@@ -52,5 +52,10 @@ htmlcov/
 Thumbs.db
 
 # Project specific
-# Do not ignore test fixtures - they are needed for tests
-# tests/fixtures/demo_database/ is intentionally tracked
+# Demo database contains real financial data - do NOT commit
+tests/fixtures/demo_database/
+*.ldb
+MANIFEST-*
+CURRENT
+LOCK
+*.log
