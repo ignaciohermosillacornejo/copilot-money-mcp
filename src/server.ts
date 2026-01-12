@@ -15,6 +15,14 @@ import { CopilotDatabase } from './core/database.js';
 import { CopilotMoneyTools, createToolSchemas } from './tools/index.js';
 
 /**
+ * Response type for tool calls.
+ */
+export interface ToolResponse {
+  content: Array<{ type: 'text'; text: string }>;
+  isError?: boolean;
+}
+
+/**
  * MCP server for Copilot Money data.
  */
 export class CopilotMoneyServer {
@@ -47,234 +55,259 @@ export class CopilotMoneyServer {
   }
 
   /**
+   * Handle list tools request.
+   * Exposed for testing purposes.
+   */
+  handleListTools(): { tools: Tool[] } {
+    const schemas = createToolSchemas();
+    const tools: Tool[] = schemas.map((schema) => ({
+      name: schema.name,
+      description: schema.description,
+      inputSchema: schema.inputSchema,
+      annotations: schema.annotations,
+    }));
+
+    return { tools };
+  }
+
+  /**
+   * Handle tool call request.
+   * Exposed for testing purposes.
+   *
+   * @param name - Tool name
+   * @param typedArgs - Tool arguments
+   */
+  handleCallTool(name: string, typedArgs?: Record<string, unknown>): ToolResponse {
+    // Check if database is available
+    if (!this.db.isAvailable()) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text:
+              'Database not available. Please ensure Copilot Money is installed ' +
+              'and has created local data, or provide a custom database path.',
+          },
+        ],
+      };
+    }
+
+    try {
+      let result: unknown;
+
+      // Route to appropriate tool handler
+      switch (name) {
+        case 'get_transactions':
+          result = this.tools.getTransactions(
+            (typedArgs as Parameters<typeof this.tools.getTransactions>[0]) || {}
+          );
+          break;
+
+        case 'search_transactions': {
+          const query = typedArgs?.query;
+          if (typeof query !== 'string') {
+            throw new Error('Missing required parameter: query');
+          }
+          result = this.tools.searchTransactions(query, {
+            limit: typedArgs?.limit as number | undefined,
+            period: typedArgs?.period as string | undefined,
+            start_date: typedArgs?.start_date as string | undefined,
+            end_date: typedArgs?.end_date as string | undefined,
+          });
+          break;
+        }
+
+        case 'get_accounts':
+          result = this.tools.getAccounts(typedArgs?.account_type as string | undefined);
+          break;
+
+        case 'get_spending_by_category':
+          result = this.tools.getSpendingByCategory(
+            (typedArgs as Parameters<typeof this.tools.getSpendingByCategory>[0]) || {}
+          );
+          break;
+
+        case 'get_account_balance': {
+          const accountId = typedArgs?.account_id;
+          if (typeof accountId !== 'string') {
+            throw new Error('Missing required parameter: account_id');
+          }
+          result = this.tools.getAccountBalance(accountId);
+          break;
+        }
+
+        case 'get_categories':
+          result = this.tools.getCategories();
+          break;
+
+        case 'get_recurring_transactions':
+          result = this.tools.getRecurringTransactions(
+            (typedArgs as Parameters<typeof this.tools.getRecurringTransactions>[0]) || {}
+          );
+          break;
+
+        case 'get_income':
+          result = this.tools.getIncome(
+            (typedArgs as Parameters<typeof this.tools.getIncome>[0]) || {}
+          );
+          break;
+
+        case 'get_spending_by_merchant':
+          result = this.tools.getSpendingByMerchant(
+            (typedArgs as Parameters<typeof this.tools.getSpendingByMerchant>[0]) || {}
+          );
+          break;
+
+        case 'compare_periods': {
+          const period1 = typedArgs?.period1;
+          const period2 = typedArgs?.period2;
+          if (typeof period1 !== 'string' || typeof period2 !== 'string') {
+            throw new Error('Missing required parameters: period1 and period2');
+          }
+          result = this.tools.comparePeriods({
+            period1,
+            period2,
+            exclude_transfers: typedArgs?.exclude_transfers as boolean | undefined,
+          });
+          break;
+        }
+
+        // ============================================
+        // NEW TOOLS - Items 13-33
+        // ============================================
+
+        case 'get_foreign_transactions':
+          result = this.tools.getForeignTransactions(
+            (typedArgs as Parameters<typeof this.tools.getForeignTransactions>[0]) || {}
+          );
+          break;
+
+        case 'get_refunds':
+          result = this.tools.getRefunds(
+            (typedArgs as Parameters<typeof this.tools.getRefunds>[0]) || {}
+          );
+          break;
+
+        case 'get_duplicate_transactions':
+          result = this.tools.getDuplicateTransactions(
+            (typedArgs as Parameters<typeof this.tools.getDuplicateTransactions>[0]) || {}
+          );
+          break;
+
+        case 'get_credits':
+          result = this.tools.getCredits(
+            (typedArgs as Parameters<typeof this.tools.getCredits>[0]) || {}
+          );
+          break;
+
+        case 'get_spending_by_day_of_week':
+          result = this.tools.getSpendingByDayOfWeek(
+            (typedArgs as Parameters<typeof this.tools.getSpendingByDayOfWeek>[0]) || {}
+          );
+          break;
+
+        case 'get_trips':
+          result = this.tools.getTrips(
+            (typedArgs as Parameters<typeof this.tools.getTrips>[0]) || {}
+          );
+          break;
+
+        case 'get_transaction_by_id': {
+          const transactionId = typedArgs?.transaction_id;
+          if (typeof transactionId !== 'string') {
+            throw new Error('Missing required parameter: transaction_id');
+          }
+          result = this.tools.getTransactionById(transactionId);
+          break;
+        }
+
+        case 'get_top_merchants':
+          result = this.tools.getTopMerchants(
+            (typedArgs as Parameters<typeof this.tools.getTopMerchants>[0]) || {}
+          );
+          break;
+
+        case 'get_unusual_transactions':
+          result = this.tools.getUnusualTransactions(
+            (typedArgs as Parameters<typeof this.tools.getUnusualTransactions>[0]) || {}
+          );
+          break;
+
+        case 'export_transactions':
+          result = this.tools.exportTransactions(
+            (typedArgs as Parameters<typeof this.tools.exportTransactions>[0]) || {}
+          );
+          break;
+
+        case 'get_hsa_fsa_eligible':
+          result = this.tools.getHsaFsaEligible(
+            (typedArgs as Parameters<typeof this.tools.getHsaFsaEligible>[0]) || {}
+          );
+          break;
+
+        case 'get_spending_rate':
+          result = this.tools.getSpendingRate(
+            (typedArgs as Parameters<typeof this.tools.getSpendingRate>[0]) || {}
+          );
+          break;
+
+        default:
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: `Unknown tool: ${name}`,
+              },
+            ],
+            isError: true,
+          };
+      }
+
+      // Format response
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      // Handle errors (validation, account not found, etc.)
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error: ${errorMessage}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+
+  /**
+   * Inject database and tools for testing.
+   * @internal
+   */
+  _injectForTesting(db: CopilotDatabase, tools: CopilotMoneyTools): void {
+    this.db = db;
+    this.tools = tools;
+  }
+
+  /**
    * Register MCP protocol handlers.
    */
   private registerHandlers(): void {
-    // List available tools
-    this.server.setRequestHandler(ListToolsRequestSchema, () => {
-      const schemas = createToolSchemas();
-      const tools: Tool[] = schemas.map((schema) => ({
-        name: schema.name,
-        description: schema.description,
-        inputSchema: schema.inputSchema,
-        annotations: schema.annotations,
-      }));
+    // List available tools - delegates to handleListTools
+    this.server.setRequestHandler(ListToolsRequestSchema, () => this.handleListTools());
 
-      return { tools };
-    });
-
-    // Handle tool calls
+    // Handle tool calls - delegates to handleCallTool
     this.server.setRequestHandler(CallToolRequestSchema, (request) => {
       const { name, arguments: typedArgs } = request.params;
-
-      // Check if database is available
-      if (!this.db.isAvailable()) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text:
-                'Database not available. Please ensure Copilot Money is installed ' +
-                'and has created local data, or provide a custom database path.',
-            },
-          ],
-        };
-      }
-
-      try {
-        let result: unknown;
-
-        // Route to appropriate tool handler
-        switch (name) {
-          case 'get_transactions':
-            result = this.tools.getTransactions(
-              (typedArgs as Parameters<typeof this.tools.getTransactions>[0]) || {}
-            );
-            break;
-
-          case 'search_transactions': {
-            const query = typedArgs?.query;
-            if (typeof query !== 'string') {
-              throw new Error('Missing required parameter: query');
-            }
-            result = this.tools.searchTransactions(query, {
-              limit: typedArgs?.limit as number | undefined,
-              period: typedArgs?.period as string | undefined,
-              start_date: typedArgs?.start_date as string | undefined,
-              end_date: typedArgs?.end_date as string | undefined,
-            });
-            break;
-          }
-
-          case 'get_accounts':
-            result = this.tools.getAccounts(typedArgs?.account_type as string | undefined);
-            break;
-
-          case 'get_spending_by_category':
-            result = this.tools.getSpendingByCategory(
-              (typedArgs as Parameters<typeof this.tools.getSpendingByCategory>[0]) || {}
-            );
-            break;
-
-          case 'get_account_balance': {
-            const accountId = typedArgs?.account_id;
-            if (typeof accountId !== 'string') {
-              throw new Error('Missing required parameter: account_id');
-            }
-            result = this.tools.getAccountBalance(accountId);
-            break;
-          }
-
-          case 'get_categories':
-            result = this.tools.getCategories();
-            break;
-
-          case 'get_recurring_transactions':
-            result = this.tools.getRecurringTransactions(
-              (typedArgs as Parameters<typeof this.tools.getRecurringTransactions>[0]) || {}
-            );
-            break;
-
-          case 'get_income':
-            result = this.tools.getIncome(
-              (typedArgs as Parameters<typeof this.tools.getIncome>[0]) || {}
-            );
-            break;
-
-          case 'get_spending_by_merchant':
-            result = this.tools.getSpendingByMerchant(
-              (typedArgs as Parameters<typeof this.tools.getSpendingByMerchant>[0]) || {}
-            );
-            break;
-
-          case 'compare_periods': {
-            const period1 = typedArgs?.period1;
-            const period2 = typedArgs?.period2;
-            if (typeof period1 !== 'string' || typeof period2 !== 'string') {
-              throw new Error('Missing required parameters: period1 and period2');
-            }
-            result = this.tools.comparePeriods({
-              period1,
-              period2,
-              exclude_transfers: typedArgs?.exclude_transfers as boolean | undefined,
-            });
-            break;
-          }
-
-          // ============================================
-          // NEW TOOLS - Items 13-33
-          // ============================================
-
-          case 'get_foreign_transactions':
-            result = this.tools.getForeignTransactions(
-              (typedArgs as Parameters<typeof this.tools.getForeignTransactions>[0]) || {}
-            );
-            break;
-
-          case 'get_refunds':
-            result = this.tools.getRefunds(
-              (typedArgs as Parameters<typeof this.tools.getRefunds>[0]) || {}
-            );
-            break;
-
-          case 'get_duplicate_transactions':
-            result = this.tools.getDuplicateTransactions(
-              (typedArgs as Parameters<typeof this.tools.getDuplicateTransactions>[0]) || {}
-            );
-            break;
-
-          case 'get_credits':
-            result = this.tools.getCredits(
-              (typedArgs as Parameters<typeof this.tools.getCredits>[0]) || {}
-            );
-            break;
-
-          case 'get_spending_by_day_of_week':
-            result = this.tools.getSpendingByDayOfWeek(
-              (typedArgs as Parameters<typeof this.tools.getSpendingByDayOfWeek>[0]) || {}
-            );
-            break;
-
-          case 'get_trips':
-            result = this.tools.getTrips(
-              (typedArgs as Parameters<typeof this.tools.getTrips>[0]) || {}
-            );
-            break;
-
-          case 'get_transaction_by_id': {
-            const transactionId = typedArgs?.transaction_id;
-            if (typeof transactionId !== 'string') {
-              throw new Error('Missing required parameter: transaction_id');
-            }
-            result = this.tools.getTransactionById(transactionId);
-            break;
-          }
-
-          case 'get_top_merchants':
-            result = this.tools.getTopMerchants(
-              (typedArgs as Parameters<typeof this.tools.getTopMerchants>[0]) || {}
-            );
-            break;
-
-          case 'get_unusual_transactions':
-            result = this.tools.getUnusualTransactions(
-              (typedArgs as Parameters<typeof this.tools.getUnusualTransactions>[0]) || {}
-            );
-            break;
-
-          case 'export_transactions':
-            result = this.tools.exportTransactions(
-              (typedArgs as Parameters<typeof this.tools.exportTransactions>[0]) || {}
-            );
-            break;
-
-          case 'get_hsa_fsa_eligible':
-            result = this.tools.getHsaFsaEligible(
-              (typedArgs as Parameters<typeof this.tools.getHsaFsaEligible>[0]) || {}
-            );
-            break;
-
-          case 'get_spending_rate':
-            result = this.tools.getSpendingRate(
-              (typedArgs as Parameters<typeof this.tools.getSpendingRate>[0]) || {}
-            );
-            break;
-
-          default:
-            return {
-              content: [
-                {
-                  type: 'text' as const,
-                  text: `Unknown tool: ${name}`,
-                },
-              ],
-              isError: true,
-            };
-        }
-
-        // Format response
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(result, null, 2),
-            },
-          ],
-        };
-      } catch (error) {
-        // Handle errors (validation, account not found, etc.)
-        const errorMessage = error instanceof Error ? error.message : String(error);
-
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Error: ${errorMessage}`,
-            },
-          ],
-          isError: true,
-        };
-      }
+      return this.handleCallTool(name, typedArgs as Record<string, unknown> | undefined);
     });
   }
 
