@@ -87,7 +87,7 @@ npm test
 After installing the MCP server, Claude Desktop will request **one-time approval for each tool** when you first use them. This is a standard security feature for all MCP servers.
 
 **What to expect:**
-- You'll see 5 approval prompts (one for each tool: transactions, search, accounts, spending, balance)
+- You'll see approval prompts as you use different tools
 - Each prompt shows the tool name and what it does
 - After approving once, the tools work seamlessly without further prompts
 
@@ -237,7 +237,9 @@ After installing the MCP server, Claude Desktop will request **one-time approval
 
 ## Available Tools
 
-The MCP server provides 5 read-only tools:
+The MCP server provides 23 read-only tools for comprehensive financial analysis:
+
+### Core Tools
 
 ### 1. `get_transactions`
 Query transactions with flexible filters.
@@ -278,6 +280,47 @@ Get specific account details.
 
 **Parameters:**
 - `account_id` - Account ID (required)
+
+### Data Quality & Advanced Analysis Tools
+
+### 6. `get_data_quality_report`
+Generate a comprehensive data quality report to identify issues in your financial data that should be corrected in Copilot Money.
+
+This tool helps you find:
+- **Unresolved category IDs** - Transactions with category IDs that can't be mapped to human-readable names
+- **Potential currency conversion issues** - Large amounts with foreign merchant names that may be displaying unconverted foreign currency
+- **Non-unique transaction IDs** - Multiple transactions sharing the same ID
+- **Duplicate accounts** - Accounts with the same name and type that may be duplicates
+- **Suspicious categorizations** - Common miscategorizations (e.g., Uber as Parking, pharmacies as Office Supplies)
+
+**Parameters:**
+- `period` - Date range shorthand (this_month, last_90_days, ytd, etc.)
+- `start_date` / `end_date` - Custom date range
+
+**Use Case:** Run this tool before doing financial analysis to identify data quality issues that could skew your results. It's especially useful after international travel or if you notice unexpected spending totals.
+
+### Other Analysis Tools
+
+The server also provides these additional tools:
+- `get_categories` - List all transaction categories
+- `get_recurring_transactions` - Find subscriptions and recurring payments
+- `get_income` - Track income sources
+- `get_spending_by_merchant` - Merchant spending analysis
+- `compare_periods` - Compare spending across time periods
+- `get_foreign_transactions` - International transactions and FX fees
+- `get_refunds` - Refund transactions
+- `get_duplicate_transactions` - Find duplicate transactions
+- `get_credits` - Credit transactions
+- `get_spending_by_day_of_week` - Spending patterns by day
+- `get_trips` - Travel analysis with location detection
+- `get_transaction_by_id` - Lookup specific transactions
+- `get_top_merchants` - Top merchants by spending
+- `get_unusual_transactions` - Anomaly detection
+- `export_transactions` - Export to CSV or JSON
+- `get_hsa_fsa_eligible` - Healthcare expenses
+- `get_spending_rate` - Spending velocity analysis
+
+See tool schemas in Claude Desktop or use the MCP Inspector for complete parameter documentation.
 
 ## Development
 
@@ -341,7 +384,7 @@ copilot-money-mcp/
 - **Language:** TypeScript 5.3+
 - **Validation:** Zod schemas
 - **Database:** LevelDB (classic-level) + Protocol Buffers
-- **Testing:** Bun test runner (50 tests, 100% passing)
+- **Testing:** Bun test runner (366 tests, 100% passing)
 - **MCP SDK:** @modelcontextprotocol/sdk v1.2
 
 ## Testing
@@ -358,12 +401,13 @@ npm run test:coverage
 ```
 
 **Test Coverage:**
-- ✅ 50 tests passing
-- ✅ 113 assertions
+- ✅ 366 tests passing
+- ✅ 1360+ assertions
 - ✅ Core decoder tests
 - ✅ Database abstraction tests
 - ✅ Tool implementation tests
 - ✅ Schema validation tests
+- ✅ Integration tests
 
 ## Data Privacy & Security
 

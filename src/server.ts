@@ -251,6 +251,12 @@ export class CopilotMoneyServer {
           );
           break;
 
+        case 'get_data_quality_report':
+          result = this.tools.getDataQualityReport(
+            (typedArgs as Parameters<typeof this.tools.getDataQualityReport>[0]) || {}
+          );
+          break;
+
         default:
           return {
             content: [
