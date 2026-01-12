@@ -29,23 +29,91 @@
   "tools": [
     {
       "name": "get_transactions",
-      "description": "Read-only query of transaction data with optional filters for date, category, merchant, account, and amount"
+      "description": "Get transactions with optional filters for date ranges, category, merchant, account, amount, pending status, and region/country"
     },
     {
       "name": "search_transactions",
-      "description": "Read-only full-text search across transaction descriptions and merchant names"
+      "description": "Free-text search of transactions by merchant name with date filtering support"
     },
     {
       "name": "get_accounts",
-      "description": "Read-only query to list all accounts with balances and calculate total balance"
+      "description": "Get all accounts with balances, optionally filter by account type (checking, savings, credit, investment)"
     },
     {
       "name": "get_spending_by_category",
-      "description": "Read-only analysis of spending aggregated by category for a specified time period"
+      "description": "Get spending aggregated by category for a date range with human-readable names, sorted by amount"
     },
     {
       "name": "get_account_balance",
-      "description": "Read-only lookup of detailed information for a specific account by ID or name"
+      "description": "Get balance and details for a specific account by ID"
+    },
+    {
+      "name": "get_categories",
+      "description": "Get all categories found in transactions with human-readable names, transaction counts, and total amounts"
+    },
+    {
+      "name": "get_recurring_transactions",
+      "description": "Identify recurring/subscription charges with frequency, monthly cost, confidence score, and next expected charge date"
+    },
+    {
+      "name": "get_income",
+      "description": "Get income transactions (deposits, paychecks, refunds) with total income and breakdown by source"
+    },
+    {
+      "name": "get_spending_by_merchant",
+      "description": "Get spending aggregated by merchant name with transaction counts and averages"
+    },
+    {
+      "name": "compare_periods",
+      "description": "Compare spending and income between two time periods with totals, percentage changes, and category-by-category comparison"
+    },
+    {
+      "name": "get_foreign_transactions",
+      "description": "Get international transactions with foreign currencies or FX fees, with breakdown by country and total FX fees"
+    },
+    {
+      "name": "get_refunds",
+      "description": "Get refund/return transactions with breakdown by merchant and total refunded"
+    },
+    {
+      "name": "get_duplicate_transactions",
+      "description": "Detect potential duplicate transactions with same merchant, amount, and date"
+    },
+    {
+      "name": "get_credits",
+      "description": "Get statement credits (Amex credits, cashback, rewards) with breakdown by credit type"
+    },
+    {
+      "name": "get_spending_by_day_of_week",
+      "description": "Get spending patterns aggregated by day of week (Sunday-Saturday) with totals, averages, and percentages"
+    },
+    {
+      "name": "get_trips",
+      "description": "Detect and group transactions into trips with location, duration, total spent, and category breakdown"
+    },
+    {
+      "name": "get_transaction_by_id",
+      "description": "Get a single transaction by its ID with detailed information"
+    },
+    {
+      "name": "get_top_merchants",
+      "description": "Get top merchants by spending with rankings, transaction counts, averages, and date ranges"
+    },
+    {
+      "name": "get_unusual_transactions",
+      "description": "Detect unusual/anomalous transactions significantly above average for merchant or category"
+    },
+    {
+      "name": "export_transactions",
+      "description": "Export transactions to CSV or JSON format for external analysis"
+    },
+    {
+      "name": "get_hsa_fsa_eligible",
+      "description": "Find HSA/FSA eligible healthcare transactions at pharmacies, medical providers, dental, and vision"
+    },
+    {
+      "name": "get_spending_rate",
+      "description": "Get spending velocity analysis with daily/weekly burn rate, month-end projections, and period comparison"
     }
   ],
   "tools_generated": false,
