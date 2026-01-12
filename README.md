@@ -414,7 +414,7 @@ MIT License - See [LICENSE](LICENSE) for details.
 ## Acknowledgments
 
 - Built with [MCP SDK](https://modelcontextprotocol.io/) by Anthropic
-- Reverse engineering findings documented in [REVERSE_ENGINEERING_FINDING.md](REVERSE_ENGINEERING_FINDING.md)
+- Reverse engineering findings documented in [REVERSE_ENGINEERING_FINDING.md](docs/REVERSE_ENGINEERING_FINDING.md)
 - Data validation with [Zod](https://zod.dev/)
 - Developed with [Bun](https://bun.sh/) for fast TypeScript development
 
@@ -423,7 +423,7 @@ MIT License - See [LICENSE](LICENSE) for details.
 - [Model Context Protocol](https://modelcontextprotocol.io/)
 - [Copilot Money](https://copilot.money/)
 - [Privacy Policy](PRIVACY.md)
-- [Reverse Engineering Findings](REVERSE_ENGINEERING_FINDING.md)
+- [Reverse Engineering Findings](docs/REVERSE_ENGINEERING_FINDING.md)
 
 ---
 

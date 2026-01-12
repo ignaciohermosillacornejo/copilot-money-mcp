@@ -109,7 +109,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CHANGELOG.md**: Version history (this file)
 - **manifest.json v0.3**: MCP bundle metadata with privacy_policies array
 - **SESSION_RECAP.md**: Complete handoff documentation
-- **MCPB_COMPLIANCE.md**: .mcpb submission guide
+- **docs/MCPB_COMPLIANCE.md**: .mcpb submission guide
 
 #### Build & Distribution
 - TypeScript 5.3+ with strict mode
