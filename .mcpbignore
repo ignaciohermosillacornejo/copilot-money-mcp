@@ -1,0 +1,67 @@
+# Development files
+node_modules/
+.bun-build/
+.coverage
+.coveragerc
+.pytest_cache/
+htmlcov/
+coverage/
+.nyc_output/
+
+# Python virtual environment (old Python version)
+venv/
+.venv/
+env/
+.env/
+
+# Python files (old Python version)
+*.py
+pyproject.toml
+pytest.ini
+
+# Test files
+tests/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Source files (we use bundled dist/)
+src/
+
+# Documentation (included separately)
+.claude/
+SESSION_RECAP.md
+MCPB_COMPLIANCE.md
+COMPLETION_SUMMARY.md
+DESIGN_NOTES.md
+TEST_SUMMARY.md
+
+# Git files
+.git/
+.gitignore
+.gitattributes
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Lock files
+bun.lock
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Config files
+tsconfig.json
+.eslintrc.json
+.prettierrc.json
+vitest.config.ts
+jest.config.js

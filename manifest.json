@@ -1,0 +1,60 @@
+{
+  "manifest_version": "0.3",
+  "name": "copilot-money-mcp",
+  "display_name": "Copilot Money MCP Server",
+  "description": "AI-powered personal finance queries using local Copilot Money data. Query transactions, analyze spending, and track accounts with natural language.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Ignacio Hermosilla",
+    "email": "ignacio@example.com",
+    "url": "https://github.com/ignaciohermosillacornejo"
+  },
+  "homepage": "https://github.com/ignaciohermosillacornejo/copilot-money-mcp",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ignaciohermosillacornejo/copilot-money-mcp.git"
+  },
+  "license": "MIT",
+  "privacy_policies": [
+    "https://github.com/ignaciohermosillacornejo/copilot-money-mcp/blob/main/PRIVACY.md"
+  ],
+  "keywords": [
+    "personal-finance",
+    "transactions",
+    "budgeting",
+    "spending-analysis",
+    "local-data",
+    "privacy-first"
+  ],
+  "tools": [
+    {
+      "name": "get_transactions",
+      "description": "Read-only query of transaction data with optional filters for date, category, merchant, account, and amount"
+    },
+    {
+      "name": "search_transactions",
+      "description": "Read-only full-text search across transaction descriptions and merchant names"
+    },
+    {
+      "name": "get_accounts",
+      "description": "Read-only query to list all accounts with balances and calculate total balance"
+    },
+    {
+      "name": "get_spending_by_category",
+      "description": "Read-only analysis of spending aggregated by category for a specified time period"
+    },
+    {
+      "name": "get_account_balance",
+      "description": "Read-only lookup of detailed information for a specific account by ID or name"
+    }
+  ],
+  "tools_generated": false,
+  "server": {
+    "type": "node",
+    "entry_point": "dist/cli.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/cli.js"]
+    }
+  }
+}
