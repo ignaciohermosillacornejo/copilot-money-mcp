@@ -133,6 +133,93 @@ describe('CopilotMoneyTools', () => {
       });
       expect(result.count).toBe(1);
     });
+
+    test('filters by region', () => {
+      // Add a transaction with region for testing
+      const txnWithRegion: Transaction = {
+        transaction_id: 'txn_region',
+        amount: 75.0,
+        date: '2024-01-25',
+        name: 'Regional Store',
+        category_id: 'shopping',
+        account_id: 'acc1',
+        region: 'California',
+        city: 'San Francisco',
+      };
+      (db as any)._transactions = [...mockTransactions, txnWithRegion];
+
+      const result = tools.getTransactions({ region: 'california' });
+      expect(result.count).toBe(1);
+      expect(result.transactions[0].region).toBe('California');
+    });
+
+    test('filters by region matching city', () => {
+      const txnWithCity: Transaction = {
+        transaction_id: 'txn_city',
+        amount: 85.0,
+        date: '2024-01-26',
+        name: 'City Store',
+        category_id: 'shopping',
+        account_id: 'acc1',
+        city: 'Los Angeles',
+      };
+      (db as any)._transactions = [...mockTransactions, txnWithCity];
+
+      const result = tools.getTransactions({ region: 'los angeles' });
+      expect(result.count).toBe(1);
+      expect(result.transactions[0].city).toBe('Los Angeles');
+    });
+
+    test('filters by country exact match', () => {
+      const txnWithCountry: Transaction = {
+        transaction_id: 'txn_country',
+        amount: 95.0,
+        date: '2024-01-27',
+        name: 'International Store',
+        category_id: 'shopping',
+        account_id: 'acc1',
+        country: 'US',
+      };
+      (db as any)._transactions = [...mockTransactions, txnWithCountry];
+
+      const result = tools.getTransactions({ country: 'us' });
+      expect(result.count).toBe(1);
+      expect(result.transactions[0].country).toBe('US');
+    });
+
+    test('filters by country partial match', () => {
+      const txnWithCountry: Transaction = {
+        transaction_id: 'txn_country2',
+        amount: 105.0,
+        date: '2024-01-28',
+        name: 'Foreign Store',
+        category_id: 'shopping',
+        account_id: 'acc1',
+        country: 'United States',
+      };
+      (db as any)._transactions = [...mockTransactions, txnWithCountry];
+
+      const result = tools.getTransactions({ country: 'united' });
+      expect(result.count).toBe(1);
+      expect(result.transactions[0].country).toBe('United States');
+    });
+
+    test('filters by pending status', () => {
+      const pendingTxn: Transaction = {
+        transaction_id: 'txn_pending',
+        amount: 45.0,
+        date: '2024-01-29',
+        name: 'Pending Transaction',
+        category_id: 'shopping',
+        account_id: 'acc1',
+        pending: true,
+      };
+      (db as any)._transactions = [...mockTransactions, pendingTxn];
+
+      const result = tools.getTransactions({ pending: true });
+      expect(result.count).toBe(1);
+      expect(result.transactions[0].pending).toBe(true);
+    });
   });
 
   describe('searchTransactions', () => {
