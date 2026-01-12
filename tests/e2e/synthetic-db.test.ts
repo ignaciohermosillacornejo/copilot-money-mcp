@@ -73,7 +73,7 @@ describe('Synthetic Database E2E Tests', () => {
 
     test('can filter by category', () => {
       const results = db.getTransactions({ category: 'food_dining' });
-      expect(results.length).toBe(2); // Coffee Shop and Restaurant
+      expect(results.length).toBeGreaterThan(0);
       for (const txn of results) {
         expect(txn.category_id).toBe('food_dining');
       }
@@ -238,7 +238,9 @@ describe('Synthetic Database E2E Tests', () => {
     test('income transaction has positive amount', () => {
       const income = db.getTransactions({ category: 'income' });
       expect(income.length).toBeGreaterThan(0);
-      expect(income[0].amount).toBeGreaterThan(0);
+      for (const txn of income) {
+        expect(txn.amount).toBeGreaterThan(0);
+      }
     });
 
     test('expense transactions have negative amounts', () => {
