@@ -133,6 +133,7 @@ export function decodeTransactions(dbPath: string): Transaction[] {
       // Extract amount value
       const amount = extractDoubleValue(data, idx + 8);
       if (amount === null || amount === 0) {
+        idx = data.indexOf(amountPattern, searchPos);
         continue;
       }
 
