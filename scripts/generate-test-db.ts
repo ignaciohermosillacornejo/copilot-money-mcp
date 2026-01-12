@@ -172,22 +172,44 @@ const SYNTHETIC_ACCOUNTS = [
 ];
 
 /**
+ * Encode a field name with length prefix.
+ * Validates that field name is within protocol buffer limits (max 255 bytes).
+ */
+function encodeFieldName(fieldName: string): Buffer {
+  const fieldNameBytes = Buffer.from(fieldName, 'utf-8');
+  if (fieldNameBytes.length > 255) {
+    throw new Error(`Field name too long: ${fieldName} (${fieldNameBytes.length} bytes, max 255)`);
+  }
+  const header = Buffer.alloc(2);
+  header[0] = 0x0a;
+  header[1] = fieldNameBytes.length;
+  return Buffer.concat([header, fieldNameBytes]);
+}
+
+/**
  * Encode a string field in the format the decoder expects.
  * Format: fieldName + \x8a\x01 + length + value
+ * Validates that value is within protocol buffer limits (max 255 bytes for single-byte length).
  */
 function encodeStringField(fieldName: string, value: string): Buffer {
-  const fieldNameBuf = Buffer.from(`\x0a${String.fromCharCode(fieldName.length)}${fieldName}`);
+  const fieldNameBuf = encodeFieldName(fieldName);
   const valueBuf = Buffer.from(value, 'utf-8');
-  const tag = Buffer.from([0x8a, 0x01, valueBuf.length]);
+  if (valueBuf.length > 255) {
+    throw new Error(`String value too long for field ${fieldName}: ${valueBuf.length} bytes, max 255`);
+  }
+  const tag = Buffer.alloc(3);
+  tag[0] = 0x8a;
+  tag[1] = 0x01;
+  tag[2] = valueBuf.length;
   return Buffer.concat([fieldNameBuf, tag, valueBuf]);
 }
 
 /**
  * Encode a double value in little-endian format with tag.
- * Format: \x19 + 8-byte double LE
+ * Format: fieldName + \x19 + 8-byte double LE
  */
 function encodeDoubleField(fieldName: string, value: number): Buffer {
-  const fieldNameBuf = Buffer.from(`\x0a${String.fromCharCode(fieldName.length)}${fieldName}`);
+  const fieldNameBuf = encodeFieldName(fieldName);
   const doubleBuf = Buffer.alloc(9);
   doubleBuf[0] = 0x19; // Double tag
   doubleBuf.writeDoubleLE(value, 1);
@@ -199,8 +221,10 @@ function encodeDoubleField(fieldName: string, value: number): Buffer {
  * Format: fieldName + \x08 + value
  */
 function encodeBooleanField(fieldName: string, value: boolean): Buffer {
-  const fieldNameBuf = Buffer.from(`\x0a${String.fromCharCode(fieldName.length)}${fieldName}`);
-  const valueBuf = Buffer.from([0x08, value ? 1 : 0]);
+  const fieldNameBuf = encodeFieldName(fieldName);
+  const valueBuf = Buffer.alloc(2);
+  valueBuf[0] = 0x08;
+  valueBuf[1] = value ? 1 : 0;
   return Buffer.concat([fieldNameBuf, valueBuf]);
 }
 
