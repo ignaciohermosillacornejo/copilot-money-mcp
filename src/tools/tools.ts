@@ -10,6 +10,82 @@ import { getCategoryName, isTransferCategory, isIncomeCategory } from '../utils/
 import type { Transaction, Account } from '../models/index.js';
 import { getTransactionDisplayName } from '../models/index.js';
 
+// ============================================
+// Category Constants
+// ============================================
+
+/**
+ * Plaid category ID for foreign transaction fees (snake_case format).
+ * @see https://plaid.com/docs/api/products/transactions/#categoriesget
+ */
+const CATEGORY_FOREIGN_TX_FEE_SNAKE = 'bank_fees_foreign_transaction_fees';
+
+/**
+ * Plaid category ID for foreign transaction fees (numeric legacy format).
+ * Format: 10005000 where 10 = Bank Fees, 005 = Foreign Transaction
+ * @see https://plaid.com/docs/api/products/transactions/#categoriesget
+ */
+const CATEGORY_FOREIGN_TX_FEE_NUMERIC = '10005000';
+
+// ============================================
+// Validation Constants
+// ============================================
+
+/** Maximum allowed limit for transaction queries */
+const MAX_QUERY_LIMIT = 10000;
+
+/** Default limit for transaction queries */
+const DEFAULT_QUERY_LIMIT = 100;
+
+/** Minimum allowed limit */
+const MIN_QUERY_LIMIT = 1;
+
+// ============================================
+// Validation Helpers
+// ============================================
+
+/**
+ * Validates and constrains a limit parameter within allowed bounds.
+ *
+ * @param limit - The requested limit
+ * @param defaultValue - Default value if limit is undefined
+ * @returns Validated limit within MIN_QUERY_LIMIT and MAX_QUERY_LIMIT
+ */
+function validateLimit(
+  limit: number | undefined,
+  defaultValue: number = DEFAULT_QUERY_LIMIT
+): number {
+  if (limit === undefined) return defaultValue;
+  return Math.max(MIN_QUERY_LIMIT, Math.min(MAX_QUERY_LIMIT, Math.floor(limit)));
+}
+
+/**
+ * Validates a date string is in YYYY-MM-DD format.
+ *
+ * @param date - The date string to validate
+ * @param paramName - Parameter name for error messages
+ * @returns The validated date string
+ * @throws Error if date format is invalid
+ */
+function validateDate(date: string | undefined, paramName: string): string | undefined {
+  if (date === undefined) return undefined;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw new Error(`Invalid ${paramName} format. Expected YYYY-MM-DD, got: ${date}`);
+  }
+  return date;
+}
+
+/**
+ * Validates offset parameter for pagination.
+ *
+ * @param offset - The requested offset
+ * @returns Validated offset (non-negative integer)
+ */
+function validateOffset(offset: number | undefined): number {
+  if (offset === undefined) return 0;
+  return Math.max(0, Math.floor(offset));
+}
+
 /**
  * Normalize merchant names for better aggregation.
  *
@@ -125,14 +201,17 @@ export class CopilotMoneyTools {
       account_id,
       min_amount,
       max_amount,
-      limit = 100,
-      offset = 0,
       exclude_transfers = false,
       pending,
       region,
       country,
     } = options;
-    let { start_date, end_date } = options;
+
+    // Validate inputs
+    const validatedLimit = validateLimit(options.limit, DEFAULT_QUERY_LIMIT);
+    const validatedOffset = validateOffset(options.offset);
+    let start_date = validateDate(options.start_date, 'start_date');
+    let end_date = validateDate(options.end_date, 'end_date');
 
     // If period is specified, parse it to start/end dates
     if (period) {
@@ -182,10 +261,10 @@ export class CopilotMoneyTools {
     }
 
     const totalCount = transactions.length;
-    const hasMore = offset + limit < totalCount;
+    const hasMore = validatedOffset + validatedLimit < totalCount;
 
     // Apply pagination
-    transactions = transactions.slice(offset, offset + limit);
+    transactions = transactions.slice(validatedOffset, validatedOffset + validatedLimit);
 
     // Add human-readable category names and normalized merchant
     const enrichedTransactions = transactions.map((txn) => ({
@@ -197,7 +276,7 @@ export class CopilotMoneyTools {
     return {
       count: enrichedTransactions.length,
       total_count: totalCount,
-      offset,
+      offset: validatedOffset,
       has_more: hasMore,
       transactions: enrichedTransactions,
     };
@@ -882,7 +961,8 @@ export class CopilotMoneyTools {
       const isForeignCountry =
         txn.country && txn.country.toUpperCase() !== 'US' && txn.country.toUpperCase() !== 'USA';
       const isForeignFeeCategory =
-        txn.category_id === 'bank_fees_foreign_transaction_fees' || txn.category_id === '10005000';
+        txn.category_id === CATEGORY_FOREIGN_TX_FEE_SNAKE ||
+        txn.category_id === CATEGORY_FOREIGN_TX_FEE_NUMERIC;
       const isForeignCurrency =
         txn.iso_currency_code && txn.iso_currency_code.toUpperCase() !== 'USD';
       return isForeignCountry || isForeignFeeCategory || isForeignCurrency;
@@ -891,7 +971,8 @@ export class CopilotMoneyTools {
     // Calculate FX fees separately
     const fxFees = allTransactions.filter(
       (txn) =>
-        txn.category_id === 'bank_fees_foreign_transaction_fees' || txn.category_id === '10005000'
+        txn.category_id === CATEGORY_FOREIGN_TX_FEE_SNAKE ||
+        txn.category_id === CATEGORY_FOREIGN_TX_FEE_NUMERIC
     );
     const totalFxFees = fxFees.reduce((sum, txn) => sum + Math.abs(txn.amount), 0);
 
@@ -977,8 +1058,8 @@ export class CopilotMoneyTools {
         name.includes('reversal');
       const isRefundCategory = txn.category_id?.toLowerCase().includes('refund');
 
-      // Include if it's a credit from a merchant (likely a refund)
-      return isRefundName || isRefundCategory || txn.amount < 0;
+      // Include only if it has refund-related keywords in name or category
+      return isRefundName || isRefundCategory;
     });
 
     // Aggregate by merchant
