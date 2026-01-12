@@ -1,0 +1,78 @@
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+
+jobs:
+  review:
+    # Skip draft PRs
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Load secrets from 1Password
+        uses: 1password/load-secrets-action@v2
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          CLAUDE_CODE_OAUTH_TOKEN: op://Dev/CLAUDE_CODE_OAUTH_TOKEN/credential
+
+      - name: AI Code Review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ env.CLAUDE_CODE_OAUTH_TOKEN }}
+          track_progress: true
+          prompt: |
+            You are a code reviewer for the copilot-money-mcp project.
+
+            REPO: ${{ github.repository }}
+            PR: #${{ github.event.pull_request.number }}
+
+            Review this PR with focus on:
+
+            1. **Code Quality** - Clean code, error handling, readability
+            2. **Security** - Vulnerabilities, input validation, data privacy
+            3. **Performance** - Bottlenecks, memory leaks, efficient data access
+            4. **Testing** - Coverage, edge cases, test quality
+            5. **TypeScript** - Proper typing, no `any` abuse, type safety
+            6. **MCP Protocol** - Correct tool definitions, proper server implementation
+            7. **Data Privacy** - No logging of sensitive financial data
+
+            For each issue found:
+            - Post an inline comment on the specific line
+            - Explain the problem clearly
+            - Propose a code snippet showing the fix
+
+            Format your review comments like this:
+            **[AI Review]**
+            **Issue:** <description>
+            **Proposed Fix:**
+            ```typescript
+            // suggested code
+            ```
+            **Reasoning:** <why this improves the code>
+
+            Use `gh pr diff` to see changes, then use `gh pr comment` for feedback.
+            Be constructive. Praise good patterns too.
+
+            After completing your review, you MUST submit an official PR review:
+
+            - If NO blocking issues found (or only minor suggestions), run BOTH commands in sequence:
+              1. First approve: gh pr review ${{ github.event.pull_request.number }} --approve -b "✅ LGTM - No blocking issues found"
+              2. Then enable auto-merge: gh pr merge ${{ github.event.pull_request.number }} --auto --squash --delete-branch
+
+            - If blocking issues found (security, bugs, or major quality issues):
+              gh pr review ${{ github.event.pull_request.number }} --request-changes -b "⚠️ Please address the review comments before merging"
+
+          claude_args: '--model claude-sonnet-4-20250514 --allowed-tools "Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh pr review:*),Bash(gh pr merge:*),Read,Grep,Glob"'
