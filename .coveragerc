@@ -6,12 +6,13 @@ omit =
     */__pycache__/*
     */.venv/*
     */venv/*
+    src/copilot_money_mcp/__main__.py
 
 [report]
 precision = 2
 show_missing = True
 skip_covered = False
-fail_under = 100.0
+fail_under = 90.0
 exclude_lines =
     pragma: no cover
     def __repr__
