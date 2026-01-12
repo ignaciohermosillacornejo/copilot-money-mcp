@@ -469,13 +469,48 @@ describe('CopilotMoneyTools', () => {
 
       const periodCompareTransactions: Transaction[] = [
         // Last year - food spending
-        { transaction_id: 'ly1', amount: 100.00, date: `${lastYear}-06-10`, name: 'Restaurant', category_id: 'food_dining', account_id: 'acc1' },
-        { transaction_id: 'ly2', amount: 50.00, date: `${lastYear}-06-15`, name: 'Grocery', category_id: 'groceries', account_id: 'acc1' },
+        {
+          transaction_id: 'ly1',
+          amount: 100.0,
+          date: `${lastYear}-06-10`,
+          name: 'Restaurant',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'ly2',
+          amount: 50.0,
+          date: `${lastYear}-06-15`,
+          name: 'Grocery',
+          category_id: 'groceries',
+          account_id: 'acc1',
+        },
         // This year - food spending increased
-        { transaction_id: 'ty1', amount: 150.00, date: `${currentYear}-01-10`, name: 'Restaurant', category_id: 'food_dining', account_id: 'acc1' },
-        { transaction_id: 'ty2', amount: 75.00, date: `${currentYear}-01-15`, name: 'Grocery', category_id: 'groceries', account_id: 'acc1' },
+        {
+          transaction_id: 'ty1',
+          amount: 150.0,
+          date: `${currentYear}-01-10`,
+          name: 'Restaurant',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'ty2',
+          amount: 75.0,
+          date: `${currentYear}-01-15`,
+          name: 'Grocery',
+          category_id: 'groceries',
+          account_id: 'acc1',
+        },
         // New category in this year only
-        { transaction_id: 'ty3', amount: 200.00, date: `${currentYear}-01-08`, name: 'Electronics Store', category_id: 'shopping', account_id: 'acc1' },
+        {
+          transaction_id: 'ty3',
+          amount: 200.0,
+          date: `${currentYear}-01-08`,
+          name: 'Electronics Store',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
       ];
       (db as any)._transactions = periodCompareTransactions;
 
@@ -489,7 +524,7 @@ describe('CopilotMoneyTools', () => {
       expect(result.category_comparison.length).toBeGreaterThan(0);
 
       // Check that category comparison includes expected fields
-      const foodCategory = result.category_comparison.find(c => c.category_id === 'food_dining');
+      const foodCategory = result.category_comparison.find((c) => c.category_id === 'food_dining');
       if (foodCategory) {
         expect(foodCategory.category_name).toBeDefined();
         expect(foodCategory.period1_spending).toBeDefined();
@@ -499,7 +534,7 @@ describe('CopilotMoneyTools', () => {
       }
 
       // Shopping category should show $0 in period 1 and $200 in period 2
-      const shoppingCategory = result.category_comparison.find(c => c.category_id === 'shopping');
+      const shoppingCategory = result.category_comparison.find((c) => c.category_id === 'shopping');
       if (shoppingCategory) {
         expect(shoppingCategory.period1_spending).toBe(0);
         expect(shoppingCategory.period2_spending).toBe(200);
@@ -762,10 +797,31 @@ describe('New MCP Tools', () => {
       // Set up mock data with actual duplicates
       const duplicateTransactions: Transaction[] = [
         // Duplicate transactions (same merchant, same amount, same day)
-        { transaction_id: 'dup1', amount: 25.00, date: '2024-01-15', name: 'Coffee Shop', category_id: 'food_dining', account_id: 'acc1' },
-        { transaction_id: 'dup2', amount: 25.00, date: '2024-01-15', name: 'Coffee Shop', category_id: 'food_dining', account_id: 'acc1' },
+        {
+          transaction_id: 'dup1',
+          amount: 25.0,
+          date: '2024-01-15',
+          name: 'Coffee Shop',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'dup2',
+          amount: 25.0,
+          date: '2024-01-15',
+          name: 'Coffee Shop',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
         // Different merchant (not duplicate)
-        { transaction_id: 'dup3', amount: 25.00, date: '2024-01-15', name: 'Different Shop', category_id: 'food_dining', account_id: 'acc1' },
+        {
+          transaction_id: 'dup3',
+          amount: 25.0,
+          date: '2024-01-15',
+          name: 'Different Shop',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
       ];
       (db as any)._transactions = duplicateTransactions;
 
@@ -790,8 +846,22 @@ describe('New MCP Tools', () => {
     test('finds duplicates with same transaction ID', () => {
       // Set up mock data with same transaction_id (edge case)
       const sameIdTransactions: Transaction[] = [
-        { transaction_id: 'same_id', amount: 50.00, date: '2024-01-15', name: 'Store A', category_id: 'shopping', account_id: 'acc1' },
-        { transaction_id: 'same_id', amount: 50.00, date: '2024-01-16', name: 'Store A', category_id: 'shopping', account_id: 'acc2' },
+        {
+          transaction_id: 'same_id',
+          amount: 50.0,
+          date: '2024-01-15',
+          name: 'Store A',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'same_id',
+          amount: 50.0,
+          date: '2024-01-16',
+          name: 'Store A',
+          category_id: 'shopping',
+          account_id: 'acc2',
+        },
       ];
       (db as any)._transactions = sameIdTransactions;
 
@@ -947,18 +1017,81 @@ describe('New MCP Tools', () => {
       // Set up mock data with recurring transactions
       const recurringTransactions: Transaction[] = [
         // Netflix subscription - monthly recurring
-        { transaction_id: 'rec1', amount: 15.99, date: '2024-01-15', name: 'Netflix', category_id: 'entertainment', account_id: 'acc1' },
-        { transaction_id: 'rec2', amount: 15.99, date: '2024-02-15', name: 'Netflix', category_id: 'entertainment', account_id: 'acc1' },
-        { transaction_id: 'rec3', amount: 15.99, date: '2024-03-15', name: 'Netflix', category_id: 'entertainment', account_id: 'acc1' },
-        { transaction_id: 'rec4', amount: 15.99, date: '2024-04-15', name: 'Netflix', category_id: 'entertainment', account_id: 'acc1' },
+        {
+          transaction_id: 'rec1',
+          amount: 15.99,
+          date: '2024-01-15',
+          name: 'Netflix',
+          category_id: 'entertainment',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'rec2',
+          amount: 15.99,
+          date: '2024-02-15',
+          name: 'Netflix',
+          category_id: 'entertainment',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'rec3',
+          amount: 15.99,
+          date: '2024-03-15',
+          name: 'Netflix',
+          category_id: 'entertainment',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'rec4',
+          amount: 15.99,
+          date: '2024-04-15',
+          name: 'Netflix',
+          category_id: 'entertainment',
+          account_id: 'acc1',
+        },
         // Gym membership - monthly
-        { transaction_id: 'rec5', amount: 49.99, date: '2024-01-01', name: 'Planet Fitness', category_id: 'health', account_id: 'acc1' },
-        { transaction_id: 'rec6', amount: 49.99, date: '2024-02-01', name: 'Planet Fitness', category_id: 'health', account_id: 'acc1' },
-        { transaction_id: 'rec7', amount: 49.99, date: '2024-03-01', name: 'Planet Fitness', category_id: 'health', account_id: 'acc1' },
+        {
+          transaction_id: 'rec5',
+          amount: 49.99,
+          date: '2024-01-01',
+          name: 'Planet Fitness',
+          category_id: 'health',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'rec6',
+          amount: 49.99,
+          date: '2024-02-01',
+          name: 'Planet Fitness',
+          category_id: 'health',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'rec7',
+          amount: 49.99,
+          date: '2024-03-01',
+          name: 'Planet Fitness',
+          category_id: 'health',
+          account_id: 'acc1',
+        },
         // One-time purchase (not recurring)
-        { transaction_id: 'one1', amount: 500.00, date: '2024-02-20', name: 'Best Buy', category_id: 'shopping', account_id: 'acc1' },
+        {
+          transaction_id: 'one1',
+          amount: 500.0,
+          date: '2024-02-20',
+          name: 'Best Buy',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
         // Income - should be excluded (negative amount)
-        { transaction_id: 'inc1', amount: -3000.00, date: '2024-01-15', name: 'Employer Inc', category_id: 'income', account_id: 'acc1' },
+        {
+          transaction_id: 'inc1',
+          amount: -3000.0,
+          date: '2024-01-15',
+          name: 'Employer Inc',
+          category_id: 'income',
+          account_id: 'acc1',
+        },
       ];
       (db as any)._transactions = recurringTransactions;
     });
@@ -981,7 +1114,7 @@ describe('New MCP Tools', () => {
       });
 
       // Find Netflix subscription
-      const netflix = result.recurring.find(r => r.merchant.includes('Netflix'));
+      const netflix = result.recurring.find((r) => r.merchant.includes('Netflix'));
       expect(netflix).toBeDefined();
       if (netflix) {
         expect(netflix.frequency).toBe('monthly');
@@ -998,7 +1131,7 @@ describe('New MCP Tools', () => {
       });
 
       // Only Netflix has 4 occurrences
-      expect(result.recurring.every(r => r.occurrences >= 4)).toBe(true);
+      expect(result.recurring.every((r) => r.occurrences >= 4)).toBe(true);
     });
 
     test('excludes non-expenses (negative amounts)', () => {
@@ -1008,7 +1141,7 @@ describe('New MCP Tools', () => {
       });
 
       // Income should not be in recurring
-      const income = result.recurring.find(r => r.merchant.includes('Employer'));
+      const income = result.recurring.find((r) => r.merchant.includes('Employer'));
       expect(income).toBeUndefined();
     });
 
@@ -1032,14 +1165,67 @@ describe('New MCP Tools', () => {
       // Set up mock data with travel transactions
       const travelTransactions: Transaction[] = [
         // Trip to France
-        { transaction_id: 'trip1', amount: 150.00, date: '2024-03-01', name: 'Hotel Paris', category_id: 'travel', account_id: 'acc1', country: 'France', city: 'Paris' },
-        { transaction_id: 'trip2', amount: 45.00, date: '2024-03-02', name: 'Restaurant Paris', category_id: 'food_dining', account_id: 'acc1', country: 'France', city: 'Paris' },
-        { transaction_id: 'trip3', amount: 80.00, date: '2024-03-03', name: 'Museum', category_id: 'entertainment', account_id: 'acc1', country: 'France', city: 'Paris' },
+        {
+          transaction_id: 'trip1',
+          amount: 150.0,
+          date: '2024-03-01',
+          name: 'Hotel Paris',
+          category_id: 'travel',
+          account_id: 'acc1',
+          country: 'France',
+          city: 'Paris',
+        },
+        {
+          transaction_id: 'trip2',
+          amount: 45.0,
+          date: '2024-03-02',
+          name: 'Restaurant Paris',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+          country: 'France',
+          city: 'Paris',
+        },
+        {
+          transaction_id: 'trip3',
+          amount: 80.0,
+          date: '2024-03-03',
+          name: 'Museum',
+          category_id: 'entertainment',
+          account_id: 'acc1',
+          country: 'France',
+          city: 'Paris',
+        },
         // Domestic transaction (should be excluded)
-        { transaction_id: 'dom1', amount: 50.00, date: '2024-03-05', name: 'Local Store', category_id: 'shopping', account_id: 'acc1', country: 'US' },
+        {
+          transaction_id: 'dom1',
+          amount: 50.0,
+          date: '2024-03-05',
+          name: 'Local Store',
+          category_id: 'shopping',
+          account_id: 'acc1',
+          country: 'US',
+        },
         // Trip to Japan (separate trip)
-        { transaction_id: 'trip4', amount: 200.00, date: '2024-05-10', name: 'Tokyo Hotel', category_id: 'travel', account_id: 'acc1', country: 'Japan', city: 'Tokyo' },
-        { transaction_id: 'trip5', amount: 60.00, date: '2024-05-11', name: 'Sushi Restaurant', category_id: 'food_dining', account_id: 'acc1', country: 'Japan', city: 'Tokyo' },
+        {
+          transaction_id: 'trip4',
+          amount: 200.0,
+          date: '2024-05-10',
+          name: 'Tokyo Hotel',
+          category_id: 'travel',
+          account_id: 'acc1',
+          country: 'Japan',
+          city: 'Tokyo',
+        },
+        {
+          transaction_id: 'trip5',
+          amount: 60.0,
+          date: '2024-05-11',
+          name: 'Sushi Restaurant',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+          country: 'Japan',
+          city: 'Tokyo',
+        },
       ];
       (db as any)._transactions = travelTransactions;
     });
@@ -1060,7 +1246,7 @@ describe('New MCP Tools', () => {
         end_date: '2024-03-31',
       });
 
-      const franceTrip = result.trips.find(t => t.country === 'France');
+      const franceTrip = result.trips.find((t) => t.country === 'France');
       expect(franceTrip).toBeDefined();
       if (franceTrip) {
         expect(franceTrip.duration_days).toBe(3);
@@ -1074,10 +1260,10 @@ describe('New MCP Tools', () => {
         end_date: '2024-03-31',
       });
 
-      const franceTrip = result.trips.find(t => t.country === 'France');
+      const franceTrip = result.trips.find((t) => t.country === 'France');
       expect(franceTrip).toBeDefined();
       if (franceTrip) {
-        expect(franceTrip.total_spent).toBe(275.00); // 150 + 45 + 80
+        expect(franceTrip.total_spent).toBe(275.0); // 150 + 45 + 80
         expect(franceTrip.transaction_count).toBe(3);
       }
     });
@@ -1088,7 +1274,7 @@ describe('New MCP Tools', () => {
         end_date: '2024-03-31',
       });
 
-      const franceTrip = result.trips.find(t => t.country === 'France');
+      const franceTrip = result.trips.find((t) => t.country === 'France');
       expect(franceTrip).toBeDefined();
       if (franceTrip) {
         expect(franceTrip.categories).toBeDefined();
@@ -1104,7 +1290,7 @@ describe('New MCP Tools', () => {
       });
 
       // All trips should have at least 3 days
-      expect(result.trips.every(t => t.duration_days >= 3)).toBe(true);
+      expect(result.trips.every((t) => t.duration_days >= 3)).toBe(true);
     });
 
     test('excludes US transactions', () => {
@@ -1114,7 +1300,7 @@ describe('New MCP Tools', () => {
       });
 
       // No trips should be in US
-      expect(result.trips.every(t => t.country !== 'US' && t.country !== 'USA')).toBe(true);
+      expect(result.trips.every((t) => t.country !== 'US' && t.country !== 'USA')).toBe(true);
     });
   });
 
@@ -1123,18 +1309,81 @@ describe('New MCP Tools', () => {
       // Set up mock data with baseline and unusual transactions
       const mixedTransactions: Transaction[] = [
         // Regular coffee purchases (baseline)
-        { transaction_id: 'cof1', amount: 5.00, date: '2024-01-01', name: 'Starbucks', category_id: 'food_dining', account_id: 'acc1' },
-        { transaction_id: 'cof2', amount: 5.50, date: '2024-01-05', name: 'Starbucks', category_id: 'food_dining', account_id: 'acc1' },
-        { transaction_id: 'cof3', amount: 4.75, date: '2024-01-10', name: 'Starbucks', category_id: 'food_dining', account_id: 'acc1' },
-        { transaction_id: 'cof4', amount: 5.25, date: '2024-01-15', name: 'Starbucks', category_id: 'food_dining', account_id: 'acc1' },
+        {
+          transaction_id: 'cof1',
+          amount: 5.0,
+          date: '2024-01-01',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'cof2',
+          amount: 5.5,
+          date: '2024-01-05',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'cof3',
+          amount: 4.75,
+          date: '2024-01-10',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'cof4',
+          amount: 5.25,
+          date: '2024-01-15',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
         // Unusual Starbucks purchase (much higher)
-        { transaction_id: 'cof5', amount: 75.00, date: '2024-01-20', name: 'Starbucks', category_id: 'food_dining', account_id: 'acc1' },
+        {
+          transaction_id: 'cof5',
+          amount: 75.0,
+          date: '2024-01-20',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
         // Regular groceries (baseline)
-        { transaction_id: 'gro1', amount: 100.00, date: '2024-01-02', name: 'Whole Foods', category_id: 'groceries', account_id: 'acc1' },
-        { transaction_id: 'gro2', amount: 95.00, date: '2024-01-09', name: 'Whole Foods', category_id: 'groceries', account_id: 'acc1' },
-        { transaction_id: 'gro3', amount: 110.00, date: '2024-01-16', name: 'Whole Foods', category_id: 'groceries', account_id: 'acc1' },
+        {
+          transaction_id: 'gro1',
+          amount: 100.0,
+          date: '2024-01-02',
+          name: 'Whole Foods',
+          category_id: 'groceries',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'gro2',
+          amount: 95.0,
+          date: '2024-01-09',
+          name: 'Whole Foods',
+          category_id: 'groceries',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'gro3',
+          amount: 110.0,
+          date: '2024-01-16',
+          name: 'Whole Foods',
+          category_id: 'groceries',
+          account_id: 'acc1',
+        },
         // Large transaction (over $1000)
-        { transaction_id: 'big1', amount: 1500.00, date: '2024-01-25', name: 'Electronics Store', category_id: 'shopping', account_id: 'acc1' },
+        {
+          transaction_id: 'big1',
+          amount: 1500.0,
+          date: '2024-01-25',
+          name: 'Electronics Store',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
       ];
       (db as any)._transactions = mixedTransactions;
     });
@@ -1155,7 +1404,7 @@ describe('New MCP Tools', () => {
         end_date: '2024-01-31',
       });
 
-      const largeTransaction = result.transactions.find(t => t.amount === 1500.00);
+      const largeTransaction = result.transactions.find((t) => t.amount === 1500.0);
       expect(largeTransaction).toBeDefined();
       if (largeTransaction) {
         expect(largeTransaction.anomaly_reason).toContain('Large transaction');
@@ -1166,16 +1415,79 @@ describe('New MCP Tools', () => {
       // Add more baseline transactions to make anomaly detection work better
       const extendedTransactions: Transaction[] = [
         // More baseline Starbucks (need consistent pattern before anomaly)
-        { transaction_id: 'cof0a', amount: 5.00, date: '2023-12-01', name: 'Starbucks', category_id: 'food_dining', account_id: 'acc1' },
-        { transaction_id: 'cof0b', amount: 5.25, date: '2023-12-05', name: 'Starbucks', category_id: 'food_dining', account_id: 'acc1' },
-        { transaction_id: 'cof0c', amount: 4.80, date: '2023-12-10', name: 'Starbucks', category_id: 'food_dining', account_id: 'acc1' },
-        { transaction_id: 'cof0d', amount: 5.10, date: '2023-12-15', name: 'Starbucks', category_id: 'food_dining', account_id: 'acc1' },
-        { transaction_id: 'cof0e', amount: 5.00, date: '2023-12-20', name: 'Starbucks', category_id: 'food_dining', account_id: 'acc1' },
-        { transaction_id: 'cof1', amount: 5.00, date: '2024-01-01', name: 'Starbucks', category_id: 'food_dining', account_id: 'acc1' },
-        { transaction_id: 'cof2', amount: 5.50, date: '2024-01-05', name: 'Starbucks', category_id: 'food_dining', account_id: 'acc1' },
-        { transaction_id: 'cof3', amount: 4.75, date: '2024-01-10', name: 'Starbucks', category_id: 'food_dining', account_id: 'acc1' },
+        {
+          transaction_id: 'cof0a',
+          amount: 5.0,
+          date: '2023-12-01',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'cof0b',
+          amount: 5.25,
+          date: '2023-12-05',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'cof0c',
+          amount: 4.8,
+          date: '2023-12-10',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'cof0d',
+          amount: 5.1,
+          date: '2023-12-15',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'cof0e',
+          amount: 5.0,
+          date: '2023-12-20',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'cof1',
+          amount: 5.0,
+          date: '2024-01-01',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'cof2',
+          amount: 5.5,
+          date: '2024-01-05',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'cof3',
+          amount: 4.75,
+          date: '2024-01-10',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
         // Unusual Starbucks purchase (much higher - 10x normal)
-        { transaction_id: 'cof5', amount: 50.00, date: '2024-01-20', name: 'Starbucks', category_id: 'food_dining', account_id: 'acc1' },
+        {
+          transaction_id: 'cof5',
+          amount: 50.0,
+          date: '2024-01-20',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
       ];
       (db as any)._transactions = extendedTransactions;
 
@@ -1185,7 +1497,9 @@ describe('New MCP Tools', () => {
       });
 
       // With more baseline data, the $50 Starbucks should be flagged as unusual
-      const unusualStarbucks = result.transactions.find(t => t.name === 'Starbucks' && t.amount === 50.00);
+      const unusualStarbucks = result.transactions.find(
+        (t) => t.name === 'Starbucks' && t.amount === 50.0
+      );
       expect(unusualStarbucks).toBeDefined();
       if (unusualStarbucks) {
         expect(unusualStarbucks.anomaly_reason).toContain('above');
@@ -1195,16 +1509,79 @@ describe('New MCP Tools', () => {
     test('provides deviation percentage', () => {
       // Add more baseline transactions for reliable anomaly detection
       const extendedTransactions: Transaction[] = [
-        { transaction_id: 'cof0a', amount: 5.00, date: '2023-12-01', name: 'Starbucks', category_id: 'food_dining', account_id: 'acc1' },
-        { transaction_id: 'cof0b', amount: 5.25, date: '2023-12-05', name: 'Starbucks', category_id: 'food_dining', account_id: 'acc1' },
-        { transaction_id: 'cof0c', amount: 4.80, date: '2023-12-10', name: 'Starbucks', category_id: 'food_dining', account_id: 'acc1' },
-        { transaction_id: 'cof0d', amount: 5.10, date: '2023-12-15', name: 'Starbucks', category_id: 'food_dining', account_id: 'acc1' },
-        { transaction_id: 'cof0e', amount: 5.00, date: '2023-12-20', name: 'Starbucks', category_id: 'food_dining', account_id: 'acc1' },
-        { transaction_id: 'cof1', amount: 5.00, date: '2024-01-01', name: 'Starbucks', category_id: 'food_dining', account_id: 'acc1' },
-        { transaction_id: 'cof2', amount: 5.50, date: '2024-01-05', name: 'Starbucks', category_id: 'food_dining', account_id: 'acc1' },
-        { transaction_id: 'cof3', amount: 4.75, date: '2024-01-10', name: 'Starbucks', category_id: 'food_dining', account_id: 'acc1' },
+        {
+          transaction_id: 'cof0a',
+          amount: 5.0,
+          date: '2023-12-01',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'cof0b',
+          amount: 5.25,
+          date: '2023-12-05',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'cof0c',
+          amount: 4.8,
+          date: '2023-12-10',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'cof0d',
+          amount: 5.1,
+          date: '2023-12-15',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'cof0e',
+          amount: 5.0,
+          date: '2023-12-20',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'cof1',
+          amount: 5.0,
+          date: '2024-01-01',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'cof2',
+          amount: 5.5,
+          date: '2024-01-05',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'cof3',
+          amount: 4.75,
+          date: '2024-01-10',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
         // Unusual purchase
-        { transaction_id: 'cof5', amount: 50.00, date: '2024-01-20', name: 'Starbucks', category_id: 'food_dining', account_id: 'acc1' },
+        {
+          transaction_id: 'cof5',
+          amount: 50.0,
+          date: '2024-01-20',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
       ];
       (db as any)._transactions = extendedTransactions;
 
@@ -1213,7 +1590,7 @@ describe('New MCP Tools', () => {
         end_date: '2024-01-31',
       });
 
-      const anomaly = result.transactions.find(t => t.deviation_percent !== undefined);
+      const anomaly = result.transactions.find((t) => t.deviation_percent !== undefined);
       expect(anomaly).toBeDefined();
       if (anomaly && anomaly.deviation_percent) {
         expect(anomaly.deviation_percent).toBeGreaterThan(0);
