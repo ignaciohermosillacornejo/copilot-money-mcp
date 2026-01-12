@@ -81,7 +81,10 @@ Thumbs.db
 # Project specific
 # Demo database contains real financial data - do NOT commit
 tests/fixtures/demo_database/
+
+# LevelDB files (except synthetic test fixtures)
 *.ldb
+!tests/fixtures/synthetic-db/*.ldb
 MANIFEST-*
 CURRENT
 LOCK

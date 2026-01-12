@@ -9,16 +9,30 @@ import { decodeTransactions, decodeAccounts } from '../../src/core/decoder.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
-// Cleanup function for test fixtures
-function cleanupFixtures() {
+// Cleanup function for test-specific temp fixtures (not the whole fixtures dir)
+const tempDirs = [
+  'test-file.txt',
+  'test-file2.txt',
+  'empty-db',
+  'no-txn-db',
+  'test-db',
+  'empty-acc-db',
+  'no-acc-db',
+  'acc-db',
+];
+
+function cleanupTempFixtures() {
   const fixturesDir = path.join(__dirname, '../fixtures');
-  if (fs.existsSync(fixturesDir)) {
-    fs.rmSync(fixturesDir, { recursive: true, force: true });
+  for (const dir of tempDirs) {
+    const fullPath = path.join(fixturesDir, dir);
+    if (fs.existsSync(fullPath)) {
+      fs.rmSync(fullPath, { recursive: true, force: true });
+    }
   }
 }
 
 afterEach(() => {
-  cleanupFixtures();
+  cleanupTempFixtures();
 });
 
 describe('Decoder Main Functions', () => {
