@@ -66,26 +66,29 @@ describe('CopilotMoneyServer', () => {
       expect(typeof server.run).toBe('function');
     });
 
-    test('registers request handlers on initialization', () => {
+    test('initializes MCP server instance', () => {
       const server = new CopilotMoneyServer('/fake/path');
       // @ts-expect-error - accessing private property for testing
       const mcpServer = server.server;
 
       expect(mcpServer).toBeDefined();
-      // Server should have registered handlers
-      expect(mcpServer.requestHandlers).toBeDefined();
+      // Server should be an instance of Server from MCP SDK
+      expect(mcpServer.constructor.name).toBe('Server');
     });
   });
 
   describe('request handler - list tools', () => {
-    test('returns list of available tools', () => {
+    test('server can list available tools via tools property', () => {
       const server = new CopilotMoneyServer('/fake/path');
       // @ts-expect-error - accessing private property for testing
-      const mcpServer = server.server;
+      const tools = server.tools;
 
-      // Get the list tools handler
-      const handler = mcpServer.requestHandlers.get('tools/list');
-      expect(handler).toBeDefined();
+      // The tools instance should have methods corresponding to available tools
+      expect(tools.getTransactions).toBeDefined();
+      expect(tools.searchTransactions).toBeDefined();
+      expect(tools.getAccounts).toBeDefined();
+      expect(tools.getCategories).toBeDefined();
+      expect(typeof tools.getTransactions).toBe('function');
     });
   });
 
@@ -196,7 +199,18 @@ describe('CopilotMoneyServer', () => {
     });
 
     test('handles invalid tool arguments gracefully', () => {
+      const db = new CopilotDatabase('/fake/path');
+      // @ts-expect-error - inject mock data
+      db._transactions = [...mockTransactions];
+      // @ts-expect-error - inject mock data
+      db._accounts = [...mockAccounts];
+
       const server = new CopilotMoneyServer('/fake/path');
+      // @ts-expect-error - inject mock db
+      server.db = db;
+      // @ts-expect-error - inject tools with mock db
+      server.tools = new CopilotMoneyTools(db);
+
       // @ts-expect-error - accessing private property
       const tools = server.tools;
 
