@@ -137,19 +137,29 @@ describe("CopilotMoneyTools", () => {
 
   describe("searchTransactions", () => {
     test("finds transactions by merchant name", () => {
-      const result = tools.searchTransactions("coffee");
+      const result = tools.searchTransactions("coffee", {});
       expect(result.count).toBe(1);
       expect(result.transactions[0].name).toBe("Coffee Shop");
     });
 
     test("is case-insensitive", () => {
-      const result = tools.searchTransactions("GROCERY");
+      const result = tools.searchTransactions("GROCERY", {});
       expect(result.count).toBe(1);
     });
 
     test("applies limit correctly", () => {
-      const result = tools.searchTransactions("food", 1);
+      const result = tools.searchTransactions("food", { limit: 1 });
       expect(result.count).toBe(1);
+    });
+
+    test("filters by date range", () => {
+      const result = tools.searchTransactions("food", {
+        start_date: "2024-02-01",
+        end_date: "2024-02-28",
+      });
+      // Should only find the Fast Food in February
+      expect(result.count).toBe(1);
+      expect(result.transactions[0].original_name).toBe("Fast Food");
     });
   });
 
@@ -187,12 +197,14 @@ describe("CopilotMoneyTools", () => {
       });
 
       // groceries (120.5) should be first
-      expect(result.categories[0].category).toBe("groceries");
+      expect(result.categories[0].category_id).toBe("groceries");
+      expect(result.categories[0].category_name).toBe("Groceries");
       expect(result.categories[0].total_spending).toBe(120.5);
       expect(result.categories[0].transaction_count).toBe(1);
 
       // food_dining (50 + 25 = 75) should be second
-      expect(result.categories[1].category).toBe("food_dining");
+      expect(result.categories[1].category_id).toBe("food_dining");
+      expect(result.categories[1].category_name).toBe("Food & Drink");
       expect(result.categories[1].total_spending).toBe(75.0);
       expect(result.categories[1].transaction_count).toBe(2);
     });
@@ -205,7 +217,7 @@ describe("CopilotMoneyTools", () => {
 
       // Should not include the -1000 income transaction
       const incomeCategory = result.categories.find(
-        (cat) => cat.category === "income"
+        (cat) => cat.category_id === "income"
       );
       expect(incomeCategory).toBeUndefined();
     });
@@ -264,12 +276,138 @@ describe("CopilotMoneyTools", () => {
       );
     });
   });
+
+  describe("getCategories", () => {
+    test("returns all unique categories", () => {
+      const result = tools.getCategories();
+
+      expect(result.count).toBeGreaterThan(0);
+      expect(result.categories).toBeDefined();
+    });
+
+    test("includes human-readable category names", () => {
+      const result = tools.getCategories();
+
+      const foodCategory = result.categories.find(
+        (c) => c.category_id === "food_dining"
+      );
+      expect(foodCategory?.category_name).toBe("Food & Drink");
+    });
+
+    test("includes transaction count and total amount", () => {
+      const result = tools.getCategories();
+
+      for (const cat of result.categories) {
+        expect(cat.transaction_count).toBeGreaterThan(0);
+        expect(cat.total_amount).toBeGreaterThanOrEqual(0);
+      }
+    });
+  });
+
+  describe("getIncome", () => {
+    test("returns income transactions", () => {
+      const result = tools.getIncome({
+        start_date: "2024-01-01",
+        end_date: "2024-12-31",
+      });
+
+      expect(result.total_income).toBeDefined();
+      expect(result.transaction_count).toBeGreaterThanOrEqual(0);
+      expect(result.income_by_source).toBeDefined();
+    });
+
+    test("filters negative amounts as income", () => {
+      const result = tools.getIncome({
+        start_date: "2024-01-01",
+        end_date: "2024-12-31",
+      });
+
+      // Should find the -1000 paycheck transaction
+      expect(result.total_income).toBe(1000.0);
+      expect(result.transaction_count).toBe(1);
+    });
+  });
+
+  describe("getSpendingByMerchant", () => {
+    test("aggregates spending by merchant", () => {
+      const result = tools.getSpendingByMerchant({
+        start_date: "2024-01-01",
+        end_date: "2024-12-31",
+      });
+
+      expect(result.total_spending).toBeDefined();
+      expect(result.merchant_count).toBeGreaterThan(0);
+      expect(result.merchants).toBeDefined();
+    });
+
+    test("merchants have correct structure", () => {
+      const result = tools.getSpendingByMerchant({
+        start_date: "2024-01-01",
+        end_date: "2024-12-31",
+      });
+
+      if (result.merchants.length > 0) {
+        const merchant = result.merchants[0];
+        expect(merchant.merchant).toBeDefined();
+        expect(merchant.total_spending).toBeGreaterThan(0);
+        expect(merchant.transaction_count).toBeGreaterThan(0);
+        expect(merchant.average_transaction).toBeDefined();
+      }
+    });
+  });
+
+  describe("comparePeriods", () => {
+    test("compares two periods", () => {
+      const result = tools.comparePeriods({
+        period1: "last_year",
+        period2: "this_year",
+      });
+
+      expect(result.period1).toBeDefined();
+      expect(result.period2).toBeDefined();
+      expect(result.comparison).toBeDefined();
+      expect(result.category_comparison).toBeDefined();
+    });
+
+    test("includes spending and income changes", () => {
+      const result = tools.comparePeriods({
+        period1: "last_year",
+        period2: "this_year",
+      });
+
+      expect(result.comparison.spending_change).toBeDefined();
+      expect(result.comparison.spending_change_percent).toBeDefined();
+      expect(result.comparison.income_change).toBeDefined();
+      expect(result.comparison.income_change_percent).toBeDefined();
+    });
+  });
+
+  describe("exclude_transfers option", () => {
+    test("getTransactions respects exclude_transfers", () => {
+      const withTransfers = tools.getTransactions({});
+      const withoutTransfers = tools.getTransactions({ exclude_transfers: true });
+
+      // Should not throw
+      expect(withTransfers.count).toBeGreaterThanOrEqual(0);
+      expect(withoutTransfers.count).toBeGreaterThanOrEqual(0);
+    });
+
+    test("getSpendingByCategory respects exclude_transfers", () => {
+      const result = tools.getSpendingByCategory({
+        start_date: "2024-01-01",
+        end_date: "2024-12-31",
+        exclude_transfers: true,
+      });
+
+      expect(result.total_spending).toBeDefined();
+    });
+  });
 });
 
 describe("createToolSchemas", () => {
-  test("returns 5 tool schemas", () => {
+  test("returns 10 tool schemas", () => {
     const schemas = createToolSchemas();
-    expect(schemas).toHaveLength(5);
+    expect(schemas).toHaveLength(10);
   });
 
   test("all tools have readOnlyHint: true", () => {
@@ -296,11 +434,19 @@ describe("createToolSchemas", () => {
     const schemas = createToolSchemas();
     const names = schemas.map((s) => s.name);
 
+    // Original tools
     expect(names).toContain("get_transactions");
     expect(names).toContain("search_transactions");
     expect(names).toContain("get_accounts");
     expect(names).toContain("get_spending_by_category");
     expect(names).toContain("get_account_balance");
+
+    // New tools
+    expect(names).toContain("get_categories");
+    expect(names).toContain("get_recurring_transactions");
+    expect(names).toContain("get_income");
+    expect(names).toContain("get_spending_by_merchant");
+    expect(names).toContain("compare_periods");
   });
 
   test("search_transactions requires query parameter", () => {
@@ -315,5 +461,13 @@ describe("createToolSchemas", () => {
     const balanceTool = schemas.find((s) => s.name === "get_account_balance");
 
     expect(balanceTool?.inputSchema.required).toContain("account_id");
+  });
+
+  test("compare_periods requires period1 and period2 parameters", () => {
+    const schemas = createToolSchemas();
+    const compareTool = schemas.find((s) => s.name === "compare_periods");
+
+    expect(compareTool?.inputSchema.required).toContain("period1");
+    expect(compareTool?.inputSchema.required).toContain("period2");
   });
 });

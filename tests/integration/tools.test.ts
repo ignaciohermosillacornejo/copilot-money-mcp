@@ -150,7 +150,7 @@ describe("CopilotMoneyTools Integration", () => {
 
   describe("searchTransactions", () => {
     test("finds transactions by query", () => {
-      const result = tools.searchTransactions("starbucks", 20);
+      const result = tools.searchTransactions("starbucks", { limit: 20 });
 
       expect(result.count).toBeDefined();
       expect(result.transactions).toBeDefined();
@@ -158,14 +158,14 @@ describe("CopilotMoneyTools Integration", () => {
     });
 
     test("search is case-insensitive", () => {
-      const result1 = tools.searchTransactions("STARBUCKS", 10);
-      const result2 = tools.searchTransactions("starbucks", 10);
+      const result1 = tools.searchTransactions("STARBUCKS", { limit: 10 });
+      const result2 = tools.searchTransactions("starbucks", { limit: 10 });
 
       expect(result1.count).toBe(result2.count);
     });
 
     test("returns empty results for no matches", () => {
-      const result = tools.searchTransactions("xyznonexistent123");
+      const result = tools.searchTransactions("xyznonexistent123", {});
 
       expect(result.count).toBe(0);
       expect(result.transactions).toEqual([]);
@@ -250,7 +250,7 @@ describe("CopilotMoneyTools Integration", () => {
 
       // Should not include income category
       const incomeCategory = result.categories.find(
-        (cat) => cat.category === "income"
+        (cat) => cat.category_id === "income"
       );
       expect(incomeCategory).toBeUndefined();
     });
@@ -279,7 +279,8 @@ describe("CopilotMoneyTools Integration", () => {
 
       if (result.categories.length > 0) {
         const cat = result.categories[0];
-        expect(cat.category).toBeDefined();
+        expect(cat.category_id).toBeDefined();
+        expect(cat.category_name).toBeDefined();
         expect(cat.total_spending).toBeDefined();
         expect(cat.transaction_count).toBeDefined();
         expect(cat.total_spending >= 0).toBe(true);
@@ -319,7 +320,7 @@ describe("CopilotMoneyTools Integration", () => {
   describe("tool schemas", () => {
     test("returns correct number of tool schemas", () => {
       const schemas = createToolSchemas();
-      expect(schemas.length).toBe(5);
+      expect(schemas.length).toBe(10);
     });
 
     test("all tools have readOnlyHint annotation", () => {
@@ -346,11 +347,19 @@ describe("CopilotMoneyTools Integration", () => {
       const schemas = createToolSchemas();
       const names = schemas.map((s) => s.name);
 
+      // Original tools
       expect(names).toContain("get_transactions");
       expect(names).toContain("search_transactions");
       expect(names).toContain("get_accounts");
       expect(names).toContain("get_spending_by_category");
       expect(names).toContain("get_account_balance");
+
+      // New tools
+      expect(names).toContain("get_categories");
+      expect(names).toContain("get_recurring_transactions");
+      expect(names).toContain("get_income");
+      expect(names).toContain("get_spending_by_merchant");
+      expect(names).toContain("compare_periods");
     });
 
     test("required parameters are specified", () => {
@@ -361,6 +370,10 @@ describe("CopilotMoneyTools Integration", () => {
 
       const balanceTool = schemas.find((s) => s.name === "get_account_balance");
       expect(balanceTool?.inputSchema.required).toContain("account_id");
+
+      const compareTool = schemas.find((s) => s.name === "compare_periods");
+      expect(compareTool?.inputSchema.required).toContain("period1");
+      expect(compareTool?.inputSchema.required).toContain("period2");
     });
   });
 
@@ -402,7 +415,7 @@ describe("CopilotMoneyTools Integration", () => {
     });
 
     test("handles empty search results", () => {
-      const result = tools.searchTransactions("xyznonexistent123");
+      const result = tools.searchTransactions("xyznonexistent123", {});
 
       expect(result.count).toBe(0);
       expect(result.transactions).toEqual([]);

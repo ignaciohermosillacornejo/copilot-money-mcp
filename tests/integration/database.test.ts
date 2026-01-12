@@ -260,11 +260,19 @@ describe("CopilotDatabase Integration", () => {
       expect(categoryIds.length).toBe(uniqueIds.size);
     });
 
-    test("category name defaults to category_id", () => {
+    test("category name is human-readable", () => {
       const categories = db.getCategories();
 
+      // All categories should have human-readable names
       for (const cat of categories) {
-        expect(cat.name).toBe(cat.category_id);
+        expect(cat.name).toBeDefined();
+        expect(cat.name.length).toBeGreaterThan(0);
+      }
+
+      // Check specific mappings
+      const foodCategory = categories.find((c) => c.category_id === "food_dining");
+      if (foodCategory) {
+        expect(foodCategory.name).toBe("Food & Drink");
       }
     });
   });

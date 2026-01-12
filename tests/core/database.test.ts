@@ -173,10 +173,10 @@ describe("CopilotDatabase", () => {
       expect(categoryIds).toContain("groceries");
     });
 
-    test("category name defaults to category_id", () => {
+    test("category name is human-readable", () => {
       const result = db.getCategories();
       const foodCategory = result.find((c) => c.category_id === "food_dining");
-      expect(foodCategory?.name).toBe("food_dining");
+      expect(foodCategory?.name).toBe("Food & Drink");
     });
   });
 

@@ -94,10 +94,12 @@ export class CopilotMoneyServer {
             if (!args?.query) {
               throw new Error("Missing required parameter: query");
             }
-            result = this.tools.searchTransactions(
-              args.query,
-              args.limit || 50
-            );
+            result = this.tools.searchTransactions(args.query, {
+              limit: args.limit,
+              period: args.period,
+              start_date: args.start_date,
+              end_date: args.end_date,
+            });
             break;
 
           case "get_accounts":
@@ -113,6 +115,31 @@ export class CopilotMoneyServer {
               throw new Error("Missing required parameter: account_id");
             }
             result = this.tools.getAccountBalance(args.account_id);
+            break;
+
+          case "get_categories":
+            result = this.tools.getCategories();
+            break;
+
+          case "get_recurring_transactions":
+            result = this.tools.getRecurringTransactions(args || {});
+            break;
+
+          case "get_income":
+            result = this.tools.getIncome(args || {});
+            break;
+
+          case "get_spending_by_merchant":
+            result = this.tools.getSpendingByMerchant(args || {});
+            break;
+
+          case "compare_periods":
+            if (!args?.period1 || !args?.period2) {
+              throw new Error(
+                "Missing required parameters: period1 and period2"
+              );
+            }
+            result = this.tools.comparePeriods(args);
             break;
 
           default:

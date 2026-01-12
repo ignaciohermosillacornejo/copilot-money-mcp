@@ -15,6 +15,7 @@ import {
   Category,
   getTransactionDisplayName,
 } from "../models/index.js";
+import { getCategoryName } from "../utils/categories.js";
 
 /**
  * Abstraction layer for querying Copilot Money data.
@@ -176,6 +177,7 @@ export class CopilotDatabase {
    *
    * @param accountType - Optional filter by account type
    *                     (checking, savings, credit, investment)
+   *                     Also checks subtype field for better matching.
    * @returns List of accounts
    */
   getAccounts(accountType?: string): Account[] {
@@ -187,13 +189,26 @@ export class CopilotDatabase {
     let result = [...this._accounts];
 
     // Apply account type filter if specified
+    // Check both account_type and subtype fields for better matching
     if (accountType) {
       const accountTypeLower = accountType.toLowerCase();
-      result = result.filter(
-        (acc) =>
+      result = result.filter((acc) => {
+        // Check account_type field
+        if (
           acc.account_type &&
           acc.account_type.toLowerCase().includes(accountTypeLower)
-      );
+        ) {
+          return true;
+        }
+        // Check subtype field (e.g., "checking" when account_type is "depository")
+        if (
+          acc.subtype &&
+          acc.subtype.toLowerCase().includes(accountTypeLower)
+        ) {
+          return true;
+        }
+        return false;
+      });
     }
 
     return result;
@@ -202,7 +217,7 @@ export class CopilotDatabase {
   /**
    * Get all unique categories from transactions.
    *
-   * @returns List of unique categories
+   * @returns List of unique categories with human-readable names
    */
   getCategories(): Category[] {
     // Load transactions
@@ -210,23 +225,49 @@ export class CopilotDatabase {
       this._transactions = decodeTransactions(this.dbPath);
     }
 
-    // Extract unique category IDs
-    const seenCategories = new Set<string>();
-    const uniqueCategories: Category[] = [];
+    // Extract unique category IDs and count transactions
+    const categoryStats = new Map<
+      string,
+      { count: number; totalAmount: number }
+    >();
 
     for (const txn of this._transactions) {
-      if (txn.category_id && !seenCategories.has(txn.category_id)) {
-        seenCategories.add(txn.category_id);
-        // Create Category object
-        const category: Category = {
-          category_id: txn.category_id,
-          name: txn.category_id, // Use category_id as name for now
+      if (txn.category_id) {
+        const stats = categoryStats.get(txn.category_id) || {
+          count: 0,
+          totalAmount: 0,
         };
-        uniqueCategories.push(category);
+        stats.count++;
+        stats.totalAmount += Math.abs(txn.amount);
+        categoryStats.set(txn.category_id, stats);
       }
     }
 
-    return uniqueCategories;
+    // Create Category objects with human-readable names
+    const uniqueCategories: Category[] = [];
+    for (const [categoryId, _stats] of categoryStats) {
+      const category: Category = {
+        category_id: categoryId,
+        name: getCategoryName(categoryId),
+      };
+      uniqueCategories.push(category);
+    }
+
+    // Sort by name for easier browsing
+    return uniqueCategories.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /**
+   * Get all transactions (unfiltered) - useful for internal aggregations.
+   *
+   * @returns All transactions
+   */
+  getAllTransactions(): Transaction[] {
+    // Lazy load transactions
+    if (this._transactions === null) {
+      this._transactions = decodeTransactions(this.dbPath);
+    }
+    return [...this._transactions];
   }
 
   /**
