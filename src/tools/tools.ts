@@ -36,25 +36,25 @@ export function normalizeMerchantName(name: string): string {
     'AMAZON MKTPL': 'AMAZON',
     'AMAZON GROCE': 'AMAZON GROCERY',
     'AMZN MKTP': 'AMAZON',
-    'AMZN': 'AMAZON',
+    AMZN: 'AMAZON',
     'UBER EATS': 'UBER EATS',
     'UBER TRIP': 'UBER',
     'UBER BV': 'UBER',
-    'LYFT': 'LYFT',
-    'STARBUCKS': 'STARBUCKS',
-    'DOORDASH': 'DOORDASH',
-    'GRUBHUB': 'GRUBHUB',
+    LYFT: 'LYFT',
+    STARBUCKS: 'STARBUCKS',
+    DOORDASH: 'DOORDASH',
+    GRUBHUB: 'GRUBHUB',
     'NETFLIX COM': 'NETFLIX',
-    'NETFLIX': 'NETFLIX',
-    'SPOTIFY': 'SPOTIFY',
-    'HULU': 'HULU',
+    NETFLIX: 'NETFLIX',
+    SPOTIFY: 'SPOTIFY',
+    HULU: 'HULU',
     'DISNEY PLUS': 'DISNEY+',
-    'DISNEYPLUS': 'DISNEY+',
+    DISNEYPLUS: 'DISNEY+',
     'HBO MAX': 'HBO MAX',
-    'WALMART': 'WALMART',
-    'TARGET': 'TARGET',
-    'COSTCO': 'COSTCO',
-    'WHOLEFDS': 'WHOLE FOODS',
+    WALMART: 'WALMART',
+    TARGET: 'TARGET',
+    COSTCO: 'COSTCO',
+    WHOLEFDS: 'WHOLE FOODS',
     'WHOLE FOODS': 'WHOLE FOODS',
     'TRADER JOE': 'TRADER JOES',
   };
@@ -67,7 +67,7 @@ export function normalizeMerchantName(name: string): string {
   }
 
   // Return first 3 words for long names
-  const words = normalized.split(' ').filter(w => w.length > 0);
+  const words = normalized.split(' ').filter((w) => w.length > 0);
   if (words.length > 3) {
     return words.slice(0, 3).join(' ');
   }
@@ -165,8 +165,9 @@ export class CopilotMoneyTools {
     if (region) {
       const regionLower = region.toLowerCase();
       transactions = transactions.filter(
-        (txn) => txn.region?.toLowerCase().includes(regionLower) ||
-                 txn.city?.toLowerCase().includes(regionLower)
+        (txn) =>
+          txn.region?.toLowerCase().includes(regionLower) ||
+          txn.city?.toLowerCase().includes(regionLower)
       );
     }
 
@@ -174,8 +175,9 @@ export class CopilotMoneyTools {
     if (country) {
       const countryLower = country.toLowerCase();
       transactions = transactions.filter(
-        (txn) => txn.country?.toLowerCase() === countryLower ||
-                 txn.country?.toLowerCase().includes(countryLower)
+        (txn) =>
+          txn.country?.toLowerCase() === countryLower ||
+          txn.country?.toLowerCase().includes(countryLower)
       );
     }
 
@@ -553,7 +555,8 @@ export class CopilotMoneyTools {
       if (consistentAmounts.length < min_occurrences) continue;
 
       // Calculate amount variance for confidence scoring
-      const amountVariance = amounts.reduce((sum, a) => sum + Math.pow(a - avgAmount, 2), 0) / amounts.length;
+      const amountVariance =
+        amounts.reduce((sum, a) => sum + Math.pow(a - avgAmount, 2), 0) / amounts.length;
       const amountStdDev = Math.sqrt(amountVariance);
       const amountCv = avgAmount > 0 ? amountStdDev / avgAmount : 1; // Coefficient of variation
 
@@ -570,9 +573,10 @@ export class CopilotMoneyTools {
       const avgGap = gaps.length > 0 ? gaps.reduce((a, b) => a + b, 0) / gaps.length : 0;
 
       // Calculate gap variance for confidence scoring
-      const gapVariance = gaps.length > 0
-        ? gaps.reduce((sum, g) => sum + Math.pow(g - avgGap, 2), 0) / gaps.length
-        : 0;
+      const gapVariance =
+        gaps.length > 0
+          ? gaps.reduce((sum, g) => sum + Math.pow(g - avgGap, 2), 0) / gaps.length
+          : 0;
       const gapStdDev = Math.sqrt(gapVariance);
       const gapCv = avgGap > 0 ? gapStdDev / avgGap : 1;
 
@@ -595,7 +599,11 @@ export class CopilotMoneyTools {
         confidenceReasons.push(`${sortedTxns.length} occurrences`);
       }
       // Medium confidence criteria
-      else if ((amountCv < 0.15 || gapCv < 0.25) && sortedTxns.length >= 2 && frequency !== 'irregular') {
+      else if (
+        (amountCv < 0.15 || gapCv < 0.25) &&
+        sortedTxns.length >= 2 &&
+        frequency !== 'irregular'
+      ) {
         confidence = 'medium';
         if (amountCv < 0.15) confidenceReasons.push('similar amounts');
         if (gapCv < 0.25) confidenceReasons.push('fairly consistent interval');
@@ -871,15 +879,19 @@ export class CopilotMoneyTools {
     // 2. Transactions with foreign transaction fee category
     // 3. Transactions with non-USD currency
     const foreignTxns = allTransactions.filter((txn) => {
-      const isForeignCountry = txn.country && txn.country.toUpperCase() !== 'US' && txn.country.toUpperCase() !== 'USA';
-      const isForeignFeeCategory = txn.category_id === 'bank_fees_foreign_transaction_fees' || txn.category_id === '10005000';
-      const isForeignCurrency = txn.iso_currency_code && txn.iso_currency_code.toUpperCase() !== 'USD';
+      const isForeignCountry =
+        txn.country && txn.country.toUpperCase() !== 'US' && txn.country.toUpperCase() !== 'USA';
+      const isForeignFeeCategory =
+        txn.category_id === 'bank_fees_foreign_transaction_fees' || txn.category_id === '10005000';
+      const isForeignCurrency =
+        txn.iso_currency_code && txn.iso_currency_code.toUpperCase() !== 'USD';
       return isForeignCountry || isForeignFeeCategory || isForeignCurrency;
     });
 
     // Calculate FX fees separately
     const fxFees = allTransactions.filter(
-      (txn) => txn.category_id === 'bank_fees_foreign_transaction_fees' || txn.category_id === '10005000'
+      (txn) =>
+        txn.category_id === 'bank_fees_foreign_transaction_fees' || txn.category_id === '10005000'
     );
     const totalFxFees = fxFees.reduce((sum, txn) => sum + Math.abs(txn.amount), 0);
 
@@ -958,7 +970,11 @@ export class CopilotMoneyTools {
 
       // Check for refund-related merchant names or categories
       const name = getTransactionDisplayName(txn).toLowerCase();
-      const isRefundName = name.includes('refund') || name.includes('return') || name.includes('credit') || name.includes('reversal');
+      const isRefundName =
+        name.includes('refund') ||
+        name.includes('return') ||
+        name.includes('credit') ||
+        name.includes('reversal');
       const isRefundCategory = txn.category_id?.toLowerCase().includes('refund');
 
       // Include if it's a credit from a merchant (likely a refund)
@@ -1005,11 +1021,7 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with potential duplicates grouped
    */
-  getDuplicateTransactions(options: {
-    period?: string;
-    start_date?: string;
-    end_date?: string;
-  }): {
+  getDuplicateTransactions(options: { period?: string; start_date?: string; end_date?: string }): {
     period: { start_date?: string; end_date?: string };
     duplicate_groups_count: number;
     total_potential_duplicates: number;
@@ -1019,7 +1031,12 @@ export class CopilotMoneyTools {
       dates: string[];
       amounts: number[];
       accounts: string[];
-      transactions: Array<{ transaction_id: string; date: string; amount: number; account_id?: string }>;
+      transactions: Array<{
+        transaction_id: string;
+        date: string;
+        amount: number;
+        account_id?: string;
+      }>;
     }>;
   } {
     const { period } = options;
@@ -1063,7 +1080,12 @@ export class CopilotMoneyTools {
       dates: string[];
       amounts: number[];
       accounts: string[];
-      transactions: Array<{ transaction_id: string; date: string; amount: number; account_id?: string }>;
+      transactions: Array<{
+        transaction_id: string;
+        date: string;
+        amount: number;
+        account_id?: string;
+      }>;
     }> = [];
 
     // Add merchant+amount+date duplicates
@@ -1072,10 +1094,10 @@ export class CopilotMoneyTools {
         duplicateGroups.push({
           group_key: key,
           transaction_count: txns.length,
-          dates: [...new Set(txns.map(t => t.date))],
-          amounts: [...new Set(txns.map(t => t.amount))],
-          accounts: [...new Set(txns.map(t => t.account_id).filter(Boolean) as string[])],
-          transactions: txns.map(t => ({
+          dates: [...new Set(txns.map((t) => t.date))],
+          amounts: [...new Set(txns.map((t) => t.amount))],
+          accounts: [...new Set(txns.map((t) => t.account_id).filter(Boolean) as string[])],
+          transactions: txns.map((t) => ({
             transaction_id: t.transaction_id,
             date: t.date,
             amount: t.amount,
@@ -1090,14 +1112,14 @@ export class CopilotMoneyTools {
       if (txns.length > 1) {
         const key = `same_id:${txnId}`;
         // Check if not already included
-        if (!duplicateGroups.some(g => g.group_key === key)) {
+        if (!duplicateGroups.some((g) => g.group_key === key)) {
           duplicateGroups.push({
             group_key: key,
             transaction_count: txns.length,
-            dates: [...new Set(txns.map(t => t.date))],
-            amounts: [...new Set(txns.map(t => t.amount))],
-            accounts: [...new Set(txns.map(t => t.account_id).filter(Boolean) as string[])],
-            transactions: txns.map(t => ({
+            dates: [...new Set(txns.map((t) => t.date))],
+            amounts: [...new Set(txns.map((t) => t.amount))],
+            accounts: [...new Set(txns.map((t) => t.account_id).filter(Boolean) as string[])],
+            transactions: txns.map((t) => ({
               transaction_id: t.transaction_id,
               date: t.date,
               amount: t.amount,
@@ -1153,7 +1175,19 @@ export class CopilotMoneyTools {
     });
 
     // Credits are negative amounts that look like statement credits
-    const creditKeywords = ['credit', 'cashback', 'reward', 'rebate', 'bonus', 'statement credit', 'hotel credit', 'entertainment credit', 'uber credit', 'airline credit', 'digital entertainment'];
+    const creditKeywords = [
+      'credit',
+      'cashback',
+      'reward',
+      'rebate',
+      'bonus',
+      'statement credit',
+      'hotel credit',
+      'entertainment credit',
+      'uber credit',
+      'airline credit',
+      'digital entertainment',
+    ];
 
     const creditTxns = allTransactions.filter((txn) => {
       if (txn.amount >= 0) return false; // Must be negative (credit)
@@ -1161,14 +1195,15 @@ export class CopilotMoneyTools {
       if (isIncomeCategory(txn.category_id)) return false;
 
       const name = getTransactionDisplayName(txn).toLowerCase();
-      return creditKeywords.some(kw => name.includes(kw));
+      return creditKeywords.some((kw) => name.includes(kw));
     });
 
     // Categorize credit types
     const getCreditType = (txn: Transaction): string => {
       const name = getTransactionDisplayName(txn).toLowerCase();
       if (name.includes('hotel')) return 'Hotel Credit';
-      if (name.includes('entertainment') || name.includes('streaming')) return 'Entertainment Credit';
+      if (name.includes('entertainment') || name.includes('streaming'))
+        return 'Entertainment Credit';
       if (name.includes('airline') || name.includes('travel')) return 'Travel Credit';
       if (name.includes('uber')) return 'Uber Credit';
       if (name.includes('cashback')) return 'Cashback';
@@ -1275,8 +1310,10 @@ export class CopilotMoneyTools {
         day_number: dayNum,
         total_spending: Math.round(stats.total * 100) / 100,
         transaction_count: stats.count,
-        average_transaction: stats.count > 0 ? Math.round((stats.total / stats.count) * 100) / 100 : 0,
-        percentage_of_total: totalSpending > 0 ? Math.round((stats.total / totalSpending) * 10000) / 100 : 0,
+        average_transaction:
+          stats.count > 0 ? Math.round((stats.total / stats.count) * 100) / 100 : 0,
+        percentage_of_total:
+          totalSpending > 0 ? Math.round((stats.total / totalSpending) * 10000) / 100 : 0,
       }))
       .sort((a, b) => a.day_number - b.day_number);
 
@@ -1327,9 +1364,10 @@ export class CopilotMoneyTools {
 
     // Find transactions in foreign countries or travel-related categories
     const travelTxns = allTransactions.filter((txn) => {
-      const isForeignCountry = txn.country && txn.country.toUpperCase() !== 'US' && txn.country.toUpperCase() !== 'USA';
-      const isTravelCategory = txn.category_id?.toLowerCase().includes('travel') ||
-                               txn.category_id?.startsWith('22'); // Travel numeric category
+      const isForeignCountry =
+        txn.country && txn.country.toUpperCase() !== 'US' && txn.country.toUpperCase() !== 'USA';
+      const isTravelCategory =
+        txn.category_id?.toLowerCase().includes('travel') || txn.category_id?.startsWith('22'); // Travel numeric category
       return isForeignCountry || isTravelCategory;
     });
 
@@ -1379,7 +1417,11 @@ export class CopilotMoneyTools {
         } else {
           // New trip - save previous if long enough
           if (tripStart && tripEnd) {
-            const duration = Math.ceil((new Date(tripEnd.date).getTime() - new Date(tripStart.date).getTime()) / (1000 * 60 * 60 * 24)) + 1;
+            const duration =
+              Math.ceil(
+                (new Date(tripEnd.date).getTime() - new Date(tripStart.date).getTime()) /
+                  (1000 * 60 * 60 * 24)
+              ) + 1;
             if (duration >= min_days) {
               const categoryTotals = new Map<string, number>();
               let totalSpent = 0;
@@ -1414,7 +1456,11 @@ export class CopilotMoneyTools {
 
       // Don't forget the last trip
       if (tripStart && tripEnd) {
-        const duration = Math.ceil((new Date(tripEnd.date).getTime() - new Date(tripStart.date).getTime()) / (1000 * 60 * 60 * 24)) + 1;
+        const duration =
+          Math.ceil(
+            (new Date(tripEnd.date).getTime() - new Date(tripStart.date).getTime()) /
+              (1000 * 60 * 60 * 24)
+          ) + 1;
         if (duration >= min_days) {
           const categoryTotals = new Map<string, number>();
           let totalSpent = 0;
@@ -1522,13 +1568,16 @@ export class CopilotMoneyTools {
       transactions = transactions.filter((txn) => !isTransferCategory(txn.category_id));
     }
 
-    const merchantStats = new Map<string, {
-      total: number;
-      count: number;
-      firstDate: string;
-      lastDate: string;
-      categoryId?: string;
-    }>();
+    const merchantStats = new Map<
+      string,
+      {
+        total: number;
+        count: number;
+        firstDate: string;
+        lastDate: string;
+        categoryId?: string;
+      }
+    >();
 
     for (const txn of transactions) {
       if (txn.amount <= 0) continue;
@@ -1582,12 +1631,14 @@ export class CopilotMoneyTools {
   }): {
     period: { start_date?: string; end_date?: string };
     count: number;
-    transactions: Array<Transaction & {
-      category_name?: string;
-      anomaly_reason: string;
-      expected_amount?: number;
-      deviation_percent?: number;
-    }>;
+    transactions: Array<
+      Transaction & {
+        category_name?: string;
+        anomaly_reason: string;
+        expected_amount?: number;
+        deviation_percent?: number;
+      }
+    >;
   } {
     const { period, threshold_multiplier = 2 } = options;
     let { start_date, end_date } = options;
@@ -1619,7 +1670,8 @@ export class CopilotMoneyTools {
     for (const [merchant, amounts] of merchantAmounts) {
       if (amounts.length < 3) continue; // Need enough data
       const avg = amounts.reduce((a, b) => a + b, 0) / amounts.length;
-      const variance = amounts.reduce((sum, val) => sum + Math.pow(val - avg, 2), 0) / amounts.length;
+      const variance =
+        amounts.reduce((sum, val) => sum + Math.pow(val - avg, 2), 0) / amounts.length;
       const stdDev = Math.sqrt(variance);
       merchantAverages.set(merchant, { avg, stdDev, count: amounts.length });
     }
@@ -1639,18 +1691,21 @@ export class CopilotMoneyTools {
     for (const [category, amounts] of categoryAmounts) {
       if (amounts.length < 3) continue;
       const avg = amounts.reduce((a, b) => a + b, 0) / amounts.length;
-      const variance = amounts.reduce((sum, val) => sum + Math.pow(val - avg, 2), 0) / amounts.length;
+      const variance =
+        amounts.reduce((sum, val) => sum + Math.pow(val - avg, 2), 0) / amounts.length;
       const stdDev = Math.sqrt(variance);
       categoryAverages.set(category, { avg, stdDev });
     }
 
     // Find anomalies in period
-    const anomalies: Array<Transaction & {
-      category_name?: string;
-      anomaly_reason: string;
-      expected_amount?: number;
-      deviation_percent?: number;
-    }> = [];
+    const anomalies: Array<
+      Transaction & {
+        category_name?: string;
+        anomaly_reason: string;
+        expected_amount?: number;
+        deviation_percent?: number;
+      }
+    > = [];
 
     for (const txn of periodTransactions) {
       if (txn.amount <= 0) continue;
@@ -1667,7 +1722,7 @@ export class CopilotMoneyTools {
 
       // Check against merchant average
       if (merchantStats && merchantStats.count >= 3) {
-        const threshold = merchantStats.avg + (threshold_multiplier * merchantStats.stdDev);
+        const threshold = merchantStats.avg + threshold_multiplier * merchantStats.stdDev;
         if (txn.amount > threshold && merchantStats.stdDev > 0) {
           isAnomaly = true;
           expected = merchantStats.avg;
@@ -1678,7 +1733,7 @@ export class CopilotMoneyTools {
 
       // Check against category average if not already flagged
       if (!isAnomaly && categoryStats) {
-        const threshold = categoryStats.avg + (threshold_multiplier * categoryStats.stdDev);
+        const threshold = categoryStats.avg + threshold_multiplier * categoryStats.stdDev;
         if (txn.amount > threshold && categoryStats.stdDev > 0) {
           isAnomaly = true;
           expected = categoryStats.avg;
@@ -1775,16 +1830,18 @@ export class CopilotMoneyTools {
     const allFields = [...fields, 'category_name', 'normalized_merchant'];
     const headers = allFields.join(',');
     const rows = enriched.map((txn) => {
-      return allFields.map((field) => {
-        const value = (txn as Record<string, unknown>)[field];
-        if (value === undefined || value === null) return '';
-        const strValue = String(value);
-        // Escape CSV values
-        if (strValue.includes(',') || strValue.includes('"') || strValue.includes('\n')) {
-          return `"${strValue.replace(/"/g, '""')}"`;
-        }
-        return strValue;
-      }).join(',');
+      return allFields
+        .map((field) => {
+          const value = (txn as Record<string, unknown>)[field];
+          if (value === undefined || value === null) return '';
+          const strValue = String(value);
+          // Escape CSV values
+          if (strValue.includes(',') || strValue.includes('"') || strValue.includes('\n')) {
+            return `"${strValue.replace(/"/g, '""')}"`;
+          }
+          return strValue;
+        })
+        .join(',');
     });
 
     return {
@@ -1800,11 +1857,7 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with HSA/FSA eligible transactions
    */
-  getHsaFsaEligible(options: {
-    period?: string;
-    start_date?: string;
-    end_date?: string;
-  }): {
+  getHsaFsaEligible(options: { period?: string; start_date?: string; end_date?: string }): {
     period: { start_date?: string; end_date?: string };
     count: number;
     total_amount: number;
@@ -1826,24 +1879,54 @@ export class CopilotMoneyTools {
 
     // Medical-related categories and merchants
     const medicalCategories = [
-      'medical', 'healthcare', 'pharmacy', 'medical_dental_care', 'medical_eye_care',
-      'medical_pharmacies_and_supplements', 'medical_primary_care', 'medical_other_medical',
-      '14000000', '14001000', '14002000', '14003000', '14009000', '14011000',
+      'medical',
+      'healthcare',
+      'pharmacy',
+      'medical_dental_care',
+      'medical_eye_care',
+      'medical_pharmacies_and_supplements',
+      'medical_primary_care',
+      'medical_other_medical',
+      '14000000',
+      '14001000',
+      '14002000',
+      '14003000',
+      '14009000',
+      '14011000',
     ];
 
     const medicalMerchants = [
-      'cvs', 'walgreens', 'rite aid', 'pharmacy', 'medical', 'health', 'doctor',
-      'dental', 'vision', 'optical', 'hospital', 'clinic', 'urgent care', 'lab',
-      'prescription', 'rx', 'healthcare', 'therapy', 'physical therapy',
+      'cvs',
+      'walgreens',
+      'rite aid',
+      'pharmacy',
+      'medical',
+      'health',
+      'doctor',
+      'dental',
+      'vision',
+      'optical',
+      'hospital',
+      'clinic',
+      'urgent care',
+      'lab',
+      'prescription',
+      'rx',
+      'healthcare',
+      'therapy',
+      'physical therapy',
     ];
 
     const hsaEligible = transactions.filter((txn) => {
       if (txn.amount <= 0) return false;
 
       // Check category
-      const isMedicalCategory = txn.category_id && medicalCategories.some(
-        (cat) => txn.category_id!.toLowerCase().includes(cat.toLowerCase()) || txn.category_id === cat
-      );
+      const isMedicalCategory =
+        txn.category_id &&
+        medicalCategories.some(
+          (cat) =>
+            txn.category_id!.toLowerCase().includes(cat.toLowerCase()) || txn.category_id === cat
+        );
 
       // Check merchant name
       const merchantName = getTransactionDisplayName(txn).toLowerCase();
@@ -1855,13 +1938,21 @@ export class CopilotMoneyTools {
     // Get eligibility reason
     const getEligibilityReason = (txn: Transaction): string => {
       const merchantName = getTransactionDisplayName(txn).toLowerCase();
-      if (merchantName.includes('pharmacy') || merchantName.includes('cvs') || merchantName.includes('walgreens')) {
+      if (
+        merchantName.includes('pharmacy') ||
+        merchantName.includes('cvs') ||
+        merchantName.includes('walgreens')
+      ) {
         return 'Pharmacy';
       }
       if (merchantName.includes('dental') || txn.category_id?.includes('dental')) {
         return 'Dental Care';
       }
-      if (merchantName.includes('vision') || merchantName.includes('optical') || txn.category_id?.includes('eye')) {
+      if (
+        merchantName.includes('vision') ||
+        merchantName.includes('optical') ||
+        txn.category_id?.includes('eye')
+      ) {
         return 'Vision Care';
       }
       if (merchantName.includes('doctor') || merchantName.includes('clinic')) {
@@ -1958,7 +2049,9 @@ export class CopilotMoneyTools {
     const startDateObj = new Date(start_date + 'T00:00:00');
     const endDateObj = new Date(end_date + 'T23:59:59');
     const todayObj = new Date();
-    const daysInPeriod = Math.ceil((endDateObj.getTime() - startDateObj.getTime()) / (1000 * 60 * 60 * 24));
+    const daysInPeriod = Math.ceil(
+      (endDateObj.getTime() - startDateObj.getTime()) / (1000 * 60 * 60 * 24)
+    );
     const daysElapsed = Math.min(
       Math.ceil((todayObj.getTime() - startDateObj.getTime()) / (1000 * 60 * 60 * 24)),
       daysInPeriod
@@ -1973,7 +2066,10 @@ export class CopilotMoneyTools {
     const projectedMonthlyTotal = dailyAverage * 30;
 
     // Weekly breakdown
-    const weeklyTotals = new Map<string, { start: string; end: string; total: number; days: number }>();
+    const weeklyTotals = new Map<
+      string,
+      { start: string; end: string; total: number; days: number }
+    >();
     for (const txn of transactions) {
       if (txn.amount <= 0) continue;
       const txnDate = new Date(txn.date + 'T12:00:00');
@@ -2023,9 +2119,10 @@ export class CopilotMoneyTools {
       .filter((txn) => txn.amount > 0)
       .reduce((sum, txn) => sum + txn.amount, 0);
 
-    const changePercent = previousPeriodTotal > 0
-      ? Math.round(((totalSpending - previousPeriodTotal) / previousPeriodTotal) * 10000) / 100
-      : 0;
+    const changePercent =
+      previousPeriodTotal > 0
+        ? Math.round(((totalSpending - previousPeriodTotal) / previousPeriodTotal) * 10000) / 100
+        : 0;
 
     // Are we on track? (spending less than prorated amount from last period)
     const proratedPrevious = (previousPeriodTotal / periodLength) * daysElapsed;
@@ -2920,7 +3017,8 @@ export function createToolSchemas(): ToolSchema[] {
           },
           include_fields: {
             type: 'array',
-            description: 'Fields to include in export (default: date, amount, name, category_id, account_id, pending)',
+            description:
+              'Fields to include in export (default: date, amount, name, category_id, account_id, pending)',
             items: { type: 'string' },
           },
         },
