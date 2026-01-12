@@ -1,6 +1,10 @@
 # Privacy Policy for Copilot Money MCP Server
 
-**Last Updated:** January 11, 2026
+**Last Updated:** January 12, 2026
+
+## Disclaimer
+
+**This is an independent, community-driven project and is not affiliated with, endorsed by, or associated with Copilot Money or its parent company in any way.** This tool was created by an independent developer. "Copilot Money" is a trademark of its respective owner.
 
 ## Overview
 
@@ -107,7 +111,7 @@ This server is open source. You can:
 
 For privacy-related questions or concerns:
 - Open an issue: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues
-- Email: ignacio@example.com
+- Email: hello@ignaciohermosilla.com
 
 ## Summary
 
