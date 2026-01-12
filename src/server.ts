@@ -161,6 +161,85 @@ export class CopilotMoneyServer {
             break;
           }
 
+          // ============================================
+          // NEW TOOLS - Items 13-33
+          // ============================================
+
+          case 'get_foreign_transactions':
+            result = this.tools.getForeignTransactions(
+              (typedArgs as Parameters<typeof this.tools.getForeignTransactions>[0]) || {}
+            );
+            break;
+
+          case 'get_refunds':
+            result = this.tools.getRefunds(
+              (typedArgs as Parameters<typeof this.tools.getRefunds>[0]) || {}
+            );
+            break;
+
+          case 'get_duplicate_transactions':
+            result = this.tools.getDuplicateTransactions(
+              (typedArgs as Parameters<typeof this.tools.getDuplicateTransactions>[0]) || {}
+            );
+            break;
+
+          case 'get_credits':
+            result = this.tools.getCredits(
+              (typedArgs as Parameters<typeof this.tools.getCredits>[0]) || {}
+            );
+            break;
+
+          case 'get_spending_by_day_of_week':
+            result = this.tools.getSpendingByDayOfWeek(
+              (typedArgs as Parameters<typeof this.tools.getSpendingByDayOfWeek>[0]) || {}
+            );
+            break;
+
+          case 'get_trips':
+            result = this.tools.getTrips(
+              (typedArgs as Parameters<typeof this.tools.getTrips>[0]) || {}
+            );
+            break;
+
+          case 'get_transaction_by_id': {
+            const transactionId = typedArgs?.transaction_id;
+            if (typeof transactionId !== 'string') {
+              throw new Error('Missing required parameter: transaction_id');
+            }
+            result = this.tools.getTransactionById(transactionId);
+            break;
+          }
+
+          case 'get_top_merchants':
+            result = this.tools.getTopMerchants(
+              (typedArgs as Parameters<typeof this.tools.getTopMerchants>[0]) || {}
+            );
+            break;
+
+          case 'get_unusual_transactions':
+            result = this.tools.getUnusualTransactions(
+              (typedArgs as Parameters<typeof this.tools.getUnusualTransactions>[0]) || {}
+            );
+            break;
+
+          case 'export_transactions':
+            result = this.tools.exportTransactions(
+              (typedArgs as Parameters<typeof this.tools.exportTransactions>[0]) || {}
+            );
+            break;
+
+          case 'get_hsa_fsa_eligible':
+            result = this.tools.getHsaFsaEligible(
+              (typedArgs as Parameters<typeof this.tools.getHsaFsaEligible>[0]) || {}
+            );
+            break;
+
+          case 'get_spending_rate':
+            result = this.tools.getSpendingRate(
+              (typedArgs as Parameters<typeof this.tools.getSpendingRate>[0]) || {}
+            );
+            break;
+
           default:
             return {
               content: [
