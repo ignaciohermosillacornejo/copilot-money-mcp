@@ -786,9 +786,54 @@ export class CopilotMoneyTools {
     });
 
     // Filter for income (negative amounts or income categories)
-    const incomeTransactions = allTransactions.filter(
-      (txn) => txn.amount < 0 || isIncomeCategory(txn.category_id)
-    );
+    // But exclude transfers, credit card payments, and likely refunds
+    const incomeTransactions = allTransactions.filter((txn) => {
+      // Exclude transfers and credit card payments
+      if (isTransferCategory(txn.category_id)) {
+        return false;
+      }
+
+      const merchant = getTransactionDisplayName(txn).toUpperCase();
+
+      // Exclude internal transfers and credit card payments by merchant name
+      if (
+        merchant.includes('CREDIT CARD') ||
+        merchant.includes('AUTOPAY') ||
+        merchant.includes('PAYMENT') ||
+        merchant.includes('TRANSFER') ||
+        merchant.includes('CHASE CREDIT') ||
+        merchant.includes('AMEX') ||
+        merchant.includes('AMERICAN EXPRESS')
+      ) {
+        return false;
+      }
+
+      // Include if it's a known income category
+      if (isIncomeCategory(txn.category_id)) {
+        return true;
+      }
+
+      // Include negative amounts (income/credits) but try to exclude obvious refunds
+      // Refunds are often from merchants where we also have positive transactions
+      if (txn.amount < 0) {
+        // Exclude small refunds from common merchants (likely just refunds, not income)
+        const isLikelyRefund =
+          (merchant.includes('AMAZON') ||
+            merchant.includes('UBER') ||
+            merchant.includes('TARGET') ||
+            merchant.includes('WALMART') ||
+            merchant.includes('STARBUCKS') ||
+            merchant.includes('NETFLIX') ||
+            merchant.includes('SPOTIFY') ||
+            merchant.includes('APPLE.COM') ||
+            merchant.includes('GOOGLE')) &&
+          Math.abs(txn.amount) < 500; // Small amounts from these merchants are likely refunds
+
+        return !isLikelyRefund;
+      }
+
+      return false;
+    });
 
     // Group by source (merchant name)
     const sourceMap = new Map<string, { total: number; count: number; categoryId?: string }>();
@@ -957,6 +1002,7 @@ export class CopilotMoneyTools {
     // 1. Transactions with country != US
     // 2. Transactions with foreign transaction fee category
     // 3. Transactions with non-USD currency
+    // 4. Transactions with foreign city/country indicators in merchant name
     const foreignTxns = allTransactions.filter((txn) => {
       const isForeignCountry =
         txn.country && txn.country.toUpperCase() !== 'US' && txn.country.toUpperCase() !== 'USA';
@@ -965,7 +1011,53 @@ export class CopilotMoneyTools {
         txn.category_id === CATEGORY_FOREIGN_TX_FEE_NUMERIC;
       const isForeignCurrency =
         txn.iso_currency_code && txn.iso_currency_code.toUpperCase() !== 'USD';
-      return isForeignCountry || isForeignFeeCategory || isForeignCurrency;
+
+      // Check merchant name for foreign indicators
+      const merchant = getTransactionDisplayName(txn).toUpperCase();
+      const hasForeignCityIndicator =
+        merchant.includes('SANTIAGO') ||
+        merchant.includes('VALPARAISO') ||
+        merchant.includes('LONDON') ||
+        merchant.includes('PARIS') ||
+        merchant.includes('TOKYO') ||
+        merchant.includes('MEXICO CITY') ||
+        merchant.includes('BARCELONA') ||
+        merchant.includes('MADRID') ||
+        merchant.includes('ROME') ||
+        merchant.includes('BERLIN') ||
+        merchant.includes('AMSTERDAM') ||
+        merchant.includes('TORONTO') ||
+        merchant.includes('VANCOUVER') ||
+        merchant.includes('MONTREAL');
+
+      // Check for country codes in merchant name (e.g., " CL ", " GB ", " MX ")
+      const hasCountryCode =
+        / CL /.test(merchant) || // Chile
+        / GB /.test(merchant) || // UK
+        / UK /.test(merchant) ||
+        / MX /.test(merchant) || // Mexico
+        / FR /.test(merchant) || // France
+        / DE /.test(merchant) || // Germany
+        / IT /.test(merchant) || // Italy
+        / ES /.test(merchant) || // Spain
+        / JP /.test(merchant) || // Japan
+        / CA /.test(merchant); // Canada
+
+      // Check region field for non-US regions
+      const isForeignRegion =
+        txn.region &&
+        !['AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY', 'DC'].includes(
+          txn.region.toUpperCase()
+        );
+
+      return (
+        isForeignCountry ||
+        isForeignFeeCategory ||
+        isForeignCurrency ||
+        hasForeignCityIndicator ||
+        hasCountryCode ||
+        isForeignRegion
+      );
     });
 
     // Calculate FX fees separately
@@ -1464,13 +1556,48 @@ export class CopilotMoneyTools {
       categories: Array<{ category: string; total: number }>;
     }> = [];
 
+    // Helper function to extract location from transaction
+    const extractLocation = (txn: Transaction): { country: string; city?: string } => {
+      // Try explicit country field first
+      if (txn.country && txn.country.toUpperCase() !== 'US') {
+        return { country: txn.country, city: txn.city };
+      }
+
+      // Parse from merchant name
+      const merchant = getTransactionDisplayName(txn).toUpperCase();
+
+      // Common foreign cities
+      if (merchant.includes('SANTIAGO')) return { country: 'CL', city: 'Santiago' };
+      if (merchant.includes('VALPARAISO')) return { country: 'CL', city: 'Valparaiso' };
+      if (merchant.includes('LONDON')) return { country: 'GB', city: 'London' };
+      if (merchant.includes('PARIS')) return { country: 'FR', city: 'Paris' };
+      if (merchant.includes('TOKYO')) return { country: 'JP', city: 'Tokyo' };
+      if (merchant.includes('BARCELONA')) return { country: 'ES', city: 'Barcelona' };
+      if (merchant.includes('MADRID')) return { country: 'ES', city: 'Madrid' };
+      if (merchant.includes('ROME')) return { country: 'IT', city: 'Rome' };
+      if (merchant.includes('BERLIN')) return { country: 'DE', city: 'Berlin' };
+
+      // Check for country codes
+      if (/ CL /.test(merchant)) return { country: 'CL', city: txn.city };
+      if (/ GB /.test(merchant) || / UK /.test(merchant)) return { country: 'GB', city: txn.city };
+      if (/ MX /.test(merchant)) return { country: 'MX', city: txn.city };
+      if (/ FR /.test(merchant)) return { country: 'FR', city: txn.city };
+      if (/ DE /.test(merchant)) return { country: 'DE', city: txn.city };
+      if (/ IT /.test(merchant)) return { country: 'IT', city: txn.city };
+      if (/ ES /.test(merchant)) return { country: 'ES', city: txn.city };
+      if (/ JP /.test(merchant)) return { country: 'JP', city: txn.city };
+      if (/ CA /.test(merchant)) return { country: 'CA', city: txn.city };
+
+      return { country: 'Unknown', city: txn.city };
+    };
+
     // Group transactions by country
-    const byCountry = new Map<string, Transaction[]>();
+    const byCountry = new Map<string, Array<Transaction & { inferred_city?: string }>>();
     for (const txn of travelTxns) {
-      const country = txn.country || 'Unknown';
-      const existing = byCountry.get(country) || [];
-      existing.push(txn);
-      byCountry.set(country, existing);
+      const location = extractLocation(txn);
+      const existing = byCountry.get(location.country) || [];
+      existing.push({ ...txn, inferred_city: location.city });
+      byCountry.set(location.country, existing);
     }
 
     // For each country, find contiguous date ranges
@@ -1514,8 +1641,16 @@ export class CopilotMoneyTools {
                 }
               }
 
+              // Collect all cities mentioned in trip
+              const cities = tripTxns
+                .map((t) => (t as typeof tripTxns[0] & { inferred_city?: string }).inferred_city || t.city)
+                .filter(Boolean);
+              const uniqueCities = [...new Set(cities)];
+              const locationStr =
+                uniqueCities.length > 0 ? uniqueCities.join(', ') : country;
+
               trips.push({
-                location: tripStart.city || country,
+                location: locationStr,
                 country,
                 start_date: tripStart.date,
                 end_date: tripEnd.date,
@@ -1553,8 +1688,15 @@ export class CopilotMoneyTools {
             }
           }
 
+          // Collect all cities mentioned in trip
+          const cities = tripTxns
+            .map((t) => (t as typeof tripTxns[0] & { inferred_city?: string }).inferred_city || t.city)
+            .filter(Boolean);
+          const uniqueCities = [...new Set(cities)];
+          const locationStr = uniqueCities.length > 0 ? uniqueCities.join(', ') : country;
+
           trips.push({
-            location: tripStart.city || country,
+            location: locationStr,
             country,
             start_date: tripStart.date,
             end_date: tripEnd.date,
@@ -2223,6 +2365,373 @@ export class CopilotMoneyTools {
         change_percent: changePercent,
         on_track: onTrack,
       },
+    };
+  }
+
+  /**
+   * Generate a data quality report to help identify issues in financial data.
+   *
+   * This tool helps users find problematic data that should be corrected in Copilot Money:
+   * - Unresolved category IDs
+   * - Potential currency conversion issues
+   * - Transactions sharing IDs (non-unique)
+   * - Potential duplicate accounts
+   * - Suspicious categorizations
+   *
+   * @param options - Filter options
+   * @returns Object with various data quality metrics and issues
+   */
+  getDataQualityReport(options: { period?: string; start_date?: string; end_date?: string }): {
+    period: { start_date?: string; end_date?: string };
+    summary: {
+      total_transactions: number;
+      total_accounts: number;
+      issues_found: number;
+    };
+    category_issues: {
+      unresolved_category_count: number;
+      unresolved_categories: Array<{
+        category_id: string;
+        transaction_count: number;
+        total_amount: number;
+        sample_transactions: Array<{ date: string; merchant: string; amount: number }>;
+      }>;
+    };
+    currency_issues: {
+      potential_unconverted_count: number;
+      suspicious_transactions: Array<{
+        transaction_id: string;
+        date: string;
+        merchant: string;
+        amount: number;
+        currency: string;
+        reason: string;
+      }>;
+    };
+    duplicate_issues: {
+      non_unique_transaction_ids: Array<{
+        transaction_id: string;
+        occurrences: number;
+        sample_dates: string[];
+      }>;
+      potential_duplicate_accounts: Array<{
+        account_name: string;
+        account_type: string;
+        count: number;
+        account_ids: string[];
+        balances: number[];
+      }>;
+    };
+    suspicious_categorizations: Array<{
+      transaction_id: string;
+      date: string;
+      merchant: string;
+      amount: number;
+      category_assigned: string;
+      reason: string;
+    }>;
+  } {
+    const { period } = options;
+    let { start_date, end_date } = options;
+
+    if (period) {
+      [start_date, end_date] = parsePeriod(period);
+    }
+
+    const allTransactions = this.db.getTransactions({
+      startDate: start_date,
+      endDate: end_date,
+      limit: 50000,
+    });
+
+    const allAccounts = this.db.getAccounts();
+
+    let issuesFound = 0;
+
+    // ===== CATEGORY ISSUES =====
+    const unresolvedCategories = new Map<
+      string,
+      { count: number; total: number; samples: Array<{ date: string; merchant: string; amount: number }> }
+    >();
+
+    for (const txn of allTransactions) {
+      if (!txn.category_id) continue;
+
+      const categoryName = getCategoryName(txn.category_id);
+
+      // Check if category is unresolved (no mapping exists or returns the ID itself)
+      const isUnresolved =
+        categoryName === txn.category_id || // No mapping found
+        /^[a-zA-Z0-9]{20,}$/.test(categoryName) || // Looks like a Firebase/random ID
+        /^\d{8}$/.test(categoryName); // 8-digit numeric ID without mapping
+
+      if (isUnresolved) {
+        const existing = unresolvedCategories.get(txn.category_id) || {
+          count: 0,
+          total: 0,
+          samples: [],
+        };
+        existing.count++;
+        existing.total += Math.abs(txn.amount);
+
+        if (existing.samples.length < 3) {
+          existing.samples.push({
+            date: txn.date,
+            merchant: getTransactionDisplayName(txn),
+            amount: txn.amount,
+          });
+        }
+
+        unresolvedCategories.set(txn.category_id, existing);
+      }
+    }
+
+    const unresolvedCategoryList = Array.from(unresolvedCategories.entries())
+      .map(([category_id, data]) => ({
+        category_id,
+        transaction_count: data.count,
+        total_amount: Math.round(data.total * 100) / 100,
+        sample_transactions: data.samples,
+      }))
+      .sort((a, b) => b.total_amount - a.total_amount);
+
+    issuesFound += unresolvedCategoryList.length;
+
+    // ===== CURRENCY ISSUES =====
+    const suspiciousCurrencyTransactions: Array<{
+      transaction_id: string;
+      date: string;
+      merchant: string;
+      amount: number;
+      currency: string;
+      reason: string;
+    }> = [];
+
+    for (const txn of allTransactions) {
+      const merchant = getTransactionDisplayName(txn).toUpperCase();
+      const amount = Math.abs(txn.amount);
+      const currency = txn.iso_currency_code || 'USD';
+
+      // Flag suspiciously large amounts with foreign indicators
+      const hasForeignIndicator =
+        merchant.includes(' CL ') || // Chile
+        merchant.includes(' SANTIAGO') ||
+        merchant.includes(' VALPARAISO') ||
+        merchant.includes(' MX ') || // Mexico
+        merchant.includes(' GB ') || // UK
+        merchant.includes(' FR ') || // France
+        merchant.includes(' JP ') || // Japan
+        /\b[A-Z]{2}\b/.test(merchant); // Two-letter country codes
+
+      // Suspiciously large transaction with foreign merchant
+      if (hasForeignIndicator && amount > 1000 && currency === 'USD') {
+        suspiciousCurrencyTransactions.push({
+          transaction_id: txn.transaction_id,
+          date: txn.date,
+          merchant: getTransactionDisplayName(txn),
+          amount: txn.amount,
+          currency,
+          reason: 'Large amount with foreign merchant name - possible unconverted currency',
+        });
+      }
+
+      // Extremely round numbers that match typical foreign exchange rates
+      if (amount > 500 && amount % 1000 < 10 && hasForeignIndicator) {
+        suspiciousCurrencyTransactions.push({
+          transaction_id: txn.transaction_id,
+          date: txn.date,
+          merchant: getTransactionDisplayName(txn),
+          amount: txn.amount,
+          currency,
+          reason: 'Very round amount with foreign merchant - possible unconverted currency',
+        });
+      }
+    }
+
+    issuesFound += suspiciousCurrencyTransactions.length;
+
+    // ===== DUPLICATE ISSUES =====
+
+    // Check for non-unique transaction IDs
+    const transactionIdCounts = new Map<string, Array<{ date: string }>>();
+    for (const txn of allTransactions) {
+      const existing = transactionIdCounts.get(txn.transaction_id) || [];
+      existing.push({ date: txn.date });
+      transactionIdCounts.set(txn.transaction_id, existing);
+    }
+
+    const nonUniqueTransactionIds = Array.from(transactionIdCounts.entries())
+      .filter(([_, occurrences]) => occurrences.length > 1)
+      .map(([transaction_id, occurrences]) => ({
+        transaction_id,
+        occurrences: occurrences.length,
+        sample_dates: occurrences.slice(0, 5).map((o) => o.date),
+      }))
+      .sort((a, b) => b.occurrences - a.occurrences)
+      .slice(0, 20); // Top 20
+
+    issuesFound += nonUniqueTransactionIds.length;
+
+    // Check for potential duplicate accounts
+    const accountsByNameAndType = new Map<
+      string,
+      Array<{ id: string; name: string; type: string; balance: number }>
+    >();
+
+    for (const account of allAccounts) {
+      const key = `${account.name}|${account.type}`;
+      const existing = accountsByNameAndType.get(key) || [];
+      existing.push({
+        id: account.account_id,
+        name: account.name,
+        type: account.type,
+        balance: account.balance || 0,
+      });
+      accountsByNameAndType.set(key, existing);
+    }
+
+    const potentialDuplicateAccounts = Array.from(accountsByNameAndType.entries())
+      .filter(([_, accounts]) => accounts.length > 1)
+      .map(([key, accounts]) => {
+        const [name, type] = key.split('|');
+        return {
+          account_name: name || 'Unknown',
+          account_type: type || 'Unknown',
+          count: accounts.length,
+          account_ids: accounts.map((a) => a.id),
+          balances: accounts.map((a) => a.balance),
+        };
+      });
+
+    issuesFound += potentialDuplicateAccounts.length;
+
+    // ===== SUSPICIOUS CATEGORIZATIONS =====
+    const suspiciousCategorizations: Array<{
+      transaction_id: string;
+      date: string;
+      merchant: string;
+      amount: number;
+      category_assigned: string;
+      reason: string;
+    }> = [];
+
+    for (const txn of allTransactions) {
+      const merchant = getTransactionDisplayName(txn).toUpperCase();
+      const categoryName = txn.category_id ? getCategoryName(txn.category_id) : 'Unknown';
+
+      // Uber categorized as Parking
+      if (merchant.includes('UBER') && categoryName.includes('Parking')) {
+        suspiciousCategorizations.push({
+          transaction_id: txn.transaction_id,
+          date: txn.date,
+          merchant: getTransactionDisplayName(txn),
+          amount: txn.amount,
+          category_assigned: categoryName,
+          reason: 'Uber should be Rideshare, not Parking',
+        });
+      }
+
+      // Grocery stores as Pawn Shops
+      if (
+        (merchant.includes('WHOLE FOODS') ||
+          merchant.includes('JUMBO') ||
+          merchant.includes('SAFEWAY') ||
+          merchant.includes('KROGER')) &&
+        categoryName.includes('Pawn')
+      ) {
+        suspiciousCategorizations.push({
+          transaction_id: txn.transaction_id,
+          date: txn.date,
+          merchant: getTransactionDisplayName(txn),
+          amount: txn.amount,
+          category_assigned: categoryName,
+          reason: 'Grocery store miscategorized as Pawn Shop',
+        });
+      }
+
+      // Pharmacies as Office Supplies or Dance & Music
+      if (
+        (merchant.includes('PHARMAC') || merchant.includes('FARMACIA') || merchant.includes('CVS')) &&
+        (categoryName.includes('Office Supplies') || categoryName.includes('Dance'))
+      ) {
+        suspiciousCategorizations.push({
+          transaction_id: txn.transaction_id,
+          date: txn.date,
+          merchant: getTransactionDisplayName(txn),
+          amount: txn.amount,
+          category_assigned: categoryName,
+          reason: 'Pharmacy should be Healthcare, not ' + categoryName,
+        });
+      }
+
+      // Software subscriptions as Travel/Cruises
+      if (
+        (merchant.includes('CLAUDE') ||
+          merchant.includes('CHATGPT') ||
+          merchant.includes('OPENAI') ||
+          merchant.includes('ANTHROPIC')) &&
+        (categoryName.includes('Travel') || categoryName.includes('Cruise'))
+      ) {
+        suspiciousCategorizations.push({
+          transaction_id: txn.transaction_id,
+          date: txn.date,
+          merchant: getTransactionDisplayName(txn),
+          amount: txn.amount,
+          category_assigned: categoryName,
+          reason: 'Software subscription miscategorized as Travel',
+        });
+      }
+
+      // Apple.com as Dance & Music
+      if (merchant.includes('APPLE.COM') && categoryName.includes('Dance')) {
+        suspiciousCategorizations.push({
+          transaction_id: txn.transaction_id,
+          date: txn.date,
+          merchant: getTransactionDisplayName(txn),
+          amount: txn.amount,
+          category_assigned: categoryName,
+          reason: 'Apple.com should be Software/Subscriptions or Electronics',
+        });
+      }
+
+      // H&M or clothing stores as CBD
+      if (
+        (merchant.includes('H&M') || merchant.includes('ZARA') || merchant.includes('GAP')) &&
+        categoryName.includes('CBD')
+      ) {
+        suspiciousCategorizations.push({
+          transaction_id: txn.transaction_id,
+          date: txn.date,
+          merchant: getTransactionDisplayName(txn),
+          amount: txn.amount,
+          category_assigned: categoryName,
+          reason: 'Clothing store miscategorized as CBD',
+        });
+      }
+    }
+
+    issuesFound += suspiciousCategorizations.length;
+
+    return {
+      period: { start_date, end_date },
+      summary: {
+        total_transactions: allTransactions.length,
+        total_accounts: allAccounts.length,
+        issues_found: issuesFound,
+      },
+      category_issues: {
+        unresolved_category_count: unresolvedCategoryList.length,
+        unresolved_categories: unresolvedCategoryList,
+      },
+      currency_issues: {
+        potential_unconverted_count: suspiciousCurrencyTransactions.length,
+        suspicious_transactions: suspiciousCurrencyTransactions.slice(0, 20), // Limit to top 20
+      },
+      duplicate_issues: {
+        non_unique_transaction_ids: nonUniqueTransactionIds,
+        potential_duplicate_accounts: potentialDuplicateAccounts,
+      },
+      suspicious_categorizations: suspiciousCategorizations.slice(0, 20), // Limit to top 20
     };
   }
 
@@ -3162,6 +3671,36 @@ export function createToolSchemas(): ToolSchema[] {
             type: 'boolean',
             description: 'Exclude transfers between accounts (default: false)',
             default: false,
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_data_quality_report',
+      description:
+        'Generate a comprehensive data quality report. Helps identify issues in financial data ' +
+        'that should be corrected in Copilot Money: unresolved category IDs, potential currency ' +
+        'conversion problems, non-unique transaction IDs, duplicate accounts, and suspicious ' +
+        'categorizations. Use this to find data quality issues before doing analysis.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          period: {
+            type: 'string',
+            description: 'Period shorthand: this_month, last_month, last_90_days, ytd, etc.',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Start date (YYYY-MM-DD)',
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+          },
+          end_date: {
+            type: 'string',
+            description: 'End date (YYYY-MM-DD)',
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
         },
       },
