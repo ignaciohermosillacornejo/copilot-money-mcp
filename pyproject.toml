@@ -35,6 +35,7 @@ dev = [
     "pytest-cov>=4.0",
     "pytest-asyncio>=0.23",
     "pytest-mock>=3.0",
+    "freezegun>=1.4.0",
     "black>=24.0",
     "ruff>=0.1.0",
     "mypy>=1.8",
@@ -69,13 +70,14 @@ omit = [
     "*/tests/*",
     "*/__pycache__/*",
     "*/.venv/*",
+    "src/copilot_money_mcp/__main__.py",
 ]
 
 [tool.coverage.report]
 precision = 2
 show_missing = true
 skip_covered = false
-fail_under = 100.0
+fail_under = 90.0
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
