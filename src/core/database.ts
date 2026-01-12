@@ -5,17 +5,12 @@
  * proper error handling.
  */
 
-import { existsSync, readdirSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
-import { decodeAccounts, decodeTransactions } from "./decoder.js";
-import {
-  Account,
-  Transaction,
-  Category,
-  getTransactionDisplayName,
-} from "../models/index.js";
-import { getCategoryName } from "../utils/categories.js";
+import { existsSync, readdirSync } from 'fs';
+import { homedir } from 'os';
+import { join } from 'path';
+import { decodeAccounts, decodeTransactions } from './decoder.js';
+import { Account, Transaction, Category, getTransactionDisplayName } from '../models/index.js';
+import { getCategoryName } from '../utils/categories.js';
 
 /**
  * Abstraction layer for querying Copilot Money data.
@@ -38,9 +33,9 @@ export class CopilotDatabase {
       // Default Copilot Money location (macOS)
       dbPath = join(
         homedir(),
-        "Library/Containers/com.copilot.production/Data/Library",
-        "Application Support/firestore/__FIRAPP_DEFAULT",
-        "copilot-production-22904/main"
+        'Library/Containers/com.copilot.production/Data/Library',
+        'Application Support/firestore/__FIRAPP_DEFAULT',
+        'copilot-production-22904/main'
       );
     }
 
@@ -58,7 +53,7 @@ export class CopilotDatabase {
 
       // Check if directory contains .ldb files
       const files = readdirSync(this.dbPath);
-      return files.some((file) => file.endsWith(".ldb"));
+      return files.some((file) => file.endsWith('.ldb'));
     } catch {
       return false;
     }
@@ -78,16 +73,18 @@ export class CopilotDatabase {
    * @param options.limit - Maximum number of transactions to return (default: 1000)
    * @returns List of filtered transactions, sorted by date descending
    */
-  getTransactions(options: {
-    startDate?: string;
-    endDate?: string;
-    category?: string;
-    merchant?: string;
-    accountId?: string;
-    minAmount?: number;
-    maxAmount?: number;
-    limit?: number;
-  } = {}): Transaction[] {
+  getTransactions(
+    options: {
+      startDate?: string;
+      endDate?: string;
+      category?: string;
+      merchant?: string;
+      accountId?: string;
+      minAmount?: number;
+      maxAmount?: number;
+      limit?: number;
+    } = {}
+  ): Transaction[] {
     const {
       startDate,
       endDate,
@@ -118,9 +115,7 @@ export class CopilotDatabase {
     if (category) {
       const categoryLower = category.toLowerCase();
       result = result.filter(
-        (txn) =>
-          txn.category_id &&
-          txn.category_id.toLowerCase().includes(categoryLower)
+        (txn) => txn.category_id && txn.category_id.toLowerCase().includes(categoryLower)
       );
     }
 
@@ -194,17 +189,11 @@ export class CopilotDatabase {
       const accountTypeLower = accountType.toLowerCase();
       result = result.filter((acc) => {
         // Check account_type field
-        if (
-          acc.account_type &&
-          acc.account_type.toLowerCase().includes(accountTypeLower)
-        ) {
+        if (acc.account_type && acc.account_type.toLowerCase().includes(accountTypeLower)) {
           return true;
         }
         // Check subtype field (e.g., "checking" when account_type is "depository")
-        if (
-          acc.subtype &&
-          acc.subtype.toLowerCase().includes(accountTypeLower)
-        ) {
+        if (acc.subtype && acc.subtype.toLowerCase().includes(accountTypeLower)) {
           return true;
         }
         return false;
@@ -226,10 +215,7 @@ export class CopilotDatabase {
     }
 
     // Extract unique category IDs and count transactions
-    const categoryStats = new Map<
-      string,
-      { count: number; totalAmount: number }
-    >();
+    const categoryStats = new Map<string, { count: number; totalAmount: number }>();
 
     for (const txn of this._transactions) {
       if (txn.category_id) {
@@ -245,7 +231,7 @@ export class CopilotDatabase {
 
     // Create Category objects with human-readable names
     const uniqueCategories: Category[] = [];
-    for (const [categoryId, _stats] of categoryStats) {
+    for (const categoryId of categoryStats.keys()) {
       const category: Category = {
         category_id: categoryId,
         name: getCategoryName(categoryId),

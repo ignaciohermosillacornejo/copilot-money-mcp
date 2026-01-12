@@ -14,27 +14,6 @@ import {
 import { Account, AccountSchema, getAccountDisplayName } from '../models/account.js';
 
 /**
- * Decode a protobuf varint.
- */
-function decodeVarint(data: Buffer, pos: number): [number, number] {
-  let result = 0;
-  let shift = 0;
-
-  while (pos < data.length) {
-    const byte = data[pos];
-    result |= (byte & 0x7f) << shift;
-    pos += 1;
-
-    if (!(byte & 0x80)) {
-      break;
-    }
-    shift += 7;
-  }
-
-  return [result, pos];
-}
-
-/**
  * Find a field and extract its string value.
  */
 function extractStringValue(data: Buffer, fieldName: Buffer): string | null {
@@ -49,8 +28,10 @@ function extractStringValue(data: Buffer, fieldName: Buffer): string | null {
   const after = data.subarray(searchStart, searchEnd);
 
   for (let i = 0; i < after.length - 3; i++) {
-    if (after[i] === 0x8a && after[i + 1] === 0x01) {
-      const strLen = after[i + 2];
+    const byte0 = after[i];
+    const byte1 = after[i + 1];
+    const strLen = after[i + 2];
+    if (byte0 === 0x8a && byte1 === 0x01 && strLen !== undefined) {
       if (strLen > 0 && strLen < 100) {
         try {
           const value = after.subarray(i + 3, i + 3 + strLen).toString('utf-8');
@@ -71,11 +52,7 @@ function extractStringValue(data: Buffer, fieldName: Buffer): string | null {
 /**
  * Extract a double value after a given position.
  */
-function extractDoubleValue(
-  data: Buffer,
-  startPos: number,
-  maxSearch: number = 20,
-): number | null {
+function extractDoubleValue(data: Buffer, startPos: number, maxSearch: number = 20): number | null {
   const chunk = data.subarray(startPos, startPos + maxSearch);
 
   for (let i = 0; i < chunk.length - 9; i++) {
@@ -149,11 +126,8 @@ export function decodeTransactions(dbPath: string): Transaction[] {
     let searchPos = 0;
     const amountPattern = Buffer.from([0x0a, 0x06, 0x61, 0x6d, 0x6f, 0x75, 0x6e, 0x74]); // "\x0a\x06amount"
 
-    while (true) {
-      const idx = data.indexOf(amountPattern, searchPos);
-      if (idx === -1) {
-        break;
-      }
+    let idx = data.indexOf(amountPattern, searchPos);
+    while (idx !== -1) {
       searchPos = idx + 1;
 
       // Extract amount value
@@ -177,7 +151,10 @@ export function decodeTransactions(dbPath: string): Transaction[] {
       const isoCurrencyCode = extractStringValue(record, Buffer.from('iso_currency_code'));
       const pending = extractBooleanValue(record, Buffer.from('pending'));
       const city = extractStringValue(record, Buffer.from([0x0a, 0x04, 0x63, 0x69, 0x74, 0x79])); // "\x0a\x04city"
-      const region = extractStringValue(record, Buffer.from([0x0a, 0x06, 0x72, 0x65, 0x67, 0x69, 0x6f, 0x6e])); // "\x0a\x06region"
+      const region = extractStringValue(
+        record,
+        Buffer.from([0x0a, 0x06, 0x72, 0x65, 0x67, 0x69, 0x6f, 0x6e])
+      ); // "\x0a\x06region"
 
       // Use name or original_name as display name
       const displayName = name || originalName;
@@ -217,9 +194,10 @@ export function decodeTransactions(dbPath: string): Transaction[] {
           transactions.push(txn);
         } catch {
           // Skip invalid transactions
-          continue;
         }
       }
+
+      idx = data.indexOf(amountPattern, searchPos);
     }
   }
 
@@ -272,11 +250,8 @@ export function decodeAccounts(dbPath: string): Account[] {
     let searchPos = 0;
     const balancePattern = Buffer.from('current_balance');
 
-    while (true) {
-      const idx = data.indexOf(balancePattern, searchPos);
-      if (idx === -1) {
-        break;
-      }
+    let idx = data.indexOf(balancePattern, searchPos);
+    while (idx !== -1) {
       searchPos = idx + 1;
 
       const recordStart = Math.max(0, idx - 1000);
@@ -286,50 +261,52 @@ export function decodeAccounts(dbPath: string): Account[] {
       const balanceIdx = record.indexOf(balancePattern);
       const balance = extractDoubleValue(record, balanceIdx + 15);
 
-      if (balance === null) {
-        continue;
-      }
+      if (balance !== null) {
+        const name = extractStringValue(record, Buffer.from([0x0a, 0x04, 0x6e, 0x61, 0x6d, 0x65])); // "\x0a\x04name"
+        const officialName = extractStringValue(record, Buffer.from('official_name'));
+        const accountType = extractStringValue(
+          record,
+          Buffer.from([0x0a, 0x04, 0x74, 0x79, 0x70, 0x65])
+        ); // "\x0a\x04type"
+        const subtype = extractStringValue(record, Buffer.from('subtype'));
+        const mask = extractStringValue(record, Buffer.from([0x0a, 0x04, 0x6d, 0x61, 0x73, 0x6b])); // "\x0a\x04mask"
+        const institutionName = extractStringValue(record, Buffer.from('institution_name'));
+        const accountId = extractStringValue(record, Buffer.from('account_id'));
 
-      const name = extractStringValue(record, Buffer.from([0x0a, 0x04, 0x6e, 0x61, 0x6d, 0x65])); // "\x0a\x04name"
-      const officialName = extractStringValue(record, Buffer.from('official_name'));
-      const accountType = extractStringValue(record, Buffer.from([0x0a, 0x04, 0x74, 0x79, 0x70, 0x65])); // "\x0a\x04type"
-      const subtype = extractStringValue(record, Buffer.from('subtype'));
-      const mask = extractStringValue(record, Buffer.from([0x0a, 0x04, 0x6d, 0x61, 0x73, 0x6b])); // "\x0a\x04mask"
-      const institutionName = extractStringValue(record, Buffer.from('institution_name'));
-      const accountId = extractStringValue(record, Buffer.from('account_id'));
+        if (accountId && (name || officialName)) {
+          try {
+            // Build account object with optional fields
+            const accData: {
+              account_id: string;
+              current_balance: number;
+              name?: string;
+              official_name?: string;
+              account_type?: string;
+              subtype?: string;
+              mask?: string;
+              institution_name?: string;
+            } = {
+              account_id: accountId,
+              current_balance: balance,
+            };
 
-      if (accountId && (name || officialName)) {
-        try {
-          // Build account object with optional fields
-          const accData: {
-            account_id: string;
-            current_balance: number;
-            name?: string;
-            official_name?: string;
-            account_type?: string;
-            subtype?: string;
-            mask?: string;
-            institution_name?: string;
-          } = {
-            account_id: accountId,
-            current_balance: balance,
-          };
+            if (name) accData.name = name;
+            if (officialName) accData.official_name = officialName;
+            if (accountType) accData.account_type = accountType;
+            if (subtype) accData.subtype = subtype;
+            if (mask) accData.mask = mask;
+            if (institutionName) accData.institution_name = institutionName;
 
-          if (name) accData.name = name;
-          if (officialName) accData.official_name = officialName;
-          if (accountType) accData.account_type = accountType;
-          if (subtype) accData.subtype = subtype;
-          if (mask) accData.mask = mask;
-          if (institutionName) accData.institution_name = institutionName;
-
-          // Validate with Zod
-          const account = AccountSchema.parse(accData);
-          accounts.push(account);
-        } catch {
-          // Skip invalid accounts
-          continue;
+            // Validate with Zod
+            const account = AccountSchema.parse(accData);
+            accounts.push(account);
+          } catch {
+            // Skip invalid accounts
+          }
         }
       }
+
+      idx = data.indexOf(balancePattern, searchPos);
     }
   }
 

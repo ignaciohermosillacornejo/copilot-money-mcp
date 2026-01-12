@@ -7,20 +7,17 @@
     "project": "./tsconfig.json"
   },
   "plugins": [
-    "@typescript-eslint",
-    "jest"
+    "@typescript-eslint"
   ],
   "extends": [
     "eslint:recommended",
     "plugin:@typescript-eslint/recommended",
     "plugin:@typescript-eslint/recommended-requiring-type-checking",
-    "plugin:jest/recommended",
     "prettier"
   ],
   "env": {
     "node": true,
-    "es2022": true,
-    "jest/globals": true
+    "es2022": true
   },
   "rules": {
     "@typescript-eslint/explicit-function-return-type": "off",
@@ -37,6 +34,7 @@
     "dist",
     "node_modules",
     "coverage",
-    "*.js"
+    "*.js",
+    "tests/**/*.ts"
   ]
 }

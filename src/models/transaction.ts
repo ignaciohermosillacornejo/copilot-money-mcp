@@ -16,11 +16,9 @@ export const TransactionSchema = z
   .object({
     // Required fields
     transaction_id: z.string(),
-    amount: z
-      .number()
-      .refine((val) => Math.abs(val) <= 10_000_000, {
-        message: 'Amount exceeds maximum allowed value',
-      }),
+    amount: z.number().refine((val) => Math.abs(val) <= 10_000_000, {
+      message: 'Amount exceeds maximum allowed value',
+    }),
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format'),
 
     // Merchant/name fields

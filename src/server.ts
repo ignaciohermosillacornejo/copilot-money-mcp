@@ -4,15 +4,15 @@
  * Exposes financial data through the Model Context Protocol.
  */
 
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
   Tool,
-} from "@modelcontextprotocol/sdk/types.js";
-import { CopilotDatabase } from "./core/database.js";
-import { CopilotMoneyTools, createToolSchemas } from "./tools/index.js";
+} from '@modelcontextprotocol/sdk/types.js';
+import { CopilotDatabase } from './core/database.js';
+import { CopilotMoneyTools, createToolSchemas } from './tools/index.js';
 
 /**
  * MCP server for Copilot Money data.
@@ -33,8 +33,8 @@ export class CopilotMoneyServer {
     this.tools = new CopilotMoneyTools(this.db);
     this.server = new Server(
       {
-        name: "copilot-money-mcp",
-        version: "1.0.0",
+        name: 'copilot-money-mcp',
+        version: '1.0.0',
       },
       {
         capabilities: {
@@ -51,7 +51,7 @@ export class CopilotMoneyServer {
    */
   private registerHandlers(): void {
     // List available tools
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => {
+    this.server.setRequestHandler(ListToolsRequestSchema, () => {
       const schemas = createToolSchemas();
       const tools: Tool[] = schemas.map((schema) => ({
         name: schema.name,
@@ -64,89 +64,108 @@ export class CopilotMoneyServer {
     });
 
     // Handle tool calls
-    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      const { name, arguments: args } = request.params;
+    this.server.setRequestHandler(CallToolRequestSchema, (request) => {
+      const { name, arguments: typedArgs } = request.params;
 
       // Check if database is available
       if (!this.db.isAvailable()) {
         return {
           content: [
             {
-              type: "text",
+              type: 'text' as const,
               text:
-                "Database not available. Please ensure Copilot Money is installed " +
-                "and has created local data, or provide a custom database path.",
+                'Database not available. Please ensure Copilot Money is installed ' +
+                'and has created local data, or provide a custom database path.',
             },
           ],
         };
       }
 
       try {
-        let result: any;
+        let result: unknown;
 
         // Route to appropriate tool handler
         switch (name) {
-          case "get_transactions":
-            result = this.tools.getTransactions(args || {});
+          case 'get_transactions':
+            result = this.tools.getTransactions(
+              (typedArgs as Parameters<typeof this.tools.getTransactions>[0]) || {}
+            );
             break;
 
-          case "search_transactions":
-            if (!args?.query) {
-              throw new Error("Missing required parameter: query");
+          case 'search_transactions': {
+            const query = typedArgs?.query;
+            if (typeof query !== 'string') {
+              throw new Error('Missing required parameter: query');
             }
-            result = this.tools.searchTransactions(args.query, {
-              limit: args.limit,
-              period: args.period,
-              start_date: args.start_date,
-              end_date: args.end_date,
+            result = this.tools.searchTransactions(query, {
+              limit: typedArgs?.limit as number | undefined,
+              period: typedArgs?.period as string | undefined,
+              start_date: typedArgs?.start_date as string | undefined,
+              end_date: typedArgs?.end_date as string | undefined,
             });
             break;
+          }
 
-          case "get_accounts":
-            result = this.tools.getAccounts(args?.account_type);
+          case 'get_accounts':
+            result = this.tools.getAccounts(typedArgs?.account_type as string | undefined);
             break;
 
-          case "get_spending_by_category":
-            result = this.tools.getSpendingByCategory(args || {});
+          case 'get_spending_by_category':
+            result = this.tools.getSpendingByCategory(
+              (typedArgs as Parameters<typeof this.tools.getSpendingByCategory>[0]) || {}
+            );
             break;
 
-          case "get_account_balance":
-            if (!args?.account_id) {
-              throw new Error("Missing required parameter: account_id");
+          case 'get_account_balance': {
+            const accountId = typedArgs?.account_id;
+            if (typeof accountId !== 'string') {
+              throw new Error('Missing required parameter: account_id');
             }
-            result = this.tools.getAccountBalance(args.account_id);
+            result = this.tools.getAccountBalance(accountId);
             break;
+          }
 
-          case "get_categories":
+          case 'get_categories':
             result = this.tools.getCategories();
             break;
 
-          case "get_recurring_transactions":
-            result = this.tools.getRecurringTransactions(args || {});
+          case 'get_recurring_transactions':
+            result = this.tools.getRecurringTransactions(
+              (typedArgs as Parameters<typeof this.tools.getRecurringTransactions>[0]) || {}
+            );
             break;
 
-          case "get_income":
-            result = this.tools.getIncome(args || {});
+          case 'get_income':
+            result = this.tools.getIncome(
+              (typedArgs as Parameters<typeof this.tools.getIncome>[0]) || {}
+            );
             break;
 
-          case "get_spending_by_merchant":
-            result = this.tools.getSpendingByMerchant(args || {});
+          case 'get_spending_by_merchant':
+            result = this.tools.getSpendingByMerchant(
+              (typedArgs as Parameters<typeof this.tools.getSpendingByMerchant>[0]) || {}
+            );
             break;
 
-          case "compare_periods":
-            if (!args?.period1 || !args?.period2) {
-              throw new Error(
-                "Missing required parameters: period1 and period2"
-              );
+          case 'compare_periods': {
+            const period1 = typedArgs?.period1;
+            const period2 = typedArgs?.period2;
+            if (typeof period1 !== 'string' || typeof period2 !== 'string') {
+              throw new Error('Missing required parameters: period1 and period2');
             }
-            result = this.tools.comparePeriods(args);
+            result = this.tools.comparePeriods({
+              period1,
+              period2,
+              exclude_transfers: typedArgs?.exclude_transfers as boolean | undefined,
+            });
             break;
+          }
 
           default:
             return {
               content: [
                 {
-                  type: "text",
+                  type: 'text' as const,
                   text: `Unknown tool: ${name}`,
                 },
               ],
@@ -158,20 +177,19 @@ export class CopilotMoneyServer {
         return {
           content: [
             {
-              type: "text",
+              type: 'text' as const,
               text: JSON.stringify(result, null, 2),
             },
           ],
         };
       } catch (error) {
         // Handle errors (validation, account not found, etc.)
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
 
         return {
           content: [
             {
-              type: "text",
+              type: 'text' as const,
               text: `Error: ${errorMessage}`,
             },
           ],
@@ -189,14 +207,12 @@ export class CopilotMoneyServer {
     await this.server.connect(transport);
 
     // Handle process signals for graceful shutdown
-    process.on("SIGINT", async () => {
-      await this.server.close();
-      process.exit(0);
+    process.on('SIGINT', () => {
+      void this.server.close().then(() => process.exit(0));
     });
 
-    process.on("SIGTERM", async () => {
-      await this.server.close();
-      process.exit(0);
+    process.on('SIGTERM', () => {
+      void this.server.close().then(() => process.exit(0));
     });
   }
 }

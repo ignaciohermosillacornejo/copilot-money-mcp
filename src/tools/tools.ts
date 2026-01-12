@@ -4,15 +4,11 @@
  * Exposes database functionality through the Model Context Protocol.
  */
 
-import { CopilotDatabase } from "../core/database.js";
-import { parsePeriod } from "../utils/date.js";
-import {
-  getCategoryName,
-  isTransferCategory,
-  isIncomeCategory,
-} from "../utils/categories.js";
-import type { Transaction, Account, Category } from "../models/index.js";
-import { getTransactionDisplayName } from "../models/index.js";
+import { CopilotDatabase } from '../core/database.js';
+import { parsePeriod } from '../utils/date.js';
+import { getCategoryName, isTransferCategory, isIncomeCategory } from '../utils/categories.js';
+import type { Transaction, Account } from '../models/index.js';
+import { getTransactionDisplayName } from '../models/index.js';
 
 /**
  * Collection of MCP tools for querying Copilot Money data.
@@ -50,10 +46,8 @@ export class CopilotMoneyTools {
     count: number;
     transactions: Array<Transaction & { category_name?: string }>;
   } {
-    let {
+    const {
       period,
-      start_date,
-      end_date,
       category,
       merchant,
       account_id,
@@ -62,6 +56,7 @@ export class CopilotMoneyTools {
       limit = 100,
       exclude_transfers = false,
     } = options;
+    let { start_date, end_date } = options;
 
     // If period is specified, parse it to start/end dates
     if (period) {
@@ -82,18 +77,14 @@ export class CopilotMoneyTools {
 
     // Filter out transfers if requested
     if (exclude_transfers) {
-      transactions = transactions.filter(
-        (txn) => !isTransferCategory(txn.category_id)
-      );
+      transactions = transactions.filter((txn) => !isTransferCategory(txn.category_id));
       transactions = transactions.slice(0, limit);
     }
 
     // Add human-readable category names
     const enrichedTransactions = transactions.map((txn) => ({
       ...txn,
-      category_name: txn.category_id
-        ? getCategoryName(txn.category_id)
-        : undefined,
+      category_name: txn.category_id ? getCategoryName(txn.category_id) : undefined,
     }));
 
     return {
@@ -123,24 +114,24 @@ export class CopilotMoneyTools {
     count: number;
     transactions: Array<Transaction & { category_name?: string }>;
   } {
-    let { limit = 50, period, start_date, end_date } = options;
+    const { limit = 50, period } = options;
+    let { start_date, end_date } = options;
 
     // If period is specified, parse it to start/end dates
     if (period) {
       [start_date, end_date] = parsePeriod(period);
     }
 
-    let transactions = this.db.searchTransactions(
-      query,
-      start_date || end_date ? 10000 : limit
-    );
+    let transactions = this.db.searchTransactions(query, start_date || end_date ? 10000 : limit);
 
     // Apply date filters if specified
     if (start_date) {
-      transactions = transactions.filter((txn) => txn.date >= start_date!);
+      const startDateFilter = start_date;
+      transactions = transactions.filter((txn) => txn.date >= startDateFilter);
     }
     if (end_date) {
-      transactions = transactions.filter((txn) => txn.date <= end_date!);
+      const endDateFilter = end_date;
+      transactions = transactions.filter((txn) => txn.date <= endDateFilter);
     }
 
     // Apply limit
@@ -149,9 +140,7 @@ export class CopilotMoneyTools {
     // Add human-readable category names
     const enrichedTransactions = transactions.map((txn) => ({
       ...txn,
-      category_name: txn.category_id
-        ? getCategoryName(txn.category_id)
-        : undefined,
+      category_name: txn.category_id ? getCategoryName(txn.category_id) : undefined,
     }));
 
     return {
@@ -174,10 +163,7 @@ export class CopilotMoneyTools {
     const accounts = this.db.getAccounts(accountType);
 
     // Calculate total balance
-    const totalBalance = accounts.reduce(
-      (sum, acc) => sum + acc.current_balance,
-      0
-    );
+    const totalBalance = accounts.reduce((sum, acc) => sum + acc.current_balance, 0);
 
     return {
       count: accounts.length,
@@ -209,13 +195,8 @@ export class CopilotMoneyTools {
       transaction_count: number;
     }>;
   } {
-    let {
-      period,
-      start_date,
-      end_date,
-      min_amount = 0.0,
-      exclude_transfers = false,
-    } = options;
+    const { period, min_amount = 0.0, exclude_transfers = false } = options;
+    let { start_date, end_date } = options;
 
     // If period is specified, parse it to start/end dates
     if (period) {
@@ -232,9 +213,7 @@ export class CopilotMoneyTools {
 
     // Filter out transfers if requested
     if (exclude_transfers) {
-      transactions = transactions.filter(
-        (txn) => !isTransferCategory(txn.category_id)
-      );
+      transactions = transactions.filter((txn) => !isTransferCategory(txn.category_id));
     }
 
     // Aggregate by category
@@ -244,7 +223,7 @@ export class CopilotMoneyTools {
     for (const txn of transactions) {
       // Only count positive amounts (expenses)
       if (txn.amount > 0) {
-        const cat = txn.category_id || "Uncategorized";
+        const cat = txn.category_id || 'Uncategorized';
         categorySpending.set(cat, (categorySpending.get(cat) || 0) + txn.amount);
         categoryCounts.set(cat, (categoryCounts.get(cat) || 0) + 1);
       }
@@ -262,9 +241,7 @@ export class CopilotMoneyTools {
 
     // Calculate totals
     const totalSpending =
-      Math.round(
-        categories.reduce((sum, cat) => sum + cat.total_spending, 0) * 100
-      ) / 100;
+      Math.round(categories.reduce((sum, cat) => sum + cat.total_spending, 0) * 100) / 100;
 
     return {
       period: { start_date, end_date },
@@ -302,7 +279,7 @@ export class CopilotMoneyTools {
 
     return {
       account_id: account.account_id,
-      name: account.name || account.official_name || "Unknown",
+      name: account.name || account.official_name || 'Unknown',
       account_type: account.account_type,
       subtype: account.subtype,
       current_balance: account.current_balance,
@@ -329,13 +306,10 @@ export class CopilotMoneyTools {
     const allTransactions = this.db.getAllTransactions();
 
     // Count transactions and amounts per category
-    const categoryStats = new Map<
-      string,
-      { count: number; totalAmount: number }
-    >();
+    const categoryStats = new Map<string, { count: number; totalAmount: number }>();
 
     for (const txn of allTransactions) {
-      const categoryId = txn.category_id || "Uncategorized";
+      const categoryId = txn.category_id || 'Uncategorized';
       const stats = categoryStats.get(categoryId) || {
         count: 0,
         totalAmount: 0,
@@ -389,11 +363,12 @@ export class CopilotMoneyTools {
       transactions: Array<{ date: string; amount: number }>;
     }>;
   } {
-    let { min_occurrences = 2, period, start_date, end_date } = options;
+    const { min_occurrences = 2 } = options;
+    let { period, start_date, end_date } = options;
 
     // Default to last 90 days if no period specified
     if (!period && !start_date && !end_date) {
-      period = "last_90_days";
+      period = 'last_90_days';
     }
 
     // If period is specified, parse it to start/end dates
@@ -422,7 +397,7 @@ export class CopilotMoneyTools {
       if (txn.amount <= 0) continue;
 
       const merchantName = getTransactionDisplayName(txn);
-      if (merchantName === "Unknown") continue;
+      if (merchantName === 'Unknown') continue;
 
       const existing = merchantTransactions.get(merchantName) || {
         transactions: [],
@@ -454,46 +429,48 @@ export class CopilotMoneyTools {
 
       // Calculate average amount (allow 30% variance for "same" amount)
       const amounts = sortedTxns.map((t) => t.amount);
-      const avgAmount =
-        amounts.reduce((a, b) => a + b, 0) / sortedTxns.length;
+      const avgAmount = amounts.reduce((a, b) => a + b, 0) / sortedTxns.length;
       const totalAmount = amounts.reduce((a, b) => a + b, 0);
 
       // Check if amounts are consistent (within 30% of average)
-      const consistentAmounts = amounts.filter(
-        (a) => Math.abs(a - avgAmount) / avgAmount < 0.3
-      );
+      const consistentAmounts = amounts.filter((a) => Math.abs(a - avgAmount) / avgAmount < 0.3);
       if (consistentAmounts.length < min_occurrences) continue;
 
       // Estimate frequency based on average days between transactions
       const dates = sortedTxns.map((t) => new Date(t.date).getTime());
       const gaps: number[] = [];
       for (let i = 1; i < dates.length; i++) {
-        gaps.push((dates[i] - dates[i - 1]) / (1000 * 60 * 60 * 24));
+        const currentDate = dates[i];
+        const previousDate = dates[i - 1];
+        if (currentDate !== undefined && previousDate !== undefined) {
+          gaps.push((currentDate - previousDate) / (1000 * 60 * 60 * 24));
+        }
       }
       const avgGap = gaps.length > 0 ? gaps.reduce((a, b) => a + b, 0) / gaps.length : 0;
 
-      let frequency = "irregular";
-      if (avgGap >= 1 && avgGap <= 7) frequency = "weekly";
-      else if (avgGap >= 13 && avgGap <= 16) frequency = "bi-weekly";
-      else if (avgGap >= 27 && avgGap <= 35) frequency = "monthly";
-      else if (avgGap >= 85 && avgGap <= 100) frequency = "quarterly";
-      else if (avgGap >= 360 && avgGap <= 370) frequency = "yearly";
+      let frequency = 'irregular';
+      if (avgGap >= 1 && avgGap <= 7) frequency = 'weekly';
+      else if (avgGap >= 13 && avgGap <= 16) frequency = 'bi-weekly';
+      else if (avgGap >= 27 && avgGap <= 35) frequency = 'monthly';
+      else if (avgGap >= 85 && avgGap <= 100) frequency = 'quarterly';
+      else if (avgGap >= 360 && avgGap <= 370) frequency = 'yearly';
 
-      recurring.push({
-        merchant,
-        occurrences: sortedTxns.length,
-        average_amount: Math.round(avgAmount * 100) / 100,
-        total_amount: Math.round(totalAmount * 100) / 100,
-        frequency,
-        category_name: data.categoryId
-          ? getCategoryName(data.categoryId)
-          : undefined,
-        last_date: sortedTxns[sortedTxns.length - 1].date,
-        transactions: sortedTxns.slice(-5).map((t) => ({
-          date: t.date,
-          amount: t.amount,
-        })),
-      });
+      const lastTxn = sortedTxns[sortedTxns.length - 1];
+      if (lastTxn) {
+        recurring.push({
+          merchant,
+          occurrences: sortedTxns.length,
+          average_amount: Math.round(avgAmount * 100) / 100,
+          total_amount: Math.round(totalAmount * 100) / 100,
+          frequency,
+          category_name: data.categoryId ? getCategoryName(data.categoryId) : undefined,
+          last_date: lastTxn.date,
+          transactions: sortedTxns.slice(-5).map((t) => ({
+            date: t.date,
+            amount: t.amount,
+          })),
+        });
+      }
     }
 
     // Sort by occurrences (most frequent first)
@@ -501,13 +478,13 @@ export class CopilotMoneyTools {
 
     // Calculate estimated monthly cost
     const monthlyRecurring = recurring.filter(
-      (r) => r.frequency === "monthly" || r.frequency === "bi-weekly" || r.frequency === "weekly"
+      (r) => r.frequency === 'monthly' || r.frequency === 'bi-weekly' || r.frequency === 'weekly'
     );
     let totalMonthlyCost = 0;
     for (const r of monthlyRecurring) {
-      if (r.frequency === "monthly") totalMonthlyCost += r.average_amount;
-      else if (r.frequency === "bi-weekly") totalMonthlyCost += r.average_amount * 2;
-      else if (r.frequency === "weekly") totalMonthlyCost += r.average_amount * 4;
+      if (r.frequency === 'monthly') totalMonthlyCost += r.average_amount;
+      else if (r.frequency === 'bi-weekly') totalMonthlyCost += r.average_amount * 2;
+      else if (r.frequency === 'weekly') totalMonthlyCost += r.average_amount * 4;
     }
 
     return {
@@ -524,11 +501,7 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with income breakdown
    */
-  getIncome(options: {
-    period?: string;
-    start_date?: string;
-    end_date?: string;
-  }): {
+  getIncome(options: { period?: string; start_date?: string; end_date?: string }): {
     period: { start_date?: string; end_date?: string };
     total_income: number;
     transaction_count: number;
@@ -540,7 +513,8 @@ export class CopilotMoneyTools {
     }>;
     transactions: Array<Transaction & { category_name?: string }>;
   } {
-    let { period, start_date, end_date } = options;
+    const { period } = options;
+    let { start_date, end_date } = options;
 
     // If period is specified, parse it to start/end dates
     if (period) {
@@ -560,10 +534,7 @@ export class CopilotMoneyTools {
     );
 
     // Group by source (merchant name)
-    const sourceMap = new Map<
-      string,
-      { total: number; count: number; categoryId?: string }
-    >();
+    const sourceMap = new Map<string, { total: number; count: number; categoryId?: string }>();
 
     for (const txn of incomeTransactions) {
       const source = getTransactionDisplayName(txn);
@@ -581,9 +552,7 @@ export class CopilotMoneyTools {
     const incomeBySource = Array.from(sourceMap.entries())
       .map(([source, data]) => ({
         source,
-        category_name: data.categoryId
-          ? getCategoryName(data.categoryId)
-          : undefined,
+        category_name: data.categoryId ? getCategoryName(data.categoryId) : undefined,
         total: Math.round(data.total * 100) / 100,
         count: data.count,
       }))
@@ -593,14 +562,10 @@ export class CopilotMoneyTools {
     const totalIncome = incomeBySource.reduce((sum, s) => sum + s.total, 0);
 
     // Enrich transactions with category names
-    const enrichedTransactions = incomeTransactions
-      .slice(0, 100)
-      .map((txn) => ({
-        ...txn,
-        category_name: txn.category_id
-          ? getCategoryName(txn.category_id)
-          : undefined,
-      }));
+    const enrichedTransactions = incomeTransactions.slice(0, 100).map((txn) => ({
+      ...txn,
+      category_name: txn.category_id ? getCategoryName(txn.category_id) : undefined,
+    }));
 
     return {
       period: { start_date, end_date },
@@ -635,13 +600,8 @@ export class CopilotMoneyTools {
       average_transaction: number;
     }>;
   } {
-    let {
-      period,
-      start_date,
-      end_date,
-      limit = 50,
-      exclude_transfers = false,
-    } = options;
+    const { period, limit = 50, exclude_transfers = false } = options;
+    let { start_date, end_date } = options;
 
     // If period is specified, parse it to start/end dates
     if (period) {
@@ -657,9 +617,7 @@ export class CopilotMoneyTools {
 
     // Filter out transfers if requested
     if (exclude_transfers) {
-      transactions = transactions.filter(
-        (txn) => !isTransferCategory(txn.category_id)
-      );
+      transactions = transactions.filter((txn) => !isTransferCategory(txn.category_id));
     }
 
     // Aggregate by merchant
@@ -687,9 +645,7 @@ export class CopilotMoneyTools {
     const merchants = Array.from(merchantSpending.entries())
       .map(([merchant, data]) => ({
         merchant,
-        category_name: data.categoryId
-          ? getCategoryName(data.categoryId)
-          : undefined,
+        category_name: data.categoryId ? getCategoryName(data.categoryId) : undefined,
         total_spending: Math.round(data.total * 100) / 100,
         transaction_count: data.count,
         average_transaction: Math.round((data.total / data.count) * 100) / 100,
@@ -698,10 +654,7 @@ export class CopilotMoneyTools {
       .slice(0, limit);
 
     // Calculate totals
-    const totalSpending = merchants.reduce(
-      (sum, m) => sum + m.total_spending,
-      0
-    );
+    const totalSpending = merchants.reduce((sum, m) => sum + m.total_spending, 0);
 
     return {
       period: { start_date, end_date },
@@ -717,11 +670,7 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with comparison between two periods
    */
-  comparePeriods(options: {
-    period1: string;
-    period2: string;
-    exclude_transfers?: boolean;
-  }): {
+  comparePeriods(options: { period1: string; period2: string; exclude_transfers?: boolean }): {
     period1: {
       name: string;
       start_date: string;
@@ -779,9 +728,7 @@ export class CopilotMoneyTools {
       });
 
       if (exclude_transfers) {
-        transactions = transactions.filter(
-          (txn) => !isTransferCategory(txn.category_id)
-        );
+        transactions = transactions.filter((txn) => !isTransferCategory(txn.category_id));
       }
 
       let spending = 0;
@@ -791,7 +738,7 @@ export class CopilotMoneyTools {
       for (const txn of transactions) {
         if (txn.amount > 0) {
           spending += txn.amount;
-          const cat = txn.category_id || "Uncategorized";
+          const cat = txn.category_id || 'Uncategorized';
           byCategory.set(cat, (byCategory.get(cat) || 0) + txn.amount);
         } else {
           income += Math.abs(txn.amount);
@@ -812,29 +759,21 @@ export class CopilotMoneyTools {
     // Calculate changes
     const spendingChange = p2Data.spending - p1Data.spending;
     const spendingChangePercent =
-      p1Data.spending > 0
-        ? Math.round((spendingChange / p1Data.spending) * 10000) / 100
-        : 0;
+      p1Data.spending > 0 ? Math.round((spendingChange / p1Data.spending) * 10000) / 100 : 0;
 
     const incomeChange = p2Data.income - p1Data.income;
     const incomeChangePercent =
-      p1Data.income > 0
-        ? Math.round((incomeChange / p1Data.income) * 10000) / 100
-        : 0;
+      p1Data.income > 0 ? Math.round((incomeChange / p1Data.income) * 10000) / 100 : 0;
 
     // Compare categories
-    const allCategories = new Set([
-      ...p1Data.byCategory.keys(),
-      ...p2Data.byCategory.keys(),
-    ]);
+    const allCategories = new Set([...p1Data.byCategory.keys(), ...p2Data.byCategory.keys()]);
 
     const categoryComparison = Array.from(allCategories)
       .map((categoryId) => {
         const p1Spending = p1Data.byCategory.get(categoryId) || 0;
         const p2Spending = p2Data.byCategory.get(categoryId) || 0;
         const change = p2Spending - p1Spending;
-        const changePercent =
-          p1Spending > 0 ? Math.round((change / p1Spending) * 10000) / 100 : 0;
+        const changePercent = p1Spending > 0 ? Math.round((change / p1Spending) * 10000) / 100 : 0;
 
         return {
           category_id: categoryId,
@@ -871,7 +810,9 @@ export class CopilotMoneyTools {
         spending_change_percent: spendingChangePercent,
         income_change: Math.round(incomeChange * 100) / 100,
         income_change_percent: incomeChangePercent,
-        net_change: Math.round((p2Data.income - p2Data.spending - (p1Data.income - p1Data.spending)) * 100) / 100,
+        net_change:
+          Math.round((p2Data.income - p2Data.spending - (p1Data.income - p1Data.spending)) * 100) /
+          100,
       },
       category_comparison: categoryComparison.slice(0, 20),
     };
@@ -885,7 +826,7 @@ export interface ToolSchema {
   name: string;
   description: string;
   inputSchema: {
-    type: "object";
+    type: 'object';
     properties: Record<string, any>;
     required?: string[];
   };
@@ -904,63 +845,62 @@ export interface ToolSchema {
 export function createToolSchemas(): ToolSchema[] {
   return [
     {
-      name: "get_transactions",
+      name: 'get_transactions',
       description:
-        "Get transactions with optional filters. Supports date ranges, " +
+        'Get transactions with optional filters. Supports date ranges, ' +
         "category, merchant, account, and amount filters. Use 'period' " +
-        "for common date ranges (this_month, last_30_days, ytd, etc.). " +
-        "Returns human-readable category names. Use exclude_transfers=true " +
-        "to filter out account transfers and credit card payments.",
+        'for common date ranges (this_month, last_30_days, ytd, etc.). ' +
+        'Returns human-readable category names. Use exclude_transfers=true ' +
+        'to filter out account transfers and credit card payments.',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
           period: {
-            type: "string",
+            type: 'string',
             description:
-              "Period shorthand: this_month, last_month, " +
-              "last_7_days, last_30_days, last_90_days, ytd, " +
-              "this_year, last_year",
+              'Period shorthand: this_month, last_month, ' +
+              'last_7_days, last_30_days, last_90_days, ytd, ' +
+              'this_year, last_year',
           },
           start_date: {
-            type: "string",
-            description: "Start date (YYYY-MM-DD)",
-            pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+            type: 'string',
+            description: 'Start date (YYYY-MM-DD)',
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
           end_date: {
-            type: "string",
-            description: "End date (YYYY-MM-DD)",
-            pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+            type: 'string',
+            description: 'End date (YYYY-MM-DD)',
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
           category: {
-            type: "string",
-            description: "Filter by category (case-insensitive substring)",
+            type: 'string',
+            description: 'Filter by category (case-insensitive substring)',
           },
           merchant: {
-            type: "string",
-            description:
-              "Filter by merchant name (case-insensitive substring)",
+            type: 'string',
+            description: 'Filter by merchant name (case-insensitive substring)',
           },
           account_id: {
-            type: "string",
-            description: "Filter by account ID",
+            type: 'string',
+            description: 'Filter by account ID',
           },
           min_amount: {
-            type: "number",
-            description: "Minimum transaction amount",
+            type: 'number',
+            description: 'Minimum transaction amount',
           },
           max_amount: {
-            type: "number",
-            description: "Maximum transaction amount",
+            type: 'number',
+            description: 'Maximum transaction amount',
           },
           limit: {
-            type: "integer",
-            description: "Maximum number of results (default: 100)",
+            type: 'integer',
+            description: 'Maximum number of results (default: 100)',
             default: 100,
           },
           exclude_transfers: {
-            type: "boolean",
+            type: 'boolean',
             description:
-              "Exclude transfers between accounts and credit card payments (default: false)",
+              'Exclude transfers between accounts and credit card payments (default: false)',
             default: false,
           },
         },
@@ -970,61 +910,61 @@ export function createToolSchemas(): ToolSchema[] {
       },
     },
     {
-      name: "search_transactions",
+      name: 'search_transactions',
       description:
-        "Free-text search of transactions by merchant name. " +
-        "Case-insensitive search. Now supports date filtering with " +
-        "period, start_date, and end_date parameters.",
+        'Free-text search of transactions by merchant name. ' +
+        'Case-insensitive search. Now supports date filtering with ' +
+        'period, start_date, and end_date parameters.',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
           query: {
-            type: "string",
-            description: "Search query",
+            type: 'string',
+            description: 'Search query',
           },
           limit: {
-            type: "integer",
-            description: "Maximum number of results (default: 50)",
+            type: 'integer',
+            description: 'Maximum number of results (default: 50)',
             default: 50,
           },
           period: {
-            type: "string",
+            type: 'string',
             description:
-              "Period shorthand: this_month, last_month, " +
-              "last_7_days, last_30_days, last_90_days, ytd, " +
-              "this_year, last_year",
+              'Period shorthand: this_month, last_month, ' +
+              'last_7_days, last_30_days, last_90_days, ytd, ' +
+              'this_year, last_year',
           },
           start_date: {
-            type: "string",
-            description: "Start date (YYYY-MM-DD)",
-            pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+            type: 'string',
+            description: 'Start date (YYYY-MM-DD)',
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
           end_date: {
-            type: "string",
-            description: "End date (YYYY-MM-DD)",
-            pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+            type: 'string',
+            description: 'End date (YYYY-MM-DD)',
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
         },
-        required: ["query"],
+        required: ['query'],
       },
       annotations: {
         readOnlyHint: true,
       },
     },
     {
-      name: "get_accounts",
+      name: 'get_accounts',
       description:
-        "Get all accounts with balances. Optionally filter by account type " +
-        "(checking, savings, credit, investment). Now checks both account_type " +
-        "and subtype fields for better filtering (e.g., finds checking accounts " +
+        'Get all accounts with balances. Optionally filter by account type ' +
+        '(checking, savings, credit, investment). Now checks both account_type ' +
+        'and subtype fields for better filtering (e.g., finds checking accounts ' +
         "even when account_type is 'depository').",
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
           account_type: {
-            type: "string",
+            type: 'string',
             description:
-              "Filter by account type (checking, savings, credit, investment, depository)",
+              'Filter by account type (checking, savings, credit, investment, depository)',
           },
         },
       },
@@ -1033,41 +973,41 @@ export function createToolSchemas(): ToolSchema[] {
       },
     },
     {
-      name: "get_spending_by_category",
+      name: 'get_spending_by_category',
       description:
-        "Get spending aggregated by category for a date range. " +
-        "Returns total spending per category with human-readable names, sorted by amount. " +
+        'Get spending aggregated by category for a date range. ' +
+        'Returns total spending per category with human-readable names, sorted by amount. ' +
         "Use 'period' for common date ranges. Use exclude_transfers=true " +
-        "to get more accurate spending totals.",
+        'to get more accurate spending totals.',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
           period: {
-            type: "string",
+            type: 'string',
             description:
-              "Period shorthand: this_month, last_month, " +
-              "last_7_days, last_30_days, last_90_days, ytd, " +
-              "this_year, last_year",
+              'Period shorthand: this_month, last_month, ' +
+              'last_7_days, last_30_days, last_90_days, ytd, ' +
+              'this_year, last_year',
           },
           start_date: {
-            type: "string",
-            description: "Start date (YYYY-MM-DD)",
-            pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+            type: 'string',
+            description: 'Start date (YYYY-MM-DD)',
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
           end_date: {
-            type: "string",
-            description: "End date (YYYY-MM-DD)",
-            pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+            type: 'string',
+            description: 'End date (YYYY-MM-DD)',
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
           min_amount: {
-            type: "number",
-            description: "Only include expenses >= this (default: 0.0)",
+            type: 'number',
+            description: 'Only include expenses >= this (default: 0.0)',
             default: 0.0,
           },
           exclude_transfers: {
-            type: "boolean",
+            type: 'boolean',
             description:
-              "Exclude transfers between accounts and credit card payments (default: false)",
+              'Exclude transfers between accounts and credit card payments (default: false)',
             default: false,
           },
         },
@@ -1077,32 +1017,32 @@ export function createToolSchemas(): ToolSchema[] {
       },
     },
     {
-      name: "get_account_balance",
+      name: 'get_account_balance',
       description:
-        "Get balance and details for a specific account by ID. " +
-        "Includes account_type and subtype fields.",
+        'Get balance and details for a specific account by ID. ' +
+        'Includes account_type and subtype fields.',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
           account_id: {
-            type: "string",
-            description: "Account ID to query",
+            type: 'string',
+            description: 'Account ID to query',
           },
         },
-        required: ["account_id"],
+        required: ['account_id'],
       },
       annotations: {
         readOnlyHint: true,
       },
     },
     {
-      name: "get_categories",
+      name: 'get_categories',
       description:
-        "Get all categories found in transactions with their human-readable names. " +
+        'Get all categories found in transactions with their human-readable names. ' +
         "Useful for understanding what category IDs like '13005000' or 'food_dining' mean. " +
-        "Returns category IDs, names, transaction counts, and total amounts.",
+        'Returns category IDs, names, transaction counts, and total amounts.',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {},
       },
       annotations: {
@@ -1110,36 +1050,35 @@ export function createToolSchemas(): ToolSchema[] {
       },
     },
     {
-      name: "get_recurring_transactions",
+      name: 'get_recurring_transactions',
       description:
-        "Identify recurring/subscription charges. Finds transactions that occur " +
-        "regularly from the same merchant with similar amounts. Returns estimated " +
-        "frequency (weekly, monthly, etc.) and total monthly cost.",
+        'Identify recurring/subscription charges. Finds transactions that occur ' +
+        'regularly from the same merchant with similar amounts. Returns estimated ' +
+        'frequency (weekly, monthly, etc.) and total monthly cost.',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
           min_occurrences: {
-            type: "integer",
-            description:
-              "Minimum number of occurrences to qualify as recurring (default: 2)",
+            type: 'integer',
+            description: 'Minimum number of occurrences to qualify as recurring (default: 2)',
             default: 2,
           },
           period: {
-            type: "string",
+            type: 'string',
             description:
-              "Period to analyze (default: last_90_days). " +
-              "Options: this_month, last_month, last_7_days, last_30_days, " +
-              "last_90_days, ytd, this_year, last_year",
+              'Period to analyze (default: last_90_days). ' +
+              'Options: this_month, last_month, last_7_days, last_30_days, ' +
+              'last_90_days, ytd, this_year, last_year',
           },
           start_date: {
-            type: "string",
-            description: "Start date (YYYY-MM-DD)",
-            pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+            type: 'string',
+            description: 'Start date (YYYY-MM-DD)',
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
           end_date: {
-            type: "string",
-            description: "End date (YYYY-MM-DD)",
-            pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+            type: 'string',
+            description: 'End date (YYYY-MM-DD)',
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
         },
       },
@@ -1148,30 +1087,30 @@ export function createToolSchemas(): ToolSchema[] {
       },
     },
     {
-      name: "get_income",
+      name: 'get_income',
       description:
-        "Get income transactions (deposits, paychecks, refunds). " +
-        "Filters for negative amounts (credits) or income-related categories. " +
-        "Returns total income and breakdown by source.",
+        'Get income transactions (deposits, paychecks, refunds). ' +
+        'Filters for negative amounts (credits) or income-related categories. ' +
+        'Returns total income and breakdown by source.',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
           period: {
-            type: "string",
+            type: 'string',
             description:
-              "Period shorthand: this_month, last_month, " +
-              "last_7_days, last_30_days, last_90_days, ytd, " +
-              "this_year, last_year",
+              'Period shorthand: this_month, last_month, ' +
+              'last_7_days, last_30_days, last_90_days, ytd, ' +
+              'this_year, last_year',
           },
           start_date: {
-            type: "string",
-            description: "Start date (YYYY-MM-DD)",
-            pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+            type: 'string',
+            description: 'Start date (YYYY-MM-DD)',
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
           end_date: {
-            type: "string",
-            description: "End date (YYYY-MM-DD)",
-            pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+            type: 'string',
+            description: 'End date (YYYY-MM-DD)',
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
         },
       },
@@ -1180,40 +1119,39 @@ export function createToolSchemas(): ToolSchema[] {
       },
     },
     {
-      name: "get_spending_by_merchant",
+      name: 'get_spending_by_merchant',
       description:
-        "Get spending aggregated by merchant name. Returns top merchants " +
-        "by total spending with transaction counts and averages. " +
-        "Use exclude_transfers=true for more accurate results.",
+        'Get spending aggregated by merchant name. Returns top merchants ' +
+        'by total spending with transaction counts and averages. ' +
+        'Use exclude_transfers=true for more accurate results.',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
           period: {
-            type: "string",
+            type: 'string',
             description:
-              "Period shorthand: this_month, last_month, " +
-              "last_7_days, last_30_days, last_90_days, ytd, " +
-              "this_year, last_year",
+              'Period shorthand: this_month, last_month, ' +
+              'last_7_days, last_30_days, last_90_days, ytd, ' +
+              'this_year, last_year',
           },
           start_date: {
-            type: "string",
-            description: "Start date (YYYY-MM-DD)",
-            pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+            type: 'string',
+            description: 'Start date (YYYY-MM-DD)',
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
           end_date: {
-            type: "string",
-            description: "End date (YYYY-MM-DD)",
-            pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+            type: 'string',
+            description: 'End date (YYYY-MM-DD)',
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
           limit: {
-            type: "integer",
-            description: "Maximum number of merchants to return (default: 50)",
+            type: 'integer',
+            description: 'Maximum number of merchants to return (default: 50)',
             default: 50,
           },
           exclude_transfers: {
-            type: "boolean",
-            description:
-              "Exclude transfers between accounts (default: false)",
+            type: 'boolean',
+            description: 'Exclude transfers between accounts (default: false)',
             default: false,
           },
         },
@@ -1223,36 +1161,35 @@ export function createToolSchemas(): ToolSchema[] {
       },
     },
     {
-      name: "compare_periods",
+      name: 'compare_periods',
       description:
-        "Compare spending and income between two time periods. " +
-        "Returns totals for each period, percentage changes, and " +
-        "category-by-category comparison showing where spending changed most.",
+        'Compare spending and income between two time periods. ' +
+        'Returns totals for each period, percentage changes, and ' +
+        'category-by-category comparison showing where spending changed most.',
       inputSchema: {
-        type: "object",
+        type: 'object',
         properties: {
           period1: {
-            type: "string",
+            type: 'string',
             description:
-              "First period (baseline): this_month, last_month, " +
-              "last_7_days, last_30_days, last_90_days, ytd, " +
-              "this_year, last_year",
+              'First period (baseline): this_month, last_month, ' +
+              'last_7_days, last_30_days, last_90_days, ytd, ' +
+              'this_year, last_year',
           },
           period2: {
-            type: "string",
+            type: 'string',
             description:
-              "Second period (to compare): this_month, last_month, " +
-              "last_7_days, last_30_days, last_90_days, ytd, " +
-              "this_year, last_year",
+              'Second period (to compare): this_month, last_month, ' +
+              'last_7_days, last_30_days, last_90_days, ytd, ' +
+              'this_year, last_year',
           },
           exclude_transfers: {
-            type: "boolean",
-            description:
-              "Exclude transfers between accounts (default: false)",
+            type: 'boolean',
+            description: 'Exclude transfers between accounts (default: false)',
             default: false,
           },
         },
-        required: ["period1", "period2"],
+        required: ['period1', 'period2'],
       },
       annotations: {
         readOnlyHint: true,

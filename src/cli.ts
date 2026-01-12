@@ -3,7 +3,7 @@
  * CLI entry point for Copilot Money MCP server.
  */
 
-import { runServer } from "./server.js";
+import { runServer } from './server.js';
 
 /**
  * Parse command-line arguments.
@@ -16,12 +16,12 @@ function parseArgs(): { dbPath?: string; verbose: boolean } {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
 
-    if (arg === "--db-path" && i + 1 < args.length) {
+    if (arg === '--db-path' && i + 1 < args.length) {
       dbPath = args[i + 1];
       i++;
-    } else if (arg === "--verbose" || arg === "-v") {
+    } else if (arg === '--verbose' || arg === '-v') {
       verbose = true;
-    } else if (arg === "--help" || arg === "-h") {
+    } else if (arg === '--help' || arg === '-h') {
       console.error(`
 Copilot Money MCP Server - Expose financial data through MCP
 
@@ -49,15 +49,14 @@ Environment:
  */
 function configureLogging(verbose: boolean): void {
   // Simple logger that writes to stderr (MCP uses stdout for protocol)
-  const originalLog = console.log;
   const originalError = console.error;
 
   if (verbose) {
-    console.log = (...args: any[]) => {
-      originalError("[LOG]", new Date().toISOString(), ...args);
+    console.log = (...args: unknown[]) => {
+      originalError('[LOG]', new Date().toISOString(), ...args);
     };
-    console.error = (...args: any[]) => {
-      originalError("[ERROR]", new Date().toISOString(), ...args);
+    console.error = (...args: unknown[]) => {
+      originalError('[ERROR]', new Date().toISOString(), ...args);
     };
   } else {
     // In non-verbose mode, suppress console.log but keep console.error
@@ -76,30 +75,30 @@ async function main(): Promise<void> {
 
   try {
     if (verbose) {
-      console.log("Starting Copilot Money MCP Server...");
+      console.log('Starting Copilot Money MCP Server...');
       if (dbPath) {
         console.log(`Using database path: ${dbPath}`);
       } else {
-        console.log("Using default Copilot Money database location");
+        console.log('Using default Copilot Money database location');
       }
     }
 
     // Run the server
     await runServer(dbPath);
   } catch (error) {
-    console.error("Server error:", error);
+    console.error('Server error:', error);
     process.exit(1);
   }
 }
 
 // Handle unhandled rejections
-process.on("unhandledRejection", (error) => {
-  console.error("Unhandled rejection:", error);
+process.on('unhandledRejection', (error) => {
+  console.error('Unhandled rejection:', error);
   process.exit(1);
 });
 
 // Run the server
 main().catch((error) => {
-  console.error("Fatal error:", error);
+  console.error('Fatal error:', error);
   process.exit(1);
 });
