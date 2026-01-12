@@ -28,11 +28,7 @@ afterEach(() => {
 function createStringField(fieldName: string | Buffer, value: string): Buffer {
   const nameBuffer = Buffer.isBuffer(fieldName) ? fieldName : Buffer.from(fieldName);
   const valueBuffer = Buffer.from(value, 'utf-8');
-  return Buffer.concat([
-    nameBuffer,
-    Buffer.from([0x8a, 0x01, valueBuffer.length]),
-    valueBuffer,
-  ]);
+  return Buffer.concat([nameBuffer, Buffer.from([0x8a, 0x01, valueBuffer.length]), valueBuffer]);
 }
 
 /**
@@ -696,9 +692,18 @@ describe('Decoder Main Functions', () => {
         ]);
 
       // Use separate files for cleaner separation
-      fs.writeFileSync(path.join(tempDir, 'acc1.ldb'), createAcc('acc_multi_1', 'Multi Account 1', 100.0));
-      fs.writeFileSync(path.join(tempDir, 'acc2.ldb'), createAcc('acc_multi_2', 'Multi Account 2', 200.0));
-      fs.writeFileSync(path.join(tempDir, 'acc3.ldb'), createAcc('acc_multi_3', 'Multi Account 3', 300.0));
+      fs.writeFileSync(
+        path.join(tempDir, 'acc1.ldb'),
+        createAcc('acc_multi_1', 'Multi Account 1', 100.0)
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'acc2.ldb'),
+        createAcc('acc_multi_2', 'Multi Account 2', 200.0)
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'acc3.ldb'),
+        createAcc('acc_multi_3', 'Multi Account 3', 300.0)
+      );
 
       const result = decodeAccounts(tempDir);
       expect(result.length).toBe(3);
@@ -763,7 +768,11 @@ describe('Decoder Main Functions', () => {
       fs.mkdirSync(tempDir, { recursive: true });
 
       const ldbFile = path.join(tempDir, 'test.ldb');
-      const data = Buffer.concat([Buffer.from('amount'), FIELD_PREFIXES.amount, createDoubleField(100.0)]);
+      const data = Buffer.concat([
+        Buffer.from('amount'),
+        FIELD_PREFIXES.amount,
+        createDoubleField(100.0),
+      ]);
       fs.writeFileSync(ldbFile, data);
 
       const result = decodeTransactions(tempDir);
