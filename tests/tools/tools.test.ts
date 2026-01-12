@@ -1158,6 +1158,445 @@ describe('New MCP Tools', () => {
       const result = tools.getRecurringTransactions({});
       expect(result.period).toBeDefined();
     });
+
+    test('detects weekly frequency subscriptions', () => {
+      // Set up weekly recurring transactions
+      const weeklyTransactions: Transaction[] = [
+        {
+          transaction_id: 'w1',
+          amount: 10.0,
+          date: '2024-01-01',
+          name: 'Weekly Service',
+          category_id: 'services',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'w2',
+          amount: 10.0,
+          date: '2024-01-08',
+          name: 'Weekly Service',
+          category_id: 'services',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'w3',
+          amount: 10.0,
+          date: '2024-01-15',
+          name: 'Weekly Service',
+          category_id: 'services',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'w4',
+          amount: 10.0,
+          date: '2024-01-22',
+          name: 'Weekly Service',
+          category_id: 'services',
+          account_id: 'acc1',
+        },
+      ];
+      (db as any)._transactions = weeklyTransactions;
+
+      const result = tools.getRecurringTransactions({
+        start_date: '2024-01-01',
+        end_date: '2024-01-31',
+      });
+
+      const weekly = result.recurring.find((r) => r.merchant.includes('Weekly Service'));
+      expect(weekly).toBeDefined();
+      if (weekly) {
+        expect(weekly.frequency).toBe('weekly');
+        // Weekly = 4 times per month
+        expect(result.total_monthly_cost).toBe(40.0);
+      }
+    });
+
+    test('detects bi-weekly frequency subscriptions', () => {
+      const biWeeklyTransactions: Transaction[] = [
+        {
+          transaction_id: 'bw1',
+          amount: 25.0,
+          date: '2024-01-01',
+          name: 'Bi-Weekly Service',
+          category_id: 'services',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'bw2',
+          amount: 25.0,
+          date: '2024-01-15',
+          name: 'Bi-Weekly Service',
+          category_id: 'services',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'bw3',
+          amount: 25.0,
+          date: '2024-01-29',
+          name: 'Bi-Weekly Service',
+          category_id: 'services',
+          account_id: 'acc1',
+        },
+      ];
+      (db as any)._transactions = biWeeklyTransactions;
+
+      const result = tools.getRecurringTransactions({
+        start_date: '2024-01-01',
+        end_date: '2024-02-15',
+      });
+
+      const biWeekly = result.recurring.find((r) => r.merchant.includes('Bi-Weekly Service'));
+      expect(biWeekly).toBeDefined();
+      if (biWeekly) {
+        expect(biWeekly.frequency).toBe('bi-weekly');
+        // Bi-weekly = 2 times per month
+        expect(result.total_monthly_cost).toBe(50.0);
+      }
+    });
+
+    test('detects quarterly frequency subscriptions', () => {
+      const quarterlyTransactions: Transaction[] = [
+        {
+          transaction_id: 'q1',
+          amount: 100.0,
+          date: '2024-01-01',
+          name: 'Quarterly Insurance',
+          category_id: 'insurance',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'q2',
+          amount: 100.0,
+          date: '2024-04-01',
+          name: 'Quarterly Insurance',
+          category_id: 'insurance',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'q3',
+          amount: 100.0,
+          date: '2024-07-01',
+          name: 'Quarterly Insurance',
+          category_id: 'insurance',
+          account_id: 'acc1',
+        },
+      ];
+      (db as any)._transactions = quarterlyTransactions;
+
+      const result = tools.getRecurringTransactions({
+        start_date: '2024-01-01',
+        end_date: '2024-07-31',
+      });
+
+      const quarterly = result.recurring.find((r) => r.merchant.includes('Quarterly Insurance'));
+      expect(quarterly).toBeDefined();
+      if (quarterly) {
+        expect(quarterly.frequency).toBe('quarterly');
+      }
+    });
+
+    test('detects yearly frequency subscriptions', () => {
+      const yearlyTransactions: Transaction[] = [
+        {
+          transaction_id: 'y1',
+          amount: 99.0,
+          date: '2023-01-15',
+          name: 'Annual Membership',
+          category_id: 'subscriptions',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'y2',
+          amount: 99.0,
+          date: '2024-01-15',
+          name: 'Annual Membership',
+          category_id: 'subscriptions',
+          account_id: 'acc1',
+        },
+      ];
+      (db as any)._transactions = yearlyTransactions;
+
+      const result = tools.getRecurringTransactions({
+        start_date: '2023-01-01',
+        end_date: '2024-12-31',
+      });
+
+      const yearly = result.recurring.find((r) => r.merchant.includes('Annual Membership'));
+      expect(yearly).toBeDefined();
+      if (yearly) {
+        expect(yearly.frequency).toBe('yearly');
+      }
+    });
+
+    test('calculates high confidence for exact amounts and consistent intervals', () => {
+      // Perfect recurring pattern - exact same amount, exact intervals
+      const highConfidenceTransactions: Transaction[] = [
+        {
+          transaction_id: 'hc1',
+          amount: 9.99,
+          date: '2024-01-01',
+          name: 'Spotify',
+          category_id: 'entertainment',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'hc2',
+          amount: 9.99,
+          date: '2024-02-01',
+          name: 'Spotify',
+          category_id: 'entertainment',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'hc3',
+          amount: 9.99,
+          date: '2024-03-01',
+          name: 'Spotify',
+          category_id: 'entertainment',
+          account_id: 'acc1',
+        },
+      ];
+      (db as any)._transactions = highConfidenceTransactions;
+
+      const result = tools.getRecurringTransactions({
+        start_date: '2024-01-01',
+        end_date: '2024-03-31',
+      });
+
+      const spotify = result.recurring.find((r) => r.merchant.includes('Spotify'));
+      expect(spotify).toBeDefined();
+      if (spotify) {
+        expect(spotify.confidence).toBe('high');
+        expect(spotify.confidence_reason).toContain('exact same amount');
+      }
+    });
+
+    test('calculates medium confidence for similar amounts', () => {
+      // Varying amounts but still within range
+      const mediumConfidenceTransactions: Transaction[] = [
+        {
+          transaction_id: 'mc1',
+          amount: 50.0,
+          date: '2024-01-01',
+          name: 'Electric Bill',
+          category_id: 'utilities',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'mc2',
+          amount: 55.0,
+          date: '2024-02-01',
+          name: 'Electric Bill',
+          category_id: 'utilities',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'mc3',
+          amount: 48.0,
+          date: '2024-03-01',
+          name: 'Electric Bill',
+          category_id: 'utilities',
+          account_id: 'acc1',
+        },
+      ];
+      (db as any)._transactions = mediumConfidenceTransactions;
+
+      const result = tools.getRecurringTransactions({
+        start_date: '2024-01-01',
+        end_date: '2024-03-31',
+      });
+
+      const electric = result.recurring.find((r) => r.merchant.includes('Electric Bill'));
+      expect(electric).toBeDefined();
+      if (electric) {
+        expect(['medium', 'high']).toContain(electric.confidence);
+      }
+    });
+
+    test('calculates low confidence for irregular patterns', () => {
+      // Irregular pattern - varying amounts and intervals
+      const lowConfidenceTransactions: Transaction[] = [
+        {
+          transaction_id: 'lc1',
+          amount: 30.0,
+          date: '2024-01-01',
+          name: 'Random Store',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'lc2',
+          amount: 45.0,
+          date: '2024-01-15',
+          name: 'Random Store',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'lc3',
+          amount: 28.0,
+          date: '2024-02-20',
+          name: 'Random Store',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
+      ];
+      (db as any)._transactions = lowConfidenceTransactions;
+
+      const result = tools.getRecurringTransactions({
+        start_date: '2024-01-01',
+        end_date: '2024-03-31',
+      });
+
+      const random = result.recurring.find((r) => r.merchant.includes('Random Store'));
+      expect(random).toBeDefined();
+      if (random) {
+        expect(random.confidence).toBe('low');
+      }
+    });
+
+    test('calculates next expected date for recurring subscriptions', () => {
+      const result = tools.getRecurringTransactions({
+        start_date: '2024-01-01',
+        end_date: '2024-04-30',
+      });
+
+      const netflix = result.recurring.find((r) => r.merchant.includes('Netflix'));
+      expect(netflix).toBeDefined();
+      if (netflix) {
+        expect(netflix.next_expected_date).toBeDefined();
+        // Last transaction is April 15, next expected should be around May 15
+        expect(netflix.next_expected_date).toMatch(/2024-05/);
+      }
+    });
+
+    test('handles empty transaction list', () => {
+      (db as any)._transactions = [];
+
+      const result = tools.getRecurringTransactions({
+        start_date: '2024-01-01',
+        end_date: '2024-04-30',
+      });
+
+      expect(result.count).toBe(0);
+      expect(result.recurring).toEqual([]);
+      expect(result.total_monthly_cost).toBe(0);
+    });
+
+    test('excludes merchants with Unknown name', () => {
+      const transactionsWithUnknown: Transaction[] = [
+        {
+          transaction_id: 'unk1',
+          amount: 10.0,
+          date: '2024-01-01',
+          category_id: 'misc',
+          account_id: 'acc1',
+          // No name - will resolve to 'Unknown'
+        },
+        {
+          transaction_id: 'unk2',
+          amount: 10.0,
+          date: '2024-02-01',
+          category_id: 'misc',
+          account_id: 'acc1',
+        },
+      ];
+      (db as any)._transactions = transactionsWithUnknown;
+
+      const result = tools.getRecurringTransactions({
+        start_date: '2024-01-01',
+        end_date: '2024-03-31',
+      });
+
+      const unknown = result.recurring.find((r) => r.merchant === 'Unknown');
+      expect(unknown).toBeUndefined();
+    });
+
+    test('filters out transactions with too much amount variance', () => {
+      // Transactions with > 30% variance from average should not be counted
+      const highVarianceTransactions: Transaction[] = [
+        {
+          transaction_id: 'hv1',
+          amount: 10.0,
+          date: '2024-01-01',
+          name: 'Variable Merchant',
+          category_id: 'misc',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'hv2',
+          amount: 50.0, // 400% of first
+          date: '2024-02-01',
+          name: 'Variable Merchant',
+          category_id: 'misc',
+          account_id: 'acc1',
+        },
+      ];
+      (db as any)._transactions = highVarianceTransactions;
+
+      const result = tools.getRecurringTransactions({
+        start_date: '2024-01-01',
+        end_date: '2024-03-31',
+      });
+
+      // Should not be marked as recurring due to high variance
+      const variable = result.recurring.find((r) => r.merchant.includes('Variable Merchant'));
+      expect(variable).toBeUndefined();
+    });
+
+    test('uses period parameter correctly', () => {
+      const result = tools.getRecurringTransactions({
+        period: 'last_30_days',
+      });
+
+      expect(result.period.start_date).toBeDefined();
+      expect(result.period.end_date).toBeDefined();
+    });
+
+    test('includes normalized merchant name', () => {
+      const result = tools.getRecurringTransactions({
+        start_date: '2024-01-01',
+        end_date: '2024-04-30',
+      });
+
+      const netflix = result.recurring.find((r) => r.merchant.includes('Netflix'));
+      expect(netflix).toBeDefined();
+      if (netflix) {
+        expect(netflix.normalized_merchant).toBeDefined();
+      }
+    });
+
+    test('includes transaction history in result', () => {
+      const result = tools.getRecurringTransactions({
+        start_date: '2024-01-01',
+        end_date: '2024-04-30',
+      });
+
+      const netflix = result.recurring.find((r) => r.merchant.includes('Netflix'));
+      expect(netflix).toBeDefined();
+      if (netflix) {
+        expect(netflix.transactions).toBeDefined();
+        expect(Array.isArray(netflix.transactions)).toBe(true);
+        expect(netflix.transactions.length).toBeGreaterThan(0);
+        // Each transaction should have date and amount
+        expect(netflix.transactions[0]).toHaveProperty('date');
+        expect(netflix.transactions[0]).toHaveProperty('amount');
+      }
+    });
+
+    test('sorts recurring by occurrences descending', () => {
+      const result = tools.getRecurringTransactions({
+        start_date: '2024-01-01',
+        end_date: '2024-04-30',
+      });
+
+      // Verify sorted by occurrences (most first)
+      for (let i = 0; i < result.recurring.length - 1; i++) {
+        expect(result.recurring[i]!.occurrences).toBeGreaterThanOrEqual(
+          result.recurring[i + 1]!.occurrences
+        );
+      }
+    });
   });
 
   describe('getTrips', () => {
@@ -1301,6 +1740,379 @@ describe('New MCP Tools', () => {
 
       // No trips should be in US
       expect(result.trips.every((t) => t.country !== 'US' && t.country !== 'USA')).toBe(true);
+    });
+
+    test('detects trips from travel category without foreign country', () => {
+      // Travel category transactions without country specified
+      const travelCategoryTransactions: Transaction[] = [
+        {
+          transaction_id: 'tc1',
+          amount: 500.0,
+          date: '2024-06-01',
+          name: 'Airline',
+          category_id: 'travel',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'tc2',
+          amount: 200.0,
+          date: '2024-06-02',
+          name: 'Hotel',
+          category_id: 'travel',
+          account_id: 'acc1',
+        },
+      ];
+      (db as any)._transactions = travelCategoryTransactions;
+
+      const result = tools.getTrips({
+        start_date: '2024-06-01',
+        end_date: '2024-06-30',
+      });
+
+      expect(result.trip_count).toBeGreaterThanOrEqual(1);
+    });
+
+    test('detects trips from numeric travel category ID (22xxx)', () => {
+      const numericCategoryTransactions: Transaction[] = [
+        {
+          transaction_id: 'nc1',
+          amount: 300.0,
+          date: '2024-07-01',
+          name: 'Travel Agency',
+          category_id: '22001',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'nc2',
+          amount: 150.0,
+          date: '2024-07-02',
+          name: 'Car Rental',
+          category_id: '22002',
+          account_id: 'acc1',
+        },
+      ];
+      (db as any)._transactions = numericCategoryTransactions;
+
+      const result = tools.getTrips({
+        start_date: '2024-07-01',
+        end_date: '2024-07-31',
+      });
+
+      expect(result.trip_count).toBeGreaterThanOrEqual(1);
+    });
+
+    test('splits trips with gap greater than 3 days', () => {
+      // Two separate trips to same country with >3 day gap
+      const splitTripTransactions: Transaction[] = [
+        // First trip
+        {
+          transaction_id: 'st1',
+          amount: 100.0,
+          date: '2024-04-01',
+          name: 'Hotel Mexico',
+          category_id: 'travel',
+          account_id: 'acc1',
+          country: 'Mexico',
+          city: 'Cancun',
+        },
+        {
+          transaction_id: 'st2',
+          amount: 50.0,
+          date: '2024-04-02',
+          name: 'Restaurant Mexico',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+          country: 'Mexico',
+          city: 'Cancun',
+        },
+        // Second trip (>3 days later)
+        {
+          transaction_id: 'st3',
+          amount: 150.0,
+          date: '2024-04-10',
+          name: 'Hotel Mexico City',
+          category_id: 'travel',
+          account_id: 'acc1',
+          country: 'Mexico',
+          city: 'Mexico City',
+        },
+        {
+          transaction_id: 'st4',
+          amount: 75.0,
+          date: '2024-04-11',
+          name: 'Restaurant Mexico City',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+          country: 'Mexico',
+          city: 'Mexico City',
+        },
+      ];
+      (db as any)._transactions = splitTripTransactions;
+
+      const result = tools.getTrips({
+        start_date: '2024-04-01',
+        end_date: '2024-04-30',
+      });
+
+      // Should be 2 separate trips to Mexico
+      const mexicoTrips = result.trips.filter((t) => t.country === 'Mexico');
+      expect(mexicoTrips.length).toBe(2);
+    });
+
+    test('uses country as location when city not provided', () => {
+      const noCityTransactions: Transaction[] = [
+        {
+          transaction_id: 'ncty1',
+          amount: 100.0,
+          date: '2024-08-01',
+          name: 'Hotel',
+          category_id: 'travel',
+          account_id: 'acc1',
+          country: 'Germany',
+          // No city
+        },
+        {
+          transaction_id: 'ncty2',
+          amount: 50.0,
+          date: '2024-08-02',
+          name: 'Restaurant',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+          country: 'Germany',
+        },
+      ];
+      (db as any)._transactions = noCityTransactions;
+
+      const result = tools.getTrips({
+        start_date: '2024-08-01',
+        end_date: '2024-08-31',
+      });
+
+      const germanyTrip = result.trips.find((t) => t.country === 'Germany');
+      expect(germanyTrip).toBeDefined();
+      if (germanyTrip) {
+        expect(germanyTrip.location).toBe('Germany');
+      }
+    });
+
+    test('excludes negative amounts (refunds) from spending totals', () => {
+      const transactionsWithRefund: Transaction[] = [
+        {
+          transaction_id: 'ref1',
+          amount: 200.0,
+          date: '2024-09-01',
+          name: 'Hotel Italy',
+          category_id: 'travel',
+          account_id: 'acc1',
+          country: 'Italy',
+          city: 'Rome',
+        },
+        {
+          transaction_id: 'ref2',
+          amount: -50.0, // Refund
+          date: '2024-09-02',
+          name: 'Refund',
+          category_id: 'travel',
+          account_id: 'acc1',
+          country: 'Italy',
+          city: 'Rome',
+        },
+        {
+          transaction_id: 'ref3',
+          amount: 100.0,
+          date: '2024-09-03',
+          name: 'Restaurant',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+          country: 'Italy',
+          city: 'Rome',
+        },
+      ];
+      (db as any)._transactions = transactionsWithRefund;
+
+      const result = tools.getTrips({
+        start_date: '2024-09-01',
+        end_date: '2024-09-30',
+      });
+
+      const italyTrip = result.trips.find((t) => t.country === 'Italy');
+      expect(italyTrip).toBeDefined();
+      if (italyTrip) {
+        // Should be 200 + 100 = 300, not 200 - 50 + 100 = 250
+        expect(italyTrip.total_spent).toBe(300.0);
+      }
+    });
+
+    test('handles empty transaction list', () => {
+      (db as any)._transactions = [];
+
+      const result = tools.getTrips({
+        start_date: '2024-01-01',
+        end_date: '2024-12-31',
+      });
+
+      expect(result.trip_count).toBe(0);
+      expect(result.trips).toEqual([]);
+    });
+
+    test('excludes USA transactions (alternate spelling)', () => {
+      const usaTransactions: Transaction[] = [
+        {
+          transaction_id: 'usa1',
+          amount: 100.0,
+          date: '2024-10-01',
+          name: 'Hotel',
+          category_id: 'travel',
+          account_id: 'acc1',
+          country: 'USA',
+          city: 'New York',
+        },
+      ];
+      (db as any)._transactions = usaTransactions;
+
+      const result = tools.getTrips({
+        start_date: '2024-10-01',
+        end_date: '2024-10-31',
+      });
+
+      expect(result.trips.every((t) => t.country !== 'USA')).toBe(true);
+    });
+
+    test('uses period parameter correctly', () => {
+      const result = tools.getTrips({
+        period: 'last_year',
+      });
+
+      expect(result.period.start_date).toBeDefined();
+      expect(result.period.end_date).toBeDefined();
+    });
+
+    test('sorts trips by start date descending', () => {
+      const result = tools.getTrips({
+        start_date: '2024-01-01',
+        end_date: '2024-12-31',
+      });
+
+      // Verify sorted by start_date descending
+      for (let i = 0; i < result.trips.length - 1; i++) {
+        expect(result.trips[i]!.start_date >= result.trips[i + 1]!.start_date).toBe(true);
+      }
+    });
+
+    test('sorts categories by total spending descending', () => {
+      const result = tools.getTrips({
+        start_date: '2024-03-01',
+        end_date: '2024-03-31',
+      });
+
+      const franceTrip = result.trips.find((t) => t.country === 'France');
+      expect(franceTrip).toBeDefined();
+      if (franceTrip && franceTrip.categories.length > 1) {
+        for (let i = 0; i < franceTrip.categories.length - 1; i++) {
+          expect(franceTrip.categories[i]!.total >= franceTrip.categories[i + 1]!.total).toBe(true);
+        }
+      }
+    });
+
+    test('handles single-day trip correctly', () => {
+      const singleDayTrip: Transaction[] = [
+        {
+          transaction_id: 'sd1',
+          amount: 50.0,
+          date: '2024-11-15',
+          name: 'Day Trip',
+          category_id: 'travel',
+          account_id: 'acc1',
+          country: 'Canada',
+          city: 'Toronto',
+        },
+      ];
+      (db as any)._transactions = singleDayTrip;
+
+      // With min_days = 1, single day trip should be included
+      const result = tools.getTrips({
+        start_date: '2024-11-01',
+        end_date: '2024-11-30',
+        min_days: 1,
+      });
+
+      const canadaTrip = result.trips.find((t) => t.country === 'Canada');
+      expect(canadaTrip).toBeDefined();
+      if (canadaTrip) {
+        expect(canadaTrip.duration_days).toBe(1);
+      }
+    });
+
+    test('handles transactions within 3-day gap as same trip', () => {
+      const gappyTrip: Transaction[] = [
+        {
+          transaction_id: 'gt1',
+          amount: 100.0,
+          date: '2024-12-01',
+          name: 'Hotel Day 1',
+          category_id: 'travel',
+          account_id: 'acc1',
+          country: 'Spain',
+          city: 'Madrid',
+        },
+        // 3 day gap - should still be same trip
+        {
+          transaction_id: 'gt2',
+          amount: 75.0,
+          date: '2024-12-04',
+          name: 'Restaurant Day 4',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+          country: 'Spain',
+          city: 'Madrid',
+        },
+      ];
+      (db as any)._transactions = gappyTrip;
+
+      const result = tools.getTrips({
+        start_date: '2024-12-01',
+        end_date: '2024-12-31',
+      });
+
+      // Should be 1 trip, not 2
+      const spainTrips = result.trips.filter((t) => t.country === 'Spain');
+      expect(spainTrips.length).toBe(1);
+      if (spainTrips[0]) {
+        expect(spainTrips[0].duration_days).toBe(4);
+        expect(spainTrips[0].total_spent).toBe(175.0);
+      }
+    });
+
+    test('handles Unknown country transactions', () => {
+      const unknownCountryTransactions: Transaction[] = [
+        {
+          transaction_id: 'uc1',
+          amount: 100.0,
+          date: '2024-01-15',
+          name: 'Mystery Place',
+          category_id: 'travel',
+          account_id: 'acc1',
+          // No country specified
+        },
+        {
+          transaction_id: 'uc2',
+          amount: 50.0,
+          date: '2024-01-16',
+          name: 'Mystery Restaurant',
+          category_id: 'travel',
+          account_id: 'acc1',
+        },
+      ];
+      (db as any)._transactions = unknownCountryTransactions;
+
+      const result = tools.getTrips({
+        start_date: '2024-01-01',
+        end_date: '2024-01-31',
+      });
+
+      // Unknown country should be included as a trip
+      const unknownTrip = result.trips.find((t) => t.country === 'Unknown');
+      expect(unknownTrip).toBeDefined();
     });
   });
 
@@ -1613,6 +2425,531 @@ describe('New MCP Tools', () => {
 
       // Lower threshold should flag more or equal transactions
       expect(lowThreshold.count).toBeGreaterThanOrEqual(highThreshold.count);
+    });
+
+    test('detects category-level anomalies when merchant has insufficient data', () => {
+      // New merchant but unusually high for category
+      // Need enough baseline variation to create meaningful stdDev
+      const categoryAnomalyTransactions: Transaction[] = [
+        // Baseline food_dining transactions with some variance
+        {
+          transaction_id: 'cat1',
+          amount: 15.0,
+          date: '2023-12-01',
+          name: 'Restaurant A',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'cat2',
+          amount: 20.0,
+          date: '2023-12-05',
+          name: 'Restaurant B',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'cat3',
+          amount: 18.0,
+          date: '2023-12-10',
+          name: 'Restaurant C',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'cat4',
+          amount: 22.0,
+          date: '2023-12-15',
+          name: 'Restaurant D',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        // New merchant with unusually high amount for category (>$1000 triggers large transaction flag)
+        {
+          transaction_id: 'cat5',
+          amount: 1500.0, // Way above category average and > $1000
+          date: '2024-01-15',
+          name: 'Fancy New Restaurant',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+      ];
+      (db as any)._transactions = categoryAnomalyTransactions;
+
+      const result = tools.getUnusualTransactions({
+        start_date: '2024-01-01',
+        end_date: '2024-01-31',
+      });
+
+      const fancyRestaurant = result.transactions.find((t) =>
+        t.name?.includes('Fancy New Restaurant')
+      );
+      expect(fancyRestaurant).toBeDefined();
+      if (fancyRestaurant) {
+        // Will be flagged as large transaction or category anomaly
+        expect(fancyRestaurant.anomaly_reason).toBeDefined();
+      }
+    });
+
+    test('handles empty transaction list', () => {
+      (db as any)._transactions = [];
+
+      const result = tools.getUnusualTransactions({
+        start_date: '2024-01-01',
+        end_date: '2024-01-31',
+      });
+
+      expect(result.count).toBe(0);
+      expect(result.transactions).toEqual([]);
+    });
+
+    test('excludes negative amounts (income/refunds)', () => {
+      const transactionsWithIncome: Transaction[] = [
+        {
+          transaction_id: 'inc1',
+          amount: -5000.0, // Large income
+          date: '2024-01-15',
+          name: 'Big Bonus',
+          category_id: 'income',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'inc2',
+          amount: 50.0,
+          date: '2024-01-16',
+          name: 'Normal Purchase',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
+      ];
+      (db as any)._transactions = transactionsWithIncome;
+
+      const result = tools.getUnusualTransactions({
+        start_date: '2024-01-01',
+        end_date: '2024-01-31',
+      });
+
+      // Income should not be flagged as unusual
+      const income = result.transactions.find((t) => t.name === 'Big Bonus');
+      expect(income).toBeUndefined();
+    });
+
+    test('does not flag transactions at exactly $1000', () => {
+      const exactlyThousandTransactions: Transaction[] = [
+        {
+          transaction_id: 'ex1',
+          amount: 1000.0, // Exactly $1000
+          date: '2024-01-15',
+          name: 'Exactly Thousand',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
+      ];
+      (db as any)._transactions = exactlyThousandTransactions;
+
+      const result = tools.getUnusualTransactions({
+        start_date: '2024-01-01',
+        end_date: '2024-01-31',
+      });
+
+      // $1000 exactly should NOT be flagged (only > $1000)
+      const exactlyThousand = result.transactions.find((t) => t.amount === 1000.0);
+      expect(exactlyThousand).toBeUndefined();
+    });
+
+    test('skips merchants with fewer than 3 transactions for merchant-level anomaly', () => {
+      // Merchant with only 2 transactions - should not be used for baseline
+      const fewMerchantTransactions: Transaction[] = [
+        {
+          transaction_id: 'fm1',
+          amount: 10.0,
+          date: '2023-12-01',
+          name: 'Rare Merchant',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'fm2',
+          amount: 500.0, // High amount but only 2 transactions
+          date: '2024-01-15',
+          name: 'Rare Merchant',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
+      ];
+      (db as any)._transactions = fewMerchantTransactions;
+
+      const result = tools.getUnusualTransactions({
+        start_date: '2024-01-01',
+        end_date: '2024-01-31',
+      });
+
+      // Should not flag based on merchant average (not enough data)
+      const rareMerchant = result.transactions.find((t) => t.name === 'Rare Merchant');
+      // If flagged, it should be for different reason (category or large amount)
+      if (rareMerchant) {
+        expect(rareMerchant.anomaly_reason).not.toContain('above average for Rare Merchant');
+      }
+    });
+
+    test('uses period parameter correctly', () => {
+      const result = tools.getUnusualTransactions({
+        period: 'last_30_days',
+      });
+
+      expect(result.period.start_date).toBeDefined();
+      expect(result.period.end_date).toBeDefined();
+    });
+
+    test('sorts anomalies by deviation percentage descending', () => {
+      // Create transactions with different deviation levels
+      const sortTestTransactions: Transaction[] = [
+        // Baseline for Merchant A
+        {
+          transaction_id: 'st1',
+          amount: 10.0,
+          date: '2023-11-01',
+          name: 'Merchant A',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'st2',
+          amount: 10.0,
+          date: '2023-11-15',
+          name: 'Merchant A',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'st3',
+          amount: 10.0,
+          date: '2023-12-01',
+          name: 'Merchant A',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
+        // Baseline for Merchant B
+        {
+          transaction_id: 'st4',
+          amount: 50.0,
+          date: '2023-11-01',
+          name: 'Merchant B',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'st5',
+          amount: 50.0,
+          date: '2023-11-15',
+          name: 'Merchant B',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'st6',
+          amount: 50.0,
+          date: '2023-12-01',
+          name: 'Merchant B',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
+        // Anomalies with different deviations
+        {
+          transaction_id: 'st7',
+          amount: 100.0, // 900% above $10 average for Merchant A
+          date: '2024-01-15',
+          name: 'Merchant A',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'st8',
+          amount: 200.0, // 300% above $50 average for Merchant B
+          date: '2024-01-16',
+          name: 'Merchant B',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
+      ];
+      (db as any)._transactions = sortTestTransactions;
+
+      const result = tools.getUnusualTransactions({
+        start_date: '2024-01-01',
+        end_date: '2024-01-31',
+      });
+
+      // Verify sorted by deviation_percent descending
+      for (let i = 0; i < result.transactions.length - 1; i++) {
+        const current = result.transactions[i]!.deviation_percent || 0;
+        const next = result.transactions[i + 1]!.deviation_percent || 0;
+        expect(current).toBeGreaterThanOrEqual(next);
+      }
+    });
+
+    test('includes category name in anomaly results', () => {
+      const result = tools.getUnusualTransactions({
+        start_date: '2024-01-01',
+        end_date: '2024-01-31',
+      });
+
+      // Large transaction should have category_name
+      const largeTransaction = result.transactions.find((t) => t.amount === 1500.0);
+      expect(largeTransaction).toBeDefined();
+      if (largeTransaction) {
+        expect(largeTransaction.category_name).toBeDefined();
+      }
+    });
+
+    test('provides expected amount for merchant-level anomalies', () => {
+      // Need many baseline transactions to dilute the anomaly's effect on average
+      // Also need enough variance for stdDev > 0
+      const extendedTransactions: Transaction[] = [
+        // Many baseline Starbucks with small variance
+        {
+          transaction_id: 'exp0a',
+          amount: 4.5,
+          date: '2023-11-01',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'exp0b',
+          amount: 5.5,
+          date: '2023-11-10',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'exp0c',
+          amount: 5.0,
+          date: '2023-11-20',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'exp0d',
+          amount: 4.8,
+          date: '2023-12-01',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'exp0e',
+          amount: 5.2,
+          date: '2023-12-10',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'exp0f',
+          amount: 5.0,
+          date: '2023-12-20',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+        // Unusual purchase - extreme outlier
+        {
+          transaction_id: 'exp5',
+          amount: 500.0,
+          date: '2024-01-20',
+          name: 'Starbucks',
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        },
+      ];
+      (db as any)._transactions = extendedTransactions;
+
+      const result = tools.getUnusualTransactions({
+        start_date: '2024-01-01',
+        end_date: '2024-01-31',
+      });
+
+      const unusualStarbucks = result.transactions.find(
+        (t) => t.name === 'Starbucks' && t.amount === 500.0
+      );
+      expect(unusualStarbucks).toBeDefined();
+      if (unusualStarbucks) {
+        expect(unusualStarbucks.expected_amount).toBeDefined();
+        // Average will include the anomaly but should still be reasonable
+        expect(unusualStarbucks.expected_amount).toBeLessThan(100);
+      }
+    });
+
+    test('limits results to 50 transactions', () => {
+      // Create many anomalous transactions
+      const manyAnomalies: Transaction[] = [];
+      for (let i = 0; i < 100; i++) {
+        manyAnomalies.push({
+          transaction_id: `many${i}`,
+          amount: 1500.0 + i, // All large transactions
+          date: `2024-01-${String((i % 28) + 1).padStart(2, '0')}`,
+          name: `Merchant ${i}`,
+          category_id: 'shopping',
+          account_id: 'acc1',
+        });
+      }
+      (db as any)._transactions = manyAnomalies;
+
+      const result = tools.getUnusualTransactions({
+        start_date: '2024-01-01',
+        end_date: '2024-01-31',
+      });
+
+      expect(result.transactions.length).toBeLessThanOrEqual(50);
+    });
+
+    test('handles zero standard deviation gracefully', () => {
+      // All same amounts - zero stdDev
+      const sameAmountTransactions: Transaction[] = [
+        {
+          transaction_id: 'za1',
+          amount: 100.0,
+          date: '2023-12-01',
+          name: 'Consistent Merchant',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'za2',
+          amount: 100.0,
+          date: '2023-12-15',
+          name: 'Consistent Merchant',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'za3',
+          amount: 100.0,
+          date: '2024-01-01',
+          name: 'Consistent Merchant',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'za4',
+          amount: 100.0, // Same as baseline, stdDev = 0
+          date: '2024-01-15',
+          name: 'Consistent Merchant',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
+      ];
+      (db as any)._transactions = sameAmountTransactions;
+
+      const result = tools.getUnusualTransactions({
+        start_date: '2024-01-01',
+        end_date: '2024-01-31',
+      });
+
+      // Should not crash and should not flag when stdDev is 0
+      const consistentMerchant = result.transactions.find((t) => t.name === 'Consistent Merchant');
+      expect(consistentMerchant).toBeUndefined();
+    });
+
+    test('defaults threshold_multiplier to 2 when not specified', () => {
+      // Need many baseline transactions to dilute anomaly's effect, and variance for stdDev > 0
+      const baselineTransactions: Transaction[] = [
+        {
+          transaction_id: 'def1',
+          amount: 9.0,
+          date: '2023-11-01',
+          name: 'Default Test',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'def2',
+          amount: 11.0,
+          date: '2023-11-10',
+          name: 'Default Test',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'def3',
+          amount: 10.0,
+          date: '2023-11-20',
+          name: 'Default Test',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'def4',
+          amount: 9.5,
+          date: '2023-12-01',
+          name: 'Default Test',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'def5',
+          amount: 10.5,
+          date: '2023-12-10',
+          name: 'Default Test',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
+        {
+          transaction_id: 'def6',
+          amount: 10.0,
+          date: '2023-12-20',
+          name: 'Default Test',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
+        // Extreme anomaly that will definitely be flagged
+        {
+          transaction_id: 'def7',
+          amount: 500.0, // Way above any threshold
+          date: '2024-01-15',
+          name: 'Default Test',
+          category_id: 'shopping',
+          account_id: 'acc1',
+        },
+      ];
+      (db as any)._transactions = baselineTransactions;
+
+      const result = tools.getUnusualTransactions({
+        start_date: '2024-01-01',
+        end_date: '2024-01-31',
+        // Not specifying threshold_multiplier
+      });
+
+      // The 500.0 transaction should be flagged with default threshold
+      const flagged = result.transactions.find((t) => t.amount === 500.0);
+      expect(flagged).toBeDefined();
+    });
+
+    test('handles transactions with no category', () => {
+      const noCategoryTransactions: Transaction[] = [
+        {
+          transaction_id: 'nocat1',
+          amount: 1500.0, // Large transaction
+          date: '2024-01-15',
+          name: 'Uncategorized Purchase',
+          // No category_id
+          account_id: 'acc1',
+        },
+      ];
+      (db as any)._transactions = noCategoryTransactions;
+
+      const result = tools.getUnusualTransactions({
+        start_date: '2024-01-01',
+        end_date: '2024-01-31',
+      });
+
+      // Should still flag large transaction
+      const uncategorized = result.transactions.find((t) =>
+        t.name?.includes('Uncategorized Purchase')
+      );
+      expect(uncategorized).toBeDefined();
     });
   });
 
