@@ -772,16 +772,6 @@ export function decodeGoals(dbPath: string): Goal[] {
       const goalId = idMatch?.[1];
 
       if (goalId && goalId.length >= MIN_GOAL_ID_LENGTH) {
-        // Extract top-level fields
-        const name = extractStringValue(record, fieldPattern('name'));
-        const recommendationId = extractStringValue(record, fieldPattern('recommendation_id'));
-        const emoji = extractStringValue(record, fieldPattern('emoji'));
-        const createdDate = extractStringValue(record, fieldPattern('created_date'));
-        const createdWithAllocations = extractBooleanValue(
-          record,
-          fieldPattern('created_with_allocations')
-        );
-
         // Extract user_id from the path (before /financial_goals/)
         const beforePath = record.subarray(0, pathIdx);
         const userIdMatch = beforePath
@@ -789,19 +779,36 @@ export function decodeGoals(dbPath: string): Goal[] {
           .match(/\/users\/([a-zA-Z0-9_-]+)\/financial_goals/);
         const userId = userIdMatch?.[1] ?? undefined;
 
-        // Extract nested savings object fields
-        const savingsType = extractStringValue(record, fieldPattern('type'));
-        const savingsStatus = extractStringValue(record, fieldPattern('status'));
-        const targetAmount = extractDoubleField(record, fieldPattern('target_amount'));
-        const trackingType = extractStringValue(record, fieldPattern('tracking_type'));
+        // IMPORTANT: Only search AFTER the goal ID to avoid picking up fields from adjacent documents
+        // The goal document fields come after the path marker
+        const afterGoalId = record.subarray(pathIdx + goalPathMarker.length + goalId.length);
+
+        // Extract top-level fields from the document (after the goal ID)
+        const name = extractStringValue(afterGoalId, fieldPattern('name'));
+        const recommendationId = extractStringValue(afterGoalId, fieldPattern('recommendation_id'));
+        const emoji = extractStringValue(afterGoalId, fieldPattern('emoji'));
+        const createdDate = extractStringValue(afterGoalId, fieldPattern('created_date'));
+        const createdWithAllocations = extractBooleanValue(
+          afterGoalId,
+          fieldPattern('created_with_allocations')
+        );
+
+        // Extract nested savings object fields (also from after the goal ID)
+        const savingsType = extractStringValue(afterGoalId, fieldPattern('type'));
+        const savingsStatus = extractStringValue(afterGoalId, fieldPattern('status'));
+        const targetAmount = extractDoubleField(afterGoalId, fieldPattern('target_amount'));
+        const trackingType = extractStringValue(afterGoalId, fieldPattern('tracking_type'));
         const monthlyContribution = extractDoubleField(
-          record,
+          afterGoalId,
           fieldPattern('tracking_type_monthly_contribution')
         );
-        const startDate = extractStringValue(record, fieldPattern('start_date'));
-        const modifiedStartDate = extractBooleanValue(record, fieldPattern('modified_start_date'));
-        const inflatesBudget = extractBooleanValue(record, fieldPattern('inflates_budget'));
-        const isOngoing = extractBooleanValue(record, fieldPattern('is_ongoing'));
+        const startDate = extractStringValue(afterGoalId, fieldPattern('start_date'));
+        const modifiedStartDate = extractBooleanValue(
+          afterGoalId,
+          fieldPattern('modified_start_date')
+        );
+        const inflatesBudget = extractBooleanValue(afterGoalId, fieldPattern('inflates_budget'));
+        const isOngoing = extractBooleanValue(afterGoalId, fieldPattern('is_ongoing'));
 
         // Build goal object
         const goalData: {
