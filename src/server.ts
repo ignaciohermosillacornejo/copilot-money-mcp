@@ -15,6 +15,11 @@ import {
 import { CopilotDatabase } from './core/database.js';
 import { CopilotMoneyTools, createToolSchemas } from './tools/index.js';
 
+// Read version from package.json
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const { version: SERVER_VERSION } = require('../package.json') as { version: string };
+
 /**
  * MCP server for Copilot Money data.
  */
@@ -35,7 +40,7 @@ export class CopilotMoneyServer {
     this.server = new Server(
       {
         name: 'copilot-money-mcp',
-        version: '1.0.0',
+        version: SERVER_VERSION,
       },
       {
         capabilities: {
