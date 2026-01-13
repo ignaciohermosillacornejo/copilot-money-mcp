@@ -16,6 +16,8 @@ import {
   decodeGoals,
   decodeGoalHistory,
   decodeInvestmentPrices,
+  decodeInvestmentSplits,
+  decodeItems,
 } from './decoder.js';
 import {
   Account,
@@ -26,6 +28,8 @@ import {
   Goal,
   GoalHistory,
   InvestmentPrice,
+  InvestmentSplit,
+  Item,
   getTransactionDisplayName,
 } from '../models/index.js';
 import { getCategoryName } from '../utils/categories.js';
@@ -509,5 +513,56 @@ export class CopilotDatabase {
     // Note: We don't cache investment prices as they can be very large (10K+ records)
     // and may change frequently with high-frequency data
     return decodeInvestmentPrices(this.requireDbPath(), options);
+  }
+
+  /**
+   * Get investment splits from the database.
+   *
+   * Investment splits are stored in:
+   * /investment_splits/{split_id}
+   *
+   * Each document contains split information including ticker symbol,
+   * split date, split ratio (e.g., "4:1"), and calculated multipliers.
+   *
+   * @param options - Filter options
+   * @param options.tickerSymbol - Filter by ticker symbol (e.g., "AAPL", "TSLA")
+   * @param options.startDate - Filter by split date >= this (YYYY-MM-DD)
+   * @param options.endDate - Filter by split date <= this (YYYY-MM-DD)
+   * @returns Array of InvestmentSplit objects, sorted by ticker and date (newest first)
+   */
+  getInvestmentSplits(
+    options: {
+      tickerSymbol?: string;
+      startDate?: string;
+      endDate?: string;
+    } = {}
+  ): InvestmentSplit[] {
+    // Note: We don't cache investment splits as they are relatively small
+    // and accessed infrequently
+    return decodeInvestmentSplits(this.requireDbPath(), options);
+  }
+
+  /**
+   * Get connected institutions (Plaid items) from the database.
+   *
+   * Items represent connections to financial institutions via Plaid.
+   * Each item can have multiple accounts (e.g., checking + savings at same bank).
+   *
+   * @param options - Filter options
+   * @param options.connectionStatus - Filter by connection status ("active", "error", etc.)
+   * @param options.institutionId - Filter by Plaid institution ID
+   * @param options.needsUpdate - Filter by needs_update flag
+   * @returns Array of Item objects, sorted by institution name
+   */
+  getItems(
+    options: {
+      connectionStatus?: string;
+      institutionId?: string;
+      needsUpdate?: boolean;
+    } = {}
+  ): Item[] {
+    // Note: We don't cache items as they may change frequently
+    // with connection status updates
+    return decodeItems(this.requireDbPath(), options);
   }
 }

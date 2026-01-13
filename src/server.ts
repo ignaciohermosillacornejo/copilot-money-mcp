@@ -322,6 +322,219 @@ export class CopilotMoneyServer {
           break;
         }
 
+        case 'get_investment_splits':
+          result = this.tools.getInvestmentSplits(
+            (typedArgs as Parameters<typeof this.tools.getInvestmentSplits>[0]) || {}
+          );
+          break;
+
+        case 'get_connected_institutions':
+          result = this.tools.getConnectedInstitutions(
+            (typedArgs as Parameters<typeof this.tools.getConnectedInstitutions>[0]) || {}
+          );
+          break;
+
+        case 'get_category_hierarchy':
+          result = this.tools.getCategoryHierarchy(
+            (typedArgs as Parameters<typeof this.tools.getCategoryHierarchy>[0]) || {}
+          );
+          break;
+
+        case 'get_subcategories': {
+          const categoryId = typedArgs?.category_id;
+          if (typeof categoryId !== 'string') {
+            throw new Error('Missing required parameter: category_id');
+          }
+          result = this.tools.getSubcategories(categoryId);
+          break;
+        }
+
+        case 'search_categories': {
+          const searchQuery = typedArgs?.query;
+          if (typeof searchQuery !== 'string') {
+            throw new Error('Missing required parameter: query');
+          }
+          result = this.tools.searchCategoriesHierarchy(searchQuery);
+          break;
+        }
+
+        // ============================================
+        // PHASE 12: ANALYTICS TOOLS
+        // ============================================
+
+        // ---- Spending Trends ----
+
+        case 'get_spending_over_time':
+          result = this.tools.getSpendingOverTime(
+            (typedArgs as Parameters<typeof this.tools.getSpendingOverTime>[0]) || {}
+          );
+          break;
+
+        case 'get_average_transaction_size':
+          result = this.tools.getAverageTransactionSize(
+            (typedArgs as Parameters<typeof this.tools.getAverageTransactionSize>[0]) || {}
+          );
+          break;
+
+        case 'get_category_trends':
+          result = this.tools.getCategoryTrends(
+            (typedArgs as Parameters<typeof this.tools.getCategoryTrends>[0]) || {}
+          );
+          break;
+
+        case 'get_merchant_frequency':
+          result = this.tools.getMerchantFrequency(
+            (typedArgs as Parameters<typeof this.tools.getMerchantFrequency>[0]) || {}
+          );
+          break;
+
+        // ---- Budget Analytics ----
+
+        case 'get_budget_utilization':
+          result = this.tools.getBudgetUtilization(
+            (typedArgs as Parameters<typeof this.tools.getBudgetUtilization>[0]) || {}
+          );
+          break;
+
+        case 'get_budget_vs_actual':
+          result = this.tools.getBudgetVsActual(
+            (typedArgs as Parameters<typeof this.tools.getBudgetVsActual>[0]) || {}
+          );
+          break;
+
+        case 'get_budget_recommendations':
+          result = this.tools.getBudgetRecommendations(
+            (typedArgs as Parameters<typeof this.tools.getBudgetRecommendations>[0]) || {}
+          );
+          break;
+
+        case 'get_budget_alerts':
+          result = this.tools.getBudgetAlerts(
+            (typedArgs as Parameters<typeof this.tools.getBudgetAlerts>[0]) || {}
+          );
+          break;
+
+        // ============================================
+        // PHASE 12.3: INVESTMENT ANALYTICS TOOLS
+        // ============================================
+
+        case 'get_portfolio_allocation':
+          result = this.tools.getPortfolioAllocation(
+            (typedArgs as Parameters<typeof this.tools.getPortfolioAllocation>[0]) || {}
+          );
+          break;
+
+        case 'get_investment_performance':
+          result = this.tools.getInvestmentPerformance(
+            (typedArgs as Parameters<typeof this.tools.getInvestmentPerformance>[0]) || {}
+          );
+          break;
+
+        case 'get_dividend_income':
+          result = this.tools.getDividendIncome(
+            (typedArgs as Parameters<typeof this.tools.getDividendIncome>[0]) || {}
+          );
+          break;
+
+        case 'get_investment_fees':
+          result = this.tools.getInvestmentFees(
+            (typedArgs as Parameters<typeof this.tools.getInvestmentFees>[0]) || {}
+          );
+          break;
+
+        // ============================================
+        // PHASE 12.4: GOAL ANALYTICS TOOLS
+        // ============================================
+
+        case 'get_goal_projection':
+          result = this.tools.getGoalProjection(
+            (typedArgs as Parameters<typeof this.tools.getGoalProjection>[0]) || {}
+          );
+          break;
+
+        case 'get_goal_milestones':
+          result = this.tools.getGoalMilestones(
+            (typedArgs as Parameters<typeof this.tools.getGoalMilestones>[0]) || {}
+          );
+          break;
+
+        case 'get_goals_at_risk':
+          result = this.tools.getGoalsAtRisk(
+            (typedArgs as Parameters<typeof this.tools.getGoalsAtRisk>[0]) || {}
+          );
+          break;
+
+        case 'get_goal_recommendations':
+          result = this.tools.getGoalRecommendations(
+            (typedArgs as Parameters<typeof this.tools.getGoalRecommendations>[0]) || {}
+          );
+          break;
+
+        // ============================================
+        // PHASE 12.5: ACCOUNT & COMPARISON TOOLS
+        // ============================================
+
+        case 'get_account_activity':
+          result = this.tools.getAccountActivity(
+            (typedArgs as Parameters<typeof this.tools.getAccountActivity>[0]) || {}
+          );
+          break;
+
+        case 'get_balance_trends':
+          result = this.tools.getBalanceTrends(
+            (typedArgs as Parameters<typeof this.tools.getBalanceTrends>[0]) || {}
+          );
+          break;
+
+        case 'get_account_fees':
+          result = this.tools.getAccountFees(
+            (typedArgs as Parameters<typeof this.tools.getAccountFees>[0]) || {}
+          );
+          break;
+
+        case 'get_year_over_year':
+          result = this.tools.getYearOverYear(
+            (typedArgs as Parameters<typeof this.tools.getYearOverYear>[0]) || {}
+          );
+          break;
+
+        // ============================================
+        // PHASE 12.6: SEARCH & DISCOVERY TOOLS
+        // ============================================
+
+        case 'get_advanced_search':
+          result = this.tools.getAdvancedSearch(
+            (typedArgs as Parameters<typeof this.tools.getAdvancedSearch>[0]) || {}
+          );
+          break;
+
+        case 'get_tag_search':
+          result = this.tools.getTagSearch(
+            (typedArgs as Parameters<typeof this.tools.getTagSearch>[0]) || {}
+          );
+          break;
+
+        case 'get_note_search': {
+          const noteQuery = typedArgs?.query;
+          if (typeof noteQuery !== 'string') {
+            throw new Error('Missing required parameter: query');
+          }
+          result = this.tools.getNoteSearch({
+            query: noteQuery,
+            period: typedArgs?.period as string | undefined,
+            start_date: typedArgs?.start_date as string | undefined,
+            end_date: typedArgs?.end_date as string | undefined,
+            limit: typedArgs?.limit as number | undefined,
+          });
+          break;
+        }
+
+        case 'get_location_search':
+          result = this.tools.getLocationSearch(
+            (typedArgs as Parameters<typeof this.tools.getLocationSearch>[0]) || {}
+          );
+          break;
+
         default:
           return {
             content: [

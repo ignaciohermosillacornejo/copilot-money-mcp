@@ -62,3 +62,48 @@ export {
   getInvestmentDisplayName,
   formatPrice,
 } from './investment-price.js';
+
+export {
+  InvestmentSplitSchema,
+  type InvestmentSplit,
+  type ParsedSplitRatio,
+  parseSplitRatio,
+  getSplitMultiplier,
+  getSplitDisplayString,
+  getSplitDisplayName,
+  isReverseSplit,
+  adjustPriceForSplit,
+  adjustSharesForSplit,
+  formatSplitDate,
+} from './investment-split.js';
+
+export {
+  ItemSchema,
+  type Item,
+  type ConnectionStatus,
+  type PlaidErrorCode,
+  CONNECTION_STATUSES,
+  KNOWN_ERROR_CODES,
+  getItemDisplayName,
+  isItemHealthy,
+  itemNeedsAttention,
+  getItemStatusDescription,
+  getItemAccountCount,
+  formatLastUpdate,
+  isConsentExpiringSoon,
+} from './item.js';
+
+export {
+  type CategoryNode,
+  getCategory,
+  getCategoryPath,
+  getCategoryParent,
+  getCategoryChildren,
+  isCategoryType,
+  getRootCategories,
+  getAllCategories,
+  searchCategories,
+  getCategoryTree,
+  getCategoriesByType,
+  isAncestorOf,
+} from './category-full.js';
