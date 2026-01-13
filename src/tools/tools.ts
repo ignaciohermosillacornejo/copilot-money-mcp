@@ -823,8 +823,7 @@ export class CopilotMoneyTools {
             total_spending: roundAmount(data.total),
             transaction_count: data.count,
             average_transaction: data.count > 0 ? roundAmount(data.total / data.count) : 0,
-            percentage:
-              totalSpending > 0 ? roundAmount((data.total / totalSpending) * 100) : 0,
+            percentage: totalSpending > 0 ? roundAmount((data.total / totalSpending) * 100) : 0,
           };
         });
 
@@ -7226,9 +7225,7 @@ export class CopilotMoneyTools {
       if (startPrice !== null && endPrice !== null) {
         priceChange = roundAmount(endPrice - startPrice);
         percentChange =
-          startPrice !== 0
-            ? roundAmount(((endPrice - startPrice) / startPrice) * 100)
-            : null;
+          startPrice !== 0 ? roundAmount(((endPrice - startPrice) / startPrice) * 100) : null;
 
         if (percentChange !== null) {
           if (percentChange > 0.5) trend = 'up';
