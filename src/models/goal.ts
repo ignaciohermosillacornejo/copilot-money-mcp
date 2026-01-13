@@ -8,20 +8,6 @@
 import { z } from 'zod';
 
 /**
- * Known goal status values.
- */
-export const KNOWN_GOAL_STATUSES = ['active', 'paused', 'completed', 'cancelled'] as const;
-
-export type KnownGoalStatus = (typeof KNOWN_GOAL_STATUSES)[number];
-
-/**
- * Known goal types.
- */
-export const KNOWN_GOAL_TYPES = ['savings', 'debt', 'investment'] as const;
-
-export type KnownGoalType = (typeof KNOWN_GOAL_TYPES)[number];
-
-/**
  * Date format regex for YYYY-MM-DD validation.
  */
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
