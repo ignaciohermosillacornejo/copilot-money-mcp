@@ -237,111 +237,102 @@ After installing the MCP server, Claude Desktop will request **one-time approval
 
 ## Available Tools
 
-The MCP server provides 31 read-only tools for comprehensive financial analysis:
+The MCP server provides **60 read-only tools** for comprehensive financial analysis:
 
-### Core Tools
+### Transactions (16 tools)
 
-### 1. `get_transactions`
-Query transactions with flexible filters.
+| Tool | Description |
+|------|-------------|
+| `get_transactions` | Query transactions with filters (date, category, merchant, amount, account) |
+| `search_transactions` | Free-text search by merchant name |
+| `get_transaction_by_id` | Get a single transaction by ID |
+| `get_income` | Get income transactions with breakdown by source |
+| `get_spending_by_merchant` | Spending aggregated by merchant |
+| `get_top_merchants` | Top merchants by spending with counts and averages |
+| `get_spending_by_category` | Spending aggregated by category |
+| `get_spending_by_day_of_week` | Spending patterns by day of week |
+| `get_foreign_transactions` | International transactions with FX fees |
+| `get_refunds` | Refund and return transactions |
+| `get_credits` | Statement credits, cashback, and rewards |
+| `get_duplicate_transactions` | Detect potential duplicate transactions |
+| `get_unusual_transactions` | Anomaly detection for flagged transactions |
+| `get_hsa_fsa_eligible` | Find HSA/FSA eligible healthcare expenses |
+| `get_trips` | Detect and group transactions into trips |
+| `export_transactions` | Export transactions to CSV or JSON |
 
-**Parameters:**
-- `period` - Date range shorthand (this_month, last_30_days, ytd, etc.)
-- `start_date` - Start date (YYYY-MM-DD)
-- `end_date` - End date (YYYY-MM-DD)
-- `category` - Filter by category (case-insensitive)
-- `merchant` - Filter by merchant name (case-insensitive)
-- `account_id` - Filter by account ID
-- `min_amount` / `max_amount` - Amount range
-- `limit` - Max results (default: 100)
+### Accounts (7 tools)
 
-### 2. `search_transactions`
-Free-text search by merchant name.
+| Tool | Description |
+|------|-------------|
+| `get_accounts` | List all accounts with balances |
+| `get_account_balance` | Get balance and details for a specific account |
+| `get_connected_institutions` | Get connected financial institutions with health status |
+| `get_account_activity` | Account activity summary (transaction counts/volumes) |
+| `get_balance_trends` | Analyze balance trends over time |
+| `get_account_fees` | Track account fees (ATM, overdraft, foreign transaction) |
+| `compare_periods` | Compare spending/income between two periods |
 
-**Parameters:**
-- `query` - Search query (required)
-- `limit` - Max results (default: 50)
+### Budgets (5 tools)
 
-### 3. `get_accounts`
-List all accounts with balances.
+| Tool | Description |
+|------|-------------|
+| `get_budgets` | Get budgets and spending limits |
+| `get_budget_utilization` | Budget usage status (used, remaining, percentage) |
+| `get_budget_vs_actual` | Compare budgeted vs actual spending over months |
+| `get_budget_recommendations` | Smart budget recommendations based on patterns |
+| `get_budget_alerts` | Alerts for budgets approaching/exceeding limits |
 
-**Parameters:**
-- `account_type` - Filter by type (checking, savings, credit, investment)
+### Goals (9 tools)
 
-### 4. `get_spending_by_category`
-Aggregate spending by category.
+| Tool | Description |
+|------|-------------|
+| `get_goals` | List financial goals (savings, debt payoff) |
+| `get_goal_progress` | Current progress and status for goals |
+| `get_goal_history` | Monthly historical snapshots of goal progress |
+| `get_goal_contributions` | Analyze contribution patterns and consistency |
+| `estimate_goal_completion` | Estimated completion dates based on history |
+| `get_goal_projection` | Goal projections (conservative/moderate/aggressive) |
+| `get_goal_milestones` | Track milestone achievements (25%, 50%, 75%, 100%) |
+| `get_goals_at_risk` | Identify goals at risk of not being achieved |
+| `get_goal_recommendations` | Personalized recommendations to improve progress |
 
-**Parameters:**
-- `period` - Date range shorthand
-- `start_date` / `end_date` - Date range
-- `min_amount` - Minimum expense amount
+### Investments (8 tools)
 
-### 5. `get_account_balance`
-Get specific account details.
+| Tool | Description |
+|------|-------------|
+| `get_investment_prices` | Current prices for stocks, crypto, ETFs |
+| `get_investment_price_history` | Historical price data with OHLCV |
+| `get_investment_splits` | Stock splits with ratios and dates |
+| `get_portfolio_allocation` | Portfolio allocation across accounts/securities |
+| `get_investment_performance` | Performance metrics (returns, trends) |
+| `get_dividend_income` | Dividend income with monthly breakdown |
+| `get_investment_fees` | Investment fees (management, trading commissions) |
+| `get_spending_rate` | Spending velocity (burn rate, projections) |
 
-**Parameters:**
-- `account_id` - Account ID (required)
+### Analytics (11 tools)
 
-### Data Quality & Advanced Analysis Tools
+| Tool | Description |
+|------|-------------|
+| `get_spending_over_time` | Spending aggregated by time period |
+| `get_average_transaction_size` | Average amounts by category/merchant |
+| `get_category_trends` | Spending trends comparing current vs previous |
+| `get_merchant_frequency` | How often you visit merchants |
+| `get_recurring_transactions` | Identify subscriptions and recurring charges |
+| `get_data_quality_report` | Data quality issues (duplicates, categorization) |
+| `get_year_over_year` | Year-over-year spending/income comparison |
+| `get_category_hierarchy` | Full Plaid category taxonomy as tree |
+| `get_subcategories` | Get subcategories of a parent category |
+| `search_categories` | Search categories by name or keyword |
+| `get_categories` | List all transaction categories |
 
-### 6. `get_data_quality_report`
-Generate a comprehensive data quality report to identify issues in your financial data that should be corrected in Copilot Money.
+### Search & Discovery (4 tools)
 
-This tool helps you find:
-- **Unresolved category IDs** - Transactions with category IDs that can't be mapped to human-readable names
-- **Potential currency conversion issues** - Large amounts with foreign merchant names that may be displaying unconverted foreign currency
-- **Non-unique transaction IDs** - Multiple transactions sharing the same ID
-- **Duplicate accounts** - Accounts with the same name and type that may be duplicates
-- **Suspicious categorizations** - Common miscategorizations (e.g., Uber as Parking, pharmacies as Office Supplies)
-
-**Parameters:**
-- `period` - Date range shorthand (this_month, last_90_days, ytd, etc.)
-- `start_date` / `end_date` - Custom date range
-
-**Use Case:** Run this tool before doing financial analysis to identify data quality issues that could skew your results. It's especially useful after international travel or if you notice unexpected spending totals.
-
-### Goal Tracking & Progress Tools
-
-- `get_budgets` - View budgets and spending limits
-- `get_goals` - List financial goals (savings, debt payoff)
-- `get_goal_progress` - Current progress toward goals with completion estimates
-- `get_goal_history` - Monthly snapshots of goal progress over time
-- `estimate_goal_completion` - Estimated completion dates based on historical contributions
-- `get_goal_contributions` - Analyze deposit/withdrawal patterns and contribution consistency
-
-### Investment Price Tools
-
-- `get_investment_prices` - Get current/latest prices for investments (stocks, crypto, ETFs)
-- `get_investment_price_history` - Get historical price data with OHLCV data and price summaries
-
-**Investment Price Features:**
-- Support for stocks, cryptocurrencies, ETFs, and other investments
-- Daily aggregated data and high-frequency intraday data
-- OHLCV data (Open, High, Low, Close, Volume) when available
-- Multiple price fields with automatic best-price selection
-- Price change analysis and volatility metrics
-- Filter by ticker symbol (e.g., "AAPL", "BTC-USD", "VTSAX")
-- Date range filtering for historical analysis
-
-### Other Analysis Tools
-
-The server also provides these additional tools:
-- `get_categories` - List all transaction categories
-- `get_recurring_transactions` - Find subscriptions and recurring payments
-- `get_income` - Track income sources
-- `get_spending_by_merchant` - Merchant spending analysis
-- `compare_periods` - Compare spending across time periods
-- `get_foreign_transactions` - International transactions and FX fees
-- `get_refunds` - Refund transactions
-- `get_duplicate_transactions` - Find duplicate transactions
-- `get_credits` - Credit transactions
-- `get_spending_by_day_of_week` - Spending patterns by day
-- `get_trips` - Travel analysis with location detection
-- `get_transaction_by_id` - Lookup specific transactions
-- `get_top_merchants` - Top merchants by spending
-- `get_unusual_transactions` - Anomaly detection
-- `export_transactions` - Export to CSV or JSON
-- `get_hsa_fsa_eligible` - Healthcare expenses
-- `get_spending_rate` - Spending velocity analysis
+| Tool | Description |
+|------|-------------|
+| `get_advanced_search` | Multi-criteria search (amount, date, category, city) |
+| `get_tag_search` | Find transactions with hashtags (#tag) |
+| `get_note_search` | Search transactions by notes/descriptions |
+| `get_location_search` | Search by location (city, region, country) |
 
 See tool schemas in Claude Desktop or use the MCP Inspector for complete parameter documentation.
 
