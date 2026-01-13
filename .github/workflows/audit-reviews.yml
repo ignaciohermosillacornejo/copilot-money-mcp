@@ -1,0 +1,75 @@
+name: Audit PR Reviews
+
+on:
+  # Run manually from Actions tab
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (no changes)'
+        required: false
+        default: 'false'
+        type: boolean
+      pr_number:
+        description: 'Specific PR number to audit (optional)'
+        required: false
+        type: string
+
+  # Run weekly on Sundays at midnight
+  schedule:
+    - cron: '0 0 * * 0'
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Create audited label if missing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create "audited" \
+            --description "PR has been reviewed in audit" \
+            --color "0E8A16" 2>/dev/null || true
+
+      - name: Create audit label if missing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create "audit" \
+            --description "Issue from PR audit" \
+            --color "D93F0B" 2>/dev/null || true
+
+      - name: Create review-followup label if missing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create "review-followup" \
+            --description "Follow-up from code review" \
+            --color "FBCA04" 2>/dev/null || true
+
+      - name: Run PR Review Audit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          if [ -n "${{ inputs.pr_number }}" ]; then
+            ARGS="$ARGS --pr ${{ inputs.pr_number }}"
+          fi
+          bun run scripts/audit-pr-reviews.ts $ARGS

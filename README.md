@@ -108,34 +108,11 @@ After installing the MCP server, Claude Desktop will request **one-time approval
 **MCP Tool Call:**
 ```json
 {
-  "tool": "get_spending_by_category",
+  "tool": "get_spending",
   "arguments": {
+    "group_by": "category",
     "period": "last_month"
   }
-}
-```
-
-**Response:**
-```json
-{
-  "period": {
-    "start_date": "2025-12-01",
-    "end_date": "2025-12-31"
-  },
-  "total_spending": 1847.32,
-  "category_count": 8,
-  "categories": [
-    {
-      "category": "food_dining",
-      "total_spending": 487.50,
-      "transaction_count": 23
-    },
-    {
-      "category": "groceries",
-      "total_spending": 612.80,
-      "transaction_count": 12
-    }
-  ]
 }
 ```
 
@@ -152,33 +129,11 @@ After installing the MCP server, Claude Desktop will request **one-time approval
 **MCP Tool Call:**
 ```json
 {
-  "tool": "search_transactions",
+  "tool": "get_transactions",
   "arguments": {
-    "query": "amazon"
+    "merchant": "amazon",
+    "period": "last_30_days"
   }
-}
-```
-
-**Response:**
-```json
-{
-  "count": 7,
-  "transactions": [
-    {
-      "transaction_id": "txn_abc123",
-      "amount": 47.99,
-      "date": "2026-01-05",
-      "name": "Amazon.com",
-      "category_id": "shopping_online"
-    },
-    {
-      "transaction_id": "txn_def456",
-      "amount": 23.50,
-      "date": "2025-12-28",
-      "name": "Amazon Prime",
-      "category_id": "subscriptions"
-    }
-  ]
 }
 ```
 
@@ -200,35 +155,6 @@ After installing the MCP server, Claude Desktop will request **one-time approval
 }
 ```
 
-**Response:**
-```json
-{
-  "count": 3,
-  "total_balance": 12547.83,
-  "accounts": [
-    {
-      "account_id": "acc_checking",
-      "name": "Chase Checking",
-      "account_type": "checking",
-      "current_balance": 3247.50,
-      "mask": "1234"
-    },
-    {
-      "account_id": "acc_savings",
-      "name": "Ally Savings",
-      "account_type": "savings",
-      "current_balance": 8500.33
-    },
-    {
-      "account_id": "acc_credit",
-      "name": "Chase Freedom",
-      "account_type": "credit",
-      "current_balance": 800.00
-    }
-  ]
-}
-```
-
 **Claude's Answer:**
 > "Your total balance across all accounts is $12,547.83. This includes:
 > - Chase Checking: $3,247.50
@@ -237,102 +163,70 @@ After installing the MCP server, Claude Desktop will request **one-time approval
 
 ## Available Tools
 
-The MCP server provides **60 read-only tools** for comprehensive financial analysis:
+The MCP server provides **28 read-only tools** using a parameter-driven design for comprehensive financial analysis:
 
-### Transactions (16 tools)
+### Core Data (6 tools)
 
 | Tool | Description |
 |------|-------------|
-| `get_transactions` | Query transactions with filters (date, category, merchant, amount, account) |
-| `search_transactions` | Free-text search by merchant name |
-| `get_transaction_by_id` | Get a single transaction by ID |
+| `get_transactions` | Query transactions with filters (date, category, merchant, amount, account, region) |
+| `get_accounts` | List all accounts with balances, optionally filter by type |
+| `get_account_balance` | Get balance and details for a specific account by ID |
+| `get_categories` | List all transaction categories with counts and totals |
 | `get_income` | Get income transactions with breakdown by source |
-| `get_spending_by_merchant` | Spending aggregated by merchant |
-| `get_top_merchants` | Top merchants by spending with counts and averages |
-| `get_spending_by_category` | Spending aggregated by category |
-| `get_spending_by_day_of_week` | Spending patterns by day of week |
-| `get_foreign_transactions` | International transactions with FX fees |
-| `get_refunds` | Refund and return transactions |
-| `get_credits` | Statement credits, cashback, and rewards |
-| `get_duplicate_transactions` | Detect potential duplicate transactions |
-| `get_unusual_transactions` | Anomaly detection for flagged transactions |
-| `get_hsa_fsa_eligible` | Find HSA/FSA eligible healthcare expenses |
-| `get_trips` | Detect and group transactions into trips |
-| `export_transactions` | Export transactions to CSV or JSON |
+| `export_transactions` | Export transactions to CSV or JSON format |
 
-### Accounts (7 tools)
+### Spending Analysis (4 tools)
 
 | Tool | Description |
 |------|-------------|
-| `get_accounts` | List all accounts with balances |
-| `get_account_balance` | Get balance and details for a specific account |
-| `get_connected_institutions` | Get connected financial institutions with health status |
-| `get_account_activity` | Account activity summary (transaction counts/volumes) |
-| `get_balance_trends` | Analyze balance trends over time |
-| `get_account_fees` | Track account fees (ATM, overdraft, foreign transaction) |
-| `compare_periods` | Compare spending/income between two periods |
+| `get_spending` | Unified spending analysis with `group_by` parameter (category, merchant, day_of_week, time_period) |
+| `get_merchant_analytics` | Merchant insights with `sort_by` parameter (total_spent, frequency, average, recency) |
+| `get_average_transaction_size` | Average transaction amounts by category or merchant |
+| `get_category_trends` | Spending trends comparing current vs previous period |
 
-### Budgets (5 tools)
+### Budgets (2 tools)
 
 | Tool | Description |
 |------|-------------|
-| `get_budgets` | Get budgets and spending limits |
-| `get_budget_utilization` | Budget usage status (used, remaining, percentage) |
-| `get_budget_vs_actual` | Compare budgeted vs actual spending over months |
-| `get_budget_recommendations` | Smart budget recommendations based on patterns |
-| `get_budget_alerts` | Alerts for budgets approaching/exceeding limits |
+| `get_budgets` | Get budgets with optional period filter |
+| `get_budget_analytics` | Budget analysis with `analysis` parameter (utilization, vs_actual, recommendations, alerts) |
 
-### Goals (9 tools)
+### Goals (4 tools)
 
 | Tool | Description |
 |------|-------------|
-| `get_goals` | List financial goals (savings, debt payoff) |
-| `get_goal_progress` | Current progress and status for goals |
-| `get_goal_history` | Monthly historical snapshots of goal progress |
-| `get_goal_contributions` | Analyze contribution patterns and consistency |
-| `estimate_goal_completion` | Estimated completion dates based on history |
-| `get_goal_projection` | Goal projections (conservative/moderate/aggressive) |
+| `get_goals` | List financial goals with optional status filter |
+| `get_goal_details` | Get goal details with optional includes (history, contributions, projections) |
+| `get_goal_analytics` | Goal analysis with `analysis` parameter (progress, at_risk, recommendations) |
 | `get_goal_milestones` | Track milestone achievements (25%, 50%, 75%, 100%) |
-| `get_goals_at_risk` | Identify goals at risk of not being achieved |
-| `get_goal_recommendations` | Personalized recommendations to improve progress |
 
-### Investments (8 tools)
+### Investments (4 tools)
 
 | Tool | Description |
 |------|-------------|
 | `get_investment_prices` | Current prices for stocks, crypto, ETFs |
-| `get_investment_price_history` | Historical price data with OHLCV |
 | `get_investment_splits` | Stock splits with ratios and dates |
 | `get_portfolio_allocation` | Portfolio allocation across accounts/securities |
-| `get_investment_performance` | Performance metrics (returns, trends) |
-| `get_dividend_income` | Dividend income with monthly breakdown |
-| `get_investment_fees` | Investment fees (management, trading commissions) |
-| `get_spending_rate` | Spending velocity (burn rate, projections) |
+| `get_investment_analytics` | Investment analysis with `analysis` parameter (performance, dividends, fees) |
 
-### Analytics (11 tools)
+### Account Insights (3 tools)
 
 | Tool | Description |
 |------|-------------|
-| `get_spending_over_time` | Spending aggregated by time period |
-| `get_average_transaction_size` | Average amounts by category/merchant |
-| `get_category_trends` | Spending trends comparing current vs previous |
-| `get_merchant_frequency` | How often you visit merchants |
+| `get_connected_institutions` | Get connected financial institutions with health status |
+| `get_account_analytics` | Account analysis with `analysis` parameter (activity, balance_trends, fees) |
+| `compare_periods` | Compare spending/income between two time periods |
+
+### Discovery & Patterns (5 tools)
+
+| Tool | Description |
+|------|-------------|
 | `get_recurring_transactions` | Identify subscriptions and recurring charges |
-| `get_data_quality_report` | Data quality issues (duplicates, categorization) |
+| `get_trips` | Detect and group transactions into trips by location |
+| `get_unusual_transactions` | Anomaly detection for flagged transactions |
 | `get_year_over_year` | Year-over-year spending/income comparison |
-| `get_category_hierarchy` | Full Plaid category taxonomy as tree |
-| `get_subcategories` | Get subcategories of a parent category |
-| `search_categories` | Search categories by name or keyword |
-| `get_categories` | List all transaction categories |
-
-### Search & Discovery (4 tools)
-
-| Tool | Description |
-|------|-------------|
-| `get_advanced_search` | Multi-criteria search (amount, date, category, city) |
-| `get_tag_search` | Find transactions with hashtags (#tag) |
-| `get_note_search` | Search transactions by notes/descriptions |
-| `get_location_search` | Search by location (city, region, country) |
+| `get_data_quality_report` | Data quality issues (duplicates, categorization problems) |
 
 See tool schemas in Claude Desktop or use the MCP Inspector for complete parameter documentation.
 
@@ -398,7 +292,7 @@ copilot-money-mcp/
 - **Language:** TypeScript 5.3+
 - **Validation:** Zod schemas
 - **Database:** LevelDB (classic-level) + Protocol Buffers
-- **Testing:** Bun test runner (366 tests, 100% passing)
+- **Testing:** Bun test runner (624 tests, 100% passing)
 - **MCP SDK:** @modelcontextprotocol/sdk v1.2
 
 ## Testing
@@ -415,8 +309,8 @@ npm run test:coverage
 ```
 
 **Test Coverage:**
-- ✅ 366 tests passing
-- ✅ 1360+ assertions
+- ✅ 624 tests passing
+- ✅ 2110+ assertions
 - ✅ Core decoder tests
 - ✅ Database abstraction tests
 - ✅ Tool implementation tests

@@ -6,7 +6,7 @@ MCP (Model Context Protocol) server that enables AI-powered queries of Copilot M
 
 ```bash
 bun install          # Install dependencies
-bun test             # Run tests (400+ tests)
+bun test             # Run tests (624 tests)
 bun run build        # Build for production
 bun run pack:mcpb    # Create .mcpb bundle for Claude Desktop
 bun run check        # Run typecheck + lint + format:check + test

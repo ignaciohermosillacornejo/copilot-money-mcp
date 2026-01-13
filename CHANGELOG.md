@@ -43,9 +43,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Trips now show actual locations instead of "Unknown"
 
 ### Changed
-- Tool count increased from 22 to 23 tools
-- Test count increased from 366 to 400 tests
-- Assertion count increased to 1427+ (from 1360+)
+- **Major Tool Consolidation**: Reduced from 60 tools to 28 using parameter-driven design
+  - `get_spending` now uses `group_by` parameter (category, merchant, day_of_week, time_period)
+  - `get_budget_analytics` consolidates budget utilization, vs_actual, recommendations, alerts
+  - `get_goal_analytics` consolidates goal progress, at_risk, recommendations
+  - `get_investment_analytics` consolidates performance, dividends, fees analysis
+  - `get_account_analytics` consolidates activity, balance_trends, fees
+  - `get_merchant_analytics` consolidates top merchants, frequency, spending analysis
+- Test count increased to 624 tests (from 366)
+- Assertion count increased to 2110+ (from 1360+)
 - All tests passing with enhanced coverage
 
 ### Technical Details
