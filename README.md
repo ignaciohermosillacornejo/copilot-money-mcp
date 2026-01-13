@@ -237,7 +237,7 @@ After installing the MCP server, Claude Desktop will request **one-time approval
 
 ## Available Tools
 
-The MCP server provides 23 read-only tools for comprehensive financial analysis:
+The MCP server provides 29 read-only tools for comprehensive financial analysis:
 
 ### Core Tools
 
@@ -298,6 +298,15 @@ This tool helps you find:
 - `start_date` / `end_date` - Custom date range
 
 **Use Case:** Run this tool before doing financial analysis to identify data quality issues that could skew your results. It's especially useful after international travel or if you notice unexpected spending totals.
+
+### Goal Tracking & Progress Tools
+
+- `get_budgets` - View budgets and spending limits
+- `get_goals` - List financial goals (savings, debt payoff)
+- `get_goal_progress` - Current progress toward goals with completion estimates
+- `get_goal_history` - Monthly snapshots of goal progress over time
+- `estimate_goal_completion` - Estimated completion dates based on historical contributions
+- `get_goal_contributions` - Analyze deposit/withdrawal patterns and contribution consistency
 
 ### Other Analysis Tools
 

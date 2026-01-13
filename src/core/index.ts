@@ -9,4 +9,5 @@ export {
   decodeRecurring,
   decodeBudgets,
   decodeGoals,
+  decodeGoalHistory,
 } from './decoder.js';

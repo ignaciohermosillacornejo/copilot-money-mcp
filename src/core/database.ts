@@ -14,6 +14,7 @@ import {
   decodeRecurring,
   decodeBudgets,
   decodeGoals,
+  decodeGoalHistory,
 } from './decoder.js';
 import {
   Account,
@@ -22,6 +23,7 @@ import {
   Recurring,
   Budget,
   Goal,
+  GoalHistory,
   getTransactionDisplayName,
 } from '../models/index.js';
 import { getCategoryName } from '../utils/categories.js';
@@ -367,6 +369,54 @@ export class CopilotDatabase {
     if (activeOnly) {
       // Filter for active goals (status === 'active')
       result = result.filter((goal) => goal.savings?.status === 'active');
+    }
+
+    return result;
+  }
+
+  /**
+   * Get goal history (monthly snapshots) from the database.
+   *
+   * Goal history is stored in the subcollection:
+   * /users/{user_id}/financial_goals/{goal_id}/financial_goal_history/{month}
+   *
+   * Each document represents a monthly snapshot with:
+   * - current_amount: Amount saved as of that month
+   * - daily_data: Nested object with daily snapshots
+   * - contributions: Array of deposits/withdrawals (if available)
+   *
+   * @param goalId - Optional goal ID to filter history for a specific goal
+   * @param options - Filter options
+   * @param options.startMonth - Filter by month >= this (YYYY-MM)
+   * @param options.endMonth - Filter by month <= this (YYYY-MM)
+   * @param options.limit - Maximum number of history entries to return
+   * @returns Array of GoalHistory objects, sorted by goal_id and month (newest first)
+   */
+  getGoalHistory(
+    goalId?: string,
+    options: {
+      startMonth?: string;
+      endMonth?: string;
+      limit?: number;
+    } = {}
+  ): GoalHistory[] {
+    const { startMonth, endMonth, limit } = options;
+
+    // Decode goal history from the database
+    // Note: We don't cache this as it can be large and change frequently
+    let result = decodeGoalHistory(this.requireDbPath(), goalId);
+
+    // Apply month range filters
+    if (startMonth) {
+      result = result.filter((h) => h.month >= startMonth);
+    }
+    if (endMonth) {
+      result = result.filter((h) => h.month <= endMonth);
+    }
+
+    // Apply limit if specified
+    if (limit && limit > 0) {
+      result = result.slice(0, limit);
     }
 
     return result;

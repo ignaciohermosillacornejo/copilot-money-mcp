@@ -9,6 +9,8 @@ import { parsePeriod } from '../utils/date.js';
 import { getCategoryName, isTransferCategory, isIncomeCategory } from '../utils/categories.js';
 import type { Transaction, Account } from '../models/index.js';
 import { getTransactionDisplayName, getRecurringDisplayName } from '../models/index.js';
+import { estimateGoalCompletion } from '../models/goal.js';
+import { getHistoryProgress, getMonthStartEnd, type GoalHistory } from '../models/goal-history.js';
 
 // ============================================
 // Category Constants
@@ -912,6 +914,408 @@ export class CopilotMoneyTools {
         is_ongoing: g.savings?.is_ongoing,
         inflates_budget: g.savings?.inflates_budget,
       })),
+    };
+  }
+
+  /**
+   * Get goal progress and current status.
+   *
+   * Returns the current amount saved, progress percentage, and completion estimate
+   * for one or all financial goals based on historical data.
+   *
+   * @param options - Filter options
+   * @returns Object with goal progress details
+   */
+  getGoalProgress(options: { goal_id?: string } = {}): {
+    count: number;
+    goals: Array<{
+      goal_id: string;
+      name?: string;
+      emoji?: string;
+      target_amount?: number;
+      current_amount?: number;
+      progress_percent?: number;
+      monthly_contribution?: number;
+      estimated_completion?: string;
+      status?: string;
+      latest_month?: string;
+    }>;
+  } {
+    const { goal_id } = options;
+
+    // Get goals (all or filtered by goal_id)
+    const goals = this.db.getGoals(false);
+    let filteredGoals = goals;
+
+    if (goal_id) {
+      filteredGoals = goals.filter((g) => g.goal_id === goal_id);
+    }
+
+    // Get history for each goal to calculate progress
+    const progressData = filteredGoals.map((goal) => {
+      // Get latest history for this goal
+      const history = this.db.getGoalHistory(goal.goal_id, { limit: 12 }); // Last 12 months
+
+      let currentAmount: number | undefined;
+      let latestMonth: string | undefined;
+      let averageMonthlyContribution: number | undefined;
+
+      if (history.length > 0) {
+        // Get latest month's current_amount
+        const latestHistory = history[0];
+        if (latestHistory) {
+          currentAmount = latestHistory.current_amount;
+          latestMonth = latestHistory.month;
+        }
+
+        // Calculate average monthly contribution from history
+        if (history.length >= 2) {
+          const amounts = history.map((h) => ({ month: h.month, amount: h.current_amount ?? 0 }));
+          // Sort by month ascending to calculate differences
+          amounts.sort((a, b) => a.month.localeCompare(b.month));
+
+          const contributions: number[] = [];
+          for (let i = 1; i < amounts.length; i++) {
+            const current = amounts[i];
+            const previous = amounts[i - 1];
+            if (current && previous) {
+              contributions.push(current.amount - previous.amount);
+            }
+          }
+
+          if (contributions.length > 0) {
+            averageMonthlyContribution =
+              contributions.reduce((sum, c) => sum + c, 0) / contributions.length;
+          }
+        }
+      }
+
+      // Calculate progress percentage
+      const targetAmount = goal.savings?.target_amount;
+      let progressPercent: number | undefined;
+      if (targetAmount && currentAmount !== undefined) {
+        progressPercent = Math.min(100, (currentAmount / targetAmount) * 100);
+      }
+
+      // Estimate completion date
+      let estimatedCompletion: string | undefined;
+      if (currentAmount !== undefined && averageMonthlyContribution !== undefined) {
+        estimatedCompletion = estimateGoalCompletion(
+          goal,
+          currentAmount,
+          averageMonthlyContribution
+        );
+      }
+
+      return {
+        goal_id: goal.goal_id,
+        name: goal.name,
+        emoji: goal.emoji,
+        target_amount: targetAmount,
+        current_amount: currentAmount,
+        progress_percent: progressPercent ? Math.round(progressPercent * 100) / 100 : undefined,
+        monthly_contribution: goal.savings?.tracking_type_monthly_contribution,
+        estimated_completion: estimatedCompletion,
+        status: goal.savings?.status,
+        latest_month: latestMonth,
+      };
+    });
+
+    return {
+      count: progressData.length,
+      goals: progressData,
+    };
+  }
+
+  /**
+   * Get goal history (monthly snapshots).
+   *
+   * Returns historical snapshots of goal progress including monthly amounts,
+   * daily data, and contribution tracking.
+   *
+   * @param options - Filter options
+   * @returns Object with historical goal data
+   */
+  getGoalHistory(options: {
+    goal_id: string;
+    start_month?: string;
+    end_month?: string;
+    limit?: number;
+  }): {
+    goal_id: string;
+    goal_name?: string;
+    count: number;
+    history: Array<{
+      month: string;
+      current_amount?: number;
+      target_amount?: number;
+      progress_percent?: number;
+      month_start_amount?: number;
+      month_end_amount?: number;
+      month_change_amount?: number;
+      month_change_percent?: number;
+      daily_snapshots_count?: number;
+    }>;
+  } {
+    const { goal_id, start_month, end_month, limit = 12 } = options;
+
+    // Get the goal details
+    const goals = this.db.getGoals(false);
+    const goal = goals.find((g) => g.goal_id === goal_id);
+
+    // Get history for this goal
+    const history = this.db.getGoalHistory(goal_id, {
+      startMonth: start_month,
+      endMonth: end_month,
+      limit,
+    });
+
+    // Process history entries
+    const processedHistory = history.map((h: GoalHistory) => {
+      const progressPercent = getHistoryProgress(h);
+      const monthStats = getMonthStartEnd(h);
+      const dailySnapshotsCount = h.daily_data ? Object.keys(h.daily_data).length : 0;
+
+      return {
+        month: h.month,
+        current_amount: h.current_amount,
+        target_amount: h.target_amount,
+        progress_percent: progressPercent ? Math.round(progressPercent * 100) / 100 : undefined,
+        month_start_amount: monthStats.start_amount,
+        month_end_amount: monthStats.end_amount,
+        month_change_amount: monthStats.change_amount
+          ? Math.round(monthStats.change_amount * 100) / 100
+          : undefined,
+        month_change_percent: monthStats.change_percent
+          ? Math.round(monthStats.change_percent * 100) / 100
+          : undefined,
+        daily_snapshots_count: dailySnapshotsCount,
+      };
+    });
+
+    return {
+      goal_id,
+      goal_name: goal?.name,
+      count: processedHistory.length,
+      history: processedHistory,
+    };
+  }
+
+  /**
+   * Estimate goal completion date.
+   *
+   * Calculates estimated completion based on historical contribution rates
+   * and remaining amount needed.
+   *
+   * @param options - Filter options
+   * @returns Object with completion estimates for goals
+   */
+  estimateGoalCompletion(options: { goal_id?: string } = {}): {
+    count: number;
+    goals: Array<{
+      goal_id: string;
+      name?: string;
+      target_amount?: number;
+      current_amount?: number;
+      remaining_amount?: number;
+      average_monthly_contribution?: number;
+      estimated_months_remaining?: number;
+      estimated_completion_month?: string;
+      is_on_track?: boolean;
+      status?: string;
+    }>;
+  } {
+    const { goal_id } = options;
+
+    // Get goals (all or filtered)
+    const goals = this.db.getGoals(false);
+    let filteredGoals = goals;
+
+    if (goal_id) {
+      filteredGoals = goals.filter((g) => g.goal_id === goal_id);
+    }
+
+    // Calculate estimates for each goal
+    const estimates = filteredGoals.map((goal) => {
+      // Get history to calculate average contribution
+      const history = this.db.getGoalHistory(goal.goal_id, { limit: 12 });
+
+      let currentAmount: number | undefined;
+      let averageMonthlyContribution: number | undefined;
+
+      if (history.length > 0) {
+        const latestHistory = history[0];
+        if (latestHistory) {
+          currentAmount = latestHistory.current_amount;
+        }
+
+        // Calculate average contribution
+        if (history.length >= 2) {
+          const amounts = history
+            .map((h) => ({ month: h.month, amount: h.current_amount ?? 0 }))
+            .sort((a, b) => a.month.localeCompare(b.month));
+
+          const contributions: number[] = [];
+          for (let i = 1; i < amounts.length; i++) {
+            const current = amounts[i];
+            const previous = amounts[i - 1];
+            if (current && previous) {
+              contributions.push(current.amount - previous.amount);
+            }
+          }
+
+          if (contributions.length > 0) {
+            averageMonthlyContribution =
+              contributions.reduce((sum, c) => sum + c, 0) / contributions.length;
+          }
+        }
+      }
+
+      const targetAmount = goal.savings?.target_amount;
+      const remainingAmount =
+        targetAmount && currentAmount !== undefined ? targetAmount - currentAmount : undefined;
+
+      let estimatedMonthsRemaining: number | undefined;
+      let estimatedCompletionMonth: string | undefined;
+      let isOnTrack: boolean | undefined;
+
+      if (
+        remainingAmount !== undefined &&
+        remainingAmount > 0 &&
+        averageMonthlyContribution !== undefined &&
+        averageMonthlyContribution > 0
+      ) {
+        estimatedMonthsRemaining = Math.ceil(remainingAmount / averageMonthlyContribution);
+
+        // Calculate completion date
+        const today = new Date();
+        const targetDate = new Date(
+          today.getFullYear(),
+          today.getMonth() + estimatedMonthsRemaining,
+          1
+        );
+        estimatedCompletionMonth = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}`;
+
+        // Check if on track (compare with expected monthly contribution)
+        const expectedContribution = goal.savings?.tracking_type_monthly_contribution;
+        if (expectedContribution) {
+          isOnTrack = averageMonthlyContribution >= expectedContribution * 0.9; // 90% threshold
+        }
+      }
+
+      return {
+        goal_id: goal.goal_id,
+        name: goal.name,
+        target_amount: targetAmount,
+        current_amount: currentAmount,
+        remaining_amount: remainingAmount ? Math.round(remainingAmount * 100) / 100 : undefined,
+        average_monthly_contribution: averageMonthlyContribution
+          ? Math.round(averageMonthlyContribution * 100) / 100
+          : undefined,
+        estimated_months_remaining: estimatedMonthsRemaining,
+        estimated_completion_month: estimatedCompletionMonth,
+        is_on_track: isOnTrack,
+        status: goal.savings?.status,
+      };
+    });
+
+    return {
+      count: estimates.length,
+      goals: estimates,
+    };
+  }
+
+  /**
+   * Get goal contributions breakdown.
+   *
+   * Analyzes contribution patterns and provides insights into deposits,
+   * withdrawals, and contribution consistency.
+   *
+   * @param options - Filter options
+   * @returns Object with contribution analysis
+   */
+  getGoalContributions(options: {
+    goal_id: string;
+    start_month?: string;
+    end_month?: string;
+    limit?: number;
+  }): {
+    goal_id: string;
+    goal_name?: string;
+    period: { start_month?: string; end_month?: string };
+    total_contributed: number;
+    total_withdrawn: number;
+    net_contribution: number;
+    average_monthly_contribution: number;
+    months_analyzed: number;
+    monthly_breakdown: Array<{
+      month: string;
+      current_amount?: number;
+      month_change: number;
+      deposits?: number;
+      withdrawals?: number;
+      net: number;
+    }>;
+  } {
+    const { goal_id, start_month, end_month, limit = 12 } = options;
+
+    // Get goal details
+    const goals = this.db.getGoals(false);
+    const goal = goals.find((g) => g.goal_id === goal_id);
+
+    // Get history
+    const history = this.db.getGoalHistory(goal_id, {
+      startMonth: start_month,
+      endMonth: end_month,
+      limit,
+    });
+
+    // Sort by month ascending for analysis
+    const sortedHistory = [...history].sort((a, b) => a.month.localeCompare(b.month));
+
+    let totalContributed = 0;
+    let totalWithdrawn = 0;
+
+    // Calculate monthly changes
+    const monthlyBreakdown = sortedHistory.map((h, index) => {
+      const currentAmount = h.current_amount ?? 0;
+      const prevAmount = index > 0 ? (sortedHistory[index - 1]?.current_amount ?? 0) : 0;
+      const monthChange = currentAmount - prevAmount;
+
+      // Track contributions vs withdrawals
+      if (monthChange > 0) {
+        totalContributed += monthChange;
+      } else if (monthChange < 0) {
+        totalWithdrawn += Math.abs(monthChange);
+      }
+
+      return {
+        month: h.month,
+        current_amount: h.current_amount,
+        month_change: Math.round(monthChange * 100) / 100,
+        deposits: monthChange > 0 ? Math.round(monthChange * 100) / 100 : undefined,
+        withdrawals: monthChange < 0 ? Math.round(Math.abs(monthChange) * 100) / 100 : undefined,
+        net: Math.round(monthChange * 100) / 100,
+      };
+    });
+
+    const netContribution = totalContributed - totalWithdrawn;
+    const averageMonthlyContribution =
+      monthlyBreakdown.length > 1 ? netContribution / (monthlyBreakdown.length - 1) : 0;
+
+    return {
+      goal_id,
+      goal_name: goal?.name,
+      period: {
+        start_month: sortedHistory[0]?.month,
+        end_month: sortedHistory[sortedHistory.length - 1]?.month,
+      },
+      total_contributed: Math.round(totalContributed * 100) / 100,
+      total_withdrawn: Math.round(totalWithdrawn * 100) / 100,
+      net_contribution: Math.round(netContribution * 100) / 100,
+      average_monthly_contribution: Math.round(averageMonthlyContribution * 100) / 100,
+      months_analyzed: monthlyBreakdown.length,
+      monthly_breakdown: monthlyBreakdown,
     };
   }
 
@@ -3473,6 +3877,114 @@ export function createToolSchemas(): ToolSchema[] {
             default: false,
           },
         },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_goal_progress',
+      description:
+        'Get current progress and status for financial goals. ' +
+        'Shows current amount saved, progress percentage toward target, estimated completion date, ' +
+        'and latest month with data. Calculates actual progress from historical snapshots. ' +
+        'Useful for tracking goal performance and completion estimates.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          goal_id: {
+            type: 'string',
+            description: 'Optional goal ID to get progress for a specific goal',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_goal_history',
+      description:
+        'Get monthly historical snapshots of goal progress. ' +
+        'Returns monthly data showing how the goal amount changed over time, ' +
+        'including start/end amounts for each month, progress percentages, and daily snapshot counts. ' +
+        'Useful for visualizing goal progress trends and analyzing contribution patterns.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          goal_id: {
+            type: 'string',
+            description: 'Goal ID to get history for (required)',
+          },
+          start_month: {
+            type: 'string',
+            description: 'Start month filter (YYYY-MM format, optional)',
+          },
+          end_month: {
+            type: 'string',
+            description: 'End month filter (YYYY-MM format, optional)',
+          },
+          limit: {
+            type: 'integer',
+            description: 'Maximum number of months to return (default: 12)',
+            default: 12,
+          },
+        },
+        required: ['goal_id'],
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'estimate_goal_completion',
+      description:
+        'Estimate when financial goals will be completed. ' +
+        'Calculates estimated completion dates based on historical contribution rates and remaining amounts. ' +
+        'Shows months remaining, estimated completion month, and whether the goal is on track. ' +
+        'Useful for planning and adjusting savings strategies.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          goal_id: {
+            type: 'string',
+            description: 'Optional goal ID to estimate completion for a specific goal',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_goal_contributions',
+      description:
+        'Analyze goal contribution patterns and history. ' +
+        'Shows total deposits, withdrawals, net contributions, and average monthly contribution rate. ' +
+        'Provides monthly breakdown of changes with deposits and withdrawals separated. ' +
+        'Useful for understanding contribution consistency and identifying patterns.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          goal_id: {
+            type: 'string',
+            description: 'Goal ID to analyze contributions for (required)',
+          },
+          start_month: {
+            type: 'string',
+            description: 'Start month filter (YYYY-MM format, optional)',
+          },
+          end_month: {
+            type: 'string',
+            description: 'End month filter (YYYY-MM format, optional)',
+          },
+          limit: {
+            type: 'integer',
+            description: 'Maximum number of months to analyze (default: 12)',
+            default: 12,
+          },
+        },
+        required: ['goal_id'],
       },
       annotations: {
         readOnlyHint: true,

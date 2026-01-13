@@ -151,6 +151,46 @@ export class CopilotMoneyServer {
           );
           break;
 
+        case 'get_goal_progress':
+          result = this.tools.getGoalProgress(
+            (typedArgs as Parameters<typeof this.tools.getGoalProgress>[0]) || {}
+          );
+          break;
+
+        case 'get_goal_history': {
+          const goalId = typedArgs?.goal_id;
+          if (typeof goalId !== 'string') {
+            throw new Error('Missing required parameter: goal_id');
+          }
+          result = this.tools.getGoalHistory({
+            goal_id: goalId,
+            start_month: typedArgs?.start_month as string | undefined,
+            end_month: typedArgs?.end_month as string | undefined,
+            limit: typedArgs?.limit as number | undefined,
+          });
+          break;
+        }
+
+        case 'estimate_goal_completion':
+          result = this.tools.estimateGoalCompletion(
+            (typedArgs as Parameters<typeof this.tools.estimateGoalCompletion>[0]) || {}
+          );
+          break;
+
+        case 'get_goal_contributions': {
+          const goalIdContrib = typedArgs?.goal_id;
+          if (typeof goalIdContrib !== 'string') {
+            throw new Error('Missing required parameter: goal_id');
+          }
+          result = this.tools.getGoalContributions({
+            goal_id: goalIdContrib,
+            start_month: typedArgs?.start_month as string | undefined,
+            end_month: typedArgs?.end_month as string | undefined,
+            limit: typedArgs?.limit as number | undefined,
+          });
+          break;
+        }
+
         case 'get_income':
           result = this.tools.getIncome(
             (typedArgs as Parameters<typeof this.tools.getIncome>[0]) || {}

@@ -101,6 +101,72 @@ export function getGoalProgress(goal: Goal, currentAmount?: number): number | un
 }
 
 /**
+ * Calculate estimated completion date based on historical progress.
+ *
+ * @param goal - The goal to estimate completion for
+ * @param currentAmount - Current amount saved
+ * @param averageMonthlyContribution - Average monthly contribution from history
+ * @returns Estimated completion date in YYYY-MM format, or undefined if cannot estimate
+ */
+export function estimateGoalCompletion(
+  goal: Goal,
+  currentAmount: number,
+  averageMonthlyContribution: number
+): string | undefined {
+  const target = goal.savings?.target_amount;
+  if (!target || currentAmount >= target) {
+    return undefined; // Already complete or no target
+  }
+
+  if (averageMonthlyContribution <= 0) {
+    return undefined; // No contributions or withdrawals
+  }
+
+  const remaining = target - currentAmount;
+  const monthsToComplete = Math.ceil(remaining / averageMonthlyContribution);
+
+  // Calculate target month
+  const today = new Date();
+  const targetDate = new Date(today.getFullYear(), today.getMonth() + monthsToComplete, 1);
+
+  const year = targetDate.getFullYear();
+  const month = String(targetDate.getMonth() + 1).padStart(2, '0');
+
+  return `${year}-${month}`;
+}
+
+/**
+ * Calculate progress velocity (amount per month).
+ *
+ * @param historicalAmounts - Array of amounts over time
+ * @returns Average monthly change, or undefined if insufficient data
+ */
+export function calculateProgressVelocity(
+  historicalAmounts: Array<{ month: string; amount: number }>
+): number | undefined {
+  if (historicalAmounts.length < 2) {
+    return undefined;
+  }
+
+  // Sort by month
+  const sorted = [...historicalAmounts].sort((a, b) => a.month.localeCompare(b.month));
+
+  // Calculate differences between consecutive months
+  const differences: number[] = [];
+  for (let i = 1; i < sorted.length; i++) {
+    const current = sorted[i];
+    const previous = sorted[i - 1];
+    if (current && previous) {
+      differences.push(current.amount - previous.amount);
+    }
+  }
+
+  // Return average difference
+  const sum = differences.reduce((acc, val) => acc + val, 0);
+  return sum / differences.length;
+}
+
+/**
  * Get the monthly contribution amount for a goal.
  */
 export function getGoalMonthlyContribution(goal: Goal): number | undefined {

@@ -15,6 +15,7 @@ import { Account, AccountSchema, getAccountDisplayName } from '../models/account
 import { Recurring, RecurringSchema } from '../models/recurring.js';
 import { Budget, BudgetSchema } from '../models/budget.js';
 import { Goal, GoalSchema } from '../models/goal.js';
+import { GoalHistory, GoalHistorySchema, DailySnapshot } from '../models/goal-history.js';
 
 /**
  * Find a field and extract its string value.
@@ -894,6 +895,186 @@ export function decodeGoals(dbPath: string): Goal[] {
       unique.push(goal);
     }
   }
+
+  return unique;
+}
+
+/**
+ * Decode financial goal history from the Copilot Money database.
+ *
+ * Goal history is stored in subcollection:
+ * /users/{user_id}/financial_goals/{goal_id}/financial_goal_history/{month}
+ *
+ * Each document represents a monthly snapshot with:
+ * - current_amount: Amount saved as of that month
+ * - daily_data: Nested object with daily snapshots
+ * - contributions: Array of deposits/withdrawals
+ *
+ * @param dbPath - Path to the LevelDB database directory
+ * @param goalId - Optional goal ID to filter history for a specific goal
+ * @returns Array of decoded GoalHistory objects
+ */
+export function decodeGoalHistory(dbPath: string, goalId?: string): GoalHistory[] {
+  const histories: GoalHistory[] = [];
+
+  // Return empty array if path doesn't exist (graceful degradation)
+  if (!fs.existsSync(dbPath)) {
+    return [];
+  }
+
+  const stat = fs.statSync(dbPath);
+  if (!stat.isDirectory()) {
+    return [];
+  }
+
+  // Configuration constants for record extraction
+  const RECORD_WINDOW_BEFORE = 500; // Bytes to search before path marker
+  const RECORD_WINDOW_AFTER = 5000; // Larger window for daily_data nested objects
+  const MIN_MONTH_LENGTH = 7; // YYYY-MM format
+
+  // Get all .ldb files
+  const files = fs.readdirSync(dbPath);
+  const ldbFiles = files.filter((f) => f.endsWith('.ldb')).map((f) => path.join(dbPath, f));
+
+  // Goal history is in subcollection: financial_goal_history
+  const historyPathMarker = Buffer.from('financial_goal_history/');
+
+  for (const filepath of ldbFiles) {
+    const data = fs.readFileSync(filepath);
+
+    if (!data.includes(historyPathMarker)) {
+      continue;
+    }
+
+    // Find history records by searching for the path marker
+    let searchPos = 0;
+    let idx = data.indexOf(historyPathMarker, searchPos);
+
+    while (idx !== -1) {
+      searchPos = idx + 1;
+
+      // Use a window around the path marker to capture all fields
+      const recordStart = Math.max(0, idx - RECORD_WINDOW_BEFORE);
+      const recordEnd = Math.min(data.length, idx + RECORD_WINDOW_AFTER);
+      const record = data.subarray(recordStart, recordEnd);
+
+      // Try to extract month (document ID) from the path
+      // Path format: /financial_goals/{goal_id}/financial_goal_history/{month}
+      const pathIdx = idx - recordStart;
+      const afterPath = record.subarray(pathIdx + historyPathMarker.length, pathIdx + 100);
+      const monthMatch = afterPath.toString('utf-8').match(/^(\d{4}-\d{2})/);
+      const month = monthMatch?.[1];
+
+      if (month && month.length >= MIN_MONTH_LENGTH) {
+        // Extract goal_id from before the history marker
+        const beforePath = record.subarray(0, pathIdx);
+        const goalIdMatch = beforePath
+          .toString('utf-8')
+          .match(/financial_goals\/([a-zA-Z0-9_-]+)\/financial_goal_history/);
+        const extractedGoalId = goalIdMatch?.[1];
+
+        // If filtering by goalId, skip if doesn't match
+        if (goalId && extractedGoalId !== goalId) {
+          idx = data.indexOf(historyPathMarker, searchPos);
+          continue;
+        }
+
+        // Extract user_id from the path (before /financial_goals/)
+        const userIdMatch = beforePath
+          .toString('utf-8')
+          .match(/\/users\/([a-zA-Z0-9_-]+)\/financial_goals/);
+        const userId = userIdMatch?.[1] ?? undefined;
+
+        // Only search AFTER the month ID to avoid picking up fields from adjacent documents
+        const afterMonthId = record.subarray(pathIdx + historyPathMarker.length + month.length);
+
+        // Extract top-level fields
+        const currentAmount = extractDoubleField(afterMonthId, fieldPattern('current_amount'));
+        const targetAmount = extractDoubleField(afterMonthId, fieldPattern('target_amount'));
+        const lastUpdated = extractStringValue(afterMonthId, fieldPattern('last_updated'));
+        const createdDate = extractStringValue(afterMonthId, fieldPattern('created_date'));
+
+        // Extract daily_data nested object
+        // This is more complex - daily_data is a map: { "YYYY-MM-DD": { amount: number, ... }, ... }
+        const dailyData: Record<string, DailySnapshot> = {};
+
+        // Look for date patterns in the record (YYYY-MM-DD format)
+        const datePattern = /(\d{4}-\d{2}-\d{2})/g;
+        const recordStr = afterMonthId.toString('utf-8', 0, Math.min(4000, afterMonthId.length));
+        let dateMatch;
+
+        while ((dateMatch = datePattern.exec(recordStr)) !== null) {
+          const date = dateMatch[1];
+          // Only include dates from this month
+          if (date && date.startsWith(month)) {
+            // Try to find amount associated with this date
+            const dateIdx = afterMonthId.indexOf(Buffer.from(date));
+            if (dateIdx !== -1) {
+              const afterDate = afterMonthId.subarray(dateIdx, dateIdx + 100);
+              const amount = extractDoubleValue(afterDate, 0, 50);
+              if (amount !== null) {
+                dailyData[date] = { amount, date };
+              }
+            }
+          }
+        }
+
+        // Build goal history object
+        const historyData: {
+          month: string;
+          goal_id: string;
+          user_id?: string;
+          current_amount?: number;
+          target_amount?: number;
+          daily_data?: Record<string, DailySnapshot>;
+          last_updated?: string;
+          created_date?: string;
+        } = {
+          month,
+          goal_id: extractedGoalId || 'unknown',
+        };
+
+        if (userId) historyData.user_id = userId;
+        if (currentAmount !== null) historyData.current_amount = currentAmount;
+        if (targetAmount !== null) historyData.target_amount = targetAmount;
+        if (Object.keys(dailyData).length > 0) historyData.daily_data = dailyData;
+        if (lastUpdated) historyData.last_updated = lastUpdated;
+        if (createdDate) historyData.created_date = createdDate;
+
+        try {
+          const history = GoalHistorySchema.parse(historyData);
+          histories.push(history);
+        } catch (error) {
+          // Skip invalid records - log in development for debugging
+          if (process.env.NODE_ENV === 'development' || process.env.DEBUG) {
+            console.warn('Skipping invalid goal history record:', error);
+          }
+        }
+      }
+
+      idx = data.indexOf(historyPathMarker, searchPos);
+    }
+  }
+
+  // Deduplicate by goal_id + month
+  const seen = new Set<string>();
+  const unique: GoalHistory[] = [];
+
+  for (const history of histories) {
+    const key = `${history.goal_id}:${history.month}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(history);
+    }
+  }
+
+  // Sort by goal_id and then by month (newest first)
+  unique.sort((a, b) => {
+    if (a.goal_id !== b.goal_id) {
+      return a.goal_id.localeCompare(b.goal_id);
+    }
+    return b.month.localeCompare(a.month); // Newest first
+  });
 
   return unique;
 }

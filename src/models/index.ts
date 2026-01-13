@@ -32,4 +32,22 @@ export {
   getGoalProgress,
   getGoalMonthlyContribution,
   isGoalActive,
+  estimateGoalCompletion,
+  calculateProgressVelocity,
 } from './goal.js';
+
+export {
+  GoalHistorySchema,
+  type GoalHistory,
+  DailySnapshotSchema,
+  type DailySnapshot,
+  GoalContributionSchema,
+  type GoalContribution,
+  getHistoryCurrentAmount,
+  getHistoryProgress,
+  getLatestDailySnapshot,
+  getDailySnapshotsSorted,
+  getTotalContributions,
+  getAverageDailyAmount,
+  getMonthStartEnd,
+} from './goal-history.js';
