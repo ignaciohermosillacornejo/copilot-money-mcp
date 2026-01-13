@@ -21,7 +21,14 @@ import { InvestmentSplit, InvestmentSplitSchema } from '../models/investment-spl
 import { Item, ItemSchema } from '../models/item.js';
 
 /**
- * Find a field and extract its string value.
+ * Find a field in a Firestore binary record and extract its string value.
+ *
+ * Searches for a field name pattern in the buffer, then looks for a string
+ * value tag (0x8a 0x01) followed by the length and UTF-8 encoded string content.
+ *
+ * @param data - The buffer containing the Firestore binary record
+ * @param fieldName - The field name pattern to search for (created by fieldPattern)
+ * @returns The extracted string value, or null if not found or invalid
  */
 function extractStringValue(data: Buffer, fieldName: Buffer): string | null {
   const idx = data.indexOf(fieldName);
@@ -57,7 +64,17 @@ function extractStringValue(data: Buffer, fieldName: Buffer): string | null {
 }
 
 /**
- * Extract a double value after a given position.
+ * Extract a double-precision floating point value from a buffer.
+ *
+ * Searches for a double value tag (0x19) within the specified range,
+ * then reads an 8-byte little-endian double following the tag.
+ * Values are validated to be within a reasonable range (-10M to 10M)
+ * and rounded to 2 decimal places.
+ *
+ * @param data - The buffer to search in
+ * @param startPos - The starting position to search from
+ * @param maxSearch - Maximum number of bytes to search (default: 20)
+ * @returns The extracted double value rounded to 2 decimals, or null if not found
  */
 function extractDoubleValue(data: Buffer, startPos: number, maxSearch: number = 20): number | null {
   const chunk = data.subarray(startPos, startPos + maxSearch);
@@ -80,7 +97,14 @@ function extractDoubleValue(data: Buffer, startPos: number, maxSearch: number = 
 }
 
 /**
- * Extract a double value for a named field.
+ * Extract a double value for a named field in a Firestore record.
+ *
+ * Combines field searching with double extraction - finds the field name
+ * pattern in the buffer, then extracts the double value that follows.
+ *
+ * @param data - The buffer containing the Firestore binary record
+ * @param fieldName - The field name pattern to search for (created by fieldPattern)
+ * @returns The extracted double value, or null if field not found or no valid double
  */
 function extractDoubleField(data: Buffer, fieldName: Buffer): number | null {
   const idx = data.indexOf(fieldName);
@@ -91,19 +115,34 @@ function extractDoubleField(data: Buffer, fieldName: Buffer): number | null {
 }
 
 /**
- * Create a length-prefixed field pattern for Firestore field names.
- * Format: \x0a{length}{fieldname}
+ * Create a length-prefixed field pattern for searching Firestore field names.
+ *
+ * Firestore stores field names with a specific binary format:
+ * - 0x0a prefix byte (field marker)
+ * - 1-byte length
+ * - UTF-8 encoded field name
+ *
+ * @param name - The field name to create a pattern for (e.g., "amount", "date")
+ * @returns A Buffer containing the binary pattern to search for
+ * @example
+ * fieldPattern('amount') // Returns Buffer with bytes [0x0a, 0x06, 'a', 'm', 'o', 'u', 'n', 't']
  */
 function fieldPattern(name: string): Buffer {
   return Buffer.from([0x0a, name.length, ...Buffer.from(name)]);
 }
 
 /**
- * Extract a boolean value for a field.
- * Supports two formats:
+ * Extract a boolean value for a named field in a Firestore record.
+ *
+ * Supports two binary formats used by Firestore:
  * 1. Firestore format: \x0a{len}fieldname\x12\x02\x08{value}
  * 2. Simple format: fieldname\x08{value}
- * where value is 0x00 (false) or 0x01 (true)
+ *
+ * Where value byte is 0x00 (false) or 0x01 (true).
+ *
+ * @param data - The buffer containing the Firestore binary record
+ * @param fieldName - The field name pattern to search for (created by fieldPattern)
+ * @returns true if value byte is non-zero, false if zero, null if field not found
  */
 function extractBooleanValue(data: Buffer, fieldName: Buffer): boolean | null {
   const idx = data.indexOf(fieldName);
