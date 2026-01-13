@@ -1046,9 +1046,59 @@ export class CopilotMoneyTools {
       // Check region field for non-US regions
       const isForeignRegion =
         txn.region &&
-        !['AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY', 'DC'].includes(
-          txn.region.toUpperCase()
-        );
+        ![
+          'AL',
+          'AK',
+          'AZ',
+          'AR',
+          'CA',
+          'CO',
+          'CT',
+          'DE',
+          'FL',
+          'GA',
+          'HI',
+          'ID',
+          'IL',
+          'IN',
+          'IA',
+          'KS',
+          'KY',
+          'LA',
+          'ME',
+          'MD',
+          'MA',
+          'MI',
+          'MN',
+          'MS',
+          'MO',
+          'MT',
+          'NE',
+          'NV',
+          'NH',
+          'NJ',
+          'NM',
+          'NY',
+          'NC',
+          'ND',
+          'OH',
+          'OK',
+          'OR',
+          'PA',
+          'RI',
+          'SC',
+          'SD',
+          'TN',
+          'TX',
+          'UT',
+          'VT',
+          'VA',
+          'WA',
+          'WV',
+          'WI',
+          'WY',
+          'DC',
+        ].includes(txn.region.toUpperCase());
 
       return (
         isForeignCountry ||
@@ -1643,11 +1693,13 @@ export class CopilotMoneyTools {
 
               // Collect all cities mentioned in trip
               const cities = tripTxns
-                .map((t) => (t as typeof tripTxns[0] & { inferred_city?: string }).inferred_city || t.city)
+                .map(
+                  (t) =>
+                    (t as (typeof tripTxns)[0] & { inferred_city?: string }).inferred_city || t.city
+                )
                 .filter(Boolean);
               const uniqueCities = [...new Set(cities)];
-              const locationStr =
-                uniqueCities.length > 0 ? uniqueCities.join(', ') : country;
+              const locationStr = uniqueCities.length > 0 ? uniqueCities.join(', ') : country;
 
               trips.push({
                 location: locationStr,
@@ -1690,7 +1742,10 @@ export class CopilotMoneyTools {
 
           // Collect all cities mentioned in trip
           const cities = tripTxns
-            .map((t) => (t as typeof tripTxns[0] & { inferred_city?: string }).inferred_city || t.city)
+            .map(
+              (t) =>
+                (t as (typeof tripTxns)[0] & { inferred_city?: string }).inferred_city || t.city
+            )
             .filter(Boolean);
           const uniqueCities = [...new Set(cities)];
           const locationStr = uniqueCities.length > 0 ? uniqueCities.join(', ') : country;
@@ -2451,7 +2506,11 @@ export class CopilotMoneyTools {
     // ===== CATEGORY ISSUES =====
     const unresolvedCategories = new Map<
       string,
-      { count: number; total: number; samples: Array<{ date: string; merchant: string; amount: number }> }
+      {
+        count: number;
+        total: number;
+        samples: Array<{ date: string; merchant: string; amount: number }>;
+      }
     >();
 
     for (const txn of allTransactions) {
@@ -2653,7 +2712,9 @@ export class CopilotMoneyTools {
 
       // Pharmacies as Office Supplies or Dance & Music
       if (
-        (merchant.includes('PHARMAC') || merchant.includes('FARMACIA') || merchant.includes('CVS')) &&
+        (merchant.includes('PHARMAC') ||
+          merchant.includes('FARMACIA') ||
+          merchant.includes('CVS')) &&
         (categoryName.includes('Office Supplies') || categoryName.includes('Dance'))
       ) {
         suspiciousCategorizations.push({
