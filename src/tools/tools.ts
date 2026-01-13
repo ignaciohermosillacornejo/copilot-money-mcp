@@ -823,8 +823,7 @@ export class CopilotMoneyTools {
             total_spending: roundAmount(data.total),
             transaction_count: data.count,
             average_transaction: data.count > 0 ? roundAmount(data.total / data.count) : 0,
-            percentage:
-              totalSpending > 0 ? Math.round((data.total / totalSpending) * 10000) / 100 : 0,
+            percentage: totalSpending > 0 ? roundAmount((data.total / totalSpending) * 100) : 0,
           };
         });
 
@@ -1402,7 +1401,7 @@ export class CopilotMoneyTools {
             target_amount: targetAmount,
             current_amount: roundAmount(currentAmount),
             progress_percent:
-              targetAmount > 0 ? Math.round((currentAmount / targetAmount) * 10000) / 100 : 0,
+              targetAmount > 0 ? roundAmount((currentAmount / targetAmount) * 100) : 0,
             avg_monthly_contribution: roundAmount(avgMonthlyContribution),
             months_to_complete: monthsToComplete,
             scenarios: {
@@ -1555,7 +1554,7 @@ export class CopilotMoneyTools {
         result.progress = {
           current_amount: roundAmount(currentAmount),
           progress_percent:
-            targetAmount > 0 ? Math.round((currentAmount / targetAmount) * 10000) / 100 : 0,
+            targetAmount > 0 ? roundAmount((currentAmount / targetAmount) * 100) : 0,
         };
       }
 
@@ -3795,7 +3794,7 @@ export class CopilotMoneyTools {
         transaction_count: stats.count,
         average_transaction: stats.count > 0 ? roundAmount(stats.total / stats.count) : 0,
         percentage_of_total:
-          totalSpending > 0 ? Math.round((stats.total / totalSpending) * 10000) / 100 : 0,
+          totalSpending > 0 ? roundAmount((stats.total / totalSpending) * 100) : 0,
       }))
       .sort((a, b) => a.day_number - b.day_number);
 
@@ -4672,7 +4671,7 @@ export class CopilotMoneyTools {
 
     const changePercent =
       previousPeriodTotal > 0
-        ? Math.round(((totalSpending - previousPeriodTotal) / previousPeriodTotal) * 10000) / 100
+        ? roundAmount(((totalSpending - previousPeriodTotal) / previousPeriodTotal) * 100)
         : 0;
 
     // Are we on track? (spending less than prorated amount from last period)
@@ -5170,11 +5169,11 @@ export class CopilotMoneyTools {
     // Calculate changes
     const spendingChange = p2Data.spending - p1Data.spending;
     const spendingChangePercent =
-      p1Data.spending > 0 ? Math.round((spendingChange / p1Data.spending) * 10000) / 100 : 0;
+      p1Data.spending > 0 ? roundAmount((spendingChange / p1Data.spending) * 100) : 0;
 
     const incomeChange = p2Data.income - p1Data.income;
     const incomeChangePercent =
-      p1Data.income > 0 ? Math.round((incomeChange / p1Data.income) * 10000) / 100 : 0;
+      p1Data.income > 0 ? roundAmount((incomeChange / p1Data.income) * 100) : 0;
 
     // Compare categories
     const allCategories = new Set([...p1Data.byCategory.keys(), ...p2Data.byCategory.keys()]);
@@ -5184,7 +5183,7 @@ export class CopilotMoneyTools {
         const p1Spending = p1Data.byCategory.get(categoryId) || 0;
         const p2Spending = p2Data.byCategory.get(categoryId) || 0;
         const change = p2Spending - p1Spending;
-        const changePercent = p1Spending > 0 ? Math.round((change / p1Spending) * 10000) / 100 : 0;
+        const changePercent = p1Spending > 0 ? roundAmount((change / p1Spending) * 100) : 0;
 
         return {
           category_id: categoryId,
@@ -5221,9 +5220,9 @@ export class CopilotMoneyTools {
         spending_change_percent: spendingChangePercent,
         income_change: roundAmount(incomeChange),
         income_change_percent: incomeChangePercent,
-        net_change:
-          Math.round((p2Data.income - p2Data.spending - (p1Data.income - p1Data.spending)) * 100) /
-          100,
+        net_change: roundAmount(
+          p2Data.income - p2Data.spending - (p1Data.income - p1Data.spending)
+        ),
       },
       category_comparison: categoryComparison.slice(0, 20),
     };
@@ -5425,7 +5424,7 @@ export class CopilotMoneyTools {
           latestPrice && earliestPrice ? roundAmount(latestPrice - earliestPrice) : undefined,
         price_change_percent:
           latestPrice && earliestPrice && earliestPrice > 0
-            ? Math.round(((latestPrice - earliestPrice) / earliestPrice) * 10000) / 100
+            ? roundAmount(((latestPrice - earliestPrice) / earliestPrice) * 100)
             : undefined,
       };
     }
@@ -7226,9 +7225,7 @@ export class CopilotMoneyTools {
       if (startPrice !== null && endPrice !== null) {
         priceChange = roundAmount(endPrice - startPrice);
         percentChange =
-          startPrice !== 0
-            ? Math.round(((endPrice - startPrice) / startPrice) * 10000) / 100
-            : null;
+          startPrice !== 0 ? roundAmount(((endPrice - startPrice) / startPrice) * 100) : null;
 
         if (percentChange !== null) {
           if (percentChange > 0.5) trend = 'up';
@@ -9074,11 +9071,11 @@ export class CopilotMoneyTools {
 
     const spendingChangePercent =
       comparePeriod.total_spending > 0
-        ? Math.round((spendingChange / comparePeriod.total_spending) * 10000) / 100
+        ? roundAmount((spendingChange / comparePeriod.total_spending) * 100)
         : null;
     const incomeChangePercent =
       comparePeriod.total_income > 0
-        ? Math.round((incomeChange / comparePeriod.total_income) * 10000) / 100
+        ? roundAmount((incomeChange / comparePeriod.total_income) * 100)
         : null;
 
     // Category comparison
@@ -9111,7 +9108,7 @@ export class CopilotMoneyTools {
       const currentAmt = currentByCategory.get(catId) || 0;
       const compareAmt = compareByCategory.get(catId) || 0;
       const changeAmt = currentAmt - compareAmt;
-      const changePct = compareAmt > 0 ? Math.round((changeAmt / compareAmt) * 10000) / 100 : null;
+      const changePct = compareAmt > 0 ? roundAmount((changeAmt / compareAmt) * 100) : null;
 
       categoryComparison.push({
         category_id: catId,
