@@ -5315,6 +5315,633 @@ export class CopilotMoneyTools {
       },
     };
   }
+
+  // ============================================
+  // PHASE 12.3: INVESTMENT ANALYTICS TOOLS
+  // ============================================
+
+  /**
+   * Get portfolio allocation across investment accounts and securities.
+   *
+   * Shows how investments are distributed across different accounts, asset types,
+   * and individual securities. Useful for understanding diversification.
+   *
+   * @param options - Filter options
+   * @returns Object with portfolio allocation data
+   */
+  getPortfolioAllocation(options: { include_prices?: boolean } = {}): {
+    total_value: number;
+    account_count: number;
+    by_account: Array<{
+      account_id: string;
+      account_name: string;
+      institution: string;
+      balance: number;
+      percentage: number;
+    }>;
+    by_security: Array<{
+      ticker_symbol: string;
+      latest_price?: number;
+      price_date?: string;
+    }>;
+    summary: {
+      largest_account: string | null;
+      largest_account_percentage: number;
+      security_count: number;
+    };
+  } {
+    const { include_prices = true } = options;
+
+    // Get investment accounts
+    const accounts = this.db.getAccounts();
+    const investmentAccounts = accounts.filter(
+      (a) =>
+        a.account_type?.toLowerCase() === 'investment' ||
+        a.subtype?.toLowerCase().includes('brokerage') ||
+        a.subtype?.toLowerCase().includes('401k') ||
+        a.subtype?.toLowerCase().includes('ira') ||
+        a.subtype?.toLowerCase().includes('roth')
+    );
+
+    // Calculate totals
+    const totalValue = investmentAccounts.reduce((sum, a) => sum + (a.current_balance || 0), 0);
+
+    // Build account allocation
+    const byAccount = investmentAccounts.map((a) => ({
+      account_id: a.account_id,
+      account_name: a.name || a.official_name || 'Unknown',
+      institution: a.institution_name || 'Unknown',
+      balance: Math.round((a.current_balance || 0) * 100) / 100,
+      percentage:
+        totalValue > 0 ? Math.round(((a.current_balance || 0) / totalValue) * 1000) / 10 : 0,
+    }));
+
+    // Sort by balance descending
+    byAccount.sort((a, b) => b.balance - a.balance);
+
+    // Get securities from investment prices
+    let bySecurity: Array<{
+      ticker_symbol: string;
+      latest_price?: number;
+      price_date?: string;
+    }> = [];
+
+    if (include_prices) {
+      const prices = this.db.getInvestmentPrices({});
+
+      // Group by ticker and get latest price
+      const latestByTicker = new Map<string, { ticker: string; price?: number; date?: string }>();
+
+      for (const p of prices) {
+        const ticker = p.ticker_symbol || p.investment_id;
+        const existing = latestByTicker.get(ticker);
+        const priceDate = getPriceDate(p);
+        const existingDate = existing?.date;
+
+        if (!existing || (priceDate && existingDate && priceDate > existingDate)) {
+          latestByTicker.set(ticker, {
+            ticker,
+            price: getBestPrice(p),
+            date: priceDate,
+          });
+        }
+      }
+
+      bySecurity = Array.from(latestByTicker.values())
+        .map((s) => ({
+          ticker_symbol: s.ticker,
+          latest_price: s.price ? Math.round(s.price * 100) / 100 : undefined,
+          price_date: s.date,
+        }))
+        .sort((a, b) => a.ticker_symbol.localeCompare(b.ticker_symbol));
+    }
+
+    // Summary
+    const largestAccount = byAccount[0] ?? null;
+
+    return {
+      total_value: Math.round(totalValue * 100) / 100,
+      account_count: investmentAccounts.length,
+      by_account: byAccount,
+      by_security: bySecurity,
+      summary: {
+        largest_account: largestAccount?.account_name ?? null,
+        largest_account_percentage: largestAccount?.percentage ?? 0,
+        security_count: bySecurity.length,
+      },
+    };
+  }
+
+  /**
+   * Get investment performance metrics.
+   *
+   * Calculates performance based on price history including returns,
+   * highs/lows, and volatility indicators.
+   *
+   * @param options - Filter options
+   * @returns Object with investment performance data
+   */
+  getInvestmentPerformance(
+    options: {
+      ticker_symbol?: string;
+      period?: string;
+      start_date?: string;
+      end_date?: string;
+    } = {}
+  ): {
+    period: {
+      start_date: string;
+      end_date: string;
+    };
+    performance: Array<{
+      ticker_symbol: string;
+      start_price: number | null;
+      end_price: number | null;
+      high_price: number | null;
+      low_price: number | null;
+      price_change: number | null;
+      percent_change: number | null;
+      data_points: number;
+      trend: 'up' | 'down' | 'flat' | 'unknown';
+    }>;
+    summary: {
+      total_securities: number;
+      gainers: number;
+      losers: number;
+      best_performer: string | null;
+      worst_performer: string | null;
+      best_return: number | null;
+      worst_return: number | null;
+    };
+  } {
+    const { ticker_symbol, period = 'last_30_days' } = options;
+    let { start_date, end_date } = options;
+
+    // Parse period to get date range
+    if (!start_date || !end_date) {
+      [start_date, end_date] = parsePeriod(period);
+    }
+
+    // Get price data
+    const prices = this.db.getInvestmentPrices({
+      tickerSymbol: ticker_symbol,
+      startDate: start_date,
+      endDate: end_date,
+    });
+
+    // Group by ticker
+    const byTicker = new Map<string, Array<{ date: string; price: number }>>();
+
+    for (const p of prices) {
+      const ticker = p.ticker_symbol || p.investment_id;
+      const price = getBestPrice(p);
+      const date = getPriceDate(p);
+
+      if (price && date) {
+        if (!byTicker.has(ticker)) {
+          byTicker.set(ticker, []);
+        }
+        byTicker.get(ticker)!.push({ date, price });
+      }
+    }
+
+    // Calculate performance for each ticker
+    const performance: Array<{
+      ticker_symbol: string;
+      start_price: number | null;
+      end_price: number | null;
+      high_price: number | null;
+      low_price: number | null;
+      price_change: number | null;
+      percent_change: number | null;
+      data_points: number;
+      trend: 'up' | 'down' | 'flat' | 'unknown';
+    }> = [];
+
+    for (const [ticker, priceData] of byTicker) {
+      // Sort by date
+      priceData.sort((a, b) => a.date.localeCompare(b.date));
+
+      const dataPoints = priceData.length;
+      if (dataPoints === 0) continue;
+
+      const startPrice = priceData[0]?.price ?? null;
+      const endPrice = priceData[dataPoints - 1]?.price ?? null;
+      const highPrice = Math.max(...priceData.map((p) => p.price));
+      const lowPrice = Math.min(...priceData.map((p) => p.price));
+
+      let priceChange: number | null = null;
+      let percentChange: number | null = null;
+      let trend: 'up' | 'down' | 'flat' | 'unknown' = 'unknown';
+
+      if (startPrice !== null && endPrice !== null) {
+        priceChange = Math.round((endPrice - startPrice) * 100) / 100;
+        percentChange =
+          startPrice !== 0
+            ? Math.round(((endPrice - startPrice) / startPrice) * 10000) / 100
+            : null;
+
+        if (percentChange !== null) {
+          if (percentChange > 0.5) trend = 'up';
+          else if (percentChange < -0.5) trend = 'down';
+          else trend = 'flat';
+        }
+      }
+
+      performance.push({
+        ticker_symbol: ticker,
+        start_price: startPrice ? Math.round(startPrice * 100) / 100 : null,
+        end_price: endPrice ? Math.round(endPrice * 100) / 100 : null,
+        high_price: Math.round(highPrice * 100) / 100,
+        low_price: Math.round(lowPrice * 100) / 100,
+        price_change: priceChange,
+        percent_change: percentChange,
+        data_points: dataPoints,
+        trend,
+      });
+    }
+
+    // Sort by percent change descending
+    performance.sort((a, b) => (b.percent_change ?? -Infinity) - (a.percent_change ?? -Infinity));
+
+    // Summary
+    const gainers = performance.filter((p) => (p.percent_change ?? 0) > 0).length;
+    const losers = performance.filter((p) => (p.percent_change ?? 0) < 0).length;
+    const bestPerformer = performance[0] ?? null;
+    const worstPerformer = performance[performance.length - 1] ?? null;
+
+    return {
+      period: {
+        start_date: start_date,
+        end_date: end_date,
+      },
+      performance,
+      summary: {
+        total_securities: performance.length,
+        gainers,
+        losers,
+        best_performer: bestPerformer?.ticker_symbol ?? null,
+        worst_performer: worstPerformer?.ticker_symbol ?? null,
+        best_return: bestPerformer?.percent_change ?? null,
+        worst_return: worstPerformer?.percent_change ?? null,
+      },
+    };
+  }
+
+  /**
+   * Get dividend income from investments.
+   *
+   * Tracks dividend payments received from investment accounts.
+   *
+   * @param options - Filter options
+   * @returns Object with dividend income data
+   */
+  getDividendIncome(
+    options: {
+      period?: string;
+      start_date?: string;
+      end_date?: string;
+      account_id?: string;
+    } = {}
+  ): {
+    period: {
+      start_date: string;
+      end_date: string;
+    };
+    total_dividends: number;
+    dividend_count: number;
+    dividends: Array<{
+      transaction_id: string;
+      date: string;
+      amount: number;
+      name: string;
+      account_id?: string;
+    }>;
+    by_month: Array<{
+      month: string;
+      amount: number;
+      count: number;
+    }>;
+    by_source: Array<{
+      source: string;
+      amount: number;
+      count: number;
+    }>;
+    summary: {
+      average_dividend: number;
+      largest_dividend: number;
+      monthly_average: number;
+    };
+  } {
+    const { period = 'ytd', account_id } = options;
+    let { start_date, end_date } = options;
+
+    // Parse period to get date range
+    if (!start_date || !end_date) {
+      [start_date, end_date] = parsePeriod(period);
+    }
+
+    // Dividend-related category IDs
+    const dividendCategories = new Set(['dividend', 'income_dividends', 'capital_gain']);
+
+    // Get transactions that are dividend income
+    const transactions = this.db.getTransactions();
+    const dividends = transactions.filter((t) => {
+      // Date filter
+      if (t.date < start_date || t.date > end_date) return false;
+
+      // Account filter
+      if (account_id && t.account_id !== account_id) return false;
+
+      // Must be income (negative amount) or match dividend category
+      const categoryId = t.category_id?.toLowerCase() || '';
+      const isDividendCategory = dividendCategories.has(categoryId);
+      const hasDividendKeyword =
+        t.name?.toLowerCase().includes('dividend') ||
+        t.name?.toLowerCase().includes('div ') ||
+        t.original_name?.toLowerCase().includes('dividend');
+
+      return isDividendCategory || (t.amount < 0 && hasDividendKeyword);
+    });
+
+    // Calculate totals (dividends are negative amounts in the system)
+    const totalDividends = Math.abs(dividends.reduce((sum, t) => sum + t.amount, 0));
+
+    // Format dividends list
+    const formattedDividends = dividends.map((t) => ({
+      transaction_id: t.transaction_id,
+      date: t.date,
+      amount: Math.abs(Math.round(t.amount * 100) / 100),
+      name: t.name || t.original_name || 'Unknown',
+      account_id: t.account_id,
+    }));
+
+    // Sort by date descending
+    formattedDividends.sort((a, b) => b.date.localeCompare(a.date));
+
+    // Group by month
+    const monthlyMap = new Map<string, { amount: number; count: number }>();
+    for (const d of formattedDividends) {
+      const month = d.date.substring(0, 7);
+      const existing = monthlyMap.get(month) || { amount: 0, count: 0 };
+      existing.amount += d.amount;
+      existing.count += 1;
+      monthlyMap.set(month, existing);
+    }
+
+    const byMonth = Array.from(monthlyMap.entries())
+      .map(([month, data]) => ({
+        month,
+        amount: Math.round(data.amount * 100) / 100,
+        count: data.count,
+      }))
+      .sort((a, b) => b.month.localeCompare(a.month));
+
+    // Group by source (merchant name)
+    const sourceMap = new Map<string, { amount: number; count: number }>();
+    for (const d of formattedDividends) {
+      const source = d.name;
+      const existing = sourceMap.get(source) || { amount: 0, count: 0 };
+      existing.amount += d.amount;
+      existing.count += 1;
+      sourceMap.set(source, existing);
+    }
+
+    const bySource = Array.from(sourceMap.entries())
+      .map(([source, data]) => ({
+        source,
+        amount: Math.round(data.amount * 100) / 100,
+        count: data.count,
+      }))
+      .sort((a, b) => b.amount - a.amount);
+
+    // Summary calculations
+    const avgDividend =
+      formattedDividends.length > 0
+        ? Math.round((totalDividends / formattedDividends.length) * 100) / 100
+        : 0;
+    const largestDividend =
+      formattedDividends.length > 0 ? Math.max(...formattedDividends.map((d) => d.amount)) : 0;
+    const monthlyAvg =
+      byMonth.length > 0 ? Math.round((totalDividends / byMonth.length) * 100) / 100 : 0;
+
+    return {
+      period: {
+        start_date: start_date,
+        end_date: end_date,
+      },
+      total_dividends: Math.round(totalDividends * 100) / 100,
+      dividend_count: formattedDividends.length,
+      dividends: formattedDividends,
+      by_month: byMonth,
+      by_source: bySource,
+      summary: {
+        average_dividend: avgDividend,
+        largest_dividend: Math.round(largestDividend * 100) / 100,
+        monthly_average: monthlyAvg,
+      },
+    };
+  }
+
+  /**
+   * Get investment-related fees.
+   *
+   * Tracks fees associated with investment accounts like management fees,
+   * trading commissions, expense ratios, etc.
+   *
+   * @param options - Filter options
+   * @returns Object with investment fee data
+   */
+  getInvestmentFees(
+    options: {
+      period?: string;
+      start_date?: string;
+      end_date?: string;
+      account_id?: string;
+    } = {}
+  ): {
+    period: {
+      start_date: string;
+      end_date: string;
+    };
+    total_fees: number;
+    fee_count: number;
+    fees: Array<{
+      transaction_id: string;
+      date: string;
+      amount: number;
+      name: string;
+      fee_type: string;
+      account_id?: string;
+    }>;
+    by_type: Array<{
+      fee_type: string;
+      amount: number;
+      count: number;
+    }>;
+    by_month: Array<{
+      month: string;
+      amount: number;
+      count: number;
+    }>;
+    summary: {
+      average_fee: number;
+      largest_fee: number;
+      monthly_average: number;
+    };
+  } {
+    const { period = 'ytd', account_id } = options;
+    let { start_date, end_date } = options;
+
+    // Parse period to get date range
+    if (!start_date || !end_date) {
+      [start_date, end_date] = parsePeriod(period);
+    }
+
+    // Get investment accounts
+    const accounts = this.db.getAccounts();
+    const investmentAccountIds = new Set(
+      accounts
+        .filter(
+          (a) =>
+            a.account_type?.toLowerCase() === 'investment' ||
+            a.subtype?.toLowerCase().includes('brokerage') ||
+            a.subtype?.toLowerCase().includes('401k') ||
+            a.subtype?.toLowerCase().includes('ira')
+        )
+        .map((a) => a.account_id)
+    );
+
+    // Fee-related keywords
+    const feeKeywords = [
+      'fee',
+      'commission',
+      'expense',
+      'management',
+      'advisory',
+      'custodian',
+      'trading',
+      'margin',
+    ];
+
+    // Get transactions that are investment fees
+    const transactions = this.db.getTransactions();
+    const fees = transactions.filter((t) => {
+      // Date filter
+      if (t.date < start_date || t.date > end_date) return false;
+
+      // Account filter - if specified use it, otherwise filter by investment accounts
+      if (account_id) {
+        if (t.account_id !== account_id) return false;
+      } else {
+        // Only include transactions from investment accounts
+        if (!t.account_id || !investmentAccountIds.has(t.account_id)) return false;
+      }
+
+      // Must be an expense (positive amount) and match fee keywords
+      if (t.amount <= 0) return false;
+
+      const name = (t.name || t.original_name || '').toLowerCase();
+      return feeKeywords.some((keyword) => name.includes(keyword));
+    });
+
+    // Calculate totals
+    const totalFees = fees.reduce((sum, t) => sum + t.amount, 0);
+
+    // Classify fee type
+    const classifyFeeType = (name: string): string => {
+      const lowerName = name.toLowerCase();
+      if (lowerName.includes('management') || lowerName.includes('advisory')) {
+        return 'Management Fee';
+      }
+      if (lowerName.includes('commission') || lowerName.includes('trading')) {
+        return 'Trading Commission';
+      }
+      if (lowerName.includes('expense ratio') || lowerName.includes('er ')) {
+        return 'Expense Ratio';
+      }
+      if (lowerName.includes('custodian')) {
+        return 'Custodian Fee';
+      }
+      if (lowerName.includes('margin')) {
+        return 'Margin Interest';
+      }
+      return 'Other Investment Fee';
+    };
+
+    // Format fees list
+    const formattedFees = fees.map((t) => ({
+      transaction_id: t.transaction_id,
+      date: t.date,
+      amount: Math.round(t.amount * 100) / 100,
+      name: t.name || t.original_name || 'Unknown',
+      fee_type: classifyFeeType(t.name || t.original_name || ''),
+      account_id: t.account_id,
+    }));
+
+    // Sort by date descending
+    formattedFees.sort((a, b) => b.date.localeCompare(a.date));
+
+    // Group by fee type
+    const typeMap = new Map<string, { amount: number; count: number }>();
+    for (const f of formattedFees) {
+      const existing = typeMap.get(f.fee_type) || { amount: 0, count: 0 };
+      existing.amount += f.amount;
+      existing.count += 1;
+      typeMap.set(f.fee_type, existing);
+    }
+
+    const byType = Array.from(typeMap.entries())
+      .map(([feeType, data]) => ({
+        fee_type: feeType,
+        amount: Math.round(data.amount * 100) / 100,
+        count: data.count,
+      }))
+      .sort((a, b) => b.amount - a.amount);
+
+    // Group by month
+    const monthlyMap = new Map<string, { amount: number; count: number }>();
+    for (const f of formattedFees) {
+      const month = f.date.substring(0, 7);
+      const existing = monthlyMap.get(month) || { amount: 0, count: 0 };
+      existing.amount += f.amount;
+      existing.count += 1;
+      monthlyMap.set(month, existing);
+    }
+
+    const byMonth = Array.from(monthlyMap.entries())
+      .map(([month, data]) => ({
+        month,
+        amount: Math.round(data.amount * 100) / 100,
+        count: data.count,
+      }))
+      .sort((a, b) => b.month.localeCompare(a.month));
+
+    // Summary calculations
+    const avgFee =
+      formattedFees.length > 0 ? Math.round((totalFees / formattedFees.length) * 100) / 100 : 0;
+    const largestFee =
+      formattedFees.length > 0 ? Math.max(...formattedFees.map((f) => f.amount)) : 0;
+    const monthlyAvg =
+      byMonth.length > 0 ? Math.round((totalFees / byMonth.length) * 100) / 100 : 0;
+
+    return {
+      period: {
+        start_date: start_date,
+        end_date: end_date,
+      },
+      total_fees: Math.round(totalFees * 100) / 100,
+      fee_count: formattedFees.length,
+      fees: formattedFees,
+      by_type: byType,
+      by_month: byMonth,
+      summary: {
+        average_fee: avgFee,
+        largest_fee: Math.round(largestFee * 100) / 100,
+        monthly_average: monthlyAvg,
+      },
+    };
+  }
 }
 
 /**
@@ -6717,6 +7344,126 @@ export function createToolSchemas(): ToolSchema[] {
           month: {
             type: 'string',
             description: 'Month to check (YYYY-MM format, default: current month)',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+
+    // ---- Investment Analytics ----
+    {
+      name: 'get_portfolio_allocation',
+      description:
+        'Get portfolio allocation across investment accounts and securities. ' +
+        'Shows how investments are distributed by account (with balances and percentages) ' +
+        'and lists all securities with current prices. Useful for understanding diversification ' +
+        'and identifying concentration in specific accounts.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          include_prices: {
+            type: 'boolean',
+            description: 'Include current security prices (default: true)',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_investment_performance',
+      description:
+        'Get investment performance metrics over a time period. ' +
+        'Shows returns, price changes, highs/lows, and trend direction for each security. ' +
+        'Identifies best and worst performers. Useful for analyzing investment returns.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          ticker_symbol: {
+            type: 'string',
+            description: 'Filter by specific ticker symbol (e.g., "AAPL")',
+          },
+          period: {
+            type: 'string',
+            description:
+              'Named period: this_month, last_month, last_30_days, last_90_days, ytd (default: last_30_days)',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Start date (YYYY-MM-DD)',
+          },
+          end_date: {
+            type: 'string',
+            description: 'End date (YYYY-MM-DD)',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_dividend_income',
+      description:
+        'Get dividend income from investments. ' +
+        'Tracks dividend payments received, grouped by month and source. ' +
+        'Shows total dividends, average payment, and largest dividend. ' +
+        'Useful for income investors tracking dividend streams.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          period: {
+            type: 'string',
+            description:
+              'Named period: this_month, last_month, last_30_days, ytd, this_year (default: ytd)',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Start date (YYYY-MM-DD)',
+          },
+          end_date: {
+            type: 'string',
+            description: 'End date (YYYY-MM-DD)',
+          },
+          account_id: {
+            type: 'string',
+            description: 'Filter by specific account ID',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_investment_fees',
+      description:
+        'Get investment-related fees (management fees, trading commissions, etc.). ' +
+        'Tracks fees from investment accounts, grouped by type and month. ' +
+        'Shows total fees, average fee, and monthly fee average. ' +
+        'Useful for understanding the cost of investing.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          period: {
+            type: 'string',
+            description:
+              'Named period: this_month, last_month, last_30_days, ytd, this_year (default: ytd)',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Start date (YYYY-MM-DD)',
+          },
+          end_date: {
+            type: 'string',
+            description: 'End date (YYYY-MM-DD)',
+          },
+          account_id: {
+            type: 'string',
+            description: 'Filter by specific account ID',
           },
         },
       },

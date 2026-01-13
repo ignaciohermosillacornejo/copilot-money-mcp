@@ -414,6 +414,34 @@ export class CopilotMoneyServer {
           );
           break;
 
+        // ============================================
+        // PHASE 12.3: INVESTMENT ANALYTICS TOOLS
+        // ============================================
+
+        case 'get_portfolio_allocation':
+          result = this.tools.getPortfolioAllocation(
+            (typedArgs as Parameters<typeof this.tools.getPortfolioAllocation>[0]) || {}
+          );
+          break;
+
+        case 'get_investment_performance':
+          result = this.tools.getInvestmentPerformance(
+            (typedArgs as Parameters<typeof this.tools.getInvestmentPerformance>[0]) || {}
+          );
+          break;
+
+        case 'get_dividend_income':
+          result = this.tools.getDividendIncome(
+            (typedArgs as Parameters<typeof this.tools.getDividendIncome>[0]) || {}
+          );
+          break;
+
+        case 'get_investment_fees':
+          result = this.tools.getInvestmentFees(
+            (typedArgs as Parameters<typeof this.tools.getInvestmentFees>[0]) || {}
+          );
+          break;
+
         default:
           return {
             content: [
