@@ -81,6 +81,8 @@ Thumbs.db
 # Project specific
 # Demo database contains real financial data - do NOT commit
 tests/fixtures/demo_database/
+# Generated test fixtures
+tests/fixtures/mixed-files-db/
 
 # LevelDB files (except synthetic test fixtures)
 *.ldb
