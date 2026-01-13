@@ -54,6 +54,8 @@
     "typecheck": "tsc --noEmit",
     "check": "bun run typecheck && bun run lint && bun run format:check && bun run test",
     "sync-manifest": "bun run scripts/sync-manifest.ts",
+    "audit-reviews": "bun run scripts/audit-pr-reviews.ts",
+    "audit-reviews:dry": "bun run scripts/audit-pr-reviews.ts --dry-run",
     "fix": "bun run lint:fix && bun run format",
     "clean": "rm -rf dist coverage .bun-build",
     "pack:mcpb": "bun run build:bundle && bun run build && bunx @anthropic-ai/mcpb pack",
