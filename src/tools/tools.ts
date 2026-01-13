@@ -7483,6 +7483,649 @@ export class CopilotMoneyTools {
       },
     };
   }
+
+  // ============================================
+  // PHASE 12.6: SEARCH & DISCOVERY TOOLS
+  // ============================================
+
+  /**
+   * Advanced search with complex multi-criteria filtering.
+   *
+   * Combines multiple filters for precise transaction discovery.
+   *
+   * @param options - Search criteria
+   * @returns Object with matching transactions
+   */
+  getAdvancedSearch(
+    options: {
+      query?: string;
+      min_amount?: number;
+      max_amount?: number;
+      start_date?: string;
+      end_date?: string;
+      category?: string;
+      account_id?: string;
+      merchant?: string;
+      is_income?: boolean;
+      is_expense?: boolean;
+      exclude_transfers?: boolean;
+      city?: string;
+      payment_method?: string;
+      limit?: number;
+    } = {}
+  ): {
+    count: number;
+    filters_applied: string[];
+    transactions: Array<{
+      transaction_id: string;
+      date: string;
+      amount: number;
+      name: string;
+      category_id?: string;
+      category_name: string;
+      account_id?: string;
+      city?: string;
+      match_score: number;
+    }>;
+    summary: {
+      total_amount: number;
+      average_amount: number;
+      date_range: {
+        earliest: string | null;
+        latest: string | null;
+      };
+    };
+  } {
+    const {
+      query,
+      min_amount,
+      max_amount,
+      start_date,
+      end_date,
+      category,
+      account_id,
+      merchant,
+      is_income,
+      is_expense,
+      exclude_transfers = true,
+      city,
+      payment_method,
+      limit = 100,
+    } = options;
+
+    const transactions = this.db.getTransactions();
+    const filtersApplied: string[] = [];
+
+    // Apply filters
+    const results = transactions.filter((t) => {
+      // Date filter
+      if (start_date && t.date < start_date) return false;
+      if (end_date && t.date > end_date) return false;
+
+      // Amount filter
+      const absAmount = Math.abs(t.amount);
+      if (min_amount !== undefined && absAmount < min_amount) return false;
+      if (max_amount !== undefined && absAmount > max_amount) return false;
+
+      // Account filter
+      if (account_id && t.account_id !== account_id) return false;
+
+      // Category filter
+      if (category) {
+        const catMatch = t.category_id?.toLowerCase().includes(category.toLowerCase());
+        if (!catMatch) return false;
+      }
+
+      // Merchant filter
+      if (merchant) {
+        const nameMatch =
+          t.name?.toLowerCase().includes(merchant.toLowerCase()) ||
+          t.original_name?.toLowerCase().includes(merchant.toLowerCase());
+        if (!nameMatch) return false;
+      }
+
+      // Income/expense filter
+      if (is_income && t.amount >= 0) return false;
+      if (is_expense && t.amount <= 0) return false;
+
+      // Transfer filter
+      if (exclude_transfers && isTransferCategory(t.category_id)) return false;
+
+      // City filter
+      if (city && !t.city?.toLowerCase().includes(city.toLowerCase())) return false;
+
+      // Payment method filter
+      if (
+        payment_method &&
+        !t.payment_method?.toLowerCase().includes(payment_method.toLowerCase())
+      ) {
+        return false;
+      }
+
+      // Query filter (searches name, original_name)
+      if (query) {
+        const searchQuery = query.toLowerCase();
+        const nameMatch =
+          t.name?.toLowerCase().includes(searchQuery) ||
+          t.original_name?.toLowerCase().includes(searchQuery);
+        if (!nameMatch) return false;
+      }
+
+      return true;
+    });
+
+    // Track applied filters
+    if (query) filtersApplied.push(`query: "${query}"`);
+    if (min_amount !== undefined) filtersApplied.push(`min_amount: $${min_amount}`);
+    if (max_amount !== undefined) filtersApplied.push(`max_amount: $${max_amount}`);
+    if (start_date) filtersApplied.push(`start_date: ${start_date}`);
+    if (end_date) filtersApplied.push(`end_date: ${end_date}`);
+    if (category) filtersApplied.push(`category: ${category}`);
+    if (account_id) filtersApplied.push(`account_id: ${account_id}`);
+    if (merchant) filtersApplied.push(`merchant: ${merchant}`);
+    if (is_income) filtersApplied.push('is_income: true');
+    if (is_expense) filtersApplied.push('is_expense: true');
+    if (exclude_transfers) filtersApplied.push('exclude_transfers: true');
+    if (city) filtersApplied.push(`city: ${city}`);
+    if (payment_method) filtersApplied.push(`payment_method: ${payment_method}`);
+
+    // Calculate match scores based on query relevance
+    const scoredResults = results.map((t) => {
+      let score = 1.0;
+      if (query) {
+        const searchQuery = query.toLowerCase();
+        const name = t.name?.toLowerCase() || '';
+        if (name === searchQuery) score = 1.0;
+        else if (name.startsWith(searchQuery)) score = 0.9;
+        else if (name.includes(searchQuery)) score = 0.7;
+        else score = 0.5;
+      }
+      return { transaction: t, score };
+    });
+
+    // Sort by date descending, then score
+    scoredResults.sort((a, b) => {
+      if (a.transaction.date !== b.transaction.date) {
+        return b.transaction.date.localeCompare(a.transaction.date);
+      }
+      return b.score - a.score;
+    });
+
+    // Apply limit
+    const limitedResults = scoredResults.slice(0, limit);
+
+    // Calculate summary
+    const totalAmount = limitedResults.reduce((sum, r) => sum + Math.abs(r.transaction.amount), 0);
+    const avgAmount = limitedResults.length > 0 ? totalAmount / limitedResults.length : 0;
+    const dates = limitedResults.map((r) => r.transaction.date).sort();
+
+    return {
+      count: limitedResults.length,
+      filters_applied: filtersApplied,
+      transactions: limitedResults.map((r) => ({
+        transaction_id: r.transaction.transaction_id,
+        date: r.transaction.date,
+        amount: Math.round(r.transaction.amount * 100) / 100,
+        name: r.transaction.name || r.transaction.original_name || 'Unknown',
+        category_id: r.transaction.category_id,
+        category_name: getCategoryName(r.transaction.category_id || 'uncategorized'),
+        account_id: r.transaction.account_id,
+        city: r.transaction.city,
+        match_score: Math.round(r.score * 100) / 100,
+      })),
+      summary: {
+        total_amount: Math.round(totalAmount * 100) / 100,
+        average_amount: Math.round(avgAmount * 100) / 100,
+        date_range: {
+          earliest: dates[0] ?? null,
+          latest: dates[dates.length - 1] ?? null,
+        },
+      },
+    };
+  }
+
+  /**
+   * Search for transactions containing hashtags or custom tags.
+   *
+   * Searches for #tag patterns in transaction names and notes.
+   *
+   * @param options - Search options
+   * @returns Object with tagged transactions
+   */
+  getTagSearch(
+    options: {
+      tag?: string;
+      period?: string;
+      start_date?: string;
+      end_date?: string;
+      limit?: number;
+    } = {}
+  ): {
+    period: {
+      start_date: string;
+      end_date: string;
+    };
+    tag_searched?: string;
+    count: number;
+    transactions: Array<{
+      transaction_id: string;
+      date: string;
+      amount: number;
+      name: string;
+      tags_found: string[];
+      category_id?: string;
+    }>;
+    all_tags: Array<{
+      tag: string;
+      count: number;
+      total_amount: number;
+    }>;
+    summary: {
+      unique_tags: number;
+      most_used_tag: string | null;
+    };
+  } {
+    const { tag, period = 'last_90_days', limit = 100 } = options;
+    let { start_date, end_date } = options;
+
+    if (!start_date || !end_date) {
+      [start_date, end_date] = parsePeriod(period);
+    }
+
+    const transactions = this.db.getTransactions();
+
+    // Filter by date
+    const periodTxns = transactions.filter((t) => t.date >= start_date && t.date <= end_date);
+
+    // Extract tags from transaction names (hashtags like #vacation, #groceries)
+    const tagRegex = /#[\w-]+/g;
+
+    const taggedTxns: Array<{
+      transaction: Transaction;
+      tags: string[];
+    }> = [];
+
+    const tagCounts = new Map<string, { count: number; amount: number }>();
+
+    for (const t of periodTxns) {
+      const text = `${t.name || ''} ${t.original_name || ''}`;
+      const matches = text.match(tagRegex);
+
+      if (matches && matches.length > 0) {
+        const uniqueTags = [...new Set(matches.map((m) => m.toLowerCase()))];
+
+        // If specific tag is searched, filter by it
+        if (tag) {
+          const searchTag = tag.startsWith('#') ? tag.toLowerCase() : `#${tag.toLowerCase()}`;
+          if (!uniqueTags.includes(searchTag)) continue;
+        }
+
+        taggedTxns.push({
+          transaction: t,
+          tags: uniqueTags,
+        });
+
+        // Count tag usage
+        for (const tagStr of uniqueTags) {
+          const existing = tagCounts.get(tagStr) || { count: 0, amount: 0 };
+          existing.count++;
+          existing.amount += Math.abs(t.amount);
+          tagCounts.set(tagStr, existing);
+        }
+      }
+    }
+
+    // Sort by date descending
+    taggedTxns.sort((a, b) => b.transaction.date.localeCompare(a.transaction.date));
+
+    // Apply limit
+    const limitedTxns = taggedTxns.slice(0, limit);
+
+    // Convert tag counts to sorted array
+    const allTags = Array.from(tagCounts.entries())
+      .map(([tagStr, data]) => ({
+        tag: tagStr,
+        count: data.count,
+        total_amount: Math.round(data.amount * 100) / 100,
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    return {
+      period: {
+        start_date,
+        end_date,
+      },
+      tag_searched: tag,
+      count: limitedTxns.length,
+      transactions: limitedTxns.map((r) => ({
+        transaction_id: r.transaction.transaction_id,
+        date: r.transaction.date,
+        amount: Math.round(r.transaction.amount * 100) / 100,
+        name: r.transaction.name || r.transaction.original_name || 'Unknown',
+        tags_found: r.tags,
+        category_id: r.transaction.category_id,
+      })),
+      all_tags: allTags,
+      summary: {
+        unique_tags: allTags.length,
+        most_used_tag: allTags[0]?.tag ?? null,
+      },
+    };
+  }
+
+  /**
+   * Search transactions by notes or descriptive text.
+   *
+   * Searches transaction names for note-like content including
+   * parenthetical text, descriptions after colons, etc.
+   *
+   * @param options - Search options
+   * @returns Object with matched transactions
+   */
+  getNoteSearch(options: {
+    query: string;
+    period?: string;
+    start_date?: string;
+    end_date?: string;
+    limit?: number;
+  }): {
+    period: {
+      start_date: string;
+      end_date: string;
+    };
+    query: string;
+    count: number;
+    transactions: Array<{
+      transaction_id: string;
+      date: string;
+      amount: number;
+      name: string;
+      matched_text: string;
+      category_id?: string;
+    }>;
+    summary: {
+      total_matches: number;
+      date_range: {
+        earliest: string | null;
+        latest: string | null;
+      };
+    };
+  } {
+    const { query, period = 'ytd', limit = 100 } = options;
+    let { start_date, end_date } = options;
+
+    if (!start_date || !end_date) {
+      [start_date, end_date] = parsePeriod(period);
+    }
+
+    const transactions = this.db.getTransactions();
+    const searchQuery = query.toLowerCase();
+
+    // Find transactions matching the query
+    const matches: Array<{
+      transaction: Transaction;
+      matchedText: string;
+    }> = [];
+
+    for (const t of transactions) {
+      if (t.date < start_date || t.date > end_date) continue;
+
+      const name = t.name || '';
+      const originalName = t.original_name || '';
+      const fullText = `${name} ${originalName}`;
+
+      if (fullText.toLowerCase().includes(searchQuery)) {
+        // Find the matched portion for context
+        const lowerText = fullText.toLowerCase();
+        const matchIdx = lowerText.indexOf(searchQuery);
+        const contextStart = Math.max(0, matchIdx - 20);
+        const contextEnd = Math.min(fullText.length, matchIdx + searchQuery.length + 20);
+        const matchedText = fullText.substring(contextStart, contextEnd);
+
+        matches.push({
+          transaction: t,
+          matchedText: matchedText.trim(),
+        });
+      }
+    }
+
+    // Sort by date descending
+    matches.sort((a, b) => b.transaction.date.localeCompare(a.transaction.date));
+
+    // Apply limit
+    const limitedMatches = matches.slice(0, limit);
+    const dates = limitedMatches.map((m) => m.transaction.date).sort();
+
+    return {
+      period: {
+        start_date,
+        end_date,
+      },
+      query,
+      count: limitedMatches.length,
+      transactions: limitedMatches.map((m) => ({
+        transaction_id: m.transaction.transaction_id,
+        date: m.transaction.date,
+        amount: Math.round(m.transaction.amount * 100) / 100,
+        name: m.transaction.name || m.transaction.original_name || 'Unknown',
+        matched_text: m.matchedText,
+        category_id: m.transaction.category_id,
+      })),
+      summary: {
+        total_matches: matches.length,
+        date_range: {
+          earliest: dates[0] ?? null,
+          latest: dates[dates.length - 1] ?? null,
+        },
+      },
+    };
+  }
+
+  /**
+   * Search transactions by location.
+   *
+   * Finds transactions at specific cities, regions, or near coordinates.
+   *
+   * @param options - Search options
+   * @returns Object with location-based results
+   */
+  getLocationSearch(
+    options: {
+      city?: string;
+      region?: string;
+      country?: string;
+      lat?: number;
+      lon?: number;
+      radius_km?: number;
+      period?: string;
+      start_date?: string;
+      end_date?: string;
+      limit?: number;
+    } = {}
+  ): {
+    period: {
+      start_date: string;
+      end_date: string;
+    };
+    location_filter: {
+      city?: string;
+      region?: string;
+      country?: string;
+      coordinates?: {
+        lat: number;
+        lon: number;
+        radius_km: number;
+      };
+    };
+    count: number;
+    transactions: Array<{
+      transaction_id: string;
+      date: string;
+      amount: number;
+      name: string;
+      city?: string;
+      region?: string;
+      country?: string;
+      coordinates?: {
+        lat: number;
+        lon: number;
+      };
+      distance_km?: number;
+      category_id?: string;
+    }>;
+    location_summary: Array<{
+      city: string;
+      count: number;
+      total_spending: number;
+    }>;
+    summary: {
+      unique_cities: number;
+      most_common_city: string | null;
+      total_spending: number;
+    };
+  } {
+    const {
+      city,
+      region,
+      country,
+      lat,
+      lon,
+      radius_km = 10,
+      period = 'ytd',
+      limit = 100,
+    } = options;
+    let { start_date, end_date } = options;
+
+    if (!start_date || !end_date) {
+      [start_date, end_date] = parsePeriod(period);
+    }
+
+    const transactions = this.db.getTransactions();
+
+    // Haversine distance calculation
+    const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+      const R = 6371; // Earth's radius in km
+      const dLat = ((lat2 - lat1) * Math.PI) / 180;
+      const dLon = ((lon2 - lon1) * Math.PI) / 180;
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos((lat1 * Math.PI) / 180) *
+          Math.cos((lat2 * Math.PI) / 180) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    };
+
+    // Filter transactions
+    const matches: Array<{
+      transaction: Transaction;
+      distance?: number;
+    }> = [];
+
+    for (const t of transactions) {
+      if (t.date < start_date || t.date > end_date) continue;
+
+      // Must have some location data
+      if (!t.city && !t.region && !t.country && !t.lat && !t.lon) continue;
+
+      // City filter
+      if (city && !t.city?.toLowerCase().includes(city.toLowerCase())) continue;
+
+      // Region filter
+      if (region && !t.region?.toLowerCase().includes(region.toLowerCase())) continue;
+
+      // Country filter
+      if (country && !t.country?.toLowerCase().includes(country.toLowerCase())) continue;
+
+      // Coordinate filter
+      let distance: number | undefined;
+      if (lat !== undefined && lon !== undefined) {
+        if (t.lat !== undefined && t.lon !== undefined) {
+          distance = calculateDistance(lat, lon, t.lat, t.lon);
+          if (distance > radius_km) continue;
+        } else {
+          continue; // No coordinates to compare
+        }
+      }
+
+      matches.push({
+        transaction: t,
+        distance,
+      });
+    }
+
+    // Sort by date or distance
+    if (lat !== undefined && lon !== undefined) {
+      matches.sort((a, b) => (a.distance ?? Infinity) - (b.distance ?? Infinity));
+    } else {
+      matches.sort((a, b) => b.transaction.date.localeCompare(a.transaction.date));
+    }
+
+    // Apply limit
+    const limitedMatches = matches.slice(0, limit);
+
+    // Calculate location summary
+    const cityMap = new Map<string, { count: number; spending: number }>();
+    for (const m of matches) {
+      const cityName = m.transaction.city || 'Unknown';
+      const existing = cityMap.get(cityName) || { count: 0, spending: 0 };
+      existing.count++;
+      if (m.transaction.amount > 0) {
+        existing.spending += m.transaction.amount;
+      }
+      cityMap.set(cityName, existing);
+    }
+
+    const locationSummary = Array.from(cityMap.entries())
+      .map(([cityName, data]) => ({
+        city: cityName,
+        count: data.count,
+        total_spending: Math.round(data.spending * 100) / 100,
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+
+    const totalSpending = limitedMatches.reduce(
+      (sum, m) => sum + (m.transaction.amount > 0 ? m.transaction.amount : 0),
+      0
+    );
+
+    return {
+      period: {
+        start_date,
+        end_date,
+      },
+      location_filter: {
+        city,
+        region,
+        country,
+        coordinates: lat !== undefined && lon !== undefined ? { lat, lon, radius_km } : undefined,
+      },
+      count: limitedMatches.length,
+      transactions: limitedMatches.map((m) => ({
+        transaction_id: m.transaction.transaction_id,
+        date: m.transaction.date,
+        amount: Math.round(m.transaction.amount * 100) / 100,
+        name: m.transaction.name || m.transaction.original_name || 'Unknown',
+        city: m.transaction.city,
+        region: m.transaction.region,
+        country: m.transaction.country,
+        coordinates:
+          m.transaction.lat !== undefined && m.transaction.lon !== undefined
+            ? { lat: m.transaction.lat, lon: m.transaction.lon }
+            : undefined,
+        distance_km: m.distance ? Math.round(m.distance * 100) / 100 : undefined,
+        category_id: m.transaction.category_id,
+      })),
+      location_summary: locationSummary,
+      summary: {
+        unique_cities: cityMap.size,
+        most_common_city: locationSummary[0]?.city ?? null,
+        total_spending: Math.round(totalSpending * 100) / 100,
+      },
+    };
+  }
 }
 
 /**
@@ -9207,6 +9850,204 @@ export function createToolSchemas(): ToolSchema[] {
           exclude_transfers: {
             type: 'boolean',
             description: 'Exclude transfers from comparison (default: true)',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+
+    // ---- Search & Discovery ----
+    {
+      name: 'get_advanced_search',
+      description:
+        'Advanced multi-criteria search for transactions. ' +
+        'Combines filters like amount range, date, category, merchant, city, and more. ' +
+        'Returns matching transactions with relevance scores.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'Text to search in transaction names',
+          },
+          min_amount: {
+            type: 'number',
+            description: 'Minimum absolute amount',
+          },
+          max_amount: {
+            type: 'number',
+            description: 'Maximum absolute amount',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Start date (YYYY-MM-DD)',
+          },
+          end_date: {
+            type: 'string',
+            description: 'End date (YYYY-MM-DD)',
+          },
+          category: {
+            type: 'string',
+            description: 'Filter by category (partial match)',
+          },
+          account_id: {
+            type: 'string',
+            description: 'Filter by specific account ID',
+          },
+          merchant: {
+            type: 'string',
+            description: 'Filter by merchant name (partial match)',
+          },
+          is_income: {
+            type: 'boolean',
+            description: 'Only show income (negative amounts)',
+          },
+          is_expense: {
+            type: 'boolean',
+            description: 'Only show expenses (positive amounts)',
+          },
+          exclude_transfers: {
+            type: 'boolean',
+            description: 'Exclude transfers (default: true)',
+          },
+          city: {
+            type: 'string',
+            description: 'Filter by city',
+          },
+          payment_method: {
+            type: 'string',
+            description: 'Filter by payment method',
+          },
+          limit: {
+            type: 'integer',
+            description: 'Maximum results to return (default: 100)',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_tag_search',
+      description:
+        'Find transactions with hashtags (#tag). ' +
+        'Discovers all tags used or filters by specific tag. ' +
+        'Shows tag usage statistics and spending per tag.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          tag: {
+            type: 'string',
+            description: 'Specific tag to search for (with or without #)',
+          },
+          period: {
+            type: 'string',
+            description: 'Named period (default: last_90_days)',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Start date (YYYY-MM-DD)',
+          },
+          end_date: {
+            type: 'string',
+            description: 'End date (YYYY-MM-DD)',
+          },
+          limit: {
+            type: 'integer',
+            description: 'Maximum results (default: 100)',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_note_search',
+      description:
+        'Search transactions by descriptive text or notes. ' +
+        'Finds matching text in transaction names and shows context.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'Text to search for in transaction descriptions',
+          },
+          period: {
+            type: 'string',
+            description: 'Named period (default: ytd)',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Start date (YYYY-MM-DD)',
+          },
+          end_date: {
+            type: 'string',
+            description: 'End date (YYYY-MM-DD)',
+          },
+          limit: {
+            type: 'integer',
+            description: 'Maximum results (default: 100)',
+          },
+        },
+        required: ['query'],
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_location_search',
+      description:
+        'Search transactions by location (city, region, country, or coordinates). ' +
+        'Supports proximity search with radius for coordinate-based queries. ' +
+        'Shows location-based spending summary.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          city: {
+            type: 'string',
+            description: 'Filter by city name (partial match)',
+          },
+          region: {
+            type: 'string',
+            description: 'Filter by state/region',
+          },
+          country: {
+            type: 'string',
+            description: 'Filter by country',
+          },
+          lat: {
+            type: 'number',
+            description: 'Latitude for proximity search',
+          },
+          lon: {
+            type: 'number',
+            description: 'Longitude for proximity search',
+          },
+          radius_km: {
+            type: 'number',
+            description: 'Search radius in kilometers (default: 10)',
+          },
+          period: {
+            type: 'string',
+            description: 'Named period (default: ytd)',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Start date (YYYY-MM-DD)',
+          },
+          end_date: {
+            type: 'string',
+            description: 'End date (YYYY-MM-DD)',
+          },
+          limit: {
+            type: 'integer',
+            description: 'Maximum results (default: 100)',
           },
         },
       },

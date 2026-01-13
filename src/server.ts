@@ -498,6 +498,43 @@ export class CopilotMoneyServer {
           );
           break;
 
+        // ============================================
+        // PHASE 12.6: SEARCH & DISCOVERY TOOLS
+        // ============================================
+
+        case 'get_advanced_search':
+          result = this.tools.getAdvancedSearch(
+            (typedArgs as Parameters<typeof this.tools.getAdvancedSearch>[0]) || {}
+          );
+          break;
+
+        case 'get_tag_search':
+          result = this.tools.getTagSearch(
+            (typedArgs as Parameters<typeof this.tools.getTagSearch>[0]) || {}
+          );
+          break;
+
+        case 'get_note_search': {
+          const noteQuery = typedArgs?.query;
+          if (typeof noteQuery !== 'string') {
+            throw new Error('Missing required parameter: query');
+          }
+          result = this.tools.getNoteSearch({
+            query: noteQuery,
+            period: typedArgs?.period as string | undefined,
+            start_date: typedArgs?.start_date as string | undefined,
+            end_date: typedArgs?.end_date as string | undefined,
+            limit: typedArgs?.limit as number | undefined,
+          });
+          break;
+        }
+
+        case 'get_location_search':
+          result = this.tools.getLocationSearch(
+            (typedArgs as Parameters<typeof this.tools.getLocationSearch>[0]) || {}
+          );
+          break;
+
         default:
           return {
             content: [
