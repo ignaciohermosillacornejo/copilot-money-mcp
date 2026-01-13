@@ -22,9 +22,13 @@ const tempDirs = [
 ];
 
 function cleanupTempFixtures() {
-  const fixturesDir = path.join(__dirname, '../fixtures');
+  const fixturesDir = path.resolve(__dirname, '../fixtures');
   for (const dir of tempDirs) {
-    const fullPath = path.join(fixturesDir, dir);
+    const fullPath = path.resolve(fixturesDir, dir);
+    // Validate path is within fixtures directory to prevent directory traversal
+    if (!fullPath.startsWith(fixturesDir + path.sep)) {
+      throw new Error(`Invalid cleanup path: ${fullPath} is outside fixtures directory`);
+    }
     if (fs.existsSync(fullPath)) {
       fs.rmSync(fullPath, { recursive: true, force: true });
     }
