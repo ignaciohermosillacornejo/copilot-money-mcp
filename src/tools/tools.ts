@@ -4736,8 +4736,7 @@ export class CopilotMoneyTools {
     period: { start_date?: string; end_date?: string };
     analysis_metadata: {
       transactions_analyzed: number;
-      transactions_available: number;
-      analysis_limited: boolean;
+      transaction_limit_reached: boolean;
       issues_limit: number;
       issues_offset: number;
     };
@@ -4747,8 +4746,8 @@ export class CopilotMoneyTools {
       issues_found: number;
     };
     category_issues: {
-      unresolved_category_count: number;
-      total_unresolved_categories: number;
+      count: number;
+      total: number;
       has_more: boolean;
       unresolved_categories: Array<{
         category_id: string;
@@ -4758,8 +4757,8 @@ export class CopilotMoneyTools {
       }>;
     };
     currency_issues: {
-      potential_unconverted_count: number;
-      total_suspicious_transactions: number;
+      count: number;
+      total: number;
       has_more: boolean;
       suspicious_transactions: Array<{
         transaction_id: string;
@@ -4771,13 +4770,16 @@ export class CopilotMoneyTools {
       }>;
     };
     duplicate_issues: {
-      total_non_unique_ids: number;
-      has_more_non_unique: boolean;
-      non_unique_transaction_ids: Array<{
-        transaction_id: string;
-        occurrences: number;
-        sample_dates: string[];
-      }>;
+      non_unique_ids: {
+        count: number;
+        total: number;
+        has_more: boolean;
+        items: Array<{
+          transaction_id: string;
+          occurrences: number;
+          sample_dates: string[];
+        }>;
+      };
       potential_duplicate_accounts: Array<{
         account_name: string;
         account_type: string;
@@ -4787,9 +4789,10 @@ export class CopilotMoneyTools {
       }>;
     };
     suspicious_categorizations: {
-      total_suspicious: number;
+      count: number;
+      total: number;
       has_more: boolean;
-      issues: Array<{
+      items: Array<{
         transaction_id: string;
         date: string;
         merchant: string;
@@ -4817,25 +4820,15 @@ export class CopilotMoneyTools {
       [start_date, end_date] = parsePeriod(period);
     }
 
-    // Get total count first for metadata
-    const totalAvailable = this.db.getTransactions({
-      startDate: start_date,
-      endDate: end_date,
-      limit: 1,
-    });
-
-    // Use db's internal total count by getting with high limit
+    // Fetch transactions up to the configured limit
     const allTransactions = this.db.getTransactions({
       startDate: start_date,
       endDate: end_date,
       limit: transactionLimit,
     });
 
-    // Estimate total available (this is an approximation since db doesn't expose total)
-    const transactionsAvailable =
-      allTransactions.length === transactionLimit
-        ? transactionLimit // May be more, but we can't know without fetching all
-        : allTransactions.length;
+    // Track if we hit the limit (meaning there may be more transactions available)
+    const hitTransactionLimit = allTransactions.length === transactionLimit;
 
     const allAccounts = this.db.getAccounts();
 
@@ -5146,8 +5139,7 @@ export class CopilotMoneyTools {
       period: { start_date, end_date },
       analysis_metadata: {
         transactions_analyzed: allTransactions.length,
-        transactions_available: transactionsAvailable,
-        analysis_limited: allTransactions.length === transactionLimit,
+        transaction_limit_reached: hitTransactionLimit,
         issues_limit: issuesLimit,
         issues_offset: issuesOffset,
       },
@@ -5157,27 +5149,31 @@ export class CopilotMoneyTools {
         issues_found: issuesFound,
       },
       category_issues: {
-        unresolved_category_count: paginatedUnresolvedCategories.length,
-        total_unresolved_categories: totalUnresolvedCategories,
+        count: paginatedUnresolvedCategories.length,
+        total: totalUnresolvedCategories,
         has_more: hasMoreUnresolvedCategories,
         unresolved_categories: paginatedUnresolvedCategories,
       },
       currency_issues: {
-        potential_unconverted_count: paginatedCurrencyIssues.length,
-        total_suspicious_transactions: totalCurrencyIssues,
+        count: paginatedCurrencyIssues.length,
+        total: totalCurrencyIssues,
         has_more: hasMoreCurrencyIssues,
         suspicious_transactions: paginatedCurrencyIssues,
       },
       duplicate_issues: {
-        total_non_unique_ids: totalNonUniqueIds,
-        has_more_non_unique: hasMoreNonUnique,
-        non_unique_transaction_ids: nonUniqueTransactionIds,
+        non_unique_ids: {
+          count: nonUniqueTransactionIds.length,
+          total: totalNonUniqueIds,
+          has_more: hasMoreNonUnique,
+          items: nonUniqueTransactionIds,
+        },
         potential_duplicate_accounts: potentialDuplicateAccounts,
       },
       suspicious_categorizations: {
-        total_suspicious: totalSuspiciousCategorizations,
+        count: paginatedSuspiciousCategorizations.length,
+        total: totalSuspiciousCategorizations,
         has_more: hasMoreSuspiciousCategorizations,
-        issues: paginatedSuspiciousCategorizations,
+        items: paginatedSuspiciousCategorizations,
       },
     };
   }

@@ -3017,8 +3017,7 @@ describe('New MCP Tools', () => {
 
       expect(result.analysis_metadata).toBeDefined();
       expect(result.analysis_metadata.transactions_analyzed).toBeGreaterThanOrEqual(0);
-      expect(result.analysis_metadata.transactions_available).toBeGreaterThanOrEqual(0);
-      expect(typeof result.analysis_metadata.analysis_limited).toBe('boolean');
+      expect(typeof result.analysis_metadata.transaction_limit_reached).toBe('boolean');
       expect(result.analysis_metadata.issues_limit).toBe(20); // default
       expect(result.analysis_metadata.issues_offset).toBe(0); // default
     });
@@ -3068,8 +3067,8 @@ describe('New MCP Tools', () => {
       const result = tools.getDataQualityReport({});
 
       expect(result.category_issues).toBeDefined();
-      expect(typeof result.category_issues.unresolved_category_count).toBe('number');
-      expect(typeof result.category_issues.total_unresolved_categories).toBe('number');
+      expect(typeof result.category_issues.count).toBe('number');
+      expect(typeof result.category_issues.total).toBe('number');
       expect(typeof result.category_issues.has_more).toBe('boolean');
       expect(Array.isArray(result.category_issues.unresolved_categories)).toBe(true);
     });
@@ -3078,8 +3077,8 @@ describe('New MCP Tools', () => {
       const result = tools.getDataQualityReport({});
 
       expect(result.currency_issues).toBeDefined();
-      expect(typeof result.currency_issues.potential_unconverted_count).toBe('number');
-      expect(typeof result.currency_issues.total_suspicious_transactions).toBe('number');
+      expect(typeof result.currency_issues.count).toBe('number');
+      expect(typeof result.currency_issues.total).toBe('number');
       expect(typeof result.currency_issues.has_more).toBe('boolean');
       expect(Array.isArray(result.currency_issues.suspicious_transactions)).toBe(true);
     });
@@ -3088,9 +3087,10 @@ describe('New MCP Tools', () => {
       const result = tools.getDataQualityReport({});
 
       expect(result.duplicate_issues).toBeDefined();
-      expect(typeof result.duplicate_issues.total_non_unique_ids).toBe('number');
-      expect(typeof result.duplicate_issues.has_more_non_unique).toBe('boolean');
-      expect(Array.isArray(result.duplicate_issues.non_unique_transaction_ids)).toBe(true);
+      expect(typeof result.duplicate_issues.non_unique_ids.count).toBe('number');
+      expect(typeof result.duplicate_issues.non_unique_ids.total).toBe('number');
+      expect(typeof result.duplicate_issues.non_unique_ids.has_more).toBe('boolean');
+      expect(Array.isArray(result.duplicate_issues.non_unique_ids.items)).toBe(true);
       expect(Array.isArray(result.duplicate_issues.potential_duplicate_accounts)).toBe(true);
     });
 
@@ -3098,9 +3098,10 @@ describe('New MCP Tools', () => {
       const result = tools.getDataQualityReport({});
 
       expect(result.suspicious_categorizations).toBeDefined();
-      expect(typeof result.suspicious_categorizations.total_suspicious).toBe('number');
+      expect(typeof result.suspicious_categorizations.count).toBe('number');
+      expect(typeof result.suspicious_categorizations.total).toBe('number');
       expect(typeof result.suspicious_categorizations.has_more).toBe('boolean');
-      expect(Array.isArray(result.suspicious_categorizations.issues)).toBe(true);
+      expect(Array.isArray(result.suspicious_categorizations.items)).toBe(true);
     });
 
     test('pagination works correctly with issues_offset', () => {
@@ -3129,7 +3130,7 @@ describe('New MCP Tools', () => {
       expect(page2.category_issues.unresolved_categories.length).toBeLessThanOrEqual(10);
 
       // If there are more than 10 unresolved categories, has_more should be true for page1
-      if (page1.category_issues.total_unresolved_categories > 10) {
+      if (page1.category_issues.total > 10) {
         expect(page1.category_issues.has_more).toBe(true);
       }
     });
@@ -3177,6 +3178,29 @@ describe('New MCP Tools', () => {
       expect(duplicateGroup.count).toBe(2);
       expect(duplicateGroup.account_ids).toContain('acc1');
       expect(duplicateGroup.account_ids).toContain('acc2');
+    });
+
+    test('sets transaction_limit_reached when hitting limit', () => {
+      // Create many transactions to hit the limit
+      const manyTransactions: Transaction[] = [];
+      for (let i = 0; i < 10; i++) {
+        manyTransactions.push({
+          transaction_id: `txn_${i}`,
+          amount: 100,
+          date: '2024-01-15',
+          name: `Merchant ${i}`,
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        });
+      }
+
+      (db as any)._transactions = manyTransactions;
+
+      // With limit of 5, should hit limit
+      const result = tools.getDataQualityReport({ transaction_limit: 5 });
+
+      expect(result.analysis_metadata.transaction_limit_reached).toBe(true);
+      expect(result.analysis_metadata.transactions_analyzed).toBe(5);
     });
   });
 });
