@@ -8,12 +8,18 @@
 import { existsSync, readdirSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
-import { decodeAccounts, decodeTransactions, decodeRecurring } from './decoder.js';
+import {
+  decodeAccounts,
+  decodeTransactions,
+  decodeRecurring,
+  decodeBalanceHistory,
+} from './decoder.js';
 import {
   Account,
   Transaction,
   Category,
   Recurring,
+  BalanceHistory,
   getTransactionDisplayName,
 } from '../models/index.js';
 import { getCategoryName } from '../utils/categories.js';
@@ -97,6 +103,7 @@ export class CopilotDatabase {
   private _transactions: Transaction[] | null = null;
   private _accounts: Account[] | null = null;
   private _recurring: Recurring[] | null = null;
+  private _balanceHistory: BalanceHistory[] | null = null;
 
   /**
    * Initialize database connection.
@@ -302,6 +309,45 @@ export class CopilotDatabase {
 
     if (activeOnly) {
       result = result.filter((rec) => rec.is_active !== false);
+    }
+
+    return result;
+  }
+
+  /**
+   * Get historical balance data for accounts.
+   *
+   * @param options - Filter options
+   * @param options.accountId - Filter by specific account
+   * @param options.startDate - Filter balances >= this date (YYYY-MM-DD)
+   * @param options.endDate - Filter balances <= this date (YYYY-MM-DD)
+   * @returns List of balance history entries sorted by date descending
+   */
+  getBalanceHistory(
+    options: {
+      accountId?: string;
+      startDate?: string;
+      endDate?: string;
+    } = {}
+  ): BalanceHistory[] {
+    // Lazy load balance history
+    if (this._balanceHistory === null) {
+      this._balanceHistory = decodeBalanceHistory(this.requireDbPath());
+    }
+
+    let result = [...this._balanceHistory];
+
+    // Apply account ID filter
+    if (options.accountId) {
+      result = result.filter((entry) => entry.account_id === options.accountId);
+    }
+
+    // Apply date range filter
+    if (options.startDate) {
+      result = result.filter((entry) => entry.date >= options.startDate!);
+    }
+    if (options.endDate) {
+      result = result.filter((entry) => entry.date <= options.endDate!);
     }
 
     return result;

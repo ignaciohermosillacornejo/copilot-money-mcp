@@ -565,9 +565,9 @@ describe('CopilotMoneyTools', () => {
 });
 
 describe('createToolSchemas', () => {
-  test('returns 23 tool schemas', () => {
+  test('returns 24 tool schemas', () => {
     const schemas = createToolSchemas();
-    expect(schemas).toHaveLength(23);
+    expect(schemas).toHaveLength(24);
   });
 
   test('all tools have readOnlyHint: true', () => {

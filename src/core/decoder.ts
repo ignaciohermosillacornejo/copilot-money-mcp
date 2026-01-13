@@ -13,6 +13,7 @@ import {
 } from '../models/transaction.js';
 import { Account, AccountSchema, getAccountDisplayName } from '../models/account.js';
 import { Recurring, RecurringSchema } from '../models/recurring.js';
+import { BalanceHistory, BalanceHistorySchema } from '../models/balance_history.js';
 
 /**
  * Find a field and extract its string value.
@@ -576,6 +577,103 @@ export function decodeRecurring(dbPath: string): Recurring[] {
       unique.push(rec);
     }
   }
+
+  return unique;
+}
+
+/**
+ * Decode balance history from Copilot Money LevelDB files.
+ *
+ * Extracts historical account balance snapshots from Copilot's
+ * /balance_history/ Firestore collection.
+ *
+ * @param dbPath - Path to LevelDB database directory
+ * @returns Array of balance history entries sorted by date
+ */
+export function decodeBalanceHistory(dbPath: string): BalanceHistory[] {
+  const balanceHistory: BalanceHistory[] = [];
+
+  // Return empty array if path doesn't exist (graceful degradation)
+  if (!fs.existsSync(dbPath)) {
+    return [];
+  }
+
+  const stat = fs.statSync(dbPath);
+  if (!stat.isDirectory()) {
+    return [];
+  }
+
+  // Get all .ldb files
+  const files = fs.readdirSync(dbPath);
+  const ldbFiles = files.filter((f) => f.endsWith('.ldb')).map((f) => path.join(dbPath, f));
+
+  const balanceHistoryMarker = Buffer.from('/balance_history/');
+
+  for (const filepath of ldbFiles) {
+    const data = fs.readFileSync(filepath);
+
+    if (!data.includes(balanceHistoryMarker)) {
+      continue;
+    }
+
+    // Find balance history records by searching for the path marker
+    let searchPos = 0;
+    let idx = data.indexOf(balanceHistoryMarker, searchPos);
+
+    while (idx !== -1) {
+      searchPos = idx + 1;
+
+      // Use a window around the path marker to capture all fields
+      const recordStart = Math.max(0, idx - 500);
+      const recordEnd = Math.min(data.length, idx + 1000);
+      const record = data.subarray(recordStart, recordEnd);
+
+      // Extract fields from the record
+      const accountId = extractStringValue(record, fieldPattern('account_id'));
+      const date = extractStringValue(record, fieldPattern('date'));
+      const balance = extractDoubleField(record, fieldPattern('balance'));
+      const isoCurrencyCode = extractStringValue(record, fieldPattern('iso_currency_code'));
+
+      if (accountId && date && balance !== null) {
+        const historyData: {
+          account_id: string;
+          date: string;
+          balance: number;
+          iso_currency_code?: string;
+        } = {
+          account_id: accountId,
+          date: date,
+          balance: balance,
+        };
+
+        if (isoCurrencyCode) historyData.iso_currency_code = isoCurrencyCode;
+
+        try {
+          const entry = BalanceHistorySchema.parse(historyData);
+          balanceHistory.push(entry);
+        } catch {
+          // Skip invalid records
+        }
+      }
+
+      idx = data.indexOf(balanceHistoryMarker, searchPos);
+    }
+  }
+
+  // Deduplicate by (account_id, date)
+  const seen = new Set<string>();
+  const unique: BalanceHistory[] = [];
+
+  for (const entry of balanceHistory) {
+    const key = `${entry.account_id}|${entry.date}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(entry);
+    }
+  }
+
+  // Sort by date descending (most recent first)
+  unique.sort((a, b) => b.date.localeCompare(a.date));
 
   return unique;
 }

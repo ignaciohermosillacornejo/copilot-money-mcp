@@ -800,6 +800,53 @@ export class CopilotMoneyTools {
   }
 
   /**
+   * Get historical balance data for accounts.
+   *
+   * Retrieves balance snapshots from Copilot's balance_history collection,
+   * enabling net worth tracking over time.
+   *
+   * @param options - Filter options
+   * @returns Object with balance history entries and summary
+   */
+  getBalanceHistory(options: { account_id?: string; start_date?: string; end_date?: string }): {
+    count: number;
+    date_range: { earliest?: string; latest?: string };
+    entries: Array<{
+      account_id: string;
+      date: string;
+      balance: number;
+      iso_currency_code?: string;
+    }>;
+  } {
+    const { account_id, start_date, end_date } = options;
+
+    const history = this.db.getBalanceHistory({
+      accountId: account_id,
+      startDate: start_date,
+      endDate: end_date,
+    });
+
+    // Get date range
+    const dates = history.map((h) => h.date).sort();
+    const earliest = dates[0];
+    const latest = dates[dates.length - 1];
+
+    return {
+      count: history.length,
+      date_range: {
+        earliest,
+        latest,
+      },
+      entries: history.map((h) => ({
+        account_id: h.account_id,
+        date: h.date,
+        balance: h.balance,
+        iso_currency_code: h.iso_currency_code,
+      })),
+    };
+  }
+
+  /**
    * Get income transactions (negative amounts or income categories).
    *
    * @param options - Filter options
@@ -3308,6 +3355,35 @@ export function createToolSchemas(): ToolSchema[] {
               "Include Copilot's native subscription tracking data (default: true). " +
               'Returns copilot_subscriptions array with user-confirmed subscriptions.',
             default: true,
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_balance_history',
+      description:
+        'Get historical balance data for accounts. Retrieves balance snapshots ' +
+        "from Copilot's database, enabling net worth tracking over time. " +
+        'Returns balance entries sorted by date with optional filtering by account or date range.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          account_id: {
+            type: 'string',
+            description: 'Filter by specific account ID',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Start date (YYYY-MM-DD)',
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+          },
+          end_date: {
+            type: 'string',
+            description: 'End date (YYYY-MM-DD)',
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
         },
       },
