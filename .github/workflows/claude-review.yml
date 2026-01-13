@@ -75,4 +75,4 @@ jobs:
             - If blocking issues found (security, bugs, or major quality issues):
               gh pr review ${{ github.event.pull_request.number }} --request-changes -b "⚠️ Please address the review comments before merging"
 
-          claude_args: '--model claude-sonnet-4-20250514 --allowed-tools "Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh pr review:*),Read,Grep,Glob"'
+          claude_args: '--model claude-sonnet-4-20250514 --allowed-tools "Bash(gh pr diff *),Bash(gh pr view *),Bash(gh pr comment *),Bash(gh pr review *),Read,Grep,Glob"'
