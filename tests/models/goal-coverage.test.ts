@@ -157,7 +157,7 @@ describe('Goal model helpers', () => {
       expect(getGoalProgress(goal, 15000)).toBe(100);
     });
 
-    test('returns 0 for zero currentAmount', () => {
+    test('returns undefined for zero currentAmount (known issue: 0 is treated as falsy)', () => {
       const goal: Goal = {
         goal_id: 'goal1',
         savings: {
@@ -165,7 +165,9 @@ describe('Goal model helpers', () => {
         },
       };
 
-      // 0 is falsy, so this returns undefined
+      // KNOWN ISSUE: Implementation uses !currentAmount which treats 0 as falsy.
+      // In financial applications, $0 should be a valid amount returning 0% progress.
+      // Consider updating implementation to: if (!target || currentAmount == null)
       expect(getGoalProgress(goal, 0)).toBeUndefined();
     });
 
