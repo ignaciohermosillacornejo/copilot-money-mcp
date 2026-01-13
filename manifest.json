@@ -86,7 +86,7 @@
     },
     {
       "name": "get_data_quality_report",
-      "description": "Generate comprehensive data quality report to identify issues like unresolved categories, currency conversion problems, duplicate accounts, and suspicious categorizations"
+      "description": "Generate comprehensive data quality report to identify issues like unresolved categories, currency conversion problems, duplicate accounts, and suspicious categorizations. Supports configurable transaction limits (up to 100K) and pagination for large datasets."
     },
     {
       "name": "get_investment_prices",
