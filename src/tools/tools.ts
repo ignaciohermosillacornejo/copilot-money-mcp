@@ -4151,16 +4151,16 @@ export class CopilotMoneyTools {
       const periodKey = this.getPeriodKey(date, granularity);
       const periodBounds = this.getPeriodBounds(date, granularity);
 
-      if (!periodMap.has(periodKey)) {
-        periodMap.set(periodKey, {
+      let period = periodMap.get(periodKey);
+      if (!period) {
+        period = {
           start: periodBounds.start,
           end: periodBounds.end,
           total: 0,
           count: 0,
-        });
+        };
+        periodMap.set(periodKey, period);
       }
-
-      const period = periodMap.get(periodKey)!;
       period.total += Math.abs(t.amount);
       period.count += 1;
     }
@@ -4325,11 +4325,11 @@ export class CopilotMoneyTools {
         key = getCategoryName(t.category_id || 'uncategorized');
       }
 
-      if (!groupMap.has(key)) {
-        groupMap.set(key, { amounts: [], total: 0, min: Infinity, max: 0 });
+      let group = groupMap.get(key);
+      if (!group) {
+        group = { amounts: [], total: 0, min: Infinity, max: 0 };
+        groupMap.set(key, group);
       }
-
-      const group = groupMap.get(key)!;
       group.amounts.push(amount);
       group.total += amount;
       group.min = Math.min(group.min, amount);
@@ -4447,10 +4447,12 @@ export class CopilotMoneyTools {
     const currentByCategory = new Map<string, { id: string; total: number }>();
     for (const t of currentTransactions) {
       const catId = t.category_id || 'uncategorized';
-      if (!currentByCategory.has(catId)) {
-        currentByCategory.set(catId, { id: catId, total: 0 });
+      let catData = currentByCategory.get(catId);
+      if (!catData) {
+        catData = { id: catId, total: 0 };
+        currentByCategory.set(catId, catData);
       }
-      currentByCategory.get(catId)!.total += Math.abs(t.amount);
+      catData.total += Math.abs(t.amount);
     }
 
     // Aggregate by category for previous period
@@ -4605,11 +4607,11 @@ export class CopilotMoneyTools {
     for (const t of filtered) {
       const merchant = t.name ? normalizeMerchantName(t.name) : 'Unknown';
 
-      if (!merchantMap.has(merchant)) {
-        merchantMap.set(merchant, { dates: [], total: 0 });
+      let data = merchantMap.get(merchant);
+      if (!data) {
+        data = { dates: [], total: 0 };
+        merchantMap.set(merchant, data);
       }
-
-      const data = merchantMap.get(merchant)!;
       data.dates.push(new Date(t.date));
       data.total += Math.abs(t.amount);
     }
@@ -4626,8 +4628,8 @@ export class CopilotMoneyTools {
       .map(([merchant, data]) => {
         data.dates.sort((a, b) => a.getTime() - b.getTime());
         const visitCount = data.dates.length;
-        const firstVisit = data.dates[0]!;
-        const lastVisit = data.dates[data.dates.length - 1]!;
+        const firstVisit = data.dates[0] as Date;
+        const lastVisit = data.dates[data.dates.length - 1] as Date;
 
         let daysBetween: number | null = null;
         if (visitCount > 1) {
@@ -4898,10 +4900,12 @@ export class CopilotMoneyTools {
 
     for (const b of filteredBudgets) {
       const catId = b.category_id || 'uncategorized';
-      if (!categoryData.has(catId)) {
-        categoryData.set(catId, { budgeted: 0, actuals: [] });
+      let catData = categoryData.get(catId);
+      if (!catData) {
+        catData = { budgeted: 0, actuals: [] };
+        categoryData.set(catId, catData);
       }
-      categoryData.get(catId)!.budgeted += b.amount || 0;
+      catData.budgeted += b.amount || 0;
     }
 
     // Get actual spending per category
@@ -5034,10 +5038,12 @@ export class CopilotMoneyTools {
       }
 
       for (const [catId, amount] of spendingThisMonth.entries()) {
-        if (!categorySpending.has(catId)) {
-          categorySpending.set(catId, []);
+        let spending = categorySpending.get(catId);
+        if (!spending) {
+          spending = [];
+          categorySpending.set(catId, spending);
         }
-        categorySpending.get(catId)!.push(amount);
+        spending.push(amount);
       }
     }
 
@@ -5498,10 +5504,12 @@ export class CopilotMoneyTools {
       const date = getPriceDate(p);
 
       if (price && date) {
-        if (!byTicker.has(ticker)) {
-          byTicker.set(ticker, []);
+        let tickerData = byTicker.get(ticker);
+        if (!tickerData) {
+          tickerData = [];
+          byTicker.set(ticker, tickerData);
         }
-        byTicker.get(ticker)!.push({ date, price });
+        tickerData.push({ date, price });
       }
     }
 
