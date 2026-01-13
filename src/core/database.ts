@@ -13,6 +13,7 @@ import {
   decodeTransactions,
   decodeRecurring,
   decodeBalanceHistory,
+  decodeHoldings,
 } from './decoder.js';
 import {
   Account,
@@ -20,6 +21,7 @@ import {
   Category,
   Recurring,
   BalanceHistory,
+  Holding,
   getTransactionDisplayName,
 } from '../models/index.js';
 import { getCategoryName } from '../utils/categories.js';
@@ -104,6 +106,7 @@ export class CopilotDatabase {
   private _accounts: Account[] | null = null;
   private _recurring: Recurring[] | null = null;
   private _balanceHistory: BalanceHistory[] | null = null;
+  private _holdings: Holding[] | null = null;
 
   /**
    * Initialize database connection.
@@ -355,6 +358,29 @@ export class CopilotDatabase {
     if (options.endDate) {
       const endDate = options.endDate;
       result = result.filter((entry) => entry.date <= endDate);
+    }
+
+    return result;
+  }
+
+  /**
+   * Get investment holdings (positions) from accounts.
+   *
+   * @param options - Filter options
+   * @param options.accountId - Filter by specific account
+   * @returns List of investment holdings
+   */
+  getHoldings(options: { accountId?: string } = {}): Holding[] {
+    // Lazy load holdings
+    if (this._holdings === null) {
+      this._holdings = decodeHoldings(this.requireDbPath());
+    }
+
+    let result = [...this._holdings];
+
+    // Apply account ID filter
+    if (options.accountId) {
+      result = result.filter((holding) => holding.account_id === options.accountId);
     }
 
     return result;

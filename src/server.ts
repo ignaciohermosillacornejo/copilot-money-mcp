@@ -145,6 +145,12 @@ export class CopilotMoneyServer {
           );
           break;
 
+        case 'get_holdings':
+          result = this.tools.getHoldings(
+            (typedArgs as Parameters<typeof this.tools.getHoldings>[0]) || {}
+          );
+          break;
+
         case 'get_income':
           result = this.tools.getIncome(
             (typedArgs as Parameters<typeof this.tools.getIncome>[0]) || {}

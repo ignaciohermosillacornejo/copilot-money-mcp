@@ -14,6 +14,7 @@ import {
 import { Account, AccountSchema, getAccountDisplayName } from '../models/account.js';
 import { Recurring, RecurringSchema } from '../models/recurring.js';
 import { BalanceHistory, BalanceHistorySchema } from '../models/balance_history.js';
+import { Holding, HoldingSchema } from '../models/holding.js';
 
 /**
  * Find a field and extract its string value.
@@ -682,6 +683,123 @@ export function decodeBalanceHistory(dbPath: string): BalanceHistory[] {
 
   // Sort by date descending (most recent first)
   unique.sort((a, b) => b.date.localeCompare(a.date));
+
+  return unique;
+}
+
+/**
+ * Decode investment holdings from Copilot Money LevelDB files.
+ *
+ * Extracts investment position data from Copilot's
+ * /holdings_history/ Firestore collection.
+ *
+ * @param dbPath - Path to LevelDB database directory
+ * @returns Array of investment holdings
+ */
+export function decodeHoldings(dbPath: string): Holding[] {
+  const holdings: Holding[] = [];
+
+  // Return empty array if path doesn't exist (graceful degradation)
+  if (!fs.existsSync(dbPath)) {
+    return [];
+  }
+
+  const stat = fs.statSync(dbPath);
+  if (!stat.isDirectory()) {
+    return [];
+  }
+
+  // Get all .ldb files
+  const files = fs.readdirSync(dbPath);
+  const ldbFiles = files.filter((f) => f.endsWith('.ldb')).map((f) => path.join(dbPath, f));
+
+  const holdingsMarker = Buffer.from('/holdings_history/');
+
+  for (const filepath of ldbFiles) {
+    const data = fs.readFileSync(filepath);
+
+    if (!data.includes(holdingsMarker)) {
+      continue;
+    }
+
+    // Find holdings records by searching for the path marker
+    let searchPos = 0;
+    let idx = data.indexOf(holdingsMarker, searchPos);
+
+    while (idx !== -1) {
+      searchPos = idx + 1;
+
+      // Use a window around the path marker to capture all fields
+      const recordStart = Math.max(0, idx - 500);
+      const recordEnd = Math.min(data.length, idx + 1500);
+      const record = data.subarray(recordStart, recordEnd);
+
+      // Try to extract holding_id from the path
+      const pathIdx = idx - recordStart;
+      const afterPath = record.subarray(pathIdx + holdingsMarker.length, pathIdx + 100);
+      const idMatch = afterPath.toString('utf-8').match(/^([a-zA-Z0-9_-]+)/);
+      const holdingId = idMatch?.[1];
+
+      if (holdingId && holdingId.length >= 10) {
+        // Extract fields from the record
+        const accountId = extractStringValue(record, fieldPattern('account_id'));
+        const securityName = extractStringValue(record, fieldPattern('security_name'));
+        const ticker = extractStringValue(record, fieldPattern('ticker_symbol'));
+        const quantity = extractDoubleField(record, fieldPattern('quantity'));
+        const price = extractDoubleField(record, fieldPattern('price'));
+        const value = extractDoubleField(record, fieldPattern('value'));
+        const costBasis = extractDoubleField(record, fieldPattern('cost_basis'));
+        const isoCurrencyCode = extractStringValue(record, fieldPattern('iso_currency_code'));
+        const date = extractStringValue(record, fieldPattern('date'));
+
+        // Build holding object
+        const holdingData: {
+          holding_id: string;
+          account_id?: string;
+          security_name?: string;
+          ticker?: string;
+          quantity?: number;
+          price?: number;
+          value?: number;
+          cost_basis?: number;
+          iso_currency_code?: string;
+          date?: string;
+        } = {
+          holding_id: holdingId,
+        };
+
+        if (accountId) holdingData.account_id = accountId;
+        if (securityName) holdingData.security_name = securityName;
+        if (ticker) holdingData.ticker = ticker;
+        if (quantity !== null) holdingData.quantity = quantity;
+        if (price !== null) holdingData.price = price;
+        if (value !== null) holdingData.value = value;
+        if (costBasis !== null) holdingData.cost_basis = costBasis;
+        if (isoCurrencyCode) holdingData.iso_currency_code = isoCurrencyCode;
+        if (date) holdingData.date = date;
+
+        try {
+          const holding = HoldingSchema.parse(holdingData);
+          holdings.push(holding);
+        } catch {
+          // Skip invalid records
+        }
+      }
+
+      idx = data.indexOf(holdingsMarker, searchPos);
+    }
+  }
+
+  // Deduplicate by holding_id
+  const seen = new Set<string>();
+  const unique: Holding[] = [];
+
+  for (const holding of holdings) {
+    if (!seen.has(holding.holding_id)) {
+      seen.add(holding.holding_id);
+      unique.push(holding);
+    }
+  }
 
   return unique;
 }

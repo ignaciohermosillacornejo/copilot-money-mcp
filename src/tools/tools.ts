@@ -856,6 +856,81 @@ export class CopilotMoneyTools {
   }
 
   /**
+   * Get investment holdings (positions) from investment accounts.
+   *
+   * @param options - Filter options
+   * @returns Object with holdings summary and list
+   */
+  getHoldings(options: { account_id?: string }): {
+    count: number;
+    total_value: number;
+    holdings: Array<{
+      holding_id: string;
+      account_id?: string;
+      security_name?: string;
+      ticker?: string;
+      quantity?: number;
+      price?: number;
+      value?: number;
+      cost_basis?: number;
+      gain_loss?: number;
+      gain_loss_percent?: number;
+      iso_currency_code?: string;
+      date?: string;
+    }>;
+  } {
+    const { account_id } = options;
+
+    const holdings = this.db.getHoldings({
+      accountId: account_id,
+    });
+
+    // Calculate total value
+    const totalValue = holdings.reduce((sum, h) => sum + (h.value || 0), 0);
+
+    return {
+      count: holdings.length,
+      total_value: totalValue,
+      holdings: holdings.map((h) => {
+        const result: {
+          holding_id: string;
+          account_id?: string;
+          security_name?: string;
+          ticker?: string;
+          quantity?: number;
+          price?: number;
+          value?: number;
+          cost_basis?: number;
+          gain_loss?: number;
+          gain_loss_percent?: number;
+          iso_currency_code?: string;
+          date?: string;
+        } = {
+          holding_id: h.holding_id,
+        };
+
+        if (h.account_id) result.account_id = h.account_id;
+        if (h.security_name) result.security_name = h.security_name;
+        if (h.ticker) result.ticker = h.ticker;
+        if (h.quantity !== undefined) result.quantity = h.quantity;
+        if (h.price !== undefined) result.price = h.price;
+        if (h.value !== undefined) result.value = h.value;
+        if (h.cost_basis !== undefined) result.cost_basis = h.cost_basis;
+        if (h.iso_currency_code) result.iso_currency_code = h.iso_currency_code;
+        if (h.date) result.date = h.date;
+
+        // Calculate gain/loss if we have both value and cost_basis
+        if (h.value !== undefined && h.cost_basis !== undefined && h.cost_basis !== 0) {
+          result.gain_loss = h.value - h.cost_basis;
+          result.gain_loss_percent = ((h.value - h.cost_basis) / h.cost_basis) * 100;
+        }
+
+        return result;
+      }),
+    };
+  }
+
+  /**
    * Get income transactions (negative amounts or income categories).
    *
    * @param options - Filter options
@@ -3393,6 +3468,26 @@ export function createToolSchemas(): ToolSchema[] {
             type: 'string',
             description: 'End date (YYYY-MM-DD)',
             pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_holdings',
+      description:
+        'Get investment holdings (positions) from investment accounts. ' +
+        'Retrieves current positions with security details, quantities, values, and cost basis. ' +
+        'Automatically calculates gain/loss when cost basis is available. ' +
+        'Filter by account to see holdings for specific investment accounts.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          account_id: {
+            type: 'string',
+            description: 'Filter by specific investment account ID',
           },
         },
       },
