@@ -862,6 +862,60 @@ export class CopilotMoneyTools {
   }
 
   /**
+   * Get financial goals (savings targets, debt payoff goals, etc.).
+   *
+   * @param options - Filter options
+   * @returns Object with goal details
+   */
+  getGoals(options: { active_only?: boolean } = {}): {
+    count: number;
+    total_target: number;
+    goals: Array<{
+      goal_id: string;
+      name?: string;
+      emoji?: string;
+      target_amount?: number;
+      monthly_contribution?: number;
+      status?: string;
+      tracking_type?: string;
+      start_date?: string;
+      created_date?: string;
+      is_ongoing?: boolean;
+      inflates_budget?: boolean;
+    }>;
+  } {
+    const { active_only = false } = options;
+
+    const goals = this.db.getGoals(active_only);
+
+    // Calculate total target amount across all goals
+    let totalTarget = 0;
+    for (const goal of goals) {
+      if (goal.savings?.target_amount) {
+        totalTarget += goal.savings.target_amount;
+      }
+    }
+
+    return {
+      count: goals.length,
+      total_target: Math.round(totalTarget * 100) / 100,
+      goals: goals.map((g) => ({
+        goal_id: g.goal_id,
+        name: g.name,
+        emoji: g.emoji,
+        target_amount: g.savings?.target_amount,
+        monthly_contribution: g.savings?.tracking_type_monthly_contribution,
+        status: g.savings?.status,
+        tracking_type: g.savings?.tracking_type,
+        start_date: g.savings?.start_date,
+        created_date: g.created_date,
+        is_ongoing: g.savings?.is_ongoing,
+        inflates_budget: g.savings?.inflates_budget,
+      })),
+    };
+  }
+
+  /**
    * Get income transactions (negative amounts or income categories).
    *
    * @param options - Filter options
@@ -3395,6 +3449,27 @@ export function createToolSchemas(): ToolSchema[] {
           active_only: {
             type: 'boolean',
             description: 'Only return active budgets (default: false)',
+            default: false,
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_goals',
+      description:
+        "Get financial goals from Copilot's native goal tracking. " +
+        'Retrieves user-defined savings goals, debt payoff targets, and investment goals. ' +
+        'Returns goal details including target amounts, monthly contributions, status (active/paused), ' +
+        'start dates, and tracking configuration. Calculates total target amount across all goals.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          active_only: {
+            type: 'boolean',
+            description: 'Only return active goals (default: false)',
             default: false,
           },
         },

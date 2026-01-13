@@ -3,4 +3,10 @@
  */
 
 export { CopilotDatabase } from './database.js';
-export { decodeTransactions, decodeAccounts } from './decoder.js';
+export {
+  decodeTransactions,
+  decodeAccounts,
+  decodeRecurring,
+  decodeBudgets,
+  decodeGoals,
+} from './decoder.js';

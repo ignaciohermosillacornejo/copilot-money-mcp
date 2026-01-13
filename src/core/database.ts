@@ -8,13 +8,20 @@
 import { existsSync, readdirSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
-import { decodeAccounts, decodeTransactions, decodeRecurring, decodeBudgets } from './decoder.js';
+import {
+  decodeAccounts,
+  decodeTransactions,
+  decodeRecurring,
+  decodeBudgets,
+  decodeGoals,
+} from './decoder.js';
 import {
   Account,
   Transaction,
   Category,
   Recurring,
   Budget,
+  Goal,
   getTransactionDisplayName,
 } from '../models/index.js';
 import { getCategoryName } from '../utils/categories.js';
@@ -99,6 +106,7 @@ export class CopilotDatabase {
   private _accounts: Account[] | null = null;
   private _recurring: Recurring[] | null = null;
   private _budgets: Budget[] | null = null;
+  private _goals: Goal[] | null = null;
 
   /**
    * Initialize database connection.
@@ -337,6 +345,28 @@ export class CopilotDatabase {
       result = result.filter(
         (budget) => budget.is_active === true || budget.is_active === undefined
       );
+    }
+
+    return result;
+  }
+
+  /**
+   * Get financial goals from the database.
+   *
+   * @param activeOnly - If true, only return active goals (default: false)
+   * @returns Array of Goal objects
+   */
+  getGoals(activeOnly = false): Goal[] {
+    // Lazy load goals
+    if (this._goals === null) {
+      this._goals = decodeGoals(this.requireDbPath());
+    }
+
+    let result = [...this._goals];
+
+    if (activeOnly) {
+      // Filter for active goals (status === 'active')
+      result = result.filter((goal) => goal.savings?.status === 'active');
     }
 
     return result;

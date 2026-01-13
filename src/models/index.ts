@@ -23,3 +23,13 @@ export { CategorySchema, type Category } from './category.js';
 export { RecurringSchema, type Recurring, getRecurringDisplayName } from './recurring.js';
 
 export { BudgetSchema, type Budget, getBudgetDisplayName } from './budget.js';
+
+export {
+  GoalSchema,
+  type Goal,
+  getGoalDisplayName,
+  getGoalCurrentAmount,
+  getGoalProgress,
+  getGoalMonthlyContribution,
+  isGoalActive,
+} from './goal.js';
