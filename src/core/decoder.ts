@@ -14,6 +14,7 @@ import {
 import { Account, AccountSchema, getAccountDisplayName } from '../models/account.js';
 import { Recurring, RecurringSchema } from '../models/recurring.js';
 import { Budget, BudgetSchema } from '../models/budget.js';
+import { Goal, GoalSchema } from '../models/goal.js';
 
 /**
  * Find a field and extract its string value.
@@ -705,6 +706,185 @@ export function decodeBudgets(dbPath: string): Budget[] {
     if (!seen.has(budget.budget_id)) {
       seen.add(budget.budget_id);
       unique.push(budget);
+    }
+  }
+
+  return unique;
+}
+
+/**
+ * Decode financial goals from the Copilot Money database.
+ *
+ * Goals are stored in: /users/{user_id}/financial_goals/{goal_id}
+ *
+ * @param dbPath - Path to the LevelDB database directory
+ * @returns Array of decoded Goal objects
+ */
+export function decodeGoals(dbPath: string): Goal[] {
+  const goals: Goal[] = [];
+
+  // Return empty array if path doesn't exist (graceful degradation)
+  if (!fs.existsSync(dbPath)) {
+    return [];
+  }
+
+  const stat = fs.statSync(dbPath);
+  if (!stat.isDirectory()) {
+    return [];
+  }
+
+  // Configuration constants for record extraction
+  const RECORD_WINDOW_BEFORE = 500; // Bytes to search before path marker
+  const RECORD_WINDOW_AFTER = 3000; // Bytes to search after path marker (larger for nested objects)
+  const MIN_GOAL_ID_LENGTH = 10; // Minimum length for valid Firestore document IDs
+
+  // Get all .ldb files
+  const files = fs.readdirSync(dbPath);
+  const ldbFiles = files.filter((f) => f.endsWith('.ldb')).map((f) => path.join(dbPath, f));
+
+  // Goals are stored in Firestore under /users/{user_id}/financial_goals/{goal_id}
+  // In LevelDB, we search for the financial_goals collection marker
+  const goalPathMarker = Buffer.from('financial_goals/');
+
+  for (const filepath of ldbFiles) {
+    const data = fs.readFileSync(filepath);
+
+    if (!data.includes(goalPathMarker)) {
+      continue;
+    }
+
+    // Find goal records by searching for the path marker
+    let searchPos = 0;
+    let idx = data.indexOf(goalPathMarker, searchPos);
+
+    while (idx !== -1) {
+      searchPos = idx + 1;
+
+      // Use a window around the path marker to capture all fields
+      const recordStart = Math.max(0, idx - RECORD_WINDOW_BEFORE);
+      const recordEnd = Math.min(data.length, idx + RECORD_WINDOW_AFTER);
+      const record = data.subarray(recordStart, recordEnd);
+
+      // Try to extract goal_id from the path (e.g., /financial_goals/{id})
+      const pathIdx = idx - recordStart;
+      const afterPath = record.subarray(pathIdx + goalPathMarker.length, pathIdx + 100);
+      const idMatch = afterPath.toString('utf-8').match(/^([a-zA-Z0-9_-]+)/);
+      const goalId = idMatch?.[1];
+
+      if (goalId && goalId.length >= MIN_GOAL_ID_LENGTH) {
+        // Extract top-level fields
+        const name = extractStringValue(record, fieldPattern('name'));
+        const recommendationId = extractStringValue(record, fieldPattern('recommendation_id'));
+        const emoji = extractStringValue(record, fieldPattern('emoji'));
+        const createdDate = extractStringValue(record, fieldPattern('created_date'));
+        const createdWithAllocations = extractBooleanValue(
+          record,
+          fieldPattern('created_with_allocations')
+        );
+
+        // Extract user_id from the path (before /financial_goals/)
+        const beforePath = record.subarray(0, pathIdx);
+        const userIdMatch = beforePath
+          .toString('utf-8')
+          .match(/\/users\/([a-zA-Z0-9_-]+)\/financial_goals/);
+        const userId = userIdMatch?.[1] ?? undefined;
+
+        // Extract nested savings object fields
+        const savingsType = extractStringValue(record, fieldPattern('type'));
+        const savingsStatus = extractStringValue(record, fieldPattern('status'));
+        const targetAmount = extractDoubleField(record, fieldPattern('target_amount'));
+        const trackingType = extractStringValue(record, fieldPattern('tracking_type'));
+        const monthlyContribution = extractDoubleField(
+          record,
+          fieldPattern('tracking_type_monthly_contribution')
+        );
+        const startDate = extractStringValue(record, fieldPattern('start_date'));
+        const modifiedStartDate = extractBooleanValue(record, fieldPattern('modified_start_date'));
+        const inflatesBudget = extractBooleanValue(record, fieldPattern('inflates_budget'));
+        const isOngoing = extractBooleanValue(record, fieldPattern('is_ongoing'));
+
+        // Build goal object
+        const goalData: {
+          goal_id: string;
+          user_id?: string;
+          name?: string;
+          recommendation_id?: string;
+          emoji?: string;
+          created_date?: string;
+          created_with_allocations?: boolean;
+          savings?: {
+            type?: string;
+            status?: string;
+            target_amount?: number;
+            tracking_type?: string;
+            tracking_type_monthly_contribution?: number;
+            start_date?: string;
+            modified_start_date?: boolean;
+            inflates_budget?: boolean;
+            is_ongoing?: boolean;
+          };
+        } = {
+          goal_id: goalId,
+        };
+
+        // Add optional top-level fields
+        if (userId) goalData.user_id = userId;
+        if (name) goalData.name = name;
+        if (recommendationId) goalData.recommendation_id = recommendationId;
+        if (emoji) goalData.emoji = emoji;
+        if (createdDate) goalData.created_date = createdDate;
+        if (createdWithAllocations !== null)
+          goalData.created_with_allocations = createdWithAllocations;
+
+        // Build nested savings object if any savings fields exist
+        const hasSavingsFields =
+          savingsType ||
+          savingsStatus ||
+          targetAmount !== null ||
+          trackingType ||
+          monthlyContribution !== null ||
+          startDate ||
+          modifiedStartDate !== null ||
+          inflatesBudget !== null ||
+          isOngoing !== null;
+
+        if (hasSavingsFields) {
+          goalData.savings = {};
+          if (savingsType) goalData.savings.type = savingsType;
+          if (savingsStatus) goalData.savings.status = savingsStatus;
+          if (targetAmount !== null) goalData.savings.target_amount = targetAmount;
+          if (trackingType) goalData.savings.tracking_type = trackingType;
+          if (monthlyContribution !== null)
+            goalData.savings.tracking_type_monthly_contribution = monthlyContribution;
+          if (startDate) goalData.savings.start_date = startDate;
+          if (modifiedStartDate !== null) goalData.savings.modified_start_date = modifiedStartDate;
+          if (inflatesBudget !== null) goalData.savings.inflates_budget = inflatesBudget;
+          if (isOngoing !== null) goalData.savings.is_ongoing = isOngoing;
+        }
+
+        try {
+          const goal = GoalSchema.parse(goalData);
+          goals.push(goal);
+        } catch (error) {
+          // Skip invalid records - log in development for debugging
+          if (process.env.NODE_ENV === 'development' || process.env.DEBUG) {
+            console.warn('Skipping invalid goal record:', error);
+          }
+        }
+      }
+
+      idx = data.indexOf(goalPathMarker, searchPos);
+    }
+  }
+
+  // Deduplicate by goal_id
+  const seen = new Set<string>();
+  const unique: Goal[] = [];
+
+  for (const goal of goals) {
+    if (!seen.has(goal.goal_id)) {
+      seen.add(goal.goal_id);
+      unique.push(goal);
     }
   }
 
