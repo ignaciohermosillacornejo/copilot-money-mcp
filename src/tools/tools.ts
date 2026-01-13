@@ -2112,7 +2112,10 @@ export class CopilotMoneyTools {
         .map((field) => {
           const value = (txn as Record<string, unknown>)[field];
           if (value === undefined || value === null) return '';
-          const strValue = String(value);
+          const strValue =
+            typeof value === 'object'
+              ? JSON.stringify(value)
+              : String(value as string | number | boolean);
           // Escape CSV values
           if (strValue.includes(',') || strValue.includes('"') || strValue.includes('\n')) {
             return `"${strValue.replace(/"/g, '""')}"`;
