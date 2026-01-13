@@ -28,12 +28,33 @@ interface Manifest {
 }
 
 function truncateDescription(description: string, maxLength: number = 150): string {
-  // Get the first sentence or truncate at maxLength
-  const firstSentence = description.split('. ')[0];
-  if (firstSentence.length <= maxLength) {
-    return firstSentence.endsWith('.') ? firstSentence : firstSentence + '.';
+  // Handle empty or whitespace-only descriptions
+  if (!description || !description.trim()) {
+    return 'No description available.';
   }
-  return description.slice(0, maxLength - 3) + '...';
+
+  const trimmed = description.trim();
+
+  // Find the first sentence-ending period (followed by space, end of string, or newline)
+  // This avoids splitting on periods in abbreviations like "e.g." or "etc."
+  const sentenceEndMatch = trimmed.match(/^(.+?\.)\s|^(.+?\.)$/);
+  const firstSentence = sentenceEndMatch
+    ? (sentenceEndMatch[1] || sentenceEndMatch[2])
+    : null;
+
+  // If we found a sentence and it fits within maxLength, use it
+  if (firstSentence && firstSentence.length <= maxLength) {
+    return firstSentence;
+  }
+
+  // Otherwise, truncate at maxLength
+  if (trimmed.length <= maxLength) {
+    // Short description without period - add one
+    return trimmed.endsWith('.') ? trimmed : trimmed + '.';
+  }
+
+  // Truncate long descriptions with ellipsis
+  return trimmed.slice(0, maxLength - 3).trimEnd() + '...';
 }
 
 function main() {
