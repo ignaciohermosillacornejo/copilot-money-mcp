@@ -4208,7 +4208,16 @@ export class CopilotMoneyTools {
   }
 
   /**
-   * Get period key for grouping (helper method).
+   * Generate a unique key for grouping transactions by time period.
+   *
+   * Used internally for aggregating spending data into day, week, or month buckets.
+   * - Day: Returns ISO date string (YYYY-MM-DD)
+   * - Week: Returns the Sunday start date of the week (YYYY-MM-DD)
+   * - Month: Returns year-month string (YYYY-MM)
+   *
+   * @param date - The date to generate a period key for
+   * @param granularity - The time granularity ('day', 'week', or 'month')
+   * @returns A string key uniquely identifying the time period
    */
   private getPeriodKey(date: Date, granularity: 'day' | 'week' | 'month'): string {
     if (granularity === 'day') {
@@ -4224,7 +4233,16 @@ export class CopilotMoneyTools {
   }
 
   /**
-   * Get period bounds for a date (helper method).
+   * Calculate the start and end dates for a time period containing a given date.
+   *
+   * Used internally for determining period boundaries when aggregating spending:
+   * - Day: Returns the same date for both start and end
+   * - Week: Returns Sunday (start) through Saturday (end) of the week
+   * - Month: Returns first day through last day of the month
+   *
+   * @param date - The date to calculate period bounds for
+   * @param granularity - The time granularity ('day', 'week', or 'month')
+   * @returns Object with start and end Date objects for the period
    */
   private getPeriodBounds(
     date: Date,
