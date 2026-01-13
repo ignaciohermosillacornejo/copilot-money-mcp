@@ -15,7 +15,7 @@ const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn1',
     amount: 50.0,
-    date: '2026-01-15',
+    date: '2025-01-15',
     name: 'Coffee Shop',
     category_id: 'food_dining',
     account_id: 'acc1',
@@ -23,7 +23,7 @@ const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn2',
     amount: 120.5,
-    date: '2026-01-20',
+    date: '2025-01-20',
     name: 'Grocery Store',
     category_id: 'groceries',
     account_id: 'acc1',
@@ -31,7 +31,7 @@ const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn3',
     amount: 10.0,
-    date: '2026-01-15',
+    date: '2025-01-15',
     name: 'Parking',
     category_id: 'transportation',
     account_id: 'acc2',
@@ -39,7 +39,7 @@ const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn4',
     amount: 25.0,
-    date: '2026-01-18',
+    date: '2025-01-18',
     name: 'Fast Food',
     category_id: 'food_dining',
     account_id: 'acc1',
@@ -103,15 +103,15 @@ describe('CopilotMoneyServer E2E', () => {
 
     test('get_transactions with all filters', () => {
       const result = tools.getTransactions({
-        start_date: '2026-01-01',
-        end_date: '2026-01-31',
+        start_date: '2025-01-01',
+        end_date: '2025-01-31',
         min_amount: 5.0,
         max_amount: 100.0,
         limit: 20,
       });
 
       for (const txn of result.transactions) {
-        expect(txn.date >= '2026-01-01' && txn.date <= '2026-01-31').toBe(true);
+        expect(txn.date >= '2025-01-01' && txn.date <= '2025-01-31').toBe(true);
         expect(txn.amount >= 5.0 && txn.amount <= 100.0).toBe(true);
       }
     });
@@ -134,8 +134,8 @@ describe('CopilotMoneyServer E2E', () => {
 
     test('get_spending_by_category tool works', () => {
       const result = tools.getSpendingByCategory({
-        start_date: '2026-01-01',
-        end_date: '2026-01-31',
+        start_date: '2025-01-01',
+        end_date: '2025-01-31',
       });
 
       expect(result.period).toBeDefined();
@@ -170,8 +170,8 @@ describe('CopilotMoneyServer E2E', () => {
         {
           func: () =>
             tools.getSpendingByCategory({
-              start_date: '2026-01-01',
-              end_date: '2026-01-31',
+              start_date: '2025-01-01',
+              end_date: '2025-01-31',
             }),
         },
         { func: () => tools.getAccountBalance('acc1') },
@@ -189,8 +189,8 @@ describe('CopilotMoneyServer E2E', () => {
   describe('data accuracy', () => {
     test('spending aggregation is mathematically correct', () => {
       const result = tools.getSpendingByCategory({
-        start_date: '2026-01-01',
-        end_date: '2026-01-31',
+        start_date: '2025-01-01',
+        end_date: '2025-01-31',
       });
 
       const categoryTotal = result.categories.reduce((sum, cat) => sum + cat.total_spending, 0);
@@ -208,8 +208,8 @@ describe('CopilotMoneyServer E2E', () => {
 
     test('category transaction counts are accurate', () => {
       const result = tools.getSpendingByCategory({
-        start_date: '2026-01-01',
-        end_date: '2026-01-31',
+        start_date: '2025-01-01',
+        end_date: '2025-01-31',
       });
 
       for (const cat of result.categories) {
@@ -248,13 +248,13 @@ describe('CopilotMoneyServer E2E', () => {
   describe('boundary conditions', () => {
     test('single day date range works', () => {
       const result = tools.getTransactions({
-        start_date: '2026-01-15',
-        end_date: '2026-01-15',
+        start_date: '2025-01-15',
+        end_date: '2025-01-15',
         limit: 100,
       });
 
       for (const txn of result.transactions) {
-        expect(txn.date).toBe('2026-01-15');
+        expect(txn.date).toBe('2025-01-15');
       }
     });
 

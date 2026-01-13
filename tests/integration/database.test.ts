@@ -16,7 +16,7 @@ const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn1',
     amount: 50.0,
-    date: '2026-01-15',
+    date: '2025-01-15',
     name: 'Starbucks',
     category_id: 'food_dining',
     account_id: 'acc1',
@@ -24,7 +24,7 @@ const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn2',
     amount: 15.5,
-    date: '2026-01-10',
+    date: '2025-01-10',
     name: 'Starbucks Coffee',
     category_id: 'food_dining',
     account_id: 'acc1',
@@ -32,7 +32,7 @@ const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn3',
     amount: 120.0,
-    date: '2026-01-08',
+    date: '2025-01-08',
     name: 'Whole Foods',
     category_id: 'groceries',
     account_id: 'acc2',
@@ -40,7 +40,7 @@ const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn4',
     amount: 8.0,
-    date: '2026-01-05',
+    date: '2025-01-05',
     name: 'Starbucks',
     category_id: 'food_dining',
     account_id: 'acc1',
@@ -48,7 +48,7 @@ const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn5',
     amount: 250.0,
-    date: '2025-12-20',
+    date: '2024-12-20',
     name: 'Target',
     category_id: 'shopping',
     account_id: 'acc1',
@@ -107,12 +107,12 @@ describe('CopilotDatabase Integration', () => {
 
     test('filters transactions by date range', () => {
       const txns = db.getTransactions({
-        startDate: '2026-01-01',
-        endDate: '2026-01-10',
+        startDate: '2025-01-01',
+        endDate: '2025-01-10',
         limit: 1000,
       });
 
-      expect(txns.every((txn) => txn.date >= '2026-01-01' && txn.date <= '2026-01-10')).toBe(true);
+      expect(txns.every((txn) => txn.date >= '2025-01-01' && txn.date <= '2025-01-10')).toBe(true);
     });
 
     test('filters transactions by merchant name', () => {
@@ -161,15 +161,15 @@ describe('CopilotDatabase Integration', () => {
 
     test('combines multiple filters', () => {
       const txns = db.getTransactions({
-        startDate: '2026-01-01',
-        endDate: '2026-12-31',
+        startDate: '2025-01-01',
+        endDate: '2025-12-31',
         minAmount: 5.0,
         category: 'food',
         limit: 100,
       });
 
       for (const txn of txns) {
-        expect(txn.date >= '2026-01-01' && txn.date <= '2026-12-31').toBe(true);
+        expect(txn.date >= '2025-01-01' && txn.date <= '2025-12-31').toBe(true);
         expect(txn.amount >= 5.0).toBe(true);
         expect(txn.category_id && txn.category_id.toLowerCase().includes('food')).toBe(true);
       }

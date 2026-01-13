@@ -43,60 +43,60 @@ afterEach(() => {
 
 describe('parsePeriod', () => {
   test("parses 'this_month' period", () => {
-    setMockDate('2026-01-15T12:00:00Z');
+    setMockDate('2025-01-15T12:00:00Z');
     const [start, end] = parsePeriod('this_month');
-    expect(start).toBe('2026-01-01');
-    expect(end).toBe('2026-01-31');
+    expect(start).toBe('2025-01-01');
+    expect(end).toBe('2025-01-31');
   });
 
   test("parses 'last_month' period", () => {
-    setMockDate('2026-01-15T12:00:00Z');
+    setMockDate('2025-01-15T12:00:00Z');
     const [start, end] = parsePeriod('last_month');
-    expect(start).toBe('2025-12-01');
-    expect(end).toBe('2025-12-31');
+    expect(start).toBe('2024-12-01');
+    expect(end).toBe('2024-12-31');
   });
 
   test("parses 'this_year' period", () => {
-    setMockDate('2026-01-15T12:00:00Z');
+    setMockDate('2025-01-15T12:00:00Z');
     const [start, end] = parsePeriod('this_year');
-    expect(start).toBe('2026-01-01');
-    expect(end).toBe('2026-12-31');
-  });
-
-  test("parses 'last_year' period", () => {
-    setMockDate('2026-01-15T12:00:00Z');
-    const [start, end] = parsePeriod('last_year');
     expect(start).toBe('2025-01-01');
     expect(end).toBe('2025-12-31');
   });
 
+  test("parses 'last_year' period", () => {
+    setMockDate('2025-01-15T12:00:00Z');
+    const [start, end] = parsePeriod('last_year');
+    expect(start).toBe('2024-01-01');
+    expect(end).toBe('2024-12-31');
+  });
+
   test("parses 'last_7_days' period", () => {
-    setMockDate('2026-01-15T12:00:00Z');
+    setMockDate('2025-01-15T12:00:00Z');
     const [start, end] = parsePeriod('last_7_days');
     // Should be 7 days ago to today
-    expect(start).toBe('2026-01-08');
-    expect(end).toBe('2026-01-15');
+    expect(start).toBe('2025-01-08');
+    expect(end).toBe('2025-01-15');
   });
 
   test("parses 'last_30_days' period", () => {
-    setMockDate('2026-01-15T12:00:00Z');
+    setMockDate('2025-01-15T12:00:00Z');
     const [start, end] = parsePeriod('last_30_days');
-    expect(start).toBe('2025-12-16');
-    expect(end).toBe('2026-01-15');
+    expect(start).toBe('2024-12-16');
+    expect(end).toBe('2025-01-15');
   });
 
   test("parses 'last_90_days' period", () => {
-    setMockDate('2026-01-15T12:00:00Z');
+    setMockDate('2025-01-15T12:00:00Z');
     const [start, end] = parsePeriod('last_90_days');
-    expect(start).toBe('2025-10-17');
-    expect(end).toBe('2026-01-15');
+    expect(start).toBe('2024-10-17');
+    expect(end).toBe('2025-01-15');
   });
 
   test("parses 'ytd' (year to date) period", () => {
-    setMockDate('2026-01-15T12:00:00Z');
+    setMockDate('2025-01-15T12:00:00Z');
     const [start, end] = parsePeriod('ytd');
-    expect(start).toBe('2026-01-01');
-    expect(end).toBe('2026-01-15');
+    expect(start).toBe('2025-01-01');
+    expect(end).toBe('2025-01-15');
   });
 
   test('throws error for invalid period', () => {
@@ -104,32 +104,32 @@ describe('parsePeriod', () => {
   });
 
   test('parses last_month when current month is February', () => {
-    setMockDate('2026-02-15T12:00:00Z');
+    setMockDate('2025-02-15T12:00:00Z');
     const [start, end] = parsePeriod('last_month');
-    expect(start).toBe('2026-01-01');
-    expect(end).toBe('2026-01-31');
+    expect(start).toBe('2025-01-01');
+    expect(end).toBe('2025-01-31');
   });
 
   test('parses last_month when current month is March', () => {
-    setMockDate('2026-03-15T12:00:00Z');
+    setMockDate('2025-03-15T12:00:00Z');
     const [start, end] = parsePeriod('last_month');
-    // February 2026 (not a leap year)
-    expect(start).toBe('2026-02-01');
-    expect(end).toBe('2026-02-28');
+    // February 2025 (not a leap year)
+    expect(start).toBe('2025-02-01');
+    expect(end).toBe('2025-02-28');
   });
 });
 
 describe('getMonthRange', () => {
   test('gets range for January', () => {
-    const [start, end] = getMonthRange(2026, 1);
-    expect(start).toBe('2026-01-01');
-    expect(end).toBe('2026-01-31');
+    const [start, end] = getMonthRange(2025, 1);
+    expect(start).toBe('2025-01-01');
+    expect(end).toBe('2025-01-31');
   });
 
   test('gets range for February in non-leap year', () => {
-    const [start, end] = getMonthRange(2026, 2);
-    expect(start).toBe('2026-02-01');
-    expect(end).toBe('2026-02-28');
+    const [start, end] = getMonthRange(2025, 2);
+    expect(start).toBe('2025-02-01');
+    expect(end).toBe('2025-02-28');
   });
 
   test('gets range for February in leap year', () => {
@@ -139,22 +139,22 @@ describe('getMonthRange', () => {
   });
 
   test('gets range for December', () => {
-    const [start, end] = getMonthRange(2026, 12);
-    expect(start).toBe('2026-12-01');
-    expect(end).toBe('2026-12-31');
+    const [start, end] = getMonthRange(2025, 12);
+    expect(start).toBe('2025-12-01');
+    expect(end).toBe('2025-12-31');
   });
 
   test('gets range for April (30 days)', () => {
-    const [start, end] = getMonthRange(2026, 4);
-    expect(start).toBe('2026-04-01');
-    expect(end).toBe('2026-04-30');
+    const [start, end] = getMonthRange(2025, 4);
+    expect(start).toBe('2025-04-01');
+    expect(end).toBe('2025-04-30');
   });
 
   test('throws error for invalid month (13)', () => {
-    expect(() => getMonthRange(2026, 13)).toThrow();
+    expect(() => getMonthRange(2025, 13)).toThrow();
   });
 
   test('throws error for invalid month (0)', () => {
-    expect(() => getMonthRange(2026, 0)).toThrow();
+    expect(() => getMonthRange(2025, 0)).toThrow();
   });
 });

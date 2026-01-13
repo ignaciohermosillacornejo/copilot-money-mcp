@@ -16,7 +16,7 @@ const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn1',
     amount: 50.0,
-    date: '2026-01-15',
+    date: '2025-01-15',
     name: 'Coffee Shop',
     category_id: 'food_dining',
     account_id: 'acc1',
@@ -25,7 +25,7 @@ const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn2',
     amount: 120.5,
-    date: '2026-01-20',
+    date: '2025-01-20',
     name: 'Grocery Store',
     category_id: 'groceries',
     account_id: 'acc1',
@@ -34,7 +34,7 @@ const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn3',
     amount: 10.0,
-    date: '2025-12-15',
+    date: '2024-12-15',
     name: 'Parking',
     category_id: 'transportation',
     account_id: 'acc2',
@@ -42,7 +42,7 @@ const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn4',
     amount: -25.0, // Refund/Credit
-    date: '2026-01-18',
+    date: '2025-01-18',
     name: 'Refund - Fast Food',
     category_id: 'food_dining',
     account_id: 'acc1',
@@ -50,7 +50,7 @@ const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn5',
     amount: 100.0,
-    date: '2026-01-10',
+    date: '2025-01-10',
     name: 'Foreign Purchase',
     category_id: 'shopping',
     account_id: 'acc1',
