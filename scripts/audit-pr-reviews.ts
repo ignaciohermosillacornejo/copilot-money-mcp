@@ -18,9 +18,28 @@ import { $ } from 'bun';
 const AUDITED_LABEL = 'audited';
 const CLAUDE_USERNAMES = ['claude', 'claude[bot]'];
 const DRY_RUN = process.argv.includes('--dry-run');
-const SPECIFIC_PR = process.argv.includes('--pr')
-  ? parseInt(process.argv[process.argv.indexOf('--pr') + 1])
-  : null;
+
+// Validate and parse PR number to prevent command injection
+function parseSpecificPR(): number | null {
+  const prIndex = process.argv.indexOf('--pr');
+  if (prIndex === -1) return null;
+
+  const prArg = process.argv[prIndex + 1];
+  if (!prArg) {
+    console.error('Error: --pr requires a PR number');
+    process.exit(1);
+  }
+
+  const prNumber = parseInt(prArg, 10);
+  if (isNaN(prNumber) || prNumber <= 0 || prNumber > 1000000) {
+    console.error('Error: Invalid PR number. Must be a positive integer.');
+    process.exit(1);
+  }
+
+  return prNumber;
+}
+
+const SPECIFIC_PR = parseSpecificPR();
 
 interface PRComment {
   body: string;
@@ -61,23 +80,39 @@ function isClaudeComment(user: string): boolean {
   );
 }
 
+// Maximum text size to process to prevent ReDoS attacks
+const MAX_TEXT_SIZE = 50000;
+
+// Delay between API calls to avoid rate limiting (ms)
+const API_DELAY_MS = 500;
+
+/**
+ * Sleep for specified milliseconds
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Extract actionable suggestions from review text
  */
 function extractSuggestions(text: string): string[] {
   const suggestions: string[] = [];
 
-  // Patterns that indicate suggestions
+  // Limit input size to prevent ReDoS
+  const safeText = text.slice(0, MAX_TEXT_SIZE);
+
+  // Patterns that indicate suggestions (simplified to reduce backtracking)
   const suggestionPatterns = [
-    /(?:suggest|consider|should|could|recommend|would be better|improvement)[:\s]+([^.]+\.)/gi,
-    /(?:TODO|FIXME|NOTE)[:\s]+([^.]+\.)/gi,
-    /\*\*(?:suggestion|issue|problem|concern)[:\s]*\*\*[:\s]*([^.]+\.)/gi,
-    /(?:^|\n)-\s*\[?\s*\]?\s*([^.\n]+(?:should|could|consider|add|fix|update|replace)[^.\n]+)/gi,
+    /(?:suggest|consider|should|could|recommend|would be better|improvement)[:\s]+([^.]{10,200}\.)/gi,
+    /(?:TODO|FIXME|NOTE)[:\s]+([^.]{10,200}\.)/gi,
+    /\*\*(?:suggestion|issue|problem|concern)[:\s]*\*\*[:\s]*([^.]{10,200}\.)/gi,
+    /(?:^|\n)-\s*\[?\s*\]?\s*([^\n]{10,200}(?:should|could|consider|add|fix|update|replace)[^\n]{0,100})/gi,
   ];
 
   for (const pattern of suggestionPatterns) {
     let match;
-    while ((match = pattern.exec(text)) !== null) {
+    while ((match = pattern.exec(safeText)) !== null) {
       const suggestion = match[1]?.trim();
       if (suggestion && suggestion.length > 20 && suggestion.length < 500) {
         suggestions.push(suggestion);
@@ -88,7 +123,7 @@ function extractSuggestions(text: string): string[] {
   // Also look for code blocks with suggestions
   const codeBlockPattern = /```(?:suggestion|diff)?\n([\s\S]*?)```/g;
   let codeMatch;
-  while ((codeMatch = codeBlockPattern.exec(text)) !== null) {
+  while ((codeMatch = codeBlockPattern.exec(safeText)) !== null) {
     if (codeMatch[1]?.includes('+') || codeMatch[1]?.includes('-')) {
       suggestions.push(`Code change suggested: ${codeMatch[1].slice(0, 200)}...`);
     }
@@ -361,7 +396,8 @@ async function main(): Promise<void> {
   // Audit each PR
   const allSuggestions: Map<number, UnaddressedSuggestion[]> = new Map();
 
-  for (const pr of prs) {
+  for (let i = 0; i < prs.length; i++) {
+    const pr = prs[i];
     const suggestions = await auditPR(pr);
 
     if (suggestions.length > 0) {
@@ -376,6 +412,11 @@ async function main(): Promise<void> {
 
     // Mark as audited
     await markAsAudited(pr.number);
+
+    // Rate limiting: add delay between PRs (except for last one)
+    if (i < prs.length - 1) {
+      await sleep(API_DELAY_MS);
+    }
   }
 
   // Create issues for unaddressed suggestions
