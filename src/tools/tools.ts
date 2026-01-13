@@ -5194,9 +5194,6 @@ export class CopilotMoneyTools {
       reason: string;
     }> = [];
 
-    let extremelyLargeCount = 0;
-    let unrealisticCount = 0;
-
     for (const txn of allTransactions) {
       const absAmount = Math.abs(txn.amount);
       const merchant = getTransactionDisplayName(txn);
@@ -5204,7 +5201,6 @@ export class CopilotMoneyTools {
 
       if (absAmount >= UNREALISTIC_AMOUNT_THRESHOLD) {
         // Unrealistic amounts (>= $1,000,000) - almost certainly data errors
-        unrealisticCount++;
         extremelyLargeTransactions.push({
           transaction_id: txn.transaction_id,
           date: txn.date,
@@ -5216,7 +5212,6 @@ export class CopilotMoneyTools {
         });
       } else if (absAmount >= EXTREMELY_LARGE_THRESHOLD) {
         // Extremely large amounts ($100,000 - $999,999) - unusual for personal finance
-        extremelyLargeCount++;
         extremelyLargeTransactions.push({
           transaction_id: txn.transaction_id,
           date: txn.date,

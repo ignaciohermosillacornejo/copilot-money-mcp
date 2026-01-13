@@ -2206,10 +2206,10 @@ describe('New MCP Tools', () => {
           category_id: 'groceries',
           account_id: 'acc1',
         },
-        // Large transaction (over $1000)
+        // Large transaction (over $10,000 threshold)
         {
           transaction_id: 'big1',
-          amount: 1500.0,
+          amount: 15000.0,
           date: '2024-01-25',
           name: 'Electronics Store',
           category_id: 'shopping',
@@ -2229,13 +2229,13 @@ describe('New MCP Tools', () => {
       expect(result.transactions).toBeDefined();
     });
 
-    test('flags large transactions over $1000', () => {
+    test('flags large transactions over $10,000', () => {
       const result = tools.getUnusualTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
 
-      const largeTransaction = result.transactions.find((t) => t.amount === 1500.0);
+      const largeTransaction = result.transactions.find((t) => t.amount === 15000.0);
       expect(largeTransaction).toBeDefined();
       if (largeTransaction) {
         expect(largeTransaction.anomaly_reason).toContain('Large transaction');
@@ -2483,10 +2483,10 @@ describe('New MCP Tools', () => {
           category_id: 'food_dining',
           account_id: 'acc1',
         },
-        // New merchant with unusually high amount for category (>$1000 triggers large transaction flag)
+        // New merchant with unusually high amount for category (>$10,000 triggers large transaction flag)
         {
           transaction_id: 'cat5',
-          amount: 1500.0, // Way above category average and > $1000
+          amount: 15000.0, // Way above category average and > $10,000
           date: '2024-01-15',
           name: 'Fancy New Restaurant',
           category_id: 'food_dining',
@@ -2713,7 +2713,7 @@ describe('New MCP Tools', () => {
       });
 
       // Large transaction should have category_name
-      const largeTransaction = result.transactions.find((t) => t.amount === 1500.0);
+      const largeTransaction = result.transactions.find((t) => t.amount === 15000.0);
       expect(largeTransaction).toBeDefined();
       if (largeTransaction) {
         expect(largeTransaction.category_name).toBeDefined();
@@ -2807,7 +2807,7 @@ describe('New MCP Tools', () => {
       for (let i = 0; i < 100; i++) {
         manyAnomalies.push({
           transaction_id: `many${i}`,
-          amount: 1500.0 + i, // All large transactions
+          amount: 15000.0 + i, // All large transactions (>= $10,000 threshold)
           date: `2024-01-${String((i % 28) + 1).padStart(2, '0')}`,
           name: `Merchant ${i}`,
           category_id: 'shopping',
@@ -2950,7 +2950,7 @@ describe('New MCP Tools', () => {
       const noCategoryTransactions: Transaction[] = [
         {
           transaction_id: 'nocat1',
-          amount: 1500.0, // Large transaction
+          amount: 15000.0, // Large transaction (>= $10,000 threshold)
           date: '2024-01-15',
           name: 'Uncategorized Purchase',
           // No category_id
@@ -3205,9 +3205,7 @@ describe('New MCP Tools', () => {
       });
 
       expect(result.amount_issues.total).toBeGreaterThanOrEqual(1);
-      const extremeTxn = result.amount_issues.items.find(
-        (t) => t.transaction_id === 'extreme1'
-      );
+      const extremeTxn = result.amount_issues.items.find((t) => t.transaction_id === 'extreme1');
       expect(extremeTxn).toBeDefined();
       expect(extremeTxn?.severity).toBe('extremely_large');
       expect(extremeTxn?.reason).toContain('100,000');
