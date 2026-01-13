@@ -328,6 +328,12 @@ export class CopilotMoneyServer {
           );
           break;
 
+        case 'get_connected_institutions':
+          result = this.tools.getConnectedInstitutions(
+            (typedArgs as Parameters<typeof this.tools.getConnectedInstitutions>[0]) || {}
+          );
+          break;
+
         default:
           return {
             content: [

@@ -76,3 +76,19 @@ export {
   adjustSharesForSplit,
   formatSplitDate,
 } from './investment-split.js';
+
+export {
+  ItemSchema,
+  type Item,
+  type ConnectionStatus,
+  type PlaidErrorCode,
+  CONNECTION_STATUSES,
+  KNOWN_ERROR_CODES,
+  getItemDisplayName,
+  isItemHealthy,
+  itemNeedsAttention,
+  getItemStatusDescription,
+  getItemAccountCount,
+  formatLastUpdate,
+  isConsentExpiringSoon,
+} from './item.js';

@@ -12,4 +12,5 @@ export {
   decodeGoalHistory,
   decodeInvestmentPrices,
   decodeInvestmentSplits,
+  decodeItems,
 } from './decoder.js';

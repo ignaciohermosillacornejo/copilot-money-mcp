@@ -18,6 +18,7 @@ import { Goal, GoalSchema } from '../models/goal.js';
 import { GoalHistory, GoalHistorySchema, DailySnapshot } from '../models/goal-history.js';
 import { InvestmentPrice, InvestmentPriceSchema } from '../models/investment-price.js';
 import { InvestmentSplit, InvestmentSplitSchema } from '../models/investment-split.js';
+import { Item, ItemSchema } from '../models/item.js';
 
 /**
  * Find a field and extract its string value.
@@ -1494,6 +1495,203 @@ export function decodeInvestmentSplits(
     const dateA = a.split_date || '';
     const dateB = b.split_date || '';
     return dateB.localeCompare(dateA); // Newest first
+  });
+
+  return unique;
+}
+
+/**
+ * Decode Plaid items (institution connections) from the Copilot Money database.
+ *
+ * Items are stored in collection:
+ * /users/{user_id}/items/{item_id}
+ *
+ * Each document represents a connection to a financial institution via Plaid,
+ * including connection status, error information, and linked accounts.
+ *
+ * @param dbPath - Path to the LevelDB database directory
+ * @param options - Filter options
+ * @returns Array of decoded Item objects
+ */
+export function decodeItems(
+  dbPath: string,
+  options: {
+    connectionStatus?: string;
+    institutionId?: string;
+    needsUpdate?: boolean;
+  } = {}
+): Item[] {
+  const items: Item[] = [];
+  const { connectionStatus, institutionId, needsUpdate } = options;
+
+  // Return empty array if path doesn't exist (graceful degradation)
+  if (!fs.existsSync(dbPath)) {
+    return [];
+  }
+
+  const stat = fs.statSync(dbPath);
+  if (!stat.isDirectory()) {
+    return [];
+  }
+
+  // Configuration constants for record extraction
+  const RECORD_WINDOW_BEFORE = 500; // Bytes to search before path marker
+  const RECORD_WINDOW_AFTER = 2000; // Bytes to search after path marker
+  const MIN_ITEM_ID_LENGTH = 10; // Minimum length for valid Firestore document IDs
+
+  // Get all .ldb files
+  const files = fs.readdirSync(dbPath);
+  const ldbFiles = files.filter((f) => f.endsWith('.ldb')).map((f) => path.join(dbPath, f));
+
+  // Items are in: /users/{user_id}/items/{item_id}
+  const itemPathMarker = Buffer.from('/items/');
+
+  for (const filepath of ldbFiles) {
+    const data = fs.readFileSync(filepath);
+
+    if (!data.includes(itemPathMarker)) {
+      continue;
+    }
+
+    // Find item records by searching for the path marker
+    let searchPos = 0;
+    let idx = data.indexOf(itemPathMarker, searchPos);
+
+    while (idx !== -1) {
+      searchPos = idx + 1;
+
+      // Use a window around the path marker to capture all fields
+      const recordStart = Math.max(0, idx - RECORD_WINDOW_BEFORE);
+      const recordEnd = Math.min(data.length, idx + RECORD_WINDOW_AFTER);
+      const record = data.subarray(recordStart, recordEnd);
+
+      // Try to extract item_id from the path (e.g., /items/{id})
+      const pathIdx = idx - recordStart;
+      const afterPath = record.subarray(pathIdx + itemPathMarker.length, pathIdx + 100);
+      const idMatch = afterPath.toString('utf-8').match(/^([a-zA-Z0-9_-]+)/);
+      const itemId = idMatch?.[1];
+
+      if (itemId && itemId.length >= MIN_ITEM_ID_LENGTH) {
+        // Extract user_id from before /items/
+        const beforePath = record.subarray(0, pathIdx);
+        const userIdMatch = beforePath.toString('utf-8').match(/\/users\/([a-zA-Z0-9_-]+)\/items/);
+        const userId = userIdMatch?.[1] ?? undefined;
+
+        // Only search AFTER the item ID to avoid picking up fields from adjacent documents
+        const afterItemId = record.subarray(pathIdx + itemPathMarker.length + itemId.length);
+
+        // Extract institution fields
+        const instId = extractStringValue(afterItemId, fieldPattern('institution_id'));
+        const instName = extractStringValue(afterItemId, fieldPattern('institution_name'));
+
+        // Extract connection status fields
+        const status = extractStringValue(afterItemId, fieldPattern('connection_status'));
+        const lastSuccessfulUpdate = extractStringValue(
+          afterItemId,
+          fieldPattern('last_successful_update')
+        );
+        const lastFailedUpdate = extractStringValue(
+          afterItemId,
+          fieldPattern('last_failed_update')
+        );
+        const consentExpiration = extractStringValue(
+          afterItemId,
+          fieldPattern('consent_expiration_time')
+        );
+
+        // Extract error fields
+        const errorCode = extractStringValue(afterItemId, fieldPattern('error_code'));
+        const errorMessage = extractStringValue(afterItemId, fieldPattern('error_message'));
+        const errorType = extractStringValue(afterItemId, fieldPattern('error_type'));
+        const needsUpdateFlag = extractBooleanValue(afterItemId, fieldPattern('needs_update'));
+
+        // Extract metadata
+        const createdAt = extractStringValue(afterItemId, fieldPattern('created_at'));
+        const updatedAt = extractStringValue(afterItemId, fieldPattern('updated_at'));
+        const webhook = extractStringValue(afterItemId, fieldPattern('webhook'));
+
+        // Apply filters
+        if (connectionStatus && status !== connectionStatus) {
+          idx = data.indexOf(itemPathMarker, searchPos);
+          continue;
+        }
+
+        if (institutionId && instId !== institutionId) {
+          idx = data.indexOf(itemPathMarker, searchPos);
+          continue;
+        }
+
+        if (needsUpdate !== undefined && needsUpdateFlag !== needsUpdate) {
+          idx = data.indexOf(itemPathMarker, searchPos);
+          continue;
+        }
+
+        // Build item object
+        const itemData: {
+          item_id: string;
+          user_id?: string;
+          institution_id?: string;
+          institution_name?: string;
+          connection_status?: string;
+          last_successful_update?: string;
+          last_failed_update?: string;
+          consent_expiration_time?: string;
+          error_code?: string;
+          error_message?: string;
+          error_type?: string;
+          needs_update?: boolean;
+          created_at?: string;
+          updated_at?: string;
+          webhook?: string;
+        } = {
+          item_id: itemId,
+        };
+
+        if (userId) itemData.user_id = userId;
+        if (instId) itemData.institution_id = instId;
+        if (instName) itemData.institution_name = instName;
+        if (status) itemData.connection_status = status;
+        if (lastSuccessfulUpdate) itemData.last_successful_update = lastSuccessfulUpdate;
+        if (lastFailedUpdate) itemData.last_failed_update = lastFailedUpdate;
+        if (consentExpiration) itemData.consent_expiration_time = consentExpiration;
+        if (errorCode) itemData.error_code = errorCode;
+        if (errorMessage) itemData.error_message = errorMessage;
+        if (errorType) itemData.error_type = errorType;
+        if (needsUpdateFlag !== null) itemData.needs_update = needsUpdateFlag;
+        if (createdAt) itemData.created_at = createdAt;
+        if (updatedAt) itemData.updated_at = updatedAt;
+        if (webhook) itemData.webhook = webhook;
+
+        // Validate and add to results
+        const validated = ItemSchema.safeParse(itemData);
+        if (validated.success) {
+          items.push(validated.data);
+        }
+      }
+
+      idx = data.indexOf(itemPathMarker, searchPos);
+    }
+  }
+
+  // Deduplicate by item_id
+  const seen = new Set<string>();
+  const unique: Item[] = [];
+
+  for (const item of items) {
+    if (!seen.has(item.item_id)) {
+      seen.add(item.item_id);
+      unique.push(item);
+    }
+  }
+
+  // Sort by institution_name, then by item_id
+  unique.sort((a, b) => {
+    const nameA = a.institution_name || '';
+    const nameB = b.institution_name || '';
+    if (nameA !== nameB) {
+      return nameA.localeCompare(nameB);
+    }
+    return a.item_id.localeCompare(b.item_id);
   });
 
   return unique;

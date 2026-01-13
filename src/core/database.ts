@@ -17,6 +17,7 @@ import {
   decodeGoalHistory,
   decodeInvestmentPrices,
   decodeInvestmentSplits,
+  decodeItems,
 } from './decoder.js';
 import {
   Account,
@@ -28,6 +29,7 @@ import {
   GoalHistory,
   InvestmentPrice,
   InvestmentSplit,
+  Item,
   getTransactionDisplayName,
 } from '../models/index.js';
 import { getCategoryName } from '../utils/categories.js';
@@ -538,5 +540,29 @@ export class CopilotDatabase {
     // Note: We don't cache investment splits as they are relatively small
     // and accessed infrequently
     return decodeInvestmentSplits(this.requireDbPath(), options);
+  }
+
+  /**
+   * Get connected institutions (Plaid items) from the database.
+   *
+   * Items represent connections to financial institutions via Plaid.
+   * Each item can have multiple accounts (e.g., checking + savings at same bank).
+   *
+   * @param options - Filter options
+   * @param options.connectionStatus - Filter by connection status ("active", "error", etc.)
+   * @param options.institutionId - Filter by Plaid institution ID
+   * @param options.needsUpdate - Filter by needs_update flag
+   * @returns Array of Item objects, sorted by institution name
+   */
+  getItems(
+    options: {
+      connectionStatus?: string;
+      institutionId?: string;
+      needsUpdate?: boolean;
+    } = {}
+  ): Item[] {
+    // Note: We don't cache items as they may change frequently
+    // with connection status updates
+    return decodeItems(this.requireDbPath(), options);
   }
 }

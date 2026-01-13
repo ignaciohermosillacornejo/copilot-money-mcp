@@ -17,6 +17,14 @@ import {
   getSplitDisplayString,
   isReverseSplit,
 } from '../models/investment-split.js';
+import {
+  getItemDisplayName,
+  isItemHealthy,
+  itemNeedsAttention,
+  getItemStatusDescription,
+  getItemAccountCount,
+  formatLastUpdate,
+} from '../models/item.js';
 
 // ============================================
 // Category Constants
@@ -3830,6 +3838,76 @@ export class CopilotMoneyTools {
       splits: formattedSplits,
     };
   }
+
+  /**
+   * Get connected financial institutions (Plaid items).
+   *
+   * Returns information about institution connections including health status,
+   * error states, and when they were last synced. Useful for monitoring
+   * connection health and identifying accounts that need re-authentication.
+   *
+   * @param options - Filter options
+   * @returns Object with institution connection data
+   */
+  getConnectedInstitutions(
+    options: {
+      connection_status?: string;
+      institution_id?: string;
+      needs_update?: boolean;
+    } = {}
+  ): {
+    count: number;
+    healthy_count: number;
+    needs_attention_count: number;
+    institutions: Array<{
+      item_id: string;
+      institution_name: string;
+      institution_id?: string;
+      connection_status?: string;
+      status_description: string;
+      is_healthy: boolean;
+      needs_attention: boolean;
+      account_count: number;
+      last_updated?: string;
+      error_code?: string;
+      error_message?: string;
+    }>;
+  } {
+    const { connection_status, institution_id, needs_update } = options;
+
+    // Get items from database
+    const items = this.db.getItems({
+      connectionStatus: connection_status,
+      institutionId: institution_id,
+      needsUpdate: needs_update,
+    });
+
+    // Format items with calculated fields
+    const formattedItems = items.map((item) => ({
+      item_id: item.item_id,
+      institution_name: getItemDisplayName(item),
+      institution_id: item.institution_id,
+      connection_status: item.connection_status,
+      status_description: getItemStatusDescription(item),
+      is_healthy: isItemHealthy(item),
+      needs_attention: itemNeedsAttention(item),
+      account_count: getItemAccountCount(item),
+      last_updated: formatLastUpdate(item),
+      error_code: item.error_code,
+      error_message: item.error_message,
+    }));
+
+    // Count healthy and needing attention
+    const healthyCount = formattedItems.filter((i) => i.is_healthy).length;
+    const needsAttentionCount = formattedItems.filter((i) => i.needs_attention).length;
+
+    return {
+      count: formattedItems.length,
+      healthy_count: healthyCount,
+      needs_attention_count: needsAttentionCount,
+      institutions: formattedItems,
+    };
+  }
 }
 
 /**
@@ -4893,6 +4971,34 @@ export function createToolSchemas(): ToolSchema[] {
             type: 'string',
             description: 'Filter splits on or before this date (YYYY-MM-DD)',
             pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_connected_institutions',
+      description:
+        'Get connected financial institutions (Plaid items). Shows all bank and financial ' +
+        'institution connections with their health status, error states, and last sync times. ' +
+        'Useful for identifying accounts that need re-authentication or have connection issues. ' +
+        'Returns counts of healthy connections and those needing attention.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          connection_status: {
+            type: 'string',
+            description: 'Filter by connection status (e.g., "active", "error", "disconnected")',
+          },
+          institution_id: {
+            type: 'string',
+            description: 'Filter by Plaid institution ID',
+          },
+          needs_update: {
+            type: 'boolean',
+            description: 'Filter by whether connection needs re-authentication (true/false)',
           },
         },
       },
