@@ -74,6 +74,34 @@ const DEFAULT_ISSUES_LIMIT = 20;
 const MAX_ISSUES_LIMIT = 100;
 
 // ============================================
+// Amount Validation Constants
+// ============================================
+
+/**
+ * Threshold for large transactions worth noting (but still normal).
+ * $10,000 is a common threshold for personal finance.
+ */
+export const LARGE_TRANSACTION_THRESHOLD = 10_000;
+
+/**
+ * Threshold for extremely large transactions that should be flagged for review.
+ * $100,000 is unusual for typical personal finance transactions.
+ */
+export const EXTREMELY_LARGE_THRESHOLD = 100_000;
+
+/**
+ * Threshold for unrealistic amounts that are likely data quality issues.
+ * $1,000,000 is almost certainly an error in personal finance data.
+ */
+export const UNREALISTIC_AMOUNT_THRESHOLD = 1_000_000;
+
+/**
+ * Maximum valid transaction amount (matches TransactionSchema validation).
+ * Amounts above this are rejected at the schema level.
+ */
+export const MAX_VALID_AMOUNT = 10_000_000;
+
+// ============================================
 // Validation Helpers
 // ============================================
 
@@ -4297,10 +4325,16 @@ export class CopilotMoneyTools {
         }
       }
 
-      // Flag very large transactions regardless
-      if (!isAnomaly && txn.amount > 1000) {
+      // Flag transactions based on amount thresholds (most severe first)
+      if (!isAnomaly && txn.amount >= UNREALISTIC_AMOUNT_THRESHOLD) {
         isAnomaly = true;
-        reason = 'Large transaction (>$1000)';
+        reason = `Unrealistic amount (>=$${UNREALISTIC_AMOUNT_THRESHOLD.toLocaleString()}) - likely data quality issue`;
+      } else if (!isAnomaly && txn.amount >= EXTREMELY_LARGE_THRESHOLD) {
+        isAnomaly = true;
+        reason = `Extremely large transaction (>=$${EXTREMELY_LARGE_THRESHOLD.toLocaleString()}) - review for accuracy`;
+      } else if (!isAnomaly && txn.amount >= LARGE_TRANSACTION_THRESHOLD) {
+        isAnomaly = true;
+        reason = `Large transaction (>=$${LARGE_TRANSACTION_THRESHOLD.toLocaleString()})`;
       }
 
       if (isAnomaly) {
@@ -4788,6 +4822,20 @@ export class CopilotMoneyTools {
         balances: number[];
       }>;
     };
+    amount_issues: {
+      count: number;
+      total: number;
+      has_more: boolean;
+      items: Array<{
+        transaction_id: string;
+        date: string;
+        merchant: string;
+        amount: number;
+        category_name: string;
+        severity: 'extremely_large' | 'unrealistic';
+        reason: string;
+      }>;
+    };
     suspicious_categorizations: {
       count: number;
       total: number;
@@ -5135,6 +5183,59 @@ export class CopilotMoneyTools {
     const hasMoreSuspiciousCategorizations =
       issuesOffset + issuesLimit < totalSuspiciousCategorizations;
 
+    // ===== AMOUNT ISSUES =====
+    const extremelyLargeTransactions: Array<{
+      transaction_id: string;
+      date: string;
+      merchant: string;
+      amount: number;
+      category_name: string;
+      severity: 'extremely_large' | 'unrealistic';
+      reason: string;
+    }> = [];
+
+    for (const txn of allTransactions) {
+      const absAmount = Math.abs(txn.amount);
+      const merchant = getTransactionDisplayName(txn);
+      const categoryName = txn.category_id ? getCategoryName(txn.category_id) : 'Unknown';
+
+      if (absAmount >= UNREALISTIC_AMOUNT_THRESHOLD) {
+        // Unrealistic amounts (>= $1,000,000) - almost certainly data errors
+        extremelyLargeTransactions.push({
+          transaction_id: txn.transaction_id,
+          date: txn.date,
+          merchant,
+          amount: txn.amount,
+          category_name: categoryName,
+          severity: 'unrealistic',
+          reason: `Amount $${absAmount.toLocaleString()} exceeds $${UNREALISTIC_AMOUNT_THRESHOLD.toLocaleString()} - likely a data quality issue or unconverted foreign currency`,
+        });
+      } else if (absAmount >= EXTREMELY_LARGE_THRESHOLD) {
+        // Extremely large amounts ($100,000 - $999,999) - unusual for personal finance
+        extremelyLargeTransactions.push({
+          transaction_id: txn.transaction_id,
+          date: txn.date,
+          merchant,
+          amount: txn.amount,
+          category_name: categoryName,
+          severity: 'extremely_large',
+          reason: `Amount $${absAmount.toLocaleString()} exceeds $${EXTREMELY_LARGE_THRESHOLD.toLocaleString()} - review for accuracy`,
+        });
+      }
+    }
+
+    // Sort by amount (largest first)
+    extremelyLargeTransactions.sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+
+    const totalAmountIssues = extremelyLargeTransactions.length;
+    issuesFound += totalAmountIssues;
+
+    const paginatedAmountIssues = extremelyLargeTransactions.slice(
+      issuesOffset,
+      issuesOffset + issuesLimit
+    );
+    const hasMoreAmountIssues = issuesOffset + issuesLimit < totalAmountIssues;
+
     return {
       period: { start_date, end_date },
       analysis_metadata: {
@@ -5168,6 +5269,12 @@ export class CopilotMoneyTools {
           items: nonUniqueTransactionIds,
         },
         potential_duplicate_accounts: potentialDuplicateAccounts,
+      },
+      amount_issues: {
+        count: paginatedAmountIssues.length,
+        total: totalAmountIssues,
+        has_more: hasMoreAmountIssues,
+        items: paginatedAmountIssues,
       },
       suspicious_categorizations: {
         count: paginatedSuspiciousCategorizations.length,
