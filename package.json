@@ -52,7 +52,7 @@
     "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\"",
     "typecheck": "tsc --noEmit",
-    "check": "bun run typecheck && bun run lint && bun run format:check && bun run test",
+    "check": "bun run typecheck && bun run lint && bun run format:check && bun test --bail",
     "sync-manifest": "bun run scripts/sync-manifest.ts",
     "fix": "bun run lint:fix && bun run format",
     "clean": "rm -rf dist coverage .bun-build",
