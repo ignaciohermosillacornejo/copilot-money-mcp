@@ -36,7 +36,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
+          # Note: registry-url intentionally omitted to prevent .npmrc auth
+          # interference with OIDC trusted publishing
+
+      - name: Update npm to latest
+        run: |
+          npm install -g npm@latest
+          echo "npm version: $(npm --version)"
+        # Node 22 bundles npm v10.x, but trusted publishing requires npm v11.5.1+
 
       - name: Install dependencies
         run: bun install
