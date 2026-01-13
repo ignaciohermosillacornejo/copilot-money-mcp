@@ -12,7 +12,7 @@ on:
         default: false
 
 env:
-  BUN_VERSION: '1.1.38'
+  BUN_VERSION: 'latest'
 
 permissions:
   contents: read
@@ -41,6 +41,10 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      - name: Audit dependencies for vulnerabilities
+        run: npm audit --audit-level=high
+        continue-on-error: true  # Don't fail on vulnerabilities, but log them
+
       - name: Run type checking
         run: bun run typecheck
 
@@ -61,6 +65,17 @@ jobs:
             echo "Error: dist/cli.js not found"
             exit 1
           fi
+
+      - name: Check if version already exists on npm
+        run: |
+          PACKAGE_NAME=$(node -p "require('./package.json').name")
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          echo "Checking if $PACKAGE_NAME@$PACKAGE_VERSION exists on npm..."
+          if npm view "$PACKAGE_NAME@$PACKAGE_VERSION" version 2>/dev/null; then
+            echo "Error: Version $PACKAGE_VERSION already exists on npm"
+            exit 1
+          fi
+          echo "Version $PACKAGE_VERSION is available for publishing"
 
       - name: Publish to npm (dry run)
         if: github.event.inputs.dry_run == 'true'
