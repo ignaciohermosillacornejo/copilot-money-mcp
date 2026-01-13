@@ -470,6 +470,34 @@ export class CopilotMoneyServer {
           );
           break;
 
+        // ============================================
+        // PHASE 12.5: ACCOUNT & COMPARISON TOOLS
+        // ============================================
+
+        case 'get_account_activity':
+          result = this.tools.getAccountActivity(
+            (typedArgs as Parameters<typeof this.tools.getAccountActivity>[0]) || {}
+          );
+          break;
+
+        case 'get_balance_trends':
+          result = this.tools.getBalanceTrends(
+            (typedArgs as Parameters<typeof this.tools.getBalanceTrends>[0]) || {}
+          );
+          break;
+
+        case 'get_account_fees':
+          result = this.tools.getAccountFees(
+            (typedArgs as Parameters<typeof this.tools.getAccountFees>[0]) || {}
+          );
+          break;
+
+        case 'get_year_over_year':
+          result = this.tools.getYearOverYear(
+            (typedArgs as Parameters<typeof this.tools.getYearOverYear>[0]) || {}
+          );
+          break;
+
         default:
           return {
             content: [

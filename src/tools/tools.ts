@@ -6749,6 +6749,740 @@ export class CopilotMoneyTools {
       },
     };
   }
+
+  // ============================================
+  // PHASE 12.5: ACCOUNT & COMPARISON TOOLS
+  // ============================================
+
+  /**
+   * Get account activity summary.
+   *
+   * Shows transaction activity statistics per account including
+   * transaction counts, volume, and activity levels.
+   *
+   * @param options - Filter options
+   * @returns Object with account activity data
+   */
+  getAccountActivity(
+    options: {
+      period?: string;
+      start_date?: string;
+      end_date?: string;
+      account_type?: string;
+    } = {}
+  ): {
+    period: {
+      start_date: string;
+      end_date: string;
+    };
+    accounts: Array<{
+      account_id: string;
+      account_name: string;
+      account_type?: string;
+      institution?: string;
+      transaction_count: number;
+      total_inflow: number;
+      total_outflow: number;
+      net_flow: number;
+      average_transaction: number;
+      largest_transaction: number;
+      activity_level: 'high' | 'medium' | 'low' | 'inactive';
+    }>;
+    summary: {
+      total_accounts: number;
+      active_accounts: number;
+      most_active_account: string | null;
+      total_transactions: number;
+    };
+  } {
+    const { period = 'last_30_days', account_type } = options;
+    let { start_date, end_date } = options;
+
+    if (!start_date || !end_date) {
+      [start_date, end_date] = parsePeriod(period);
+    }
+
+    const accounts = this.db.getAccounts();
+    const transactions = this.db.getTransactions();
+
+    // Filter transactions by date
+    const periodTransactions = transactions.filter(
+      (t) => t.date >= start_date && t.date <= end_date
+    );
+
+    // Calculate activity per account
+    const activityData: Array<{
+      account_id: string;
+      account_name: string;
+      account_type?: string;
+      institution?: string;
+      transaction_count: number;
+      total_inflow: number;
+      total_outflow: number;
+      net_flow: number;
+      average_transaction: number;
+      largest_transaction: number;
+      activity_level: 'high' | 'medium' | 'low' | 'inactive';
+    }> = [];
+
+    let totalTransactions = 0;
+    let mostActiveAccount: string | null = null;
+    let highestCount = 0;
+
+    for (const account of accounts) {
+      // Filter by account type if specified
+      if (account_type) {
+        const typeMatch =
+          account.account_type?.toLowerCase().includes(account_type.toLowerCase()) ||
+          account.subtype?.toLowerCase().includes(account_type.toLowerCase());
+        if (!typeMatch) continue;
+      }
+
+      const accountTxns = periodTransactions.filter((t) => t.account_id === account.account_id);
+      const count = accountTxns.length;
+      totalTransactions += count;
+
+      let totalInflow = 0;
+      let totalOutflow = 0;
+      let largestTxn = 0;
+
+      for (const t of accountTxns) {
+        if (t.amount < 0) {
+          totalInflow += Math.abs(t.amount);
+        } else {
+          totalOutflow += t.amount;
+        }
+        largestTxn = Math.max(largestTxn, Math.abs(t.amount));
+      }
+
+      const avgTxn = count > 0 ? (totalInflow + totalOutflow) / count : 0;
+      const netFlow = totalInflow - totalOutflow;
+
+      // Determine activity level
+      let activityLevel: 'high' | 'medium' | 'low' | 'inactive' = 'inactive';
+      if (count >= 30) activityLevel = 'high';
+      else if (count >= 10) activityLevel = 'medium';
+      else if (count > 0) activityLevel = 'low';
+
+      if (count > highestCount) {
+        highestCount = count;
+        mostActiveAccount = account.name || account.official_name || 'Unknown';
+      }
+
+      activityData.push({
+        account_id: account.account_id,
+        account_name: account.name || account.official_name || 'Unknown',
+        account_type: account.account_type,
+        institution: account.institution_name,
+        transaction_count: count,
+        total_inflow: Math.round(totalInflow * 100) / 100,
+        total_outflow: Math.round(totalOutflow * 100) / 100,
+        net_flow: Math.round(netFlow * 100) / 100,
+        average_transaction: Math.round(avgTxn * 100) / 100,
+        largest_transaction: Math.round(largestTxn * 100) / 100,
+        activity_level: activityLevel,
+      });
+    }
+
+    // Sort by transaction count descending
+    activityData.sort((a, b) => b.transaction_count - a.transaction_count);
+
+    return {
+      period: {
+        start_date,
+        end_date,
+      },
+      accounts: activityData,
+      summary: {
+        total_accounts: activityData.length,
+        active_accounts: activityData.filter((a) => a.activity_level !== 'inactive').length,
+        most_active_account: mostActiveAccount,
+        total_transactions: totalTransactions,
+      },
+    };
+  }
+
+  /**
+   * Get balance trends over time.
+   *
+   * Shows how account balances have changed by analyzing transaction flows.
+   *
+   * @param options - Filter options
+   * @returns Object with balance trend data
+   */
+  getBalanceTrends(
+    options: {
+      account_id?: string;
+      months?: number;
+      granularity?: 'daily' | 'weekly' | 'monthly';
+    } = {}
+  ): {
+    months_analyzed: number;
+    accounts: Array<{
+      account_id: string;
+      account_name: string;
+      current_balance: number;
+      trend_data: Array<{
+        period: string;
+        inflow: number;
+        outflow: number;
+        net_change: number;
+      }>;
+      overall_trend: 'growing' | 'declining' | 'stable';
+      average_monthly_change: number;
+    }>;
+    summary: {
+      total_accounts: number;
+      growing_accounts: number;
+      declining_accounts: number;
+      stable_accounts: number;
+    };
+  } {
+    const { account_id, months = 6, granularity = 'monthly' } = options;
+
+    const accounts = this.db.getAccounts();
+    const transactions = this.db.getTransactions();
+
+    // Calculate date range
+    const today = new Date();
+    const startDate = new Date(today.getFullYear(), today.getMonth() - months, 1);
+    const startDateStr = startDate.toISOString().substring(0, 10);
+    const endDateStr = today.toISOString().substring(0, 10);
+
+    // Filter transactions
+    const periodTransactions = transactions.filter(
+      (t) => t.date >= startDateStr && t.date <= endDateStr
+    );
+
+    // Filter accounts if specified
+    let targetAccounts = accounts;
+    if (account_id) {
+      targetAccounts = accounts.filter((a) => a.account_id === account_id);
+    }
+
+    const trendData: Array<{
+      account_id: string;
+      account_name: string;
+      current_balance: number;
+      trend_data: Array<{
+        period: string;
+        inflow: number;
+        outflow: number;
+        net_change: number;
+      }>;
+      overall_trend: 'growing' | 'declining' | 'stable';
+      average_monthly_change: number;
+    }> = [];
+
+    let growingCount = 0;
+    let decliningCount = 0;
+    let stableCount = 0;
+
+    for (const account of targetAccounts) {
+      const accountTxns = periodTransactions.filter((t) => t.account_id === account.account_id);
+
+      // Group by period
+      const periodMap = new Map<string, { inflow: number; outflow: number }>();
+
+      for (const t of accountTxns) {
+        let periodKey: string;
+        if (granularity === 'daily') {
+          periodKey = t.date;
+        } else if (granularity === 'weekly') {
+          const date = new Date(t.date);
+          const weekStart = new Date(date);
+          weekStart.setDate(date.getDate() - date.getDay());
+          periodKey = weekStart.toISOString().substring(0, 10);
+        } else {
+          periodKey = t.date.substring(0, 7);
+        }
+
+        const existing = periodMap.get(periodKey) || { inflow: 0, outflow: 0 };
+        if (t.amount < 0) {
+          existing.inflow += Math.abs(t.amount);
+        } else {
+          existing.outflow += t.amount;
+        }
+        periodMap.set(periodKey, existing);
+      }
+
+      // Convert to sorted array
+      const trends = Array.from(periodMap.entries())
+        .map(([period, data]) => ({
+          period,
+          inflow: Math.round(data.inflow * 100) / 100,
+          outflow: Math.round(data.outflow * 100) / 100,
+          net_change: Math.round((data.inflow - data.outflow) * 100) / 100,
+        }))
+        .sort((a, b) => a.period.localeCompare(b.period));
+
+      // Calculate overall trend
+      let totalNetChange = 0;
+      for (const t of trends) {
+        totalNetChange += t.net_change;
+      }
+
+      const avgMonthlyChange = trends.length > 0 ? totalNetChange / Math.max(months, 1) : 0;
+
+      let overallTrend: 'growing' | 'declining' | 'stable' = 'stable';
+      if (avgMonthlyChange > 100) {
+        overallTrend = 'growing';
+        growingCount++;
+      } else if (avgMonthlyChange < -100) {
+        overallTrend = 'declining';
+        decliningCount++;
+      } else {
+        stableCount++;
+      }
+
+      trendData.push({
+        account_id: account.account_id,
+        account_name: account.name || account.official_name || 'Unknown',
+        current_balance: account.current_balance,
+        trend_data: trends,
+        overall_trend: overallTrend,
+        average_monthly_change: Math.round(avgMonthlyChange * 100) / 100,
+      });
+    }
+
+    return {
+      months_analyzed: months,
+      accounts: trendData,
+      summary: {
+        total_accounts: trendData.length,
+        growing_accounts: growingCount,
+        declining_accounts: decliningCount,
+        stable_accounts: stableCount,
+      },
+    };
+  }
+
+  /**
+   * Get account-related fees.
+   *
+   * Tracks fees like ATM fees, overdraft fees, foreign transaction fees, etc.
+   *
+   * @param options - Filter options
+   * @returns Object with account fee data
+   */
+  getAccountFees(
+    options: {
+      period?: string;
+      start_date?: string;
+      end_date?: string;
+      account_id?: string;
+    } = {}
+  ): {
+    period: {
+      start_date: string;
+      end_date: string;
+    };
+    total_fees: number;
+    fee_count: number;
+    fees: Array<{
+      transaction_id: string;
+      date: string;
+      amount: number;
+      name: string;
+      fee_type: string;
+      account_id?: string;
+      account_name?: string;
+    }>;
+    by_type: Array<{
+      fee_type: string;
+      amount: number;
+      count: number;
+    }>;
+    by_account: Array<{
+      account_id: string;
+      account_name: string;
+      amount: number;
+      count: number;
+    }>;
+    summary: {
+      average_fee: number;
+      largest_fee: number;
+      most_common_fee: string | null;
+    };
+  } {
+    const { period = 'ytd', account_id } = options;
+    let { start_date, end_date } = options;
+
+    if (!start_date || !end_date) {
+      [start_date, end_date] = parsePeriod(period);
+    }
+
+    const accounts = this.db.getAccounts();
+    const accountMap = new Map(accounts.map((a) => [a.account_id, a]));
+
+    const transactions = this.db.getTransactions();
+
+    // Fee-related categories
+    const feeCategories = new Set([
+      '10000000',
+      '10001000',
+      '10002000',
+      '10003000',
+      '10004000',
+      '10005000',
+      '10006000',
+      '10007000',
+      '10008000',
+      '10009000',
+      'bank_fees',
+      'bank_fees_atm_fees',
+      'bank_fees_foreign_transaction_fees',
+      'bank_fees_insufficient_funds',
+      'bank_fees_interest_charge',
+      'bank_fees_overdraft_fees',
+      'bank_fees_other_bank_fees',
+      'fees',
+    ]);
+
+    // Fee keywords
+    const feeKeywords = ['fee', 'charge', 'penalty', 'overdraft', 'atm'];
+
+    // Find fee transactions
+    const fees = transactions.filter((t) => {
+      if (t.date < start_date || t.date > end_date) return false;
+      if (account_id && t.account_id !== account_id) return false;
+      if (t.amount <= 0) return false; // Fees are expenses (positive)
+
+      const categoryMatch = t.category_id ? feeCategories.has(t.category_id.toLowerCase()) : false;
+      const nameMatch = feeKeywords.some(
+        (keyword) =>
+          t.name?.toLowerCase().includes(keyword) ||
+          t.original_name?.toLowerCase().includes(keyword)
+      );
+
+      return categoryMatch || nameMatch;
+    });
+
+    // Classify fee type
+    const classifyFeeType = (t: Transaction): string => {
+      const name = (t.name || t.original_name || '').toLowerCase();
+      const categoryId = t.category_id?.toLowerCase() || '';
+
+      if (name.includes('atm') || categoryId.includes('atm')) return 'ATM Fee';
+      if (name.includes('overdraft') || categoryId.includes('overdraft')) return 'Overdraft Fee';
+      if (name.includes('foreign') || categoryId.includes('foreign'))
+        return 'Foreign Transaction Fee';
+      if (name.includes('insufficient') || categoryId.includes('insufficient'))
+        return 'Insufficient Funds Fee';
+      if (name.includes('wire') || categoryId.includes('wire')) return 'Wire Transfer Fee';
+      if (name.includes('late') || categoryId.includes('late')) return 'Late Payment Fee';
+      if (name.includes('interest') || categoryId.includes('interest')) return 'Interest Charge';
+      return 'Other Fee';
+    };
+
+    // Format fees
+    const formattedFees = fees.map((t) => {
+      const account = t.account_id ? accountMap.get(t.account_id) : undefined;
+      return {
+        transaction_id: t.transaction_id,
+        date: t.date,
+        amount: Math.round(t.amount * 100) / 100,
+        name: t.name || t.original_name || 'Unknown',
+        fee_type: classifyFeeType(t),
+        account_id: t.account_id,
+        account_name: account?.name || account?.official_name,
+      };
+    });
+
+    // Sort by date descending
+    formattedFees.sort((a, b) => b.date.localeCompare(a.date));
+
+    // Calculate totals
+    const totalFees = formattedFees.reduce((sum, f) => sum + f.amount, 0);
+
+    // Group by type
+    const typeMap = new Map<string, { amount: number; count: number }>();
+    for (const f of formattedFees) {
+      const existing = typeMap.get(f.fee_type) || { amount: 0, count: 0 };
+      existing.amount += f.amount;
+      existing.count++;
+      typeMap.set(f.fee_type, existing);
+    }
+
+    const byType = Array.from(typeMap.entries())
+      .map(([feeType, data]) => ({
+        fee_type: feeType,
+        amount: Math.round(data.amount * 100) / 100,
+        count: data.count,
+      }))
+      .sort((a, b) => b.amount - a.amount);
+
+    // Group by account
+    const accountFeeMap = new Map<string, { name: string; amount: number; count: number }>();
+    for (const f of formattedFees) {
+      if (!f.account_id) continue;
+      const existing = accountFeeMap.get(f.account_id) || {
+        name: f.account_name || 'Unknown',
+        amount: 0,
+        count: 0,
+      };
+      existing.amount += f.amount;
+      existing.count++;
+      accountFeeMap.set(f.account_id, existing);
+    }
+
+    const byAccount = Array.from(accountFeeMap.entries())
+      .map(([accountId, data]) => ({
+        account_id: accountId,
+        account_name: data.name,
+        amount: Math.round(data.amount * 100) / 100,
+        count: data.count,
+      }))
+      .sort((a, b) => b.amount - a.amount);
+
+    // Summary
+    const avgFee = formattedFees.length > 0 ? totalFees / formattedFees.length : 0;
+    const largestFee =
+      formattedFees.length > 0 ? Math.max(...formattedFees.map((f) => f.amount)) : 0;
+    const mostCommonFee = byType[0]?.fee_type ?? null;
+
+    return {
+      period: {
+        start_date,
+        end_date,
+      },
+      total_fees: Math.round(totalFees * 100) / 100,
+      fee_count: formattedFees.length,
+      fees: formattedFees,
+      by_type: byType,
+      by_account: byAccount,
+      summary: {
+        average_fee: Math.round(avgFee * 100) / 100,
+        largest_fee: Math.round(largestFee * 100) / 100,
+        most_common_fee: mostCommonFee,
+      },
+    };
+  }
+
+  /**
+   * Compare year-over-year spending and income.
+   *
+   * Shows how spending and income changed compared to the same period last year.
+   *
+   * @param options - Filter options
+   * @returns Object with year-over-year comparison data
+   */
+  getYearOverYear(
+    options: {
+      current_year?: number;
+      compare_year?: number;
+      month?: number;
+      exclude_transfers?: boolean;
+    } = {}
+  ): {
+    current_year: number;
+    compare_year: number;
+    period_analyzed: string;
+    current_period: {
+      total_spending: number;
+      total_income: number;
+      net_savings: number;
+      transaction_count: number;
+    };
+    compare_period: {
+      total_spending: number;
+      total_income: number;
+      net_savings: number;
+      transaction_count: number;
+    };
+    changes: {
+      spending_change: number;
+      spending_change_percent: number | null;
+      income_change: number;
+      income_change_percent: number | null;
+      savings_change: number;
+    };
+    category_comparison: Array<{
+      category_id: string;
+      category_name: string;
+      current_amount: number;
+      compare_amount: number;
+      change_amount: number;
+      change_percent: number | null;
+    }>;
+    summary: {
+      spending_trend: 'increased' | 'decreased' | 'stable';
+      income_trend: 'increased' | 'decreased' | 'stable';
+      biggest_spending_increase: string | null;
+      biggest_spending_decrease: string | null;
+    };
+  } {
+    const today = new Date();
+    const {
+      current_year = today.getFullYear(),
+      compare_year = current_year - 1,
+      month,
+      exclude_transfers = true,
+    } = options;
+
+    // Determine date ranges
+    let currentStart: string;
+    let currentEnd: string;
+    let compareStart: string;
+    let compareEnd: string;
+    let periodAnalyzed: string;
+
+    if (month) {
+      // Specific month comparison
+      const monthStr = String(month).padStart(2, '0');
+      currentStart = `${current_year}-${monthStr}-01`;
+      currentEnd = `${current_year}-${monthStr}-31`;
+      compareStart = `${compare_year}-${monthStr}-01`;
+      compareEnd = `${compare_year}-${monthStr}-31`;
+      periodAnalyzed = `Month ${month}`;
+    } else {
+      // Year-to-date comparison
+      const currentMonth = today.getMonth() + 1;
+      const dayOfMonth = today.getDate();
+      currentStart = `${current_year}-01-01`;
+      currentEnd = `${current_year}-${String(currentMonth).padStart(2, '0')}-${String(dayOfMonth).padStart(2, '0')}`;
+      compareStart = `${compare_year}-01-01`;
+      compareEnd = `${compare_year}-${String(currentMonth).padStart(2, '0')}-${String(dayOfMonth).padStart(2, '0')}`;
+      periodAnalyzed = `Year to date (Jan 1 - ${currentEnd.substring(5)})`;
+    }
+
+    const transactions = this.db.getTransactions();
+
+    // Filter transactions
+    const filterTransactions = (txns: Transaction[], start: string, end: string) =>
+      txns.filter((t) => {
+        if (t.date < start || t.date > end) return false;
+        if (exclude_transfers && isTransferCategory(t.category_id)) return false;
+        return true;
+      });
+
+    const currentTxns = filterTransactions(transactions, currentStart, currentEnd);
+    const compareTxns = filterTransactions(transactions, compareStart, compareEnd);
+
+    // Calculate totals
+    const calculatePeriodTotals = (txns: Transaction[]) => {
+      let spending = 0;
+      let income = 0;
+
+      for (const t of txns) {
+        if (t.amount > 0) {
+          spending += t.amount;
+        } else {
+          income += Math.abs(t.amount);
+        }
+      }
+
+      return {
+        total_spending: Math.round(spending * 100) / 100,
+        total_income: Math.round(income * 100) / 100,
+        net_savings: Math.round((income - spending) * 100) / 100,
+        transaction_count: txns.length,
+      };
+    };
+
+    const currentPeriod = calculatePeriodTotals(currentTxns);
+    const comparePeriod = calculatePeriodTotals(compareTxns);
+
+    // Calculate changes
+    const spendingChange = currentPeriod.total_spending - comparePeriod.total_spending;
+    const incomeChange = currentPeriod.total_income - comparePeriod.total_income;
+    const savingsChange = currentPeriod.net_savings - comparePeriod.net_savings;
+
+    const spendingChangePercent =
+      comparePeriod.total_spending > 0
+        ? Math.round((spendingChange / comparePeriod.total_spending) * 10000) / 100
+        : null;
+    const incomeChangePercent =
+      comparePeriod.total_income > 0
+        ? Math.round((incomeChange / comparePeriod.total_income) * 10000) / 100
+        : null;
+
+    // Category comparison
+    const getCategorySpending = (txns: Transaction[]) => {
+      const map = new Map<string, number>();
+      for (const t of txns) {
+        if (t.amount > 0) {
+          const catId = t.category_id || 'uncategorized';
+          map.set(catId, (map.get(catId) || 0) + t.amount);
+        }
+      }
+      return map;
+    };
+
+    const currentByCategory = getCategorySpending(currentTxns);
+    const compareByCategory = getCategorySpending(compareTxns);
+
+    // Merge categories
+    const allCategories = new Set([...currentByCategory.keys(), ...compareByCategory.keys()]);
+    const categoryComparison: Array<{
+      category_id: string;
+      category_name: string;
+      current_amount: number;
+      compare_amount: number;
+      change_amount: number;
+      change_percent: number | null;
+    }> = [];
+
+    for (const catId of allCategories) {
+      const currentAmt = currentByCategory.get(catId) || 0;
+      const compareAmt = compareByCategory.get(catId) || 0;
+      const changeAmt = currentAmt - compareAmt;
+      const changePct = compareAmt > 0 ? Math.round((changeAmt / compareAmt) * 10000) / 100 : null;
+
+      categoryComparison.push({
+        category_id: catId,
+        category_name: getCategoryName(catId),
+        current_amount: Math.round(currentAmt * 100) / 100,
+        compare_amount: Math.round(compareAmt * 100) / 100,
+        change_amount: Math.round(changeAmt * 100) / 100,
+        change_percent: changePct,
+      });
+    }
+
+    // Sort by change amount
+    categoryComparison.sort((a, b) => b.change_amount - a.change_amount);
+
+    // Determine trends
+    const spendingTrend: 'increased' | 'decreased' | 'stable' =
+      spendingChangePercent !== null && spendingChangePercent > 5
+        ? 'increased'
+        : spendingChangePercent !== null && spendingChangePercent < -5
+          ? 'decreased'
+          : 'stable';
+
+    const incomeTrend: 'increased' | 'decreased' | 'stable' =
+      incomeChangePercent !== null && incomeChangePercent > 5
+        ? 'increased'
+        : incomeChangePercent !== null && incomeChangePercent < -5
+          ? 'decreased'
+          : 'stable';
+
+    // Find biggest changes
+    const increases = categoryComparison.filter((c) => c.change_amount > 0);
+    const decreases = categoryComparison.filter((c) => c.change_amount < 0);
+
+    return {
+      current_year,
+      compare_year,
+      period_analyzed: periodAnalyzed,
+      current_period: currentPeriod,
+      compare_period: comparePeriod,
+      changes: {
+        spending_change: Math.round(spendingChange * 100) / 100,
+        spending_change_percent: spendingChangePercent,
+        income_change: Math.round(incomeChange * 100) / 100,
+        income_change_percent: incomeChangePercent,
+        savings_change: Math.round(savingsChange * 100) / 100,
+      },
+      category_comparison: categoryComparison.slice(0, 20),
+      summary: {
+        spending_trend: spendingTrend,
+        income_trend: incomeTrend,
+        biggest_spending_increase: increases[0]?.category_name ?? null,
+        biggest_spending_decrease: decreases[decreases.length - 1]?.category_name ?? null,
+      },
+    };
+  }
 }
 
 /**
@@ -8353,6 +9087,126 @@ export function createToolSchemas(): ToolSchema[] {
           goal_id: {
             type: 'string',
             description: 'Filter by specific goal ID',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+
+    // ---- Account & Comparison ----
+    {
+      name: 'get_account_activity',
+      description:
+        'Get account activity summary showing transaction counts, volumes, and activity levels. ' +
+        'Identifies most active accounts and shows inflow/outflow statistics per account.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          period: {
+            type: 'string',
+            description:
+              'Named period: this_month, last_month, last_30_days, last_90_days, ytd (default: last_30_days)',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Start date (YYYY-MM-DD)',
+          },
+          end_date: {
+            type: 'string',
+            description: 'End date (YYYY-MM-DD)',
+          },
+          account_type: {
+            type: 'string',
+            description: 'Filter by account type (checking, savings, credit, etc.)',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_balance_trends',
+      description:
+        'Analyze balance trends over time by tracking inflows and outflows. ' +
+        'Shows growing, declining, or stable accounts and average monthly changes.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          account_id: {
+            type: 'string',
+            description: 'Filter by specific account ID',
+          },
+          months: {
+            type: 'integer',
+            description: 'Number of months to analyze (default: 6)',
+          },
+          granularity: {
+            type: 'string',
+            description: 'Time granularity: daily, weekly, or monthly (default: monthly)',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_account_fees',
+      description:
+        'Track account-related fees (ATM, overdraft, foreign transaction, etc.). ' +
+        'Shows fees grouped by type and account with totals and averages.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          period: {
+            type: 'string',
+            description:
+              'Named period: this_month, last_month, last_30_days, ytd, this_year (default: ytd)',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Start date (YYYY-MM-DD)',
+          },
+          end_date: {
+            type: 'string',
+            description: 'End date (YYYY-MM-DD)',
+          },
+          account_id: {
+            type: 'string',
+            description: 'Filter by specific account ID',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_year_over_year',
+      description:
+        'Compare spending and income year-over-year. ' +
+        'Shows changes compared to the same period last year with category breakdown.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          current_year: {
+            type: 'integer',
+            description: 'Current year to compare (default: current year)',
+          },
+          compare_year: {
+            type: 'integer',
+            description: 'Year to compare against (default: current year - 1)',
+          },
+          month: {
+            type: 'integer',
+            description: 'Specific month to compare (1-12). If omitted, compares YTD.',
+          },
+          exclude_transfers: {
+            type: 'boolean',
+            description: 'Exclude transfers from comparison (default: true)',
           },
         },
       },
