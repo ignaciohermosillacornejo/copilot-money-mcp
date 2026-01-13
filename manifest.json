@@ -33,16 +33,12 @@
       "description": "Get transactions with optional filters for date ranges, category, merchant, account, amount, pending status, and region/country"
     },
     {
-      "name": "search_transactions",
-      "description": "Free-text search of transactions by merchant name with date filtering support"
-    },
-    {
       "name": "get_accounts",
       "description": "Get all accounts with balances, optionally filter by account type (checking, savings, credit, investment)"
     },
     {
-      "name": "get_spending_by_category",
-      "description": "Get spending aggregated by category for a date range with human-readable names, sorted by amount"
+      "name": "get_spending",
+      "description": "Unified spending aggregation tool."
     },
     {
       "name": "get_account_balance",
@@ -57,48 +53,28 @@
       "description": "Identify recurring/subscription charges with frequency, monthly cost, confidence score, and next expected charge date"
     },
     {
-      "name": "get_income",
-      "description": "Get income transactions (deposits, paychecks, refunds) with total income and breakdown by source"
+      "name": "get_budgets",
+      "description": "Get budgets from Copilot's native budget tracking."
     },
     {
-      "name": "get_spending_by_merchant",
-      "description": "Get spending aggregated by merchant name with transaction counts and averages"
+      "name": "get_goals",
+      "description": "Get financial goals from Copilot's native goal tracking."
+    },
+    {
+      "name": "get_income",
+      "description": "Get income transactions (deposits, paychecks, refunds) with total income and breakdown by source"
     },
     {
       "name": "compare_periods",
       "description": "Compare spending and income between two time periods with totals, percentage changes, and category-by-category comparison"
     },
     {
-      "name": "get_foreign_transactions",
-      "description": "Get international transactions with foreign currencies or FX fees, with breakdown by country and total FX fees"
-    },
-    {
-      "name": "get_refunds",
-      "description": "Get refund/return transactions with breakdown by merchant and total refunded"
-    },
-    {
-      "name": "get_duplicate_transactions",
-      "description": "Detect potential duplicate transactions with same merchant, amount, and date"
-    },
-    {
-      "name": "get_credits",
-      "description": "Get statement credits (Amex credits, cashback, rewards) with breakdown by credit type"
-    },
-    {
-      "name": "get_spending_by_day_of_week",
-      "description": "Get spending patterns aggregated by day of week (Sunday-Saturday) with totals, averages, and percentages"
-    },
-    {
       "name": "get_trips",
       "description": "Detect and group transactions into trips with location, duration, total spent, and category breakdown"
     },
     {
-      "name": "get_transaction_by_id",
-      "description": "Get a single transaction by its ID with detailed information"
-    },
-    {
-      "name": "get_top_merchants",
-      "description": "Get top merchants by spending with rankings, transaction counts, averages, and date ranges"
+      "name": "get_merchant_analytics",
+      "description": "Unified merchant analytics tool."
     },
     {
       "name": "get_unusual_transactions",
@@ -109,16 +85,60 @@
       "description": "Export transactions to CSV or JSON format for external analysis"
     },
     {
-      "name": "get_hsa_fsa_eligible",
-      "description": "Find HSA/FSA eligible healthcare transactions at pharmacies, medical providers, dental, and vision"
-    },
-    {
-      "name": "get_spending_rate",
-      "description": "Get spending velocity analysis with daily/weekly burn rate, month-end projections, and period comparison"
-    },
-    {
       "name": "get_data_quality_report",
       "description": "Generate comprehensive data quality report to identify issues like unresolved categories, currency conversion problems, duplicate accounts, and suspicious categorizations"
+    },
+    {
+      "name": "get_investment_prices",
+      "description": "Get current/latest prices for investments (stocks, crypto, ETFs)."
+    },
+    {
+      "name": "get_investment_splits",
+      "description": "Get stock splits for investments."
+    },
+    {
+      "name": "get_connected_institutions",
+      "description": "Get connected financial institutions (Plaid items)."
+    },
+    {
+      "name": "get_average_transaction_size",
+      "description": "Calculate average transaction amounts grouped by category or merchant."
+    },
+    {
+      "name": "get_category_trends",
+      "description": "Track spending trends by category, comparing current vs previous period."
+    },
+    {
+      "name": "get_budget_analytics",
+      "description": "Unified budget analytics tool."
+    },
+    {
+      "name": "get_investment_analytics",
+      "description": "Unified investment analytics tool."
+    },
+    {
+      "name": "get_portfolio_allocation",
+      "description": "Get portfolio allocation across investment accounts and securities."
+    },
+    {
+      "name": "get_goal_analytics",
+      "description": "Unified goal analytics tool."
+    },
+    {
+      "name": "get_goal_details",
+      "description": "Get goal details with optional includes."
+    },
+    {
+      "name": "get_goal_milestones",
+      "description": "Track goal milestone achievements (25%, 50%, 75%, 100%)."
+    },
+    {
+      "name": "get_account_analytics",
+      "description": "Unified account analytics tool."
+    },
+    {
+      "name": "get_year_over_year",
+      "description": "Compare spending and income year-over-year."
     }
   ],
   "tools_generated": false,
@@ -127,7 +147,9 @@
     "entry_point": "dist/cli.js",
     "mcp_config": {
       "command": "node",
-      "args": ["${__dirname}/dist/cli.js"]
+      "args": [
+        "${__dirname}/dist/cli.js"
+      ]
     }
   }
 }
