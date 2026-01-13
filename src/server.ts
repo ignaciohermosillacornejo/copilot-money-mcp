@@ -306,7 +306,7 @@ export class CopilotMoneyServer {
     // Handle tool calls - delegates to handleCallTool
     this.server.setRequestHandler(CallToolRequestSchema, (request, _extra) => {
       const { name, arguments: typedArgs } = request.params;
-      return this.handleCallTool(name, typedArgs as Record<string, unknown> | undefined);
+      return this.handleCallTool(name, typedArgs);
     });
   }
 
