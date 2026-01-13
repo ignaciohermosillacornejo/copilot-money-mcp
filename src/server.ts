@@ -358,6 +358,36 @@ export class CopilotMoneyServer {
           break;
         }
 
+        // ============================================
+        // PHASE 12: ANALYTICS TOOLS
+        // ============================================
+
+        // ---- Spending Trends ----
+
+        case 'get_spending_over_time':
+          result = this.tools.getSpendingOverTime(
+            (typedArgs as Parameters<typeof this.tools.getSpendingOverTime>[0]) || {}
+          );
+          break;
+
+        case 'get_average_transaction_size':
+          result = this.tools.getAverageTransactionSize(
+            (typedArgs as Parameters<typeof this.tools.getAverageTransactionSize>[0]) || {}
+          );
+          break;
+
+        case 'get_category_trends':
+          result = this.tools.getCategoryTrends(
+            (typedArgs as Parameters<typeof this.tools.getCategoryTrends>[0]) || {}
+          );
+          break;
+
+        case 'get_merchant_frequency':
+          result = this.tools.getMerchantFrequency(
+            (typedArgs as Parameters<typeof this.tools.getMerchantFrequency>[0]) || {}
+          );
+          break;
+
         default:
           return {
             content: [

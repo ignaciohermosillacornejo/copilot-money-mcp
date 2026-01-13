@@ -740,7 +740,7 @@ export class CopilotMoneyTools {
         else if (frequency === 'quarterly') daysToAdd = 90;
         else if (frequency === 'yearly') daysToAdd = 365;
         lastDate.setDate(lastDate.getDate() + daysToAdd);
-        nextExpectedDate = lastDate.toISOString().split('T')[0];
+        nextExpectedDate = lastDate.toISOString().substring(0, 10);
       }
 
       if (lastTxn) {
@@ -2960,13 +2960,13 @@ export class CopilotMoneyTools {
       const txnDate = new Date(txn.date + 'T12:00:00');
       const weekStart = new Date(txnDate);
       weekStart.setDate(txnDate.getDate() - txnDate.getDay());
-      const weekKey = weekStart.toISOString().split('T')[0] ?? '';
+      const weekKey = weekStart.toISOString().substring(0, 10) ?? '';
       const weekEnd = new Date(weekStart);
       weekEnd.setDate(weekStart.getDate() + 6);
 
       const existing = weeklyTotals.get(weekKey) || {
         start: weekKey,
-        end: weekEnd.toISOString().split('T')[0] ?? '',
+        end: weekEnd.toISOString().substring(0, 10) ?? '',
         total: 0,
         days: 7,
       };
@@ -2991,8 +2991,8 @@ export class CopilotMoneyTools {
     prevEnd.setDate(prevEnd.getDate() - 1);
 
     let prevTransactions = this.db.getTransactions({
-      startDate: prevStart.toISOString().split('T')[0],
-      endDate: prevEnd.toISOString().split('T')[0],
+      startDate: prevStart.toISOString().substring(0, 10),
+      endDate: prevEnd.toISOString().substring(0, 10),
       limit: 50000,
     });
 
@@ -4061,6 +4061,611 @@ export class CopilotMoneyTools {
         depth: cat.depth,
         is_leaf: cat.is_leaf,
       })),
+    };
+  }
+
+  // ============================================
+  // PHASE 12: ANALYTICS TOOLS
+  // ============================================
+
+  // ---- Spending Trends ----
+
+  /**
+   * Get spending aggregated over time periods.
+   *
+   * Shows spending trends by day, week, or month within a date range.
+   *
+   * @param options - Filter options
+   * @returns Time series spending data
+   */
+  getSpendingOverTime(
+    options: {
+      period?: string;
+      start_date?: string;
+      end_date?: string;
+      granularity?: 'day' | 'week' | 'month';
+      category?: string;
+      exclude_transfers?: boolean;
+    } = {}
+  ): {
+    granularity: string;
+    start_date: string;
+    end_date: string;
+    periods: Array<{
+      period_start: string;
+      period_end: string;
+      total_spending: number;
+      transaction_count: number;
+      average_transaction: number;
+    }>;
+    summary: {
+      total_spending: number;
+      average_per_period: number;
+      highest_period: { period_start: string; amount: number } | null;
+      lowest_period: { period_start: string; amount: number } | null;
+    };
+  } {
+    const allTransactions = this.db.getTransactions();
+    const granularity = options.granularity || 'month';
+
+    // Determine date range
+    let startDate: Date;
+    let endDate: Date;
+
+    if (options.period) {
+      const [start, end] = parsePeriod(options.period);
+      startDate = new Date(start);
+      endDate = new Date(end);
+    } else if (options.start_date && options.end_date) {
+      validateDate(options.start_date, 'start_date');
+      validateDate(options.end_date, 'end_date');
+      startDate = new Date(options.start_date);
+      endDate = new Date(options.end_date);
+    } else {
+      // Default to last 6 months
+      endDate = new Date();
+      startDate = new Date();
+      startDate.setMonth(startDate.getMonth() - 6);
+    }
+
+    // Filter transactions
+    let filtered = allTransactions.filter((t) => {
+      const txDate = new Date(t.date);
+      return txDate >= startDate && txDate <= endDate && t.amount < 0;
+    });
+
+    // Apply additional filters
+    if (options.exclude_transfers !== false) {
+      filtered = filtered.filter((t) => !isTransferCategory(t.category_id));
+    }
+    if (options.category) {
+      const categoryLower = options.category.toLowerCase();
+      filtered = filtered.filter((t) => t.category_id?.toLowerCase().includes(categoryLower));
+    }
+
+    // Group by period
+    const periodMap = new Map<string, { start: Date; end: Date; total: number; count: number }>();
+
+    for (const t of filtered) {
+      const date = new Date(t.date);
+      const periodKey = this.getPeriodKey(date, granularity);
+      const periodBounds = this.getPeriodBounds(date, granularity);
+
+      if (!periodMap.has(periodKey)) {
+        periodMap.set(periodKey, {
+          start: periodBounds.start,
+          end: periodBounds.end,
+          total: 0,
+          count: 0,
+        });
+      }
+
+      const period = periodMap.get(periodKey)!;
+      period.total += Math.abs(t.amount);
+      period.count += 1;
+    }
+
+    // Convert to sorted array
+    const periods = Array.from(periodMap.entries())
+      .sort((a, b) => a[1].start.getTime() - b[1].start.getTime())
+      .map(([, data]) => ({
+        period_start: data.start.toISOString().substring(0, 10),
+        period_end: data.end.toISOString().substring(0, 10),
+        total_spending: Math.round(data.total * 100) / 100,
+        transaction_count: data.count,
+        average_transaction: data.count > 0 ? Math.round((data.total / data.count) * 100) / 100 : 0,
+      }));
+
+    // Calculate summary
+    const totalSpending = periods.reduce((sum, p) => sum + p.total_spending, 0);
+    const avgPerPeriod =
+      periods.length > 0 ? Math.round((totalSpending / periods.length) * 100) / 100 : 0;
+
+    let highest: { period_start: string; amount: number } | null = null;
+    let lowest: { period_start: string; amount: number } | null = null;
+
+    for (const p of periods) {
+      if (!highest || p.total_spending > highest.amount) {
+        highest = { period_start: p.period_start, amount: p.total_spending };
+      }
+      if (!lowest || p.total_spending < lowest.amount) {
+        lowest = { period_start: p.period_start, amount: p.total_spending };
+      }
+    }
+
+    return {
+      granularity,
+      start_date: startDate.toISOString().substring(0, 10),
+      end_date: endDate.toISOString().substring(0, 10),
+      periods,
+      summary: {
+        total_spending: Math.round(totalSpending * 100) / 100,
+        average_per_period: avgPerPeriod,
+        highest_period: highest,
+        lowest_period: lowest,
+      },
+    };
+  }
+
+  /**
+   * Get period key for grouping (helper method).
+   */
+  private getPeriodKey(date: Date, granularity: 'day' | 'week' | 'month'): string {
+    if (granularity === 'day') {
+      return date.toISOString().substring(0, 10);
+    }
+    if (granularity === 'week') {
+      const weekStart = new Date(date);
+      weekStart.setDate(date.getDate() - date.getDay());
+      return weekStart.toISOString().substring(0, 10);
+    }
+    // month
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  }
+
+  /**
+   * Get period bounds for a date (helper method).
+   */
+  private getPeriodBounds(
+    date: Date,
+    granularity: 'day' | 'week' | 'month'
+  ): { start: Date; end: Date } {
+    if (granularity === 'day') {
+      return { start: new Date(date), end: new Date(date) };
+    }
+    if (granularity === 'week') {
+      const start = new Date(date);
+      start.setDate(date.getDate() - date.getDay());
+      const end = new Date(start);
+      end.setDate(start.getDate() + 6);
+      return { start, end };
+    }
+    // month
+    const start = new Date(date.getFullYear(), date.getMonth(), 1);
+    const end = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+    return { start, end };
+  }
+
+  /**
+   * Get average transaction size by category or merchant.
+   *
+   * Analyzes transaction sizes to identify patterns.
+   *
+   * @param options - Filter options
+   * @returns Average transaction analysis
+   */
+  getAverageTransactionSize(
+    options: {
+      period?: string;
+      start_date?: string;
+      end_date?: string;
+      group_by?: 'category' | 'merchant';
+      limit?: number;
+    } = {}
+  ): {
+    group_by: string;
+    overall_average: number;
+    groups: Array<{
+      name: string;
+      average_amount: number;
+      transaction_count: number;
+      total_amount: number;
+      min_amount: number;
+      max_amount: number;
+    }>;
+  } {
+    const allTransactions = this.db.getTransactions();
+    const groupBy = options.group_by || 'category';
+    const limit = validateLimit(options.limit, 20);
+
+    // Determine date range
+    let startDate: Date;
+    let endDate: Date;
+
+    if (options.period) {
+      const [start, end] = parsePeriod(options.period);
+      startDate = new Date(start);
+      endDate = new Date(end);
+    } else if (options.start_date && options.end_date) {
+      validateDate(options.start_date, 'start_date');
+      validateDate(options.end_date, 'end_date');
+      startDate = new Date(options.start_date);
+      endDate = new Date(options.end_date);
+    } else {
+      // Default to last 3 months
+      endDate = new Date();
+      startDate = new Date();
+      startDate.setMonth(startDate.getMonth() - 3);
+    }
+
+    // Filter transactions (expenses only)
+    const filtered = allTransactions.filter((t) => {
+      const txDate = new Date(t.date);
+      return (
+        txDate >= startDate &&
+        txDate <= endDate &&
+        t.amount < 0 &&
+        !isTransferCategory(t.category_id)
+      );
+    });
+
+    // Group transactions
+    const groupMap = new Map<
+      string,
+      { amounts: number[]; total: number; min: number; max: number }
+    >();
+
+    for (const t of filtered) {
+      const amount = Math.abs(t.amount);
+      let key: string;
+
+      if (groupBy === 'merchant') {
+        key = t.name ? normalizeMerchantName(t.name) : 'Unknown';
+      } else {
+        key = getCategoryName(t.category_id || 'uncategorized');
+      }
+
+      if (!groupMap.has(key)) {
+        groupMap.set(key, { amounts: [], total: 0, min: Infinity, max: 0 });
+      }
+
+      const group = groupMap.get(key)!;
+      group.amounts.push(amount);
+      group.total += amount;
+      group.min = Math.min(group.min, amount);
+      group.max = Math.max(group.max, amount);
+    }
+
+    // Calculate overall average
+    const allAmounts = filtered.map((t) => Math.abs(t.amount));
+    const overallAvg =
+      allAmounts.length > 0
+        ? Math.round((allAmounts.reduce((a, b) => a + b, 0) / allAmounts.length) * 100) / 100
+        : 0;
+
+    // Convert to sorted array
+    const groups = Array.from(groupMap.entries())
+      .map(([name, data]) => ({
+        name,
+        average_amount: Math.round((data.total / data.amounts.length) * 100) / 100,
+        transaction_count: data.amounts.length,
+        total_amount: Math.round(data.total * 100) / 100,
+        min_amount: data.min === Infinity ? 0 : Math.round(data.min * 100) / 100,
+        max_amount: Math.round(data.max * 100) / 100,
+      }))
+      .sort((a, b) => b.transaction_count - a.transaction_count)
+      .slice(0, limit);
+
+    return {
+      group_by: groupBy,
+      overall_average: overallAvg,
+      groups,
+    };
+  }
+
+  /**
+   * Get spending trends by category over time.
+   *
+   * Compares spending in each category across two time periods.
+   *
+   * @param options - Filter options
+   * @returns Category trend analysis
+   */
+  getCategoryTrends(
+    options: {
+      period?: string;
+      start_date?: string;
+      end_date?: string;
+      compare_to_previous?: boolean;
+      limit?: number;
+    } = {}
+  ): {
+    current_period: { start: string; end: string };
+    previous_period: { start: string; end: string } | null;
+    trends: Array<{
+      category: string;
+      category_id: string;
+      current_amount: number;
+      previous_amount: number | null;
+      change_amount: number | null;
+      change_percentage: number | null;
+      trend: 'up' | 'down' | 'stable' | 'new';
+    }>;
+  } {
+    const allTransactions = this.db.getTransactions();
+    const compareToPrevious = options.compare_to_previous !== false;
+    const limit = validateLimit(options.limit, 15);
+
+    // Determine current period date range
+    let currentStart: Date;
+    let currentEnd: Date;
+
+    if (options.period) {
+      const [start, end] = parsePeriod(options.period);
+      currentStart = new Date(start);
+      currentEnd = new Date(end);
+    } else if (options.start_date && options.end_date) {
+      validateDate(options.start_date, 'start_date');
+      validateDate(options.end_date, 'end_date');
+      currentStart = new Date(options.start_date);
+      currentEnd = new Date(options.end_date);
+    } else {
+      // Default to current month
+      currentEnd = new Date();
+      currentStart = new Date(currentEnd.getFullYear(), currentEnd.getMonth(), 1);
+    }
+
+    // Calculate previous period (same duration)
+    const durationMs = currentEnd.getTime() - currentStart.getTime();
+    const previousEnd = new Date(currentStart.getTime() - 1);
+    const previousStart = new Date(previousEnd.getTime() - durationMs);
+
+    // Filter transactions for both periods
+    const currentTransactions = allTransactions.filter((t) => {
+      const txDate = new Date(t.date);
+      return (
+        txDate >= currentStart &&
+        txDate <= currentEnd &&
+        t.amount < 0 &&
+        !isTransferCategory(t.category_id)
+      );
+    });
+
+    const previousTransactions = compareToPrevious
+      ? allTransactions.filter((t) => {
+          const txDate = new Date(t.date);
+          return (
+            txDate >= previousStart &&
+            txDate <= previousEnd &&
+            t.amount < 0 &&
+            !isTransferCategory(t.category_id)
+          );
+        })
+      : [];
+
+    // Aggregate by category for current period
+    const currentByCategory = new Map<string, { id: string; total: number }>();
+    for (const t of currentTransactions) {
+      const catId = t.category_id || 'uncategorized';
+      if (!currentByCategory.has(catId)) {
+        currentByCategory.set(catId, { id: catId, total: 0 });
+      }
+      currentByCategory.get(catId)!.total += Math.abs(t.amount);
+    }
+
+    // Aggregate by category for previous period
+    const previousByCategory = new Map<string, number>();
+    for (const t of previousTransactions) {
+      const catId = t.category_id || 'uncategorized';
+      previousByCategory.set(catId, (previousByCategory.get(catId) || 0) + Math.abs(t.amount));
+    }
+
+    // Build trends array
+    const allCategories = new Set([...currentByCategory.keys(), ...previousByCategory.keys()]);
+
+    const trends: Array<{
+      category: string;
+      category_id: string;
+      current_amount: number;
+      previous_amount: number | null;
+      change_amount: number | null;
+      change_percentage: number | null;
+      trend: 'up' | 'down' | 'stable' | 'new';
+    }> = [];
+
+    for (const catId of allCategories) {
+      const current = currentByCategory.get(catId);
+      const previous = previousByCategory.get(catId);
+
+      if (!current && !previous) continue;
+
+      const currentAmount = current?.total || 0;
+      const previousAmount = compareToPrevious ? previous || 0 : null;
+
+      let changeAmount: number | null = null;
+      let changePercentage: number | null = null;
+      let trend: 'up' | 'down' | 'stable' | 'new' = 'stable';
+
+      if (compareToPrevious) {
+        if (previousAmount === 0 && currentAmount > 0) {
+          trend = 'new';
+        } else if (previousAmount !== null && previousAmount > 0) {
+          changeAmount = currentAmount - previousAmount;
+          changePercentage = Math.round((changeAmount / previousAmount) * 100 * 10) / 10;
+          if (changePercentage > 5) trend = 'up';
+          else if (changePercentage < -5) trend = 'down';
+          else trend = 'stable';
+        }
+      }
+
+      trends.push({
+        category: getCategoryName(catId),
+        category_id: catId,
+        current_amount: Math.round(currentAmount * 100) / 100,
+        previous_amount: previousAmount !== null ? Math.round(previousAmount * 100) / 100 : null,
+        change_amount: changeAmount !== null ? Math.round(changeAmount * 100) / 100 : null,
+        change_percentage: changePercentage,
+        trend,
+      });
+    }
+
+    // Sort by current amount descending and limit
+    trends.sort((a, b) => b.current_amount - a.current_amount);
+    const limitedTrends = trends.slice(0, limit);
+
+    return {
+      current_period: {
+        start: currentStart.toISOString().substring(0, 10),
+        end: currentEnd.toISOString().substring(0, 10),
+      },
+      previous_period: compareToPrevious
+        ? {
+            start: previousStart.toISOString().substring(0, 10),
+            end: previousEnd.toISOString().substring(0, 10),
+          }
+        : null,
+      trends: limitedTrends,
+    };
+  }
+
+  /**
+   * Get merchant visit frequency analysis.
+   *
+   * Shows how often you visit merchants and spending patterns.
+   *
+   * @param options - Filter options
+   * @returns Merchant frequency analysis
+   */
+  getMerchantFrequency(
+    options: {
+      period?: string;
+      start_date?: string;
+      end_date?: string;
+      min_visits?: number;
+      limit?: number;
+    } = {}
+  ): {
+    period: { start: string; end: string };
+    merchants: Array<{
+      merchant: string;
+      visit_count: number;
+      total_spent: number;
+      average_per_visit: number;
+      first_visit: string;
+      last_visit: string;
+      days_between_visits: number | null;
+      visits_per_month: number;
+    }>;
+    summary: {
+      total_merchants: number;
+      total_visits: number;
+      most_frequent: string | null;
+      highest_spending: string | null;
+    };
+  } {
+    const allTransactions = this.db.getTransactions();
+    const minVisits = options.min_visits || 2;
+    const limit = validateLimit(options.limit, 20);
+
+    // Determine date range
+    let startDate: Date;
+    let endDate: Date;
+
+    if (options.period) {
+      const [start, end] = parsePeriod(options.period);
+      startDate = new Date(start);
+      endDate = new Date(end);
+    } else if (options.start_date && options.end_date) {
+      validateDate(options.start_date, 'start_date');
+      validateDate(options.end_date, 'end_date');
+      startDate = new Date(options.start_date);
+      endDate = new Date(options.end_date);
+    } else {
+      // Default to last 6 months
+      endDate = new Date();
+      startDate = new Date();
+      startDate.setMonth(startDate.getMonth() - 6);
+    }
+
+    // Filter transactions (expenses only, exclude transfers)
+    const filtered = allTransactions.filter((t) => {
+      const txDate = new Date(t.date);
+      return (
+        txDate >= startDate &&
+        txDate <= endDate &&
+        t.amount < 0 &&
+        !isTransferCategory(t.category_id) &&
+        t.name
+      );
+    });
+
+    // Group by merchant
+    const merchantMap = new Map<string, { dates: Date[]; total: number }>();
+
+    for (const t of filtered) {
+      const merchant = t.name ? normalizeMerchantName(t.name) : 'Unknown';
+
+      if (!merchantMap.has(merchant)) {
+        merchantMap.set(merchant, { dates: [], total: 0 });
+      }
+
+      const data = merchantMap.get(merchant)!;
+      data.dates.push(new Date(t.date));
+      data.total += Math.abs(t.amount);
+    }
+
+    // Calculate months in period for visits_per_month
+    const monthsInPeriod = Math.max(
+      1,
+      (endDate.getTime() - startDate.getTime()) / (30 * 24 * 60 * 60 * 1000)
+    );
+
+    // Convert to sorted array
+    const merchants = Array.from(merchantMap.entries())
+      .filter(([, data]) => data.dates.length >= minVisits)
+      .map(([merchant, data]) => {
+        data.dates.sort((a, b) => a.getTime() - b.getTime());
+        const visitCount = data.dates.length;
+        const firstVisit = data.dates[0]!;
+        const lastVisit = data.dates[data.dates.length - 1]!;
+
+        let daysBetween: number | null = null;
+        if (visitCount > 1) {
+          const totalDays = (lastVisit.getTime() - firstVisit.getTime()) / (24 * 60 * 60 * 1000);
+          daysBetween = Math.round(totalDays / (visitCount - 1));
+        }
+
+        return {
+          merchant,
+          visit_count: visitCount,
+          total_spent: Math.round(data.total * 100) / 100,
+          average_per_visit: Math.round((data.total / visitCount) * 100) / 100,
+          first_visit: firstVisit.toISOString().substring(0, 10),
+          last_visit: lastVisit.toISOString().substring(0, 10),
+          days_between_visits: daysBetween,
+          visits_per_month: Math.round((visitCount / monthsInPeriod) * 10) / 10,
+        };
+      })
+      .sort((a, b) => b.visit_count - a.visit_count)
+      .slice(0, limit);
+
+    // Summary
+    const mostFrequent = merchants[0]?.merchant ?? null;
+    const sortedBySpending = [...merchants].sort((a, b) => b.total_spent - a.total_spent);
+    const highestSpending = sortedBySpending[0]?.merchant ?? null;
+
+    return {
+      period: {
+        start: startDate.toISOString().substring(0, 10),
+        end: endDate.toISOString().substring(0, 10),
+      },
+      merchants,
+      summary: {
+        total_merchants: merchants.length,
+        total_visits: merchants.reduce((sum, m) => sum + m.visit_count, 0),
+        most_frequent: mostFrequent,
+        highest_spending: highestSpending,
+      },
     };
   }
 }
@@ -5218,6 +5823,161 @@ export function createToolSchemas(): ToolSchema[] {
           },
         },
         required: ['query'],
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+
+    // ============================================
+    // PHASE 12: ANALYTICS TOOLS
+    // ============================================
+
+    // ---- Spending Trends ----
+    {
+      name: 'get_spending_over_time',
+      description:
+        'Get spending aggregated over time periods (daily, weekly, or monthly). ' +
+        'Shows spending trends within a date range with totals, transaction counts, ' +
+        'and averages per period. Includes summary with highest/lowest periods. ' +
+        'Great for understanding spending patterns over time.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          period: {
+            type: 'string',
+            description:
+              'Named period: this_month, last_month, last_30_days, last_3_months, last_6_months, ytd, last_year',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Start date (YYYY-MM-DD). Use with end_date for custom range.',
+          },
+          end_date: {
+            type: 'string',
+            description: 'End date (YYYY-MM-DD). Use with start_date for custom range.',
+          },
+          granularity: {
+            type: 'string',
+            enum: ['day', 'week', 'month'],
+            description: 'Time granularity for grouping (default: month)',
+          },
+          category: {
+            type: 'string',
+            description: 'Filter by category (partial match)',
+          },
+          exclude_transfers: {
+            type: 'boolean',
+            description: 'Exclude transfers (default: true)',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_average_transaction_size',
+      description:
+        'Calculate average transaction amounts grouped by category or merchant. ' +
+        'Shows min/max amounts, transaction counts, and totals for each group. ' +
+        'Useful for identifying spending patterns and outliers.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          period: {
+            type: 'string',
+            description: 'Named period: this_month, last_month, last_30_days, last_3_months, ytd',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Start date (YYYY-MM-DD)',
+          },
+          end_date: {
+            type: 'string',
+            description: 'End date (YYYY-MM-DD)',
+          },
+          group_by: {
+            type: 'string',
+            enum: ['category', 'merchant'],
+            description: 'How to group transactions (default: category)',
+          },
+          limit: {
+            type: 'integer',
+            description: 'Maximum groups to return (default: 20)',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_category_trends',
+      description:
+        'Track spending trends by category, comparing current vs previous period. ' +
+        'Shows change amounts, percentages, and trend direction (up/down/stable/new) ' +
+        'for each category. Helps identify categories with significant changes.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          period: {
+            type: 'string',
+            description: 'Named period: this_month, last_month, last_30_days, last_3_months, ytd',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Start date (YYYY-MM-DD)',
+          },
+          end_date: {
+            type: 'string',
+            description: 'End date (YYYY-MM-DD)',
+          },
+          compare_to_previous: {
+            type: 'boolean',
+            description: 'Compare to equivalent previous period (default: true)',
+          },
+          limit: {
+            type: 'integer',
+            description: 'Maximum categories to return (default: 15)',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_merchant_frequency',
+      description:
+        'Analyze how often you visit merchants and your spending patterns. ' +
+        'Shows visit counts, total spent, average per visit, days between visits, ' +
+        'and visits per month. Great for identifying shopping habits.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          period: {
+            type: 'string',
+            description:
+              'Named period: this_month, last_month, last_30_days, last_3_months, last_6_months, ytd',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Start date (YYYY-MM-DD)',
+          },
+          end_date: {
+            type: 'string',
+            description: 'End date (YYYY-MM-DD)',
+          },
+          min_visits: {
+            type: 'integer',
+            description: 'Minimum visits to include (default: 2)',
+          },
+          limit: {
+            type: 'integer',
+            description: 'Maximum merchants to return (default: 20)',
+          },
+        },
       },
       annotations: {
         readOnlyHint: true,
