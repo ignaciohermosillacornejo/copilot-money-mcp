@@ -367,6 +367,15 @@ export function decodeAccounts(dbPath: string): Account[] {
         const mask = extractStringValue(afterBalance, fieldPattern('mask'));
         const institutionName = extractStringValue(afterBalance, fieldPattern('institution_name'));
 
+        // Additional account fields
+        const itemId = extractStringValue(afterBalance, fieldPattern('item_id'));
+        const availableBalance = extractDoubleField(
+          afterBalance,
+          fieldPattern('available_balance')
+        );
+        const isoCurrencyCode = extractStringValue(afterBalance, fieldPattern('iso_currency_code'));
+        const institutionId = extractStringValue(afterBalance, fieldPattern('institution_id'));
+
         // Try account_id first, then fall back to 'id' field
         let accountId = extractStringValue(afterBalance, fieldPattern('account_id'));
         if (!accountId) {
@@ -401,6 +410,10 @@ export function decodeAccounts(dbPath: string): Account[] {
               subtype?: string;
               mask?: string;
               institution_name?: string;
+              item_id?: string;
+              available_balance?: number;
+              iso_currency_code?: string;
+              institution_id?: string;
             } = {
               account_id: accountId,
               current_balance: balance,
@@ -412,6 +425,10 @@ export function decodeAccounts(dbPath: string): Account[] {
             if (subtype) accData.subtype = subtype;
             if (mask) accData.mask = mask;
             if (institutionName) accData.institution_name = institutionName;
+            if (itemId) accData.item_id = itemId;
+            if (availableBalance !== null) accData.available_balance = availableBalance;
+            if (isoCurrencyCode) accData.iso_currency_code = isoCurrencyCode;
+            if (institutionId) accData.institution_id = institutionId;
 
             // Validate with Zod
             const account = AccountSchema.parse(accData);
