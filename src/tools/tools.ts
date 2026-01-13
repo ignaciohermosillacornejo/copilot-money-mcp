@@ -25,6 +25,11 @@ import {
   getItemAccountCount,
   formatLastUpdate,
 } from '../models/item.js';
+import {
+  getRootCategories,
+  getCategoryChildren,
+  searchCategories as searchCategoriesInHierarchy,
+} from '../models/category-full.js';
 
 // ============================================
 // Category Constants
@@ -3908,6 +3913,156 @@ export class CopilotMoneyTools {
       institutions: formattedItems,
     };
   }
+
+  /**
+   * Get the full category hierarchy tree.
+   *
+   * Returns the complete Plaid category taxonomy organized as a tree structure
+   * with root categories and their children. Useful for understanding how
+   * transactions are categorized and for building category selection UIs.
+   *
+   * @param options - Filter options
+   * @returns Object with category hierarchy
+   */
+  getCategoryHierarchy(options: { type?: 'income' | 'expense' | 'transfer' } = {}): {
+    count: number;
+    type_filter?: string;
+    categories: Array<{
+      id: string;
+      name: string;
+      display_name: string;
+      type: string;
+      children: Array<{
+        id: string;
+        name: string;
+        display_name: string;
+        path: string;
+      }>;
+    }>;
+  } {
+    const { type } = options;
+
+    // Get root categories, optionally filtered by type
+    let rootCats = getRootCategories();
+    if (type) {
+      rootCats = rootCats.filter((cat) => cat.type === type);
+    }
+
+    // Build hierarchy
+    const categories = rootCats.map((root) => {
+      const children = getCategoryChildren(root.id);
+      return {
+        id: root.id,
+        name: root.name,
+        display_name: root.display_name,
+        type: root.type,
+        children: children.map((child) => ({
+          id: child.id,
+          name: child.name,
+          display_name: child.display_name,
+          path: child.path,
+        })),
+      };
+    });
+
+    // Count total categories
+    const totalCount = categories.reduce((sum, cat) => sum + 1 + cat.children.length, 0);
+
+    return {
+      count: totalCount,
+      type_filter: type,
+      categories,
+    };
+  }
+
+  /**
+   * Get subcategories (children) of a specific category.
+   *
+   * Returns all direct children of a given category. Useful for drilling down
+   * into specific spending areas or building hierarchical category selectors.
+   *
+   * @param categoryId - Parent category ID
+   * @returns Object with subcategories
+   */
+  getSubcategories(categoryId: string): {
+    parent_id: string;
+    parent_name: string;
+    count: number;
+    subcategories: Array<{
+      id: string;
+      name: string;
+      display_name: string;
+      path: string;
+      type: string;
+    }>;
+  } {
+    // Find the parent category
+    const rootCats = getRootCategories();
+    const parent = rootCats.find((cat) => cat.id === categoryId);
+
+    if (!parent) {
+      // Check if it's a child category (which would have no children)
+      throw new Error(`Category not found or has no subcategories: ${categoryId}`);
+    }
+
+    const children = getCategoryChildren(categoryId);
+
+    return {
+      parent_id: parent.id,
+      parent_name: parent.display_name,
+      count: children.length,
+      subcategories: children.map((child) => ({
+        id: child.id,
+        name: child.name,
+        display_name: child.display_name,
+        path: child.path,
+        type: child.type,
+      })),
+    };
+  }
+
+  /**
+   * Search categories by name or keyword.
+   *
+   * Performs a case-insensitive search across category names, IDs, and paths.
+   * Useful for finding specific categories when you know part of the name.
+   *
+   * @param query - Search query
+   * @returns Object with matching categories
+   */
+  searchCategoriesHierarchy(query: string): {
+    query: string;
+    count: number;
+    categories: Array<{
+      id: string;
+      name: string;
+      display_name: string;
+      path: string;
+      type: string;
+      depth: number;
+      is_leaf: boolean;
+    }>;
+  } {
+    if (!query || query.trim().length === 0) {
+      throw new Error('Search query is required');
+    }
+
+    const results = searchCategoriesInHierarchy(query.trim());
+
+    return {
+      query: query.trim(),
+      count: results.length,
+      categories: results.map((cat) => ({
+        id: cat.id,
+        name: cat.name,
+        display_name: cat.display_name,
+        path: cat.path,
+        type: cat.type,
+        depth: cat.depth,
+        is_leaf: cat.is_leaf,
+      })),
+    };
+  }
 }
 
 /**
@@ -5001,6 +5156,68 @@ export function createToolSchemas(): ToolSchema[] {
             description: 'Filter by whether connection needs re-authentication (true/false)',
           },
         },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_category_hierarchy',
+      description:
+        'Get the full Plaid category taxonomy as a hierarchical tree. ' +
+        'Shows all spending categories organized by type (income, expense, transfer) ' +
+        'with parent categories and their subcategories. Useful for understanding ' +
+        'how transactions are categorized and for building category selection interfaces.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          type: {
+            type: 'string',
+            description: 'Filter by category type: "income", "expense", or "transfer"',
+            enum: ['income', 'expense', 'transfer'],
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_subcategories',
+      description:
+        'Get subcategories (children) of a specific parent category. ' +
+        'Use this to drill down into specific spending areas. For example, ' +
+        '"food_and_drink" has subcategories like groceries, restaurants, coffee, etc.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          category_id: {
+            type: 'string',
+            description:
+              'Parent category ID (e.g., "food_and_drink", "transportation", "entertainment")',
+          },
+        },
+        required: ['category_id'],
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'search_categories',
+      description:
+        'Search for categories by name or keyword. Performs a case-insensitive search ' +
+        'across category names, IDs, and paths. Returns matching categories with their ' +
+        'full hierarchy information. Useful for finding specific categories.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'Search query (e.g., "food", "gas", "utilities", "entertainment")',
+          },
+        },
+        required: ['query'],
       },
       annotations: {
         readOnlyHint: true,

@@ -92,3 +92,18 @@ export {
   formatLastUpdate,
   isConsentExpiringSoon,
 } from './item.js';
+
+export {
+  type CategoryNode,
+  getCategory,
+  getCategoryPath,
+  getCategoryParent,
+  getCategoryChildren,
+  isCategoryType,
+  getRootCategories,
+  getAllCategories,
+  searchCategories,
+  getCategoryTree,
+  getCategoriesByType,
+  isAncestorOf,
+} from './category-full.js';

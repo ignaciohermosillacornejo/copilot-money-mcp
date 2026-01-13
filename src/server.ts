@@ -334,6 +334,30 @@ export class CopilotMoneyServer {
           );
           break;
 
+        case 'get_category_hierarchy':
+          result = this.tools.getCategoryHierarchy(
+            (typedArgs as Parameters<typeof this.tools.getCategoryHierarchy>[0]) || {}
+          );
+          break;
+
+        case 'get_subcategories': {
+          const categoryId = typedArgs?.category_id;
+          if (typeof categoryId !== 'string') {
+            throw new Error('Missing required parameter: category_id');
+          }
+          result = this.tools.getSubcategories(categoryId);
+          break;
+        }
+
+        case 'search_categories': {
+          const searchQuery = typedArgs?.query;
+          if (typeof searchQuery !== 'string') {
+            throw new Error('Missing required parameter: query');
+          }
+          result = this.tools.searchCategoriesHierarchy(searchQuery);
+          break;
+        }
+
         default:
           return {
             content: [
