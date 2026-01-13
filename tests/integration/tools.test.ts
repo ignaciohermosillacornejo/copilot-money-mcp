@@ -14,7 +14,7 @@ const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn1',
     amount: 50.0,
-    date: '2026-01-15',
+    date: '2025-01-15',
     name: 'Starbucks',
     category_id: 'food_dining',
     account_id: 'acc1',
@@ -22,7 +22,7 @@ const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn2',
     amount: 15.5,
-    date: '2026-01-10',
+    date: '2025-01-10',
     name: 'Starbucks Coffee',
     category_id: 'food_dining',
     account_id: 'acc1',
@@ -30,7 +30,7 @@ const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn3',
     amount: 120.0,
-    date: '2026-01-08',
+    date: '2025-01-08',
     name: 'Whole Foods',
     category_id: 'groceries',
     account_id: 'acc2',
@@ -38,7 +38,7 @@ const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn4',
     amount: -1000.0, // Income
-    date: '2026-01-05',
+    date: '2025-01-05',
     name: 'Paycheck',
     category_id: 'income',
     account_id: 'acc1',
@@ -46,7 +46,7 @@ const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn5',
     amount: 250.0,
-    date: '2025-12-20',
+    date: '2024-12-20',
     name: 'Target',
     category_id: 'shopping',
     account_id: 'acc1',
@@ -100,13 +100,13 @@ describe('CopilotMoneyTools Integration', () => {
 
     test('filters by date range', () => {
       const result = tools.getTransactions({
-        start_date: '2026-01-01',
-        end_date: '2026-01-31',
+        start_date: '2025-01-01',
+        end_date: '2025-01-31',
         limit: 50,
       });
 
       for (const txn of result.transactions) {
-        expect(txn.date >= '2026-01-01' && txn.date <= '2026-01-31').toBe(true);
+        expect(txn.date >= '2025-01-01' && txn.date <= '2025-01-31').toBe(true);
       }
     });
 
@@ -206,8 +206,8 @@ describe('CopilotMoneyTools Integration', () => {
   describe('getSpendingByCategory', () => {
     test('aggregates spending by category', () => {
       const result = tools.getSpendingByCategory({
-        start_date: '2026-01-01',
-        end_date: '2026-01-31',
+        start_date: '2025-01-01',
+        end_date: '2025-01-31',
       });
 
       expect(result.period).toBeDefined();
@@ -215,14 +215,14 @@ describe('CopilotMoneyTools Integration', () => {
       expect(result.category_count).toBeDefined();
       expect(result.categories).toBeDefined();
 
-      expect(result.period.start_date).toBe('2026-01-01');
-      expect(result.period.end_date).toBe('2026-01-31');
+      expect(result.period.start_date).toBe('2025-01-01');
+      expect(result.period.end_date).toBe('2025-01-31');
     });
 
     test('categories are sorted by spending descending', () => {
       const result = tools.getSpendingByCategory({
-        start_date: '2026-01-01',
-        end_date: '2026-01-31',
+        start_date: '2025-01-01',
+        end_date: '2025-01-31',
       });
 
       const categories = result.categories;
@@ -233,8 +233,8 @@ describe('CopilotMoneyTools Integration', () => {
 
     test('excludes income (negative amounts)', () => {
       const result = tools.getSpendingByCategory({
-        start_date: '2026-01-01',
-        end_date: '2026-01-31',
+        start_date: '2025-01-01',
+        end_date: '2025-01-31',
       });
 
       // Should not include income category
@@ -244,8 +244,8 @@ describe('CopilotMoneyTools Integration', () => {
 
     test('total spending matches sum of categories', () => {
       const result = tools.getSpendingByCategory({
-        start_date: '2026-01-01',
-        end_date: '2026-01-31',
+        start_date: '2025-01-01',
+        end_date: '2025-01-31',
       });
 
       const calculatedTotal = result.categories.reduce((sum, cat) => sum + cat.total_spending, 0);
@@ -255,8 +255,8 @@ describe('CopilotMoneyTools Integration', () => {
 
     test('category structure is correct', () => {
       const result = tools.getSpendingByCategory({
-        start_date: '2026-01-01',
-        end_date: '2026-01-31',
+        start_date: '2025-01-01',
+        end_date: '2025-01-31',
       });
 
       if (result.categories.length > 0) {
@@ -377,8 +377,8 @@ describe('CopilotMoneyTools Integration', () => {
 
     test('spending responses are JSON serializable', () => {
       const result = tools.getSpendingByCategory({
-        start_date: '2026-01-01',
-        end_date: '2026-01-31',
+        start_date: '2025-01-01',
+        end_date: '2025-01-31',
       });
       const json = JSON.stringify(result);
       const parsed = JSON.parse(json);

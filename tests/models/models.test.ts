@@ -116,7 +116,7 @@ describe('Transaction model helpers', () => {
       const transaction: Transaction = {
         transaction_id: 'txn1',
         amount: 50,
-        date: '2026-01-15',
+        date: '2025-01-15',
         name: 'Starbucks',
         original_name: 'STARBUCKS #12345',
       };
@@ -128,7 +128,7 @@ describe('Transaction model helpers', () => {
       const transaction: Transaction = {
         transaction_id: 'txn1',
         amount: 50,
-        date: '2026-01-15',
+        date: '2025-01-15',
         original_name: 'STARBUCKS #12345',
       };
 
@@ -139,7 +139,7 @@ describe('Transaction model helpers', () => {
       const transaction: Transaction = {
         transaction_id: 'txn1',
         amount: 50,
-        date: '2026-01-15',
+        date: '2025-01-15',
       };
 
       expect(getTransactionDisplayName(transaction)).toBe('Unknown');
@@ -151,7 +151,7 @@ describe('Transaction model helpers', () => {
       const transaction: Transaction = {
         transaction_id: 'txn1',
         amount: 50,
-        date: '2026-01-15',
+        date: '2025-01-15',
         name: 'Starbucks',
       };
 
@@ -160,7 +160,7 @@ describe('Transaction model helpers', () => {
       expect(result.display_name).toBe('Starbucks');
       expect(result.transaction_id).toBe('txn1');
       expect(result.amount).toBe(50);
-      expect(result.date).toBe('2026-01-15');
+      expect(result.date).toBe('2025-01-15');
       expect(result.name).toBe('Starbucks');
     });
 
@@ -168,7 +168,7 @@ describe('Transaction model helpers', () => {
       const transaction: Transaction = {
         transaction_id: 'txn1',
         amount: 50,
-        date: '2026-01-15',
+        date: '2025-01-15',
         original_name: 'STARBUCKS #12345',
       };
 
@@ -182,7 +182,7 @@ describe('Transaction model helpers', () => {
       const transaction: Transaction = {
         transaction_id: 'txn1',
         amount: 50,
-        date: '2026-01-15',
+        date: '2025-01-15',
       };
 
       const result = withTransactionDisplayName(transaction);
@@ -194,7 +194,7 @@ describe('Transaction model helpers', () => {
       const transaction: Transaction = {
         transaction_id: 'txn1',
         amount: 50,
-        date: '2026-01-15',
+        date: '2025-01-15',
         name: 'Starbucks',
         category_id: 'food_dining',
         account_id: 'acc1',
@@ -206,7 +206,7 @@ describe('Transaction model helpers', () => {
 
       expect(result.transaction_id).toBe('txn1');
       expect(result.amount).toBe(50);
-      expect(result.date).toBe('2026-01-15');
+      expect(result.date).toBe('2025-01-15');
       expect(result.name).toBe('Starbucks');
       expect(result.category_id).toBe('food_dining');
       expect(result.account_id).toBe('acc1');

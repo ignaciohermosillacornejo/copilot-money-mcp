@@ -13,7 +13,7 @@ const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn1',
     amount: 50.0,
-    date: '2026-01-15',
+    date: '2025-01-15',
     name: 'Test Transaction',
     category_id: 'food_dining',
     account_id: 'acc1',
