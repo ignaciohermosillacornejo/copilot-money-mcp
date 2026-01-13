@@ -322,6 +322,12 @@ export class CopilotMoneyServer {
           break;
         }
 
+        case 'get_investment_splits':
+          result = this.tools.getInvestmentSplits(
+            (typedArgs as Parameters<typeof this.tools.getInvestmentSplits>[0]) || {}
+          );
+          break;
+
         default:
           return {
             content: [

@@ -12,6 +12,11 @@ import { getTransactionDisplayName, getRecurringDisplayName } from '../models/in
 import { estimateGoalCompletion } from '../models/goal.js';
 import { getHistoryProgress, getMonthStartEnd, type GoalHistory } from '../models/goal-history.js';
 import { getBestPrice, getPriceDate } from '../models/investment-price.js';
+import {
+  getSplitMultiplier,
+  getSplitDisplayString,
+  isReverseSplit,
+} from '../models/investment-split.js';
 
 // ============================================
 // Category Constants
@@ -3760,6 +3765,71 @@ export class CopilotMoneyTools {
       history,
     };
   }
+
+  /**
+   * Get investment splits (stock splits) from the database.
+   *
+   * Returns stock split information including split ratios, dates, and calculated multipliers.
+   * Useful for understanding how historical prices and share counts should be adjusted.
+   *
+   * @param options - Filter options
+   * @returns Object with investment split data
+   */
+  getInvestmentSplits(
+    options: {
+      ticker_symbol?: string;
+      start_date?: string;
+      end_date?: string;
+    } = {}
+  ): {
+    count: number;
+    splits: Array<{
+      split_id: string;
+      ticker_symbol?: string;
+      split_date?: string;
+      split_ratio?: string;
+      from_factor?: number;
+      to_factor?: number;
+      multiplier?: number;
+      display_string: string;
+      is_reverse_split?: boolean;
+      announcement_date?: string;
+      record_date?: string;
+      ex_date?: string;
+      description?: string;
+    }>;
+  } {
+    const { ticker_symbol, start_date, end_date } = options;
+
+    // Get splits from database
+    const splits = this.db.getInvestmentSplits({
+      tickerSymbol: ticker_symbol,
+      startDate: start_date,
+      endDate: end_date,
+    });
+
+    // Format splits with calculated fields
+    const formattedSplits = splits.map((split) => ({
+      split_id: split.split_id,
+      ticker_symbol: split.ticker_symbol,
+      split_date: split.split_date,
+      split_ratio: split.split_ratio,
+      from_factor: split.from_factor,
+      to_factor: split.to_factor,
+      multiplier: getSplitMultiplier(split),
+      display_string: getSplitDisplayString(split),
+      is_reverse_split: isReverseSplit(split),
+      announcement_date: split.announcement_date,
+      record_date: split.record_date,
+      ex_date: split.ex_date,
+      description: split.description,
+    }));
+
+    return {
+      count: formattedSplits.length,
+      splits: formattedSplits,
+    };
+  }
 }
 
 /**
@@ -4793,6 +4863,38 @@ export function createToolSchemas(): ToolSchema[] {
           },
         },
         required: ['ticker_symbol'],
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_investment_splits',
+      description:
+        'Get stock splits for investments. Returns information about historical stock splits ' +
+        'including split ratios (e.g., "4:1"), split dates, and calculated multipliers. ' +
+        'Stock splits affect share counts and historical price calculations. ' +
+        'For example, after a 4:1 split, historical prices should be divided by 4 ' +
+        'and share counts multiplied by 4 to maintain accurate comparisons. ' +
+        'Also identifies reverse splits where shares are consolidated.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          ticker_symbol: {
+            type: 'string',
+            description: 'Filter by ticker symbol (e.g., "AAPL", "TSLA", "GOOGL")',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Filter splits on or after this date (YYYY-MM-DD)',
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+          },
+          end_date: {
+            type: 'string',
+            description: 'Filter splits on or before this date (YYYY-MM-DD)',
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+          },
+        },
       },
       annotations: {
         readOnlyHint: true,

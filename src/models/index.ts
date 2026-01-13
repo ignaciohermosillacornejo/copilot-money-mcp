@@ -62,3 +62,17 @@ export {
   getInvestmentDisplayName,
   formatPrice,
 } from './investment-price.js';
+
+export {
+  InvestmentSplitSchema,
+  type InvestmentSplit,
+  type ParsedSplitRatio,
+  parseSplitRatio,
+  getSplitMultiplier,
+  getSplitDisplayString,
+  getSplitDisplayName,
+  isReverseSplit,
+  adjustPriceForSplit,
+  adjustSharesForSplit,
+  formatSplitDate,
+} from './investment-split.js';
