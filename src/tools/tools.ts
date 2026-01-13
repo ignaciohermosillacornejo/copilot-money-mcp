@@ -800,6 +800,68 @@ export class CopilotMoneyTools {
   }
 
   /**
+   * Get budgets from Copilot's native budget tracking.
+   *
+   * @param options - Filter options
+   * @returns Object with budget count and list of budgets
+   */
+  getBudgets(options: { active_only?: boolean } = {}): {
+    count: number;
+    total_budgeted: number;
+    budgets: Array<{
+      budget_id: string;
+      name?: string;
+      amount?: number;
+      period?: string;
+      category_id?: string;
+      category_name?: string;
+      start_date?: string;
+      end_date?: string;
+      is_active?: boolean;
+      iso_currency_code?: string;
+    }>;
+  } {
+    const { active_only = false } = options;
+
+    const budgets = this.db.getBudgets(active_only);
+
+    // Calculate total budgeted amount (monthly equivalent)
+    let totalBudgeted = 0;
+    for (const budget of budgets) {
+      if (budget.amount) {
+        // Convert to monthly equivalent based on period
+        const monthlyAmount =
+          budget.period === 'yearly'
+            ? budget.amount / 12
+            : budget.period === 'weekly'
+              ? budget.amount * 4.33 // Average weeks per month
+              : budget.period === 'daily'
+                ? budget.amount * 30
+                : budget.amount; // Default to monthly
+
+        totalBudgeted += monthlyAmount;
+      }
+    }
+
+    return {
+      count: budgets.length,
+      total_budgeted: Math.round(totalBudgeted * 100) / 100,
+      budgets: budgets.map((b) => ({
+        budget_id: b.budget_id,
+        name: b.name,
+        amount: b.amount,
+        period: b.period,
+        category_id: b.category_id,
+        category_name: b.category_id ? getCategoryName(b.category_id) : undefined,
+        start_date: b.start_date,
+        end_date: b.end_date,
+        is_active: b.is_active,
+        iso_currency_code: b.iso_currency_code,
+      })),
+    };
+  }
+
+  /**
    * Get income transactions (negative amounts or income categories).
    *
    * @param options - Filter options
@@ -3313,6 +3375,27 @@ export function createToolSchemas(): ToolSchema[] {
               "Include Copilot's native subscription tracking data (default: true). " +
               'Returns copilot_subscriptions array with user-confirmed subscriptions.',
             default: true,
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_budgets',
+      description:
+        "Get budgets from Copilot's native budget tracking. " +
+        'Retrieves user-defined spending limits and budget rules stored in the app. ' +
+        'Returns budget details including amounts, periods (monthly/yearly/weekly), ' +
+        'category associations, and active status. Calculates total budgeted amount as monthly equivalent.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          active_only: {
+            type: 'boolean',
+            description: 'Only return active budgets (default: false)',
+            default: false,
           },
         },
       },

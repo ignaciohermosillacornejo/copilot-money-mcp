@@ -8,12 +8,13 @@
 import { existsSync, readdirSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
-import { decodeAccounts, decodeTransactions, decodeRecurring } from './decoder.js';
+import { decodeAccounts, decodeTransactions, decodeRecurring, decodeBudgets } from './decoder.js';
 import {
   Account,
   Transaction,
   Category,
   Recurring,
+  Budget,
   getTransactionDisplayName,
 } from '../models/index.js';
 import { getCategoryName } from '../utils/categories.js';
@@ -97,6 +98,7 @@ export class CopilotDatabase {
   private _transactions: Transaction[] | null = null;
   private _accounts: Account[] | null = null;
   private _recurring: Recurring[] | null = null;
+  private _budgets: Budget[] | null = null;
 
   /**
    * Initialize database connection.
@@ -307,6 +309,34 @@ export class CopilotDatabase {
       //   (better to show potentially active subscriptions than hide real ones)
       // - is_active === false: explicitly canceled, excluded
       result = result.filter((rec) => rec.is_active === true || rec.is_active === undefined);
+    }
+
+    return result;
+  }
+
+  /**
+   * Get budgets from Copilot's native budget tracking.
+   *
+   * @param activeOnly - If true, only return active budgets
+   * @returns List of budgets
+   */
+  getBudgets(activeOnly = false): Budget[] {
+    // Lazy load budgets
+    if (this._budgets === null) {
+      this._budgets = decodeBudgets(this.requireDbPath());
+    }
+
+    let result = [...this._budgets];
+
+    if (activeOnly) {
+      // Filter for active budgets:
+      // - is_active === true: explicitly marked as active
+      // - is_active === undefined: status field not set in Firestore, treat as potentially active
+      //   (better to show potentially active budgets than hide real ones)
+      // - is_active === false: explicitly disabled, excluded
+      result = result.filter(
+        (budget) => budget.is_active === true || budget.is_active === undefined
+      );
     }
 
     return result;

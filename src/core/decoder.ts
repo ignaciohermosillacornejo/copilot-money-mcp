@@ -13,6 +13,7 @@ import {
 } from '../models/transaction.js';
 import { Account, AccountSchema, getAccountDisplayName } from '../models/account.js';
 import { Recurring, RecurringSchema } from '../models/recurring.js';
+import { Budget, BudgetSchema } from '../models/budget.js';
 
 /**
  * Find a field and extract its string value.
@@ -582,6 +583,128 @@ export function decodeRecurring(dbPath: string): Recurring[] {
     if (!seen.has(rec.recurring_id)) {
       seen.add(rec.recurring_id);
       unique.push(rec);
+    }
+  }
+
+  return unique;
+}
+
+/**
+ * Decode budgets from Copilot Money database.
+ *
+ * Extracts budget data from /budgets/ Firestore collection.
+ * Returns empty array if database is unavailable (graceful degradation).
+ *
+ * @param dbPath - Path to LevelDB database directory
+ * @returns Array of Budget objects
+ */
+export function decodeBudgets(dbPath: string): Budget[] {
+  const budgets: Budget[] = [];
+
+  // Return empty array if path doesn't exist (graceful degradation)
+  if (!fs.existsSync(dbPath)) {
+    return [];
+  }
+
+  const stat = fs.statSync(dbPath);
+  if (!stat.isDirectory()) {
+    return [];
+  }
+
+  // Configuration constants for record extraction
+  const RECORD_WINDOW_BEFORE = 500; // Bytes to search before path marker
+  const RECORD_WINDOW_AFTER = 2000; // Bytes to search after path marker
+  const MIN_BUDGET_ID_LENGTH = 10; // Minimum length for valid Firestore document IDs
+
+  // Get all .ldb files
+  const files = fs.readdirSync(dbPath);
+  const ldbFiles = files.filter((f) => f.endsWith('.ldb')).map((f) => path.join(dbPath, f));
+
+  const budgetPathMarker = Buffer.from('/budgets/');
+
+  for (const filepath of ldbFiles) {
+    const data = fs.readFileSync(filepath);
+
+    if (!data.includes(budgetPathMarker)) {
+      continue;
+    }
+
+    // Find budget records by searching for the path marker
+    let searchPos = 0;
+    let idx = data.indexOf(budgetPathMarker, searchPos);
+
+    while (idx !== -1) {
+      searchPos = idx + 1;
+
+      // Use a window around the path marker to capture all fields
+      const recordStart = Math.max(0, idx - RECORD_WINDOW_BEFORE);
+      const recordEnd = Math.min(data.length, idx + RECORD_WINDOW_AFTER);
+      const record = data.subarray(recordStart, recordEnd);
+
+      // Try to extract budget_id from the path (e.g., /budgets/{id})
+      const pathIdx = idx - recordStart;
+      const afterPath = record.subarray(pathIdx + budgetPathMarker.length, pathIdx + 100);
+      const idMatch = afterPath.toString('utf-8').match(/^([a-zA-Z0-9_-]+)/);
+      const budgetId = idMatch?.[1];
+
+      if (budgetId && budgetId.length >= MIN_BUDGET_ID_LENGTH) {
+        // Extract fields from the record
+        const name = extractStringValue(record, fieldPattern('name'));
+        const amount = extractDoubleField(record, fieldPattern('amount'));
+        const period = extractStringValue(record, fieldPattern('period'));
+        const categoryId = extractStringValue(record, fieldPattern('category_id'));
+        const startDate = extractStringValue(record, fieldPattern('start_date'));
+        const endDate = extractStringValue(record, fieldPattern('end_date'));
+        const isActive = extractBooleanValue(record, fieldPattern('is_active'));
+        const isoCurrencyCode = extractStringValue(record, fieldPattern('iso_currency_code'));
+
+        // Build budget object
+        const budgetData: {
+          budget_id: string;
+          name?: string;
+          amount?: number;
+          period?: string;
+          category_id?: string;
+          start_date?: string;
+          end_date?: string;
+          is_active?: boolean;
+          iso_currency_code?: string;
+        } = {
+          budget_id: budgetId,
+        };
+
+        if (name) budgetData.name = name;
+        if (amount !== null) budgetData.amount = amount;
+        if (period) budgetData.period = period;
+        if (categoryId) budgetData.category_id = categoryId;
+        if (startDate) budgetData.start_date = startDate;
+        if (endDate) budgetData.end_date = endDate;
+        if (isActive !== null) budgetData.is_active = isActive;
+        if (isoCurrencyCode) budgetData.iso_currency_code = isoCurrencyCode;
+
+        try {
+          const budget = BudgetSchema.parse(budgetData);
+          budgets.push(budget);
+        } catch (error) {
+          // Skip invalid records - log in development for debugging
+          if (process.env.NODE_ENV === 'development' || process.env.DEBUG) {
+            console.warn('Skipping invalid budget record:', error);
+          }
+        }
+      }
+
+      idx = data.indexOf(budgetPathMarker, searchPos);
+    }
+  }
+
+  // Deduplicate by budget_id
+  const seen = new Set<string>();
+  const unique: Budget[] = [];
+
+  for (const budget of budgets) {
+    if (!seen.has(budget.budget_id)) {
+      seen.add(budget.budget_id);
+      unique.push(budget);
     }
   }
 

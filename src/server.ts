@@ -139,6 +139,12 @@ export class CopilotMoneyServer {
           );
           break;
 
+        case 'get_budgets':
+          result = this.tools.getBudgets(
+            (typedArgs as Parameters<typeof this.tools.getBudgets>[0]) || {}
+          );
+          break;
+
         case 'get_income':
           result = this.tools.getIncome(
             (typedArgs as Parameters<typeof this.tools.getIncome>[0]) || {}
