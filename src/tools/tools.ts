@@ -107,6 +107,39 @@ function validateOffset(offset: number | undefined): number {
   return Math.max(0, Math.floor(offset));
 }
 
+// ============================================
+// Common Helpers
+// ============================================
+
+/**
+ * Default category ID for uncategorized transactions.
+ */
+const DEFAULT_CATEGORY_ID = 'uncategorized';
+
+/**
+ * Rounds a number to 2 decimal places for currency display.
+ *
+ * @param value - The number to round
+ * @returns Number rounded to 2 decimal places
+ *
+ * @example
+ * roundAmount(10.126) // returns 10.13
+ * roundAmount(10.1)   // returns 10.1
+ */
+function roundAmount(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+/**
+ * Gets the category ID or returns the default 'uncategorized'.
+ *
+ * @param categoryId - The category ID (may be null or undefined)
+ * @returns The category ID or 'uncategorized'
+ */
+function getCategoryIdOrDefault(categoryId: string | null | undefined): string {
+  return categoryId || DEFAULT_CATEGORY_ID;
+}
+
 /**
  * Normalize merchant names for better aggregation.
  *
@@ -454,12 +487,12 @@ export class CopilotMoneyTools {
         return {
           transactions: foreignTxns,
           typeSpecificData: {
-            total_fx_fees: Math.round(totalFxFees * 100) / 100,
+            total_fx_fees: roundAmount(totalFxFees),
             countries: Array.from(countryMap.entries())
               .map(([c, d]) => ({
                 country: c,
                 count: d.count,
-                total: Math.round(d.total * 100) / 100,
+                total: roundAmount(d.total),
               }))
               .sort((a, b) => b.total - a.total),
           },
@@ -477,7 +510,7 @@ export class CopilotMoneyTools {
         const totalRefunded = refundTxns.reduce((sum, txn) => sum + Math.abs(txn.amount), 0);
         return {
           transactions: refundTxns,
-          typeSpecificData: { total_refunded: Math.round(totalRefunded * 100) / 100 },
+          typeSpecificData: { total_refunded: roundAmount(totalRefunded) },
         };
       }
 
@@ -493,14 +526,14 @@ export class CopilotMoneyTools {
         const totalCredits = creditTxns.reduce((sum, txn) => sum + Math.abs(txn.amount), 0);
         return {
           transactions: creditTxns,
-          typeSpecificData: { total_credits: Math.round(totalCredits * 100) / 100 },
+          typeSpecificData: { total_credits: roundAmount(totalCredits) },
         };
       }
 
       case 'duplicates': {
         const duplicateMap = new Map<string, Transaction[]>();
         for (const txn of transactions) {
-          const key = `${getTransactionDisplayName(txn)}|${Math.round(txn.amount * 100) / 100}|${txn.date}`;
+          const key = `${getTransactionDisplayName(txn)}|${roundAmount(txn.amount)}|${txn.date}`;
           const existing = duplicateMap.get(key) || [];
           existing.push(txn);
           duplicateMap.set(key, existing);
@@ -542,7 +575,7 @@ export class CopilotMoneyTools {
         const totalAmount = hsaTxns.reduce((sum, txn) => sum + txn.amount, 0);
         return {
           transactions: hsaTxns,
-          typeSpecificData: { total_hsa_eligible: Math.round(totalAmount * 100) / 100 },
+          typeSpecificData: { total_hsa_eligible: roundAmount(totalAmount) },
         };
       }
 
@@ -694,7 +727,7 @@ export class CopilotMoneyTools {
       case 'category': {
         const categorySpending = new Map<string, { total: number; count: number }>();
         for (const txn of expenses) {
-          const cat = txn.category_id || 'Uncategorized';
+          const cat = getCategoryIdOrDefault(txn.category_id);
           const existing = categorySpending.get(cat) || { total: 0, count: 0 };
           existing.total += txn.amount;
           existing.count++;
@@ -705,7 +738,7 @@ export class CopilotMoneyTools {
           .map(([category_id, data]) => ({
             category_id,
             category_name: getCategoryName(category_id),
-            total_spending: Math.round(data.total * 100) / 100,
+            total_spending: roundAmount(data.total),
             transaction_count: data.count,
           }))
           .sort((a, b) => b.total_spending - a.total_spending);
@@ -715,7 +748,7 @@ export class CopilotMoneyTools {
         return {
           group_by,
           period: { start_date, end_date },
-          total_spending: Math.round(totalSpending * 100) / 100,
+          total_spending: roundAmount(totalSpending),
           data: categories,
           summary: { category_count: categories.length },
         };
@@ -742,9 +775,9 @@ export class CopilotMoneyTools {
           .map(([merchant, data]) => ({
             merchant,
             category_name: data.categoryId ? getCategoryName(data.categoryId) : undefined,
-            total_spending: Math.round(data.total * 100) / 100,
+            total_spending: roundAmount(data.total),
             transaction_count: data.count,
-            average_transaction: Math.round((data.total / data.count) * 100) / 100,
+            average_transaction: roundAmount(data.total / data.count),
           }))
           .sort((a, b) => b.total_spending - a.total_spending)
           .slice(0, limit);
@@ -754,7 +787,7 @@ export class CopilotMoneyTools {
         return {
           group_by,
           period: { start_date, end_date },
-          total_spending: Math.round(totalSpending * 100) / 100,
+          total_spending: roundAmount(totalSpending),
           data: merchants,
           summary: { merchant_count: merchantSpending.size },
         };
@@ -787,10 +820,9 @@ export class CopilotMoneyTools {
           return {
             day_of_week: index,
             day_name: name,
-            total_spending: Math.round(data.total * 100) / 100,
+            total_spending: roundAmount(data.total),
             transaction_count: data.count,
-            average_transaction:
-              data.count > 0 ? Math.round((data.total / data.count) * 100) / 100 : 0,
+            average_transaction: data.count > 0 ? roundAmount(data.total / data.count) : 0,
             percentage:
               totalSpending > 0 ? Math.round((data.total / totalSpending) * 10000) / 100 : 0,
           };
@@ -804,7 +836,7 @@ export class CopilotMoneyTools {
         return {
           group_by,
           period: { start_date, end_date },
-          total_spending: Math.round(totalSpending * 100) / 100,
+          total_spending: roundAmount(totalSpending),
           data: days,
           summary: { highest_spending_day: highestDay?.day_name },
         };
@@ -840,15 +872,13 @@ export class CopilotMoneyTools {
           .map(([, data]) => ({
             period_start: data.start.toISOString().substring(0, 10),
             period_end: data.end.toISOString().substring(0, 10),
-            total_spending: Math.round(data.total * 100) / 100,
+            total_spending: roundAmount(data.total),
             transaction_count: data.count,
-            average_transaction:
-              data.count > 0 ? Math.round((data.total / data.count) * 100) / 100 : 0,
+            average_transaction: data.count > 0 ? roundAmount(data.total / data.count) : 0,
           }));
 
         const totalSpending = periods.reduce((sum, p) => sum + p.total_spending, 0);
-        const avgPerPeriod =
-          periods.length > 0 ? Math.round((totalSpending / periods.length) * 100) / 100 : 0;
+        const avgPerPeriod = periods.length > 0 ? roundAmount(totalSpending / periods.length) : 0;
 
         let highest: { period_start: string; amount: number } | null = null;
         let lowest: { period_start: string; amount: number } | null = null;
@@ -864,7 +894,7 @@ export class CopilotMoneyTools {
         return {
           group_by,
           period: { start_date, end_date },
-          total_spending: Math.round(totalSpending * 100) / 100,
+          total_spending: roundAmount(totalSpending),
           data: { granularity, periods },
           summary: {
             average_per_period: avgPerPeriod,
@@ -894,13 +924,13 @@ export class CopilotMoneyTools {
         return {
           group_by,
           period: { start_date, end_date },
-          total_spending: Math.round(totalSpending * 100) / 100,
+          total_spending: roundAmount(totalSpending),
           data: {
             days_in_period: daysInPeriod,
             days_elapsed: daysElapsed,
-            daily_average: Math.round(dailyAverage * 100) / 100,
-            weekly_average: Math.round(weeklyAverage * 100) / 100,
-            projected_monthly_total: Math.round(projectedMonthlyTotal * 100) / 100,
+            daily_average: roundAmount(dailyAverage),
+            weekly_average: roundAmount(weeklyAverage),
+            projected_monthly_total: roundAmount(projectedMonthlyTotal),
           },
           summary: {
             on_track: totalSpending <= dailyAverage * daysInPeriod,
@@ -999,9 +1029,9 @@ export class CopilotMoneyTools {
             account_name: account.name || account.official_name || 'Unknown',
             account_type: account.account_type,
             transaction_count: count,
-            total_inflow: Math.round(totalInflow * 100) / 100,
-            total_outflow: Math.round(totalOutflow * 100) / 100,
-            net_flow: Math.round((totalInflow - totalOutflow) * 100) / 100,
+            total_inflow: roundAmount(totalInflow),
+            total_outflow: roundAmount(totalOutflow),
+            net_flow: roundAmount(totalInflow - totalOutflow),
             activity_level: activityLevel,
           });
         }
@@ -1046,9 +1076,9 @@ export class CopilotMoneyTools {
             .slice(-months)
             .map(([month, data]) => ({
               month,
-              inflow: Math.round(data.inflow * 100) / 100,
-              outflow: Math.round(data.outflow * 100) / 100,
-              net_change: Math.round((data.inflow - data.outflow) * 100) / 100,
+              inflow: roundAmount(data.inflow),
+              outflow: roundAmount(data.outflow),
+              net_change: roundAmount(data.inflow - data.outflow),
             }));
 
           return {
@@ -1102,7 +1132,7 @@ export class CopilotMoneyTools {
           .map(([type, data]) => ({
             fee_type: type,
             count: data.count,
-            total: Math.round(data.total * 100) / 100,
+            total: roundAmount(data.total),
           }))
           .sort((a, b) => b.total - a.total);
 
@@ -1113,7 +1143,7 @@ export class CopilotMoneyTools {
           period: { start_date, end_date },
           data: feeData,
           summary: {
-            total_fees: Math.round(totalFees * 100) / 100,
+            total_fees: roundAmount(totalFees),
             fee_count: feeTxns.length,
           },
         };
@@ -1175,9 +1205,9 @@ export class CopilotMoneyTools {
             budget_id: budget.budget_id,
             category: getCategoryName(categoryId || 'Unknown'),
             budget_amount: budgetAmount,
-            spent: Math.round(spent * 100) / 100,
-            remaining: Math.round((budgetAmount - spent) * 100) / 100,
-            utilization_percent: Math.round(utilization * 100) / 100,
+            spent: roundAmount(spent),
+            remaining: roundAmount(budgetAmount - spent),
+            utilization_percent: roundAmount(utilization),
             status: utilization >= 100 ? 'over' : utilization >= 80 ? 'warning' : 'ok',
           };
         });
@@ -1232,9 +1262,9 @@ export class CopilotMoneyTools {
 
           historicalData.push({
             month: monthStr,
-            budgeted: Math.round(budgeted * 100) / 100,
-            actual: Math.round(actual * 100) / 100,
-            variance: Math.round((budgeted - actual) * 100) / 100,
+            budgeted: roundAmount(budgeted),
+            actual: roundAmount(actual),
+            variance: roundAmount(budgeted - actual),
           });
         }
 
@@ -1260,8 +1290,8 @@ export class CopilotMoneyTools {
                 budget_id: budget.budget_id,
                 category: getCategoryName(categoryId || 'Unknown'),
                 budget_amount: budgetAmount,
-                spent: Math.round(spent * 100) / 100,
-                utilization_percent: Math.round(utilization * 100) / 100,
+                spent: roundAmount(spent),
+                utilization_percent: roundAmount(utilization),
                 alert_level: utilization >= 100 ? 'exceeded' : 'warning',
               };
             }
@@ -1289,7 +1319,7 @@ export class CopilotMoneyTools {
         const spendingByCategory = new Map<string, number>();
         for (const t of transactions) {
           if (t.amount > 0 && !isTransferCategory(t.category_id)) {
-            const cat = t.category_id || 'Uncategorized';
+            const cat = getCategoryIdOrDefault(t.category_id);
             spendingByCategory.set(cat, (spendingByCategory.get(cat) || 0) + t.amount);
           }
         }
@@ -1302,7 +1332,7 @@ export class CopilotMoneyTools {
               type: 'new_budget',
               category: getCategoryName(cat),
               message: `Consider creating a budget for ${getCategoryName(cat)} - you spent $${Math.round(spent)} this month`,
-              suggested_amount: Math.round(spent * 1.1 * 100) / 100,
+              suggested_amount: roundAmount(spent * 1.1),
             });
           }
         }
@@ -1370,10 +1400,10 @@ export class CopilotMoneyTools {
             goal_id: goal.goal_id,
             name: goal.name,
             target_amount: targetAmount,
-            current_amount: Math.round(currentAmount * 100) / 100,
+            current_amount: roundAmount(currentAmount),
             progress_percent:
               targetAmount > 0 ? Math.round((currentAmount / targetAmount) * 10000) / 100 : 0,
-            avg_monthly_contribution: Math.round(avgMonthlyContribution * 100) / 100,
+            avg_monthly_contribution: roundAmount(avgMonthlyContribution),
             months_to_complete: monthsToComplete,
             scenarios: {
               conservative: monthsToComplete ? Math.ceil(monthsToComplete * 1.2) : null,
@@ -1419,7 +1449,7 @@ export class CopilotMoneyTools {
                 risk_score: riskScore,
                 risk_level: riskScore >= 50 ? 'high' : 'medium',
                 risk_factors: riskFactors,
-                current_progress: Math.round(progress * 100) / 100,
+                current_progress: roundAmount(progress),
               };
             }
             return null;
@@ -1523,7 +1553,7 @@ export class CopilotMoneyTools {
         const currentAmount = history[0]?.current_amount ?? 0;
         const targetAmount = goal.savings?.target_amount || 0;
         result.progress = {
-          current_amount: Math.round(currentAmount * 100) / 100,
+          current_amount: roundAmount(currentAmount),
           progress_percent:
             targetAmount > 0 ? Math.round((currentAmount / targetAmount) * 10000) / 100 : 0,
         };
@@ -1532,7 +1562,7 @@ export class CopilotMoneyTools {
       if (include.includes('history')) {
         result.history = history.map((h) => ({
           month: h.month,
-          amount: Math.round((h.current_amount ?? 0) * 100) / 100,
+          amount: roundAmount(h.current_amount ?? 0),
         }));
       }
 
@@ -1546,11 +1576,9 @@ export class CopilotMoneyTools {
           }
         }
         result.contributions = {
-          total: Math.round(totalContributions * 100) / 100,
+          total: roundAmount(totalContributions),
           monthly_avg:
-            history.length > 1
-              ? Math.round((totalContributions / (history.length - 1)) * 100) / 100
-              : 0,
+            history.length > 1 ? roundAmount(totalContributions / (history.length - 1)) : 0,
         };
       }
 
@@ -1628,10 +1656,10 @@ export class CopilotMoneyTools {
           const changePercent = data.earliest > 0 ? (change / data.earliest) * 100 : 0;
           return {
             ticker_symbol: ticker,
-            earliest_price: Math.round(data.earliest * 100) / 100,
-            latest_price: Math.round(data.latest * 100) / 100,
-            change: Math.round(change * 100) / 100,
-            change_percent: Math.round(changePercent * 100) / 100,
+            earliest_price: roundAmount(data.earliest),
+            latest_price: roundAmount(data.latest),
+            change: roundAmount(change),
+            change_percent: roundAmount(changePercent),
             trend: change > 0 ? 'up' : change < 0 ? 'down' : 'stable',
           };
         });
@@ -1669,11 +1697,11 @@ export class CopilotMoneyTools {
           period: { start_date, end_date },
           data: dividendTxns.map((t) => ({
             date: t.date,
-            amount: Math.round(Math.abs(t.amount) * 100) / 100,
+            amount: roundAmount(Math.abs(t.amount)),
             source: getTransactionDisplayName(t),
           })),
           summary: {
-            total_dividends: Math.round(totalDividends * 100) / 100,
+            total_dividends: roundAmount(totalDividends),
             payment_count: dividendTxns.length,
           },
         };
@@ -1708,11 +1736,11 @@ export class CopilotMoneyTools {
           period: { start_date, end_date },
           data: feeTxns.map((t) => ({
             date: t.date,
-            amount: Math.round(t.amount * 100) / 100,
+            amount: roundAmount(t.amount),
             description: getTransactionDisplayName(t),
           })),
           summary: {
-            total_fees: Math.round(totalFees * 100) / 100,
+            total_fees: roundAmount(totalFees),
             fee_count: feeTxns.length,
           },
         };
@@ -1791,12 +1819,12 @@ export class CopilotMoneyTools {
         const sortedDates = data.dates.sort();
         return {
           merchant,
-          total_spending: Math.round(data.total * 100) / 100,
+          total_spending: roundAmount(data.total),
           transaction_count: data.count,
-          average_transaction: Math.round((data.total / data.count) * 100) / 100,
+          average_transaction: roundAmount(data.total / data.count),
           first_visit: sortedDates[0],
           last_visit: sortedDates[sortedDates.length - 1],
-          visits_per_month: Math.round((data.count / monthsInPeriod) * 100) / 100,
+          visits_per_month: roundAmount(data.count / monthsInPeriod),
         };
       });
 
@@ -1822,7 +1850,7 @@ export class CopilotMoneyTools {
       merchants,
       summary: {
         total_merchants: merchantData.size,
-        total_spending: Math.round(totalSpending * 100) / 100,
+        total_spending: roundAmount(totalSpending),
       },
     };
   }
@@ -1901,7 +1929,7 @@ export class CopilotMoneyTools {
 
     return {
       count: accounts.length,
-      total_balance: Math.round(totalBalance * 100) / 100,
+      total_balance: roundAmount(totalBalance),
       accounts,
     };
   }
@@ -1959,7 +1987,7 @@ export class CopilotMoneyTools {
     for (const txn of transactions) {
       // Only count positive amounts (expenses), skip internal transfers
       if (txn.amount > 0 && !txn.internal_transfer) {
-        const cat = txn.category_id || 'Uncategorized';
+        const cat = getCategoryIdOrDefault(txn.category_id);
         categorySpending.set(cat, (categorySpending.get(cat) || 0) + txn.amount);
         categoryCounts.set(cat, (categoryCounts.get(cat) || 0) + 1);
       }
@@ -1970,14 +1998,13 @@ export class CopilotMoneyTools {
       .map(([category_id, total_spending]) => ({
         category_id,
         category_name: getCategoryName(category_id),
-        total_spending: Math.round(total_spending * 100) / 100,
+        total_spending: roundAmount(total_spending),
         transaction_count: categoryCounts.get(category_id) || 0,
       }))
       .sort((a, b) => b.total_spending - a.total_spending);
 
     // Calculate totals
-    const totalSpending =
-      Math.round(categories.reduce((sum, cat) => sum + cat.total_spending, 0) * 100) / 100;
+    const totalSpending = roundAmount(categories.reduce((sum, cat) => sum + cat.total_spending, 0));
 
     return {
       period: { start_date, end_date },
@@ -2158,7 +2185,7 @@ export class CopilotMoneyTools {
         const categoryStats = new Map<string, { count: number; totalAmount: number }>();
 
         for (const txn of allTransactions) {
-          const categoryId = txn.category_id || 'Uncategorized';
+          const categoryId = getCategoryIdOrDefault(txn.category_id);
           const stats = categoryStats.get(categoryId) || {
             count: 0,
             totalAmount: 0,
@@ -2174,7 +2201,7 @@ export class CopilotMoneyTools {
             category_id,
             category_name: getCategoryName(category_id),
             transaction_count: stats.count,
-            total_amount: Math.round(stats.totalAmount * 100) / 100,
+            total_amount: roundAmount(stats.totalAmount),
           }))
           .sort((a, b) => b.transaction_count - a.transaction_count);
 
@@ -2388,8 +2415,8 @@ export class CopilotMoneyTools {
           merchant,
           normalized_merchant: normalizeMerchantName(merchant),
           occurrences: sortedTxns.length,
-          average_amount: Math.round(avgAmount * 100) / 100,
-          total_amount: Math.round(totalAmount * 100) / 100,
+          average_amount: roundAmount(avgAmount),
+          total_amount: roundAmount(totalAmount),
           frequency,
           confidence,
           confidence_reason: confidenceReasons.join(', '),
@@ -2452,7 +2479,7 @@ export class CopilotMoneyTools {
     return {
       period: { start_date, end_date },
       count: recurring.length,
-      total_monthly_cost: Math.round(totalMonthlyCost * 100) / 100,
+      total_monthly_cost: roundAmount(totalMonthlyCost),
       recurring,
       ...(copilotSubscriptions && copilotSubscriptions.length > 0
         ? { copilot_subscriptions: copilotSubscriptions }
@@ -2506,7 +2533,7 @@ export class CopilotMoneyTools {
 
     return {
       count: budgets.length,
-      total_budgeted: Math.round(totalBudgeted * 100) / 100,
+      total_budgeted: roundAmount(totalBudgeted),
       budgets: budgets.map((b) => ({
         budget_id: b.budget_id,
         name: b.name,
@@ -2559,7 +2586,7 @@ export class CopilotMoneyTools {
 
     return {
       count: goals.length,
-      total_target: Math.round(totalTarget * 100) / 100,
+      total_target: roundAmount(totalTarget),
       goals: goals.map((g) => ({
         goal_id: g.goal_id,
         name: g.name,
@@ -2672,7 +2699,7 @@ export class CopilotMoneyTools {
         emoji: goal.emoji,
         target_amount: targetAmount,
         current_amount: currentAmount,
-        progress_percent: progressPercent ? Math.round(progressPercent * 100) / 100 : undefined,
+        progress_percent: progressPercent ? roundAmount(progressPercent) : undefined,
         monthly_contribution: goal.savings?.tracking_type_monthly_contribution,
         estimated_completion: estimatedCompletion,
         status: goal.savings?.status,
@@ -2739,14 +2766,14 @@ export class CopilotMoneyTools {
         month: h.month,
         current_amount: h.current_amount,
         target_amount: h.target_amount,
-        progress_percent: progressPercent ? Math.round(progressPercent * 100) / 100 : undefined,
+        progress_percent: progressPercent ? roundAmount(progressPercent) : undefined,
         month_start_amount: monthStats.start_amount,
         month_end_amount: monthStats.end_amount,
         month_change_amount: monthStats.change_amount
-          ? Math.round(monthStats.change_amount * 100) / 100
+          ? roundAmount(monthStats.change_amount)
           : undefined,
         month_change_percent: monthStats.change_percent
-          ? Math.round(monthStats.change_percent * 100) / 100
+          ? roundAmount(monthStats.change_percent)
           : undefined,
         daily_snapshots_count: dailySnapshotsCount,
       };
@@ -2867,9 +2894,9 @@ export class CopilotMoneyTools {
         name: goal.name,
         target_amount: targetAmount,
         current_amount: currentAmount,
-        remaining_amount: remainingAmount ? Math.round(remainingAmount * 100) / 100 : undefined,
+        remaining_amount: remainingAmount ? roundAmount(remainingAmount) : undefined,
         average_monthly_contribution: averageMonthlyContribution
-          ? Math.round(averageMonthlyContribution * 100) / 100
+          ? roundAmount(averageMonthlyContribution)
           : undefined,
         estimated_months_remaining: estimatedMonthsRemaining,
         estimated_completion_month: estimatedCompletionMonth,
@@ -2951,10 +2978,10 @@ export class CopilotMoneyTools {
       return {
         month: h.month,
         current_amount: h.current_amount,
-        month_change: Math.round(monthChange * 100) / 100,
-        deposits: monthChange > 0 ? Math.round(monthChange * 100) / 100 : undefined,
-        withdrawals: monthChange < 0 ? Math.round(Math.abs(monthChange) * 100) / 100 : undefined,
-        net: Math.round(monthChange * 100) / 100,
+        month_change: roundAmount(monthChange),
+        deposits: monthChange > 0 ? roundAmount(monthChange) : undefined,
+        withdrawals: monthChange < 0 ? roundAmount(Math.abs(monthChange)) : undefined,
+        net: roundAmount(monthChange),
       };
     });
 
@@ -2969,10 +2996,10 @@ export class CopilotMoneyTools {
         start_month: sortedHistory[0]?.month,
         end_month: sortedHistory[sortedHistory.length - 1]?.month,
       },
-      total_contributed: Math.round(totalContributed * 100) / 100,
-      total_withdrawn: Math.round(totalWithdrawn * 100) / 100,
-      net_contribution: Math.round(netContribution * 100) / 100,
-      average_monthly_contribution: Math.round(averageMonthlyContribution * 100) / 100,
+      total_contributed: roundAmount(totalContributed),
+      total_withdrawn: roundAmount(totalWithdrawn),
+      net_contribution: roundAmount(netContribution),
+      average_monthly_contribution: roundAmount(averageMonthlyContribution),
       months_analyzed: monthlyBreakdown.length,
       monthly_breakdown: monthlyBreakdown,
     };
@@ -3081,7 +3108,7 @@ export class CopilotMoneyTools {
       .map(([source, data]) => ({
         source,
         category_name: data.categoryId ? getCategoryName(data.categoryId) : undefined,
-        total: Math.round(data.total * 100) / 100,
+        total: roundAmount(data.total),
         count: data.count,
       }))
       .sort((a, b) => b.total - a.total);
@@ -3097,7 +3124,7 @@ export class CopilotMoneyTools {
 
     return {
       period: { start_date, end_date },
-      total_income: Math.round(totalIncome * 100) / 100,
+      total_income: roundAmount(totalIncome),
       transaction_count: incomeTransactions.length,
       income_by_source: incomeBySource,
       transactions: enrichedTransactions,
@@ -3176,9 +3203,9 @@ export class CopilotMoneyTools {
       .map(([merchant, data]) => ({
         merchant,
         category_name: data.categoryId ? getCategoryName(data.categoryId) : undefined,
-        total_spending: Math.round(data.total * 100) / 100,
+        total_spending: roundAmount(data.total),
         transaction_count: data.count,
-        average_transaction: Math.round((data.total / data.count) * 100) / 100,
+        average_transaction: roundAmount(data.total / data.count),
       }))
       .sort((a, b) => b.total_spending - a.total_spending)
       .slice(0, limit);
@@ -3188,7 +3215,7 @@ export class CopilotMoneyTools {
 
     return {
       period: { start_date, end_date },
-      total_spending: Math.round(totalSpending * 100) / 100,
+      total_spending: roundAmount(totalSpending),
       merchant_count: merchantSpending.size,
       merchants,
     };
@@ -3360,7 +3387,7 @@ export class CopilotMoneyTools {
       .map(([country, data]) => ({
         country,
         transaction_count: data.count,
-        total_amount: Math.round(data.total * 100) / 100,
+        total_amount: roundAmount(data.total),
       }))
       .sort((a, b) => b.total_amount - a.total_amount);
 
@@ -3375,8 +3402,8 @@ export class CopilotMoneyTools {
     return {
       period: { start_date, end_date },
       count: foreignTxns.length,
-      total_amount: Math.round(totalAmount * 100) / 100,
-      total_fx_fees: Math.round(totalFxFees * 100) / 100,
+      total_amount: roundAmount(totalAmount),
+      total_fx_fees: roundAmount(totalFxFees),
       countries,
       transactions: enrichedTransactions,
     };
@@ -3446,7 +3473,7 @@ export class CopilotMoneyTools {
       .map(([merchant, data]) => ({
         merchant,
         refund_count: data.count,
-        total_refunded: Math.round(data.total * 100) / 100,
+        total_refunded: roundAmount(data.total),
       }))
       .sort((a, b) => b.total_refunded - a.total_refunded);
 
@@ -3460,7 +3487,7 @@ export class CopilotMoneyTools {
     return {
       period: { start_date, end_date },
       count: refundTxns.length,
-      total_refunded: Math.round(totalRefunded * 100) / 100,
+      total_refunded: roundAmount(totalRefunded),
       refunds_by_merchant: refundsByMerchant,
       transactions: enrichedTransactions,
     };
@@ -3508,7 +3535,7 @@ export class CopilotMoneyTools {
 
     for (const txn of allTransactions) {
       const merchant = getTransactionDisplayName(txn);
-      const amount = Math.round(txn.amount * 100) / 100;
+      const amount = roundAmount(txn.amount);
       const key = `${merchant}|${amount}|${txn.date}`;
 
       const existing = potentialDuplicates.get(key) || [];
@@ -3677,7 +3704,7 @@ export class CopilotMoneyTools {
       .map(([type, data]) => ({
         type,
         count: data.count,
-        total: Math.round(data.total * 100) / 100,
+        total: roundAmount(data.total),
       }))
       .sort((a, b) => b.total - a.total);
 
@@ -3692,7 +3719,7 @@ export class CopilotMoneyTools {
     return {
       period: { start_date, end_date },
       count: creditTxns.length,
-      total_credits: Math.round(totalCredits * 100) / 100,
+      total_credits: roundAmount(totalCredits),
       credits_by_type: creditsByType,
       transactions: enrichedTransactions,
     };
@@ -3764,10 +3791,9 @@ export class CopilotMoneyTools {
       .map(([dayNum, stats]) => ({
         day: dayNames[dayNum] ?? 'Unknown',
         day_number: dayNum,
-        total_spending: Math.round(stats.total * 100) / 100,
+        total_spending: roundAmount(stats.total),
         transaction_count: stats.count,
-        average_transaction:
-          stats.count > 0 ? Math.round((stats.total / stats.count) * 100) / 100 : 0,
+        average_transaction: stats.count > 0 ? roundAmount(stats.total / stats.count) : 0,
         percentage_of_total:
           totalSpending > 0 ? Math.round((stats.total / totalSpending) * 10000) / 100 : 0,
       }))
@@ -3775,7 +3801,7 @@ export class CopilotMoneyTools {
 
     return {
       period: { start_date, end_date },
-      total_spending: Math.round(totalSpending * 100) / 100,
+      total_spending: roundAmount(totalSpending),
       days,
     };
   }
@@ -3922,7 +3948,7 @@ export class CopilotMoneyTools {
               for (const t of tripTxns) {
                 if (t.amount > 0) {
                   totalSpent += t.amount;
-                  const cat = getCategoryName(t.category_id || 'Uncategorized');
+                  const cat = getCategoryName(getCategoryIdOrDefault(t.category_id));
                   categoryTotals.set(cat, (categoryTotals.get(cat) || 0) + t.amount);
                 }
               }
@@ -3943,10 +3969,10 @@ export class CopilotMoneyTools {
                 start_date: tripStart.date,
                 end_date: tripEnd.date,
                 duration_days: duration,
-                total_spent: Math.round(totalSpent * 100) / 100,
+                total_spent: roundAmount(totalSpent),
                 transaction_count: tripTxns.length,
                 categories: Array.from(categoryTotals.entries())
-                  .map(([category, total]) => ({ category, total: Math.round(total * 100) / 100 }))
+                  .map(([category, total]) => ({ category, total: roundAmount(total) }))
                   .sort((a, b) => b.total - a.total),
               });
             }
@@ -3971,7 +3997,7 @@ export class CopilotMoneyTools {
           for (const t of tripTxns) {
             if (t.amount > 0) {
               totalSpent += t.amount;
-              const cat = getCategoryName(t.category_id || 'Uncategorized');
+              const cat = getCategoryName(getCategoryIdOrDefault(t.category_id));
               categoryTotals.set(cat, (categoryTotals.get(cat) || 0) + t.amount);
             }
           }
@@ -3992,10 +4018,10 @@ export class CopilotMoneyTools {
             start_date: tripStart.date,
             end_date: tripEnd.date,
             duration_days: duration,
-            total_spent: Math.round(totalSpent * 100) / 100,
+            total_spent: roundAmount(totalSpent),
             transaction_count: tripTxns.length,
             categories: Array.from(categoryTotals.entries())
-              .map(([category, total]) => ({ category, total: Math.round(total * 100) / 100 }))
+              .map(([category, total]) => ({ category, total: roundAmount(total) }))
               .sort((a, b) => b.total - a.total),
           });
         }
@@ -4118,9 +4144,9 @@ export class CopilotMoneyTools {
       .map(([merchant, stats]) => ({
         merchant,
         normalized_name: normalizeMerchantName(merchant),
-        total_spent: Math.round(stats.total * 100) / 100,
+        total_spent: roundAmount(stats.total),
         transaction_count: stats.count,
-        average_transaction: Math.round((stats.total / stats.count) * 100) / 100,
+        average_transaction: roundAmount(stats.total / stats.count),
         first_transaction: stats.firstDate,
         last_transaction: stats.lastDate,
         category_name: stats.categoryId ? getCategoryName(stats.categoryId) : undefined,
@@ -4200,7 +4226,7 @@ export class CopilotMoneyTools {
 
     for (const txn of allTransactions) {
       if (txn.amount <= 0) continue;
-      const category = txn.category_id || 'Uncategorized';
+      const category = getCategoryIdOrDefault(txn.category_id);
       const amounts = categoryAmounts.get(category) || [];
       amounts.push(txn.amount);
       categoryAmounts.set(category, amounts);
@@ -4230,7 +4256,7 @@ export class CopilotMoneyTools {
 
       const merchant = getTransactionDisplayName(txn);
       const merchantStats = merchantAverages.get(merchant);
-      const category = txn.category_id || 'Uncategorized';
+      const category = getCategoryIdOrDefault(txn.category_id);
       const categoryStats = categoryAverages.get(category);
 
       let isAnomaly = false;
@@ -4271,7 +4297,7 @@ export class CopilotMoneyTools {
           ...txn,
           category_name: txn.category_id ? getCategoryName(txn.category_id) : undefined,
           anomaly_reason: reason,
-          expected_amount: expected ? Math.round(expected * 100) / 100 : undefined,
+          expected_amount: expected ? roundAmount(expected) : undefined,
           deviation_percent: deviation,
         });
       }
@@ -4496,7 +4522,7 @@ export class CopilotMoneyTools {
       .map(([category, data]) => ({
         category,
         count: data.count,
-        total: Math.round(data.total * 100) / 100,
+        total: roundAmount(data.total),
       }))
       .sort((a, b) => b.total - a.total);
 
@@ -4505,7 +4531,7 @@ export class CopilotMoneyTools {
     return {
       period: { start_date, end_date },
       count: hsaEligible.length,
-      total_amount: Math.round(totalAmount * 100) / 100,
+      total_amount: roundAmount(totalAmount),
       by_category: byCategory,
       transactions: hsaEligible.slice(0, 100).map((txn) => ({
         ...txn,
@@ -4618,8 +4644,8 @@ export class CopilotMoneyTools {
       .map((week) => ({
         week_start: week.start,
         week_end: week.end,
-        total: Math.round(week.total * 100) / 100,
-        daily_average: Math.round((week.total / week.days) * 100) / 100,
+        total: roundAmount(week.total),
+        daily_average: roundAmount(week.total / week.days),
       }))
       .sort((a, b) => a.week_start.localeCompare(b.week_start));
 
@@ -4657,13 +4683,13 @@ export class CopilotMoneyTools {
       period: { start_date, end_date },
       days_in_period: daysInPeriod,
       days_elapsed: daysElapsed,
-      total_spending: Math.round(totalSpending * 100) / 100,
-      daily_average: Math.round(dailyAverage * 100) / 100,
-      weekly_average: Math.round(weeklyAverage * 100) / 100,
-      projected_monthly_total: Math.round(projectedMonthlyTotal * 100) / 100,
+      total_spending: roundAmount(totalSpending),
+      daily_average: roundAmount(dailyAverage),
+      weekly_average: roundAmount(weeklyAverage),
+      projected_monthly_total: roundAmount(projectedMonthlyTotal),
       spending_by_week: spendingByWeek,
       comparison_to_previous: {
-        previous_period_total: Math.round(previousPeriodTotal * 100) / 100,
+        previous_period_total: roundAmount(previousPeriodTotal),
         change_percent: changePercent,
         on_track: onTrack,
       },
@@ -4796,7 +4822,7 @@ export class CopilotMoneyTools {
       .map(([category_id, data]) => ({
         category_id,
         transaction_count: data.count,
-        total_amount: Math.round(data.total * 100) / 100,
+        total_amount: roundAmount(data.total),
         sample_transactions: data.samples,
       }))
       .sort((a, b) => b.total_amount - a.total_amount);
@@ -5123,7 +5149,7 @@ export class CopilotMoneyTools {
         // Always exclude internal transfers from spending calculations
         if (txn.amount > 0 && !txn.internal_transfer) {
           spending += txn.amount;
-          const cat = txn.category_id || 'Uncategorized';
+          const cat = getCategoryIdOrDefault(txn.category_id);
           byCategory.set(cat, (byCategory.get(cat) || 0) + txn.amount);
         } else if (txn.amount < 0) {
           income += Math.abs(txn.amount);
@@ -5131,8 +5157,8 @@ export class CopilotMoneyTools {
       }
 
       return {
-        spending: Math.round(spending * 100) / 100,
-        income: Math.round(income * 100) / 100,
+        spending: roundAmount(spending),
+        income: roundAmount(income),
         count: transactions.length,
         byCategory,
       };
@@ -5163,9 +5189,9 @@ export class CopilotMoneyTools {
         return {
           category_id: categoryId,
           category_name: getCategoryName(categoryId),
-          period1_spending: Math.round(p1Spending * 100) / 100,
-          period2_spending: Math.round(p2Spending * 100) / 100,
-          change: Math.round(change * 100) / 100,
+          period1_spending: roundAmount(p1Spending),
+          period2_spending: roundAmount(p2Spending),
+          change: roundAmount(change),
           change_percent: changePercent,
         };
       })
@@ -5178,7 +5204,7 @@ export class CopilotMoneyTools {
         end_date: end1,
         total_spending: p1Data.spending,
         total_income: p1Data.income,
-        net: Math.round((p1Data.income - p1Data.spending) * 100) / 100,
+        net: roundAmount(p1Data.income - p1Data.spending),
         transaction_count: p1Data.count,
       },
       period2: {
@@ -5187,13 +5213,13 @@ export class CopilotMoneyTools {
         end_date: end2,
         total_spending: p2Data.spending,
         total_income: p2Data.income,
-        net: Math.round((p2Data.income - p2Data.spending) * 100) / 100,
+        net: roundAmount(p2Data.income - p2Data.spending),
         transaction_count: p2Data.count,
       },
       comparison: {
-        spending_change: Math.round(spendingChange * 100) / 100,
+        spending_change: roundAmount(spendingChange),
         spending_change_percent: spendingChangePercent,
-        income_change: Math.round(incomeChange * 100) / 100,
+        income_change: roundAmount(incomeChange),
         income_change_percent: incomeChangePercent,
         net_change:
           Math.round((p2Data.income - p2Data.spending - (p1Data.income - p1Data.spending)) * 100) /
@@ -5396,9 +5422,7 @@ export class CopilotMoneyTools {
         highest_price: highestPrice,
         lowest_price: lowestPrice,
         price_change:
-          latestPrice && earliestPrice
-            ? Math.round((latestPrice - earliestPrice) * 100) / 100
-            : undefined,
+          latestPrice && earliestPrice ? roundAmount(latestPrice - earliestPrice) : undefined,
         price_change_percent:
           latestPrice && earliestPrice && earliestPrice > 0
             ? Math.round(((latestPrice - earliestPrice) / earliestPrice) * 10000) / 100
@@ -5811,15 +5835,14 @@ export class CopilotMoneyTools {
       .map(([, data]) => ({
         period_start: data.start.toISOString().substring(0, 10),
         period_end: data.end.toISOString().substring(0, 10),
-        total_spending: Math.round(data.total * 100) / 100,
+        total_spending: roundAmount(data.total),
         transaction_count: data.count,
-        average_transaction: data.count > 0 ? Math.round((data.total / data.count) * 100) / 100 : 0,
+        average_transaction: data.count > 0 ? roundAmount(data.total / data.count) : 0,
       }));
 
     // Calculate summary
     const totalSpending = periods.reduce((sum, p) => sum + p.total_spending, 0);
-    const avgPerPeriod =
-      periods.length > 0 ? Math.round((totalSpending / periods.length) * 100) / 100 : 0;
+    const avgPerPeriod = periods.length > 0 ? roundAmount(totalSpending / periods.length) : 0;
 
     let highest: { period_start: string; amount: number } | null = null;
     let lowest: { period_start: string; amount: number } | null = null;
@@ -5839,7 +5862,7 @@ export class CopilotMoneyTools {
       end_date: endDate.toISOString().substring(0, 10),
       periods,
       summary: {
-        total_spending: Math.round(totalSpending * 100) / 100,
+        total_spending: roundAmount(totalSpending),
         average_per_period: avgPerPeriod,
         highest_period: highest,
         lowest_period: lowest,
@@ -5980,7 +6003,7 @@ export class CopilotMoneyTools {
       if (groupBy === 'merchant') {
         key = t.name ? normalizeMerchantName(t.name) : 'Unknown';
       } else {
-        key = getCategoryName(t.category_id || 'uncategorized');
+        key = getCategoryName(getCategoryIdOrDefault(t.category_id));
       }
 
       let group = groupMap.get(key);
@@ -5998,18 +6021,18 @@ export class CopilotMoneyTools {
     const allAmounts = filtered.map((t) => Math.abs(t.amount));
     const overallAvg =
       allAmounts.length > 0
-        ? Math.round((allAmounts.reduce((a, b) => a + b, 0) / allAmounts.length) * 100) / 100
+        ? roundAmount(allAmounts.reduce((a, b) => a + b, 0) / allAmounts.length)
         : 0;
 
     // Convert to sorted array
     const groups = Array.from(groupMap.entries())
       .map(([name, data]) => ({
         name,
-        average_amount: Math.round((data.total / data.amounts.length) * 100) / 100,
+        average_amount: roundAmount(data.total / data.amounts.length),
         transaction_count: data.amounts.length,
-        total_amount: Math.round(data.total * 100) / 100,
-        min_amount: data.min === Infinity ? 0 : Math.round(data.min * 100) / 100,
-        max_amount: Math.round(data.max * 100) / 100,
+        total_amount: roundAmount(data.total),
+        min_amount: data.min === Infinity ? 0 : roundAmount(data.min),
+        max_amount: roundAmount(data.max),
       }))
       .sort((a, b) => b.transaction_count - a.transaction_count)
       .slice(0, limit);
@@ -6104,7 +6127,7 @@ export class CopilotMoneyTools {
     // Aggregate by category for current period
     const currentByCategory = new Map<string, { id: string; total: number }>();
     for (const t of currentTransactions) {
-      const catId = t.category_id || 'uncategorized';
+      const catId = getCategoryIdOrDefault(t.category_id);
       let catData = currentByCategory.get(catId);
       if (!catData) {
         catData = { id: catId, total: 0 };
@@ -6116,7 +6139,7 @@ export class CopilotMoneyTools {
     // Aggregate by category for previous period
     const previousByCategory = new Map<string, number>();
     for (const t of previousTransactions) {
-      const catId = t.category_id || 'uncategorized';
+      const catId = getCategoryIdOrDefault(t.category_id);
       previousByCategory.set(catId, (previousByCategory.get(catId) || 0) + Math.abs(t.amount));
     }
 
@@ -6161,9 +6184,9 @@ export class CopilotMoneyTools {
       trends.push({
         category: getCategoryName(catId),
         category_id: catId,
-        current_amount: Math.round(currentAmount * 100) / 100,
-        previous_amount: previousAmount !== null ? Math.round(previousAmount * 100) / 100 : null,
-        change_amount: changeAmount !== null ? Math.round(changeAmount * 100) / 100 : null,
+        current_amount: roundAmount(currentAmount),
+        previous_amount: previousAmount !== null ? roundAmount(previousAmount) : null,
+        change_amount: changeAmount !== null ? roundAmount(changeAmount) : null,
         change_percentage: changePercentage,
         trend,
       });
@@ -6298,8 +6321,8 @@ export class CopilotMoneyTools {
         return {
           merchant,
           visit_count: visitCount,
-          total_spent: Math.round(data.total * 100) / 100,
-          average_per_visit: Math.round((data.total / visitCount) * 100) / 100,
+          total_spent: roundAmount(data.total),
+          average_per_visit: roundAmount(data.total / visitCount),
           first_visit: firstVisit.toISOString().substring(0, 10),
           last_visit: lastVisit.toISOString().substring(0, 10),
           days_between_visits: daysBetween,
@@ -6409,7 +6432,7 @@ export class CopilotMoneyTools {
     // Group spending by category
     const spendingByCategory = new Map<string, number>();
     for (const t of monthTransactions) {
-      const catId = t.category_id || 'uncategorized';
+      const catId = getCategoryIdOrDefault(t.category_id);
       spendingByCategory.set(catId, (spendingByCategory.get(catId) || 0) + Math.abs(t.amount));
     }
 
@@ -6432,9 +6455,9 @@ export class CopilotMoneyTools {
         budget_id: b.budget_id,
         category: getCategoryName(categoryId),
         category_id: categoryId,
-        budget_amount: Math.round(budgetAmount * 100) / 100,
-        spent_amount: Math.round(spent * 100) / 100,
-        remaining: Math.round(remaining * 100) / 100,
+        budget_amount: roundAmount(budgetAmount),
+        spent_amount: roundAmount(spent),
+        remaining: roundAmount(remaining),
         utilization_percentage: Math.round(utilization * 10) / 10,
         status,
       };
@@ -6452,8 +6475,8 @@ export class CopilotMoneyTools {
       month: targetMonth,
       budgets: utilizationData,
       summary: {
-        total_budgeted: Math.round(totalBudgeted * 100) / 100,
-        total_spent: Math.round(totalSpent * 100) / 100,
+        total_budgeted: roundAmount(totalBudgeted),
+        total_spent: roundAmount(totalSpent),
         overall_utilization:
           totalBudgeted > 0 ? Math.round((totalSpent / totalBudgeted) * 100 * 10) / 10 : 0,
         over_budget_count: overBudgetCount,
@@ -6546,9 +6569,9 @@ export class CopilotMoneyTools {
 
       return {
         month,
-        total_budgeted: Math.round(totalBudgetedPerMonth * 100) / 100,
-        total_actual: Math.round(totalActual * 100) / 100,
-        difference: Math.round(difference * 100) / 100,
+        total_budgeted: roundAmount(totalBudgetedPerMonth),
+        total_actual: roundAmount(totalActual),
+        difference: roundAmount(difference),
         variance_percentage: Math.round(variance * 10) / 10,
       };
     });
@@ -6557,7 +6580,7 @@ export class CopilotMoneyTools {
     const categoryData = new Map<string, { budgeted: number; actuals: number[] }>();
 
     for (const b of filteredBudgets) {
-      const catId = b.category_id || 'uncategorized';
+      const catId = getCategoryIdOrDefault(b.category_id);
       let catData = categoryData.get(catId);
       if (!catData) {
         catData = { budgeted: 0, actuals: [] };
@@ -6599,8 +6622,8 @@ export class CopilotMoneyTools {
       return {
         category: getCategoryName(catId),
         category_id: catId,
-        avg_budgeted: Math.round(avgBudgeted * 100) / 100,
-        avg_actual: Math.round(avgActual * 100) / 100,
+        avg_budgeted: roundAmount(avgBudgeted),
+        avg_actual: roundAmount(avgActual),
         consistency_score: Math.round(consistencyScore),
       };
     });
@@ -6691,7 +6714,7 @@ export class CopilotMoneyTools {
 
       const spendingThisMonth = new Map<string, number>();
       for (const t of monthTxns) {
-        const catId = t.category_id || 'uncategorized';
+        const catId = getCategoryIdOrDefault(t.category_id);
         spendingThisMonth.set(catId, (spendingThisMonth.get(catId) || 0) + Math.abs(t.amount));
       }
 
@@ -6742,7 +6765,7 @@ export class CopilotMoneyTools {
       else if (cv > 0.25) confidence = 'medium';
 
       // Recommended budget: average + 10% buffer
-      const recommendedBudget = Math.round(avgSpending * 1.1 * 100) / 100;
+      const recommendedBudget = roundAmount(avgSpending * 1.1);
       const diff = currentBudget - recommendedBudget;
       const diffPercent = currentBudget > 0 ? (diff / currentBudget) * 100 : 0;
 
@@ -6758,7 +6781,7 @@ export class CopilotMoneyTools {
         category_id: catId,
         current_budget: currentBudget,
         recommended_budget: recommendedBudget,
-        avg_spending: Math.round(avgSpending * 100) / 100,
+        avg_spending: roundAmount(avgSpending),
         confidence,
         reason,
       });
@@ -6781,8 +6804,8 @@ export class CopilotMoneyTools {
           newBudgetSuggestions.push({
             category: getCategoryName(catId),
             category_id: catId,
-            avg_spending: Math.round(avgSpending * 100) / 100,
-            suggested_budget: Math.round(avgSpending * 1.1 * 100) / 100,
+            avg_spending: roundAmount(avgSpending),
+            suggested_budget: roundAmount(avgSpending * 1.1),
             reason: `Consistent spending of $${Math.round(avgSpending)}/month detected`,
           });
         }
@@ -6800,9 +6823,9 @@ export class CopilotMoneyTools {
       recommendations: recommendations.sort((a, b) => b.avg_spending - a.avg_spending),
       new_budget_suggestions: newBudgetSuggestions.slice(0, 10),
       summary: {
-        total_current_budget: Math.round(totalCurrent * 100) / 100,
-        total_recommended: Math.round(totalRecommended * 100) / 100,
-        potential_savings: Math.round((totalCurrent - totalRecommended) * 100) / 100,
+        total_current_budget: roundAmount(totalCurrent),
+        total_recommended: roundAmount(totalRecommended),
+        potential_savings: roundAmount(totalCurrent - totalRecommended),
       },
     };
   }
@@ -6885,7 +6908,7 @@ export class CopilotMoneyTools {
     // Group spending by category
     const spendingByCategory = new Map<string, number>();
     for (const t of monthTransactions) {
-      const catId = t.category_id || 'uncategorized';
+      const catId = getCategoryIdOrDefault(t.category_id);
       spendingByCategory.set(catId, (spendingByCategory.get(catId) || 0) + Math.abs(t.amount));
     }
 
@@ -6916,7 +6939,7 @@ export class CopilotMoneyTools {
       let projectedTotal: number | null = null;
       if (currentDay > 0 && daysRemaining > 0) {
         const dailyRate = spent / currentDay;
-        projectedTotal = Math.round(dailyRate * daysInMonth * 100) / 100;
+        projectedTotal = roundAmount(dailyRate * daysInMonth);
       }
 
       // Determine alert type and message
@@ -6925,11 +6948,11 @@ export class CopilotMoneyTools {
 
       if (utilization >= 100) {
         alertType = 'exceeded';
-        const overAmount = Math.round((spent - budgetAmount) * 100) / 100;
+        const overAmount = roundAmount(spent - budgetAmount);
         message = `Over budget by $${overAmount}`;
       } else if (utilization >= 90) {
         alertType = 'warning';
-        const remaining = Math.round((budgetAmount - spent) * 100) / 100;
+        const remaining = roundAmount(budgetAmount - spent);
         message = `Only $${remaining} remaining with ${daysRemaining} days left`;
       } else {
         alertType = 'approaching';
@@ -6943,8 +6966,8 @@ export class CopilotMoneyTools {
         category: getCategoryName(categoryId),
         category_id: categoryId,
         alert_type: alertType,
-        budget_amount: Math.round(budgetAmount * 100) / 100,
-        spent_amount: Math.round(spent * 100) / 100,
+        budget_amount: roundAmount(budgetAmount),
+        spent_amount: roundAmount(spent),
         utilization_percentage: Math.round(utilization * 10) / 10,
         days_remaining: daysRemaining,
         projected_total: projectedTotal,
@@ -6975,7 +6998,7 @@ export class CopilotMoneyTools {
         exceeded_count: exceededAlerts.length,
         warning_count: alerts.filter((a) => a.alert_type === 'warning').length,
         approaching_count: alerts.filter((a) => a.alert_type === 'approaching').length,
-        total_over_budget: Math.round(totalOverBudget * 100) / 100,
+        total_over_budget: roundAmount(totalOverBudget),
       },
     };
   }
@@ -7035,7 +7058,7 @@ export class CopilotMoneyTools {
       account_id: a.account_id,
       account_name: a.name || a.official_name || 'Unknown',
       institution: a.institution_name || 'Unknown',
-      balance: Math.round((a.current_balance || 0) * 100) / 100,
+      balance: roundAmount(a.current_balance || 0),
       percentage:
         totalValue > 0 ? Math.round(((a.current_balance || 0) / totalValue) * 1000) / 10 : 0,
     }));
@@ -7074,7 +7097,7 @@ export class CopilotMoneyTools {
       bySecurity = Array.from(latestByTicker.values())
         .map((s) => ({
           ticker_symbol: s.ticker,
-          latest_price: s.price ? Math.round(s.price * 100) / 100 : undefined,
+          latest_price: s.price ? roundAmount(s.price) : undefined,
           price_date: s.date,
         }))
         .sort((a, b) => a.ticker_symbol.localeCompare(b.ticker_symbol));
@@ -7084,7 +7107,7 @@ export class CopilotMoneyTools {
     const largestAccount = byAccount[0] ?? null;
 
     return {
-      total_value: Math.round(totalValue * 100) / 100,
+      total_value: roundAmount(totalValue),
       account_count: investmentAccounts.length,
       by_account: byAccount,
       by_security: bySecurity,
@@ -7201,7 +7224,7 @@ export class CopilotMoneyTools {
       let trend: 'up' | 'down' | 'flat' | 'unknown' = 'unknown';
 
       if (startPrice !== null && endPrice !== null) {
-        priceChange = Math.round((endPrice - startPrice) * 100) / 100;
+        priceChange = roundAmount(endPrice - startPrice);
         percentChange =
           startPrice !== 0
             ? Math.round(((endPrice - startPrice) / startPrice) * 10000) / 100
@@ -7216,10 +7239,10 @@ export class CopilotMoneyTools {
 
       performance.push({
         ticker_symbol: ticker,
-        start_price: startPrice ? Math.round(startPrice * 100) / 100 : null,
-        end_price: endPrice ? Math.round(endPrice * 100) / 100 : null,
-        high_price: Math.round(highPrice * 100) / 100,
-        low_price: Math.round(lowPrice * 100) / 100,
+        start_price: startPrice ? roundAmount(startPrice) : null,
+        end_price: endPrice ? roundAmount(endPrice) : null,
+        high_price: roundAmount(highPrice),
+        low_price: roundAmount(lowPrice),
         price_change: priceChange,
         percent_change: percentChange,
         data_points: dataPoints,
@@ -7337,7 +7360,7 @@ export class CopilotMoneyTools {
     const formattedDividends = dividends.map((t) => ({
       transaction_id: t.transaction_id,
       date: t.date,
-      amount: Math.abs(Math.round(t.amount * 100) / 100),
+      amount: Math.abs(roundAmount(t.amount)),
       name: t.name || t.original_name || 'Unknown',
       account_id: t.account_id,
     }));
@@ -7358,7 +7381,7 @@ export class CopilotMoneyTools {
     const byMonth = Array.from(monthlyMap.entries())
       .map(([month, data]) => ({
         month,
-        amount: Math.round(data.amount * 100) / 100,
+        amount: roundAmount(data.amount),
         count: data.count,
       }))
       .sort((a, b) => b.month.localeCompare(a.month));
@@ -7376,34 +7399,31 @@ export class CopilotMoneyTools {
     const bySource = Array.from(sourceMap.entries())
       .map(([source, data]) => ({
         source,
-        amount: Math.round(data.amount * 100) / 100,
+        amount: roundAmount(data.amount),
         count: data.count,
       }))
       .sort((a, b) => b.amount - a.amount);
 
     // Summary calculations
     const avgDividend =
-      formattedDividends.length > 0
-        ? Math.round((totalDividends / formattedDividends.length) * 100) / 100
-        : 0;
+      formattedDividends.length > 0 ? roundAmount(totalDividends / formattedDividends.length) : 0;
     const largestDividend =
       formattedDividends.length > 0 ? Math.max(...formattedDividends.map((d) => d.amount)) : 0;
-    const monthlyAvg =
-      byMonth.length > 0 ? Math.round((totalDividends / byMonth.length) * 100) / 100 : 0;
+    const monthlyAvg = byMonth.length > 0 ? roundAmount(totalDividends / byMonth.length) : 0;
 
     return {
       period: {
         start_date: start_date,
         end_date: end_date,
       },
-      total_dividends: Math.round(totalDividends * 100) / 100,
+      total_dividends: roundAmount(totalDividends),
       dividend_count: formattedDividends.length,
       dividends: formattedDividends,
       by_month: byMonth,
       by_source: bySource,
       summary: {
         average_dividend: avgDividend,
-        largest_dividend: Math.round(largestDividend * 100) / 100,
+        largest_dividend: roundAmount(largestDividend),
         monthly_average: monthlyAvg,
       },
     };
@@ -7539,7 +7559,7 @@ export class CopilotMoneyTools {
     const formattedFees = fees.map((t) => ({
       transaction_id: t.transaction_id,
       date: t.date,
-      amount: Math.round(t.amount * 100) / 100,
+      amount: roundAmount(t.amount),
       name: t.name || t.original_name || 'Unknown',
       fee_type: classifyFeeType(t.name || t.original_name || ''),
       account_id: t.account_id,
@@ -7560,7 +7580,7 @@ export class CopilotMoneyTools {
     const byType = Array.from(typeMap.entries())
       .map(([feeType, data]) => ({
         fee_type: feeType,
-        amount: Math.round(data.amount * 100) / 100,
+        amount: roundAmount(data.amount),
         count: data.count,
       }))
       .sort((a, b) => b.amount - a.amount);
@@ -7578,32 +7598,30 @@ export class CopilotMoneyTools {
     const byMonth = Array.from(monthlyMap.entries())
       .map(([month, data]) => ({
         month,
-        amount: Math.round(data.amount * 100) / 100,
+        amount: roundAmount(data.amount),
         count: data.count,
       }))
       .sort((a, b) => b.month.localeCompare(a.month));
 
     // Summary calculations
-    const avgFee =
-      formattedFees.length > 0 ? Math.round((totalFees / formattedFees.length) * 100) / 100 : 0;
+    const avgFee = formattedFees.length > 0 ? roundAmount(totalFees / formattedFees.length) : 0;
     const largestFee =
       formattedFees.length > 0 ? Math.max(...formattedFees.map((f) => f.amount)) : 0;
-    const monthlyAvg =
-      byMonth.length > 0 ? Math.round((totalFees / byMonth.length) * 100) / 100 : 0;
+    const monthlyAvg = byMonth.length > 0 ? roundAmount(totalFees / byMonth.length) : 0;
 
     return {
       period: {
         start_date: start_date,
         end_date: end_date,
       },
-      total_fees: Math.round(totalFees * 100) / 100,
+      total_fees: roundAmount(totalFees),
       fee_count: formattedFees.length,
       fees: formattedFees,
       by_type: byType,
       by_month: byMonth,
       summary: {
         average_fee: avgFee,
-        largest_fee: Math.round(largestFee * 100) / 100,
+        largest_fee: roundAmount(largestFee),
         monthly_average: monthlyAvg,
       },
     };
@@ -7747,7 +7765,7 @@ export class CopilotMoneyTools {
         const month = String(targetDate.getMonth() + 1).padStart(2, '0');
 
         return {
-          monthly_contribution: Math.round(monthlyAmount * 100) / 100,
+          monthly_contribution: roundAmount(monthlyAmount),
           months_to_complete: months,
           estimated_date: `${year}-${month}`,
         };
@@ -7773,11 +7791,11 @@ export class CopilotMoneyTools {
       projections.push({
         goal_id: goal.goal_id,
         name: goal.name,
-        target_amount: Math.round(targetAmount * 100) / 100,
-        current_amount: Math.round(currentAmount * 100) / 100,
-        remaining_amount: Math.round(remaining * 100) / 100,
+        target_amount: roundAmount(targetAmount),
+        current_amount: roundAmount(currentAmount),
+        remaining_amount: roundAmount(remaining),
         progress_percent: Math.round(progressPercent * 10) / 10,
-        historical_monthly_contribution: Math.round(historicalContribution * 100) / 100,
+        historical_monthly_contribution: roundAmount(historicalContribution),
         projections: {
           conservative,
           moderate,
@@ -7923,51 +7941,51 @@ export class CopilotMoneyTools {
       if (!milestone25Achieved) {
         nextMilestone = {
           percentage: 25,
-          amount_needed: Math.round((milestone25Amount - currentAmount) * 100) / 100,
+          amount_needed: roundAmount(milestone25Amount - currentAmount),
         };
       } else if (!milestone50Achieved) {
         nextMilestone = {
           percentage: 50,
-          amount_needed: Math.round((milestone50Amount - currentAmount) * 100) / 100,
+          amount_needed: roundAmount(milestone50Amount - currentAmount),
         };
       } else if (!milestone75Achieved) {
         nextMilestone = {
           percentage: 75,
-          amount_needed: Math.round((milestone75Amount - currentAmount) * 100) / 100,
+          amount_needed: roundAmount(milestone75Amount - currentAmount),
         };
       } else if (!milestone100Achieved) {
         nextMilestone = {
           percentage: 100,
-          amount_needed: Math.round((milestone100Amount - currentAmount) * 100) / 100,
+          amount_needed: roundAmount(milestone100Amount - currentAmount),
         };
       }
 
       milestoneData.push({
         goal_id: goal.goal_id,
         name: goal.name,
-        target_amount: Math.round(targetAmount * 100) / 100,
-        current_amount: Math.round(currentAmount * 100) / 100,
+        target_amount: roundAmount(targetAmount),
+        current_amount: roundAmount(currentAmount),
         progress_percent: Math.round(progressPercent * 10) / 10,
         milestones: {
           milestone_25: {
             achieved: milestone25Achieved,
             achieved_date: milestone25Achieved ? findMilestoneDate(milestone25Amount) : undefined,
-            amount: Math.round(milestone25Amount * 100) / 100,
+            amount: roundAmount(milestone25Amount),
           },
           milestone_50: {
             achieved: milestone50Achieved,
             achieved_date: milestone50Achieved ? findMilestoneDate(milestone50Amount) : undefined,
-            amount: Math.round(milestone50Amount * 100) / 100,
+            amount: roundAmount(milestone50Amount),
           },
           milestone_75: {
             achieved: milestone75Achieved,
             achieved_date: milestone75Achieved ? findMilestoneDate(milestone75Amount) : undefined,
-            amount: Math.round(milestone75Amount * 100) / 100,
+            amount: roundAmount(milestone75Amount),
           },
           milestone_100: {
             achieved: milestone100Achieved,
             achieved_date: milestone100Achieved ? findMilestoneDate(milestone100Amount) : undefined,
-            amount: Math.round(milestone100Amount * 100) / 100,
+            amount: roundAmount(milestone100Amount),
           },
         },
         next_milestone: nextMilestone,
@@ -8168,15 +8186,15 @@ export class CopilotMoneyTools {
         atRiskGoals.push({
           goal_id: goal.goal_id,
           name: goal.name,
-          target_amount: Math.round(targetAmount * 100) / 100,
-          current_amount: Math.round(currentAmount * 100) / 100,
-          remaining_amount: Math.round(remaining * 100) / 100,
+          target_amount: roundAmount(targetAmount),
+          current_amount: roundAmount(currentAmount),
+          remaining_amount: roundAmount(remaining),
           progress_percent: Math.round(progressPercent * 10) / 10,
           risk_level: riskLevel,
           risk_factors: riskFactors,
-          historical_monthly_contribution: Math.round(historicalContribution * 100) / 100,
-          required_monthly_contribution: Math.round(requiredMonthly * 100) / 100,
-          contribution_gap: Math.round(Math.max(0, contributionGap) * 100) / 100,
+          historical_monthly_contribution: roundAmount(historicalContribution),
+          required_monthly_contribution: roundAmount(requiredMonthly),
+          contribution_gap: roundAmount(Math.max(0, contributionGap)),
           estimated_completion: estimatedCompletion,
           status: goal.savings?.status,
         });
@@ -8197,7 +8215,7 @@ export class CopilotMoneyTools {
         medium_risk_count: mediumRiskCount,
         low_risk_count: lowRiskCount,
         average_contribution_gap:
-          atRiskGoals.length > 0 ? Math.round((totalGap / atRiskGoals.length) * 100) / 100 : 0,
+          atRiskGoals.length > 0 ? roundAmount(totalGap / atRiskGoals.length) : 0,
       },
     };
   }
@@ -8316,7 +8334,7 @@ export class CopilotMoneyTools {
           title: 'Start Contributing',
           description: `No contributions detected for "${goal.name || 'this goal'}". Set up automatic transfers to make progress.`,
           current_value: 0,
-          suggested_value: Math.round((remaining / 12) * 100) / 100,
+          suggested_value: roundAmount(remaining / 12),
           impact: 'Essential to make any progress toward this goal',
         });
         highPriorityCount++;
@@ -8333,8 +8351,8 @@ export class CopilotMoneyTools {
           priority: 'high',
           title: 'Increase Contributions',
           description: `Contributing $${Math.round(historicalContribution)} vs planned $${plannedContribution}/month. Increase to stay on track.`,
-          current_value: Math.round(historicalContribution * 100) / 100,
-          suggested_value: Math.round(plannedContribution * 100) / 100,
+          current_value: roundAmount(historicalContribution),
+          suggested_value: roundAmount(plannedContribution),
           impact: `Will help reach goal ${Math.round((plannedContribution / historicalContribution - 1) * 100)}% faster`,
         });
         highPriorityCount++;
@@ -8349,8 +8367,8 @@ export class CopilotMoneyTools {
           priority: 'low',
           title: 'Great Progress!',
           description: `You're ${Math.round(progressPercent)}% of the way to "${goal.name || 'your goal'}". Keep up the momentum!`,
-          current_value: Math.round(currentAmount * 100) / 100,
-          impact: `Only $${Math.round(remaining * 100) / 100} left to reach your goal`,
+          current_value: roundAmount(currentAmount),
+          impact: `Only $${roundAmount(remaining)} left to reach your goal`,
         });
         lowPriorityCount++;
         onTrackCount++;
@@ -8366,8 +8384,8 @@ export class CopilotMoneyTools {
             priority: 'medium',
             title: 'Consider Adjusting Target',
             description: `At current pace, you'll reach $${Math.round(achievableTarget)} in 2 years. Consider a more achievable target.`,
-            current_value: Math.round(targetAmount * 100) / 100,
-            suggested_value: Math.round(achievableTarget * 100) / 100,
+            current_value: roundAmount(targetAmount),
+            suggested_value: roundAmount(achievableTarget),
             impact: 'Makes the goal more achievable and motivating',
           });
           mediumPriorityCount++;
@@ -8390,9 +8408,9 @@ export class CopilotMoneyTools {
             priority: 'medium',
             title: 'Adjust Timeline Expectations',
             description: `At current pace, "${goal.name || 'this goal'}" will take ${Math.round(monthsToComplete)} months. Consider extending your timeline or increasing contributions.`,
-            current_value: Math.round(historicalContribution * 100) / 100,
-            suggested_value: Math.round((remaining / 24) * 100) / 100,
-            impact: `Increasing to $${Math.round((remaining / 24) * 100) / 100}/month achieves goal in 2 years`,
+            current_value: roundAmount(historicalContribution),
+            suggested_value: roundAmount(remaining / 24),
+            impact: `Increasing to $${roundAmount(remaining / 24)}/month achieves goal in 2 years`,
           });
           mediumPriorityCount++;
         }
@@ -8541,11 +8559,11 @@ export class CopilotMoneyTools {
         account_type: account.account_type,
         institution: account.institution_name,
         transaction_count: count,
-        total_inflow: Math.round(totalInflow * 100) / 100,
-        total_outflow: Math.round(totalOutflow * 100) / 100,
-        net_flow: Math.round(netFlow * 100) / 100,
-        average_transaction: Math.round(avgTxn * 100) / 100,
-        largest_transaction: Math.round(largestTxn * 100) / 100,
+        total_inflow: roundAmount(totalInflow),
+        total_outflow: roundAmount(totalOutflow),
+        net_flow: roundAmount(netFlow),
+        average_transaction: roundAmount(avgTxn),
+        largest_transaction: roundAmount(largestTxn),
         activity_level: activityLevel,
       });
     }
@@ -8676,9 +8694,9 @@ export class CopilotMoneyTools {
       const trends = Array.from(periodMap.entries())
         .map(([period, data]) => ({
           period,
-          inflow: Math.round(data.inflow * 100) / 100,
-          outflow: Math.round(data.outflow * 100) / 100,
-          net_change: Math.round((data.inflow - data.outflow) * 100) / 100,
+          inflow: roundAmount(data.inflow),
+          outflow: roundAmount(data.outflow),
+          net_change: roundAmount(data.inflow - data.outflow),
         }))
         .sort((a, b) => a.period.localeCompare(b.period));
 
@@ -8707,7 +8725,7 @@ export class CopilotMoneyTools {
         current_balance: account.current_balance,
         trend_data: trends,
         overall_trend: overallTrend,
-        average_monthly_change: Math.round(avgMonthlyChange * 100) / 100,
+        average_monthly_change: roundAmount(avgMonthlyChange),
       });
     }
 
@@ -8847,7 +8865,7 @@ export class CopilotMoneyTools {
       return {
         transaction_id: t.transaction_id,
         date: t.date,
-        amount: Math.round(t.amount * 100) / 100,
+        amount: roundAmount(t.amount),
         name: t.name || t.original_name || 'Unknown',
         fee_type: classifyFeeType(t),
         account_id: t.account_id,
@@ -8873,7 +8891,7 @@ export class CopilotMoneyTools {
     const byType = Array.from(typeMap.entries())
       .map(([feeType, data]) => ({
         fee_type: feeType,
-        amount: Math.round(data.amount * 100) / 100,
+        amount: roundAmount(data.amount),
         count: data.count,
       }))
       .sort((a, b) => b.amount - a.amount);
@@ -8896,7 +8914,7 @@ export class CopilotMoneyTools {
       .map(([accountId, data]) => ({
         account_id: accountId,
         account_name: data.name,
-        amount: Math.round(data.amount * 100) / 100,
+        amount: roundAmount(data.amount),
         count: data.count,
       }))
       .sort((a, b) => b.amount - a.amount);
@@ -8912,14 +8930,14 @@ export class CopilotMoneyTools {
         start_date,
         end_date,
       },
-      total_fees: Math.round(totalFees * 100) / 100,
+      total_fees: roundAmount(totalFees),
       fee_count: formattedFees.length,
       fees: formattedFees,
       by_type: byType,
       by_account: byAccount,
       summary: {
-        average_fee: Math.round(avgFee * 100) / 100,
-        largest_fee: Math.round(largestFee * 100) / 100,
+        average_fee: roundAmount(avgFee),
+        largest_fee: roundAmount(largestFee),
         most_common_fee: mostCommonFee,
       },
     };
@@ -9039,9 +9057,9 @@ export class CopilotMoneyTools {
       }
 
       return {
-        total_spending: Math.round(spending * 100) / 100,
-        total_income: Math.round(income * 100) / 100,
-        net_savings: Math.round((income - spending) * 100) / 100,
+        total_spending: roundAmount(spending),
+        total_income: roundAmount(income),
+        net_savings: roundAmount(income - spending),
         transaction_count: txns.length,
       };
     };
@@ -9068,7 +9086,7 @@ export class CopilotMoneyTools {
       const map = new Map<string, number>();
       for (const t of txns) {
         if (t.amount > 0) {
-          const catId = t.category_id || 'uncategorized';
+          const catId = getCategoryIdOrDefault(t.category_id);
           map.set(catId, (map.get(catId) || 0) + t.amount);
         }
       }
@@ -9098,9 +9116,9 @@ export class CopilotMoneyTools {
       categoryComparison.push({
         category_id: catId,
         category_name: getCategoryName(catId),
-        current_amount: Math.round(currentAmt * 100) / 100,
-        compare_amount: Math.round(compareAmt * 100) / 100,
-        change_amount: Math.round(changeAmt * 100) / 100,
+        current_amount: roundAmount(currentAmt),
+        compare_amount: roundAmount(compareAmt),
+        change_amount: roundAmount(changeAmt),
         change_percent: changePct,
       });
     }
@@ -9134,11 +9152,11 @@ export class CopilotMoneyTools {
       current_period: currentPeriod,
       compare_period: comparePeriod,
       changes: {
-        spending_change: Math.round(spendingChange * 100) / 100,
+        spending_change: roundAmount(spendingChange),
         spending_change_percent: spendingChangePercent,
-        income_change: Math.round(incomeChange * 100) / 100,
+        income_change: roundAmount(incomeChange),
         income_change_percent: incomeChangePercent,
-        savings_change: Math.round(savingsChange * 100) / 100,
+        savings_change: roundAmount(savingsChange),
       },
       category_comparison: categoryComparison.slice(0, 20),
       summary: {
@@ -9331,17 +9349,17 @@ export class CopilotMoneyTools {
       transactions: limitedResults.map((r) => ({
         transaction_id: r.transaction.transaction_id,
         date: r.transaction.date,
-        amount: Math.round(r.transaction.amount * 100) / 100,
+        amount: roundAmount(r.transaction.amount),
         name: r.transaction.name || r.transaction.original_name || 'Unknown',
         category_id: r.transaction.category_id,
-        category_name: getCategoryName(r.transaction.category_id || 'uncategorized'),
+        category_name: getCategoryName(getCategoryIdOrDefault(r.transaction.category_id)),
         account_id: r.transaction.account_id,
         city: r.transaction.city,
-        match_score: Math.round(r.score * 100) / 100,
+        match_score: roundAmount(r.score),
       })),
       summary: {
-        total_amount: Math.round(totalAmount * 100) / 100,
-        average_amount: Math.round(avgAmount * 100) / 100,
+        total_amount: roundAmount(totalAmount),
+        average_amount: roundAmount(avgAmount),
         date_range: {
           earliest: dates[0] ?? null,
           latest: dates[dates.length - 1] ?? null,
@@ -9452,7 +9470,7 @@ export class CopilotMoneyTools {
       .map(([tagStr, data]) => ({
         tag: tagStr,
         count: data.count,
-        total_amount: Math.round(data.amount * 100) / 100,
+        total_amount: roundAmount(data.amount),
       }))
       .sort((a, b) => b.count - a.count);
 
@@ -9466,7 +9484,7 @@ export class CopilotMoneyTools {
       transactions: limitedTxns.map((r) => ({
         transaction_id: r.transaction.transaction_id,
         date: r.transaction.date,
-        amount: Math.round(r.transaction.amount * 100) / 100,
+        amount: roundAmount(r.transaction.amount),
         name: r.transaction.name || r.transaction.original_name || 'Unknown',
         tags_found: r.tags,
         category_id: r.transaction.category_id,
@@ -9572,7 +9590,7 @@ export class CopilotMoneyTools {
       transactions: limitedMatches.map((m) => ({
         transaction_id: m.transaction.transaction_id,
         date: m.transaction.date,
-        amount: Math.round(m.transaction.amount * 100) / 100,
+        amount: roundAmount(m.transaction.amount),
         name: m.transaction.name || m.transaction.original_name || 'Unknown',
         matched_text: m.matchedText,
         category_id: m.transaction.category_id,
@@ -9747,7 +9765,7 @@ export class CopilotMoneyTools {
       .map(([cityName, data]) => ({
         city: cityName,
         count: data.count,
-        total_spending: Math.round(data.spending * 100) / 100,
+        total_spending: roundAmount(data.spending),
       }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
@@ -9772,7 +9790,7 @@ export class CopilotMoneyTools {
       transactions: limitedMatches.map((m) => ({
         transaction_id: m.transaction.transaction_id,
         date: m.transaction.date,
-        amount: Math.round(m.transaction.amount * 100) / 100,
+        amount: roundAmount(m.transaction.amount),
         name: m.transaction.name || m.transaction.original_name || 'Unknown',
         city: m.transaction.city,
         region: m.transaction.region,
@@ -9781,14 +9799,14 @@ export class CopilotMoneyTools {
           m.transaction.lat !== undefined && m.transaction.lon !== undefined
             ? { lat: m.transaction.lat, lon: m.transaction.lon }
             : undefined,
-        distance_km: m.distance ? Math.round(m.distance * 100) / 100 : undefined,
+        distance_km: m.distance ? roundAmount(m.distance) : undefined,
         category_id: m.transaction.category_id,
       })),
       location_summary: locationSummary,
       summary: {
         unique_cities: cityMap.size,
         most_common_city: locationSummary[0]?.city ?? null,
-        total_spending: Math.round(totalSpending * 100) / 100,
+        total_spending: roundAmount(totalSpending),
       },
     };
   }
