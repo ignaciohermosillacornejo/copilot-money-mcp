@@ -8,7 +8,7 @@ import { CopilotDatabase } from '../core/database.js';
 import { parsePeriod } from '../utils/date.js';
 import { getCategoryName, isTransferCategory, isIncomeCategory } from '../utils/categories.js';
 import type { Transaction, Account } from '../models/index.js';
-import { getTransactionDisplayName } from '../models/index.js';
+import { getTransactionDisplayName, getRecurringDisplayName } from '../models/index.js';
 
 // ============================================
 // Category Constants
@@ -539,6 +539,7 @@ export class CopilotMoneyTools {
     period?: string;
     start_date?: string;
     end_date?: string;
+    include_copilot_subscriptions?: boolean;
   }): {
     period: { start_date?: string; end_date?: string };
     count: number;
@@ -556,6 +557,16 @@ export class CopilotMoneyTools {
       last_date: string;
       next_expected_date?: string;
       transactions: Array<{ date: string; amount: number }>;
+    }>;
+    copilot_subscriptions?: Array<{
+      recurring_id: string;
+      name: string;
+      amount?: number;
+      frequency?: string;
+      next_date?: string;
+      last_date?: string;
+      category_name?: string;
+      is_active?: boolean;
     }>;
   } {
     const { min_occurrences = 2 } = options;
@@ -746,11 +757,45 @@ export class CopilotMoneyTools {
       else if (r.frequency === 'weekly') totalMonthlyCost += r.average_amount * 4;
     }
 
+    // Include Copilot's native subscription data if requested (default: true)
+    const includeCopilotSubs = options.include_copilot_subscriptions !== false;
+    let copilotSubscriptions:
+      | Array<{
+          recurring_id: string;
+          name: string;
+          amount?: number;
+          frequency?: string;
+          next_date?: string;
+          last_date?: string;
+          category_name?: string;
+          is_active?: boolean;
+        }>
+      | undefined;
+
+    if (includeCopilotSubs) {
+      const copilotRecurring = this.db.getRecurring();
+      if (copilotRecurring.length > 0) {
+        copilotSubscriptions = copilotRecurring.map((rec) => ({
+          recurring_id: rec.recurring_id,
+          name: getRecurringDisplayName(rec),
+          amount: rec.amount,
+          frequency: rec.frequency,
+          next_date: rec.next_date,
+          last_date: rec.last_date,
+          category_name: rec.category_id ? getCategoryName(rec.category_id) : undefined,
+          is_active: rec.is_active,
+        }));
+      }
+    }
+
     return {
       period: { start_date, end_date },
       count: recurring.length,
       total_monthly_cost: Math.round(totalMonthlyCost * 100) / 100,
       recurring,
+      ...(copilotSubscriptions && copilotSubscriptions.length > 0
+        ? { copilot_subscriptions: copilotSubscriptions }
+        : {}),
     };
   }
 
@@ -3227,10 +3272,11 @@ export function createToolSchemas(): ToolSchema[] {
     {
       name: 'get_recurring_transactions',
       description:
-        'Identify recurring/subscription charges. Finds transactions that occur ' +
-        'regularly from the same merchant with similar amounts. Returns estimated ' +
-        'frequency (weekly, monthly, etc.), total monthly cost, confidence score ' +
-        '(high/medium/low), and next expected charge date.',
+        'Identify recurring/subscription charges. Combines two data sources: ' +
+        '(1) Pattern analysis - finds transactions from same merchant with similar amounts, ' +
+        'returns estimated frequency, confidence score, and next expected date. ' +
+        "(2) Copilot's native subscription tracking - returns user-confirmed subscriptions " +
+        'stored in the app. Both sources are included by default for comprehensive coverage.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -3255,6 +3301,13 @@ export function createToolSchemas(): ToolSchema[] {
             type: 'string',
             description: 'End date (YYYY-MM-DD)',
             pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+          },
+          include_copilot_subscriptions: {
+            type: 'boolean',
+            description:
+              "Include Copilot's native subscription tracking data (default: true). " +
+              'Returns copilot_subscriptions array with user-confirmed subscriptions.',
+            default: true,
           },
         },
       },

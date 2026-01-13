@@ -8,8 +8,14 @@
 import { existsSync, readdirSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
-import { decodeAccounts, decodeTransactions } from './decoder.js';
-import { Account, Transaction, Category, getTransactionDisplayName } from '../models/index.js';
+import { decodeAccounts, decodeTransactions, decodeRecurring } from './decoder.js';
+import {
+  Account,
+  Transaction,
+  Category,
+  Recurring,
+  getTransactionDisplayName,
+} from '../models/index.js';
 import { getCategoryName } from '../utils/categories.js';
 
 /**
@@ -90,6 +96,7 @@ export class CopilotDatabase {
   private dbPath: string | undefined;
   private _transactions: Transaction[] | null = null;
   private _accounts: Account[] | null = null;
+  private _recurring: Recurring[] | null = null;
 
   /**
    * Initialize database connection.
@@ -274,6 +281,32 @@ export class CopilotDatabase {
         }
         return false;
       });
+    }
+
+    return result;
+  }
+
+  /**
+   * Get recurring transactions from Copilot's native subscription tracking.
+   *
+   * @param activeOnly - If true, only return active recurring transactions
+   * @returns List of recurring transactions
+   */
+  getRecurring(activeOnly = false): Recurring[] {
+    // Lazy load recurring
+    if (this._recurring === null) {
+      this._recurring = decodeRecurring(this.requireDbPath());
+    }
+
+    let result = [...this._recurring];
+
+    if (activeOnly) {
+      // Filter for active subscriptions:
+      // - is_active === true: explicitly marked as active
+      // - is_active === undefined: status field not set in Firestore, treat as potentially active
+      //   (better to show potentially active subscriptions than hide real ones)
+      // - is_active === false: explicitly canceled, excluded
+      result = result.filter((rec) => rec.is_active === true || rec.is_active === undefined);
     }
 
     return result;
