@@ -68,11 +68,11 @@ jobs:
 
             After completing your review, you MUST submit an official PR review:
 
-            - If NO blocking issues found (or only minor suggestions), run BOTH commands in sequence:
-              1. First approve: gh pr review ${{ github.event.pull_request.number }} --approve -b "✅ LGTM - No blocking issues found"
-              2. Then enable auto-merge: gh pr merge ${{ github.event.pull_request.number }} --auto --squash --delete-branch
+            - If NO blocking issues found (or only minor suggestions):
+              gh pr review ${{ github.event.pull_request.number }} --approve -b "✅ LGTM - No blocking issues found"
+              (Auto-merge will be enabled automatically by the auto-merge workflow)
 
             - If blocking issues found (security, bugs, or major quality issues):
               gh pr review ${{ github.event.pull_request.number }} --request-changes -b "⚠️ Please address the review comments before merging"
 
-          claude_args: '--model claude-sonnet-4-20250514 --allowed-tools "Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh pr review:*),Bash(gh pr merge:*),Read,Grep,Glob"'
+          claude_args: '--model claude-sonnet-4-20250514 --allowed-tools "Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh pr review:*),Read,Grep,Glob"'
