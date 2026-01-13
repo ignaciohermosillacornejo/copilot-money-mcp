@@ -32,6 +32,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ env.CLAUDE_CODE_OAUTH_TOKEN }}
+          mode: agent
           track_progress: true
           prompt: |
             You are a code reviewer for the copilot-money-mcp project.
@@ -75,4 +76,4 @@ jobs:
             - If blocking issues found (security, bugs, or major quality issues):
               gh pr review ${{ github.event.pull_request.number }} --request-changes -b "⚠️ Please address the review comments before merging"
 
-          claude_args: '--model claude-sonnet-4-20250514 --allowed-tools "Bash(gh pr diff *),Bash(gh pr view *),Bash(gh pr comment *),Bash(gh pr review *),Read,Grep,Glob"'
+          claude_args: '--model claude-sonnet-4-20250514 --allowedTools "Bash(gh:*),Read,Grep,Glob"'
