@@ -61,6 +61,18 @@ const DEFAULT_QUERY_LIMIT = 100;
 /** Minimum allowed limit */
 const MIN_QUERY_LIMIT = 1;
 
+/** Maximum allowed limit for data quality report transaction analysis */
+const MAX_DATA_QUALITY_TRANSACTION_LIMIT = 100000;
+
+/** Default limit for data quality report transaction analysis */
+const DEFAULT_DATA_QUALITY_TRANSACTION_LIMIT = 50000;
+
+/** Default limit for issues returned per category in data quality report */
+const DEFAULT_ISSUES_LIMIT = 20;
+
+/** Maximum issues to return per category in data quality report */
+const MAX_ISSUES_LIMIT = 100;
+
 // ============================================
 // Validation Helpers
 // ============================================
@@ -4705,18 +4717,38 @@ export class CopilotMoneyTools {
    * - Potential duplicate accounts
    * - Suspicious categorizations
    *
-   * @param options - Filter options
+   * Supports configurable limits for large datasets:
+   * - transaction_limit: Max transactions to analyze (default 50000, max 100000)
+   * - issues_limit: Max issues to return per category (default 20, max 100)
+   * - issues_offset: Skip first N issues for pagination (default 0)
+   *
+   * @param options - Filter and pagination options
    * @returns Object with various data quality metrics and issues
    */
-  getDataQualityReport(options: { period?: string; start_date?: string; end_date?: string }): {
+  getDataQualityReport(options: {
+    period?: string;
+    start_date?: string;
+    end_date?: string;
+    transaction_limit?: number;
+    issues_limit?: number;
+    issues_offset?: number;
+  }): {
     period: { start_date?: string; end_date?: string };
+    analysis_metadata: {
+      transactions_analyzed: number;
+      transaction_limit_reached: boolean;
+      issues_limit: number;
+      issues_offset: number;
+    };
     summary: {
       total_transactions: number;
       total_accounts: number;
       issues_found: number;
     };
     category_issues: {
-      unresolved_category_count: number;
+      count: number;
+      total: number;
+      has_more: boolean;
       unresolved_categories: Array<{
         category_id: string;
         transaction_count: number;
@@ -4725,7 +4757,9 @@ export class CopilotMoneyTools {
       }>;
     };
     currency_issues: {
-      potential_unconverted_count: number;
+      count: number;
+      total: number;
+      has_more: boolean;
       suspicious_transactions: Array<{
         transaction_id: string;
         date: string;
@@ -4736,11 +4770,16 @@ export class CopilotMoneyTools {
       }>;
     };
     duplicate_issues: {
-      non_unique_transaction_ids: Array<{
-        transaction_id: string;
-        occurrences: number;
-        sample_dates: string[];
-      }>;
+      non_unique_ids: {
+        count: number;
+        total: number;
+        has_more: boolean;
+        items: Array<{
+          transaction_id: string;
+          occurrences: number;
+          sample_dates: string[];
+        }>;
+      };
       potential_duplicate_accounts: Array<{
         account_name: string;
         account_type: string;
@@ -4749,27 +4788,47 @@ export class CopilotMoneyTools {
         balances: number[];
       }>;
     };
-    suspicious_categorizations: Array<{
-      transaction_id: string;
-      date: string;
-      merchant: string;
-      amount: number;
-      category_assigned: string;
-      reason: string;
-    }>;
+    suspicious_categorizations: {
+      count: number;
+      total: number;
+      has_more: boolean;
+      items: Array<{
+        transaction_id: string;
+        date: string;
+        merchant: string;
+        amount: number;
+        category_assigned: string;
+        reason: string;
+      }>;
+    };
   } {
     const { period } = options;
     let { start_date, end_date } = options;
+
+    // Validate and apply limits
+    const transactionLimit = Math.min(
+      Math.max(1, options.transaction_limit ?? DEFAULT_DATA_QUALITY_TRANSACTION_LIMIT),
+      MAX_DATA_QUALITY_TRANSACTION_LIMIT
+    );
+    const issuesLimit = Math.min(
+      Math.max(1, options.issues_limit ?? DEFAULT_ISSUES_LIMIT),
+      MAX_ISSUES_LIMIT
+    );
+    const issuesOffset = Math.max(0, options.issues_offset ?? 0);
 
     if (period) {
       [start_date, end_date] = parsePeriod(period);
     }
 
+    // Fetch transactions up to the configured limit
     const allTransactions = this.db.getTransactions({
       startDate: start_date,
       endDate: end_date,
-      limit: 50000,
+      limit: transactionLimit,
     });
+
+    // Track if we hit the limit (meaning there may be more transactions available)
+    const hitTransactionLimit = allTransactions.length === transactionLimit;
 
     const allAccounts = this.db.getAccounts();
 
@@ -4891,17 +4950,23 @@ export class CopilotMoneyTools {
       transactionIdCounts.set(txn.transaction_id, existing);
     }
 
-    const nonUniqueTransactionIds = Array.from(transactionIdCounts.entries())
+    const allNonUniqueTransactionIds = Array.from(transactionIdCounts.entries())
       .filter(([_, occurrences]) => occurrences.length > 1)
       .map(([transaction_id, occurrences]) => ({
         transaction_id,
         occurrences: occurrences.length,
         sample_dates: occurrences.slice(0, 5).map((o) => o.date),
       }))
-      .sort((a, b) => b.occurrences - a.occurrences)
-      .slice(0, 20); // Top 20
+      .sort((a, b) => b.occurrences - a.occurrences);
 
-    issuesFound += nonUniqueTransactionIds.length;
+    const totalNonUniqueIds = allNonUniqueTransactionIds.length;
+    const nonUniqueTransactionIds = allNonUniqueTransactionIds.slice(
+      issuesOffset,
+      issuesOffset + issuesLimit
+    );
+    const hasMoreNonUnique = issuesOffset + issuesLimit < totalNonUniqueIds;
+
+    issuesFound += totalNonUniqueIds;
 
     // Check for potential duplicate accounts
     const accountsByNameAndType = new Map<
@@ -5045,28 +5110,71 @@ export class CopilotMoneyTools {
       }
     }
 
-    issuesFound += suspiciousCategorizations.length;
+    const totalSuspiciousCategorizations = suspiciousCategorizations.length;
+    issuesFound += totalSuspiciousCategorizations;
+
+    // Apply pagination to all issue categories
+    const paginatedUnresolvedCategories = unresolvedCategoryList.slice(
+      issuesOffset,
+      issuesOffset + issuesLimit
+    );
+    const totalUnresolvedCategories = unresolvedCategoryList.length;
+    const hasMoreUnresolvedCategories = issuesOffset + issuesLimit < totalUnresolvedCategories;
+
+    const paginatedCurrencyIssues = suspiciousCurrencyTransactions.slice(
+      issuesOffset,
+      issuesOffset + issuesLimit
+    );
+    const totalCurrencyIssues = suspiciousCurrencyTransactions.length;
+    const hasMoreCurrencyIssues = issuesOffset + issuesLimit < totalCurrencyIssues;
+
+    const paginatedSuspiciousCategorizations = suspiciousCategorizations.slice(
+      issuesOffset,
+      issuesOffset + issuesLimit
+    );
+    const hasMoreSuspiciousCategorizations =
+      issuesOffset + issuesLimit < totalSuspiciousCategorizations;
 
     return {
       period: { start_date, end_date },
+      analysis_metadata: {
+        transactions_analyzed: allTransactions.length,
+        transaction_limit_reached: hitTransactionLimit,
+        issues_limit: issuesLimit,
+        issues_offset: issuesOffset,
+      },
       summary: {
         total_transactions: allTransactions.length,
         total_accounts: allAccounts.length,
         issues_found: issuesFound,
       },
       category_issues: {
-        unresolved_category_count: unresolvedCategoryList.length,
-        unresolved_categories: unresolvedCategoryList,
+        count: paginatedUnresolvedCategories.length,
+        total: totalUnresolvedCategories,
+        has_more: hasMoreUnresolvedCategories,
+        unresolved_categories: paginatedUnresolvedCategories,
       },
       currency_issues: {
-        potential_unconverted_count: suspiciousCurrencyTransactions.length,
-        suspicious_transactions: suspiciousCurrencyTransactions.slice(0, 20), // Limit to top 20
+        count: paginatedCurrencyIssues.length,
+        total: totalCurrencyIssues,
+        has_more: hasMoreCurrencyIssues,
+        suspicious_transactions: paginatedCurrencyIssues,
       },
       duplicate_issues: {
-        non_unique_transaction_ids: nonUniqueTransactionIds,
+        non_unique_ids: {
+          count: nonUniqueTransactionIds.length,
+          total: totalNonUniqueIds,
+          has_more: hasMoreNonUnique,
+          items: nonUniqueTransactionIds,
+        },
         potential_duplicate_accounts: potentialDuplicateAccounts,
       },
-      suspicious_categorizations: suspiciousCategorizations.slice(0, 20), // Limit to top 20
+      suspicious_categorizations: {
+        count: paginatedSuspiciousCategorizations.length,
+        total: totalSuspiciousCategorizations,
+        has_more: hasMoreSuspiciousCategorizations,
+        items: paginatedSuspiciousCategorizations,
+      },
     };
   }
 
@@ -10411,7 +10519,8 @@ export function createToolSchemas(): ToolSchema[] {
         'Generate a comprehensive data quality report. Helps identify issues in financial data ' +
         'that should be corrected in Copilot Money: unresolved category IDs, potential currency ' +
         'conversion problems, non-unique transaction IDs, duplicate accounts, and suspicious ' +
-        'categorizations. Use this to find data quality issues before doing analysis.',
+        'categorizations. Use this to find data quality issues before doing analysis. ' +
+        'Supports configurable limits for large datasets and pagination for browsing issues.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -10428,6 +10537,32 @@ export function createToolSchemas(): ToolSchema[] {
             type: 'string',
             description: 'End date (YYYY-MM-DD)',
             pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+          },
+          transaction_limit: {
+            type: 'number',
+            description:
+              'Maximum transactions to analyze (default: 50000, max: 100000). ' +
+              'Use lower values for faster analysis or higher for comprehensive reports.',
+            default: 50000,
+            minimum: 1,
+            maximum: 100000,
+          },
+          issues_limit: {
+            type: 'number',
+            description:
+              'Maximum issues to return per category (default: 20, max: 100). ' +
+              'Use with issues_offset for pagination through large result sets.',
+            default: 20,
+            minimum: 1,
+            maximum: 100,
+          },
+          issues_offset: {
+            type: 'number',
+            description:
+              'Number of issues to skip for pagination (default: 0). ' +
+              'Use with issues_limit to page through results.',
+            default: 0,
+            minimum: 0,
           },
         },
       },

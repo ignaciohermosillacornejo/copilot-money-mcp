@@ -3010,4 +3010,197 @@ describe('New MCP Tools', () => {
       }
     });
   });
+
+  describe('getDataQualityReport', () => {
+    test('returns analysis metadata', () => {
+      const result = tools.getDataQualityReport({});
+
+      expect(result.analysis_metadata).toBeDefined();
+      expect(result.analysis_metadata.transactions_analyzed).toBeGreaterThanOrEqual(0);
+      expect(typeof result.analysis_metadata.transaction_limit_reached).toBe('boolean');
+      expect(result.analysis_metadata.issues_limit).toBe(20); // default
+      expect(result.analysis_metadata.issues_offset).toBe(0); // default
+    });
+
+    test('respects custom transaction_limit', () => {
+      const result = tools.getDataQualityReport({ transaction_limit: 2 });
+
+      expect(result.analysis_metadata.transactions_analyzed).toBeLessThanOrEqual(2);
+    });
+
+    test('respects custom issues_limit', () => {
+      const result = tools.getDataQualityReport({ issues_limit: 5 });
+
+      expect(result.analysis_metadata.issues_limit).toBe(5);
+    });
+
+    test('respects custom issues_offset', () => {
+      const result = tools.getDataQualityReport({ issues_offset: 10 });
+
+      expect(result.analysis_metadata.issues_offset).toBe(10);
+    });
+
+    test('clamps transaction_limit to max value', () => {
+      const result = tools.getDataQualityReport({ transaction_limit: 200000 });
+
+      // Should be clamped to MAX_DATA_QUALITY_TRANSACTION_LIMIT (100000)
+      expect(result.analysis_metadata.transactions_analyzed).toBeLessThanOrEqual(100000);
+    });
+
+    test('clamps issues_limit to max value', () => {
+      const result = tools.getDataQualityReport({ issues_limit: 500 });
+
+      // Should be clamped to MAX_ISSUES_LIMIT (100)
+      expect(result.analysis_metadata.issues_limit).toBeLessThanOrEqual(100);
+    });
+
+    test('returns summary with totals', () => {
+      const result = tools.getDataQualityReport({});
+
+      expect(result.summary).toBeDefined();
+      expect(typeof result.summary.total_transactions).toBe('number');
+      expect(typeof result.summary.total_accounts).toBe('number');
+      expect(typeof result.summary.issues_found).toBe('number');
+    });
+
+    test('returns category_issues with pagination metadata', () => {
+      const result = tools.getDataQualityReport({});
+
+      expect(result.category_issues).toBeDefined();
+      expect(typeof result.category_issues.count).toBe('number');
+      expect(typeof result.category_issues.total).toBe('number');
+      expect(typeof result.category_issues.has_more).toBe('boolean');
+      expect(Array.isArray(result.category_issues.unresolved_categories)).toBe(true);
+    });
+
+    test('returns currency_issues with pagination metadata', () => {
+      const result = tools.getDataQualityReport({});
+
+      expect(result.currency_issues).toBeDefined();
+      expect(typeof result.currency_issues.count).toBe('number');
+      expect(typeof result.currency_issues.total).toBe('number');
+      expect(typeof result.currency_issues.has_more).toBe('boolean');
+      expect(Array.isArray(result.currency_issues.suspicious_transactions)).toBe(true);
+    });
+
+    test('returns duplicate_issues with pagination metadata', () => {
+      const result = tools.getDataQualityReport({});
+
+      expect(result.duplicate_issues).toBeDefined();
+      expect(typeof result.duplicate_issues.non_unique_ids.count).toBe('number');
+      expect(typeof result.duplicate_issues.non_unique_ids.total).toBe('number');
+      expect(typeof result.duplicate_issues.non_unique_ids.has_more).toBe('boolean');
+      expect(Array.isArray(result.duplicate_issues.non_unique_ids.items)).toBe(true);
+      expect(Array.isArray(result.duplicate_issues.potential_duplicate_accounts)).toBe(true);
+    });
+
+    test('returns suspicious_categorizations with pagination metadata', () => {
+      const result = tools.getDataQualityReport({});
+
+      expect(result.suspicious_categorizations).toBeDefined();
+      expect(typeof result.suspicious_categorizations.count).toBe('number');
+      expect(typeof result.suspicious_categorizations.total).toBe('number');
+      expect(typeof result.suspicious_categorizations.has_more).toBe('boolean');
+      expect(Array.isArray(result.suspicious_categorizations.items)).toBe(true);
+    });
+
+    test('pagination works correctly with issues_offset', () => {
+      // Create mock data with unresolved categories
+      const txnsWithUnresolvedCategories: Transaction[] = [];
+      for (let i = 0; i < 30; i++) {
+        txnsWithUnresolvedCategories.push({
+          transaction_id: `unresolved_txn_${i}`,
+          amount: 100 + i,
+          date: '2024-01-15',
+          name: `Merchant ${i}`,
+          category_id: `unresolved_category_${i % 25}`, // 25 unique unresolved categories
+          account_id: 'acc1',
+        });
+      }
+
+      (db as any)._transactions = txnsWithUnresolvedCategories;
+
+      // First page
+      const page1 = tools.getDataQualityReport({ issues_limit: 10, issues_offset: 0 });
+      // Second page
+      const page2 = tools.getDataQualityReport({ issues_limit: 10, issues_offset: 10 });
+
+      // Verify pagination metadata
+      expect(page1.category_issues.unresolved_categories.length).toBeLessThanOrEqual(10);
+      expect(page2.category_issues.unresolved_categories.length).toBeLessThanOrEqual(10);
+
+      // If there are more than 10 unresolved categories, has_more should be true for page1
+      if (page1.category_issues.total > 10) {
+        expect(page1.category_issues.has_more).toBe(true);
+      }
+    });
+
+    test('filters by date period', () => {
+      const result = tools.getDataQualityReport({
+        start_date: '2024-01-01',
+        end_date: '2024-01-31',
+      });
+
+      expect(result.period.start_date).toBe('2024-01-01');
+      expect(result.period.end_date).toBe('2024-01-31');
+    });
+
+    test('parses period shorthand', () => {
+      const result = tools.getDataQualityReport({ period: 'last_30_days' });
+
+      expect(result.period.start_date).toBeDefined();
+      expect(result.period.end_date).toBeDefined();
+    });
+
+    test('detects duplicate accounts', () => {
+      // Create mock accounts with duplicates
+      const accountsWithDuplicates: Account[] = [
+        {
+          account_id: 'acc1',
+          current_balance: 1500.0,
+          name: 'Checking Account',
+          account_type: 'checking',
+        },
+        {
+          account_id: 'acc2',
+          current_balance: 1600.0,
+          name: 'Checking Account', // Same name
+          account_type: 'checking', // Same type
+        },
+      ];
+
+      (db as any)._accounts = accountsWithDuplicates;
+
+      const result = tools.getDataQualityReport({});
+
+      expect(result.duplicate_issues.potential_duplicate_accounts.length).toBeGreaterThan(0);
+      const duplicateGroup = result.duplicate_issues.potential_duplicate_accounts[0];
+      expect(duplicateGroup.count).toBe(2);
+      expect(duplicateGroup.account_ids).toContain('acc1');
+      expect(duplicateGroup.account_ids).toContain('acc2');
+    });
+
+    test('sets transaction_limit_reached when hitting limit', () => {
+      // Create many transactions to hit the limit
+      const manyTransactions: Transaction[] = [];
+      for (let i = 0; i < 10; i++) {
+        manyTransactions.push({
+          transaction_id: `txn_${i}`,
+          amount: 100,
+          date: '2024-01-15',
+          name: `Merchant ${i}`,
+          category_id: 'food_dining',
+          account_id: 'acc1',
+        });
+      }
+
+      (db as any)._transactions = manyTransactions;
+
+      // With limit of 5, should hit limit
+      const result = tools.getDataQualityReport({ transaction_limit: 5 });
+
+      expect(result.analysis_metadata.transaction_limit_reached).toBe(true);
+      expect(result.analysis_metadata.transactions_analyzed).toBe(5);
+    });
+  });
 });
