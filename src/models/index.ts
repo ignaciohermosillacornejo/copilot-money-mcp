@@ -19,3 +19,5 @@ export {
 } from './account.js';
 
 export { CategorySchema, type Category } from './category.js';
+
+export { RecurringSchema, type Recurring, getRecurringDisplayName } from './recurring.js';
