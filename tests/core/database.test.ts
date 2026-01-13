@@ -4,7 +4,7 @@
 
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { CopilotDatabase } from '../../src/core/database.js';
-import type { Transaction, Account } from '../../src/models/index.js';
+import type { Transaction, Account, Recurring } from '../../src/models/index.js';
 
 // Mock the decoder functions
 const mockTransactions: Transaction[] = [
@@ -49,14 +49,39 @@ const mockAccounts: Account[] = [
   },
 ];
 
+const mockRecurring: Recurring[] = [
+  {
+    recurring_id: 'rec_active1234',
+    name: 'Netflix',
+    amount: 15.99,
+    frequency: 'monthly',
+    is_active: true,
+  },
+  {
+    recurring_id: 'rec_inactive123',
+    name: 'Old Gym',
+    amount: 50.0,
+    frequency: 'monthly',
+    is_active: false,
+  },
+  {
+    recurring_id: 'rec_unknown1234',
+    name: 'Unknown Status Subscription',
+    amount: 9.99,
+    frequency: 'monthly',
+    // is_active is undefined
+  },
+];
+
 describe('CopilotDatabase', () => {
   let db: CopilotDatabase;
 
   beforeEach(() => {
     db = new CopilotDatabase('/fake/path');
-    // Override the private _transactions and _accounts fields
+    // Override the private _transactions, _accounts, and _recurring fields
     (db as any)._transactions = [...mockTransactions];
     (db as any)._accounts = [...mockAccounts];
+    (db as any)._recurring = [...mockRecurring];
   });
 
   describe('getTransactions', () => {
@@ -188,6 +213,41 @@ describe('CopilotDatabase', () => {
   describe('getDbPath', () => {
     test('returns the database path', () => {
       expect(db.getDbPath()).toBe('/fake/path');
+    });
+  });
+
+  describe('getRecurring', () => {
+    test('returns all recurring transactions when activeOnly is false', () => {
+      const result = db.getRecurring(false);
+      expect(result).toHaveLength(3);
+    });
+
+    test('returns all recurring transactions when no parameter passed', () => {
+      const result = db.getRecurring();
+      expect(result).toHaveLength(3);
+    });
+
+    test('filters to only active when activeOnly is true', () => {
+      const result = db.getRecurring(true);
+      expect(result).toHaveLength(2);
+      // Should include active and undefined
+      const ids = result.map((r) => r.recurring_id);
+      expect(ids).toContain('rec_active1234');
+      expect(ids).toContain('rec_unknown1234');
+      expect(ids).not.toContain('rec_inactive123');
+    });
+
+    test('includes undefined is_active as active when activeOnly is true', () => {
+      const result = db.getRecurring(true);
+      const unknownStatus = result.find((r) => r.recurring_id === 'rec_unknown1234');
+      expect(unknownStatus).toBeDefined();
+      expect(unknownStatus?.is_active).toBeUndefined();
+    });
+
+    test('excludes explicitly inactive subscriptions when activeOnly is true', () => {
+      const result = db.getRecurring(true);
+      const inactive = result.find((r) => r.is_active === false);
+      expect(inactive).toBeUndefined();
     });
   });
 });

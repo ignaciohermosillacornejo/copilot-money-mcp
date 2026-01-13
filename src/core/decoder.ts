@@ -12,6 +12,7 @@ import {
   getTransactionDisplayName,
 } from '../models/transaction.js';
 import { Account, AccountSchema, getAccountDisplayName } from '../models/account.js';
+import { Recurring, RecurringSchema } from '../models/recurring.js';
 
 /**
  * Find a field and extract its string value.
@@ -453,6 +454,134 @@ export function decodeAccounts(dbPath: string): Account[] {
     if (!seen.has(key)) {
       seen.add(key);
       unique.push(acc);
+    }
+  }
+
+  return unique;
+}
+
+/**
+ * Decode recurring transactions from Copilot Money LevelDB files.
+ *
+ * Extracts subscription/recurring payment data from Copilot's native
+ * /recurring/ Firestore collection.
+ *
+ * @param dbPath - Path to LevelDB database directory
+ * @returns Array of recurring transactions
+ */
+export function decodeRecurring(dbPath: string): Recurring[] {
+  const recurring: Recurring[] = [];
+
+  // Return empty array if path doesn't exist (graceful degradation)
+  if (!fs.existsSync(dbPath)) {
+    return [];
+  }
+
+  const stat = fs.statSync(dbPath);
+  if (!stat.isDirectory()) {
+    return [];
+  }
+
+  // Configuration constants for record extraction
+  const RECORD_WINDOW_BEFORE = 500; // Bytes to search before path marker
+  const RECORD_WINDOW_AFTER = 2000; // Bytes to search after path marker
+  const MIN_RECURRING_ID_LENGTH = 10; // Minimum length for valid Firestore document IDs
+
+  // Get all .ldb files
+  const files = fs.readdirSync(dbPath);
+  const ldbFiles = files.filter((f) => f.endsWith('.ldb')).map((f) => path.join(dbPath, f));
+
+  const recurringPathMarker = Buffer.from('/recurring/');
+
+  for (const filepath of ldbFiles) {
+    const data = fs.readFileSync(filepath);
+
+    if (!data.includes(recurringPathMarker)) {
+      continue;
+    }
+
+    // Find recurring records by searching for the path marker
+    let searchPos = 0;
+    let idx = data.indexOf(recurringPathMarker, searchPos);
+
+    while (idx !== -1) {
+      searchPos = idx + 1;
+
+      // Use a window around the path marker to capture all fields
+      const recordStart = Math.max(0, idx - RECORD_WINDOW_BEFORE);
+      const recordEnd = Math.min(data.length, idx + RECORD_WINDOW_AFTER);
+      const record = data.subarray(recordStart, recordEnd);
+
+      // Try to extract recurring_id from the path (e.g., /recurring/{id})
+      const pathIdx = idx - recordStart;
+      const afterPath = record.subarray(pathIdx + recurringPathMarker.length, pathIdx + 100);
+      const idMatch = afterPath.toString('utf-8').match(/^([a-zA-Z0-9_-]+)/);
+      const recurringId = idMatch?.[1];
+
+      if (recurringId && recurringId.length >= MIN_RECURRING_ID_LENGTH) {
+        // Extract fields from the record
+        const name = extractStringValue(record, fieldPattern('name'));
+        const merchantName = extractStringValue(record, fieldPattern('merchant_name'));
+        const amount = extractDoubleField(record, fieldPattern('amount'));
+        const frequency = extractStringValue(record, fieldPattern('frequency'));
+        const nextDate = extractStringValue(record, fieldPattern('next_date'));
+        const lastDate = extractStringValue(record, fieldPattern('last_date'));
+        const categoryId = extractStringValue(record, fieldPattern('category_id'));
+        const accountId = extractStringValue(record, fieldPattern('account_id'));
+        const isActive = extractBooleanValue(record, fieldPattern('is_active'));
+        const isoCurrencyCode = extractStringValue(record, fieldPattern('iso_currency_code'));
+
+        // Build recurring object
+        const recData: {
+          recurring_id: string;
+          name?: string;
+          merchant_name?: string;
+          amount?: number;
+          frequency?: string;
+          next_date?: string;
+          last_date?: string;
+          category_id?: string;
+          account_id?: string;
+          is_active?: boolean;
+          iso_currency_code?: string;
+        } = {
+          recurring_id: recurringId,
+        };
+
+        if (name) recData.name = name;
+        if (merchantName) recData.merchant_name = merchantName;
+        if (amount !== null) recData.amount = amount;
+        if (frequency) recData.frequency = frequency;
+        if (nextDate) recData.next_date = nextDate;
+        if (lastDate) recData.last_date = lastDate;
+        if (categoryId) recData.category_id = categoryId;
+        if (accountId) recData.account_id = accountId;
+        if (isActive !== null) recData.is_active = isActive;
+        if (isoCurrencyCode) recData.iso_currency_code = isoCurrencyCode;
+
+        try {
+          const rec = RecurringSchema.parse(recData);
+          recurring.push(rec);
+        } catch (error) {
+          // Skip invalid records - log in development for debugging
+          if (process.env.NODE_ENV === 'development' || process.env.DEBUG) {
+            console.warn('Skipping invalid recurring record:', error);
+          }
+        }
+      }
+
+      idx = data.indexOf(recurringPathMarker, searchPos);
+    }
+  }
+
+  // Deduplicate by recurring_id
+  const seen = new Set<string>();
+  const unique: Recurring[] = [];
+
+  for (const rec of recurring) {
+    if (!seen.has(rec.recurring_id)) {
+      seen.add(rec.recurring_id);
+      unique.push(rec);
     }
   }
 

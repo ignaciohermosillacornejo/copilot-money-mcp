@@ -5,7 +5,7 @@
  */
 
 import { describe, test, expect, afterEach } from 'bun:test';
-import { decodeTransactions, decodeAccounts } from '../../src/core/decoder.js';
+import { decodeTransactions, decodeAccounts, decodeRecurring } from '../../src/core/decoder.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -917,6 +917,227 @@ describe('Decoder Main Functions', () => {
       const result = decodeTransactions(tempDir);
       // Transaction should be skipped due to empty transaction_id
       expect(result).toEqual([]);
+    });
+  });
+
+  describe('decodeRecurring', () => {
+    test('returns empty array for non-existent path', () => {
+      const result = decodeRecurring('/nonexistent/path/that/does/not/exist');
+      expect(result).toEqual([]);
+    });
+
+    test('returns empty array for directory without .ldb files', () => {
+      const tempDir = path.join(__dirname, '../fixtures/empty-recurring-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const result = decodeRecurring(tempDir);
+      expect(result).toEqual([]);
+    });
+
+    test('returns empty array for files without recurring markers', () => {
+      const tempDir = path.join(__dirname, '../fixtures/no-recurring-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const ldbFile = path.join(tempDir, 'test.ldb');
+      fs.writeFileSync(ldbFile, Buffer.from('random data'));
+
+      const result = decodeRecurring(tempDir);
+      expect(result).toEqual([]);
+    });
+
+    test('decodes complete recurring transaction with all fields', () => {
+      const tempDir = path.join(__dirname, '../fixtures/complete-recurring-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const ldbFile = path.join(tempDir, 'test.ldb');
+      // Include recurring ID in the path itself
+      const data = Buffer.concat([
+        Buffer.from('/recurring/rec_123456789012'),
+        Buffer.alloc(50), // Padding
+        createStringField(FIELD_PREFIXES.name, 'Netflix Subscription'),
+        createStringField('merchant_name', 'Netflix'),
+        createStringField('amount', ''), // Use field pattern
+        createDoubleField(15.99),
+        createStringField('frequency', 'monthly'),
+        createStringField('next_date', '2025-02-15'),
+        createStringField('last_date', '2025-01-15'),
+        createStringField('category_id', 'cat_entertainment'),
+        createStringField('account_id', 'acc_checking'),
+        createBooleanField('is_active', true),
+        createStringField('iso_currency_code', 'USD'),
+      ]);
+      fs.writeFileSync(ldbFile, data);
+
+      const result = decodeRecurring(tempDir);
+      expect(result.length).toBe(1);
+      expect(result[0].recurring_id).toBe('rec_123456789012');
+      expect(result[0].name).toBe('Netflix Subscription');
+      expect(result[0].merchant_name).toBe('Netflix');
+      expect(result[0].amount).toBe(15.99);
+      expect(result[0].frequency).toBe('monthly');
+      expect(result[0].next_date).toBe('2025-02-15');
+      expect(result[0].last_date).toBe('2025-01-15');
+      expect(result[0].category_id).toBe('cat_entertainment');
+      expect(result[0].account_id).toBe('acc_checking');
+      expect(result[0].is_active).toBe(true);
+      expect(result[0].iso_currency_code).toBe('USD');
+    });
+
+    test('decodes recurring transaction with minimal required fields', () => {
+      const tempDir = path.join(__dirname, '../fixtures/minimal-recurring-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const ldbFile = path.join(tempDir, 'test.ldb');
+      const data = Buffer.from('/recurring/rec_minimal123');
+      fs.writeFileSync(ldbFile, data);
+
+      const result = decodeRecurring(tempDir);
+      expect(result.length).toBe(1);
+      expect(result[0].recurring_id).toBe('rec_minimal123');
+    });
+
+    test('skips recurring record with short recurring_id', () => {
+      const tempDir = path.join(__dirname, '../fixtures/short-id-recurring-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const ldbFile = path.join(tempDir, 'test.ldb');
+      const data = Buffer.from('/recurring/short'); // Too short (< 10 chars)
+      fs.writeFileSync(ldbFile, data);
+
+      const result = decodeRecurring(tempDir);
+      expect(result).toEqual([]);
+    });
+
+    test('skips recurring record with invalid date format', () => {
+      const tempDir = path.join(__dirname, '../fixtures/invalid-date-recurring-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const ldbFile = path.join(tempDir, 'test.ldb');
+      const data = Buffer.concat([
+        Buffer.from('/recurring/rec_invaliddate'),
+        Buffer.alloc(20),
+        createStringField('next_date', '01/15/2025'), // Invalid format (not YYYY-MM-DD)
+      ]);
+      fs.writeFileSync(ldbFile, data);
+
+      const result = decodeRecurring(tempDir);
+      // Should be skipped due to invalid date format
+      expect(result).toEqual([]);
+    });
+
+    test('skips recurring record with invalid frequency', () => {
+      const tempDir = path.join(__dirname, '../fixtures/invalid-freq-recurring-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const ldbFile = path.join(tempDir, 'test.ldb');
+      const data = Buffer.concat([
+        Buffer.from('/recurring/rec_badfrequency'),
+        Buffer.alloc(20),
+        createStringField('frequency', 'sometimes'), // Invalid frequency
+      ]);
+      fs.writeFileSync(ldbFile, data);
+
+      const result = decodeRecurring(tempDir);
+      // Should be skipped due to invalid frequency enum
+      expect(result).toEqual([]);
+    });
+
+    test('deduplicates recurring records by recurring_id', () => {
+      const tempDir = path.join(__dirname, '../fixtures/dedup-recurring-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const createRec = (id: string, name: string) =>
+        Buffer.concat([
+          Buffer.from(`/recurring/${id}`),
+          Buffer.alloc(20),
+          createStringField(FIELD_PREFIXES.name, name),
+        ]);
+
+      const ldbFile = path.join(tempDir, 'test.ldb');
+      const data = Buffer.concat([
+        createRec('rec_duplicate12', 'First Instance'),
+        createRec('rec_duplicate12', 'Second Instance'), // Duplicate ID
+      ]);
+      fs.writeFileSync(ldbFile, data);
+
+      const result = decodeRecurring(tempDir);
+      expect(result.length).toBe(1);
+      expect(result[0].name).toBe('First Instance');
+    });
+
+    test('handles recurring with is_active false', () => {
+      const tempDir = path.join(__dirname, '../fixtures/inactive-recurring-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const ldbFile = path.join(tempDir, 'test.ldb');
+      const data = Buffer.concat([
+        Buffer.from('/recurring/rec_inactive123'),
+        Buffer.alloc(20),
+        createStringField(FIELD_PREFIXES.name, 'Canceled Subscription'),
+        createBooleanField('is_active', false),
+      ]);
+      fs.writeFileSync(ldbFile, data);
+
+      const result = decodeRecurring(tempDir);
+      expect(result.length).toBe(1);
+      expect(result[0].is_active).toBe(false);
+    });
+
+    test('handles multiple .ldb files with recurring data', () => {
+      const tempDir = path.join(__dirname, '../fixtures/multi-recurring-files-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const createRec = (id: string, name: string) =>
+        Buffer.concat([
+          Buffer.from(`/recurring/${id}`),
+          Buffer.alloc(20),
+          createStringField(FIELD_PREFIXES.name, name),
+        ]);
+
+      fs.writeFileSync(
+        path.join(tempDir, 'file1.ldb'),
+        createRec('rec_file1_12345', 'Subscription 1')
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'file2.ldb'),
+        createRec('rec_file2_12345', 'Subscription 2')
+      );
+
+      const result = decodeRecurring(tempDir);
+      expect(result.length).toBe(2);
+    });
+
+    test('logs validation errors in development mode', () => {
+      const tempDir = path.join(__dirname, '../fixtures/dev-log-recurring-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      // Set development mode
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'development';
+
+      const ldbFile = path.join(tempDir, 'test.ldb');
+      const data = Buffer.concat([
+        Buffer.from('/recurring/rec_devlog12345'),
+        Buffer.alloc(20),
+        createStringField('frequency', 'invalid'), // Will cause validation error
+      ]);
+      fs.writeFileSync(ldbFile, data);
+
+      // Capture console.warn
+      const originalWarn = console.warn;
+      let warnCalled = false;
+      console.warn = () => {
+        warnCalled = true;
+      };
+
+      const result = decodeRecurring(tempDir);
+
+      // Restore
+      console.warn = originalWarn;
+      process.env.NODE_ENV = originalEnv;
+
+      expect(result).toEqual([]);
+      expect(warnCalled).toBe(true);
     });
   });
 });
