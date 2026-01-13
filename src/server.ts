@@ -388,6 +388,32 @@ export class CopilotMoneyServer {
           );
           break;
 
+        // ---- Budget Analytics ----
+
+        case 'get_budget_utilization':
+          result = this.tools.getBudgetUtilization(
+            (typedArgs as Parameters<typeof this.tools.getBudgetUtilization>[0]) || {}
+          );
+          break;
+
+        case 'get_budget_vs_actual':
+          result = this.tools.getBudgetVsActual(
+            (typedArgs as Parameters<typeof this.tools.getBudgetVsActual>[0]) || {}
+          );
+          break;
+
+        case 'get_budget_recommendations':
+          result = this.tools.getBudgetRecommendations(
+            (typedArgs as Parameters<typeof this.tools.getBudgetRecommendations>[0]) || {}
+          );
+          break;
+
+        case 'get_budget_alerts':
+          result = this.tools.getBudgetAlerts(
+            (typedArgs as Parameters<typeof this.tools.getBudgetAlerts>[0]) || {}
+          );
+          break;
+
         default:
           return {
             content: [

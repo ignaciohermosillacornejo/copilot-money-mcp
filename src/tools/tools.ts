@@ -4668,6 +4668,653 @@ export class CopilotMoneyTools {
       },
     };
   }
+
+  // ---- Budget Analytics ----
+
+  /**
+   * Get budget utilization for all budgets.
+   *
+   * Shows how much of each budget has been used.
+   *
+   * @param options - Filter options
+   * @returns Budget utilization data
+   */
+  getBudgetUtilization(
+    options: {
+      month?: string;
+      category?: string;
+      include_inactive?: boolean;
+    } = {}
+  ): {
+    month: string;
+    budgets: Array<{
+      budget_id: string;
+      category: string;
+      category_id: string;
+      budget_amount: number;
+      spent_amount: number;
+      remaining: number;
+      utilization_percentage: number;
+      status: 'under' | 'on_track' | 'over';
+    }>;
+    summary: {
+      total_budgeted: number;
+      total_spent: number;
+      overall_utilization: number;
+      over_budget_count: number;
+    };
+  } {
+    const budgets = this.db.getBudgets();
+    const transactions = this.db.getTransactions();
+
+    // Determine month
+    let targetMonth: string;
+    if (options.month) {
+      if (!/^\d{4}-\d{2}$/.test(options.month)) {
+        throw new Error('Invalid month format. Expected YYYY-MM');
+      }
+      targetMonth = options.month;
+    } else {
+      const now = new Date();
+      targetMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    }
+
+    // Filter budgets
+    let filtered = budgets;
+    if (!options.include_inactive) {
+      filtered = filtered.filter((b) => b.is_active !== false);
+    }
+    if (options.category) {
+      const categoryLower = options.category.toLowerCase();
+      filtered = filtered.filter(
+        (b) =>
+          b.category_id?.toLowerCase().includes(categoryLower) ||
+          b.name?.toLowerCase().includes(categoryLower)
+      );
+    }
+
+    // Calculate spending for the month
+    const monthStart = `${targetMonth}-01`;
+    const monthEnd = `${targetMonth}-31`;
+
+    const monthTransactions = transactions.filter((t) => {
+      return (
+        t.date >= monthStart &&
+        t.date <= monthEnd &&
+        t.amount < 0 &&
+        !isTransferCategory(t.category_id)
+      );
+    });
+
+    // Group spending by category
+    const spendingByCategory = new Map<string, number>();
+    for (const t of monthTransactions) {
+      const catId = t.category_id || 'uncategorized';
+      spendingByCategory.set(catId, (spendingByCategory.get(catId) || 0) + Math.abs(t.amount));
+    }
+
+    // Build utilization data
+    const utilizationData = filtered.map((b) => {
+      const categoryId = b.category_id || '';
+      const spent = spendingByCategory.get(categoryId) || 0;
+      const budgetAmount = b.amount || 0;
+      const remaining = budgetAmount - spent;
+      const utilization = budgetAmount > 0 ? (spent / budgetAmount) * 100 : 0;
+
+      let status: 'under' | 'on_track' | 'over' = 'under';
+      if (utilization >= 100) {
+        status = 'over';
+      } else if (utilization >= 75) {
+        status = 'on_track';
+      }
+
+      return {
+        budget_id: b.budget_id,
+        category: getCategoryName(categoryId),
+        category_id: categoryId,
+        budget_amount: Math.round(budgetAmount * 100) / 100,
+        spent_amount: Math.round(spent * 100) / 100,
+        remaining: Math.round(remaining * 100) / 100,
+        utilization_percentage: Math.round(utilization * 10) / 10,
+        status,
+      };
+    });
+
+    // Sort by utilization descending
+    utilizationData.sort((a, b) => b.utilization_percentage - a.utilization_percentage);
+
+    // Summary
+    const totalBudgeted = utilizationData.reduce((sum, b) => sum + b.budget_amount, 0);
+    const totalSpent = utilizationData.reduce((sum, b) => sum + b.spent_amount, 0);
+    const overBudgetCount = utilizationData.filter((b) => b.status === 'over').length;
+
+    return {
+      month: targetMonth,
+      budgets: utilizationData,
+      summary: {
+        total_budgeted: Math.round(totalBudgeted * 100) / 100,
+        total_spent: Math.round(totalSpent * 100) / 100,
+        overall_utilization:
+          totalBudgeted > 0 ? Math.round((totalSpent / totalBudgeted) * 100 * 10) / 10 : 0,
+        over_budget_count: overBudgetCount,
+      },
+    };
+  }
+
+  /**
+   * Compare budgets to actual spending over multiple months.
+   *
+   * Shows how budgets compare to actual spending historically.
+   *
+   * @param options - Filter options
+   * @returns Budget vs actual comparison data
+   */
+  getBudgetVsActual(
+    options: {
+      months?: number;
+      category?: string;
+    } = {}
+  ): {
+    months_analyzed: number;
+    comparisons: Array<{
+      month: string;
+      total_budgeted: number;
+      total_actual: number;
+      difference: number;
+      variance_percentage: number;
+    }>;
+    category_breakdown: Array<{
+      category: string;
+      category_id: string;
+      avg_budgeted: number;
+      avg_actual: number;
+      consistency_score: number;
+    }>;
+    insights: {
+      most_accurate_month: string | null;
+      least_accurate_month: string | null;
+      avg_variance: number;
+    };
+  } {
+    const numMonths = options.months || 6;
+    const budgets = this.db.getBudgets().filter((b) => b.is_active !== false);
+    const transactions = this.db.getTransactions();
+
+    // Generate list of months to analyze
+    const months: string[] = [];
+    const now = new Date();
+    for (let i = 0; i < numMonths; i++) {
+      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`);
+    }
+
+    // Filter budgets by category if specified
+    let filteredBudgets = budgets;
+    if (options.category) {
+      const categoryLower = options.category.toLowerCase();
+      filteredBudgets = budgets.filter(
+        (b) =>
+          b.category_id?.toLowerCase().includes(categoryLower) ||
+          b.name?.toLowerCase().includes(categoryLower)
+      );
+    }
+
+    // Calculate total budgeted amount
+    const totalBudgetedPerMonth = filteredBudgets.reduce((sum, b) => sum + (b.amount || 0), 0);
+
+    // Analyze each month
+    const comparisons = months.map((month) => {
+      const monthStart = `${month}-01`;
+      const monthEnd = `${month}-31`;
+
+      const monthTransactions = transactions.filter((t) => {
+        const matchesCategory =
+          !options.category ||
+          t.category_id?.toLowerCase().includes(options.category.toLowerCase());
+        return (
+          t.date >= monthStart &&
+          t.date <= monthEnd &&
+          t.amount < 0 &&
+          !isTransferCategory(t.category_id) &&
+          matchesCategory
+        );
+      });
+
+      const totalActual = monthTransactions.reduce((sum, t) => sum + Math.abs(t.amount), 0);
+      const difference = totalBudgetedPerMonth - totalActual;
+      const variance = totalBudgetedPerMonth > 0 ? (difference / totalBudgetedPerMonth) * 100 : 0;
+
+      return {
+        month,
+        total_budgeted: Math.round(totalBudgetedPerMonth * 100) / 100,
+        total_actual: Math.round(totalActual * 100) / 100,
+        difference: Math.round(difference * 100) / 100,
+        variance_percentage: Math.round(variance * 10) / 10,
+      };
+    });
+
+    // Category breakdown
+    const categoryData = new Map<string, { budgeted: number; actuals: number[] }>();
+
+    for (const b of filteredBudgets) {
+      const catId = b.category_id || 'uncategorized';
+      if (!categoryData.has(catId)) {
+        categoryData.set(catId, { budgeted: 0, actuals: [] });
+      }
+      categoryData.get(catId)!.budgeted += b.amount || 0;
+    }
+
+    // Get actual spending per category
+    for (const month of months) {
+      const monthStart = `${month}-01`;
+      const monthEnd = `${month}-31`;
+
+      for (const [catId, data] of categoryData.entries()) {
+        const spent = transactions
+          .filter(
+            (t) =>
+              t.date >= monthStart && t.date <= monthEnd && t.category_id === catId && t.amount < 0
+          )
+          .reduce((sum, t) => sum + Math.abs(t.amount), 0);
+        data.actuals.push(spent);
+      }
+    }
+
+    const categoryBreakdown = Array.from(categoryData.entries()).map(([catId, data]) => {
+      const avgBudgeted = data.budgeted;
+      const avgActual =
+        data.actuals.length > 0 ? data.actuals.reduce((a, b) => a + b, 0) / data.actuals.length : 0;
+
+      // Calculate consistency (lower variance = higher score)
+      const variance =
+        data.actuals.length > 0
+          ? data.actuals.reduce((sum, v) => sum + Math.pow(v - avgActual, 2), 0) /
+            data.actuals.length
+          : 0;
+      const stdDev = Math.sqrt(variance);
+      const consistencyScore = avgActual > 0 ? Math.max(0, 100 - (stdDev / avgActual) * 100) : 100;
+
+      return {
+        category: getCategoryName(catId),
+        category_id: catId,
+        avg_budgeted: Math.round(avgBudgeted * 100) / 100,
+        avg_actual: Math.round(avgActual * 100) / 100,
+        consistency_score: Math.round(consistencyScore),
+      };
+    });
+
+    // Insights
+    const sortedByVariance = [...comparisons].sort(
+      (a, b) => Math.abs(a.variance_percentage) - Math.abs(b.variance_percentage)
+    );
+    const avgVariance =
+      comparisons.length > 0
+        ? comparisons.reduce((sum, c) => sum + Math.abs(c.variance_percentage), 0) /
+          comparisons.length
+        : 0;
+
+    return {
+      months_analyzed: numMonths,
+      comparisons,
+      category_breakdown: categoryBreakdown.sort((a, b) => b.avg_actual - a.avg_actual),
+      insights: {
+        most_accurate_month: sortedByVariance[0]?.month ?? null,
+        least_accurate_month: sortedByVariance[sortedByVariance.length - 1]?.month ?? null,
+        avg_variance: Math.round(avgVariance * 10) / 10,
+      },
+    };
+  }
+
+  /**
+   * Get budget recommendations based on spending patterns.
+   *
+   * Suggests budget adjustments based on historical data.
+   *
+   * @param options - Filter options
+   * @returns Budget recommendations
+   */
+  getBudgetRecommendations(
+    options: {
+      months?: number;
+    } = {}
+  ): {
+    recommendations: Array<{
+      category: string;
+      category_id: string;
+      current_budget: number | null;
+      recommended_budget: number;
+      avg_spending: number;
+      confidence: 'high' | 'medium' | 'low';
+      reason: string;
+    }>;
+    new_budget_suggestions: Array<{
+      category: string;
+      category_id: string;
+      avg_spending: number;
+      suggested_budget: number;
+      reason: string;
+    }>;
+    summary: {
+      total_current_budget: number;
+      total_recommended: number;
+      potential_savings: number;
+    };
+  } {
+    const numMonths = options.months || 3;
+    const budgets = this.db.getBudgets().filter((b) => b.is_active !== false);
+    const transactions = this.db.getTransactions();
+
+    // Generate list of months to analyze
+    const months: string[] = [];
+    const now = new Date();
+    for (let i = 0; i < numMonths; i++) {
+      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`);
+    }
+
+    // Calculate average spending by category
+    const categorySpending = new Map<string, number[]>();
+
+    for (const month of months) {
+      const monthStart = `${month}-01`;
+      const monthEnd = `${month}-31`;
+
+      const monthTxns = transactions.filter(
+        (t) =>
+          t.date >= monthStart &&
+          t.date <= monthEnd &&
+          t.amount < 0 &&
+          !isTransferCategory(t.category_id)
+      );
+
+      const spendingThisMonth = new Map<string, number>();
+      for (const t of monthTxns) {
+        const catId = t.category_id || 'uncategorized';
+        spendingThisMonth.set(catId, (spendingThisMonth.get(catId) || 0) + Math.abs(t.amount));
+      }
+
+      for (const [catId, amount] of spendingThisMonth.entries()) {
+        if (!categorySpending.has(catId)) {
+          categorySpending.set(catId, []);
+        }
+        categorySpending.get(catId)!.push(amount);
+      }
+    }
+
+    // Build budget map
+    const budgetMap = new Map<string, number>();
+    for (const b of budgets) {
+      const catId = b.category_id || '';
+      budgetMap.set(catId, b.amount || 0);
+    }
+
+    // Generate recommendations for existing budgets
+    const recommendations: Array<{
+      category: string;
+      category_id: string;
+      current_budget: number | null;
+      recommended_budget: number;
+      avg_spending: number;
+      confidence: 'high' | 'medium' | 'low';
+      reason: string;
+    }> = [];
+
+    for (const b of budgets) {
+      const catId = b.category_id || '';
+      const spending = categorySpending.get(catId) || [];
+      const currentBudget = b.amount || 0;
+
+      if (spending.length === 0) continue;
+
+      const avgSpending = spending.reduce((a, b) => a + b, 0) / spending.length;
+      const variance =
+        spending.reduce((sum, v) => sum + Math.pow(v - avgSpending, 2), 0) / spending.length;
+      const stdDev = Math.sqrt(variance);
+
+      // Confidence based on variance
+      let confidence: 'high' | 'medium' | 'low' = 'high';
+      const cv = avgSpending > 0 ? stdDev / avgSpending : 0;
+      if (cv > 0.5) confidence = 'low';
+      else if (cv > 0.25) confidence = 'medium';
+
+      // Recommended budget: average + 10% buffer
+      const recommendedBudget = Math.round(avgSpending * 1.1 * 100) / 100;
+      const diff = currentBudget - recommendedBudget;
+      const diffPercent = currentBudget > 0 ? (diff / currentBudget) * 100 : 0;
+
+      let reason = 'Budget appears well-calibrated';
+      if (diffPercent > 20) {
+        reason = `Budget may be ${Math.round(diffPercent)}% higher than needed`;
+      } else if (diffPercent < -20) {
+        reason = `Budget may be ${Math.abs(Math.round(diffPercent))}% too low`;
+      }
+
+      recommendations.push({
+        category: getCategoryName(catId),
+        category_id: catId,
+        current_budget: currentBudget,
+        recommended_budget: recommendedBudget,
+        avg_spending: Math.round(avgSpending * 100) / 100,
+        confidence,
+        reason,
+      });
+    }
+
+    // Suggest new budgets for categories without budgets
+    const newBudgetSuggestions: Array<{
+      category: string;
+      category_id: string;
+      avg_spending: number;
+      suggested_budget: number;
+      reason: string;
+    }> = [];
+
+    for (const [catId, spending] of categorySpending.entries()) {
+      if (!budgetMap.has(catId) && spending.length >= 2) {
+        const avgSpending = spending.reduce((a, b) => a + b, 0) / spending.length;
+        if (avgSpending >= 50) {
+          // Only suggest for significant spending
+          newBudgetSuggestions.push({
+            category: getCategoryName(catId),
+            category_id: catId,
+            avg_spending: Math.round(avgSpending * 100) / 100,
+            suggested_budget: Math.round(avgSpending * 1.1 * 100) / 100,
+            reason: `Consistent spending of $${Math.round(avgSpending)}/month detected`,
+          });
+        }
+      }
+    }
+
+    // Sort suggestions by spending
+    newBudgetSuggestions.sort((a, b) => b.avg_spending - a.avg_spending);
+
+    // Summary
+    const totalCurrent = recommendations.reduce((sum, r) => sum + (r.current_budget || 0), 0);
+    const totalRecommended = recommendations.reduce((sum, r) => sum + r.recommended_budget, 0);
+
+    return {
+      recommendations: recommendations.sort((a, b) => b.avg_spending - a.avg_spending),
+      new_budget_suggestions: newBudgetSuggestions.slice(0, 10),
+      summary: {
+        total_current_budget: Math.round(totalCurrent * 100) / 100,
+        total_recommended: Math.round(totalRecommended * 100) / 100,
+        potential_savings: Math.round((totalCurrent - totalRecommended) * 100) / 100,
+      },
+    };
+  }
+
+  /**
+   * Get budget alerts for categories approaching or exceeding limits.
+   *
+   * Identifies budgets that need attention.
+   *
+   * @param options - Filter options
+   * @returns Budget alerts
+   */
+  getBudgetAlerts(
+    options: {
+      threshold_percentage?: number;
+      month?: string;
+    } = {}
+  ): {
+    month: string;
+    alerts: Array<{
+      budget_id: string;
+      category: string;
+      category_id: string;
+      alert_type: 'exceeded' | 'warning' | 'approaching';
+      budget_amount: number;
+      spent_amount: number;
+      utilization_percentage: number;
+      days_remaining: number;
+      projected_total: number | null;
+      message: string;
+    }>;
+    summary: {
+      exceeded_count: number;
+      warning_count: number;
+      approaching_count: number;
+      total_over_budget: number;
+    };
+  } {
+    const threshold = options.threshold_percentage || 80;
+    const budgets = this.db.getBudgets().filter((b) => b.is_active !== false);
+    const transactions = this.db.getTransactions();
+
+    // Determine month
+    let targetMonth: string;
+    if (options.month) {
+      if (!/^\d{4}-\d{2}$/.test(options.month)) {
+        throw new Error('Invalid month format. Expected YYYY-MM');
+      }
+      targetMonth = options.month;
+    } else {
+      const now = new Date();
+      targetMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    }
+
+    // Calculate days in month and remaining
+    const parts = targetMonth.split('-').map(Number);
+    const year = parts[0] ?? new Date().getFullYear();
+    const month = parts[1] ?? 1;
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const today = new Date();
+    const currentDay =
+      today.getFullYear() === year && today.getMonth() + 1 === month
+        ? today.getDate()
+        : daysInMonth;
+    const daysRemaining = Math.max(0, daysInMonth - currentDay);
+
+    // Calculate spending for the month
+    const monthStart = `${targetMonth}-01`;
+    const monthEnd = `${targetMonth}-31`;
+
+    const monthTransactions = transactions.filter((t) => {
+      return (
+        t.date >= monthStart &&
+        t.date <= monthEnd &&
+        t.amount < 0 &&
+        !isTransferCategory(t.category_id)
+      );
+    });
+
+    // Group spending by category
+    const spendingByCategory = new Map<string, number>();
+    for (const t of monthTransactions) {
+      const catId = t.category_id || 'uncategorized';
+      spendingByCategory.set(catId, (spendingByCategory.get(catId) || 0) + Math.abs(t.amount));
+    }
+
+    // Generate alerts
+    const alerts: Array<{
+      budget_id: string;
+      category: string;
+      category_id: string;
+      alert_type: 'exceeded' | 'warning' | 'approaching';
+      budget_amount: number;
+      spent_amount: number;
+      utilization_percentage: number;
+      days_remaining: number;
+      projected_total: number | null;
+      message: string;
+    }> = [];
+
+    for (const b of budgets) {
+      const categoryId = b.category_id || '';
+      const budgetAmount = b.amount || 0;
+      const spent = spendingByCategory.get(categoryId) || 0;
+      const utilization = budgetAmount > 0 ? (spent / budgetAmount) * 100 : 0;
+
+      // Skip if below threshold
+      if (utilization < threshold) continue;
+
+      // Calculate projected spending
+      let projectedTotal: number | null = null;
+      if (currentDay > 0 && daysRemaining > 0) {
+        const dailyRate = spent / currentDay;
+        projectedTotal = Math.round(dailyRate * daysInMonth * 100) / 100;
+      }
+
+      // Determine alert type and message
+      let alertType: 'exceeded' | 'warning' | 'approaching' = 'approaching';
+      let message = '';
+
+      if (utilization >= 100) {
+        alertType = 'exceeded';
+        const overAmount = Math.round((spent - budgetAmount) * 100) / 100;
+        message = `Over budget by $${overAmount}`;
+      } else if (utilization >= 90) {
+        alertType = 'warning';
+        const remaining = Math.round((budgetAmount - spent) * 100) / 100;
+        message = `Only $${remaining} remaining with ${daysRemaining} days left`;
+      } else {
+        alertType = 'approaching';
+        message = `${Math.round(utilization)}% used - on pace to ${
+          projectedTotal && projectedTotal > budgetAmount ? 'exceed' : 'stay within'
+        } budget`;
+      }
+
+      alerts.push({
+        budget_id: b.budget_id,
+        category: getCategoryName(categoryId),
+        category_id: categoryId,
+        alert_type: alertType,
+        budget_amount: Math.round(budgetAmount * 100) / 100,
+        spent_amount: Math.round(spent * 100) / 100,
+        utilization_percentage: Math.round(utilization * 10) / 10,
+        days_remaining: daysRemaining,
+        projected_total: projectedTotal,
+        message,
+      });
+    }
+
+    // Sort by severity (exceeded first, then by utilization)
+    alerts.sort((a, b) => {
+      const severityOrder = { exceeded: 0, warning: 1, approaching: 2 };
+      const aSeverity = severityOrder[a.alert_type];
+      const bSeverity = severityOrder[b.alert_type];
+      if (aSeverity !== bSeverity) return aSeverity - bSeverity;
+      return b.utilization_percentage - a.utilization_percentage;
+    });
+
+    // Summary
+    const exceededAlerts = alerts.filter((a) => a.alert_type === 'exceeded');
+    const totalOverBudget = exceededAlerts.reduce(
+      (sum, a) => sum + (a.spent_amount - a.budget_amount),
+      0
+    );
+
+    return {
+      month: targetMonth,
+      alerts,
+      summary: {
+        exceeded_count: exceededAlerts.length,
+        warning_count: alerts.filter((a) => a.alert_type === 'warning').length,
+        approaching_count: alerts.filter((a) => a.alert_type === 'approaching').length,
+        total_over_budget: Math.round(totalOverBudget * 100) / 100,
+      },
+    };
+  }
 }
 
 /**
@@ -5976,6 +6623,100 @@ export function createToolSchemas(): ToolSchema[] {
           limit: {
             type: 'integer',
             description: 'Maximum merchants to return (default: 20)',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+
+    // ---- Budget Analytics ----
+    {
+      name: 'get_budget_utilization',
+      description:
+        'Get budget utilization status for all active budgets. Shows how much of each ' +
+        'budget has been used, remaining amount, and utilization percentage. ' +
+        'Identifies budgets that are under, on track, or over budget.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          month: {
+            type: 'string',
+            description: 'Month to analyze (YYYY-MM format, default: current month)',
+          },
+          category: {
+            type: 'string',
+            description: 'Filter by category (partial match)',
+          },
+          include_inactive: {
+            type: 'boolean',
+            description: 'Include inactive budgets (default: false)',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_budget_vs_actual',
+      description:
+        'Compare budgeted amounts to actual spending over multiple months. ' +
+        'Shows variance, category breakdown, and consistency scores. ' +
+        'Helps understand budget accuracy and spending patterns.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          months: {
+            type: 'integer',
+            description: 'Number of months to analyze (default: 6)',
+          },
+          category: {
+            type: 'string',
+            description: 'Filter by category (partial match)',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_budget_recommendations',
+      description:
+        'Get smart budget recommendations based on spending patterns. ' +
+        'Suggests adjustments for existing budgets and recommends new budgets ' +
+        'for categories with consistent spending but no budget.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          months: {
+            type: 'integer',
+            description: 'Number of months to analyze for recommendations (default: 3)',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_budget_alerts',
+      description:
+        'Get alerts for budgets that are approaching, at warning level, or exceeded. ' +
+        'Shows utilization, days remaining, and projected totals. ' +
+        'Helps proactively manage spending.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          threshold_percentage: {
+            type: 'integer',
+            description: 'Alert threshold percentage (default: 80)',
+          },
+          month: {
+            type: 'string',
+            description: 'Month to check (YYYY-MM format, default: current month)',
           },
         },
       },
