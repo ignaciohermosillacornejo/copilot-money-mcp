@@ -102,6 +102,29 @@ export const UNREALISTIC_AMOUNT_THRESHOLD = 1_000_000;
 export const MAX_VALID_AMOUNT = 10_000_000;
 
 // ============================================
+// Configurable Currency Thresholds
+// ============================================
+// These thresholds can be overridden via tool parameters
+
+/** Minimum spending amount to recommend creating a budget for an unbudgeted category */
+const DEFAULT_BUDGET_RECOMMENDATION_THRESHOLD = 100;
+
+/** Maximum amount from common retail merchants to consider as a refund (not income) */
+const DEFAULT_REFUND_THRESHOLD = 500;
+
+/** Default transaction amount above which to flag as a large transaction anomaly (user-configurable) */
+const DEFAULT_LARGE_TRANSACTION_THRESHOLD = 1000;
+
+/** Amount threshold for flagging large transactions with foreign merchant indicators */
+const DEFAULT_FOREIGN_LARGE_AMOUNT_THRESHOLD = 1000;
+
+/** Amount threshold for flagging suspiciously round foreign amounts */
+const DEFAULT_ROUND_AMOUNT_THRESHOLD = 500;
+
+/** Monthly change amount threshold for classifying account trends as growing/declining */
+const DEFAULT_TREND_THRESHOLD = 100;
+
+// ============================================
 // Validation Helpers
 // ============================================
 
@@ -999,6 +1022,7 @@ export class CopilotMoneyTools {
     months?: number;
     granularity?: 'daily' | 'weekly' | 'monthly';
     account_type?: string;
+    trend_threshold?: number;
   }): {
     analysis: string;
     period: { start_date?: string; end_date?: string };
@@ -1012,6 +1036,7 @@ export class CopilotMoneyTools {
       account_type,
       months = 6,
       granularity = 'monthly',
+      trend_threshold = DEFAULT_TREND_THRESHOLD,
     } = options;
     let { start_date, end_date } = options;
 
@@ -1095,6 +1120,10 @@ export class CopilotMoneyTools {
           ? accounts.filter((a) => a.account_id === account_id)
           : accounts;
 
+        let growingCount = 0;
+        let decliningCount = 0;
+        let stableCount = 0;
+
         const trendsData = accountsToAnalyze.map((account) => {
           const accountTxns = transactions
             .filter((t) => t.account_id === account.account_id)
@@ -1120,11 +1149,28 @@ export class CopilotMoneyTools {
               net_change: roundAmount(data.inflow - data.outflow),
             }));
 
+          // Calculate overall trend using configurable threshold
+          const totalNetChange = monthlyArray.reduce((sum, m) => sum + m.net_change, 0);
+          const avgMonthlyChange = monthlyArray.length > 0 ? totalNetChange / months : 0;
+
+          let overallTrend: 'growing' | 'declining' | 'stable' = 'stable';
+          if (avgMonthlyChange > trend_threshold) {
+            overallTrend = 'growing';
+            growingCount++;
+          } else if (avgMonthlyChange < -trend_threshold) {
+            overallTrend = 'declining';
+            decliningCount++;
+          } else {
+            stableCount++;
+          }
+
           return {
             account_id: account.account_id,
             account_name: account.name || account.official_name || 'Unknown',
             current_balance: account.current_balance,
             monthly_data: monthlyArray,
+            overall_trend: overallTrend,
+            average_monthly_change: roundAmount(avgMonthlyChange),
           };
         });
 
@@ -1132,6 +1178,12 @@ export class CopilotMoneyTools {
           analysis,
           period: { start_date, end_date },
           data: { months, granularity, accounts: trendsData },
+          summary: {
+            total_accounts: trendsData.length,
+            growing_accounts: growingCount,
+            declining_accounts: decliningCount,
+            stable_accounts: stableCount,
+          },
         };
       }
 
@@ -1208,12 +1260,20 @@ export class CopilotMoneyTools {
     months?: number;
     category?: string;
     threshold_percentage?: number;
+    budget_recommendation_threshold?: number;
   }): {
     analysis: string;
     data: unknown;
     summary?: Record<string, unknown>;
   } {
-    const { analysis, month, months = 6, category, threshold_percentage = 80 } = options;
+    const {
+      analysis,
+      month,
+      months = 6,
+      category,
+      threshold_percentage = 80,
+      budget_recommendation_threshold = DEFAULT_BUDGET_RECOMMENDATION_THRESHOLD,
+    } = options;
 
     const budgets = this.db.getBudgets(true);
     const now = new Date();
@@ -1366,7 +1426,7 @@ export class CopilotMoneyTools {
         const budgetedCategories = new Set(budgets.map((b) => b.category_id));
 
         for (const [cat, spent] of spendingByCategory) {
-          if (!budgetedCategories.has(cat) && spent > 100) {
+          if (!budgetedCategories.has(cat) && spent > budget_recommendation_threshold) {
             recommendations.push({
               type: 'new_budget',
               category: getCategoryName(cat),
@@ -3050,7 +3110,12 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with income breakdown
    */
-  getIncome(options: { period?: string; start_date?: string; end_date?: string }): {
+  getIncome(options: {
+    period?: string;
+    start_date?: string;
+    end_date?: string;
+    refund_threshold?: number;
+  }): {
     period: { start_date?: string; end_date?: string };
     total_income: number;
     transaction_count: number;
@@ -3062,7 +3127,7 @@ export class CopilotMoneyTools {
     }>;
     transactions: Array<Transaction & { category_name?: string }>;
   } {
-    const { period } = options;
+    const { period, refund_threshold = DEFAULT_REFUND_THRESHOLD } = options;
     let { start_date, end_date } = options;
 
     // If period is specified, parse it to start/end dates
@@ -3119,7 +3184,7 @@ export class CopilotMoneyTools {
             merchant.includes('SPOTIFY') ||
             merchant.includes('APPLE.COM') ||
             merchant.includes('GOOGLE')) &&
-          Math.abs(txn.amount) < 500; // Small amounts from these merchants are likely refunds
+          Math.abs(txn.amount) < refund_threshold; // Small amounts from these merchants are likely refunds
 
         return !isLikelyRefund;
       }
@@ -4211,6 +4276,7 @@ export class CopilotMoneyTools {
     start_date?: string;
     end_date?: string;
     threshold_multiplier?: number;
+    large_transaction_threshold?: number;
   }): {
     period: { start_date?: string; end_date?: string };
     count: number;
@@ -4223,7 +4289,11 @@ export class CopilotMoneyTools {
       }
     >;
   } {
-    const { period, threshold_multiplier = 2 } = options;
+    const {
+      period,
+      threshold_multiplier = 2,
+      large_transaction_threshold = DEFAULT_LARGE_TRANSACTION_THRESHOLD,
+    } = options;
     let { start_date, end_date } = options;
 
     if (period) {
@@ -4335,6 +4405,10 @@ export class CopilotMoneyTools {
       } else if (!isAnomaly && txn.amount >= LARGE_TRANSACTION_THRESHOLD) {
         isAnomaly = true;
         reason = `Large transaction (>=$${LARGE_TRANSACTION_THRESHOLD.toLocaleString()})`;
+      } else if (!isAnomaly && txn.amount > large_transaction_threshold) {
+        // User-configurable threshold for flagging smaller large transactions
+        isAnomaly = true;
+        reason = `Large transaction (>$${large_transaction_threshold})`;
       }
 
       if (isAnomaly) {
@@ -4766,6 +4840,8 @@ export class CopilotMoneyTools {
     transaction_limit?: number;
     issues_limit?: number;
     issues_offset?: number;
+    foreign_large_amount_threshold?: number;
+    round_amount_threshold?: number;
   }): {
     period: { start_date?: string; end_date?: string };
     analysis_metadata: {
@@ -4850,7 +4926,11 @@ export class CopilotMoneyTools {
       }>;
     };
   } {
-    const { period } = options;
+    const {
+      period,
+      foreign_large_amount_threshold = DEFAULT_FOREIGN_LARGE_AMOUNT_THRESHOLD,
+      round_amount_threshold = DEFAULT_ROUND_AMOUNT_THRESHOLD,
+    } = options;
     let { start_date, end_date } = options;
 
     // Validate and apply limits
@@ -4962,7 +5042,7 @@ export class CopilotMoneyTools {
         /\b[A-Z]{2}\b/.test(merchant); // Two-letter country codes
 
       // Suspiciously large transaction with foreign merchant
-      if (hasForeignIndicator && amount > 1000 && currency === 'USD') {
+      if (hasForeignIndicator && amount > foreign_large_amount_threshold && currency === 'USD') {
         suspiciousCurrencyTransactions.push({
           transaction_id: txn.transaction_id,
           date: txn.date,
@@ -4974,7 +5054,7 @@ export class CopilotMoneyTools {
       }
 
       // Extremely round numbers that match typical foreign exchange rates
-      if (amount > 500 && amount % 1000 < 10 && hasForeignIndicator) {
+      if (amount > round_amount_threshold && amount % 1000 < 10 && hasForeignIndicator) {
         suspiciousCurrencyTransactions.push({
           transaction_id: txn.transaction_id,
           date: txn.date,
@@ -8811,6 +8891,7 @@ export class CopilotMoneyTools {
       account_id?: string;
       months?: number;
       granularity?: 'daily' | 'weekly' | 'monthly';
+      trend_threshold?: number;
     } = {}
   ): {
     months_analyzed: number;
@@ -8834,7 +8915,12 @@ export class CopilotMoneyTools {
       stable_accounts: number;
     };
   } {
-    const { account_id, months = 6, granularity = 'monthly' } = options;
+    const {
+      account_id,
+      months = 6,
+      granularity = 'monthly',
+      trend_threshold = DEFAULT_TREND_THRESHOLD,
+    } = options;
 
     const accounts = this.db.getAccounts();
     const transactions = this.db.getTransactions();
@@ -8921,10 +9007,10 @@ export class CopilotMoneyTools {
       const avgMonthlyChange = trends.length > 0 ? totalNetChange / Math.max(months, 1) : 0;
 
       let overallTrend: 'growing' | 'declining' | 'stable' = 'stable';
-      if (avgMonthlyChange > 100) {
+      if (avgMonthlyChange > trend_threshold) {
         overallTrend = 'growing';
         growingCount++;
-      } else if (avgMonthlyChange < -100) {
+      } else if (avgMonthlyChange < -trend_threshold) {
         overallTrend = 'declining';
         decliningCount++;
       } else {
@@ -10428,6 +10514,11 @@ export function createToolSchemas(): ToolSchema[] {
             description: 'End date (YYYY-MM-DD)',
             pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
+          refund_threshold: {
+            type: 'number',
+            description:
+              'Maximum amount from common retail merchants to consider as a refund rather than income (default: 500)',
+          },
         },
       },
       annotations: {
@@ -10551,7 +10642,7 @@ export function createToolSchemas(): ToolSchema[] {
       name: 'get_unusual_transactions',
       description:
         'Detect unusual/anomalous transactions. Flags transactions significantly above ' +
-        'average for that merchant or category. Also flags large transactions >$1000.',
+        'average for that merchant or category. Also flags large transactions above a configurable threshold.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -10573,6 +10664,11 @@ export function createToolSchemas(): ToolSchema[] {
             type: 'number',
             description: 'Number of standard deviations above average to flag (default: 2)',
             default: 2,
+          },
+          large_transaction_threshold: {
+            type: 'number',
+            description:
+              'Transaction amount above which to flag as a large transaction anomaly (default: 1000)',
           },
         },
       },
@@ -10670,6 +10766,16 @@ export function createToolSchemas(): ToolSchema[] {
               'Use with issues_limit to page through results.',
             default: 0,
             minimum: 0,
+          },
+          foreign_large_amount_threshold: {
+            type: 'number',
+            description:
+              'Amount threshold for flagging large transactions with foreign merchant indicators (default: 1000)',
+          },
+          round_amount_threshold: {
+            type: 'number',
+            description:
+              'Amount threshold for flagging suspiciously round foreign amounts (default: 500)',
           },
         },
       },
@@ -10870,6 +10976,11 @@ export function createToolSchemas(): ToolSchema[] {
             type: 'integer',
             description: 'Alert threshold percentage (default: 80)',
           },
+          budget_recommendation_threshold: {
+            type: 'number',
+            description:
+              'Minimum spending amount in a category to recommend creating a budget (default: 100)',
+          },
         },
         required: ['analysis'],
       },
@@ -11069,6 +11180,11 @@ export function createToolSchemas(): ToolSchema[] {
           account_type: {
             type: 'string',
             description: 'Filter by account type',
+          },
+          trend_threshold: {
+            type: 'number',
+            description:
+              'Monthly change amount threshold for classifying account trends as growing/declining (default: 100)',
           },
         },
         required: ['analysis'],
