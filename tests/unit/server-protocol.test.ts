@@ -173,7 +173,7 @@ describe('CopilotMoneyServer.handleListTools', () => {
     for (const expected of expectedTools) {
       expect(actualNames).toContain(expected);
     }
-    expect(response.tools.length).toBe(23);
+    expect(response.tools.length).toBe(24);
   });
 
   test('tool schemas have valid JSON schema format', () => {

@@ -21,3 +21,5 @@ export {
 export { CategorySchema, type Category } from './category.js';
 
 export { RecurringSchema, type Recurring, getRecurringDisplayName } from './recurring.js';
+
+export { BalanceHistorySchema, type BalanceHistory } from './balance_history.js';

@@ -565,9 +565,9 @@ describe('CopilotMoneyTools', () => {
 });
 
 describe('createToolSchemas', () => {
-  test('returns 23 tool schemas', () => {
+  test('returns 24 tool schemas', () => {
     const schemas = createToolSchemas();
-    expect(schemas).toHaveLength(23);
+    expect(schemas).toHaveLength(24);
   });
 
   test('all tools have readOnlyHint: true', () => {
@@ -2950,6 +2950,113 @@ describe('New MCP Tools', () => {
         t.name?.includes('Uncategorized Purchase')
       );
       expect(uncategorized).toBeDefined();
+    });
+  });
+
+  describe('getBalanceHistory', () => {
+    test('returns all balance history entries when no filters applied', () => {
+      // Add mock balance history data
+      (db as any)._balanceHistory = [
+        { account_id: 'acc1', date: '2024-01-15', balance: 1500.0, iso_currency_code: 'USD' },
+        { account_id: 'acc1', date: '2024-02-15', balance: 1600.0, iso_currency_code: 'USD' },
+        { account_id: 'acc2', date: '2024-01-15', balance: 500.0, iso_currency_code: 'USD' },
+      ];
+
+      const result = tools.getBalanceHistory({});
+
+      expect(result.count).toBe(3);
+      expect(result.entries.length).toBe(3);
+      expect(result.date_range.earliest).toBe('2024-01-15');
+      expect(result.date_range.latest).toBe('2024-02-15');
+    });
+
+    test('filters by account_id correctly', () => {
+      (db as any)._balanceHistory = [
+        { account_id: 'acc1', date: '2024-01-15', balance: 1500.0, iso_currency_code: 'USD' },
+        { account_id: 'acc1', date: '2024-02-15', balance: 1600.0, iso_currency_code: 'USD' },
+        { account_id: 'acc2', date: '2024-01-15', balance: 500.0, iso_currency_code: 'USD' },
+      ];
+
+      const result = tools.getBalanceHistory({ account_id: 'acc1' });
+
+      expect(result.count).toBe(2);
+      expect(result.entries.every((e) => e.account_id === 'acc1')).toBe(true);
+    });
+
+    test('filters by start_date correctly', () => {
+      (db as any)._balanceHistory = [
+        { account_id: 'acc1', date: '2024-01-15', balance: 1500.0, iso_currency_code: 'USD' },
+        { account_id: 'acc1', date: '2024-02-15', balance: 1600.0, iso_currency_code: 'USD' },
+        { account_id: 'acc1', date: '2024-03-15', balance: 1700.0, iso_currency_code: 'USD' },
+      ];
+
+      const result = tools.getBalanceHistory({ start_date: '2024-02-01' });
+
+      expect(result.count).toBe(2);
+      expect(result.entries.every((e) => e.date >= '2024-02-01')).toBe(true);
+    });
+
+    test('filters by end_date correctly', () => {
+      (db as any)._balanceHistory = [
+        { account_id: 'acc1', date: '2024-01-15', balance: 1500.0, iso_currency_code: 'USD' },
+        { account_id: 'acc1', date: '2024-02-15', balance: 1600.0, iso_currency_code: 'USD' },
+        { account_id: 'acc1', date: '2024-03-15', balance: 1700.0, iso_currency_code: 'USD' },
+      ];
+
+      const result = tools.getBalanceHistory({ end_date: '2024-02-28' });
+
+      expect(result.count).toBe(2);
+      expect(result.entries.every((e) => e.date <= '2024-02-28')).toBe(true);
+    });
+
+    test('validates start_date format', () => {
+      (db as any)._balanceHistory = [
+        { account_id: 'acc1', date: '2024-01-15', balance: 1500.0, iso_currency_code: 'USD' },
+      ];
+
+      expect(() => {
+        tools.getBalanceHistory({ start_date: '01/15/2024' });
+      }).toThrow('start_date must be in YYYY-MM-DD format');
+    });
+
+    test('validates end_date format', () => {
+      (db as any)._balanceHistory = [
+        { account_id: 'acc1', date: '2024-01-15', balance: 1500.0, iso_currency_code: 'USD' },
+      ];
+
+      expect(() => {
+        tools.getBalanceHistory({ end_date: '02/28/2024' });
+      }).toThrow('end_date must be in YYYY-MM-DD format');
+    });
+
+    test('returns empty result for no matches', () => {
+      (db as any)._balanceHistory = [
+        { account_id: 'acc1', date: '2024-01-15', balance: 1500.0, iso_currency_code: 'USD' },
+      ];
+
+      const result = tools.getBalanceHistory({ account_id: 'nonexistent' });
+
+      expect(result.count).toBe(0);
+      expect(result.entries).toEqual([]);
+      expect(result.date_range.earliest).toBeUndefined();
+      expect(result.date_range.latest).toBeUndefined();
+    });
+
+    test('combines multiple filters correctly', () => {
+      (db as any)._balanceHistory = [
+        { account_id: 'acc1', date: '2024-01-15', balance: 1500.0, iso_currency_code: 'USD' },
+        { account_id: 'acc1', date: '2024-02-15', balance: 1600.0, iso_currency_code: 'USD' },
+        { account_id: 'acc2', date: '2024-02-15', balance: 500.0, iso_currency_code: 'USD' },
+      ];
+
+      const result = tools.getBalanceHistory({
+        account_id: 'acc1',
+        start_date: '2024-02-01',
+      });
+
+      expect(result.count).toBe(1);
+      expect(result.entries[0].account_id).toBe('acc1');
+      expect(result.entries[0].date).toBe('2024-02-15');
     });
   });
 
