@@ -400,18 +400,20 @@ export class CopilotMoneyTools {
       limit: 50000, // High limit for aggregation
     });
 
-    // Filter out transfers if requested
+    // Filter out transfers if requested (check both category and internal_transfer flag)
     if (exclude_transfers) {
-      transactions = transactions.filter((txn) => !isTransferCategory(txn.category_id));
+      transactions = transactions.filter(
+        (txn) => !isTransferCategory(txn.category_id) && !txn.internal_transfer
+      );
     }
 
-    // Aggregate by category
+    // Aggregate by category (always exclude internal transfers from spending)
     const categorySpending: Map<string, number> = new Map();
     const categoryCounts: Map<string, number> = new Map();
 
     for (const txn of transactions) {
-      // Only count positive amounts (expenses)
-      if (txn.amount > 0) {
+      // Only count positive amounts (expenses), skip internal transfers
+      if (txn.amount > 0 && !txn.internal_transfer) {
         const cat = txn.category_id || 'Uncategorized';
         categorySpending.set(cat, (categorySpending.get(cat) || 0) + txn.amount);
         categoryCounts.set(cat, (categoryCounts.get(cat) || 0) + 1);
@@ -917,20 +919,22 @@ export class CopilotMoneyTools {
       limit: 50000,
     });
 
-    // Filter out transfers if requested
+    // Filter out transfers if requested (check both category and internal_transfer flag)
     if (exclude_transfers) {
-      transactions = transactions.filter((txn) => !isTransferCategory(txn.category_id));
+      transactions = transactions.filter(
+        (txn) => !isTransferCategory(txn.category_id) && !txn.internal_transfer
+      );
     }
 
-    // Aggregate by merchant
+    // Aggregate by merchant (always exclude internal transfers from spending)
     const merchantSpending = new Map<
       string,
       { total: number; count: number; categoryId?: string }
     >();
 
     for (const txn of transactions) {
-      // Only count positive amounts (expenses)
-      if (txn.amount <= 0) continue;
+      // Only count positive amounts (expenses), skip internal transfers
+      if (txn.amount <= 0 || txn.internal_transfer) continue;
 
       const merchantName = getTransactionDisplayName(txn);
       const existing = merchantSpending.get(merchantName) || {
@@ -1506,8 +1510,11 @@ export class CopilotMoneyTools {
       limit: 50000,
     });
 
+    // Filter out transfers if requested (check both category and internal_transfer flag)
     if (exclude_transfers) {
-      transactions = transactions.filter((txn) => !isTransferCategory(txn.category_id));
+      transactions = transactions.filter(
+        (txn) => !isTransferCategory(txn.category_id) && !txn.internal_transfer
+      );
     }
 
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -1518,7 +1525,8 @@ export class CopilotMoneyTools {
     }
 
     for (const txn of transactions) {
-      if (txn.amount <= 0) continue; // Only count expenses
+      // Only count expenses, skip internal transfers
+      if (txn.amount <= 0 || txn.internal_transfer) continue;
       const dayOfWeek = new Date(txn.date + 'T12:00:00').getDay();
       const stats = dayStats.get(dayOfWeek);
       if (!stats) continue;
@@ -1846,8 +1854,11 @@ export class CopilotMoneyTools {
       limit: 50000,
     });
 
+    // Filter out transfers if requested (check both category and internal_transfer flag)
     if (exclude_transfers) {
-      transactions = transactions.filter((txn) => !isTransferCategory(txn.category_id));
+      transactions = transactions.filter(
+        (txn) => !isTransferCategory(txn.category_id) && !txn.internal_transfer
+      );
     }
 
     const merchantStats = new Map<
@@ -1862,7 +1873,8 @@ export class CopilotMoneyTools {
     >();
 
     for (const txn of transactions) {
-      if (txn.amount <= 0) continue;
+      // Only count expenses, skip internal transfers
+      if (txn.amount <= 0 || txn.internal_transfer) continue;
       const merchant = getTransactionDisplayName(txn);
       const existing = merchantStats.get(merchant) || {
         total: 0,
@@ -2326,8 +2338,11 @@ export class CopilotMoneyTools {
       limit: 50000,
     });
 
+    // Filter out transfers if requested (check both category and internal_transfer flag)
     if (exclude_transfers) {
-      transactions = transactions.filter((txn) => !isTransferCategory(txn.category_id));
+      transactions = transactions.filter(
+        (txn) => !isTransferCategory(txn.category_id) && !txn.internal_transfer
+      );
     }
 
     // Calculate period stats
@@ -2342,21 +2357,22 @@ export class CopilotMoneyTools {
       daysInPeriod
     );
 
+    // Always exclude internal transfers from spending calculations
     const totalSpending = transactions
-      .filter((txn) => txn.amount > 0)
+      .filter((txn) => txn.amount > 0 && !txn.internal_transfer)
       .reduce((sum, txn) => sum + txn.amount, 0);
 
     const dailyAverage = daysElapsed > 0 ? totalSpending / daysElapsed : 0;
     const weeklyAverage = dailyAverage * 7;
     const projectedMonthlyTotal = dailyAverage * 30;
 
-    // Weekly breakdown
+    // Weekly breakdown (exclude internal transfers)
     const weeklyTotals = new Map<
       string,
       { start: string; end: string; total: number; days: number }
     >();
     for (const txn of transactions) {
-      if (txn.amount <= 0) continue;
+      if (txn.amount <= 0 || txn.internal_transfer) continue;
       const txnDate = new Date(txn.date + 'T12:00:00');
       const weekStart = new Date(txnDate);
       weekStart.setDate(txnDate.getDate() - txnDate.getDay());
@@ -2868,8 +2884,11 @@ export class CopilotMoneyTools {
         limit: 50000,
       });
 
+      // Filter out transfers if requested (check both category and internal_transfer flag)
       if (exclude_transfers) {
-        transactions = transactions.filter((txn) => !isTransferCategory(txn.category_id));
+        transactions = transactions.filter(
+          (txn) => !isTransferCategory(txn.category_id) && !txn.internal_transfer
+        );
       }
 
       let spending = 0;
@@ -2877,11 +2896,12 @@ export class CopilotMoneyTools {
       const byCategory = new Map<string, number>();
 
       for (const txn of transactions) {
-        if (txn.amount > 0) {
+        // Always exclude internal transfers from spending calculations
+        if (txn.amount > 0 && !txn.internal_transfer) {
           spending += txn.amount;
           const cat = txn.category_id || 'Uncategorized';
           byCategory.set(cat, (byCategory.get(cat) || 0) + txn.amount);
-        } else {
+        } else if (txn.amount < 0) {
           income += Math.abs(txn.amount);
         }
       }

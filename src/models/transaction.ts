@@ -45,6 +45,11 @@ export const TransactionSchema = z
     pending_transaction_id: z.string().optional(),
     user_reviewed: z.boolean().optional(),
     plaid_deleted: z.boolean().optional(),
+    excluded: z.boolean().optional(), // True if excluded from spending calculations
+    internal_transfer: z.boolean().optional(), // True if this is an internal transfer between accounts
+
+    // Transaction type
+    transaction_type: z.string().optional(), // "place", "special", "digital", etc.
 
     // Payment info
     payment_method: z.string().optional(),

@@ -36,11 +36,21 @@ afterEach(() => {
 });
 
 /**
+ * Helper to create a length-prefixed field name.
+ * Format: 0x0a + length + field_name_bytes
+ */
+function fieldPattern(name: string): Buffer {
+  return Buffer.from([0x0a, name.length, ...Buffer.from(name)]);
+}
+
+/**
  * Helper to create a string field in protobuf-like format.
- * Format: field_name + 0x8a 0x01 + length + string_bytes
+ * Format: 0x0a + name_length + field_name + 0x8a 0x01 + value_length + value_bytes
+ * If fieldName is a Buffer (pre-formatted), it's used as-is.
+ * If fieldName is a string, it's converted to length-prefixed format.
  */
 function createStringField(fieldName: string | Buffer, value: string): Buffer {
-  const nameBuffer = Buffer.isBuffer(fieldName) ? fieldName : Buffer.from(fieldName);
+  const nameBuffer = Buffer.isBuffer(fieldName) ? fieldName : fieldPattern(fieldName);
   const valueBuffer = Buffer.from(value, 'utf-8');
   return Buffer.concat([nameBuffer, Buffer.from([0x8a, 0x01, valueBuffer.length]), valueBuffer]);
 }
@@ -58,10 +68,10 @@ function createDoubleField(value: number): Buffer {
 
 /**
  * Helper to create a boolean field in protobuf-like format.
- * Format: field_name + 0x08 + boolean_byte
+ * Format: 0x0a + name_length + field_name + 0x08 + boolean_byte
  */
 function createBooleanField(fieldName: string | Buffer, value: boolean): Buffer {
-  const nameBuffer = Buffer.isBuffer(fieldName) ? fieldName : Buffer.from(fieldName);
+  const nameBuffer = Buffer.isBuffer(fieldName) ? fieldName : fieldPattern(fieldName);
   return Buffer.concat([nameBuffer, Buffer.from([0x08, value ? 0x01 : 0x00])]);
 }
 
@@ -178,12 +188,12 @@ describe('Decoder Main Functions', () => {
         FIELD_PREFIXES.amount,
         createDoubleField(125.5),
         createStringField(FIELD_PREFIXES.name, 'Test Store'),
-        createStringField(Buffer.from('original_date'), '2024-01-15'),
-        createStringField(Buffer.from('category_id'), 'cat_123'),
-        createStringField(Buffer.from('account_id'), 'acc_456'),
-        createStringField(Buffer.from('transaction_id'), 'txn_789'),
-        createStringField(Buffer.from('iso_currency_code'), 'USD'),
-        createBooleanField(Buffer.from('pending'), false),
+        createStringField('original_date', '2024-01-15'),
+        createStringField('category_id', 'cat_123'),
+        createStringField('account_id', 'acc_456'),
+        createStringField('transaction_id', 'txn_789'),
+        createStringField('iso_currency_code', 'USD'),
+        createBooleanField('pending', false),
         createStringField(FIELD_PREFIXES.city, 'San Francisco'),
         createStringField(FIELD_PREFIXES.region, 'CA'),
       ]);
@@ -213,8 +223,8 @@ describe('Decoder Main Functions', () => {
         FIELD_PREFIXES.amount,
         createDoubleField(50.0),
         createStringField(FIELD_PREFIXES.name, 'Pending Store'),
-        createStringField(Buffer.from('original_date'), '2024-02-20'),
-        createStringField(Buffer.from('transaction_id'), 'txn_pending'),
+        createStringField('original_date', '2024-02-20'),
+        createStringField('transaction_id', 'txn_pending'),
       ]);
       fs.writeFileSync(ldbFile, data);
 
@@ -234,8 +244,8 @@ describe('Decoder Main Functions', () => {
         FIELD_PREFIXES.amount,
         createDoubleField(75.25),
         createStringField(FIELD_PREFIXES.name, 'Valid Store Name'),
-        createStringField(Buffer.from('original_date'), '2024-03-10'),
-        createStringField(Buffer.from('transaction_id'), 'txn_original'),
+        createStringField('original_date', '2024-03-10'),
+        createStringField('transaction_id', 'txn_original'),
       ]);
       fs.writeFileSync(ldbFile, data);
 
@@ -257,8 +267,8 @@ describe('Decoder Main Functions', () => {
           FIELD_PREFIXES.amount,
           createDoubleField(100.0),
           createStringField(FIELD_PREFIXES.name, 'Duplicate Store'),
-          createStringField(Buffer.from('original_date'), '2024-04-01'),
-          createStringField(Buffer.from('transaction_id'), id),
+          createStringField('original_date', '2024-04-01'),
+          createStringField('transaction_id', id),
         ]);
 
       const ldbFile = path.join(tempDir, 'test.ldb');
@@ -282,8 +292,8 @@ describe('Decoder Main Functions', () => {
           FIELD_PREFIXES.amount,
           createDoubleField(amount),
           createStringField(FIELD_PREFIXES.name, `Store ${id}`),
-          createStringField(Buffer.from('original_date'), date),
-          createStringField(Buffer.from('transaction_id'), id),
+          createStringField('original_date', date),
+          createStringField('transaction_id', id),
         ]);
 
       // Use separate files for cleaner separation
@@ -311,7 +321,7 @@ describe('Decoder Main Functions', () => {
         FIELD_PREFIXES.amount,
         createDoubleField(100.0),
         createStringField(FIELD_PREFIXES.name, 'Missing ID Store'),
-        createStringField(Buffer.from('original_date'), '2024-05-01'),
+        createStringField('original_date', '2024-05-01'),
         // No transaction_id
       ]);
       fs.writeFileSync(ldbFile, data);
@@ -331,8 +341,8 @@ describe('Decoder Main Functions', () => {
         FIELD_PREFIXES.amount,
         createDoubleField(999_999_999.0), // > 10_000_000
         createStringField(FIELD_PREFIXES.name, 'High Amount Store'),
-        createStringField(Buffer.from('original_date'), '2024-06-01'),
-        createStringField(Buffer.from('transaction_id'), 'txn_high'),
+        createStringField('original_date', '2024-06-01'),
+        createStringField('transaction_id', 'txn_high'),
       ]);
       fs.writeFileSync(ldbFile, data);
 
@@ -351,8 +361,8 @@ describe('Decoder Main Functions', () => {
         FIELD_PREFIXES.amount,
         createDoubleField(-999_999_999.0), // < -10_000_000
         createStringField(FIELD_PREFIXES.name, 'Low Amount Store'),
-        createStringField(Buffer.from('original_date'), '2024-06-02'),
-        createStringField(Buffer.from('transaction_id'), 'txn_low'),
+        createStringField('original_date', '2024-06-02'),
+        createStringField('transaction_id', 'txn_low'),
       ]);
       fs.writeFileSync(ldbFile, data);
 
@@ -371,8 +381,8 @@ describe('Decoder Main Functions', () => {
         FIELD_PREFIXES.amount,
         createDoubleField(-250.75),
         createStringField(FIELD_PREFIXES.name, 'Refund Store'),
-        createStringField(Buffer.from('original_date'), '2024-07-01'),
-        createStringField(Buffer.from('transaction_id'), 'txn_neg'),
+        createStringField('original_date', '2024-07-01'),
+        createStringField('transaction_id', 'txn_neg'),
       ]);
       fs.writeFileSync(ldbFile, data);
 
@@ -392,8 +402,8 @@ describe('Decoder Main Functions', () => {
           FIELD_PREFIXES.amount,
           createDoubleField(amount),
           createStringField(FIELD_PREFIXES.name, `Store ${id}`),
-          createStringField(Buffer.from('original_date'), '2024-08-01'),
-          createStringField(Buffer.from('transaction_id'), id),
+          createStringField('original_date', '2024-08-01'),
+          createStringField('transaction_id', id),
         ]);
 
       fs.writeFileSync(path.join(tempDir, 'file1.ldb'), createTxn('txn_file1', 100.0));
@@ -415,8 +425,8 @@ describe('Decoder Main Functions', () => {
         FIELD_PREFIXES.amount,
         createDoubleField(50.0),
         createStringField(FIELD_PREFIXES.name, 'Valid Name'),
-        createStringField(Buffer.from('original_date'), '2024-09-01'),
-        createStringField(Buffer.from('transaction_id'), 'txn_valid'),
+        createStringField('original_date', '2024-09-01'),
+        createStringField('transaction_id', 'txn_valid'),
       ]);
       fs.writeFileSync(ldbFile, data);
 
@@ -441,8 +451,8 @@ describe('Decoder Main Functions', () => {
         Buffer.from([0x8a, 0x01, 150]),
         Buffer.alloc(150, 0x41), // 150 'A' characters
         // Valid transaction_id and date
-        createStringField(Buffer.from('original_date'), '2024-10-01'),
-        createStringField(Buffer.from('transaction_id'), 'txn_long'),
+        createStringField('original_date', '2024-10-01'),
+        createStringField('transaction_id', 'txn_long'),
       ]);
       fs.writeFileSync(ldbFile, data);
 
@@ -462,8 +472,8 @@ describe('Decoder Main Functions', () => {
           FIELD_PREFIXES.amount,
           createDoubleField(amount),
           createStringField(FIELD_PREFIXES.name, `Store ${id}`),
-          createStringField(Buffer.from('original_date'), date),
-          createStringField(Buffer.from('transaction_id'), id),
+          createStringField('original_date', date),
+          createStringField('transaction_id', id),
           Buffer.alloc(100), // Padding to separate records
         ]);
 
@@ -537,12 +547,12 @@ describe('Decoder Main Functions', () => {
         Buffer.from('current_balance'),
         createDoubleField(5000.5),
         createStringField(FIELD_PREFIXES.name, 'Checking Account'),
-        createStringField(Buffer.from('official_name'), 'Primary Checking Account'),
+        createStringField('official_name', 'Primary Checking Account'),
         createStringField(FIELD_PREFIXES.type, 'depository'),
-        createStringField(Buffer.from('subtype'), 'checking'),
+        createStringField('subtype', 'checking'),
         createStringField(FIELD_PREFIXES.mask, '4567'),
-        createStringField(Buffer.from('institution_name'), 'Test Bank'),
-        createStringField(Buffer.from('account_id'), 'acc_123'),
+        createStringField('institution_name', 'Test Bank'),
+        createStringField('account_id', 'acc_123'),
       ]);
       fs.writeFileSync(ldbFile, data);
 
@@ -567,8 +577,8 @@ describe('Decoder Main Functions', () => {
         Buffer.from('/accounts/'),
         Buffer.from('current_balance'),
         createDoubleField(2500.0),
-        createStringField(Buffer.from('official_name'), 'Official Savings Account'),
-        createStringField(Buffer.from('account_id'), 'acc_official'),
+        createStringField('official_name', 'Official Savings Account'),
+        createStringField('account_id', 'acc_official'),
       ]);
       fs.writeFileSync(ldbFile, data);
 
@@ -588,7 +598,7 @@ describe('Decoder Main Functions', () => {
           createDoubleField(1000.0),
           createStringField(FIELD_PREFIXES.name, 'Duplicate Account'),
           createStringField(FIELD_PREFIXES.mask, '1234'),
-          createStringField(Buffer.from('account_id'), id),
+          createStringField('account_id', id),
         ]);
 
       const ldbFile = path.join(tempDir, 'test.ldb');
@@ -609,7 +619,7 @@ describe('Decoder Main Functions', () => {
         Buffer.from('/accounts/'),
         Buffer.from('current_balance'),
         createDoubleField(3000.0),
-        createStringField(Buffer.from('account_id'), 'acc_no_name'),
+        createStringField('account_id', 'acc_no_name'),
       ]);
       fs.writeFileSync(ldbFile, data);
 
@@ -645,7 +655,7 @@ describe('Decoder Main Functions', () => {
         // No valid double value tag
         Buffer.from([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
         createStringField(FIELD_PREFIXES.name, 'Null Balance Account'),
-        createStringField(Buffer.from('account_id'), 'acc_null'),
+        createStringField('account_id', 'acc_null'),
       ]);
       fs.writeFileSync(ldbFile, data);
 
@@ -663,7 +673,7 @@ describe('Decoder Main Functions', () => {
         Buffer.from('current_balance'),
         createDoubleField(-500.25),
         createStringField(FIELD_PREFIXES.name, 'Overdrawn Account'),
-        createStringField(Buffer.from('account_id'), 'acc_neg'),
+        createStringField('account_id', 'acc_neg'),
       ]);
       fs.writeFileSync(ldbFile, data);
 
@@ -682,7 +692,7 @@ describe('Decoder Main Functions', () => {
           Buffer.from('current_balance'),
           createDoubleField(balance),
           createStringField(FIELD_PREFIXES.name, name),
-          createStringField(Buffer.from('account_id'), id),
+          createStringField('account_id', id),
         ]);
 
       fs.writeFileSync(path.join(tempDir, 'file1.ldb'), createAcc('acc_1', 'Account 1', 1000.0));
@@ -702,7 +712,7 @@ describe('Decoder Main Functions', () => {
           Buffer.from('current_balance'),
           createDoubleField(balance),
           createStringField(FIELD_PREFIXES.name, name),
-          createStringField(Buffer.from('account_id'), id),
+          createStringField('account_id', id),
         ]);
 
       // Use separate files for cleaner separation
@@ -733,7 +743,7 @@ describe('Decoder Main Functions', () => {
           Buffer.from('current_balance'),
           createDoubleField(1500.0),
           createStringField(FIELD_PREFIXES.name, 'No Mask Account'),
-          createStringField(Buffer.from('account_id'), id),
+          createStringField('account_id', id),
           // No mask field
         ]);
 
@@ -816,8 +826,8 @@ describe('Decoder Main Functions', () => {
         FIELD_PREFIXES.amount,
         createDoubleField(123.456789), // Should round to 123.46
         createStringField(FIELD_PREFIXES.name, 'Round Store'),
-        createStringField(Buffer.from('original_date'), '2024-12-01'),
-        createStringField(Buffer.from('transaction_id'), 'txn_round'),
+        createStringField('original_date', '2024-12-01'),
+        createStringField('transaction_id', 'txn_round'),
       ]);
       fs.writeFileSync(ldbFile, data);
 
@@ -836,7 +846,7 @@ describe('Decoder Main Functions', () => {
         Buffer.from('current_balance'),
         createDoubleField(9999.999), // Should round to 10000
         createStringField(FIELD_PREFIXES.name, 'Round Balance Account'),
-        createStringField(Buffer.from('account_id'), 'acc_round'),
+        createStringField('account_id', 'acc_round'),
       ]);
       fs.writeFileSync(ldbFile, data);
 
@@ -856,8 +866,8 @@ describe('Decoder Main Functions', () => {
         FIELD_PREFIXES.amount,
         createDoubleField(50.0),
         createStringField(FIELD_PREFIXES.name, 'Minimal Store'),
-        createStringField(Buffer.from('original_date'), '2024-12-15'),
-        createStringField(Buffer.from('transaction_id'), 'txn_minimal'),
+        createStringField('original_date', '2024-12-15'),
+        createStringField('transaction_id', 'txn_minimal'),
       ]);
       fs.writeFileSync(ldbFile, data);
 
@@ -877,8 +887,8 @@ describe('Decoder Main Functions', () => {
         FIELD_PREFIXES.amount,
         createDoubleField(88.88),
         createStringField(FIELD_PREFIXES.name, 'Café Münich'),
-        createStringField(Buffer.from('original_date'), '2024-12-20'),
-        createStringField(Buffer.from('transaction_id'), 'txn_unicode'),
+        createStringField('original_date', '2024-12-20'),
+        createStringField('transaction_id', 'txn_unicode'),
       ]);
       fs.writeFileSync(ldbFile, data);
 
@@ -899,8 +909,8 @@ describe('Decoder Main Functions', () => {
         FIELD_PREFIXES.amount,
         createDoubleField(100.0),
         createStringField(FIELD_PREFIXES.name, 'Valid Name'),
-        createStringField(Buffer.from('original_date'), 'not-a-valid-date'),
-        createStringField(Buffer.from('transaction_id'), ''),
+        createStringField('original_date', 'not-a-valid-date'),
+        createStringField('transaction_id', ''),
       ]);
       fs.writeFileSync(ldbFile, data);
 

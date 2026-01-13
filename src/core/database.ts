@@ -13,12 +13,81 @@ import { Account, Transaction, Category, getTransactionDisplayName } from '../mo
 import { getCategoryName } from '../utils/categories.js';
 
 /**
+ * Find Copilot Money database by searching known locations.
+ * Returns the first valid path found, or undefined if none found.
+ */
+function findCopilotDatabase(): string | undefined {
+  const home = homedir();
+
+  // Known possible locations for Copilot Money database (macOS)
+  const possiblePaths = [
+    // Current known location
+    join(
+      home,
+      'Library/Containers/com.copilot.production/Data/Library',
+      'Application Support/firestore/__FIRAPP_DEFAULT',
+      'copilot-production-22904/main'
+    ),
+    // Alternative Firestore paths
+    join(
+      home,
+      'Library/Containers/com.copilot.production/Data/Library',
+      'Application Support/Copilot/FirestoreDB/data'
+    ),
+    // Potential future locations
+    join(home, 'Library/Application Support/Copilot/FirestoreDB/data'),
+    join(home, 'Library/Containers/com.copilot.production/Data/Documents/FirestoreDB'),
+  ];
+
+  // Also try to dynamically find paths matching patterns
+  const containerBase = join(
+    home,
+    'Library/Containers/com.copilot.production/Data/Library/Application Support'
+  );
+  if (existsSync(containerBase)) {
+    try {
+      // Look for firestore directories
+      const firestorePath = join(containerBase, 'firestore/__FIRAPP_DEFAULT');
+      if (existsSync(firestorePath)) {
+        const entries = readdirSync(firestorePath, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.isDirectory() && entry.name.startsWith('copilot-')) {
+            const mainPath = join(firestorePath, entry.name, 'main');
+            if (existsSync(mainPath)) {
+              possiblePaths.unshift(mainPath); // Add to front as highest priority
+            }
+          }
+        }
+      }
+    } catch {
+      // Ignore errors during dynamic discovery
+    }
+  }
+
+  // Check each path for validity (contains .ldb files)
+  for (const path of possiblePaths) {
+    try {
+      if (existsSync(path)) {
+        const files = readdirSync(path);
+        if (files.some((file) => file.endsWith('.ldb'))) {
+          return path;
+        }
+      }
+    } catch {
+      // Continue to next path
+    }
+  }
+
+  return undefined;
+}
+
+/**
  * Abstraction layer for querying Copilot Money data.
  *
  * Wraps the decoder and provides filtering capabilities.
  */
 export class CopilotDatabase {
-  private dbPath: string;
+  private dbPath: string | undefined;
   private _transactions: Transaction[] | null = null;
   private _accounts: Account[] | null = null;
 
@@ -26,20 +95,27 @@ export class CopilotDatabase {
    * Initialize database connection.
    *
    * @param dbPath - Path to LevelDB database directory.
-   *                If undefined, uses default Copilot Money location.
+   *                If undefined, auto-detects Copilot Money location.
    */
   constructor(dbPath?: string) {
-    if (!dbPath) {
-      // Default Copilot Money location (macOS)
-      dbPath = join(
-        homedir(),
-        'Library/Containers/com.copilot.production/Data/Library',
-        'Application Support/firestore/__FIRAPP_DEFAULT',
-        'copilot-production-22904/main'
+    if (dbPath) {
+      this.dbPath = dbPath;
+    } else {
+      // Auto-detect database location
+      this.dbPath = findCopilotDatabase();
+    }
+  }
+
+  /**
+   * Get the database path, throwing if not available.
+   */
+  private requireDbPath(): string {
+    if (!this.dbPath) {
+      throw new Error(
+        'Database not found. Please ensure Copilot Money is installed and has synced data.'
       );
     }
-
-    this.dbPath = dbPath;
+    return this.dbPath;
   }
 
   /**
@@ -47,7 +123,7 @@ export class CopilotDatabase {
    */
   isAvailable(): boolean {
     try {
-      if (!existsSync(this.dbPath)) {
+      if (!this.dbPath || !existsSync(this.dbPath)) {
         return false;
       }
 
@@ -98,7 +174,7 @@ export class CopilotDatabase {
 
     // Lazy load transactions
     if (this._transactions === null) {
-      this._transactions = decodeTransactions(this.dbPath);
+      this._transactions = decodeTransactions(this.requireDbPath());
     }
 
     let result = [...this._transactions];
@@ -156,7 +232,7 @@ export class CopilotDatabase {
   searchTransactions(query: string, limit = 50): Transaction[] {
     // Lazy load transactions
     if (this._transactions === null) {
-      this._transactions = decodeTransactions(this.dbPath);
+      this._transactions = decodeTransactions(this.requireDbPath());
     }
 
     const queryLower = query.toLowerCase();
@@ -178,7 +254,7 @@ export class CopilotDatabase {
   getAccounts(accountType?: string): Account[] {
     // Lazy load accounts
     if (this._accounts === null) {
-      this._accounts = decodeAccounts(this.dbPath);
+      this._accounts = decodeAccounts(this.requireDbPath());
     }
 
     let result = [...this._accounts];
@@ -211,7 +287,7 @@ export class CopilotDatabase {
   getCategories(): Category[] {
     // Load transactions
     if (this._transactions === null) {
-      this._transactions = decodeTransactions(this.dbPath);
+      this._transactions = decodeTransactions(this.requireDbPath());
     }
 
     // Extract unique category IDs and count transactions
@@ -251,15 +327,15 @@ export class CopilotDatabase {
   getAllTransactions(): Transaction[] {
     // Lazy load transactions
     if (this._transactions === null) {
-      this._transactions = decodeTransactions(this.dbPath);
+      this._transactions = decodeTransactions(this.requireDbPath());
     }
     return [...this._transactions];
   }
 
   /**
-   * Get database path.
+   * Get database path, or undefined if not found.
    */
-  getDbPath(): string {
+  getDbPath(): string | undefined {
     return this.dbPath;
   }
 }
