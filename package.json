@@ -52,7 +52,7 @@
     "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\"",
     "typecheck": "tsc --noEmit",
-    "check": "bun run typecheck && bun run lint && bun run format:check && bun run test",
+    "check": "bun run typecheck && bun run lint && bun run format:check && bun test --bail",
     "sync-manifest": "bun run scripts/sync-manifest.ts",
     "audit-reviews": "bun run scripts/audit-pr-reviews.ts",
     "audit-reviews:dry": "bun run scripts/audit-pr-reviews.ts --dry-run",
