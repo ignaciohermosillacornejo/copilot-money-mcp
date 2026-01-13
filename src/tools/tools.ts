@@ -5942,6 +5942,813 @@ export class CopilotMoneyTools {
       },
     };
   }
+
+  // ============================================
+  // PHASE 12.4: GOAL ANALYTICS TOOLS
+  // ============================================
+
+  /**
+   * Get goal projections with multiple scenarios.
+   *
+   * Projects when goals will be achieved under different contribution scenarios
+   * (conservative, moderate, aggressive).
+   *
+   * @param options - Filter options
+   * @returns Object with goal projection data
+   */
+  getGoalProjection(options: { goal_id?: string } = {}): {
+    count: number;
+    goals: Array<{
+      goal_id: string;
+      name?: string;
+      target_amount: number;
+      current_amount: number;
+      remaining_amount: number;
+      progress_percent: number;
+      historical_monthly_contribution: number;
+      projections: {
+        conservative: {
+          monthly_contribution: number;
+          months_to_complete: number;
+          estimated_date: string;
+        } | null;
+        moderate: {
+          monthly_contribution: number;
+          months_to_complete: number;
+          estimated_date: string;
+        } | null;
+        aggressive: {
+          monthly_contribution: number;
+          months_to_complete: number;
+          estimated_date: string;
+        } | null;
+      };
+      status?: string;
+    }>;
+    summary: {
+      all_on_track: number;
+      needs_attention: number;
+      average_progress: number;
+    };
+  } {
+    const { goal_id } = options;
+
+    const goals = this.db.getGoals(false);
+    let filteredGoals = goals;
+
+    if (goal_id) {
+      filteredGoals = goals.filter((g) => g.goal_id === goal_id);
+    }
+
+    // Process each goal
+    const projections: Array<{
+      goal_id: string;
+      name?: string;
+      target_amount: number;
+      current_amount: number;
+      remaining_amount: number;
+      progress_percent: number;
+      historical_monthly_contribution: number;
+      projections: {
+        conservative: {
+          monthly_contribution: number;
+          months_to_complete: number;
+          estimated_date: string;
+        } | null;
+        moderate: {
+          monthly_contribution: number;
+          months_to_complete: number;
+          estimated_date: string;
+        } | null;
+        aggressive: {
+          monthly_contribution: number;
+          months_to_complete: number;
+          estimated_date: string;
+        } | null;
+      };
+      status?: string;
+    }> = [];
+
+    let totalProgress = 0;
+    let onTrackCount = 0;
+    let needsAttentionCount = 0;
+
+    for (const goal of filteredGoals) {
+      const targetAmount = goal.savings?.target_amount || 0;
+      if (targetAmount <= 0) continue;
+
+      // Get historical data
+      const history = this.db.getGoalHistory(goal.goal_id, { limit: 12 });
+
+      let currentAmount = 0;
+      let historicalContribution = 0;
+
+      if (history.length > 0) {
+        currentAmount = history[0]?.current_amount ?? 0;
+
+        // Calculate historical average contribution
+        if (history.length >= 2) {
+          const sorted = [...history].sort((a, b) => a.month.localeCompare(b.month));
+          const contributions: number[] = [];
+
+          for (let i = 1; i < sorted.length; i++) {
+            const curr = sorted[i]?.current_amount ?? 0;
+            const prev = sorted[i - 1]?.current_amount ?? 0;
+            if (curr > prev) {
+              contributions.push(curr - prev);
+            }
+          }
+
+          if (contributions.length > 0) {
+            historicalContribution =
+              contributions.reduce((a, b) => a + b, 0) / contributions.length;
+          }
+        }
+      }
+
+      const remaining = Math.max(0, targetAmount - currentAmount);
+      const progressPercent = (currentAmount / targetAmount) * 100;
+      totalProgress += progressPercent;
+
+      // Calculate projections for each scenario
+      const calculateProjection = (monthlyAmount: number) => {
+        if (monthlyAmount <= 0 || remaining <= 0) return null;
+
+        const months = Math.ceil(remaining / monthlyAmount);
+        const today = new Date();
+        const targetDate = new Date(today.getFullYear(), today.getMonth() + months, 1);
+        const year = targetDate.getFullYear();
+        const month = String(targetDate.getMonth() + 1).padStart(2, '0');
+
+        return {
+          monthly_contribution: Math.round(monthlyAmount * 100) / 100,
+          months_to_complete: months,
+          estimated_date: `${year}-${month}`,
+        };
+      };
+
+      // Conservative: 80% of historical rate
+      // Moderate: historical rate
+      // Aggressive: 120% of historical rate or planned contribution
+      const plannedContribution = goal.savings?.tracking_type_monthly_contribution || 0;
+      const baseContribution = Math.max(historicalContribution, plannedContribution);
+
+      const conservative = calculateProjection(baseContribution * 0.8);
+      const moderate = calculateProjection(baseContribution);
+      const aggressive = calculateProjection(Math.max(baseContribution * 1.2, plannedContribution));
+
+      // Determine if on track
+      if (moderate && moderate.months_to_complete <= 24) {
+        onTrackCount++;
+      } else {
+        needsAttentionCount++;
+      }
+
+      projections.push({
+        goal_id: goal.goal_id,
+        name: goal.name,
+        target_amount: Math.round(targetAmount * 100) / 100,
+        current_amount: Math.round(currentAmount * 100) / 100,
+        remaining_amount: Math.round(remaining * 100) / 100,
+        progress_percent: Math.round(progressPercent * 10) / 10,
+        historical_monthly_contribution: Math.round(historicalContribution * 100) / 100,
+        projections: {
+          conservative,
+          moderate,
+          aggressive,
+        },
+        status: goal.savings?.status,
+      });
+    }
+
+    return {
+      count: projections.length,
+      goals: projections,
+      summary: {
+        all_on_track: onTrackCount,
+        needs_attention: needsAttentionCount,
+        average_progress:
+          projections.length > 0 ? Math.round((totalProgress / projections.length) * 10) / 10 : 0,
+      },
+    };
+  }
+
+  /**
+   * Get goal milestones progress.
+   *
+   * Tracks milestone achievements (25%, 50%, 75%, 100%) for each goal.
+   *
+   * @param options - Filter options
+   * @returns Object with milestone data
+   */
+  getGoalMilestones(options: { goal_id?: string } = {}): {
+    count: number;
+    goals: Array<{
+      goal_id: string;
+      name?: string;
+      target_amount: number;
+      current_amount: number;
+      progress_percent: number;
+      milestones: {
+        milestone_25: { achieved: boolean; achieved_date?: string; amount: number };
+        milestone_50: { achieved: boolean; achieved_date?: string; amount: number };
+        milestone_75: { achieved: boolean; achieved_date?: string; amount: number };
+        milestone_100: { achieved: boolean; achieved_date?: string; amount: number };
+      };
+      next_milestone: {
+        percentage: number;
+        amount_needed: number;
+      } | null;
+      status?: string;
+    }>;
+    summary: {
+      total_milestones_achieved: number;
+      goals_at_25: number;
+      goals_at_50: number;
+      goals_at_75: number;
+      goals_complete: number;
+    };
+  } {
+    const { goal_id } = options;
+
+    const goals = this.db.getGoals(false);
+    let filteredGoals = goals;
+
+    if (goal_id) {
+      filteredGoals = goals.filter((g) => g.goal_id === goal_id);
+    }
+
+    const milestoneData: Array<{
+      goal_id: string;
+      name?: string;
+      target_amount: number;
+      current_amount: number;
+      progress_percent: number;
+      milestones: {
+        milestone_25: { achieved: boolean; achieved_date?: string; amount: number };
+        milestone_50: { achieved: boolean; achieved_date?: string; amount: number };
+        milestone_75: { achieved: boolean; achieved_date?: string; amount: number };
+        milestone_100: { achieved: boolean; achieved_date?: string; amount: number };
+      };
+      next_milestone: {
+        percentage: number;
+        amount_needed: number;
+      } | null;
+      status?: string;
+    }> = [];
+
+    let totalMilestonesAchieved = 0;
+    let goalsAt25 = 0;
+    let goalsAt50 = 0;
+    let goalsAt75 = 0;
+    let goalsComplete = 0;
+
+    for (const goal of filteredGoals) {
+      const targetAmount = goal.savings?.target_amount || 0;
+      if (targetAmount <= 0) continue;
+
+      // Get history to find milestone dates
+      const history = this.db.getGoalHistory(goal.goal_id, { limit: 24 });
+      const sortedHistory = [...history].sort((a, b) => a.month.localeCompare(b.month));
+
+      let currentAmount = 0;
+      if (history.length > 0) {
+        const latestHistory = history.sort((a, b) => b.month.localeCompare(a.month))[0];
+        currentAmount = latestHistory?.current_amount ?? 0;
+      }
+
+      const progressPercent = (currentAmount / targetAmount) * 100;
+
+      // Calculate milestone amounts
+      const milestone25Amount = targetAmount * 0.25;
+      const milestone50Amount = targetAmount * 0.5;
+      const milestone75Amount = targetAmount * 0.75;
+      const milestone100Amount = targetAmount;
+
+      // Find when milestones were achieved
+      const findMilestoneDate = (threshold: number): string | undefined => {
+        for (const h of sortedHistory) {
+          if ((h.current_amount ?? 0) >= threshold) {
+            return h.month;
+          }
+        }
+        return undefined;
+      };
+
+      const milestone25Achieved = currentAmount >= milestone25Amount;
+      const milestone50Achieved = currentAmount >= milestone50Amount;
+      const milestone75Achieved = currentAmount >= milestone75Amount;
+      const milestone100Achieved = currentAmount >= milestone100Amount;
+
+      // Count milestones
+      if (milestone25Achieved) totalMilestonesAchieved++;
+      if (milestone50Achieved) totalMilestonesAchieved++;
+      if (milestone75Achieved) totalMilestonesAchieved++;
+      if (milestone100Achieved) totalMilestonesAchieved++;
+
+      // Track goals at each milestone level
+      if (milestone100Achieved) goalsComplete++;
+      else if (milestone75Achieved) goalsAt75++;
+      else if (milestone50Achieved) goalsAt50++;
+      else if (milestone25Achieved) goalsAt25++;
+
+      // Determine next milestone
+      let nextMilestone: { percentage: number; amount_needed: number } | null = null;
+      if (!milestone25Achieved) {
+        nextMilestone = {
+          percentage: 25,
+          amount_needed: Math.round((milestone25Amount - currentAmount) * 100) / 100,
+        };
+      } else if (!milestone50Achieved) {
+        nextMilestone = {
+          percentage: 50,
+          amount_needed: Math.round((milestone50Amount - currentAmount) * 100) / 100,
+        };
+      } else if (!milestone75Achieved) {
+        nextMilestone = {
+          percentage: 75,
+          amount_needed: Math.round((milestone75Amount - currentAmount) * 100) / 100,
+        };
+      } else if (!milestone100Achieved) {
+        nextMilestone = {
+          percentage: 100,
+          amount_needed: Math.round((milestone100Amount - currentAmount) * 100) / 100,
+        };
+      }
+
+      milestoneData.push({
+        goal_id: goal.goal_id,
+        name: goal.name,
+        target_amount: Math.round(targetAmount * 100) / 100,
+        current_amount: Math.round(currentAmount * 100) / 100,
+        progress_percent: Math.round(progressPercent * 10) / 10,
+        milestones: {
+          milestone_25: {
+            achieved: milestone25Achieved,
+            achieved_date: milestone25Achieved ? findMilestoneDate(milestone25Amount) : undefined,
+            amount: Math.round(milestone25Amount * 100) / 100,
+          },
+          milestone_50: {
+            achieved: milestone50Achieved,
+            achieved_date: milestone50Achieved ? findMilestoneDate(milestone50Amount) : undefined,
+            amount: Math.round(milestone50Amount * 100) / 100,
+          },
+          milestone_75: {
+            achieved: milestone75Achieved,
+            achieved_date: milestone75Achieved ? findMilestoneDate(milestone75Amount) : undefined,
+            amount: Math.round(milestone75Amount * 100) / 100,
+          },
+          milestone_100: {
+            achieved: milestone100Achieved,
+            achieved_date: milestone100Achieved ? findMilestoneDate(milestone100Amount) : undefined,
+            amount: Math.round(milestone100Amount * 100) / 100,
+          },
+        },
+        next_milestone: nextMilestone,
+        status: goal.savings?.status,
+      });
+    }
+
+    return {
+      count: milestoneData.length,
+      goals: milestoneData,
+      summary: {
+        total_milestones_achieved: totalMilestonesAchieved,
+        goals_at_25: goalsAt25,
+        goals_at_50: goalsAt50,
+        goals_at_75: goalsAt75,
+        goals_complete: goalsComplete,
+      },
+    };
+  }
+
+  /**
+   * Get goals at risk of not being achieved.
+   *
+   * Identifies goals that are behind schedule or at risk based on
+   * contribution patterns and remaining time.
+   *
+   * @param options - Filter options
+   * @returns Object with at-risk goal data
+   */
+  getGoalsAtRisk(
+    options: {
+      months_lookback?: number;
+      risk_threshold?: number;
+    } = {}
+  ): {
+    count: number;
+    at_risk_count: number;
+    goals: Array<{
+      goal_id: string;
+      name?: string;
+      target_amount: number;
+      current_amount: number;
+      remaining_amount: number;
+      progress_percent: number;
+      risk_level: 'low' | 'medium' | 'high' | 'critical';
+      risk_factors: string[];
+      historical_monthly_contribution: number;
+      required_monthly_contribution: number;
+      contribution_gap: number;
+      estimated_completion?: string;
+      status?: string;
+    }>;
+    summary: {
+      critical_count: number;
+      high_risk_count: number;
+      medium_risk_count: number;
+      low_risk_count: number;
+      average_contribution_gap: number;
+    };
+  } {
+    const { months_lookback = 6, risk_threshold = 50 } = options;
+
+    const goals = this.db.getGoals(false);
+    const activeGoals = goals.filter((g) => g.savings?.status === 'active');
+
+    const atRiskGoals: Array<{
+      goal_id: string;
+      name?: string;
+      target_amount: number;
+      current_amount: number;
+      remaining_amount: number;
+      progress_percent: number;
+      risk_level: 'low' | 'medium' | 'high' | 'critical';
+      risk_factors: string[];
+      historical_monthly_contribution: number;
+      required_monthly_contribution: number;
+      contribution_gap: number;
+      estimated_completion?: string;
+      status?: string;
+    }> = [];
+
+    let criticalCount = 0;
+    let highRiskCount = 0;
+    let mediumRiskCount = 0;
+    let lowRiskCount = 0;
+    let totalGap = 0;
+
+    for (const goal of activeGoals) {
+      const targetAmount = goal.savings?.target_amount || 0;
+      if (targetAmount <= 0) continue;
+
+      const plannedMonthlyContribution = goal.savings?.tracking_type_monthly_contribution || 0;
+
+      // Get history
+      const history = this.db.getGoalHistory(goal.goal_id, { limit: months_lookback });
+
+      let currentAmount = 0;
+      let historicalContribution = 0;
+
+      if (history.length > 0) {
+        currentAmount =
+          history.sort((a, b) => b.month.localeCompare(a.month))[0]?.current_amount ?? 0;
+
+        // Calculate historical average
+        if (history.length >= 2) {
+          const sorted = [...history].sort((a, b) => a.month.localeCompare(b.month));
+          const contributions: number[] = [];
+
+          for (let i = 1; i < sorted.length; i++) {
+            const curr = sorted[i]?.current_amount ?? 0;
+            const prev = sorted[i - 1]?.current_amount ?? 0;
+            contributions.push(curr - prev);
+          }
+
+          if (contributions.length > 0) {
+            historicalContribution =
+              contributions.reduce((a, b) => a + b, 0) / contributions.length;
+          }
+        }
+      }
+
+      const remaining = Math.max(0, targetAmount - currentAmount);
+      const progressPercent = (currentAmount / targetAmount) * 100;
+
+      // Calculate required monthly contribution for 12-month completion
+      const requiredMonthly = remaining / 12;
+
+      // Calculate contribution gap
+      const contributionGap =
+        plannedMonthlyContribution > 0
+          ? plannedMonthlyContribution - historicalContribution
+          : requiredMonthly - historicalContribution;
+
+      totalGap += Math.max(0, contributionGap);
+
+      // Determine risk factors and level
+      const riskFactors: string[] = [];
+      let riskScore = 0;
+
+      // Factor 1: Contribution gap
+      if (historicalContribution < requiredMonthly * 0.5) {
+        riskFactors.push('Contributions significantly below required pace');
+        riskScore += 40;
+      } else if (historicalContribution < requiredMonthly * 0.8) {
+        riskFactors.push('Contributions below required pace');
+        riskScore += 20;
+      }
+
+      // Factor 2: Progress below expected
+      const expectedProgress = (months_lookback / 24) * 100; // Assuming 2-year goal
+      if (progressPercent < expectedProgress * 0.5) {
+        riskFactors.push('Progress significantly behind schedule');
+        riskScore += 30;
+      } else if (progressPercent < expectedProgress * 0.8) {
+        riskFactors.push('Progress slightly behind schedule');
+        riskScore += 15;
+      }
+
+      // Factor 3: No contributions in recent months
+      if (historicalContribution <= 0) {
+        riskFactors.push('No recent contributions detected');
+        riskScore += 25;
+      }
+
+      // Factor 4: Large remaining amount
+      if (remaining > targetAmount * 0.8) {
+        riskFactors.push('Large amount still remaining');
+        riskScore += 10;
+      }
+
+      // Determine risk level
+      let riskLevel: 'low' | 'medium' | 'high' | 'critical' = 'low';
+      if (riskScore >= 60) {
+        riskLevel = 'critical';
+        criticalCount++;
+      } else if (riskScore >= 40) {
+        riskLevel = 'high';
+        highRiskCount++;
+      } else if (riskScore >= 20) {
+        riskLevel = 'medium';
+        mediumRiskCount++;
+      } else {
+        riskLevel = 'low';
+        lowRiskCount++;
+      }
+
+      // Only include goals above risk threshold
+      if (riskScore >= risk_threshold || progressPercent < 50) {
+        // Calculate estimated completion
+        let estimatedCompletion: string | undefined;
+        if (historicalContribution > 0 && remaining > 0) {
+          const months = Math.ceil(remaining / historicalContribution);
+          const today = new Date();
+          const targetDate = new Date(today.getFullYear(), today.getMonth() + months, 1);
+          estimatedCompletion = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}`;
+        }
+
+        atRiskGoals.push({
+          goal_id: goal.goal_id,
+          name: goal.name,
+          target_amount: Math.round(targetAmount * 100) / 100,
+          current_amount: Math.round(currentAmount * 100) / 100,
+          remaining_amount: Math.round(remaining * 100) / 100,
+          progress_percent: Math.round(progressPercent * 10) / 10,
+          risk_level: riskLevel,
+          risk_factors: riskFactors,
+          historical_monthly_contribution: Math.round(historicalContribution * 100) / 100,
+          required_monthly_contribution: Math.round(requiredMonthly * 100) / 100,
+          contribution_gap: Math.round(Math.max(0, contributionGap) * 100) / 100,
+          estimated_completion: estimatedCompletion,
+          status: goal.savings?.status,
+        });
+      }
+    }
+
+    // Sort by risk level (critical first)
+    const riskOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+    atRiskGoals.sort((a, b) => riskOrder[a.risk_level] - riskOrder[b.risk_level]);
+
+    return {
+      count: activeGoals.length,
+      at_risk_count: atRiskGoals.length,
+      goals: atRiskGoals,
+      summary: {
+        critical_count: criticalCount,
+        high_risk_count: highRiskCount,
+        medium_risk_count: mediumRiskCount,
+        low_risk_count: lowRiskCount,
+        average_contribution_gap:
+          atRiskGoals.length > 0 ? Math.round((totalGap / atRiskGoals.length) * 100) / 100 : 0,
+      },
+    };
+  }
+
+  /**
+   * Get goal recommendations based on analysis.
+   *
+   * Suggests actions to improve goal achievement chances.
+   *
+   * @param options - Filter options
+   * @returns Object with goal recommendations
+   */
+  getGoalRecommendations(options: { goal_id?: string } = {}): {
+    count: number;
+    recommendations: Array<{
+      goal_id: string;
+      goal_name?: string;
+      recommendation_type:
+        | 'increase_contribution'
+        | 'adjust_target'
+        | 'extend_timeline'
+        | 'celebrate_progress'
+        | 'start_contributing';
+      priority: 'high' | 'medium' | 'low';
+      title: string;
+      description: string;
+      current_value?: number;
+      suggested_value?: number;
+      impact: string;
+    }>;
+    summary: {
+      high_priority_count: number;
+      medium_priority_count: number;
+      low_priority_count: number;
+      goals_needing_attention: number;
+      goals_on_track: number;
+    };
+  } {
+    const { goal_id } = options;
+
+    const goals = this.db.getGoals(false);
+    let filteredGoals = goals;
+
+    if (goal_id) {
+      filteredGoals = goals.filter((g) => g.goal_id === goal_id);
+    }
+
+    const recommendations: Array<{
+      goal_id: string;
+      goal_name?: string;
+      recommendation_type:
+        | 'increase_contribution'
+        | 'adjust_target'
+        | 'extend_timeline'
+        | 'celebrate_progress'
+        | 'start_contributing';
+      priority: 'high' | 'medium' | 'low';
+      title: string;
+      description: string;
+      current_value?: number;
+      suggested_value?: number;
+      impact: string;
+    }> = [];
+
+    let highPriorityCount = 0;
+    let mediumPriorityCount = 0;
+    let lowPriorityCount = 0;
+    let needsAttentionCount = 0;
+    let onTrackCount = 0;
+
+    for (const goal of filteredGoals) {
+      const targetAmount = goal.savings?.target_amount || 0;
+      if (targetAmount <= 0) continue;
+
+      const plannedContribution = goal.savings?.tracking_type_monthly_contribution || 0;
+
+      // Get history
+      const history = this.db.getGoalHistory(goal.goal_id, { limit: 6 });
+
+      let currentAmount = 0;
+      let historicalContribution = 0;
+
+      if (history.length > 0) {
+        currentAmount =
+          history.sort((a, b) => b.month.localeCompare(a.month))[0]?.current_amount ?? 0;
+
+        if (history.length >= 2) {
+          const sorted = [...history].sort((a, b) => a.month.localeCompare(b.month));
+          const contributions: number[] = [];
+
+          for (let i = 1; i < sorted.length; i++) {
+            const curr = sorted[i]?.current_amount ?? 0;
+            const prev = sorted[i - 1]?.current_amount ?? 0;
+            if (curr > prev) contributions.push(curr - prev);
+          }
+
+          if (contributions.length > 0) {
+            historicalContribution =
+              contributions.reduce((a, b) => a + b, 0) / contributions.length;
+          }
+        }
+      }
+
+      const progressPercent = (currentAmount / targetAmount) * 100;
+      const remaining = targetAmount - currentAmount;
+
+      // Generate recommendations based on analysis
+
+      // 1. No contributions detected
+      if (historicalContribution <= 0 && progressPercent < 100) {
+        recommendations.push({
+          goal_id: goal.goal_id,
+          goal_name: goal.name,
+          recommendation_type: 'start_contributing',
+          priority: 'high',
+          title: 'Start Contributing',
+          description: `No contributions detected for "${goal.name || 'this goal'}". Set up automatic transfers to make progress.`,
+          current_value: 0,
+          suggested_value: Math.round((remaining / 12) * 100) / 100,
+          impact: 'Essential to make any progress toward this goal',
+        });
+        highPriorityCount++;
+        needsAttentionCount++;
+        continue;
+      }
+
+      // 2. Contributions below planned amount
+      if (plannedContribution > 0 && historicalContribution < plannedContribution * 0.8) {
+        recommendations.push({
+          goal_id: goal.goal_id,
+          goal_name: goal.name,
+          recommendation_type: 'increase_contribution',
+          priority: 'high',
+          title: 'Increase Contributions',
+          description: `Contributing $${Math.round(historicalContribution)} vs planned $${plannedContribution}/month. Increase to stay on track.`,
+          current_value: Math.round(historicalContribution * 100) / 100,
+          suggested_value: Math.round(plannedContribution * 100) / 100,
+          impact: `Will help reach goal ${Math.round((plannedContribution / historicalContribution - 1) * 100)}% faster`,
+        });
+        highPriorityCount++;
+        needsAttentionCount++;
+      }
+      // 3. Progress above 75% - celebrate
+      else if (progressPercent >= 75 && progressPercent < 100) {
+        recommendations.push({
+          goal_id: goal.goal_id,
+          goal_name: goal.name,
+          recommendation_type: 'celebrate_progress',
+          priority: 'low',
+          title: 'Great Progress!',
+          description: `You're ${Math.round(progressPercent)}% of the way to "${goal.name || 'your goal'}". Keep up the momentum!`,
+          current_value: Math.round(currentAmount * 100) / 100,
+          impact: `Only $${Math.round(remaining * 100) / 100} left to reach your goal`,
+        });
+        lowPriorityCount++;
+        onTrackCount++;
+      }
+      // 4. Slow progress - suggest smaller target
+      else if (progressPercent < 25 && history.length >= 6 && historicalContribution > 0) {
+        const achievableTarget = currentAmount + historicalContribution * 24;
+        if (achievableTarget < targetAmount * 0.7) {
+          recommendations.push({
+            goal_id: goal.goal_id,
+            goal_name: goal.name,
+            recommendation_type: 'adjust_target',
+            priority: 'medium',
+            title: 'Consider Adjusting Target',
+            description: `At current pace, you'll reach $${Math.round(achievableTarget)} in 2 years. Consider a more achievable target.`,
+            current_value: Math.round(targetAmount * 100) / 100,
+            suggested_value: Math.round(achievableTarget * 100) / 100,
+            impact: 'Makes the goal more achievable and motivating',
+          });
+          mediumPriorityCount++;
+          needsAttentionCount++;
+        }
+      }
+      // 5. Good progress - continue
+      else if (progressPercent >= 25 && progressPercent < 75) {
+        // Check if on track for 24-month completion
+        const monthsToComplete =
+          historicalContribution > 0 ? remaining / historicalContribution : Infinity;
+
+        if (monthsToComplete <= 24) {
+          onTrackCount++;
+        } else {
+          recommendations.push({
+            goal_id: goal.goal_id,
+            goal_name: goal.name,
+            recommendation_type: 'extend_timeline',
+            priority: 'medium',
+            title: 'Adjust Timeline Expectations',
+            description: `At current pace, "${goal.name || 'this goal'}" will take ${Math.round(monthsToComplete)} months. Consider extending your timeline or increasing contributions.`,
+            current_value: Math.round(historicalContribution * 100) / 100,
+            suggested_value: Math.round((remaining / 24) * 100) / 100,
+            impact: `Increasing to $${Math.round((remaining / 24) * 100) / 100}/month achieves goal in 2 years`,
+          });
+          mediumPriorityCount++;
+        }
+      }
+    }
+
+    // Sort by priority
+    const priorityOrder = { high: 0, medium: 1, low: 2 };
+    recommendations.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
+
+    return {
+      count: recommendations.length,
+      recommendations,
+      summary: {
+        high_priority_count: highPriorityCount,
+        medium_priority_count: mediumPriorityCount,
+        low_priority_count: lowPriorityCount,
+        goals_needing_attention: needsAttentionCount,
+        goals_on_track: onTrackCount,
+      },
+    };
+  }
 }
 
 /**
@@ -7464,6 +8271,88 @@ export function createToolSchemas(): ToolSchema[] {
           account_id: {
             type: 'string',
             description: 'Filter by specific account ID',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+
+    // ---- Goal Analytics ----
+    {
+      name: 'get_goal_projection',
+      description:
+        'Get goal projections with multiple scenarios (conservative, moderate, aggressive). ' +
+        'Shows estimated completion dates based on different contribution rates. ' +
+        'Useful for planning and understanding goal achievement timelines.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          goal_id: {
+            type: 'string',
+            description: 'Filter by specific goal ID',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_goal_milestones',
+      description:
+        'Track goal milestone achievements (25%, 50%, 75%, 100%). ' +
+        'Shows when milestones were achieved and what the next milestone requires. ' +
+        'Useful for celebrating progress and staying motivated.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          goal_id: {
+            type: 'string',
+            description: 'Filter by specific goal ID',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_goals_at_risk',
+      description:
+        'Identify goals at risk of not being achieved. ' +
+        'Analyzes contribution patterns and flags goals with critical/high/medium risk. ' +
+        'Shows risk factors and required contributions to get back on track.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          months_lookback: {
+            type: 'integer',
+            description: 'Number of months to analyze (default: 6)',
+          },
+          risk_threshold: {
+            type: 'integer',
+            description: 'Minimum risk score to include (default: 50)',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_goal_recommendations',
+      description:
+        'Get personalized recommendations to improve goal progress. ' +
+        'Suggests increasing contributions, adjusting targets, or celebrating milestones. ' +
+        'Prioritizes recommendations by urgency and impact.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          goal_id: {
+            type: 'string',
+            description: 'Filter by specific goal ID',
           },
         },
       },

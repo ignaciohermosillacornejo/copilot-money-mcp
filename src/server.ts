@@ -442,6 +442,34 @@ export class CopilotMoneyServer {
           );
           break;
 
+        // ============================================
+        // PHASE 12.4: GOAL ANALYTICS TOOLS
+        // ============================================
+
+        case 'get_goal_projection':
+          result = this.tools.getGoalProjection(
+            (typedArgs as Parameters<typeof this.tools.getGoalProjection>[0]) || {}
+          );
+          break;
+
+        case 'get_goal_milestones':
+          result = this.tools.getGoalMilestones(
+            (typedArgs as Parameters<typeof this.tools.getGoalMilestones>[0]) || {}
+          );
+          break;
+
+        case 'get_goals_at_risk':
+          result = this.tools.getGoalsAtRisk(
+            (typedArgs as Parameters<typeof this.tools.getGoalsAtRisk>[0]) || {}
+          );
+          break;
+
+        case 'get_goal_recommendations':
+          result = this.tools.getGoalRecommendations(
+            (typedArgs as Parameters<typeof this.tools.getGoalRecommendations>[0]) || {}
+          );
+          break;
+
         default:
           return {
             content: [
