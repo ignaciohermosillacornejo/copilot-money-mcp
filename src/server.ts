@@ -8,19 +8,12 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
+  CallToolResult,
   ListToolsRequestSchema,
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import { CopilotDatabase } from './core/database.js';
 import { CopilotMoneyTools, createToolSchemas } from './tools/index.js';
-
-/**
- * Response type for tool calls.
- */
-export interface ToolResponse {
-  content: Array<{ type: 'text'; text: string }>;
-  isError?: boolean;
-}
 
 /**
  * MCP server for Copilot Money data.
@@ -77,7 +70,7 @@ export class CopilotMoneyServer {
    * @param name - Tool name
    * @param typedArgs - Tool arguments
    */
-  handleCallTool(name: string, typedArgs?: Record<string, unknown>): ToolResponse {
+  handleCallTool(name: string, typedArgs?: Record<string, unknown>): CallToolResult {
     // Check if database is available
     if (!this.db.isAvailable()) {
       return {
@@ -311,7 +304,7 @@ export class CopilotMoneyServer {
     this.server.setRequestHandler(ListToolsRequestSchema, () => this.handleListTools());
 
     // Handle tool calls - delegates to handleCallTool
-    this.server.setRequestHandler(CallToolRequestSchema, (request) => {
+    this.server.setRequestHandler(CallToolRequestSchema, (request, _extra) => {
       const { name, arguments: typedArgs } = request.params;
       return this.handleCallTool(name, typedArgs as Record<string, unknown> | undefined);
     });

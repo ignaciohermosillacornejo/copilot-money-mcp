@@ -2579,13 +2579,15 @@ export class CopilotMoneyTools {
     >();
 
     for (const account of allAccounts) {
-      const key = `${account.name}|${account.type}`;
+      const accountName = account.name || account.official_name || 'Unknown';
+      const accountType = account.account_type || 'unknown';
+      const key = `${accountName}|${accountType}`;
       const existing = accountsByNameAndType.get(key) || [];
       existing.push({
         id: account.account_id,
-        name: account.name,
-        type: account.type,
-        balance: account.balance || 0,
+        name: accountName,
+        type: accountType,
+        balance: account.current_balance || 0,
       });
       accountsByNameAndType.set(key, existing);
     }
