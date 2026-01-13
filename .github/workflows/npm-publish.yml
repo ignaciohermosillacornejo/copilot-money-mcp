@@ -1,0 +1,86 @@
+name: Publish to npm
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Perform a dry run (do not actually publish)'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  BUN_VERSION: 'latest'
+
+permissions:
+  contents: read
+  id-token: write  # Required for npm OIDC trusted publishing
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Audit dependencies for vulnerabilities
+        run: npm audit --audit-level=high
+        continue-on-error: true  # Don't fail on vulnerabilities, but log them
+
+      - name: Run type checking
+        run: bun run typecheck
+
+      - name: Run linting
+        run: bun run lint
+
+      - name: Run tests
+        run: bun test
+
+      - name: Build package
+        run: bun run build
+
+      - name: Verify dist files
+        run: |
+          echo "Checking dist directory contents:"
+          ls -la dist/
+          if [ ! -f dist/cli.js ]; then
+            echo "Error: dist/cli.js not found"
+            exit 1
+          fi
+
+      - name: Check if version already exists on npm
+        run: |
+          PACKAGE_NAME=$(node -p "require('./package.json').name")
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          echo "Checking if $PACKAGE_NAME@$PACKAGE_VERSION exists on npm..."
+          if npm view "$PACKAGE_NAME@$PACKAGE_VERSION" version 2>/dev/null; then
+            echo "Error: Version $PACKAGE_VERSION already exists on npm"
+            exit 1
+          fi
+          echo "Version $PACKAGE_VERSION is available for publishing"
+
+      - name: Publish to npm (dry run)
+        if: github.event.inputs.dry_run == 'true'
+        run: npm publish --dry-run --verbose
+
+      - name: Publish to npm
+        if: github.event.inputs.dry_run != 'true'
+        run: npm publish --provenance --access public --verbose

@@ -35,6 +35,10 @@
     "LICENSE",
     "PRIVACY.md"
   ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "dev": "bun run src/server.ts",
     "dev:debug": "bun --inspect run src/server.ts",
