@@ -96,29 +96,81 @@ export class CopilotMoneyServer {
           );
           break;
 
-        case 'search_transactions': {
-          const query = typedArgs?.query;
-          if (typeof query !== 'string') {
-            throw new Error('Missing required parameter: query');
-          }
-          result = this.tools.searchTransactions(query, {
-            limit: typedArgs?.limit as number | undefined,
-            period: typedArgs?.period as string | undefined,
-            start_date: typedArgs?.start_date as string | undefined,
-            end_date: typedArgs?.end_date as string | undefined,
-          });
-          break;
-        }
-
         case 'get_accounts':
           result = this.tools.getAccounts(typedArgs?.account_type as string | undefined);
           break;
 
-        case 'get_spending_by_category':
-          result = this.tools.getSpendingByCategory(
-            (typedArgs as Parameters<typeof this.tools.getSpendingByCategory>[0]) || {}
+        case 'get_spending': {
+          const groupBy = typedArgs?.group_by;
+          if (typeof groupBy !== 'string') {
+            throw new Error('Missing required parameter: group_by');
+          }
+          result = this.tools.getSpending(
+            typedArgs as Parameters<typeof this.tools.getSpending>[0]
           );
           break;
+        }
+
+        case 'get_account_analytics': {
+          const analysis = typedArgs?.analysis;
+          if (typeof analysis !== 'string') {
+            throw new Error('Missing required parameter: analysis');
+          }
+          result = this.tools.getAccountAnalytics(
+            typedArgs as Parameters<typeof this.tools.getAccountAnalytics>[0]
+          );
+          break;
+        }
+
+        case 'get_budget_analytics': {
+          const analysis = typedArgs?.analysis;
+          if (typeof analysis !== 'string') {
+            throw new Error('Missing required parameter: analysis');
+          }
+          result = this.tools.getBudgetAnalytics(
+            typedArgs as Parameters<typeof this.tools.getBudgetAnalytics>[0]
+          );
+          break;
+        }
+
+        case 'get_goal_analytics': {
+          const analysis = typedArgs?.analysis;
+          if (typeof analysis !== 'string') {
+            throw new Error('Missing required parameter: analysis');
+          }
+          result = this.tools.getGoalAnalytics(
+            typedArgs as Parameters<typeof this.tools.getGoalAnalytics>[0]
+          );
+          break;
+        }
+
+        case 'get_goal_details':
+          result = this.tools.getGoalDetails(
+            (typedArgs as Parameters<typeof this.tools.getGoalDetails>[0]) || {}
+          );
+          break;
+
+        case 'get_investment_analytics': {
+          const analysis = typedArgs?.analysis;
+          if (typeof analysis !== 'string') {
+            throw new Error('Missing required parameter: analysis');
+          }
+          result = this.tools.getInvestmentAnalytics(
+            typedArgs as Parameters<typeof this.tools.getInvestmentAnalytics>[0]
+          );
+          break;
+        }
+
+        case 'get_merchant_analytics': {
+          const sortBy = typedArgs?.sort_by;
+          if (typeof sortBy !== 'string') {
+            throw new Error('Missing required parameter: sort_by');
+          }
+          result = this.tools.getMerchantAnalytics(
+            typedArgs as Parameters<typeof this.tools.getMerchantAnalytics>[0]
+          );
+          break;
+        }
 
         case 'get_account_balance': {
           const accountId = typedArgs?.account_id;
@@ -130,7 +182,9 @@ export class CopilotMoneyServer {
         }
 
         case 'get_categories':
-          result = this.tools.getCategories();
+          result = this.tools.getCategories(
+            (typedArgs as Parameters<typeof this.tools.getCategories>[0]) || {}
+          );
           break;
 
         case 'get_recurring_transactions':
@@ -151,55 +205,9 @@ export class CopilotMoneyServer {
           );
           break;
 
-        case 'get_goal_progress':
-          result = this.tools.getGoalProgress(
-            (typedArgs as Parameters<typeof this.tools.getGoalProgress>[0]) || {}
-          );
-          break;
-
-        case 'get_goal_history': {
-          const goalId = typedArgs?.goal_id;
-          if (typeof goalId !== 'string') {
-            throw new Error('Missing required parameter: goal_id');
-          }
-          result = this.tools.getGoalHistory({
-            goal_id: goalId,
-            start_month: typedArgs?.start_month as string | undefined,
-            end_month: typedArgs?.end_month as string | undefined,
-            limit: typedArgs?.limit as number | undefined,
-          });
-          break;
-        }
-
-        case 'estimate_goal_completion':
-          result = this.tools.estimateGoalCompletion(
-            (typedArgs as Parameters<typeof this.tools.estimateGoalCompletion>[0]) || {}
-          );
-          break;
-
-        case 'get_goal_contributions': {
-          const goalIdContrib = typedArgs?.goal_id;
-          if (typeof goalIdContrib !== 'string') {
-            throw new Error('Missing required parameter: goal_id');
-          }
-          result = this.tools.getGoalContributions({
-            goal_id: goalIdContrib,
-            start_month: typedArgs?.start_month as string | undefined,
-            end_month: typedArgs?.end_month as string | undefined,
-            limit: typedArgs?.limit as number | undefined,
-          });
-          break;
-        }
-
         case 'get_income':
           result = this.tools.getIncome(
             (typedArgs as Parameters<typeof this.tools.getIncome>[0]) || {}
-          );
-          break;
-
-        case 'get_spending_by_merchant':
-          result = this.tools.getSpendingByMerchant(
-            (typedArgs as Parameters<typeof this.tools.getSpendingByMerchant>[0]) || {}
           );
           break;
 
@@ -217,58 +225,9 @@ export class CopilotMoneyServer {
           break;
         }
 
-        // ============================================
-        // NEW TOOLS - Items 13-33
-        // ============================================
-
-        case 'get_foreign_transactions':
-          result = this.tools.getForeignTransactions(
-            (typedArgs as Parameters<typeof this.tools.getForeignTransactions>[0]) || {}
-          );
-          break;
-
-        case 'get_refunds':
-          result = this.tools.getRefunds(
-            (typedArgs as Parameters<typeof this.tools.getRefunds>[0]) || {}
-          );
-          break;
-
-        case 'get_duplicate_transactions':
-          result = this.tools.getDuplicateTransactions(
-            (typedArgs as Parameters<typeof this.tools.getDuplicateTransactions>[0]) || {}
-          );
-          break;
-
-        case 'get_credits':
-          result = this.tools.getCredits(
-            (typedArgs as Parameters<typeof this.tools.getCredits>[0]) || {}
-          );
-          break;
-
-        case 'get_spending_by_day_of_week':
-          result = this.tools.getSpendingByDayOfWeek(
-            (typedArgs as Parameters<typeof this.tools.getSpendingByDayOfWeek>[0]) || {}
-          );
-          break;
-
         case 'get_trips':
           result = this.tools.getTrips(
             (typedArgs as Parameters<typeof this.tools.getTrips>[0]) || {}
-          );
-          break;
-
-        case 'get_transaction_by_id': {
-          const transactionId = typedArgs?.transaction_id;
-          if (typeof transactionId !== 'string') {
-            throw new Error('Missing required parameter: transaction_id');
-          }
-          result = this.tools.getTransactionById(transactionId);
-          break;
-        }
-
-        case 'get_top_merchants':
-          result = this.tools.getTopMerchants(
-            (typedArgs as Parameters<typeof this.tools.getTopMerchants>[0]) || {}
           );
           break;
 
@@ -284,18 +243,6 @@ export class CopilotMoneyServer {
           );
           break;
 
-        case 'get_hsa_fsa_eligible':
-          result = this.tools.getHsaFsaEligible(
-            (typedArgs as Parameters<typeof this.tools.getHsaFsaEligible>[0]) || {}
-          );
-          break;
-
-        case 'get_spending_rate':
-          result = this.tools.getSpendingRate(
-            (typedArgs as Parameters<typeof this.tools.getSpendingRate>[0]) || {}
-          );
-          break;
-
         case 'get_data_quality_report':
           result = this.tools.getDataQualityReport(
             (typedArgs as Parameters<typeof this.tools.getDataQualityReport>[0]) || {}
@@ -308,20 +255,6 @@ export class CopilotMoneyServer {
           );
           break;
 
-        case 'get_investment_price_history': {
-          const tickerSymbol = typedArgs?.ticker_symbol;
-          if (typeof tickerSymbol !== 'string') {
-            throw new Error('Missing required parameter: ticker_symbol');
-          }
-          result = this.tools.getInvestmentPriceHistory({
-            ticker_symbol: tickerSymbol,
-            start_date: typedArgs?.start_date as string | undefined,
-            end_date: typedArgs?.end_date as string | undefined,
-            price_type: typedArgs?.price_type as 'daily' | 'hf' | undefined,
-          });
-          break;
-        }
-
         case 'get_investment_splits':
           result = this.tools.getInvestmentSplits(
             (typedArgs as Parameters<typeof this.tools.getInvestmentSplits>[0]) || {}
@@ -331,42 +264,6 @@ export class CopilotMoneyServer {
         case 'get_connected_institutions':
           result = this.tools.getConnectedInstitutions(
             (typedArgs as Parameters<typeof this.tools.getConnectedInstitutions>[0]) || {}
-          );
-          break;
-
-        case 'get_category_hierarchy':
-          result = this.tools.getCategoryHierarchy(
-            (typedArgs as Parameters<typeof this.tools.getCategoryHierarchy>[0]) || {}
-          );
-          break;
-
-        case 'get_subcategories': {
-          const categoryId = typedArgs?.category_id;
-          if (typeof categoryId !== 'string') {
-            throw new Error('Missing required parameter: category_id');
-          }
-          result = this.tools.getSubcategories(categoryId);
-          break;
-        }
-
-        case 'search_categories': {
-          const searchQuery = typedArgs?.query;
-          if (typeof searchQuery !== 'string') {
-            throw new Error('Missing required parameter: query');
-          }
-          result = this.tools.searchCategoriesHierarchy(searchQuery);
-          break;
-        }
-
-        // ============================================
-        // PHASE 12: ANALYTICS TOOLS
-        // ============================================
-
-        // ---- Spending Trends ----
-
-        case 'get_spending_over_time':
-          result = this.tools.getSpendingOverTime(
-            (typedArgs as Parameters<typeof this.tools.getSpendingOverTime>[0]) || {}
           );
           break;
 
@@ -382,73 +279,9 @@ export class CopilotMoneyServer {
           );
           break;
 
-        case 'get_merchant_frequency':
-          result = this.tools.getMerchantFrequency(
-            (typedArgs as Parameters<typeof this.tools.getMerchantFrequency>[0]) || {}
-          );
-          break;
-
-        // ---- Budget Analytics ----
-
-        case 'get_budget_utilization':
-          result = this.tools.getBudgetUtilization(
-            (typedArgs as Parameters<typeof this.tools.getBudgetUtilization>[0]) || {}
-          );
-          break;
-
-        case 'get_budget_vs_actual':
-          result = this.tools.getBudgetVsActual(
-            (typedArgs as Parameters<typeof this.tools.getBudgetVsActual>[0]) || {}
-          );
-          break;
-
-        case 'get_budget_recommendations':
-          result = this.tools.getBudgetRecommendations(
-            (typedArgs as Parameters<typeof this.tools.getBudgetRecommendations>[0]) || {}
-          );
-          break;
-
-        case 'get_budget_alerts':
-          result = this.tools.getBudgetAlerts(
-            (typedArgs as Parameters<typeof this.tools.getBudgetAlerts>[0]) || {}
-          );
-          break;
-
-        // ============================================
-        // PHASE 12.3: INVESTMENT ANALYTICS TOOLS
-        // ============================================
-
         case 'get_portfolio_allocation':
           result = this.tools.getPortfolioAllocation(
             (typedArgs as Parameters<typeof this.tools.getPortfolioAllocation>[0]) || {}
-          );
-          break;
-
-        case 'get_investment_performance':
-          result = this.tools.getInvestmentPerformance(
-            (typedArgs as Parameters<typeof this.tools.getInvestmentPerformance>[0]) || {}
-          );
-          break;
-
-        case 'get_dividend_income':
-          result = this.tools.getDividendIncome(
-            (typedArgs as Parameters<typeof this.tools.getDividendIncome>[0]) || {}
-          );
-          break;
-
-        case 'get_investment_fees':
-          result = this.tools.getInvestmentFees(
-            (typedArgs as Parameters<typeof this.tools.getInvestmentFees>[0]) || {}
-          );
-          break;
-
-        // ============================================
-        // PHASE 12.4: GOAL ANALYTICS TOOLS
-        // ============================================
-
-        case 'get_goal_projection':
-          result = this.tools.getGoalProjection(
-            (typedArgs as Parameters<typeof this.tools.getGoalProjection>[0]) || {}
           );
           break;
 
@@ -458,80 +291,9 @@ export class CopilotMoneyServer {
           );
           break;
 
-        case 'get_goals_at_risk':
-          result = this.tools.getGoalsAtRisk(
-            (typedArgs as Parameters<typeof this.tools.getGoalsAtRisk>[0]) || {}
-          );
-          break;
-
-        case 'get_goal_recommendations':
-          result = this.tools.getGoalRecommendations(
-            (typedArgs as Parameters<typeof this.tools.getGoalRecommendations>[0]) || {}
-          );
-          break;
-
-        // ============================================
-        // PHASE 12.5: ACCOUNT & COMPARISON TOOLS
-        // ============================================
-
-        case 'get_account_activity':
-          result = this.tools.getAccountActivity(
-            (typedArgs as Parameters<typeof this.tools.getAccountActivity>[0]) || {}
-          );
-          break;
-
-        case 'get_balance_trends':
-          result = this.tools.getBalanceTrends(
-            (typedArgs as Parameters<typeof this.tools.getBalanceTrends>[0]) || {}
-          );
-          break;
-
-        case 'get_account_fees':
-          result = this.tools.getAccountFees(
-            (typedArgs as Parameters<typeof this.tools.getAccountFees>[0]) || {}
-          );
-          break;
-
         case 'get_year_over_year':
           result = this.tools.getYearOverYear(
             (typedArgs as Parameters<typeof this.tools.getYearOverYear>[0]) || {}
-          );
-          break;
-
-        // ============================================
-        // PHASE 12.6: SEARCH & DISCOVERY TOOLS
-        // ============================================
-
-        case 'get_advanced_search':
-          result = this.tools.getAdvancedSearch(
-            (typedArgs as Parameters<typeof this.tools.getAdvancedSearch>[0]) || {}
-          );
-          break;
-
-        case 'get_tag_search':
-          result = this.tools.getTagSearch(
-            (typedArgs as Parameters<typeof this.tools.getTagSearch>[0]) || {}
-          );
-          break;
-
-        case 'get_note_search': {
-          const noteQuery = typedArgs?.query;
-          if (typeof noteQuery !== 'string') {
-            throw new Error('Missing required parameter: query');
-          }
-          result = this.tools.getNoteSearch({
-            query: noteQuery,
-            period: typedArgs?.period as string | undefined,
-            start_date: typedArgs?.start_date as string | undefined,
-            end_date: typedArgs?.end_date as string | undefined,
-            limit: typedArgs?.limit as number | undefined,
-          });
-          break;
-        }
-
-        case 'get_location_search':
-          result = this.tools.getLocationSearch(
-            (typedArgs as Parameters<typeof this.tools.getLocationSearch>[0]) || {}
           );
           break;
 

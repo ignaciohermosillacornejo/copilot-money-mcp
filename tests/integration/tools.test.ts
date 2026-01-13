@@ -300,7 +300,7 @@ describe('CopilotMoneyTools Integration', () => {
   describe('tool schemas', () => {
     test('returns correct number of tool schemas', () => {
       const schemas = createToolSchemas();
-      expect(schemas.length).toBe(60);
+      expect(schemas.length).toBe(28);
     });
 
     test('all tools have readOnlyHint annotation', () => {
@@ -327,26 +327,29 @@ describe('CopilotMoneyTools Integration', () => {
       const schemas = createToolSchemas();
       const names = schemas.map((s) => s.name);
 
-      // Original tools
+      // Core tools
       expect(names).toContain('get_transactions');
-      expect(names).toContain('search_transactions');
       expect(names).toContain('get_accounts');
-      expect(names).toContain('get_spending_by_category');
       expect(names).toContain('get_account_balance');
 
-      // New tools
+      // Consolidated tools
+      expect(names).toContain('get_spending');
       expect(names).toContain('get_categories');
       expect(names).toContain('get_recurring_transactions');
       expect(names).toContain('get_income');
-      expect(names).toContain('get_spending_by_merchant');
       expect(names).toContain('compare_periods');
+      expect(names).toContain('get_account_analytics');
+      expect(names).toContain('get_budget_analytics');
+      expect(names).toContain('get_goal_analytics');
+      expect(names).toContain('get_investment_analytics');
+      expect(names).toContain('get_merchant_analytics');
     });
 
     test('required parameters are specified', () => {
       const schemas = createToolSchemas();
 
-      const searchTool = schemas.find((s) => s.name === 'search_transactions');
-      expect(searchTool?.inputSchema.required).toContain('query');
+      const spendingTool = schemas.find((s) => s.name === 'get_spending');
+      expect(spendingTool?.inputSchema.required).toContain('group_by');
 
       const balanceTool = schemas.find((s) => s.name === 'get_account_balance');
       expect(balanceTool?.inputSchema.required).toContain('account_id');

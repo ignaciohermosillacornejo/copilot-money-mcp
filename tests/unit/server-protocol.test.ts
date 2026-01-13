@@ -120,10 +120,9 @@ describe('CopilotMoneyServer.handleListTools', () => {
     const toolNames = response.tools.map((t) => t.name);
 
     expect(toolNames).toContain('get_transactions');
-    expect(toolNames).toContain('search_transactions');
     expect(toolNames).toContain('get_accounts');
     expect(toolNames).toContain('get_categories');
-    expect(toolNames).toContain('get_spending_by_category');
+    expect(toolNames).toContain('get_spending');
     expect(toolNames).toContain('get_account_balance');
   });
 
@@ -140,46 +139,45 @@ describe('CopilotMoneyServer.handleListTools', () => {
     }
   });
 
-  test('returns all 29 tools', () => {
+  test('returns all 28 tools', () => {
     const response = server.handleListTools();
 
     const expectedTools = [
       'get_transactions',
-      'search_transactions',
       'get_accounts',
-      'get_spending_by_category',
+      'get_spending',
       'get_account_balance',
       'get_categories',
       'get_recurring_transactions',
       'get_income',
-      'get_spending_by_merchant',
       'compare_periods',
-      'get_foreign_transactions',
-      'get_refunds',
-      'get_duplicate_transactions',
-      'get_credits',
-      'get_spending_by_day_of_week',
       'get_trips',
-      'get_transaction_by_id',
-      'get_top_merchants',
       'get_unusual_transactions',
       'export_transactions',
-      'get_hsa_fsa_eligible',
-      'get_spending_rate',
       'get_data_quality_report',
       'get_budgets',
       'get_goals',
-      'get_goal_progress',
-      'get_goal_history',
-      'estimate_goal_completion',
-      'get_goal_contributions',
+      'get_account_analytics',
+      'get_budget_analytics',
+      'get_goal_analytics',
+      'get_goal_details',
+      'get_goal_milestones',
+      'get_investment_analytics',
+      'get_merchant_analytics',
+      'get_investment_prices',
+      'get_investment_splits',
+      'get_connected_institutions',
+      'get_average_transaction_size',
+      'get_category_trends',
+      'get_portfolio_allocation',
+      'get_year_over_year',
     ];
 
     const actualNames = response.tools.map((t) => t.name);
     for (const expected of expectedTools) {
       expect(actualNames).toContain(expected);
     }
-    expect(response.tools.length).toBe(60);
+    expect(response.tools.length).toBe(28);
   });
 
   test('tool schemas have valid JSON schema format', () => {
@@ -206,7 +204,7 @@ describe('CopilotMoneyServer.handleCallTool - database unavailable', () => {
   test('database unavailable error works for all tools', () => {
     const server = setupServerWithUnavailableDb();
 
-    const toolsToTest = ['get_transactions', 'search_transactions', 'get_accounts'];
+    const toolsToTest = ['get_transactions', 'get_accounts', 'get_spending'];
     for (const toolName of toolsToTest) {
       const response = server.handleCallTool(toolName, { query: 'test' });
       expect(response.content[0].text).toContain('Database not available');
@@ -247,30 +245,28 @@ describe('CopilotMoneyServer.handleCallTool - basic tools', () => {
     expect(result.transactions).toBeDefined();
   });
 
-  test('search_transactions - routes correctly with query', () => {
-    const response = server.handleCallTool('search_transactions', { query: 'coffee' });
+  test('get_spending - routes correctly with group_by', () => {
+    const response = server.handleCallTool('get_spending', { group_by: 'category' });
 
     expect(response.content).toBeDefined();
     expect(response.isError).toBeUndefined();
     const result = JSON.parse(response.content[0].text);
-    expect(result.transactions).toBeDefined();
-    expect(result.count).toBeDefined();
+    expect(result.data).toBeDefined();
+    expect(result.group_by).toBe('category');
   });
 
-  test('search_transactions - returns error when query missing', () => {
-    const response = server.handleCallTool('search_transactions', {});
+  test('get_spending - returns error when group_by missing', () => {
+    const response = server.handleCallTool('get_spending', {});
 
     expect(response.isError).toBe(true);
-    expect(response.content[0].text).toContain('Missing required parameter: query');
+    expect(response.content[0].text).toContain('Missing required parameter: group_by');
   });
 
-  test('search_transactions - with optional params', () => {
-    const response = server.handleCallTool('search_transactions', {
-      query: 'test',
+  test('get_spending - with optional params', () => {
+    const response = server.handleCallTool('get_spending', {
+      group_by: 'merchant',
       limit: 5,
       period: 'this_month',
-      start_date: '2026-01-01',
-      end_date: '2026-01-31',
     });
 
     expect(response.content).toBeDefined();
@@ -294,12 +290,13 @@ describe('CopilotMoneyServer.handleCallTool - basic tools', () => {
     expect(result.accounts).toBeDefined();
   });
 
-  test('get_spending_by_category - routes correctly', () => {
-    const response = server.handleCallTool('get_spending_by_category', {});
+  test('get_spending with group_by category - routes correctly', () => {
+    const response = server.handleCallTool('get_spending', { group_by: 'category' });
 
     expect(response.content).toBeDefined();
     const result = JSON.parse(response.content[0].text);
-    expect(result.categories).toBeDefined();
+    expect(result.group_by).toBe('category');
+    expect(result.data).toBeDefined();
     expect(result.total_spending).toBeDefined();
   });
 
@@ -333,7 +330,8 @@ describe('CopilotMoneyServer.handleCallTool - basic tools', () => {
 
     expect(response.content).toBeDefined();
     const result = JSON.parse(response.content[0].text);
-    expect(result.categories).toBeDefined();
+    expect(result.view).toBe('list');
+    expect(result.data.categories).toBeDefined();
     expect(result.count).toBeDefined();
   });
 
@@ -353,8 +351,8 @@ describe('CopilotMoneyServer.handleCallTool - basic tools', () => {
     expect(result).toBeDefined();
   });
 
-  test('get_spending_by_merchant - routes correctly', () => {
-    const response = server.handleCallTool('get_spending_by_merchant', {});
+  test('get_spending with group_by merchant - routes correctly', () => {
+    const response = server.handleCallTool('get_spending', { group_by: 'merchant' });
 
     expect(response.content).toBeDefined();
     const result = JSON.parse(response.content[0].text);
@@ -421,36 +419,36 @@ describe('CopilotMoneyServer.handleCallTool - new tools (13-22)', () => {
     server = setupServerWithMockData();
   });
 
-  test('get_foreign_transactions - routes correctly', () => {
-    const response = server.handleCallTool('get_foreign_transactions', {});
+  test('get_transactions with transaction_type foreign - routes correctly', () => {
+    const response = server.handleCallTool('get_transactions', { transaction_type: 'foreign' });
 
     expect(response.content).toBeDefined();
     expect(response.isError).toBeUndefined();
   });
 
-  test('get_refunds - routes correctly', () => {
-    const response = server.handleCallTool('get_refunds', {});
+  test('get_transactions with transaction_type refunds - routes correctly', () => {
+    const response = server.handleCallTool('get_transactions', { transaction_type: 'refunds' });
 
     expect(response.content).toBeDefined();
     expect(response.isError).toBeUndefined();
   });
 
-  test('get_duplicate_transactions - routes correctly', () => {
-    const response = server.handleCallTool('get_duplicate_transactions', {});
+  test('get_transactions with transaction_type duplicates - routes correctly', () => {
+    const response = server.handleCallTool('get_transactions', { transaction_type: 'duplicates' });
 
     expect(response.content).toBeDefined();
     expect(response.isError).toBeUndefined();
   });
 
-  test('get_credits - routes correctly', () => {
-    const response = server.handleCallTool('get_credits', {});
+  test('get_transactions with transaction_type credits - routes correctly', () => {
+    const response = server.handleCallTool('get_transactions', { transaction_type: 'credits' });
 
     expect(response.content).toBeDefined();
     expect(response.isError).toBeUndefined();
   });
 
-  test('get_spending_by_day_of_week - routes correctly', () => {
-    const response = server.handleCallTool('get_spending_by_day_of_week', {});
+  test('get_spending with day_of_week - routes correctly', () => {
+    const response = server.handleCallTool('get_spending', { group_by: 'day_of_week' });
 
     expect(response.content).toBeDefined();
     expect(response.isError).toBeUndefined();
@@ -463,25 +461,25 @@ describe('CopilotMoneyServer.handleCallTool - new tools (13-22)', () => {
     expect(response.isError).toBeUndefined();
   });
 
-  test('get_transaction_by_id - routes correctly', () => {
-    const response = server.handleCallTool('get_transaction_by_id', { transaction_id: 'txn1' });
+  test('get_transactions with transaction_id - routes correctly', () => {
+    const response = server.handleCallTool('get_transactions', { transaction_id: 'txn1' });
 
     expect(response.content).toBeDefined();
     expect(response.isError).toBeUndefined();
   });
 
-  test('get_transaction_by_id - returns error when transaction_id missing', () => {
-    const response = server.handleCallTool('get_transaction_by_id', {});
+  test('get_merchant_analytics - routes correctly', () => {
+    const response = server.handleCallTool('get_merchant_analytics', { sort_by: 'spending' });
+
+    expect(response.content).toBeDefined();
+    expect(response.isError).toBeUndefined();
+  });
+
+  test('get_merchant_analytics - returns error when sort_by missing', () => {
+    const response = server.handleCallTool('get_merchant_analytics', {});
 
     expect(response.isError).toBe(true);
-    expect(response.content[0].text).toContain('Missing required parameter: transaction_id');
-  });
-
-  test('get_top_merchants - routes correctly', () => {
-    const response = server.handleCallTool('get_top_merchants', {});
-
-    expect(response.content).toBeDefined();
-    expect(response.isError).toBeUndefined();
+    expect(response.content[0].text).toContain('Missing required parameter: sort_by');
   });
 
   test('get_unusual_transactions - routes correctly', () => {
@@ -498,15 +496,15 @@ describe('CopilotMoneyServer.handleCallTool - new tools (13-22)', () => {
     expect(response.isError).toBeUndefined();
   });
 
-  test('get_hsa_fsa_eligible - routes correctly', () => {
-    const response = server.handleCallTool('get_hsa_fsa_eligible', {});
+  test('get_account_analytics - routes correctly', () => {
+    const response = server.handleCallTool('get_account_analytics', { analysis: 'activity' });
 
     expect(response.content).toBeDefined();
     expect(response.isError).toBeUndefined();
   });
 
-  test('get_spending_rate - routes correctly', () => {
-    const response = server.handleCallTool('get_spending_rate', {});
+  test('get_budget_analytics - routes correctly', () => {
+    const response = server.handleCallTool('get_budget_analytics', { analysis: 'utilization' });
 
     expect(response.content).toBeDefined();
     expect(response.isError).toBeUndefined();
@@ -680,11 +678,11 @@ describe('CopilotMoneyServer - tool arguments edge cases', () => {
     expect(response.isError).toBeUndefined();
   });
 
-  test('search_transactions - query parameter validation', () => {
-    // Number query should fail
-    const response = server.handleCallTool('search_transactions', { query: 123 as any });
+  test('get_spending - group_by parameter validation', () => {
+    // Number group_by should fail
+    const response = server.handleCallTool('get_spending', { group_by: 123 as any });
     expect(response.isError).toBe(true);
-    expect(response.content[0].text).toContain('Missing required parameter: query');
+    expect(response.content[0].text).toContain('Missing required parameter: group_by');
   });
 
   test('get_account_balance - account_id parameter validation', () => {
@@ -694,11 +692,11 @@ describe('CopilotMoneyServer - tool arguments edge cases', () => {
     expect(response.content[0].text).toContain('Missing required parameter: account_id');
   });
 
-  test('get_transaction_by_id - transaction_id parameter validation', () => {
-    // Number transaction_id should fail
-    const response = server.handleCallTool('get_transaction_by_id', { transaction_id: 123 as any });
+  test('get_merchant_analytics - sort_by parameter validation', () => {
+    // Number sort_by should fail
+    const response = server.handleCallTool('get_merchant_analytics', { sort_by: 123 as any });
     expect(response.isError).toBe(true);
-    expect(response.content[0].text).toContain('Missing required parameter: transaction_id');
+    expect(response.content[0].text).toContain('Missing required parameter: sort_by');
   });
 
   test('compare_periods - non-string period validation', () => {
