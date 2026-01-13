@@ -1520,7 +1520,8 @@ export class CopilotMoneyTools {
     for (const txn of transactions) {
       if (txn.amount <= 0) continue; // Only count expenses
       const dayOfWeek = new Date(txn.date + 'T12:00:00').getDay();
-      const stats = dayStats.get(dayOfWeek)!;
+      const stats = dayStats.get(dayOfWeek);
+      if (!stats) continue;
       stats.total += txn.amount;
       stats.count++;
     }
@@ -1529,7 +1530,7 @@ export class CopilotMoneyTools {
 
     const days = Array.from(dayStats.entries())
       .map(([dayNum, stats]) => ({
-        day: dayNames[dayNum]!,
+        day: dayNames[dayNum] ?? 'Unknown',
         day_number: dayNum,
         total_spending: Math.round(stats.total * 100) / 100,
         transaction_count: stats.count,
@@ -1656,15 +1657,18 @@ export class CopilotMoneyTools {
 
       // Sort by date
       const sorted = [...txns].sort((a, b) => a.date.localeCompare(b.date));
+      const firstTxn = sorted[0];
+      if (!firstTxn) continue;
 
       // Find contiguous ranges (transactions within 3 days of each other)
-      let tripStart = sorted[0];
-      let tripEnd = sorted[0];
-      let tripTxns: Transaction[] = [sorted[0]!].filter(Boolean);
+      let tripStart: Transaction = firstTxn;
+      let tripEnd: Transaction = firstTxn;
+      let tripTxns: Transaction[] = [firstTxn];
 
       for (let i = 1; i < sorted.length; i++) {
-        const current = sorted[i]!;
-        const prevDate = new Date(tripEnd!.date);
+        const current = sorted[i];
+        if (!current || !tripEnd) continue;
+        const prevDate = new Date(tripEnd.date);
         const currDate = new Date(current.date);
         const daysDiff = (currDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24);
 
@@ -2206,7 +2210,7 @@ export class CopilotMoneyTools {
         txn.category_id &&
         medicalCategories.some(
           (cat) =>
-            txn.category_id!.toLowerCase().includes(cat.toLowerCase()) || txn.category_id === cat
+            txn.category_id?.toLowerCase().includes(cat.toLowerCase()) || txn.category_id === cat
         );
 
       // Check merchant name
@@ -2356,13 +2360,13 @@ export class CopilotMoneyTools {
       const txnDate = new Date(txn.date + 'T12:00:00');
       const weekStart = new Date(txnDate);
       weekStart.setDate(txnDate.getDate() - txnDate.getDay());
-      const weekKey = weekStart.toISOString().split('T')[0]!;
+      const weekKey = weekStart.toISOString().split('T')[0] ?? '';
       const weekEnd = new Date(weekStart);
       weekEnd.setDate(weekStart.getDate() + 6);
 
       const existing = weeklyTotals.get(weekKey) || {
         start: weekKey,
-        end: weekEnd.toISOString().split('T')[0]!,
+        end: weekEnd.toISOString().split('T')[0] ?? '',
         total: 0,
         days: 7,
       };
@@ -2964,6 +2968,7 @@ export interface ToolSchema {
   description: string;
   inputSchema: {
     type: 'object';
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- JSON Schema properties require flexible typing
     properties: Record<string, any>;
     required?: string[];
   };

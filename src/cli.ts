@@ -52,6 +52,7 @@ function configureLogging(verbose: boolean): void {
   const originalError = console.error;
 
   if (verbose) {
+    // eslint-disable-next-line no-console -- CLI logging, redirected to stderr
     console.log = (...args: unknown[]) => {
       originalError('[LOG]', new Date().toISOString(), ...args);
     };
@@ -60,6 +61,7 @@ function configureLogging(verbose: boolean): void {
     };
   } else {
     // In non-verbose mode, suppress console.log but keep console.error
+    // eslint-disable-next-line no-console -- CLI logging configuration
     console.log = () => {};
   }
 }
@@ -75,12 +77,14 @@ async function main(): Promise<void> {
 
   try {
     if (verbose) {
+      /* eslint-disable no-console -- CLI startup messages */
       console.log('Starting Copilot Money MCP Server...');
       if (dbPath) {
         console.log(`Using database path: ${dbPath}`);
       } else {
         console.log('Using default Copilot Money database location');
       }
+      /* eslint-enable no-console */
     }
 
     // Run the server
