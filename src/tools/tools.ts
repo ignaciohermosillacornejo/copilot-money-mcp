@@ -190,10 +190,18 @@ export class CopilotMoneyTools {
   /**
    * Get transactions with optional filters.
    *
+   * Enhanced to support multiple query modes:
+   * - Default: Filter-based transaction retrieval
+   * - transaction_id: Single transaction lookup
+   * - query: Free-text search
+   * - transaction_type: Special transaction types (foreign, refunds, credits, duplicates, hsa_eligible, tagged)
+   * - Location-based: city, lat/lon with radius
+   *
    * @param options - Filter options
    * @returns Object with transaction count and list of transactions
    */
   getTransactions(options: {
+    // Existing filters
     period?: string;
     start_date?: string;
     end_date?: string;
@@ -208,12 +216,27 @@ export class CopilotMoneyTools {
     pending?: boolean;
     region?: string;
     country?: string;
+    // NEW: Single lookup
+    transaction_id?: string;
+    // NEW: Text search
+    query?: string;
+    // NEW: Special types
+    transaction_type?: 'foreign' | 'refunds' | 'credits' | 'duplicates' | 'hsa_eligible' | 'tagged';
+    // NEW: Tag filter
+    tag?: string;
+    // NEW: Location
+    city?: string;
+    lat?: number;
+    lon?: number;
+    radius_km?: number;
   }): {
     count: number;
     total_count: number;
     offset: number;
     has_more: boolean;
     transactions: Array<Transaction & { category_name?: string; normalized_merchant?: string }>;
+    // Additional fields for special types
+    type_specific_data?: Record<string, unknown>;
   } {
     const {
       period,
@@ -226,6 +249,14 @@ export class CopilotMoneyTools {
       pending,
       region,
       country,
+      transaction_id,
+      query,
+      transaction_type,
+      tag,
+      city,
+      lat,
+      lon,
+      radius_km = 10,
     } = options;
 
     // Validate inputs
@@ -239,6 +270,36 @@ export class CopilotMoneyTools {
       [start_date, end_date] = parsePeriod(period);
     }
 
+    // ============================================
+    // MODE 1: Single transaction lookup by ID
+    // ============================================
+    if (transaction_id) {
+      const allTransactions = this.db.getAllTransactions();
+      const found = allTransactions.find((t) => t.transaction_id === transaction_id);
+      if (!found) {
+        return {
+          count: 0,
+          total_count: 0,
+          offset: 0,
+          has_more: false,
+          transactions: [],
+        };
+      }
+      return {
+        count: 1,
+        total_count: 1,
+        offset: 0,
+        has_more: false,
+        transactions: [
+          {
+            ...found,
+            category_name: found.category_id ? getCategoryName(found.category_id) : undefined,
+            normalized_merchant: normalizeMerchantName(getTransactionDisplayName(found)),
+          },
+        ],
+      };
+    }
+
     // Query transactions with higher limit for post-filtering
     let transactions = this.db.getTransactions({
       startDate: start_date,
@@ -250,6 +311,54 @@ export class CopilotMoneyTools {
       maxAmount: max_amount,
       limit: 50000, // Get more for filtering
     });
+
+    // ============================================
+    // MODE 2: Free-text search (query parameter)
+    // ============================================
+    if (query) {
+      const queryLower = query.toLowerCase();
+      transactions = transactions.filter((txn) => {
+        const name = getTransactionDisplayName(txn).toLowerCase();
+        return name.includes(queryLower);
+      });
+    }
+
+    // ============================================
+    // MODE 3: Special transaction types
+    // ============================================
+    let typeSpecificData: Record<string, unknown> | undefined;
+
+    if (transaction_type) {
+      const result = this._filterByTransactionType(
+        transactions,
+        transaction_type,
+        start_date,
+        end_date
+      );
+      transactions = result.transactions;
+      typeSpecificData = result.typeSpecificData;
+    }
+
+    // ============================================
+    // MODE 4: Tag filter
+    // ============================================
+    if (tag) {
+      const normalizedTag = tag.startsWith('#')
+        ? tag.substring(1).toLowerCase()
+        : tag.toLowerCase();
+      const tagRegex = new RegExp(`#${normalizedTag}\\b`, 'i');
+      transactions = transactions.filter((txn) => {
+        const name = txn.name || txn.original_name || '';
+        return tagRegex.test(name);
+      });
+    }
+
+    // ============================================
+    // MODE 5: Location-based filtering
+    // ============================================
+    if (city || (lat !== undefined && lon !== undefined)) {
+      transactions = this._filterByLocation(transactions, { city, lat, lon, radius_km });
+    }
 
     // Filter out transfers if requested
     if (exclude_transfers) {
@@ -300,6 +409,1421 @@ export class CopilotMoneyTools {
       offset: validatedOffset,
       has_more: hasMore,
       transactions: enrichedTransactions,
+      ...(typeSpecificData && { type_specific_data: typeSpecificData }),
+    };
+  }
+
+  /**
+   * Filter transactions by special type.
+   * @internal
+   */
+  private _filterByTransactionType(
+    transactions: Transaction[],
+    type: 'foreign' | 'refunds' | 'credits' | 'duplicates' | 'hsa_eligible' | 'tagged',
+    _startDate?: string,
+    _endDate?: string
+  ): { transactions: Transaction[]; typeSpecificData?: Record<string, unknown> } {
+    switch (type) {
+      case 'foreign': {
+        const foreignTxns = transactions.filter((txn) => {
+          const isForeignCountry =
+            txn.country &&
+            txn.country.toUpperCase() !== 'US' &&
+            txn.country.toUpperCase() !== 'USA';
+          const isForeignFeeCategory =
+            txn.category_id === CATEGORY_FOREIGN_TX_FEE_SNAKE ||
+            txn.category_id === CATEGORY_FOREIGN_TX_FEE_NUMERIC;
+          const isForeignCurrency =
+            txn.iso_currency_code && txn.iso_currency_code.toUpperCase() !== 'USD';
+          return isForeignCountry || isForeignFeeCategory || isForeignCurrency;
+        });
+        const fxFees = transactions.filter(
+          (txn) =>
+            txn.category_id === CATEGORY_FOREIGN_TX_FEE_SNAKE ||
+            txn.category_id === CATEGORY_FOREIGN_TX_FEE_NUMERIC
+        );
+        const totalFxFees = fxFees.reduce((sum, txn) => sum + Math.abs(txn.amount), 0);
+        const countryMap = new Map<string, { count: number; total: number }>();
+        for (const txn of foreignTxns) {
+          const ctry = txn.country || 'Unknown';
+          const existing = countryMap.get(ctry) || { count: 0, total: 0 };
+          existing.count++;
+          existing.total += Math.abs(txn.amount);
+          countryMap.set(ctry, existing);
+        }
+        return {
+          transactions: foreignTxns,
+          typeSpecificData: {
+            total_fx_fees: Math.round(totalFxFees * 100) / 100,
+            countries: Array.from(countryMap.entries())
+              .map(([c, d]) => ({
+                country: c,
+                count: d.count,
+                total: Math.round(d.total * 100) / 100,
+              }))
+              .sort((a, b) => b.total - a.total),
+          },
+        };
+      }
+
+      case 'refunds': {
+        const refundTxns = transactions.filter((txn) => {
+          if (txn.amount >= 0) return false;
+          if (isTransferCategory(txn.category_id)) return false;
+          if (isIncomeCategory(txn.category_id)) return false;
+          const name = getTransactionDisplayName(txn).toLowerCase();
+          return name.includes('refund') || name.includes('return') || name.includes('reversal');
+        });
+        const totalRefunded = refundTxns.reduce((sum, txn) => sum + Math.abs(txn.amount), 0);
+        return {
+          transactions: refundTxns,
+          typeSpecificData: { total_refunded: Math.round(totalRefunded * 100) / 100 },
+        };
+      }
+
+      case 'credits': {
+        const creditKeywords = ['credit', 'cashback', 'reward', 'rebate', 'bonus'];
+        const creditTxns = transactions.filter((txn) => {
+          if (txn.amount >= 0) return false;
+          if (isTransferCategory(txn.category_id)) return false;
+          if (isIncomeCategory(txn.category_id)) return false;
+          const name = getTransactionDisplayName(txn).toLowerCase();
+          return creditKeywords.some((kw) => name.includes(kw));
+        });
+        const totalCredits = creditTxns.reduce((sum, txn) => sum + Math.abs(txn.amount), 0);
+        return {
+          transactions: creditTxns,
+          typeSpecificData: { total_credits: Math.round(totalCredits * 100) / 100 },
+        };
+      }
+
+      case 'duplicates': {
+        const duplicateMap = new Map<string, Transaction[]>();
+        for (const txn of transactions) {
+          const key = `${getTransactionDisplayName(txn)}|${Math.round(txn.amount * 100) / 100}|${txn.date}`;
+          const existing = duplicateMap.get(key) || [];
+          existing.push(txn);
+          duplicateMap.set(key, existing);
+        }
+        const duplicates: Transaction[] = [];
+        const groups: Array<{ key: string; count: number }> = [];
+        for (const [key, txns] of duplicateMap) {
+          if (txns.length > 1) {
+            duplicates.push(...txns);
+            groups.push({ key, count: txns.length });
+          }
+        }
+        return {
+          transactions: duplicates,
+          typeSpecificData: { duplicate_groups: groups.length, groups: groups.slice(0, 20) },
+        };
+      }
+
+      case 'hsa_eligible': {
+        const medicalCategories = ['medical', 'healthcare', 'pharmacy', 'dental', 'eye_care'];
+        const medicalMerchants = [
+          'cvs',
+          'walgreens',
+          'pharmacy',
+          'medical',
+          'dental',
+          'vision',
+          'hospital',
+        ];
+        const hsaTxns = transactions.filter((txn) => {
+          if (txn.amount <= 0) return false;
+          const isMedicalCat =
+            txn.category_id &&
+            medicalCategories.some((c) => txn.category_id?.toLowerCase().includes(c));
+          const merchantName = getTransactionDisplayName(txn).toLowerCase();
+          const isMedicalMerchant = medicalMerchants.some((m) => merchantName.includes(m));
+          return isMedicalCat || isMedicalMerchant;
+        });
+        const totalAmount = hsaTxns.reduce((sum, txn) => sum + txn.amount, 0);
+        return {
+          transactions: hsaTxns,
+          typeSpecificData: { total_hsa_eligible: Math.round(totalAmount * 100) / 100 },
+        };
+      }
+
+      case 'tagged': {
+        const taggedTxns = transactions.filter((txn) => {
+          const name = txn.name || txn.original_name || '';
+          return /#\w+/.test(name);
+        });
+        const tagMap = new Map<string, number>();
+        for (const txn of taggedTxns) {
+          const name = txn.name || txn.original_name || '';
+          const tags = name.match(/#\w+/g) || [];
+          for (const t of tags) {
+            tagMap.set(t.toLowerCase(), (tagMap.get(t.toLowerCase()) || 0) + 1);
+          }
+        }
+        return {
+          transactions: taggedTxns,
+          typeSpecificData: {
+            tags: Array.from(tagMap.entries())
+              .map(([t, c]) => ({ tag: t, count: c }))
+              .sort((a, b) => b.count - a.count),
+          },
+        };
+      }
+    }
+  }
+
+  /**
+   * Filter transactions by location.
+   * @internal
+   */
+  private _filterByLocation(
+    transactions: Transaction[],
+    options: { city?: string; lat?: number; lon?: number; radius_km?: number }
+  ): Transaction[] {
+    const { city, lat, lon, radius_km = 10 } = options;
+
+    // Haversine distance calculation
+    const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+      const R = 6371; // Earth's radius in km
+      const dLat = ((lat2 - lat1) * Math.PI) / 180;
+      const dLon = ((lon2 - lon1) * Math.PI) / 180;
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos((lat1 * Math.PI) / 180) *
+          Math.cos((lat2 * Math.PI) / 180) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    };
+
+    return transactions.filter((txn) => {
+      // City filter
+      if (city && !txn.city?.toLowerCase().includes(city.toLowerCase())) return false;
+
+      // Coordinate filter
+      if (lat !== undefined && lon !== undefined) {
+        if (txn.lat !== undefined && txn.lon !== undefined) {
+          const distance = calculateDistance(lat, lon, txn.lat, txn.lon);
+          if (distance > radius_km) return false;
+        } else {
+          return false; // No coordinates to compare
+        }
+      }
+
+      return true;
+    });
+  }
+
+  /**
+   * Unified spending aggregation tool.
+   *
+   * Supports multiple groupings via group_by parameter:
+   * - category: Spending by category
+   * - merchant: Spending by merchant
+   * - day_of_week: Spending by day of week
+   * - time: Spending over time (with granularity)
+   * - rate: Spending rate/velocity analysis
+   *
+   * @param options - Filter and grouping options
+   * @returns Spending data grouped as specified
+   */
+  getSpending(options: {
+    group_by: 'category' | 'merchant' | 'day_of_week' | 'time' | 'rate';
+    granularity?: 'day' | 'week' | 'month';
+    period?: string;
+    start_date?: string;
+    end_date?: string;
+    category?: string;
+    limit?: number;
+    exclude_transfers?: boolean;
+  }): {
+    group_by: string;
+    period: { start_date?: string; end_date?: string };
+    total_spending: number;
+    data: unknown;
+    summary?: Record<string, unknown>;
+  } {
+    const {
+      group_by,
+      granularity = 'month',
+      period,
+      category,
+      limit = 50,
+      exclude_transfers = true,
+    } = options;
+    let { start_date, end_date } = options;
+
+    // Parse period if specified
+    if (period) {
+      [start_date, end_date] = parsePeriod(period);
+    } else if (!start_date && !end_date) {
+      // Default to last 6 months for most analyses
+      const now = new Date();
+      end_date = now.toISOString().substring(0, 10);
+      const sixMonthsAgo = new Date();
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+      start_date = sixMonthsAgo.toISOString().substring(0, 10);
+    }
+
+    // Get transactions
+    let transactions = this.db.getTransactions({
+      startDate: start_date,
+      endDate: end_date,
+      limit: 50000,
+    });
+
+    // Filter out transfers if requested
+    if (exclude_transfers) {
+      transactions = transactions.filter(
+        (txn) => !isTransferCategory(txn.category_id) && !txn.internal_transfer
+      );
+    }
+
+    // Filter by category if specified
+    if (category) {
+      const categoryLower = category.toLowerCase();
+      transactions = transactions.filter((txn) =>
+        txn.category_id?.toLowerCase().includes(categoryLower)
+      );
+    }
+
+    // Only consider expenses (positive amounts)
+    const expenses = transactions.filter((txn) => txn.amount > 0);
+
+    switch (group_by) {
+      case 'category': {
+        const categorySpending = new Map<string, { total: number; count: number }>();
+        for (const txn of expenses) {
+          const cat = txn.category_id || 'Uncategorized';
+          const existing = categorySpending.get(cat) || { total: 0, count: 0 };
+          existing.total += txn.amount;
+          existing.count++;
+          categorySpending.set(cat, existing);
+        }
+
+        const categories = Array.from(categorySpending.entries())
+          .map(([category_id, data]) => ({
+            category_id,
+            category_name: getCategoryName(category_id),
+            total_spending: Math.round(data.total * 100) / 100,
+            transaction_count: data.count,
+          }))
+          .sort((a, b) => b.total_spending - a.total_spending);
+
+        const totalSpending = categories.reduce((sum, c) => sum + c.total_spending, 0);
+
+        return {
+          group_by,
+          period: { start_date, end_date },
+          total_spending: Math.round(totalSpending * 100) / 100,
+          data: categories,
+          summary: { category_count: categories.length },
+        };
+      }
+
+      case 'merchant': {
+        const merchantSpending = new Map<
+          string,
+          { total: number; count: number; categoryId?: string }
+        >();
+        for (const txn of expenses) {
+          const merchantName = getTransactionDisplayName(txn);
+          const existing = merchantSpending.get(merchantName) || {
+            total: 0,
+            count: 0,
+            categoryId: txn.category_id,
+          };
+          existing.total += txn.amount;
+          existing.count++;
+          merchantSpending.set(merchantName, existing);
+        }
+
+        const merchants = Array.from(merchantSpending.entries())
+          .map(([merchant, data]) => ({
+            merchant,
+            category_name: data.categoryId ? getCategoryName(data.categoryId) : undefined,
+            total_spending: Math.round(data.total * 100) / 100,
+            transaction_count: data.count,
+            average_transaction: Math.round((data.total / data.count) * 100) / 100,
+          }))
+          .sort((a, b) => b.total_spending - a.total_spending)
+          .slice(0, limit);
+
+        const totalSpending = merchants.reduce((sum, m) => sum + m.total_spending, 0);
+
+        return {
+          group_by,
+          period: { start_date, end_date },
+          total_spending: Math.round(totalSpending * 100) / 100,
+          data: merchants,
+          summary: { merchant_count: merchantSpending.size },
+        };
+      }
+
+      case 'day_of_week': {
+        const dayNames = [
+          'Sunday',
+          'Monday',
+          'Tuesday',
+          'Wednesday',
+          'Thursday',
+          'Friday',
+          'Saturday',
+        ];
+        const daySpending = new Map<number, { total: number; count: number }>();
+
+        for (const txn of expenses) {
+          const dayOfWeek = new Date(txn.date + 'T12:00:00').getDay();
+          const existing = daySpending.get(dayOfWeek) || { total: 0, count: 0 };
+          existing.total += txn.amount;
+          existing.count++;
+          daySpending.set(dayOfWeek, existing);
+        }
+
+        const totalSpending = expenses.reduce((sum, txn) => sum + txn.amount, 0);
+
+        const days = dayNames.map((name, index) => {
+          const data = daySpending.get(index) || { total: 0, count: 0 };
+          return {
+            day_of_week: index,
+            day_name: name,
+            total_spending: Math.round(data.total * 100) / 100,
+            transaction_count: data.count,
+            average_transaction:
+              data.count > 0 ? Math.round((data.total / data.count) * 100) / 100 : 0,
+            percentage:
+              totalSpending > 0 ? Math.round((data.total / totalSpending) * 10000) / 100 : 0,
+          };
+        });
+
+        const highestDay =
+          days.length > 0
+            ? days.reduce((max, d) => (d.total_spending > max.total_spending ? d : max), days[0]!)
+            : null;
+
+        return {
+          group_by,
+          period: { start_date, end_date },
+          total_spending: Math.round(totalSpending * 100) / 100,
+          data: days,
+          summary: { highest_spending_day: highestDay?.day_name },
+        };
+      }
+
+      case 'time': {
+        const periodMap = new Map<
+          string,
+          { start: Date; end: Date; total: number; count: number }
+        >();
+
+        for (const txn of expenses) {
+          const date = new Date(txn.date);
+          const periodKey = this.getPeriodKey(date, granularity);
+          const periodBounds = this.getPeriodBounds(date, granularity);
+
+          if (!periodMap.has(periodKey)) {
+            periodMap.set(periodKey, {
+              start: periodBounds.start,
+              end: periodBounds.end,
+              total: 0,
+              count: 0,
+            });
+          }
+
+          const p = periodMap.get(periodKey)!;
+          p.total += txn.amount;
+          p.count++;
+        }
+
+        const periods = Array.from(periodMap.entries())
+          .sort((a, b) => a[1].start.getTime() - b[1].start.getTime())
+          .map(([, data]) => ({
+            period_start: data.start.toISOString().substring(0, 10),
+            period_end: data.end.toISOString().substring(0, 10),
+            total_spending: Math.round(data.total * 100) / 100,
+            transaction_count: data.count,
+            average_transaction:
+              data.count > 0 ? Math.round((data.total / data.count) * 100) / 100 : 0,
+          }));
+
+        const totalSpending = periods.reduce((sum, p) => sum + p.total_spending, 0);
+        const avgPerPeriod =
+          periods.length > 0 ? Math.round((totalSpending / periods.length) * 100) / 100 : 0;
+
+        let highest: { period_start: string; amount: number } | null = null;
+        let lowest: { period_start: string; amount: number } | null = null;
+        for (const p of periods) {
+          if (!highest || p.total_spending > highest.amount) {
+            highest = { period_start: p.period_start, amount: p.total_spending };
+          }
+          if (!lowest || p.total_spending < lowest.amount) {
+            lowest = { period_start: p.period_start, amount: p.total_spending };
+          }
+        }
+
+        return {
+          group_by,
+          period: { start_date, end_date },
+          total_spending: Math.round(totalSpending * 100) / 100,
+          data: { granularity, periods },
+          summary: {
+            average_per_period: avgPerPeriod,
+            highest_period: highest,
+            lowest_period: lowest,
+          },
+        };
+      }
+
+      case 'rate': {
+        const startDateObj = new Date(start_date + 'T00:00:00');
+        const endDateObj = new Date(end_date + 'T23:59:59');
+        const todayObj = new Date();
+        const daysInPeriod = Math.ceil(
+          (endDateObj.getTime() - startDateObj.getTime()) / (1000 * 60 * 60 * 24)
+        );
+        const daysElapsed = Math.min(
+          Math.ceil((todayObj.getTime() - startDateObj.getTime()) / (1000 * 60 * 60 * 24)),
+          daysInPeriod
+        );
+
+        const totalSpending = expenses.reduce((sum, txn) => sum + txn.amount, 0);
+        const dailyAverage = daysElapsed > 0 ? totalSpending / daysElapsed : 0;
+        const weeklyAverage = dailyAverage * 7;
+        const projectedMonthlyTotal = dailyAverage * 30;
+
+        return {
+          group_by,
+          period: { start_date, end_date },
+          total_spending: Math.round(totalSpending * 100) / 100,
+          data: {
+            days_in_period: daysInPeriod,
+            days_elapsed: daysElapsed,
+            daily_average: Math.round(dailyAverage * 100) / 100,
+            weekly_average: Math.round(weeklyAverage * 100) / 100,
+            projected_monthly_total: Math.round(projectedMonthlyTotal * 100) / 100,
+          },
+          summary: {
+            on_track: totalSpending <= dailyAverage * daysInPeriod,
+          },
+        };
+      }
+    }
+  }
+
+  /**
+   * Unified account analytics tool.
+   *
+   * Supports multiple analysis types via the analysis parameter:
+   * - activity: Account activity summary with transaction counts and flows
+   * - balance_trends: Balance trends over time
+   * - fees: Account-related fees (ATM, overdraft, etc.)
+   *
+   * @param options - Analysis type and filter options
+   * @returns Account analytics data
+   */
+  getAccountAnalytics(options: {
+    analysis: 'activity' | 'balance_trends' | 'fees';
+    account_id?: string;
+    period?: string;
+    start_date?: string;
+    end_date?: string;
+    months?: number;
+    granularity?: 'daily' | 'weekly' | 'monthly';
+    account_type?: string;
+  }): {
+    analysis: string;
+    period: { start_date?: string; end_date?: string };
+    data: unknown;
+    summary?: Record<string, unknown>;
+  } {
+    const {
+      analysis,
+      account_id,
+      period = 'last_30_days',
+      account_type,
+      months = 6,
+      granularity = 'monthly',
+    } = options;
+    let { start_date, end_date } = options;
+
+    if (!start_date || !end_date) {
+      [start_date, end_date] = parsePeriod(period);
+    }
+    const effectiveStartDate = start_date;
+    const effectiveEndDate = end_date;
+
+    const accounts = this.db.getAccounts();
+    const transactions = this.db.getTransactions();
+    const periodTransactions = transactions.filter(
+      (t) => t.date >= effectiveStartDate && t.date <= effectiveEndDate
+    );
+
+    switch (analysis) {
+      case 'activity': {
+        const activityData: Array<{
+          account_id: string;
+          account_name: string;
+          account_type?: string;
+          transaction_count: number;
+          total_inflow: number;
+          total_outflow: number;
+          net_flow: number;
+          activity_level: string;
+        }> = [];
+
+        for (const account of accounts) {
+          if (account_type) {
+            const typeMatch =
+              account.account_type?.toLowerCase().includes(account_type.toLowerCase()) ||
+              account.subtype?.toLowerCase().includes(account_type.toLowerCase());
+            if (!typeMatch) continue;
+          }
+
+          const accountTxns = periodTransactions.filter((t) => t.account_id === account.account_id);
+          const count = accountTxns.length;
+
+          let totalInflow = 0;
+          let totalOutflow = 0;
+          for (const t of accountTxns) {
+            if (t.amount < 0) totalInflow += Math.abs(t.amount);
+            else totalOutflow += t.amount;
+          }
+
+          let activityLevel = 'inactive';
+          if (count >= 30) activityLevel = 'high';
+          else if (count >= 10) activityLevel = 'medium';
+          else if (count > 0) activityLevel = 'low';
+
+          activityData.push({
+            account_id: account.account_id,
+            account_name: account.name || account.official_name || 'Unknown',
+            account_type: account.account_type,
+            transaction_count: count,
+            total_inflow: Math.round(totalInflow * 100) / 100,
+            total_outflow: Math.round(totalOutflow * 100) / 100,
+            net_flow: Math.round((totalInflow - totalOutflow) * 100) / 100,
+            activity_level: activityLevel,
+          });
+        }
+
+        activityData.sort((a, b) => b.transaction_count - a.transaction_count);
+
+        return {
+          analysis,
+          period: { start_date, end_date },
+          data: activityData,
+          summary: {
+            total_accounts: activityData.length,
+            active_accounts: activityData.filter((a) => a.activity_level !== 'inactive').length,
+            most_active: activityData[0]?.account_name || null,
+          },
+        };
+      }
+
+      case 'balance_trends': {
+        // Calculate monthly trends based on transactions
+        const accountsToAnalyze = account_id
+          ? accounts.filter((a) => a.account_id === account_id)
+          : accounts;
+
+        const trendsData = accountsToAnalyze.map((account) => {
+          const accountTxns = transactions
+            .filter((t) => t.account_id === account.account_id)
+            .sort((a, b) => a.date.localeCompare(b.date));
+
+          // Group by month
+          const monthlyData = new Map<string, { inflow: number; outflow: number }>();
+          for (const t of accountTxns) {
+            const month = t.date.substring(0, 7);
+            const existing = monthlyData.get(month) || { inflow: 0, outflow: 0 };
+            if (t.amount < 0) existing.inflow += Math.abs(t.amount);
+            else existing.outflow += t.amount;
+            monthlyData.set(month, existing);
+          }
+
+          const monthlyArray = Array.from(monthlyData.entries())
+            .sort((a, b) => a[0].localeCompare(b[0]))
+            .slice(-months)
+            .map(([month, data]) => ({
+              month,
+              inflow: Math.round(data.inflow * 100) / 100,
+              outflow: Math.round(data.outflow * 100) / 100,
+              net_change: Math.round((data.inflow - data.outflow) * 100) / 100,
+            }));
+
+          return {
+            account_id: account.account_id,
+            account_name: account.name || account.official_name || 'Unknown',
+            current_balance: account.current_balance,
+            monthly_data: monthlyArray,
+          };
+        });
+
+        return {
+          analysis,
+          period: { start_date, end_date },
+          data: { months, granularity, accounts: trendsData },
+        };
+      }
+
+      case 'fees': {
+        const feeCategories = [
+          'bank_fees',
+          'atm_fee',
+          'overdraft',
+          'service_fee',
+          'late_fee',
+          '10000000',
+        ];
+        const feeTxns = periodTransactions.filter((t) => {
+          const isFeeCategory =
+            t.category_id &&
+            feeCategories.some((fc) => t.category_id!.toLowerCase().includes(fc.toLowerCase()));
+          const isFeeName = getTransactionDisplayName(t).toLowerCase().includes('fee');
+          return (isFeeCategory || isFeeName) && t.amount > 0;
+        });
+
+        if (account_id) {
+          const filtered = feeTxns.filter((t) => t.account_id === account_id);
+          feeTxns.length = 0;
+          feeTxns.push(...filtered);
+        }
+
+        const feesByType = new Map<string, { count: number; total: number }>();
+        for (const t of feeTxns) {
+          const type = getCategoryName(t.category_id || 'unknown_fee');
+          const existing = feesByType.get(type) || { count: 0, total: 0 };
+          existing.count++;
+          existing.total += t.amount;
+          feesByType.set(type, existing);
+        }
+
+        const feeData = Array.from(feesByType.entries())
+          .map(([type, data]) => ({
+            fee_type: type,
+            count: data.count,
+            total: Math.round(data.total * 100) / 100,
+          }))
+          .sort((a, b) => b.total - a.total);
+
+        const totalFees = feeTxns.reduce((sum, t) => sum + t.amount, 0);
+
+        return {
+          analysis,
+          period: { start_date, end_date },
+          data: feeData,
+          summary: {
+            total_fees: Math.round(totalFees * 100) / 100,
+            fee_count: feeTxns.length,
+          },
+        };
+      }
+    }
+  }
+
+  /**
+   * Unified budget analytics tool.
+   *
+   * Supports multiple analysis types:
+   * - utilization: Current budget usage
+   * - vs_actual: Budget vs actual spending comparison
+   * - alerts: Budgets approaching/exceeding limits
+   * - recommendations: Smart budget recommendations
+   *
+   * @param options - Analysis type and filter options
+   * @returns Budget analytics data
+   */
+  getBudgetAnalytics(options: {
+    analysis: 'utilization' | 'vs_actual' | 'alerts' | 'recommendations';
+    month?: string;
+    months?: number;
+    category?: string;
+    threshold_percentage?: number;
+  }): {
+    analysis: string;
+    data: unknown;
+    summary?: Record<string, unknown>;
+  } {
+    const { analysis, month, months = 6, category, threshold_percentage = 80 } = options;
+
+    const budgets = this.db.getBudgets(true);
+    const now = new Date();
+    const currentMonth =
+      month || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const [monthStart, monthEnd] = parsePeriod('this_month');
+
+    const transactions = this.db.getTransactions({
+      startDate: monthStart,
+      endDate: monthEnd,
+      limit: 50000,
+    });
+
+    switch (analysis) {
+      case 'utilization': {
+        const utilizationData = budgets.map((budget) => {
+          const categoryId = budget.category_id;
+          const spent = transactions
+            .filter(
+              (t) =>
+                t.amount > 0 && t.category_id === categoryId && !isTransferCategory(t.category_id)
+            )
+            .reduce((sum, t) => sum + t.amount, 0);
+          const budgetAmount = budget.amount || 0;
+          const utilization = budgetAmount > 0 ? (spent / budgetAmount) * 100 : 0;
+
+          return {
+            budget_id: budget.budget_id,
+            category: getCategoryName(categoryId || 'Unknown'),
+            budget_amount: budgetAmount,
+            spent: Math.round(spent * 100) / 100,
+            remaining: Math.round((budgetAmount - spent) * 100) / 100,
+            utilization_percent: Math.round(utilization * 100) / 100,
+            status: utilization >= 100 ? 'over' : utilization >= 80 ? 'warning' : 'ok',
+          };
+        });
+
+        if (category) {
+          const filtered = utilizationData.filter((u) =>
+            u.category.toLowerCase().includes(category.toLowerCase())
+          );
+          return { analysis, data: filtered, summary: { month: currentMonth } };
+        }
+
+        return {
+          analysis,
+          data: utilizationData,
+          summary: {
+            month: currentMonth,
+            over_budget: utilizationData.filter((u) => u.status === 'over').length,
+            warning: utilizationData.filter((u) => u.status === 'warning').length,
+          },
+        };
+      }
+
+      case 'vs_actual': {
+        // Get historical data
+        const historicalData: Array<{
+          month: string;
+          budgeted: number;
+          actual: number;
+          variance: number;
+        }> = [];
+        const startMonth = new Date();
+        startMonth.setMonth(startMonth.getMonth() - months);
+
+        for (let i = 0; i < months; i++) {
+          const m = new Date(startMonth);
+          m.setMonth(m.getMonth() + i);
+          const monthStr = `${m.getFullYear()}-${String(m.getMonth() + 1).padStart(2, '0')}`;
+          // Approximate month boundaries
+          const monthStartDate = `${monthStr}-01`;
+          const monthEndDate = `${monthStr}-31`;
+
+          const monthTxns = this.db.getTransactions({
+            startDate: monthStartDate,
+            endDate: monthEndDate,
+            limit: 50000,
+          });
+          const actual = monthTxns
+            .filter((t) => t.amount > 0 && !isTransferCategory(t.category_id))
+            .reduce((sum, t) => sum + t.amount, 0);
+
+          const budgeted = budgets.reduce((sum, b) => sum + (b.amount || 0), 0);
+
+          historicalData.push({
+            month: monthStr,
+            budgeted: Math.round(budgeted * 100) / 100,
+            actual: Math.round(actual * 100) / 100,
+            variance: Math.round((budgeted - actual) * 100) / 100,
+          });
+        }
+
+        return {
+          analysis,
+          data: historicalData,
+          summary: { months_analyzed: months },
+        };
+      }
+
+      case 'alerts': {
+        const alerts = budgets
+          .map((budget) => {
+            const categoryId = budget.category_id;
+            const spent = transactions
+              .filter((t) => t.amount > 0 && t.category_id === categoryId)
+              .reduce((sum, t) => sum + t.amount, 0);
+            const budgetAmount = budget.amount || 0;
+            const utilization = budgetAmount > 0 ? (spent / budgetAmount) * 100 : 0;
+
+            if (utilization >= threshold_percentage) {
+              return {
+                budget_id: budget.budget_id,
+                category: getCategoryName(categoryId || 'Unknown'),
+                budget_amount: budgetAmount,
+                spent: Math.round(spent * 100) / 100,
+                utilization_percent: Math.round(utilization * 100) / 100,
+                alert_level: utilization >= 100 ? 'exceeded' : 'warning',
+              };
+            }
+            return null;
+          })
+          .filter(Boolean);
+
+        return {
+          analysis,
+          data: alerts,
+          summary: { threshold: threshold_percentage, alert_count: alerts.length },
+        };
+      }
+
+      case 'recommendations': {
+        // Simple recommendations based on spending patterns
+        const recommendations: Array<{
+          type: string;
+          category: string;
+          message: string;
+          suggested_amount?: number;
+        }> = [];
+
+        // Check for categories with spending but no budget
+        const spendingByCategory = new Map<string, number>();
+        for (const t of transactions) {
+          if (t.amount > 0 && !isTransferCategory(t.category_id)) {
+            const cat = t.category_id || 'Uncategorized';
+            spendingByCategory.set(cat, (spendingByCategory.get(cat) || 0) + t.amount);
+          }
+        }
+
+        const budgetedCategories = new Set(budgets.map((b) => b.category_id));
+
+        for (const [cat, spent] of spendingByCategory) {
+          if (!budgetedCategories.has(cat) && spent > 100) {
+            recommendations.push({
+              type: 'new_budget',
+              category: getCategoryName(cat),
+              message: `Consider creating a budget for ${getCategoryName(cat)} - you spent $${Math.round(spent)} this month`,
+              suggested_amount: Math.round(spent * 1.1 * 100) / 100,
+            });
+          }
+        }
+
+        return {
+          analysis,
+          data: recommendations.slice(0, 10),
+          summary: { recommendation_count: recommendations.length },
+        };
+      }
+    }
+  }
+
+  /**
+   * Unified goal analytics tool.
+   *
+   * Supports multiple analysis types:
+   * - projection: Goal completion projections with scenarios
+   * - risk: Identify goals at risk
+   * - recommendations: Personalized goal recommendations
+   *
+   * @param options - Analysis type and filter options
+   * @returns Goal analytics data
+   */
+  getGoalAnalytics(options: {
+    analysis: 'projection' | 'risk' | 'recommendations';
+    goal_id?: string;
+    months_lookback?: number;
+  }): {
+    analysis: string;
+    data: unknown;
+    summary?: Record<string, unknown>;
+  } {
+    const { analysis, goal_id, months_lookback = 6 } = options;
+    const goals = this.db.getGoals(false);
+    const filteredGoals = goal_id ? goals.filter((g) => g.goal_id === goal_id) : goals;
+
+    switch (analysis) {
+      case 'projection': {
+        const projections = filteredGoals.map((goal) => {
+          const history = this.db.getGoalHistory(goal.goal_id, { limit: 12 });
+          const targetAmount = goal.savings?.target_amount || 0;
+          let currentAmount = 0;
+          let avgMonthlyContribution = 0;
+
+          if (history.length > 0) {
+            currentAmount = history[0]?.current_amount ?? 0;
+            if (history.length >= 2) {
+              const contributions = [];
+              for (let i = 1; i < history.length; i++) {
+                const current = history[i - 1]?.current_amount ?? 0;
+                const previous = history[i]?.current_amount ?? 0;
+                contributions.push(current - previous);
+              }
+              avgMonthlyContribution =
+                contributions.reduce((a, b) => a + b, 0) / contributions.length;
+            }
+          }
+
+          const remaining = targetAmount - currentAmount;
+          const monthsToComplete =
+            avgMonthlyContribution > 0 ? Math.ceil(remaining / avgMonthlyContribution) : null;
+
+          return {
+            goal_id: goal.goal_id,
+            name: goal.name,
+            target_amount: targetAmount,
+            current_amount: Math.round(currentAmount * 100) / 100,
+            progress_percent:
+              targetAmount > 0 ? Math.round((currentAmount / targetAmount) * 10000) / 100 : 0,
+            avg_monthly_contribution: Math.round(avgMonthlyContribution * 100) / 100,
+            months_to_complete: monthsToComplete,
+            scenarios: {
+              conservative: monthsToComplete ? Math.ceil(monthsToComplete * 1.2) : null,
+              moderate: monthsToComplete,
+              aggressive: monthsToComplete ? Math.ceil(monthsToComplete * 0.8) : null,
+            },
+          };
+        });
+
+        return { analysis, data: projections };
+      }
+
+      case 'risk': {
+        const atRisk = filteredGoals
+          .map((goal) => {
+            const history = this.db.getGoalHistory(goal.goal_id, { limit: months_lookback });
+            const targetAmount = goal.savings?.target_amount || 0;
+            const currentAmount = history[0]?.current_amount ?? 0;
+            const progress = targetAmount > 0 ? (currentAmount / targetAmount) * 100 : 0;
+
+            // Calculate consistency
+            let riskScore = 0;
+            const riskFactors: string[] = [];
+
+            if (progress < 25 && history.length > 3) {
+              riskScore += 30;
+              riskFactors.push('Low progress after several months');
+            }
+
+            if (history.length >= 2) {
+              const recentChange =
+                (history[0]?.current_amount ?? 0) - (history[1]?.current_amount ?? 0);
+              if (recentChange <= 0) {
+                riskScore += 20;
+                riskFactors.push('No recent contributions');
+              }
+            }
+
+            if (riskScore >= 30) {
+              return {
+                goal_id: goal.goal_id,
+                name: goal.name,
+                risk_score: riskScore,
+                risk_level: riskScore >= 50 ? 'high' : 'medium',
+                risk_factors: riskFactors,
+                current_progress: Math.round(progress * 100) / 100,
+              };
+            }
+            return null;
+          })
+          .filter(Boolean);
+
+        return {
+          analysis,
+          data: atRisk,
+          summary: { goals_at_risk: atRisk.length },
+        };
+      }
+
+      case 'recommendations': {
+        const recommendations: Array<{
+          goal_id: string;
+          name: string;
+          recommendation: string;
+          priority: string;
+        }> = [];
+
+        for (const goal of filteredGoals) {
+          const history = this.db.getGoalHistory(goal.goal_id, { limit: 6 });
+          const targetAmount = goal.savings?.target_amount || 0;
+          const currentAmount = history[0]?.current_amount ?? 0;
+          const progress = targetAmount > 0 ? (currentAmount / targetAmount) * 100 : 0;
+
+          if (progress >= 90) {
+            recommendations.push({
+              goal_id: goal.goal_id,
+              name: goal.name || 'Unknown',
+              recommendation: 'Almost there! Consider a final push to complete this goal.',
+              priority: 'low',
+            });
+          } else if (progress < 10 && history.length > 2) {
+            recommendations.push({
+              goal_id: goal.goal_id,
+              name: goal.name || 'Unknown',
+              recommendation: 'Consider increasing contributions or adjusting the target.',
+              priority: 'high',
+            });
+          }
+        }
+
+        return { analysis, data: recommendations };
+      }
+    }
+  }
+
+  /**
+   * Get goal details with optional includes.
+   *
+   * Combines goal progress, history, and contributions into a single call.
+   *
+   * @param options - Filter and include options
+   * @returns Goal details
+   */
+  getGoalDetails(
+    options: {
+      goal_id?: string;
+      include?: ('progress' | 'history' | 'contributions')[];
+      start_month?: string;
+      end_month?: string;
+    } = {}
+  ): {
+    count: number;
+    goals: Array<{
+      goal_id: string;
+      name?: string;
+      target_amount?: number;
+      progress?: { current_amount: number; progress_percent: number };
+      history?: Array<{ month: string; amount: number }>;
+      contributions?: { total: number; monthly_avg: number };
+    }>;
+  } {
+    const { goal_id, include = ['progress'], start_month, end_month } = options;
+    const goals = this.db.getGoals(false);
+    const filteredGoals = goal_id ? goals.filter((g) => g.goal_id === goal_id) : goals;
+
+    const goalDetails = filteredGoals.map((goal) => {
+      const result: {
+        goal_id: string;
+        name?: string;
+        target_amount?: number;
+        progress?: { current_amount: number; progress_percent: number };
+        history?: Array<{ month: string; amount: number }>;
+        contributions?: { total: number; monthly_avg: number };
+      } = {
+        goal_id: goal.goal_id,
+        name: goal.name,
+        target_amount: goal.savings?.target_amount,
+      };
+
+      const history = this.db.getGoalHistory(goal.goal_id, {
+        startMonth: start_month,
+        endMonth: end_month,
+        limit: 12,
+      });
+
+      if (include.includes('progress')) {
+        const currentAmount = history[0]?.current_amount ?? 0;
+        const targetAmount = goal.savings?.target_amount || 0;
+        result.progress = {
+          current_amount: Math.round(currentAmount * 100) / 100,
+          progress_percent:
+            targetAmount > 0 ? Math.round((currentAmount / targetAmount) * 10000) / 100 : 0,
+        };
+      }
+
+      if (include.includes('history')) {
+        result.history = history.map((h) => ({
+          month: h.month,
+          amount: Math.round((h.current_amount ?? 0) * 100) / 100,
+        }));
+      }
+
+      if (include.includes('contributions')) {
+        let totalContributions = 0;
+        if (history.length >= 2) {
+          for (let i = 0; i < history.length - 1; i++) {
+            const current = history[i]?.current_amount ?? 0;
+            const previous = history[i + 1]?.current_amount ?? 0;
+            if (current > previous) totalContributions += current - previous;
+          }
+        }
+        result.contributions = {
+          total: Math.round(totalContributions * 100) / 100,
+          monthly_avg:
+            history.length > 1
+              ? Math.round((totalContributions / (history.length - 1)) * 100) / 100
+              : 0,
+        };
+      }
+
+      return result;
+    });
+
+    return { count: goalDetails.length, goals: goalDetails };
+  }
+
+  /**
+   * Unified investment analytics tool.
+   *
+   * Supports multiple analysis types:
+   * - performance: Investment performance metrics
+   * - dividends: Dividend income tracking
+   * - fees: Investment-related fees
+   *
+   * @param options - Analysis type and filter options
+   * @returns Investment analytics data
+   */
+  getInvestmentAnalytics(options: {
+    analysis: 'performance' | 'dividends' | 'fees';
+    ticker_symbol?: string;
+    account_id?: string;
+    period?: string;
+    start_date?: string;
+    end_date?: string;
+  }): {
+    analysis: string;
+    period: { start_date?: string; end_date?: string };
+    data: unknown;
+    summary?: Record<string, unknown>;
+  } {
+    const { analysis, ticker_symbol, account_id, period = 'ytd' } = options;
+    let { start_date, end_date } = options;
+
+    if (!start_date || !end_date) {
+      [start_date, end_date] = parsePeriod(period);
+    }
+    const effectiveStartDate = start_date;
+    const effectiveEndDate = end_date;
+
+    switch (analysis) {
+      case 'performance': {
+        const prices = this.db.getInvestmentPrices({ tickerSymbol: ticker_symbol });
+        const filteredPrices = prices.filter((p) => {
+          const priceDate = getPriceDate(p);
+          return priceDate && priceDate >= effectiveStartDate && priceDate <= effectiveEndDate;
+        });
+
+        // Group by ticker
+        const tickerPerformance = new Map<
+          string,
+          { prices: typeof filteredPrices; earliest: number; latest: number }
+        >();
+
+        for (const p of filteredPrices) {
+          const ticker = p.ticker_symbol || 'Unknown';
+          const existing = tickerPerformance.get(ticker) || {
+            prices: [],
+            earliest: Infinity,
+            latest: 0,
+          };
+          const price = getBestPrice(p);
+          if (price) {
+            existing.prices.push(p);
+            existing.earliest = Math.min(existing.earliest, price);
+            existing.latest = price;
+          }
+          tickerPerformance.set(ticker, existing);
+        }
+
+        const performanceData = Array.from(tickerPerformance.entries()).map(([ticker, data]) => {
+          const change = data.latest - data.earliest;
+          const changePercent = data.earliest > 0 ? (change / data.earliest) * 100 : 0;
+          return {
+            ticker_symbol: ticker,
+            earliest_price: Math.round(data.earliest * 100) / 100,
+            latest_price: Math.round(data.latest * 100) / 100,
+            change: Math.round(change * 100) / 100,
+            change_percent: Math.round(changePercent * 100) / 100,
+            trend: change > 0 ? 'up' : change < 0 ? 'down' : 'stable',
+          };
+        });
+
+        return {
+          analysis,
+          period: { start_date, end_date },
+          data: performanceData,
+          summary: {
+            securities_count: performanceData.length,
+            gainers: performanceData.filter((p) => p.trend === 'up').length,
+            losers: performanceData.filter((p) => p.trend === 'down').length,
+          },
+        };
+      }
+
+      case 'dividends': {
+        const transactions = this.db.getTransactions({
+          startDate: start_date,
+          endDate: end_date,
+          limit: 50000,
+        });
+        const dividendTxns = transactions.filter((t) => {
+          const name = getTransactionDisplayName(t).toLowerCase();
+          const isDividend =
+            name.includes('dividend') || t.category_id?.toLowerCase().includes('dividend');
+          const accountMatch = !account_id || t.account_id === account_id;
+          return isDividend && t.amount < 0 && accountMatch;
+        });
+
+        const totalDividends = dividendTxns.reduce((sum, t) => sum + Math.abs(t.amount), 0);
+
+        return {
+          analysis,
+          period: { start_date, end_date },
+          data: dividendTxns.map((t) => ({
+            date: t.date,
+            amount: Math.round(Math.abs(t.amount) * 100) / 100,
+            source: getTransactionDisplayName(t),
+          })),
+          summary: {
+            total_dividends: Math.round(totalDividends * 100) / 100,
+            payment_count: dividendTxns.length,
+          },
+        };
+      }
+
+      case 'fees': {
+        const transactions = this.db.getTransactions({
+          startDate: start_date,
+          endDate: end_date,
+          limit: 50000,
+        });
+        const feeTxns = transactions.filter((t) => {
+          const name = getTransactionDisplayName(t).toLowerCase();
+          const isFee =
+            name.includes('fee') ||
+            name.includes('commission') ||
+            t.category_id?.toLowerCase().includes('fee');
+          const accountMatch = !account_id || t.account_id === account_id;
+          // Check if it's from an investment account type
+          const accounts = this.db.getAccounts();
+          const txnAccount = accounts.find((a) => a.account_id === t.account_id);
+          const isInvestmentAccount =
+            txnAccount?.account_type?.toLowerCase().includes('investment') ||
+            txnAccount?.subtype?.toLowerCase().includes('brokerage');
+          return isFee && t.amount > 0 && accountMatch && isInvestmentAccount;
+        });
+
+        const totalFees = feeTxns.reduce((sum, t) => sum + t.amount, 0);
+
+        return {
+          analysis,
+          period: { start_date, end_date },
+          data: feeTxns.map((t) => ({
+            date: t.date,
+            amount: Math.round(t.amount * 100) / 100,
+            description: getTransactionDisplayName(t),
+          })),
+          summary: {
+            total_fees: Math.round(totalFees * 100) / 100,
+            fee_count: feeTxns.length,
+          },
+        };
+      }
+    }
+  }
+
+  /**
+   * Unified merchant analytics tool.
+   *
+   * Combines top merchants and merchant frequency analysis.
+   *
+   * @param options - Sort and filter options
+   * @returns Merchant analytics data
+   */
+  getMerchantAnalytics(options: {
+    sort_by: 'spending' | 'frequency' | 'average';
+    period?: string;
+    start_date?: string;
+    end_date?: string;
+    limit?: number;
+    min_visits?: number;
+  }): {
+    sort_by: string;
+    period: { start_date?: string; end_date?: string };
+    merchants: Array<{
+      merchant: string;
+      total_spending: number;
+      transaction_count: number;
+      average_transaction: number;
+      first_visit?: string;
+      last_visit?: string;
+      visits_per_month?: number;
+    }>;
+    summary: {
+      total_merchants: number;
+      total_spending: number;
+    };
+  } {
+    const { sort_by, period = 'last_90_days', limit = 20, min_visits = 1 } = options;
+    let { start_date, end_date } = options;
+
+    if (!start_date || !end_date) {
+      [start_date, end_date] = parsePeriod(period);
+    }
+
+    const transactions = this.db.getTransactions({
+      startDate: start_date,
+      endDate: end_date,
+      limit: 50000,
+    });
+    const expenses = transactions.filter((t) => t.amount > 0 && !isTransferCategory(t.category_id));
+
+    const merchantData = new Map<string, { total: number; count: number; dates: string[] }>();
+
+    for (const t of expenses) {
+      const merchant = normalizeMerchantName(getTransactionDisplayName(t));
+      const existing = merchantData.get(merchant) || { total: 0, count: 0, dates: [] };
+      existing.total += t.amount;
+      existing.count++;
+      existing.dates.push(t.date);
+      merchantData.set(merchant, existing);
+    }
+
+    // Calculate months in period for visits_per_month
+    const startDateObj = new Date(start_date);
+    const endDateObj = new Date(end_date);
+    const monthsInPeriod = Math.max(
+      1,
+      (endDateObj.getTime() - startDateObj.getTime()) / (1000 * 60 * 60 * 24 * 30)
+    );
+
+    let merchants = Array.from(merchantData.entries())
+      .filter(([, data]) => data.count >= min_visits)
+      .map(([merchant, data]) => {
+        const sortedDates = data.dates.sort();
+        return {
+          merchant,
+          total_spending: Math.round(data.total * 100) / 100,
+          transaction_count: data.count,
+          average_transaction: Math.round((data.total / data.count) * 100) / 100,
+          first_visit: sortedDates[0],
+          last_visit: sortedDates[sortedDates.length - 1],
+          visits_per_month: Math.round((data.count / monthsInPeriod) * 100) / 100,
+        };
+      });
+
+    // Sort based on sort_by
+    switch (sort_by) {
+      case 'spending':
+        merchants.sort((a, b) => b.total_spending - a.total_spending);
+        break;
+      case 'frequency':
+        merchants.sort((a, b) => b.transaction_count - a.transaction_count);
+        break;
+      case 'average':
+        merchants.sort((a, b) => b.average_transaction - a.average_transaction);
+        break;
+    }
+
+    merchants = merchants.slice(0, limit);
+    const totalSpending = merchants.reduce((sum, m) => sum + m.total_spending, 0);
+
+    return {
+      sort_by,
+      period: { start_date, end_date },
+      merchants,
+      summary: {
+        total_merchants: merchantData.size,
+        total_spending: Math.round(totalSpending * 100) / 100,
+      },
     };
   }
 
@@ -506,45 +2030,161 @@ export class CopilotMoneyTools {
    *
    * @returns Object with list of all categories found in transactions
    */
-  getCategories(): {
+  /**
+   * Unified category retrieval tool.
+   *
+   * Supports multiple views via the view parameter:
+   * - list (default): Categories used in transactions with counts and amounts
+   * - tree: Full Plaid category taxonomy as hierarchical tree
+   * - search: Search categories by keyword
+   *
+   * Additional parameters:
+   * - parent_id: Get subcategories of a specific parent
+   * - query: Search query for 'search' view
+   * - type: Filter by category type (income, expense, transfer)
+   *
+   * @param options - View and filter options
+   * @returns Category data based on view mode
+   */
+  getCategories(
+    options: {
+      view?: 'list' | 'tree' | 'search';
+      parent_id?: string;
+      query?: string;
+      type?: 'income' | 'expense' | 'transfer';
+    } = {}
+  ): {
+    view: string;
     count: number;
-    categories: Array<{
-      category_id: string;
-      category_name: string;
-      transaction_count: number;
-      total_amount: number;
-    }>;
+    data: unknown;
   } {
-    const allTransactions = this.db.getAllTransactions();
+    const { view = 'list', parent_id, query, type } = options;
 
-    // Count transactions and amounts per category
-    const categoryStats = new Map<string, { count: number; totalAmount: number }>();
+    // If parent_id is specified, get subcategories
+    if (parent_id) {
+      const rootCats = getRootCategories();
+      const parent = rootCats.find((cat) => cat.id === parent_id);
 
-    for (const txn of allTransactions) {
-      const categoryId = txn.category_id || 'Uncategorized';
-      const stats = categoryStats.get(categoryId) || {
-        count: 0,
-        totalAmount: 0,
+      if (!parent) {
+        throw new Error(`Category not found or has no subcategories: ${parent_id}`);
+      }
+
+      const children = getCategoryChildren(parent_id);
+
+      return {
+        view: 'subcategories',
+        count: children.length,
+        data: {
+          parent_id: parent.id,
+          parent_name: parent.display_name,
+          subcategories: children.map((child) => ({
+            id: child.id,
+            name: child.name,
+            display_name: child.display_name,
+            path: child.path,
+            type: child.type,
+          })),
+        },
       };
-      stats.count++;
-      stats.totalAmount += Math.abs(txn.amount);
-      categoryStats.set(categoryId, stats);
     }
 
-    // Convert to list
-    const categories = Array.from(categoryStats.entries())
-      .map(([category_id, stats]) => ({
-        category_id,
-        category_name: getCategoryName(category_id),
-        transaction_count: stats.count,
-        total_amount: Math.round(stats.totalAmount * 100) / 100,
-      }))
-      .sort((a, b) => b.transaction_count - a.transaction_count);
+    switch (view) {
+      case 'tree': {
+        // Get root categories, optionally filtered by type
+        let rootCats = getRootCategories();
+        if (type) {
+          rootCats = rootCats.filter((cat) => cat.type === type);
+        }
 
-    return {
-      count: categories.length,
-      categories,
-    };
+        // Build hierarchy
+        const categories = rootCats.map((root) => {
+          const children = getCategoryChildren(root.id);
+          return {
+            id: root.id,
+            name: root.name,
+            display_name: root.display_name,
+            type: root.type,
+            children: children.map((child) => ({
+              id: child.id,
+              name: child.name,
+              display_name: child.display_name,
+              path: child.path,
+            })),
+          };
+        });
+
+        const totalCount = categories.reduce((sum, cat) => sum + 1 + cat.children.length, 0);
+
+        return {
+          view: 'tree',
+          count: totalCount,
+          data: {
+            type_filter: type,
+            categories,
+          },
+        };
+      }
+
+      case 'search': {
+        if (!query || query.trim().length === 0) {
+          throw new Error('Search query is required for search view');
+        }
+
+        const results = searchCategoriesInHierarchy(query.trim());
+
+        return {
+          view: 'search',
+          count: results.length,
+          data: {
+            query: query.trim(),
+            categories: results.map((cat) => ({
+              id: cat.id,
+              name: cat.name,
+              display_name: cat.display_name,
+              path: cat.path,
+              type: cat.type,
+              depth: cat.depth,
+              is_leaf: cat.is_leaf,
+            })),
+          },
+        };
+      }
+
+      case 'list':
+      default: {
+        const allTransactions = this.db.getAllTransactions();
+
+        // Count transactions and amounts per category
+        const categoryStats = new Map<string, { count: number; totalAmount: number }>();
+
+        for (const txn of allTransactions) {
+          const categoryId = txn.category_id || 'Uncategorized';
+          const stats = categoryStats.get(categoryId) || {
+            count: 0,
+            totalAmount: 0,
+          };
+          stats.count++;
+          stats.totalAmount += Math.abs(txn.amount);
+          categoryStats.set(categoryId, stats);
+        }
+
+        // Convert to list
+        const categories = Array.from(categoryStats.entries())
+          .map(([category_id, stats]) => ({
+            category_id,
+            category_name: getCategoryName(category_id),
+            transaction_count: stats.count,
+            total_amount: Math.round(stats.totalAmount * 100) / 100,
+          }))
+          .sort((a, b) => b.transaction_count - a.transaction_count);
+
+        return {
+          view: 'list',
+          count: categories.length,
+          data: { categories },
+        };
+      }
+    }
   }
 
   /**
@@ -8157,15 +9797,18 @@ export function createToolSchemas(): ToolSchema[] {
     {
       name: 'get_transactions',
       description:
-        'Get transactions with optional filters. Supports date ranges, ' +
-        "category, merchant, account, amount, pending status, region/country filters. Use 'period' " +
-        'for common date ranges (this_month, last_30_days, ytd, etc.). ' +
-        'Returns human-readable category names and normalized merchant names. ' +
-        'Supports pagination with offset parameter. Use exclude_transfers=true ' +
-        'to filter out account transfers and credit card payments.',
+        'Unified transaction retrieval tool. Supports multiple modes: ' +
+        '(1) Filter-based: Use period, date range, category, merchant, amount filters. ' +
+        '(2) Single lookup: Provide transaction_id to get one transaction. ' +
+        '(3) Text search: Use query for free-text merchant search. ' +
+        '(4) Special types: Use transaction_type for foreign/refunds/credits/duplicates/hsa_eligible/tagged. ' +
+        '(5) Location-based: Use city or lat/lon with radius_km. ' +
+        '(6) Tag filter: Use tag to find #tagged transactions. ' +
+        'Returns human-readable category names and normalized merchant names.',
       inputSchema: {
         type: 'object',
         properties: {
+          // Date filters
           period: {
             type: 'string',
             description:
@@ -8183,6 +9826,7 @@ export function createToolSchemas(): ToolSchema[] {
             description: 'End date (YYYY-MM-DD)',
             pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
+          // Basic filters
           category: {
             type: 'string',
             description: 'Filter by category (case-insensitive substring)',
@@ -8203,6 +9847,7 @@ export function createToolSchemas(): ToolSchema[] {
             type: 'number',
             description: 'Maximum transaction amount',
           },
+          // Pagination
           limit: {
             type: 'integer',
             description: 'Maximum number of results (default: 100)',
@@ -8213,6 +9858,7 @@ export function createToolSchemas(): ToolSchema[] {
             description: 'Number of results to skip for pagination (default: 0)',
             default: 0,
           },
+          // Toggles
           exclude_transfers: {
             type: 'boolean',
             description:
@@ -8231,49 +9877,48 @@ export function createToolSchemas(): ToolSchema[] {
             type: 'string',
             description: 'Filter by country code (e.g., US, CL)',
           },
-        },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
-      name: 'search_transactions',
-      description:
-        'Free-text search of transactions by merchant name. ' +
-        'Case-insensitive search. Now supports date filtering with ' +
-        'period, start_date, and end_date parameters.',
-      inputSchema: {
-        type: 'object',
-        properties: {
+          // NEW: Single transaction lookup
+          transaction_id: {
+            type: 'string',
+            description: 'Get a single transaction by ID (ignores other filters)',
+          },
+          // NEW: Text search
           query: {
             type: 'string',
-            description: 'Search query',
+            description: 'Free-text search in merchant/transaction names',
           },
-          limit: {
-            type: 'integer',
-            description: 'Maximum number of results (default: 50)',
-            default: 50,
-          },
-          period: {
+          // NEW: Special transaction types
+          transaction_type: {
             type: 'string',
+            enum: ['foreign', 'refunds', 'credits', 'duplicates', 'hsa_eligible', 'tagged'],
             description:
-              'Period shorthand: this_month, last_month, ' +
-              'last_7_days, last_30_days, last_90_days, ytd, ' +
-              'this_year, last_year',
+              'Filter by special type: foreign (international), refunds, credits (cashback/rewards), ' +
+              'duplicates (potential duplicate transactions), hsa_eligible (medical expenses), tagged (#hashtag)',
           },
-          start_date: {
+          // NEW: Tag filter
+          tag: {
             type: 'string',
-            description: 'Start date (YYYY-MM-DD)',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+            description: 'Filter by hashtag (with or without #)',
           },
-          end_date: {
+          // NEW: Location filters
+          city: {
             type: 'string',
-            description: 'End date (YYYY-MM-DD)',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+            description: 'Filter by city name (partial match)',
+          },
+          lat: {
+            type: 'number',
+            description: 'Latitude for proximity search (use with lon and radius_km)',
+          },
+          lon: {
+            type: 'number',
+            description: 'Longitude for proximity search (use with lat and radius_km)',
+          },
+          radius_km: {
+            type: 'number',
+            description: 'Search radius in kilometers (default: 10)',
+            default: 10,
           },
         },
-        required: ['query'],
       },
       annotations: {
         readOnlyHint: true,
@@ -8301,21 +9946,31 @@ export function createToolSchemas(): ToolSchema[] {
       },
     },
     {
-      name: 'get_spending_by_category',
+      name: 'get_spending',
       description:
-        'Get spending aggregated by category for a date range. ' +
-        'Returns total spending per category with human-readable names, sorted by amount. ' +
-        "Use 'period' for common date ranges. Use exclude_transfers=true " +
-        'to get more accurate spending totals.',
+        'Unified spending aggregation tool. Use group_by to select analysis type: ' +
+        'category (spending by category), merchant (spending by merchant), ' +
+        'day_of_week (spending patterns by weekday), time (spending over time with granularity), ' +
+        'rate (spending velocity and projections). Replaces get_spending_by_category, ' +
+        'get_spending_by_merchant, get_spending_by_day_of_week, get_spending_over_time, get_spending_rate.',
       inputSchema: {
         type: 'object',
         properties: {
+          group_by: {
+            type: 'string',
+            enum: ['category', 'merchant', 'day_of_week', 'time', 'rate'],
+            description:
+              'How to aggregate spending: category, merchant, day_of_week, time (with granularity), or rate (velocity)',
+          },
+          granularity: {
+            type: 'string',
+            enum: ['day', 'week', 'month'],
+            description: "Time granularity for 'time' grouping (default: month)",
+          },
           period: {
             type: 'string',
             description:
-              'Period shorthand: this_month, last_month, ' +
-              'last_7_days, last_30_days, last_90_days, ytd, ' +
-              'this_year, last_year',
+              'Period shorthand: this_month, last_month, last_7_days, last_30_days, last_90_days, ytd, this_year, last_year',
           },
           start_date: {
             type: 'string',
@@ -8327,18 +9982,22 @@ export function createToolSchemas(): ToolSchema[] {
             description: 'End date (YYYY-MM-DD)',
             pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
-          min_amount: {
-            type: 'number',
-            description: 'Only include expenses >= this (default: 0.0)',
-            default: 0.0,
+          category: {
+            type: 'string',
+            description: 'Filter by category (partial match)',
+          },
+          limit: {
+            type: 'integer',
+            description: 'Max results for merchant grouping (default: 50)',
+            default: 50,
           },
           exclude_transfers: {
             type: 'boolean',
-            description:
-              'Exclude transfers between accounts and credit card payments (default: false)',
-            default: false,
+            description: 'Exclude transfers (default: true)',
+            default: true,
           },
         },
+        required: ['group_by'],
       },
       annotations: {
         readOnlyHint: true,
@@ -8366,12 +10025,34 @@ export function createToolSchemas(): ToolSchema[] {
     {
       name: 'get_categories',
       description:
-        'Get all categories found in transactions with their human-readable names. ' +
-        "Useful for understanding what category IDs like '13005000' or 'food_dining' mean. " +
-        'Returns category IDs, names, transaction counts, and total amounts.',
+        'Unified category retrieval tool. Supports multiple views: ' +
+        'list (default) - categories used in transactions with counts/amounts; ' +
+        'tree - full Plaid category taxonomy as hierarchical tree; ' +
+        'search - search categories by keyword. Use parent_id to get subcategories. ' +
+        'Replaces get_category_hierarchy, get_subcategories, search_categories.',
       inputSchema: {
         type: 'object',
-        properties: {},
+        properties: {
+          view: {
+            type: 'string',
+            enum: ['list', 'tree', 'search'],
+            description:
+              'View mode: list (categories in transactions), tree (full hierarchy), search (find by keyword)',
+          },
+          parent_id: {
+            type: 'string',
+            description: 'Get subcategories of this parent category ID',
+          },
+          query: {
+            type: 'string',
+            description: "Search query (required for 'search' view)",
+          },
+          type: {
+            type: 'string',
+            enum: ['income', 'expense', 'transfer'],
+            description: "Filter by category type (for 'tree' view)",
+          },
+        },
       },
       annotations: {
         readOnlyHint: true,
@@ -8466,114 +10147,6 @@ export function createToolSchemas(): ToolSchema[] {
       },
     },
     {
-      name: 'get_goal_progress',
-      description:
-        'Get current progress and status for financial goals. ' +
-        'Shows current amount saved, progress percentage toward target, estimated completion date, ' +
-        'and latest month with data. Calculates actual progress from historical snapshots. ' +
-        'Useful for tracking goal performance and completion estimates.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          goal_id: {
-            type: 'string',
-            description: 'Optional goal ID to get progress for a specific goal',
-          },
-        },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
-      name: 'get_goal_history',
-      description:
-        'Get monthly historical snapshots of goal progress. ' +
-        'Returns monthly data showing how the goal amount changed over time, ' +
-        'including start/end amounts for each month, progress percentages, and daily snapshot counts. ' +
-        'Useful for visualizing goal progress trends and analyzing contribution patterns.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          goal_id: {
-            type: 'string',
-            description: 'Goal ID to get history for (required)',
-          },
-          start_month: {
-            type: 'string',
-            description: 'Start month filter (YYYY-MM format, optional)',
-          },
-          end_month: {
-            type: 'string',
-            description: 'End month filter (YYYY-MM format, optional)',
-          },
-          limit: {
-            type: 'integer',
-            description: 'Maximum number of months to return (default: 12)',
-            default: 12,
-          },
-        },
-        required: ['goal_id'],
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
-      name: 'estimate_goal_completion',
-      description:
-        'Estimate when financial goals will be completed. ' +
-        'Calculates estimated completion dates based on historical contribution rates and remaining amounts. ' +
-        'Shows months remaining, estimated completion month, and whether the goal is on track. ' +
-        'Useful for planning and adjusting savings strategies.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          goal_id: {
-            type: 'string',
-            description: 'Optional goal ID to estimate completion for a specific goal',
-          },
-        },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
-      name: 'get_goal_contributions',
-      description:
-        'Analyze goal contribution patterns and history. ' +
-        'Shows total deposits, withdrawals, net contributions, and average monthly contribution rate. ' +
-        'Provides monthly breakdown of changes with deposits and withdrawals separated. ' +
-        'Useful for understanding contribution consistency and identifying patterns.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          goal_id: {
-            type: 'string',
-            description: 'Goal ID to analyze contributions for (required)',
-          },
-          start_month: {
-            type: 'string',
-            description: 'Start month filter (YYYY-MM format, optional)',
-          },
-          end_month: {
-            type: 'string',
-            description: 'End month filter (YYYY-MM format, optional)',
-          },
-          limit: {
-            type: 'integer',
-            description: 'Maximum number of months to analyze (default: 12)',
-            default: 12,
-          },
-        },
-        required: ['goal_id'],
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
       name: 'get_income',
       description:
         'Get income transactions (deposits, paychecks, refunds). ' +
@@ -8598,48 +10171,6 @@ export function createToolSchemas(): ToolSchema[] {
             type: 'string',
             description: 'End date (YYYY-MM-DD)',
             pattern: '^\\d{4}-\\d{2}-\\d{2}$',
-          },
-        },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
-      name: 'get_spending_by_merchant',
-      description:
-        'Get spending aggregated by merchant name. Returns top merchants ' +
-        'by total spending with transaction counts and averages. ' +
-        'Use exclude_transfers=true for more accurate results.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          period: {
-            type: 'string',
-            description:
-              'Period shorthand: this_month, last_month, ' +
-              'last_7_days, last_30_days, last_90_days, ytd, ' +
-              'this_year, last_year',
-          },
-          start_date: {
-            type: 'string',
-            description: 'Start date (YYYY-MM-DD)',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
-          },
-          end_date: {
-            type: 'string',
-            description: 'End date (YYYY-MM-DD)',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
-          },
-          limit: {
-            type: 'integer',
-            description: 'Maximum number of merchants to return (default: 50)',
-            default: 50,
-          },
-          exclude_transfers: {
-            type: 'boolean',
-            description: 'Exclude transfers between accounts (default: false)',
-            default: false,
           },
         },
       },
@@ -8686,171 +10217,6 @@ export function createToolSchemas(): ToolSchema[] {
     // NEW TOOLS - Items 13-33
     // ============================================
     {
-      name: 'get_foreign_transactions',
-      description:
-        'Get international transactions with foreign currencies or FX fees. ' +
-        'Identifies transactions in foreign countries, with non-USD currency, ' +
-        'or with foreign transaction fee categories. Returns breakdown by country ' +
-        'and total FX fees paid.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          period: {
-            type: 'string',
-            description: 'Period shorthand: this_month, last_month, last_30_days, ytd, etc.',
-          },
-          start_date: {
-            type: 'string',
-            description: 'Start date (YYYY-MM-DD)',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
-          },
-          end_date: {
-            type: 'string',
-            description: 'End date (YYYY-MM-DD)',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
-          },
-          limit: {
-            type: 'integer',
-            description: 'Maximum number of transactions to return (default: 100)',
-            default: 100,
-          },
-        },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
-      name: 'get_refunds',
-      description:
-        'Get refund/return transactions. Finds negative amounts (credits) that represent ' +
-        'refunds, returns, or reversals. Returns breakdown by merchant and total refunded.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          period: {
-            type: 'string',
-            description: 'Period shorthand: this_month, last_month, last_30_days, ytd, etc.',
-          },
-          start_date: {
-            type: 'string',
-            description: 'Start date (YYYY-MM-DD)',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
-          },
-          end_date: {
-            type: 'string',
-            description: 'End date (YYYY-MM-DD)',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
-          },
-          limit: {
-            type: 'integer',
-            description: 'Maximum number of transactions to return (default: 100)',
-            default: 100,
-          },
-        },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
-      name: 'get_duplicate_transactions',
-      description:
-        'Detect potential duplicate transactions. Identifies transactions with same ' +
-        'merchant, amount, and date, or transactions sharing the same transaction_id. ' +
-        'Useful for finding data quality issues or actual duplicates.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          period: {
-            type: 'string',
-            description: 'Period shorthand: this_month, last_month, last_30_days, ytd, etc.',
-          },
-          start_date: {
-            type: 'string',
-            description: 'Start date (YYYY-MM-DD)',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
-          },
-          end_date: {
-            type: 'string',
-            description: 'End date (YYYY-MM-DD)',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
-          },
-        },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
-      name: 'get_credits',
-      description:
-        'Get statement credits (Amex credits, cashback, rewards). Finds negative amounts ' +
-        'that represent credits like hotel credits, entertainment credits, uber credits, etc. ' +
-        'Returns breakdown by credit type.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          period: {
-            type: 'string',
-            description: 'Period shorthand: this_month, last_month, last_30_days, ytd, etc.',
-          },
-          start_date: {
-            type: 'string',
-            description: 'Start date (YYYY-MM-DD)',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
-          },
-          end_date: {
-            type: 'string',
-            description: 'End date (YYYY-MM-DD)',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
-          },
-          limit: {
-            type: 'integer',
-            description: 'Maximum number of transactions to return (default: 100)',
-            default: 100,
-          },
-        },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
-      name: 'get_spending_by_day_of_week',
-      description:
-        'Get spending aggregated by day of week. Shows spending patterns across ' +
-        'Sunday through Saturday, including total, average transaction, and percentage ' +
-        'of total spending for each day.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          period: {
-            type: 'string',
-            description: 'Period shorthand: this_month, last_month, last_30_days, ytd, etc.',
-          },
-          start_date: {
-            type: 'string',
-            description: 'Start date (YYYY-MM-DD)',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
-          },
-          end_date: {
-            type: 'string',
-            description: 'End date (YYYY-MM-DD)',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
-          },
-          exclude_transfers: {
-            type: 'boolean',
-            description: 'Exclude transfers between accounts (default: false)',
-            default: false,
-          },
-        },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
       name: 'get_trips',
       description:
         'Detect and group transactions into trips. Identifies clusters of transactions ' +
@@ -8885,57 +10251,41 @@ export function createToolSchemas(): ToolSchema[] {
       },
     },
     {
-      name: 'get_transaction_by_id',
+      name: 'get_merchant_analytics',
       description:
-        'Get a single transaction by its ID. Returns detailed transaction information ' +
-        'including category name and normalized merchant name.',
+        'Unified merchant analytics tool. Use sort_by parameter to rank merchants: ' +
+        'spending (by total amount), frequency (by visit count), average (by avg transaction). ' +
+        'Includes visit dates and visits_per_month. Replaces get_top_merchants, get_merchant_frequency.',
       inputSchema: {
         type: 'object',
         properties: {
-          transaction_id: {
+          sort_by: {
             type: 'string',
-            description: 'The transaction ID to look up',
+            enum: ['spending', 'frequency', 'average'],
+            description: 'How to rank merchants',
           },
-        },
-        required: ['transaction_id'],
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
-      name: 'get_top_merchants',
-      description:
-        'Get top merchants by spending. Returns ranked list of merchants with total spent, ' +
-        'transaction count, average transaction, and date range of transactions.',
-      inputSchema: {
-        type: 'object',
-        properties: {
           period: {
             type: 'string',
-            description: 'Period shorthand: this_month, last_month, last_30_days, ytd, etc.',
+            description: 'Named period (default: last_90_days)',
           },
           start_date: {
             type: 'string',
             description: 'Start date (YYYY-MM-DD)',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
           end_date: {
             type: 'string',
             description: 'End date (YYYY-MM-DD)',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
           limit: {
             type: 'integer',
-            description: 'Number of top merchants to return (default: 20)',
-            default: 20,
+            description: 'Max merchants to return (default: 20)',
           },
-          exclude_transfers: {
-            type: 'boolean',
-            description: 'Exclude transfers between accounts (default: false)',
-            default: false,
+          min_visits: {
+            type: 'integer',
+            description: 'Minimum visits to include (default: 1)',
           },
         },
+        required: ['sort_by'],
       },
       annotations: {
         readOnlyHint: true,
@@ -9015,67 +10365,6 @@ export function createToolSchemas(): ToolSchema[] {
       },
     },
     {
-      name: 'get_hsa_fsa_eligible',
-      description:
-        'Find HSA/FSA eligible transactions. Identifies transactions at pharmacies, ' +
-        'medical providers, dental, vision, and other healthcare expenses.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          period: {
-            type: 'string',
-            description: 'Period shorthand: this_month, last_month, last_30_days, ytd, etc.',
-          },
-          start_date: {
-            type: 'string',
-            description: 'Start date (YYYY-MM-DD)',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
-          },
-          end_date: {
-            type: 'string',
-            description: 'End date (YYYY-MM-DD)',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
-          },
-        },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
-      name: 'get_spending_rate',
-      description:
-        'Get spending velocity analysis. Shows daily/weekly burn rate, projects month-end total, ' +
-        'compares to previous period, and indicates if spending is on track.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          period: {
-            type: 'string',
-            description: 'Period shorthand (default: this_month)',
-          },
-          start_date: {
-            type: 'string',
-            description: 'Start date (YYYY-MM-DD)',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
-          },
-          end_date: {
-            type: 'string',
-            description: 'End date (YYYY-MM-DD)',
-            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
-          },
-          exclude_transfers: {
-            type: 'boolean',
-            description: 'Exclude transfers between accounts (default: false)',
-            default: false,
-          },
-        },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
       name: 'get_data_quality_report',
       description:
         'Generate a comprehensive data quality report. Helps identify issues in financial data ' +
@@ -9123,42 +10412,6 @@ export function createToolSchemas(): ToolSchema[] {
               'If omitted, returns prices for all investments.',
           },
         },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
-      name: 'get_investment_price_history',
-      description:
-        'Get historical price data for a specific investment ticker over a date range. ' +
-        'Returns time-series price data showing how the investment price changed over time. ' +
-        'Includes price summary with latest/earliest prices, high/low ranges, and percent change. ' +
-        'Supports both daily (monthly aggregated) and high-frequency (intraday) price data. ' +
-        'Useful for analyzing price trends, volatility, and historical performance.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          ticker_symbol: {
-            type: 'string',
-            description: 'Ticker symbol to get history for (e.g., "AAPL", "BTC-USD") - required',
-          },
-          start_date: {
-            type: 'string',
-            description: 'Start date filter (YYYY-MM or YYYY-MM-DD format, optional)',
-          },
-          end_date: {
-            type: 'string',
-            description: 'End date filter (YYYY-MM or YYYY-MM-DD format, optional)',
-          },
-          price_type: {
-            type: 'string',
-            description:
-              'Filter by price type: "daily" (monthly data) or "hf" (high-frequency intraday)',
-            enum: ['daily', 'hf'],
-          },
-        },
-        required: ['ticker_symbol'],
       },
       annotations: {
         readOnlyHint: true,
@@ -9224,116 +10477,12 @@ export function createToolSchemas(): ToolSchema[] {
         readOnlyHint: true,
       },
     },
-    {
-      name: 'get_category_hierarchy',
-      description:
-        'Get the full Plaid category taxonomy as a hierarchical tree. ' +
-        'Shows all spending categories organized by type (income, expense, transfer) ' +
-        'with parent categories and their subcategories. Useful for understanding ' +
-        'how transactions are categorized and for building category selection interfaces.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          type: {
-            type: 'string',
-            description: 'Filter by category type: "income", "expense", or "transfer"',
-            enum: ['income', 'expense', 'transfer'],
-          },
-        },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
-      name: 'get_subcategories',
-      description:
-        'Get subcategories (children) of a specific parent category. ' +
-        'Use this to drill down into specific spending areas. For example, ' +
-        '"food_and_drink" has subcategories like groceries, restaurants, coffee, etc.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          category_id: {
-            type: 'string',
-            description:
-              'Parent category ID (e.g., "food_and_drink", "transportation", "entertainment")',
-          },
-        },
-        required: ['category_id'],
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
-      name: 'search_categories',
-      description:
-        'Search for categories by name or keyword. Performs a case-insensitive search ' +
-        'across category names, IDs, and paths. Returns matching categories with their ' +
-        'full hierarchy information. Useful for finding specific categories.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          query: {
-            type: 'string',
-            description: 'Search query (e.g., "food", "gas", "utilities", "entertainment")',
-          },
-        },
-        required: ['query'],
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
 
     // ============================================
     // PHASE 12: ANALYTICS TOOLS
     // ============================================
 
     // ---- Spending Trends ----
-    {
-      name: 'get_spending_over_time',
-      description:
-        'Get spending aggregated over time periods (daily, weekly, or monthly). ' +
-        'Shows spending trends within a date range with totals, transaction counts, ' +
-        'and averages per period. Includes summary with highest/lowest periods. ' +
-        'Great for understanding spending patterns over time.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          period: {
-            type: 'string',
-            description:
-              'Named period: this_month, last_month, last_30_days, last_3_months, last_6_months, ytd, last_year',
-          },
-          start_date: {
-            type: 'string',
-            description: 'Start date (YYYY-MM-DD). Use with end_date for custom range.',
-          },
-          end_date: {
-            type: 'string',
-            description: 'End date (YYYY-MM-DD). Use with start_date for custom range.',
-          },
-          granularity: {
-            type: 'string',
-            enum: ['day', 'week', 'month'],
-            description: 'Time granularity for grouping (default: month)',
-          },
-          category: {
-            type: 'string',
-            description: 'Filter by category (partial match)',
-          },
-          exclude_transfers: {
-            type: 'boolean',
-            description: 'Exclude transfers (default: true)',
-          },
-        },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
     {
       name: 'get_average_transaction_size',
       description:
@@ -9405,19 +10554,73 @@ export function createToolSchemas(): ToolSchema[] {
         readOnlyHint: true,
       },
     },
+
+    // ---- Budget Analytics ----
     {
-      name: 'get_merchant_frequency',
+      name: 'get_budget_analytics',
       description:
-        'Analyze how often you visit merchants and your spending patterns. ' +
-        'Shows visit counts, total spent, average per visit, days between visits, ' +
-        'and visits per month. Great for identifying shopping habits.',
+        'Unified budget analytics tool. Use analysis parameter: ' +
+        'utilization (current budget usage), vs_actual (budget vs actual comparison), ' +
+        'alerts (budgets near/over limit), recommendations (smart budget suggestions). ' +
+        'Replaces get_budget_utilization, get_budget_vs_actual, get_budget_alerts, get_budget_recommendations.',
       inputSchema: {
         type: 'object',
         properties: {
+          analysis: {
+            type: 'string',
+            enum: ['utilization', 'vs_actual', 'alerts', 'recommendations'],
+            description: 'Type of analysis',
+          },
+          month: {
+            type: 'string',
+            description: 'Month to analyze (YYYY-MM format)',
+          },
+          months: {
+            type: 'integer',
+            description: 'Number of months for vs_actual analysis (default: 6)',
+          },
+          category: {
+            type: 'string',
+            description: 'Filter by category',
+          },
+          threshold_percentage: {
+            type: 'integer',
+            description: 'Alert threshold percentage (default: 80)',
+          },
+        },
+        required: ['analysis'],
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+
+    // ---- Investment Analytics ----
+    {
+      name: 'get_investment_analytics',
+      description:
+        'Unified investment analytics tool. Use analysis parameter: ' +
+        'performance (price changes, returns), dividends (dividend income tracking), ' +
+        'fees (investment-related fees). Replaces get_investment_performance, get_dividend_income, get_investment_fees.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          analysis: {
+            type: 'string',
+            enum: ['performance', 'dividends', 'fees'],
+            description: 'Type of analysis',
+          },
+          ticker_symbol: {
+            type: 'string',
+            description: 'Filter by specific ticker symbol',
+          },
+          account_id: {
+            type: 'string',
+            description: 'Filter by specific account ID',
+          },
           period: {
             type: 'string',
-            description:
-              'Named period: this_month, last_month, last_30_days, last_3_months, last_6_months, ytd',
+            description: 'Named period (default: ytd)',
           },
           start_date: {
             type: 'string',
@@ -9427,116 +10630,13 @@ export function createToolSchemas(): ToolSchema[] {
             type: 'string',
             description: 'End date (YYYY-MM-DD)',
           },
-          min_visits: {
-            type: 'integer',
-            description: 'Minimum visits to include (default: 2)',
-          },
-          limit: {
-            type: 'integer',
-            description: 'Maximum merchants to return (default: 20)',
-          },
         },
+        required: ['analysis'],
       },
       annotations: {
         readOnlyHint: true,
       },
     },
-
-    // ---- Budget Analytics ----
-    {
-      name: 'get_budget_utilization',
-      description:
-        'Get budget utilization status for all active budgets. Shows how much of each ' +
-        'budget has been used, remaining amount, and utilization percentage. ' +
-        'Identifies budgets that are under, on track, or over budget.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          month: {
-            type: 'string',
-            description: 'Month to analyze (YYYY-MM format, default: current month)',
-          },
-          category: {
-            type: 'string',
-            description: 'Filter by category (partial match)',
-          },
-          include_inactive: {
-            type: 'boolean',
-            description: 'Include inactive budgets (default: false)',
-          },
-        },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
-      name: 'get_budget_vs_actual',
-      description:
-        'Compare budgeted amounts to actual spending over multiple months. ' +
-        'Shows variance, category breakdown, and consistency scores. ' +
-        'Helps understand budget accuracy and spending patterns.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          months: {
-            type: 'integer',
-            description: 'Number of months to analyze (default: 6)',
-          },
-          category: {
-            type: 'string',
-            description: 'Filter by category (partial match)',
-          },
-        },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
-      name: 'get_budget_recommendations',
-      description:
-        'Get smart budget recommendations based on spending patterns. ' +
-        'Suggests adjustments for existing budgets and recommends new budgets ' +
-        'for categories with consistent spending but no budget.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          months: {
-            type: 'integer',
-            description: 'Number of months to analyze for recommendations (default: 3)',
-          },
-        },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
-      name: 'get_budget_alerts',
-      description:
-        'Get alerts for budgets that are approaching, at warning level, or exceeded. ' +
-        'Shows utilization, days remaining, and projected totals. ' +
-        'Helps proactively manage spending.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          threshold_percentage: {
-            type: 'integer',
-            description: 'Alert threshold percentage (default: 80)',
-          },
-          month: {
-            type: 'string',
-            description: 'Month to check (YYYY-MM format, default: current month)',
-          },
-        },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-
-    // ---- Investment Analytics ----
     {
       name: 'get_portfolio_allocation',
       description:
@@ -9557,118 +10657,65 @@ export function createToolSchemas(): ToolSchema[] {
         readOnlyHint: true,
       },
     },
-    {
-      name: 'get_investment_performance',
-      description:
-        'Get investment performance metrics over a time period. ' +
-        'Shows returns, price changes, highs/lows, and trend direction for each security. ' +
-        'Identifies best and worst performers. Useful for analyzing investment returns.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          ticker_symbol: {
-            type: 'string',
-            description: 'Filter by specific ticker symbol (e.g., "AAPL")',
-          },
-          period: {
-            type: 'string',
-            description:
-              'Named period: this_month, last_month, last_30_days, last_90_days, ytd (default: last_30_days)',
-          },
-          start_date: {
-            type: 'string',
-            description: 'Start date (YYYY-MM-DD)',
-          },
-          end_date: {
-            type: 'string',
-            description: 'End date (YYYY-MM-DD)',
-          },
-        },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
-      name: 'get_dividend_income',
-      description:
-        'Get dividend income from investments. ' +
-        'Tracks dividend payments received, grouped by month and source. ' +
-        'Shows total dividends, average payment, and largest dividend. ' +
-        'Useful for income investors tracking dividend streams.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          period: {
-            type: 'string',
-            description:
-              'Named period: this_month, last_month, last_30_days, ytd, this_year (default: ytd)',
-          },
-          start_date: {
-            type: 'string',
-            description: 'Start date (YYYY-MM-DD)',
-          },
-          end_date: {
-            type: 'string',
-            description: 'End date (YYYY-MM-DD)',
-          },
-          account_id: {
-            type: 'string',
-            description: 'Filter by specific account ID',
-          },
-        },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
-      name: 'get_investment_fees',
-      description:
-        'Get investment-related fees (management fees, trading commissions, etc.). ' +
-        'Tracks fees from investment accounts, grouped by type and month. ' +
-        'Shows total fees, average fee, and monthly fee average. ' +
-        'Useful for understanding the cost of investing.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          period: {
-            type: 'string',
-            description:
-              'Named period: this_month, last_month, last_30_days, ytd, this_year (default: ytd)',
-          },
-          start_date: {
-            type: 'string',
-            description: 'Start date (YYYY-MM-DD)',
-          },
-          end_date: {
-            type: 'string',
-            description: 'End date (YYYY-MM-DD)',
-          },
-          account_id: {
-            type: 'string',
-            description: 'Filter by specific account ID',
-          },
-        },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
 
     // ---- Goal Analytics ----
     {
-      name: 'get_goal_projection',
+      name: 'get_goal_analytics',
       description:
-        'Get goal projections with multiple scenarios (conservative, moderate, aggressive). ' +
-        'Shows estimated completion dates based on different contribution rates. ' +
-        'Useful for planning and understanding goal achievement timelines.',
+        'Unified goal analytics tool. Use analysis parameter: ' +
+        'projection (completion scenarios), risk (identify at-risk goals), ' +
+        'recommendations (personalized suggestions). ' +
+        'Replaces get_goal_projection, get_goals_at_risk, get_goal_recommendations.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          analysis: {
+            type: 'string',
+            enum: ['projection', 'risk', 'recommendations'],
+            description: 'Type of analysis',
+          },
+          goal_id: {
+            type: 'string',
+            description: 'Filter by specific goal ID',
+          },
+          months_lookback: {
+            type: 'integer',
+            description: 'Number of months to analyze for risk assessment (default: 6)',
+          },
+        },
+        required: ['analysis'],
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_goal_details',
+      description:
+        'Get goal details with optional includes. Combines progress, history, and contributions into one call. ' +
+        'Replaces separate calls to get_goal_progress, get_goal_history, get_goal_contributions.',
       inputSchema: {
         type: 'object',
         properties: {
           goal_id: {
             type: 'string',
             description: 'Filter by specific goal ID',
+          },
+          include: {
+            type: 'array',
+            items: {
+              type: 'string',
+              enum: ['progress', 'history', 'contributions'],
+            },
+            description: 'What to include: progress, history, contributions (default: [progress])',
+          },
+          start_month: {
+            type: 'string',
+            description: 'Start month for history (YYYY-MM)',
+          },
+          end_month: {
+            type: 'string',
+            description: 'End month for history (YYYY-MM)',
           },
         },
       },
@@ -9695,62 +10742,29 @@ export function createToolSchemas(): ToolSchema[] {
         readOnlyHint: true,
       },
     },
-    {
-      name: 'get_goals_at_risk',
-      description:
-        'Identify goals at risk of not being achieved. ' +
-        'Analyzes contribution patterns and flags goals with critical/high/medium risk. ' +
-        'Shows risk factors and required contributions to get back on track.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          months_lookback: {
-            type: 'integer',
-            description: 'Number of months to analyze (default: 6)',
-          },
-          risk_threshold: {
-            type: 'integer',
-            description: 'Minimum risk score to include (default: 50)',
-          },
-        },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
-      name: 'get_goal_recommendations',
-      description:
-        'Get personalized recommendations to improve goal progress. ' +
-        'Suggests increasing contributions, adjusting targets, or celebrating milestones. ' +
-        'Prioritizes recommendations by urgency and impact.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          goal_id: {
-            type: 'string',
-            description: 'Filter by specific goal ID',
-          },
-        },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
 
     // ---- Account & Comparison ----
     {
-      name: 'get_account_activity',
+      name: 'get_account_analytics',
       description:
-        'Get account activity summary showing transaction counts, volumes, and activity levels. ' +
-        'Identifies most active accounts and shows inflow/outflow statistics per account.',
+        'Unified account analytics tool. Use analysis parameter: ' +
+        'activity (transaction counts, inflows/outflows), balance_trends (balance changes over time), ' +
+        'fees (ATM, overdraft, service fees). Replaces get_account_activity, get_balance_trends, get_account_fees.',
       inputSchema: {
         type: 'object',
         properties: {
+          analysis: {
+            type: 'string',
+            enum: ['activity', 'balance_trends', 'fees'],
+            description: 'Type of analysis: activity, balance_trends, or fees',
+          },
+          account_id: {
+            type: 'string',
+            description: 'Filter by specific account ID',
+          },
           period: {
             type: 'string',
-            description:
-              'Named period: this_month, last_month, last_30_days, last_90_days, ytd (default: last_30_days)',
+            description: 'Named period (default: last_30_days)',
           },
           start_date: {
             type: 'string',
@@ -9759,69 +10773,22 @@ export function createToolSchemas(): ToolSchema[] {
           end_date: {
             type: 'string',
             description: 'End date (YYYY-MM-DD)',
-          },
-          account_type: {
-            type: 'string',
-            description: 'Filter by account type (checking, savings, credit, etc.)',
-          },
-        },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
-      name: 'get_balance_trends',
-      description:
-        'Analyze balance trends over time by tracking inflows and outflows. ' +
-        'Shows growing, declining, or stable accounts and average monthly changes.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          account_id: {
-            type: 'string',
-            description: 'Filter by specific account ID',
           },
           months: {
             type: 'integer',
-            description: 'Number of months to analyze (default: 6)',
+            description: 'Number of months for balance_trends (default: 6)',
           },
           granularity: {
             type: 'string',
-            description: 'Time granularity: daily, weekly, or monthly (default: monthly)',
+            enum: ['daily', 'weekly', 'monthly'],
+            description: 'Time granularity for balance_trends',
+          },
+          account_type: {
+            type: 'string',
+            description: 'Filter by account type',
           },
         },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
-      name: 'get_account_fees',
-      description:
-        'Track account-related fees (ATM, overdraft, foreign transaction, etc.). ' +
-        'Shows fees grouped by type and account with totals and averages.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          period: {
-            type: 'string',
-            description:
-              'Named period: this_month, last_month, last_30_days, ytd, this_year (default: ytd)',
-          },
-          start_date: {
-            type: 'string',
-            description: 'Start date (YYYY-MM-DD)',
-          },
-          end_date: {
-            type: 'string',
-            description: 'End date (YYYY-MM-DD)',
-          },
-          account_id: {
-            type: 'string',
-            description: 'Filter by specific account ID',
-          },
-        },
+        required: ['analysis'],
       },
       annotations: {
         readOnlyHint: true,
@@ -9859,201 +10826,5 @@ export function createToolSchemas(): ToolSchema[] {
     },
 
     // ---- Search & Discovery ----
-    {
-      name: 'get_advanced_search',
-      description:
-        'Advanced multi-criteria search for transactions. ' +
-        'Combines filters like amount range, date, category, merchant, city, and more. ' +
-        'Returns matching transactions with relevance scores.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          query: {
-            type: 'string',
-            description: 'Text to search in transaction names',
-          },
-          min_amount: {
-            type: 'number',
-            description: 'Minimum absolute amount',
-          },
-          max_amount: {
-            type: 'number',
-            description: 'Maximum absolute amount',
-          },
-          start_date: {
-            type: 'string',
-            description: 'Start date (YYYY-MM-DD)',
-          },
-          end_date: {
-            type: 'string',
-            description: 'End date (YYYY-MM-DD)',
-          },
-          category: {
-            type: 'string',
-            description: 'Filter by category (partial match)',
-          },
-          account_id: {
-            type: 'string',
-            description: 'Filter by specific account ID',
-          },
-          merchant: {
-            type: 'string',
-            description: 'Filter by merchant name (partial match)',
-          },
-          is_income: {
-            type: 'boolean',
-            description: 'Only show income (negative amounts)',
-          },
-          is_expense: {
-            type: 'boolean',
-            description: 'Only show expenses (positive amounts)',
-          },
-          exclude_transfers: {
-            type: 'boolean',
-            description: 'Exclude transfers (default: true)',
-          },
-          city: {
-            type: 'string',
-            description: 'Filter by city',
-          },
-          payment_method: {
-            type: 'string',
-            description: 'Filter by payment method',
-          },
-          limit: {
-            type: 'integer',
-            description: 'Maximum results to return (default: 100)',
-          },
-        },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
-      name: 'get_tag_search',
-      description:
-        'Find transactions with hashtags (#tag). ' +
-        'Discovers all tags used or filters by specific tag. ' +
-        'Shows tag usage statistics and spending per tag.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          tag: {
-            type: 'string',
-            description: 'Specific tag to search for (with or without #)',
-          },
-          period: {
-            type: 'string',
-            description: 'Named period (default: last_90_days)',
-          },
-          start_date: {
-            type: 'string',
-            description: 'Start date (YYYY-MM-DD)',
-          },
-          end_date: {
-            type: 'string',
-            description: 'End date (YYYY-MM-DD)',
-          },
-          limit: {
-            type: 'integer',
-            description: 'Maximum results (default: 100)',
-          },
-        },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
-      name: 'get_note_search',
-      description:
-        'Search transactions by descriptive text or notes. ' +
-        'Finds matching text in transaction names and shows context.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          query: {
-            type: 'string',
-            description: 'Text to search for in transaction descriptions',
-          },
-          period: {
-            type: 'string',
-            description: 'Named period (default: ytd)',
-          },
-          start_date: {
-            type: 'string',
-            description: 'Start date (YYYY-MM-DD)',
-          },
-          end_date: {
-            type: 'string',
-            description: 'End date (YYYY-MM-DD)',
-          },
-          limit: {
-            type: 'integer',
-            description: 'Maximum results (default: 100)',
-          },
-        },
-        required: ['query'],
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
-    {
-      name: 'get_location_search',
-      description:
-        'Search transactions by location (city, region, country, or coordinates). ' +
-        'Supports proximity search with radius for coordinate-based queries. ' +
-        'Shows location-based spending summary.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          city: {
-            type: 'string',
-            description: 'Filter by city name (partial match)',
-          },
-          region: {
-            type: 'string',
-            description: 'Filter by state/region',
-          },
-          country: {
-            type: 'string',
-            description: 'Filter by country',
-          },
-          lat: {
-            type: 'number',
-            description: 'Latitude for proximity search',
-          },
-          lon: {
-            type: 'number',
-            description: 'Longitude for proximity search',
-          },
-          radius_km: {
-            type: 'number',
-            description: 'Search radius in kilometers (default: 10)',
-          },
-          period: {
-            type: 'string',
-            description: 'Named period (default: ytd)',
-          },
-          start_date: {
-            type: 'string',
-            description: 'Start date (YYYY-MM-DD)',
-          },
-          end_date: {
-            type: 'string',
-            description: 'End date (YYYY-MM-DD)',
-          },
-          limit: {
-            type: 'integer',
-            description: 'Maximum results (default: 100)',
-          },
-        },
-      },
-      annotations: {
-        readOnlyHint: true,
-      },
-    },
   ];
 }

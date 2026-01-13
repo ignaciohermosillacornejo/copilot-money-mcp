@@ -169,9 +169,10 @@ describe('CopilotMoneyServer', () => {
       const tools = server.tools;
       const result = tools.getCategories();
 
+      expect(result.view).toBe('list');
       expect(result.count).toBeDefined();
-      expect(result.categories).toBeDefined();
-      expect(Array.isArray(result.categories)).toBe(true);
+      expect((result.data as { categories: unknown[] }).categories).toBeDefined();
+      expect(Array.isArray((result.data as { categories: unknown[] }).categories)).toBe(true);
     });
   });
 

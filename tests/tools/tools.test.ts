@@ -364,21 +364,28 @@ describe('CopilotMoneyTools', () => {
     test('returns all unique categories', () => {
       const result = tools.getCategories();
 
+      expect(result.view).toBe('list');
       expect(result.count).toBeGreaterThan(0);
-      expect(result.categories).toBeDefined();
+      expect((result.data as { categories: unknown[] }).categories).toBeDefined();
     });
 
     test('includes human-readable category names', () => {
       const result = tools.getCategories();
+      const categories = (
+        result.data as { categories: { category_id: string; category_name: string }[] }
+      ).categories;
 
-      const foodCategory = result.categories.find((c) => c.category_id === 'food_dining');
+      const foodCategory = categories.find((c) => c.category_id === 'food_dining');
       expect(foodCategory?.category_name).toBe('Food & Drink');
     });
 
     test('includes transaction count and total amount', () => {
       const result = tools.getCategories();
+      const categories = (
+        result.data as { categories: { transaction_count: number; total_amount: number }[] }
+      ).categories;
 
-      for (const cat of result.categories) {
+      for (const cat of categories) {
         expect(cat.transaction_count).toBeGreaterThan(0);
         expect(cat.total_amount).toBeGreaterThanOrEqual(0);
       }
@@ -565,9 +572,9 @@ describe('CopilotMoneyTools', () => {
 });
 
 describe('createToolSchemas', () => {
-  test('returns 60 tool schemas', () => {
+  test('returns 28 tool schemas', () => {
     const schemas = createToolSchemas();
-    expect(schemas).toHaveLength(60);
+    expect(schemas).toHaveLength(28);
   });
 
   test('all tools have readOnlyHint: true', () => {
@@ -594,26 +601,29 @@ describe('createToolSchemas', () => {
     const schemas = createToolSchemas();
     const names = schemas.map((s) => s.name);
 
-    // Original tools
+    // Core tools
     expect(names).toContain('get_transactions');
-    expect(names).toContain('search_transactions');
     expect(names).toContain('get_accounts');
-    expect(names).toContain('get_spending_by_category');
     expect(names).toContain('get_account_balance');
 
-    // New tools
+    // Consolidated tools
+    expect(names).toContain('get_spending');
     expect(names).toContain('get_categories');
     expect(names).toContain('get_recurring_transactions');
     expect(names).toContain('get_income');
-    expect(names).toContain('get_spending_by_merchant');
     expect(names).toContain('compare_periods');
+    expect(names).toContain('get_account_analytics');
+    expect(names).toContain('get_budget_analytics');
+    expect(names).toContain('get_goal_analytics');
+    expect(names).toContain('get_investment_analytics');
+    expect(names).toContain('get_merchant_analytics');
   });
 
-  test('search_transactions requires query parameter', () => {
+  test('get_spending requires group_by parameter', () => {
     const schemas = createToolSchemas();
-    const searchTool = schemas.find((s) => s.name === 'search_transactions');
+    const spendingTool = schemas.find((s) => s.name === 'get_spending');
 
-    expect(searchTool?.inputSchema.required).toContain('query');
+    expect(spendingTool?.inputSchema.required).toContain('group_by');
   });
 
   test('get_account_balance requires account_id parameter', () => {
@@ -631,30 +641,39 @@ describe('createToolSchemas', () => {
     expect(compareTool?.inputSchema.required).toContain('period2');
   });
 
-  test('new tools are present in schema', () => {
+  test('consolidated tools are present in schema', () => {
     const schemas = createToolSchemas();
     const names = schemas.map((s) => s.name);
 
-    // New tools from PR
-    expect(names).toContain('get_foreign_transactions');
-    expect(names).toContain('get_refunds');
-    expect(names).toContain('get_duplicate_transactions');
-    expect(names).toContain('get_credits');
-    expect(names).toContain('get_spending_by_day_of_week');
+    // Consolidated analytics tools
+    expect(names).toContain('get_account_analytics');
+    expect(names).toContain('get_budget_analytics');
+    expect(names).toContain('get_goal_analytics');
+    expect(names).toContain('get_goal_details');
+    expect(names).toContain('get_investment_analytics');
+    expect(names).toContain('get_merchant_analytics');
     expect(names).toContain('get_trips');
-    expect(names).toContain('get_transaction_by_id');
-    expect(names).toContain('get_top_merchants');
     expect(names).toContain('get_unusual_transactions');
     expect(names).toContain('export_transactions');
-    expect(names).toContain('get_hsa_fsa_eligible');
-    expect(names).toContain('get_spending_rate');
   });
 
-  test('get_transaction_by_id requires transaction_id parameter', () => {
+  test('consolidated analytics tools require analysis parameter', () => {
     const schemas = createToolSchemas();
-    const tool = schemas.find((s) => s.name === 'get_transaction_by_id');
 
-    expect(tool?.inputSchema.required).toContain('transaction_id');
+    const accountAnalytics = schemas.find((s) => s.name === 'get_account_analytics');
+    expect(accountAnalytics?.inputSchema.required).toContain('analysis');
+
+    const budgetAnalytics = schemas.find((s) => s.name === 'get_budget_analytics');
+    expect(budgetAnalytics?.inputSchema.required).toContain('analysis');
+
+    const goalAnalytics = schemas.find((s) => s.name === 'get_goal_analytics');
+    expect(goalAnalytics?.inputSchema.required).toContain('analysis');
+
+    const investmentAnalytics = schemas.find((s) => s.name === 'get_investment_analytics');
+    expect(investmentAnalytics?.inputSchema.required).toContain('analysis');
+
+    const merchantAnalytics = schemas.find((s) => s.name === 'get_merchant_analytics');
+    expect(merchantAnalytics?.inputSchema.required).toContain('sort_by');
   });
 });
 
