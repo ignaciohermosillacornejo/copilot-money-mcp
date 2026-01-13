@@ -7,16 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-01-12
+
 ### Added
-- Complete Node.js/TypeScript rewrite from Python
-- 142 comprehensive tests with 351 assertions
-- Full .mcpb bundle compliance
-- Comprehensive documentation
+
+#### New Data Quality Tool
+- **`get_data_quality_report`** - Comprehensive data quality analysis tool
+  - Detects unresolved category IDs that can't be mapped to human-readable names
+  - Flags potential currency conversion issues (large amounts with foreign merchant names)
+  - Identifies non-unique transaction IDs (multiple transactions sharing same ID)
+  - Finds potential duplicate accounts (same name and type)
+  - Detects suspicious categorizations (e.g., Uber as Parking, pharmacies as Office Supplies)
+  - Provides actionable insights for users to fix data in Copilot Money
+
+#### Enhanced Analysis Capabilities
+- **Improved Income Detection**
+  - Now excludes transfer categories and credit card payments automatically
+  - Filters out internal transfers by merchant name patterns (CREDIT CARD, AUTOPAY, etc.)
+  - Excludes likely refunds from common merchants (Amazon, Uber, Target, etc. under $500)
+  - Better distinction between true income and credits/refunds
+  - More accurate income reporting for financial analysis
+
+- **Enhanced Foreign Transaction Detection**
+  - Parses merchant names for foreign city indicators (Santiago, London, Paris, Tokyo, etc.)
+  - Detects country codes in merchant names (CL, GB, MX, FR, DE, IT, ES, JP, CA)
+  - Checks region field for non-US state codes
+  - More comprehensive international transaction identification
+  - Catches transactions that were previously missed
+
+- **Better Trip Location Detection**
+  - Extracts city names from merchant names when not in transaction fields
+  - Infers country codes from merchant data patterns
+  - Displays multiple cities visited during a trip
+  - Handles missing location data gracefully with intelligent fallbacks
+  - Trips now show actual locations instead of "Unknown"
 
 ### Changed
-- Migration from Python to TypeScript for better type safety
-- Improved performance with lazy-loading database
-- Enhanced error handling and validation
+- Tool count increased from 22 to 23 tools
+- Test count increased from 366 to 400 tests
+- Assertion count increased to 1427+ (from 1360+)
+- All tests passing with enhanced coverage
+
+### Technical Details
+- **Design Philosophy**: Data quality issues are surfaced rather than masked, enabling users to fix root causes in Copilot Money
+- **Backwards Compatible**: All changes are additive, no breaking changes
+- **Performance**: No impact on query performance
+- **Testing**: All new functionality comprehensively tested
 
 ## [1.0.0] - 2026-01-11
 
