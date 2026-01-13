@@ -16,6 +16,7 @@ import { Recurring, RecurringSchema } from '../models/recurring.js';
 import { Budget, BudgetSchema } from '../models/budget.js';
 import { Goal, GoalSchema } from '../models/goal.js';
 import { GoalHistory, GoalHistorySchema, DailySnapshot } from '../models/goal-history.js';
+import { InvestmentPrice, InvestmentPriceSchema } from '../models/investment-price.js';
 
 /**
  * Find a field and extract its string value.
@@ -1074,6 +1075,237 @@ export function decodeGoalHistory(dbPath: string, goalId?: string): GoalHistory[
       return a.goal_id.localeCompare(b.goal_id);
     }
     return b.month.localeCompare(a.month); // Newest first
+  });
+
+  return unique;
+}
+/**
+ * Decode investment prices from the Copilot Money database.
+ *
+ * Investment prices are stored in collection:
+ * /investment_prices/{hash}/daily/{month}  (historical monthly data)
+ * /investment_prices/{hash}/hf/{date}      (high-frequency intraday data)
+ *
+ * Each document contains price information for stocks, crypto, ETFs, etc.
+ * The hash is typically a SHA-256 hash (64 hex chars) or shorter ID.
+ *
+ * @param dbPath - Path to the LevelDB database directory
+ * @param options - Filter options
+ * @returns Array of decoded InvestmentPrice objects
+ */
+export function decodeInvestmentPrices(
+  dbPath: string,
+  options: {
+    tickerSymbol?: string;
+    startDate?: string; // YYYY-MM or YYYY-MM-DD
+    endDate?: string; // YYYY-MM or YYYY-MM-DD
+    priceType?: 'daily' | 'hf';
+  } = {}
+): InvestmentPrice[] {
+  const prices: InvestmentPrice[] = [];
+  const { tickerSymbol, startDate, endDate, priceType } = options;
+
+  // Return empty array if path doesn't exist (graceful degradation)
+  if (!fs.existsSync(dbPath)) {
+    return [];
+  }
+
+  const stat = fs.statSync(dbPath);
+  if (!stat.isDirectory()) {
+    return [];
+  }
+
+  // Configuration constants for record extraction
+  const RECORD_WINDOW_BEFORE = 500; // Bytes to search before path marker
+  const RECORD_WINDOW_AFTER = 2000; // Bytes to search after investment ID
+  const MIN_HASH_LENGTH = 20; // Minimum length for investment ID
+
+  // Get all .ldb files
+  const files = fs.readdirSync(dbPath);
+  const ldbFiles = files.filter((f) => f.endsWith('.ldb')).map((f) => path.join(dbPath, f));
+
+  // Investment prices are in: /investment_prices/{hash}/daily/{month} or /hf/{date}
+  const pricePathMarker = Buffer.from('investment_prices');
+  const dailyMarker = Buffer.from('/daily/');
+  const hfMarker = Buffer.from('/hf/');
+
+  for (const filepath of ldbFiles) {
+    const data = fs.readFileSync(filepath);
+
+    if (!data.includes(pricePathMarker)) {
+      continue;
+    }
+
+    // Find price records by searching for the path marker
+    let searchPos = 0;
+    let idx = data.indexOf(pricePathMarker, searchPos);
+
+    while (idx !== -1) {
+      searchPos = idx + 1;
+
+      // Use a window around the path marker to capture all fields
+      const recordStart = Math.max(0, idx - RECORD_WINDOW_BEFORE);
+      const recordEnd = Math.min(data.length, idx + pricePathMarker.length + 200);
+      const record = data.subarray(recordStart, recordEnd);
+
+      // Try to extract investment ID (hash) from the path
+      // Path format: /investment_prices/{hash}/daily/{month} or /hf/{date}
+      const pathIdx = idx - recordStart;
+      const afterPath = record.subarray(pathIdx + pricePathMarker.length, pathIdx + 200);
+
+      // Look for hash after investment_prices/ - SHA-256 (64 hex) or shorter IDs (20+)
+      const hashMatch = afterPath.toString('utf-8').match(/^\/([a-f0-9]{64}|[a-zA-Z0-9_-]{20,})/);
+      const investmentId = hashMatch?.[1];
+
+      if (!investmentId || investmentId.length < MIN_HASH_LENGTH) {
+        idx = data.indexOf(pricePathMarker, searchPos);
+        continue;
+      }
+
+      // Determine if this is daily or high-frequency data
+      const isDailyData = record.includes(dailyMarker);
+      const isHfData = record.includes(hfMarker);
+
+      // Skip if filtering by price type
+      if (priceType === 'daily' && !isDailyData) {
+        idx = data.indexOf(pricePathMarker, searchPos);
+        continue;
+      }
+      if (priceType === 'hf' && !isHfData) {
+        idx = data.indexOf(pricePathMarker, searchPos);
+        continue;
+      }
+
+      // Expand search window for price fields
+      const extendedEnd = Math.min(
+        data.length,
+        idx + pricePathMarker.length + investmentId.length + RECORD_WINDOW_AFTER
+      );
+      const extendedRecord = data.subarray(
+        idx + pricePathMarker.length + investmentId.length,
+        extendedEnd
+      );
+
+      // Extract ticker symbol if present
+      const ticker = extractStringValue(extendedRecord, fieldPattern('ticker_symbol'));
+
+      // Skip if filtering by ticker and doesn't match
+      if (tickerSymbol && ticker !== tickerSymbol) {
+        idx = data.indexOf(pricePathMarker, searchPos);
+        continue;
+      }
+
+      // Extract date/month based on data type
+      let date: string | undefined;
+      let month: string | undefined;
+
+      if (isDailyData) {
+        month = extractStringValue(extendedRecord, fieldPattern('month')) ?? undefined;
+      } else if (isHfData) {
+        date = extractStringValue(extendedRecord, fieldPattern('date')) ?? undefined;
+      }
+
+      // Apply date range filters
+      const recordDate = date ?? month;
+      if (recordDate) {
+        if (startDate && recordDate < startDate) {
+          idx = data.indexOf(pricePathMarker, searchPos);
+          continue;
+        }
+        if (endDate && recordDate > endDate) {
+          idx = data.indexOf(pricePathMarker, searchPos);
+          continue;
+        }
+      }
+
+      // Extract price fields (multiple types available)
+      const price = extractDoubleField(extendedRecord, fieldPattern('price'));
+      const closePrice = extractDoubleField(extendedRecord, fieldPattern('close_price'));
+      const currentPrice = extractDoubleField(extendedRecord, fieldPattern('current_price'));
+      const institutionPrice = extractDoubleField(
+        extendedRecord,
+        fieldPattern('institution_price')
+      );
+
+      // Extract OHLCV data
+      const high = extractDoubleField(extendedRecord, fieldPattern('high'));
+      const low = extractDoubleField(extendedRecord, fieldPattern('low'));
+      const open = extractDoubleField(extendedRecord, fieldPattern('open'));
+      const volume = extractDoubleField(extendedRecord, fieldPattern('volume'));
+
+      // Extract metadata
+      const currency = extractStringValue(extendedRecord, fieldPattern('currency'));
+      const source = extractStringValue(extendedRecord, fieldPattern('source'));
+      const closePriceAsOf = extractStringValue(extendedRecord, fieldPattern('close_price_as_of'));
+
+      // Build price object
+      const priceData: {
+        investment_id: string;
+        ticker_symbol?: string;
+        price?: number;
+        close_price?: number;
+        current_price?: number;
+        institution_price?: number;
+        date?: string;
+        month?: string;
+        close_price_as_of?: string;
+        high?: number;
+        low?: number;
+        open?: number;
+        volume?: number;
+        currency?: string;
+        source?: string;
+        price_type?: string;
+      } = {
+        investment_id: investmentId,
+      };
+
+      if (ticker) priceData.ticker_symbol = ticker;
+      if (price !== null) priceData.price = price;
+      if (closePrice !== null) priceData.close_price = closePrice;
+      if (currentPrice !== null) priceData.current_price = currentPrice;
+      if (institutionPrice !== null) priceData.institution_price = institutionPrice;
+      if (date) priceData.date = date;
+      if (month) priceData.month = month;
+      if (closePriceAsOf) priceData.close_price_as_of = closePriceAsOf;
+      if (high !== null) priceData.high = high;
+      if (low !== null) priceData.low = low;
+      if (open !== null) priceData.open = open;
+      if (volume !== null) priceData.volume = volume;
+      if (currency) priceData.currency = currency;
+      if (source) priceData.source = source;
+      priceData.price_type = isDailyData ? 'daily' : 'hf';
+
+      // Validate and add to results
+      const validated = InvestmentPriceSchema.safeParse(priceData);
+      if (validated.success) {
+        prices.push(validated.data);
+      }
+
+      idx = data.indexOf(pricePathMarker, searchPos);
+    }
+  }
+
+  // Deduplicate by investment_id + date/month combination
+  const seen = new Set<string>();
+  const unique: InvestmentPrice[] = [];
+
+  for (const price of prices) {
+    const key = `${price.investment_id}-${price.date || price.month || 'unknown'}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(price);
+    }
+  }
+
+  // Sort by investment_id, then by date/month (newest first)
+  unique.sort((a, b) => {
+    if (a.investment_id !== b.investment_id) {
+      return a.investment_id.localeCompare(b.investment_id);
+    }
+    const dateA = a.date || a.month || '';
+    const dateB = b.date || b.month || '';
+    return dateB.localeCompare(dateA); // Newest first
   });
 
   return unique;

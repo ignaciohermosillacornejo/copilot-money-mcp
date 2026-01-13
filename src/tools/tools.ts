@@ -11,6 +11,7 @@ import type { Transaction, Account } from '../models/index.js';
 import { getTransactionDisplayName, getRecurringDisplayName } from '../models/index.js';
 import { estimateGoalCompletion } from '../models/goal.js';
 import { getHistoryProgress, getMonthStartEnd, type GoalHistory } from '../models/goal-history.js';
+import { getBestPrice, getPriceDate } from '../models/investment-price.js';
 
 // ============================================
 // Category Constants
@@ -3543,6 +3544,222 @@ export class CopilotMoneyTools {
       category_comparison: categoryComparison.slice(0, 20),
     };
   }
+
+  /**
+   * Get investment prices (current/latest prices for investments).
+   *
+   * Returns the most recent price data for investments, optionally filtered by ticker symbol.
+   * Useful for checking current portfolio values and tracking investment performance.
+   *
+   * @param options - Filter options
+   * @returns Object with investment price data
+   */
+  getInvestmentPrices(options: { ticker_symbol?: string } = {}): {
+    count: number;
+    prices: Array<{
+      investment_id: string;
+      ticker_symbol?: string;
+      price?: number;
+      close_price?: number;
+      current_price?: number;
+      institution_price?: number;
+      best_price?: number;
+      date?: string;
+      month?: string;
+      currency?: string;
+      high?: number;
+      low?: number;
+      open?: number;
+      volume?: number;
+      price_type?: string;
+    }>;
+  } {
+    const { ticker_symbol } = options;
+
+    // Get latest prices (no date filter to get most recent)
+    const prices = this.db.getInvestmentPrices({
+      tickerSymbol: ticker_symbol,
+    });
+
+    // Group by investment_id and get the latest price for each
+    const latestPrices = new Map<string, (typeof prices)[0]>();
+    for (const price of prices) {
+      const existing = latestPrices.get(price.investment_id);
+      const priceDate = getPriceDate(price);
+      const existingDate = existing ? getPriceDate(existing) : undefined;
+
+      // Keep the most recent price (by date/month)
+      if (!existing || (priceDate && existingDate && priceDate > existingDate)) {
+        latestPrices.set(price.investment_id, price);
+      }
+    }
+
+    // Convert to array and format
+    const formattedPrices = Array.from(latestPrices.values()).map((p) => ({
+      investment_id: p.investment_id,
+      ticker_symbol: p.ticker_symbol,
+      price: p.price,
+      close_price: p.close_price,
+      current_price: p.current_price,
+      institution_price: p.institution_price,
+      best_price: getBestPrice(p),
+      date: p.date,
+      month: p.month,
+      currency: p.currency,
+      high: p.high,
+      low: p.low,
+      open: p.open,
+      volume: p.volume,
+      price_type: p.price_type,
+    }));
+
+    // Sort by ticker symbol (or investment_id if no ticker)
+    formattedPrices.sort((a, b) => {
+      const aName = a.ticker_symbol || a.investment_id;
+      const bName = b.ticker_symbol || b.investment_id;
+      return aName.localeCompare(bName);
+    });
+
+    return {
+      count: formattedPrices.length,
+      prices: formattedPrices,
+    };
+  }
+
+  /**
+   * Get historical price data for a specific investment ticker.
+   *
+   * Returns time-series price data for an investment over a specified date range.
+   * Useful for analyzing price trends, volatility, and historical performance.
+   *
+   * @param options - Filter options
+   * @returns Object with historical price data
+   */
+  getInvestmentPriceHistory(options: {
+    ticker_symbol: string;
+    start_date?: string;
+    end_date?: string;
+    price_type?: 'daily' | 'hf';
+  }): {
+    ticker_symbol: string;
+    count: number;
+    date_range: {
+      start_date?: string;
+      end_date?: string;
+    };
+    price_summary?: {
+      latest_price?: number;
+      earliest_price?: number;
+      highest_price?: number;
+      lowest_price?: number;
+      price_change?: number;
+      price_change_percent?: number;
+    };
+    history: Array<{
+      date?: string;
+      month?: string;
+      price?: number;
+      close_price?: number;
+      current_price?: number;
+      best_price?: number;
+      open?: number;
+      high?: number;
+      low?: number;
+      volume?: number;
+      currency?: string;
+      price_type?: string;
+    }>;
+  } {
+    const { ticker_symbol, start_date, end_date, price_type } = options;
+
+    // Validate required parameter
+    if (!ticker_symbol) {
+      throw new Error('ticker_symbol is required');
+    }
+
+    // Get historical prices for this ticker
+    const prices = this.db.getInvestmentPrices({
+      tickerSymbol: ticker_symbol,
+      startDate: start_date,
+      endDate: end_date,
+      priceType: price_type,
+    });
+
+    if (prices.length === 0) {
+      return {
+        ticker_symbol,
+        count: 0,
+        date_range: {
+          start_date,
+          end_date,
+        },
+        history: [],
+      };
+    }
+
+    // Format history
+    const history = prices.map((p) => ({
+      date: p.date,
+      month: p.month,
+      price: p.price,
+      close_price: p.close_price,
+      current_price: p.current_price,
+      best_price: getBestPrice(p),
+      open: p.open,
+      high: p.high,
+      low: p.low,
+      volume: p.volume,
+      currency: p.currency,
+      price_type: p.price_type,
+    }));
+
+    // Sort by date/month descending (newest first)
+    history.sort((a, b) => {
+      const aDate = a.date || a.month || '';
+      const bDate = b.date || b.month || '';
+      return bDate.localeCompare(aDate);
+    });
+
+    // Calculate price summary
+    const pricesWithValues = prices
+      .map((p) => getBestPrice(p))
+      .filter((p): p is number => p !== undefined);
+
+    let priceSummary;
+    if (pricesWithValues.length > 0) {
+      const latestPrice = history[0]?.best_price;
+      const earliestPrice = history[history.length - 1]?.best_price;
+      const highestPrice = Math.max(...pricesWithValues);
+      const lowestPrice = Math.min(...pricesWithValues);
+
+      priceSummary = {
+        latest_price: latestPrice,
+        earliest_price: earliestPrice,
+        highest_price: highestPrice,
+        lowest_price: lowestPrice,
+        price_change:
+          latestPrice && earliestPrice
+            ? Math.round((latestPrice - earliestPrice) * 100) / 100
+            : undefined,
+        price_change_percent:
+          latestPrice && earliestPrice && earliestPrice > 0
+            ? Math.round(((latestPrice - earliestPrice) / earliestPrice) * 10000) / 100
+            : undefined,
+      };
+    }
+
+    return {
+      ticker_symbol,
+      count: history.length,
+      date_range: {
+        start_date:
+          start_date || history[history.length - 1]?.date || history[history.length - 1]?.month,
+        end_date: end_date || history[0]?.date || history[0]?.month,
+      },
+      price_summary: priceSummary,
+      history,
+    };
+  }
 }
 
 /**
@@ -4517,6 +4734,65 @@ export function createToolSchemas(): ToolSchema[] {
             pattern: '^\\d{4}-\\d{2}-\\d{2}$',
           },
         },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_investment_prices',
+      description:
+        'Get current/latest prices for investments (stocks, crypto, ETFs). ' +
+        'Returns the most recent price data for each investment, optionally filtered by ticker symbol. ' +
+        'Shows multiple price fields (price, close_price, current_price, institution_price) with a best_price ' +
+        'field that automatically selects the most relevant price. Includes OHLCV data when available. ' +
+        'Useful for checking current portfolio values and tracking investment performance.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          ticker_symbol: {
+            type: 'string',
+            description:
+              'Optional ticker symbol to filter by (e.g., "AAPL", "BTC-USD", "VTSAX"). ' +
+              'If omitted, returns prices for all investments.',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_investment_price_history',
+      description:
+        'Get historical price data for a specific investment ticker over a date range. ' +
+        'Returns time-series price data showing how the investment price changed over time. ' +
+        'Includes price summary with latest/earliest prices, high/low ranges, and percent change. ' +
+        'Supports both daily (monthly aggregated) and high-frequency (intraday) price data. ' +
+        'Useful for analyzing price trends, volatility, and historical performance.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          ticker_symbol: {
+            type: 'string',
+            description: 'Ticker symbol to get history for (e.g., "AAPL", "BTC-USD") - required',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Start date filter (YYYY-MM or YYYY-MM-DD format, optional)',
+          },
+          end_date: {
+            type: 'string',
+            description: 'End date filter (YYYY-MM or YYYY-MM-DD format, optional)',
+          },
+          price_type: {
+            type: 'string',
+            description:
+              'Filter by price type: "daily" (monthly data) or "hf" (high-frequency intraday)',
+            enum: ['daily', 'hf'],
+          },
+        },
+        required: ['ticker_symbol'],
       },
       annotations: {
         readOnlyHint: true,

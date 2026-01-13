@@ -15,6 +15,7 @@ import {
   decodeBudgets,
   decodeGoals,
   decodeGoalHistory,
+  decodeInvestmentPrices,
 } from './decoder.js';
 import {
   Account,
@@ -24,6 +25,7 @@ import {
   Budget,
   Goal,
   GoalHistory,
+  InvestmentPrice,
   getTransactionDisplayName,
 } from '../models/index.js';
 import { getCategoryName } from '../utils/categories.js';
@@ -480,5 +482,32 @@ export class CopilotDatabase {
    */
   getDbPath(): string | undefined {
     return this.dbPath;
+  }
+
+  /**
+   * Get investment prices from the database.
+   *
+   * Investment prices are stored in:
+   * /investment_prices/{hash}/daily/{month} - Historical monthly data
+   * /investment_prices/{hash}/hf/{date} - High-frequency intraday data
+   *
+   * @param options - Filter options
+   * @param options.tickerSymbol - Filter by ticker symbol (e.g., "AAPL", "BTC-USD")
+   * @param options.startDate - Filter by date >= this (YYYY-MM or YYYY-MM-DD)
+   * @param options.endDate - Filter by date <= this (YYYY-MM or YYYY-MM-DD)
+   * @param options.priceType - Filter by price type ("daily" or "hf")
+   * @returns Array of InvestmentPrice objects, sorted by investment_id and date (newest first)
+   */
+  getInvestmentPrices(
+    options: {
+      tickerSymbol?: string;
+      startDate?: string;
+      endDate?: string;
+      priceType?: 'daily' | 'hf';
+    } = {}
+  ): InvestmentPrice[] {
+    // Note: We don't cache investment prices as they can be very large (10K+ records)
+    // and may change frequently with high-frequency data
+    return decodeInvestmentPrices(this.requireDbPath(), options);
   }
 }

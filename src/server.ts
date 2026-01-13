@@ -302,6 +302,26 @@ export class CopilotMoneyServer {
           );
           break;
 
+        case 'get_investment_prices':
+          result = this.tools.getInvestmentPrices(
+            (typedArgs as Parameters<typeof this.tools.getInvestmentPrices>[0]) || {}
+          );
+          break;
+
+        case 'get_investment_price_history': {
+          const tickerSymbol = typedArgs?.ticker_symbol;
+          if (typeof tickerSymbol !== 'string') {
+            throw new Error('Missing required parameter: ticker_symbol');
+          }
+          result = this.tools.getInvestmentPriceHistory({
+            ticker_symbol: tickerSymbol,
+            start_date: typedArgs?.start_date as string | undefined,
+            end_date: typedArgs?.end_date as string | undefined,
+            price_type: typedArgs?.price_type as 'daily' | 'hf' | undefined,
+          });
+          break;
+        }
+
         default:
           return {
             content: [

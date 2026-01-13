@@ -237,7 +237,7 @@ After installing the MCP server, Claude Desktop will request **one-time approval
 
 ## Available Tools
 
-The MCP server provides 29 read-only tools for comprehensive financial analysis:
+The MCP server provides 31 read-only tools for comprehensive financial analysis:
 
 ### Core Tools
 
@@ -307,6 +307,20 @@ This tool helps you find:
 - `get_goal_history` - Monthly snapshots of goal progress over time
 - `estimate_goal_completion` - Estimated completion dates based on historical contributions
 - `get_goal_contributions` - Analyze deposit/withdrawal patterns and contribution consistency
+
+### Investment Price Tools
+
+- `get_investment_prices` - Get current/latest prices for investments (stocks, crypto, ETFs)
+- `get_investment_price_history` - Get historical price data with OHLCV data and price summaries
+
+**Investment Price Features:**
+- Support for stocks, cryptocurrencies, ETFs, and other investments
+- Daily aggregated data and high-frequency intraday data
+- OHLCV data (Open, High, Low, Close, Volume) when available
+- Multiple price fields with automatic best-price selection
+- Price change analysis and volatility metrics
+- Filter by ticker symbol (e.g., "AAPL", "BTC-USD", "VTSAX")
+- Date range filtering for historical analysis
 
 ### Other Analysis Tools
 
