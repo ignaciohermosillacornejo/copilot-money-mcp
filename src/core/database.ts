@@ -18,6 +18,7 @@ import {
   decodeInvestmentPrices,
   decodeInvestmentSplits,
   decodeItems,
+  decodeCategories,
 } from './decoder.js';
 import {
   Account,
@@ -115,6 +116,7 @@ export class CopilotDatabase {
   private _recurring: Recurring[] | null = null;
   private _budgets: Budget[] | null = null;
   private _goals: Goal[] | null = null;
+  private _userCategories: Category[] | null = null;
 
   /**
    * Initialize database connection.
@@ -429,7 +431,47 @@ export class CopilotDatabase {
   }
 
   /**
+   * Get user-defined categories from Firestore.
+   *
+   * These are custom categories created by the user in the Copilot Money app,
+   * stored in /users/{user_id}/categories/{category_id}.
+   *
+   * @returns List of user-defined categories with full metadata
+   */
+  getUserCategories(): Category[] {
+    // Lazy load user categories
+    if (this._userCategories === null) {
+      this._userCategories = decodeCategories(this.requireDbPath());
+    }
+    return [...this._userCategories];
+  }
+
+  /**
+   * Build a map of category ID to category name from user-defined categories.
+   *
+   * This map can be used for efficient category name lookups.
+   *
+   * @returns Map from category_id to category name
+   */
+  getCategoryNameMap(): Map<string, string> {
+    const userCategories = this.getUserCategories();
+    const nameMap = new Map<string, string>();
+
+    for (const category of userCategories) {
+      if (category.name) {
+        nameMap.set(category.category_id, category.name);
+      }
+    }
+
+    return nameMap;
+  }
+
+  /**
    * Get all unique categories from transactions.
+   *
+   * Combines user-defined categories from Firestore with categories
+   * referenced in transactions. User-defined categories take precedence
+   * for naming.
    *
    * @returns List of unique categories with human-readable names
    */
@@ -439,33 +481,50 @@ export class CopilotDatabase {
       this._transactions = decodeTransactions(this.requireDbPath());
     }
 
-    // Extract unique category IDs and count transactions
-    const categoryStats = new Map<string, { count: number; totalAmount: number }>();
+    // Get user-defined categories (which have the actual names)
+    const userCategories = this.getUserCategories();
+    const userCategoryMap = new Map<string, Category>();
+    for (const cat of userCategories) {
+      userCategoryMap.set(cat.category_id, cat);
+    }
 
+    // Extract unique category IDs from transactions
+    const categoryIdsFromTxns = new Set<string>();
     for (const txn of this._transactions) {
       if (txn.category_id) {
-        const stats = categoryStats.get(txn.category_id) || {
-          count: 0,
-          totalAmount: 0,
-        };
-        stats.count++;
-        stats.totalAmount += Math.abs(txn.amount);
-        categoryStats.set(txn.category_id, stats);
+        categoryIdsFromTxns.add(txn.category_id);
       }
     }
 
-    // Create Category objects with human-readable names
+    // Build result: prefer user-defined categories, fall back to static mapping
     const uniqueCategories: Category[] = [];
-    for (const categoryId of categoryStats.keys()) {
-      const category: Category = {
-        category_id: categoryId,
-        name: getCategoryName(categoryId),
-      };
-      uniqueCategories.push(category);
+    const seenIds = new Set<string>();
+
+    // First, add all user-defined categories
+    for (const cat of userCategories) {
+      uniqueCategories.push(cat);
+      seenIds.add(cat.category_id);
+    }
+
+    // Then add any transaction categories not in user-defined list
+    for (const categoryId of categoryIdsFromTxns) {
+      if (!seenIds.has(categoryId)) {
+        // Fall back to static mapping for standard Plaid categories
+        const category: Category = {
+          category_id: categoryId,
+          name: getCategoryName(categoryId),
+        };
+        uniqueCategories.push(category);
+        seenIds.add(categoryId);
+      }
     }
 
     // Sort by name for easier browsing
-    return uniqueCategories.sort((a, b) => a.name.localeCompare(b.name));
+    return uniqueCategories.sort((a, b) => {
+      const nameA = a.name ?? a.category_id;
+      const nameB = b.name ?? b.category_id;
+      return nameA.localeCompare(nameB);
+    });
   }
 
   /**

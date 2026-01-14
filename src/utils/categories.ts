@@ -910,11 +910,22 @@ export const INCOME_CATEGORIES = new Set([
 /**
  * Get the human-readable name for a category ID.
  *
- * @param categoryId - The category ID (e.g., "13005000", "food_dining")
+ * @param categoryId - The category ID (e.g., "13005000", "food_dining", or user-defined IDs)
+ * @param userCategoryMap - Optional map of user-defined category IDs to names.
+ *                          Pass this to resolve custom Copilot Money categories.
  * @returns Human-readable category name, or the original ID if not found
  */
-export function getCategoryName(categoryId: string): string {
-  // Check exact match first
+export function getCategoryName(categoryId: string, userCategoryMap?: Map<string, string>): string {
+  // First, check user-defined categories (highest priority)
+  // These are custom categories created by the user in Copilot Money
+  if (userCategoryMap) {
+    const userName = userCategoryMap.get(categoryId);
+    if (userName) {
+      return userName;
+    }
+  }
+
+  // Check exact match in static Plaid categories
   if (CATEGORY_NAMES[categoryId]) {
     return CATEGORY_NAMES[categoryId];
   }

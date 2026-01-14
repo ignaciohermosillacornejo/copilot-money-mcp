@@ -19,6 +19,7 @@ import { GoalHistory, GoalHistorySchema, DailySnapshot } from '../models/goal-hi
 import { InvestmentPrice, InvestmentPriceSchema } from '../models/investment-price.js';
 import { InvestmentSplit, InvestmentSplitSchema } from '../models/investment-split.js';
 import { Item, ItemSchema } from '../models/item.js';
+import { Category, CategorySchema } from '../models/category.js';
 
 /**
  * Find a field in a Firestore binary record and extract its string value.
@@ -1731,6 +1732,182 @@ export function decodeItems(
       return nameA.localeCompare(nameB);
     }
     return a.item_id.localeCompare(b.item_id);
+  });
+
+  return unique;
+}
+
+/**
+ * Decode user-defined categories from the Copilot Money database.
+ *
+ * Categories are stored in collection:
+ * /users/{user_id}/categories/{category_id}
+ *
+ * Each document contains category information including:
+ * - name: Human-readable category name (e.g., "Restaurants", "Groceries")
+ * - emoji: Icon for display
+ * - color/bg_color: Display colors
+ * - parent_category_id: For hierarchical categories
+ * - plaid_category_ids: Links to standard Plaid categories
+ *
+ * @param dbPath - Path to the LevelDB database directory
+ * @returns Array of decoded Category objects
+ */
+export function decodeCategories(dbPath: string): Category[] {
+  const categories: Category[] = [];
+
+  // Return empty array if path doesn't exist (graceful degradation)
+  if (!fs.existsSync(dbPath)) {
+    return [];
+  }
+
+  const stat = fs.statSync(dbPath);
+  if (!stat.isDirectory()) {
+    return [];
+  }
+
+  // Configuration constants for record extraction
+  const RECORD_WINDOW_BEFORE = 500; // Bytes to search before path marker
+  const RECORD_WINDOW_AFTER = 2000; // Bytes to search after path marker
+  const MIN_CATEGORY_ID_LENGTH = 15; // Minimum length for valid Firestore document IDs
+
+  // Get all .ldb files
+  const files = fs.readdirSync(dbPath);
+  const ldbFiles = files.filter((f) => f.endsWith('.ldb')).map((f) => path.join(dbPath, f));
+
+  // Categories are in: /users/{user_id}/categories/{category_id}
+  const categoryPathMarker = Buffer.from('/categories/');
+
+  for (const filepath of ldbFiles) {
+    const data = fs.readFileSync(filepath);
+
+    if (!data.includes(categoryPathMarker)) {
+      continue;
+    }
+
+    // Find category records by searching for the path marker
+    let searchPos = 0;
+    let idx = data.indexOf(categoryPathMarker, searchPos);
+
+    while (idx !== -1) {
+      searchPos = idx + 1;
+
+      // Use a window around the path marker to capture all fields
+      const recordStart = Math.max(0, idx - RECORD_WINDOW_BEFORE);
+      const recordEnd = Math.min(data.length, idx + RECORD_WINDOW_AFTER);
+      const record = data.subarray(recordStart, recordEnd);
+
+      // Try to extract category_id from the path (e.g., /categories/{id})
+      const pathIdx = idx - recordStart;
+      const afterPath = record.subarray(pathIdx + categoryPathMarker.length, pathIdx + 100);
+      const idMatch = afterPath.toString('utf-8').match(/^([a-zA-Z0-9_-]+)/);
+      const categoryId = idMatch?.[1];
+
+      // Skip if this looks like a subcollection path (e.g., /categories/xxx/something)
+      // We want the actual category documents, not nested paths
+      if (categoryId && categoryId.length >= MIN_CATEGORY_ID_LENGTH) {
+        // Extract user_id from before /categories/
+        const beforePath = record.subarray(0, pathIdx);
+        const userIdMatch = beforePath
+          .toString('utf-8')
+          .match(/\/users\/([a-zA-Z0-9_-]+)\/categories/);
+        const userId = userIdMatch?.[1] ?? undefined;
+
+        // Only search AFTER the category ID to avoid picking up fields from adjacent documents
+        const afterCategoryId = record.subarray(
+          pathIdx + categoryPathMarker.length + categoryId.length
+        );
+
+        // Extract fields from the record
+        const name = extractStringValue(afterCategoryId, fieldPattern('name'));
+        const emoji = extractStringValue(afterCategoryId, fieldPattern('emoji'));
+        const color = extractStringValue(afterCategoryId, fieldPattern('color'));
+        const bgColor = extractStringValue(afterCategoryId, fieldPattern('bg_color'));
+        const parentCategoryId = extractStringValue(
+          afterCategoryId,
+          fieldPattern('parent_category_id')
+        );
+
+        // Extract boolean fields
+        const excluded = extractBooleanValue(afterCategoryId, fieldPattern('excluded'));
+        const isOther = extractBooleanValue(afterCategoryId, fieldPattern('is_other'));
+        const autoBudgetLock = extractBooleanValue(
+          afterCategoryId,
+          fieldPattern('auto_budget_lock')
+        );
+        const autoDeleteLock = extractBooleanValue(
+          afterCategoryId,
+          fieldPattern('auto_delete_lock')
+        );
+
+        // Extract order (numeric)
+        const order = extractDoubleField(afterCategoryId, fieldPattern('order'));
+
+        // Build category object - only include if we have a name
+        // (categories without names are not useful for display)
+        if (name) {
+          const categoryData: {
+            category_id: string;
+            name?: string;
+            emoji?: string;
+            color?: string;
+            bg_color?: string;
+            parent_category_id?: string;
+            order?: number;
+            excluded?: boolean;
+            is_other?: boolean;
+            auto_budget_lock?: boolean;
+            auto_delete_lock?: boolean;
+            user_id?: string;
+          } = {
+            category_id: categoryId,
+          };
+
+          if (name) categoryData.name = name;
+          if (emoji) categoryData.emoji = emoji;
+          if (color) categoryData.color = color;
+          if (bgColor) categoryData.bg_color = bgColor;
+          if (parentCategoryId) categoryData.parent_category_id = parentCategoryId;
+          if (order !== null) categoryData.order = order;
+          if (excluded !== null) categoryData.excluded = excluded;
+          if (isOther !== null) categoryData.is_other = isOther;
+          if (autoBudgetLock !== null) categoryData.auto_budget_lock = autoBudgetLock;
+          if (autoDeleteLock !== null) categoryData.auto_delete_lock = autoDeleteLock;
+          if (userId) categoryData.user_id = userId;
+
+          // Validate and add to results
+          const validated = CategorySchema.safeParse(categoryData);
+          if (validated.success) {
+            categories.push(validated.data);
+          }
+        }
+      }
+
+      idx = data.indexOf(categoryPathMarker, searchPos);
+    }
+  }
+
+  // Deduplicate by category_id
+  const seen = new Set<string>();
+  const unique: Category[] = [];
+
+  for (const category of categories) {
+    if (!seen.has(category.category_id)) {
+      seen.add(category.category_id);
+      unique.push(category);
+    }
+  }
+
+  // Sort by order, then by name
+  unique.sort((a, b) => {
+    const orderA = a.order ?? 999;
+    const orderB = b.order ?? 999;
+    if (orderA !== orderB) {
+      return orderA - orderB;
+    }
+    const nameA = a.name || '';
+    const nameB = b.name || '';
+    return nameA.localeCompare(nameB);
   });
 
   return unique;
