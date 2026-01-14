@@ -103,6 +103,20 @@ describe('CopilotMoneyServer', () => {
       db._transactions = [...mockTransactions];
       // @ts-expect-error - inject mock data
       db._accounts = [...mockAccounts];
+      // @ts-expect-error - inject auxiliary data for name resolution
+      db._userCategories = [];
+      // @ts-expect-error - inject auxiliary data
+      db._userAccounts = [];
+      // @ts-expect-error - inject auxiliary data
+      db._categoryNameMap = new Map<string, string>();
+      // @ts-expect-error - inject auxiliary data
+      db._accountNameMap = new Map<string, string>();
+      // @ts-expect-error - inject auxiliary data
+      db._recurring = [];
+      // @ts-expect-error - inject auxiliary data
+      db._budgets = [];
+      // @ts-expect-error - inject auxiliary data
+      db._goals = [];
 
       server = new CopilotMoneyServer('/fake/path');
       // @ts-expect-error - inject mock db
@@ -111,64 +125,62 @@ describe('CopilotMoneyServer', () => {
       server.tools = new CopilotMoneyTools(db);
     });
 
-    test('handles get_transactions tool call', () => {
+    test('handles get_transactions tool call', async () => {
       // @ts-expect-error - accessing private property
       const tools = server.tools;
-      const result = tools.getTransactions({});
+      const result = await tools.getTransactions({});
 
       expect(result.count).toBeGreaterThan(0);
       expect(result.transactions).toBeDefined();
     });
 
-    test('handles search_transactions tool call', () => {
+    test('handles search_transactions tool call', async () => {
       // @ts-expect-error - accessing private property
       const tools = server.tools;
-      const result = tools.searchTransactions('Test', 10);
+      const result = await tools.searchTransactions('Test', 10);
 
       expect(result.count).toBeDefined();
       expect(result.transactions).toBeDefined();
     });
 
-    test('handles get_accounts tool call', () => {
+    test('handles get_accounts tool call', async () => {
       // @ts-expect-error - accessing private property
       const tools = server.tools;
-      const result = tools.getAccounts();
+      const result = await tools.getAccounts();
 
       expect(result.count).toBeGreaterThan(0);
       expect(result.accounts).toBeDefined();
     });
 
-    test('handles get_spending_by_category tool call', () => {
+    test('handles get_spending_by_category tool call', async () => {
       // @ts-expect-error - accessing private property
       const tools = server.tools;
-      const result = tools.getSpendingByCategory({});
+      const result = await tools.getSpendingByCategory({});
 
       expect(result.total_spending).toBeDefined();
       expect(result.categories).toBeDefined();
     });
 
-    test('handles get_account_balance tool call', () => {
+    test('handles get_account_balance tool call', async () => {
       // @ts-expect-error - accessing private property
       const tools = server.tools;
-      const result = tools.getAccountBalance('acc1');
+      const result = await tools.getAccountBalance('acc1');
 
       expect(result.account_id).toBe('acc1');
       expect(result.current_balance).toBeDefined();
     });
 
-    test('throws error for get_account_balance with invalid ID', () => {
+    test('throws error for get_account_balance with invalid ID', async () => {
       // @ts-expect-error - accessing private property
       const tools = server.tools;
 
-      expect(() => {
-        tools.getAccountBalance('invalid_id');
-      }).toThrow('Account not found');
+      await expect(tools.getAccountBalance('invalid_id')).rejects.toThrow('Account not found');
     });
 
-    test('handles get_categories tool call', () => {
+    test('handles get_categories tool call', async () => {
       // @ts-expect-error - accessing private property
       const tools = server.tools;
-      const result = tools.getCategories();
+      const result = await tools.getCategories();
 
       expect(result.view).toBe('list');
       expect(result.count).toBeDefined();
@@ -188,24 +200,61 @@ describe('CopilotMoneyServer', () => {
   });
 
   describe('error handling', () => {
-    test('handles missing required parameters', () => {
+    test('handles missing required parameters', async () => {
+      const db = new CopilotDatabase('/fake/path');
+      // @ts-expect-error - inject mock data
+      db._transactions = [];
+      // @ts-expect-error - inject mock data
+      db._accounts = [];
+      // @ts-expect-error - inject auxiliary data
+      db._userCategories = [];
+      // @ts-expect-error - inject auxiliary data
+      db._userAccounts = [];
+      // @ts-expect-error - inject auxiliary data
+      db._categoryNameMap = new Map<string, string>();
+      // @ts-expect-error - inject auxiliary data
+      db._accountNameMap = new Map<string, string>();
+      // @ts-expect-error - inject auxiliary data
+      db._recurring = [];
+      // @ts-expect-error - inject auxiliary data
+      db._budgets = [];
+      // @ts-expect-error - inject auxiliary data
+      db._goals = [];
+
       const server = new CopilotMoneyServer('/fake/path');
+      // @ts-expect-error - inject mock db
+      server.db = db;
+      // @ts-expect-error - inject tools with mock db
+      server.tools = new CopilotMoneyTools(db);
+
       // @ts-expect-error - accessing private property
       const tools = server.tools;
 
-      // get_account_balance requires account_id
-      expect(() => {
-        // @ts-expect-error - intentionally passing invalid input
-        tools.getAccountBalance();
-      }).toThrow();
+      // get_account_balance requires account_id - now async so use rejects
+      // @ts-expect-error - intentionally passing invalid input
+      await expect(tools.getAccountBalance()).rejects.toThrow();
     });
 
-    test('handles invalid tool arguments gracefully', () => {
+    test('handles invalid tool arguments gracefully', async () => {
       const db = new CopilotDatabase('/fake/path');
       // @ts-expect-error - inject mock data
       db._transactions = [...mockTransactions];
       // @ts-expect-error - inject mock data
       db._accounts = [...mockAccounts];
+      // @ts-expect-error - inject auxiliary data
+      db._userCategories = [];
+      // @ts-expect-error - inject auxiliary data
+      db._userAccounts = [];
+      // @ts-expect-error - inject auxiliary data
+      db._categoryNameMap = new Map<string, string>();
+      // @ts-expect-error - inject auxiliary data
+      db._accountNameMap = new Map<string, string>();
+      // @ts-expect-error - inject auxiliary data
+      db._recurring = [];
+      // @ts-expect-error - inject auxiliary data
+      db._budgets = [];
+      // @ts-expect-error - inject auxiliary data
+      db._goals = [];
 
       const server = new CopilotMoneyServer('/fake/path');
       // @ts-expect-error - inject mock db
@@ -217,7 +266,7 @@ describe('CopilotMoneyServer', () => {
       const tools = server.tools;
 
       // Should handle empty/invalid arguments
-      const result = tools.getTransactions({});
+      const result = await tools.getTransactions({});
       expect(result).toBeDefined();
     });
   });

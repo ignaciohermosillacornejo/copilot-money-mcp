@@ -1,11 +1,15 @@
 /**
  * LevelDB/Protobuf decoder for Copilot Money Firestore data.
  *
- * Based on working decoder code from REVERSE_ENGINEERING_FINDING.md.
+ * This module provides type-safe decoding of Firestore documents stored in LevelDB,
+ * using proper protocol buffer parsing instead of brittle pattern matching.
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
+import { iterateDocuments } from './leveldb-reader.js';
+import { type FirestoreValue, toPlainObject } from './protobuf-parser.js';
+
+// Re-export for potential use by other modules
+export { toPlainObject } from './protobuf-parser.js';
 import {
   Transaction,
   TransactionSchema,
@@ -22,322 +26,202 @@ import { Item, ItemSchema } from '../models/item.js';
 import { Category, CategorySchema } from '../models/category.js';
 
 /**
- * Find a field in a Firestore binary record and extract its string value.
- *
- * Searches for a field name pattern in the buffer, then looks for a string
- * value tag (0x8a 0x01) followed by the length and UTF-8 encoded string content.
- *
- * @param data - The buffer containing the Firestore binary record
- * @param fieldName - The field name pattern to search for (created by fieldPattern)
- * @returns The extracted string value, or null if not found or invalid
+ * Extract a primitive value from a FirestoreValue.
+ * Useful for debugging and converting Firestore values to plain JS values.
  */
-function extractStringValue(data: Buffer, fieldName: Buffer): string | null {
-  const idx = data.indexOf(fieldName);
-  if (idx === -1) {
-    return null;
+export function extractValue(value: FirestoreValue | undefined): unknown {
+  if (!value) return undefined;
+
+  switch (value.type) {
+    case 'string':
+    case 'integer':
+    case 'double':
+    case 'boolean':
+    case 'reference':
+      return value.value;
+    case 'null':
+      return null;
+    case 'timestamp':
+      return new Date(value.value.seconds * 1000).toISOString().split('T')[0];
+    case 'geopoint':
+      return { lat: value.value.latitude, lon: value.value.longitude };
+    case 'map':
+      return toPlainObject(value.value);
+    case 'array':
+      return value.value.map((v) => extractValue(v));
+    case 'bytes':
+      return value.value;
+    default:
+      return undefined;
   }
-
-  // Look for string value tag (0x8a 0x01) after field name
-  const searchStart = idx + fieldName.length;
-  const searchEnd = Math.min(data.length, searchStart + 50);
-  const after = data.subarray(searchStart, searchEnd);
-
-  for (let i = 0; i < after.length - 3; i++) {
-    const byte0 = after[i];
-    const byte1 = after[i + 1];
-    const strLen = after[i + 2];
-    if (byte0 === 0x8a && byte1 === 0x01 && strLen !== undefined) {
-      if (strLen > 0 && strLen < 100) {
-        try {
-          const value = after.subarray(i + 3, i + 3 + strLen).toString('utf-8');
-          // Check if string is printable (no control characters except space)
-          if (/^[\x20-\x7E\u00A0-\uFFFF]*$/.test(value)) {
-            return value;
-          }
-        } catch {
-          // Unicode decode error
-        }
-      }
-    }
-  }
-
-  return null;
 }
 
 /**
- * Extract a double-precision floating point value from a buffer.
- *
- * Searches for a double value tag (0x19) within the specified range,
- * then reads an 8-byte little-endian double following the tag.
- * Values are validated to be within a reasonable range (-10M to 10M)
- * and rounded to 2 decimal places.
- *
- * @param data - The buffer to search in
- * @param startPos - The starting position to search from
- * @param maxSearch - Maximum number of bytes to search (default: 20)
- * @returns The extracted double value rounded to 2 decimals, or null if not found
+ * Extract a string field from parsed Firestore fields.
  */
-function extractDoubleValue(data: Buffer, startPos: number, maxSearch: number = 20): number | null {
-  const chunk = data.subarray(startPos, startPos + maxSearch);
-
-  for (let i = 0; i < chunk.length - 9; i++) {
-    if (chunk[i] === 0x19) {
-      // Double value tag
-      try {
-        const val = chunk.readDoubleLE(i + 1);
-        if (val > -10_000_000 && val < 10_000_000) {
-          return Math.round(val * 100) / 100; // Round to 2 decimal places
-        }
-      } catch {
-        // Read error
-      }
-    }
+function getString(fields: Map<string, FirestoreValue>, key: string): string | undefined {
+  const value = fields.get(key);
+  if (value?.type === 'string') {
+    return value.value;
   }
-
-  return null;
+  if (value?.type === 'reference') {
+    return value.value;
+  }
+  return undefined;
 }
 
 /**
- * Extract a double value for a named field in a Firestore record.
- *
- * Combines field searching with double extraction - finds the field name
- * pattern in the buffer, then extracts the double value that follows.
- *
- * @param data - The buffer containing the Firestore binary record
- * @param fieldName - The field name pattern to search for (created by fieldPattern)
- * @returns The extracted double value, or null if field not found or no valid double
+ * Extract a number field from parsed Firestore fields.
  */
-function extractDoubleField(data: Buffer, fieldName: Buffer): number | null {
-  const idx = data.indexOf(fieldName);
-  if (idx === -1) {
-    return null;
+function getNumber(fields: Map<string, FirestoreValue>, key: string): number | undefined {
+  const value = fields.get(key);
+  if (value?.type === 'double' || value?.type === 'integer') {
+    return value.value;
   }
-  return extractDoubleValue(data, idx + fieldName.length);
+  return undefined;
 }
 
 /**
- * Create a length-prefixed field pattern for searching Firestore field names.
- *
- * Firestore stores field names with a specific binary format:
- * - 0x0a prefix byte (field marker)
- * - 1-byte length
- * - UTF-8 encoded field name
- *
- * @param name - The field name to create a pattern for (e.g., "amount", "date")
- * @returns A Buffer containing the binary pattern to search for
- * @example
- * fieldPattern('amount') // Returns Buffer with bytes [0x0a, 0x06, 'a', 'm', 'o', 'u', 'n', 't']
+ * Extract a boolean field from parsed Firestore fields.
  */
-function fieldPattern(name: string): Buffer {
-  return Buffer.from([0x0a, name.length, ...Buffer.from(name)]);
+function getBoolean(fields: Map<string, FirestoreValue>, key: string): boolean | undefined {
+  const value = fields.get(key);
+  if (value?.type === 'boolean') {
+    return value.value;
+  }
+  return undefined;
 }
 
 /**
- * Extract a boolean value for a named field in a Firestore record.
- *
- * Supports two binary formats used by Firestore:
- * 1. Firestore format: \x0a{len}fieldname\x12\x02\x08{value}
- * 2. Simple format: fieldname\x08{value}
- *
- * Where value byte is 0x00 (false) or 0x01 (true).
- *
- * @param data - The buffer containing the Firestore binary record
- * @param fieldName - The field name pattern to search for (created by fieldPattern)
- * @returns true if value byte is non-zero, false if zero, null if field not found
+ * Extract a date string from a timestamp field.
  */
-function extractBooleanValue(data: Buffer, fieldName: Buffer): boolean | null {
-  const idx = data.indexOf(fieldName);
-  if (idx === -1) {
-    return null;
+function getDateString(fields: Map<string, FirestoreValue>, key: string): string | undefined {
+  const value = fields.get(key);
+  if (value?.type === 'string') {
+    // Already a date string
+    return value.value;
   }
-
-  const searchStart = idx + fieldName.length;
-  const searchEnd = Math.min(data.length, searchStart + 20);
-  const after = data.subarray(searchStart, searchEnd);
-
-  // Try Firestore format first: \x12\x02\x08{value}
-  for (let i = 0; i < after.length - 3; i++) {
-    if (after[i] === 0x12 && after[i + 1] === 0x02 && after[i + 2] === 0x08) {
-      return Boolean(after[i + 3]);
-    }
+  if (value?.type === 'timestamp') {
+    // Convert timestamp to YYYY-MM-DD
+    const date = new Date(value.value.seconds * 1000);
+    return date.toISOString().split('T')[0];
   }
-
-  // Fall back to simple format: \x08{value}
-  for (let i = 0; i < after.length - 1; i++) {
-    if (after[i] === 0x08) {
-      return Boolean(after[i + 1]);
-    }
-  }
-
-  return null;
+  return undefined;
 }
 
 /**
- * Decode all transactions from LevelDB files.
+ * Extract a map/object field.
  */
-export function decodeTransactions(dbPath: string): Transaction[] {
+function getMap(
+  fields: Map<string, FirestoreValue>,
+  key: string
+): Map<string, FirestoreValue> | undefined {
+  const value = fields.get(key);
+  if (value?.type === 'map') {
+    return value.value;
+  }
+  return undefined;
+}
+
+/**
+ * Decode all transactions from LevelDB database.
+ */
+export async function decodeTransactions(dbPath: string): Promise<Transaction[]> {
   const transactions: Transaction[] = [];
 
-  if (!fs.existsSync(dbPath)) {
-    throw new Error(`Database path not found: ${dbPath}`);
-  }
+  for await (const doc of iterateDocuments(dbPath, { collection: 'transactions' })) {
+    const fields = doc.fields;
 
-  const stat = fs.statSync(dbPath);
-  if (!stat.isDirectory()) {
-    throw new Error(`Path is not a directory: ${dbPath}`);
-  }
+    // Extract required fields
+    const transactionId = getString(fields, 'transaction_id') ?? doc.documentId;
+    const amount = getNumber(fields, 'amount');
+    const date = getDateString(fields, 'date') ?? getDateString(fields, 'original_date');
 
-  // Get all .ldb files
-  const files = fs.readdirSync(dbPath);
-  const ldbFiles = files.filter((f) => f.endsWith('.ldb')).map((f) => path.join(dbPath, f));
-
-  for (const filepath of ldbFiles) {
-    const data = fs.readFileSync(filepath);
-
-    // Skip files without transaction data
-    if (!data.includes(Buffer.from('amount')) || !data.includes(Buffer.from('original_name'))) {
+    if (amount === undefined || !date) {
       continue;
     }
 
-    // Find all amount fields
-    let searchPos = 0;
-    const amountPattern = Buffer.from([0x0a, 0x06, 0x61, 0x6d, 0x6f, 0x75, 0x6e, 0x74]); // "\x0a\x06amount"
+    // Skip zero amounts
+    if (amount === 0) {
+      continue;
+    }
 
-    let idx = data.indexOf(amountPattern, searchPos);
-    while (idx !== -1) {
-      searchPos = idx + 1;
+    // Build transaction object
+    const txnData: Record<string, unknown> = {
+      transaction_id: transactionId,
+      amount,
+      date,
+    };
 
-      // Extract amount value
-      const amount = extractDoubleValue(data, idx + 8);
-      if (amount === null || amount === 0) {
-        idx = data.indexOf(amountPattern, searchPos);
-        continue;
-      }
+    // String fields
+    const stringFields = [
+      'name',
+      'original_name',
+      'original_clean_name',
+      'account_id',
+      'item_id',
+      'user_id',
+      'category_id',
+      'plaid_category_id',
+      'category_id_source',
+      'original_date',
+      'pending_transaction_id',
+      'iso_currency_code',
+      'transaction_type',
+      'plaid_transaction_type',
+      'payment_method',
+      'payment_processor',
+      'city',
+      'region',
+      'address',
+      'postal_code',
+      'country',
+      'reference_number',
+      'ppd_id',
+      'by_order_of',
+      'from_investment',
+    ];
 
-      // Get surrounding record context
-      const recordStart = Math.max(0, idx - 1500);
-      const recordEnd = Math.min(data.length, idx + 1500);
-      const record = data.subarray(recordStart, recordEnd);
+    for (const field of stringFields) {
+      const value = getString(fields, field);
+      if (value) txnData[field] = value;
+    }
 
-      // Extract all string fields
-      const name = extractStringValue(record, fieldPattern('name'));
-      const originalName = extractStringValue(record, fieldPattern('original_name'));
-      const originalCleanName = extractStringValue(record, fieldPattern('original_clean_name'));
-      const date = extractStringValue(record, fieldPattern('original_date'));
-      const originalDate = extractStringValue(record, fieldPattern('original_date'));
-      const categoryId = extractStringValue(record, fieldPattern('category_id'));
-      const plaidCategoryId = extractStringValue(record, fieldPattern('plaid_category_id'));
-      const categoryIdSource = extractStringValue(record, fieldPattern('category_id_source'));
-      const accountId = extractStringValue(record, fieldPattern('account_id'));
-      const itemId = extractStringValue(record, fieldPattern('item_id'));
-      const userId = extractStringValue(record, fieldPattern('user_id'));
-      const transactionId = extractStringValue(record, fieldPattern('transaction_id'));
-      const pendingTransactionId = extractStringValue(
-        record,
-        fieldPattern('pending_transaction_id')
-      );
-      const isoCurrencyCode = extractStringValue(record, fieldPattern('iso_currency_code'));
-      const transactionType = extractStringValue(record, fieldPattern('transaction_type'));
-      const plaidTransactionType = extractStringValue(
-        record,
-        fieldPattern('plaid_transaction_type')
-      );
-      const paymentMethod = extractStringValue(record, fieldPattern('payment_method'));
-      const paymentProcessor = extractStringValue(record, fieldPattern('payment_processor'));
-      const city = extractStringValue(record, fieldPattern('city'));
-      const region = extractStringValue(record, fieldPattern('region'));
-      const address = extractStringValue(record, fieldPattern('address'));
-      const postalCode = extractStringValue(record, fieldPattern('postal_code'));
-      const country = extractStringValue(record, fieldPattern('country'));
-      const referenceNumber = extractStringValue(record, fieldPattern('reference_number'));
-      const ppdId = extractStringValue(record, fieldPattern('ppd_id'));
-      const byOrderOf = extractStringValue(record, fieldPattern('by_order_of'));
-      const fromInvestment = extractStringValue(record, fieldPattern('from_investment'));
-      // Copilot type field: "internal_transfer", "income", "regular", etc.
-      const copilotType = extractStringValue(record, fieldPattern('type'));
+    // Boolean fields
+    const booleanFields = [
+      'pending',
+      'excluded',
+      'user_reviewed',
+      'plaid_deleted',
+      'is_amazon',
+      'account_dashboard_active',
+    ];
 
-      // Extract boolean fields
-      const pending = extractBooleanValue(record, fieldPattern('pending'));
-      const excluded = extractBooleanValue(record, fieldPattern('excluded'));
-      const userReviewed = extractBooleanValue(record, fieldPattern('user_reviewed'));
-      const plaidDeleted = extractBooleanValue(record, fieldPattern('plaid_deleted'));
-      const isAmazon = extractBooleanValue(record, fieldPattern('is_amazon'));
-      const accountDashboardActive = extractBooleanValue(
-        record,
-        fieldPattern('account_dashboard_active')
-      );
+    for (const field of booleanFields) {
+      const value = getBoolean(fields, field);
+      if (value !== undefined) txnData[field] = value;
+    }
 
-      // Extract numeric fields
-      const originalAmount = extractDoubleField(record, fieldPattern('original_amount'));
-      const lat = extractDoubleField(record, fieldPattern('lat'));
-      const lon = extractDoubleField(record, fieldPattern('lon'));
+    // Numeric fields
+    const numericFields = ['original_amount', 'lat', 'lon'];
 
-      // Derive internal_transfer from copilot type
-      const isInternalTransfer = copilotType === 'internal_transfer';
+    for (const field of numericFields) {
+      const value = getNumber(fields, field);
+      if (value !== undefined) txnData[field] = value;
+    }
 
-      // Use name or original_name as display name
-      const displayName = name || originalName;
+    // Derive internal_transfer from type field
+    const copilotType = getString(fields, 'type');
+    if (copilotType === 'internal_transfer') {
+      txnData.internal_transfer = true;
+    }
 
-      if (displayName && transactionId && date) {
-        try {
-          // Build transaction object with all extracted fields
-          const txnData: Record<string, string | number | boolean> = {
-            transaction_id: transactionId,
-            amount,
-            date,
-          };
-
-          // String fields
-          if (name) txnData.name = name;
-          if (originalName) txnData.original_name = originalName;
-          if (originalCleanName) txnData.original_clean_name = originalCleanName;
-          if (accountId) txnData.account_id = accountId;
-          if (itemId) txnData.item_id = itemId;
-          if (userId) txnData.user_id = userId;
-          if (categoryId) txnData.category_id = categoryId;
-          if (plaidCategoryId) txnData.plaid_category_id = plaidCategoryId;
-          if (categoryIdSource) txnData.category_id_source = categoryIdSource;
-          if (originalDate) txnData.original_date = originalDate;
-          if (pendingTransactionId) txnData.pending_transaction_id = pendingTransactionId;
-          if (isoCurrencyCode) txnData.iso_currency_code = isoCurrencyCode;
-          if (transactionType) txnData.transaction_type = transactionType;
-          if (plaidTransactionType) txnData.plaid_transaction_type = plaidTransactionType;
-          if (paymentMethod) txnData.payment_method = paymentMethod;
-          if (paymentProcessor) txnData.payment_processor = paymentProcessor;
-          if (city) txnData.city = city;
-          if (region) txnData.region = region;
-          if (address) txnData.address = address;
-          if (postalCode) txnData.postal_code = postalCode;
-          if (country) txnData.country = country;
-          if (referenceNumber) txnData.reference_number = referenceNumber;
-          if (ppdId) txnData.ppd_id = ppdId;
-          if (byOrderOf) txnData.by_order_of = byOrderOf;
-          if (fromInvestment) txnData.from_investment = fromInvestment;
-
-          // Boolean fields
-          if (pending !== null) txnData.pending = pending;
-          if (excluded !== null) txnData.excluded = excluded;
-          if (isInternalTransfer) txnData.internal_transfer = isInternalTransfer;
-          if (userReviewed !== null) txnData.user_reviewed = userReviewed;
-          if (plaidDeleted !== null) txnData.plaid_deleted = plaidDeleted;
-          if (isAmazon !== null) txnData.is_amazon = isAmazon;
-          if (accountDashboardActive !== null)
-            txnData.account_dashboard_active = accountDashboardActive;
-
-          // Numeric fields
-          if (originalAmount !== null) txnData.original_amount = originalAmount;
-          if (lat !== null) txnData.lat = lat;
-          if (lon !== null) txnData.lon = lon;
-
-          // Validate with Zod
-          const txn = TransactionSchema.parse(txnData);
-          transactions.push(txn);
-        } catch {
-          // Skip invalid transactions
-        }
-      }
-
-      idx = data.indexOf(amountPattern, searchPos);
+    // Validate with Zod
+    try {
+      const txn = TransactionSchema.parse(txnData);
+      transactions.push(txn);
+    } catch {
+      // Skip invalid transactions
     }
   }
 
@@ -361,189 +245,72 @@ export function decodeTransactions(dbPath: string): Transaction[] {
 }
 
 /**
- * Balance field patterns to search for in account records.
- * Some accounts (especially brokerage/investment) use `original_current_balance`
- * instead of `current_balance`.
+ * Decode account information from LevelDB database.
  */
-const ACCOUNT_BALANCE_PATTERNS = [
-  { pattern: Buffer.from('current_balance'), length: 15 },
-  { pattern: Buffer.from('original_current_balance'), length: 24 },
-] as const;
-
-/**
- * Decode account information from LevelDB files.
- */
-export function decodeAccounts(dbPath: string): Account[] {
+export async function decodeAccounts(dbPath: string): Promise<Account[]> {
   const accounts: Account[] = [];
 
-  if (!fs.existsSync(dbPath)) {
-    throw new Error(`Database path not found: ${dbPath}`);
-  }
+  for await (const doc of iterateDocuments(dbPath, { collection: 'accounts' })) {
+    const fields = doc.fields;
 
-  const stat = fs.statSync(dbPath);
-  if (!stat.isDirectory()) {
-    throw new Error(`Path is not a directory: ${dbPath}`);
-  }
+    // Extract required fields
+    const accountId = getString(fields, 'account_id') ?? getString(fields, 'id') ?? doc.documentId;
+    const balance =
+      getNumber(fields, 'current_balance') ?? getNumber(fields, 'original_current_balance');
 
-  // Get all .ldb files
-  const files = fs.readdirSync(dbPath);
-  const ldbFiles = files.filter((f) => f.endsWith('.ldb')).map((f) => path.join(dbPath, f));
-
-  // Track seen account IDs to avoid duplicates from different balance patterns
-  const seenAccountIds = new Set<string>();
-
-  for (const filepath of ldbFiles) {
-    const data = fs.readFileSync(filepath);
-
-    if (!data.includes(Buffer.from('/accounts/'))) {
+    if (balance === undefined) {
       continue;
     }
 
-    // Try each balance field pattern to find accounts
-    // Some accounts use current_balance, others use original_current_balance
-    for (const {
-      pattern: balancePattern,
-      length: balanceFieldLength,
-    } of ACCOUNT_BALANCE_PATTERNS) {
-      let searchPos = 0;
+    // Build account object
+    const accData: Record<string, unknown> = {
+      account_id: accountId,
+      current_balance: Math.round(balance * 100) / 100,
+    };
 
-      let idx = data.indexOf(balancePattern, searchPos);
-      while (idx !== -1) {
-        searchPos = idx + 1;
+    // String fields
+    const stringFields = [
+      'name',
+      'official_name',
+      'mask',
+      'institution_name',
+      'item_id',
+      'iso_currency_code',
+      'institution_id',
+    ];
 
-        // Use large window to capture all account fields
-        // Some accounts (like brokerage) can span 6000+ bytes due to embedded images/data
-        const recordStart = Math.max(0, idx - 6500);
-        const recordEnd = Math.min(data.length, idx + 6500);
-        const record = data.subarray(recordStart, recordEnd);
+    for (const field of stringFields) {
+      const value = getString(fields, field);
+      if (value) accData[field] = value;
+    }
 
-        // Calculate balance position within window based on original position
-        const balanceIdx = idx - recordStart;
-        const balance = extractDoubleValue(record, balanceIdx + balanceFieldLength);
+    // Account type fields (may be stored as 'type' or 'original_type')
+    const accountType =
+      getString(fields, 'type') ??
+      getString(fields, 'account_type') ??
+      getString(fields, 'original_type');
+    if (accountType) accData.account_type = accountType;
 
-        if (balance !== null) {
-          // Search for fields after the balance position first (most common case)
-          // If not found, also check before the balance (for brokerage accounts like Schwab
-          // where fields like name/mask come before original_current_balance)
-          const afterBalance = record.subarray(balanceIdx);
-          const beforeBalance = record.subarray(0, balanceIdx + balanceFieldLength);
+    const subtype = getString(fields, 'subtype') ?? getString(fields, 'original_subtype');
+    if (subtype) accData.subtype = subtype;
 
-          // Try after first, then before
-          const name =
-            extractStringValue(afterBalance, fieldPattern('name')) ||
-            extractStringValue(beforeBalance, fieldPattern('name'));
-          const officialName =
-            extractStringValue(afterBalance, fieldPattern('official_name')) ||
-            extractStringValue(beforeBalance, fieldPattern('official_name'));
-          const accountType =
-            extractStringValue(afterBalance, fieldPattern('type')) ||
-            extractStringValue(beforeBalance, fieldPattern('type')) ||
-            extractStringValue(beforeBalance, fieldPattern('original_type'));
-          const subtype =
-            extractStringValue(afterBalance, fieldPattern('subtype')) ||
-            extractStringValue(beforeBalance, fieldPattern('subtype')) ||
-            extractStringValue(beforeBalance, fieldPattern('original_subtype'));
-          const mask =
-            extractStringValue(afterBalance, fieldPattern('mask')) ||
-            extractStringValue(beforeBalance, fieldPattern('mask'));
-          const institutionName =
-            extractStringValue(afterBalance, fieldPattern('institution_name')) ||
-            extractStringValue(beforeBalance, fieldPattern('institution_name'));
+    // Available balance
+    const availableBalance = getNumber(fields, 'available_balance');
+    if (availableBalance !== undefined) {
+      accData.available_balance = Math.round(availableBalance * 100) / 100;
+    }
 
-          // Additional account fields
-          const itemId =
-            extractStringValue(afterBalance, fieldPattern('item_id')) ||
-            extractStringValue(beforeBalance, fieldPattern('item_id'));
-          const availableBalance =
-            extractDoubleField(afterBalance, fieldPattern('available_balance')) ??
-            extractDoubleField(beforeBalance, fieldPattern('available_balance'));
-          const isoCurrencyCode =
-            extractStringValue(afterBalance, fieldPattern('iso_currency_code')) ||
-            extractStringValue(beforeBalance, fieldPattern('iso_currency_code'));
-          const institutionId =
-            extractStringValue(afterBalance, fieldPattern('institution_id')) ||
-            extractStringValue(beforeBalance, fieldPattern('institution_id'));
+    // Need at least a name
+    if (!accData.name && !accData.official_name) {
+      continue;
+    }
 
-          // Try account_id first, then fall back to 'id' field
-          let accountId =
-            extractStringValue(afterBalance, fieldPattern('account_id')) ||
-            extractStringValue(beforeBalance, fieldPattern('account_id'));
-          if (!accountId) {
-            accountId =
-              extractStringValue(afterBalance, fieldPattern('id')) ||
-              extractStringValue(beforeBalance, fieldPattern('id'));
-          }
-
-          // If still no account ID, try extracting from /accounts/ path
-          if (!accountId) {
-            const accountsPathIdx = beforeBalance.lastIndexOf(Buffer.from('/accounts/'));
-            if (accountsPathIdx !== -1) {
-              // Extract ID after /accounts/
-              const afterPath = beforeBalance.subarray(accountsPathIdx + 10, accountsPathIdx + 60);
-              // Match alphanumeric ID, but stop at known field names that might be adjacent
-              const match = afterPath
-                .toString('utf-8')
-                .match(/^([a-zA-Z0-9_-]+?)(?:current_balance|original_|balance|name|mask|type|$)/);
-              // Only use as ID if it looks like a valid ID (not a field name)
-              // Valid IDs are usually 15+ chars with mixed case/numbers
-              if (match?.[1] && match[1].length >= 15 && /[A-Z]/.test(match[1])) {
-                accountId = match[1];
-              }
-            }
-          }
-
-          // Skip if we've already seen this account ID (from a different balance pattern)
-          if (accountId && seenAccountIds.has(accountId)) {
-            idx = data.indexOf(balancePattern, searchPos);
-            continue;
-          }
-
-          if (accountId && (name || officialName)) {
-            // Mark this account ID as seen
-            seenAccountIds.add(accountId);
-
-            try {
-              // Build account object with optional fields
-              const accData: {
-                account_id: string;
-                current_balance: number;
-                name?: string;
-                official_name?: string;
-                account_type?: string;
-                subtype?: string;
-                mask?: string;
-                institution_name?: string;
-                item_id?: string;
-                available_balance?: number;
-                iso_currency_code?: string;
-                institution_id?: string;
-              } = {
-                account_id: accountId,
-                current_balance: balance,
-              };
-
-              if (name) accData.name = name;
-              if (officialName) accData.official_name = officialName;
-              if (accountType) accData.account_type = accountType;
-              if (subtype) accData.subtype = subtype;
-              if (mask) accData.mask = mask;
-              if (institutionName) accData.institution_name = institutionName;
-              if (itemId) accData.item_id = itemId;
-              if (availableBalance !== null) accData.available_balance = availableBalance;
-              if (isoCurrencyCode) accData.iso_currency_code = isoCurrencyCode;
-              if (institutionId) accData.institution_id = institutionId;
-
-              // Validate with Zod
-              const account = AccountSchema.parse(accData);
-              accounts.push(account);
-            } catch {
-              // Skip invalid accounts
-            }
-          }
-        }
-
-        idx = data.indexOf(balancePattern, searchPos);
-      }
+    // Validate with Zod
+    try {
+      const account = AccountSchema.parse(accData);
+      accounts.push(account);
+    } catch {
+      // Skip invalid accounts
     }
   }
 
@@ -564,116 +331,52 @@ export function decodeAccounts(dbPath: string): Account[] {
 }
 
 /**
- * Decode recurring transactions from Copilot Money LevelDB files.
- *
- * Extracts subscription/recurring payment data from Copilot's native
- * /recurring/ Firestore collection.
- *
- * @param dbPath - Path to LevelDB database directory
- * @returns Array of recurring transactions
+ * Decode recurring transactions from LevelDB database.
  */
-export function decodeRecurring(dbPath: string): Recurring[] {
+export async function decodeRecurring(dbPath: string): Promise<Recurring[]> {
   const recurring: Recurring[] = [];
 
-  // Return empty array if path doesn't exist (graceful degradation)
-  if (!fs.existsSync(dbPath)) {
-    return [];
-  }
+  for await (const doc of iterateDocuments(dbPath, { collection: 'recurring' })) {
+    const fields = doc.fields;
 
-  const stat = fs.statSync(dbPath);
-  if (!stat.isDirectory()) {
-    return [];
-  }
+    const recurringId = getString(fields, 'recurring_id') ?? doc.documentId;
 
-  // Configuration constants for record extraction
-  const RECORD_WINDOW_BEFORE = 500; // Bytes to search before path marker
-  const RECORD_WINDOW_AFTER = 2000; // Bytes to search after path marker
-  const MIN_RECURRING_ID_LENGTH = 10; // Minimum length for valid Firestore document IDs
+    // Build recurring object
+    const recData: Record<string, unknown> = {
+      recurring_id: recurringId,
+    };
 
-  // Get all .ldb files
-  const files = fs.readdirSync(dbPath);
-  const ldbFiles = files.filter((f) => f.endsWith('.ldb')).map((f) => path.join(dbPath, f));
+    // String fields
+    const stringFields = [
+      'name',
+      'merchant_name',
+      'frequency',
+      'next_date',
+      'last_date',
+      'category_id',
+      'account_id',
+      'iso_currency_code',
+    ];
 
-  const recurringPathMarker = Buffer.from('/recurring/');
-
-  for (const filepath of ldbFiles) {
-    const data = fs.readFileSync(filepath);
-
-    if (!data.includes(recurringPathMarker)) {
-      continue;
+    for (const field of stringFields) {
+      const value = getString(fields, field);
+      if (value) recData[field] = value;
     }
 
-    // Find recurring records by searching for the path marker
-    let searchPos = 0;
-    let idx = data.indexOf(recurringPathMarker, searchPos);
+    // Amount
+    const amount = getNumber(fields, 'amount');
+    if (amount !== undefined) recData.amount = amount;
 
-    while (idx !== -1) {
-      searchPos = idx + 1;
+    // is_active
+    const isActive = getBoolean(fields, 'is_active');
+    if (isActive !== undefined) recData.is_active = isActive;
 
-      // Use a window around the path marker to capture all fields
-      const recordStart = Math.max(0, idx - RECORD_WINDOW_BEFORE);
-      const recordEnd = Math.min(data.length, idx + RECORD_WINDOW_AFTER);
-      const record = data.subarray(recordStart, recordEnd);
-
-      // Try to extract recurring_id from the path (e.g., /recurring/{id})
-      const pathIdx = idx - recordStart;
-      const afterPath = record.subarray(pathIdx + recurringPathMarker.length, pathIdx + 100);
-      const idMatch = afterPath.toString('utf-8').match(/^([a-zA-Z0-9_-]+)/);
-      const recurringId = idMatch?.[1];
-
-      if (recurringId && recurringId.length >= MIN_RECURRING_ID_LENGTH) {
-        // Extract fields from the record
-        const name = extractStringValue(record, fieldPattern('name'));
-        const merchantName = extractStringValue(record, fieldPattern('merchant_name'));
-        const amount = extractDoubleField(record, fieldPattern('amount'));
-        const frequency = extractStringValue(record, fieldPattern('frequency'));
-        const nextDate = extractStringValue(record, fieldPattern('next_date'));
-        const lastDate = extractStringValue(record, fieldPattern('last_date'));
-        const categoryId = extractStringValue(record, fieldPattern('category_id'));
-        const accountId = extractStringValue(record, fieldPattern('account_id'));
-        const isActive = extractBooleanValue(record, fieldPattern('is_active'));
-        const isoCurrencyCode = extractStringValue(record, fieldPattern('iso_currency_code'));
-
-        // Build recurring object
-        const recData: {
-          recurring_id: string;
-          name?: string;
-          merchant_name?: string;
-          amount?: number;
-          frequency?: string;
-          next_date?: string;
-          last_date?: string;
-          category_id?: string;
-          account_id?: string;
-          is_active?: boolean;
-          iso_currency_code?: string;
-        } = {
-          recurring_id: recurringId,
-        };
-
-        if (name) recData.name = name;
-        if (merchantName) recData.merchant_name = merchantName;
-        if (amount !== null) recData.amount = amount;
-        if (frequency) recData.frequency = frequency;
-        if (nextDate) recData.next_date = nextDate;
-        if (lastDate) recData.last_date = lastDate;
-        if (categoryId) recData.category_id = categoryId;
-        if (accountId) recData.account_id = accountId;
-        if (isActive !== null) recData.is_active = isActive;
-        if (isoCurrencyCode) recData.iso_currency_code = isoCurrencyCode;
-
-        try {
-          const rec = RecurringSchema.parse(recData);
-          recurring.push(rec);
-        } catch (error) {
-          // Skip invalid records - log in development for debugging
-          if (process.env.NODE_ENV === 'development' || process.env.DEBUG) {
-            console.warn('Skipping invalid recurring record:', error);
-          }
-        }
-      }
-
-      idx = data.indexOf(recurringPathMarker, searchPos);
+    // Validate with Zod
+    try {
+      const rec = RecurringSchema.parse(recData);
+      recurring.push(rec);
+    } catch {
+      // Skip invalid records
     }
   }
 
@@ -692,110 +395,50 @@ export function decodeRecurring(dbPath: string): Recurring[] {
 }
 
 /**
- * Decode budgets from Copilot Money database.
- *
- * Extracts budget data from /budgets/ Firestore collection.
- * Returns empty array if database is unavailable (graceful degradation).
- *
- * @param dbPath - Path to LevelDB database directory
- * @returns Array of Budget objects
+ * Decode budgets from LevelDB database.
  */
-export function decodeBudgets(dbPath: string): Budget[] {
+export async function decodeBudgets(dbPath: string): Promise<Budget[]> {
   const budgets: Budget[] = [];
 
-  // Return empty array if path doesn't exist (graceful degradation)
-  if (!fs.existsSync(dbPath)) {
-    return [];
-  }
+  for await (const doc of iterateDocuments(dbPath, { collection: 'budgets' })) {
+    const fields = doc.fields;
 
-  const stat = fs.statSync(dbPath);
-  if (!stat.isDirectory()) {
-    return [];
-  }
+    const budgetId = getString(fields, 'budget_id') ?? doc.documentId;
 
-  // Configuration constants for record extraction
-  const RECORD_WINDOW_BEFORE = 500; // Bytes to search before path marker
-  const RECORD_WINDOW_AFTER = 2000; // Bytes to search after path marker
-  const MIN_BUDGET_ID_LENGTH = 10; // Minimum length for valid Firestore document IDs
+    // Build budget object
+    const budgetData: Record<string, unknown> = {
+      budget_id: budgetId,
+    };
 
-  // Get all .ldb files
-  const files = fs.readdirSync(dbPath);
-  const ldbFiles = files.filter((f) => f.endsWith('.ldb')).map((f) => path.join(dbPath, f));
+    // String fields
+    const stringFields = [
+      'name',
+      'period',
+      'category_id',
+      'start_date',
+      'end_date',
+      'iso_currency_code',
+    ];
 
-  const budgetPathMarker = Buffer.from('/budgets/');
-
-  for (const filepath of ldbFiles) {
-    const data = fs.readFileSync(filepath);
-
-    if (!data.includes(budgetPathMarker)) {
-      continue;
+    for (const field of stringFields) {
+      const value = getString(fields, field);
+      if (value) budgetData[field] = value;
     }
 
-    // Find budget records by searching for the path marker
-    let searchPos = 0;
-    let idx = data.indexOf(budgetPathMarker, searchPos);
+    // Amount
+    const amount = getNumber(fields, 'amount');
+    if (amount !== undefined) budgetData.amount = amount;
 
-    while (idx !== -1) {
-      searchPos = idx + 1;
+    // is_active
+    const isActive = getBoolean(fields, 'is_active');
+    if (isActive !== undefined) budgetData.is_active = isActive;
 
-      // Use a window around the path marker to capture all fields
-      const recordStart = Math.max(0, idx - RECORD_WINDOW_BEFORE);
-      const recordEnd = Math.min(data.length, idx + RECORD_WINDOW_AFTER);
-      const record = data.subarray(recordStart, recordEnd);
-
-      // Try to extract budget_id from the path (e.g., /budgets/{id})
-      const pathIdx = idx - recordStart;
-      const afterPath = record.subarray(pathIdx + budgetPathMarker.length, pathIdx + 100);
-      const idMatch = afterPath.toString('utf-8').match(/^([a-zA-Z0-9_-]+)/);
-      const budgetId = idMatch?.[1];
-
-      if (budgetId && budgetId.length >= MIN_BUDGET_ID_LENGTH) {
-        // Extract fields from the record
-        const name = extractStringValue(record, fieldPattern('name'));
-        const amount = extractDoubleField(record, fieldPattern('amount'));
-        const period = extractStringValue(record, fieldPattern('period'));
-        const categoryId = extractStringValue(record, fieldPattern('category_id'));
-        const startDate = extractStringValue(record, fieldPattern('start_date'));
-        const endDate = extractStringValue(record, fieldPattern('end_date'));
-        const isActive = extractBooleanValue(record, fieldPattern('is_active'));
-        const isoCurrencyCode = extractStringValue(record, fieldPattern('iso_currency_code'));
-
-        // Build budget object
-        const budgetData: {
-          budget_id: string;
-          name?: string;
-          amount?: number;
-          period?: string;
-          category_id?: string;
-          start_date?: string;
-          end_date?: string;
-          is_active?: boolean;
-          iso_currency_code?: string;
-        } = {
-          budget_id: budgetId,
-        };
-
-        if (name) budgetData.name = name;
-        if (amount !== null) budgetData.amount = amount;
-        if (period) budgetData.period = period;
-        if (categoryId) budgetData.category_id = categoryId;
-        if (startDate) budgetData.start_date = startDate;
-        if (endDate) budgetData.end_date = endDate;
-        if (isActive !== null) budgetData.is_active = isActive;
-        if (isoCurrencyCode) budgetData.iso_currency_code = isoCurrencyCode;
-
-        try {
-          const budget = BudgetSchema.parse(budgetData);
-          budgets.push(budget);
-        } catch (error) {
-          // Skip invalid records - log in development for debugging
-          if (process.env.NODE_ENV === 'development' || process.env.DEBUG) {
-            console.warn('Skipping invalid budget record:', error);
-          }
-        }
-      }
-
-      idx = data.indexOf(budgetPathMarker, searchPos);
+    // Validate with Zod
+    try {
+      const budget = BudgetSchema.parse(budgetData);
+      budgets.push(budget);
+    } catch {
+      // Skip invalid records
     }
   }
 
@@ -814,174 +457,71 @@ export function decodeBudgets(dbPath: string): Budget[] {
 }
 
 /**
- * Decode financial goals from the Copilot Money database.
- *
- * Goals are stored in: /users/{user_id}/financial_goals/{goal_id}
- *
- * @param dbPath - Path to the LevelDB database directory
- * @returns Array of decoded Goal objects
+ * Decode financial goals from LevelDB database.
  */
-export function decodeGoals(dbPath: string): Goal[] {
+export async function decodeGoals(dbPath: string): Promise<Goal[]> {
   const goals: Goal[] = [];
 
-  // Return empty array if path doesn't exist (graceful degradation)
-  if (!fs.existsSync(dbPath)) {
-    return [];
-  }
+  for await (const doc of iterateDocuments(dbPath, { collection: 'financial_goals' })) {
+    const fields = doc.fields;
 
-  const stat = fs.statSync(dbPath);
-  if (!stat.isDirectory()) {
-    return [];
-  }
+    const goalId = getString(fields, 'goal_id') ?? doc.documentId;
 
-  // Configuration constants for record extraction
-  const RECORD_WINDOW_BEFORE = 500; // Bytes to search before path marker
-  const RECORD_WINDOW_AFTER = 3000; // Bytes to search after path marker (larger for nested objects)
-  const MIN_GOAL_ID_LENGTH = 10; // Minimum length for valid Firestore document IDs
+    // Build goal object
+    const goalData: Record<string, unknown> = {
+      goal_id: goalId,
+    };
 
-  // Get all .ldb files
-  const files = fs.readdirSync(dbPath);
-  const ldbFiles = files.filter((f) => f.endsWith('.ldb')).map((f) => path.join(dbPath, f));
+    // Top-level string fields
+    const stringFields = ['name', 'recommendation_id', 'emoji', 'created_date', 'user_id'];
 
-  // Goals are stored in Firestore under /users/{user_id}/financial_goals/{goal_id}
-  // In LevelDB, we search for the financial_goals collection marker
-  const goalPathMarker = Buffer.from('financial_goals/');
-
-  for (const filepath of ldbFiles) {
-    const data = fs.readFileSync(filepath);
-
-    if (!data.includes(goalPathMarker)) {
-      continue;
+    for (const field of stringFields) {
+      const value = getString(fields, field);
+      if (value) goalData[field] = value;
     }
 
-    // Find goal records by searching for the path marker
-    let searchPos = 0;
-    let idx = data.indexOf(goalPathMarker, searchPos);
+    // created_with_allocations
+    const createdWithAllocations = getBoolean(fields, 'created_with_allocations');
+    if (createdWithAllocations !== undefined) {
+      goalData.created_with_allocations = createdWithAllocations;
+    }
 
-    while (idx !== -1) {
-      searchPos = idx + 1;
+    // Extract nested savings object
+    const savingsMap = getMap(fields, 'savings');
+    if (savingsMap) {
+      const savings: Record<string, unknown> = {};
 
-      // Use a window around the path marker to capture all fields
-      const recordStart = Math.max(0, idx - RECORD_WINDOW_BEFORE);
-      const recordEnd = Math.min(data.length, idx + RECORD_WINDOW_AFTER);
-      const record = data.subarray(recordStart, recordEnd);
-
-      // Try to extract goal_id from the path (e.g., /financial_goals/{id})
-      const pathIdx = idx - recordStart;
-      const afterPath = record.subarray(pathIdx + goalPathMarker.length, pathIdx + 100);
-      const idMatch = afterPath.toString('utf-8').match(/^([a-zA-Z0-9_-]+)/);
-      const goalId = idMatch?.[1];
-
-      if (goalId && goalId.length >= MIN_GOAL_ID_LENGTH) {
-        // Extract user_id from the path (before /financial_goals/)
-        const beforePath = record.subarray(0, pathIdx);
-        const userIdMatch = beforePath
-          .toString('utf-8')
-          .match(/\/users\/([a-zA-Z0-9_-]+)\/financial_goals/);
-        const userId = userIdMatch?.[1] ?? undefined;
-
-        // IMPORTANT: Only search AFTER the goal ID to avoid picking up fields from adjacent documents
-        // The goal document fields come after the path marker
-        const afterGoalId = record.subarray(pathIdx + goalPathMarker.length + goalId.length);
-
-        // Extract top-level fields from the document (after the goal ID)
-        const name = extractStringValue(afterGoalId, fieldPattern('name'));
-        const recommendationId = extractStringValue(afterGoalId, fieldPattern('recommendation_id'));
-        const emoji = extractStringValue(afterGoalId, fieldPattern('emoji'));
-        const createdDate = extractStringValue(afterGoalId, fieldPattern('created_date'));
-        const createdWithAllocations = extractBooleanValue(
-          afterGoalId,
-          fieldPattern('created_with_allocations')
-        );
-
-        // Extract nested savings object fields (also from after the goal ID)
-        const savingsType = extractStringValue(afterGoalId, fieldPattern('type'));
-        const savingsStatus = extractStringValue(afterGoalId, fieldPattern('status'));
-        const targetAmount = extractDoubleField(afterGoalId, fieldPattern('target_amount'));
-        const trackingType = extractStringValue(afterGoalId, fieldPattern('tracking_type'));
-        const monthlyContribution = extractDoubleField(
-          afterGoalId,
-          fieldPattern('tracking_type_monthly_contribution')
-        );
-        const startDate = extractStringValue(afterGoalId, fieldPattern('start_date'));
-        const modifiedStartDate = extractBooleanValue(
-          afterGoalId,
-          fieldPattern('modified_start_date')
-        );
-        const inflatesBudget = extractBooleanValue(afterGoalId, fieldPattern('inflates_budget'));
-        const isOngoing = extractBooleanValue(afterGoalId, fieldPattern('is_ongoing'));
-
-        // Build goal object
-        const goalData: {
-          goal_id: string;
-          user_id?: string;
-          name?: string;
-          recommendation_id?: string;
-          emoji?: string;
-          created_date?: string;
-          created_with_allocations?: boolean;
-          savings?: {
-            type?: string;
-            status?: string;
-            target_amount?: number;
-            tracking_type?: string;
-            tracking_type_monthly_contribution?: number;
-            start_date?: string;
-            modified_start_date?: boolean;
-            inflates_budget?: boolean;
-            is_ongoing?: boolean;
-          };
-        } = {
-          goal_id: goalId,
-        };
-
-        // Add optional top-level fields
-        if (userId) goalData.user_id = userId;
-        if (name) goalData.name = name;
-        if (recommendationId) goalData.recommendation_id = recommendationId;
-        if (emoji) goalData.emoji = emoji;
-        if (createdDate) goalData.created_date = createdDate;
-        if (createdWithAllocations !== null)
-          goalData.created_with_allocations = createdWithAllocations;
-
-        // Build nested savings object if any savings fields exist
-        const hasSavingsFields =
-          savingsType ||
-          savingsStatus ||
-          targetAmount !== null ||
-          trackingType ||
-          monthlyContribution !== null ||
-          startDate ||
-          modifiedStartDate !== null ||
-          inflatesBudget !== null ||
-          isOngoing !== null;
-
-        if (hasSavingsFields) {
-          goalData.savings = {};
-          if (savingsType) goalData.savings.type = savingsType;
-          if (savingsStatus) goalData.savings.status = savingsStatus;
-          if (targetAmount !== null) goalData.savings.target_amount = targetAmount;
-          if (trackingType) goalData.savings.tracking_type = trackingType;
-          if (monthlyContribution !== null)
-            goalData.savings.tracking_type_monthly_contribution = monthlyContribution;
-          if (startDate) goalData.savings.start_date = startDate;
-          if (modifiedStartDate !== null) goalData.savings.modified_start_date = modifiedStartDate;
-          if (inflatesBudget !== null) goalData.savings.inflates_budget = inflatesBudget;
-          if (isOngoing !== null) goalData.savings.is_ongoing = isOngoing;
-        }
-
-        try {
-          const goal = GoalSchema.parse(goalData);
-          goals.push(goal);
-        } catch (error) {
-          // Skip invalid records - log in development for debugging
-          if (process.env.NODE_ENV === 'development' || process.env.DEBUG) {
-            console.warn('Skipping invalid goal record:', error);
-          }
-        }
+      const savingsStringFields = ['type', 'status', 'tracking_type', 'start_date'];
+      for (const field of savingsStringFields) {
+        const value = getString(savingsMap, field);
+        if (value) savings[field] = value;
       }
 
-      idx = data.indexOf(goalPathMarker, searchPos);
+      const targetAmount = getNumber(savingsMap, 'target_amount');
+      if (targetAmount !== undefined) savings.target_amount = targetAmount;
+
+      const monthlyContribution = getNumber(savingsMap, 'tracking_type_monthly_contribution');
+      if (monthlyContribution !== undefined) {
+        savings.tracking_type_monthly_contribution = monthlyContribution;
+      }
+
+      const savingsBoolFields = ['modified_start_date', 'inflates_budget', 'is_ongoing'];
+      for (const field of savingsBoolFields) {
+        const value = getBoolean(savingsMap, field);
+        if (value !== undefined) savings[field] = value;
+      }
+
+      if (Object.keys(savings).length > 0) {
+        goalData.savings = savings;
+      }
+    }
+
+    // Validate with Zod
+    try {
+      const goal = GoalSchema.parse(goalData);
+      goals.push(goal);
+    } catch {
+      // Skip invalid records
     }
   }
 
@@ -1000,159 +540,71 @@ export function decodeGoals(dbPath: string): Goal[] {
 }
 
 /**
- * Decode financial goal history from the Copilot Money database.
- *
- * Goal history is stored in subcollection:
- * /users/{user_id}/financial_goals/{goal_id}/financial_goal_history/{month}
- *
- * Each document represents a monthly snapshot with:
- * - current_amount: Amount saved as of that month
- * - daily_data: Nested object with daily snapshots
- * - contributions: Array of deposits/withdrawals
- *
- * @param dbPath - Path to the LevelDB database directory
- * @param goalId - Optional goal ID to filter history for a specific goal
- * @returns Array of decoded GoalHistory objects
+ * Decode financial goal history from LevelDB database.
  */
-export function decodeGoalHistory(dbPath: string, goalId?: string): GoalHistory[] {
+export async function decodeGoalHistory(dbPath: string, goalId?: string): Promise<GoalHistory[]> {
   const histories: GoalHistory[] = [];
 
-  // Return empty array if path doesn't exist (graceful degradation)
-  if (!fs.existsSync(dbPath)) {
-    return [];
-  }
+  for await (const doc of iterateDocuments(dbPath, { collection: 'financial_goal_history' })) {
+    const fields = doc.fields;
 
-  const stat = fs.statSync(dbPath);
-  if (!stat.isDirectory()) {
-    return [];
-  }
-
-  // Configuration constants for record extraction
-  const RECORD_WINDOW_BEFORE = 500; // Bytes to search before path marker
-  const RECORD_WINDOW_AFTER = 5000; // Larger window for daily_data nested objects
-  const MIN_MONTH_LENGTH = 7; // YYYY-MM format
-
-  // Get all .ldb files
-  const files = fs.readdirSync(dbPath);
-  const ldbFiles = files.filter((f) => f.endsWith('.ldb')).map((f) => path.join(dbPath, f));
-
-  // Goal history is in subcollection: financial_goal_history
-  const historyPathMarker = Buffer.from('financial_goal_history/');
-
-  for (const filepath of ldbFiles) {
-    const data = fs.readFileSync(filepath);
-
-    if (!data.includes(historyPathMarker)) {
+    // Month is typically the document ID in YYYY-MM format
+    const month = doc.documentId;
+    if (!/^\d{4}-\d{2}$/.test(month)) {
       continue;
     }
 
-    // Find history records by searching for the path marker
-    let searchPos = 0;
-    let idx = data.indexOf(historyPathMarker, searchPos);
+    // Extract goal_id from the collection path
+    const extractedGoalId = doc.collection.split('/')[1] ?? getString(fields, 'goal_id');
 
-    while (idx !== -1) {
-      searchPos = idx + 1;
+    // Filter by goalId if specified
+    if (goalId && extractedGoalId !== goalId) {
+      continue;
+    }
 
-      // Use a window around the path marker to capture all fields
-      const recordStart = Math.max(0, idx - RECORD_WINDOW_BEFORE);
-      const recordEnd = Math.min(data.length, idx + RECORD_WINDOW_AFTER);
-      const record = data.subarray(recordStart, recordEnd);
+    // Build history object
+    const historyData: Record<string, unknown> = {
+      month,
+      goal_id: extractedGoalId ?? 'unknown',
+    };
 
-      // Try to extract month (document ID) from the path
-      // Path format: /financial_goals/{goal_id}/financial_goal_history/{month}
-      const pathIdx = idx - recordStart;
-      const afterPath = record.subarray(pathIdx + historyPathMarker.length, pathIdx + 100);
-      const monthMatch = afterPath.toString('utf-8').match(/^(\d{4}-\d{2})/);
-      const month = monthMatch?.[1];
+    // String fields
+    const stringFields = ['user_id', 'last_updated', 'created_date'];
+    for (const field of stringFields) {
+      const value = getString(fields, field);
+      if (value) historyData[field] = value;
+    }
 
-      if (month && month.length >= MIN_MONTH_LENGTH) {
-        // Extract goal_id from before the history marker
-        const beforePath = record.subarray(0, pathIdx);
-        const goalIdMatch = beforePath
-          .toString('utf-8')
-          .match(/financial_goals\/([a-zA-Z0-9_-]+)\/financial_goal_history/);
-        const extractedGoalId = goalIdMatch?.[1];
+    // Numeric fields
+    const currentAmount = getNumber(fields, 'current_amount');
+    if (currentAmount !== undefined) historyData.current_amount = currentAmount;
 
-        // If filtering by goalId, skip if doesn't match
-        if (goalId && extractedGoalId !== goalId) {
-          idx = data.indexOf(historyPathMarker, searchPos);
-          continue;
-        }
+    const targetAmount = getNumber(fields, 'target_amount');
+    if (targetAmount !== undefined) historyData.target_amount = targetAmount;
 
-        // Extract user_id from the path (before /financial_goals/)
-        const userIdMatch = beforePath
-          .toString('utf-8')
-          .match(/\/users\/([a-zA-Z0-9_-]+)\/financial_goals/);
-        const userId = userIdMatch?.[1] ?? undefined;
-
-        // Only search AFTER the month ID to avoid picking up fields from adjacent documents
-        const afterMonthId = record.subarray(pathIdx + historyPathMarker.length + month.length);
-
-        // Extract top-level fields
-        const currentAmount = extractDoubleField(afterMonthId, fieldPattern('current_amount'));
-        const targetAmount = extractDoubleField(afterMonthId, fieldPattern('target_amount'));
-        const lastUpdated = extractStringValue(afterMonthId, fieldPattern('last_updated'));
-        const createdDate = extractStringValue(afterMonthId, fieldPattern('created_date'));
-
-        // Extract daily_data nested object
-        // This is more complex - daily_data is a map: { "YYYY-MM-DD": { amount: number, ... }, ... }
-        const dailyData: Record<string, DailySnapshot> = {};
-
-        // Look for date patterns in the record (YYYY-MM-DD format)
-        const datePattern = /(\d{4}-\d{2}-\d{2})/g;
-        const recordStr = afterMonthId.toString('utf-8', 0, Math.min(4000, afterMonthId.length));
-        let dateMatch;
-
-        while ((dateMatch = datePattern.exec(recordStr)) !== null) {
-          const date = dateMatch[1];
-          // Only include dates from this month
-          if (date && date.startsWith(month)) {
-            // Try to find amount associated with this date
-            const dateIdx = afterMonthId.indexOf(Buffer.from(date));
-            if (dateIdx !== -1) {
-              const afterDate = afterMonthId.subarray(dateIdx, dateIdx + 100);
-              const amount = extractDoubleValue(afterDate, 0, 50);
-              if (amount !== null) {
-                dailyData[date] = { amount, date };
-              }
-            }
-          }
-        }
-
-        // Build goal history object
-        const historyData: {
-          month: string;
-          goal_id: string;
-          user_id?: string;
-          current_amount?: number;
-          target_amount?: number;
-          daily_data?: Record<string, DailySnapshot>;
-          last_updated?: string;
-          created_date?: string;
-        } = {
-          month,
-          goal_id: extractedGoalId || 'unknown',
-        };
-
-        if (userId) historyData.user_id = userId;
-        if (currentAmount !== null) historyData.current_amount = currentAmount;
-        if (targetAmount !== null) historyData.target_amount = targetAmount;
-        if (Object.keys(dailyData).length > 0) historyData.daily_data = dailyData;
-        if (lastUpdated) historyData.last_updated = lastUpdated;
-        if (createdDate) historyData.created_date = createdDate;
-
-        try {
-          const history = GoalHistorySchema.parse(historyData);
-          histories.push(history);
-        } catch (error) {
-          // Skip invalid records - log in development for debugging
-          if (process.env.NODE_ENV === 'development' || process.env.DEBUG) {
-            console.warn('Skipping invalid goal history record:', error);
+    // Daily data (nested map)
+    const dailyDataMap = getMap(fields, 'daily_data');
+    if (dailyDataMap) {
+      const dailyData: Record<string, DailySnapshot> = {};
+      for (const [date, value] of dailyDataMap) {
+        if (date.startsWith(month) && value.type === 'map') {
+          const amount = getNumber(value.value, 'amount');
+          if (amount !== undefined) {
+            dailyData[date] = { amount, date };
           }
         }
       }
+      if (Object.keys(dailyData).length > 0) {
+        historyData.daily_data = dailyData;
+      }
+    }
 
-      idx = data.indexOf(historyPathMarker, searchPos);
+    // Validate with Zod
+    try {
+      const history = GoalHistorySchema.parse(historyData);
+      histories.push(history);
+    } catch {
+      // Skip invalid records
     }
   }
 
@@ -1173,219 +625,95 @@ export function decodeGoalHistory(dbPath: string, goalId?: string): GoalHistory[
     if (a.goal_id !== b.goal_id) {
       return a.goal_id.localeCompare(b.goal_id);
     }
-    return b.month.localeCompare(a.month); // Newest first
+    return b.month.localeCompare(a.month);
   });
 
   return unique;
 }
+
 /**
- * Decode investment prices from the Copilot Money database.
- *
- * Investment prices are stored in collection:
- * /investment_prices/{hash}/daily/{month}  (historical monthly data)
- * /investment_prices/{hash}/hf/{date}      (high-frequency intraday data)
- *
- * Each document contains price information for stocks, crypto, ETFs, etc.
- * The hash is typically a SHA-256 hash (64 hex chars) or shorter ID.
- *
- * @param dbPath - Path to the LevelDB database directory
- * @param options - Filter options
- * @returns Array of decoded InvestmentPrice objects
+ * Decode investment prices from LevelDB database.
  */
-export function decodeInvestmentPrices(
+export async function decodeInvestmentPrices(
   dbPath: string,
   options: {
     tickerSymbol?: string;
-    startDate?: string; // YYYY-MM or YYYY-MM-DD
-    endDate?: string; // YYYY-MM or YYYY-MM-DD
+    startDate?: string;
+    endDate?: string;
     priceType?: 'daily' | 'hf';
   } = {}
-): InvestmentPrice[] {
-  const prices: InvestmentPrice[] = [];
+): Promise<InvestmentPrice[]> {
   const { tickerSymbol, startDate, endDate, priceType } = options;
+  const prices: InvestmentPrice[] = [];
 
-  // Return empty array if path doesn't exist (graceful degradation)
-  if (!fs.existsSync(dbPath)) {
-    return [];
-  }
+  for await (const doc of iterateDocuments(dbPath, { collection: 'investment_prices' })) {
+    const fields = doc.fields;
 
-  const stat = fs.statSync(dbPath);
-  if (!stat.isDirectory()) {
-    return [];
-  }
+    const investmentId = getString(fields, 'investment_id') ?? doc.documentId;
 
-  // Configuration constants for record extraction
-  const RECORD_WINDOW_BEFORE = 500; // Bytes to search before path marker
-  const RECORD_WINDOW_AFTER = 2000; // Bytes to search after investment ID
-  const MIN_HASH_LENGTH = 20; // Minimum length for investment ID
-
-  // Get all .ldb files
-  const files = fs.readdirSync(dbPath);
-  const ldbFiles = files.filter((f) => f.endsWith('.ldb')).map((f) => path.join(dbPath, f));
-
-  // Investment prices are in: /investment_prices/{hash}/daily/{month} or /hf/{date}
-  const pricePathMarker = Buffer.from('investment_prices');
-  const dailyMarker = Buffer.from('/daily/');
-  const hfMarker = Buffer.from('/hf/');
-
-  for (const filepath of ldbFiles) {
-    const data = fs.readFileSync(filepath);
-
-    if (!data.includes(pricePathMarker)) {
+    // Filter by ticker if specified
+    const ticker = getString(fields, 'ticker_symbol');
+    if (tickerSymbol && ticker !== tickerSymbol) {
       continue;
     }
 
-    // Find price records by searching for the path marker
-    let searchPos = 0;
-    let idx = data.indexOf(pricePathMarker, searchPos);
+    // Determine price type
+    const isDailyData = doc.key.includes('/daily/');
+    const isHfData = doc.key.includes('/hf/');
 
-    while (idx !== -1) {
-      searchPos = idx + 1;
+    if (priceType === 'daily' && !isDailyData) continue;
+    if (priceType === 'hf' && !isHfData) continue;
 
-      // Use a window around the path marker to capture all fields
-      const recordStart = Math.max(0, idx - RECORD_WINDOW_BEFORE);
-      const recordEnd = Math.min(data.length, idx + pricePathMarker.length + 200);
-      const record = data.subarray(recordStart, recordEnd);
+    // Get date/month
+    const date = getString(fields, 'date');
+    const month = getString(fields, 'month');
+    const recordDate = date ?? month;
 
-      // Try to extract investment ID (hash) from the path
-      // Path format: /investment_prices/{hash}/daily/{month} or /hf/{date}
-      const pathIdx = idx - recordStart;
-      const afterPath = record.subarray(pathIdx + pricePathMarker.length, pathIdx + 200);
+    // Apply date filters
+    if (recordDate) {
+      if (startDate && recordDate < startDate) continue;
+      if (endDate && recordDate > endDate) continue;
+    }
 
-      // Look for hash after investment_prices/ - SHA-256 (64 hex) or shorter IDs (20+)
-      const hashMatch = afterPath.toString('utf-8').match(/^\/([a-f0-9]{64}|[a-zA-Z0-9_-]{20,})/);
-      const investmentId = hashMatch?.[1];
+    // Build price object
+    const priceData: Record<string, unknown> = {
+      investment_id: investmentId,
+      price_type: isDailyData ? 'daily' : 'hf',
+    };
 
-      if (!investmentId || investmentId.length < MIN_HASH_LENGTH) {
-        idx = data.indexOf(pricePathMarker, searchPos);
-        continue;
-      }
+    if (ticker) priceData.ticker_symbol = ticker;
+    if (date) priceData.date = date;
+    if (month) priceData.month = month;
 
-      // Determine if this is daily or high-frequency data
-      const isDailyData = record.includes(dailyMarker);
-      const isHfData = record.includes(hfMarker);
+    // Price fields
+    const priceFields = ['price', 'close_price', 'current_price', 'institution_price'];
+    for (const field of priceFields) {
+      const value = getNumber(fields, field);
+      if (value !== undefined) priceData[field] = value;
+    }
 
-      // Skip if filtering by price type
-      if (priceType === 'daily' && !isDailyData) {
-        idx = data.indexOf(pricePathMarker, searchPos);
-        continue;
-      }
-      if (priceType === 'hf' && !isHfData) {
-        idx = data.indexOf(pricePathMarker, searchPos);
-        continue;
-      }
+    // OHLCV fields
+    const ohlcvFields = ['high', 'low', 'open', 'volume'];
+    for (const field of ohlcvFields) {
+      const value = getNumber(fields, field);
+      if (value !== undefined) priceData[field] = value;
+    }
 
-      // Expand search window for price fields
-      const extendedEnd = Math.min(
-        data.length,
-        idx + pricePathMarker.length + investmentId.length + RECORD_WINDOW_AFTER
-      );
-      const extendedRecord = data.subarray(
-        idx + pricePathMarker.length + investmentId.length,
-        extendedEnd
-      );
+    // String metadata
+    const metaFields = ['currency', 'source', 'close_price_as_of'];
+    for (const field of metaFields) {
+      const value = getString(fields, field);
+      if (value) priceData[field] = value;
+    }
 
-      // Extract ticker symbol if present
-      const ticker = extractStringValue(extendedRecord, fieldPattern('ticker_symbol'));
-
-      // Skip if filtering by ticker and doesn't match
-      if (tickerSymbol && ticker !== tickerSymbol) {
-        idx = data.indexOf(pricePathMarker, searchPos);
-        continue;
-      }
-
-      // Extract date/month based on data type
-      let date: string | undefined;
-      let month: string | undefined;
-
-      if (isDailyData) {
-        month = extractStringValue(extendedRecord, fieldPattern('month')) ?? undefined;
-      } else if (isHfData) {
-        date = extractStringValue(extendedRecord, fieldPattern('date')) ?? undefined;
-      }
-
-      // Apply date range filters
-      const recordDate = date ?? month;
-      if (recordDate) {
-        if (startDate && recordDate < startDate) {
-          idx = data.indexOf(pricePathMarker, searchPos);
-          continue;
-        }
-        if (endDate && recordDate > endDate) {
-          idx = data.indexOf(pricePathMarker, searchPos);
-          continue;
-        }
-      }
-
-      // Extract price fields (multiple types available)
-      const price = extractDoubleField(extendedRecord, fieldPattern('price'));
-      const closePrice = extractDoubleField(extendedRecord, fieldPattern('close_price'));
-      const currentPrice = extractDoubleField(extendedRecord, fieldPattern('current_price'));
-      const institutionPrice = extractDoubleField(
-        extendedRecord,
-        fieldPattern('institution_price')
-      );
-
-      // Extract OHLCV data
-      const high = extractDoubleField(extendedRecord, fieldPattern('high'));
-      const low = extractDoubleField(extendedRecord, fieldPattern('low'));
-      const open = extractDoubleField(extendedRecord, fieldPattern('open'));
-      const volume = extractDoubleField(extendedRecord, fieldPattern('volume'));
-
-      // Extract metadata
-      const currency = extractStringValue(extendedRecord, fieldPattern('currency'));
-      const source = extractStringValue(extendedRecord, fieldPattern('source'));
-      const closePriceAsOf = extractStringValue(extendedRecord, fieldPattern('close_price_as_of'));
-
-      // Build price object
-      const priceData: {
-        investment_id: string;
-        ticker_symbol?: string;
-        price?: number;
-        close_price?: number;
-        current_price?: number;
-        institution_price?: number;
-        date?: string;
-        month?: string;
-        close_price_as_of?: string;
-        high?: number;
-        low?: number;
-        open?: number;
-        volume?: number;
-        currency?: string;
-        source?: string;
-        price_type?: string;
-      } = {
-        investment_id: investmentId,
-      };
-
-      if (ticker) priceData.ticker_symbol = ticker;
-      if (price !== null) priceData.price = price;
-      if (closePrice !== null) priceData.close_price = closePrice;
-      if (currentPrice !== null) priceData.current_price = currentPrice;
-      if (institutionPrice !== null) priceData.institution_price = institutionPrice;
-      if (date) priceData.date = date;
-      if (month) priceData.month = month;
-      if (closePriceAsOf) priceData.close_price_as_of = closePriceAsOf;
-      if (high !== null) priceData.high = high;
-      if (low !== null) priceData.low = low;
-      if (open !== null) priceData.open = open;
-      if (volume !== null) priceData.volume = volume;
-      if (currency) priceData.currency = currency;
-      if (source) priceData.source = source;
-      priceData.price_type = isDailyData ? 'daily' : 'hf';
-
-      // Validate and add to results
-      const validated = InvestmentPriceSchema.safeParse(priceData);
-      if (validated.success) {
-        prices.push(validated.data);
-      }
-
-      idx = data.indexOf(pricePathMarker, searchPos);
+    // Validate with Zod
+    const validated = InvestmentPriceSchema.safeParse(priceData);
+    if (validated.success) {
+      prices.push(validated.data);
     }
   }
 
-  // Deduplicate by investment_id + date/month combination
+  // Deduplicate by investment_id + date/month
   const seen = new Set<string>();
   const unique: InvestmentPrice[] = [];
 
@@ -1404,170 +732,80 @@ export function decodeInvestmentPrices(
     }
     const dateA = a.date || a.month || '';
     const dateB = b.date || b.month || '';
-    return dateB.localeCompare(dateA); // Newest first
+    return dateB.localeCompare(dateA);
   });
 
   return unique;
 }
 
 /**
- * Decode investment splits from the Copilot Money database.
- *
- * Investment splits are stored in collection:
- * /investment_splits/{split_id}
- *
- * Each document contains split information for stocks/ETFs including:
- * - ticker_symbol: Stock ticker (e.g., "AAPL", "TSLA")
- * - split_date: Date of the split (YYYY-MM-DD)
- * - split_ratio: Ratio string (e.g., "4:1", "2:1")
- * - to_factor/from_factor: Numeric split factors
- * - multiplier: Calculated multiplier (to_factor / from_factor)
- *
- * @param dbPath - Path to the LevelDB database directory
- * @param options - Filter options
- * @returns Array of decoded InvestmentSplit objects
+ * Decode investment splits from LevelDB database.
  */
-export function decodeInvestmentSplits(
+export async function decodeInvestmentSplits(
   dbPath: string,
   options: {
     tickerSymbol?: string;
-    startDate?: string; // YYYY-MM-DD
-    endDate?: string; // YYYY-MM-DD
+    startDate?: string;
+    endDate?: string;
   } = {}
-): InvestmentSplit[] {
-  const splits: InvestmentSplit[] = [];
+): Promise<InvestmentSplit[]> {
   const { tickerSymbol, startDate, endDate } = options;
+  const splits: InvestmentSplit[] = [];
 
-  // Return empty array if path doesn't exist (graceful degradation)
-  if (!fs.existsSync(dbPath)) {
-    return [];
-  }
+  for await (const doc of iterateDocuments(dbPath, { collection: 'investment_splits' })) {
+    const fields = doc.fields;
 
-  const stat = fs.statSync(dbPath);
-  if (!stat.isDirectory()) {
-    return [];
-  }
+    const splitId = getString(fields, 'split_id') ?? doc.documentId;
 
-  // Configuration constants for record extraction
-  const RECORD_WINDOW_BEFORE = 500; // Bytes to search before path marker
-  const RECORD_WINDOW_AFTER = 1500; // Bytes to search after path marker
-  const MIN_SPLIT_ID_LENGTH = 10; // Minimum length for valid Firestore document IDs
-
-  // Get all .ldb files
-  const files = fs.readdirSync(dbPath);
-  const ldbFiles = files.filter((f) => f.endsWith('.ldb')).map((f) => path.join(dbPath, f));
-
-  // Investment splits are in: /investment_splits/{split_id}
-  const splitPathMarker = Buffer.from('investment_splits/');
-
-  for (const filepath of ldbFiles) {
-    const data = fs.readFileSync(filepath);
-
-    if (!data.includes(splitPathMarker)) {
+    // Filter by ticker if specified
+    const ticker = getString(fields, 'ticker_symbol');
+    if (tickerSymbol && ticker !== tickerSymbol) {
       continue;
     }
 
-    // Find split records by searching for the path marker
-    let searchPos = 0;
-    let idx = data.indexOf(splitPathMarker, searchPos);
+    // Get split date
+    const splitDate = getString(fields, 'split_date');
 
-    while (idx !== -1) {
-      searchPos = idx + 1;
+    // Apply date filters
+    if (splitDate) {
+      if (startDate && splitDate < startDate) continue;
+      if (endDate && splitDate > endDate) continue;
+    }
 
-      // Use a window around the path marker to capture all fields
-      const recordStart = Math.max(0, idx - RECORD_WINDOW_BEFORE);
-      const recordEnd = Math.min(data.length, idx + RECORD_WINDOW_AFTER);
-      const record = data.subarray(recordStart, recordEnd);
+    // Build split object
+    const splitData: Record<string, unknown> = {
+      split_id: splitId,
+    };
 
-      // Try to extract split_id from the path (e.g., /investment_splits/{id})
-      const pathIdx = idx - recordStart;
-      const afterPath = record.subarray(pathIdx + splitPathMarker.length, pathIdx + 100);
-      const idMatch = afterPath.toString('utf-8').match(/^([a-zA-Z0-9_-]+)/);
-      const splitId = idMatch?.[1];
+    // String fields
+    const stringFields = [
+      'ticker_symbol',
+      'investment_id',
+      'split_date',
+      'split_ratio',
+      'announcement_date',
+      'record_date',
+      'ex_date',
+      'description',
+      'source',
+    ];
 
-      if (splitId && splitId.length >= MIN_SPLIT_ID_LENGTH) {
-        // Only search AFTER the split ID to avoid picking up fields from adjacent documents
-        const afterSplitId = record.subarray(pathIdx + splitPathMarker.length + splitId.length);
+    for (const field of stringFields) {
+      const value = getString(fields, field);
+      if (value) splitData[field] = value;
+    }
 
-        // Extract fields from the record
-        const ticker = extractStringValue(afterSplitId, fieldPattern('ticker_symbol'));
-        const splitDate = extractStringValue(afterSplitId, fieldPattern('split_date'));
-        const splitRatio = extractStringValue(afterSplitId, fieldPattern('split_ratio'));
-        const investmentId = extractStringValue(afterSplitId, fieldPattern('investment_id'));
+    // Numeric fields
+    const numericFields = ['from_factor', 'to_factor', 'multiplier'];
+    for (const field of numericFields) {
+      const value = getNumber(fields, field);
+      if (value !== undefined) splitData[field] = value;
+    }
 
-        // Extract numeric factors
-        const fromFactor = extractDoubleField(afterSplitId, fieldPattern('from_factor'));
-        const toFactor = extractDoubleField(afterSplitId, fieldPattern('to_factor'));
-        const multiplier = extractDoubleField(afterSplitId, fieldPattern('multiplier'));
-
-        // Extract additional metadata
-        const announcementDate = extractStringValue(
-          afterSplitId,
-          fieldPattern('announcement_date')
-        );
-        const recordDate = extractStringValue(afterSplitId, fieldPattern('record_date'));
-        const exDate = extractStringValue(afterSplitId, fieldPattern('ex_date'));
-        const description = extractStringValue(afterSplitId, fieldPattern('description'));
-        const source = extractStringValue(afterSplitId, fieldPattern('source'));
-
-        // Skip if filtering by ticker and doesn't match
-        if (tickerSymbol && ticker !== tickerSymbol) {
-          idx = data.indexOf(splitPathMarker, searchPos);
-          continue;
-        }
-
-        // Apply date range filters
-        if (splitDate) {
-          if (startDate && splitDate < startDate) {
-            idx = data.indexOf(splitPathMarker, searchPos);
-            continue;
-          }
-          if (endDate && splitDate > endDate) {
-            idx = data.indexOf(splitPathMarker, searchPos);
-            continue;
-          }
-        }
-
-        // Build split object
-        const splitData: {
-          split_id: string;
-          ticker_symbol?: string;
-          investment_id?: string;
-          split_date?: string;
-          split_ratio?: string;
-          from_factor?: number;
-          to_factor?: number;
-          multiplier?: number;
-          announcement_date?: string;
-          record_date?: string;
-          ex_date?: string;
-          description?: string;
-          source?: string;
-        } = {
-          split_id: splitId,
-        };
-
-        if (ticker) splitData.ticker_symbol = ticker;
-        if (investmentId) splitData.investment_id = investmentId;
-        if (splitDate) splitData.split_date = splitDate;
-        if (splitRatio) splitData.split_ratio = splitRatio;
-        if (fromFactor !== null) splitData.from_factor = fromFactor;
-        if (toFactor !== null) splitData.to_factor = toFactor;
-        if (multiplier !== null) splitData.multiplier = multiplier;
-        if (announcementDate) splitData.announcement_date = announcementDate;
-        if (recordDate) splitData.record_date = recordDate;
-        if (exDate) splitData.ex_date = exDate;
-        if (description) splitData.description = description;
-        if (source) splitData.source = source;
-
-        // Validate and add to results
-        const validated = InvestmentSplitSchema.safeParse(splitData);
-        if (validated.success) {
-          splits.push(validated.data);
-        }
-      }
-
-      idx = data.indexOf(splitPathMarker, searchPos);
+    // Validate with Zod
+    const validated = InvestmentSplitSchema.safeParse(splitData);
+    if (validated.success) {
+      splits.push(validated.data);
     }
   }
 
@@ -1591,182 +829,77 @@ export function decodeInvestmentSplits(
     }
     const dateA = a.split_date || '';
     const dateB = b.split_date || '';
-    return dateB.localeCompare(dateA); // Newest first
+    return dateB.localeCompare(dateA);
   });
 
   return unique;
 }
 
 /**
- * Decode Plaid items (institution connections) from the Copilot Money database.
- *
- * Items are stored in collection:
- * /users/{user_id}/items/{item_id}
- *
- * Each document represents a connection to a financial institution via Plaid,
- * including connection status, error information, and linked accounts.
- *
- * @param dbPath - Path to the LevelDB database directory
- * @param options - Filter options
- * @returns Array of decoded Item objects
+ * Decode Plaid items (institution connections) from LevelDB database.
  */
-export function decodeItems(
+export async function decodeItems(
   dbPath: string,
   options: {
     connectionStatus?: string;
     institutionId?: string;
     needsUpdate?: boolean;
   } = {}
-): Item[] {
-  const items: Item[] = [];
+): Promise<Item[]> {
   const { connectionStatus, institutionId, needsUpdate } = options;
+  const items: Item[] = [];
 
-  // Return empty array if path doesn't exist (graceful degradation)
-  if (!fs.existsSync(dbPath)) {
-    return [];
-  }
+  for await (const doc of iterateDocuments(dbPath, { collection: 'items' })) {
+    const fields = doc.fields;
 
-  const stat = fs.statSync(dbPath);
-  if (!stat.isDirectory()) {
-    return [];
-  }
+    const itemId = getString(fields, 'item_id') ?? doc.documentId;
 
-  // Configuration constants for record extraction
-  const RECORD_WINDOW_BEFORE = 500; // Bytes to search before path marker
-  const RECORD_WINDOW_AFTER = 2000; // Bytes to search after path marker
-  const MIN_ITEM_ID_LENGTH = 10; // Minimum length for valid Firestore document IDs
+    // Build item object
+    const itemData: Record<string, unknown> = {
+      item_id: itemId,
+    };
 
-  // Get all .ldb files
-  const files = fs.readdirSync(dbPath);
-  const ldbFiles = files.filter((f) => f.endsWith('.ldb')).map((f) => path.join(dbPath, f));
+    // String fields
+    const stringFields = [
+      'user_id',
+      'institution_id',
+      'institution_name',
+      'connection_status',
+      'last_successful_update',
+      'last_failed_update',
+      'consent_expiration_time',
+      'error_code',
+      'error_message',
+      'error_type',
+      'created_at',
+      'updated_at',
+      'webhook',
+    ];
 
-  // Items are in: /users/{user_id}/items/{item_id}
-  const itemPathMarker = Buffer.from('/items/');
+    for (const field of stringFields) {
+      const value = getString(fields, field);
+      if (value) itemData[field] = value;
+    }
 
-  for (const filepath of ldbFiles) {
-    const data = fs.readFileSync(filepath);
+    // Boolean fields
+    const needsUpdateValue = getBoolean(fields, 'needs_update');
+    if (needsUpdateValue !== undefined) itemData.needs_update = needsUpdateValue;
 
-    if (!data.includes(itemPathMarker)) {
+    // Apply filters
+    if (connectionStatus && itemData.connection_status !== connectionStatus) {
+      continue;
+    }
+    if (institutionId && itemData.institution_id !== institutionId) {
+      continue;
+    }
+    if (needsUpdate !== undefined && itemData.needs_update !== needsUpdate) {
       continue;
     }
 
-    // Find item records by searching for the path marker
-    let searchPos = 0;
-    let idx = data.indexOf(itemPathMarker, searchPos);
-
-    while (idx !== -1) {
-      searchPos = idx + 1;
-
-      // Use a window around the path marker to capture all fields
-      const recordStart = Math.max(0, idx - RECORD_WINDOW_BEFORE);
-      const recordEnd = Math.min(data.length, idx + RECORD_WINDOW_AFTER);
-      const record = data.subarray(recordStart, recordEnd);
-
-      // Try to extract item_id from the path (e.g., /items/{id})
-      const pathIdx = idx - recordStart;
-      const afterPath = record.subarray(pathIdx + itemPathMarker.length, pathIdx + 100);
-      const idMatch = afterPath.toString('utf-8').match(/^([a-zA-Z0-9_-]+)/);
-      const itemId = idMatch?.[1];
-
-      if (itemId && itemId.length >= MIN_ITEM_ID_LENGTH) {
-        // Extract user_id from before /items/
-        const beforePath = record.subarray(0, pathIdx);
-        const userIdMatch = beforePath.toString('utf-8').match(/\/users\/([a-zA-Z0-9_-]+)\/items/);
-        const userId = userIdMatch?.[1] ?? undefined;
-
-        // Only search AFTER the item ID to avoid picking up fields from adjacent documents
-        const afterItemId = record.subarray(pathIdx + itemPathMarker.length + itemId.length);
-
-        // Extract institution fields
-        const instId = extractStringValue(afterItemId, fieldPattern('institution_id'));
-        const instName = extractStringValue(afterItemId, fieldPattern('institution_name'));
-
-        // Extract connection status fields
-        const status = extractStringValue(afterItemId, fieldPattern('connection_status'));
-        const lastSuccessfulUpdate = extractStringValue(
-          afterItemId,
-          fieldPattern('last_successful_update')
-        );
-        const lastFailedUpdate = extractStringValue(
-          afterItemId,
-          fieldPattern('last_failed_update')
-        );
-        const consentExpiration = extractStringValue(
-          afterItemId,
-          fieldPattern('consent_expiration_time')
-        );
-
-        // Extract error fields
-        const errorCode = extractStringValue(afterItemId, fieldPattern('error_code'));
-        const errorMessage = extractStringValue(afterItemId, fieldPattern('error_message'));
-        const errorType = extractStringValue(afterItemId, fieldPattern('error_type'));
-        const needsUpdateFlag = extractBooleanValue(afterItemId, fieldPattern('needs_update'));
-
-        // Extract metadata
-        const createdAt = extractStringValue(afterItemId, fieldPattern('created_at'));
-        const updatedAt = extractStringValue(afterItemId, fieldPattern('updated_at'));
-        const webhook = extractStringValue(afterItemId, fieldPattern('webhook'));
-
-        // Apply filters
-        if (connectionStatus && status !== connectionStatus) {
-          idx = data.indexOf(itemPathMarker, searchPos);
-          continue;
-        }
-
-        if (institutionId && instId !== institutionId) {
-          idx = data.indexOf(itemPathMarker, searchPos);
-          continue;
-        }
-
-        if (needsUpdate !== undefined && needsUpdateFlag !== needsUpdate) {
-          idx = data.indexOf(itemPathMarker, searchPos);
-          continue;
-        }
-
-        // Build item object
-        const itemData: {
-          item_id: string;
-          user_id?: string;
-          institution_id?: string;
-          institution_name?: string;
-          connection_status?: string;
-          last_successful_update?: string;
-          last_failed_update?: string;
-          consent_expiration_time?: string;
-          error_code?: string;
-          error_message?: string;
-          error_type?: string;
-          needs_update?: boolean;
-          created_at?: string;
-          updated_at?: string;
-          webhook?: string;
-        } = {
-          item_id: itemId,
-        };
-
-        if (userId) itemData.user_id = userId;
-        if (instId) itemData.institution_id = instId;
-        if (instName) itemData.institution_name = instName;
-        if (status) itemData.connection_status = status;
-        if (lastSuccessfulUpdate) itemData.last_successful_update = lastSuccessfulUpdate;
-        if (lastFailedUpdate) itemData.last_failed_update = lastFailedUpdate;
-        if (consentExpiration) itemData.consent_expiration_time = consentExpiration;
-        if (errorCode) itemData.error_code = errorCode;
-        if (errorMessage) itemData.error_message = errorMessage;
-        if (errorType) itemData.error_type = errorType;
-        if (needsUpdateFlag !== null) itemData.needs_update = needsUpdateFlag;
-        if (createdAt) itemData.created_at = createdAt;
-        if (updatedAt) itemData.updated_at = updatedAt;
-        if (webhook) itemData.webhook = webhook;
-
-        // Validate and add to results
-        const validated = ItemSchema.safeParse(itemData);
-        if (validated.success) {
-          items.push(validated.data);
-        }
-      }
-
-      idx = data.indexOf(itemPathMarker, searchPos);
+    // Validate with Zod
+    const validated = ItemSchema.safeParse(itemData);
+    if (validated.success) {
+      items.push(validated.data);
     }
   }
 
@@ -1795,185 +928,49 @@ export function decodeItems(
 }
 
 /**
- * Decode user-defined categories from the Copilot Money database.
- *
- * Categories are stored in collection:
- * /users/{user_id}/categories/{category_id}
- *
- * Each document contains category information including:
- * - name: Human-readable category name (e.g., "Restaurants", "Groceries")
- * - emoji: Icon for display
- * - color/bg_color: Display colors
- * - parent_category_id: For hierarchical categories
- * - plaid_category_ids: Links to standard Plaid categories
- *
- * @param dbPath - Path to the LevelDB database directory
- * @returns Array of decoded Category objects
+ * Decode user-defined categories from LevelDB database.
  */
-export function decodeCategories(dbPath: string): Category[] {
+export async function decodeCategories(dbPath: string): Promise<Category[]> {
   const categories: Category[] = [];
 
-  const isDebug = process.env.NODE_ENV === 'development' || process.env.DEBUG;
+  for await (const doc of iterateDocuments(dbPath, { collection: 'categories' })) {
+    const fields = doc.fields;
 
-  // Return empty array if path doesn't exist (graceful degradation)
-  if (!fs.existsSync(dbPath)) {
-    if (isDebug) {
-      console.warn(`[decodeCategories] Database path does not exist: ${dbPath}`);
-    }
-    return [];
-  }
+    const categoryId = getString(fields, 'category_id') ?? doc.documentId;
 
-  let stat;
-  try {
-    stat = fs.statSync(dbPath);
-  } catch (error) {
-    if (isDebug) {
-      console.warn(`[decodeCategories] Failed to stat database path: ${dbPath}`, error);
-    }
-    return [];
-  }
+    // Get name - skip if no name
+    const name = getString(fields, 'name');
+    if (!name) continue;
 
-  if (!stat.isDirectory()) {
-    if (isDebug) {
-      console.warn(`[decodeCategories] Path is not a directory: ${dbPath}`);
-    }
-    return [];
-  }
+    // Build category object
+    const categoryData: Record<string, unknown> = {
+      category_id: categoryId,
+      name,
+    };
 
-  // Configuration constants for record extraction
-  const RECORD_WINDOW_BEFORE = 500; // Bytes to search before path marker
-  const RECORD_WINDOW_AFTER = 2000; // Bytes to search after path marker
-  const MIN_CATEGORY_ID_LENGTH = 15; // Minimum length for valid Firestore document IDs
+    // String fields
+    const stringFields = ['emoji', 'color', 'bg_color', 'parent_category_id', 'user_id'];
 
-  // Get all .ldb files
-  let files;
-  try {
-    files = fs.readdirSync(dbPath);
-  } catch (error) {
-    if (isDebug) {
-      console.warn(`[decodeCategories] Failed to read directory: ${dbPath}`, error);
-    }
-    return [];
-  }
-  const ldbFiles = files.filter((f) => f.endsWith('.ldb')).map((f) => path.join(dbPath, f));
-
-  // Categories are in: /users/{user_id}/categories/{category_id}
-  const categoryPathMarker = Buffer.from('/categories/');
-
-  for (const filepath of ldbFiles) {
-    let data;
-    try {
-      data = fs.readFileSync(filepath);
-    } catch (error) {
-      if (isDebug) {
-        console.warn(`[decodeCategories] Failed to read file: ${filepath}`, error);
-      }
-      continue;
+    for (const field of stringFields) {
+      const value = getString(fields, field);
+      if (value) categoryData[field] = value;
     }
 
-    if (!data.includes(categoryPathMarker)) {
-      continue;
+    // Numeric fields
+    const order = getNumber(fields, 'order');
+    if (order !== undefined) categoryData.order = order;
+
+    // Boolean fields
+    const booleanFields = ['excluded', 'is_other', 'auto_budget_lock', 'auto_delete_lock'];
+    for (const field of booleanFields) {
+      const value = getBoolean(fields, field);
+      if (value !== undefined) categoryData[field] = value;
     }
 
-    // Find category records by searching for the path marker
-    let searchPos = 0;
-    let idx = data.indexOf(categoryPathMarker, searchPos);
-
-    while (idx !== -1) {
-      searchPos = idx + 1;
-
-      // Use a window around the path marker to capture all fields
-      const recordStart = Math.max(0, idx - RECORD_WINDOW_BEFORE);
-      const recordEnd = Math.min(data.length, idx + RECORD_WINDOW_AFTER);
-      const record = data.subarray(recordStart, recordEnd);
-
-      // Try to extract category_id from the path (e.g., /categories/{id})
-      const pathIdx = idx - recordStart;
-      const afterPath = record.subarray(pathIdx + categoryPathMarker.length, pathIdx + 100);
-      const idMatch = afterPath.toString('utf-8').match(/^([a-zA-Z0-9_-]+)/);
-      const categoryId = idMatch?.[1];
-
-      // Skip if this looks like a subcollection path (e.g., /categories/xxx/something)
-      // We want the actual category documents, not nested paths
-      if (categoryId && categoryId.length >= MIN_CATEGORY_ID_LENGTH) {
-        // Extract user_id from before /categories/
-        const beforePath = record.subarray(0, pathIdx);
-        const userIdMatch = beforePath
-          .toString('utf-8')
-          .match(/\/users\/([a-zA-Z0-9_-]+)\/categories/);
-        const userId = userIdMatch?.[1] ?? undefined;
-
-        // Only search AFTER the category ID to avoid picking up fields from adjacent documents
-        const afterCategoryId = record.subarray(
-          pathIdx + categoryPathMarker.length + categoryId.length
-        );
-
-        // Extract fields from the record
-        const name = extractStringValue(afterCategoryId, fieldPattern('name'));
-        const emoji = extractStringValue(afterCategoryId, fieldPattern('emoji'));
-        const color = extractStringValue(afterCategoryId, fieldPattern('color'));
-        const bgColor = extractStringValue(afterCategoryId, fieldPattern('bg_color'));
-        const parentCategoryId = extractStringValue(
-          afterCategoryId,
-          fieldPattern('parent_category_id')
-        );
-
-        // Extract boolean fields
-        const excluded = extractBooleanValue(afterCategoryId, fieldPattern('excluded'));
-        const isOther = extractBooleanValue(afterCategoryId, fieldPattern('is_other'));
-        const autoBudgetLock = extractBooleanValue(
-          afterCategoryId,
-          fieldPattern('auto_budget_lock')
-        );
-        const autoDeleteLock = extractBooleanValue(
-          afterCategoryId,
-          fieldPattern('auto_delete_lock')
-        );
-
-        // Extract order (numeric)
-        const order = extractDoubleField(afterCategoryId, fieldPattern('order'));
-
-        // Build category object - only include if we have a name
-        // (categories without names are not useful for display)
-        if (name) {
-          const categoryData: {
-            category_id: string;
-            name?: string;
-            emoji?: string;
-            color?: string;
-            bg_color?: string;
-            parent_category_id?: string;
-            order?: number;
-            excluded?: boolean;
-            is_other?: boolean;
-            auto_budget_lock?: boolean;
-            auto_delete_lock?: boolean;
-            user_id?: string;
-          } = {
-            category_id: categoryId,
-          };
-
-          if (name) categoryData.name = name;
-          if (emoji) categoryData.emoji = emoji;
-          if (color) categoryData.color = color;
-          if (bgColor) categoryData.bg_color = bgColor;
-          if (parentCategoryId) categoryData.parent_category_id = parentCategoryId;
-          if (order !== null) categoryData.order = order;
-          if (excluded !== null) categoryData.excluded = excluded;
-          if (isOther !== null) categoryData.is_other = isOther;
-          if (autoBudgetLock !== null) categoryData.auto_budget_lock = autoBudgetLock;
-          if (autoDeleteLock !== null) categoryData.auto_delete_lock = autoDeleteLock;
-          if (userId) categoryData.user_id = userId;
-
-          // Validate and add to results
-          const validated = CategorySchema.safeParse(categoryData);
-          if (validated.success) {
-            categories.push(validated.data);
-          }
-        }
-      }
-
-      idx = data.indexOf(categoryPathMarker, searchPos);
+    // Validate with Zod
+    const validated = CategorySchema.safeParse(categoryData);
+    if (validated.success) {
+      categories.push(validated.data);
     }
   }
 
@@ -2005,9 +1002,6 @@ export function decodeCategories(dbPath: string): Category[] {
 
 /**
  * User account customization data.
- *
- * This represents user-defined account settings stored in the
- * /users/{user_id}/accounts/{account_id} collection.
  */
 export interface UserAccountCustomization {
   account_id: string;
@@ -2018,148 +1012,50 @@ export interface UserAccountCustomization {
 }
 
 /**
- * Decode user-defined account customizations from the Copilot Money database.
- *
- * User account customizations are stored in collection:
- * /users/{user_id}/accounts/{account_id}
- *
- * Each document contains user customizations including:
- * - name: User-defined account name (e.g., "Chase Sapphire Preferred")
- * - hidden: Whether the account is hidden from views
- * - order: Display order preference
- *
- * This is separate from raw Plaid account data in /accounts/ which contains
- * the bank's internal names (e.g., "CHASE CREDIT CRD AUTOPAY").
- *
- * @param dbPath - Path to the LevelDB database directory
- * @returns Array of user account customization objects
+ * Decode user-defined account customizations from LevelDB database.
  */
-export function decodeUserAccounts(dbPath: string): UserAccountCustomization[] {
+export async function decodeUserAccounts(dbPath: string): Promise<UserAccountCustomization[]> {
   const userAccounts: UserAccountCustomization[] = [];
 
-  const isDebug = process.env.NODE_ENV === 'development' || process.env.DEBUG;
-
-  // Return empty array if path doesn't exist (graceful degradation)
-  if (!fs.existsSync(dbPath)) {
-    if (isDebug) {
-      console.warn(`[decodeUserAccounts] Database path does not exist: ${dbPath}`);
-    }
-    return [];
-  }
-
-  let stat;
-  try {
-    stat = fs.statSync(dbPath);
-  } catch (error) {
-    if (isDebug) {
-      console.warn(`[decodeUserAccounts] Failed to stat database path: ${dbPath}`, error);
-    }
-    return [];
-  }
-
-  if (!stat.isDirectory()) {
-    if (isDebug) {
-      console.warn(`[decodeUserAccounts] Path is not a directory: ${dbPath}`);
-    }
-    return [];
-  }
-
-  // Configuration constants for record extraction
-  const RECORD_WINDOW_BEFORE = 500; // Bytes to search before path marker
-  const RECORD_WINDOW_AFTER = 2000; // Bytes to search after path marker
-  const MIN_ACCOUNT_ID_LENGTH = 15; // Minimum length for valid Firestore document IDs
-
-  // Get all .ldb files
-  let files;
-  try {
-    files = fs.readdirSync(dbPath);
-  } catch (error) {
-    if (isDebug) {
-      console.warn(`[decodeUserAccounts] Failed to read directory: ${dbPath}`, error);
-    }
-    return [];
-  }
-  const ldbFiles = files.filter((f) => f.endsWith('.ldb')).map((f) => path.join(dbPath, f));
-
-  // User accounts are in: /users/{user_id}/accounts/{account_id}
-  // We need to find the /accounts/ marker that comes AFTER /users/
-  const usersPathMarker = Buffer.from('/users/');
-
-  for (const filepath of ldbFiles) {
-    let data;
-    try {
-      data = fs.readFileSync(filepath);
-    } catch (error) {
-      if (isDebug) {
-        console.warn(`[decodeUserAccounts] Failed to read file: ${filepath}`, error);
-      }
+  // User accounts are in subcollection: users/{user_id}/accounts
+  for await (const doc of iterateDocuments(dbPath)) {
+    // Check if this is a user account document
+    if (!doc.collection.includes('users/') || !doc.collection.endsWith('/accounts')) {
       continue;
     }
 
-    // Quick check: file must contain /users/ to have user account data
-    if (!data.includes(usersPathMarker)) {
-      continue;
+    const fields = doc.fields;
+
+    const accountId = getString(fields, 'account_id') ?? doc.documentId;
+
+    // Get name - skip if no name
+    const name = getString(fields, 'name');
+    if (!name) continue;
+
+    // Build user account object
+    const userAccountData: UserAccountCustomization = {
+      account_id: accountId,
+      name,
+    };
+
+    // Extract user_id from collection path
+    const userIdMatch = doc.collection.match(/users\/([^/]+)\/accounts/);
+    if (userIdMatch) {
+      userAccountData.user_id = userIdMatch[1];
     }
 
-    // Find user account records by searching for /users/.../accounts/ pattern
-    let searchPos = 0;
-    let idx = data.indexOf(usersPathMarker, searchPos);
+    // Boolean fields
+    const hidden = getBoolean(fields, 'hidden');
+    if (hidden !== undefined) userAccountData.hidden = hidden;
 
-    while (idx !== -1) {
-      searchPos = idx + 1;
+    // Numeric fields
+    const order = getNumber(fields, 'order');
+    if (order !== undefined) userAccountData.order = order;
 
-      // Use a window around the users path marker
-      const recordStart = Math.max(0, idx - RECORD_WINDOW_BEFORE);
-      const recordEnd = Math.min(data.length, idx + RECORD_WINDOW_AFTER);
-      const record = data.subarray(recordStart, recordEnd);
-
-      // Calculate position within the window
-      const pathIdx = idx - recordStart;
-      const afterUsers = record.subarray(pathIdx);
-
-      // Look for /users/{user_id}/accounts/{account_id} pattern
-      const pathMatch = afterUsers
-        .toString('utf-8')
-        .match(/^\/users\/([a-zA-Z0-9_-]+)\/accounts\/([a-zA-Z0-9_-]+)/);
-
-      if (pathMatch) {
-        const userId = pathMatch[1];
-        const accountId = pathMatch[2];
-
-        // Validate account ID length (Firestore IDs are typically 20+ chars)
-        if (accountId && accountId.length >= MIN_ACCOUNT_ID_LENGTH) {
-          // Calculate where to start searching for fields
-          const fullPathLength = pathMatch[0].length;
-          const afterAccountId = record.subarray(pathIdx + fullPathLength);
-
-          // Extract user-defined account name
-          const name = extractStringValue(afterAccountId, fieldPattern('name'));
-          const hidden = extractBooleanValue(afterAccountId, fieldPattern('hidden'));
-          const order = extractDoubleField(afterAccountId, fieldPattern('order'));
-
-          // Build user account object - include even if name is undefined
-          // (the account_id mapping is still useful for other customizations)
-          const userAccountData: UserAccountCustomization = {
-            account_id: accountId,
-          };
-
-          if (name) userAccountData.name = name;
-          if (userId) userAccountData.user_id = userId;
-          if (hidden !== null) userAccountData.hidden = hidden;
-          if (order !== null) userAccountData.order = order;
-
-          // Only add if we have a name (the primary use case for this function)
-          if (name) {
-            userAccounts.push(userAccountData);
-          }
-        }
-      }
-
-      idx = data.indexOf(usersPathMarker, searchPos);
-    }
+    userAccounts.push(userAccountData);
   }
 
-  // Deduplicate by account_id (keep first occurrence which has most recent data)
+  // Deduplicate by account_id
   const seen = new Set<string>();
   const unique: UserAccountCustomization[] = [];
 

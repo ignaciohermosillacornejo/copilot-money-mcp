@@ -79,12 +79,24 @@ describe('CopilotMoneyTools Integration', () => {
     const db = new CopilotDatabase('/fake/path');
     (db as any)._transactions = [...mockTransactions];
     (db as any)._accounts = [...mockAccounts];
+    // Add required cache fields for async database methods
+    (db as any)._recurring = [];
+    (db as any)._budgets = [];
+    (db as any)._goals = [];
+    (db as any)._goalHistory = [];
+    (db as any)._investmentPrices = [];
+    (db as any)._investmentSplits = [];
+    (db as any)._items = [];
+    (db as any)._userCategories = [];
+    (db as any)._userAccounts = [];
+    (db as any)._categoryNameMap = new Map<string, string>();
+    (db as any)._accountNameMap = new Map<string, string>();
     tools = new CopilotMoneyTools(db);
   });
 
   describe('getTransactions', () => {
-    test('returns basic transaction data', () => {
-      const result = tools.getTransactions({ limit: 10 });
+    test('returns basic transaction data', async () => {
+      const result = await tools.getTransactions({ limit: 10 });
 
       expect(result.count).toBeDefined();
       expect(result.transactions).toBeDefined();
@@ -99,8 +111,8 @@ describe('CopilotMoneyTools Integration', () => {
       }
     });
 
-    test('filters by date range', () => {
-      const result = tools.getTransactions({
+    test('filters by date range', async () => {
+      const result = await tools.getTransactions({
         start_date: '2025-01-01',
         end_date: '2025-01-31',
         limit: 50,
@@ -111,8 +123,8 @@ describe('CopilotMoneyTools Integration', () => {
       }
     });
 
-    test('filters by merchant', () => {
-      const result = tools.getTransactions({
+    test('filters by merchant', async () => {
+      const result = await tools.getTransactions({
         merchant: 'starbucks',
         limit: 20,
       });
@@ -123,8 +135,8 @@ describe('CopilotMoneyTools Integration', () => {
       }
     });
 
-    test('filters by category', () => {
-      const result = tools.getTransactions({
+    test('filters by category', async () => {
+      const result = await tools.getTransactions({
         category: 'food',
         limit: 20,
       });
@@ -134,9 +146,9 @@ describe('CopilotMoneyTools Integration', () => {
       }
     });
 
-    test('filters by amount range', () => {
+    test('filters by amount range', async () => {
       // Amount filtering uses absolute values (magnitude)
-      const result = tools.getTransactions({
+      const result = await tools.getTransactions({
         min_amount: 10.0,
         max_amount: 100.0,
         limit: 50,
@@ -149,23 +161,23 @@ describe('CopilotMoneyTools Integration', () => {
   });
 
   describe('searchTransactions', () => {
-    test('finds transactions by query', () => {
-      const result = tools.searchTransactions('starbucks', { limit: 20 });
+    test('finds transactions by query', async () => {
+      const result = await tools.searchTransactions('starbucks', { limit: 20 });
 
       expect(result.count).toBeDefined();
       expect(result.transactions).toBeDefined();
       expect(result.count).toBeLessThanOrEqual(20);
     });
 
-    test('search is case-insensitive', () => {
-      const result1 = tools.searchTransactions('STARBUCKS', { limit: 10 });
-      const result2 = tools.searchTransactions('starbucks', { limit: 10 });
+    test('search is case-insensitive', async () => {
+      const result1 = await tools.searchTransactions('STARBUCKS', { limit: 10 });
+      const result2 = await tools.searchTransactions('starbucks', { limit: 10 });
 
       expect(result1.count).toBe(result2.count);
     });
 
-    test('returns empty results for no matches', () => {
-      const result = tools.searchTransactions('xyznonexistent123', {});
+    test('returns empty results for no matches', async () => {
+      const result = await tools.searchTransactions('xyznonexistent123', {});
 
       expect(result.count).toBe(0);
       expect(result.transactions).toEqual([]);
@@ -173,8 +185,8 @@ describe('CopilotMoneyTools Integration', () => {
   });
 
   describe('getAccounts', () => {
-    test('returns all accounts with total balance', () => {
-      const result = tools.getAccounts();
+    test('returns all accounts with total balance', async () => {
+      const result = await tools.getAccounts();
 
       expect(result.count).toBeDefined();
       expect(result.total_balance).toBeDefined();
@@ -186,8 +198,8 @@ describe('CopilotMoneyTools Integration', () => {
       expect(Math.abs(result.total_balance - calculatedTotal)).toBeLessThan(0.01);
     });
 
-    test('account structure is correct', () => {
-      const result = tools.getAccounts();
+    test('account structure is correct', async () => {
+      const result = await tools.getAccounts();
 
       if (result.accounts.length > 0) {
         const acc = result.accounts[0];
@@ -196,8 +208,8 @@ describe('CopilotMoneyTools Integration', () => {
       }
     });
 
-    test('filters by account type', () => {
-      const result = tools.getAccounts('checking');
+    test('filters by account type', async () => {
+      const result = await tools.getAccounts('checking');
 
       for (const acc of result.accounts) {
         expect(acc.account_type && acc.account_type.toLowerCase().includes('checking')).toBe(true);
@@ -206,8 +218,8 @@ describe('CopilotMoneyTools Integration', () => {
   });
 
   describe('getSpendingByCategory', () => {
-    test('aggregates spending by category', () => {
-      const result = tools.getSpendingByCategory({
+    test('aggregates spending by category', async () => {
+      const result = await tools.getSpendingByCategory({
         start_date: '2025-01-01',
         end_date: '2025-01-31',
       });
@@ -221,8 +233,8 @@ describe('CopilotMoneyTools Integration', () => {
       expect(result.period.end_date).toBe('2025-01-31');
     });
 
-    test('categories are sorted by spending descending', () => {
-      const result = tools.getSpendingByCategory({
+    test('categories are sorted by spending descending', async () => {
+      const result = await tools.getSpendingByCategory({
         start_date: '2025-01-01',
         end_date: '2025-01-31',
       });
@@ -233,8 +245,8 @@ describe('CopilotMoneyTools Integration', () => {
       }
     });
 
-    test('excludes income (negative amounts)', () => {
-      const result = tools.getSpendingByCategory({
+    test('excludes income (negative amounts)', async () => {
+      const result = await tools.getSpendingByCategory({
         start_date: '2025-01-01',
         end_date: '2025-01-31',
       });
@@ -244,8 +256,8 @@ describe('CopilotMoneyTools Integration', () => {
       expect(incomeCategory).toBeUndefined();
     });
 
-    test('total spending matches sum of categories', () => {
-      const result = tools.getSpendingByCategory({
+    test('total spending matches sum of categories', async () => {
+      const result = await tools.getSpendingByCategory({
         start_date: '2025-01-01',
         end_date: '2025-01-31',
       });
@@ -255,8 +267,8 @@ describe('CopilotMoneyTools Integration', () => {
       expect(Math.abs(result.total_spending - calculatedTotal)).toBeLessThan(0.01);
     });
 
-    test('category structure is correct', () => {
-      const result = tools.getSpendingByCategory({
+    test('category structure is correct', async () => {
+      const result = await tools.getSpendingByCategory({
         start_date: '2025-01-01',
         end_date: '2025-01-31',
       });
@@ -274,16 +286,16 @@ describe('CopilotMoneyTools Integration', () => {
   });
 
   describe('getAccountBalance', () => {
-    test('returns account details', () => {
-      const result = tools.getAccountBalance('acc1');
+    test('returns account details', async () => {
+      const result = await tools.getAccountBalance('acc1');
 
       expect(result.account_id).toBe('acc1');
       expect(result.name).toBeDefined();
       expect(result.current_balance).toBeDefined();
     });
 
-    test('includes all account fields', () => {
-      const result = tools.getAccountBalance('acc1');
+    test('includes all account fields', async () => {
+      const result = await tools.getAccountBalance('acc1');
 
       expect(result.account_id).toBe('acc1');
       expect(result.name).toBe('Checking Account');
@@ -294,18 +306,18 @@ describe('CopilotMoneyTools Integration', () => {
       expect(result.institution_name).toBe('Chase');
     });
 
-    test('throws error for invalid account_id', () => {
-      expect(() => tools.getAccountBalance('nonexistent')).toThrow('Account not found');
+    test('throws error for invalid account_id', async () => {
+      await expect(tools.getAccountBalance('nonexistent')).rejects.toThrow('Account not found');
     });
   });
 
   describe('tool schemas', () => {
-    test('returns correct number of tool schemas', () => {
+    test('returns correct number of tool schemas', async () => {
       const schemas = createToolSchemas();
       expect(schemas.length).toBe(28);
     });
 
-    test('all tools have readOnlyHint annotation', () => {
+    test('all tools have readOnlyHint annotation', async () => {
       const schemas = createToolSchemas();
 
       for (const schema of schemas) {
@@ -313,7 +325,7 @@ describe('CopilotMoneyTools Integration', () => {
       }
     });
 
-    test('all schemas have required fields', () => {
+    test('all schemas have required fields', async () => {
       const schemas = createToolSchemas();
 
       for (const schema of schemas) {
@@ -325,7 +337,7 @@ describe('CopilotMoneyTools Integration', () => {
       }
     });
 
-    test('tool names are correct', () => {
+    test('tool names are correct', async () => {
       const schemas = createToolSchemas();
       const names = schemas.map((s) => s.name);
 
@@ -347,7 +359,7 @@ describe('CopilotMoneyTools Integration', () => {
       expect(names).toContain('get_merchant_analytics');
     });
 
-    test('required parameters are specified', () => {
+    test('required parameters are specified', async () => {
       const schemas = createToolSchemas();
 
       const spendingTool = schemas.find((s) => s.name === 'get_spending');
@@ -363,22 +375,22 @@ describe('CopilotMoneyTools Integration', () => {
   });
 
   describe('response formats', () => {
-    test('transaction responses are JSON serializable', () => {
-      const result = tools.getTransactions({ limit: 5 });
+    test('transaction responses are JSON serializable', async () => {
+      const result = await tools.getTransactions({ limit: 5 });
       const json = JSON.stringify(result);
       const parsed = JSON.parse(json);
       expect(parsed.count).toBe(result.count);
     });
 
-    test('account responses are JSON serializable', () => {
-      const result = tools.getAccounts();
+    test('account responses are JSON serializable', async () => {
+      const result = await tools.getAccounts();
       const json = JSON.stringify(result);
       const parsed = JSON.parse(json);
       expect(parsed.count).toBe(result.count);
     });
 
-    test('spending responses are JSON serializable', () => {
-      const result = tools.getSpendingByCategory({
+    test('spending responses are JSON serializable', async () => {
+      const result = await tools.getSpendingByCategory({
         start_date: '2025-01-01',
         end_date: '2025-01-31',
       });
@@ -389,8 +401,8 @@ describe('CopilotMoneyTools Integration', () => {
   });
 
   describe('empty results', () => {
-    test('handles empty transaction results', () => {
-      const result = tools.getTransactions({
+    test('handles empty transaction results', async () => {
+      const result = await tools.getTransactions({
         start_date: '1900-01-01',
         end_date: '1900-01-31',
       });
@@ -399,8 +411,8 @@ describe('CopilotMoneyTools Integration', () => {
       expect(result.transactions).toEqual([]);
     });
 
-    test('handles empty search results', () => {
-      const result = tools.searchTransactions('xyznonexistent123', {});
+    test('handles empty search results', async () => {
+      const result = await tools.searchTransactions('xyznonexistent123', {});
 
       expect(result.count).toBe(0);
       expect(result.transactions).toEqual([]);

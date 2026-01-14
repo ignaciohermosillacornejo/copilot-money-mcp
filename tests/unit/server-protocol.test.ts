@@ -85,6 +85,14 @@ function setupServerWithMockData(): CopilotMoneyServer {
   const db = new CopilotDatabase('/fake/path');
   (db as any)._transactions = [...mockTransactions];
   (db as any)._accounts = [...mockAccounts];
+  // Also mock the auxiliary data needed for name resolution
+  (db as any)._userCategories = []; // Empty - no user-defined categories
+  (db as any)._userAccounts = []; // Empty - no user-defined account names
+  (db as any)._categoryNameMap = new Map<string, string>(); // Pre-compute empty map
+  (db as any)._accountNameMap = new Map<string, string>(); // Pre-compute empty map
+  (db as any)._recurring = []; // Empty recurring transactions
+  (db as any)._budgets = []; // Empty budgets
+  (db as any)._goals = []; // Empty goals
   // Mock isAvailable to return true since we have mock data
   db.isAvailable = () => true;
 
@@ -192,22 +200,22 @@ describe('CopilotMoneyServer.handleListTools', () => {
 });
 
 describe('CopilotMoneyServer.handleCallTool - database unavailable', () => {
-  test('returns error message when database is unavailable', () => {
+  test('returns error message when database is unavailable', async () => {
     const server = setupServerWithUnavailableDb();
 
-    const response = server.handleCallTool('get_transactions', {});
+    const response = await server.handleCallTool('get_transactions', {});
 
     expect(response.content).toBeDefined();
     expect(response.content[0].type).toBe('text');
     expect(response.content[0].text).toContain('Database not available');
   });
 
-  test('database unavailable error works for all tools', () => {
+  test('database unavailable error works for all tools', async () => {
     const server = setupServerWithUnavailableDb();
 
     const toolsToTest = ['get_transactions', 'get_accounts', 'get_spending'];
     for (const toolName of toolsToTest) {
-      const response = server.handleCallTool(toolName, { query: 'test' });
+      const response = await server.handleCallTool(toolName, { query: 'test' });
       expect(response.content[0].text).toContain('Database not available');
     }
   });
@@ -220,8 +228,8 @@ describe('CopilotMoneyServer.handleCallTool - basic tools', () => {
     server = setupServerWithMockData();
   });
 
-  test('get_transactions - routes correctly', () => {
-    const response = server.handleCallTool('get_transactions', { limit: 10 });
+  test('get_transactions - routes correctly', async () => {
+    const response = await server.handleCallTool('get_transactions', { limit: 10 });
 
     expect(response.content).toBeDefined();
     expect(response.isError).toBeUndefined();
@@ -230,24 +238,24 @@ describe('CopilotMoneyServer.handleCallTool - basic tools', () => {
     expect(result.count).toBeDefined();
   });
 
-  test('get_transactions - handles empty arguments', () => {
-    const response = server.handleCallTool('get_transactions', undefined);
+  test('get_transactions - handles empty arguments', async () => {
+    const response = await server.handleCallTool('get_transactions', undefined);
 
     expect(response.content).toBeDefined();
     const result = JSON.parse(response.content[0].text);
     expect(result.transactions).toBeDefined();
   });
 
-  test('get_transactions - handles null-like arguments', () => {
-    const response = server.handleCallTool('get_transactions', {});
+  test('get_transactions - handles null-like arguments', async () => {
+    const response = await server.handleCallTool('get_transactions', {});
 
     expect(response.content).toBeDefined();
     const result = JSON.parse(response.content[0].text);
     expect(result.transactions).toBeDefined();
   });
 
-  test('get_spending - routes correctly with group_by', () => {
-    const response = server.handleCallTool('get_spending', { group_by: 'category' });
+  test('get_spending - routes correctly with group_by', async () => {
+    const response = await server.handleCallTool('get_spending', { group_by: 'category' });
 
     expect(response.content).toBeDefined();
     expect(response.isError).toBeUndefined();
@@ -256,15 +264,15 @@ describe('CopilotMoneyServer.handleCallTool - basic tools', () => {
     expect(result.group_by).toBe('category');
   });
 
-  test('get_spending - returns error when group_by missing', () => {
-    const response = server.handleCallTool('get_spending', {});
+  test('get_spending - returns error when group_by missing', async () => {
+    const response = await server.handleCallTool('get_spending', {});
 
     expect(response.isError).toBe(true);
     expect(response.content[0].text).toContain('Missing required parameter: group_by');
   });
 
-  test('get_spending - with optional params', () => {
-    const response = server.handleCallTool('get_spending', {
+  test('get_spending - with optional params', async () => {
+    const response = await server.handleCallTool('get_spending', {
       group_by: 'merchant',
       limit: 5,
       period: 'this_month',
@@ -274,8 +282,8 @@ describe('CopilotMoneyServer.handleCallTool - basic tools', () => {
     expect(response.isError).toBeUndefined();
   });
 
-  test('get_accounts - routes correctly', () => {
-    const response = server.handleCallTool('get_accounts', {});
+  test('get_accounts - routes correctly', async () => {
+    const response = await server.handleCallTool('get_accounts', {});
 
     expect(response.content).toBeDefined();
     const result = JSON.parse(response.content[0].text);
@@ -283,16 +291,16 @@ describe('CopilotMoneyServer.handleCallTool - basic tools', () => {
     expect(result.count).toBeGreaterThan(0);
   });
 
-  test('get_accounts - with account_type filter', () => {
-    const response = server.handleCallTool('get_accounts', { account_type: 'checking' });
+  test('get_accounts - with account_type filter', async () => {
+    const response = await server.handleCallTool('get_accounts', { account_type: 'checking' });
 
     expect(response.content).toBeDefined();
     const result = JSON.parse(response.content[0].text);
     expect(result.accounts).toBeDefined();
   });
 
-  test('get_spending with group_by category - routes correctly', () => {
-    const response = server.handleCallTool('get_spending', { group_by: 'category' });
+  test('get_spending with group_by category - routes correctly', async () => {
+    const response = await server.handleCallTool('get_spending', { group_by: 'category' });
 
     expect(response.content).toBeDefined();
     const result = JSON.parse(response.content[0].text);
@@ -301,8 +309,8 @@ describe('CopilotMoneyServer.handleCallTool - basic tools', () => {
     expect(result.total_spending).toBeDefined();
   });
 
-  test('get_account_balance - routes correctly', () => {
-    const response = server.handleCallTool('get_account_balance', { account_id: 'acc1' });
+  test('get_account_balance - routes correctly', async () => {
+    const response = await server.handleCallTool('get_account_balance', { account_id: 'acc1' });
 
     expect(response.content).toBeDefined();
     const result = JSON.parse(response.content[0].text);
@@ -310,15 +318,15 @@ describe('CopilotMoneyServer.handleCallTool - basic tools', () => {
     expect(result.current_balance).toBeDefined();
   });
 
-  test('get_account_balance - returns error when account_id missing', () => {
-    const response = server.handleCallTool('get_account_balance', {});
+  test('get_account_balance - returns error when account_id missing', async () => {
+    const response = await server.handleCallTool('get_account_balance', {});
 
     expect(response.isError).toBe(true);
     expect(response.content[0].text).toContain('Missing required parameter: account_id');
   });
 
-  test('get_account_balance - returns error for nonexistent account', () => {
-    const response = server.handleCallTool('get_account_balance', {
+  test('get_account_balance - returns error for nonexistent account', async () => {
+    const response = await server.handleCallTool('get_account_balance', {
       account_id: 'nonexistent_account_123',
     });
 
@@ -326,8 +334,8 @@ describe('CopilotMoneyServer.handleCallTool - basic tools', () => {
     expect(response.content[0].text).toContain('Error:');
   });
 
-  test('get_categories - routes correctly', () => {
-    const response = server.handleCallTool('get_categories', {});
+  test('get_categories - routes correctly', async () => {
+    const response = await server.handleCallTool('get_categories', {});
 
     expect(response.content).toBeDefined();
     const result = JSON.parse(response.content[0].text);
@@ -336,24 +344,24 @@ describe('CopilotMoneyServer.handleCallTool - basic tools', () => {
     expect(result.count).toBeDefined();
   });
 
-  test('get_recurring_transactions - routes correctly', () => {
-    const response = server.handleCallTool('get_recurring_transactions', {});
+  test('get_recurring_transactions - routes correctly', async () => {
+    const response = await server.handleCallTool('get_recurring_transactions', {});
 
     expect(response.content).toBeDefined();
     const result = JSON.parse(response.content[0].text);
     expect(result).toBeDefined();
   });
 
-  test('get_income - routes correctly', () => {
-    const response = server.handleCallTool('get_income', {});
+  test('get_income - routes correctly', async () => {
+    const response = await server.handleCallTool('get_income', {});
 
     expect(response.content).toBeDefined();
     const result = JSON.parse(response.content[0].text);
     expect(result).toBeDefined();
   });
 
-  test('get_spending with group_by merchant - routes correctly', () => {
-    const response = server.handleCallTool('get_spending', { group_by: 'merchant' });
+  test('get_spending with group_by merchant - routes correctly', async () => {
+    const response = await server.handleCallTool('get_spending', { group_by: 'merchant' });
 
     expect(response.content).toBeDefined();
     const result = JSON.parse(response.content[0].text);
@@ -368,8 +376,8 @@ describe('CopilotMoneyServer.handleCallTool - compare_periods', () => {
     server = setupServerWithMockData();
   });
 
-  test('compare_periods - routes correctly with required params', () => {
-    const response = server.handleCallTool('compare_periods', {
+  test('compare_periods - routes correctly with required params', async () => {
+    const response = await server.handleCallTool('compare_periods', {
       period1: 'this_month',
       period2: 'last_month',
     });
@@ -380,29 +388,29 @@ describe('CopilotMoneyServer.handleCallTool - compare_periods', () => {
     expect(result).toBeDefined();
   });
 
-  test('compare_periods - returns error when period1 missing', () => {
-    const response = server.handleCallTool('compare_periods', { period2: 'last_month' });
+  test('compare_periods - returns error when period1 missing', async () => {
+    const response = await server.handleCallTool('compare_periods', { period2: 'last_month' });
 
     expect(response.isError).toBe(true);
     expect(response.content[0].text).toContain('Missing required parameters');
   });
 
-  test('compare_periods - returns error when period2 missing', () => {
-    const response = server.handleCallTool('compare_periods', { period1: 'this_month' });
+  test('compare_periods - returns error when period2 missing', async () => {
+    const response = await server.handleCallTool('compare_periods', { period1: 'this_month' });
 
     expect(response.isError).toBe(true);
     expect(response.content[0].text).toContain('Missing required parameters');
   });
 
-  test('compare_periods - returns error when both periods missing', () => {
-    const response = server.handleCallTool('compare_periods', {});
+  test('compare_periods - returns error when both periods missing', async () => {
+    const response = await server.handleCallTool('compare_periods', {});
 
     expect(response.isError).toBe(true);
     expect(response.content[0].text).toContain('Missing required parameters');
   });
 
-  test('compare_periods - with exclude_transfers', () => {
-    const response = server.handleCallTool('compare_periods', {
+  test('compare_periods - with exclude_transfers', async () => {
+    const response = await server.handleCallTool('compare_periods', {
       period1: 'this_month',
       period2: 'last_month',
       exclude_transfers: true,
@@ -420,92 +428,102 @@ describe('CopilotMoneyServer.handleCallTool - new tools (13-22)', () => {
     server = setupServerWithMockData();
   });
 
-  test('get_transactions with transaction_type foreign - routes correctly', () => {
-    const response = server.handleCallTool('get_transactions', { transaction_type: 'foreign' });
+  test('get_transactions with transaction_type foreign - routes correctly', async () => {
+    const response = await server.handleCallTool('get_transactions', {
+      transaction_type: 'foreign',
+    });
 
     expect(response.content).toBeDefined();
     expect(response.isError).toBeUndefined();
   });
 
-  test('get_transactions with transaction_type refunds - routes correctly', () => {
-    const response = server.handleCallTool('get_transactions', { transaction_type: 'refunds' });
+  test('get_transactions with transaction_type refunds - routes correctly', async () => {
+    const response = await server.handleCallTool('get_transactions', {
+      transaction_type: 'refunds',
+    });
 
     expect(response.content).toBeDefined();
     expect(response.isError).toBeUndefined();
   });
 
-  test('get_transactions with transaction_type duplicates - routes correctly', () => {
-    const response = server.handleCallTool('get_transactions', { transaction_type: 'duplicates' });
+  test('get_transactions with transaction_type duplicates - routes correctly', async () => {
+    const response = await server.handleCallTool('get_transactions', {
+      transaction_type: 'duplicates',
+    });
 
     expect(response.content).toBeDefined();
     expect(response.isError).toBeUndefined();
   });
 
-  test('get_transactions with transaction_type credits - routes correctly', () => {
-    const response = server.handleCallTool('get_transactions', { transaction_type: 'credits' });
+  test('get_transactions with transaction_type credits - routes correctly', async () => {
+    const response = await server.handleCallTool('get_transactions', {
+      transaction_type: 'credits',
+    });
 
     expect(response.content).toBeDefined();
     expect(response.isError).toBeUndefined();
   });
 
-  test('get_spending with day_of_week - routes correctly', () => {
-    const response = server.handleCallTool('get_spending', { group_by: 'day_of_week' });
+  test('get_spending with day_of_week - routes correctly', async () => {
+    const response = await server.handleCallTool('get_spending', { group_by: 'day_of_week' });
 
     expect(response.content).toBeDefined();
     expect(response.isError).toBeUndefined();
   });
 
-  test('get_trips - routes correctly', () => {
-    const response = server.handleCallTool('get_trips', {});
+  test('get_trips - routes correctly', async () => {
+    const response = await server.handleCallTool('get_trips', {});
 
     expect(response.content).toBeDefined();
     expect(response.isError).toBeUndefined();
   });
 
-  test('get_transactions with transaction_id - routes correctly', () => {
-    const response = server.handleCallTool('get_transactions', { transaction_id: 'txn1' });
+  test('get_transactions with transaction_id - routes correctly', async () => {
+    const response = await server.handleCallTool('get_transactions', { transaction_id: 'txn1' });
 
     expect(response.content).toBeDefined();
     expect(response.isError).toBeUndefined();
   });
 
-  test('get_merchant_analytics - routes correctly', () => {
-    const response = server.handleCallTool('get_merchant_analytics', { sort_by: 'spending' });
+  test('get_merchant_analytics - routes correctly', async () => {
+    const response = await server.handleCallTool('get_merchant_analytics', { sort_by: 'spending' });
 
     expect(response.content).toBeDefined();
     expect(response.isError).toBeUndefined();
   });
 
-  test('get_merchant_analytics - returns error when sort_by missing', () => {
-    const response = server.handleCallTool('get_merchant_analytics', {});
+  test('get_merchant_analytics - returns error when sort_by missing', async () => {
+    const response = await server.handleCallTool('get_merchant_analytics', {});
 
     expect(response.isError).toBe(true);
     expect(response.content[0].text).toContain('Missing required parameter: sort_by');
   });
 
-  test('get_unusual_transactions - routes correctly', () => {
-    const response = server.handleCallTool('get_unusual_transactions', {});
+  test('get_unusual_transactions - routes correctly', async () => {
+    const response = await server.handleCallTool('get_unusual_transactions', {});
 
     expect(response.content).toBeDefined();
     expect(response.isError).toBeUndefined();
   });
 
-  test('export_transactions - routes correctly', () => {
-    const response = server.handleCallTool('export_transactions', {});
+  test('export_transactions - routes correctly', async () => {
+    const response = await server.handleCallTool('export_transactions', {});
 
     expect(response.content).toBeDefined();
     expect(response.isError).toBeUndefined();
   });
 
-  test('get_account_analytics - routes correctly', () => {
-    const response = server.handleCallTool('get_account_analytics', { analysis: 'activity' });
+  test('get_account_analytics - routes correctly', async () => {
+    const response = await server.handleCallTool('get_account_analytics', { analysis: 'activity' });
 
     expect(response.content).toBeDefined();
     expect(response.isError).toBeUndefined();
   });
 
-  test('get_budget_analytics - routes correctly', () => {
-    const response = server.handleCallTool('get_budget_analytics', { analysis: 'utilization' });
+  test('get_budget_analytics - routes correctly', async () => {
+    const response = await server.handleCallTool('get_budget_analytics', {
+      analysis: 'utilization',
+    });
 
     expect(response.content).toBeDefined();
     expect(response.isError).toBeUndefined();
@@ -519,15 +537,15 @@ describe('CopilotMoneyServer.handleCallTool - error handling', () => {
     server = setupServerWithMockData();
   });
 
-  test('returns error for unknown tool', () => {
-    const response = server.handleCallTool('unknown_tool_that_does_not_exist', {});
+  test('returns error for unknown tool', async () => {
+    const response = await server.handleCallTool('unknown_tool_that_does_not_exist', {});
 
     expect(response.isError).toBe(true);
     expect(response.content[0].text).toContain('Unknown tool');
     expect(response.content[0].text).toContain('unknown_tool_that_does_not_exist');
   });
 
-  test('handles tool execution errors gracefully', () => {
+  test('handles tool execution errors gracefully', async () => {
     // Create server with mock that throws
     const db = new CopilotDatabase('/fake/path');
     (db as any)._transactions = [...mockTransactions];
@@ -539,14 +557,14 @@ describe('CopilotMoneyServer.handleCallTool - error handling', () => {
     };
     server._injectForTesting(db, tools);
 
-    const response = server.handleCallTool('get_account_balance', { account_id: 'acc1' });
+    const response = await server.handleCallTool('get_account_balance', { account_id: 'acc1' });
 
     expect(response.isError).toBe(true);
     expect(response.content[0].text).toContain('Error:');
     expect(response.content[0].text).toContain('Test error from tool');
   });
 
-  test('handles non-Error exceptions', () => {
+  test('handles non-Error exceptions', async () => {
     const db = new CopilotDatabase('/fake/path');
     (db as any)._transactions = [...mockTransactions];
     (db as any)._accounts = [...mockAccounts];
@@ -557,14 +575,14 @@ describe('CopilotMoneyServer.handleCallTool - error handling', () => {
     };
     server._injectForTesting(db, tools);
 
-    const response = server.handleCallTool('get_categories', {});
+    const response = await server.handleCallTool('get_categories', {});
 
     expect(response.isError).toBe(true);
     expect(response.content[0].text).toContain('Error:');
     expect(response.content[0].text).toContain('string error');
   });
 
-  test('handles number exceptions', () => {
+  test('handles number exceptions', async () => {
     const db = new CopilotDatabase('/fake/path');
     (db as any)._transactions = [...mockTransactions];
     (db as any)._accounts = [...mockAccounts];
@@ -575,7 +593,7 @@ describe('CopilotMoneyServer.handleCallTool - error handling', () => {
     };
     server._injectForTesting(db, tools);
 
-    const response = server.handleCallTool('get_categories', {});
+    const response = await server.handleCallTool('get_categories', {});
 
     expect(response.isError).toBe(true);
     expect(response.content[0].text).toContain('Error:');
@@ -590,8 +608,8 @@ describe('CopilotMoneyServer.handleCallTool - response format', () => {
     server = setupServerWithMockData();
   });
 
-  test('successful response has correct structure', () => {
-    const response = server.handleCallTool('get_transactions', {});
+  test('successful response has correct structure', async () => {
+    const response = await server.handleCallTool('get_transactions', {});
 
     expect(response.content).toBeDefined();
     expect(Array.isArray(response.content)).toBe(true);
@@ -601,21 +619,21 @@ describe('CopilotMoneyServer.handleCallTool - response format', () => {
     expect(response.isError).toBeUndefined();
   });
 
-  test('error response has isError flag', () => {
-    const response = server.handleCallTool('unknown_tool', {});
+  test('error response has isError flag', async () => {
+    const response = await server.handleCallTool('unknown_tool', {});
 
     expect(response.isError).toBe(true);
     expect(response.content).toBeDefined();
   });
 
-  test('successful response is valid JSON', () => {
-    const response = server.handleCallTool('get_accounts', {});
+  test('successful response is valid JSON', async () => {
+    const response = await server.handleCallTool('get_accounts', {});
 
     expect(() => JSON.parse(response.content[0].text)).not.toThrow();
   });
 
-  test('response JSON is properly formatted with indentation', () => {
-    const response = server.handleCallTool('get_accounts', {});
+  test('response JSON is properly formatted with indentation', async () => {
+    const response = await server.handleCallTool('get_accounts', {});
     const text = response.content[0].text;
 
     // Should contain newlines indicating formatting
@@ -644,18 +662,26 @@ describe('CopilotMoneyServer - constructor and initialization', () => {
     expect(typeof server.run).toBe('function');
   });
 
-  test('_injectForTesting method works correctly', () => {
+  test('_injectForTesting method works correctly', async () => {
     const server = new CopilotMoneyServer('/fake/path');
     const db = new CopilotDatabase('/test/path');
     (db as any)._transactions = [...mockTransactions];
     (db as any)._accounts = [...mockAccounts];
+    // Also mock auxiliary data for name resolution
+    (db as any)._userCategories = [];
+    (db as any)._userAccounts = [];
+    (db as any)._categoryNameMap = new Map<string, string>();
+    (db as any)._accountNameMap = new Map<string, string>();
+    (db as any)._recurring = [];
+    (db as any)._budgets = [];
+    (db as any)._goals = [];
     db.isAvailable = () => true;
     const tools = new CopilotMoneyTools(db);
 
     server._injectForTesting(db, tools);
 
     // Verify injection worked by calling a tool
-    const response = server.handleCallTool('get_transactions', {});
+    const response = await server.handleCallTool('get_transactions', {});
     expect(response.isError).toBeUndefined();
     const result = JSON.parse(response.content[0].text);
     expect(result.transactions.length).toBeGreaterThan(0);
@@ -669,39 +695,39 @@ describe('CopilotMoneyServer - tool arguments edge cases', () => {
     server = setupServerWithMockData();
   });
 
-  test('handles undefined arguments gracefully', () => {
-    const response = server.handleCallTool('get_transactions', undefined);
+  test('handles undefined arguments gracefully', async () => {
+    const response = await server.handleCallTool('get_transactions', undefined);
     expect(response.isError).toBeUndefined();
   });
 
-  test('handles empty object arguments', () => {
-    const response = server.handleCallTool('get_transactions', {});
+  test('handles empty object arguments', async () => {
+    const response = await server.handleCallTool('get_transactions', {});
     expect(response.isError).toBeUndefined();
   });
 
-  test('get_spending - group_by parameter validation', () => {
+  test('get_spending - group_by parameter validation', async () => {
     // Number group_by should fail
-    const response = server.handleCallTool('get_spending', { group_by: 123 as any });
+    const response = await server.handleCallTool('get_spending', { group_by: 123 as any });
     expect(response.isError).toBe(true);
     expect(response.content[0].text).toContain('Missing required parameter: group_by');
   });
 
-  test('get_account_balance - account_id parameter validation', () => {
+  test('get_account_balance - account_id parameter validation', async () => {
     // Number account_id should fail
-    const response = server.handleCallTool('get_account_balance', { account_id: 123 as any });
+    const response = await server.handleCallTool('get_account_balance', { account_id: 123 as any });
     expect(response.isError).toBe(true);
     expect(response.content[0].text).toContain('Missing required parameter: account_id');
   });
 
-  test('get_merchant_analytics - sort_by parameter validation', () => {
+  test('get_merchant_analytics - sort_by parameter validation', async () => {
     // Number sort_by should fail
-    const response = server.handleCallTool('get_merchant_analytics', { sort_by: 123 as any });
+    const response = await server.handleCallTool('get_merchant_analytics', { sort_by: 123 as any });
     expect(response.isError).toBe(true);
     expect(response.content[0].text).toContain('Missing required parameter: sort_by');
   });
 
-  test('compare_periods - non-string period validation', () => {
-    const response = server.handleCallTool('compare_periods', {
+  test('compare_periods - non-string period validation', async () => {
+    const response = await server.handleCallTool('compare_periods', {
       period1: 123 as any,
       period2: 'last_month',
     });

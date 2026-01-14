@@ -83,59 +83,70 @@ describe('CopilotDatabase', () => {
     (db as any)._transactions = [...mockTransactions];
     (db as any)._accounts = [...mockAccounts];
     (db as any)._recurring = [...mockRecurring];
+    // Add required cache fields for async database methods
+    (db as any)._budgets = [];
+    (db as any)._goals = [];
+    (db as any)._goalHistory = [];
+    (db as any)._investmentPrices = [];
+    (db as any)._investmentSplits = [];
+    (db as any)._items = [];
+    (db as any)._userCategories = [];
+    (db as any)._userAccounts = [];
+    (db as any)._categoryNameMap = new Map<string, string>();
+    (db as any)._accountNameMap = new Map<string, string>();
   });
 
   describe('getTransactions', () => {
-    test('returns all transactions when no filters applied', () => {
-      const result = db.getTransactions();
+    test('returns all transactions when no filters applied', async () => {
+      const result = await db.getTransactions();
       expect(result).toHaveLength(3);
     });
 
-    test('filters by start date', () => {
-      const result = db.getTransactions({ startDate: '2024-02-01' });
+    test('filters by start date', async () => {
+      const result = await db.getTransactions({ startDate: '2024-02-01' });
       expect(result).toHaveLength(1);
       expect(result[0].transaction_id).toBe('txn3');
     });
 
-    test('filters by end date', () => {
-      const result = db.getTransactions({ endDate: '2024-01-31' });
+    test('filters by end date', async () => {
+      const result = await db.getTransactions({ endDate: '2024-01-31' });
       expect(result).toHaveLength(2);
     });
 
-    test('filters by category (case-insensitive)', () => {
-      const result = db.getTransactions({ category: 'FOOD' });
+    test('filters by category (case-insensitive)', async () => {
+      const result = await db.getTransactions({ category: 'FOOD' });
       expect(result).toHaveLength(2);
       expect(result.every((txn) => txn.category_id?.includes('food'))).toBe(true);
     });
 
-    test('filters by merchant name', () => {
-      const result = db.getTransactions({ merchant: 'coffee' });
+    test('filters by merchant name', async () => {
+      const result = await db.getTransactions({ merchant: 'coffee' });
       expect(result).toHaveLength(1);
       expect(result[0].name).toBe('Coffee Shop');
     });
 
-    test('filters by account ID', () => {
-      const result = db.getTransactions({ accountId: 'acc1' });
+    test('filters by account ID', async () => {
+      const result = await db.getTransactions({ accountId: 'acc1' });
       expect(result).toHaveLength(2);
     });
 
-    test('filters by min amount', () => {
-      const result = db.getTransactions({ minAmount: 50.0 });
+    test('filters by min amount', async () => {
+      const result = await db.getTransactions({ minAmount: 50.0 });
       expect(result).toHaveLength(2);
     });
 
-    test('filters by max amount', () => {
-      const result = db.getTransactions({ maxAmount: 50.0 });
+    test('filters by max amount', async () => {
+      const result = await db.getTransactions({ maxAmount: 50.0 });
       expect(result).toHaveLength(2);
     });
 
-    test('applies limit correctly', () => {
-      const result = db.getTransactions({ limit: 2 });
+    test('applies limit correctly', async () => {
+      const result = await db.getTransactions({ limit: 2 });
       expect(result).toHaveLength(2);
     });
 
-    test('combines multiple filters', () => {
-      const result = db.getTransactions({
+    test('combines multiple filters', async () => {
+      const result = await db.getTransactions({
         startDate: '2024-01-01',
         endDate: '2024-01-31',
         category: 'food',
@@ -146,50 +157,50 @@ describe('CopilotDatabase', () => {
   });
 
   describe('searchTransactions', () => {
-    test('finds transactions by merchant name', () => {
-      const result = db.searchTransactions('grocery');
+    test('finds transactions by merchant name', async () => {
+      const result = await db.searchTransactions('grocery');
       expect(result).toHaveLength(1);
       expect(result[0].name).toBe('Grocery Store');
     });
 
-    test('is case-insensitive', () => {
-      const result = db.searchTransactions('COFFEE');
+    test('is case-insensitive', async () => {
+      const result = await db.searchTransactions('COFFEE');
       expect(result).toHaveLength(1);
     });
 
-    test('uses original_name when name is not present', () => {
-      const result = db.searchTransactions('fast');
+    test('uses original_name when name is not present', async () => {
+      const result = await db.searchTransactions('fast');
       expect(result).toHaveLength(1);
       expect(result[0].original_name).toBe('Fast Food');
     });
 
-    test('applies limit correctly', () => {
-      const result = db.searchTransactions('food', 0);
+    test('applies limit correctly', async () => {
+      const result = await db.searchTransactions('food', 0);
       expect(result).toHaveLength(0);
     });
   });
 
   describe('getAccounts', () => {
-    test('returns all accounts when no filter applied', () => {
-      const result = db.getAccounts();
+    test('returns all accounts when no filter applied', async () => {
+      const result = await db.getAccounts();
       expect(result).toHaveLength(2);
     });
 
-    test('filters by account type', () => {
-      const result = db.getAccounts('checking');
+    test('filters by account type', async () => {
+      const result = await db.getAccounts('checking');
       expect(result).toHaveLength(1);
       expect(result[0].account_type).toBe('checking');
     });
 
-    test('account type filter is case-insensitive', () => {
-      const result = db.getAccounts('SAVINGS');
+    test('account type filter is case-insensitive', async () => {
+      const result = await db.getAccounts('SAVINGS');
       expect(result).toHaveLength(1);
     });
   });
 
   describe('getCategories', () => {
-    test('returns unique categories from transactions', () => {
-      const result = db.getCategories();
+    test('returns unique categories from transactions', async () => {
+      const result = await db.getCategories();
       expect(result).toHaveLength(2);
 
       const categoryIds = result.map((c) => c.category_id);
@@ -197,39 +208,39 @@ describe('CopilotDatabase', () => {
       expect(categoryIds).toContain('groceries');
     });
 
-    test('category name is human-readable', () => {
-      const result = db.getCategories();
+    test('category name is human-readable', async () => {
+      const result = await db.getCategories();
       const foodCategory = result.find((c) => c.category_id === 'food_dining');
       expect(foodCategory?.name).toBe('Food & Drink');
     });
   });
 
   describe('isAvailable', () => {
-    test('returns false for non-existent path', () => {
+    test('returns false for non-existent path', async () => {
       const db = new CopilotDatabase('/fake/nonexistent/path');
       expect(db.isAvailable()).toBe(false);
     });
   });
 
   describe('getDbPath', () => {
-    test('returns the database path', () => {
+    test('returns the database path', async () => {
       expect(db.getDbPath()).toBe('/fake/path');
     });
   });
 
   describe('getRecurring', () => {
-    test('returns all recurring transactions when activeOnly is false', () => {
-      const result = db.getRecurring(false);
+    test('returns all recurring transactions when activeOnly is false', async () => {
+      const result = await db.getRecurring(false);
       expect(result).toHaveLength(3);
     });
 
-    test('returns all recurring transactions when no parameter passed', () => {
-      const result = db.getRecurring();
+    test('returns all recurring transactions when no parameter passed', async () => {
+      const result = await db.getRecurring();
       expect(result).toHaveLength(3);
     });
 
-    test('filters to only active when activeOnly is true', () => {
-      const result = db.getRecurring(true);
+    test('filters to only active when activeOnly is true', async () => {
+      const result = await db.getRecurring(true);
       expect(result).toHaveLength(2);
       // Should include active and undefined
       const ids = result.map((r) => r.recurring_id);
@@ -238,15 +249,15 @@ describe('CopilotDatabase', () => {
       expect(ids).not.toContain('rec_inactive123');
     });
 
-    test('includes undefined is_active as active when activeOnly is true', () => {
-      const result = db.getRecurring(true);
+    test('includes undefined is_active as active when activeOnly is true', async () => {
+      const result = await db.getRecurring(true);
       const unknownStatus = result.find((r) => r.recurring_id === 'rec_unknown1234');
       expect(unknownStatus).toBeDefined();
       expect(unknownStatus?.is_active).toBeUndefined();
     });
 
-    test('excludes explicitly inactive subscriptions when activeOnly is true', () => {
-      const result = db.getRecurring(true);
+    test('excludes explicitly inactive subscriptions when activeOnly is true', async () => {
+      const result = await db.getRecurring(true);
       const inactive = result.find((r) => r.is_active === false);
       expect(inactive).toBeUndefined();
     });

@@ -89,12 +89,13 @@ function findCopilotDatabase(): string | undefined {
     }
   }
 
-  // Check each path for validity (contains .ldb files)
+  // Check each path for validity (contains .ldb files or is a valid LevelDB directory)
   for (const path of possiblePaths) {
     try {
       if (existsSync(path)) {
         const files = readdirSync(path);
-        if (files.some((file) => file.endsWith('.ldb'))) {
+        // Check for .ldb files or LevelDB manifest files
+        if (files.some((file) => file.endsWith('.ldb') || file.startsWith('MANIFEST-'))) {
           return path;
         }
       }
@@ -110,6 +111,7 @@ function findCopilotDatabase(): string | undefined {
  * Abstraction layer for querying Copilot Money data.
  *
  * Wraps the decoder and provides filtering capabilities.
+ * All data access methods are async due to LevelDB iteration.
  */
 export class CopilotDatabase {
   private dbPath: string | undefined;
@@ -118,10 +120,27 @@ export class CopilotDatabase {
   private _recurring: Recurring[] | null = null;
   private _budgets: Budget[] | null = null;
   private _goals: Goal[] | null = null;
+  private _goalHistory: GoalHistory[] | null = null;
+  private _investmentPrices: InvestmentPrice[] | null = null;
+  private _investmentSplits: InvestmentSplit[] | null = null;
+  private _items: Item[] | null = null;
   private _userCategories: Category[] | null = null;
   private _categoryNameMap: Map<string, string> | null = null;
   private _userAccounts: UserAccountCustomization[] | null = null;
   private _accountNameMap: Map<string, string> | null = null;
+
+  // Promises for in-flight loads to prevent duplicate loading
+  private _loadingTransactions: Promise<Transaction[]> | null = null;
+  private _loadingAccounts: Promise<Account[]> | null = null;
+  private _loadingRecurring: Promise<Recurring[]> | null = null;
+  private _loadingBudgets: Promise<Budget[]> | null = null;
+  private _loadingGoals: Promise<Goal[]> | null = null;
+  private _loadingGoalHistory: Promise<GoalHistory[]> | null = null;
+  private _loadingInvestmentPrices: Promise<InvestmentPrice[]> | null = null;
+  private _loadingInvestmentSplits: Promise<InvestmentSplit[]> | null = null;
+  private _loadingItems: Promise<Item[]> | null = null;
+  private _loadingUserCategories: Promise<Category[]> | null = null;
+  private _loadingUserAccounts: Promise<UserAccountCustomization[]> | null = null;
 
   /**
    * Initialize database connection.
@@ -159,11 +178,245 @@ export class CopilotDatabase {
         return false;
       }
 
-      // Check if directory contains .ldb files
+      // Check if directory contains .ldb files or LevelDB manifest
       const files = readdirSync(this.dbPath);
-      return files.some((file) => file.endsWith('.ldb'));
+      return files.some((file) => file.endsWith('.ldb') || file.startsWith('MANIFEST-'));
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Load transactions with caching.
+   */
+  private async loadTransactions(): Promise<Transaction[]> {
+    // Return cached data if available
+    if (this._transactions !== null) {
+      return this._transactions;
+    }
+
+    // Return in-flight promise if loading
+    if (this._loadingTransactions !== null) {
+      return this._loadingTransactions;
+    }
+
+    // Start loading
+    this._loadingTransactions = decodeTransactions(this.requireDbPath());
+    try {
+      this._transactions = await this._loadingTransactions;
+      return this._transactions;
+    } finally {
+      this._loadingTransactions = null;
+    }
+  }
+
+  /**
+   * Load accounts with caching.
+   */
+  private async loadAccounts(): Promise<Account[]> {
+    if (this._accounts !== null) {
+      return this._accounts;
+    }
+
+    if (this._loadingAccounts !== null) {
+      return this._loadingAccounts;
+    }
+
+    this._loadingAccounts = decodeAccounts(this.requireDbPath());
+    try {
+      this._accounts = await this._loadingAccounts;
+      return this._accounts;
+    } finally {
+      this._loadingAccounts = null;
+    }
+  }
+
+  /**
+   * Load recurring with caching.
+   */
+  private async loadRecurring(): Promise<Recurring[]> {
+    if (this._recurring !== null) {
+      return this._recurring;
+    }
+
+    if (this._loadingRecurring !== null) {
+      return this._loadingRecurring;
+    }
+
+    this._loadingRecurring = decodeRecurring(this.requireDbPath());
+    try {
+      this._recurring = await this._loadingRecurring;
+      return this._recurring;
+    } finally {
+      this._loadingRecurring = null;
+    }
+  }
+
+  /**
+   * Load budgets with caching.
+   */
+  private async loadBudgets(): Promise<Budget[]> {
+    if (this._budgets !== null) {
+      return this._budgets;
+    }
+
+    if (this._loadingBudgets !== null) {
+      return this._loadingBudgets;
+    }
+
+    this._loadingBudgets = decodeBudgets(this.requireDbPath());
+    try {
+      this._budgets = await this._loadingBudgets;
+      return this._budgets;
+    } finally {
+      this._loadingBudgets = null;
+    }
+  }
+
+  /**
+   * Load goals with caching.
+   */
+  private async loadGoals(): Promise<Goal[]> {
+    if (this._goals !== null) {
+      return this._goals;
+    }
+
+    if (this._loadingGoals !== null) {
+      return this._loadingGoals;
+    }
+
+    this._loadingGoals = decodeGoals(this.requireDbPath());
+    try {
+      this._goals = await this._loadingGoals;
+      return this._goals;
+    } finally {
+      this._loadingGoals = null;
+    }
+  }
+
+  /**
+   * Load goal history with caching.
+   */
+  private async loadGoalHistory(): Promise<GoalHistory[]> {
+    if (this._goalHistory !== null) {
+      return this._goalHistory;
+    }
+
+    if (this._loadingGoalHistory !== null) {
+      return this._loadingGoalHistory;
+    }
+
+    this._loadingGoalHistory = decodeGoalHistory(this.requireDbPath());
+    try {
+      this._goalHistory = await this._loadingGoalHistory;
+      return this._goalHistory;
+    } finally {
+      this._loadingGoalHistory = null;
+    }
+  }
+
+  /**
+   * Load investment prices with caching.
+   */
+  private async loadInvestmentPrices(): Promise<InvestmentPrice[]> {
+    if (this._investmentPrices !== null) {
+      return this._investmentPrices;
+    }
+
+    if (this._loadingInvestmentPrices !== null) {
+      return this._loadingInvestmentPrices;
+    }
+
+    this._loadingInvestmentPrices = decodeInvestmentPrices(this.requireDbPath(), {});
+    try {
+      this._investmentPrices = await this._loadingInvestmentPrices;
+      return this._investmentPrices;
+    } finally {
+      this._loadingInvestmentPrices = null;
+    }
+  }
+
+  /**
+   * Load investment splits with caching.
+   */
+  private async loadInvestmentSplits(): Promise<InvestmentSplit[]> {
+    if (this._investmentSplits !== null) {
+      return this._investmentSplits;
+    }
+
+    if (this._loadingInvestmentSplits !== null) {
+      return this._loadingInvestmentSplits;
+    }
+
+    this._loadingInvestmentSplits = decodeInvestmentSplits(this.requireDbPath());
+    try {
+      this._investmentSplits = await this._loadingInvestmentSplits;
+      return this._investmentSplits;
+    } finally {
+      this._loadingInvestmentSplits = null;
+    }
+  }
+
+  /**
+   * Load items with caching.
+   */
+  private async loadItems(): Promise<Item[]> {
+    if (this._items !== null) {
+      return this._items;
+    }
+
+    if (this._loadingItems !== null) {
+      return this._loadingItems;
+    }
+
+    this._loadingItems = decodeItems(this.requireDbPath());
+    try {
+      this._items = await this._loadingItems;
+      return this._items;
+    } finally {
+      this._loadingItems = null;
+    }
+  }
+
+  /**
+   * Load user categories with caching.
+   */
+  private async loadUserCategories(): Promise<Category[]> {
+    if (this._userCategories !== null) {
+      return this._userCategories;
+    }
+
+    if (this._loadingUserCategories !== null) {
+      return this._loadingUserCategories;
+    }
+
+    this._loadingUserCategories = decodeCategories(this.requireDbPath());
+    try {
+      this._userCategories = await this._loadingUserCategories;
+      return this._userCategories;
+    } finally {
+      this._loadingUserCategories = null;
+    }
+  }
+
+  /**
+   * Load user accounts with caching.
+   */
+  private async loadUserAccounts(): Promise<UserAccountCustomization[]> {
+    if (this._userAccounts !== null) {
+      return this._userAccounts;
+    }
+
+    if (this._loadingUserAccounts !== null) {
+      return this._loadingUserAccounts;
+    }
+
+    this._loadingUserAccounts = decodeUserAccounts(this.requireDbPath());
+    try {
+      this._userAccounts = await this._loadingUserAccounts;
+      return this._userAccounts;
+    } finally {
+      this._loadingUserAccounts = null;
     }
   }
 
@@ -181,7 +434,7 @@ export class CopilotDatabase {
    * @param options.limit - Maximum number of transactions to return (default: 1000)
    * @returns List of filtered transactions, sorted by date descending
    */
-  getTransactions(
+  async getTransactions(
     options: {
       startDate?: string;
       endDate?: string;
@@ -192,7 +445,7 @@ export class CopilotDatabase {
       maxAmount?: number;
       limit?: number;
     } = {}
-  ): Transaction[] {
+  ): Promise<Transaction[]> {
     const {
       startDate,
       endDate,
@@ -204,12 +457,8 @@ export class CopilotDatabase {
       limit = 1000,
     } = options;
 
-    // Lazy load transactions
-    if (this._transactions === null) {
-      this._transactions = decodeTransactions(this.requireDbPath());
-    }
-
-    let result = [...this._transactions];
+    const transactions = await this.loadTransactions();
+    let result = [...transactions];
 
     // Apply date range filter
     if (startDate) {
@@ -263,14 +512,11 @@ export class CopilotDatabase {
    * @param limit - Maximum results (default: 50)
    * @returns List of matching transactions
    */
-  searchTransactions(query: string, limit = 50): Transaction[] {
-    // Lazy load transactions
-    if (this._transactions === null) {
-      this._transactions = decodeTransactions(this.requireDbPath());
-    }
+  async searchTransactions(query: string, limit = 50): Promise<Transaction[]> {
+    const transactions = await this.loadTransactions();
 
     const queryLower = query.toLowerCase();
-    const result = this._transactions.filter((txn) =>
+    const result = transactions.filter((txn) =>
       getTransactionDisplayName(txn).toLowerCase().includes(queryLower)
     );
 
@@ -285,13 +531,9 @@ export class CopilotDatabase {
    *                     Also checks subtype field for better matching.
    * @returns List of accounts
    */
-  getAccounts(accountType?: string): Account[] {
-    // Lazy load accounts
-    if (this._accounts === null) {
-      this._accounts = decodeAccounts(this.requireDbPath());
-    }
-
-    let result = [...this._accounts];
+  async getAccounts(accountType?: string): Promise<Account[]> {
+    const accounts = await this.loadAccounts();
+    let result = [...accounts];
 
     // Apply account type filter if specified
     // Check both account_type and subtype fields for better matching
@@ -319,13 +561,9 @@ export class CopilotDatabase {
    * @param activeOnly - If true, only return active recurring transactions
    * @returns List of recurring transactions
    */
-  getRecurring(activeOnly = false): Recurring[] {
-    // Lazy load recurring
-    if (this._recurring === null) {
-      this._recurring = decodeRecurring(this.requireDbPath());
-    }
-
-    let result = [...this._recurring];
+  async getRecurring(activeOnly = false): Promise<Recurring[]> {
+    const recurring = await this.loadRecurring();
+    let result = [...recurring];
 
     if (activeOnly) {
       // Filter for active subscriptions:
@@ -345,13 +583,9 @@ export class CopilotDatabase {
    * @param activeOnly - If true, only return active budgets
    * @returns List of budgets
    */
-  getBudgets(activeOnly = false): Budget[] {
-    // Lazy load budgets
-    if (this._budgets === null) {
-      this._budgets = decodeBudgets(this.requireDbPath());
-    }
-
-    let result = [...this._budgets];
+  async getBudgets(activeOnly = false): Promise<Budget[]> {
+    const budgets = await this.loadBudgets();
+    let result = [...budgets];
 
     if (activeOnly) {
       // Filter for active budgets:
@@ -373,13 +607,9 @@ export class CopilotDatabase {
    * @param activeOnly - If true, only return active goals (default: false)
    * @returns Array of Goal objects
    */
-  getGoals(activeOnly = false): Goal[] {
-    // Lazy load goals
-    if (this._goals === null) {
-      this._goals = decodeGoals(this.requireDbPath());
-    }
-
-    let result = [...this._goals];
+  async getGoals(activeOnly = false): Promise<Goal[]> {
+    const goals = await this.loadGoals();
+    let result = [...goals];
 
     if (activeOnly) {
       // Filter for active goals (status === 'active')
@@ -407,19 +637,24 @@ export class CopilotDatabase {
    * @param options.limit - Maximum number of history entries to return
    * @returns Array of GoalHistory objects, sorted by goal_id and month (newest first)
    */
-  getGoalHistory(
+  async getGoalHistory(
     goalId?: string,
     options: {
       startMonth?: string;
       endMonth?: string;
       limit?: number;
     } = {}
-  ): GoalHistory[] {
+  ): Promise<GoalHistory[]> {
     const { startMonth, endMonth, limit } = options;
 
-    // Decode goal history from the database
-    // Note: We don't cache this as it can be large and change frequently
-    let result = decodeGoalHistory(this.requireDbPath(), goalId);
+    // Load goal history with caching
+    const allHistory = await this.loadGoalHistory();
+    let result = [...allHistory];
+
+    // Apply goal ID filter
+    if (goalId) {
+      result = result.filter((h) => h.goal_id === goalId);
+    }
 
     // Apply month range filters
     if (startMonth) {
@@ -445,12 +680,9 @@ export class CopilotDatabase {
    *
    * @returns List of user-defined categories with full metadata
    */
-  getUserCategories(): Category[] {
-    // Lazy load user categories
-    if (this._userCategories === null) {
-      this._userCategories = decodeCategories(this.requireDbPath());
-    }
-    return [...this._userCategories];
+  async getUserCategories(): Promise<Category[]> {
+    const userCategories = await this.loadUserCategories();
+    return [...userCategories];
   }
 
   /**
@@ -461,13 +693,13 @@ export class CopilotDatabase {
    *
    * @returns Map from category_id to category name
    */
-  getCategoryNameMap(): Map<string, string> {
+  async getCategoryNameMap(): Promise<Map<string, string>> {
     // Return cached map if available
     if (this._categoryNameMap !== null) {
       return this._categoryNameMap;
     }
 
-    const userCategories = this.getUserCategories();
+    const userCategories = await this.loadUserCategories();
     const nameMap = new Map<string, string>();
 
     for (const category of userCategories) {
@@ -491,12 +723,9 @@ export class CopilotDatabase {
    *
    * @returns List of user account customizations
    */
-  getUserAccounts(): UserAccountCustomization[] {
-    // Lazy load user accounts
-    if (this._userAccounts === null) {
-      this._userAccounts = decodeUserAccounts(this.requireDbPath());
-    }
-    return [...this._userAccounts];
+  async getUserAccounts(): Promise<UserAccountCustomization[]> {
+    const userAccounts = await this.loadUserAccounts();
+    return [...userAccounts];
   }
 
   /**
@@ -507,13 +736,13 @@ export class CopilotDatabase {
    *
    * @returns Map from account_id to user-defined account name
    */
-  getAccountNameMap(): Map<string, string> {
+  async getAccountNameMap(): Promise<Map<string, string>> {
     // Return cached map if available
     if (this._accountNameMap !== null) {
       return this._accountNameMap;
     }
 
-    const userAccounts = this.getUserAccounts();
+    const userAccounts = await this.loadUserAccounts();
     const nameMap = new Map<string, string>();
 
     for (const userAccount of userAccounts) {
@@ -535,14 +764,13 @@ export class CopilotDatabase {
    *
    * @returns List of unique categories with human-readable names
    */
-  getCategories(): Category[] {
-    // Load transactions
-    if (this._transactions === null) {
-      this._transactions = decodeTransactions(this.requireDbPath());
-    }
+  async getCategories(): Promise<Category[]> {
+    const [transactions, userCategories] = await Promise.all([
+      this.loadTransactions(),
+      this.loadUserCategories(),
+    ]);
 
-    // Get user-defined categories (which have the actual names)
-    const userCategories = this.getUserCategories();
+    // Build map of user-defined categories
     const userCategoryMap = new Map<string, Category>();
     for (const cat of userCategories) {
       userCategoryMap.set(cat.category_id, cat);
@@ -550,7 +778,7 @@ export class CopilotDatabase {
 
     // Extract unique category IDs from transactions
     const categoryIdsFromTxns = new Set<string>();
-    for (const txn of this._transactions) {
+    for (const txn of transactions) {
       if (txn.category_id) {
         categoryIdsFromTxns.add(txn.category_id);
       }
@@ -592,12 +820,9 @@ export class CopilotDatabase {
    *
    * @returns All transactions
    */
-  getAllTransactions(): Transaction[] {
-    // Lazy load transactions
-    if (this._transactions === null) {
-      this._transactions = decodeTransactions(this.requireDbPath());
-    }
-    return [...this._transactions];
+  async getAllTransactions(): Promise<Transaction[]> {
+    const transactions = await this.loadTransactions();
+    return [...transactions];
   }
 
   /**
@@ -621,17 +846,39 @@ export class CopilotDatabase {
    * @param options.priceType - Filter by price type ("daily" or "hf")
    * @returns Array of InvestmentPrice objects, sorted by investment_id and date (newest first)
    */
-  getInvestmentPrices(
+  async getInvestmentPrices(
     options: {
       tickerSymbol?: string;
       startDate?: string;
       endDate?: string;
       priceType?: 'daily' | 'hf';
     } = {}
-  ): InvestmentPrice[] {
-    // Note: We don't cache investment prices as they can be very large (10K+ records)
-    // and may change frequently with high-frequency data
-    return decodeInvestmentPrices(this.requireDbPath(), options);
+  ): Promise<InvestmentPrice[]> {
+    const { tickerSymbol, startDate, endDate, priceType } = options;
+
+    // Load investment prices with caching
+    const allPrices = await this.loadInvestmentPrices();
+    let result = [...allPrices];
+
+    // Apply ticker symbol filter
+    if (tickerSymbol) {
+      result = result.filter((p) => p.ticker_symbol === tickerSymbol);
+    }
+
+    // Apply date range filters
+    if (startDate) {
+      result = result.filter((p) => p.date && p.date >= startDate);
+    }
+    if (endDate) {
+      result = result.filter((p) => p.date && p.date <= endDate);
+    }
+
+    // Apply price type filter
+    if (priceType) {
+      result = result.filter((p) => p.price_type === priceType);
+    }
+
+    return result;
   }
 
   /**
@@ -649,16 +896,33 @@ export class CopilotDatabase {
    * @param options.endDate - Filter by split date <= this (YYYY-MM-DD)
    * @returns Array of InvestmentSplit objects, sorted by ticker and date (newest first)
    */
-  getInvestmentSplits(
+  async getInvestmentSplits(
     options: {
       tickerSymbol?: string;
       startDate?: string;
       endDate?: string;
     } = {}
-  ): InvestmentSplit[] {
-    // Note: We don't cache investment splits as they are relatively small
-    // and accessed infrequently
-    return decodeInvestmentSplits(this.requireDbPath(), options);
+  ): Promise<InvestmentSplit[]> {
+    const { tickerSymbol, startDate, endDate } = options;
+
+    // Load investment splits with caching
+    const allSplits = await this.loadInvestmentSplits();
+    let result = [...allSplits];
+
+    // Apply ticker symbol filter
+    if (tickerSymbol) {
+      result = result.filter((s) => s.ticker_symbol === tickerSymbol);
+    }
+
+    // Apply date range filters
+    if (startDate) {
+      result = result.filter((s) => s.split_date && s.split_date >= startDate);
+    }
+    if (endDate) {
+      result = result.filter((s) => s.split_date && s.split_date <= endDate);
+    }
+
+    return result;
   }
 
   /**
@@ -673,15 +937,34 @@ export class CopilotDatabase {
    * @param options.needsUpdate - Filter by needs_update flag
    * @returns Array of Item objects, sorted by institution name
    */
-  getItems(
+  async getItems(
     options: {
       connectionStatus?: string;
       institutionId?: string;
       needsUpdate?: boolean;
     } = {}
-  ): Item[] {
-    // Note: We don't cache items as they may change frequently
-    // with connection status updates
-    return decodeItems(this.requireDbPath(), options);
+  ): Promise<Item[]> {
+    const { connectionStatus, institutionId, needsUpdate } = options;
+
+    // Load items with caching
+    const allItems = await this.loadItems();
+    let result = [...allItems];
+
+    // Apply connection status filter
+    if (connectionStatus) {
+      result = result.filter((item) => item.connection_status === connectionStatus);
+    }
+
+    // Apply institution ID filter
+    if (institutionId) {
+      result = result.filter((item) => item.institution_id === institutionId);
+    }
+
+    // Apply needs update filter
+    if (needsUpdate !== undefined) {
+      result = result.filter((item) => item.needs_update === needsUpdate);
+    }
+
+    return result;
   }
 }

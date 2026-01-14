@@ -85,29 +85,41 @@ describe('CopilotDatabase Integration', () => {
     // Mock the internal data
     (db as any)._transactions = [...mockTransactions];
     (db as any)._accounts = [...mockAccounts];
+    // Add required cache fields for async database methods
+    (db as any)._recurring = [];
+    (db as any)._budgets = [];
+    (db as any)._goals = [];
+    (db as any)._goalHistory = [];
+    (db as any)._investmentPrices = [];
+    (db as any)._investmentSplits = [];
+    (db as any)._items = [];
+    (db as any)._userCategories = [];
+    (db as any)._userAccounts = [];
+    (db as any)._categoryNameMap = new Map<string, string>();
+    (db as any)._accountNameMap = new Map<string, string>();
   });
 
   describe('initialization', () => {
-    test('can be initialized', () => {
+    test('can be initialized', async () => {
       const db = new CopilotDatabase('/fake/path');
       expect(db).toBeDefined();
     });
 
-    test('reports database not available for missing path', () => {
+    test('reports database not available for missing path', async () => {
       const db = new CopilotDatabase('/nonexistent/path');
       expect(db.isAvailable()).toBe(false);
     });
   });
 
   describe('getTransactions', () => {
-    test('returns transactions without filters', () => {
-      const txns = db.getTransactions({ limit: 10 });
+    test('returns transactions without filters', async () => {
+      const txns = await db.getTransactions({ limit: 10 });
       expect(txns.length).toBeLessThanOrEqual(10);
       expect(txns.every((txn) => txn.transaction_id)).toBe(true);
     });
 
-    test('filters transactions by date range', () => {
-      const txns = db.getTransactions({
+    test('filters transactions by date range', async () => {
+      const txns = await db.getTransactions({
         startDate: '2025-01-01',
         endDate: '2025-01-10',
         limit: 1000,
@@ -116,8 +128,8 @@ describe('CopilotDatabase Integration', () => {
       expect(txns.every((txn) => txn.date >= '2025-01-01' && txn.date <= '2025-01-10')).toBe(true);
     });
 
-    test('filters transactions by merchant name', () => {
-      const txns = db.getTransactions({ merchant: 'starbucks', limit: 100 });
+    test('filters transactions by merchant name', async () => {
+      const txns = await db.getTransactions({ merchant: 'starbucks', limit: 100 });
 
       expect(txns.length).toBe(3); // Three Starbucks transactions
       expect(
@@ -127,12 +139,12 @@ describe('CopilotDatabase Integration', () => {
       ).toBe(true);
     });
 
-    test('filters transactions by amount range', () => {
+    test('filters transactions by amount range', async () => {
       // Amount filtering uses absolute values (magnitude)
       // minAmount: 10 matches |amount| >= 10: all except Starbucks (-8.0)
       // maxAmount: 20 matches |amount| <= 20: Starbucks (-8.0), Starbucks Coffee (-15.5)
       // Combined: only Starbucks Coffee (-15.5) matches
-      const txns = db.getTransactions({
+      const txns = await db.getTransactions({
         minAmount: 10.0,
         maxAmount: 20.0,
         limit: 100,
@@ -143,31 +155,31 @@ describe('CopilotDatabase Integration', () => {
       ).toBe(true);
     });
 
-    test('filters transactions by category', () => {
-      const txns = db.getTransactions({ category: 'food', limit: 100 });
+    test('filters transactions by category', async () => {
+      const txns = await db.getTransactions({ category: 'food', limit: 100 });
 
       expect(
         txns.every((txn) => txn.category_id && txn.category_id.toLowerCase().includes('food'))
       ).toBe(true);
     });
 
-    test('filters transactions by account ID', () => {
-      const txns = db.getTransactions({ accountId: 'acc1', limit: 100 });
+    test('filters transactions by account ID', async () => {
+      const txns = await db.getTransactions({ accountId: 'acc1', limit: 100 });
 
       expect(txns.every((txn) => txn.account_id === 'acc1')).toBe(true);
       expect(txns.length).toBe(4); // Four transactions on acc1
     });
 
-    test('respects limit parameter', () => {
+    test('respects limit parameter', async () => {
       const limits = [1, 2, 5];
       for (const limit of limits) {
-        const txns = db.getTransactions({ limit });
+        const txns = await db.getTransactions({ limit });
         expect(txns.length).toBeLessThanOrEqual(limit);
       }
     });
 
-    test('combines multiple filters', () => {
-      const txns = db.getTransactions({
+    test('combines multiple filters', async () => {
+      const txns = await db.getTransactions({
         startDate: '2025-01-01',
         endDate: '2025-12-31',
         minAmount: 5.0,
@@ -183,8 +195,8 @@ describe('CopilotDatabase Integration', () => {
       }
     });
 
-    test('returns empty array for impossible filters', () => {
-      const txns = db.getTransactions({
+    test('returns empty array for impossible filters', async () => {
+      const txns = await db.getTransactions({
         startDate: '1900-01-01',
         endDate: '1900-01-31',
         limit: 100,
@@ -195,57 +207,57 @@ describe('CopilotDatabase Integration', () => {
   });
 
   describe('searchTransactions', () => {
-    test('searches transactions by merchant name', () => {
-      const txns = db.searchTransactions('starbucks', 20);
+    test('searches transactions by merchant name', async () => {
+      const txns = await db.searchTransactions('starbucks', 20);
 
       expect(txns.length).toBe(3);
     });
 
-    test('is case-insensitive', () => {
-      const results1 = db.searchTransactions('STARBUCKS', 10);
-      const results2 = db.searchTransactions('starbucks', 10);
+    test('is case-insensitive', async () => {
+      const results1 = await db.searchTransactions('STARBUCKS', 10);
+      const results2 = await db.searchTransactions('starbucks', 10);
 
       expect(results1.length).toBe(results2.length);
     });
 
-    test('respects limit parameter', () => {
-      const txns = db.searchTransactions('test', 1);
+    test('respects limit parameter', async () => {
+      const txns = await db.searchTransactions('test', 1);
       expect(txns.length).toBeLessThanOrEqual(1);
     });
 
-    test('returns empty array for no matches', () => {
-      const txns = db.searchTransactions('xyznonexistent123', 100);
+    test('returns empty array for no matches', async () => {
+      const txns = await db.searchTransactions('xyznonexistent123', 100);
       expect(txns).toEqual([]);
     });
   });
 
   describe('getAccounts', () => {
-    test('returns all accounts', () => {
-      const accounts = db.getAccounts();
+    test('returns all accounts', async () => {
+      const accounts = await db.getAccounts();
 
       expect(accounts.length).toBe(3);
       expect(accounts.every((acc) => acc.account_id)).toBe(true);
       expect(accounts.every((acc) => acc.current_balance !== undefined)).toBe(true);
     });
 
-    test('filters accounts by type', () => {
-      const accounts = db.getAccounts('checking');
+    test('filters accounts by type', async () => {
+      const accounts = await db.getAccounts('checking');
 
       expect(accounts.length).toBe(1);
       expect(accounts[0].account_type).toBe('checking');
     });
 
-    test('account type filter is case-insensitive', () => {
-      const results1 = db.getAccounts('SAVINGS');
-      const results2 = db.getAccounts('savings');
+    test('account type filter is case-insensitive', async () => {
+      const results1 = await db.getAccounts('SAVINGS');
+      const results2 = await db.getAccounts('savings');
 
       expect(results1.length).toBe(results2.length);
     });
   });
 
   describe('getCategories', () => {
-    test('returns unique categories', () => {
-      const categories = db.getCategories();
+    test('returns unique categories', async () => {
+      const categories = await db.getCategories();
 
       expect(categories.length).toBeGreaterThan(0);
 
@@ -255,8 +267,8 @@ describe('CopilotDatabase Integration', () => {
       expect(categoryIds.length).toBe(uniqueIds.size);
     });
 
-    test('category name is human-readable', () => {
-      const categories = db.getCategories();
+    test('category name is human-readable', async () => {
+      const categories = await db.getCategories();
 
       // All categories should have human-readable names
       for (const cat of categories) {
@@ -294,22 +306,22 @@ if (hasDemoDb) {
       db = new CopilotDatabase(DEMO_DB_PATH);
     });
 
-    test("database is available", () => {
+    test("database is available", async () => {
       expect(db.isAvailable()).toBe(true);
     });
 
-    test("can decode transactions", () => {
-      const txns = db.getTransactions({ limit: 10 });
+    test("can decode transactions", async () => {
+      const txns = await db.getTransactions({ limit: 10 });
       expect(txns.length).toBeGreaterThan(0);
     });
 
-    test("can decode accounts", () => {
-      const accounts = db.getAccounts();
+    test("can decode accounts", async () => {
+      const accounts = await db.getAccounts();
       expect(accounts.length).toBeGreaterThan(0);
     });
 
-    test("transactions are sorted by date descending", () => {
-      const txns = db.getTransactions({ limit: 50 });
+    test("transactions are sorted by date descending", async () => {
+      const txns = await db.getTransactions({ limit: 50 });
 
       for (let i = 0; i < txns.length - 1; i++) {
         expect(txns[i].date >= txns[i + 1].date).toBe(true);
