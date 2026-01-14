@@ -361,6 +361,16 @@ export function decodeTransactions(dbPath: string): Transaction[] {
 }
 
 /**
+ * Balance field patterns to search for in account records.
+ * Some accounts (especially brokerage/investment) use `original_current_balance`
+ * instead of `current_balance`.
+ */
+const ACCOUNT_BALANCE_PATTERNS = [
+  { pattern: Buffer.from('current_balance'), length: 15 },
+  { pattern: Buffer.from('original_current_balance'), length: 24 },
+] as const;
+
+/**
  * Decode account information from LevelDB files.
  */
 export function decodeAccounts(dbPath: string): Account[] {
@@ -379,6 +389,9 @@ export function decodeAccounts(dbPath: string): Account[] {
   const files = fs.readdirSync(dbPath);
   const ldbFiles = files.filter((f) => f.endsWith('.ldb')).map((f) => path.join(dbPath, f));
 
+  // Track seen account IDs to avoid duplicates from different balance patterns
+  const seenAccountIds = new Set<string>();
+
   for (const filepath of ldbFiles) {
     const data = fs.readFileSync(filepath);
 
@@ -386,107 +399,151 @@ export function decodeAccounts(dbPath: string): Account[] {
       continue;
     }
 
-    // Find account records
-    let searchPos = 0;
-    const balancePattern = Buffer.from('current_balance');
+    // Try each balance field pattern to find accounts
+    // Some accounts use current_balance, others use original_current_balance
+    for (const {
+      pattern: balancePattern,
+      length: balanceFieldLength,
+    } of ACCOUNT_BALANCE_PATTERNS) {
+      let searchPos = 0;
 
-    let idx = data.indexOf(balancePattern, searchPos);
-    while (idx !== -1) {
-      searchPos = idx + 1;
+      let idx = data.indexOf(balancePattern, searchPos);
+      while (idx !== -1) {
+        searchPos = idx + 1;
 
-      // Use wider window to capture all account fields
-      const recordStart = Math.max(0, idx - 2500);
-      const recordEnd = Math.min(data.length, idx + 2500);
-      const record = data.subarray(recordStart, recordEnd);
+        // Use large window to capture all account fields
+        // Some accounts (like brokerage) can span 6000+ bytes due to embedded images/data
+        const recordStart = Math.max(0, idx - 6500);
+        const recordEnd = Math.min(data.length, idx + 6500);
+        const record = data.subarray(recordStart, recordEnd);
 
-      // Calculate balance position within window based on original position
-      const balanceIdx = idx - recordStart;
-      const balance = extractDoubleValue(record, balanceIdx + 15);
+        // Calculate balance position within window based on original position
+        const balanceIdx = idx - recordStart;
+        const balance = extractDoubleValue(record, balanceIdx + balanceFieldLength);
 
-      if (balance !== null) {
-        // Search for fields after the balance position to avoid finding data from previous records
-        const afterBalance = record.subarray(balanceIdx);
+        if (balance !== null) {
+          // Search for fields after the balance position first (most common case)
+          // If not found, also check before the balance (for brokerage accounts like Schwab
+          // where fields like name/mask come before original_current_balance)
+          const afterBalance = record.subarray(balanceIdx);
+          const beforeBalance = record.subarray(0, balanceIdx + balanceFieldLength);
 
-        const name = extractStringValue(afterBalance, fieldPattern('name'));
-        const officialName = extractStringValue(afterBalance, fieldPattern('official_name'));
-        const accountType = extractStringValue(afterBalance, fieldPattern('type'));
-        const subtype = extractStringValue(afterBalance, fieldPattern('subtype'));
-        const mask = extractStringValue(afterBalance, fieldPattern('mask'));
-        const institutionName = extractStringValue(afterBalance, fieldPattern('institution_name'));
+          // Try after first, then before
+          const name =
+            extractStringValue(afterBalance, fieldPattern('name')) ||
+            extractStringValue(beforeBalance, fieldPattern('name'));
+          const officialName =
+            extractStringValue(afterBalance, fieldPattern('official_name')) ||
+            extractStringValue(beforeBalance, fieldPattern('official_name'));
+          const accountType =
+            extractStringValue(afterBalance, fieldPattern('type')) ||
+            extractStringValue(beforeBalance, fieldPattern('type')) ||
+            extractStringValue(beforeBalance, fieldPattern('original_type'));
+          const subtype =
+            extractStringValue(afterBalance, fieldPattern('subtype')) ||
+            extractStringValue(beforeBalance, fieldPattern('subtype')) ||
+            extractStringValue(beforeBalance, fieldPattern('original_subtype'));
+          const mask =
+            extractStringValue(afterBalance, fieldPattern('mask')) ||
+            extractStringValue(beforeBalance, fieldPattern('mask'));
+          const institutionName =
+            extractStringValue(afterBalance, fieldPattern('institution_name')) ||
+            extractStringValue(beforeBalance, fieldPattern('institution_name'));
 
-        // Additional account fields
-        const itemId = extractStringValue(afterBalance, fieldPattern('item_id'));
-        const availableBalance = extractDoubleField(
-          afterBalance,
-          fieldPattern('available_balance')
-        );
-        const isoCurrencyCode = extractStringValue(afterBalance, fieldPattern('iso_currency_code'));
-        const institutionId = extractStringValue(afterBalance, fieldPattern('institution_id'));
+          // Additional account fields
+          const itemId =
+            extractStringValue(afterBalance, fieldPattern('item_id')) ||
+            extractStringValue(beforeBalance, fieldPattern('item_id'));
+          const availableBalance =
+            extractDoubleField(afterBalance, fieldPattern('available_balance')) ??
+            extractDoubleField(beforeBalance, fieldPattern('available_balance'));
+          const isoCurrencyCode =
+            extractStringValue(afterBalance, fieldPattern('iso_currency_code')) ||
+            extractStringValue(beforeBalance, fieldPattern('iso_currency_code'));
+          const institutionId =
+            extractStringValue(afterBalance, fieldPattern('institution_id')) ||
+            extractStringValue(beforeBalance, fieldPattern('institution_id'));
 
-        // Try account_id first, then fall back to 'id' field
-        let accountId = extractStringValue(afterBalance, fieldPattern('account_id'));
-        if (!accountId) {
-          accountId = extractStringValue(afterBalance, fieldPattern('id'));
-        }
+          // Try account_id first, then fall back to 'id' field
+          let accountId =
+            extractStringValue(afterBalance, fieldPattern('account_id')) ||
+            extractStringValue(beforeBalance, fieldPattern('account_id'));
+          if (!accountId) {
+            accountId =
+              extractStringValue(afterBalance, fieldPattern('id')) ||
+              extractStringValue(beforeBalance, fieldPattern('id'));
+          }
 
-        // If still no account ID, try extracting from /accounts/ path (search before balance)
-        if (!accountId) {
-          const beforeBalance = record.subarray(0, balanceIdx);
-          const accountsPathIdx = beforeBalance.lastIndexOf(Buffer.from('/accounts/'));
-          if (accountsPathIdx !== -1) {
-            // Extract ID after /accounts/
-            const afterPath = beforeBalance.subarray(accountsPathIdx + 10, accountsPathIdx + 60);
-            const match = afterPath.toString('utf-8').match(/^([a-zA-Z0-9_-]+)/);
-            // Only use as ID if it looks like a valid ID (not a field name)
-            // Valid IDs are usually 20+ chars with mixed case/numbers
-            if (match?.[1] && match[1].length >= 15 && /[A-Z]/.test(match[1])) {
-              accountId = match[1];
+          // If still no account ID, try extracting from /accounts/ path
+          if (!accountId) {
+            const accountsPathIdx = beforeBalance.lastIndexOf(Buffer.from('/accounts/'));
+            if (accountsPathIdx !== -1) {
+              // Extract ID after /accounts/
+              const afterPath = beforeBalance.subarray(accountsPathIdx + 10, accountsPathIdx + 60);
+              // Match alphanumeric ID, but stop at known field names that might be adjacent
+              const match = afterPath
+                .toString('utf-8')
+                .match(/^([a-zA-Z0-9_-]+?)(?:current_balance|original_|balance|name|mask|type|$)/);
+              // Only use as ID if it looks like a valid ID (not a field name)
+              // Valid IDs are usually 15+ chars with mixed case/numbers
+              if (match?.[1] && match[1].length >= 15 && /[A-Z]/.test(match[1])) {
+                accountId = match[1];
+              }
+            }
+          }
+
+          // Skip if we've already seen this account ID (from a different balance pattern)
+          if (accountId && seenAccountIds.has(accountId)) {
+            idx = data.indexOf(balancePattern, searchPos);
+            continue;
+          }
+
+          if (accountId && (name || officialName)) {
+            // Mark this account ID as seen
+            seenAccountIds.add(accountId);
+
+            try {
+              // Build account object with optional fields
+              const accData: {
+                account_id: string;
+                current_balance: number;
+                name?: string;
+                official_name?: string;
+                account_type?: string;
+                subtype?: string;
+                mask?: string;
+                institution_name?: string;
+                item_id?: string;
+                available_balance?: number;
+                iso_currency_code?: string;
+                institution_id?: string;
+              } = {
+                account_id: accountId,
+                current_balance: balance,
+              };
+
+              if (name) accData.name = name;
+              if (officialName) accData.official_name = officialName;
+              if (accountType) accData.account_type = accountType;
+              if (subtype) accData.subtype = subtype;
+              if (mask) accData.mask = mask;
+              if (institutionName) accData.institution_name = institutionName;
+              if (itemId) accData.item_id = itemId;
+              if (availableBalance !== null) accData.available_balance = availableBalance;
+              if (isoCurrencyCode) accData.iso_currency_code = isoCurrencyCode;
+              if (institutionId) accData.institution_id = institutionId;
+
+              // Validate with Zod
+              const account = AccountSchema.parse(accData);
+              accounts.push(account);
+            } catch {
+              // Skip invalid accounts
             }
           }
         }
 
-        if (accountId && (name || officialName)) {
-          try {
-            // Build account object with optional fields
-            const accData: {
-              account_id: string;
-              current_balance: number;
-              name?: string;
-              official_name?: string;
-              account_type?: string;
-              subtype?: string;
-              mask?: string;
-              institution_name?: string;
-              item_id?: string;
-              available_balance?: number;
-              iso_currency_code?: string;
-              institution_id?: string;
-            } = {
-              account_id: accountId,
-              current_balance: balance,
-            };
-
-            if (name) accData.name = name;
-            if (officialName) accData.official_name = officialName;
-            if (accountType) accData.account_type = accountType;
-            if (subtype) accData.subtype = subtype;
-            if (mask) accData.mask = mask;
-            if (institutionName) accData.institution_name = institutionName;
-            if (itemId) accData.item_id = itemId;
-            if (availableBalance !== null) accData.available_balance = availableBalance;
-            if (isoCurrencyCode) accData.iso_currency_code = isoCurrencyCode;
-            if (institutionId) accData.institution_id = institutionId;
-
-            // Validate with Zod
-            const account = AccountSchema.parse(accData);
-            accounts.push(account);
-          } catch {
-            // Skip invalid accounts
-          }
-        }
+        idx = data.indexOf(balancePattern, searchPos);
       }
-
-      idx = data.indexOf(balancePattern, searchPos);
     }
   }
 
