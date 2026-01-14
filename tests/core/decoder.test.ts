@@ -5,7 +5,12 @@
  */
 
 import { describe, test, expect, afterEach } from 'bun:test';
-import { decodeTransactions, decodeAccounts, decodeRecurring } from '../../src/core/decoder.js';
+import {
+  decodeTransactions,
+  decodeAccounts,
+  decodeRecurring,
+  decodeCategories,
+} from '../../src/core/decoder.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -68,6 +73,15 @@ const tempDirs = [
   'inactive-recurring-db',
   'multi-recurring-files-db',
   'dev-log-recurring-db',
+  // Category test directories
+  'empty-category-db',
+  'no-category-db',
+  'complete-category-db',
+  'minimal-category-db',
+  'short-id-category-db',
+  'dedup-category-db',
+  'multi-category-files-db',
+  'no-name-category-db',
 ];
 
 function cleanupTempFixtures() {
@@ -1191,6 +1205,176 @@ describe('Decoder Main Functions', () => {
 
       expect(result).toEqual([]);
       expect(warnCalled).toBe(true);
+    });
+  });
+
+  describe('decodeCategories', () => {
+    test('returns empty array for non-existent path', () => {
+      const result = decodeCategories('/nonexistent/path/that/does/not/exist');
+      expect(result).toEqual([]);
+    });
+
+    test('returns empty array for file instead of directory', () => {
+      const tempFile = path.join(__dirname, '../fixtures/test-file2.txt');
+      fs.mkdirSync(path.dirname(tempFile), { recursive: true });
+      fs.writeFileSync(tempFile, 'test');
+
+      const result = decodeCategories(tempFile);
+      expect(result).toEqual([]);
+    });
+
+    test('returns empty array for directory without .ldb files', () => {
+      const tempDir = path.join(__dirname, '../fixtures/empty-category-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const result = decodeCategories(tempDir);
+      expect(result).toEqual([]);
+    });
+
+    test('skips files without category markers', () => {
+      const tempDir = path.join(__dirname, '../fixtures/no-category-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      // Create .ldb file without category data
+      const ldbFile = path.join(tempDir, 'test.ldb');
+      fs.writeFileSync(ldbFile, Buffer.from('random data here'));
+
+      const result = decodeCategories(tempDir);
+      expect(result).toEqual([]);
+    });
+
+    test('extracts category with all fields', () => {
+      const tempDir = path.join(__dirname, '../fixtures/complete-category-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const ldbFile = path.join(tempDir, 'test.ldb');
+      const data = Buffer.concat([
+        Buffer.from('/users/user123/categories/TestCategory1234567'),
+        Buffer.alloc(20), // Padding
+        createStringField('name', 'Restaurants'),
+        createStringField('emoji', '🍕'),
+        createStringField('color', '#FF5733'),
+        createStringField('bg_color', '#FFFFFF'),
+        createStringField('parent_category_id', 'parent123456789'),
+        createBooleanField('excluded', false),
+        createBooleanField('is_other', false),
+      ]);
+      fs.writeFileSync(ldbFile, data);
+
+      const result = decodeCategories(tempDir);
+      expect(result.length).toBe(1);
+      expect(result[0].category_id).toBe('TestCategory1234567');
+      expect(result[0].name).toBe('Restaurants');
+      expect(result[0].emoji).toBe('🍕');
+      expect(result[0].color).toBe('#FF5733');
+      expect(result[0].bg_color).toBe('#FFFFFF');
+      expect(result[0].parent_category_id).toBe('parent123456789');
+    });
+
+    test('extracts category with minimal fields', () => {
+      const tempDir = path.join(__dirname, '../fixtures/minimal-category-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const ldbFile = path.join(tempDir, 'test.ldb');
+      const data = Buffer.concat([
+        Buffer.from('/users/user123/categories/MinimalCategory12'),
+        Buffer.alloc(20), // Padding
+        createStringField('name', 'Groceries'),
+      ]);
+      fs.writeFileSync(ldbFile, data);
+
+      const result = decodeCategories(tempDir);
+      expect(result.length).toBe(1);
+      expect(result[0].category_id).toBe('MinimalCategory12');
+      expect(result[0].name).toBe('Groceries');
+    });
+
+    test('skips categories with short IDs', () => {
+      const tempDir = path.join(__dirname, '../fixtures/short-id-category-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const ldbFile = path.join(tempDir, 'test.ldb');
+      const data = Buffer.concat([
+        Buffer.from('/users/user123/categories/short'), // ID too short (< 15 chars)
+        Buffer.alloc(20),
+        createStringField('name', 'Invalid Category'),
+      ]);
+      fs.writeFileSync(ldbFile, data);
+
+      const result = decodeCategories(tempDir);
+      expect(result).toEqual([]);
+    });
+
+    test('skips categories without name', () => {
+      const tempDir = path.join(__dirname, '../fixtures/no-name-category-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const ldbFile = path.join(tempDir, 'test.ldb');
+      const data = Buffer.concat([
+        Buffer.from('/users/user123/categories/NoNameCategory123'),
+        Buffer.alloc(20),
+        createStringField('emoji', '🍕'), // Has emoji but no name
+        createStringField('color', '#FF5733'),
+      ]);
+      fs.writeFileSync(ldbFile, data);
+
+      const result = decodeCategories(tempDir);
+      expect(result).toEqual([]);
+    });
+
+    test('deduplicates categories by ID', () => {
+      const tempDir = path.join(__dirname, '../fixtures/dedup-category-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const createCat = (id: string, name: string) =>
+        Buffer.concat([
+          Buffer.from(`/users/user123/categories/${id}`),
+          Buffer.alloc(20),
+          createStringField('name', name),
+        ]);
+
+      // Create file with duplicate category IDs
+      const ldbFile = path.join(tempDir, 'test.ldb');
+      const data = Buffer.concat([
+        createCat('DuplicateCategory1', 'First Category'),
+        Buffer.alloc(50),
+        createCat('DuplicateCategory1', 'First Category Duplicate'),
+      ]);
+      fs.writeFileSync(ldbFile, data);
+
+      const result = decodeCategories(tempDir);
+      expect(result.length).toBe(1);
+      expect(result[0].name).toBe('First Category'); // First one wins
+    });
+
+    test('handles multiple .ldb files for categories', () => {
+      const tempDir = path.join(__dirname, '../fixtures/multi-category-files-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const createCat = (id: string, name: string) =>
+        Buffer.concat([
+          Buffer.from(`/users/user123/categories/${id}`),
+          Buffer.alloc(20),
+          createStringField('name', name),
+        ]);
+
+      fs.writeFileSync(path.join(tempDir, 'file1.ldb'), createCat('Category123456781', 'Food'));
+      fs.writeFileSync(
+        path.join(tempDir, 'file2.ldb'),
+        createCat('Category123456782', 'Transportation')
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'file3.ldb'),
+        createCat('Category123456783', 'Entertainment')
+      );
+
+      const result = decodeCategories(tempDir);
+      expect(result.length).toBe(3);
+      // Results should be sorted by name
+      const names = result.map((c) => c.name);
+      expect(names).toContain('Food');
+      expect(names).toContain('Transportation');
+      expect(names).toContain('Entertainment');
     });
   });
 });

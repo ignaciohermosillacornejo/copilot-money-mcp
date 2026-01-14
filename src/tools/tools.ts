@@ -273,6 +273,7 @@ export function normalizeMerchantName(name: string): string {
  */
 export class CopilotMoneyTools {
   private db: CopilotDatabase;
+  private _userCategoryMap: Map<string, string> | null = null;
 
   /**
    * Initialize tools with a database connection.
@@ -281,6 +282,32 @@ export class CopilotMoneyTools {
    */
   constructor(database: CopilotDatabase) {
     this.db = database;
+  }
+
+  /**
+   * Get the user-defined category name map.
+   *
+   * This map contains custom category names defined by the user in Copilot Money,
+   * which take precedence over the standard Plaid category names.
+   *
+   * @returns Map from category_id to category name
+   */
+  private getUserCategoryMap(): Map<string, string> {
+    if (this._userCategoryMap === null) {
+      this._userCategoryMap = this.db.getCategoryNameMap();
+    }
+    return this._userCategoryMap;
+  }
+
+  /**
+   * Get category name with user-defined categories taking precedence.
+   *
+   * @param categoryId - The category ID to look up
+   * @returns Human-readable category name
+   */
+  private resolveCategoryName(categoryId: string | undefined): string {
+    if (!categoryId) return 'Unknown';
+    return getCategoryName(categoryId, this.getUserCategoryMap());
   }
 
   /**
@@ -389,7 +416,9 @@ export class CopilotMoneyTools {
         transactions: [
           {
             ...found,
-            category_name: found.category_id ? getCategoryName(found.category_id) : undefined,
+            category_name: found.category_id
+              ? this.resolveCategoryName(found.category_id)
+              : undefined,
             normalized_merchant: normalizeMerchantName(getTransactionDisplayName(found)),
           },
         ],
@@ -495,7 +524,7 @@ export class CopilotMoneyTools {
     // Add human-readable category names and normalized merchant
     const enrichedTransactions = transactions.map((txn) => ({
       ...txn,
-      category_name: txn.category_id ? getCategoryName(txn.category_id) : undefined,
+      category_name: txn.category_id ? this.resolveCategoryName(txn.category_id) : undefined,
       normalized_merchant: normalizeMerchantName(getTransactionDisplayName(txn)),
     }));
 
@@ -800,7 +829,7 @@ export class CopilotMoneyTools {
         const categories = Array.from(categorySpending.entries())
           .map(([category_id, data]) => ({
             category_id,
-            category_name: getCategoryName(category_id),
+            category_name: this.resolveCategoryName(category_id),
             total_spending: roundAmount(data.total),
             transaction_count: data.count,
           }))
@@ -837,7 +866,7 @@ export class CopilotMoneyTools {
         const merchants = Array.from(merchantSpending.entries())
           .map(([merchant, data]) => ({
             merchant,
-            category_name: data.categoryId ? getCategoryName(data.categoryId) : undefined,
+            category_name: data.categoryId ? this.resolveCategoryName(data.categoryId) : undefined,
             total_spending: roundAmount(data.total),
             transaction_count: data.count,
             average_transaction: roundAmount(data.total / data.count),
@@ -1212,7 +1241,7 @@ export class CopilotMoneyTools {
 
         const feesByType = new Map<string, { count: number; total: number }>();
         for (const t of feeTxns) {
-          const type = getCategoryName(t.category_id || 'unknown_fee');
+          const type = this.resolveCategoryName(t.category_id || 'unknown_fee');
           const existing = feesByType.get(type) || { count: 0, total: 0 };
           existing.count++;
           existing.total += t.amount;
@@ -1302,7 +1331,7 @@ export class CopilotMoneyTools {
 
           return {
             budget_id: budget.budget_id,
-            category: getCategoryName(categoryId || 'Unknown'),
+            category: this.resolveCategoryName(categoryId || 'Unknown'),
             budget_amount: budgetAmount,
             spent: roundAmount(spent),
             remaining: roundAmount(budgetAmount - spent),
@@ -1387,7 +1416,7 @@ export class CopilotMoneyTools {
             if (utilization >= threshold_percentage) {
               return {
                 budget_id: budget.budget_id,
-                category: getCategoryName(categoryId || 'Unknown'),
+                category: this.resolveCategoryName(categoryId || 'Unknown'),
                 budget_amount: budgetAmount,
                 spent: roundAmount(spent),
                 utilization_percent: roundAmount(utilization),
@@ -1429,8 +1458,8 @@ export class CopilotMoneyTools {
           if (!budgetedCategories.has(cat) && spent > budget_recommendation_threshold) {
             recommendations.push({
               type: 'new_budget',
-              category: getCategoryName(cat),
-              message: `Consider creating a budget for ${getCategoryName(cat)} - you spent $${Math.round(spent)} this month`,
+              category: this.resolveCategoryName(cat),
+              message: `Consider creating a budget for ${this.resolveCategoryName(cat)} - you spent $${Math.round(spent)} this month`,
               suggested_amount: roundAmount(spent * 1.1),
             });
           }
@@ -2001,7 +2030,7 @@ export class CopilotMoneyTools {
     // Add human-readable category names
     const enrichedTransactions = transactions.map((txn) => ({
       ...txn,
-      category_name: txn.category_id ? getCategoryName(txn.category_id) : undefined,
+      category_name: txn.category_id ? this.resolveCategoryName(txn.category_id) : undefined,
     }));
 
     return {
@@ -2096,7 +2125,7 @@ export class CopilotMoneyTools {
     const categories = Array.from(categorySpending.entries())
       .map(([category_id, total_spending]) => ({
         category_id,
-        category_name: getCategoryName(category_id),
+        category_name: this.resolveCategoryName(category_id),
         total_spending: roundAmount(total_spending),
         transaction_count: categoryCounts.get(category_id) || 0,
       }))
@@ -2298,7 +2327,7 @@ export class CopilotMoneyTools {
         const categories = Array.from(categoryStats.entries())
           .map(([category_id, stats]) => ({
             category_id,
-            category_name: getCategoryName(category_id),
+            category_name: this.resolveCategoryName(category_id),
             transaction_count: stats.count,
             total_amount: roundAmount(stats.totalAmount),
           }))
@@ -2519,7 +2548,7 @@ export class CopilotMoneyTools {
           frequency,
           confidence,
           confidence_reason: confidenceReasons.join(', '),
-          category_name: data.categoryId ? getCategoryName(data.categoryId) : undefined,
+          category_name: data.categoryId ? this.resolveCategoryName(data.categoryId) : undefined,
           last_date: lastTxn.date,
           next_expected_date: nextExpectedDate,
           transactions: sortedTxns.slice(-5).map((t) => ({
@@ -2569,7 +2598,7 @@ export class CopilotMoneyTools {
           frequency: rec.frequency,
           next_date: rec.next_date,
           last_date: rec.last_date,
-          category_name: rec.category_id ? getCategoryName(rec.category_id) : undefined,
+          category_name: rec.category_id ? this.resolveCategoryName(rec.category_id) : undefined,
           is_active: rec.is_active,
         }));
       }
@@ -2639,7 +2668,7 @@ export class CopilotMoneyTools {
         amount: b.amount,
         period: b.period,
         category_id: b.category_id,
-        category_name: b.category_id ? getCategoryName(b.category_id) : undefined,
+        category_name: b.category_id ? this.resolveCategoryName(b.category_id) : undefined,
         start_date: b.start_date,
         end_date: b.end_date,
         is_active: b.is_active,
@@ -3211,7 +3240,7 @@ export class CopilotMoneyTools {
     const incomeBySource = Array.from(sourceMap.entries())
       .map(([source, data]) => ({
         source,
-        category_name: data.categoryId ? getCategoryName(data.categoryId) : undefined,
+        category_name: data.categoryId ? this.resolveCategoryName(data.categoryId) : undefined,
         total: roundAmount(data.total),
         count: data.count,
       }))
@@ -3223,7 +3252,7 @@ export class CopilotMoneyTools {
     // Enrich transactions with category names
     const enrichedTransactions = incomeTransactions.slice(0, 100).map((txn) => ({
       ...txn,
-      category_name: txn.category_id ? getCategoryName(txn.category_id) : undefined,
+      category_name: txn.category_id ? this.resolveCategoryName(txn.category_id) : undefined,
     }));
 
     return {
@@ -3306,7 +3335,7 @@ export class CopilotMoneyTools {
     const merchants = Array.from(merchantSpending.entries())
       .map(([merchant, data]) => ({
         merchant,
-        category_name: data.categoryId ? getCategoryName(data.categoryId) : undefined,
+        category_name: data.categoryId ? this.resolveCategoryName(data.categoryId) : undefined,
         total_spending: roundAmount(data.total),
         transaction_count: data.count,
         average_transaction: roundAmount(data.total / data.count),
@@ -3499,7 +3528,7 @@ export class CopilotMoneyTools {
 
     const enrichedTransactions = foreignTxns.slice(0, limit).map((txn) => ({
       ...txn,
-      category_name: txn.category_id ? getCategoryName(txn.category_id) : undefined,
+      category_name: txn.category_id ? this.resolveCategoryName(txn.category_id) : undefined,
       normalized_merchant: normalizeMerchantName(getTransactionDisplayName(txn)),
     }));
 
@@ -3585,7 +3614,7 @@ export class CopilotMoneyTools {
 
     const enrichedTransactions = refundTxns.slice(0, limit).map((txn) => ({
       ...txn,
-      category_name: txn.category_id ? getCategoryName(txn.category_id) : undefined,
+      category_name: txn.category_id ? this.resolveCategoryName(txn.category_id) : undefined,
     }));
 
     return {
@@ -3816,7 +3845,7 @@ export class CopilotMoneyTools {
 
     const enrichedTransactions = creditTxns.slice(0, limit).map((txn) => ({
       ...txn,
-      category_name: txn.category_id ? getCategoryName(txn.category_id) : undefined,
+      category_name: txn.category_id ? this.resolveCategoryName(txn.category_id) : undefined,
       credit_type: getCreditType(txn),
     }));
 
@@ -4052,7 +4081,7 @@ export class CopilotMoneyTools {
               for (const t of tripTxns) {
                 if (t.amount > 0) {
                   totalSpent += t.amount;
-                  const cat = getCategoryName(getCategoryIdOrDefault(t.category_id));
+                  const cat = this.resolveCategoryName(getCategoryIdOrDefault(t.category_id));
                   categoryTotals.set(cat, (categoryTotals.get(cat) || 0) + t.amount);
                 }
               }
@@ -4101,7 +4130,7 @@ export class CopilotMoneyTools {
           for (const t of tripTxns) {
             if (t.amount > 0) {
               totalSpent += t.amount;
-              const cat = getCategoryName(getCategoryIdOrDefault(t.category_id));
+              const cat = this.resolveCategoryName(getCategoryIdOrDefault(t.category_id));
               categoryTotals.set(cat, (categoryTotals.get(cat) || 0) + t.amount);
             }
           }
@@ -4163,7 +4192,7 @@ export class CopilotMoneyTools {
       found: true,
       transaction: {
         ...txn,
-        category_name: txn.category_id ? getCategoryName(txn.category_id) : undefined,
+        category_name: txn.category_id ? this.resolveCategoryName(txn.category_id) : undefined,
         normalized_merchant: normalizeMerchantName(getTransactionDisplayName(txn)),
       },
     };
@@ -4253,7 +4282,7 @@ export class CopilotMoneyTools {
         average_transaction: roundAmount(stats.total / stats.count),
         first_transaction: stats.firstDate,
         last_transaction: stats.lastDate,
-        category_name: stats.categoryId ? getCategoryName(stats.categoryId) : undefined,
+        category_name: stats.categoryId ? this.resolveCategoryName(stats.categoryId) : undefined,
       }))
       .sort((a, b) => b.total_spent - a.total_spent)
       .slice(0, limit)
@@ -4414,7 +4443,7 @@ export class CopilotMoneyTools {
       if (isAnomaly) {
         anomalies.push({
           ...txn,
-          category_name: txn.category_id ? getCategoryName(txn.category_id) : undefined,
+          category_name: txn.category_id ? this.resolveCategoryName(txn.category_id) : undefined,
           anomaly_reason: reason,
           expected_amount: expected ? roundAmount(expected) : undefined,
           deviation_percent: deviation,
@@ -4468,7 +4497,7 @@ export class CopilotMoneyTools {
     // Enrich with category names
     const enriched = transactions.map((txn) => ({
       ...txn,
-      category_name: txn.category_id ? getCategoryName(txn.category_id) : '',
+      category_name: txn.category_id ? this.resolveCategoryName(txn.category_id) : '',
       normalized_merchant: normalizeMerchantName(getTransactionDisplayName(txn)),
     }));
 
@@ -4654,7 +4683,7 @@ export class CopilotMoneyTools {
       by_category: byCategory,
       transactions: hsaEligible.slice(0, 100).map((txn) => ({
         ...txn,
-        category_name: txn.category_id ? getCategoryName(txn.category_id) : undefined,
+        category_name: txn.category_id ? this.resolveCategoryName(txn.category_id) : undefined,
         eligibility_reason: getEligibilityReason(txn),
       })),
     };
@@ -4975,7 +5004,7 @@ export class CopilotMoneyTools {
     for (const txn of allTransactions) {
       if (!txn.category_id) continue;
 
-      const categoryName = getCategoryName(txn.category_id);
+      const categoryName = this.resolveCategoryName(txn.category_id);
 
       // Check if category is unresolved (no mapping exists or returns the ID itself)
       const isUnresolved =
@@ -5143,7 +5172,7 @@ export class CopilotMoneyTools {
 
     for (const txn of allTransactions) {
       const merchant = getTransactionDisplayName(txn).toUpperCase();
-      const categoryName = txn.category_id ? getCategoryName(txn.category_id) : 'Unknown';
+      const categoryName = txn.category_id ? this.resolveCategoryName(txn.category_id) : 'Unknown';
 
       // Uber categorized as Parking
       if (merchant.includes('UBER') && categoryName.includes('Parking')) {
@@ -5277,7 +5306,7 @@ export class CopilotMoneyTools {
     for (const txn of allTransactions) {
       const absAmount = Math.abs(txn.amount);
       const merchant = getTransactionDisplayName(txn);
-      const categoryName = txn.category_id ? getCategoryName(txn.category_id) : 'Unknown';
+      const categoryName = txn.category_id ? this.resolveCategoryName(txn.category_id) : 'Unknown';
 
       if (absAmount >= UNREALISTIC_AMOUNT_THRESHOLD) {
         // Unrealistic amounts (>= $1,000,000) - almost certainly data errors
@@ -5482,7 +5511,7 @@ export class CopilotMoneyTools {
 
         return {
           category_id: categoryId,
-          category_name: getCategoryName(categoryId),
+          category_name: this.resolveCategoryName(categoryId),
           period1_spending: roundAmount(p1Spending),
           period2_spending: roundAmount(p2Spending),
           change: roundAmount(change),
@@ -6297,7 +6326,7 @@ export class CopilotMoneyTools {
       if (groupBy === 'merchant') {
         key = t.name ? normalizeMerchantName(t.name) : 'Unknown';
       } else {
-        key = getCategoryName(getCategoryIdOrDefault(t.category_id));
+        key = this.resolveCategoryName(getCategoryIdOrDefault(t.category_id));
       }
 
       let group = groupMap.get(key);
@@ -6476,7 +6505,7 @@ export class CopilotMoneyTools {
       }
 
       trends.push({
-        category: getCategoryName(catId),
+        category: this.resolveCategoryName(catId),
         category_id: catId,
         current_amount: roundAmount(currentAmount),
         previous_amount: previousAmount !== null ? roundAmount(previousAmount) : null,
@@ -6747,7 +6776,7 @@ export class CopilotMoneyTools {
 
       return {
         budget_id: b.budget_id,
-        category: getCategoryName(categoryId),
+        category: this.resolveCategoryName(categoryId),
         category_id: categoryId,
         budget_amount: roundAmount(budgetAmount),
         spent_amount: roundAmount(spent),
@@ -6914,7 +6943,7 @@ export class CopilotMoneyTools {
       const consistencyScore = avgActual > 0 ? Math.max(0, 100 - (stdDev / avgActual) * 100) : 100;
 
       return {
-        category: getCategoryName(catId),
+        category: this.resolveCategoryName(catId),
         category_id: catId,
         avg_budgeted: roundAmount(avgBudgeted),
         avg_actual: roundAmount(avgActual),
@@ -7071,7 +7100,7 @@ export class CopilotMoneyTools {
       }
 
       recommendations.push({
-        category: getCategoryName(catId),
+        category: this.resolveCategoryName(catId),
         category_id: catId,
         current_budget: currentBudget,
         recommended_budget: recommendedBudget,
@@ -7096,7 +7125,7 @@ export class CopilotMoneyTools {
         if (avgSpending >= 50) {
           // Only suggest for significant spending
           newBudgetSuggestions.push({
-            category: getCategoryName(catId),
+            category: this.resolveCategoryName(catId),
             category_id: catId,
             avg_spending: roundAmount(avgSpending),
             suggested_budget: roundAmount(avgSpending * 1.1),
@@ -7257,7 +7286,7 @@ export class CopilotMoneyTools {
 
       alerts.push({
         budget_id: b.budget_id,
-        category: getCategoryName(categoryId),
+        category: this.resolveCategoryName(categoryId),
         category_id: categoryId,
         alert_type: alertType,
         budget_amount: roundAmount(budgetAmount),
@@ -9413,7 +9442,7 @@ export class CopilotMoneyTools {
 
       categoryComparison.push({
         category_id: catId,
-        category_name: getCategoryName(catId),
+        category_name: this.resolveCategoryName(catId),
         current_amount: roundAmount(currentAmt),
         compare_amount: roundAmount(compareAmt),
         change_amount: roundAmount(changeAmt),
@@ -9650,7 +9679,7 @@ export class CopilotMoneyTools {
         amount: roundAmount(r.transaction.amount),
         name: r.transaction.name || r.transaction.original_name || 'Unknown',
         category_id: r.transaction.category_id,
-        category_name: getCategoryName(getCategoryIdOrDefault(r.transaction.category_id)),
+        category_name: this.resolveCategoryName(getCategoryIdOrDefault(r.transaction.category_id)),
         account_id: r.transaction.account_id,
         city: r.transaction.city,
         match_score: roundAmount(r.score),
