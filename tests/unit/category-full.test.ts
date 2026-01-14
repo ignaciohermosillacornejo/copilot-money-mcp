@@ -172,6 +172,21 @@ describe('isCategoryType', () => {
     // Unknown categories default to expense check
     expect(isCategoryType('unknown_expense', 'expense')).toBe(true);
   });
+
+  test('handles unknown income category with fallback', () => {
+    // Unknown category starting with 'income' should be considered income
+    expect(isCategoryType('income_unknown_source', 'income')).toBe(true);
+    // The fallback logic only checks prefix when matching that specific type
+    // For expense check on unknown categories, it defaults to true
+    expect(isCategoryType('non_income_unknown', 'income')).toBe(false);
+  });
+
+  test('handles unknown transfer category with fallback', () => {
+    // Unknown category starting with 'transfer' should be considered transfer
+    expect(isCategoryType('transfer_unknown_type', 'transfer')).toBe(true);
+    // Unknown categories default to expense if not income/transfer prefix match
+    expect(isCategoryType('some_random_category', 'expense')).toBe(true);
+  });
 });
 
 describe('getAllCategories', () => {
