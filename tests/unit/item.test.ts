@@ -315,6 +315,26 @@ describe('getItemStatusDescription', () => {
 
     expect(getItemStatusDescription(item)).toBe('Update required');
   });
+
+  test('returns Institution not responding for INSTITUTION_NOT_RESPONDING error', () => {
+    const item: Item = {
+      item_id: 'item_1',
+      error_code: 'INSTITUTION_NOT_RESPONDING',
+    };
+
+    expect(getItemStatusDescription(item)).toBe('Institution not responding');
+  });
+
+  test('returns Update required for needs_update without error codes', () => {
+    const item: Item = {
+      item_id: 'item_1',
+      connection_status: 'active',
+      needs_update: true,
+      error_code: 'ITEM_NO_ERROR', // No actionable error
+    };
+
+    expect(getItemStatusDescription(item)).toBe('Update required');
+  });
 });
 
 describe('getItemAccountCount', () => {

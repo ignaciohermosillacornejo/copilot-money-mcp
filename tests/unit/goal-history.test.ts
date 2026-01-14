@@ -198,6 +198,16 @@ describe('getLatestDailySnapshot', () => {
 
     expect(getLatestDailySnapshot(history)).toBeUndefined();
   });
+
+  test('returns undefined when daily_data is empty object', () => {
+    const history: GoalHistory = {
+      month: '2024-01',
+      goal_id: 'goal_123',
+      daily_data: {},
+    };
+
+    expect(getLatestDailySnapshot(history)).toBeUndefined();
+  });
 });
 
 describe('getMonthStartEnd', () => {
@@ -246,6 +256,42 @@ describe('getMonthStartEnd', () => {
     expect(result.end_amount).toBe(500.0);
     expect(result.change_amount).toBe(500.0);
     expect(result.change_percent).toBeUndefined(); // Can't calculate percent from 0
+  });
+
+  test('returns partial data when start amount is undefined', () => {
+    const history: GoalHistory = {
+      month: '2024-01',
+      goal_id: 'goal_123',
+      daily_data: {
+        '2024-01-01': {}, // No amount
+        '2024-01-31': { amount: 500.0 },
+      },
+    };
+
+    const result = getMonthStartEnd(history);
+
+    expect(result.start_amount).toBeUndefined();
+    expect(result.end_amount).toBe(500.0);
+    expect(result.change_amount).toBeUndefined();
+    expect(result.change_percent).toBeUndefined();
+  });
+
+  test('returns partial data when end amount is undefined', () => {
+    const history: GoalHistory = {
+      month: '2024-01',
+      goal_id: 'goal_123',
+      daily_data: {
+        '2024-01-01': { amount: 100.0 },
+        '2024-01-31': {}, // No amount
+      },
+    };
+
+    const result = getMonthStartEnd(history);
+
+    expect(result.start_amount).toBe(100.0);
+    expect(result.end_amount).toBeUndefined();
+    expect(result.change_amount).toBeUndefined();
+    expect(result.change_percent).toBeUndefined();
   });
 });
 
