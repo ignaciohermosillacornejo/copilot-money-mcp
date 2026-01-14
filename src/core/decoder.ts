@@ -1945,3 +1945,173 @@ export function decodeCategories(dbPath: string): Category[] {
 
   return unique;
 }
+
+/**
+ * User account customization data.
+ *
+ * This represents user-defined account settings stored in the
+ * /users/{user_id}/accounts/{account_id} collection.
+ */
+export interface UserAccountCustomization {
+  account_id: string;
+  name?: string;
+  user_id?: string;
+  hidden?: boolean;
+  order?: number;
+}
+
+/**
+ * Decode user-defined account customizations from the Copilot Money database.
+ *
+ * User account customizations are stored in collection:
+ * /users/{user_id}/accounts/{account_id}
+ *
+ * Each document contains user customizations including:
+ * - name: User-defined account name (e.g., "Chase Sapphire Preferred")
+ * - hidden: Whether the account is hidden from views
+ * - order: Display order preference
+ *
+ * This is separate from raw Plaid account data in /accounts/ which contains
+ * the bank's internal names (e.g., "CHASE CREDIT CRD AUTOPAY").
+ *
+ * @param dbPath - Path to the LevelDB database directory
+ * @returns Array of user account customization objects
+ */
+export function decodeUserAccounts(dbPath: string): UserAccountCustomization[] {
+  const userAccounts: UserAccountCustomization[] = [];
+
+  const isDebug = process.env.NODE_ENV === 'development' || process.env.DEBUG;
+
+  // Return empty array if path doesn't exist (graceful degradation)
+  if (!fs.existsSync(dbPath)) {
+    if (isDebug) {
+      console.warn(`[decodeUserAccounts] Database path does not exist: ${dbPath}`);
+    }
+    return [];
+  }
+
+  let stat;
+  try {
+    stat = fs.statSync(dbPath);
+  } catch (error) {
+    if (isDebug) {
+      console.warn(`[decodeUserAccounts] Failed to stat database path: ${dbPath}`, error);
+    }
+    return [];
+  }
+
+  if (!stat.isDirectory()) {
+    if (isDebug) {
+      console.warn(`[decodeUserAccounts] Path is not a directory: ${dbPath}`);
+    }
+    return [];
+  }
+
+  // Configuration constants for record extraction
+  const RECORD_WINDOW_BEFORE = 500; // Bytes to search before path marker
+  const RECORD_WINDOW_AFTER = 2000; // Bytes to search after path marker
+  const MIN_ACCOUNT_ID_LENGTH = 15; // Minimum length for valid Firestore document IDs
+
+  // Get all .ldb files
+  let files;
+  try {
+    files = fs.readdirSync(dbPath);
+  } catch (error) {
+    if (isDebug) {
+      console.warn(`[decodeUserAccounts] Failed to read directory: ${dbPath}`, error);
+    }
+    return [];
+  }
+  const ldbFiles = files.filter((f) => f.endsWith('.ldb')).map((f) => path.join(dbPath, f));
+
+  // User accounts are in: /users/{user_id}/accounts/{account_id}
+  // We need to find the /accounts/ marker that comes AFTER /users/
+  const usersPathMarker = Buffer.from('/users/');
+
+  for (const filepath of ldbFiles) {
+    let data;
+    try {
+      data = fs.readFileSync(filepath);
+    } catch (error) {
+      if (isDebug) {
+        console.warn(`[decodeUserAccounts] Failed to read file: ${filepath}`, error);
+      }
+      continue;
+    }
+
+    // Quick check: file must contain /users/ to have user account data
+    if (!data.includes(usersPathMarker)) {
+      continue;
+    }
+
+    // Find user account records by searching for /users/.../accounts/ pattern
+    let searchPos = 0;
+    let idx = data.indexOf(usersPathMarker, searchPos);
+
+    while (idx !== -1) {
+      searchPos = idx + 1;
+
+      // Use a window around the users path marker
+      const recordStart = Math.max(0, idx - RECORD_WINDOW_BEFORE);
+      const recordEnd = Math.min(data.length, idx + RECORD_WINDOW_AFTER);
+      const record = data.subarray(recordStart, recordEnd);
+
+      // Calculate position within the window
+      const pathIdx = idx - recordStart;
+      const afterUsers = record.subarray(pathIdx);
+
+      // Look for /users/{user_id}/accounts/{account_id} pattern
+      const pathMatch = afterUsers
+        .toString('utf-8')
+        .match(/^\/users\/([a-zA-Z0-9_-]+)\/accounts\/([a-zA-Z0-9_-]+)/);
+
+      if (pathMatch) {
+        const userId = pathMatch[1];
+        const accountId = pathMatch[2];
+
+        // Validate account ID length (Firestore IDs are typically 20+ chars)
+        if (accountId && accountId.length >= MIN_ACCOUNT_ID_LENGTH) {
+          // Calculate where to start searching for fields
+          const fullPathLength = pathMatch[0].length;
+          const afterAccountId = record.subarray(pathIdx + fullPathLength);
+
+          // Extract user-defined account name
+          const name = extractStringValue(afterAccountId, fieldPattern('name'));
+          const hidden = extractBooleanValue(afterAccountId, fieldPattern('hidden'));
+          const order = extractDoubleField(afterAccountId, fieldPattern('order'));
+
+          // Build user account object - include even if name is undefined
+          // (the account_id mapping is still useful for other customizations)
+          const userAccountData: UserAccountCustomization = {
+            account_id: accountId,
+          };
+
+          if (name) userAccountData.name = name;
+          if (userId) userAccountData.user_id = userId;
+          if (hidden !== null) userAccountData.hidden = hidden;
+          if (order !== null) userAccountData.order = order;
+
+          // Only add if we have a name (the primary use case for this function)
+          if (name) {
+            userAccounts.push(userAccountData);
+          }
+        }
+      }
+
+      idx = data.indexOf(usersPathMarker, searchPos);
+    }
+  }
+
+  // Deduplicate by account_id (keep first occurrence which has most recent data)
+  const seen = new Set<string>();
+  const unique: UserAccountCustomization[] = [];
+
+  for (const userAccount of userAccounts) {
+    if (!seen.has(userAccount.account_id)) {
+      seen.add(userAccount.account_id);
+      unique.push(userAccount);
+    }
+  }
+
+  return unique;
+}

@@ -274,6 +274,7 @@ export function normalizeMerchantName(name: string): string {
 export class CopilotMoneyTools {
   private db: CopilotDatabase;
   private _userCategoryMap: Map<string, string> | null = null;
+  private _userAccountMap: Map<string, string> | null = null;
 
   /**
    * Initialize tools with a database connection.
@@ -300,6 +301,21 @@ export class CopilotMoneyTools {
   }
 
   /**
+   * Get the user-defined account name map.
+   *
+   * This map contains custom account names defined by the user in Copilot Money,
+   * which take precedence over the bank's internal account names.
+   *
+   * @returns Map from account_id to user-defined account name
+   */
+  private getUserAccountMap(): Map<string, string> {
+    if (this._userAccountMap === null) {
+      this._userAccountMap = this.db.getAccountNameMap();
+    }
+    return this._userAccountMap;
+  }
+
+  /**
    * Get category name with user-defined categories taking precedence.
    *
    * @param categoryId - The category ID to look up
@@ -308,6 +324,31 @@ export class CopilotMoneyTools {
   private resolveCategoryName(categoryId: string | undefined): string {
     if (!categoryId) return 'Unknown';
     return getCategoryName(categoryId, this.getUserCategoryMap());
+  }
+
+  /**
+   * Get account name with user-defined names taking precedence.
+   *
+   * Checks user-defined account names first (e.g., "Chase Sapphire Preferred"),
+   * then falls back to the account's own name/official_name from the bank
+   * (e.g., "CHASE CREDIT CRD AUTOPAY").
+   *
+   * @param account - The account object to get a display name for
+   * @returns Human-readable account name
+   */
+  private resolveAccountName(account: {
+    account_id: string;
+    name?: string;
+    official_name?: string;
+  }): string {
+    // Check user-defined name first (highest priority)
+    const userAccountMap = this.getUserAccountMap();
+    const userName = userAccountMap.get(account.account_id);
+    if (userName) {
+      return userName;
+    }
+    // Fall back to the account's own name/official_name
+    return account.name ?? account.official_name ?? 'Unknown';
   }
 
   /**
@@ -1119,7 +1160,7 @@ export class CopilotMoneyTools {
 
           activityData.push({
             account_id: account.account_id,
-            account_name: account.name || account.official_name || 'Unknown',
+            account_name: this.resolveAccountName(account),
             account_type: account.account_type,
             transaction_count: count,
             total_inflow: roundAmount(totalInflow),
@@ -1195,7 +1236,7 @@ export class CopilotMoneyTools {
 
           return {
             account_id: account.account_id,
-            account_name: account.name || account.official_name || 'Unknown',
+            account_name: this.resolveAccountName(account),
             current_balance: account.current_balance,
             monthly_data: monthlyArray,
             overall_trend: overallTrend,
@@ -2170,7 +2211,7 @@ export class CopilotMoneyTools {
 
     return {
       account_id: account.account_id,
-      name: account.name || account.official_name || 'Unknown',
+      name: this.resolveAccountName(account),
       account_type: account.account_type,
       subtype: account.subtype,
       current_balance: account.current_balance,
@@ -5132,7 +5173,7 @@ export class CopilotMoneyTools {
     >();
 
     for (const account of allAccounts) {
-      const accountName = account.name || account.official_name || 'Unknown';
+      const accountName = this.resolveAccountName(account);
       const accountType = account.account_type || 'unknown';
       const key = `${accountName}|${accountType}`;
       const existing = accountsByNameAndType.get(key) || [];
@@ -7379,7 +7420,7 @@ export class CopilotMoneyTools {
     // Build account allocation
     const byAccount = investmentAccounts.map((a) => ({
       account_id: a.account_id,
-      account_name: a.name || a.official_name || 'Unknown',
+      account_name: this.resolveAccountName(a),
       institution: a.institution_name || 'Unknown',
       balance: roundAmount(a.current_balance || 0),
       percentage:
@@ -8871,12 +8912,12 @@ export class CopilotMoneyTools {
 
       if (count > highestCount) {
         highestCount = count;
-        mostActiveAccount = account.name || account.official_name || 'Unknown';
+        mostActiveAccount = this.resolveAccountName(account);
       }
 
       activityData.push({
         account_id: account.account_id,
-        account_name: account.name || account.official_name || 'Unknown',
+        account_name: this.resolveAccountName(account),
         account_type: account.account_type,
         institution: account.institution_name,
         transaction_count: count,
@@ -9048,7 +9089,7 @@ export class CopilotMoneyTools {
 
       trendData.push({
         account_id: account.account_id,
-        account_name: account.name || account.official_name || 'Unknown',
+        account_name: this.resolveAccountName(account),
         current_balance: account.current_balance,
         trend_data: trends,
         overall_trend: overallTrend,
@@ -9196,7 +9237,7 @@ export class CopilotMoneyTools {
         name: t.name || t.original_name || 'Unknown',
         fee_type: classifyFeeType(t),
         account_id: t.account_id,
-        account_name: account?.name || account?.official_name,
+        account_name: account ? this.resolveAccountName(account) : undefined,
       };
     });
 

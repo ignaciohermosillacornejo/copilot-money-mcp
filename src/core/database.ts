@@ -19,6 +19,8 @@ import {
   decodeInvestmentSplits,
   decodeItems,
   decodeCategories,
+  decodeUserAccounts,
+  UserAccountCustomization,
 } from './decoder.js';
 import {
   Account,
@@ -118,6 +120,8 @@ export class CopilotDatabase {
   private _goals: Goal[] | null = null;
   private _userCategories: Category[] | null = null;
   private _categoryNameMap: Map<string, string> | null = null;
+  private _userAccounts: UserAccountCustomization[] | null = null;
+  private _accountNameMap: Map<string, string> | null = null;
 
   /**
    * Initialize database connection.
@@ -471,6 +475,52 @@ export class CopilotDatabase {
     }
 
     this._categoryNameMap = nameMap;
+    return nameMap;
+  }
+
+  /**
+   * Get user-defined account customizations from Firestore.
+   *
+   * These are user settings for accounts stored in the Copilot Money app,
+   * stored in /users/{user_id}/accounts/{account_id}.
+   *
+   * This includes user-defined account names (e.g., "Chase Sapphire Preferred")
+   * which override the bank's internal names (e.g., "CHASE CREDIT CRD AUTOPAY").
+   *
+   * @returns List of user account customizations
+   */
+  getUserAccounts(): UserAccountCustomization[] {
+    // Lazy load user accounts
+    if (this._userAccounts === null) {
+      this._userAccounts = decodeUserAccounts(this.requireDbPath());
+    }
+    return [...this._userAccounts];
+  }
+
+  /**
+   * Build a map of account ID to user-defined account name.
+   *
+   * This map can be used to look up user-friendly account names.
+   * The map is cached after the first call.
+   *
+   * @returns Map from account_id to user-defined account name
+   */
+  getAccountNameMap(): Map<string, string> {
+    // Return cached map if available
+    if (this._accountNameMap !== null) {
+      return this._accountNameMap;
+    }
+
+    const userAccounts = this.getUserAccounts();
+    const nameMap = new Map<string, string>();
+
+    for (const userAccount of userAccounts) {
+      if (userAccount.name) {
+        nameMap.set(userAccount.account_id, userAccount.name);
+      }
+    }
+
+    this._accountNameMap = nameMap;
     return nameMap;
   }
 

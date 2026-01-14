@@ -10,6 +10,7 @@ import {
   decodeAccounts,
   decodeRecurring,
   decodeCategories,
+  decodeUserAccounts,
 } from '../../src/core/decoder.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -1375,6 +1376,186 @@ describe('Decoder Main Functions', () => {
       expect(names).toContain('Food');
       expect(names).toContain('Transportation');
       expect(names).toContain('Entertainment');
+    });
+  });
+
+  describe('decodeUserAccounts', () => {
+    test('returns empty array for non-existent path', () => {
+      const result = decodeUserAccounts('/nonexistent/path/that/does/not/exist');
+      expect(result).toEqual([]);
+    });
+
+    test('returns empty array for file instead of directory', () => {
+      const tempFile = path.join(__dirname, '../fixtures/user-account-test-file.txt');
+      fs.mkdirSync(path.dirname(tempFile), { recursive: true });
+      fs.writeFileSync(tempFile, 'test');
+
+      const result = decodeUserAccounts(tempFile);
+      expect(result).toEqual([]);
+    });
+
+    test('returns empty array for directory without .ldb files', () => {
+      const tempDir = path.join(__dirname, '../fixtures/empty-user-account-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const result = decodeUserAccounts(tempDir);
+      expect(result).toEqual([]);
+    });
+
+    test('skips files without /users/ markers', () => {
+      const tempDir = path.join(__dirname, '../fixtures/no-user-account-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      // Create .ldb file without user account data
+      const ldbFile = path.join(tempDir, 'test.ldb');
+      fs.writeFileSync(ldbFile, Buffer.from('random data here'));
+
+      const result = decodeUserAccounts(tempDir);
+      expect(result).toEqual([]);
+    });
+
+    test('extracts user account with all fields', () => {
+      const tempDir = path.join(__dirname, '../fixtures/complete-user-account-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const ldbFile = path.join(tempDir, 'test.ldb');
+      const data = Buffer.concat([
+        Buffer.from('/users/user123/accounts/TestAccount1234567'),
+        Buffer.alloc(20), // Padding
+        createStringField('name', 'Chase Sapphire Preferred'),
+        createBooleanField('hidden', false),
+      ]);
+      fs.writeFileSync(ldbFile, data);
+
+      const result = decodeUserAccounts(tempDir);
+      expect(result.length).toBe(1);
+      expect(result[0].account_id).toBe('TestAccount1234567');
+      expect(result[0].name).toBe('Chase Sapphire Preferred');
+      expect(result[0].hidden).toBe(false);
+    });
+
+    test('extracts user account with minimal fields', () => {
+      const tempDir = path.join(__dirname, '../fixtures/minimal-user-account-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const ldbFile = path.join(tempDir, 'test.ldb');
+      const data = Buffer.concat([
+        Buffer.from('/users/user123/accounts/MinimalAccount12'),
+        Buffer.alloc(20), // Padding
+        createStringField('name', 'My Checking Account'),
+      ]);
+      fs.writeFileSync(ldbFile, data);
+
+      const result = decodeUserAccounts(tempDir);
+      expect(result.length).toBe(1);
+      expect(result[0].account_id).toBe('MinimalAccount12');
+      expect(result[0].name).toBe('My Checking Account');
+    });
+
+    test('skips accounts with short IDs', () => {
+      const tempDir = path.join(__dirname, '../fixtures/short-id-user-account-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const ldbFile = path.join(tempDir, 'test.ldb');
+      const data = Buffer.concat([
+        Buffer.from('/users/user123/accounts/short'), // ID too short (< 15 chars)
+        Buffer.alloc(20),
+        createStringField('name', 'Invalid Account'),
+      ]);
+      fs.writeFileSync(ldbFile, data);
+
+      const result = decodeUserAccounts(tempDir);
+      expect(result).toEqual([]);
+    });
+
+    test('skips accounts without name', () => {
+      const tempDir = path.join(__dirname, '../fixtures/no-name-user-account-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const ldbFile = path.join(tempDir, 'test.ldb');
+      const data = Buffer.concat([
+        Buffer.from('/users/user123/accounts/NoNameAccount1234'),
+        Buffer.alloc(20),
+        createBooleanField('hidden', true), // Has hidden but no name
+      ]);
+      fs.writeFileSync(ldbFile, data);
+
+      const result = decodeUserAccounts(tempDir);
+      expect(result).toEqual([]);
+    });
+
+    test('deduplicates accounts by ID', () => {
+      const tempDir = path.join(__dirname, '../fixtures/dedup-user-account-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const createAcc = (id: string, name: string) =>
+        Buffer.concat([
+          Buffer.from(`/users/user123/accounts/${id}`),
+          Buffer.alloc(20),
+          createStringField('name', name),
+        ]);
+
+      // Create file with duplicate account IDs
+      const ldbFile = path.join(tempDir, 'test.ldb');
+      const data = Buffer.concat([
+        createAcc('DuplicateAccount1', 'First Name'),
+        Buffer.alloc(50),
+        createAcc('DuplicateAccount1', 'Second Name'),
+      ]);
+      fs.writeFileSync(ldbFile, data);
+
+      const result = decodeUserAccounts(tempDir);
+      expect(result.length).toBe(1);
+      expect(result[0].name).toBe('First Name'); // First one wins
+    });
+
+    test('handles multiple .ldb files for user accounts', () => {
+      const tempDir = path.join(__dirname, '../fixtures/multi-user-account-files-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const createAcc = (id: string, name: string) =>
+        Buffer.concat([
+          Buffer.from(`/users/user123/accounts/${id}`),
+          Buffer.alloc(20),
+          createStringField('name', name),
+        ]);
+
+      fs.writeFileSync(
+        path.join(tempDir, 'file1.ldb'),
+        createAcc('Account12345678901', 'Checking Account')
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'file2.ldb'),
+        createAcc('Account12345678902', 'Savings Account')
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'file3.ldb'),
+        createAcc('Account12345678903', 'Credit Card')
+      );
+
+      const result = decodeUserAccounts(tempDir);
+      expect(result.length).toBe(3);
+      const names = result.map((a) => a.name);
+      expect(names).toContain('Checking Account');
+      expect(names).toContain('Savings Account');
+      expect(names).toContain('Credit Card');
+    });
+
+    test('extracts user_id from path', () => {
+      const tempDir = path.join(__dirname, '../fixtures/user-id-user-account-db');
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const ldbFile = path.join(tempDir, 'test.ldb');
+      const data = Buffer.concat([
+        Buffer.from('/users/myUserId12345/accounts/AccountId12345678'),
+        Buffer.alloc(20),
+        createStringField('name', 'Test Account'),
+      ]);
+      fs.writeFileSync(ldbFile, data);
+
+      const result = decodeUserAccounts(tempDir);
+      expect(result.length).toBe(1);
+      expect(result[0].user_id).toBe('myUserId12345');
     });
   });
 });
