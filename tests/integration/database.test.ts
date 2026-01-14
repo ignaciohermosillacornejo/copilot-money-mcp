@@ -12,10 +12,11 @@ import { CopilotDatabase } from '../../src/core/database.js';
 import type { Transaction, Account } from '../../src/models/index.js';
 
 // Mock transactions for testing
+// Standard accounting: negative = expenses, positive = income
 const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn1',
-    amount: 50.0,
+    amount: -50.0, // Expense
     date: '2025-01-15',
     name: 'Starbucks',
     category_id: 'food_dining',
@@ -23,7 +24,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn2',
-    amount: 15.5,
+    amount: -15.5, // Expense
     date: '2025-01-10',
     name: 'Starbucks Coffee',
     category_id: 'food_dining',
@@ -31,7 +32,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn3',
-    amount: 120.0,
+    amount: -120.0, // Expense
     date: '2025-01-08',
     name: 'Whole Foods',
     category_id: 'groceries',
@@ -39,7 +40,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn4',
-    amount: 8.0,
+    amount: -8.0, // Expense
     date: '2025-01-05',
     name: 'Starbucks',
     category_id: 'food_dining',
@@ -47,7 +48,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn5',
-    amount: 250.0,
+    amount: -250.0, // Expense
     date: '2024-12-20',
     name: 'Target',
     category_id: 'shopping',
@@ -127,13 +128,19 @@ describe('CopilotDatabase Integration', () => {
     });
 
     test('filters transactions by amount range', () => {
+      // Amount filtering uses absolute values (magnitude)
+      // minAmount: 10 matches |amount| >= 10: all except Starbucks (-8.0)
+      // maxAmount: 20 matches |amount| <= 20: Starbucks (-8.0), Starbucks Coffee (-15.5)
+      // Combined: only Starbucks Coffee (-15.5) matches
       const txns = db.getTransactions({
         minAmount: 10.0,
         maxAmount: 20.0,
         limit: 100,
       });
 
-      expect(txns.every((txn) => txn.amount >= 10.0 && txn.amount <= 20.0)).toBe(true);
+      expect(
+        txns.every((txn) => Math.abs(txn.amount) >= 10.0 && Math.abs(txn.amount) <= 20.0)
+      ).toBe(true);
     });
 
     test('filters transactions by category', () => {
@@ -170,7 +177,8 @@ describe('CopilotDatabase Integration', () => {
 
       for (const txn of txns) {
         expect(txn.date >= '2025-01-01' && txn.date <= '2025-12-31').toBe(true);
-        expect(txn.amount >= 5.0).toBe(true);
+        // Amount filtering uses absolute values (magnitude)
+        expect(Math.abs(txn.amount) >= 5.0).toBe(true);
         expect(txn.category_id && txn.category_id.toLowerCase().includes('food')).toBe(true);
       }
     });

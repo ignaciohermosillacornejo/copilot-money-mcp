@@ -853,8 +853,8 @@ export class CopilotMoneyTools {
       );
     }
 
-    // Only consider expenses (positive amounts)
-    const expenses = transactions.filter((txn) => txn.amount > 0);
+    // Only consider expenses (negative amounts in standard accounting)
+    const expenses = transactions.filter((txn) => txn.amount < 0);
 
     switch (group_by) {
       case 'category': {
@@ -862,7 +862,7 @@ export class CopilotMoneyTools {
         for (const txn of expenses) {
           const cat = getCategoryIdOrDefault(txn.category_id);
           const existing = categorySpending.get(cat) || { total: 0, count: 0 };
-          existing.total += txn.amount;
+          existing.total += Math.abs(txn.amount);
           existing.count++;
           categorySpending.set(cat, existing);
         }
@@ -899,7 +899,7 @@ export class CopilotMoneyTools {
             count: 0,
             categoryId: txn.category_id,
           };
-          existing.total += txn.amount;
+          existing.total += Math.abs(txn.amount);
           existing.count++;
           merchantSpending.set(merchantName, existing);
         }
@@ -941,12 +941,12 @@ export class CopilotMoneyTools {
         for (const txn of expenses) {
           const dayOfWeek = new Date(txn.date + 'T12:00:00').getDay();
           const existing = daySpending.get(dayOfWeek) || { total: 0, count: 0 };
-          existing.total += txn.amount;
+          existing.total += Math.abs(txn.amount);
           existing.count++;
           daySpending.set(dayOfWeek, existing);
         }
 
-        const totalSpending = expenses.reduce((sum, txn) => sum + txn.amount, 0);
+        const totalSpending = expenses.reduce((sum, txn) => sum + Math.abs(txn.amount), 0);
 
         const days = dayNames.map((name, index) => {
           const data = daySpending.get(index) || { total: 0, count: 0 };
@@ -995,7 +995,7 @@ export class CopilotMoneyTools {
           }
 
           const p = periodMap.get(periodKey)!;
-          p.total += txn.amount;
+          p.total += Math.abs(txn.amount);
           p.count++;
         }
 
@@ -1048,7 +1048,7 @@ export class CopilotMoneyTools {
           daysInPeriod
         );
 
-        const totalSpending = expenses.reduce((sum, txn) => sum + txn.amount, 0);
+        const totalSpending = expenses.reduce((sum, txn) => sum + Math.abs(txn.amount), 0);
         const dailyAverage = daysElapsed > 0 ? totalSpending / daysElapsed : 0;
         const weeklyAverage = dailyAverage * 7;
         const projectedMonthlyTotal = dailyAverage * 30;
@@ -1266,12 +1266,13 @@ export class CopilotMoneyTools {
           'late_fee',
           '10000000',
         ];
+        // Fees are expenses (negative amounts in standard accounting)
         const feeTxns = periodTransactions.filter((t) => {
           const isFeeCategory =
             t.category_id &&
             feeCategories.some((fc) => t.category_id!.toLowerCase().includes(fc.toLowerCase()));
           const isFeeName = getTransactionDisplayName(t).toLowerCase().includes('fee');
-          return (isFeeCategory || isFeeName) && t.amount > 0;
+          return (isFeeCategory || isFeeName) && t.amount < 0;
         });
 
         if (account_id) {
@@ -1285,7 +1286,7 @@ export class CopilotMoneyTools {
           const type = this.resolveCategoryName(t.category_id || 'unknown_fee');
           const existing = feesByType.get(type) || { count: 0, total: 0 };
           existing.count++;
-          existing.total += t.amount;
+          existing.total += Math.abs(t.amount);
           feesByType.set(type, existing);
         }
 
@@ -1297,7 +1298,7 @@ export class CopilotMoneyTools {
           }))
           .sort((a, b) => b.total - a.total);
 
-        const totalFees = feeTxns.reduce((sum, t) => sum + t.amount, 0);
+        const totalFees = feeTxns.reduce((sum, t) => sum + Math.abs(t.amount), 0);
 
         return {
           analysis,
@@ -1361,12 +1362,13 @@ export class CopilotMoneyTools {
       case 'utilization': {
         const utilizationData = budgets.map((budget) => {
           const categoryId = budget.category_id;
+          // Expenses are negative amounts in standard accounting
           const spent = transactions
             .filter(
               (t) =>
-                t.amount > 0 && t.category_id === categoryId && !isTransferCategory(t.category_id)
+                t.amount < 0 && t.category_id === categoryId && !isTransferCategory(t.category_id)
             )
-            .reduce((sum, t) => sum + t.amount, 0);
+            .reduce((sum, t) => sum + Math.abs(t.amount), 0);
           const budgetAmount = budget.amount || 0;
           const utilization = budgetAmount > 0 ? (spent / budgetAmount) * 100 : 0;
 
@@ -1423,9 +1425,10 @@ export class CopilotMoneyTools {
             endDate: monthEndDate,
             limit: 50000,
           });
+          // Expenses are negative amounts in standard accounting
           const actual = monthTxns
-            .filter((t) => t.amount > 0 && !isTransferCategory(t.category_id))
-            .reduce((sum, t) => sum + t.amount, 0);
+            .filter((t) => t.amount < 0 && !isTransferCategory(t.category_id))
+            .reduce((sum, t) => sum + Math.abs(t.amount), 0);
 
           const budgeted = budgets.reduce((sum, b) => sum + (b.amount || 0), 0);
 
@@ -1448,9 +1451,10 @@ export class CopilotMoneyTools {
         const alerts = budgets
           .map((budget) => {
             const categoryId = budget.category_id;
+            // Expenses are negative amounts in standard accounting
             const spent = transactions
-              .filter((t) => t.amount > 0 && t.category_id === categoryId)
-              .reduce((sum, t) => sum + t.amount, 0);
+              .filter((t) => t.amount < 0 && t.category_id === categoryId)
+              .reduce((sum, t) => sum + Math.abs(t.amount), 0);
             const budgetAmount = budget.amount || 0;
             const utilization = budgetAmount > 0 ? (spent / budgetAmount) * 100 : 0;
 
@@ -1485,11 +1489,12 @@ export class CopilotMoneyTools {
         }> = [];
 
         // Check for categories with spending but no budget
+        // Expenses are negative amounts in standard accounting
         const spendingByCategory = new Map<string, number>();
         for (const t of transactions) {
-          if (t.amount > 0 && !isTransferCategory(t.category_id)) {
+          if (t.amount < 0 && !isTransferCategory(t.category_id)) {
             const cat = getCategoryIdOrDefault(t.category_id);
-            spendingByCategory.set(cat, (spendingByCategory.get(cat) || 0) + t.amount);
+            spendingByCategory.set(cat, (spendingByCategory.get(cat) || 0) + Math.abs(t.amount));
           }
         }
 
@@ -1882,6 +1887,7 @@ export class CopilotMoneyTools {
           endDate: end_date,
           limit: 50000,
         });
+        // Fees are expenses (negative amounts in standard accounting)
         const feeTxns = transactions.filter((t) => {
           const name = getTransactionDisplayName(t).toLowerCase();
           const isFee =
@@ -1895,17 +1901,17 @@ export class CopilotMoneyTools {
           const isInvestmentAccount =
             txnAccount?.account_type?.toLowerCase().includes('investment') ||
             txnAccount?.subtype?.toLowerCase().includes('brokerage');
-          return isFee && t.amount > 0 && accountMatch && isInvestmentAccount;
+          return isFee && t.amount < 0 && accountMatch && isInvestmentAccount;
         });
 
-        const totalFees = feeTxns.reduce((sum, t) => sum + t.amount, 0);
+        const totalFees = feeTxns.reduce((sum, t) => sum + Math.abs(t.amount), 0);
 
         return {
           analysis,
           period: { start_date, end_date },
           data: feeTxns.map((t) => ({
             date: t.date,
-            amount: roundAmount(t.amount),
+            amount: roundAmount(Math.abs(t.amount)),
             description: getTransactionDisplayName(t),
           })),
           summary: {
@@ -1961,14 +1967,15 @@ export class CopilotMoneyTools {
       endDate: end_date,
       limit: 50000,
     });
-    const expenses = transactions.filter((t) => t.amount > 0 && !isTransferCategory(t.category_id));
+    // Expenses are negative amounts in standard accounting
+    const expenses = transactions.filter((t) => t.amount < 0 && !isTransferCategory(t.category_id));
 
     const merchantData = new Map<string, { total: number; count: number; dates: string[] }>();
 
     for (const t of expenses) {
       const merchant = normalizeMerchantName(getTransactionDisplayName(t));
       const existing = merchantData.get(merchant) || { total: 0, count: 0, dates: [] };
-      existing.total += t.amount;
+      existing.total += Math.abs(t.amount);
       existing.count++;
       existing.dates.push(t.date);
       merchantData.set(merchant, existing);
@@ -2135,10 +2142,11 @@ export class CopilotMoneyTools {
     }
 
     // Get transactions with filters
+    // Note: Don't pass minAmount to database since expenses are negative
+    // We'll filter by absolute amount after selecting expenses
     let transactions = this.db.getTransactions({
       startDate: start_date,
       endDate: end_date,
-      minAmount: min_amount,
       limit: 50000, // High limit for aggregation
     });
 
@@ -2150,14 +2158,16 @@ export class CopilotMoneyTools {
     }
 
     // Aggregate by category (always exclude internal transfers from spending)
+    // Expenses are negative amounts in standard accounting
     const categorySpending: Map<string, number> = new Map();
     const categoryCounts: Map<string, number> = new Map();
 
     for (const txn of transactions) {
-      // Only count positive amounts (expenses), skip internal transfers
-      if (txn.amount > 0 && !txn.internal_transfer) {
+      // Only count negative amounts (expenses), skip internal transfers
+      // Also apply min_amount filter on absolute value
+      if (txn.amount < 0 && !txn.internal_transfer && Math.abs(txn.amount) >= min_amount) {
         const cat = getCategoryIdOrDefault(txn.category_id);
-        categorySpending.set(cat, (categorySpending.get(cat) || 0) + txn.amount);
+        categorySpending.set(cat, (categorySpending.get(cat) || 0) + Math.abs(txn.amount));
         categoryCounts.set(cat, (categoryCounts.get(cat) || 0) + 1);
       }
     }
@@ -3175,7 +3185,11 @@ export class CopilotMoneyTools {
   }
 
   /**
-   * Get income transactions (negative amounts or income categories).
+   * Get income transactions (positive amounts or income categories).
+   *
+   * With standard accounting sign convention:
+   * - Positive amounts = income/credits (money coming IN)
+   * - Negative amounts = expenses (money going OUT)
    *
    * @param options - Filter options
    * @returns Object with income breakdown
@@ -3212,7 +3226,7 @@ export class CopilotMoneyTools {
       limit: 50000,
     });
 
-    // Filter for income (negative amounts or income categories)
+    // Filter for income (positive amounts or income categories)
     // But exclude transfers, credit card payments, and likely refunds
     const incomeTransactions = allTransactions.filter((txn) => {
       // Exclude transfers and credit card payments
@@ -3240,9 +3254,9 @@ export class CopilotMoneyTools {
         return true;
       }
 
-      // Include negative amounts (income/credits) but try to exclude obvious refunds
-      // Refunds are often from merchants where we also have positive transactions
-      if (txn.amount < 0) {
+      // Include positive amounts (income/credits) but try to exclude obvious refunds
+      // Refunds are often small positive amounts from retail merchants
+      if (txn.amount > 0) {
         // Exclude small refunds from common merchants (likely just refunds, not income)
         const isLikelyRefund =
           (merchant.includes('AMAZON') ||
@@ -3254,7 +3268,7 @@ export class CopilotMoneyTools {
             merchant.includes('SPOTIFY') ||
             merchant.includes('APPLE.COM') ||
             merchant.includes('GOOGLE')) &&
-          Math.abs(txn.amount) < refund_threshold; // Small amounts from these merchants are likely refunds
+          txn.amount < refund_threshold; // Small positive amounts from these merchants are likely refunds
 
         return !isLikelyRefund;
       }
@@ -3352,14 +3366,15 @@ export class CopilotMoneyTools {
     }
 
     // Aggregate by merchant (always exclude internal transfers from spending)
+    // Expenses are negative amounts in standard accounting
     const merchantSpending = new Map<
       string,
       { total: number; count: number; categoryId?: string }
     >();
 
     for (const txn of transactions) {
-      // Only count positive amounts (expenses), skip internal transfers
-      if (txn.amount <= 0 || txn.internal_transfer) continue;
+      // Only count negative amounts (expenses), skip internal transfers
+      if (txn.amount >= 0 || txn.internal_transfer) continue;
 
       const merchantName = getTransactionDisplayName(txn);
       const existing = merchantSpending.get(merchantName) || {
@@ -3367,7 +3382,7 @@ export class CopilotMoneyTools {
         count: 0,
         categoryId: txn.category_id,
       };
-      existing.total += txn.amount;
+      existing.total += Math.abs(txn.amount);
       existing.count++;
       merchantSpending.set(merchantName, existing);
     }
@@ -3614,9 +3629,9 @@ export class CopilotMoneyTools {
       limit: 50000,
     });
 
-    // Refunds are negative amounts (credits) that are not transfers/income
+    // Refunds are positive amounts (credits/money coming back) that are not transfers/income
     const refundTxns = allTransactions.filter((txn) => {
-      if (txn.amount >= 0) return false; // Must be a credit
+      if (txn.amount <= 0) return false; // Must be a credit (positive = money in)
       if (isTransferCategory(txn.category_id)) return false;
       if (isIncomeCategory(txn.category_id)) return false;
 
@@ -3826,7 +3841,7 @@ export class CopilotMoneyTools {
       limit: 50000,
     });
 
-    // Credits are negative amounts that look like statement credits
+    // Keywords that indicate statement credits (positive amounts with these keywords)
     const creditKeywords = [
       'credit',
       'cashback',
@@ -3841,8 +3856,9 @@ export class CopilotMoneyTools {
       'digital entertainment',
     ];
 
+    // Credits are positive amounts (money coming back) that are not regular income
     const creditTxns = allTransactions.filter((txn) => {
-      if (txn.amount >= 0) return false; // Must be negative (credit)
+      if (txn.amount <= 0) return false; // Must be positive (credit = money coming in)
       if (isTransferCategory(txn.category_id)) return false;
       if (isIncomeCategory(txn.category_id)) return false;
 
@@ -4119,11 +4135,12 @@ export class CopilotMoneyTools {
             if (duration >= min_days) {
               const categoryTotals = new Map<string, number>();
               let totalSpent = 0;
+              // Expenses are negative amounts in standard accounting
               for (const t of tripTxns) {
-                if (t.amount > 0) {
-                  totalSpent += t.amount;
+                if (t.amount < 0) {
+                  totalSpent += Math.abs(t.amount);
                   const cat = this.resolveCategoryName(getCategoryIdOrDefault(t.category_id));
-                  categoryTotals.set(cat, (categoryTotals.get(cat) || 0) + t.amount);
+                  categoryTotals.set(cat, (categoryTotals.get(cat) || 0) + Math.abs(t.amount));
                 }
               }
 
@@ -4168,11 +4185,12 @@ export class CopilotMoneyTools {
         if (duration >= min_days) {
           const categoryTotals = new Map<string, number>();
           let totalSpent = 0;
+          // Expenses are negative amounts in standard accounting
           for (const t of tripTxns) {
-            if (t.amount > 0) {
-              totalSpent += t.amount;
+            if (t.amount < 0) {
+              totalSpent += Math.abs(t.amount);
               const cat = this.resolveCategoryName(getCategoryIdOrDefault(t.category_id));
-              categoryTotals.set(cat, (categoryTotals.get(cat) || 0) + t.amount);
+              categoryTotals.set(cat, (categoryTotals.get(cat) || 0) + Math.abs(t.amount));
             }
           }
 
@@ -4653,8 +4671,9 @@ export class CopilotMoneyTools {
       'physical therapy',
     ];
 
+    // HSA/FSA eligible transactions are expenses (negative amounts) for medical services
     const hsaEligible = transactions.filter((txn) => {
-      if (txn.amount <= 0) return false;
+      if (txn.amount >= 0) return false; // Must be an expense (negative)
 
       // Check category
       const isMedicalCategory =
@@ -4797,9 +4816,10 @@ export class CopilotMoneyTools {
     );
 
     // Always exclude internal transfers from spending calculations
+    // Expenses are negative amounts in standard accounting
     const totalSpending = transactions
-      .filter((txn) => txn.amount > 0 && !txn.internal_transfer)
-      .reduce((sum, txn) => sum + txn.amount, 0);
+      .filter((txn) => txn.amount < 0 && !txn.internal_transfer)
+      .reduce((sum, txn) => sum + Math.abs(txn.amount), 0);
 
     const dailyAverage = daysElapsed > 0 ? totalSpending / daysElapsed : 0;
     const weeklyAverage = dailyAverage * 7;
@@ -4811,7 +4831,7 @@ export class CopilotMoneyTools {
       { start: string; end: string; total: number; days: number }
     >();
     for (const txn of transactions) {
-      if (txn.amount <= 0 || txn.internal_transfer) continue;
+      if (txn.amount >= 0 || txn.internal_transfer) continue;
       const txnDate = new Date(txn.date + 'T12:00:00');
       const weekStart = new Date(txnDate);
       weekStart.setDate(txnDate.getDate() - txnDate.getDay());
@@ -4825,7 +4845,7 @@ export class CopilotMoneyTools {
         total: 0,
         days: 7,
       };
-      existing.total += txn.amount;
+      existing.total += Math.abs(txn.amount);
       weeklyTotals.set(weekKey, existing);
     }
 
@@ -4855,9 +4875,10 @@ export class CopilotMoneyTools {
       prevTransactions = prevTransactions.filter((txn) => !isTransferCategory(txn.category_id));
     }
 
+    // Expenses are negative amounts in standard accounting
     const previousPeriodTotal = prevTransactions
-      .filter((txn) => txn.amount > 0)
-      .reduce((sum, txn) => sum + txn.amount, 0);
+      .filter((txn) => txn.amount < 0)
+      .reduce((sum, txn) => sum + Math.abs(txn.amount), 0);
 
     const changePercent =
       previousPeriodTotal > 0
@@ -5509,14 +5530,15 @@ export class CopilotMoneyTools {
       let income = 0;
       const byCategory = new Map<string, number>();
 
+      // Standard accounting: negative = expenses, positive = income
       for (const txn of transactions) {
         // Always exclude internal transfers from spending calculations
-        if (txn.amount > 0 && !txn.internal_transfer) {
-          spending += txn.amount;
+        if (txn.amount < 0 && !txn.internal_transfer) {
+          spending += Math.abs(txn.amount);
           const cat = getCategoryIdOrDefault(txn.category_id);
-          byCategory.set(cat, (byCategory.get(cat) || 0) + txn.amount);
-        } else if (txn.amount < 0) {
-          income += Math.abs(txn.amount);
+          byCategory.set(cat, (byCategory.get(cat) || 0) + Math.abs(txn.amount));
+        } else if (txn.amount > 0) {
+          income += txn.amount;
         }
       }
 
@@ -9412,15 +9434,16 @@ export class CopilotMoneyTools {
     const compareTxns = filterTransactions(transactions, compareStart, compareEnd);
 
     // Calculate totals
+    // Standard accounting: negative = expenses, positive = income
     const calculatePeriodTotals = (txns: Transaction[]) => {
       let spending = 0;
       let income = 0;
 
       for (const t of txns) {
-        if (t.amount > 0) {
-          spending += t.amount;
-        } else {
-          income += Math.abs(t.amount);
+        if (t.amount < 0) {
+          spending += Math.abs(t.amount);
+        } else if (t.amount > 0) {
+          income += t.amount;
         }
       }
 
@@ -9450,12 +9473,13 @@ export class CopilotMoneyTools {
         : null;
 
     // Category comparison
+    // Expenses are negative amounts in standard accounting
     const getCategorySpending = (txns: Transaction[]) => {
       const map = new Map<string, number>();
       for (const t of txns) {
-        if (t.amount > 0) {
+        if (t.amount < 0) {
           const catId = getCategoryIdOrDefault(t.category_id);
-          map.set(catId, (map.get(catId) || 0) + t.amount);
+          map.set(catId, (map.get(catId) || 0) + Math.abs(t.amount));
         }
       }
       return map;
@@ -10562,7 +10586,7 @@ export function createToolSchemas(): ToolSchema[] {
       name: 'get_income',
       description:
         'Get income transactions (deposits, paychecks, refunds). ' +
-        'Filters for negative amounts (credits) or income-related categories. ' +
+        'Filters for positive amounts (credits) or income-related categories. ' +
         'Returns total income and breakdown by source.',
       inputSchema: {
         type: 'object',

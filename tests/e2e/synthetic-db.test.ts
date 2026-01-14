@@ -181,12 +181,15 @@ describe('Synthetic Database E2E Tests', () => {
       expect(result.total_spending).toBeGreaterThan(0);
       expect(result.categories.length).toBeGreaterThan(0);
 
-      // The tool counts positive amounts as "spending"
-      // In our synthetic data, income (3500) and transfer-in (500) are positive
+      // With standard accounting, spending is calculated from negative amounts (expenses)
+      // Income (positive) should NOT appear in spending categories
       const income = result.categories.find((c) => c.category_id === 'income');
-      expect(income).toBeDefined();
-      expect(income?.total_spending).toBe(3500);
-      expect(income?.transaction_count).toBe(1);
+      expect(income).toBeUndefined(); // Income is not spending
+
+      // Food & Dining should be present with actual expense amounts
+      const foodDining = result.categories.find((c) => c.category_id === 'food_dining');
+      expect(foodDining).toBeDefined();
+      expect(foodDining?.total_spending).toBeGreaterThan(0); // 4.5 + 78.5 = 83
     });
 
     test('spending aggregation math is correct', () => {

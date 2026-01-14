@@ -10,11 +10,12 @@ import { CopilotDatabase } from '../../src/core/database.js';
 import type { Transaction, Account, Budget, Goal, GoalHistory } from '../../src/models/index.js';
 
 // Extended mock data for comprehensive testing
+// Standard accounting: negative = expenses, positive = income/credits
 const mockTransactions: Transaction[] = [
-  // Regular expenses
+  // Regular expenses (negative = money out)
   {
     transaction_id: 'txn1',
-    amount: 50.0,
+    amount: -50.0,
     date: '2024-01-15',
     name: 'Coffee Shop',
     category_id: 'food_dining',
@@ -22,7 +23,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn2',
-    amount: 120.5,
+    amount: -120.5,
     date: '2024-01-20',
     name: 'Grocery Store',
     category_id: 'groceries',
@@ -30,25 +31,25 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn3',
-    amount: 25.0,
+    amount: -25.0,
     date: '2024-01-22',
     original_name: 'Fast Food',
     category_id: 'food_dining',
     account_id: 'acc2',
   },
-  // Income
+  // Income (positive = money in)
   {
     transaction_id: 'txn4',
-    amount: -3000.0,
+    amount: 3000.0,
     date: '2024-01-31',
     name: 'Paycheck',
     category_id: 'income',
     account_id: 'acc1',
   },
-  // Foreign transaction
+  // Foreign transaction (expense)
   {
     transaction_id: 'txn_foreign',
-    amount: 75.0,
+    amount: -75.0,
     date: '2024-01-18',
     name: 'Santiago Restaurant CL',
     category_id: 'food_dining',
@@ -56,46 +57,46 @@ const mockTransactions: Transaction[] = [
     country: 'CL',
     iso_currency_code: 'CLP',
   },
-  // Refund
+  // Refund (positive = money in)
   {
     transaction_id: 'txn_refund',
-    amount: -25.0,
+    amount: 25.0,
     date: '2024-01-19',
     name: 'Amazon Refund',
     category_id: 'shopping',
     account_id: 'acc1',
   },
-  // Credit/Cashback
+  // Credit/Cashback (positive = money in)
   {
     transaction_id: 'txn_credit',
-    amount: -15.0,
+    amount: 15.0,
     date: '2024-01-20',
     name: 'Statement Credit Cashback',
     category_id: 'other',
     account_id: 'acc1',
   },
-  // HSA eligible
+  // HSA eligible (expense)
   {
     transaction_id: 'txn_medical',
-    amount: 45.0,
+    amount: -45.0,
     date: '2024-01-21',
     name: 'CVS Pharmacy',
     category_id: 'medical',
     account_id: 'acc1',
   },
-  // Tagged transaction
+  // Tagged transaction (expense)
   {
     transaction_id: 'txn_tagged',
-    amount: 30.0,
+    amount: -30.0,
     date: '2024-01-22',
     name: 'Business Lunch #work #expense',
     category_id: 'food_dining',
     account_id: 'acc1',
   },
-  // Duplicate pattern
+  // Duplicate pattern (expense)
   {
     transaction_id: 'txn_dup1',
-    amount: 99.99,
+    amount: -99.99,
     date: '2024-01-23',
     name: 'Subscription Service',
     category_id: 'subscriptions',
@@ -103,34 +104,34 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn_dup2',
-    amount: 99.99,
+    amount: -99.99,
     date: '2024-01-23',
     name: 'Subscription Service',
     category_id: 'subscriptions',
     account_id: 'acc1',
   },
-  // Fee transaction
+  // Fee transaction (expense)
   {
     transaction_id: 'txn_fee',
-    amount: 5.0,
+    amount: -5.0,
     date: '2024-01-24',
     name: 'ATM Fee',
     category_id: 'bank_fees',
     account_id: 'acc1',
   },
-  // Dividend
+  // Dividend (income)
   {
     transaction_id: 'txn_dividend',
-    amount: -50.0,
+    amount: 50.0,
     date: '2024-01-25',
     name: 'Dividend Payment AAPL',
     category_id: 'investment_dividend',
     account_id: 'acc_invest',
   },
-  // More transactions for time-based analysis
+  // More transactions for time-based analysis (expenses)
   {
     transaction_id: 'txn_week1',
-    amount: 40.0,
+    amount: -40.0,
     date: '2024-01-08',
     name: 'Week 1 Expense',
     category_id: 'food_dining',
@@ -138,7 +139,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn_week2',
-    amount: 60.0,
+    amount: -60.0,
     date: '2024-01-14',
     name: 'Week 2 Expense',
     category_id: 'food_dining',

@@ -9,10 +9,11 @@ import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import type { Transaction, Account } from '../../src/models/index.js';
 
 // Mock data
+// Standard accounting: negative = expenses, positive = income
 const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn1',
-    amount: 50.0,
+    amount: -50.0, // Expense
     date: '2025-01-15',
     name: 'Test Transaction',
     category_id: 'food_dining',

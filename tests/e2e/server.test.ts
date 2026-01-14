@@ -11,10 +11,11 @@ import { CopilotDatabase } from '../../src/core/database.js';
 import type { Transaction, Account } from '../../src/models/index.js';
 
 // Mock data for E2E tests
+// Standard accounting: negative = expenses, positive = income
 const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn1',
-    amount: 50.0,
+    amount: -50.0, // Expense (negative = money out)
     date: '2025-01-15',
     name: 'Coffee Shop',
     category_id: 'food_dining',
@@ -22,7 +23,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn2',
-    amount: 120.5,
+    amount: -120.5, // Expense (negative = money out)
     date: '2025-01-20',
     name: 'Grocery Store',
     category_id: 'groceries',
@@ -30,7 +31,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn3',
-    amount: 10.0,
+    amount: -10.0, // Expense (negative = money out)
     date: '2025-01-15',
     name: 'Parking',
     category_id: 'transportation',
@@ -38,7 +39,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn4',
-    amount: 25.0,
+    amount: -25.0, // Expense (negative = money out)
     date: '2025-01-18',
     name: 'Fast Food',
     category_id: 'food_dining',
@@ -102,6 +103,7 @@ describe('CopilotMoneyServer E2E', () => {
     });
 
     test('get_transactions with all filters', () => {
+      // Amount filtering uses absolute values (magnitude)
       const result = tools.getTransactions({
         start_date: '2025-01-01',
         end_date: '2025-01-31',
@@ -112,7 +114,7 @@ describe('CopilotMoneyServer E2E', () => {
 
       for (const txn of result.transactions) {
         expect(txn.date >= '2025-01-01' && txn.date <= '2025-01-31').toBe(true);
-        expect(txn.amount >= 5.0 && txn.amount <= 100.0).toBe(true);
+        expect(Math.abs(txn.amount) >= 5.0 && Math.abs(txn.amount) <= 100.0).toBe(true);
       }
     });
 
@@ -259,6 +261,8 @@ describe('CopilotMoneyServer E2E', () => {
     });
 
     test('exact amount match works', () => {
+      // Amount filtering uses absolute values (magnitude)
+      // Match transactions with magnitude = 10.0
       const result = tools.getTransactions({
         min_amount: 10.0,
         max_amount: 10.0,
@@ -266,7 +270,9 @@ describe('CopilotMoneyServer E2E', () => {
       });
 
       for (const txn of result.transactions) {
-        expect(txn.amount).toBe(10.0);
+        // With absolute value filtering, exact match means |amount| = 10.0
+        // So the actual amount could be -10.0 or 10.0
+        expect(Math.abs(txn.amount)).toBe(10.0);
       }
     });
   });
