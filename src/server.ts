@@ -75,7 +75,7 @@ export class CopilotMoneyServer {
    * @param name - Tool name
    * @param typedArgs - Tool arguments
    */
-  handleCallTool(name: string, typedArgs?: Record<string, unknown>): CallToolResult {
+  async handleCallTool(name: string, typedArgs?: Record<string, unknown>): Promise<CallToolResult> {
     // Check if database is available
     if (!this.db.isAvailable()) {
       return {
@@ -96,13 +96,13 @@ export class CopilotMoneyServer {
       // Route to appropriate tool handler
       switch (name) {
         case 'get_transactions':
-          result = this.tools.getTransactions(
+          result = await this.tools.getTransactions(
             (typedArgs as Parameters<typeof this.tools.getTransactions>[0]) || {}
           );
           break;
 
         case 'get_accounts':
-          result = this.tools.getAccounts(typedArgs?.account_type as string | undefined);
+          result = await this.tools.getAccounts(typedArgs?.account_type as string | undefined);
           break;
 
         case 'get_spending': {
@@ -110,7 +110,7 @@ export class CopilotMoneyServer {
           if (typeof groupBy !== 'string') {
             throw new Error('Missing required parameter: group_by');
           }
-          result = this.tools.getSpending(
+          result = await this.tools.getSpending(
             typedArgs as Parameters<typeof this.tools.getSpending>[0]
           );
           break;
@@ -121,7 +121,7 @@ export class CopilotMoneyServer {
           if (typeof analysis !== 'string') {
             throw new Error('Missing required parameter: analysis');
           }
-          result = this.tools.getAccountAnalytics(
+          result = await this.tools.getAccountAnalytics(
             typedArgs as Parameters<typeof this.tools.getAccountAnalytics>[0]
           );
           break;
@@ -132,7 +132,7 @@ export class CopilotMoneyServer {
           if (typeof analysis !== 'string') {
             throw new Error('Missing required parameter: analysis');
           }
-          result = this.tools.getBudgetAnalytics(
+          result = await this.tools.getBudgetAnalytics(
             typedArgs as Parameters<typeof this.tools.getBudgetAnalytics>[0]
           );
           break;
@@ -143,14 +143,14 @@ export class CopilotMoneyServer {
           if (typeof analysis !== 'string') {
             throw new Error('Missing required parameter: analysis');
           }
-          result = this.tools.getGoalAnalytics(
+          result = await this.tools.getGoalAnalytics(
             typedArgs as Parameters<typeof this.tools.getGoalAnalytics>[0]
           );
           break;
         }
 
         case 'get_goal_details':
-          result = this.tools.getGoalDetails(
+          result = await this.tools.getGoalDetails(
             (typedArgs as Parameters<typeof this.tools.getGoalDetails>[0]) || {}
           );
           break;
@@ -160,7 +160,7 @@ export class CopilotMoneyServer {
           if (typeof analysis !== 'string') {
             throw new Error('Missing required parameter: analysis');
           }
-          result = this.tools.getInvestmentAnalytics(
+          result = await this.tools.getInvestmentAnalytics(
             typedArgs as Parameters<typeof this.tools.getInvestmentAnalytics>[0]
           );
           break;
@@ -171,7 +171,7 @@ export class CopilotMoneyServer {
           if (typeof sortBy !== 'string') {
             throw new Error('Missing required parameter: sort_by');
           }
-          result = this.tools.getMerchantAnalytics(
+          result = await this.tools.getMerchantAnalytics(
             typedArgs as Parameters<typeof this.tools.getMerchantAnalytics>[0]
           );
           break;
@@ -182,36 +182,36 @@ export class CopilotMoneyServer {
           if (typeof accountId !== 'string') {
             throw new Error('Missing required parameter: account_id');
           }
-          result = this.tools.getAccountBalance(accountId);
+          result = await this.tools.getAccountBalance(accountId);
           break;
         }
 
         case 'get_categories':
-          result = this.tools.getCategories(
+          result = await this.tools.getCategories(
             (typedArgs as Parameters<typeof this.tools.getCategories>[0]) || {}
           );
           break;
 
         case 'get_recurring_transactions':
-          result = this.tools.getRecurringTransactions(
+          result = await this.tools.getRecurringTransactions(
             (typedArgs as Parameters<typeof this.tools.getRecurringTransactions>[0]) || {}
           );
           break;
 
         case 'get_budgets':
-          result = this.tools.getBudgets(
+          result = await this.tools.getBudgets(
             (typedArgs as Parameters<typeof this.tools.getBudgets>[0]) || {}
           );
           break;
 
         case 'get_goals':
-          result = this.tools.getGoals(
+          result = await this.tools.getGoals(
             (typedArgs as Parameters<typeof this.tools.getGoals>[0]) || {}
           );
           break;
 
         case 'get_income':
-          result = this.tools.getIncome(
+          result = await this.tools.getIncome(
             (typedArgs as Parameters<typeof this.tools.getIncome>[0]) || {}
           );
           break;
@@ -222,7 +222,7 @@ export class CopilotMoneyServer {
           if (typeof period1 !== 'string' || typeof period2 !== 'string') {
             throw new Error('Missing required parameters: period1 and period2');
           }
-          result = this.tools.comparePeriods({
+          result = await this.tools.comparePeriods({
             period1,
             period2,
             exclude_transfers: typedArgs?.exclude_transfers as boolean | undefined,
@@ -231,73 +231,73 @@ export class CopilotMoneyServer {
         }
 
         case 'get_trips':
-          result = this.tools.getTrips(
+          result = await this.tools.getTrips(
             (typedArgs as Parameters<typeof this.tools.getTrips>[0]) || {}
           );
           break;
 
         case 'get_unusual_transactions':
-          result = this.tools.getUnusualTransactions(
+          result = await this.tools.getUnusualTransactions(
             (typedArgs as Parameters<typeof this.tools.getUnusualTransactions>[0]) || {}
           );
           break;
 
         case 'export_transactions':
-          result = this.tools.exportTransactions(
+          result = await this.tools.exportTransactions(
             (typedArgs as Parameters<typeof this.tools.exportTransactions>[0]) || {}
           );
           break;
 
         case 'get_data_quality_report':
-          result = this.tools.getDataQualityReport(
+          result = await this.tools.getDataQualityReport(
             (typedArgs as Parameters<typeof this.tools.getDataQualityReport>[0]) || {}
           );
           break;
 
         case 'get_investment_prices':
-          result = this.tools.getInvestmentPrices(
+          result = await this.tools.getInvestmentPrices(
             (typedArgs as Parameters<typeof this.tools.getInvestmentPrices>[0]) || {}
           );
           break;
 
         case 'get_investment_splits':
-          result = this.tools.getInvestmentSplits(
+          result = await this.tools.getInvestmentSplits(
             (typedArgs as Parameters<typeof this.tools.getInvestmentSplits>[0]) || {}
           );
           break;
 
         case 'get_connected_institutions':
-          result = this.tools.getConnectedInstitutions(
+          result = await this.tools.getConnectedInstitutions(
             (typedArgs as Parameters<typeof this.tools.getConnectedInstitutions>[0]) || {}
           );
           break;
 
         case 'get_average_transaction_size':
-          result = this.tools.getAverageTransactionSize(
+          result = await this.tools.getAverageTransactionSize(
             (typedArgs as Parameters<typeof this.tools.getAverageTransactionSize>[0]) || {}
           );
           break;
 
         case 'get_category_trends':
-          result = this.tools.getCategoryTrends(
+          result = await this.tools.getCategoryTrends(
             (typedArgs as Parameters<typeof this.tools.getCategoryTrends>[0]) || {}
           );
           break;
 
         case 'get_portfolio_allocation':
-          result = this.tools.getPortfolioAllocation(
+          result = await this.tools.getPortfolioAllocation(
             (typedArgs as Parameters<typeof this.tools.getPortfolioAllocation>[0]) || {}
           );
           break;
 
         case 'get_goal_milestones':
-          result = this.tools.getGoalMilestones(
+          result = await this.tools.getGoalMilestones(
             (typedArgs as Parameters<typeof this.tools.getGoalMilestones>[0]) || {}
           );
           break;
 
         case 'get_year_over_year':
-          result = this.tools.getYearOverYear(
+          result = await this.tools.getYearOverYear(
             (typedArgs as Parameters<typeof this.tools.getYearOverYear>[0]) || {}
           );
           break;

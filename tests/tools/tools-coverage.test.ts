@@ -311,7 +311,14 @@ describe('CopilotMoneyTools Extended Coverage', () => {
     (db as any)._goals = [...mockGoals];
     (db as any)._goalHistory = [...mockGoalHistory];
     (db as any)._investmentPrices = [...mockInvestmentPrices];
+    (db as any)._investmentSplits = [];
+    (db as any)._items = [];
     (db as any)._recurring = [...mockRecurring];
+    // Add auxiliary data for name resolution
+    (db as any)._userCategories = [];
+    (db as any)._userAccounts = [];
+    (db as any)._categoryNameMap = new Map<string, string>();
+    (db as any)._accountNameMap = new Map<string, string>();
 
     tools = new CopilotMoneyTools(db);
   });
@@ -321,8 +328,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
   // ============================================
   describe('getSpending', () => {
     describe('group_by: category', () => {
-      test('aggregates spending by category', () => {
-        const result = tools.getSpending({
+      test('aggregates spending by category', async () => {
+        const result = await tools.getSpending({
           group_by: 'category',
           start_date: '2024-01-01',
           end_date: '2024-01-31',
@@ -336,8 +343,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
     });
 
     describe('group_by: merchant', () => {
-      test('aggregates spending by merchant', () => {
-        const result = tools.getSpending({
+      test('aggregates spending by merchant', async () => {
+        const result = await tools.getSpending({
           group_by: 'merchant',
           start_date: '2024-01-01',
           end_date: '2024-01-31',
@@ -351,8 +358,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
     });
 
     describe('group_by: day_of_week', () => {
-      test('aggregates spending by day of week', () => {
-        const result = tools.getSpending({
+      test('aggregates spending by day of week', async () => {
+        const result = await tools.getSpending({
           group_by: 'day_of_week',
           start_date: '2024-01-01',
           end_date: '2024-01-31',
@@ -369,8 +376,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         expect(result.summary?.highest_spending_day).toBeDefined();
       });
 
-      test('calculates percentage of total correctly', () => {
-        const result = tools.getSpending({
+      test('calculates percentage of total correctly', async () => {
+        const result = await tools.getSpending({
           group_by: 'day_of_week',
           start_date: '2024-01-01',
           end_date: '2024-01-31',
@@ -385,8 +392,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
     });
 
     describe('group_by: time', () => {
-      test('aggregates spending over time with monthly granularity', () => {
-        const result = tools.getSpending({
+      test('aggregates spending over time with monthly granularity', async () => {
+        const result = await tools.getSpending({
           group_by: 'time',
           granularity: 'month',
           start_date: '2024-01-01',
@@ -402,8 +409,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         expect(result.summary?.average_per_period).toBeDefined();
       });
 
-      test('aggregates spending over time with weekly granularity', () => {
-        const result = tools.getSpending({
+      test('aggregates spending over time with weekly granularity', async () => {
+        const result = await tools.getSpending({
           group_by: 'time',
           granularity: 'week',
           start_date: '2024-01-01',
@@ -415,8 +422,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         expect(data.granularity).toBe('week');
       });
 
-      test('aggregates spending over time with daily granularity', () => {
-        const result = tools.getSpending({
+      test('aggregates spending over time with daily granularity', async () => {
+        const result = await tools.getSpending({
           group_by: 'time',
           granularity: 'day',
           start_date: '2024-01-15',
@@ -428,8 +435,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         expect(data.granularity).toBe('day');
       });
 
-      test('identifies highest and lowest spending periods', () => {
-        const result = tools.getSpending({
+      test('identifies highest and lowest spending periods', async () => {
+        const result = await tools.getSpending({
           group_by: 'time',
           granularity: 'week',
           start_date: '2024-01-01',
@@ -442,8 +449,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
     });
 
     describe('group_by: rate', () => {
-      test('calculates spending rate and velocity', () => {
-        const result = tools.getSpending({
+      test('calculates spending rate and velocity', async () => {
+        const result = await tools.getSpending({
           group_by: 'rate',
           start_date: '2024-01-01',
           end_date: '2024-01-31',
@@ -467,8 +474,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       });
     });
 
-    test('filters by category', () => {
-      const result = tools.getSpending({
+    test('filters by category', async () => {
+      const result = await tools.getSpending({
         group_by: 'category',
         category: 'food',
         start_date: '2024-01-01',
@@ -478,8 +485,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.total_spending).toBeGreaterThan(0);
     });
 
-    test('uses default period when not specified', () => {
-      const result = tools.getSpending({
+    test('uses default period when not specified', async () => {
+      const result = await tools.getSpending({
         group_by: 'category',
       });
 
@@ -493,8 +500,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
   // ============================================
   describe('getAccountAnalytics', () => {
     describe('analysis: activity', () => {
-      test('returns account activity summary', () => {
-        const result = tools.getAccountAnalytics({
+      test('returns account activity summary', async () => {
+        const result = await tools.getAccountAnalytics({
           analysis: 'activity',
           period: 'last_30_days',
         });
@@ -505,8 +512,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         expect(result.summary?.active_accounts).toBeDefined();
       });
 
-      test('filters by account type', () => {
-        const result = tools.getAccountAnalytics({
+      test('filters by account type', async () => {
+        const result = await tools.getAccountAnalytics({
           analysis: 'activity',
           account_type: 'checking',
         });
@@ -524,8 +531,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         }
       });
 
-      test('calculates activity levels correctly', () => {
-        const result = tools.getAccountAnalytics({
+      test('calculates activity levels correctly', async () => {
+        const result = await tools.getAccountAnalytics({
           analysis: 'activity',
           start_date: '2024-01-01',
           end_date: '2024-01-31',
@@ -547,8 +554,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
     });
 
     describe('analysis: balance_trends', () => {
-      test('returns balance trend data', () => {
-        const result = tools.getAccountAnalytics({
+      test('returns balance trend data', async () => {
+        const result = await tools.getAccountAnalytics({
           analysis: 'balance_trends',
           months: 6,
         });
@@ -559,8 +566,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         expect(Array.isArray(data.accounts)).toBe(true);
       });
 
-      test('filters by specific account_id', () => {
-        const result = tools.getAccountAnalytics({
+      test('filters by specific account_id', async () => {
+        const result = await tools.getAccountAnalytics({
           analysis: 'balance_trends',
           account_id: 'acc1',
         });
@@ -573,8 +580,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
     });
 
     describe('analysis: fees', () => {
-      test('returns fee analysis', () => {
-        const result = tools.getAccountAnalytics({
+      test('returns fee analysis', async () => {
+        const result = await tools.getAccountAnalytics({
           analysis: 'fees',
           start_date: '2024-01-01',
           end_date: '2024-01-31',
@@ -586,8 +593,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         expect(result.summary?.fee_count).toBeDefined();
       });
 
-      test('filters fees by account_id', () => {
-        const result = tools.getAccountAnalytics({
+      test('filters fees by account_id', async () => {
+        const result = await tools.getAccountAnalytics({
           analysis: 'fees',
           account_id: 'acc1',
           start_date: '2024-01-01',
@@ -604,8 +611,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
   // ============================================
   describe('getBudgetAnalytics', () => {
     describe('analysis: utilization', () => {
-      test('returns budget utilization data', () => {
-        const result = tools.getBudgetAnalytics({
+      test('returns budget utilization data', async () => {
+        const result = await tools.getBudgetAnalytics({
           analysis: 'utilization',
         });
 
@@ -614,8 +621,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         expect(result.summary?.month).toBeDefined();
       });
 
-      test('filters by category', () => {
-        const result = tools.getBudgetAnalytics({
+      test('filters by category', async () => {
+        const result = await tools.getBudgetAnalytics({
           analysis: 'utilization',
           category: 'food',
         });
@@ -623,8 +630,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         expect(result.analysis).toBe('utilization');
       });
 
-      test('calculates utilization status correctly', () => {
-        const result = tools.getBudgetAnalytics({
+      test('calculates utilization status correctly', async () => {
+        const result = await tools.getBudgetAnalytics({
           analysis: 'utilization',
         });
 
@@ -642,8 +649,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
     });
 
     describe('analysis: vs_actual', () => {
-      test('returns budget vs actual comparison', () => {
-        const result = tools.getBudgetAnalytics({
+      test('returns budget vs actual comparison', async () => {
+        const result = await tools.getBudgetAnalytics({
           analysis: 'vs_actual',
           months: 6,
         });
@@ -655,8 +662,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
     });
 
     describe('analysis: alerts', () => {
-      test('returns budget alerts', () => {
-        const result = tools.getBudgetAnalytics({
+      test('returns budget alerts', async () => {
+        const result = await tools.getBudgetAnalytics({
           analysis: 'alerts',
           threshold_percentage: 80,
         });
@@ -667,13 +674,13 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         expect(result.summary?.alert_count).toBeDefined();
       });
 
-      test('filters by custom threshold', () => {
-        const result50 = tools.getBudgetAnalytics({
+      test('filters by custom threshold', async () => {
+        const result50 = await tools.getBudgetAnalytics({
           analysis: 'alerts',
           threshold_percentage: 50,
         });
 
-        const result90 = tools.getBudgetAnalytics({
+        const result90 = await tools.getBudgetAnalytics({
           analysis: 'alerts',
           threshold_percentage: 90,
         });
@@ -684,8 +691,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
     });
 
     describe('analysis: recommendations', () => {
-      test('returns budget recommendations', () => {
-        const result = tools.getBudgetAnalytics({
+      test('returns budget recommendations', async () => {
+        const result = await tools.getBudgetAnalytics({
           analysis: 'recommendations',
         });
 
@@ -701,8 +708,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
   // ============================================
   describe('getGoalAnalytics', () => {
     describe('analysis: projection', () => {
-      test('returns goal projections', () => {
-        const result = tools.getGoalAnalytics({
+      test('returns goal projections', async () => {
+        const result = await tools.getGoalAnalytics({
           analysis: 'projection',
         });
 
@@ -728,8 +735,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         }
       });
 
-      test('filters by goal_id', () => {
-        const result = tools.getGoalAnalytics({
+      test('filters by goal_id', async () => {
+        const result = await tools.getGoalAnalytics({
           analysis: 'projection',
           goal_id: 'goal1',
         });
@@ -742,8 +749,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
     });
 
     describe('analysis: risk', () => {
-      test('returns goals at risk', () => {
-        const result = tools.getGoalAnalytics({
+      test('returns goals at risk', async () => {
+        const result = await tools.getGoalAnalytics({
           analysis: 'risk',
           months_lookback: 6,
         });
@@ -755,8 +762,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
     });
 
     describe('analysis: recommendations', () => {
-      test('returns goal recommendations', () => {
-        const result = tools.getGoalAnalytics({
+      test('returns goal recommendations', async () => {
+        const result = await tools.getGoalAnalytics({
           analysis: 'recommendations',
         });
 
@@ -771,8 +778,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
   // ============================================
   describe('getInvestmentAnalytics', () => {
     describe('analysis: performance', () => {
-      test('returns investment performance data', () => {
-        const result = tools.getInvestmentAnalytics({
+      test('returns investment performance data', async () => {
+        const result = await tools.getInvestmentAnalytics({
           analysis: 'performance',
           start_date: '2024-01-01',
           end_date: '2024-01-31',
@@ -785,8 +792,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         expect(result.summary?.losers).toBeDefined();
       });
 
-      test('filters by ticker symbol', () => {
-        const result = tools.getInvestmentAnalytics({
+      test('filters by ticker symbol', async () => {
+        const result = await tools.getInvestmentAnalytics({
           analysis: 'performance',
           ticker_symbol: 'AAPL',
           start_date: '2024-01-01',
@@ -798,8 +805,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
     });
 
     describe('analysis: dividends', () => {
-      test('returns dividend data', () => {
-        const result = tools.getInvestmentAnalytics({
+      test('returns dividend data', async () => {
+        const result = await tools.getInvestmentAnalytics({
           analysis: 'dividends',
           start_date: '2024-01-01',
           end_date: '2024-01-31',
@@ -811,8 +818,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         expect(result.summary?.payment_count).toBeDefined();
       });
 
-      test('filters by account_id', () => {
-        const result = tools.getInvestmentAnalytics({
+      test('filters by account_id', async () => {
+        const result = await tools.getInvestmentAnalytics({
           analysis: 'dividends',
           account_id: 'acc_invest',
           start_date: '2024-01-01',
@@ -824,8 +831,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
     });
 
     describe('analysis: fees', () => {
-      test('returns investment fee data', () => {
-        const result = tools.getInvestmentAnalytics({
+      test('returns investment fee data', async () => {
+        const result = await tools.getInvestmentAnalytics({
           analysis: 'fees',
           start_date: '2024-01-01',
           end_date: '2024-01-31',
@@ -844,8 +851,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
   // ============================================
   describe('getMerchantAnalytics', () => {
     describe('sort_by: spending', () => {
-      test('sorts merchants by total spending', () => {
-        const result = tools.getMerchantAnalytics({
+      test('sorts merchants by total spending', async () => {
+        const result = await tools.getMerchantAnalytics({
           sort_by: 'spending',
           start_date: '2024-01-01',
           end_date: '2024-01-31',
@@ -865,8 +872,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
     });
 
     describe('sort_by: frequency', () => {
-      test('sorts merchants by transaction count', () => {
-        const result = tools.getMerchantAnalytics({
+      test('sorts merchants by transaction count', async () => {
+        const result = await tools.getMerchantAnalytics({
           sort_by: 'frequency',
           start_date: '2024-01-01',
           end_date: '2024-01-31',
@@ -884,8 +891,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
     });
 
     describe('sort_by: average', () => {
-      test('sorts merchants by average transaction amount', () => {
-        const result = tools.getMerchantAnalytics({
+      test('sorts merchants by average transaction amount', async () => {
+        const result = await tools.getMerchantAnalytics({
           sort_by: 'average',
           start_date: '2024-01-01',
           end_date: '2024-01-31',
@@ -902,8 +909,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       });
     });
 
-    test('respects limit parameter', () => {
-      const result = tools.getMerchantAnalytics({
+    test('respects limit parameter', async () => {
+      const result = await tools.getMerchantAnalytics({
         sort_by: 'spending',
         limit: 5,
         start_date: '2024-01-01',
@@ -913,8 +920,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.merchants.length).toBeLessThanOrEqual(5);
     });
 
-    test('respects min_visits parameter', () => {
-      const result = tools.getMerchantAnalytics({
+    test('respects min_visits parameter', async () => {
+      const result = await tools.getMerchantAnalytics({
         sort_by: 'spending',
         min_visits: 2,
         start_date: '2024-01-01',
@@ -926,8 +933,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       }
     });
 
-    test('includes visit frequency and dates', () => {
-      const result = tools.getMerchantAnalytics({
+    test('includes visit frequency and dates', async () => {
+      const result = await tools.getMerchantAnalytics({
         sort_by: 'spending',
         start_date: '2024-01-01',
         end_date: '2024-01-31',
@@ -947,8 +954,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
   // ============================================
   describe('getTransactions transaction_type', () => {
     describe('transaction_type: foreign', () => {
-      test('returns foreign transactions', () => {
-        const result = tools.getTransactions({
+      test('returns foreign transactions', async () => {
+        const result = await tools.getTransactions({
           transaction_type: 'foreign',
           start_date: '2024-01-01',
           end_date: '2024-01-31',
@@ -961,8 +968,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
     });
 
     describe('transaction_type: refunds', () => {
-      test('returns refund transactions', () => {
-        const result = tools.getTransactions({
+      test('returns refund transactions', async () => {
+        const result = await tools.getTransactions({
           transaction_type: 'refunds',
           start_date: '2024-01-01',
           end_date: '2024-01-31',
@@ -977,8 +984,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
     });
 
     describe('transaction_type: credits', () => {
-      test('returns credit transactions', () => {
-        const result = tools.getTransactions({
+      test('returns credit transactions', async () => {
+        const result = await tools.getTransactions({
           transaction_type: 'credits',
           start_date: '2024-01-01',
           end_date: '2024-01-31',
@@ -989,8 +996,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
     });
 
     describe('transaction_type: duplicates', () => {
-      test('returns duplicate transactions', () => {
-        const result = tools.getTransactions({
+      test('returns duplicate transactions', async () => {
+        const result = await tools.getTransactions({
           transaction_type: 'duplicates',
           start_date: '2024-01-01',
           end_date: '2024-01-31',
@@ -1002,8 +1009,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
     });
 
     describe('transaction_type: hsa_eligible', () => {
-      test('returns HSA-eligible transactions', () => {
-        const result = tools.getTransactions({
+      test('returns HSA-eligible transactions', async () => {
+        const result = await tools.getTransactions({
           transaction_type: 'hsa_eligible',
           start_date: '2024-01-01',
           end_date: '2024-01-31',
@@ -1018,8 +1025,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
     });
 
     describe('transaction_type: tagged', () => {
-      test('returns tagged transactions', () => {
-        const result = tools.getTransactions({
+      test('returns tagged transactions', async () => {
+        const result = await tools.getTransactions({
           transaction_type: 'tagged',
           start_date: '2024-01-01',
           end_date: '2024-01-31',
@@ -1034,7 +1041,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
   // getTransactions with location filtering
   // ============================================
   describe('getTransactions location filtering', () => {
-    test('filters by city', () => {
+    test('filters by city', async () => {
       // Add transaction with city
       (db as any)._transactions = [
         ...mockTransactions,
@@ -1049,7 +1056,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         },
       ];
 
-      const result = tools.getTransactions({
+      const result = await tools.getTransactions({
         city: 'San Francisco',
       });
 
@@ -1057,7 +1064,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.transactions[0].city).toBe('San Francisco');
     });
 
-    test('filters by lat/lon with radius', () => {
+    test('filters by lat/lon with radius', async () => {
       // Add transaction with coordinates
       (db as any)._transactions = [
         ...mockTransactions,
@@ -1073,7 +1080,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         },
       ];
 
-      const result = tools.getTransactions({
+      const result = await tools.getTransactions({
         lat: 37.7749,
         lon: -122.4194,
         radius_km: 5,
@@ -1087,8 +1094,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
   // getTransactions with tag filtering
   // ============================================
   describe('getTransactions tag filtering', () => {
-    test('filters by tag with hash', () => {
-      const result = tools.getTransactions({
+    test('filters by tag with hash', async () => {
+      const result = await tools.getTransactions({
         tag: '#work',
         start_date: '2024-01-01',
         end_date: '2024-01-31',
@@ -1097,8 +1104,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.count).toBeGreaterThan(0);
     });
 
-    test('filters by tag without hash', () => {
-      const result = tools.getTransactions({
+    test('filters by tag without hash', async () => {
+      const result = await tools.getTransactions({
         tag: 'work',
         start_date: '2024-01-01',
         end_date: '2024-01-31',
@@ -1113,8 +1120,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
   // ============================================
   describe('getCategories', () => {
     describe('view: tree', () => {
-      test('returns category tree structure', () => {
-        const result = tools.getCategories({ view: 'tree' });
+      test('returns category tree structure', async () => {
+        const result = await tools.getCategories({ view: 'tree' });
 
         expect(result.view).toBe('tree');
         expect(result.count).toBeGreaterThan(0);
@@ -1124,8 +1131,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         expect(Array.isArray(data.categories)).toBe(true);
       });
 
-      test('filters tree by type', () => {
-        const result = tools.getCategories({ view: 'tree', type: 'expense' });
+      test('filters tree by type', async () => {
+        const result = await tools.getCategories({ view: 'tree', type: 'expense' });
 
         expect(result.view).toBe('tree');
         const data = result.data as { type_filter: string };
@@ -1134,8 +1141,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
     });
 
     describe('view: search', () => {
-      test('searches categories by query', () => {
-        const result = tools.getCategories({ view: 'search', query: 'food' });
+      test('searches categories by query', async () => {
+        const result = await tools.getCategories({ view: 'search', query: 'food' });
 
         expect(result.view).toBe('search');
         const data = result.data as { query: string; categories: Array<unknown> };
@@ -1143,18 +1150,18 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         expect(Array.isArray(data.categories)).toBe(true);
       });
 
-      test('throws error when query is missing', () => {
+      test('throws error when query is missing', async () => {
         expect(() => tools.getCategories({ view: 'search' })).toThrow();
       });
 
-      test('throws error for empty query', () => {
+      test('throws error for empty query', async () => {
         expect(() => tools.getCategories({ view: 'search', query: '   ' })).toThrow();
       });
     });
 
     describe('parent_id parameter', () => {
-      test('returns subcategories for valid parent', () => {
-        const result = tools.getCategories({ parent_id: 'food_and_drink' });
+      test('returns subcategories for valid parent', async () => {
+        const result = await tools.getCategories({ parent_id: 'food_and_drink' });
 
         expect(result.view).toBe('subcategories');
         const data = result.data as { parent_id: string; subcategories: Array<unknown> };
@@ -1162,7 +1169,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         expect(Array.isArray(data.subcategories)).toBe(true);
       });
 
-      test('throws error for invalid parent_id', () => {
+      test('throws error for invalid parent_id', async () => {
         expect(() => tools.getCategories({ parent_id: 'invalid_category_xyz' })).toThrow();
       });
     });
@@ -1172,8 +1179,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
   // getGoalDetails
   // ============================================
   describe('getGoalDetails', () => {
-    test('returns goal details with progress', () => {
-      const result = tools.getGoalDetails({
+    test('returns goal details with progress', async () => {
+      const result = await tools.getGoalDetails({
         include: ['progress'],
       });
 
@@ -1184,8 +1191,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       }
     });
 
-    test('returns goal details with history', () => {
-      const result = tools.getGoalDetails({
+    test('returns goal details with history', async () => {
+      const result = await tools.getGoalDetails({
         goal_id: 'goal1',
         include: ['history'],
       });
@@ -1194,8 +1201,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.goals[0].history).toBeDefined();
     });
 
-    test('returns goal details with contributions', () => {
-      const result = tools.getGoalDetails({
+    test('returns goal details with contributions', async () => {
+      const result = await tools.getGoalDetails({
         goal_id: 'goal1',
         include: ['contributions'],
       });
@@ -1204,8 +1211,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.goals[0].contributions).toBeDefined();
     });
 
-    test('returns goal details with all includes', () => {
-      const result = tools.getGoalDetails({
+    test('returns goal details with all includes', async () => {
+      const result = await tools.getGoalDetails({
         include: ['progress', 'history', 'contributions'],
       });
 
@@ -1222,8 +1229,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
   // Additional coverage for edge cases
   // ============================================
   describe('Edge cases and validation', () => {
-    test('getTransactions handles transaction_id lookup', () => {
-      const result = tools.getTransactions({
+    test('getTransactions handles transaction_id lookup', async () => {
+      const result = await tools.getTransactions({
         transaction_id: 'txn1',
       });
 
@@ -1231,8 +1238,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.transactions[0].transaction_id).toBe('txn1');
     });
 
-    test('getTransactions returns empty for non-existent transaction_id', () => {
-      const result = tools.getTransactions({
+    test('getTransactions returns empty for non-existent transaction_id', async () => {
+      const result = await tools.getTransactions({
         transaction_id: 'non_existent_id',
       });
 
@@ -1240,8 +1247,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.transactions.length).toBe(0);
     });
 
-    test('getTransactions handles query parameter', () => {
-      const result = tools.getTransactions({
+    test('getTransactions handles query parameter', async () => {
+      const result = await tools.getTransactions({
         query: 'Coffee',
         start_date: '2024-01-01',
         end_date: '2024-01-31',
@@ -1250,28 +1257,28 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.count).toBeGreaterThan(0);
     });
 
-    test('getBudgets returns all budgets', () => {
-      const result = tools.getBudgets();
+    test('getBudgets returns all budgets', async () => {
+      const result = await tools.getBudgets();
 
       expect(result.count).toBe(2);
       expect(result.total_budgeted).toBeGreaterThan(0);
     });
 
-    test('getBudgets filters active only', () => {
-      const result = tools.getBudgets({ active_only: true });
+    test('getBudgets filters active only', async () => {
+      const result = await tools.getBudgets({ active_only: true });
 
       expect(result.count).toBeGreaterThanOrEqual(0);
     });
 
-    test('getGoals returns all goals', () => {
-      const result = tools.getGoals();
+    test('getGoals returns all goals', async () => {
+      const result = await tools.getGoals();
 
       expect(result.count).toBe(2);
       expect(result.total_target).toBeGreaterThan(0);
     });
 
-    test('getGoalProgress returns progress data', () => {
-      const result = tools.getGoalProgress();
+    test('getGoalProgress returns progress data', async () => {
+      const result = await tools.getGoalProgress();
 
       expect(result.count).toBeGreaterThan(0);
       for (const goal of result.goals) {
@@ -1279,15 +1286,15 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       }
     });
 
-    test('getGoalProgress filters by goal_id', () => {
-      const result = tools.getGoalProgress({ goal_id: 'goal1' });
+    test('getGoalProgress filters by goal_id', async () => {
+      const result = await tools.getGoalProgress({ goal_id: 'goal1' });
 
       expect(result.count).toBe(1);
       expect(result.goals[0].goal_id).toBe('goal1');
     });
 
-    test('getGoalHistory returns history data', () => {
-      const result = tools.getGoalHistory({
+    test('getGoalHistory returns history data', async () => {
+      const result = await tools.getGoalHistory({
         goal_id: 'goal1',
         limit: 10,
       });
@@ -1297,8 +1304,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.history).toBeDefined();
     });
 
-    test('estimateGoalCompletion returns estimates', () => {
-      const result = tools.estimateGoalCompletion();
+    test('estimateGoalCompletion returns estimates', async () => {
+      const result = await tools.estimateGoalCompletion();
 
       expect(result.count).toBeGreaterThan(0);
       for (const goal of result.goals) {
@@ -1306,8 +1313,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       }
     });
 
-    test('getGoalContributions returns contribution data', () => {
-      const result = tools.getGoalContributions({
+    test('getGoalContributions returns contribution data', async () => {
+      const result = await tools.getGoalContributions({
         goal_id: 'goal1',
         limit: 10,
       });
@@ -1317,8 +1324,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.monthly_breakdown).toBeDefined();
     });
 
-    test('getRecurringTransactions includes Copilot subscriptions', () => {
-      const result = tools.getRecurringTransactions({
+    test('getRecurringTransactions includes Copilot subscriptions', async () => {
+      const result = await tools.getRecurringTransactions({
         include_copilot_subscriptions: true,
         start_date: '2024-01-01',
         end_date: '2024-01-31',
@@ -1335,8 +1342,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
   // Additional coverage for remaining methods
   // ============================================
   describe('Additional Tools Coverage', () => {
-    test('getForeignTransactions returns foreign transaction data', () => {
-      const result = tools.getForeignTransactions({
+    test('getForeignTransactions returns foreign transaction data', async () => {
+      const result = await tools.getForeignTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -1346,8 +1353,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.countries).toBeDefined();
     });
 
-    test('getRefunds returns refund data', () => {
-      const result = tools.getRefunds({
+    test('getRefunds returns refund data', async () => {
+      const result = await tools.getRefunds({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -1357,8 +1364,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.refunds_by_merchant).toBeDefined();
     });
 
-    test('getCredits returns credits/cashback data', () => {
-      const result = tools.getCredits({
+    test('getCredits returns credits/cashback data', async () => {
+      const result = await tools.getCredits({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -1368,8 +1375,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.credits_by_type).toBeDefined();
     });
 
-    test('getDuplicateTransactions returns potential duplicates', () => {
-      const result = tools.getDuplicateTransactions({
+    test('getDuplicateTransactions returns potential duplicates', async () => {
+      const result = await tools.getDuplicateTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -1379,8 +1386,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.duplicate_groups).toBeDefined();
     });
 
-    test('getSpendingByDayOfWeek returns day breakdown', () => {
-      const result = tools.getSpendingByDayOfWeek({
+    test('getSpendingByDayOfWeek returns day breakdown', async () => {
+      const result = await tools.getSpendingByDayOfWeek({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -1389,8 +1396,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.days.length).toBe(7);
     });
 
-    test('getTrips returns detected trips', () => {
-      const result = tools.getTrips({
+    test('getTrips returns detected trips', async () => {
+      const result = await tools.getTrips({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -1399,22 +1406,22 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.trips).toBeDefined();
     });
 
-    test('getTransactionById returns single transaction', () => {
-      const result = tools.getTransactionById('txn1');
+    test('getTransactionById returns single transaction', async () => {
+      const result = await tools.getTransactionById('txn1');
 
       expect(result.found).toBe(true);
       expect(result.transaction?.transaction_id).toBe('txn1');
     });
 
-    test('getTransactionById returns not found for invalid ID', () => {
-      const result = tools.getTransactionById('invalid_id');
+    test('getTransactionById returns not found for invalid ID', async () => {
+      const result = await tools.getTransactionById('invalid_id');
 
       expect(result.found).toBe(false);
       expect(result.transaction).toBeUndefined();
     });
 
-    test('getTopMerchants returns top spending merchants', () => {
-      const result = tools.getTopMerchants({
+    test('getTopMerchants returns top spending merchants', async () => {
+      const result = await tools.getTopMerchants({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -1423,8 +1430,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(Array.isArray(result.merchants)).toBe(true);
     });
 
-    test('getUnusualTransactions returns anomalies', () => {
-      const result = tools.getUnusualTransactions({
+    test('getUnusualTransactions returns anomalies', async () => {
+      const result = await tools.getUnusualTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -1433,8 +1440,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.transactions).toBeDefined();
     });
 
-    test('getHsaFsaEligible returns eligible transactions', () => {
-      const result = tools.getHsaFsaEligible({
+    test('getHsaFsaEligible returns eligible transactions', async () => {
+      const result = await tools.getHsaFsaEligible({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -1444,8 +1451,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.by_category).toBeDefined();
     });
 
-    test('getSpendingRate returns spending velocity', () => {
-      const result = tools.getSpendingRate({
+    test('getSpendingRate returns spending velocity', async () => {
+      const result = await tools.getSpendingRate({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -1455,8 +1462,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.projected_monthly_total).toBeDefined();
     });
 
-    test('getDataQualityReport returns data quality metrics', () => {
-      const result = tools.getDataQualityReport({
+    test('getDataQualityReport returns data quality metrics', async () => {
+      const result = await tools.getDataQualityReport({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -1468,8 +1475,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.duplicate_issues).toBeDefined();
     });
 
-    test('comparePeriods compares two time periods', () => {
-      const result = tools.comparePeriods({
+    test('comparePeriods compares two time periods', async () => {
+      const result = await tools.comparePeriods({
         period1: 'last_month',
         period2: 'this_month',
       });
@@ -1480,21 +1487,21 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.category_comparison).toBeDefined();
     });
 
-    test('getInvestmentPrices returns price data', () => {
-      const result = tools.getInvestmentPrices();
+    test('getInvestmentPrices returns price data', async () => {
+      const result = await tools.getInvestmentPrices();
 
       expect(result.count).toBeGreaterThanOrEqual(0);
       expect(result.prices).toBeDefined();
     });
 
-    test('getInvestmentPrices filters by ticker', () => {
-      const result = tools.getInvestmentPrices({ ticker_symbol: 'AAPL' });
+    test('getInvestmentPrices filters by ticker', async () => {
+      const result = await tools.getInvestmentPrices({ ticker_symbol: 'AAPL' });
 
       expect(result.count).toBeGreaterThanOrEqual(0);
     });
 
-    test('getInvestmentPriceHistory returns price history', () => {
-      const result = tools.getInvestmentPriceHistory({
+    test('getInvestmentPriceHistory returns price history', async () => {
+      const result = await tools.getInvestmentPriceHistory({
         ticker_symbol: 'AAPL',
       });
 
@@ -1502,49 +1509,49 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.count).toBeGreaterThanOrEqual(0);
     });
 
-    test('getInvestmentSplits returns split data', () => {
-      const result = tools.getInvestmentSplits();
+    test('getInvestmentSplits returns split data', async () => {
+      const result = await tools.getInvestmentSplits();
 
       expect(result.count).toBeGreaterThanOrEqual(0);
       expect(result.splits).toBeDefined();
     });
 
-    test('getConnectedInstitutions returns institution data', () => {
-      const result = tools.getConnectedInstitutions();
+    test('getConnectedInstitutions returns institution data', async () => {
+      const result = await tools.getConnectedInstitutions();
 
       expect(result.count).toBeGreaterThanOrEqual(0);
       expect(result.institutions).toBeDefined();
     });
 
-    test('getCategoryHierarchy returns category tree', () => {
-      const result = tools.getCategoryHierarchy();
+    test('getCategoryHierarchy returns category tree', async () => {
+      const result = await tools.getCategoryHierarchy();
 
       expect(result.count).toBeGreaterThan(0);
       expect(result.categories).toBeDefined();
     });
 
-    test('getCategoryHierarchy filters by type', () => {
-      const result = tools.getCategoryHierarchy({ type: 'expense' });
+    test('getCategoryHierarchy filters by type', async () => {
+      const result = await tools.getCategoryHierarchy({ type: 'expense' });
 
       expect(result.count).toBeGreaterThan(0);
     });
 
-    test('getSubcategories returns child categories', () => {
-      const result = tools.getSubcategories('food_and_drink');
+    test('getSubcategories returns child categories', async () => {
+      const result = await tools.getSubcategories('food_and_drink');
 
       expect(result.parent_id).toBe('food_and_drink');
       expect(result.count).toBeGreaterThanOrEqual(0);
     });
 
-    test('searchCategoriesHierarchy searches categories', () => {
-      const result = tools.searchCategoriesHierarchy('food');
+    test('searchCategoriesHierarchy searches categories', async () => {
+      const result = await tools.searchCategoriesHierarchy('food');
 
       expect(result.query).toBe('food');
       expect(result.count).toBeGreaterThanOrEqual(0);
     });
 
-    test('getSpendingOverTime returns time-series data', () => {
-      const result = tools.getSpendingOverTime({
+    test('getSpendingOverTime returns time-series data', async () => {
+      const result = await tools.getSpendingOverTime({
         granularity: 'month',
         start_date: '2024-01-01',
         end_date: '2024-01-31',
@@ -1554,8 +1561,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.periods).toBeDefined();
     });
 
-    test('getAverageTransactionSize returns size analysis', () => {
-      const result = tools.getAverageTransactionSize({
+    test('getAverageTransactionSize returns size analysis', async () => {
+      const result = await tools.getAverageTransactionSize({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -1564,8 +1571,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.groups).toBeDefined();
     });
 
-    test('getCategoryTrends returns category trend analysis', () => {
-      const result = tools.getCategoryTrends({
+    test('getCategoryTrends returns category trend analysis', async () => {
+      const result = await tools.getCategoryTrends({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -1574,8 +1581,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.trends).toBeDefined();
     });
 
-    test('getMerchantFrequency returns frequency data', () => {
-      const result = tools.getMerchantFrequency({
+    test('getMerchantFrequency returns frequency data', async () => {
+      const result = await tools.getMerchantFrequency({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -1584,44 +1591,44 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.merchants).toBeDefined();
     });
 
-    test('getBudgetUtilization returns utilization data', () => {
-      const result = tools.getBudgetUtilization();
+    test('getBudgetUtilization returns utilization data', async () => {
+      const result = await tools.getBudgetUtilization();
 
       expect(result.budgets).toBeDefined();
     });
 
-    test('getBudgetVsActual returns comparison data', () => {
-      const result = tools.getBudgetVsActual({ months: 3 });
+    test('getBudgetVsActual returns comparison data', async () => {
+      const result = await tools.getBudgetVsActual({ months: 3 });
 
       expect(result.months_analyzed).toBeDefined();
       expect(result.comparisons).toBeDefined();
       expect(result.insights).toBeDefined();
     });
 
-    test('getBudgetRecommendations returns recommendations', () => {
-      const result = tools.getBudgetRecommendations();
+    test('getBudgetRecommendations returns recommendations', async () => {
+      const result = await tools.getBudgetRecommendations();
 
       expect(result.recommendations).toBeDefined();
     });
 
-    test('getBudgetAlerts returns budget alerts', () => {
-      const result = tools.getBudgetAlerts({ threshold_percentage: 80 });
+    test('getBudgetAlerts returns budget alerts', async () => {
+      const result = await tools.getBudgetAlerts({ threshold_percentage: 80 });
 
       expect(result.month).toBeDefined();
       expect(result.alerts).toBeDefined();
       expect(result.summary).toBeDefined();
     });
 
-    test('getPortfolioAllocation returns allocation data', () => {
-      const result = tools.getPortfolioAllocation();
+    test('getPortfolioAllocation returns allocation data', async () => {
+      const result = await tools.getPortfolioAllocation();
 
       expect(result.total_value).toBeDefined();
       expect(result.by_account).toBeDefined();
       expect(result.summary).toBeDefined();
     });
 
-    test('getInvestmentPerformance returns performance metrics', () => {
-      const result = tools.getInvestmentPerformance({
+    test('getInvestmentPerformance returns performance metrics', async () => {
+      const result = await tools.getInvestmentPerformance({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -1630,8 +1637,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.summary).toBeDefined();
     });
 
-    test('getDividendIncome returns dividend data', () => {
-      const result = tools.getDividendIncome({
+    test('getDividendIncome returns dividend data', async () => {
+      const result = await tools.getDividendIncome({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -1640,8 +1647,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.dividends).toBeDefined();
     });
 
-    test('getInvestmentFees returns fee data', () => {
-      const result = tools.getInvestmentFees({
+    test('getInvestmentFees returns fee data', async () => {
+      const result = await tools.getInvestmentFees({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -1650,33 +1657,33 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.fees).toBeDefined();
     });
 
-    test('getGoalProjection returns projection data', () => {
-      const result = tools.getGoalProjection();
+    test('getGoalProjection returns projection data', async () => {
+      const result = await tools.getGoalProjection();
 
       expect(result.goals).toBeDefined();
     });
 
-    test('getGoalMilestones returns milestone data', () => {
-      const result = tools.getGoalMilestones();
+    test('getGoalMilestones returns milestone data', async () => {
+      const result = await tools.getGoalMilestones();
 
       expect(result.goals).toBeDefined();
     });
 
-    test('getGoalsAtRisk returns at-risk goals', () => {
-      const result = tools.getGoalsAtRisk();
+    test('getGoalsAtRisk returns at-risk goals', async () => {
+      const result = await tools.getGoalsAtRisk();
 
       expect(result.at_risk_count).toBeGreaterThanOrEqual(0);
       expect(result.goals).toBeDefined();
     });
 
-    test('getGoalRecommendations returns recommendations', () => {
-      const result = tools.getGoalRecommendations();
+    test('getGoalRecommendations returns recommendations', async () => {
+      const result = await tools.getGoalRecommendations();
 
       expect(result.recommendations).toBeDefined();
     });
 
-    test('getAccountActivity returns activity data', () => {
-      const result = tools.getAccountActivity({
+    test('getAccountActivity returns activity data', async () => {
+      const result = await tools.getAccountActivity({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -1684,16 +1691,16 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.accounts).toBeDefined();
     });
 
-    test('getBalanceTrends returns balance trend data', () => {
-      const result = tools.getBalanceTrends({ months: 3 });
+    test('getBalanceTrends returns balance trend data', async () => {
+      const result = await tools.getBalanceTrends({ months: 3 });
 
       expect(result.months_analyzed).toBeDefined();
       expect(result.accounts).toBeDefined();
       expect(result.summary).toBeDefined();
     });
 
-    test('getAccountFees returns account fee data', () => {
-      const result = tools.getAccountFees({
+    test('getAccountFees returns account fee data', async () => {
+      const result = await tools.getAccountFees({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -1702,8 +1709,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.fees).toBeDefined();
     });
 
-    test('getYearOverYear returns year comparison', () => {
-      const result = tools.getYearOverYear();
+    test('getYearOverYear returns year comparison', async () => {
+      const result = await tools.getYearOverYear();
 
       expect(result.current_year).toBeDefined();
       expect(result.compare_year).toBeDefined();
@@ -1711,8 +1718,8 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.compare_period).toBeDefined();
     });
 
-    test('getAdvancedSearch performs complex search', () => {
-      const result = tools.getAdvancedSearch({
+    test('getAdvancedSearch performs complex search', async () => {
+      const result = await tools.getAdvancedSearch({
         merchant_query: 'Coffee',
       });
 
@@ -1720,23 +1727,23 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       expect(result.transactions).toBeDefined();
     });
 
-    test('getTagSearch searches by tag', () => {
-      const result = tools.getTagSearch({ tag: 'work' });
+    test('getTagSearch searches by tag', async () => {
+      const result = await tools.getTagSearch({ tag: 'work' });
 
       expect(result.count).toBeGreaterThanOrEqual(0);
       expect(result.transactions).toBeDefined();
       expect(result.all_tags).toBeDefined();
     });
 
-    test('getNoteSearch searches by note', () => {
-      const result = tools.getNoteSearch({ query: 'business' });
+    test('getNoteSearch searches by note', async () => {
+      const result = await tools.getNoteSearch({ query: 'business' });
 
       expect(result.query).toBe('business');
       expect(result.transactions).toBeDefined();
     });
 
-    test('getLocationSearch searches by location', () => {
-      const result = tools.getLocationSearch({ city: 'San Francisco' });
+    test('getLocationSearch searches by location', async () => {
+      const result = await tools.getLocationSearch({ city: 'San Francisco' });
 
       expect(result.transactions).toBeDefined();
     });

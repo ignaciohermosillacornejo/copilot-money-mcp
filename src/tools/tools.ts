@@ -293,9 +293,9 @@ export class CopilotMoneyTools {
    *
    * @returns Map from category_id to category name
    */
-  private getUserCategoryMap(): Map<string, string> {
+  private async getUserCategoryMap(): Promise<Map<string, string>> {
     if (this._userCategoryMap === null) {
-      this._userCategoryMap = this.db.getCategoryNameMap();
+      this._userCategoryMap = await this.db.getCategoryNameMap();
     }
     return this._userCategoryMap;
   }
@@ -308,9 +308,9 @@ export class CopilotMoneyTools {
    *
    * @returns Map from account_id to user-defined account name
    */
-  private getUserAccountMap(): Map<string, string> {
+  private async getUserAccountMap(): Promise<Map<string, string>> {
     if (this._userAccountMap === null) {
-      this._userAccountMap = this.db.getAccountNameMap();
+      this._userAccountMap = await this.db.getAccountNameMap();
     }
     return this._userAccountMap;
   }
@@ -321,9 +321,9 @@ export class CopilotMoneyTools {
    * @param categoryId - The category ID to look up
    * @returns Human-readable category name
    */
-  private resolveCategoryName(categoryId: string | undefined): string {
+  private async resolveCategoryName(categoryId: string | undefined): Promise<string> {
     if (!categoryId) return 'Unknown';
-    return getCategoryName(categoryId, this.getUserCategoryMap());
+    return getCategoryName(categoryId, await this.getUserCategoryMap());
   }
 
   /**
@@ -336,13 +336,13 @@ export class CopilotMoneyTools {
    * @param account - The account object to get a display name for
    * @returns Human-readable account name
    */
-  private resolveAccountName(account: {
+  private async resolveAccountName(account: {
     account_id: string;
     name?: string;
     official_name?: string;
-  }): string {
+  }): Promise<string> {
     // Check user-defined name first (highest priority)
-    const userAccountMap = this.getUserAccountMap();
+    const userAccountMap = await this.getUserAccountMap();
     const userName = userAccountMap.get(account.account_id);
     if (userName) {
       return userName;
@@ -364,7 +364,7 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with transaction count and list of transactions
    */
-  getTransactions(options: {
+  async getTransactions(options: {
     // Existing filters
     period?: string;
     start_date?: string;
@@ -393,7 +393,7 @@ export class CopilotMoneyTools {
     lat?: number;
     lon?: number;
     radius_km?: number;
-  }): {
+  }): Promise<{
     count: number;
     total_count: number;
     offset: number;
@@ -401,7 +401,7 @@ export class CopilotMoneyTools {
     transactions: Array<Transaction & { category_name?: string; normalized_merchant?: string }>;
     // Additional fields for special types
     type_specific_data?: Record<string, unknown>;
-  } {
+  }> {
     const {
       period,
       category,
@@ -438,7 +438,7 @@ export class CopilotMoneyTools {
     // MODE 1: Single transaction lookup by ID
     // ============================================
     if (transaction_id) {
-      const allTransactions = this.db.getAllTransactions();
+      const allTransactions = await this.db.getAllTransactions();
       const found = allTransactions.find((t) => t.transaction_id === transaction_id);
       if (!found) {
         return {
@@ -458,7 +458,7 @@ export class CopilotMoneyTools {
           {
             ...found,
             category_name: found.category_id
-              ? this.resolveCategoryName(found.category_id)
+              ? await this.resolveCategoryName(found.category_id)
               : undefined,
             normalized_merchant: normalizeMerchantName(getTransactionDisplayName(found)),
           },
@@ -467,7 +467,7 @@ export class CopilotMoneyTools {
     }
 
     // Query transactions with higher limit for post-filtering
-    let transactions = this.db.getTransactions({
+    let transactions = await this.db.getTransactions({
       startDate: start_date,
       endDate: end_date,
       category,
@@ -563,11 +563,15 @@ export class CopilotMoneyTools {
     transactions = transactions.slice(validatedOffset, validatedOffset + validatedLimit);
 
     // Add human-readable category names and normalized merchant
-    const enrichedTransactions = transactions.map((txn) => ({
-      ...txn,
-      category_name: txn.category_id ? this.resolveCategoryName(txn.category_id) : undefined,
-      normalized_merchant: normalizeMerchantName(getTransactionDisplayName(txn)),
-    }));
+    const enrichedTransactions = await Promise.all(
+      transactions.map(async (txn) => ({
+        ...txn,
+        category_name: txn.category_id
+          ? await this.resolveCategoryName(txn.category_id)
+          : undefined,
+        normalized_merchant: normalizeMerchantName(getTransactionDisplayName(txn)),
+      }))
+    );
 
     return {
       count: enrichedTransactions.length,
@@ -793,7 +797,7 @@ export class CopilotMoneyTools {
    * @param options - Filter and grouping options
    * @returns Spending data grouped as specified
    */
-  getSpending(options: {
+  async getSpending(options: {
     group_by: 'category' | 'merchant' | 'day_of_week' | 'time' | 'rate';
     granularity?: 'day' | 'week' | 'month';
     period?: string;
@@ -802,13 +806,13 @@ export class CopilotMoneyTools {
     category?: string;
     limit?: number;
     exclude_transfers?: boolean;
-  }): {
+  }): Promise<{
     group_by: string;
     period: { start_date?: string; end_date?: string };
     total_spending: number;
     data: unknown;
     summary?: Record<string, unknown>;
-  } {
+  }> {
     const {
       group_by,
       granularity = 'month',
@@ -832,7 +836,7 @@ export class CopilotMoneyTools {
     }
 
     // Get transactions
-    let transactions = this.db.getTransactions({
+    let transactions = await this.db.getTransactions({
       startDate: start_date,
       endDate: end_date,
       limit: 50000,
@@ -867,14 +871,16 @@ export class CopilotMoneyTools {
           categorySpending.set(cat, existing);
         }
 
-        const categories = Array.from(categorySpending.entries())
-          .map(([category_id, data]) => ({
-            category_id,
-            category_name: this.resolveCategoryName(category_id),
-            total_spending: roundAmount(data.total),
-            transaction_count: data.count,
-          }))
-          .sort((a, b) => b.total_spending - a.total_spending);
+        const categories = (
+          await Promise.all(
+            Array.from(categorySpending.entries()).map(async ([category_id, data]) => ({
+              category_id,
+              category_name: await this.resolveCategoryName(category_id),
+              total_spending: roundAmount(data.total),
+              transaction_count: data.count,
+            }))
+          )
+        ).sort((a, b) => b.total_spending - a.total_spending);
 
         const totalSpending = categories.reduce((sum, c) => sum + c.total_spending, 0);
 
@@ -904,14 +910,19 @@ export class CopilotMoneyTools {
           merchantSpending.set(merchantName, existing);
         }
 
-        const merchants = Array.from(merchantSpending.entries())
-          .map(([merchant, data]) => ({
-            merchant,
-            category_name: data.categoryId ? this.resolveCategoryName(data.categoryId) : undefined,
-            total_spending: roundAmount(data.total),
-            transaction_count: data.count,
-            average_transaction: roundAmount(data.total / data.count),
-          }))
+        const merchants = (
+          await Promise.all(
+            Array.from(merchantSpending.entries()).map(async ([merchant, data]) => ({
+              merchant,
+              category_name: data.categoryId
+                ? await this.resolveCategoryName(data.categoryId)
+                : undefined,
+              total_spending: roundAmount(data.total),
+              transaction_count: data.count,
+              average_transaction: roundAmount(data.total / data.count),
+            }))
+          )
+        )
           .sort((a, b) => b.total_spending - a.total_spending)
           .slice(0, limit);
 
@@ -1083,7 +1094,7 @@ export class CopilotMoneyTools {
    * @param options - Analysis type and filter options
    * @returns Account analytics data
    */
-  getAccountAnalytics(options: {
+  async getAccountAnalytics(options: {
     analysis: 'activity' | 'balance_trends' | 'fees';
     account_id?: string;
     period?: string;
@@ -1093,12 +1104,12 @@ export class CopilotMoneyTools {
     granularity?: 'daily' | 'weekly' | 'monthly';
     account_type?: string;
     trend_threshold?: number;
-  }): {
+  }): Promise<{
     analysis: string;
     period: { start_date?: string; end_date?: string };
     data: unknown;
     summary?: Record<string, unknown>;
-  } {
+  }> {
     const {
       analysis,
       account_id,
@@ -1116,8 +1127,8 @@ export class CopilotMoneyTools {
     const effectiveStartDate = start_date;
     const effectiveEndDate = end_date;
 
-    const accounts = this.db.getAccounts();
-    const transactions = this.db.getTransactions();
+    const accounts = await this.db.getAccounts();
+    const transactions = await this.db.getTransactions();
     const periodTransactions = transactions.filter(
       (t) => t.date >= effectiveStartDate && t.date <= effectiveEndDate
     );
@@ -1160,7 +1171,7 @@ export class CopilotMoneyTools {
 
           activityData.push({
             account_id: account.account_id,
-            account_name: this.resolveAccountName(account),
+            account_name: await this.resolveAccountName(account),
             account_type: account.account_type,
             transaction_count: count,
             total_inflow: roundAmount(totalInflow),
@@ -1194,55 +1205,57 @@ export class CopilotMoneyTools {
         let decliningCount = 0;
         let stableCount = 0;
 
-        const trendsData = accountsToAnalyze.map((account) => {
-          const accountTxns = transactions
-            .filter((t) => t.account_id === account.account_id)
-            .sort((a, b) => a.date.localeCompare(b.date));
+        const trendsData = await Promise.all(
+          accountsToAnalyze.map(async (account) => {
+            const accountTxns = transactions
+              .filter((t) => t.account_id === account.account_id)
+              .sort((a, b) => a.date.localeCompare(b.date));
 
-          // Group by month
-          const monthlyData = new Map<string, { inflow: number; outflow: number }>();
-          for (const t of accountTxns) {
-            const month = t.date.substring(0, 7);
-            const existing = monthlyData.get(month) || { inflow: 0, outflow: 0 };
-            if (t.amount < 0) existing.inflow += Math.abs(t.amount);
-            else existing.outflow += t.amount;
-            monthlyData.set(month, existing);
-          }
+            // Group by month
+            const monthlyData = new Map<string, { inflow: number; outflow: number }>();
+            for (const t of accountTxns) {
+              const month = t.date.substring(0, 7);
+              const existing = monthlyData.get(month) || { inflow: 0, outflow: 0 };
+              if (t.amount < 0) existing.inflow += Math.abs(t.amount);
+              else existing.outflow += t.amount;
+              monthlyData.set(month, existing);
+            }
 
-          const monthlyArray = Array.from(monthlyData.entries())
-            .sort((a, b) => a[0].localeCompare(b[0]))
-            .slice(-months)
-            .map(([month, data]) => ({
-              month,
-              inflow: roundAmount(data.inflow),
-              outflow: roundAmount(data.outflow),
-              net_change: roundAmount(data.inflow - data.outflow),
-            }));
+            const monthlyArray = Array.from(monthlyData.entries())
+              .sort((a, b) => a[0].localeCompare(b[0]))
+              .slice(-months)
+              .map(([month, data]) => ({
+                month,
+                inflow: roundAmount(data.inflow),
+                outflow: roundAmount(data.outflow),
+                net_change: roundAmount(data.inflow - data.outflow),
+              }));
 
-          // Calculate overall trend using configurable threshold
-          const totalNetChange = monthlyArray.reduce((sum, m) => sum + m.net_change, 0);
-          const avgMonthlyChange = monthlyArray.length > 0 ? totalNetChange / months : 0;
+            // Calculate overall trend using configurable threshold
+            const totalNetChange = monthlyArray.reduce((sum, m) => sum + m.net_change, 0);
+            const avgMonthlyChange = monthlyArray.length > 0 ? totalNetChange / months : 0;
 
-          let overallTrend: 'growing' | 'declining' | 'stable' = 'stable';
-          if (avgMonthlyChange > trend_threshold) {
-            overallTrend = 'growing';
-            growingCount++;
-          } else if (avgMonthlyChange < -trend_threshold) {
-            overallTrend = 'declining';
-            decliningCount++;
-          } else {
-            stableCount++;
-          }
+            let overallTrend: 'growing' | 'declining' | 'stable' = 'stable';
+            if (avgMonthlyChange > trend_threshold) {
+              overallTrend = 'growing';
+              growingCount++;
+            } else if (avgMonthlyChange < -trend_threshold) {
+              overallTrend = 'declining';
+              decliningCount++;
+            } else {
+              stableCount++;
+            }
 
-          return {
-            account_id: account.account_id,
-            account_name: this.resolveAccountName(account),
-            current_balance: account.current_balance,
-            monthly_data: monthlyArray,
-            overall_trend: overallTrend,
-            average_monthly_change: roundAmount(avgMonthlyChange),
-          };
-        });
+            return {
+              account_id: account.account_id,
+              account_name: await this.resolveAccountName(account),
+              current_balance: account.current_balance,
+              monthly_data: monthlyArray,
+              overall_trend: overallTrend,
+              average_monthly_change: roundAmount(avgMonthlyChange),
+            };
+          })
+        );
 
         return {
           analysis,
@@ -1283,7 +1296,7 @@ export class CopilotMoneyTools {
 
         const feesByType = new Map<string, { count: number; total: number }>();
         for (const t of feeTxns) {
-          const type = this.resolveCategoryName(t.category_id || 'unknown_fee');
+          const type = await this.resolveCategoryName(t.category_id || 'unknown_fee');
           const existing = feesByType.get(type) || { count: 0, total: 0 };
           existing.count++;
           existing.total += Math.abs(t.amount);
@@ -1325,18 +1338,18 @@ export class CopilotMoneyTools {
    * @param options - Analysis type and filter options
    * @returns Budget analytics data
    */
-  getBudgetAnalytics(options: {
+  async getBudgetAnalytics(options: {
     analysis: 'utilization' | 'vs_actual' | 'alerts' | 'recommendations';
     month?: string;
     months?: number;
     category?: string;
     threshold_percentage?: number;
     budget_recommendation_threshold?: number;
-  }): {
+  }): Promise<{
     analysis: string;
     data: unknown;
     summary?: Record<string, unknown>;
-  } {
+  }> {
     const {
       analysis,
       month,
@@ -1346,13 +1359,13 @@ export class CopilotMoneyTools {
       budget_recommendation_threshold = DEFAULT_BUDGET_RECOMMENDATION_THRESHOLD,
     } = options;
 
-    const budgets = this.db.getBudgets(true);
+    const budgets = await this.db.getBudgets(true);
     const now = new Date();
     const currentMonth =
       month || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const [monthStart, monthEnd] = parsePeriod('this_month');
 
-    const transactions = this.db.getTransactions({
+    const transactions = await this.db.getTransactions({
       startDate: monthStart,
       endDate: monthEnd,
       limit: 50000,
@@ -1360,28 +1373,35 @@ export class CopilotMoneyTools {
 
     switch (analysis) {
       case 'utilization': {
-        const utilizationData = budgets.map((budget) => {
-          const categoryId = budget.category_id;
-          // Expenses are negative amounts in standard accounting
-          const spent = transactions
-            .filter(
-              (t) =>
-                t.amount < 0 && t.category_id === categoryId && !isTransferCategory(t.category_id)
-            )
-            .reduce((sum, t) => sum + Math.abs(t.amount), 0);
-          const budgetAmount = budget.amount || 0;
-          const utilization = budgetAmount > 0 ? (spent / budgetAmount) * 100 : 0;
+        const utilizationData = await Promise.all(
+          budgets.map(async (budget) => {
+            const categoryId = budget.category_id;
+            // Expenses are negative amounts in standard accounting
+            const spent = transactions
+              .filter(
+                (t) =>
+                  t.amount < 0 && t.category_id === categoryId && !isTransferCategory(t.category_id)
+              )
+              .reduce((sum, t) => sum + Math.abs(t.amount), 0);
+            const budgetAmount = budget.amount || 0;
+            const utilization = budgetAmount > 0 ? (spent / budgetAmount) * 100 : 0;
 
-          return {
-            budget_id: budget.budget_id,
-            category: this.resolveCategoryName(categoryId || 'Unknown'),
-            budget_amount: budgetAmount,
-            spent: roundAmount(spent),
-            remaining: roundAmount(budgetAmount - spent),
-            utilization_percent: roundAmount(utilization),
-            status: utilization >= 100 ? 'over' : utilization >= 80 ? 'warning' : 'ok',
-          };
-        });
+            return {
+              budget_id: budget.budget_id,
+              category: await this.resolveCategoryName(categoryId || 'Unknown'),
+              budget_amount: budgetAmount,
+              spent: roundAmount(spent),
+              remaining: roundAmount(budgetAmount - spent),
+              utilization_percent: roundAmount(utilization),
+              status:
+                utilization >= 100
+                  ? ('over' as const)
+                  : utilization >= 80
+                    ? ('warning' as const)
+                    : ('ok' as const),
+            };
+          })
+        );
 
         if (category) {
           const filtered = utilizationData.filter((u) =>
@@ -1420,7 +1440,7 @@ export class CopilotMoneyTools {
           const monthStartDate = `${monthStr}-01`;
           const monthEndDate = `${monthStr}-31`;
 
-          const monthTxns = this.db.getTransactions({
+          const monthTxns = await this.db.getTransactions({
             startDate: monthStartDate,
             endDate: monthEndDate,
             limit: 50000,
@@ -1448,8 +1468,8 @@ export class CopilotMoneyTools {
       }
 
       case 'alerts': {
-        const alerts = budgets
-          .map((budget) => {
+        const alertsRaw = await Promise.all(
+          budgets.map(async (budget) => {
             const categoryId = budget.category_id;
             // Expenses are negative amounts in standard accounting
             const spent = transactions
@@ -1461,16 +1481,17 @@ export class CopilotMoneyTools {
             if (utilization >= threshold_percentage) {
               return {
                 budget_id: budget.budget_id,
-                category: this.resolveCategoryName(categoryId || 'Unknown'),
+                category: await this.resolveCategoryName(categoryId || 'Unknown'),
                 budget_amount: budgetAmount,
                 spent: roundAmount(spent),
                 utilization_percent: roundAmount(utilization),
-                alert_level: utilization >= 100 ? 'exceeded' : 'warning',
+                alert_level: utilization >= 100 ? ('exceeded' as const) : ('warning' as const),
               };
             }
             return null;
           })
-          .filter(Boolean);
+        );
+        const alerts = alertsRaw.filter(Boolean);
 
         return {
           analysis,
@@ -1504,8 +1525,8 @@ export class CopilotMoneyTools {
           if (!budgetedCategories.has(cat) && spent > budget_recommendation_threshold) {
             recommendations.push({
               type: 'new_budget',
-              category: this.resolveCategoryName(cat),
-              message: `Consider creating a budget for ${this.resolveCategoryName(cat)} - you spent $${Math.round(spent)} this month`,
+              category: await this.resolveCategoryName(cat),
+              message: `Consider creating a budget for ${await this.resolveCategoryName(cat)} - you spent $${Math.round(spent)} this month`,
               suggested_amount: roundAmount(spent * 1.1),
             });
           }
@@ -1531,69 +1552,71 @@ export class CopilotMoneyTools {
    * @param options - Analysis type and filter options
    * @returns Goal analytics data
    */
-  getGoalAnalytics(options: {
+  async getGoalAnalytics(options: {
     analysis: 'projection' | 'risk' | 'recommendations';
     goal_id?: string;
     months_lookback?: number;
-  }): {
+  }): Promise<{
     analysis: string;
     data: unknown;
     summary?: Record<string, unknown>;
-  } {
+  }> {
     const { analysis, goal_id, months_lookback = 6 } = options;
-    const goals = this.db.getGoals(false);
+    const goals = await this.db.getGoals(false);
     const filteredGoals = goal_id ? goals.filter((g) => g.goal_id === goal_id) : goals;
 
     switch (analysis) {
       case 'projection': {
-        const projections = filteredGoals.map((goal) => {
-          const history = this.db.getGoalHistory(goal.goal_id, { limit: 12 });
-          const targetAmount = goal.savings?.target_amount || 0;
-          let currentAmount = 0;
-          let avgMonthlyContribution = 0;
+        const projections = await Promise.all(
+          filteredGoals.map(async (goal) => {
+            const history = await this.db.getGoalHistory(goal.goal_id, { limit: 12 });
+            const targetAmount = goal.savings?.target_amount || 0;
+            let currentAmount = 0;
+            let avgMonthlyContribution = 0;
 
-          if (history.length > 0) {
-            currentAmount = history[0]?.current_amount ?? 0;
-            if (history.length >= 2) {
-              const contributions = [];
-              for (let i = 1; i < history.length; i++) {
-                const current = history[i - 1]?.current_amount ?? 0;
-                const previous = history[i]?.current_amount ?? 0;
-                contributions.push(current - previous);
+            if (history.length > 0) {
+              currentAmount = history[0]?.current_amount ?? 0;
+              if (history.length >= 2) {
+                const contributions = [];
+                for (let i = 1; i < history.length; i++) {
+                  const current = history[i - 1]?.current_amount ?? 0;
+                  const previous = history[i]?.current_amount ?? 0;
+                  contributions.push(current - previous);
+                }
+                avgMonthlyContribution =
+                  contributions.reduce((a, b) => a + b, 0) / contributions.length;
               }
-              avgMonthlyContribution =
-                contributions.reduce((a, b) => a + b, 0) / contributions.length;
             }
-          }
 
-          const remaining = targetAmount - currentAmount;
-          const monthsToComplete =
-            avgMonthlyContribution > 0 ? Math.ceil(remaining / avgMonthlyContribution) : null;
+            const remaining = targetAmount - currentAmount;
+            const monthsToComplete =
+              avgMonthlyContribution > 0 ? Math.ceil(remaining / avgMonthlyContribution) : null;
 
-          return {
-            goal_id: goal.goal_id,
-            name: goal.name,
-            target_amount: targetAmount,
-            current_amount: roundAmount(currentAmount),
-            progress_percent:
-              targetAmount > 0 ? roundAmount((currentAmount / targetAmount) * 100) : 0,
-            avg_monthly_contribution: roundAmount(avgMonthlyContribution),
-            months_to_complete: monthsToComplete,
-            scenarios: {
-              conservative: monthsToComplete ? Math.ceil(monthsToComplete * 1.2) : null,
-              moderate: monthsToComplete,
-              aggressive: monthsToComplete ? Math.ceil(monthsToComplete * 0.8) : null,
-            },
-          };
-        });
+            return {
+              goal_id: goal.goal_id,
+              name: goal.name,
+              target_amount: targetAmount,
+              current_amount: roundAmount(currentAmount),
+              progress_percent:
+                targetAmount > 0 ? roundAmount((currentAmount / targetAmount) * 100) : 0,
+              avg_monthly_contribution: roundAmount(avgMonthlyContribution),
+              months_to_complete: monthsToComplete,
+              scenarios: {
+                conservative: monthsToComplete ? Math.ceil(monthsToComplete * 1.2) : null,
+                moderate: monthsToComplete,
+                aggressive: monthsToComplete ? Math.ceil(monthsToComplete * 0.8) : null,
+              },
+            };
+          })
+        );
 
         return { analysis, data: projections };
       }
 
       case 'risk': {
-        const atRisk = filteredGoals
-          .map((goal) => {
-            const history = this.db.getGoalHistory(goal.goal_id, { limit: months_lookback });
+        const atRiskRaw = await Promise.all(
+          filteredGoals.map(async (goal) => {
+            const history = await this.db.getGoalHistory(goal.goal_id, { limit: months_lookback });
             const targetAmount = goal.savings?.target_amount || 0;
             const currentAmount = history[0]?.current_amount ?? 0;
             const progress = targetAmount > 0 ? (currentAmount / targetAmount) * 100 : 0;
@@ -1621,14 +1644,15 @@ export class CopilotMoneyTools {
                 goal_id: goal.goal_id,
                 name: goal.name,
                 risk_score: riskScore,
-                risk_level: riskScore >= 50 ? 'high' : 'medium',
+                risk_level: riskScore >= 50 ? ('high' as const) : ('medium' as const),
                 risk_factors: riskFactors,
                 current_progress: roundAmount(progress),
               };
             }
             return null;
           })
-          .filter(Boolean);
+        );
+        const atRisk = atRiskRaw.filter(Boolean);
 
         return {
           analysis,
@@ -1646,7 +1670,7 @@ export class CopilotMoneyTools {
         }> = [];
 
         for (const goal of filteredGoals) {
-          const history = this.db.getGoalHistory(goal.goal_id, { limit: 6 });
+          const history = await this.db.getGoalHistory(goal.goal_id, { limit: 6 });
           const targetAmount = goal.savings?.target_amount || 0;
           const currentAmount = history[0]?.current_amount ?? 0;
           const progress = targetAmount > 0 ? (currentAmount / targetAmount) * 100 : 0;
@@ -1681,14 +1705,14 @@ export class CopilotMoneyTools {
    * @param options - Filter and include options
    * @returns Goal details
    */
-  getGoalDetails(
+  async getGoalDetails(
     options: {
       goal_id?: string;
       include?: ('progress' | 'history' | 'contributions')[];
       start_month?: string;
       end_month?: string;
     } = {}
-  ): {
+  ): Promise<{
     count: number;
     goals: Array<{
       goal_id: string;
@@ -1698,66 +1722,68 @@ export class CopilotMoneyTools {
       history?: Array<{ month: string; amount: number }>;
       contributions?: { total: number; monthly_avg: number };
     }>;
-  } {
+  }> {
     const { goal_id, include = ['progress'], start_month, end_month } = options;
-    const goals = this.db.getGoals(false);
+    const goals = await this.db.getGoals(false);
     const filteredGoals = goal_id ? goals.filter((g) => g.goal_id === goal_id) : goals;
 
-    const goalDetails = filteredGoals.map((goal) => {
-      const result: {
-        goal_id: string;
-        name?: string;
-        target_amount?: number;
-        progress?: { current_amount: number; progress_percent: number };
-        history?: Array<{ month: string; amount: number }>;
-        contributions?: { total: number; monthly_avg: number };
-      } = {
-        goal_id: goal.goal_id,
-        name: goal.name,
-        target_amount: goal.savings?.target_amount,
-      };
-
-      const history = this.db.getGoalHistory(goal.goal_id, {
-        startMonth: start_month,
-        endMonth: end_month,
-        limit: 12,
-      });
-
-      if (include.includes('progress')) {
-        const currentAmount = history[0]?.current_amount ?? 0;
-        const targetAmount = goal.savings?.target_amount || 0;
-        result.progress = {
-          current_amount: roundAmount(currentAmount),
-          progress_percent:
-            targetAmount > 0 ? roundAmount((currentAmount / targetAmount) * 100) : 0,
+    const goalDetails = await Promise.all(
+      filteredGoals.map(async (goal) => {
+        const result: {
+          goal_id: string;
+          name?: string;
+          target_amount?: number;
+          progress?: { current_amount: number; progress_percent: number };
+          history?: Array<{ month: string; amount: number }>;
+          contributions?: { total: number; monthly_avg: number };
+        } = {
+          goal_id: goal.goal_id,
+          name: goal.name,
+          target_amount: goal.savings?.target_amount,
         };
-      }
 
-      if (include.includes('history')) {
-        result.history = history.map((h) => ({
-          month: h.month,
-          amount: roundAmount(h.current_amount ?? 0),
-        }));
-      }
+        const history = await this.db.getGoalHistory(goal.goal_id, {
+          startMonth: start_month,
+          endMonth: end_month,
+          limit: 12,
+        });
 
-      if (include.includes('contributions')) {
-        let totalContributions = 0;
-        if (history.length >= 2) {
-          for (let i = 0; i < history.length - 1; i++) {
-            const current = history[i]?.current_amount ?? 0;
-            const previous = history[i + 1]?.current_amount ?? 0;
-            if (current > previous) totalContributions += current - previous;
-          }
+        if (include.includes('progress')) {
+          const currentAmount = history[0]?.current_amount ?? 0;
+          const targetAmount = goal.savings?.target_amount || 0;
+          result.progress = {
+            current_amount: roundAmount(currentAmount),
+            progress_percent:
+              targetAmount > 0 ? roundAmount((currentAmount / targetAmount) * 100) : 0,
+          };
         }
-        result.contributions = {
-          total: roundAmount(totalContributions),
-          monthly_avg:
-            history.length > 1 ? roundAmount(totalContributions / (history.length - 1)) : 0,
-        };
-      }
 
-      return result;
-    });
+        if (include.includes('history')) {
+          result.history = history.map((h) => ({
+            month: h.month,
+            amount: roundAmount(h.current_amount ?? 0),
+          }));
+        }
+
+        if (include.includes('contributions')) {
+          let totalContributions = 0;
+          if (history.length >= 2) {
+            for (let i = 0; i < history.length - 1; i++) {
+              const current = history[i]?.current_amount ?? 0;
+              const previous = history[i + 1]?.current_amount ?? 0;
+              if (current > previous) totalContributions += current - previous;
+            }
+          }
+          result.contributions = {
+            total: roundAmount(totalContributions),
+            monthly_avg:
+              history.length > 1 ? roundAmount(totalContributions / (history.length - 1)) : 0,
+          };
+        }
+
+        return result;
+      })
+    );
 
     return { count: goalDetails.length, goals: goalDetails };
   }
@@ -1773,19 +1799,19 @@ export class CopilotMoneyTools {
    * @param options - Analysis type and filter options
    * @returns Investment analytics data
    */
-  getInvestmentAnalytics(options: {
+  async getInvestmentAnalytics(options: {
     analysis: 'performance' | 'dividends' | 'fees';
     ticker_symbol?: string;
     account_id?: string;
     period?: string;
     start_date?: string;
     end_date?: string;
-  }): {
+  }): Promise<{
     analysis: string;
     period: { start_date?: string; end_date?: string };
     data: unknown;
     summary?: Record<string, unknown>;
-  } {
+  }> {
     const { analysis, ticker_symbol, account_id, period = 'ytd' } = options;
     let { start_date, end_date } = options;
 
@@ -1797,7 +1823,7 @@ export class CopilotMoneyTools {
 
     switch (analysis) {
       case 'performance': {
-        const prices = this.db.getInvestmentPrices({ tickerSymbol: ticker_symbol });
+        const prices = await this.db.getInvestmentPrices({ tickerSymbol: ticker_symbol });
         const filteredPrices = prices.filter((p) => {
           const priceDate = getPriceDate(p);
           return priceDate && priceDate >= effectiveStartDate && priceDate <= effectiveEndDate;
@@ -1851,7 +1877,7 @@ export class CopilotMoneyTools {
       }
 
       case 'dividends': {
-        const transactions = this.db.getTransactions({
+        const transactions = await this.db.getTransactions({
           startDate: start_date,
           endDate: end_date,
           limit: 50000,
@@ -1882,11 +1908,12 @@ export class CopilotMoneyTools {
       }
 
       case 'fees': {
-        const transactions = this.db.getTransactions({
+        const transactions = await this.db.getTransactions({
           startDate: start_date,
           endDate: end_date,
           limit: 50000,
         });
+        const accounts = await this.db.getAccounts();
         // Fees are expenses (negative amounts in standard accounting)
         const feeTxns = transactions.filter((t) => {
           const name = getTransactionDisplayName(t).toLowerCase();
@@ -1896,7 +1923,6 @@ export class CopilotMoneyTools {
             t.category_id?.toLowerCase().includes('fee');
           const accountMatch = !account_id || t.account_id === account_id;
           // Check if it's from an investment account type
-          const accounts = this.db.getAccounts();
           const txnAccount = accounts.find((a) => a.account_id === t.account_id);
           const isInvestmentAccount =
             txnAccount?.account_type?.toLowerCase().includes('investment') ||
@@ -1931,14 +1957,14 @@ export class CopilotMoneyTools {
    * @param options - Sort and filter options
    * @returns Merchant analytics data
    */
-  getMerchantAnalytics(options: {
+  async getMerchantAnalytics(options: {
     sort_by: 'spending' | 'frequency' | 'average';
     period?: string;
     start_date?: string;
     end_date?: string;
     limit?: number;
     min_visits?: number;
-  }): {
+  }): Promise<{
     sort_by: string;
     period: { start_date?: string; end_date?: string };
     merchants: Array<{
@@ -1954,7 +1980,7 @@ export class CopilotMoneyTools {
       total_merchants: number;
       total_spending: number;
     };
-  } {
+  }> {
     const { sort_by, period = 'last_90_days', limit = 20, min_visits = 1 } = options;
     let { start_date, end_date } = options;
 
@@ -1962,7 +1988,7 @@ export class CopilotMoneyTools {
       [start_date, end_date] = parsePeriod(period);
     }
 
-    const transactions = this.db.getTransactions({
+    const transactions = await this.db.getTransactions({
       startDate: start_date,
       endDate: end_date,
       limit: 50000,
@@ -2040,7 +2066,7 @@ export class CopilotMoneyTools {
    * @param options - Optional search options
    * @returns Object with transaction count and list of matching transactions
    */
-  searchTransactions(
+  async searchTransactions(
     query: string,
     options: {
       limit?: number;
@@ -2048,10 +2074,10 @@ export class CopilotMoneyTools {
       start_date?: string;
       end_date?: string;
     } = {}
-  ): {
+  ): Promise<{
     count: number;
     transactions: Array<Transaction & { category_name?: string }>;
-  } {
+  }> {
     const { limit = 50, period } = options;
     let { start_date, end_date } = options;
 
@@ -2060,7 +2086,10 @@ export class CopilotMoneyTools {
       [start_date, end_date] = parsePeriod(period);
     }
 
-    let transactions = this.db.searchTransactions(query, start_date || end_date ? 10000 : limit);
+    let transactions = await this.db.searchTransactions(
+      query,
+      start_date || end_date ? 10000 : limit
+    );
 
     // Apply date filters if specified
     if (start_date) {
@@ -2076,10 +2105,14 @@ export class CopilotMoneyTools {
     transactions = transactions.slice(0, limit);
 
     // Add human-readable category names
-    const enrichedTransactions = transactions.map((txn) => ({
-      ...txn,
-      category_name: txn.category_id ? this.resolveCategoryName(txn.category_id) : undefined,
-    }));
+    const enrichedTransactions = await Promise.all(
+      transactions.map(async (txn) => ({
+        ...txn,
+        category_name: txn.category_id
+          ? await this.resolveCategoryName(txn.category_id)
+          : undefined,
+      }))
+    );
 
     return {
       count: enrichedTransactions.length,
@@ -2093,12 +2126,12 @@ export class CopilotMoneyTools {
    * @param accountType - Optional filter by account type
    * @returns Object with account count, total balance, and list of accounts
    */
-  getAccounts(accountType?: string): {
+  async getAccounts(accountType?: string): Promise<{
     count: number;
     total_balance: number;
     accounts: Account[];
-  } {
-    const accounts = this.db.getAccounts(accountType);
+  }> {
+    const accounts = await this.db.getAccounts(accountType);
 
     // Calculate total balance
     const totalBalance = accounts.reduce((sum, acc) => sum + acc.current_balance, 0);
@@ -2116,13 +2149,13 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with spending breakdown by category
    */
-  getSpendingByCategory(options: {
+  async getSpendingByCategory(options: {
     period?: string;
     start_date?: string;
     end_date?: string;
     min_amount?: number;
     exclude_transfers?: boolean;
-  }): {
+  }): Promise<{
     period: { start_date?: string; end_date?: string };
     total_spending: number;
     category_count: number;
@@ -2132,7 +2165,7 @@ export class CopilotMoneyTools {
       total_spending: number;
       transaction_count: number;
     }>;
-  } {
+  }> {
     const { period, min_amount = 0.0, exclude_transfers = false } = options;
     let { start_date, end_date } = options;
 
@@ -2144,7 +2177,7 @@ export class CopilotMoneyTools {
     // Get transactions with filters
     // Note: Don't pass minAmount to database since expenses are negative
     // We'll filter by absolute amount after selecting expenses
-    let transactions = this.db.getTransactions({
+    let transactions = await this.db.getTransactions({
       startDate: start_date,
       endDate: end_date,
       limit: 50000, // High limit for aggregation
@@ -2173,14 +2206,16 @@ export class CopilotMoneyTools {
     }
 
     // Convert to list of objects, sorted by spending (descending)
-    const categories = Array.from(categorySpending.entries())
-      .map(([category_id, total_spending]) => ({
-        category_id,
-        category_name: this.resolveCategoryName(category_id),
-        total_spending: roundAmount(total_spending),
-        transaction_count: categoryCounts.get(category_id) || 0,
-      }))
-      .sort((a, b) => b.total_spending - a.total_spending);
+    const categories = (
+      await Promise.all(
+        Array.from(categorySpending.entries()).map(async ([category_id, total_spending]) => ({
+          category_id,
+          category_name: await this.resolveCategoryName(category_id),
+          total_spending: roundAmount(total_spending),
+          transaction_count: categoryCounts.get(category_id) || 0,
+        }))
+      )
+    ).sort((a, b) => b.total_spending - a.total_spending);
 
     // Calculate totals
     const totalSpending = roundAmount(categories.reduce((sum, cat) => sum + cat.total_spending, 0));
@@ -2200,7 +2235,7 @@ export class CopilotMoneyTools {
    * @returns Object with account details and balance
    * @throws Error if account_id is not found
    */
-  getAccountBalance(accountId: string): {
+  async getAccountBalance(accountId: string): Promise<{
     account_id: string;
     name: string;
     account_type?: string;
@@ -2209,8 +2244,8 @@ export class CopilotMoneyTools {
     available_balance?: number;
     mask?: string;
     institution_name?: string;
-  } {
-    const accounts = this.db.getAccounts();
+  }> {
+    const accounts = await this.db.getAccounts();
 
     // Find the account
     const account = accounts.find((acc) => acc.account_id === accountId);
@@ -2221,7 +2256,7 @@ export class CopilotMoneyTools {
 
     return {
       account_id: account.account_id,
-      name: this.resolveAccountName(account),
+      name: await this.resolveAccountName(account),
       account_type: account.account_type,
       subtype: account.subtype,
       current_balance: account.current_balance,
@@ -2252,18 +2287,18 @@ export class CopilotMoneyTools {
    * @param options - View and filter options
    * @returns Category data based on view mode
    */
-  getCategories(
+  async getCategories(
     options: {
       view?: 'list' | 'tree' | 'search';
       parent_id?: string;
       query?: string;
       type?: 'income' | 'expense' | 'transfer';
     } = {}
-  ): {
+  ): Promise<{
     view: string;
     count: number;
     data: unknown;
-  } {
+  }> {
     const { view = 'list', parent_id, query, type } = options;
 
     // If parent_id is specified, get subcategories
@@ -2358,7 +2393,7 @@ export class CopilotMoneyTools {
 
       case 'list':
       default: {
-        const allTransactions = this.db.getAllTransactions();
+        const allTransactions = await this.db.getAllTransactions();
 
         // Count transactions and amounts per category
         const categoryStats = new Map<string, { count: number; totalAmount: number }>();
@@ -2375,14 +2410,16 @@ export class CopilotMoneyTools {
         }
 
         // Convert to list
-        const categories = Array.from(categoryStats.entries())
-          .map(([category_id, stats]) => ({
-            category_id,
-            category_name: this.resolveCategoryName(category_id),
-            transaction_count: stats.count,
-            total_amount: roundAmount(stats.totalAmount),
-          }))
-          .sort((a, b) => b.transaction_count - a.transaction_count);
+        const categories = (
+          await Promise.all(
+            Array.from(categoryStats.entries()).map(async ([category_id, stats]) => ({
+              category_id,
+              category_name: await this.resolveCategoryName(category_id),
+              transaction_count: stats.count,
+              total_amount: roundAmount(stats.totalAmount),
+            }))
+          )
+        ).sort((a, b) => b.transaction_count - a.transaction_count);
 
         return {
           view: 'list',
@@ -2401,13 +2438,13 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with list of recurring transactions grouped by merchant
    */
-  getRecurringTransactions(options: {
+  async getRecurringTransactions(options: {
     min_occurrences?: number;
     period?: string;
     start_date?: string;
     end_date?: string;
     include_copilot_subscriptions?: boolean;
-  }): {
+  }): Promise<{
     period: { start_date?: string; end_date?: string };
     count: number;
     total_monthly_cost: number;
@@ -2435,7 +2472,7 @@ export class CopilotMoneyTools {
       category_name?: string;
       is_active?: boolean;
     }>;
-  } {
+  }> {
     const { min_occurrences = 2 } = options;
     let { period, start_date, end_date } = options;
 
@@ -2450,7 +2487,7 @@ export class CopilotMoneyTools {
     }
 
     // Get all transactions in the period
-    const transactions = this.db.getTransactions({
+    const transactions = await this.db.getTransactions({
       startDate: start_date,
       endDate: end_date,
       limit: 50000,
@@ -2599,7 +2636,9 @@ export class CopilotMoneyTools {
           frequency,
           confidence,
           confidence_reason: confidenceReasons.join(', '),
-          category_name: data.categoryId ? this.resolveCategoryName(data.categoryId) : undefined,
+          category_name: data.categoryId
+            ? await this.resolveCategoryName(data.categoryId)
+            : undefined,
           last_date: lastTxn.date,
           next_expected_date: nextExpectedDate,
           transactions: sortedTxns.slice(-5).map((t) => ({
@@ -2640,18 +2679,22 @@ export class CopilotMoneyTools {
       | undefined;
 
     if (includeCopilotSubs) {
-      const copilotRecurring = this.db.getRecurring();
+      const copilotRecurring = await this.db.getRecurring();
       if (copilotRecurring.length > 0) {
-        copilotSubscriptions = copilotRecurring.map((rec) => ({
-          recurring_id: rec.recurring_id,
-          name: getRecurringDisplayName(rec),
-          amount: rec.amount,
-          frequency: rec.frequency,
-          next_date: rec.next_date,
-          last_date: rec.last_date,
-          category_name: rec.category_id ? this.resolveCategoryName(rec.category_id) : undefined,
-          is_active: rec.is_active,
-        }));
+        copilotSubscriptions = await Promise.all(
+          copilotRecurring.map(async (rec) => ({
+            recurring_id: rec.recurring_id,
+            name: getRecurringDisplayName(rec),
+            amount: rec.amount,
+            frequency: rec.frequency,
+            next_date: rec.next_date,
+            last_date: rec.last_date,
+            category_name: rec.category_id
+              ? await this.resolveCategoryName(rec.category_id)
+              : undefined,
+            is_active: rec.is_active,
+          }))
+        );
       }
     }
 
@@ -2672,7 +2715,7 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with budget count and list of budgets
    */
-  getBudgets(options: { active_only?: boolean } = {}): {
+  async getBudgets(options: { active_only?: boolean } = {}): Promise<{
     count: number;
     total_budgeted: number;
     budgets: Array<{
@@ -2687,10 +2730,10 @@ export class CopilotMoneyTools {
       is_active?: boolean;
       iso_currency_code?: string;
     }>;
-  } {
+  }> {
     const { active_only = false } = options;
 
-    const budgets = this.db.getBudgets(active_only);
+    const budgets = await this.db.getBudgets(active_only);
 
     // Calculate total budgeted amount (monthly equivalent)
     let totalBudgeted = 0;
@@ -2710,21 +2753,25 @@ export class CopilotMoneyTools {
       }
     }
 
-    return {
-      count: budgets.length,
-      total_budgeted: roundAmount(totalBudgeted),
-      budgets: budgets.map((b) => ({
+    const enrichedBudgets = await Promise.all(
+      budgets.map(async (b) => ({
         budget_id: b.budget_id,
         name: b.name,
         amount: b.amount,
         period: b.period,
         category_id: b.category_id,
-        category_name: b.category_id ? this.resolveCategoryName(b.category_id) : undefined,
+        category_name: b.category_id ? await this.resolveCategoryName(b.category_id) : undefined,
         start_date: b.start_date,
         end_date: b.end_date,
         is_active: b.is_active,
         iso_currency_code: b.iso_currency_code,
-      })),
+      }))
+    );
+
+    return {
+      count: budgets.length,
+      total_budgeted: roundAmount(totalBudgeted),
+      budgets: enrichedBudgets,
     };
   }
 
@@ -2734,7 +2781,7 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with goal details
    */
-  getGoals(options: { active_only?: boolean } = {}): {
+  async getGoals(options: { active_only?: boolean } = {}): Promise<{
     count: number;
     total_target: number;
     goals: Array<{
@@ -2750,10 +2797,10 @@ export class CopilotMoneyTools {
       is_ongoing?: boolean;
       inflates_budget?: boolean;
     }>;
-  } {
+  }> {
     const { active_only = false } = options;
 
-    const goals = this.db.getGoals(active_only);
+    const goals = await this.db.getGoals(active_only);
 
     // Calculate total target amount across all goals
     let totalTarget = 0;
@@ -2791,7 +2838,7 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with goal progress details
    */
-  getGoalProgress(options: { goal_id?: string } = {}): {
+  async getGoalProgress(options: { goal_id?: string } = {}): Promise<{
     count: number;
     goals: Array<{
       goal_id: string;
@@ -2805,11 +2852,11 @@ export class CopilotMoneyTools {
       status?: string;
       latest_month?: string;
     }>;
-  } {
+  }> {
     const { goal_id } = options;
 
     // Get goals (all or filtered by goal_id)
-    const goals = this.db.getGoals(false);
+    const goals = await this.db.getGoals(false);
     let filteredGoals = goals;
 
     if (goal_id) {
@@ -2817,74 +2864,76 @@ export class CopilotMoneyTools {
     }
 
     // Get history for each goal to calculate progress
-    const progressData = filteredGoals.map((goal) => {
-      // Get latest history for this goal
-      const history = this.db.getGoalHistory(goal.goal_id, { limit: 12 }); // Last 12 months
+    const progressData = await Promise.all(
+      filteredGoals.map(async (goal) => {
+        // Get latest history for this goal
+        const history = await this.db.getGoalHistory(goal.goal_id, { limit: 12 }); // Last 12 months
 
-      let currentAmount: number | undefined;
-      let latestMonth: string | undefined;
-      let averageMonthlyContribution: number | undefined;
+        let currentAmount: number | undefined;
+        let latestMonth: string | undefined;
+        let averageMonthlyContribution: number | undefined;
 
-      if (history.length > 0) {
-        // Get latest month's current_amount
-        const latestHistory = history[0];
-        if (latestHistory) {
-          currentAmount = latestHistory.current_amount;
-          latestMonth = latestHistory.month;
-        }
+        if (history.length > 0) {
+          // Get latest month's current_amount
+          const latestHistory = history[0];
+          if (latestHistory) {
+            currentAmount = latestHistory.current_amount;
+            latestMonth = latestHistory.month;
+          }
 
-        // Calculate average monthly contribution from history
-        if (history.length >= 2) {
-          const amounts = history.map((h) => ({ month: h.month, amount: h.current_amount ?? 0 }));
-          // Sort by month ascending to calculate differences
-          amounts.sort((a, b) => a.month.localeCompare(b.month));
+          // Calculate average monthly contribution from history
+          if (history.length >= 2) {
+            const amounts = history.map((h) => ({ month: h.month, amount: h.current_amount ?? 0 }));
+            // Sort by month ascending to calculate differences
+            amounts.sort((a, b) => a.month.localeCompare(b.month));
 
-          const contributions: number[] = [];
-          for (let i = 1; i < amounts.length; i++) {
-            const current = amounts[i];
-            const previous = amounts[i - 1];
-            if (current && previous) {
-              contributions.push(current.amount - previous.amount);
+            const contributions: number[] = [];
+            for (let i = 1; i < amounts.length; i++) {
+              const current = amounts[i];
+              const previous = amounts[i - 1];
+              if (current && previous) {
+                contributions.push(current.amount - previous.amount);
+              }
+            }
+
+            if (contributions.length > 0) {
+              averageMonthlyContribution =
+                contributions.reduce((sum, c) => sum + c, 0) / contributions.length;
             }
           }
-
-          if (contributions.length > 0) {
-            averageMonthlyContribution =
-              contributions.reduce((sum, c) => sum + c, 0) / contributions.length;
-          }
         }
-      }
 
-      // Calculate progress percentage
-      const targetAmount = goal.savings?.target_amount;
-      let progressPercent: number | undefined;
-      if (targetAmount && currentAmount !== undefined) {
-        progressPercent = Math.min(100, (currentAmount / targetAmount) * 100);
-      }
+        // Calculate progress percentage
+        const targetAmount = goal.savings?.target_amount;
+        let progressPercent: number | undefined;
+        if (targetAmount && currentAmount !== undefined) {
+          progressPercent = Math.min(100, (currentAmount / targetAmount) * 100);
+        }
 
-      // Estimate completion date
-      let estimatedCompletion: string | undefined;
-      if (currentAmount !== undefined && averageMonthlyContribution !== undefined) {
-        estimatedCompletion = estimateGoalCompletion(
-          goal,
-          currentAmount,
-          averageMonthlyContribution
-        );
-      }
+        // Estimate completion date
+        let estimatedCompletion: string | undefined;
+        if (currentAmount !== undefined && averageMonthlyContribution !== undefined) {
+          estimatedCompletion = estimateGoalCompletion(
+            goal,
+            currentAmount,
+            averageMonthlyContribution
+          );
+        }
 
-      return {
-        goal_id: goal.goal_id,
-        name: goal.name,
-        emoji: goal.emoji,
-        target_amount: targetAmount,
-        current_amount: currentAmount,
-        progress_percent: progressPercent ? roundAmount(progressPercent) : undefined,
-        monthly_contribution: goal.savings?.tracking_type_monthly_contribution,
-        estimated_completion: estimatedCompletion,
-        status: goal.savings?.status,
-        latest_month: latestMonth,
-      };
-    });
+        return {
+          goal_id: goal.goal_id,
+          name: goal.name,
+          emoji: goal.emoji,
+          target_amount: targetAmount,
+          current_amount: currentAmount,
+          progress_percent: progressPercent ? roundAmount(progressPercent) : undefined,
+          monthly_contribution: goal.savings?.tracking_type_monthly_contribution,
+          estimated_completion: estimatedCompletion,
+          status: goal.savings?.status,
+          latest_month: latestMonth,
+        };
+      })
+    );
 
     return {
       count: progressData.length,
@@ -2901,12 +2950,12 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with historical goal data
    */
-  getGoalHistory(options: {
+  async getGoalHistory(options: {
     goal_id: string;
     start_month?: string;
     end_month?: string;
     limit?: number;
-  }): {
+  }): Promise<{
     goal_id: string;
     goal_name?: string;
     count: number;
@@ -2921,15 +2970,15 @@ export class CopilotMoneyTools {
       month_change_percent?: number;
       daily_snapshots_count?: number;
     }>;
-  } {
+  }> {
     const { goal_id, start_month, end_month, limit = 12 } = options;
 
     // Get the goal details
-    const goals = this.db.getGoals(false);
+    const goals = await this.db.getGoals(false);
     const goal = goals.find((g) => g.goal_id === goal_id);
 
     // Get history for this goal
-    const history = this.db.getGoalHistory(goal_id, {
+    const history = await this.db.getGoalHistory(goal_id, {
       startMonth: start_month,
       endMonth: end_month,
       limit,
@@ -2975,7 +3024,7 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with completion estimates for goals
    */
-  estimateGoalCompletion(options: { goal_id?: string } = {}): {
+  async estimateGoalCompletion(options: { goal_id?: string } = {}): Promise<{
     count: number;
     goals: Array<{
       goal_id: string;
@@ -2989,11 +3038,11 @@ export class CopilotMoneyTools {
       is_on_track?: boolean;
       status?: string;
     }>;
-  } {
+  }> {
     const { goal_id } = options;
 
     // Get goals (all or filtered)
-    const goals = this.db.getGoals(false);
+    const goals = await this.db.getGoals(false);
     let filteredGoals = goals;
 
     if (goal_id) {
@@ -3001,88 +3050,90 @@ export class CopilotMoneyTools {
     }
 
     // Calculate estimates for each goal
-    const estimates = filteredGoals.map((goal) => {
-      // Get history to calculate average contribution
-      const history = this.db.getGoalHistory(goal.goal_id, { limit: 12 });
+    const estimates = await Promise.all(
+      filteredGoals.map(async (goal) => {
+        // Get history to calculate average contribution
+        const history = await this.db.getGoalHistory(goal.goal_id, { limit: 12 });
 
-      let currentAmount: number | undefined;
-      let averageMonthlyContribution: number | undefined;
+        let currentAmount: number | undefined;
+        let averageMonthlyContribution: number | undefined;
 
-      if (history.length > 0) {
-        const latestHistory = history[0];
-        if (latestHistory) {
-          currentAmount = latestHistory.current_amount;
-        }
+        if (history.length > 0) {
+          const latestHistory = history[0];
+          if (latestHistory) {
+            currentAmount = latestHistory.current_amount;
+          }
 
-        // Calculate average contribution
-        if (history.length >= 2) {
-          const amounts = history
-            .map((h) => ({ month: h.month, amount: h.current_amount ?? 0 }))
-            .sort((a, b) => a.month.localeCompare(b.month));
+          // Calculate average contribution
+          if (history.length >= 2) {
+            const amounts = history
+              .map((h) => ({ month: h.month, amount: h.current_amount ?? 0 }))
+              .sort((a, b) => a.month.localeCompare(b.month));
 
-          const contributions: number[] = [];
-          for (let i = 1; i < amounts.length; i++) {
-            const current = amounts[i];
-            const previous = amounts[i - 1];
-            if (current && previous) {
-              contributions.push(current.amount - previous.amount);
+            const contributions: number[] = [];
+            for (let i = 1; i < amounts.length; i++) {
+              const current = amounts[i];
+              const previous = amounts[i - 1];
+              if (current && previous) {
+                contributions.push(current.amount - previous.amount);
+              }
+            }
+
+            if (contributions.length > 0) {
+              averageMonthlyContribution =
+                contributions.reduce((sum, c) => sum + c, 0) / contributions.length;
             }
           }
+        }
 
-          if (contributions.length > 0) {
-            averageMonthlyContribution =
-              contributions.reduce((sum, c) => sum + c, 0) / contributions.length;
+        const targetAmount = goal.savings?.target_amount;
+        const remainingAmount =
+          targetAmount && currentAmount !== undefined ? targetAmount - currentAmount : undefined;
+
+        let estimatedMonthsRemaining: number | undefined;
+        let estimatedCompletionMonth: string | undefined;
+        let isOnTrack: boolean | undefined;
+
+        if (
+          remainingAmount !== undefined &&
+          remainingAmount > 0 &&
+          averageMonthlyContribution !== undefined &&
+          averageMonthlyContribution > 0
+        ) {
+          estimatedMonthsRemaining = Math.ceil(remainingAmount / averageMonthlyContribution);
+
+          // Calculate completion date
+          const today = new Date();
+          const targetDate = new Date(
+            today.getFullYear(),
+            today.getMonth() + estimatedMonthsRemaining,
+            1
+          );
+          estimatedCompletionMonth = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}`;
+
+          // Check if on track (compare with expected monthly contribution)
+          const expectedContribution = goal.savings?.tracking_type_monthly_contribution;
+          if (expectedContribution) {
+            isOnTrack = averageMonthlyContribution >= expectedContribution * 0.9; // 90% threshold
           }
         }
-      }
 
-      const targetAmount = goal.savings?.target_amount;
-      const remainingAmount =
-        targetAmount && currentAmount !== undefined ? targetAmount - currentAmount : undefined;
-
-      let estimatedMonthsRemaining: number | undefined;
-      let estimatedCompletionMonth: string | undefined;
-      let isOnTrack: boolean | undefined;
-
-      if (
-        remainingAmount !== undefined &&
-        remainingAmount > 0 &&
-        averageMonthlyContribution !== undefined &&
-        averageMonthlyContribution > 0
-      ) {
-        estimatedMonthsRemaining = Math.ceil(remainingAmount / averageMonthlyContribution);
-
-        // Calculate completion date
-        const today = new Date();
-        const targetDate = new Date(
-          today.getFullYear(),
-          today.getMonth() + estimatedMonthsRemaining,
-          1
-        );
-        estimatedCompletionMonth = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}`;
-
-        // Check if on track (compare with expected monthly contribution)
-        const expectedContribution = goal.savings?.tracking_type_monthly_contribution;
-        if (expectedContribution) {
-          isOnTrack = averageMonthlyContribution >= expectedContribution * 0.9; // 90% threshold
-        }
-      }
-
-      return {
-        goal_id: goal.goal_id,
-        name: goal.name,
-        target_amount: targetAmount,
-        current_amount: currentAmount,
-        remaining_amount: remainingAmount ? roundAmount(remainingAmount) : undefined,
-        average_monthly_contribution: averageMonthlyContribution
-          ? roundAmount(averageMonthlyContribution)
-          : undefined,
-        estimated_months_remaining: estimatedMonthsRemaining,
-        estimated_completion_month: estimatedCompletionMonth,
-        is_on_track: isOnTrack,
-        status: goal.savings?.status,
-      };
-    });
+        return {
+          goal_id: goal.goal_id,
+          name: goal.name,
+          target_amount: targetAmount,
+          current_amount: currentAmount,
+          remaining_amount: remainingAmount ? roundAmount(remainingAmount) : undefined,
+          average_monthly_contribution: averageMonthlyContribution
+            ? roundAmount(averageMonthlyContribution)
+            : undefined,
+          estimated_months_remaining: estimatedMonthsRemaining,
+          estimated_completion_month: estimatedCompletionMonth,
+          is_on_track: isOnTrack,
+          status: goal.savings?.status,
+        };
+      })
+    );
 
     return {
       count: estimates.length,
@@ -3099,12 +3150,12 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with contribution analysis
    */
-  getGoalContributions(options: {
+  async getGoalContributions(options: {
     goal_id: string;
     start_month?: string;
     end_month?: string;
     limit?: number;
-  }): {
+  }): Promise<{
     goal_id: string;
     goal_name?: string;
     period: { start_month?: string; end_month?: string };
@@ -3121,15 +3172,15 @@ export class CopilotMoneyTools {
       withdrawals?: number;
       net: number;
     }>;
-  } {
+  }> {
     const { goal_id, start_month, end_month, limit = 12 } = options;
 
     // Get goal details
-    const goals = this.db.getGoals(false);
+    const goals = await this.db.getGoals(false);
     const goal = goals.find((g) => g.goal_id === goal_id);
 
     // Get history
-    const history = this.db.getGoalHistory(goal_id, {
+    const history = await this.db.getGoalHistory(goal_id, {
       startMonth: start_month,
       endMonth: end_month,
       limit,
@@ -3194,12 +3245,12 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with income breakdown
    */
-  getIncome(options: {
+  async getIncome(options: {
     period?: string;
     start_date?: string;
     end_date?: string;
     refund_threshold?: number;
-  }): {
+  }): Promise<{
     period: { start_date?: string; end_date?: string };
     total_income: number;
     transaction_count: number;
@@ -3210,7 +3261,7 @@ export class CopilotMoneyTools {
       count: number;
     }>;
     transactions: Array<Transaction & { category_name?: string }>;
-  } {
+  }> {
     const { period, refund_threshold = DEFAULT_REFUND_THRESHOLD } = options;
     let { start_date, end_date } = options;
 
@@ -3220,7 +3271,7 @@ export class CopilotMoneyTools {
     }
 
     // Get all transactions in the period
-    const allTransactions = this.db.getTransactions({
+    const allTransactions = await this.db.getTransactions({
       startDate: start_date,
       endDate: end_date,
       limit: 50000,
@@ -3292,23 +3343,31 @@ export class CopilotMoneyTools {
     }
 
     // Convert to sorted list
-    const incomeBySource = Array.from(sourceMap.entries())
-      .map(([source, data]) => ({
-        source,
-        category_name: data.categoryId ? this.resolveCategoryName(data.categoryId) : undefined,
-        total: roundAmount(data.total),
-        count: data.count,
-      }))
-      .sort((a, b) => b.total - a.total);
+    const incomeBySource = (
+      await Promise.all(
+        Array.from(sourceMap.entries()).map(async ([source, data]) => ({
+          source,
+          category_name: data.categoryId
+            ? await this.resolveCategoryName(data.categoryId)
+            : undefined,
+          total: roundAmount(data.total),
+          count: data.count,
+        }))
+      )
+    ).sort((a, b) => b.total - a.total);
 
     // Calculate total
     const totalIncome = incomeBySource.reduce((sum, s) => sum + s.total, 0);
 
     // Enrich transactions with category names
-    const enrichedTransactions = incomeTransactions.slice(0, 100).map((txn) => ({
-      ...txn,
-      category_name: txn.category_id ? this.resolveCategoryName(txn.category_id) : undefined,
-    }));
+    const enrichedTransactions = await Promise.all(
+      incomeTransactions.slice(0, 100).map(async (txn) => ({
+        ...txn,
+        category_name: txn.category_id
+          ? await this.resolveCategoryName(txn.category_id)
+          : undefined,
+      }))
+    );
 
     return {
       period: { start_date, end_date },
@@ -3325,13 +3384,13 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with spending breakdown by merchant
    */
-  getSpendingByMerchant(options: {
+  async getSpendingByMerchant(options: {
     period?: string;
     start_date?: string;
     end_date?: string;
     limit?: number;
     exclude_transfers?: boolean;
-  }): {
+  }): Promise<{
     period: { start_date?: string; end_date?: string };
     total_spending: number;
     merchant_count: number;
@@ -3342,7 +3401,7 @@ export class CopilotMoneyTools {
       transaction_count: number;
       average_transaction: number;
     }>;
-  } {
+  }> {
     const { period, limit = 50, exclude_transfers = false } = options;
     let { start_date, end_date } = options;
 
@@ -3352,7 +3411,7 @@ export class CopilotMoneyTools {
     }
 
     // Get transactions with filters
-    let transactions = this.db.getTransactions({
+    let transactions = await this.db.getTransactions({
       startDate: start_date,
       endDate: end_date,
       limit: 50000,
@@ -3388,14 +3447,19 @@ export class CopilotMoneyTools {
     }
 
     // Convert to list, sorted by spending
-    const merchants = Array.from(merchantSpending.entries())
-      .map(([merchant, data]) => ({
-        merchant,
-        category_name: data.categoryId ? this.resolveCategoryName(data.categoryId) : undefined,
-        total_spending: roundAmount(data.total),
-        transaction_count: data.count,
-        average_transaction: roundAmount(data.total / data.count),
-      }))
+    const merchants = (
+      await Promise.all(
+        Array.from(merchantSpending.entries()).map(async ([merchant, data]) => ({
+          merchant,
+          category_name: data.categoryId
+            ? await this.resolveCategoryName(data.categoryId)
+            : undefined,
+          total_spending: roundAmount(data.total),
+          transaction_count: data.count,
+          average_transaction: roundAmount(data.total / data.count),
+        }))
+      )
+    )
       .sort((a, b) => b.total_spending - a.total_spending)
       .slice(0, limit);
 
@@ -3416,19 +3480,19 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with foreign transactions and total FX fees
    */
-  getForeignTransactions(options: {
+  async getForeignTransactions(options: {
     period?: string;
     start_date?: string;
     end_date?: string;
     limit?: number;
-  }): {
+  }): Promise<{
     period: { start_date?: string; end_date?: string };
     count: number;
     total_amount: number;
     total_fx_fees: number;
     countries: Array<{ country: string; transaction_count: number; total_amount: number }>;
     transactions: Array<Transaction & { category_name?: string; normalized_merchant?: string }>;
-  } {
+  }> {
     const { period, limit = 100 } = options;
     let { start_date, end_date } = options;
 
@@ -3436,7 +3500,7 @@ export class CopilotMoneyTools {
       [start_date, end_date] = parsePeriod(period);
     }
 
-    const allTransactions = this.db.getTransactions({
+    const allTransactions = await this.db.getTransactions({
       startDate: start_date,
       endDate: end_date,
       limit: 50000,
@@ -3582,11 +3646,15 @@ export class CopilotMoneyTools {
 
     const totalAmount = foreignTxns.reduce((sum, txn) => sum + Math.abs(txn.amount), 0);
 
-    const enrichedTransactions = foreignTxns.slice(0, limit).map((txn) => ({
-      ...txn,
-      category_name: txn.category_id ? this.resolveCategoryName(txn.category_id) : undefined,
-      normalized_merchant: normalizeMerchantName(getTransactionDisplayName(txn)),
-    }));
+    const enrichedTransactions = await Promise.all(
+      foreignTxns.slice(0, limit).map(async (txn) => ({
+        ...txn,
+        category_name: txn.category_id
+          ? await this.resolveCategoryName(txn.category_id)
+          : undefined,
+        normalized_merchant: normalizeMerchantName(getTransactionDisplayName(txn)),
+      }))
+    );
 
     return {
       period: { start_date, end_date },
@@ -3604,18 +3672,18 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with refund transactions
    */
-  getRefunds(options: {
+  async getRefunds(options: {
     period?: string;
     start_date?: string;
     end_date?: string;
     limit?: number;
-  }): {
+  }): Promise<{
     period: { start_date?: string; end_date?: string };
     count: number;
     total_refunded: number;
     refunds_by_merchant: Array<{ merchant: string; refund_count: number; total_refunded: number }>;
     transactions: Array<Transaction & { category_name?: string }>;
-  } {
+  }> {
     const { period, limit = 100 } = options;
     let { start_date, end_date } = options;
 
@@ -3623,7 +3691,7 @@ export class CopilotMoneyTools {
       [start_date, end_date] = parsePeriod(period);
     }
 
-    const allTransactions = this.db.getTransactions({
+    const allTransactions = await this.db.getTransactions({
       startDate: start_date,
       endDate: end_date,
       limit: 50000,
@@ -3668,10 +3736,14 @@ export class CopilotMoneyTools {
 
     const totalRefunded = refundTxns.reduce((sum, txn) => sum + Math.abs(txn.amount), 0);
 
-    const enrichedTransactions = refundTxns.slice(0, limit).map((txn) => ({
-      ...txn,
-      category_name: txn.category_id ? this.resolveCategoryName(txn.category_id) : undefined,
-    }));
+    const enrichedTransactions = await Promise.all(
+      refundTxns.slice(0, limit).map(async (txn) => ({
+        ...txn,
+        category_name: txn.category_id
+          ? await this.resolveCategoryName(txn.category_id)
+          : undefined,
+      }))
+    );
 
     return {
       period: { start_date, end_date },
@@ -3688,7 +3760,11 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with potential duplicates grouped
    */
-  getDuplicateTransactions(options: { period?: string; start_date?: string; end_date?: string }): {
+  async getDuplicateTransactions(options: {
+    period?: string;
+    start_date?: string;
+    end_date?: string;
+  }): Promise<{
     period: { start_date?: string; end_date?: string };
     duplicate_groups_count: number;
     total_potential_duplicates: number;
@@ -3705,7 +3781,7 @@ export class CopilotMoneyTools {
         account_id?: string;
       }>;
     }>;
-  } {
+  }> {
     const { period } = options;
     let { start_date, end_date } = options;
 
@@ -3713,7 +3789,7 @@ export class CopilotMoneyTools {
       [start_date, end_date] = parsePeriod(period);
     }
 
-    const allTransactions = this.db.getTransactions({
+    const allTransactions = await this.db.getTransactions({
       startDate: start_date,
       endDate: end_date,
       limit: 50000,
@@ -3816,18 +3892,18 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with credit transactions
    */
-  getCredits(options: {
+  async getCredits(options: {
     period?: string;
     start_date?: string;
     end_date?: string;
     limit?: number;
-  }): {
+  }): Promise<{
     period: { start_date?: string; end_date?: string };
     count: number;
     total_credits: number;
     credits_by_type: Array<{ type: string; count: number; total: number }>;
     transactions: Array<Transaction & { category_name?: string; credit_type?: string }>;
-  } {
+  }> {
     const { period, limit = 100 } = options;
     let { start_date, end_date } = options;
 
@@ -3835,7 +3911,7 @@ export class CopilotMoneyTools {
       [start_date, end_date] = parsePeriod(period);
     }
 
-    const allTransactions = this.db.getTransactions({
+    const allTransactions = await this.db.getTransactions({
       startDate: start_date,
       endDate: end_date,
       limit: 50000,
@@ -3900,11 +3976,15 @@ export class CopilotMoneyTools {
 
     const totalCredits = creditTxns.reduce((sum, txn) => sum + Math.abs(txn.amount), 0);
 
-    const enrichedTransactions = creditTxns.slice(0, limit).map((txn) => ({
-      ...txn,
-      category_name: txn.category_id ? this.resolveCategoryName(txn.category_id) : undefined,
-      credit_type: getCreditType(txn),
-    }));
+    const enrichedTransactions = await Promise.all(
+      creditTxns.slice(0, limit).map(async (txn) => ({
+        ...txn,
+        category_name: txn.category_id
+          ? await this.resolveCategoryName(txn.category_id)
+          : undefined,
+        credit_type: getCreditType(txn),
+      }))
+    );
 
     return {
       period: { start_date, end_date },
@@ -3921,12 +4001,12 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with spending breakdown by day
    */
-  getSpendingByDayOfWeek(options: {
+  async getSpendingByDayOfWeek(options: {
     period?: string;
     start_date?: string;
     end_date?: string;
     exclude_transfers?: boolean;
-  }): {
+  }): Promise<{
     period: { start_date?: string; end_date?: string };
     total_spending: number;
     days: Array<{
@@ -3937,7 +4017,7 @@ export class CopilotMoneyTools {
       average_transaction: number;
       percentage_of_total: number;
     }>;
-  } {
+  }> {
     const { period, exclude_transfers = false } = options;
     let { start_date, end_date } = options;
 
@@ -3945,7 +4025,7 @@ export class CopilotMoneyTools {
       [start_date, end_date] = parsePeriod(period);
     }
 
-    let transactions = this.db.getTransactions({
+    let transactions = await this.db.getTransactions({
       startDate: start_date,
       endDate: end_date,
       limit: 50000,
@@ -4002,12 +4082,12 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with detected trips
    */
-  getTrips(options: {
+  async getTrips(options: {
     period?: string;
     start_date?: string;
     end_date?: string;
     min_days?: number;
-  }): {
+  }): Promise<{
     period: { start_date?: string; end_date?: string };
     trip_count: number;
     trips: Array<{
@@ -4020,7 +4100,7 @@ export class CopilotMoneyTools {
       transaction_count: number;
       categories: Array<{ category: string; total: number }>;
     }>;
-  } {
+  }> {
     const { period, min_days = 2 } = options;
     let { start_date, end_date } = options;
 
@@ -4028,7 +4108,7 @@ export class CopilotMoneyTools {
       [start_date, end_date] = parsePeriod(period);
     }
 
-    const allTransactions = this.db.getTransactions({
+    const allTransactions = await this.db.getTransactions({
       startDate: start_date,
       endDate: end_date,
       limit: 50000,
@@ -4139,7 +4219,7 @@ export class CopilotMoneyTools {
               for (const t of tripTxns) {
                 if (t.amount < 0) {
                   totalSpent += Math.abs(t.amount);
-                  const cat = this.resolveCategoryName(getCategoryIdOrDefault(t.category_id));
+                  const cat = await this.resolveCategoryName(getCategoryIdOrDefault(t.category_id));
                   categoryTotals.set(cat, (categoryTotals.get(cat) || 0) + Math.abs(t.amount));
                 }
               }
@@ -4189,7 +4269,7 @@ export class CopilotMoneyTools {
           for (const t of tripTxns) {
             if (t.amount < 0) {
               totalSpent += Math.abs(t.amount);
-              const cat = this.resolveCategoryName(getCategoryIdOrDefault(t.category_id));
+              const cat = await this.resolveCategoryName(getCategoryIdOrDefault(t.category_id));
               categoryTotals.set(cat, (categoryTotals.get(cat) || 0) + Math.abs(t.amount));
             }
           }
@@ -4236,11 +4316,11 @@ export class CopilotMoneyTools {
    * @param transactionId - Transaction ID
    * @returns Transaction details
    */
-  getTransactionById(transactionId: string): {
+  async getTransactionById(transactionId: string): Promise<{
     found: boolean;
     transaction?: Transaction & { category_name?: string; normalized_merchant?: string };
-  } {
-    const allTransactions = this.db.getAllTransactions();
+  }> {
+    const allTransactions = await this.db.getAllTransactions();
     const txn = allTransactions.find((t) => t.transaction_id === transactionId);
 
     if (!txn) {
@@ -4251,7 +4331,9 @@ export class CopilotMoneyTools {
       found: true,
       transaction: {
         ...txn,
-        category_name: txn.category_id ? this.resolveCategoryName(txn.category_id) : undefined,
+        category_name: txn.category_id
+          ? await this.resolveCategoryName(txn.category_id)
+          : undefined,
         normalized_merchant: normalizeMerchantName(getTransactionDisplayName(txn)),
       },
     };
@@ -4263,13 +4345,13 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with top merchants
    */
-  getTopMerchants(options: {
+  async getTopMerchants(options: {
     period?: string;
     start_date?: string;
     end_date?: string;
     limit?: number;
     exclude_transfers?: boolean;
-  }): {
+  }): Promise<{
     period: { start_date?: string; end_date?: string };
     merchants: Array<{
       rank: number;
@@ -4282,7 +4364,7 @@ export class CopilotMoneyTools {
       last_transaction: string;
       category_name?: string;
     }>;
-  } {
+  }> {
     const { period, limit = 20, exclude_transfers = false } = options;
     let { start_date, end_date } = options;
 
@@ -4290,7 +4372,7 @@ export class CopilotMoneyTools {
       [start_date, end_date] = parsePeriod(period);
     }
 
-    let transactions = this.db.getTransactions({
+    let transactions = await this.db.getTransactions({
       startDate: start_date,
       endDate: end_date,
       limit: 50000,
@@ -4332,8 +4414,8 @@ export class CopilotMoneyTools {
       merchantStats.set(merchant, existing);
     }
 
-    const merchants = Array.from(merchantStats.entries())
-      .map(([merchant, stats]) => ({
+    const merchantsRaw = await Promise.all(
+      Array.from(merchantStats.entries()).map(async ([merchant, stats]) => ({
         merchant,
         normalized_name: normalizeMerchantName(merchant),
         total_spent: roundAmount(stats.total),
@@ -4341,8 +4423,12 @@ export class CopilotMoneyTools {
         average_transaction: roundAmount(stats.total / stats.count),
         first_transaction: stats.firstDate,
         last_transaction: stats.lastDate,
-        category_name: stats.categoryId ? this.resolveCategoryName(stats.categoryId) : undefined,
+        category_name: stats.categoryId
+          ? await this.resolveCategoryName(stats.categoryId)
+          : undefined,
       }))
+    );
+    const merchants = merchantsRaw
       .sort((a, b) => b.total_spent - a.total_spent)
       .slice(0, limit)
       .map((m, i) => ({ rank: i + 1, ...m }));
@@ -4359,13 +4445,13 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with unusual transactions
    */
-  getUnusualTransactions(options: {
+  async getUnusualTransactions(options: {
     period?: string;
     start_date?: string;
     end_date?: string;
     threshold_multiplier?: number;
     large_transaction_threshold?: number;
-  }): {
+  }): Promise<{
     period: { start_date?: string; end_date?: string };
     count: number;
     transactions: Array<
@@ -4376,7 +4462,7 @@ export class CopilotMoneyTools {
         deviation_percent?: number;
       }
     >;
-  } {
+  }> {
     const {
       period,
       threshold_multiplier = 2,
@@ -4389,8 +4475,8 @@ export class CopilotMoneyTools {
     }
 
     // Get a longer history for baseline calculation
-    const allTransactions = this.db.getAllTransactions();
-    const periodTransactions = this.db.getTransactions({
+    const allTransactions = await this.db.getAllTransactions();
+    const periodTransactions = await this.db.getTransactions({
       startDate: start_date,
       endDate: end_date,
       limit: 50000,
@@ -4502,7 +4588,9 @@ export class CopilotMoneyTools {
       if (isAnomaly) {
         anomalies.push({
           ...txn,
-          category_name: txn.category_id ? this.resolveCategoryName(txn.category_id) : undefined,
+          category_name: txn.category_id
+            ? await this.resolveCategoryName(txn.category_id)
+            : undefined,
           anomaly_reason: reason,
           expected_amount: expected ? roundAmount(expected) : undefined,
           deviation_percent: deviation,
@@ -4526,17 +4614,17 @@ export class CopilotMoneyTools {
    * @param options - Export options
    * @returns Formatted export data
    */
-  exportTransactions(options: {
+  async exportTransactions(options: {
     period?: string;
     start_date?: string;
     end_date?: string;
     format?: 'csv' | 'json';
     include_fields?: string[];
-  }): {
+  }): Promise<{
     format: string;
     record_count: number;
     data: string;
-  } {
+  }> {
     const { period, format = 'csv', include_fields } = options;
     let { start_date, end_date } = options;
 
@@ -4544,7 +4632,7 @@ export class CopilotMoneyTools {
       [start_date, end_date] = parsePeriod(period);
     }
 
-    const transactions = this.db.getTransactions({
+    const transactions = await this.db.getTransactions({
       startDate: start_date,
       endDate: end_date,
       limit: 50000,
@@ -4554,11 +4642,13 @@ export class CopilotMoneyTools {
     const fields = include_fields || defaultFields;
 
     // Enrich with category names
-    const enriched = transactions.map((txn) => ({
-      ...txn,
-      category_name: txn.category_id ? this.resolveCategoryName(txn.category_id) : '',
-      normalized_merchant: normalizeMerchantName(getTransactionDisplayName(txn)),
-    }));
+    const enriched = await Promise.all(
+      transactions.map(async (txn) => ({
+        ...txn,
+        category_name: txn.category_id ? await this.resolveCategoryName(txn.category_id) : '',
+        normalized_merchant: normalizeMerchantName(getTransactionDisplayName(txn)),
+      }))
+    );
 
     if (format === 'json') {
       const filteredData = enriched.map((txn) => {
@@ -4611,13 +4701,17 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with HSA/FSA eligible transactions
    */
-  getHsaFsaEligible(options: { period?: string; start_date?: string; end_date?: string }): {
+  async getHsaFsaEligible(options: {
+    period?: string;
+    start_date?: string;
+    end_date?: string;
+  }): Promise<{
     period: { start_date?: string; end_date?: string };
     count: number;
     total_amount: number;
     by_category: Array<{ category: string; count: number; total: number }>;
     transactions: Array<Transaction & { category_name?: string; eligibility_reason: string }>;
-  } {
+  }> {
     const { period } = options;
     let { start_date, end_date } = options;
 
@@ -4625,7 +4719,7 @@ export class CopilotMoneyTools {
       [start_date, end_date] = parsePeriod(period);
     }
 
-    const transactions = this.db.getTransactions({
+    const transactions = await this.db.getTransactions({
       startDate: start_date,
       endDate: end_date,
       limit: 50000,
@@ -4736,16 +4830,22 @@ export class CopilotMoneyTools {
 
     const totalAmount = hsaEligible.reduce((sum, txn) => sum + txn.amount, 0);
 
+    const enrichedTransactions = await Promise.all(
+      hsaEligible.slice(0, 100).map(async (txn) => ({
+        ...txn,
+        category_name: txn.category_id
+          ? await this.resolveCategoryName(txn.category_id)
+          : undefined,
+        eligibility_reason: getEligibilityReason(txn),
+      }))
+    );
+
     return {
       period: { start_date, end_date },
       count: hsaEligible.length,
       total_amount: roundAmount(totalAmount),
       by_category: byCategory,
-      transactions: hsaEligible.slice(0, 100).map((txn) => ({
-        ...txn,
-        category_name: txn.category_id ? this.resolveCategoryName(txn.category_id) : undefined,
-        eligibility_reason: getEligibilityReason(txn),
-      })),
+      transactions: enrichedTransactions,
     };
   }
 
@@ -4755,12 +4855,12 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Spending rate analysis with projections
    */
-  getSpendingRate(options: {
+  async getSpendingRate(options: {
     period?: string;
     start_date?: string;
     end_date?: string;
     exclude_transfers?: boolean;
-  }): {
+  }): Promise<{
     period: { start_date?: string; end_date?: string };
     days_in_period: number;
     days_elapsed: number;
@@ -4779,7 +4879,7 @@ export class CopilotMoneyTools {
       change_percent: number;
       on_track: boolean;
     };
-  } {
+  }> {
     const { period, exclude_transfers = false } = options;
     let { start_date, end_date } = options;
 
@@ -4790,7 +4890,7 @@ export class CopilotMoneyTools {
       [start_date, end_date] = parsePeriod('this_month');
     }
 
-    let transactions = this.db.getTransactions({
+    let transactions = await this.db.getTransactions({
       startDate: start_date,
       endDate: end_date,
       limit: 50000,
@@ -4865,7 +4965,7 @@ export class CopilotMoneyTools {
     const prevEnd = new Date(startDateObj);
     prevEnd.setDate(prevEnd.getDate() - 1);
 
-    let prevTransactions = this.db.getTransactions({
+    let prevTransactions = await this.db.getTransactions({
       startDate: prevStart.toISOString().substring(0, 10),
       endDate: prevEnd.toISOString().substring(0, 10),
       limit: 50000,
@@ -4924,7 +5024,7 @@ export class CopilotMoneyTools {
    * @param options - Filter and pagination options
    * @returns Object with various data quality metrics and issues
    */
-  getDataQualityReport(options: {
+  async getDataQualityReport(options: {
     period?: string;
     start_date?: string;
     end_date?: string;
@@ -4933,7 +5033,7 @@ export class CopilotMoneyTools {
     issues_offset?: number;
     foreign_large_amount_threshold?: number;
     round_amount_threshold?: number;
-  }): {
+  }): Promise<{
     period: { start_date?: string; end_date?: string };
     analysis_metadata: {
       transactions_analyzed: number;
@@ -5016,7 +5116,7 @@ export class CopilotMoneyTools {
         reason: string;
       }>;
     };
-  } {
+  }> {
     const {
       period,
       foreign_large_amount_threshold = DEFAULT_FOREIGN_LARGE_AMOUNT_THRESHOLD,
@@ -5040,7 +5140,7 @@ export class CopilotMoneyTools {
     }
 
     // Fetch transactions up to the configured limit
-    const allTransactions = this.db.getTransactions({
+    const allTransactions = await this.db.getTransactions({
       startDate: start_date,
       endDate: end_date,
       limit: transactionLimit,
@@ -5049,7 +5149,7 @@ export class CopilotMoneyTools {
     // Track if we hit the limit (meaning there may be more transactions available)
     const hitTransactionLimit = allTransactions.length === transactionLimit;
 
-    const allAccounts = this.db.getAccounts();
+    const allAccounts = await this.db.getAccounts();
 
     let issuesFound = 0;
 
@@ -5066,7 +5166,7 @@ export class CopilotMoneyTools {
     for (const txn of allTransactions) {
       if (!txn.category_id) continue;
 
-      const categoryName = this.resolveCategoryName(txn.category_id);
+      const categoryName = await this.resolveCategoryName(txn.category_id);
 
       // Check if category is unresolved (no mapping exists or returns the ID itself)
       const isUnresolved =
@@ -5194,7 +5294,7 @@ export class CopilotMoneyTools {
     >();
 
     for (const account of allAccounts) {
-      const accountName = this.resolveAccountName(account);
+      const accountName = await this.resolveAccountName(account);
       const accountType = account.account_type || 'unknown';
       const key = `${accountName}|${accountType}`;
       const existing = accountsByNameAndType.get(key) || [];
@@ -5234,7 +5334,9 @@ export class CopilotMoneyTools {
 
     for (const txn of allTransactions) {
       const merchant = getTransactionDisplayName(txn).toUpperCase();
-      const categoryName = txn.category_id ? this.resolveCategoryName(txn.category_id) : 'Unknown';
+      const categoryName = txn.category_id
+        ? await this.resolveCategoryName(txn.category_id)
+        : 'Unknown';
 
       // Uber categorized as Parking
       if (merchant.includes('UBER') && categoryName.includes('Parking')) {
@@ -5368,7 +5470,9 @@ export class CopilotMoneyTools {
     for (const txn of allTransactions) {
       const absAmount = Math.abs(txn.amount);
       const merchant = getTransactionDisplayName(txn);
-      const categoryName = txn.category_id ? this.resolveCategoryName(txn.category_id) : 'Unknown';
+      const categoryName = txn.category_id
+        ? await this.resolveCategoryName(txn.category_id)
+        : 'Unknown';
 
       if (absAmount >= UNREALISTIC_AMOUNT_THRESHOLD) {
         // Unrealistic amounts (>= $1,000,000) - almost certainly data errors
@@ -5462,7 +5566,11 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with comparison between two periods
    */
-  comparePeriods(options: { period1: string; period2: string; exclude_transfers?: boolean }): {
+  async comparePeriods(options: {
+    period1: string;
+    period2: string;
+    exclude_transfers?: boolean;
+  }): Promise<{
     period1: {
       name: string;
       start_date: string;
@@ -5496,7 +5604,7 @@ export class CopilotMoneyTools {
       change: number;
       change_percent: number;
     }>;
-  } {
+  }> {
     const { period1, period2, exclude_transfers = false } = options;
 
     // Parse periods
@@ -5504,16 +5612,16 @@ export class CopilotMoneyTools {
     const [start2, end2] = parsePeriod(period2);
 
     // Helper to analyze a period
-    const analyzePeriod = (
+    const analyzePeriod = async (
       startDate: string,
       endDate: string
-    ): {
+    ): Promise<{
       spending: number;
       income: number;
       count: number;
       byCategory: Map<string, number>;
-    } => {
-      let transactions = this.db.getTransactions({
+    }> => {
+      let transactions = await this.db.getTransactions({
         startDate,
         endDate,
         limit: 50000,
@@ -5550,8 +5658,8 @@ export class CopilotMoneyTools {
       };
     };
 
-    const p1Data = analyzePeriod(start1, end1);
-    const p2Data = analyzePeriod(start2, end2);
+    const p1Data = await analyzePeriod(start1, end1);
+    const p2Data = await analyzePeriod(start2, end2);
 
     // Calculate changes
     const spendingChange = p2Data.spending - p1Data.spending;
@@ -5565,23 +5673,25 @@ export class CopilotMoneyTools {
     // Compare categories
     const allCategories = new Set([...p1Data.byCategory.keys(), ...p2Data.byCategory.keys()]);
 
-    const categoryComparison = Array.from(allCategories)
-      .map((categoryId) => {
-        const p1Spending = p1Data.byCategory.get(categoryId) || 0;
-        const p2Spending = p2Data.byCategory.get(categoryId) || 0;
-        const change = p2Spending - p1Spending;
-        const changePercent = p1Spending > 0 ? roundAmount((change / p1Spending) * 100) : 0;
+    const categoryComparison = (
+      await Promise.all(
+        Array.from(allCategories).map(async (categoryId) => {
+          const p1Spending = p1Data.byCategory.get(categoryId) || 0;
+          const p2Spending = p2Data.byCategory.get(categoryId) || 0;
+          const change = p2Spending - p1Spending;
+          const changePercent = p1Spending > 0 ? roundAmount((change / p1Spending) * 100) : 0;
 
-        return {
-          category_id: categoryId,
-          category_name: this.resolveCategoryName(categoryId),
-          period1_spending: roundAmount(p1Spending),
-          period2_spending: roundAmount(p2Spending),
-          change: roundAmount(change),
-          change_percent: changePercent,
-        };
-      })
-      .sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
+          return {
+            category_id: categoryId,
+            category_name: await this.resolveCategoryName(categoryId),
+            period1_spending: roundAmount(p1Spending),
+            period2_spending: roundAmount(p2Spending),
+            change: roundAmount(change),
+            change_percent: changePercent,
+          };
+        })
+      )
+    ).sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
 
     return {
       period1: {
@@ -5624,7 +5734,7 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with investment price data
    */
-  getInvestmentPrices(options: { ticker_symbol?: string } = {}): {
+  async getInvestmentPrices(options: { ticker_symbol?: string } = {}): Promise<{
     count: number;
     prices: Array<{
       investment_id: string;
@@ -5643,11 +5753,11 @@ export class CopilotMoneyTools {
       volume?: number;
       price_type?: string;
     }>;
-  } {
+  }> {
     const { ticker_symbol } = options;
 
     // Get latest prices (no date filter to get most recent)
-    const prices = this.db.getInvestmentPrices({
+    const prices = await this.db.getInvestmentPrices({
       tickerSymbol: ticker_symbol,
     });
 
@@ -5705,12 +5815,12 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with historical price data
    */
-  getInvestmentPriceHistory(options: {
+  async getInvestmentPriceHistory(options: {
     ticker_symbol: string;
     start_date?: string;
     end_date?: string;
     price_type?: 'daily' | 'hf';
-  }): {
+  }): Promise<{
     ticker_symbol: string;
     count: number;
     date_range: {
@@ -5739,7 +5849,7 @@ export class CopilotMoneyTools {
       currency?: string;
       price_type?: string;
     }>;
-  } {
+  }> {
     const { ticker_symbol, start_date, end_date, price_type } = options;
 
     // Validate required parameter
@@ -5748,7 +5858,7 @@ export class CopilotMoneyTools {
     }
 
     // Get historical prices for this ticker
-    const prices = this.db.getInvestmentPrices({
+    const prices = await this.db.getInvestmentPrices({
       tickerSymbol: ticker_symbol,
       startDate: start_date,
       endDate: end_date,
@@ -5838,13 +5948,13 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with investment split data
    */
-  getInvestmentSplits(
+  async getInvestmentSplits(
     options: {
       ticker_symbol?: string;
       start_date?: string;
       end_date?: string;
     } = {}
-  ): {
+  ): Promise<{
     count: number;
     splits: Array<{
       split_id: string;
@@ -5861,11 +5971,11 @@ export class CopilotMoneyTools {
       ex_date?: string;
       description?: string;
     }>;
-  } {
+  }> {
     const { ticker_symbol, start_date, end_date } = options;
 
     // Get splits from database
-    const splits = this.db.getInvestmentSplits({
+    const splits = await this.db.getInvestmentSplits({
       tickerSymbol: ticker_symbol,
       startDate: start_date,
       endDate: end_date,
@@ -5904,13 +6014,13 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with institution connection data
    */
-  getConnectedInstitutions(
+  async getConnectedInstitutions(
     options: {
       connection_status?: string;
       institution_id?: string;
       needs_update?: boolean;
     } = {}
-  ): {
+  ): Promise<{
     count: number;
     healthy_count: number;
     needs_attention_count: number;
@@ -5927,11 +6037,11 @@ export class CopilotMoneyTools {
       error_code?: string;
       error_message?: string;
     }>;
-  } {
+  }> {
     const { connection_status, institution_id, needs_update } = options;
 
     // Get items from database
-    const items = this.db.getItems({
+    const items = await this.db.getItems({
       connectionStatus: connection_status,
       institutionId: institution_id,
       needsUpdate: needs_update,
@@ -6128,7 +6238,7 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Time series spending data
    */
-  getSpendingOverTime(
+  async getSpendingOverTime(
     options: {
       period?: string;
       start_date?: string;
@@ -6137,7 +6247,7 @@ export class CopilotMoneyTools {
       category?: string;
       exclude_transfers?: boolean;
     } = {}
-  ): {
+  ): Promise<{
     granularity: string;
     start_date: string;
     end_date: string;
@@ -6154,8 +6264,8 @@ export class CopilotMoneyTools {
       highest_period: { period_start: string; amount: number } | null;
       lowest_period: { period_start: string; amount: number } | null;
     };
-  } {
-    const allTransactions = this.db.getTransactions();
+  }> {
+    const allTransactions = await this.db.getTransactions();
     const granularity = options.granularity || 'month';
 
     // Determine date range
@@ -6321,7 +6431,7 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Average transaction analysis
    */
-  getAverageTransactionSize(
+  async getAverageTransactionSize(
     options: {
       period?: string;
       start_date?: string;
@@ -6329,7 +6439,7 @@ export class CopilotMoneyTools {
       group_by?: 'category' | 'merchant';
       limit?: number;
     } = {}
-  ): {
+  ): Promise<{
     group_by: string;
     overall_average: number;
     groups: Array<{
@@ -6340,8 +6450,8 @@ export class CopilotMoneyTools {
       min_amount: number;
       max_amount: number;
     }>;
-  } {
-    const allTransactions = this.db.getTransactions();
+  }> {
+    const allTransactions = await this.db.getTransactions();
     const groupBy = options.group_by || 'category';
     const limit = validateLimit(options.limit, 20);
 
@@ -6389,7 +6499,7 @@ export class CopilotMoneyTools {
       if (groupBy === 'merchant') {
         key = t.name ? normalizeMerchantName(t.name) : 'Unknown';
       } else {
-        key = this.resolveCategoryName(getCategoryIdOrDefault(t.category_id));
+        key = await this.resolveCategoryName(getCategoryIdOrDefault(t.category_id));
       }
 
       let group = groupMap.get(key);
@@ -6438,7 +6548,7 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Category trend analysis
    */
-  getCategoryTrends(
+  async getCategoryTrends(
     options: {
       period?: string;
       start_date?: string;
@@ -6446,7 +6556,7 @@ export class CopilotMoneyTools {
       compare_to_previous?: boolean;
       limit?: number;
     } = {}
-  ): {
+  ): Promise<{
     current_period: { start: string; end: string };
     previous_period: { start: string; end: string } | null;
     trends: Array<{
@@ -6458,8 +6568,8 @@ export class CopilotMoneyTools {
       change_percentage: number | null;
       trend: 'up' | 'down' | 'stable' | 'new';
     }>;
-  } {
-    const allTransactions = this.db.getTransactions();
+  }> {
+    const allTransactions = await this.db.getTransactions();
     const compareToPrevious = options.compare_to_previous !== false;
     const limit = validateLimit(options.limit, 15);
 
@@ -6568,7 +6678,7 @@ export class CopilotMoneyTools {
       }
 
       trends.push({
-        category: this.resolveCategoryName(catId),
+        category: await this.resolveCategoryName(catId),
         category_id: catId,
         current_amount: roundAmount(currentAmount),
         previous_amount: previousAmount !== null ? roundAmount(previousAmount) : null,
@@ -6605,7 +6715,7 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Merchant frequency analysis
    */
-  getMerchantFrequency(
+  async getMerchantFrequency(
     options: {
       period?: string;
       start_date?: string;
@@ -6613,7 +6723,7 @@ export class CopilotMoneyTools {
       min_visits?: number;
       limit?: number;
     } = {}
-  ): {
+  ): Promise<{
     period: { start: string; end: string };
     merchants: Array<{
       merchant: string;
@@ -6631,8 +6741,8 @@ export class CopilotMoneyTools {
       most_frequent: string | null;
       highest_spending: string | null;
     };
-  } {
-    const allTransactions = this.db.getTransactions();
+  }> {
+    const allTransactions = await this.db.getTransactions();
     const minVisits = options.min_visits || 2;
     const limit = validateLimit(options.limit, 20);
 
@@ -6748,13 +6858,13 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Budget utilization data
    */
-  getBudgetUtilization(
+  async getBudgetUtilization(
     options: {
       month?: string;
       category?: string;
       include_inactive?: boolean;
     } = {}
-  ): {
+  ): Promise<{
     month: string;
     budgets: Array<{
       budget_id: string;
@@ -6772,9 +6882,9 @@ export class CopilotMoneyTools {
       overall_utilization: number;
       over_budget_count: number;
     };
-  } {
-    const budgets = this.db.getBudgets();
-    const transactions = this.db.getTransactions();
+  }> {
+    const budgets = await this.db.getBudgets();
+    const transactions = await this.db.getTransactions();
 
     // Determine month
     let targetMonth: string;
@@ -6823,31 +6933,33 @@ export class CopilotMoneyTools {
     }
 
     // Build utilization data
-    const utilizationData = filtered.map((b) => {
-      const categoryId = b.category_id || '';
-      const spent = spendingByCategory.get(categoryId) || 0;
-      const budgetAmount = b.amount || 0;
-      const remaining = budgetAmount - spent;
-      const utilization = budgetAmount > 0 ? (spent / budgetAmount) * 100 : 0;
+    const utilizationData = await Promise.all(
+      filtered.map(async (b) => {
+        const categoryId = b.category_id || '';
+        const spent = spendingByCategory.get(categoryId) || 0;
+        const budgetAmount = b.amount || 0;
+        const remaining = budgetAmount - spent;
+        const utilization = budgetAmount > 0 ? (spent / budgetAmount) * 100 : 0;
 
-      let status: 'under' | 'on_track' | 'over' = 'under';
-      if (utilization >= 100) {
-        status = 'over';
-      } else if (utilization >= 75) {
-        status = 'on_track';
-      }
+        let status: 'under' | 'on_track' | 'over' = 'under';
+        if (utilization >= 100) {
+          status = 'over';
+        } else if (utilization >= 75) {
+          status = 'on_track';
+        }
 
-      return {
-        budget_id: b.budget_id,
-        category: this.resolveCategoryName(categoryId),
-        category_id: categoryId,
-        budget_amount: roundAmount(budgetAmount),
-        spent_amount: roundAmount(spent),
-        remaining: roundAmount(remaining),
-        utilization_percentage: Math.round(utilization * 10) / 10,
-        status,
-      };
-    });
+        return {
+          budget_id: b.budget_id,
+          category: await this.resolveCategoryName(categoryId),
+          category_id: categoryId,
+          budget_amount: roundAmount(budgetAmount),
+          spent_amount: roundAmount(spent),
+          remaining: roundAmount(remaining),
+          utilization_percentage: Math.round(utilization * 10) / 10,
+          status,
+        };
+      })
+    );
 
     // Sort by utilization descending
     utilizationData.sort((a, b) => b.utilization_percentage - a.utilization_percentage);
@@ -6878,12 +6990,12 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Budget vs actual comparison data
    */
-  getBudgetVsActual(
+  async getBudgetVsActual(
     options: {
       months?: number;
       category?: string;
     } = {}
-  ): {
+  ): Promise<{
     months_analyzed: number;
     comparisons: Array<{
       month: string;
@@ -6904,10 +7016,10 @@ export class CopilotMoneyTools {
       least_accurate_month: string | null;
       avg_variance: number;
     };
-  } {
+  }> {
     const numMonths = options.months || 6;
-    const budgets = this.db.getBudgets().filter((b) => b.is_active !== false);
-    const transactions = this.db.getTransactions();
+    const budgets = (await this.db.getBudgets()).filter((b) => b.is_active !== false);
+    const transactions = await this.db.getTransactions();
 
     // Generate list of months to analyze
     const months: string[] = [];
@@ -6991,28 +7103,33 @@ export class CopilotMoneyTools {
       }
     }
 
-    const categoryBreakdown = Array.from(categoryData.entries()).map(([catId, data]) => {
-      const avgBudgeted = data.budgeted;
-      const avgActual =
-        data.actuals.length > 0 ? data.actuals.reduce((a, b) => a + b, 0) / data.actuals.length : 0;
+    const categoryBreakdown = await Promise.all(
+      Array.from(categoryData.entries()).map(async ([catId, data]) => {
+        const avgBudgeted = data.budgeted;
+        const avgActual =
+          data.actuals.length > 0
+            ? data.actuals.reduce((a, b) => a + b, 0) / data.actuals.length
+            : 0;
 
-      // Calculate consistency (lower variance = higher score)
-      const variance =
-        data.actuals.length > 0
-          ? data.actuals.reduce((sum, v) => sum + Math.pow(v - avgActual, 2), 0) /
-            data.actuals.length
-          : 0;
-      const stdDev = Math.sqrt(variance);
-      const consistencyScore = avgActual > 0 ? Math.max(0, 100 - (stdDev / avgActual) * 100) : 100;
+        // Calculate consistency (lower variance = higher score)
+        const variance =
+          data.actuals.length > 0
+            ? data.actuals.reduce((sum, v) => sum + Math.pow(v - avgActual, 2), 0) /
+              data.actuals.length
+            : 0;
+        const stdDev = Math.sqrt(variance);
+        const consistencyScore =
+          avgActual > 0 ? Math.max(0, 100 - (stdDev / avgActual) * 100) : 100;
 
-      return {
-        category: this.resolveCategoryName(catId),
-        category_id: catId,
-        avg_budgeted: roundAmount(avgBudgeted),
-        avg_actual: roundAmount(avgActual),
-        consistency_score: Math.round(consistencyScore),
-      };
-    });
+        return {
+          category: await this.resolveCategoryName(catId),
+          category_id: catId,
+          avg_budgeted: roundAmount(avgBudgeted),
+          avg_actual: roundAmount(avgActual),
+          consistency_score: Math.round(consistencyScore),
+        };
+      })
+    );
 
     // Insights
     const sortedByVariance = [...comparisons].sort(
@@ -7044,11 +7161,11 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Budget recommendations
    */
-  getBudgetRecommendations(
+  async getBudgetRecommendations(
     options: {
       months?: number;
     } = {}
-  ): {
+  ): Promise<{
     recommendations: Array<{
       category: string;
       category_id: string;
@@ -7070,10 +7187,10 @@ export class CopilotMoneyTools {
       total_recommended: number;
       potential_savings: number;
     };
-  } {
+  }> {
     const numMonths = options.months || 3;
-    const budgets = this.db.getBudgets().filter((b) => b.is_active !== false);
-    const transactions = this.db.getTransactions();
+    const budgets = (await this.db.getBudgets()).filter((b) => b.is_active !== false);
+    const transactions = await this.db.getTransactions();
 
     // Generate list of months to analyze
     const months: string[] = [];
@@ -7163,7 +7280,7 @@ export class CopilotMoneyTools {
       }
 
       recommendations.push({
-        category: this.resolveCategoryName(catId),
+        category: await this.resolveCategoryName(catId),
         category_id: catId,
         current_budget: currentBudget,
         recommended_budget: recommendedBudget,
@@ -7188,7 +7305,7 @@ export class CopilotMoneyTools {
         if (avgSpending >= 50) {
           // Only suggest for significant spending
           newBudgetSuggestions.push({
-            category: this.resolveCategoryName(catId),
+            category: await this.resolveCategoryName(catId),
             category_id: catId,
             avg_spending: roundAmount(avgSpending),
             suggested_budget: roundAmount(avgSpending * 1.1),
@@ -7224,12 +7341,12 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Budget alerts
    */
-  getBudgetAlerts(
+  async getBudgetAlerts(
     options: {
       threshold_percentage?: number;
       month?: string;
     } = {}
-  ): {
+  ): Promise<{
     month: string;
     alerts: Array<{
       budget_id: string;
@@ -7249,10 +7366,10 @@ export class CopilotMoneyTools {
       approaching_count: number;
       total_over_budget: number;
     };
-  } {
+  }> {
     const threshold = options.threshold_percentage || 80;
-    const budgets = this.db.getBudgets().filter((b) => b.is_active !== false);
-    const transactions = this.db.getTransactions();
+    const budgets = (await this.db.getBudgets()).filter((b) => b.is_active !== false);
+    const transactions = await this.db.getTransactions();
 
     // Determine month
     let targetMonth: string;
@@ -7349,7 +7466,7 @@ export class CopilotMoneyTools {
 
       alerts.push({
         budget_id: b.budget_id,
-        category: this.resolveCategoryName(categoryId),
+        category: await this.resolveCategoryName(categoryId),
         category_id: categoryId,
         alert_type: alertType,
         budget_amount: roundAmount(budgetAmount),
@@ -7402,7 +7519,7 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with portfolio allocation data
    */
-  getPortfolioAllocation(options: { include_prices?: boolean } = {}): {
+  async getPortfolioAllocation(options: { include_prices?: boolean } = {}): Promise<{
     total_value: number;
     account_count: number;
     by_account: Array<{
@@ -7422,11 +7539,11 @@ export class CopilotMoneyTools {
       largest_account_percentage: number;
       security_count: number;
     };
-  } {
+  }> {
     const { include_prices = true } = options;
 
     // Get investment accounts
-    const accounts = this.db.getAccounts();
+    const accounts = await this.db.getAccounts();
     const investmentAccounts = accounts.filter(
       (a) =>
         a.account_type?.toLowerCase() === 'investment' ||
@@ -7440,14 +7557,16 @@ export class CopilotMoneyTools {
     const totalValue = investmentAccounts.reduce((sum, a) => sum + (a.current_balance || 0), 0);
 
     // Build account allocation
-    const byAccount = investmentAccounts.map((a) => ({
-      account_id: a.account_id,
-      account_name: this.resolveAccountName(a),
-      institution: a.institution_name || 'Unknown',
-      balance: roundAmount(a.current_balance || 0),
-      percentage:
-        totalValue > 0 ? Math.round(((a.current_balance || 0) / totalValue) * 1000) / 10 : 0,
-    }));
+    const byAccount = await Promise.all(
+      investmentAccounts.map(async (a) => ({
+        account_id: a.account_id,
+        account_name: await this.resolveAccountName(a),
+        institution: a.institution_name || 'Unknown',
+        balance: roundAmount(a.current_balance || 0),
+        percentage:
+          totalValue > 0 ? Math.round(((a.current_balance || 0) / totalValue) * 1000) / 10 : 0,
+      }))
+    );
 
     // Sort by balance descending
     byAccount.sort((a, b) => b.balance - a.balance);
@@ -7460,7 +7579,7 @@ export class CopilotMoneyTools {
     }> = [];
 
     if (include_prices) {
-      const prices = this.db.getInvestmentPrices({});
+      const prices = await this.db.getInvestmentPrices({});
 
       // Group by ticker and get latest price
       const latestByTicker = new Map<string, { ticker: string; price?: number; date?: string }>();
@@ -7514,14 +7633,14 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with investment performance data
    */
-  getInvestmentPerformance(
+  async getInvestmentPerformance(
     options: {
       ticker_symbol?: string;
       period?: string;
       start_date?: string;
       end_date?: string;
     } = {}
-  ): {
+  ): Promise<{
     period: {
       start_date: string;
       end_date: string;
@@ -7546,7 +7665,7 @@ export class CopilotMoneyTools {
       best_return: number | null;
       worst_return: number | null;
     };
-  } {
+  }> {
     const { ticker_symbol, period = 'last_30_days' } = options;
     let { start_date, end_date } = options;
 
@@ -7556,7 +7675,7 @@ export class CopilotMoneyTools {
     }
 
     // Get price data
-    const prices = this.db.getInvestmentPrices({
+    const prices = await this.db.getInvestmentPrices({
       tickerSymbol: ticker_symbol,
       startDate: start_date,
       endDate: end_date,
@@ -7669,14 +7788,14 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with dividend income data
    */
-  getDividendIncome(
+  async getDividendIncome(
     options: {
       period?: string;
       start_date?: string;
       end_date?: string;
       account_id?: string;
     } = {}
-  ): {
+  ): Promise<{
     period: {
       start_date: string;
       end_date: string;
@@ -7705,7 +7824,7 @@ export class CopilotMoneyTools {
       largest_dividend: number;
       monthly_average: number;
     };
-  } {
+  }> {
     const { period = 'ytd', account_id } = options;
     let { start_date, end_date } = options;
 
@@ -7718,7 +7837,7 @@ export class CopilotMoneyTools {
     const dividendCategories = new Set(['dividend', 'income_dividends', 'capital_gain']);
 
     // Get transactions that are dividend income
-    const transactions = this.db.getTransactions();
+    const transactions = await this.db.getTransactions();
     const dividends = transactions.filter((t) => {
       // Date filter
       if (t.date < start_date || t.date > end_date) return false;
@@ -7822,14 +7941,14 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with investment fee data
    */
-  getInvestmentFees(
+  async getInvestmentFees(
     options: {
       period?: string;
       start_date?: string;
       end_date?: string;
       account_id?: string;
     } = {}
-  ): {
+  ): Promise<{
     period: {
       start_date: string;
       end_date: string;
@@ -7859,7 +7978,7 @@ export class CopilotMoneyTools {
       largest_fee: number;
       monthly_average: number;
     };
-  } {
+  }> {
     const { period = 'ytd', account_id } = options;
     let { start_date, end_date } = options;
 
@@ -7869,7 +7988,7 @@ export class CopilotMoneyTools {
     }
 
     // Get investment accounts
-    const accounts = this.db.getAccounts();
+    const accounts = await this.db.getAccounts();
     const investmentAccountIds = new Set(
       accounts
         .filter(
@@ -7895,7 +8014,7 @@ export class CopilotMoneyTools {
     ];
 
     // Get transactions that are investment fees
-    const transactions = this.db.getTransactions();
+    const transactions = await this.db.getTransactions();
     const fees = transactions.filter((t) => {
       // Date filter
       if (t.date < start_date || t.date > end_date) return false;
@@ -8024,7 +8143,7 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with goal projection data
    */
-  getGoalProjection(options: { goal_id?: string } = {}): {
+  async getGoalProjection(options: { goal_id?: string } = {}): Promise<{
     count: number;
     goals: Array<{
       goal_id: string;
@@ -8058,10 +8177,10 @@ export class CopilotMoneyTools {
       needs_attention: number;
       average_progress: number;
     };
-  } {
+  }> {
     const { goal_id } = options;
 
-    const goals = this.db.getGoals(false);
+    const goals = await this.db.getGoals(false);
     let filteredGoals = goals;
 
     if (goal_id) {
@@ -8106,7 +8225,7 @@ export class CopilotMoneyTools {
       if (targetAmount <= 0) continue;
 
       // Get historical data
-      const history = this.db.getGoalHistory(goal.goal_id, { limit: 12 });
+      const history = await this.db.getGoalHistory(goal.goal_id, { limit: 12 });
 
       let currentAmount = 0;
       let historicalContribution = 0;
@@ -8209,7 +8328,7 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with milestone data
    */
-  getGoalMilestones(options: { goal_id?: string } = {}): {
+  async getGoalMilestones(options: { goal_id?: string } = {}): Promise<{
     count: number;
     goals: Array<{
       goal_id: string;
@@ -8236,10 +8355,10 @@ export class CopilotMoneyTools {
       goals_at_75: number;
       goals_complete: number;
     };
-  } {
+  }> {
     const { goal_id } = options;
 
-    const goals = this.db.getGoals(false);
+    const goals = await this.db.getGoals(false);
     let filteredGoals = goals;
 
     if (goal_id) {
@@ -8276,7 +8395,7 @@ export class CopilotMoneyTools {
       if (targetAmount <= 0) continue;
 
       // Get history to find milestone dates
-      const history = this.db.getGoalHistory(goal.goal_id, { limit: 24 });
+      const history = await this.db.getGoalHistory(goal.goal_id, { limit: 24 });
       const sortedHistory = [...history].sort((a, b) => a.month.localeCompare(b.month));
 
       let currentAmount = 0;
@@ -8399,12 +8518,12 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with at-risk goal data
    */
-  getGoalsAtRisk(
+  async getGoalsAtRisk(
     options: {
       months_lookback?: number;
       risk_threshold?: number;
     } = {}
-  ): {
+  ): Promise<{
     count: number;
     at_risk_count: number;
     goals: Array<{
@@ -8429,10 +8548,10 @@ export class CopilotMoneyTools {
       low_risk_count: number;
       average_contribution_gap: number;
     };
-  } {
+  }> {
     const { months_lookback = 6, risk_threshold = 50 } = options;
 
-    const goals = this.db.getGoals(false);
+    const goals = await this.db.getGoals(false);
     const activeGoals = goals.filter((g) => g.savings?.status === 'active');
 
     const atRiskGoals: Array<{
@@ -8464,7 +8583,7 @@ export class CopilotMoneyTools {
       const plannedMonthlyContribution = goal.savings?.tracking_type_monthly_contribution || 0;
 
       // Get history
-      const history = this.db.getGoalHistory(goal.goal_id, { limit: months_lookback });
+      const history = await this.db.getGoalHistory(goal.goal_id, { limit: months_lookback });
 
       let currentAmount = 0;
       let historicalContribution = 0;
@@ -8612,7 +8731,7 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with goal recommendations
    */
-  getGoalRecommendations(options: { goal_id?: string } = {}): {
+  async getGoalRecommendations(options: { goal_id?: string } = {}): Promise<{
     count: number;
     recommendations: Array<{
       goal_id: string;
@@ -8637,10 +8756,10 @@ export class CopilotMoneyTools {
       goals_needing_attention: number;
       goals_on_track: number;
     };
-  } {
+  }> {
     const { goal_id } = options;
 
-    const goals = this.db.getGoals(false);
+    const goals = await this.db.getGoals(false);
     let filteredGoals = goals;
 
     if (goal_id) {
@@ -8677,7 +8796,7 @@ export class CopilotMoneyTools {
       const plannedContribution = goal.savings?.tracking_type_monthly_contribution || 0;
 
       // Get history
-      const history = this.db.getGoalHistory(goal.goal_id, { limit: 6 });
+      const history = await this.db.getGoalHistory(goal.goal_id, { limit: 6 });
 
       let currentAmount = 0;
       let historicalContribution = 0;
@@ -8831,14 +8950,14 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with account activity data
    */
-  getAccountActivity(
+  async getAccountActivity(
     options: {
       period?: string;
       start_date?: string;
       end_date?: string;
       account_type?: string;
     } = {}
-  ): {
+  ): Promise<{
     period: {
       start_date: string;
       end_date: string;
@@ -8862,7 +8981,7 @@ export class CopilotMoneyTools {
       most_active_account: string | null;
       total_transactions: number;
     };
-  } {
+  }> {
     const { period = 'last_30_days', account_type } = options;
     let { start_date, end_date } = options;
 
@@ -8870,8 +8989,8 @@ export class CopilotMoneyTools {
       [start_date, end_date] = parsePeriod(period);
     }
 
-    const accounts = this.db.getAccounts();
-    const transactions = this.db.getTransactions();
+    const accounts = await this.db.getAccounts();
+    const transactions = await this.db.getTransactions();
 
     // Filter transactions by date
     const periodTransactions = transactions.filter(
@@ -8934,12 +9053,12 @@ export class CopilotMoneyTools {
 
       if (count > highestCount) {
         highestCount = count;
-        mostActiveAccount = this.resolveAccountName(account);
+        mostActiveAccount = await this.resolveAccountName(account);
       }
 
       activityData.push({
         account_id: account.account_id,
-        account_name: this.resolveAccountName(account),
+        account_name: await this.resolveAccountName(account),
         account_type: account.account_type,
         institution: account.institution_name,
         transaction_count: count,
@@ -8978,14 +9097,14 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with balance trend data
    */
-  getBalanceTrends(
+  async getBalanceTrends(
     options: {
       account_id?: string;
       months?: number;
       granularity?: 'daily' | 'weekly' | 'monthly';
       trend_threshold?: number;
     } = {}
-  ): {
+  ): Promise<{
     months_analyzed: number;
     accounts: Array<{
       account_id: string;
@@ -9006,7 +9125,7 @@ export class CopilotMoneyTools {
       declining_accounts: number;
       stable_accounts: number;
     };
-  } {
+  }> {
     const {
       account_id,
       months = 6,
@@ -9014,8 +9133,8 @@ export class CopilotMoneyTools {
       trend_threshold = DEFAULT_TREND_THRESHOLD,
     } = options;
 
-    const accounts = this.db.getAccounts();
-    const transactions = this.db.getTransactions();
+    const accounts = await this.db.getAccounts();
+    const transactions = await this.db.getTransactions();
 
     // Calculate date range
     const today = new Date();
@@ -9111,7 +9230,7 @@ export class CopilotMoneyTools {
 
       trendData.push({
         account_id: account.account_id,
-        account_name: this.resolveAccountName(account),
+        account_name: await this.resolveAccountName(account),
         current_balance: account.current_balance,
         trend_data: trends,
         overall_trend: overallTrend,
@@ -9139,14 +9258,14 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with account fee data
    */
-  getAccountFees(
+  async getAccountFees(
     options: {
       period?: string;
       start_date?: string;
       end_date?: string;
       account_id?: string;
     } = {}
-  ): {
+  ): Promise<{
     period: {
       start_date: string;
       end_date: string;
@@ -9178,7 +9297,7 @@ export class CopilotMoneyTools {
       largest_fee: number;
       most_common_fee: string | null;
     };
-  } {
+  }> {
     const { period = 'ytd', account_id } = options;
     let { start_date, end_date } = options;
 
@@ -9186,10 +9305,10 @@ export class CopilotMoneyTools {
       [start_date, end_date] = parsePeriod(period);
     }
 
-    const accounts = this.db.getAccounts();
+    const accounts = await this.db.getAccounts();
     const accountMap = new Map(accounts.map((a) => [a.account_id, a]));
 
-    const transactions = this.db.getTransactions();
+    const transactions = await this.db.getTransactions();
 
     // Fee-related categories
     const feeCategories = new Set([
@@ -9250,18 +9369,20 @@ export class CopilotMoneyTools {
     };
 
     // Format fees
-    const formattedFees = fees.map((t) => {
-      const account = t.account_id ? accountMap.get(t.account_id) : undefined;
-      return {
-        transaction_id: t.transaction_id,
-        date: t.date,
-        amount: roundAmount(t.amount),
-        name: t.name || t.original_name || 'Unknown',
-        fee_type: classifyFeeType(t),
-        account_id: t.account_id,
-        account_name: account ? this.resolveAccountName(account) : undefined,
-      };
-    });
+    const formattedFees = await Promise.all(
+      fees.map(async (t) => {
+        const account = t.account_id ? accountMap.get(t.account_id) : undefined;
+        return {
+          transaction_id: t.transaction_id,
+          date: t.date,
+          amount: roundAmount(t.amount),
+          name: t.name || t.original_name || 'Unknown',
+          fee_type: classifyFeeType(t),
+          account_id: t.account_id,
+          account_name: account ? await this.resolveAccountName(account) : undefined,
+        };
+      })
+    );
 
     // Sort by date descending
     formattedFees.sort((a, b) => b.date.localeCompare(a.date));
@@ -9341,14 +9462,14 @@ export class CopilotMoneyTools {
    * @param options - Filter options
    * @returns Object with year-over-year comparison data
    */
-  getYearOverYear(
+  async getYearOverYear(
     options: {
       current_year?: number;
       compare_year?: number;
       month?: number;
       exclude_transfers?: boolean;
     } = {}
-  ): {
+  ): Promise<{
     current_year: number;
     compare_year: number;
     period_analyzed: string;
@@ -9385,7 +9506,7 @@ export class CopilotMoneyTools {
       biggest_spending_increase: string | null;
       biggest_spending_decrease: string | null;
     };
-  } {
+  }> {
     const today = new Date();
     const {
       current_year = today.getFullYear(),
@@ -9420,7 +9541,7 @@ export class CopilotMoneyTools {
       periodAnalyzed = `Year to date (Jan 1 - ${currentEnd.substring(5)})`;
     }
 
-    const transactions = this.db.getTransactions();
+    const transactions = await this.db.getTransactions();
 
     // Filter transactions
     const filterTransactions = (txns: Transaction[], start: string, end: string) =>
@@ -9507,7 +9628,7 @@ export class CopilotMoneyTools {
 
       categoryComparison.push({
         category_id: catId,
-        category_name: this.resolveCategoryName(catId),
+        category_name: await this.resolveCategoryName(catId),
         current_amount: roundAmount(currentAmt),
         compare_amount: roundAmount(compareAmt),
         change_amount: roundAmount(changeAmt),
@@ -9572,7 +9693,7 @@ export class CopilotMoneyTools {
    * @param options - Search criteria
    * @returns Object with matching transactions
    */
-  getAdvancedSearch(
+  async getAdvancedSearch(
     options: {
       query?: string;
       min_amount?: number;
@@ -9589,7 +9710,7 @@ export class CopilotMoneyTools {
       payment_method?: string;
       limit?: number;
     } = {}
-  ): {
+  ): Promise<{
     count: number;
     filters_applied: string[];
     transactions: Array<{
@@ -9611,7 +9732,7 @@ export class CopilotMoneyTools {
         latest: string | null;
       };
     };
-  } {
+  }> {
     const {
       query,
       min_amount,
@@ -9629,7 +9750,7 @@ export class CopilotMoneyTools {
       limit = 100,
     } = options;
 
-    const transactions = this.db.getTransactions();
+    const transactions = await this.db.getTransactions();
     const filtersApplied: string[] = [];
 
     // Apply filters
@@ -9738,17 +9859,21 @@ export class CopilotMoneyTools {
     return {
       count: limitedResults.length,
       filters_applied: filtersApplied,
-      transactions: limitedResults.map((r) => ({
-        transaction_id: r.transaction.transaction_id,
-        date: r.transaction.date,
-        amount: roundAmount(r.transaction.amount),
-        name: r.transaction.name || r.transaction.original_name || 'Unknown',
-        category_id: r.transaction.category_id,
-        category_name: this.resolveCategoryName(getCategoryIdOrDefault(r.transaction.category_id)),
-        account_id: r.transaction.account_id,
-        city: r.transaction.city,
-        match_score: roundAmount(r.score),
-      })),
+      transactions: await Promise.all(
+        limitedResults.map(async (r) => ({
+          transaction_id: r.transaction.transaction_id,
+          date: r.transaction.date,
+          amount: roundAmount(r.transaction.amount),
+          name: r.transaction.name || r.transaction.original_name || 'Unknown',
+          category_id: r.transaction.category_id,
+          category_name: await this.resolveCategoryName(
+            getCategoryIdOrDefault(r.transaction.category_id)
+          ),
+          account_id: r.transaction.account_id,
+          city: r.transaction.city,
+          match_score: roundAmount(r.score),
+        }))
+      ),
       summary: {
         total_amount: roundAmount(totalAmount),
         average_amount: roundAmount(avgAmount),
@@ -9768,7 +9893,7 @@ export class CopilotMoneyTools {
    * @param options - Search options
    * @returns Object with tagged transactions
    */
-  getTagSearch(
+  async getTagSearch(
     options: {
       tag?: string;
       period?: string;
@@ -9776,7 +9901,7 @@ export class CopilotMoneyTools {
       end_date?: string;
       limit?: number;
     } = {}
-  ): {
+  ): Promise<{
     period: {
       start_date: string;
       end_date: string;
@@ -9800,7 +9925,7 @@ export class CopilotMoneyTools {
       unique_tags: number;
       most_used_tag: string | null;
     };
-  } {
+  }> {
     const { tag, period = 'last_90_days', limit = 100 } = options;
     let { start_date, end_date } = options;
 
@@ -9808,7 +9933,7 @@ export class CopilotMoneyTools {
       [start_date, end_date] = parsePeriod(period);
     }
 
-    const transactions = this.db.getTransactions();
+    const transactions = await this.db.getTransactions();
 
     // Filter by date
     const periodTxns = transactions.filter((t) => t.date >= start_date && t.date <= end_date);
@@ -9898,13 +10023,13 @@ export class CopilotMoneyTools {
    * @param options - Search options
    * @returns Object with matched transactions
    */
-  getNoteSearch(options: {
+  async getNoteSearch(options: {
     query: string;
     period?: string;
     start_date?: string;
     end_date?: string;
     limit?: number;
-  }): {
+  }): Promise<{
     period: {
       start_date: string;
       end_date: string;
@@ -9926,7 +10051,7 @@ export class CopilotMoneyTools {
         latest: string | null;
       };
     };
-  } {
+  }> {
     const { query, period = 'ytd', limit = 100 } = options;
     let { start_date, end_date } = options;
 
@@ -9934,7 +10059,7 @@ export class CopilotMoneyTools {
       [start_date, end_date] = parsePeriod(period);
     }
 
-    const transactions = this.db.getTransactions();
+    const transactions = await this.db.getTransactions();
     const searchQuery = query.toLowerCase();
 
     // Find transactions matching the query
@@ -10005,7 +10130,7 @@ export class CopilotMoneyTools {
    * @param options - Search options
    * @returns Object with location-based results
    */
-  getLocationSearch(
+  async getLocationSearch(
     options: {
       city?: string;
       region?: string;
@@ -10018,7 +10143,7 @@ export class CopilotMoneyTools {
       end_date?: string;
       limit?: number;
     } = {}
-  ): {
+  ): Promise<{
     period: {
       start_date: string;
       end_date: string;
@@ -10059,7 +10184,7 @@ export class CopilotMoneyTools {
       most_common_city: string | null;
       total_spending: number;
     };
-  } {
+  }> {
     const {
       city,
       region,
@@ -10076,7 +10201,7 @@ export class CopilotMoneyTools {
       [start_date, end_date] = parsePeriod(period);
     }
 
-    const transactions = this.db.getTransactions();
+    const transactions = await this.db.getTransactions();
 
     // Haversine distance calculation
     const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {

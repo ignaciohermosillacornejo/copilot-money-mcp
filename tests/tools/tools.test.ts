@@ -71,19 +71,31 @@ describe('CopilotMoneyTools', () => {
     // Mock the database with test data
     (db as any)._transactions = [...mockTransactions];
     (db as any)._accounts = [...mockAccounts];
+    // Add required cache fields for async database methods
+    (db as any)._recurring = [];
+    (db as any)._budgets = [];
+    (db as any)._goals = [];
+    (db as any)._goalHistory = [];
+    (db as any)._investmentPrices = [];
+    (db as any)._investmentSplits = [];
+    (db as any)._items = [];
+    (db as any)._userCategories = [];
+    (db as any)._userAccounts = [];
+    (db as any)._categoryNameMap = new Map<string, string>();
+    (db as any)._accountNameMap = new Map<string, string>();
 
     tools = new CopilotMoneyTools(db);
   });
 
   describe('getTransactions', () => {
-    test('returns all transactions when no filters applied', () => {
-      const result = tools.getTransactions({});
+    test('returns all transactions when no filters applied', async () => {
+      const result = await tools.getTransactions({});
       expect(result.count).toBe(4);
       expect(result.transactions).toHaveLength(4);
     });
 
-    test('filters by start_date and end_date', () => {
-      const result = tools.getTransactions({
+    test('filters by start_date and end_date', async () => {
+      const result = await tools.getTransactions({
         start_date: '2024-02-01',
         end_date: '2024-02-28',
       });
@@ -91,46 +103,46 @@ describe('CopilotMoneyTools', () => {
       expect(result.transactions[0].transaction_id).toBe('txn3');
     });
 
-    test('parses period shorthand', () => {
+    test('parses period shorthand', async () => {
       // Note: This will use current date, so we can only test it doesn't crash
-      const result = tools.getTransactions({ period: 'last_30_days' });
+      const result = await tools.getTransactions({ period: 'last_30_days' });
       expect(result.count).toBeGreaterThanOrEqual(0);
     });
 
-    test('filters by category', () => {
-      const result = tools.getTransactions({ category: 'food' });
+    test('filters by category', async () => {
+      const result = await tools.getTransactions({ category: 'food' });
       expect(result.count).toBe(2);
     });
 
-    test('filters by merchant', () => {
-      const result = tools.getTransactions({ merchant: 'grocery' });
+    test('filters by merchant', async () => {
+      const result = await tools.getTransactions({ merchant: 'grocery' });
       expect(result.count).toBe(1);
     });
 
-    test('filters by account_id', () => {
-      const result = tools.getTransactions({ account_id: 'acc1' });
+    test('filters by account_id', async () => {
+      const result = await tools.getTransactions({ account_id: 'acc1' });
       expect(result.count).toBe(3);
     });
 
-    test('filters by amount range', () => {
+    test('filters by amount range', async () => {
       // Amount filtering uses absolute values (magnitude)
       // min_amount: 50 matches |amount| >= 50: Coffee (-50), Grocery (-120.5), Paycheck (1000)
       // max_amount: 150 matches |amount| <= 150: Coffee (-50), Grocery (-120.5), Fast Food (-25)
       // Combined: Coffee (-50), Grocery (-120.5) = 2 transactions
-      const result = tools.getTransactions({
+      const result = await tools.getTransactions({
         min_amount: 50.0,
         max_amount: 150.0,
       });
       expect(result.count).toBe(2);
     });
 
-    test('applies limit correctly', () => {
-      const result = tools.getTransactions({ limit: 2 });
+    test('applies limit correctly', async () => {
+      const result = await tools.getTransactions({ limit: 2 });
       expect(result.count).toBe(2);
     });
 
-    test('combines multiple filters', () => {
-      const result = tools.getTransactions({
+    test('combines multiple filters', async () => {
+      const result = await tools.getTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
         category: 'food',
@@ -139,7 +151,7 @@ describe('CopilotMoneyTools', () => {
       expect(result.count).toBe(1);
     });
 
-    test('filters by region', () => {
+    test('filters by region', async () => {
       // Add a transaction with region for testing
       const txnWithRegion: Transaction = {
         transaction_id: 'txn_region',
@@ -153,12 +165,12 @@ describe('CopilotMoneyTools', () => {
       };
       (db as any)._transactions = [...mockTransactions, txnWithRegion];
 
-      const result = tools.getTransactions({ region: 'california' });
+      const result = await tools.getTransactions({ region: 'california' });
       expect(result.count).toBe(1);
       expect(result.transactions[0].region).toBe('California');
     });
 
-    test('filters by region matching city', () => {
+    test('filters by region matching city', async () => {
       const txnWithCity: Transaction = {
         transaction_id: 'txn_city',
         amount: 85.0,
@@ -170,12 +182,12 @@ describe('CopilotMoneyTools', () => {
       };
       (db as any)._transactions = [...mockTransactions, txnWithCity];
 
-      const result = tools.getTransactions({ region: 'los angeles' });
+      const result = await tools.getTransactions({ region: 'los angeles' });
       expect(result.count).toBe(1);
       expect(result.transactions[0].city).toBe('Los Angeles');
     });
 
-    test('filters by country exact match', () => {
+    test('filters by country exact match', async () => {
       const txnWithCountry: Transaction = {
         transaction_id: 'txn_country',
         amount: 95.0,
@@ -187,12 +199,12 @@ describe('CopilotMoneyTools', () => {
       };
       (db as any)._transactions = [...mockTransactions, txnWithCountry];
 
-      const result = tools.getTransactions({ country: 'us' });
+      const result = await tools.getTransactions({ country: 'us' });
       expect(result.count).toBe(1);
       expect(result.transactions[0].country).toBe('US');
     });
 
-    test('filters by country partial match', () => {
+    test('filters by country partial match', async () => {
       const txnWithCountry: Transaction = {
         transaction_id: 'txn_country2',
         amount: 105.0,
@@ -204,12 +216,12 @@ describe('CopilotMoneyTools', () => {
       };
       (db as any)._transactions = [...mockTransactions, txnWithCountry];
 
-      const result = tools.getTransactions({ country: 'united' });
+      const result = await tools.getTransactions({ country: 'united' });
       expect(result.count).toBe(1);
       expect(result.transactions[0].country).toBe('United States');
     });
 
-    test('filters by pending status', () => {
+    test('filters by pending status', async () => {
       const pendingTxn: Transaction = {
         transaction_id: 'txn_pending',
         amount: 45.0,
@@ -221,31 +233,31 @@ describe('CopilotMoneyTools', () => {
       };
       (db as any)._transactions = [...mockTransactions, pendingTxn];
 
-      const result = tools.getTransactions({ pending: true });
+      const result = await tools.getTransactions({ pending: true });
       expect(result.count).toBe(1);
       expect(result.transactions[0].pending).toBe(true);
     });
   });
 
   describe('searchTransactions', () => {
-    test('finds transactions by merchant name', () => {
-      const result = tools.searchTransactions('coffee', {});
+    test('finds transactions by merchant name', async () => {
+      const result = await tools.searchTransactions('coffee', {});
       expect(result.count).toBe(1);
       expect(result.transactions[0].name).toBe('Coffee Shop');
     });
 
-    test('is case-insensitive', () => {
-      const result = tools.searchTransactions('GROCERY', {});
+    test('is case-insensitive', async () => {
+      const result = await tools.searchTransactions('GROCERY', {});
       expect(result.count).toBe(1);
     });
 
-    test('applies limit correctly', () => {
-      const result = tools.searchTransactions('food', { limit: 1 });
+    test('applies limit correctly', async () => {
+      const result = await tools.searchTransactions('food', { limit: 1 });
       expect(result.count).toBe(1);
     });
 
-    test('filters by date range', () => {
-      const result = tools.searchTransactions('food', {
+    test('filters by date range', async () => {
+      const result = await tools.searchTransactions('food', {
         start_date: '2024-02-01',
         end_date: '2024-02-28',
       });
@@ -256,23 +268,23 @@ describe('CopilotMoneyTools', () => {
   });
 
   describe('getAccounts', () => {
-    test('returns all accounts with total balance', () => {
-      const result = tools.getAccounts();
+    test('returns all accounts with total balance', async () => {
+      const result = await tools.getAccounts();
       expect(result.count).toBe(2);
       expect(result.total_balance).toBe(2000.0);
       expect(result.accounts).toHaveLength(2);
     });
 
-    test('filters by account type', () => {
-      const result = tools.getAccounts('checking');
+    test('filters by account type', async () => {
+      const result = await tools.getAccounts('checking');
       expect(result.count).toBe(1);
       expect(result.accounts[0].account_type).toBe('checking');
     });
   });
 
   describe('getSpendingByCategory', () => {
-    test('aggregates spending by category', () => {
-      const result = tools.getSpendingByCategory({
+    test('aggregates spending by category', async () => {
+      const result = await tools.getSpendingByCategory({
         start_date: '2024-01-01',
         end_date: '2024-12-31',
       });
@@ -282,8 +294,8 @@ describe('CopilotMoneyTools', () => {
       expect(result.categories).toHaveLength(2);
     });
 
-    test('sorts categories by spending descending', () => {
-      const result = tools.getSpendingByCategory({
+    test('sorts categories by spending descending', async () => {
+      const result = await tools.getSpendingByCategory({
         start_date: '2024-01-01',
         end_date: '2024-12-31',
       });
@@ -301,8 +313,8 @@ describe('CopilotMoneyTools', () => {
       expect(result.categories[1].transaction_count).toBe(2);
     });
 
-    test('excludes income (negative amounts)', () => {
-      const result = tools.getSpendingByCategory({
+    test('excludes income (negative amounts)', async () => {
+      const result = await tools.getSpendingByCategory({
         start_date: '2024-01-01',
         end_date: '2024-12-31',
       });
@@ -312,8 +324,8 @@ describe('CopilotMoneyTools', () => {
       expect(incomeCategory).toBeUndefined();
     });
 
-    test('applies min_amount filter', () => {
-      const result = tools.getSpendingByCategory({
+    test('applies min_amount filter', async () => {
+      const result = await tools.getSpendingByCategory({
         start_date: '2024-01-01',
         end_date: '2024-12-31',
         min_amount: 100.0,
@@ -324,8 +336,8 @@ describe('CopilotMoneyTools', () => {
       expect(result.total_spending).toBe(120.5);
     });
 
-    test('includes period in response', () => {
-      const result = tools.getSpendingByCategory({
+    test('includes period in response', async () => {
+      const result = await tools.getSpendingByCategory({
         start_date: '2024-01-01',
         end_date: '2024-12-31',
       });
@@ -334,17 +346,17 @@ describe('CopilotMoneyTools', () => {
       expect(result.period.end_date).toBe('2024-12-31');
     });
 
-    test('parses period shorthand', () => {
+    test('parses period shorthand', async () => {
       // Note: This will use current date, so we can only test it doesn't crash
-      const result = tools.getSpendingByCategory({ period: 'this_month' });
+      const result = await tools.getSpendingByCategory({ period: 'this_month' });
       expect(result.period.start_date).toBeDefined();
       expect(result.period.end_date).toBeDefined();
     });
   });
 
   describe('getAccountBalance', () => {
-    test('returns account details for valid account_id', () => {
-      const result = tools.getAccountBalance('acc1');
+    test('returns account details for valid account_id', async () => {
+      const result = await tools.getAccountBalance('acc1');
 
       expect(result.account_id).toBe('acc1');
       expect(result.name).toBe('Checking Account');
@@ -355,27 +367,27 @@ describe('CopilotMoneyTools', () => {
       expect(result.institution_name).toBe('Bank of Example');
     });
 
-    test('uses official_name when name is not present', () => {
-      const result = tools.getAccountBalance('acc2');
+    test('uses official_name when name is not present', async () => {
+      const result = await tools.getAccountBalance('acc2');
       expect(result.name).toBe('Savings Account');
     });
 
-    test('throws error for invalid account_id', () => {
+    test('throws error for invalid account_id', async () => {
       expect(() => tools.getAccountBalance('invalid')).toThrow('Account not found: invalid');
     });
   });
 
   describe('getCategories', () => {
-    test('returns all unique categories', () => {
-      const result = tools.getCategories();
+    test('returns all unique categories', async () => {
+      const result = await tools.getCategories();
 
       expect(result.view).toBe('list');
       expect(result.count).toBeGreaterThan(0);
       expect((result.data as { categories: unknown[] }).categories).toBeDefined();
     });
 
-    test('includes human-readable category names', () => {
-      const result = tools.getCategories();
+    test('includes human-readable category names', async () => {
+      const result = await tools.getCategories();
       const categories = (
         result.data as { categories: { category_id: string; category_name: string }[] }
       ).categories;
@@ -384,8 +396,8 @@ describe('CopilotMoneyTools', () => {
       expect(foodCategory?.category_name).toBe('Food & Drink');
     });
 
-    test('includes transaction count and total amount', () => {
-      const result = tools.getCategories();
+    test('includes transaction count and total amount', async () => {
+      const result = await tools.getCategories();
       const categories = (
         result.data as { categories: { transaction_count: number; total_amount: number }[] }
       ).categories;
@@ -398,8 +410,8 @@ describe('CopilotMoneyTools', () => {
   });
 
   describe('getIncome', () => {
-    test('returns income transactions', () => {
-      const result = tools.getIncome({
+    test('returns income transactions', async () => {
+      const result = await tools.getIncome({
         start_date: '2024-01-01',
         end_date: '2024-12-31',
       });
@@ -409,8 +421,8 @@ describe('CopilotMoneyTools', () => {
       expect(result.income_by_source).toBeDefined();
     });
 
-    test('filters positive amounts as income', () => {
-      const result = tools.getIncome({
+    test('filters positive amounts as income', async () => {
+      const result = await tools.getIncome({
         start_date: '2024-01-01',
         end_date: '2024-12-31',
       });
@@ -422,8 +434,8 @@ describe('CopilotMoneyTools', () => {
   });
 
   describe('getSpendingByMerchant', () => {
-    test('aggregates spending by merchant', () => {
-      const result = tools.getSpendingByMerchant({
+    test('aggregates spending by merchant', async () => {
+      const result = await tools.getSpendingByMerchant({
         start_date: '2024-01-01',
         end_date: '2024-12-31',
       });
@@ -433,8 +445,8 @@ describe('CopilotMoneyTools', () => {
       expect(result.merchants).toBeDefined();
     });
 
-    test('merchants have correct structure', () => {
-      const result = tools.getSpendingByMerchant({
+    test('merchants have correct structure', async () => {
+      const result = await tools.getSpendingByMerchant({
         start_date: '2024-01-01',
         end_date: '2024-12-31',
       });
@@ -450,8 +462,8 @@ describe('CopilotMoneyTools', () => {
   });
 
   describe('comparePeriods', () => {
-    test('compares two periods', () => {
-      const result = tools.comparePeriods({
+    test('compares two periods', async () => {
+      const result = await tools.comparePeriods({
         period1: 'last_year',
         period2: 'this_year',
       });
@@ -462,8 +474,8 @@ describe('CopilotMoneyTools', () => {
       expect(result.category_comparison).toBeDefined();
     });
 
-    test('includes spending and income changes', () => {
-      const result = tools.comparePeriods({
+    test('includes spending and income changes', async () => {
+      const result = await tools.comparePeriods({
         period1: 'last_year',
         period2: 'this_year',
       });
@@ -474,7 +486,7 @@ describe('CopilotMoneyTools', () => {
       expect(result.comparison.income_change_percent).toBeDefined();
     });
 
-    test('compares spending by category between periods', () => {
+    test('compares spending by category between periods', async () => {
       // Set up transactions in two different years with categories
       // Standard accounting: negative = expenses
       const currentYear = new Date().getFullYear();
@@ -527,7 +539,7 @@ describe('CopilotMoneyTools', () => {
       ];
       (db as any)._transactions = periodCompareTransactions;
 
-      const result = tools.comparePeriods({
+      const result = await tools.comparePeriods({
         period1: 'last_year',
         period2: 'this_year',
       });
@@ -556,17 +568,17 @@ describe('CopilotMoneyTools', () => {
   });
 
   describe('exclude_transfers option', () => {
-    test('getTransactions respects exclude_transfers', () => {
-      const withTransfers = tools.getTransactions({});
-      const withoutTransfers = tools.getTransactions({ exclude_transfers: true });
+    test('getTransactions respects exclude_transfers', async () => {
+      const withTransfers = await tools.getTransactions({});
+      const withoutTransfers = await tools.getTransactions({ exclude_transfers: true });
 
       // Should not throw
       expect(withTransfers.count).toBeGreaterThanOrEqual(0);
       expect(withoutTransfers.count).toBeGreaterThanOrEqual(0);
     });
 
-    test('getSpendingByCategory respects exclude_transfers', () => {
-      const result = tools.getSpendingByCategory({
+    test('getSpendingByCategory respects exclude_transfers', async () => {
+      const result = await tools.getSpendingByCategory({
         start_date: '2024-01-01',
         end_date: '2024-12-31',
         exclude_transfers: true,
@@ -578,12 +590,12 @@ describe('CopilotMoneyTools', () => {
 });
 
 describe('createToolSchemas', () => {
-  test('returns 28 tool schemas', () => {
+  test('returns 28 tool schemas', async () => {
     const schemas = createToolSchemas();
     expect(schemas).toHaveLength(28);
   });
 
-  test('all tools have readOnlyHint: true', () => {
+  test('all tools have readOnlyHint: true', async () => {
     const schemas = createToolSchemas();
 
     for (const schema of schemas) {
@@ -591,7 +603,7 @@ describe('createToolSchemas', () => {
     }
   });
 
-  test('all tools have required fields', () => {
+  test('all tools have required fields', async () => {
     const schemas = createToolSchemas();
 
     for (const schema of schemas) {
@@ -603,7 +615,7 @@ describe('createToolSchemas', () => {
     }
   });
 
-  test('tool names match expected names', () => {
+  test('tool names match expected names', async () => {
     const schemas = createToolSchemas();
     const names = schemas.map((s) => s.name);
 
@@ -625,21 +637,21 @@ describe('createToolSchemas', () => {
     expect(names).toContain('get_merchant_analytics');
   });
 
-  test('get_spending requires group_by parameter', () => {
+  test('get_spending requires group_by parameter', async () => {
     const schemas = createToolSchemas();
     const spendingTool = schemas.find((s) => s.name === 'get_spending');
 
     expect(spendingTool?.inputSchema.required).toContain('group_by');
   });
 
-  test('get_account_balance requires account_id parameter', () => {
+  test('get_account_balance requires account_id parameter', async () => {
     const schemas = createToolSchemas();
     const balanceTool = schemas.find((s) => s.name === 'get_account_balance');
 
     expect(balanceTool?.inputSchema.required).toContain('account_id');
   });
 
-  test('compare_periods requires period1 and period2 parameters', () => {
+  test('compare_periods requires period1 and period2 parameters', async () => {
     const schemas = createToolSchemas();
     const compareTool = schemas.find((s) => s.name === 'compare_periods');
 
@@ -647,7 +659,7 @@ describe('createToolSchemas', () => {
     expect(compareTool?.inputSchema.required).toContain('period2');
   });
 
-  test('consolidated tools are present in schema', () => {
+  test('consolidated tools are present in schema', async () => {
     const schemas = createToolSchemas();
     const names = schemas.map((s) => s.name);
 
@@ -663,7 +675,7 @@ describe('createToolSchemas', () => {
     expect(names).toContain('export_transactions');
   });
 
-  test('consolidated analytics tools require analysis parameter', () => {
+  test('consolidated analytics tools require analysis parameter', async () => {
     const schemas = createToolSchemas();
 
     const accountAnalytics = schemas.find((s) => s.name === 'get_account_analytics');
@@ -763,12 +775,24 @@ describe('New MCP Tools', () => {
         account_type: 'checking',
       },
     ];
+    // Add required cache fields for async database methods
+    (db as any)._recurring = [];
+    (db as any)._budgets = [];
+    (db as any)._goals = [];
+    (db as any)._goalHistory = [];
+    (db as any)._investmentPrices = [];
+    (db as any)._investmentSplits = [];
+    (db as any)._items = [];
+    (db as any)._userCategories = [];
+    (db as any)._userAccounts = [];
+    (db as any)._categoryNameMap = new Map<string, string>();
+    (db as any)._accountNameMap = new Map<string, string>();
     tools = new CopilotMoneyTools(db);
   });
 
   describe('getForeignTransactions', () => {
-    test('returns transactions from foreign countries', () => {
-      const result = tools.getForeignTransactions({
+    test('returns transactions from foreign countries', async () => {
+      const result = await tools.getForeignTransactions({
         start_date: '2024-01-01',
         end_date: '2024-12-31',
       });
@@ -782,8 +806,8 @@ describe('New MCP Tools', () => {
   });
 
   describe('getRefunds', () => {
-    test('returns refund transactions', () => {
-      const result = tools.getRefunds({
+    test('returns refund transactions', async () => {
+      const result = await tools.getRefunds({
         start_date: '2024-01-01',
         end_date: '2024-12-31',
       });
@@ -796,8 +820,8 @@ describe('New MCP Tools', () => {
       expect(result.total_refunded).toBeGreaterThan(0);
     });
 
-    test('excludes non-refund credits', () => {
-      const result = tools.getRefunds({
+    test('excludes non-refund credits', async () => {
+      const result = await tools.getRefunds({
         start_date: '2024-01-01',
         end_date: '2024-12-31',
       });
@@ -810,8 +834,8 @@ describe('New MCP Tools', () => {
   });
 
   describe('getDuplicateTransactions', () => {
-    test('identifies potential duplicates', () => {
-      const result = tools.getDuplicateTransactions({
+    test('identifies potential duplicates', async () => {
+      const result = await tools.getDuplicateTransactions({
         start_date: '2024-01-01',
         end_date: '2024-12-31',
       });
@@ -819,7 +843,7 @@ describe('New MCP Tools', () => {
       expect(result.duplicate_groups_count).toBeGreaterThanOrEqual(0);
     });
 
-    test('finds duplicates with same merchant and amount on same day', () => {
+    test('finds duplicates with same merchant and amount on same day', async () => {
       // Set up mock data with actual duplicates
       const duplicateTransactions: Transaction[] = [
         // Duplicate transactions (same merchant, same amount, same day)
@@ -851,7 +875,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = duplicateTransactions;
 
-      const result = tools.getDuplicateTransactions({
+      const result = await tools.getDuplicateTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -869,7 +893,7 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('finds duplicates with same transaction ID', () => {
+    test('finds duplicates with same transaction ID', async () => {
       // Set up mock data with same transaction_id (edge case)
       const sameIdTransactions: Transaction[] = [
         {
@@ -891,7 +915,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = sameIdTransactions;
 
-      const result = tools.getDuplicateTransactions({
+      const result = await tools.getDuplicateTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -902,8 +926,8 @@ describe('New MCP Tools', () => {
   });
 
   describe('getCredits', () => {
-    test('returns credit transactions', () => {
-      const result = tools.getCredits({
+    test('returns credit transactions', async () => {
+      const result = await tools.getCredits({
         start_date: '2024-01-01',
         end_date: '2024-12-31',
       });
@@ -915,8 +939,8 @@ describe('New MCP Tools', () => {
   });
 
   describe('getSpendingByDayOfWeek', () => {
-    test('returns spending by day', () => {
-      const result = tools.getSpendingByDayOfWeek({
+    test('returns spending by day', async () => {
+      const result = await tools.getSpendingByDayOfWeek({
         start_date: '2024-01-01',
         end_date: '2024-12-31',
       });
@@ -928,16 +952,16 @@ describe('New MCP Tools', () => {
   });
 
   describe('getTransactionById', () => {
-    test('finds transaction by ID', () => {
-      const result = tools.getTransactionById('txn1');
+    test('finds transaction by ID', async () => {
+      const result = await tools.getTransactionById('txn1');
 
       expect(result.found).toBe(true);
       expect(result.transaction?.transaction_id).toBe('txn1');
       expect(result.transaction?.name).toBe('Coffee Shop');
     });
 
-    test('returns not found for invalid ID', () => {
-      const result = tools.getTransactionById('nonexistent');
+    test('returns not found for invalid ID', async () => {
+      const result = await tools.getTransactionById('nonexistent');
 
       expect(result.found).toBe(false);
       expect(result.transaction).toBeUndefined();
@@ -945,8 +969,8 @@ describe('New MCP Tools', () => {
   });
 
   describe('getTopMerchants', () => {
-    test('returns ranked merchants', () => {
-      const result = tools.getTopMerchants({
+    test('returns ranked merchants', async () => {
+      const result = await tools.getTopMerchants({
         start_date: '2024-01-01',
         end_date: '2024-12-31',
         limit: 5,
@@ -964,8 +988,8 @@ describe('New MCP Tools', () => {
   });
 
   describe('getHsaFsaEligible', () => {
-    test('finds medical transactions', () => {
-      const result = tools.getHsaFsaEligible({
+    test('finds medical transactions', async () => {
+      const result = await tools.getHsaFsaEligible({
         start_date: '2024-01-01',
         end_date: '2024-12-31',
       });
@@ -978,8 +1002,8 @@ describe('New MCP Tools', () => {
   });
 
   describe('exportTransactions', () => {
-    test('exports to CSV format', () => {
-      const result = tools.exportTransactions({
+    test('exports to CSV format', async () => {
+      const result = await tools.exportTransactions({
         start_date: '2024-01-01',
         end_date: '2024-12-31',
         format: 'csv',
@@ -990,8 +1014,8 @@ describe('New MCP Tools', () => {
       expect(result.data).toContain('date,amount,name');
     });
 
-    test('exports to JSON format', () => {
-      const result = tools.exportTransactions({
+    test('exports to JSON format', async () => {
+      const result = await tools.exportTransactions({
         start_date: '2024-01-01',
         end_date: '2024-12-31',
         format: 'json',
@@ -1006,8 +1030,8 @@ describe('New MCP Tools', () => {
   });
 
   describe('getSpendingRate', () => {
-    test('returns spending velocity analysis', () => {
-      const result = tools.getSpendingRate({
+    test('returns spending velocity analysis', async () => {
+      const result = await tools.getSpendingRate({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -1020,20 +1044,20 @@ describe('New MCP Tools', () => {
   });
 
   describe('Input Validation', () => {
-    test('getTransactions validates date format', () => {
+    test('getTransactions validates date format', async () => {
       expect(() => tools.getTransactions({ start_date: 'invalid-date' })).toThrow(
         'Invalid start_date format'
       );
     });
 
-    test('getTransactions constrains limit', () => {
-      const result = tools.getTransactions({ limit: 99999 });
+    test('getTransactions constrains limit', async () => {
+      const result = await tools.getTransactions({ limit: 99999 });
       // Should not throw and should constrain limit
       expect(result.count).toBeLessThanOrEqual(10000);
     });
 
-    test('getTransactions handles negative offset', () => {
-      const result = tools.getTransactions({ offset: -5 });
+    test('getTransactions handles negative offset', async () => {
+      const result = await tools.getTransactions({ offset: -5 });
       expect(result.offset).toBe(0);
     });
   });
@@ -1122,8 +1146,8 @@ describe('New MCP Tools', () => {
       (db as any)._transactions = recurringTransactions;
     });
 
-    test('identifies recurring transactions', () => {
-      const result = tools.getRecurringTransactions({
+    test('identifies recurring transactions', async () => {
+      const result = await tools.getRecurringTransactions({
         start_date: '2024-01-01',
         end_date: '2024-04-30',
       });
@@ -1133,8 +1157,8 @@ describe('New MCP Tools', () => {
       expect(Array.isArray(result.recurring)).toBe(true);
     });
 
-    test('calculates frequency correctly', () => {
-      const result = tools.getRecurringTransactions({
+    test('calculates frequency correctly', async () => {
+      const result = await tools.getRecurringTransactions({
         start_date: '2024-01-01',
         end_date: '2024-04-30',
       });
@@ -1149,8 +1173,8 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('respects min_occurrences filter', () => {
-      const result = tools.getRecurringTransactions({
+    test('respects min_occurrences filter', async () => {
+      const result = await tools.getRecurringTransactions({
         start_date: '2024-01-01',
         end_date: '2024-04-30',
         min_occurrences: 4,
@@ -1160,8 +1184,8 @@ describe('New MCP Tools', () => {
       expect(result.recurring.every((r) => r.occurrences >= 4)).toBe(true);
     });
 
-    test('excludes non-expenses (negative amounts)', () => {
-      const result = tools.getRecurringTransactions({
+    test('excludes non-expenses (negative amounts)', async () => {
+      const result = await tools.getRecurringTransactions({
         start_date: '2024-01-01',
         end_date: '2024-04-30',
       });
@@ -1171,8 +1195,8 @@ describe('New MCP Tools', () => {
       expect(income).toBeUndefined();
     });
 
-    test('calculates total monthly cost', () => {
-      const result = tools.getRecurringTransactions({
+    test('calculates total monthly cost', async () => {
+      const result = await tools.getRecurringTransactions({
         start_date: '2024-01-01',
         end_date: '2024-04-30',
       });
@@ -1180,12 +1204,12 @@ describe('New MCP Tools', () => {
       expect(result.total_monthly_cost).toBeGreaterThan(0);
     });
 
-    test('defaults to last_90_days when no period specified', () => {
-      const result = tools.getRecurringTransactions({});
+    test('defaults to last_90_days when no period specified', async () => {
+      const result = await tools.getRecurringTransactions({});
       expect(result.period).toBeDefined();
     });
 
-    test('detects weekly frequency subscriptions', () => {
+    test('detects weekly frequency subscriptions', async () => {
       // Set up weekly recurring transactions
       const weeklyTransactions: Transaction[] = [
         {
@@ -1223,7 +1247,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = weeklyTransactions;
 
-      const result = tools.getRecurringTransactions({
+      const result = await tools.getRecurringTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -1237,7 +1261,7 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('detects bi-weekly frequency subscriptions', () => {
+    test('detects bi-weekly frequency subscriptions', async () => {
       const biWeeklyTransactions: Transaction[] = [
         {
           transaction_id: 'bw1',
@@ -1266,7 +1290,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = biWeeklyTransactions;
 
-      const result = tools.getRecurringTransactions({
+      const result = await tools.getRecurringTransactions({
         start_date: '2024-01-01',
         end_date: '2024-02-15',
       });
@@ -1280,7 +1304,7 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('detects quarterly frequency subscriptions', () => {
+    test('detects quarterly frequency subscriptions', async () => {
       const quarterlyTransactions: Transaction[] = [
         {
           transaction_id: 'q1',
@@ -1309,7 +1333,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = quarterlyTransactions;
 
-      const result = tools.getRecurringTransactions({
+      const result = await tools.getRecurringTransactions({
         start_date: '2024-01-01',
         end_date: '2024-07-31',
       });
@@ -1321,7 +1345,7 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('detects yearly frequency subscriptions', () => {
+    test('detects yearly frequency subscriptions', async () => {
       const yearlyTransactions: Transaction[] = [
         {
           transaction_id: 'y1',
@@ -1342,7 +1366,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = yearlyTransactions;
 
-      const result = tools.getRecurringTransactions({
+      const result = await tools.getRecurringTransactions({
         start_date: '2023-01-01',
         end_date: '2024-12-31',
       });
@@ -1354,7 +1378,7 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('calculates high confidence for exact amounts and consistent intervals', () => {
+    test('calculates high confidence for exact amounts and consistent intervals', async () => {
       // Perfect recurring pattern - exact same amount, exact intervals
       const highConfidenceTransactions: Transaction[] = [
         {
@@ -1384,7 +1408,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = highConfidenceTransactions;
 
-      const result = tools.getRecurringTransactions({
+      const result = await tools.getRecurringTransactions({
         start_date: '2024-01-01',
         end_date: '2024-03-31',
       });
@@ -1397,7 +1421,7 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('calculates medium confidence for similar amounts', () => {
+    test('calculates medium confidence for similar amounts', async () => {
       // Varying amounts but still within range
       const mediumConfidenceTransactions: Transaction[] = [
         {
@@ -1427,7 +1451,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = mediumConfidenceTransactions;
 
-      const result = tools.getRecurringTransactions({
+      const result = await tools.getRecurringTransactions({
         start_date: '2024-01-01',
         end_date: '2024-03-31',
       });
@@ -1439,7 +1463,7 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('calculates low confidence for irregular patterns', () => {
+    test('calculates low confidence for irregular patterns', async () => {
       // Irregular pattern - varying amounts and intervals
       const lowConfidenceTransactions: Transaction[] = [
         {
@@ -1469,7 +1493,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = lowConfidenceTransactions;
 
-      const result = tools.getRecurringTransactions({
+      const result = await tools.getRecurringTransactions({
         start_date: '2024-01-01',
         end_date: '2024-03-31',
       });
@@ -1481,8 +1505,8 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('calculates next expected date for recurring subscriptions', () => {
-      const result = tools.getRecurringTransactions({
+    test('calculates next expected date for recurring subscriptions', async () => {
+      const result = await tools.getRecurringTransactions({
         start_date: '2024-01-01',
         end_date: '2024-04-30',
       });
@@ -1496,10 +1520,10 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('handles empty transaction list', () => {
+    test('handles empty transaction list', async () => {
       (db as any)._transactions = [];
 
-      const result = tools.getRecurringTransactions({
+      const result = await tools.getRecurringTransactions({
         start_date: '2024-01-01',
         end_date: '2024-04-30',
       });
@@ -1509,7 +1533,7 @@ describe('New MCP Tools', () => {
       expect(result.total_monthly_cost).toBe(0);
     });
 
-    test('excludes merchants with Unknown name', () => {
+    test('excludes merchants with Unknown name', async () => {
       const transactionsWithUnknown: Transaction[] = [
         {
           transaction_id: 'unk1',
@@ -1529,7 +1553,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = transactionsWithUnknown;
 
-      const result = tools.getRecurringTransactions({
+      const result = await tools.getRecurringTransactions({
         start_date: '2024-01-01',
         end_date: '2024-03-31',
       });
@@ -1538,7 +1562,7 @@ describe('New MCP Tools', () => {
       expect(unknown).toBeUndefined();
     });
 
-    test('filters out transactions with too much amount variance', () => {
+    test('filters out transactions with too much amount variance', async () => {
       // Transactions with > 30% variance from average should not be counted
       const highVarianceTransactions: Transaction[] = [
         {
@@ -1560,7 +1584,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = highVarianceTransactions;
 
-      const result = tools.getRecurringTransactions({
+      const result = await tools.getRecurringTransactions({
         start_date: '2024-01-01',
         end_date: '2024-03-31',
       });
@@ -1570,8 +1594,8 @@ describe('New MCP Tools', () => {
       expect(variable).toBeUndefined();
     });
 
-    test('uses period parameter correctly', () => {
-      const result = tools.getRecurringTransactions({
+    test('uses period parameter correctly', async () => {
+      const result = await tools.getRecurringTransactions({
         period: 'last_30_days',
       });
 
@@ -1579,8 +1603,8 @@ describe('New MCP Tools', () => {
       expect(result.period.end_date).toBeDefined();
     });
 
-    test('includes normalized merchant name', () => {
-      const result = tools.getRecurringTransactions({
+    test('includes normalized merchant name', async () => {
+      const result = await tools.getRecurringTransactions({
         start_date: '2024-01-01',
         end_date: '2024-04-30',
       });
@@ -1592,8 +1616,8 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('includes transaction history in result', () => {
-      const result = tools.getRecurringTransactions({
+    test('includes transaction history in result', async () => {
+      const result = await tools.getRecurringTransactions({
         start_date: '2024-01-01',
         end_date: '2024-04-30',
       });
@@ -1610,8 +1634,8 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('sorts recurring by occurrences descending', () => {
-      const result = tools.getRecurringTransactions({
+    test('sorts recurring by occurrences descending', async () => {
+      const result = await tools.getRecurringTransactions({
         start_date: '2024-01-01',
         end_date: '2024-04-30',
       });
@@ -1696,8 +1720,8 @@ describe('New MCP Tools', () => {
       (db as any)._transactions = travelTransactions;
     });
 
-    test('detects trips from foreign transactions', () => {
-      const result = tools.getTrips({
+    test('detects trips from foreign transactions', async () => {
+      const result = await tools.getTrips({
         start_date: '2024-01-01',
         end_date: '2024-12-31',
       });
@@ -1706,8 +1730,8 @@ describe('New MCP Tools', () => {
       expect(result.trips).toBeDefined();
     });
 
-    test('calculates trip duration correctly', () => {
-      const result = tools.getTrips({
+    test('calculates trip duration correctly', async () => {
+      const result = await tools.getTrips({
         start_date: '2024-03-01',
         end_date: '2024-03-31',
       });
@@ -1720,8 +1744,8 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('calculates total spent per trip', () => {
-      const result = tools.getTrips({
+    test('calculates total spent per trip', async () => {
+      const result = await tools.getTrips({
         start_date: '2024-03-01',
         end_date: '2024-03-31',
       });
@@ -1734,8 +1758,8 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('groups spending by category', () => {
-      const result = tools.getTrips({
+    test('groups spending by category', async () => {
+      const result = await tools.getTrips({
         start_date: '2024-03-01',
         end_date: '2024-03-31',
       });
@@ -1748,8 +1772,8 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('respects min_days filter', () => {
-      const result = tools.getTrips({
+    test('respects min_days filter', async () => {
+      const result = await tools.getTrips({
         start_date: '2024-01-01',
         end_date: '2024-12-31',
         min_days: 3,
@@ -1759,8 +1783,8 @@ describe('New MCP Tools', () => {
       expect(result.trips.every((t) => t.duration_days >= 3)).toBe(true);
     });
 
-    test('excludes US transactions', () => {
-      const result = tools.getTrips({
+    test('excludes US transactions', async () => {
+      const result = await tools.getTrips({
         start_date: '2024-01-01',
         end_date: '2024-12-31',
       });
@@ -1769,7 +1793,7 @@ describe('New MCP Tools', () => {
       expect(result.trips.every((t) => t.country !== 'US' && t.country !== 'USA')).toBe(true);
     });
 
-    test('detects trips from travel category without foreign country', () => {
+    test('detects trips from travel category without foreign country', async () => {
       // Travel category transactions without country specified
       // Standard accounting: negative = expenses
       const travelCategoryTransactions: Transaction[] = [
@@ -1792,7 +1816,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = travelCategoryTransactions;
 
-      const result = tools.getTrips({
+      const result = await tools.getTrips({
         start_date: '2024-06-01',
         end_date: '2024-06-30',
       });
@@ -1800,7 +1824,7 @@ describe('New MCP Tools', () => {
       expect(result.trip_count).toBeGreaterThanOrEqual(1);
     });
 
-    test('detects trips from numeric travel category ID (22xxx)', () => {
+    test('detects trips from numeric travel category ID (22xxx)', async () => {
       // Standard accounting: negative = expenses
       const numericCategoryTransactions: Transaction[] = [
         {
@@ -1822,7 +1846,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = numericCategoryTransactions;
 
-      const result = tools.getTrips({
+      const result = await tools.getTrips({
         start_date: '2024-07-01',
         end_date: '2024-07-31',
       });
@@ -1830,7 +1854,7 @@ describe('New MCP Tools', () => {
       expect(result.trip_count).toBeGreaterThanOrEqual(1);
     });
 
-    test('splits trips with gap greater than 3 days', () => {
+    test('splits trips with gap greater than 3 days', async () => {
       // Two separate trips to same country with >3 day gap
       // Standard accounting: negative = expenses
       const splitTripTransactions: Transaction[] = [
@@ -1879,7 +1903,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = splitTripTransactions;
 
-      const result = tools.getTrips({
+      const result = await tools.getTrips({
         start_date: '2024-04-01',
         end_date: '2024-04-30',
       });
@@ -1889,7 +1913,7 @@ describe('New MCP Tools', () => {
       expect(mexicoTrips.length).toBe(2);
     });
 
-    test('uses country as location when city not provided', () => {
+    test('uses country as location when city not provided', async () => {
       // Standard accounting: negative = expenses
       const noCityTransactions: Transaction[] = [
         {
@@ -1914,7 +1938,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = noCityTransactions;
 
-      const result = tools.getTrips({
+      const result = await tools.getTrips({
         start_date: '2024-08-01',
         end_date: '2024-08-31',
       });
@@ -1926,7 +1950,7 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('excludes positive amounts (refunds) from spending totals', () => {
+    test('excludes positive amounts (refunds) from spending totals', async () => {
       // Standard accounting: negative = expenses, positive = refunds/credits
       const transactionsWithRefund: Transaction[] = [
         {
@@ -1962,7 +1986,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = transactionsWithRefund;
 
-      const result = tools.getTrips({
+      const result = await tools.getTrips({
         start_date: '2024-09-01',
         end_date: '2024-09-30',
       });
@@ -1975,10 +1999,10 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('handles empty transaction list', () => {
+    test('handles empty transaction list', async () => {
       (db as any)._transactions = [];
 
-      const result = tools.getTrips({
+      const result = await tools.getTrips({
         start_date: '2024-01-01',
         end_date: '2024-12-31',
       });
@@ -1987,7 +2011,7 @@ describe('New MCP Tools', () => {
       expect(result.trips).toEqual([]);
     });
 
-    test('excludes USA transactions (alternate spelling)', () => {
+    test('excludes USA transactions (alternate spelling)', async () => {
       // Standard accounting: negative = expenses
       const usaTransactions: Transaction[] = [
         {
@@ -2003,7 +2027,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = usaTransactions;
 
-      const result = tools.getTrips({
+      const result = await tools.getTrips({
         start_date: '2024-10-01',
         end_date: '2024-10-31',
       });
@@ -2011,8 +2035,8 @@ describe('New MCP Tools', () => {
       expect(result.trips.every((t) => t.country !== 'USA')).toBe(true);
     });
 
-    test('uses period parameter correctly', () => {
-      const result = tools.getTrips({
+    test('uses period parameter correctly', async () => {
+      const result = await tools.getTrips({
         period: 'last_year',
       });
 
@@ -2020,8 +2044,8 @@ describe('New MCP Tools', () => {
       expect(result.period.end_date).toBeDefined();
     });
 
-    test('sorts trips by start date descending', () => {
-      const result = tools.getTrips({
+    test('sorts trips by start date descending', async () => {
+      const result = await tools.getTrips({
         start_date: '2024-01-01',
         end_date: '2024-12-31',
       });
@@ -2032,8 +2056,8 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('sorts categories by total spending descending', () => {
-      const result = tools.getTrips({
+    test('sorts categories by total spending descending', async () => {
+      const result = await tools.getTrips({
         start_date: '2024-03-01',
         end_date: '2024-03-31',
       });
@@ -2047,7 +2071,7 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('handles single-day trip correctly', () => {
+    test('handles single-day trip correctly', async () => {
       // Standard accounting: negative = expenses
       const singleDayTrip: Transaction[] = [
         {
@@ -2064,7 +2088,7 @@ describe('New MCP Tools', () => {
       (db as any)._transactions = singleDayTrip;
 
       // With min_days = 1, single day trip should be included
-      const result = tools.getTrips({
+      const result = await tools.getTrips({
         start_date: '2024-11-01',
         end_date: '2024-11-30',
         min_days: 1,
@@ -2077,7 +2101,7 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('handles transactions within 3-day gap as same trip', () => {
+    test('handles transactions within 3-day gap as same trip', async () => {
       // Standard accounting: negative = expenses
       const gappyTrip: Transaction[] = [
         {
@@ -2104,7 +2128,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = gappyTrip;
 
-      const result = tools.getTrips({
+      const result = await tools.getTrips({
         start_date: '2024-12-01',
         end_date: '2024-12-31',
       });
@@ -2118,7 +2142,7 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('handles Unknown country transactions', () => {
+    test('handles Unknown country transactions', async () => {
       // Standard accounting: negative = expenses
       const unknownCountryTransactions: Transaction[] = [
         {
@@ -2141,7 +2165,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = unknownCountryTransactions;
 
-      const result = tools.getTrips({
+      const result = await tools.getTrips({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -2236,8 +2260,8 @@ describe('New MCP Tools', () => {
       (db as any)._transactions = mixedTransactions;
     });
 
-    test('identifies unusual transactions', () => {
-      const result = tools.getUnusualTransactions({
+    test('identifies unusual transactions', async () => {
+      const result = await tools.getUnusualTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -2246,8 +2270,8 @@ describe('New MCP Tools', () => {
       expect(result.transactions).toBeDefined();
     });
 
-    test('flags large transactions over $10,000', () => {
-      const result = tools.getUnusualTransactions({
+    test('flags large transactions over $10,000', async () => {
+      const result = await tools.getUnusualTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -2259,7 +2283,7 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('flags transactions significantly above merchant average', () => {
+    test('flags transactions significantly above merchant average', async () => {
       // Add more baseline transactions to make anomaly detection work better
       const extendedTransactions: Transaction[] = [
         // More baseline Starbucks (need consistent pattern before anomaly)
@@ -2339,7 +2363,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = extendedTransactions;
 
-      const result = tools.getUnusualTransactions({
+      const result = await tools.getUnusualTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -2354,7 +2378,7 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('provides deviation percentage', () => {
+    test('provides deviation percentage', async () => {
       // Add more baseline transactions for reliable anomaly detection
       const extendedTransactions: Transaction[] = [
         {
@@ -2433,7 +2457,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = extendedTransactions;
 
-      const result = tools.getUnusualTransactions({
+      const result = await tools.getUnusualTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -2445,15 +2469,15 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('respects threshold_multiplier', () => {
+    test('respects threshold_multiplier', async () => {
       // With a higher threshold, fewer transactions should be flagged
-      const highThreshold = tools.getUnusualTransactions({
+      const highThreshold = await tools.getUnusualTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
         threshold_multiplier: 5,
       });
 
-      const lowThreshold = tools.getUnusualTransactions({
+      const lowThreshold = await tools.getUnusualTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
         threshold_multiplier: 1,
@@ -2463,7 +2487,7 @@ describe('New MCP Tools', () => {
       expect(lowThreshold.count).toBeGreaterThanOrEqual(highThreshold.count);
     });
 
-    test('detects category-level anomalies when merchant has insufficient data', () => {
+    test('detects category-level anomalies when merchant has insufficient data', async () => {
       // New merchant but unusually high for category
       // Need enough baseline variation to create meaningful stdDev
       const categoryAnomalyTransactions: Transaction[] = [
@@ -2512,7 +2536,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = categoryAnomalyTransactions;
 
-      const result = tools.getUnusualTransactions({
+      const result = await tools.getUnusualTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -2527,10 +2551,10 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('handles empty transaction list', () => {
+    test('handles empty transaction list', async () => {
       (db as any)._transactions = [];
 
-      const result = tools.getUnusualTransactions({
+      const result = await tools.getUnusualTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -2539,7 +2563,7 @@ describe('New MCP Tools', () => {
       expect(result.transactions).toEqual([]);
     });
 
-    test('excludes negative amounts (income/refunds)', () => {
+    test('excludes negative amounts (income/refunds)', async () => {
       const transactionsWithIncome: Transaction[] = [
         {
           transaction_id: 'inc1',
@@ -2560,7 +2584,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = transactionsWithIncome;
 
-      const result = tools.getUnusualTransactions({
+      const result = await tools.getUnusualTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -2570,7 +2594,7 @@ describe('New MCP Tools', () => {
       expect(income).toBeUndefined();
     });
 
-    test('does not flag transactions at exactly $1000', () => {
+    test('does not flag transactions at exactly $1000', async () => {
       const exactlyThousandTransactions: Transaction[] = [
         {
           transaction_id: 'ex1',
@@ -2583,7 +2607,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = exactlyThousandTransactions;
 
-      const result = tools.getUnusualTransactions({
+      const result = await tools.getUnusualTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -2593,7 +2617,7 @@ describe('New MCP Tools', () => {
       expect(exactlyThousand).toBeUndefined();
     });
 
-    test('skips merchants with fewer than 3 transactions for merchant-level anomaly', () => {
+    test('skips merchants with fewer than 3 transactions for merchant-level anomaly', async () => {
       // Merchant with only 2 transactions - should not be used for baseline
       const fewMerchantTransactions: Transaction[] = [
         {
@@ -2615,7 +2639,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = fewMerchantTransactions;
 
-      const result = tools.getUnusualTransactions({
+      const result = await tools.getUnusualTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -2628,8 +2652,8 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('uses period parameter correctly', () => {
-      const result = tools.getUnusualTransactions({
+    test('uses period parameter correctly', async () => {
+      const result = await tools.getUnusualTransactions({
         period: 'last_30_days',
       });
 
@@ -2637,7 +2661,7 @@ describe('New MCP Tools', () => {
       expect(result.period.end_date).toBeDefined();
     });
 
-    test('sorts anomalies by deviation percentage descending', () => {
+    test('sorts anomalies by deviation percentage descending', async () => {
       // Create transactions with different deviation levels
       const sortTestTransactions: Transaction[] = [
         // Baseline for Merchant A
@@ -2710,7 +2734,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = sortTestTransactions;
 
-      const result = tools.getUnusualTransactions({
+      const result = await tools.getUnusualTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -2723,8 +2747,8 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('includes category name in anomaly results', () => {
-      const result = tools.getUnusualTransactions({
+    test('includes category name in anomaly results', async () => {
+      const result = await tools.getUnusualTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -2737,7 +2761,7 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('provides expected amount for merchant-level anomalies', () => {
+    test('provides expected amount for merchant-level anomalies', async () => {
       // Need many baseline transactions to dilute the anomaly's effect on average
       // Also need enough variance for stdDev > 0
       const extendedTransactions: Transaction[] = [
@@ -2802,7 +2826,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = extendedTransactions;
 
-      const result = tools.getUnusualTransactions({
+      const result = await tools.getUnusualTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -2818,7 +2842,7 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('limits results to 50 transactions', () => {
+    test('limits results to 50 transactions', async () => {
       // Create many anomalous transactions
       const manyAnomalies: Transaction[] = [];
       for (let i = 0; i < 100; i++) {
@@ -2833,7 +2857,7 @@ describe('New MCP Tools', () => {
       }
       (db as any)._transactions = manyAnomalies;
 
-      const result = tools.getUnusualTransactions({
+      const result = await tools.getUnusualTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -2841,7 +2865,7 @@ describe('New MCP Tools', () => {
       expect(result.transactions.length).toBeLessThanOrEqual(50);
     });
 
-    test('handles zero standard deviation gracefully', () => {
+    test('handles zero standard deviation gracefully', async () => {
       // All same amounts - zero stdDev
       const sameAmountTransactions: Transaction[] = [
         {
@@ -2879,7 +2903,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = sameAmountTransactions;
 
-      const result = tools.getUnusualTransactions({
+      const result = await tools.getUnusualTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -2889,7 +2913,7 @@ describe('New MCP Tools', () => {
       expect(consistentMerchant).toBeUndefined();
     });
 
-    test('defaults threshold_multiplier to 2 when not specified', () => {
+    test('defaults threshold_multiplier to 2 when not specified', async () => {
       // Need many baseline transactions to dilute anomaly's effect, and variance for stdDev > 0
       const baselineTransactions: Transaction[] = [
         {
@@ -2952,7 +2976,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = baselineTransactions;
 
-      const result = tools.getUnusualTransactions({
+      const result = await tools.getUnusualTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
         // Not specifying threshold_multiplier
@@ -2963,7 +2987,7 @@ describe('New MCP Tools', () => {
       expect(flagged).toBeDefined();
     });
 
-    test('handles transactions with no category', () => {
+    test('handles transactions with no category', async () => {
       const noCategoryTransactions: Transaction[] = [
         {
           transaction_id: 'nocat1',
@@ -2976,7 +3000,7 @@ describe('New MCP Tools', () => {
       ];
       (db as any)._transactions = noCategoryTransactions;
 
-      const result = tools.getUnusualTransactions({
+      const result = await tools.getUnusualTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -2990,8 +3014,8 @@ describe('New MCP Tools', () => {
   });
 
   describe('getTransactionById', () => {
-    test('finds existing transaction by ID', () => {
-      const result = tools.getTransactionById('txn1');
+    test('finds existing transaction by ID', async () => {
+      const result = await tools.getTransactionById('txn1');
 
       expect(result.found).toBe(true);
       expect(result.transaction).toBeDefined();
@@ -3002,15 +3026,15 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('returns not found for non-existent ID', () => {
-      const result = tools.getTransactionById('nonexistent');
+    test('returns not found for non-existent ID', async () => {
+      const result = await tools.getTransactionById('nonexistent');
 
       expect(result.found).toBe(false);
       expect(result.transaction).toBeUndefined();
     });
 
-    test('includes category name when available', () => {
-      const result = tools.getTransactionById('txn1');
+    test('includes category name when available', async () => {
+      const result = await tools.getTransactionById('txn1');
 
       expect(result.found).toBe(true);
       if (result.transaction) {
@@ -3018,8 +3042,8 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('includes normalized merchant name', () => {
-      const result = tools.getTransactionById('txn1');
+    test('includes normalized merchant name', async () => {
+      const result = await tools.getTransactionById('txn1');
 
       expect(result.found).toBe(true);
       if (result.transaction) {
@@ -3100,8 +3124,8 @@ describe('New MCP Tools', () => {
       (db as any)._transactions = transactionsWithLargeAmounts;
     });
 
-    test('flags large transactions with appropriate threshold', () => {
-      const result = tools.getUnusualTransactions({
+    test('flags large transactions with appropriate threshold', async () => {
+      const result = await tools.getUnusualTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -3112,8 +3136,8 @@ describe('New MCP Tools', () => {
       expect(largeTxn?.anomaly_reason).toContain('10,000');
     });
 
-    test('flags extremely large transactions with higher severity', () => {
-      const result = tools.getUnusualTransactions({
+    test('flags extremely large transactions with higher severity', async () => {
+      const result = await tools.getUnusualTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -3124,8 +3148,8 @@ describe('New MCP Tools', () => {
       expect(extremeTxn?.anomaly_reason).toContain('100,000');
     });
 
-    test('flags unrealistic amounts as data quality issues', () => {
-      const result = tools.getUnusualTransactions({
+    test('flags unrealistic amounts as data quality issues', async () => {
+      const result = await tools.getUnusualTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -3136,8 +3160,8 @@ describe('New MCP Tools', () => {
       expect(unrealisticTxn?.anomaly_reason).toContain('data quality');
     });
 
-    test('does not flag normal transactions based on amount alone', () => {
-      const result = tools.getUnusualTransactions({
+    test('does not flag normal transactions based on amount alone', async () => {
+      const result = await tools.getUnusualTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -3202,8 +3226,8 @@ describe('New MCP Tools', () => {
       (db as any)._transactions = transactionsWithAmountIssues;
     });
 
-    test('includes amount_issues in report with pagination metadata', () => {
-      const result = tools.getDataQualityReport({
+    test('includes amount_issues in report with pagination metadata', async () => {
+      const result = await tools.getDataQualityReport({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -3215,8 +3239,8 @@ describe('New MCP Tools', () => {
       expect(Array.isArray(result.amount_issues.items)).toBe(true);
     });
 
-    test('detects extremely large transactions', () => {
-      const result = tools.getDataQualityReport({
+    test('detects extremely large transactions', async () => {
+      const result = await tools.getDataQualityReport({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -3228,8 +3252,8 @@ describe('New MCP Tools', () => {
       expect(extremeTxn?.reason).toContain('100,000');
     });
 
-    test('detects unrealistic amounts', () => {
-      const result = tools.getDataQualityReport({
+    test('detects unrealistic amounts', async () => {
+      const result = await tools.getDataQualityReport({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -3242,8 +3266,8 @@ describe('New MCP Tools', () => {
       expect(unrealisticTxn?.reason).toContain('1,000,000');
     });
 
-    test('detects unrealistic negative amounts (income)', () => {
-      const result = tools.getDataQualityReport({
+    test('detects unrealistic negative amounts (income)', async () => {
+      const result = await tools.getDataQualityReport({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -3255,8 +3279,8 @@ describe('New MCP Tools', () => {
       expect(unrealisticIncome?.severity).toBe('unrealistic');
     });
 
-    test('sorts transactions by amount (largest first)', () => {
-      const result = tools.getDataQualityReport({
+    test('sorts transactions by amount (largest first)', async () => {
+      const result = await tools.getDataQualityReport({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -3271,8 +3295,8 @@ describe('New MCP Tools', () => {
       }
     });
 
-    test('includes amount issues in total issues count', () => {
-      const result = tools.getDataQualityReport({
+    test('includes amount issues in total issues count', async () => {
+      const result = await tools.getDataQualityReport({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -3280,8 +3304,8 @@ describe('New MCP Tools', () => {
       expect(result.summary.issues_found).toBeGreaterThanOrEqual(result.amount_issues.total);
     });
 
-    test('does not flag normal transactions as amount issues', () => {
-      const result = tools.getDataQualityReport({
+    test('does not flag normal transactions as amount issues', async () => {
+      const result = await tools.getDataQualityReport({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
       });
@@ -3292,7 +3316,7 @@ describe('New MCP Tools', () => {
       expect(normalTxn).toBeUndefined();
     });
 
-    test('respects issues_limit for amount issues', () => {
+    test('respects issues_limit for amount issues', async () => {
       // Add many large transactions
       const manyLargeTransactions: Transaction[] = [];
       for (let i = 0; i < 30; i++) {
@@ -3307,7 +3331,7 @@ describe('New MCP Tools', () => {
       }
       (db as any)._transactions = manyLargeTransactions;
 
-      const result = tools.getDataQualityReport({
+      const result = await tools.getDataQualityReport({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
         issues_limit: 10,

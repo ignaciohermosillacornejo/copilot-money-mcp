@@ -70,6 +70,18 @@ describe('CopilotMoneyServer E2E', () => {
     const db = new CopilotDatabase('/fake/path');
     (db as any)._transactions = [...mockTransactions];
     (db as any)._accounts = [...mockAccounts];
+    // Add required cache fields for async database methods
+    (db as any)._recurring = [];
+    (db as any)._budgets = [];
+    (db as any)._goals = [];
+    (db as any)._goalHistory = [];
+    (db as any)._investmentPrices = [];
+    (db as any)._investmentSplits = [];
+    (db as any)._items = [];
+    (db as any)._userCategories = [];
+    (db as any)._userAccounts = [];
+    (db as any)._categoryNameMap = new Map<string, string>();
+    (db as any)._accountNameMap = new Map<string, string>();
 
     server = new CopilotMoneyServer('/fake/path');
     // Override server's database
@@ -80,31 +92,31 @@ describe('CopilotMoneyServer E2E', () => {
   });
 
   describe('server initialization', () => {
-    test('server can be initialized', () => {
+    test('server can be initialized', async () => {
       expect(server).toBeDefined();
     });
 
-    test('server has database', () => {
+    test('server has database', async () => {
       expect((server as any).db).toBeDefined();
     });
 
-    test('server has tools', () => {
+    test('server has tools', async () => {
       expect((server as any).tools).toBeDefined();
     });
   });
 
   describe('tool functionality', () => {
-    test('get_transactions tool works', () => {
-      const result = tools.getTransactions({ limit: 10 });
+    test('get_transactions tool works', async () => {
+      const result = await tools.getTransactions({ limit: 10 });
 
       expect(result.count).toBeDefined();
       expect(result.transactions).toBeDefined();
       expect(result.count).toBeLessThanOrEqual(10);
     });
 
-    test('get_transactions with all filters', () => {
+    test('get_transactions with all filters', async () => {
       // Amount filtering uses absolute values (magnitude)
-      const result = tools.getTransactions({
+      const result = await tools.getTransactions({
         start_date: '2025-01-01',
         end_date: '2025-01-31',
         min_amount: 5.0,
@@ -118,15 +130,15 @@ describe('CopilotMoneyServer E2E', () => {
       }
     });
 
-    test('search_transactions tool works', () => {
-      const result = tools.searchTransactions('coffee', 10);
+    test('search_transactions tool works', async () => {
+      const result = await tools.searchTransactions('coffee', 10);
 
       expect(result.count).toBeDefined();
       expect(result.transactions).toBeDefined();
     });
 
-    test('get_accounts tool works', () => {
-      const result = tools.getAccounts();
+    test('get_accounts tool works', async () => {
+      const result = await tools.getAccounts();
 
       expect(result.count).toBeDefined();
       expect(result.total_balance).toBeDefined();
@@ -134,8 +146,8 @@ describe('CopilotMoneyServer E2E', () => {
       expect(result.count).toBe(result.accounts.length);
     });
 
-    test('get_spending_by_category tool works', () => {
-      const result = tools.getSpendingByCategory({
+    test('get_spending_by_category tool works', async () => {
+      const result = await tools.getSpendingByCategory({
         start_date: '2025-01-01',
         end_date: '2025-01-31',
       });
@@ -151,20 +163,20 @@ describe('CopilotMoneyServer E2E', () => {
       }
     });
 
-    test('get_account_balance tool works', () => {
-      const result = tools.getAccountBalance('acc1');
+    test('get_account_balance tool works', async () => {
+      const result = await tools.getAccountBalance('acc1');
 
       expect(result.account_id).toBe('acc1');
       expect(result.current_balance).toBeDefined();
     });
 
-    test('get_account_balance throws for invalid account', () => {
-      expect(() => tools.getAccountBalance('nonexistent_123')).toThrow('Account not found');
+    test('get_account_balance throws for invalid account', async () => {
+      await expect(tools.getAccountBalance('nonexistent_123')).rejects.toThrow('Account not found');
     });
   });
 
   describe('response serialization', () => {
-    test('all tool responses can be serialized to JSON', () => {
+    test('all tool responses can be serialized to JSON', async () => {
       const toolsToTest = [
         { func: () => tools.getTransactions({ limit: 5 }) },
         { func: () => tools.searchTransactions('test') },
@@ -189,8 +201,8 @@ describe('CopilotMoneyServer E2E', () => {
   });
 
   describe('data accuracy', () => {
-    test('spending aggregation is mathematically correct', () => {
-      const result = tools.getSpendingByCategory({
+    test('spending aggregation is mathematically correct', async () => {
+      const result = await tools.getSpendingByCategory({
         start_date: '2025-01-01',
         end_date: '2025-01-31',
       });
@@ -200,16 +212,16 @@ describe('CopilotMoneyServer E2E', () => {
       expect(Math.abs(result.total_spending - categoryTotal)).toBeLessThan(0.01);
     });
 
-    test('account balance totals are correct', () => {
-      const result = tools.getAccounts();
+    test('account balance totals are correct', async () => {
+      const result = await tools.getAccounts();
 
       const calculatedTotal = result.accounts.reduce((sum, acc) => sum + acc.current_balance, 0);
 
       expect(Math.abs(result.total_balance - calculatedTotal)).toBeLessThan(0.01);
     });
 
-    test('category transaction counts are accurate', () => {
-      const result = tools.getSpendingByCategory({
+    test('category transaction counts are accurate', async () => {
+      const result = await tools.getSpendingByCategory({
         start_date: '2025-01-01',
         end_date: '2025-01-31',
       });
@@ -222,14 +234,14 @@ describe('CopilotMoneyServer E2E', () => {
   });
 
   describe('empty results', () => {
-    test('handles empty transaction results gracefully', () => {
-      const result = tools.searchTransactions('xyznonexistent123');
+    test('handles empty transaction results gracefully', async () => {
+      const result = await tools.searchTransactions('xyznonexistent123');
       expect(result.count).toBe(0);
       expect(result.transactions).toEqual([]);
     });
 
-    test('handles impossible date ranges', () => {
-      const result = tools.getTransactions({
+    test('handles impossible date ranges', async () => {
+      const result = await tools.getTransactions({
         start_date: '1900-01-01',
         end_date: '1900-01-31',
       });
@@ -239,8 +251,8 @@ describe('CopilotMoneyServer E2E', () => {
   });
 
   describe('large limits', () => {
-    test('handles large limits appropriately', () => {
-      const result = tools.getTransactions({ limit: 10000 });
+    test('handles large limits appropriately', async () => {
+      const result = await tools.getTransactions({ limit: 10000 });
 
       expect(result.count).toBeGreaterThanOrEqual(0);
       expect(result.count).toBeLessThanOrEqual(10000);
@@ -248,8 +260,8 @@ describe('CopilotMoneyServer E2E', () => {
   });
 
   describe('boundary conditions', () => {
-    test('single day date range works', () => {
-      const result = tools.getTransactions({
+    test('single day date range works', async () => {
+      const result = await tools.getTransactions({
         start_date: '2025-01-15',
         end_date: '2025-01-15',
         limit: 100,
@@ -260,10 +272,10 @@ describe('CopilotMoneyServer E2E', () => {
       }
     });
 
-    test('exact amount match works', () => {
+    test('exact amount match works', async () => {
       // Amount filtering uses absolute values (magnitude)
       // Match transactions with magnitude = 10.0
-      const result = tools.getTransactions({
+      const result = await tools.getTransactions({
         min_amount: 10.0,
         max_amount: 10.0,
         limit: 100,
@@ -278,9 +290,9 @@ describe('CopilotMoneyServer E2E', () => {
   });
 
   describe('consistency', () => {
-    test('multiple calls return consistent results', () => {
-      const result1 = tools.getTransactions({ limit: 10 });
-      const result2 = tools.getTransactions({ limit: 10 });
+    test('multiple calls return consistent results', async () => {
+      const result1 = await tools.getTransactions({ limit: 10 });
+      const result2 = await tools.getTransactions({ limit: 10 });
 
       expect(result1.count).toBe(result2.count);
 
@@ -295,7 +307,7 @@ describe('CopilotMoneyServer E2E', () => {
   });
 
   describe('error handling', () => {
-    test('database unavailable returns appropriate message', () => {
+    test('database unavailable returns appropriate message', async () => {
       const dbUnavailable = new CopilotDatabase('/nonexistent/path');
       expect(dbUnavailable.isAvailable()).toBe(false);
     });
