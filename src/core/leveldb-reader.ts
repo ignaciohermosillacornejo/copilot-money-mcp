@@ -4,18 +4,136 @@
  * This module provides proper iteration over LevelDB databases using the
  * classic-level library, eliminating the need for raw binary file parsing.
  *
+ * To support concurrent access (reading while Copilot Money app is running),
+ * this module copies the database files to a temp directory before reading.
+ * LevelDB uses file locks that prevent multiple processes from opening the
+ * same database, so copying allows us to read without conflicting with the app.
+ *
  * Firestore stores documents with keys like:
  * remote_document/projects/{project}/databases/(default)/documents/{collection}/{doc_id}
  */
 
 import { ClassicLevel } from 'classic-level';
 import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import {
   parseFirestoreDocument,
   toPlainObject,
   encodeFirestoreDocument,
   type FirestoreValue,
 } from './protobuf-parser.js';
+
+/**
+ * Cache for temporary database copies.
+ * Maps source path to { tempPath, refCount, lastAccess }.
+ */
+interface TempDbCacheEntry {
+  tempPath: string;
+  refCount: number;
+  lastAccess: number;
+}
+
+const tempDbCache = new Map<string, TempDbCacheEntry>();
+
+// Cleanup interval (5 minutes)
+const TEMP_DB_CACHE_TTL = 5 * 60 * 1000;
+
+/**
+ * Copy a LevelDB database to a temporary directory.
+ * This allows reading while another process has the database locked.
+ *
+ * Uses a cache to avoid copying the same database multiple times.
+ * The cache entry is reference-counted and cleaned up when no longer in use.
+ *
+ * @param srcPath - Source database directory
+ * @returns Path to the temporary copy
+ */
+function copyDatabaseToTemp(srcPath: string): string {
+  // Check cache first
+  const cached = tempDbCache.get(srcPath);
+  if (cached && fs.existsSync(cached.tempPath)) {
+    cached.refCount++;
+    cached.lastAccess = Date.now();
+    return cached.tempPath;
+  }
+
+  // Create a unique temp directory
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'copilot-leveldb-'));
+
+  // Copy all LevelDB files
+  // LevelDB database consists of: .ldb (SST files), MANIFEST-*, CURRENT, LOG, LOCK
+  const files = fs.readdirSync(srcPath);
+  for (const file of files) {
+    // Copy all relevant LevelDB files (skip LOCK file - we don't need it for read-only)
+    if (
+      file.endsWith('.ldb') ||
+      file.endsWith('.log') ||
+      file.startsWith('MANIFEST-') ||
+      file === 'CURRENT' ||
+      file === 'LOG' ||
+      file === 'LOG.old'
+    ) {
+      const srcFile = path.join(srcPath, file);
+      const destFile = path.join(tempDir, file);
+      fs.copyFileSync(srcFile, destFile);
+    }
+  }
+
+  // Add to cache
+  tempDbCache.set(srcPath, {
+    tempPath: tempDir,
+    refCount: 1,
+    lastAccess: Date.now(),
+  });
+
+  return tempDir;
+}
+
+/**
+ * Release a reference to a temporary database copy.
+ * When refCount reaches 0, schedule cleanup after TTL.
+ */
+function releaseTempDatabase(srcPath: string): void {
+  const cached = tempDbCache.get(srcPath);
+  if (!cached) return;
+
+  cached.refCount--;
+  cached.lastAccess = Date.now();
+
+  // Schedule cleanup if no more references
+  if (cached.refCount <= 0) {
+    setTimeout(() => {
+      const entry = tempDbCache.get(srcPath);
+      if (entry && entry.refCount <= 0 && Date.now() - entry.lastAccess >= TEMP_DB_CACHE_TTL) {
+        cleanupTempDatabase(entry.tempPath);
+        tempDbCache.delete(srcPath);
+      }
+    }, TEMP_DB_CACHE_TTL);
+  }
+}
+
+/**
+ * Clean up a temporary database copy.
+ */
+function cleanupTempDatabase(tempPath: string): void {
+  try {
+    fs.rmSync(tempPath, { recursive: true, force: true });
+  } catch {
+    // Ignore cleanup errors - temp files will be cleaned up eventually
+  }
+}
+
+/**
+ * Force cleanup of all cached temp databases.
+ * Useful for tests.
+ */
+export function cleanupAllTempDatabases(): void {
+  for (const [, entry] of tempDbCache) {
+    cleanupTempDatabase(entry.tempPath);
+  }
+  tempDbCache.clear();
+}
 
 /**
  * A parsed document from the LevelDB database.
@@ -56,26 +174,136 @@ export interface IterateOptions {
 }
 
 /**
- * Regex to parse Firestore document keys.
+ * Regex to parse Firestore document keys (legacy format).
  * Expected format: remote_document/.../documents/{collection}/{doc_id}
  */
 const DOCUMENT_KEY_REGEX = /documents\/([^/]+)\/([^/]+)$/;
 
 /**
- * Alternative key format for subcollections.
+ * Alternative key format for subcollections (legacy format).
  * Expected format: .../documents/{parent_collection}/{parent_id}/{sub_collection}/{doc_id}
  */
 const SUBCOLLECTION_KEY_REGEX = /documents\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)$/;
 
 /**
- * Parse a LevelDB key to extract collection and document ID.
+ * Parse a LevelDB key in the binary format used by Firestore SDK.
+ *
+ * The binary format uses:
+ * - 0x85 as start marker for "remote_document"
+ * - 0x00 0x01 as separators between segments
+ * - 0xBE as prefix for string segments (followed immediately by the string)
+ * - 0x80 as end marker
+ *
+ * Example key structure:
+ * \x85remote_document\x00\x01\xBEitems\x00\x01\xBE<item_id>\x00\x01\xBEaccounts\x00\x01\xBE<account_id>\x00\x01\xBEtransactions\x00\x01\xBE<transaction_id>\x00\x01\x80
+ *
+ * Also handles simple string path format for test databases:
+ * remote_document/.../documents/{collection}/{doc_id}
+ *
+ * We extract the last two non-empty segments as collection and document ID.
  */
-export function parseDocumentKey(key: string): { collection: string; documentId: string } | null {
+function parseBinaryKey(keyBuffer: Buffer): { collection: string; documentId: string } | null {
+  const keyStr = keyBuffer.toString('utf8');
+
+  // Look for 'remote_document' marker
+  if (!keyStr.includes('remote_document')) {
+    return null;
+  }
+
+  // Try simple string path format first (for test databases)
+  // Format: remote_document/.../documents/{collection}/{doc_id}
+  const pathMatch = keyStr.match(/documents\/([^/]+)\/([^/]+)$/);
+  if (pathMatch && pathMatch[1] && pathMatch[2]) {
+    const collection = pathMatch[1];
+    const documentId = pathMatch[2];
+    const skipCollections = ['collection_parent', 'target', 'target_global', 'mutation_queue'];
+    if (!skipCollections.includes(collection)) {
+      return { collection, documentId };
+    }
+  }
+
+  // Try binary format (for real Firestore databases)
+  const remoteDocStr = 'remote_document';
+  const remoteDocIndex = keyBuffer.indexOf(remoteDocStr, 0, 'utf8');
+  if (remoteDocIndex === -1) {
+    return null;
+  }
+
+  // Extract segments by parsing the binary structure directly
+  // Pattern: 0x00 0x01 0xBE followed by string, then 0x00 0x01 or 0x80 (end)
+  const segments: string[] = [];
+  let pos = remoteDocIndex + remoteDocStr.length;
+
+  while (pos < keyBuffer.length) {
+    // Look for separator: 0x00 0x01
+    if (keyBuffer[pos] === 0x00 && pos + 1 < keyBuffer.length && keyBuffer[pos + 1] === 0x01) {
+      pos += 2;
+
+      // Check for 0xBE (string segment marker) or 0x80 (end marker)
+      if (pos < keyBuffer.length) {
+        if (keyBuffer[pos] === 0x80) {
+          // End of key
+          break;
+        }
+        if (keyBuffer[pos] === 0xbe) {
+          pos++;
+          // Find the end of this string (next 0x00 or end of buffer)
+          let strEnd = pos;
+          while (
+            strEnd < keyBuffer.length &&
+            keyBuffer[strEnd] !== 0x00 &&
+            keyBuffer[strEnd] !== 0x80
+          ) {
+            strEnd++;
+          }
+          if (strEnd > pos) {
+            const str = keyBuffer.slice(pos, strEnd).toString('utf8');
+            // Filter out non-printable strings
+            if (str.length > 0 && /^[\x20-\x7e]+$/.test(str)) {
+              segments.push(str);
+            }
+          }
+          pos = strEnd;
+        }
+      }
+    } else {
+      pos++;
+    }
+  }
+
+  // Need at least: collection, doc_id
+  if (segments.length < 2) {
+    return null;
+  }
+
+  const documentId = segments[segments.length - 1];
+  const collection = segments[segments.length - 2];
+
+  // Skip certain collections that aren't actual document storage
+  const skipCollections = ['collection_parent', 'target', 'target_global', 'mutation_queue'];
+  if (!documentId || !collection || skipCollections.includes(collection)) {
+    return null;
+  }
+
+  return { collection, documentId };
+}
+
+/**
+ * Parse a LevelDB key to extract collection and document ID.
+ * Supports both the legacy string format and the binary format used by Firestore SDK.
+ */
+export function parseDocumentKey(
+  key: string | Buffer
+): { collection: string; documentId: string } | null {
+  // If it's a buffer, use the binary parser
+  if (Buffer.isBuffer(key)) {
+    return parseBinaryKey(key);
+  }
+
+  // For strings, try the legacy path-based format first
   // Try subcollection pattern first (more specific)
   const subMatch = key.match(SUBCOLLECTION_KEY_REGEX);
   if (subMatch && subMatch[1] && subMatch[2] && subMatch[3] && subMatch[4]) {
-    // For subcollections, return the full path as collection
-    // e.g., "users/abc123/categories" with doc id "xyz789"
     return {
       collection: `${subMatch[1]}/${subMatch[2]}/${subMatch[3]}`,
       documentId: subMatch[4],
@@ -91,11 +319,20 @@ export function parseDocumentKey(key: string): { collection: string; documentId:
     };
   }
 
+  // Try binary format on string by converting to buffer
+  if (key.includes('remote_document')) {
+    return parseBinaryKey(Buffer.from(key, 'utf8'));
+  }
+
   return null;
 }
 
 /**
  * Open a LevelDB database and iterate through Firestore documents.
+ *
+ * To support concurrent access (e.g., reading while Copilot Money app is running),
+ * this function copies the database to a temp directory before reading. LevelDB
+ * uses file locks that prevent multiple processes from opening the same database.
  *
  * @param dbPath - Path to the LevelDB database directory
  * @param options - Iteration options
@@ -118,10 +355,13 @@ export async function* iterateDocuments(
     throw new Error('Path is not a directory');
   }
 
-  // Open database in read-only mode
-  const db = new ClassicLevel<string, Buffer>(dbPath, {
+  // Copy database to temp directory to avoid lock conflicts with Copilot app
+  const tempDbPath = copyDatabaseToTemp(dbPath);
+
+  // Open the temp copy with buffer key encoding to handle binary keys
+  const db = new ClassicLevel<Buffer, Buffer>(tempDbPath, {
     createIfMissing: false,
-    keyEncoding: 'utf8',
+    keyEncoding: 'buffer',
     valueEncoding: 'buffer',
   });
 
@@ -134,17 +374,19 @@ export async function* iterateDocuments(
         break;
       }
 
+      const keyStr = key.toString('utf8');
+
       // Check key prefix filter
-      if (keyPrefix && !key.startsWith(keyPrefix)) {
+      if (keyPrefix && !keyStr.startsWith(keyPrefix)) {
         continue;
       }
 
-      // Skip non-document keys
-      if (!key.includes('documents/')) {
+      // Skip non-document keys (must contain remote_document)
+      if (!keyStr.includes('remote_document')) {
         continue;
       }
 
-      // Parse the key
+      // Parse the key (supports both binary and string formats)
       const parsed = parseDocumentKey(key);
       if (!parsed) {
         continue;
@@ -166,7 +408,7 @@ export async function* iterateDocuments(
         const fields = parseFirestoreDocument(value);
 
         yield {
-          key,
+          key: keyStr,
           collection: parsed.collection,
           documentId: parsed.documentId,
           rawValue: value,
@@ -182,6 +424,8 @@ export async function* iterateDocuments(
     }
   } finally {
     await db.close();
+    // Release reference to temp copy (will be cleaned up after TTL if no other users)
+    releaseTempDatabase(dbPath);
   }
 }
 
