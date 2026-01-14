@@ -1756,13 +1756,30 @@ export function decodeItems(
 export function decodeCategories(dbPath: string): Category[] {
   const categories: Category[] = [];
 
+  const isDebug = process.env.NODE_ENV === 'development' || process.env.DEBUG;
+
   // Return empty array if path doesn't exist (graceful degradation)
   if (!fs.existsSync(dbPath)) {
+    if (isDebug) {
+      console.warn(`[decodeCategories] Database path does not exist: ${dbPath}`);
+    }
     return [];
   }
 
-  const stat = fs.statSync(dbPath);
+  let stat;
+  try {
+    stat = fs.statSync(dbPath);
+  } catch (error) {
+    if (isDebug) {
+      console.warn(`[decodeCategories] Failed to stat database path: ${dbPath}`, error);
+    }
+    return [];
+  }
+
   if (!stat.isDirectory()) {
+    if (isDebug) {
+      console.warn(`[decodeCategories] Path is not a directory: ${dbPath}`);
+    }
     return [];
   }
 
@@ -1772,14 +1789,30 @@ export function decodeCategories(dbPath: string): Category[] {
   const MIN_CATEGORY_ID_LENGTH = 15; // Minimum length for valid Firestore document IDs
 
   // Get all .ldb files
-  const files = fs.readdirSync(dbPath);
+  let files;
+  try {
+    files = fs.readdirSync(dbPath);
+  } catch (error) {
+    if (isDebug) {
+      console.warn(`[decodeCategories] Failed to read directory: ${dbPath}`, error);
+    }
+    return [];
+  }
   const ldbFiles = files.filter((f) => f.endsWith('.ldb')).map((f) => path.join(dbPath, f));
 
   // Categories are in: /users/{user_id}/categories/{category_id}
   const categoryPathMarker = Buffer.from('/categories/');
 
   for (const filepath of ldbFiles) {
-    const data = fs.readFileSync(filepath);
+    let data;
+    try {
+      data = fs.readFileSync(filepath);
+    } catch (error) {
+      if (isDebug) {
+        console.warn(`[decodeCategories] Failed to read file: ${filepath}`, error);
+      }
+      continue;
+    }
 
     if (!data.includes(categoryPathMarker)) {
       continue;

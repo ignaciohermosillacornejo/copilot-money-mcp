@@ -117,6 +117,7 @@ export class CopilotDatabase {
   private _budgets: Budget[] | null = null;
   private _goals: Goal[] | null = null;
   private _userCategories: Category[] | null = null;
+  private _categoryNameMap: Map<string, string> | null = null;
 
   /**
    * Initialize database connection.
@@ -450,10 +451,16 @@ export class CopilotDatabase {
    * Build a map of category ID to category name from user-defined categories.
    *
    * This map can be used for efficient category name lookups.
+   * The map is cached after the first call.
    *
    * @returns Map from category_id to category name
    */
   getCategoryNameMap(): Map<string, string> {
+    // Return cached map if available
+    if (this._categoryNameMap !== null) {
+      return this._categoryNameMap;
+    }
+
     const userCategories = this.getUserCategories();
     const nameMap = new Map<string, string>();
 
@@ -463,6 +470,7 @@ export class CopilotDatabase {
       }
     }
 
+    this._categoryNameMap = nameMap;
     return nameMap;
   }
 
