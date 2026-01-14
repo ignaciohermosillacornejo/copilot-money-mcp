@@ -10,10 +10,11 @@ import { CopilotDatabase } from '../../src/core/database.js';
 import type { Transaction, Account } from '../../src/models/index.js';
 
 // Mock data
+// Standard accounting: negative = expenses, positive = income
 const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn1',
-    amount: 50.0,
+    amount: -50.0, // Expense
     date: '2025-01-15',
     name: 'Starbucks',
     category_id: 'food_dining',
@@ -21,7 +22,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn2',
-    amount: 15.5,
+    amount: -15.5, // Expense
     date: '2025-01-10',
     name: 'Starbucks Coffee',
     category_id: 'food_dining',
@@ -29,7 +30,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn3',
-    amount: 120.0,
+    amount: -120.0, // Expense
     date: '2025-01-08',
     name: 'Whole Foods',
     category_id: 'groceries',
@@ -37,7 +38,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn4',
-    amount: -1000.0, // Income
+    amount: 1000.0, // Income (positive = money in)
     date: '2025-01-05',
     name: 'Paycheck',
     category_id: 'income',
@@ -45,7 +46,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn5',
-    amount: 250.0,
+    amount: -250.0, // Expense
     date: '2024-12-20',
     name: 'Target',
     category_id: 'shopping',
@@ -134,6 +135,7 @@ describe('CopilotMoneyTools Integration', () => {
     });
 
     test('filters by amount range', () => {
+      // Amount filtering uses absolute values (magnitude)
       const result = tools.getTransactions({
         min_amount: 10.0,
         max_amount: 100.0,
@@ -141,7 +143,7 @@ describe('CopilotMoneyTools Integration', () => {
       });
 
       for (const txn of result.transactions) {
-        expect(txn.amount >= 10.0 && txn.amount <= 100.0).toBe(true);
+        expect(Math.abs(txn.amount) >= 10.0 && Math.abs(txn.amount) <= 100.0).toBe(true);
       }
     });
   });

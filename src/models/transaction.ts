@@ -9,8 +9,9 @@ import { z } from 'zod';
 /**
  * Transaction schema with validation.
  *
- * Positive amounts = expenses
- * Negative amounts = income/credits
+ * Amount sign convention (standard accounting):
+ * - Positive amounts = income/credits (money coming IN)
+ * - Negative amounts = expenses (money going OUT)
  */
 export const TransactionSchema = z
   .object({

@@ -240,12 +240,14 @@ export class CopilotDatabase {
       result = result.filter((txn) => txn.account_id === accountId);
     }
 
-    // Apply amount range filter
+    // Apply amount range filter (using absolute value for intuitive filtering)
+    // With standard accounting (negative = expense), users expect minAmount: 50
+    // to find transactions with magnitude >= 50 (e.g., -50, -100, not -25)
     if (minAmount !== undefined) {
-      result = result.filter((txn) => txn.amount >= minAmount);
+      result = result.filter((txn) => Math.abs(txn.amount) >= minAmount);
     }
     if (maxAmount !== undefined) {
-      result = result.filter((txn) => txn.amount <= maxAmount);
+      result = result.filter((txn) => Math.abs(txn.amount) <= maxAmount);
     }
 
     // Apply limit
