@@ -91,6 +91,21 @@ function copyDatabaseToTemp(srcPath: string): string {
 }
 
 /**
+ * Scheduled cleanup callback for temporary database copies.
+ * This is the callback that runs after the TTL expires.
+ *
+ * @param srcPath - The source database path
+ * @param scheduledTime - The time when the cleanup was scheduled
+ */
+function scheduledCleanupCallback(srcPath: string, scheduledTime: number): void {
+  const entry = tempDbCache.get(srcPath);
+  if (entry && entry.refCount <= 0 && Date.now() - scheduledTime >= TEMP_DB_CACHE_TTL) {
+    cleanupTempDatabase(entry.tempPath);
+    tempDbCache.delete(srcPath);
+  }
+}
+
+/**
  * Release a reference to a temporary database copy.
  * When refCount reaches 0, schedule cleanup after TTL.
  */
@@ -103,13 +118,8 @@ function releaseTempDatabase(srcPath: string): void {
 
   // Schedule cleanup if no more references
   if (cached.refCount <= 0) {
-    setTimeout(() => {
-      const entry = tempDbCache.get(srcPath);
-      if (entry && entry.refCount <= 0 && Date.now() - entry.lastAccess >= TEMP_DB_CACHE_TTL) {
-        cleanupTempDatabase(entry.tempPath);
-        tempDbCache.delete(srcPath);
-      }
-    }, TEMP_DB_CACHE_TTL);
+    const scheduledTime = cached.lastAccess;
+    setTimeout(() => scheduledCleanupCallback(srcPath, scheduledTime), TEMP_DB_CACHE_TTL);
   }
 }
 
@@ -133,6 +143,29 @@ export function cleanupAllTempDatabases(): void {
     cleanupTempDatabase(entry.tempPath);
   }
   tempDbCache.clear();
+}
+
+/**
+ * Run the scheduled cleanup for a specific database path.
+ * This function is exported for testing purposes to trigger the cleanup
+ * callback logic without waiting for the actual TTL timer.
+ *
+ * @internal
+ * @param srcPath - The source database path
+ * @param scheduledTime - The time when cleanup was scheduled (use Date.now() - TEMP_DB_CACHE_TTL for immediate cleanup)
+ */
+export function _runScheduledCleanup(srcPath: string, scheduledTime?: number): void {
+  // If no scheduledTime provided, use a time that ensures TTL check passes
+  const time = scheduledTime ?? Date.now() - TEMP_DB_CACHE_TTL;
+  scheduledCleanupCallback(srcPath, time);
+}
+
+/**
+ * Get the current temp database cache for testing purposes.
+ * @internal
+ */
+export function _getTempDbCache(): Map<string, TempDbCacheEntry> {
+  return tempDbCache;
 }
 
 /**
