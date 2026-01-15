@@ -212,11 +212,24 @@ function parseBinaryKey(keyBuffer: Buffer): { collection: string; documentId: st
 
   // Try simple string path format first (for test databases)
   // Format: remote_document/.../documents/{collection}/{doc_id}
+  // Or subcollection: remote_document/.../documents/{parent}/{parent_id}/{sub}/{doc_id}
+  const skipCollections = ['collection_parent', 'target', 'target_global', 'mutation_queue'];
+
+  // Try subcollection pattern first (4 segments after documents/)
+  const subPathMatch = keyStr.match(/documents\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)$/);
+  if (subPathMatch && subPathMatch[1] && subPathMatch[2] && subPathMatch[3] && subPathMatch[4]) {
+    const collection = `${subPathMatch[1]}/${subPathMatch[2]}/${subPathMatch[3]}`;
+    const documentId = subPathMatch[4];
+    if (!skipCollections.includes(subPathMatch[3])) {
+      return { collection, documentId };
+    }
+  }
+
+  // Try simple collection pattern (2 segments after documents/)
   const pathMatch = keyStr.match(/documents\/([^/]+)\/([^/]+)$/);
   if (pathMatch && pathMatch[1] && pathMatch[2]) {
     const collection = pathMatch[1];
     const documentId = pathMatch[2];
-    const skipCollections = ['collection_parent', 'target', 'target_global', 'mutation_queue'];
     if (!skipCollections.includes(collection)) {
       return { collection, documentId };
     }
@@ -280,7 +293,7 @@ function parseBinaryKey(keyBuffer: Buffer): { collection: string; documentId: st
   const collection = segments[segments.length - 2];
 
   // Skip certain collections that aren't actual document storage
-  const skipCollections = ['collection_parent', 'target', 'target_global', 'mutation_queue'];
+  // (skipCollections is declared at the top of this function)
   if (!documentId || !collection || skipCollections.includes(collection)) {
     return null;
   }
