@@ -519,35 +519,34 @@ function parseArrayValue(data: Buffer, start: number, end: number): FirestoreVal
 }
 
 /**
- * Parse a complete Firestore document (which is essentially a MapValue).
- *
- * In Firestore's wire format, a document's fields are stored as a MapValue.
+ * Parse the inner Document proto structure.
  * The document structure is:
  * - string name = 1 (document path)
- * - MapValue fields = 2 (the actual field data)
+ * - map<string, Value> fields = 2 (repeated map entries)
  * - Timestamp create_time = 3
  * - Timestamp update_time = 4
  *
- * @param data - The complete protobuf-encoded document
- * @returns A map of field names to their values
+ * Note: In Firestore's encoding, field 2 contains repeated map entries directly
+ * (not wrapped in a MapValue). Each entry has: string key = 1; Value value = 2;
  */
-export function parseFirestoreDocument(data: Buffer): Map<string, FirestoreValue> {
-  let pos = 0;
+function parseDocumentProto(data: Buffer, start: number, end: number): Map<string, FirestoreValue> {
+  let pos = start;
   const result = new Map<string, FirestoreValue>();
 
-  while (pos < data.length) {
+  while (pos < end) {
     const tagResult = decodeVarint(data, pos);
     pos += tagResult.bytesRead;
 
     const { fieldNumber, wireType } = parseTag(tagResult.value);
 
-    // Field 2 is the MapValue containing document fields
+    // Field 2 is a map entry (key-value pair) - repeated for each field
     if (fieldNumber === 2 && wireType === WireType.LengthDelimited) {
       const { value: length, bytesRead } = decodeVarint(data, pos);
       pos += bytesRead;
 
-      const fields = parseMapValue(data, pos, pos + length);
-      for (const [key, value] of fields) {
+      // Parse this map entry directly
+      const { key, value } = parseMapEntry(data, pos, pos + length);
+      if (key !== null) {
         result.set(key, value);
       }
 
@@ -560,6 +559,54 @@ export function parseFirestoreDocument(data: Buffer): Map<string, FirestoreValue
   }
 
   return result;
+}
+
+/**
+ * Parse a complete Firestore document from LevelDB storage.
+ *
+ * The Firestore SDK stores documents in a MaybeDocument wrapper:
+ * message MaybeDocument {
+ *   oneof document_type {
+ *     NoDocument no_document = 1;
+ *     Document document = 2;
+ *   }
+ *   ...
+ * }
+ *
+ * The Document proto contains:
+ * - string name = 1 (document path)
+ * - MapValue fields = 2 (the actual field data)
+ * - Timestamp create_time = 3
+ * - Timestamp update_time = 4
+ *
+ * @param data - The complete protobuf-encoded MaybeDocument
+ * @returns A map of field names to their values
+ */
+export function parseFirestoreDocument(data: Buffer): Map<string, FirestoreValue> {
+  let pos = 0;
+
+  while (pos < data.length) {
+    const tagResult = decodeVarint(data, pos);
+    pos += tagResult.bytesRead;
+
+    const { fieldNumber, wireType } = parseTag(tagResult.value);
+
+    // Field 2 in MaybeDocument is the Document
+    if (fieldNumber === 2 && wireType === WireType.LengthDelimited) {
+      const { value: length, bytesRead } = decodeVarint(data, pos);
+      pos += bytesRead;
+
+      // Parse the inner Document proto
+      return parseDocumentProto(data, pos, pos + length);
+    } else {
+      // Skip other fields (no_document, etc.)
+      const skipped = skipField(data, pos, wireType);
+      pos += skipped;
+    }
+  }
+
+  // No document found - return empty map
+  return new Map<string, FirestoreValue>();
 }
 
 /**
@@ -706,35 +753,47 @@ export function encodeFirestoreValue(value: unknown): Buffer {
 
 /**
  * Encode a complete Firestore document with fields.
+ *
+ * Creates a MaybeDocument wrapper containing a Document with map entries.
+ * The format matches what parseFirestoreDocument expects:
+ * MaybeDocument {
+ *   field 2: Document {
+ *     field 1: name (optional, we skip for tests)
+ *     field 2: map entries (repeated, each entry has key=1, value=2)
+ *   }
+ * }
  */
 export function encodeFirestoreDocument(fields: Record<string, unknown>): Buffer {
-  // Encode all fields as a MapValue
-  const entries: Buffer[] = [];
+  // Encode all fields as map entries (field 2 of Document, repeated)
+  const docFields: Buffer[] = [];
   for (const [k, v] of Object.entries(fields)) {
-    // Key: field 1 (string)
+    // Key: field 1 of map entry (string)
     const keyBytes = Buffer.from(k, 'utf-8');
-    const keyTag = Buffer.from([0x0a]);
+    const keyTag = Buffer.from([0x0a]); // Field 1, wire type 2
     const keyLength = encodeVarint(keyBytes.length);
     const keyPart = Buffer.concat([keyTag, keyLength, keyBytes]);
 
-    // Value: field 2 (Value message)
+    // Value: field 2 of map entry (Value message)
     const valueEncoded = encodeFirestoreValue(v);
-    const valueTag = Buffer.from([0x12]);
+    const valueTag = Buffer.from([0x12]); // Field 2, wire type 2
     const valueLength = encodeVarint(valueEncoded.length);
     const valuePart = Buffer.concat([valueTag, valueLength, valueEncoded]);
 
-    // Entry: field 1 of MapValue
+    // Map entry content (key + value)
     const entryContent = Buffer.concat([keyPart, valuePart]);
-    const entryTag = Buffer.from([0x0a]);
+
+    // Wrap as field 2 of Document (repeated map entries)
+    const entryTag = Buffer.from([0x12]); // Field 2, wire type 2
     const entryLength = encodeVarint(entryContent.length);
-    entries.push(Buffer.concat([entryTag, entryLength, entryContent]));
+    docFields.push(Buffer.concat([entryTag, entryLength, entryContent]));
   }
 
-  const mapContent = Buffer.concat(entries);
+  // Document content (all map entries)
+  const documentContent = Buffer.concat(docFields);
 
-  // Wrap in document structure: field 2 (fields)
-  const docTag = Buffer.from([0x12]); // Field 2, wire type 2
-  const docLength = encodeVarint(mapContent.length);
+  // Wrap in MaybeDocument: field 2 is Document
+  const maybeDocTag = Buffer.from([0x12]); // Field 2, wire type 2
+  const maybeDocLength = encodeVarint(documentContent.length);
 
-  return Buffer.concat([docTag, docLength, mapContent]);
+  return Buffer.concat([maybeDocTag, maybeDocLength, documentContent]);
 }
