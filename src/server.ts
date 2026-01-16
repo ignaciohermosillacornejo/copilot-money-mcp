@@ -102,7 +102,9 @@ export class CopilotMoneyServer {
           break;
 
         case 'get_accounts':
-          result = await this.tools.getAccounts(typedArgs?.account_type as string | undefined);
+          result = await this.tools.getAccounts(
+            typedArgs as Parameters<typeof this.tools.getAccounts>[0]
+          );
           break;
 
         case 'get_spending': {

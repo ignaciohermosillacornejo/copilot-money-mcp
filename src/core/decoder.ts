@@ -700,6 +700,12 @@ function processAccount(fields: Map<string, FirestoreValue>, docId: string): Acc
     accData.available_balance = Math.round(availableBalance * 100) / 100;
   }
 
+  // Extract user_deleted flag - accounts that were deleted or merged
+  const userDeleted = getBoolean(fields, 'user_deleted');
+  if (userDeleted !== undefined) {
+    accData.user_deleted = userDeleted;
+  }
+
   if (!accData.name && !accData.official_name) {
     return null;
   }

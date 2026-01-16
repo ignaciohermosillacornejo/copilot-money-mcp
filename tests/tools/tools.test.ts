@@ -62,6 +62,68 @@ const mockAccounts: Account[] = [
   },
 ];
 
+// Additional mock data for testing new filtering behavior
+const mockTransactionsWithFilters: Transaction[] = [
+  {
+    transaction_id: 'txn_normal',
+    amount: -50.0,
+    date: '2024-03-01',
+    name: 'Normal Transaction',
+    category_id: 'shopping',
+    account_id: 'acc1',
+  },
+  {
+    transaction_id: 'txn_transfer',
+    amount: -100.0,
+    date: '2024-03-01',
+    name: 'Transfer',
+    category_id: 'transfer_credit_card',
+    account_id: 'acc1',
+    internal_transfer: true,
+  },
+  {
+    transaction_id: 'txn_deleted',
+    amount: -30.0,
+    date: '2024-03-01',
+    name: 'Deleted Transaction',
+    category_id: 'shopping',
+    account_id: 'acc1',
+    plaid_deleted: true,
+  },
+  {
+    transaction_id: 'txn_excluded',
+    amount: -40.0,
+    date: '2024-03-01',
+    name: 'Excluded Transaction',
+    category_id: 'shopping',
+    account_id: 'acc1',
+    excluded: true,
+  },
+];
+
+const mockAccountsWithHidden: Account[] = [
+  {
+    account_id: 'acc_visible',
+    current_balance: 1000.0,
+    name: 'Visible Account',
+    account_type: 'checking',
+  },
+  {
+    account_id: 'acc_hidden',
+    current_balance: 5000.0,
+    name: 'Hidden Account',
+    account_type: 'investment',
+  },
+];
+
+// UserAccountCustomization for hidden accounts
+const mockUserAccounts = [
+  {
+    account_id: 'acc_hidden',
+    hidden: true,
+  },
+];
+
 describe('CopilotMoneyTools', () => {
   let db: CopilotDatabase;
   let tools: CopilotMoneyTools;
@@ -276,9 +338,89 @@ describe('CopilotMoneyTools', () => {
     });
 
     test('filters by account type', async () => {
-      const result = await tools.getAccounts('checking');
+      const result = await tools.getAccounts({ account_type: 'checking' });
       expect(result.count).toBe(1);
       expect(result.accounts[0].account_type).toBe('checking');
+    });
+  });
+
+  describe('getAccounts with hidden accounts', () => {
+    beforeEach(() => {
+      // Override with mock data that includes hidden accounts
+      (db as any)._accounts = [...mockAccountsWithHidden];
+      (db as any)._userAccounts = [...mockUserAccounts];
+    });
+
+    test('excludes hidden accounts by default', async () => {
+      const result = await tools.getAccounts();
+      expect(result.count).toBe(1);
+      expect(result.accounts[0].account_id).toBe('acc_visible');
+      expect(result.total_balance).toBe(1000.0);
+    });
+
+    test('includes hidden accounts when include_hidden is true', async () => {
+      const result = await tools.getAccounts({ include_hidden: true });
+      expect(result.count).toBe(2);
+      expect(result.total_balance).toBe(6000.0);
+    });
+  });
+
+  describe('getTransactions with filtering defaults', () => {
+    beforeEach(() => {
+      // Override with mock data that includes transfers, deleted, and excluded transactions
+      (db as any)._transactions = [...mockTransactionsWithFilters];
+    });
+
+    test('excludes transfers, deleted, and excluded transactions by default', async () => {
+      const result = await tools.getTransactions({
+        start_date: '2024-03-01',
+        end_date: '2024-03-31',
+      });
+      // Only normal transaction should be returned
+      expect(result.count).toBe(1);
+      expect(result.transactions[0].transaction_id).toBe('txn_normal');
+    });
+
+    test('includes transfers when exclude_transfers is false', async () => {
+      const result = await tools.getTransactions({
+        start_date: '2024-03-01',
+        end_date: '2024-03-31',
+        exclude_transfers: false,
+      });
+      // Normal + transfer
+      expect(result.count).toBe(2);
+    });
+
+    test('includes deleted transactions when exclude_deleted is false', async () => {
+      const result = await tools.getTransactions({
+        start_date: '2024-03-01',
+        end_date: '2024-03-31',
+        exclude_deleted: false,
+      });
+      // Normal + deleted
+      expect(result.count).toBe(2);
+    });
+
+    test('includes excluded transactions when exclude_excluded is false', async () => {
+      const result = await tools.getTransactions({
+        start_date: '2024-03-01',
+        end_date: '2024-03-31',
+        exclude_excluded: false,
+      });
+      // Normal + excluded
+      expect(result.count).toBe(2);
+    });
+
+    test('includes all transactions when all filters are disabled', async () => {
+      const result = await tools.getTransactions({
+        start_date: '2024-03-01',
+        end_date: '2024-03-31',
+        exclude_transfers: false,
+        exclude_deleted: false,
+        exclude_excluded: false,
+      });
+      // All 4 transactions
+      expect(result.count).toBe(4);
     });
   });
 
