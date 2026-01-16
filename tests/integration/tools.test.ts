@@ -314,7 +314,7 @@ describe('CopilotMoneyTools Integration', () => {
   describe('tool schemas', () => {
     test('returns correct number of tool schemas', async () => {
       const schemas = createToolSchemas();
-      expect(schemas.length).toBe(28);
+      expect(schemas.length).toBe(31);
     });
 
     test('all tools have readOnlyHint annotation', async () => {

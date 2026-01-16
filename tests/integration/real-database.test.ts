@@ -10,12 +10,15 @@
  * 3. Report statistics about the data found
  * 4. Catch field mapping issues that synthetic tests might miss
  *
+ * IMPORTANT: These tests are OPT-IN due to long load times on large databases.
+ * They will only run when the RUN_REAL_DB_TESTS environment variable is set.
+ *
  * IMPORTANT: You must quit the Copilot Money app before running these tests!
  * LevelDB does not allow concurrent access from multiple processes.
  *
  * To run these tests locally:
  * 1. Quit the Copilot Money app (Cmd+Q)
- * 2. Run: bun test tests/integration/real-database.test.ts
+ * 2. Run: RUN_REAL_DB_TESTS=1 bun test tests/integration/real-database.test.ts
  * 3. Restart Copilot Money when done
  */
 
@@ -115,9 +118,12 @@ function findRealDatabase(): string | undefined {
   return undefined;
 }
 
+// Check if tests are enabled via environment variable
+const RUN_REAL_DB_TESTS = process.env.RUN_REAL_DB_TESTS === '1';
+
 // Find database once at module load time
 const REAL_DB_PATH = findRealDatabase();
-const HAS_REAL_DB = REAL_DB_PATH !== undefined;
+const HAS_REAL_DB = REAL_DB_PATH !== undefined && RUN_REAL_DB_TESTS;
 
 // Helper to format statistics
 interface DataStats {
@@ -287,7 +293,7 @@ describeWithRealDb('Real Copilot Money Database Integration', () => {
       }
       throw error;
     }
-  }, 120000); // 120 second timeout for database copy and loading
+  }, 300000); // 5 minute timeout for large database loading
 
   test('database is available and accessible', () => {
     expect(db.isAvailable()).toBe(true);
@@ -668,6 +674,7 @@ describeWithRealDb('Real Copilot Money Database Integration', () => {
 // Test that runs even without real database to report status
 describe('Real Database Availability', () => {
   test('reports whether real database was found', () => {
+    const dbPath = findRealDatabase();
     if (HAS_REAL_DB) {
       console.log(`\n✅ Real Copilot Money database found at:`);
       console.log(`   ${REAL_DB_PATH}`);
@@ -676,6 +683,18 @@ describe('Real Database Availability', () => {
       console.log('   LevelDB does not allow concurrent access from multiple processes.');
       console.log('');
       console.log('   Running full integration test suite...\n');
+    } else if (dbPath && !RUN_REAL_DB_TESTS) {
+      console.log(`\n📂 Real Copilot Money database found at:`);
+      console.log(`   ${dbPath}`);
+      console.log('');
+      console.log('⏭️  Real database tests are SKIPPED by default (opt-in).');
+      console.log('   Large databases can take several minutes to load.\n');
+      console.log('   To run these tests:');
+      console.log('   1. Quit the Copilot Money app (Cmd+Q)');
+      console.log(
+        '   2. Run: RUN_REAL_DB_TESTS=1 bun test tests/integration/real-database.test.ts'
+      );
+      console.log('   3. Restart Copilot Money when done\n');
     } else {
       console.log('\n⚠️  No real Copilot Money database found.');
       console.log('   Integration tests will be skipped.');
@@ -684,7 +703,9 @@ describe('Real Database Availability', () => {
       console.log('   1. Install Copilot Money on macOS');
       console.log('   2. Sign in and sync your data');
       console.log('   3. Quit the Copilot Money app (Cmd+Q)');
-      console.log('   4. Run: bun test tests/integration/real-database.test.ts\n');
+      console.log(
+        '   4. Run: RUN_REAL_DB_TESTS=1 bun test tests/integration/real-database.test.ts\n'
+      );
     }
     expect(true).toBe(true); // Always passes
   });
