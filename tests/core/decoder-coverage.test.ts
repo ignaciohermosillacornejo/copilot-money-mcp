@@ -9,6 +9,8 @@ import {
   decodeUserAccounts,
   decodeItems,
   decodeInvestmentSplits,
+  decodeAllCollections,
+  decodeGoalHistory,
 } from '../../src/core/decoder.js';
 import { createTestDatabase, cleanupAllTempDatabases } from '../../src/core/leveldb-reader.js';
 import type { FirestoreValue } from '../../src/core/protobuf-parser.js';
@@ -477,6 +479,312 @@ describe('decoder coverage', () => {
 
       expect(splits.length).toBe(1);
       expect(splits[0]?.split_date).toBe('2024-01-20');
+    });
+  });
+
+  describe('decodeGoalHistory', () => {
+    test('decodes goal history from database', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'goal-history-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'financial_goals/goal1/financial_goal_history',
+          id: '2024-01',
+          fields: {
+            goal_id: 'goal1',
+            current_amount: 5000,
+            target_amount: 10000,
+            user_id: 'user1',
+          },
+        },
+      ]);
+
+      const histories = await decodeGoalHistory(dbPath);
+
+      expect(histories.length).toBe(1);
+      expect(histories[0]?.goal_id).toBe('goal1');
+      expect(histories[0]?.month).toBe('2024-01');
+      expect(histories[0]?.current_amount).toBe(5000);
+    });
+
+    test('filters goal history by goalId', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'goal-history-filter-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'financial_goals/goal1/financial_goal_history',
+          id: '2024-01',
+          fields: {
+            goal_id: 'goal1',
+            current_amount: 5000,
+          },
+        },
+        {
+          collection: 'financial_goals/goal2/financial_goal_history',
+          id: '2024-01',
+          fields: {
+            goal_id: 'goal2',
+            current_amount: 3000,
+          },
+        },
+      ]);
+
+      const histories = await decodeGoalHistory(dbPath, 'goal1');
+
+      expect(histories.length).toBe(1);
+      expect(histories[0]?.goal_id).toBe('goal1');
+    });
+
+    test('deduplicates and sorts goal history', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'goal-history-sort-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'financial_goals/goal1/financial_goal_history',
+          id: '2024-01',
+          fields: {
+            goal_id: 'goal1',
+            current_amount: 5000,
+          },
+        },
+        {
+          collection: 'financial_goals/goal1/financial_goal_history',
+          id: '2024-02',
+          fields: {
+            goal_id: 'goal1',
+            current_amount: 6000,
+          },
+        },
+        {
+          collection: 'financial_goals/goal2/financial_goal_history',
+          id: '2024-01',
+          fields: {
+            goal_id: 'goal2',
+            current_amount: 3000,
+          },
+        },
+      ]);
+
+      const histories = await decodeGoalHistory(dbPath);
+
+      // Should be sorted by goal_id, then month (newest first)
+      expect(histories.length).toBe(3);
+      expect(histories[0]?.goal_id).toBe('goal1');
+      expect(histories[0]?.month).toBe('2024-02');
+      expect(histories[1]?.goal_id).toBe('goal1');
+      expect(histories[1]?.month).toBe('2024-01');
+      expect(histories[2]?.goal_id).toBe('goal2');
+    });
+  });
+
+  describe('decodeAllCollections', () => {
+    test('decodes all collection types in a single pass', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'all-collections-db');
+      await createTestDatabase(dbPath, [
+        // Transaction
+        {
+          collection: 'transactions',
+          id: 'txn1',
+          fields: {
+            transaction_id: 'txn1',
+            amount: -50.0,
+            date: '2024-01-15',
+            name: 'Coffee Shop',
+          },
+        },
+        // Account
+        {
+          collection: 'accounts',
+          id: 'acc1',
+          fields: {
+            account_id: 'acc1',
+            name: 'Checking',
+            current_balance: 1000.0,
+            account_type: 'depository',
+          },
+        },
+        // Recurring
+        {
+          collection: 'recurring',
+          id: 'rec1',
+          fields: {
+            recurring_id: 'rec1',
+            name: 'Netflix',
+            amount: -15.99,
+            frequency: 'monthly',
+          },
+        },
+        // Budget
+        {
+          collection: 'budgets',
+          id: 'bud1',
+          fields: {
+            budget_id: 'bud1',
+            name: 'Food Budget',
+            amount: 500,
+          },
+        },
+        // Goal
+        {
+          collection: 'financial_goals',
+          id: 'goal1',
+          fields: {
+            goal_id: 'goal1',
+            name: 'Emergency Fund',
+          },
+        },
+        // Item
+        {
+          collection: 'items',
+          id: 'item1',
+          fields: {
+            item_id: 'item1',
+            institution_name: 'Chase',
+          },
+        },
+        // Category
+        {
+          collection: 'categories',
+          id: 'cat1',
+          fields: {
+            category_id: 'cat1',
+            name: 'Food & Drink',
+          },
+        },
+        // Investment price
+        {
+          collection: 'investment_prices',
+          id: 'price1',
+          fields: {
+            investment_id: 'inv1',
+            ticker_symbol: 'AAPL',
+            price: 150.0,
+            date: '2024-01-15',
+          },
+        },
+        // Investment split
+        {
+          collection: 'investment_splits',
+          id: 'split1',
+          fields: {
+            split_id: 'split1',
+            ticker_symbol: 'AAPL',
+            split_ratio: '4:1',
+          },
+        },
+        // Goal history
+        {
+          collection: 'financial_goals/goal1/financial_goal_history',
+          id: '2024-01',
+          fields: {
+            goal_id: 'goal1',
+            current_amount: 5000,
+            target_amount: 10000,
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      // Verify all collections were decoded
+      expect(result.transactions.length).toBe(1);
+      expect(result.transactions[0]?.name).toBe('Coffee Shop');
+
+      expect(result.accounts.length).toBe(1);
+      expect(result.accounts[0]?.name).toBe('Checking');
+
+      expect(result.recurring.length).toBe(1);
+      expect(result.recurring[0]?.name).toBe('Netflix');
+
+      expect(result.budgets.length).toBe(1);
+      expect(result.budgets[0]?.name).toBe('Food Budget');
+
+      expect(result.goals.length).toBe(1);
+      expect(result.goals[0]?.name).toBe('Emergency Fund');
+
+      expect(result.goalHistory.length).toBe(1);
+      expect(result.goalHistory[0]?.goal_id).toBe('goal1');
+
+      expect(result.items.length).toBe(1);
+      expect(result.items[0]?.institution_name).toBe('Chase');
+
+      expect(result.categories.length).toBe(1);
+      expect(result.categories[0]?.name).toBe('Food & Drink');
+
+      expect(result.investmentPrices.length).toBe(1);
+      expect(result.investmentPrices[0]?.ticker_symbol).toBe('AAPL');
+
+      expect(result.investmentSplits.length).toBe(1);
+      expect(result.investmentSplits[0]?.split_ratio).toBe('4:1');
+    });
+
+    test('deduplicates transactions by display name, amount, and date', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'all-collections-dedupe-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'transactions',
+          id: 'txn1',
+          fields: {
+            transaction_id: 'txn1',
+            amount: -50.0,
+            date: '2024-01-15',
+            name: 'Coffee Shop',
+          },
+        },
+        {
+          collection: 'transactions',
+          id: 'txn2',
+          fields: {
+            transaction_id: 'txn2',
+            amount: -50.0,
+            date: '2024-01-15',
+            name: 'Coffee Shop', // Same name/amount/date = duplicate
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      // Should be deduplicated to 1
+      expect(result.transactions.length).toBe(1);
+    });
+
+    test('handles empty database', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'all-collections-empty-db');
+      await createTestDatabase(dbPath, []);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.transactions).toEqual([]);
+      expect(result.accounts).toEqual([]);
+      expect(result.recurring).toEqual([]);
+      expect(result.budgets).toEqual([]);
+      expect(result.goals).toEqual([]);
+      expect(result.goalHistory).toEqual([]);
+      expect(result.investmentPrices).toEqual([]);
+      expect(result.investmentSplits).toEqual([]);
+      expect(result.items).toEqual([]);
+      expect(result.categories).toEqual([]);
+      expect(result.userAccounts).toEqual([]);
+    });
+
+    test('handles user accounts in subcollections', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'all-collections-user-accounts-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'users/user123/accounts',
+          id: 'acc1',
+          fields: {
+            account_id: 'acc1',
+            name: 'My Custom Account Name',
+            hidden: false,
+            order: 1,
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.userAccounts.length).toBe(1);
+      expect(result.userAccounts[0]?.name).toBe('My Custom Account Name');
+      expect(result.userAccounts[0]?.user_id).toBe('user123');
     });
   });
 });

@@ -130,99 +130,8 @@ export async function decodeTransactions(dbPath: string): Promise<Transaction[]>
   const transactions: Transaction[] = [];
 
   for await (const doc of iterateDocuments(dbPath, { collection: 'transactions' })) {
-    const fields = doc.fields;
-
-    // Extract required fields
-    const transactionId = getString(fields, 'transaction_id') ?? doc.documentId;
-    const amount = getNumber(fields, 'amount');
-    const date = getDateString(fields, 'date') ?? getDateString(fields, 'original_date');
-
-    if (amount === undefined || !date) {
-      continue;
-    }
-
-    // Skip zero amounts
-    if (amount === 0) {
-      continue;
-    }
-
-    // Build transaction object
-    const txnData: Record<string, unknown> = {
-      transaction_id: transactionId,
-      amount,
-      date,
-    };
-
-    // String fields
-    const stringFields = [
-      'name',
-      'original_name',
-      'original_clean_name',
-      'account_id',
-      'item_id',
-      'user_id',
-      'category_id',
-      'plaid_category_id',
-      'category_id_source',
-      'original_date',
-      'pending_transaction_id',
-      'iso_currency_code',
-      'transaction_type',
-      'plaid_transaction_type',
-      'payment_method',
-      'payment_processor',
-      'city',
-      'region',
-      'address',
-      'postal_code',
-      'country',
-      'reference_number',
-      'ppd_id',
-      'by_order_of',
-      'from_investment',
-    ];
-
-    for (const field of stringFields) {
-      const value = getString(fields, field);
-      if (value) txnData[field] = value;
-    }
-
-    // Boolean fields
-    const booleanFields = [
-      'pending',
-      'excluded',
-      'user_reviewed',
-      'plaid_deleted',
-      'is_amazon',
-      'account_dashboard_active',
-    ];
-
-    for (const field of booleanFields) {
-      const value = getBoolean(fields, field);
-      if (value !== undefined) txnData[field] = value;
-    }
-
-    // Numeric fields
-    const numericFields = ['original_amount', 'lat', 'lon'];
-
-    for (const field of numericFields) {
-      const value = getNumber(fields, field);
-      if (value !== undefined) txnData[field] = value;
-    }
-
-    // Derive internal_transfer from type field
-    const copilotType = getString(fields, 'type');
-    if (copilotType === 'internal_transfer') {
-      txnData.internal_transfer = true;
-    }
-
-    // Validate with Zod
-    try {
-      const txn = TransactionSchema.parse(txnData);
-      transactions.push(txn);
-    } catch {
-      // Skip invalid transactions
-    }
+    const txn = processTransaction(doc.fields, doc.documentId);
+    if (txn) transactions.push(txn);
   }
 
   // Deduplicate by (display_name, amount, date)
@@ -251,67 +160,8 @@ export async function decodeAccounts(dbPath: string): Promise<Account[]> {
   const accounts: Account[] = [];
 
   for await (const doc of iterateDocuments(dbPath, { collection: 'accounts' })) {
-    const fields = doc.fields;
-
-    // Extract required fields
-    const accountId = getString(fields, 'account_id') ?? getString(fields, 'id') ?? doc.documentId;
-    const balance =
-      getNumber(fields, 'current_balance') ?? getNumber(fields, 'original_current_balance');
-
-    if (balance === undefined) {
-      continue;
-    }
-
-    // Build account object
-    const accData: Record<string, unknown> = {
-      account_id: accountId,
-      current_balance: Math.round(balance * 100) / 100,
-    };
-
-    // String fields
-    const stringFields = [
-      'name',
-      'official_name',
-      'mask',
-      'institution_name',
-      'item_id',
-      'iso_currency_code',
-      'institution_id',
-    ];
-
-    for (const field of stringFields) {
-      const value = getString(fields, field);
-      if (value) accData[field] = value;
-    }
-
-    // Account type fields (may be stored as 'type' or 'original_type')
-    const accountType =
-      getString(fields, 'type') ??
-      getString(fields, 'account_type') ??
-      getString(fields, 'original_type');
-    if (accountType) accData.account_type = accountType;
-
-    const subtype = getString(fields, 'subtype') ?? getString(fields, 'original_subtype');
-    if (subtype) accData.subtype = subtype;
-
-    // Available balance
-    const availableBalance = getNumber(fields, 'available_balance');
-    if (availableBalance !== undefined) {
-      accData.available_balance = Math.round(availableBalance * 100) / 100;
-    }
-
-    // Need at least a name
-    if (!accData.name && !accData.official_name) {
-      continue;
-    }
-
-    // Validate with Zod
-    try {
-      const account = AccountSchema.parse(accData);
-      accounts.push(account);
-    } catch {
-      // Skip invalid accounts
-    }
+    const acc = processAccount(doc.fields, doc.documentId);
+    if (acc) accounts.push(acc);
   }
 
   // Deduplicate by (name, mask)
@@ -337,47 +187,8 @@ export async function decodeRecurring(dbPath: string): Promise<Recurring[]> {
   const recurring: Recurring[] = [];
 
   for await (const doc of iterateDocuments(dbPath, { collection: 'recurring' })) {
-    const fields = doc.fields;
-
-    const recurringId = getString(fields, 'recurring_id') ?? doc.documentId;
-
-    // Build recurring object
-    const recData: Record<string, unknown> = {
-      recurring_id: recurringId,
-    };
-
-    // String fields
-    const stringFields = [
-      'name',
-      'merchant_name',
-      'frequency',
-      'next_date',
-      'last_date',
-      'category_id',
-      'account_id',
-      'iso_currency_code',
-    ];
-
-    for (const field of stringFields) {
-      const value = getString(fields, field);
-      if (value) recData[field] = value;
-    }
-
-    // Amount
-    const amount = getNumber(fields, 'amount');
-    if (amount !== undefined) recData.amount = amount;
-
-    // is_active
-    const isActive = getBoolean(fields, 'is_active');
-    if (isActive !== undefined) recData.is_active = isActive;
-
-    // Validate with Zod
-    try {
-      const rec = RecurringSchema.parse(recData);
-      recurring.push(rec);
-    } catch {
-      // Skip invalid records
-    }
+    const rec = processRecurring(doc.fields, doc.documentId);
+    if (rec) recurring.push(rec);
   }
 
   // Deduplicate by recurring_id
@@ -401,45 +212,8 @@ export async function decodeBudgets(dbPath: string): Promise<Budget[]> {
   const budgets: Budget[] = [];
 
   for await (const doc of iterateDocuments(dbPath, { collection: 'budgets' })) {
-    const fields = doc.fields;
-
-    const budgetId = getString(fields, 'budget_id') ?? doc.documentId;
-
-    // Build budget object
-    const budgetData: Record<string, unknown> = {
-      budget_id: budgetId,
-    };
-
-    // String fields
-    const stringFields = [
-      'name',
-      'period',
-      'category_id',
-      'start_date',
-      'end_date',
-      'iso_currency_code',
-    ];
-
-    for (const field of stringFields) {
-      const value = getString(fields, field);
-      if (value) budgetData[field] = value;
-    }
-
-    // Amount
-    const amount = getNumber(fields, 'amount');
-    if (amount !== undefined) budgetData.amount = amount;
-
-    // is_active
-    const isActive = getBoolean(fields, 'is_active');
-    if (isActive !== undefined) budgetData.is_active = isActive;
-
-    // Validate with Zod
-    try {
-      const budget = BudgetSchema.parse(budgetData);
-      budgets.push(budget);
-    } catch {
-      // Skip invalid records
-    }
+    const budget = processBudget(doc.fields, doc.documentId);
+    if (budget) budgets.push(budget);
   }
 
   // Deduplicate by budget_id
@@ -463,66 +237,8 @@ export async function decodeGoals(dbPath: string): Promise<Goal[]> {
   const goals: Goal[] = [];
 
   for await (const doc of iterateDocuments(dbPath, { collection: 'financial_goals' })) {
-    const fields = doc.fields;
-
-    const goalId = getString(fields, 'goal_id') ?? doc.documentId;
-
-    // Build goal object
-    const goalData: Record<string, unknown> = {
-      goal_id: goalId,
-    };
-
-    // Top-level string fields
-    const stringFields = ['name', 'recommendation_id', 'emoji', 'created_date', 'user_id'];
-
-    for (const field of stringFields) {
-      const value = getString(fields, field);
-      if (value) goalData[field] = value;
-    }
-
-    // created_with_allocations
-    const createdWithAllocations = getBoolean(fields, 'created_with_allocations');
-    if (createdWithAllocations !== undefined) {
-      goalData.created_with_allocations = createdWithAllocations;
-    }
-
-    // Extract nested savings object
-    const savingsMap = getMap(fields, 'savings');
-    if (savingsMap) {
-      const savings: Record<string, unknown> = {};
-
-      const savingsStringFields = ['type', 'status', 'tracking_type', 'start_date'];
-      for (const field of savingsStringFields) {
-        const value = getString(savingsMap, field);
-        if (value) savings[field] = value;
-      }
-
-      const targetAmount = getNumber(savingsMap, 'target_amount');
-      if (targetAmount !== undefined) savings.target_amount = targetAmount;
-
-      const monthlyContribution = getNumber(savingsMap, 'tracking_type_monthly_contribution');
-      if (monthlyContribution !== undefined) {
-        savings.tracking_type_monthly_contribution = monthlyContribution;
-      }
-
-      const savingsBoolFields = ['modified_start_date', 'inflates_budget', 'is_ongoing'];
-      for (const field of savingsBoolFields) {
-        const value = getBoolean(savingsMap, field);
-        if (value !== undefined) savings[field] = value;
-      }
-
-      if (Object.keys(savings).length > 0) {
-        goalData.savings = savings;
-      }
-    }
-
-    // Validate with Zod
-    try {
-      const goal = GoalSchema.parse(goalData);
-      goals.push(goal);
-    } catch {
-      // Skip invalid records
-    }
+    const goal = processGoal(doc.fields, doc.documentId);
+    if (goal) goals.push(goal);
   }
 
   // Deduplicate by goal_id
@@ -546,66 +262,14 @@ export async function decodeGoalHistory(dbPath: string, goalId?: string): Promis
   const histories: GoalHistory[] = [];
 
   for await (const doc of iterateDocuments(dbPath, { collection: 'financial_goal_history' })) {
-    const fields = doc.fields;
-
-    // Month is typically the document ID in YYYY-MM format
-    const month = doc.documentId;
-    if (!/^\d{4}-\d{2}$/.test(month)) {
-      continue;
+    // Filter by goalId if specified (before processing)
+    if (goalId) {
+      const extractedGoalId = doc.collection.split('/')[1] ?? getString(doc.fields, 'goal_id');
+      if (extractedGoalId !== goalId) continue;
     }
 
-    // Extract goal_id from the collection path
-    const extractedGoalId = doc.collection.split('/')[1] ?? getString(fields, 'goal_id');
-
-    // Filter by goalId if specified
-    if (goalId && extractedGoalId !== goalId) {
-      continue;
-    }
-
-    // Build history object
-    const historyData: Record<string, unknown> = {
-      month,
-      goal_id: extractedGoalId ?? 'unknown',
-    };
-
-    // String fields
-    const stringFields = ['user_id', 'last_updated', 'created_date'];
-    for (const field of stringFields) {
-      const value = getString(fields, field);
-      if (value) historyData[field] = value;
-    }
-
-    // Numeric fields
-    const currentAmount = getNumber(fields, 'current_amount');
-    if (currentAmount !== undefined) historyData.current_amount = currentAmount;
-
-    const targetAmount = getNumber(fields, 'target_amount');
-    if (targetAmount !== undefined) historyData.target_amount = targetAmount;
-
-    // Daily data (nested map)
-    const dailyDataMap = getMap(fields, 'daily_data');
-    if (dailyDataMap) {
-      const dailyData: Record<string, DailySnapshot> = {};
-      for (const [date, value] of dailyDataMap) {
-        if (date.startsWith(month) && value.type === 'map') {
-          const amount = getNumber(value.value, 'amount');
-          if (amount !== undefined) {
-            dailyData[date] = { amount, date };
-          }
-        }
-      }
-      if (Object.keys(dailyData).length > 0) {
-        historyData.daily_data = dailyData;
-      }
-    }
-
-    // Validate with Zod
-    try {
-      const history = GoalHistorySchema.parse(historyData);
-      histories.push(history);
-    } catch {
-      // Skip invalid records
-    }
+    const history = processGoalHistory(doc.fields, doc.documentId, doc.collection);
+    if (history) histories.push(history);
   }
 
   // Deduplicate by goal_id + month
@@ -647,70 +311,29 @@ export async function decodeInvestmentPrices(
   const prices: InvestmentPrice[] = [];
 
   for await (const doc of iterateDocuments(dbPath, { collection: 'investment_prices' })) {
-    const fields = doc.fields;
-
-    const investmentId = getString(fields, 'investment_id') ?? doc.documentId;
-
-    // Filter by ticker if specified
-    const ticker = getString(fields, 'ticker_symbol');
-    if (tickerSymbol && ticker !== tickerSymbol) {
-      continue;
+    // Pre-filter by ticker
+    if (tickerSymbol) {
+      const ticker = getString(doc.fields, 'ticker_symbol');
+      if (ticker !== tickerSymbol) continue;
     }
 
-    // Determine price type
-    const isDailyData = doc.key.includes('/daily/');
-    const isHfData = doc.key.includes('/hf/');
+    // Pre-filter by price type
+    if (priceType === 'daily' && !doc.key.includes('/daily/')) continue;
+    if (priceType === 'hf' && !doc.key.includes('/hf/')) continue;
 
-    if (priceType === 'daily' && !isDailyData) continue;
-    if (priceType === 'hf' && !isHfData) continue;
-
-    // Get date/month
-    const date = getString(fields, 'date');
-    const month = getString(fields, 'month');
-    const recordDate = date ?? month;
-
-    // Apply date filters
-    if (recordDate) {
-      if (startDate && recordDate < startDate) continue;
-      if (endDate && recordDate > endDate) continue;
+    // Pre-filter by date range
+    if (startDate || endDate) {
+      const date = getString(doc.fields, 'date');
+      const month = getString(doc.fields, 'month');
+      const recordDate = date ?? month;
+      if (recordDate) {
+        if (startDate && recordDate < startDate) continue;
+        if (endDate && recordDate > endDate) continue;
+      }
     }
 
-    // Build price object
-    const priceData: Record<string, unknown> = {
-      investment_id: investmentId,
-      price_type: isDailyData ? 'daily' : 'hf',
-    };
-
-    if (ticker) priceData.ticker_symbol = ticker;
-    if (date) priceData.date = date;
-    if (month) priceData.month = month;
-
-    // Price fields
-    const priceFields = ['price', 'close_price', 'current_price', 'institution_price'];
-    for (const field of priceFields) {
-      const value = getNumber(fields, field);
-      if (value !== undefined) priceData[field] = value;
-    }
-
-    // OHLCV fields
-    const ohlcvFields = ['high', 'low', 'open', 'volume'];
-    for (const field of ohlcvFields) {
-      const value = getNumber(fields, field);
-      if (value !== undefined) priceData[field] = value;
-    }
-
-    // String metadata
-    const metaFields = ['currency', 'source', 'close_price_as_of'];
-    for (const field of metaFields) {
-      const value = getString(fields, field);
-      if (value) priceData[field] = value;
-    }
-
-    // Validate with Zod
-    const validated = InvestmentPriceSchema.safeParse(priceData);
-    if (validated.success) {
-      prices.push(validated.data);
-    }
+    const price = processInvestmentPrice(doc.fields, doc.documentId, doc.key);
+    if (price) prices.push(price);
   }
 
   // Deduplicate by investment_id + date/month
@@ -753,60 +376,23 @@ export async function decodeInvestmentSplits(
   const splits: InvestmentSplit[] = [];
 
   for await (const doc of iterateDocuments(dbPath, { collection: 'investment_splits' })) {
-    const fields = doc.fields;
-
-    const splitId = getString(fields, 'split_id') ?? doc.documentId;
-
-    // Filter by ticker if specified
-    const ticker = getString(fields, 'ticker_symbol');
-    if (tickerSymbol && ticker !== tickerSymbol) {
-      continue;
+    // Pre-filter by ticker
+    if (tickerSymbol) {
+      const ticker = getString(doc.fields, 'ticker_symbol');
+      if (ticker !== tickerSymbol) continue;
     }
 
-    // Get split date
-    const splitDate = getString(fields, 'split_date');
-
-    // Apply date filters
-    if (splitDate) {
-      if (startDate && splitDate < startDate) continue;
-      if (endDate && splitDate > endDate) continue;
+    // Pre-filter by date range
+    if (startDate || endDate) {
+      const splitDate = getString(doc.fields, 'split_date');
+      if (splitDate) {
+        if (startDate && splitDate < startDate) continue;
+        if (endDate && splitDate > endDate) continue;
+      }
     }
 
-    // Build split object
-    const splitData: Record<string, unknown> = {
-      split_id: splitId,
-    };
-
-    // String fields
-    const stringFields = [
-      'ticker_symbol',
-      'investment_id',
-      'split_date',
-      'split_ratio',
-      'announcement_date',
-      'record_date',
-      'ex_date',
-      'description',
-      'source',
-    ];
-
-    for (const field of stringFields) {
-      const value = getString(fields, field);
-      if (value) splitData[field] = value;
-    }
-
-    // Numeric fields
-    const numericFields = ['from_factor', 'to_factor', 'multiplier'];
-    for (const field of numericFields) {
-      const value = getNumber(fields, field);
-      if (value !== undefined) splitData[field] = value;
-    }
-
-    // Validate with Zod
-    const validated = InvestmentSplitSchema.safeParse(splitData);
-    if (validated.success) {
-      splits.push(validated.data);
-    }
+    const split = processInvestmentSplit(doc.fields, doc.documentId);
+    if (split) splits.push(split);
   }
 
   // Deduplicate by split_id
@@ -850,57 +436,15 @@ export async function decodeItems(
   const items: Item[] = [];
 
   for await (const doc of iterateDocuments(dbPath, { collection: 'items' })) {
-    const fields = doc.fields;
+    const item = processItem(doc.fields, doc.documentId);
+    if (!item) continue;
 
-    const itemId = getString(fields, 'item_id') ?? doc.documentId;
+    // Apply filters after processing
+    if (connectionStatus && item.connection_status !== connectionStatus) continue;
+    if (institutionId && item.institution_id !== institutionId) continue;
+    if (needsUpdate !== undefined && item.needs_update !== needsUpdate) continue;
 
-    // Build item object
-    const itemData: Record<string, unknown> = {
-      item_id: itemId,
-    };
-
-    // String fields
-    const stringFields = [
-      'user_id',
-      'institution_id',
-      'institution_name',
-      'connection_status',
-      'last_successful_update',
-      'last_failed_update',
-      'consent_expiration_time',
-      'error_code',
-      'error_message',
-      'error_type',
-      'created_at',
-      'updated_at',
-      'webhook',
-    ];
-
-    for (const field of stringFields) {
-      const value = getString(fields, field);
-      if (value) itemData[field] = value;
-    }
-
-    // Boolean fields
-    const needsUpdateValue = getBoolean(fields, 'needs_update');
-    if (needsUpdateValue !== undefined) itemData.needs_update = needsUpdateValue;
-
-    // Apply filters
-    if (connectionStatus && itemData.connection_status !== connectionStatus) {
-      continue;
-    }
-    if (institutionId && itemData.institution_id !== institutionId) {
-      continue;
-    }
-    if (needsUpdate !== undefined && itemData.needs_update !== needsUpdate) {
-      continue;
-    }
-
-    // Validate with Zod
-    const validated = ItemSchema.safeParse(itemData);
-    if (validated.success) {
-      items.push(validated.data);
-    }
+    items.push(item);
   }
 
   // Deduplicate by item_id
@@ -934,44 +478,8 @@ export async function decodeCategories(dbPath: string): Promise<Category[]> {
   const categories: Category[] = [];
 
   for await (const doc of iterateDocuments(dbPath, { collection: 'categories' })) {
-    const fields = doc.fields;
-
-    const categoryId = getString(fields, 'category_id') ?? doc.documentId;
-
-    // Get name - skip if no name
-    const name = getString(fields, 'name');
-    if (!name) continue;
-
-    // Build category object
-    const categoryData: Record<string, unknown> = {
-      category_id: categoryId,
-      name,
-    };
-
-    // String fields
-    const stringFields = ['emoji', 'color', 'bg_color', 'parent_category_id', 'user_id'];
-
-    for (const field of stringFields) {
-      const value = getString(fields, field);
-      if (value) categoryData[field] = value;
-    }
-
-    // Numeric fields
-    const order = getNumber(fields, 'order');
-    if (order !== undefined) categoryData.order = order;
-
-    // Boolean fields
-    const booleanFields = ['excluded', 'is_other', 'auto_budget_lock', 'auto_delete_lock'];
-    for (const field of booleanFields) {
-      const value = getBoolean(fields, field);
-      if (value !== undefined) categoryData[field] = value;
-    }
-
-    // Validate with Zod
-    const validated = CategorySchema.safeParse(categoryData);
-    if (validated.success) {
-      categories.push(validated.data);
-    }
+    const category = processCategory(doc.fields, doc.documentId);
+    if (category) categories.push(category);
   }
 
   // Deduplicate by category_id
@@ -1024,35 +532,8 @@ export async function decodeUserAccounts(dbPath: string): Promise<UserAccountCus
       continue;
     }
 
-    const fields = doc.fields;
-
-    const accountId = getString(fields, 'account_id') ?? doc.documentId;
-
-    // Get name - skip if no name
-    const name = getString(fields, 'name');
-    if (!name) continue;
-
-    // Build user account object
-    const userAccountData: UserAccountCustomization = {
-      account_id: accountId,
-      name,
-    };
-
-    // Extract user_id from collection path
-    const userIdMatch = doc.collection.match(/users\/([^/]+)\/accounts/);
-    if (userIdMatch) {
-      userAccountData.user_id = userIdMatch[1];
-    }
-
-    // Boolean fields
-    const hidden = getBoolean(fields, 'hidden');
-    if (hidden !== undefined) userAccountData.hidden = hidden;
-
-    // Numeric fields
-    const order = getNumber(fields, 'order');
-    if (order !== undefined) userAccountData.order = order;
-
-    userAccounts.push(userAccountData);
+    const userAccount = processUserAccount(doc.fields, doc.documentId, doc.collection);
+    if (userAccount) userAccounts.push(userAccount);
   }
 
   // Deduplicate by account_id
