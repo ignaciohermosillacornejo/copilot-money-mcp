@@ -209,10 +209,14 @@ describe('CopilotMoneyTools Integration', () => {
     });
 
     test('filters by account type', async () => {
-      const result = await tools.getAccounts('checking');
+      const result = await tools.getAccounts({ account_type: 'checking' });
 
       for (const acc of result.accounts) {
-        expect(acc.account_type && acc.account_type.toLowerCase().includes('checking')).toBe(true);
+        // Account may have account_type='depository' with subtype='checking', or account_type='checking'
+        const matchesAccountType =
+          acc.account_type?.toLowerCase().includes('checking') ||
+          acc.subtype?.toLowerCase().includes('checking');
+        expect(matchesAccountType).toBe(true);
       }
     });
   });

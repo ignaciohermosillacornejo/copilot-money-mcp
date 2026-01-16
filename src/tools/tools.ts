@@ -377,6 +377,8 @@ export class CopilotMoneyTools {
     limit?: number;
     offset?: number;
     exclude_transfers?: boolean;
+    exclude_deleted?: boolean;
+    exclude_excluded?: boolean;
     pending?: boolean;
     region?: string;
     country?: string;
@@ -409,7 +411,9 @@ export class CopilotMoneyTools {
       account_id,
       min_amount,
       max_amount,
-      exclude_transfers = false,
+      exclude_transfers = true,
+      exclude_deleted = true,
+      exclude_excluded = true,
       pending,
       region,
       country,
@@ -526,9 +530,21 @@ export class CopilotMoneyTools {
       transactions = this._filterByLocation(transactions, { city, lat, lon, radius_km });
     }
 
-    // Filter out transfers if requested
+    // Filter out transfers if requested (check both category and internal_transfer flag)
     if (exclude_transfers) {
-      transactions = transactions.filter((txn) => !isTransferCategory(txn.category_id));
+      transactions = transactions.filter(
+        (txn) => !isTransferCategory(txn.category_id) && !txn.internal_transfer
+      );
+    }
+
+    // Filter out deleted transactions (Plaid marks these for removal)
+    if (exclude_deleted) {
+      transactions = transactions.filter((txn) => !txn.plaid_deleted);
+    }
+
+    // Filter out user-excluded transactions
+    if (exclude_excluded) {
+      transactions = transactions.filter((txn) => !txn.excluded);
     }
 
     // Filter by pending status if specified
@@ -2123,15 +2139,33 @@ export class CopilotMoneyTools {
   /**
    * Get all accounts with balances.
    *
-   * @param accountType - Optional filter by account type
+   * @param options - Filter options
    * @returns Object with account count, total balance, and list of accounts
    */
-  async getAccounts(accountType?: string): Promise<{
+  async getAccounts(
+    options: {
+      account_type?: string;
+      include_hidden?: boolean;
+    } = {}
+  ): Promise<{
     count: number;
     total_balance: number;
     accounts: Account[];
   }> {
-    const accounts = await this.db.getAccounts(accountType);
+    const { account_type, include_hidden = false } = options;
+
+    let accounts = await this.db.getAccounts(account_type);
+
+    // Filter hidden/deleted accounts if needed (same pattern as getNetWorth)
+    if (!include_hidden) {
+      // Filter out accounts marked as user_deleted (merged or removed accounts)
+      accounts = accounts.filter((acc) => acc.user_deleted !== true);
+
+      // Also filter by hidden flag from user account customizations
+      const userAccounts = await this.db.getUserAccounts();
+      const hiddenIds = new Set(userAccounts.filter((ua) => ua.hidden).map((ua) => ua.account_id));
+      accounts = accounts.filter((acc) => !hiddenIds.has(acc.account_id));
+    }
 
     // Calculate total balance
     const totalBalance = accounts.reduce((sum, acc) => sum + acc.current_balance, 0);
@@ -10376,8 +10410,12 @@ export class CopilotMoneyTools {
     // Get accounts with optional type filter
     let accounts = await this.db.getAccounts(account_type);
 
-    // Filter hidden accounts if needed
+    // Filter hidden/deleted accounts if needed
     if (!include_hidden) {
+      // Filter out accounts marked as user_deleted (merged or removed accounts)
+      accounts = accounts.filter((acc) => acc.user_deleted !== true);
+
+      // Also filter by hidden flag from user account customizations
       const userAccounts = await this.db.getUserAccounts();
       const hiddenIds = new Set(userAccounts.filter((ua) => ua.hidden).map((ua) => ua.account_id));
       accounts = accounts.filter((acc) => !hiddenIds.has(acc.account_id));
@@ -10913,8 +10951,18 @@ export function createToolSchemas(): ToolSchema[] {
           exclude_transfers: {
             type: 'boolean',
             description:
-              'Exclude transfers between accounts and credit card payments (default: false)',
-            default: false,
+              'Exclude transfers between accounts and credit card payments (default: true)',
+            default: true,
+          },
+          exclude_deleted: {
+            type: 'boolean',
+            description: 'Exclude deleted transactions marked by Plaid (default: true)',
+            default: true,
+          },
+          exclude_excluded: {
+            type: 'boolean',
+            description: 'Exclude user-excluded transactions (default: true)',
+            default: true,
           },
           pending: {
             type: 'boolean',
@@ -10981,7 +11029,7 @@ export function createToolSchemas(): ToolSchema[] {
         'Get all accounts with balances. Optionally filter by account type ' +
         '(checking, savings, credit, investment). Now checks both account_type ' +
         'and subtype fields for better filtering (e.g., finds checking accounts ' +
-        "even when account_type is 'depository').",
+        "even when account_type is 'depository'). By default, hidden accounts are excluded.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -10989,6 +11037,11 @@ export function createToolSchemas(): ToolSchema[] {
             type: 'string',
             description:
               'Filter by account type (checking, savings, credit, investment, depository)',
+          },
+          include_hidden: {
+            type: 'boolean',
+            description: 'Include hidden accounts (default: false)',
+            default: false,
           },
         },
       },

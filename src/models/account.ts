@@ -34,6 +34,9 @@ export const AccountSchema = z
 
     // Metadata
     iso_currency_code: z.string().optional(),
+
+    // Visibility - accounts marked as deleted by user or merged into other accounts
+    user_deleted: z.boolean().optional(),
   })
   .strict();
 
