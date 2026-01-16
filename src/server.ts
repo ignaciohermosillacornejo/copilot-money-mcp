@@ -302,6 +302,24 @@ export class CopilotMoneyServer {
           );
           break;
 
+        case 'get_net_worth':
+          result = await this.tools.getNetWorth(
+            (typedArgs as Parameters<typeof this.tools.getNetWorth>[0]) || {}
+          );
+          break;
+
+        case 'get_savings_rate':
+          result = await this.tools.getSavingsRate(
+            (typedArgs as Parameters<typeof this.tools.getSavingsRate>[0]) || {}
+          );
+          break;
+
+        case 'get_cash_flow':
+          result = await this.tools.getCashFlow(
+            (typedArgs as Parameters<typeof this.tools.getCashFlow>[0]) || {}
+          );
+          break;
+
         default:
           return {
             content: [

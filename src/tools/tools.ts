@@ -10327,6 +10327,496 @@ export class CopilotMoneyTools {
       },
     };
   }
+
+  // ============================================
+  // NET WORTH & CASH FLOW TOOLS
+  // ============================================
+
+  /**
+   * Calculate net worth from all accounts.
+   *
+   * @param options - Filter options
+   * @returns Object with assets, liabilities, net worth, and account breakdown
+   */
+  async getNetWorth(
+    options: {
+      account_type?: string;
+      include_hidden?: boolean;
+    } = {}
+  ): Promise<{
+    net_worth: number;
+    assets: number;
+    liabilities: number;
+    breakdown: {
+      asset_accounts: Array<{
+        account_id: string;
+        name: string;
+        account_type?: string;
+        balance: number;
+        institution_name?: string;
+      }>;
+      liability_accounts: Array<{
+        account_id: string;
+        name: string;
+        account_type?: string;
+        balance: number;
+        institution_name?: string;
+      }>;
+    };
+    summary: {
+      total_accounts: number;
+      asset_account_count: number;
+      liability_account_count: number;
+      largest_asset: { name: string; balance: number } | null;
+      largest_liability: { name: string; balance: number } | null;
+    };
+  }> {
+    const { account_type, include_hidden = false } = options;
+
+    // Get accounts with optional type filter
+    let accounts = await this.db.getAccounts(account_type);
+
+    // Filter hidden accounts if needed
+    if (!include_hidden) {
+      const userAccounts = await this.db.getUserAccounts();
+      const hiddenIds = new Set(userAccounts.filter((ua) => ua.hidden).map((ua) => ua.account_id));
+      accounts = accounts.filter((acc) => !hiddenIds.has(acc.account_id));
+    }
+
+    // Get user account names for display
+    const userAccountMap = await this.getUserAccountMap();
+
+    // Separate assets (positive balance) and liabilities (negative balance like credit cards)
+    const assetAccounts: Array<{
+      account_id: string;
+      name: string;
+      account_type?: string;
+      balance: number;
+      institution_name?: string;
+    }> = [];
+
+    const liabilityAccounts: Array<{
+      account_id: string;
+      name: string;
+      account_type?: string;
+      balance: number;
+      institution_name?: string;
+    }> = [];
+
+    let totalAssets = 0;
+    let totalLiabilities = 0;
+
+    for (const acc of accounts) {
+      const accountEntry = {
+        account_id: acc.account_id,
+        name:
+          userAccountMap.get(acc.account_id) || acc.name || acc.official_name || 'Unknown Account',
+        account_type: acc.account_type,
+        balance: roundAmount(acc.current_balance),
+        institution_name: acc.institution_name,
+      };
+
+      // Credit cards and loans typically have negative balances (money owed)
+      // But some accounts might have positive balance representing what you owe
+      // Use account type to help classify
+      const isLiabilityType = ['credit', 'loan', 'mortgage'].some(
+        (t) => acc.account_type?.toLowerCase().includes(t) || acc.subtype?.toLowerCase().includes(t)
+      );
+
+      if (isLiabilityType || acc.current_balance < 0) {
+        // Liabilities: store as positive number (amount owed)
+        accountEntry.balance = roundAmount(Math.abs(acc.current_balance));
+        liabilityAccounts.push(accountEntry);
+        totalLiabilities += Math.abs(acc.current_balance);
+      } else {
+        assetAccounts.push(accountEntry);
+        totalAssets += acc.current_balance;
+      }
+    }
+
+    // Sort by balance (highest first)
+    assetAccounts.sort((a, b) => b.balance - a.balance);
+    liabilityAccounts.sort((a, b) => b.balance - a.balance);
+
+    const netWorth = roundAmount(totalAssets - totalLiabilities);
+
+    return {
+      net_worth: netWorth,
+      assets: roundAmount(totalAssets),
+      liabilities: roundAmount(totalLiabilities),
+      breakdown: {
+        asset_accounts: assetAccounts,
+        liability_accounts: liabilityAccounts,
+      },
+      summary: {
+        total_accounts: accounts.length,
+        asset_account_count: assetAccounts.length,
+        liability_account_count: liabilityAccounts.length,
+        largest_asset: assetAccounts[0]
+          ? { name: assetAccounts[0].name, balance: assetAccounts[0].balance }
+          : null,
+        largest_liability: liabilityAccounts[0]
+          ? { name: liabilityAccounts[0].name, balance: liabilityAccounts[0].balance }
+          : null,
+      },
+    };
+  }
+
+  /**
+   * Calculate savings rate for a period.
+   *
+   * @param options - Filter options
+   * @returns Object with income, spending, savings, and rate
+   */
+  async getSavingsRate(
+    options: {
+      period?: string;
+      start_date?: string;
+      end_date?: string;
+      exclude_transfers?: boolean;
+    } = {}
+  ): Promise<{
+    period: {
+      start_date?: string;
+      end_date?: string;
+    };
+    income: number;
+    spending: number;
+    savings: number;
+    savings_rate: number | null;
+    interpretation: string;
+    breakdown: {
+      income_sources: Array<{
+        category_id: string;
+        category_name: string;
+        amount: number;
+      }>;
+      top_expenses: Array<{
+        category_id: string;
+        category_name: string;
+        amount: number;
+      }>;
+    };
+  }> {
+    const { period, exclude_transfers = true } = options;
+    let { start_date, end_date } = options;
+
+    // If period is specified, parse it to start/end dates
+    if (period) {
+      [start_date, end_date] = parsePeriod(period);
+    }
+
+    // Get all transactions for the period
+    const transactions = await this.db.getTransactions({
+      startDate: start_date,
+      endDate: end_date,
+      limit: MAX_QUERY_LIMIT,
+    });
+
+    // Calculate income and spending
+    let totalIncome = 0;
+    let totalSpending = 0;
+
+    const incomeByCategory = new Map<string, number>();
+    const expenseByCategory = new Map<string, number>();
+
+    for (const txn of transactions) {
+      // Skip transfers if requested
+      if (exclude_transfers && isTransferCategory(txn.category_id)) {
+        continue;
+      }
+
+      // Standard accounting: positive = income, negative = expense
+      if (txn.amount > 0) {
+        totalIncome += txn.amount;
+        const catId = getCategoryIdOrDefault(txn.category_id);
+        incomeByCategory.set(catId, (incomeByCategory.get(catId) || 0) + txn.amount);
+      } else {
+        totalSpending += Math.abs(txn.amount);
+        const catId = getCategoryIdOrDefault(txn.category_id);
+        expenseByCategory.set(catId, (expenseByCategory.get(catId) || 0) + Math.abs(txn.amount));
+      }
+    }
+
+    const savings = totalIncome - totalSpending;
+    const savingsRate = totalIncome > 0 ? roundAmount((savings / totalIncome) * 100) : null;
+
+    // Determine interpretation
+    let interpretation: string;
+    if (savingsRate === null) {
+      interpretation = 'No income recorded in this period';
+    } else if (savingsRate >= 50) {
+      interpretation = 'Excellent! Saving more than half of income';
+    } else if (savingsRate >= 30) {
+      interpretation = 'Great! Saving a significant portion of income';
+    } else if (savingsRate >= 20) {
+      interpretation = 'Good savings rate, meeting the recommended 20% target';
+    } else if (savingsRate >= 10) {
+      interpretation = 'Moderate savings rate, consider increasing if possible';
+    } else if (savingsRate >= 0) {
+      interpretation = 'Low savings rate, spending nearly all income';
+    } else {
+      interpretation = 'Negative savings rate - spending more than earning';
+    }
+
+    // Build income sources breakdown
+    const incomeSources: Array<{
+      category_id: string;
+      category_name: string;
+      amount: number;
+    }> = [];
+
+    for (const [catId, amount] of incomeByCategory) {
+      incomeSources.push({
+        category_id: catId,
+        category_name: await this.resolveCategoryName(catId),
+        amount: roundAmount(amount),
+      });
+    }
+    incomeSources.sort((a, b) => b.amount - a.amount);
+
+    // Build top expenses breakdown
+    const topExpenses: Array<{
+      category_id: string;
+      category_name: string;
+      amount: number;
+    }> = [];
+
+    for (const [catId, amount] of expenseByCategory) {
+      topExpenses.push({
+        category_id: catId,
+        category_name: await this.resolveCategoryName(catId),
+        amount: roundAmount(amount),
+      });
+    }
+    topExpenses.sort((a, b) => b.amount - a.amount);
+
+    return {
+      period: {
+        start_date,
+        end_date,
+      },
+      income: roundAmount(totalIncome),
+      spending: roundAmount(totalSpending),
+      savings: roundAmount(savings),
+      savings_rate: savingsRate,
+      interpretation,
+      breakdown: {
+        income_sources: incomeSources.slice(0, 10),
+        top_expenses: topExpenses.slice(0, 10),
+      },
+    };
+  }
+
+  /**
+   * Analyze cash flow showing money in vs money out.
+   *
+   * @param options - Filter options
+   * @returns Object with inflows, outflows, net flow, and breakdown
+   */
+  async getCashFlow(
+    options: {
+      period?: string;
+      start_date?: string;
+      end_date?: string;
+      exclude_transfers?: boolean;
+      top_n?: number;
+    } = {}
+  ): Promise<{
+    period: {
+      start_date?: string;
+      end_date?: string;
+    };
+    inflows: number;
+    outflows: number;
+    net_cash_flow: number;
+    transaction_count: {
+      inflow_count: number;
+      outflow_count: number;
+    };
+    by_category: {
+      inflows: Array<{
+        category_id: string;
+        category_name: string;
+        amount: number;
+        count: number;
+      }>;
+      outflows: Array<{
+        category_id: string;
+        category_name: string;
+        amount: number;
+        count: number;
+      }>;
+    };
+    largest_transactions: {
+      largest_inflows: Array<{
+        date: string;
+        amount: number;
+        name: string;
+        category_name: string;
+      }>;
+      largest_outflows: Array<{
+        date: string;
+        amount: number;
+        name: string;
+        category_name: string;
+      }>;
+    };
+    summary: {
+      daily_average_inflow: number;
+      daily_average_outflow: number;
+      flow_status: 'positive' | 'negative' | 'balanced';
+    };
+  }> {
+    const { period, exclude_transfers = true, top_n = 10 } = options;
+    let { start_date, end_date } = options;
+
+    // If period is specified, parse it to start/end dates
+    if (period) {
+      [start_date, end_date] = parsePeriod(period);
+    }
+
+    // Get all transactions for the period
+    const transactions = await this.db.getTransactions({
+      startDate: start_date,
+      endDate: end_date,
+      limit: MAX_QUERY_LIMIT,
+    });
+
+    // Separate inflows and outflows
+    const inflows: Transaction[] = [];
+    const outflows: Transaction[] = [];
+    let totalInflows = 0;
+    let totalOutflows = 0;
+
+    const inflowByCategory = new Map<string, { amount: number; count: number }>();
+    const outflowByCategory = new Map<string, { amount: number; count: number }>();
+
+    for (const txn of transactions) {
+      // Skip transfers if requested
+      if (exclude_transfers && isTransferCategory(txn.category_id)) {
+        continue;
+      }
+
+      const catId = getCategoryIdOrDefault(txn.category_id);
+
+      if (txn.amount > 0) {
+        inflows.push(txn);
+        totalInflows += txn.amount;
+        const existing = inflowByCategory.get(catId) || { amount: 0, count: 0 };
+        existing.amount += txn.amount;
+        existing.count++;
+        inflowByCategory.set(catId, existing);
+      } else {
+        outflows.push(txn);
+        totalOutflows += Math.abs(txn.amount);
+        const existing = outflowByCategory.get(catId) || { amount: 0, count: 0 };
+        existing.amount += Math.abs(txn.amount);
+        existing.count++;
+        outflowByCategory.set(catId, existing);
+      }
+    }
+
+    // Sort by amount for largest transactions
+    inflows.sort((a, b) => b.amount - a.amount);
+    outflows.sort((a, b) => a.amount - b.amount); // Most negative first
+
+    // Build category breakdowns
+    const inflowCategories: Array<{
+      category_id: string;
+      category_name: string;
+      amount: number;
+      count: number;
+    }> = [];
+
+    for (const [catId, data] of inflowByCategory) {
+      inflowCategories.push({
+        category_id: catId,
+        category_name: await this.resolveCategoryName(catId),
+        amount: roundAmount(data.amount),
+        count: data.count,
+      });
+    }
+    inflowCategories.sort((a, b) => b.amount - a.amount);
+
+    const outflowCategories: Array<{
+      category_id: string;
+      category_name: string;
+      amount: number;
+      count: number;
+    }> = [];
+
+    for (const [catId, data] of outflowByCategory) {
+      outflowCategories.push({
+        category_id: catId,
+        category_name: await this.resolveCategoryName(catId),
+        amount: roundAmount(data.amount),
+        count: data.count,
+      });
+    }
+    outflowCategories.sort((a, b) => b.amount - a.amount);
+
+    // Calculate daily averages
+    let dayCount = 1;
+    if (start_date && end_date) {
+      const startMs = new Date(start_date).getTime();
+      const endMs = new Date(end_date).getTime();
+      dayCount = Math.max(1, Math.ceil((endMs - startMs) / (1000 * 60 * 60 * 24)));
+    }
+
+    const dailyAvgInflow = roundAmount(totalInflows / dayCount);
+    const dailyAvgOutflow = roundAmount(totalOutflows / dayCount);
+
+    const netCashFlow = totalInflows - totalOutflows;
+    const flowStatus: 'positive' | 'negative' | 'balanced' =
+      netCashFlow > 100 ? 'positive' : netCashFlow < -100 ? 'negative' : 'balanced';
+
+    // Build largest transactions lists
+    const largestInflows = await Promise.all(
+      inflows.slice(0, top_n).map(async (txn) => ({
+        date: txn.date,
+        amount: roundAmount(txn.amount),
+        name: getTransactionDisplayName(txn),
+        category_name: await this.resolveCategoryName(txn.category_id),
+      }))
+    );
+
+    const largestOutflows = await Promise.all(
+      outflows.slice(0, top_n).map(async (txn) => ({
+        date: txn.date,
+        amount: roundAmount(Math.abs(txn.amount)),
+        name: getTransactionDisplayName(txn),
+        category_name: await this.resolveCategoryName(txn.category_id),
+      }))
+    );
+
+    return {
+      period: {
+        start_date,
+        end_date,
+      },
+      inflows: roundAmount(totalInflows),
+      outflows: roundAmount(totalOutflows),
+      net_cash_flow: roundAmount(netCashFlow),
+      transaction_count: {
+        inflow_count: inflows.length,
+        outflow_count: outflows.length,
+      },
+      by_category: {
+        inflows: inflowCategories.slice(0, 10),
+        outflows: outflowCategories.slice(0, 10),
+      },
+      largest_transactions: {
+        largest_inflows: largestInflows,
+        largest_outflows: largestOutflows,
+      },
+      summary: {
+        daily_average_inflow: dailyAvgInflow,
+        daily_average_outflow: dailyAvgOutflow,
+        flow_status: flowStatus,
+      },
+    };
+  }
 }
 
 /**
@@ -11443,6 +11933,101 @@ export function createToolSchemas(): ToolSchema[] {
       },
     },
 
-    // ---- Search & Discovery ----
+    // ---- Net Worth & Cash Flow ----
+    {
+      name: 'get_net_worth',
+      description:
+        'Calculate total net worth from all accounts. ' +
+        'Shows assets (positive balances), liabilities (negative balances like credit cards), ' +
+        'and net worth (assets - liabilities). Optionally filter by account type.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          account_type: {
+            type: 'string',
+            description:
+              'Filter by account type (checking, savings, credit, investment, depository)',
+          },
+          include_hidden: {
+            type: 'boolean',
+            description: 'Include hidden accounts (default: false)',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_savings_rate',
+      description:
+        'Calculate savings rate (income - spending) / income for a period. ' +
+        'Shows income, spending, savings amount, and savings rate percentage. ' +
+        'A positive rate means saving money, negative means spending more than earning.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          period: {
+            type: 'string',
+            description:
+              'Period shorthand: this_month, last_month, last_30_days, last_90_days, ytd, this_year, last_year',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Start date (YYYY-MM-DD)',
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+          },
+          end_date: {
+            type: 'string',
+            description: 'End date (YYYY-MM-DD)',
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+          },
+          exclude_transfers: {
+            type: 'boolean',
+            description: 'Exclude transfers from calculation (default: true)',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_cash_flow',
+      description:
+        'Analyze cash flow showing money in (income) vs money out (expenses) for a period. ' +
+        'Includes net cash flow, flow by category, and largest inflows/outflows.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          period: {
+            type: 'string',
+            description:
+              'Period shorthand: this_month, last_month, last_30_days, last_90_days, ytd, this_year, last_year',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Start date (YYYY-MM-DD)',
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+          },
+          end_date: {
+            type: 'string',
+            description: 'End date (YYYY-MM-DD)',
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+          },
+          exclude_transfers: {
+            type: 'boolean',
+            description: 'Exclude transfers from calculation (default: true)',
+          },
+          top_n: {
+            type: 'integer',
+            description: 'Number of top inflows/outflows to return (default: 10)',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
   ];
 }

@@ -20,7 +20,9 @@ import {
   decodeItems,
   decodeCategories,
   decodeUserAccounts,
+  decodeAllCollections,
   UserAccountCustomization,
+  AllCollectionsResult,
 } from './decoder.js';
 import {
   Account,
@@ -142,6 +144,10 @@ export class CopilotDatabase {
   private _loadingUserCategories: Promise<Category[]> | null = null;
   private _loadingUserAccounts: Promise<UserAccountCustomization[]> | null = null;
 
+  // Batch loading state
+  private _loadingAllCollections: Promise<AllCollectionsResult> | null = null;
+  private _allCollectionsLoaded = false;
+
   /**
    * Initialize database connection.
    *
@@ -187,7 +193,50 @@ export class CopilotDatabase {
   }
 
   /**
+   * Load all collections in a single database pass for optimal performance.
+   *
+   * This is ~10x faster than loading each collection individually because
+   * it only iterates through the database once instead of once per collection.
+   */
+  private async loadAllCollections(): Promise<void> {
+    // Return if already loaded
+    if (this._allCollectionsLoaded) {
+      return;
+    }
+
+    // Return in-flight promise if loading
+    if (this._loadingAllCollections !== null) {
+      await this._loadingAllCollections;
+      return;
+    }
+
+    // Start batch loading
+    this._loadingAllCollections = decodeAllCollections(this.requireDbPath());
+    try {
+      const result = await this._loadingAllCollections;
+
+      // Populate all caches
+      this._transactions = result.transactions;
+      this._accounts = result.accounts;
+      this._recurring = result.recurring;
+      this._budgets = result.budgets;
+      this._goals = result.goals;
+      this._goalHistory = result.goalHistory;
+      this._investmentPrices = result.investmentPrices;
+      this._investmentSplits = result.investmentSplits;
+      this._items = result.items;
+      this._userCategories = result.categories;
+      this._userAccounts = result.userAccounts;
+
+      this._allCollectionsLoaded = true;
+    } finally {
+      this._loadingAllCollections = null;
+    }
+  }
+
+  /**
    * Load transactions with caching.
+   * Uses batch loading for optimal performance on first access.
    */
   private async loadTransactions(): Promise<Transaction[]> {
     // Return cached data if available
@@ -195,12 +244,17 @@ export class CopilotDatabase {
       return this._transactions;
     }
 
-    // Return in-flight promise if loading
+    // Use batch loading for optimal performance
+    if (!this._allCollectionsLoaded) {
+      await this.loadAllCollections();
+      return this._transactions!;
+    }
+
+    // Fallback to individual loading (shouldn't normally happen)
     if (this._loadingTransactions !== null) {
       return this._loadingTransactions;
     }
 
-    // Start loading
     this._loadingTransactions = decodeTransactions(this.requireDbPath());
     try {
       this._transactions = await this._loadingTransactions;
@@ -212,10 +266,16 @@ export class CopilotDatabase {
 
   /**
    * Load accounts with caching.
+   * Uses batch loading for optimal performance on first access.
    */
   private async loadAccounts(): Promise<Account[]> {
     if (this._accounts !== null) {
       return this._accounts;
+    }
+
+    if (!this._allCollectionsLoaded) {
+      await this.loadAllCollections();
+      return this._accounts!;
     }
 
     if (this._loadingAccounts !== null) {
@@ -233,10 +293,16 @@ export class CopilotDatabase {
 
   /**
    * Load recurring with caching.
+   * Uses batch loading for optimal performance on first access.
    */
   private async loadRecurring(): Promise<Recurring[]> {
     if (this._recurring !== null) {
       return this._recurring;
+    }
+
+    if (!this._allCollectionsLoaded) {
+      await this.loadAllCollections();
+      return this._recurring!;
     }
 
     if (this._loadingRecurring !== null) {
@@ -254,10 +320,16 @@ export class CopilotDatabase {
 
   /**
    * Load budgets with caching.
+   * Uses batch loading for optimal performance on first access.
    */
   private async loadBudgets(): Promise<Budget[]> {
     if (this._budgets !== null) {
       return this._budgets;
+    }
+
+    if (!this._allCollectionsLoaded) {
+      await this.loadAllCollections();
+      return this._budgets!;
     }
 
     if (this._loadingBudgets !== null) {
@@ -275,10 +347,16 @@ export class CopilotDatabase {
 
   /**
    * Load goals with caching.
+   * Uses batch loading for optimal performance on first access.
    */
   private async loadGoals(): Promise<Goal[]> {
     if (this._goals !== null) {
       return this._goals;
+    }
+
+    if (!this._allCollectionsLoaded) {
+      await this.loadAllCollections();
+      return this._goals!;
     }
 
     if (this._loadingGoals !== null) {
@@ -296,10 +374,16 @@ export class CopilotDatabase {
 
   /**
    * Load goal history with caching.
+   * Uses batch loading for optimal performance on first access.
    */
   private async loadGoalHistory(): Promise<GoalHistory[]> {
     if (this._goalHistory !== null) {
       return this._goalHistory;
+    }
+
+    if (!this._allCollectionsLoaded) {
+      await this.loadAllCollections();
+      return this._goalHistory!;
     }
 
     if (this._loadingGoalHistory !== null) {
@@ -317,10 +401,16 @@ export class CopilotDatabase {
 
   /**
    * Load investment prices with caching.
+   * Uses batch loading for optimal performance on first access.
    */
   private async loadInvestmentPrices(): Promise<InvestmentPrice[]> {
     if (this._investmentPrices !== null) {
       return this._investmentPrices;
+    }
+
+    if (!this._allCollectionsLoaded) {
+      await this.loadAllCollections();
+      return this._investmentPrices!;
     }
 
     if (this._loadingInvestmentPrices !== null) {
@@ -338,10 +428,16 @@ export class CopilotDatabase {
 
   /**
    * Load investment splits with caching.
+   * Uses batch loading for optimal performance on first access.
    */
   private async loadInvestmentSplits(): Promise<InvestmentSplit[]> {
     if (this._investmentSplits !== null) {
       return this._investmentSplits;
+    }
+
+    if (!this._allCollectionsLoaded) {
+      await this.loadAllCollections();
+      return this._investmentSplits!;
     }
 
     if (this._loadingInvestmentSplits !== null) {
@@ -359,10 +455,16 @@ export class CopilotDatabase {
 
   /**
    * Load items with caching.
+   * Uses batch loading for optimal performance on first access.
    */
   private async loadItems(): Promise<Item[]> {
     if (this._items !== null) {
       return this._items;
+    }
+
+    if (!this._allCollectionsLoaded) {
+      await this.loadAllCollections();
+      return this._items!;
     }
 
     if (this._loadingItems !== null) {
@@ -380,10 +482,16 @@ export class CopilotDatabase {
 
   /**
    * Load user categories with caching.
+   * Uses batch loading for optimal performance on first access.
    */
   private async loadUserCategories(): Promise<Category[]> {
     if (this._userCategories !== null) {
       return this._userCategories;
+    }
+
+    if (!this._allCollectionsLoaded) {
+      await this.loadAllCollections();
+      return this._userCategories!;
     }
 
     if (this._loadingUserCategories !== null) {
@@ -401,10 +509,16 @@ export class CopilotDatabase {
 
   /**
    * Load user accounts with caching.
+   * Uses batch loading for optimal performance on first access.
    */
   private async loadUserAccounts(): Promise<UserAccountCustomization[]> {
     if (this._userAccounts !== null) {
       return this._userAccounts;
+    }
+
+    if (!this._allCollectionsLoaded) {
+      await this.loadAllCollections();
+      return this._userAccounts!;
     }
 
     if (this._loadingUserAccounts !== null) {

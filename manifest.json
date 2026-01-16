@@ -139,6 +139,18 @@
     {
       "name": "get_year_over_year",
       "description": "Compare spending and income year-over-year."
+    },
+    {
+      "name": "get_net_worth",
+      "description": "Calculate total net worth from all accounts (assets - liabilities)."
+    },
+    {
+      "name": "get_savings_rate",
+      "description": "Calculate savings rate (income - spending) / income for a period."
+    },
+    {
+      "name": "get_cash_flow",
+      "description": "Analyze cash flow showing money in vs money out for a period."
     }
   ],
   "tools_generated": false,
