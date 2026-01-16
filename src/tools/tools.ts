@@ -275,6 +275,7 @@ export class CopilotMoneyTools {
   private db: CopilotDatabase;
   private _userCategoryMap: Map<string, string> | null = null;
   private _userAccountMap: Map<string, string> | null = null;
+  private _excludedCategoryIds: Set<string> | null = null;
 
   /**
    * Initialize tools with a database connection.
@@ -313,6 +314,23 @@ export class CopilotMoneyTools {
       this._userAccountMap = await this.db.getAccountNameMap();
     }
     return this._userAccountMap;
+  }
+
+  /**
+   * Get the set of category IDs that are marked as excluded.
+   *
+   * Transactions in these categories should be excluded from spending calculations.
+   *
+   * @returns Set of excluded category IDs
+   */
+  private async getExcludedCategoryIds(): Promise<Set<string>> {
+    if (this._excludedCategoryIds === null) {
+      const userCategories = await this.db.getUserCategories();
+      this._excludedCategoryIds = new Set(
+        userCategories.filter((cat) => cat.excluded === true).map((cat) => cat.category_id)
+      );
+    }
+    return this._excludedCategoryIds;
   }
 
   /**
@@ -542,9 +560,12 @@ export class CopilotMoneyTools {
       transactions = transactions.filter((txn) => !txn.plaid_deleted);
     }
 
-    // Filter out user-excluded transactions
+    // Filter out user-excluded transactions (both txn.excluded and category.excluded)
     if (exclude_excluded) {
-      transactions = transactions.filter((txn) => !txn.excluded);
+      const excludedCategoryIds = await this.getExcludedCategoryIds();
+      transactions = transactions.filter(
+        (txn) => !txn.excluded && !(txn.category_id && excludedCategoryIds.has(txn.category_id))
+      );
     }
 
     // Filter by pending status if specified
