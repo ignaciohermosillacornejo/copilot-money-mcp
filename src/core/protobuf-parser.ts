@@ -84,7 +84,8 @@ interface VarintResult {
  * Decode a varint from a buffer at the given position.
  *
  * Varints encode integers using 7 bits per byte, with the MSB indicating
- * whether more bytes follow. This handles up to 64-bit integers.
+ * whether more bytes follow. This handles up to 64-bit integers correctly
+ * using BigInt to avoid JavaScript's 32-bit bitwise operation limitation.
  *
  * @param data - The buffer to read from
  * @param pos - Starting position in the buffer
@@ -92,8 +93,8 @@ interface VarintResult {
  * @throws Error if the varint is malformed or truncated
  */
 export function decodeVarint(data: Buffer, pos: number): VarintResult {
-  let result = 0;
-  let shift = 0;
+  let result = 0n; // Use BigInt for 64-bit precision
+  let shift = 0n;
   let bytesRead = 0;
 
   while (pos + bytesRead < data.length) {
@@ -102,19 +103,26 @@ export function decodeVarint(data: Buffer, pos: number): VarintResult {
       throw new Error(`Truncated varint at position ${pos + bytesRead}`);
     }
 
-    // Add the lower 7 bits to our result
-    result |= (byte & 0x7f) << shift;
+    // Add the lower 7 bits to our result using BigInt
+    result |= BigInt(byte & 0x7f) << shift;
     bytesRead++;
 
     // If MSB is 0, this is the last byte
     if ((byte & 0x80) === 0) {
-      return { value: result, bytesRead };
+      // Convert BigInt to signed 64-bit number
+      // If the high bit is set, it's a negative number in two's complement
+      const maxInt64 = (1n << 63n) - 1n;
+      if (result > maxInt64) {
+        // Negative number: convert from unsigned to signed
+        result = result - (1n << 64n);
+      }
+      return { value: Number(result), bytesRead };
     }
 
-    shift += 7;
+    shift += 7n;
 
     // Prevent overflow (varints can be at most 10 bytes for 64-bit values)
-    if (shift >= 64) {
+    if (shift >= 64n) {
       throw new Error(`Varint too long at position ${pos}`);
     }
   }
@@ -136,16 +144,25 @@ export function decodeSignedVarint(data: Buffer, pos: number): VarintResult {
 /**
  * Encode a value as a varint.
  * Useful for creating test data.
+ * Handles both positive and negative numbers using 64-bit signed representation.
  */
 export function encodeVarint(value: number): Buffer {
   const bytes: number[] = [];
-  let v = value >>> 0; // Convert to unsigned 32-bit
 
-  while (v > 0x7f) {
-    bytes.push((v & 0x7f) | 0x80);
-    v >>>= 7;
+  // Convert to BigInt for 64-bit precision
+  // Negative numbers are converted to their two's complement representation
+  let v = BigInt(value);
+  if (v < 0n) {
+    // Convert to unsigned 64-bit two's complement
+    v = v + (1n << 64n);
   }
-  bytes.push(v);
+
+  // Encode as varint (up to 10 bytes for 64-bit values)
+  while (v > 0x7fn) {
+    bytes.push(Number(v & 0x7fn) | 0x80);
+    v >>= 7n;
+  }
+  bytes.push(Number(v));
 
   return Buffer.from(bytes);
 }
