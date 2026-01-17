@@ -160,30 +160,6 @@ describe('CopilotMoneyTools Integration', () => {
     });
   });
 
-  describe('searchTransactions', () => {
-    test('finds transactions by query', async () => {
-      const result = await tools.searchTransactions('starbucks', { limit: 20 });
-
-      expect(result.count).toBeDefined();
-      expect(result.transactions).toBeDefined();
-      expect(result.count).toBeLessThanOrEqual(20);
-    });
-
-    test('search is case-insensitive', async () => {
-      const result1 = await tools.searchTransactions('STARBUCKS', { limit: 10 });
-      const result2 = await tools.searchTransactions('starbucks', { limit: 10 });
-
-      expect(result1.count).toBe(result2.count);
-    });
-
-    test('returns empty results for no matches', async () => {
-      const result = await tools.searchTransactions('xyznonexistent123', {});
-
-      expect(result.count).toBe(0);
-      expect(result.transactions).toEqual([]);
-    });
-  });
-
   describe('getAccounts', () => {
     test('returns all accounts with total balance', async () => {
       const result = await tools.getAccounts();
@@ -221,104 +197,10 @@ describe('CopilotMoneyTools Integration', () => {
     });
   });
 
-  describe('getSpendingByCategory', () => {
-    test('aggregates spending by category', async () => {
-      const result = await tools.getSpendingByCategory({
-        start_date: '2025-01-01',
-        end_date: '2025-01-31',
-      });
-
-      expect(result.period).toBeDefined();
-      expect(result.total_spending).toBeDefined();
-      expect(result.category_count).toBeDefined();
-      expect(result.categories).toBeDefined();
-
-      expect(result.period.start_date).toBe('2025-01-01');
-      expect(result.period.end_date).toBe('2025-01-31');
-    });
-
-    test('categories are sorted by spending descending', async () => {
-      const result = await tools.getSpendingByCategory({
-        start_date: '2025-01-01',
-        end_date: '2025-01-31',
-      });
-
-      const categories = result.categories;
-      for (let i = 0; i < categories.length - 1; i++) {
-        expect(categories[i].total_spending >= categories[i + 1].total_spending).toBe(true);
-      }
-    });
-
-    test('excludes income (negative amounts)', async () => {
-      const result = await tools.getSpendingByCategory({
-        start_date: '2025-01-01',
-        end_date: '2025-01-31',
-      });
-
-      // Should not include income category
-      const incomeCategory = result.categories.find((cat) => cat.category_id === 'income');
-      expect(incomeCategory).toBeUndefined();
-    });
-
-    test('total spending matches sum of categories', async () => {
-      const result = await tools.getSpendingByCategory({
-        start_date: '2025-01-01',
-        end_date: '2025-01-31',
-      });
-
-      const calculatedTotal = result.categories.reduce((sum, cat) => sum + cat.total_spending, 0);
-
-      expect(Math.abs(result.total_spending - calculatedTotal)).toBeLessThan(0.01);
-    });
-
-    test('category structure is correct', async () => {
-      const result = await tools.getSpendingByCategory({
-        start_date: '2025-01-01',
-        end_date: '2025-01-31',
-      });
-
-      if (result.categories.length > 0) {
-        const cat = result.categories[0];
-        expect(cat.category_id).toBeDefined();
-        expect(cat.category_name).toBeDefined();
-        expect(cat.total_spending).toBeDefined();
-        expect(cat.transaction_count).toBeDefined();
-        expect(cat.total_spending >= 0).toBe(true);
-        expect(cat.transaction_count > 0).toBe(true);
-      }
-    });
-  });
-
-  describe('getAccountBalance', () => {
-    test('returns account details', async () => {
-      const result = await tools.getAccountBalance('acc1');
-
-      expect(result.account_id).toBe('acc1');
-      expect(result.name).toBeDefined();
-      expect(result.current_balance).toBeDefined();
-    });
-
-    test('includes all account fields', async () => {
-      const result = await tools.getAccountBalance('acc1');
-
-      expect(result.account_id).toBe('acc1');
-      expect(result.name).toBe('Checking Account');
-      expect(result.account_type).toBe('checking');
-      expect(result.current_balance).toBe(1500.0);
-      expect(result.available_balance).toBe(1450.0);
-      expect(result.mask).toBe('1234');
-      expect(result.institution_name).toBe('Chase');
-    });
-
-    test('throws error for invalid account_id', async () => {
-      await expect(tools.getAccountBalance('nonexistent')).rejects.toThrow('Account not found');
-    });
-  });
-
   describe('tool schemas', () => {
     test('returns correct number of tool schemas', async () => {
       const schemas = createToolSchemas();
-      expect(schemas.length).toBe(31);
+      expect(schemas.length).toBe(6);
     });
 
     test('all tools have readOnlyHint annotation', async () => {
@@ -345,36 +227,16 @@ describe('CopilotMoneyTools Integration', () => {
       const schemas = createToolSchemas();
       const names = schemas.map((s) => s.name);
 
-      // Core tools
+      // Core 6 tools
       expect(names).toContain('get_transactions');
       expect(names).toContain('get_accounts');
-      expect(names).toContain('get_account_balance');
-
-      // Consolidated tools
-      expect(names).toContain('get_spending');
       expect(names).toContain('get_categories');
       expect(names).toContain('get_recurring_transactions');
-      expect(names).toContain('get_income');
-      expect(names).toContain('compare_periods');
-      expect(names).toContain('get_account_analytics');
-      expect(names).toContain('get_budget_analytics');
-      expect(names).toContain('get_goal_analytics');
-      expect(names).toContain('get_investment_analytics');
-      expect(names).toContain('get_merchant_analytics');
-    });
+      expect(names).toContain('get_budgets');
+      expect(names).toContain('get_goals');
 
-    test('required parameters are specified', async () => {
-      const schemas = createToolSchemas();
-
-      const spendingTool = schemas.find((s) => s.name === 'get_spending');
-      expect(spendingTool?.inputSchema.required).toContain('group_by');
-
-      const balanceTool = schemas.find((s) => s.name === 'get_account_balance');
-      expect(balanceTool?.inputSchema.required).toContain('account_id');
-
-      const compareTool = schemas.find((s) => s.name === 'compare_periods');
-      expect(compareTool?.inputSchema.required).toContain('period1');
-      expect(compareTool?.inputSchema.required).toContain('period2');
+      // Should have exactly 6 tools
+      expect(names.length).toBe(6);
     });
   });
 
@@ -392,16 +254,6 @@ describe('CopilotMoneyTools Integration', () => {
       const parsed = JSON.parse(json);
       expect(parsed.count).toBe(result.count);
     });
-
-    test('spending responses are JSON serializable', async () => {
-      const result = await tools.getSpendingByCategory({
-        start_date: '2025-01-01',
-        end_date: '2025-01-31',
-      });
-      const json = JSON.stringify(result);
-      const parsed = JSON.parse(json);
-      expect(parsed.total_spending).toBe(result.total_spending);
-    });
   });
 
   describe('empty results', () => {
@@ -410,13 +262,6 @@ describe('CopilotMoneyTools Integration', () => {
         start_date: '1900-01-01',
         end_date: '1900-01-31',
       });
-
-      expect(result.count).toBe(0);
-      expect(result.transactions).toEqual([]);
-    });
-
-    test('handles empty search results', async () => {
-      const result = await tools.searchTransactions('xyznonexistent123', {});
 
       expect(result.count).toBe(0);
       expect(result.transactions).toEqual([]);

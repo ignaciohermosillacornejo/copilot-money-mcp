@@ -158,8 +158,8 @@ describe('server.ts - MCP Request Handler Coverage', () => {
       const mockRequest = {
         method: 'tools/call',
         params: {
-          name: 'get_spending',
-          arguments: { group_by: 'category' },
+          name: 'get_transactions',
+          arguments: {},
         },
       };
 
@@ -168,7 +168,7 @@ describe('server.ts - MCP Request Handler Coverage', () => {
       expect(result).toBeDefined();
       expect(result.isError).toBeUndefined();
       const parsed = JSON.parse(result.content[0].text);
-      expect(parsed.group_by).toBe('category');
+      expect(parsed.transactions).toBeDefined();
     }
   });
 });

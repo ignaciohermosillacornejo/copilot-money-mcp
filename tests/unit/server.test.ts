@@ -86,9 +86,11 @@ describe('CopilotMoneyServer', () => {
 
       // The tools instance should have methods corresponding to available tools
       expect(tools.getTransactions).toBeDefined();
-      expect(tools.searchTransactions).toBeDefined();
       expect(tools.getAccounts).toBeDefined();
       expect(tools.getCategories).toBeDefined();
+      expect(tools.getRecurringTransactions).toBeDefined();
+      expect(tools.getBudgets).toBeDefined();
+      expect(tools.getGoals).toBeDefined();
       expect(typeof tools.getTransactions).toBe('function');
     });
   });
@@ -134,15 +136,6 @@ describe('CopilotMoneyServer', () => {
       expect(result.transactions).toBeDefined();
     });
 
-    test('handles search_transactions tool call', async () => {
-      // @ts-expect-error - accessing private property
-      const tools = server.tools;
-      const result = await tools.searchTransactions('Test', 10);
-
-      expect(result.count).toBeDefined();
-      expect(result.transactions).toBeDefined();
-    });
-
     test('handles get_accounts tool call', async () => {
       // @ts-expect-error - accessing private property
       const tools = server.tools;
@@ -150,31 +143,6 @@ describe('CopilotMoneyServer', () => {
 
       expect(result.count).toBeGreaterThan(0);
       expect(result.accounts).toBeDefined();
-    });
-
-    test('handles get_spending_by_category tool call', async () => {
-      // @ts-expect-error - accessing private property
-      const tools = server.tools;
-      const result = await tools.getSpendingByCategory({});
-
-      expect(result.total_spending).toBeDefined();
-      expect(result.categories).toBeDefined();
-    });
-
-    test('handles get_account_balance tool call', async () => {
-      // @ts-expect-error - accessing private property
-      const tools = server.tools;
-      const result = await tools.getAccountBalance('acc1');
-
-      expect(result.account_id).toBe('acc1');
-      expect(result.current_balance).toBeDefined();
-    });
-
-    test('throws error for get_account_balance with invalid ID', async () => {
-      // @ts-expect-error - accessing private property
-      const tools = server.tools;
-
-      await expect(tools.getAccountBalance('invalid_id')).rejects.toThrow('Account not found');
     });
 
     test('handles get_categories tool call', async () => {
@@ -200,41 +168,6 @@ describe('CopilotMoneyServer', () => {
   });
 
   describe('error handling', () => {
-    test('handles missing required parameters', async () => {
-      const db = new CopilotDatabase('/fake/path');
-      // @ts-expect-error - inject mock data
-      db._transactions = [];
-      // @ts-expect-error - inject mock data
-      db._accounts = [];
-      // @ts-expect-error - inject auxiliary data
-      db._userCategories = [];
-      // @ts-expect-error - inject auxiliary data
-      db._userAccounts = [];
-      // @ts-expect-error - inject auxiliary data
-      db._categoryNameMap = new Map<string, string>();
-      // @ts-expect-error - inject auxiliary data
-      db._accountNameMap = new Map<string, string>();
-      // @ts-expect-error - inject auxiliary data
-      db._recurring = [];
-      // @ts-expect-error - inject auxiliary data
-      db._budgets = [];
-      // @ts-expect-error - inject auxiliary data
-      db._goals = [];
-
-      const server = new CopilotMoneyServer('/fake/path');
-      // @ts-expect-error - inject mock db
-      server.db = db;
-      // @ts-expect-error - inject tools with mock db
-      server.tools = new CopilotMoneyTools(db);
-
-      // @ts-expect-error - accessing private property
-      const tools = server.tools;
-
-      // get_account_balance requires account_id - now async so use rejects
-      // @ts-expect-error - intentionally passing invalid input
-      await expect(tools.getAccountBalance()).rejects.toThrow();
-    });
-
     test('handles invalid tool arguments gracefully', async () => {
       const db = new CopilotDatabase('/fake/path');
       // @ts-expect-error - inject mock data
