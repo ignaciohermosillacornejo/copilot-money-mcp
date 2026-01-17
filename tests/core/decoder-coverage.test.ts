@@ -584,7 +584,7 @@ describe('decoder coverage', () => {
           id: 'txn1',
           fields: {
             transaction_id: 'txn1',
-            amount: -50.0,
+            amount: 50.0,
             date: '2024-01-15',
             name: 'Coffee Shop',
           },
@@ -607,7 +607,7 @@ describe('decoder coverage', () => {
           fields: {
             recurring_id: 'rec1',
             name: 'Netflix',
-            amount: -15.99,
+            amount: 15.99,
             frequency: 'monthly',
           },
         },
@@ -723,7 +723,7 @@ describe('decoder coverage', () => {
           id: 'txn1',
           fields: {
             transaction_id: 'txn1',
-            amount: -50.0,
+            amount: 50.0,
             date: '2024-01-15',
             name: 'Coffee Shop',
           },
@@ -733,7 +733,7 @@ describe('decoder coverage', () => {
           id: 'txn2',
           fields: {
             transaction_id: 'txn2',
-            amount: -50.0,
+            amount: 50.0,
             date: '2024-01-15',
             name: 'Coffee Shop', // Same name/amount/date = duplicate
           },

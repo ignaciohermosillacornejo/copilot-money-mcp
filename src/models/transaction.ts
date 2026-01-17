@@ -9,9 +9,11 @@ import { z } from 'zod';
 /**
  * Transaction schema with validation.
  *
- * Amount sign convention (standard accounting):
- * - Positive amounts = income/credits (money coming IN)
- * - Negative amounts = expenses (money going OUT)
+ * Amount sign convention (Copilot Money format):
+ * - Positive amounts = expenses (money going OUT)
+ * - Negative amounts = income/credits (money coming IN)
+ *
+ * Note: This is the opposite of standard accounting convention.
  */
 export const TransactionSchema = z
   .object({

@@ -10,12 +10,12 @@ import { CopilotDatabase } from '../../src/core/database.js';
 import type { Transaction, Account, Budget, Goal, GoalHistory } from '../../src/models/index.js';
 
 // Extended mock data for comprehensive testing
-// Standard accounting: negative = expenses, positive = income/credits
+// Copilot Money format: positive = expenses, negative = income/credits
 const mockTransactions: Transaction[] = [
   // Regular expenses (negative = money out)
   {
     transaction_id: 'txn1',
-    amount: -50.0,
+    amount: 50.0,
     date: '2024-01-15',
     name: 'Coffee Shop',
     category_id: 'food_dining',
@@ -23,7 +23,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn2',
-    amount: -120.5,
+    amount: 120.5,
     date: '2024-01-20',
     name: 'Grocery Store',
     category_id: 'groceries',
@@ -31,7 +31,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn3',
-    amount: -25.0,
+    amount: 25.0,
     date: '2024-01-22',
     original_name: 'Fast Food',
     category_id: 'food_dining',
@@ -49,7 +49,7 @@ const mockTransactions: Transaction[] = [
   // Foreign transaction (expense)
   {
     transaction_id: 'txn_foreign',
-    amount: -75.0,
+    amount: 75.0,
     date: '2024-01-18',
     name: 'Santiago Restaurant CL',
     category_id: 'food_dining',
@@ -78,7 +78,7 @@ const mockTransactions: Transaction[] = [
   // HSA eligible (expense)
   {
     transaction_id: 'txn_medical',
-    amount: -45.0,
+    amount: 45.0,
     date: '2024-01-21',
     name: 'CVS Pharmacy',
     category_id: 'medical',
@@ -87,7 +87,7 @@ const mockTransactions: Transaction[] = [
   // Tagged transaction (expense)
   {
     transaction_id: 'txn_tagged',
-    amount: -30.0,
+    amount: 30.0,
     date: '2024-01-22',
     name: 'Business Lunch #work #expense',
     category_id: 'food_dining',
@@ -96,7 +96,7 @@ const mockTransactions: Transaction[] = [
   // Duplicate pattern (expense)
   {
     transaction_id: 'txn_dup1',
-    amount: -99.99,
+    amount: 99.99,
     date: '2024-01-23',
     name: 'Subscription Service',
     category_id: 'subscriptions',
@@ -104,7 +104,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn_dup2',
-    amount: -99.99,
+    amount: 99.99,
     date: '2024-01-23',
     name: 'Subscription Service',
     category_id: 'subscriptions',
@@ -113,7 +113,7 @@ const mockTransactions: Transaction[] = [
   // Fee transaction (expense)
   {
     transaction_id: 'txn_fee',
-    amount: -5.0,
+    amount: 5.0,
     date: '2024-01-24',
     name: 'ATM Fee',
     category_id: 'bank_fees',
@@ -131,7 +131,7 @@ const mockTransactions: Transaction[] = [
   // More transactions for time-based analysis (expenses)
   {
     transaction_id: 'txn_week1',
-    amount: -40.0,
+    amount: 40.0,
     date: '2024-01-08',
     name: 'Week 1 Expense',
     category_id: 'food_dining',
@@ -139,7 +139,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn_week2',
-    amount: -60.0,
+    amount: 60.0,
     date: '2024-01-14',
     name: 'Week 2 Expense',
     category_id: 'food_dining',
@@ -1850,19 +1850,19 @@ describe('CopilotMoneyTools Extended Coverage', () => {
 
     describe('dividends analysis with dividend transactions', () => {
       test('returns dividend data with formatting', async () => {
-        // Set up dividend transactions (negative amounts in standard accounting)
+        // Set up dividend transactions (negative amounts = income in Copilot format)
         (db as any)._transactions = [
           {
             transaction_id: 'div1',
-            amount: -50.0, // Dividends are income (negative in this system)
+            amount: -50.0, // Dividends are income (negative in Copilot format)
             date: '2024-01-15',
             name: 'AAPL Dividend Payment',
-            category_id: 'investment_dividend',
+            category_id: 'dividend',
             account_id: 'acc_invest',
           },
           {
             transaction_id: 'div2',
-            amount: -75.0,
+            amount: -75.0, // Dividends are income (negative in Copilot format)
             date: '2024-01-20',
             name: 'MSFT Quarterly Dividend',
             category_id: 'dividend',
@@ -1870,10 +1870,10 @@ describe('CopilotMoneyTools Extended Coverage', () => {
           },
           {
             transaction_id: 'div3',
-            amount: -25.0,
+            amount: -25.0, // Dividends are income (negative in Copilot format)
             date: '2024-01-25',
             name: 'GOOG Dividend',
-            category_id: 'investment_dividend',
+            category_id: 'dividend',
             account_id: 'acc_invest',
           },
         ];
@@ -1913,7 +1913,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
           },
           {
             transaction_id: 'fee2',
-            amount: -25.0,
+            amount: 25.0,
             date: '2024-01-20',
             name: 'Account Fee',
             category_id: 'bank_fees',
@@ -1947,7 +1947,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         (db as any)._transactions = [
           {
             transaction_id: 'txn_unresolved1',
-            amount: -100.0,
+            amount: 100.0,
             date: '2024-01-15',
             name: 'Unknown Merchant',
             category_id: 'abcdefghij1234567890ab', // 22 char alphanumeric (Firebase-like ID)
@@ -1955,7 +1955,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
           },
           {
             transaction_id: 'txn_unresolved2',
-            amount: -200.0,
+            amount: 200.0,
             date: '2024-01-16',
             name: 'Another Unknown',
             category_id: 'abcdefghij1234567890ab', // Same unresolved ID
@@ -1963,7 +1963,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
           },
           {
             transaction_id: 'txn_unresolved3',
-            amount: -50.0,
+            amount: 50.0,
             date: '2024-01-17',
             name: 'Third Unknown',
             category_id: '12345678', // 8-digit numeric ID
@@ -1988,7 +1988,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         (db as any)._transactions = [
           {
             transaction_id: 'duplicate_txn_id',
-            amount: -50.0,
+            amount: 50.0,
             date: '2024-01-15',
             name: 'First Transaction',
             category_id: 'food_dining',
@@ -1996,7 +1996,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
           },
           {
             transaction_id: 'duplicate_txn_id', // Same ID
-            amount: -75.0,
+            amount: 75.0,
             date: '2024-01-16',
             name: 'Second Transaction',
             category_id: 'shopping',
@@ -2004,7 +2004,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
           },
           {
             transaction_id: 'duplicate_txn_id', // Same ID again
-            amount: -100.0,
+            amount: 100.0,
             date: '2024-01-17',
             name: 'Third Transaction',
             category_id: 'groceries',
@@ -2012,7 +2012,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
           },
           {
             transaction_id: 'unique_txn_id',
-            amount: -25.0,
+            amount: 25.0,
             date: '2024-01-18',
             name: 'Unique Transaction',
             category_id: 'food_dining',
@@ -2303,7 +2303,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         // Entertainment - 50% (approaching)
         {
           transaction_id: 'txn_ent',
-          amount: -500.0,
+          amount: 500.0,
           date: `${thisMonth}-15`,
           name: 'Entertainment',
           category_id: 'entertainment',
@@ -2312,7 +2312,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         // Food - 85% (warning)
         {
           transaction_id: 'txn_food',
-          amount: -85.0,
+          amount: 85.0,
           date: `${thisMonth}-15`,
           name: 'Restaurant',
           category_id: 'food_dining',
@@ -2321,7 +2321,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         // Groceries - 120% (exceeded)
         {
           transaction_id: 'txn_groc',
-          amount: -60.0,
+          amount: 60.0,
           date: `${thisMonth}-15`,
           name: 'Grocery Store',
           category_id: 'groceries',
@@ -2357,35 +2357,35 @@ describe('CopilotMoneyTools Extended Coverage', () => {
   // ============================================
   describe('Dividend Income Formatting Coverage', () => {
     test('formats dividends with monthly and source grouping', async () => {
-      // Set up dividend transactions
+      // Set up dividend transactions (negative amounts = income in Copilot format)
       (db as any)._transactions = [
         {
           transaction_id: 'div_aapl1',
-          amount: -50.0, // Dividend (negative = income)
+          amount: -50.0, // Dividend income (negative in Copilot format)
           date: '2024-01-15',
           name: 'AAPL Dividend',
-          category_id: 'investment_dividend',
+          category_id: 'dividend',
           account_id: 'acc_invest',
         },
         {
           transaction_id: 'div_aapl2',
-          amount: -50.0,
+          amount: -50.0, // Dividend income (negative in Copilot format)
           date: '2024-02-15',
           name: 'AAPL Dividend',
-          category_id: 'investment_dividend',
+          category_id: 'dividend',
           account_id: 'acc_invest',
         },
         {
           transaction_id: 'div_msft1',
-          amount: -75.0,
+          amount: -75.0, // Dividend income (negative in Copilot format)
           date: '2024-01-20',
           name: 'MSFT Quarterly Dividend',
-          category_id: 'investment_dividend',
+          category_id: 'dividend',
           account_id: 'acc_invest',
         },
         {
           transaction_id: 'div_goog1',
-          amount: -100.0,
+          amount: -100.0, // Dividend income (negative in Copilot format)
           date: '2024-01-25',
           original_name: 'GOOG Div Payment', // Use original_name
           category_id: 'dividend',
@@ -2665,7 +2665,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       (db as any)._transactions = [
         {
           transaction_id: 'txn_search1',
-          amount: -100.0,
+          amount: 100.0,
           date: '2024-01-15',
           name: 'Business Dinner Quarterly Review',
           original_name: 'Restaurant XYZ',
@@ -2674,7 +2674,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         },
         {
           transaction_id: 'txn_search2',
-          amount: -250.0,
+          amount: 250.0,
           date: '2024-01-16',
           name: 'Office Supplies',
           original_name: 'Quarterly Supply Store',
@@ -2683,7 +2683,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         },
         {
           transaction_id: 'txn_no_match',
-          amount: -50.0,
+          amount: 50.0,
           date: '2024-01-17',
           name: 'Coffee Shop',
           category_id: 'food_dining',
@@ -2715,7 +2715,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       (db as any)._transactions = [
         {
           transaction_id: 'txn_meeting1',
-          amount: -75.0,
+          amount: 75.0,
           date: '2024-01-10',
           name: 'Lunch Meeting Expenses',
           category_id: 'food_dining',
@@ -2723,7 +2723,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         },
         {
           transaction_id: 'txn_meeting2',
-          amount: -120.0,
+          amount: 120.0,
           date: '2024-01-15',
           name: 'Conference Room Rental',
           original_name: 'Meeting Space Inc',
@@ -2732,7 +2732,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         },
         {
           transaction_id: 'txn_meeting3',
-          amount: -200.0,
+          amount: 200.0,
           date: '2024-01-20',
           name: 'Team Meeting Dinner',
           category_id: 'food_dining',
@@ -2767,7 +2767,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       (db as any)._transactions = [
         {
           transaction_id: 'txn_close1',
-          amount: -50.0,
+          amount: 50.0,
           date: '2024-01-15',
           name: 'Close Restaurant',
           category_id: 'food_dining',
@@ -2778,7 +2778,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         },
         {
           transaction_id: 'txn_far',
-          amount: -75.0,
+          amount: 75.0,
           date: '2024-01-16',
           name: 'Far Away Store',
           category_id: 'shopping',
@@ -2789,7 +2789,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         },
         {
           transaction_id: 'txn_close2',
-          amount: -25.0,
+          amount: 25.0,
           date: '2024-01-17',
           name: 'Close Coffee',
           category_id: 'food_dining',
@@ -2836,7 +2836,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       (db as any)._transactions = [
         {
           transaction_id: 'txn_sf1',
-          amount: -100.0,
+          amount: 100.0,
           date: '2024-01-15',
           name: 'SF Restaurant 1',
           category_id: 'food_dining',
@@ -2847,7 +2847,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         },
         {
           transaction_id: 'txn_sf2',
-          amount: -150.0,
+          amount: 150.0,
           date: '2024-01-16',
           name: 'SF Restaurant 2',
           category_id: 'food_dining',
@@ -2858,7 +2858,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         },
         {
           transaction_id: 'txn_oak',
-          amount: -75.0,
+          amount: 75.0,
           date: '2024-01-17',
           name: 'Oakland Store',
           category_id: 'shopping',
@@ -2900,7 +2900,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
       (db as any)._transactions = [
         {
           transaction_id: 'txn_us',
-          amount: -100.0,
+          amount: 100.0,
           date: '2024-01-15',
           name: 'US Store',
           category_id: 'shopping',
@@ -2910,7 +2910,7 @@ describe('CopilotMoneyTools Extended Coverage', () => {
         },
         {
           transaction_id: 'txn_mx',
-          amount: -75.0,
+          amount: 75.0,
           date: '2024-01-16',
           name: 'Mexico Store',
           category_id: 'shopping',

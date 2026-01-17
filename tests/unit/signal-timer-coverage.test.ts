@@ -24,7 +24,7 @@ import fs from 'node:fs';
 const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn1',
-    amount: -50.0,
+    amount: 50.0,
     date: '2025-01-15',
     name: 'Coffee Shop',
     category_id: 'food_dining',

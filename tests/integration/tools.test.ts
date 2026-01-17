@@ -10,11 +10,11 @@ import { CopilotDatabase } from '../../src/core/database.js';
 import type { Transaction, Account } from '../../src/models/index.js';
 
 // Mock data
-// Standard accounting: negative = expenses, positive = income
+// Copilot Money format: positive = expenses, negative = income
 const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn1',
-    amount: -50.0, // Expense
+    amount: 50.0, // Expense (positive in Copilot format)
     date: '2025-01-15',
     name: 'Starbucks',
     category_id: 'food_dining',
@@ -22,7 +22,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn2',
-    amount: -15.5, // Expense
+    amount: 15.5, // Expense (positive in Copilot format)
     date: '2025-01-10',
     name: 'Starbucks Coffee',
     category_id: 'food_dining',
@@ -30,7 +30,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn3',
-    amount: -120.0, // Expense
+    amount: 120.0, // Expense (positive in Copilot format)
     date: '2025-01-08',
     name: 'Whole Foods',
     category_id: 'groceries',
@@ -38,7 +38,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn4',
-    amount: 1000.0, // Income (positive = money in)
+    amount: -1000.0, // Income (negative in Copilot format = money coming in)
     date: '2025-01-05',
     name: 'Paycheck',
     category_id: 'income',
@@ -46,7 +46,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn5',
-    amount: -250.0, // Expense
+    amount: 250.0, // Expense (positive in Copilot format)
     date: '2024-12-20',
     name: 'Target',
     category_id: 'shopping',
