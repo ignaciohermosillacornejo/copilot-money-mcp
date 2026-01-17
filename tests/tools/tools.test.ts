@@ -8,11 +8,11 @@ import { CopilotDatabase } from '../../src/core/database.js';
 import type { Transaction, Account } from '../../src/models/index.js';
 
 // Mock data
-// Standard accounting: negative = expenses, positive = income
+// Copilot Money format: positive = expenses, negative = income
 const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn1',
-    amount: -50.0, // Expense (negative = money out)
+    amount: 50.0, // Expense (positive = money out in Copilot format)
     date: '2024-01-15',
     name: 'Coffee Shop',
     category_id: 'food_dining',
@@ -20,7 +20,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn2',
-    amount: -120.5, // Expense (negative = money out)
+    amount: 120.5, // Expense (positive = money out in Copilot format)
     date: '2024-01-20',
     name: 'Grocery Store',
     category_id: 'groceries',
@@ -28,7 +28,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn3',
-    amount: -25.0, // Expense (negative = money out)
+    amount: 25.0, // Expense (positive = money out in Copilot format)
     date: '2024-02-10',
     original_name: 'Fast Food',
     category_id: 'food_dining',
@@ -36,7 +36,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn4',
-    amount: 1000.0, // Income (positive = money in)
+    amount: -1000.0, // Income (negative = money in in Copilot format)
     date: '2024-01-31',
     name: 'Paycheck',
     category_id: 'income',
@@ -66,7 +66,7 @@ const mockAccounts: Account[] = [
 const mockTransactionsWithFilters: Transaction[] = [
   {
     transaction_id: 'txn_normal',
-    amount: -50.0,
+    amount: 50.0, // Expense
     date: '2024-03-01',
     name: 'Normal Transaction',
     category_id: 'shopping',
@@ -74,7 +74,7 @@ const mockTransactionsWithFilters: Transaction[] = [
   },
   {
     transaction_id: 'txn_transfer',
-    amount: -100.0,
+    amount: 100.0, // Transfer (expense)
     date: '2024-03-01',
     name: 'Transfer',
     category_id: 'transfer_credit_card',
@@ -83,7 +83,7 @@ const mockTransactionsWithFilters: Transaction[] = [
   },
   {
     transaction_id: 'txn_deleted',
-    amount: -30.0,
+    amount: 30.0, // Expense
     date: '2024-03-01',
     name: 'Deleted Transaction',
     category_id: 'shopping',
@@ -92,7 +92,7 @@ const mockTransactionsWithFilters: Transaction[] = [
   },
   {
     transaction_id: 'txn_excluded',
-    amount: -40.0,
+    amount: 40.0, // Expense
     date: '2024-03-01',
     name: 'Excluded Transaction',
     category_id: 'shopping',
@@ -638,7 +638,7 @@ describe('CopilotMoneyTools', () => {
         // Last year - food spending
         {
           transaction_id: 'ly1',
-          amount: -100.0, // Expense
+          amount: 100.0, // Expense (positive in Copilot format)
           date: `${lastYear}-06-10`,
           name: 'Restaurant',
           category_id: 'food_dining',
@@ -646,7 +646,7 @@ describe('CopilotMoneyTools', () => {
         },
         {
           transaction_id: 'ly2',
-          amount: -50.0, // Expense
+          amount: 50.0, // Expense (positive in Copilot format)
           date: `${lastYear}-06-15`,
           name: 'Grocery',
           category_id: 'groceries',
@@ -655,7 +655,7 @@ describe('CopilotMoneyTools', () => {
         // This year - food spending increased
         {
           transaction_id: 'ty1',
-          amount: -150.0, // Expense
+          amount: 150.0, // Expense (positive in Copilot format)
           date: `${currentYear}-01-10`,
           name: 'Restaurant',
           category_id: 'food_dining',
@@ -663,7 +663,7 @@ describe('CopilotMoneyTools', () => {
         },
         {
           transaction_id: 'ty2',
-          amount: -75.0, // Expense
+          amount: 75.0, // Expense (positive in Copilot format)
           date: `${currentYear}-01-15`,
           name: 'Grocery',
           category_id: 'groceries',
@@ -672,7 +672,7 @@ describe('CopilotMoneyTools', () => {
         // New category in this year only
         {
           transaction_id: 'ty3',
-          amount: -200.0, // Expense
+          amount: 200.0, // Expense (positive in Copilot format)
           date: `${currentYear}-01-08`,
           name: 'Electronics Store',
           category_id: 'shopping',
@@ -843,11 +843,11 @@ describe('New MCP Tools', () => {
   let tools: CopilotMoneyTools;
 
   // Extended mock data with foreign transactions and refunds
-  // Standard accounting: negative = expenses, positive = income/refunds
+  // Copilot Money format: positive = expenses, negative = income/refunds
   const extendedMockTransactions: Transaction[] = [
     {
       transaction_id: 'txn1',
-      amount: -50.0, // Expense
+      amount: 50.0, // Expense (positive in Copilot format)
       date: '2024-01-15',
       name: 'Coffee Shop',
       category_id: 'food_dining',
@@ -856,7 +856,7 @@ describe('New MCP Tools', () => {
     },
     {
       transaction_id: 'txn2',
-      amount: -120.5, // Expense
+      amount: 120.5, // Expense (positive in Copilot format)
       date: '2024-01-16',
       name: 'Grocery Store',
       category_id: 'groceries',
@@ -865,7 +865,7 @@ describe('New MCP Tools', () => {
     },
     {
       transaction_id: 'txn3',
-      amount: -200.0, // Expense
+      amount: 200.0, // Expense (positive in Copilot format)
       date: '2024-01-17',
       name: 'Foreign Restaurant',
       category_id: 'food_dining',
@@ -874,7 +874,7 @@ describe('New MCP Tools', () => {
     },
     {
       transaction_id: 'txn4',
-      amount: 50.0, // Refund (positive = money coming back)
+      amount: -50.0, // Refund (negative = money coming back in Copilot format)
       date: '2024-01-18',
       name: 'Amazon Refund',
       category_id: 'shopping',
@@ -882,7 +882,7 @@ describe('New MCP Tools', () => {
     },
     {
       transaction_id: 'txn5',
-      amount: 25.0, // Statement credit (positive = money coming back)
+      amount: -25.0, // Statement credit (negative = money coming back in Copilot format)
       date: '2024-01-19',
       name: 'Uber Credit',
       category_id: 'travel',
@@ -890,7 +890,7 @@ describe('New MCP Tools', () => {
     },
     {
       transaction_id: 'txn6',
-      amount: -15.0, // Expense
+      amount: 15.0, // Expense (positive in Copilot format)
       date: '2024-01-15', // Same date as txn1 - potential duplicate
       name: 'Coffee Shop',
       category_id: 'food_dining',
@@ -898,7 +898,7 @@ describe('New MCP Tools', () => {
     },
     {
       transaction_id: 'txn7',
-      amount: -45.0, // Expense
+      amount: 45.0, // Expense (positive in Copilot format)
       date: '2024-01-20',
       name: 'CVS Pharmacy',
       category_id: 'medical_pharmacies_and_supplements',
@@ -1278,7 +1278,7 @@ describe('New MCP Tools', () => {
         // Income - should be excluded (negative amount)
         {
           transaction_id: 'inc1',
-          amount: -3000.0,
+          amount: 3000.0,
           date: '2024-01-15',
           name: 'Employer Inc',
           category_id: 'income',
@@ -1799,7 +1799,7 @@ describe('New MCP Tools', () => {
         // Trip to France
         {
           transaction_id: 'trip1',
-          amount: -150.0, // Expense
+          amount: 150.0, // Expense (positive in Copilot format)
           date: '2024-03-01',
           name: 'Hotel Paris',
           category_id: 'travel',
@@ -1809,7 +1809,7 @@ describe('New MCP Tools', () => {
         },
         {
           transaction_id: 'trip2',
-          amount: -45.0, // Expense
+          amount: 45.0, // Expense (positive in Copilot format)
           date: '2024-03-02',
           name: 'Restaurant Paris',
           category_id: 'food_dining',
@@ -1819,7 +1819,7 @@ describe('New MCP Tools', () => {
         },
         {
           transaction_id: 'trip3',
-          amount: -80.0, // Expense
+          amount: 80.0, // Expense (positive in Copilot format)
           date: '2024-03-03',
           name: 'Museum',
           category_id: 'entertainment',
@@ -1830,7 +1830,7 @@ describe('New MCP Tools', () => {
         // Domestic transaction (should be excluded)
         {
           transaction_id: 'dom1',
-          amount: -50.0, // Expense
+          amount: 50.0, // Expense (positive in Copilot format)
           date: '2024-03-05',
           name: 'Local Store',
           category_id: 'shopping',
@@ -1840,7 +1840,7 @@ describe('New MCP Tools', () => {
         // Trip to Japan (separate trip)
         {
           transaction_id: 'trip4',
-          amount: -200.0, // Expense
+          amount: 200.0, // Expense (positive in Copilot format)
           date: '2024-05-10',
           name: 'Tokyo Hotel',
           category_id: 'travel',
@@ -1850,7 +1850,7 @@ describe('New MCP Tools', () => {
         },
         {
           transaction_id: 'trip5',
-          amount: -60.0, // Expense
+          amount: 60.0, // Expense (positive in Copilot format)
           date: '2024-05-11',
           name: 'Sushi Restaurant',
           category_id: 'food_dining',
@@ -1941,7 +1941,7 @@ describe('New MCP Tools', () => {
       const travelCategoryTransactions: Transaction[] = [
         {
           transaction_id: 'tc1',
-          amount: -500.0, // Expense
+          amount: 500.0, // Expense (positive in Copilot format)
           date: '2024-06-01',
           name: 'Airline',
           category_id: 'travel',
@@ -1949,7 +1949,7 @@ describe('New MCP Tools', () => {
         },
         {
           transaction_id: 'tc2',
-          amount: -200.0, // Expense
+          amount: 200.0, // Expense (positive in Copilot format)
           date: '2024-06-02',
           name: 'Hotel',
           category_id: 'travel',
@@ -1971,7 +1971,7 @@ describe('New MCP Tools', () => {
       const numericCategoryTransactions: Transaction[] = [
         {
           transaction_id: 'nc1',
-          amount: -300.0, // Expense
+          amount: 300.0, // Expense (positive in Copilot format)
           date: '2024-07-01',
           name: 'Travel Agency',
           category_id: '22001',
@@ -1979,7 +1979,7 @@ describe('New MCP Tools', () => {
         },
         {
           transaction_id: 'nc2',
-          amount: -150.0, // Expense
+          amount: 150.0, // Expense (positive in Copilot format)
           date: '2024-07-02',
           name: 'Car Rental',
           category_id: '22002',
@@ -2003,7 +2003,7 @@ describe('New MCP Tools', () => {
         // First trip
         {
           transaction_id: 'st1',
-          amount: -100.0, // Expense
+          amount: 100.0, // Expense (positive in Copilot format)
           date: '2024-04-01',
           name: 'Hotel Mexico',
           category_id: 'travel',
@@ -2013,7 +2013,7 @@ describe('New MCP Tools', () => {
         },
         {
           transaction_id: 'st2',
-          amount: -50.0, // Expense
+          amount: 50.0, // Expense (positive in Copilot format)
           date: '2024-04-02',
           name: 'Restaurant Mexico',
           category_id: 'food_dining',
@@ -2024,7 +2024,7 @@ describe('New MCP Tools', () => {
         // Second trip (>3 days later)
         {
           transaction_id: 'st3',
-          amount: -150.0, // Expense
+          amount: 150.0, // Expense (positive in Copilot format)
           date: '2024-04-10',
           name: 'Hotel Mexico City',
           category_id: 'travel',
@@ -2034,7 +2034,7 @@ describe('New MCP Tools', () => {
         },
         {
           transaction_id: 'st4',
-          amount: -75.0, // Expense
+          amount: 75.0, // Expense (positive in Copilot format)
           date: '2024-04-11',
           name: 'Restaurant Mexico City',
           category_id: 'food_dining',
@@ -2060,7 +2060,7 @@ describe('New MCP Tools', () => {
       const noCityTransactions: Transaction[] = [
         {
           transaction_id: 'ncty1',
-          amount: -100.0, // Expense
+          amount: 100.0, // Expense (positive in Copilot format)
           date: '2024-08-01',
           name: 'Hotel',
           category_id: 'travel',
@@ -2070,7 +2070,7 @@ describe('New MCP Tools', () => {
         },
         {
           transaction_id: 'ncty2',
-          amount: -50.0, // Expense
+          amount: 50.0, // Expense (positive in Copilot format)
           date: '2024-08-02',
           name: 'Restaurant',
           category_id: 'food_dining',
@@ -2097,7 +2097,7 @@ describe('New MCP Tools', () => {
       const transactionsWithRefund: Transaction[] = [
         {
           transaction_id: 'ref1',
-          amount: -200.0, // Expense
+          amount: 200.0, // Expense (positive in Copilot format)
           date: '2024-09-01',
           name: 'Hotel Italy',
           category_id: 'travel',
@@ -2107,7 +2107,7 @@ describe('New MCP Tools', () => {
         },
         {
           transaction_id: 'ref2',
-          amount: 50.0, // Refund (positive = money back)
+          amount: -50.0, // Refund (negative in Copilot format = money coming back)
           date: '2024-09-02',
           name: 'Refund',
           category_id: 'travel',
@@ -2117,7 +2117,7 @@ describe('New MCP Tools', () => {
         },
         {
           transaction_id: 'ref3',
-          amount: -100.0, // Expense
+          amount: 100.0, // Expense (positive in Copilot format)
           date: '2024-09-03',
           name: 'Restaurant',
           category_id: 'food_dining',
@@ -2158,7 +2158,7 @@ describe('New MCP Tools', () => {
       const usaTransactions: Transaction[] = [
         {
           transaction_id: 'usa1',
-          amount: -100.0, // Expense
+          amount: 100.0, // Expense (positive in Copilot format)
           date: '2024-10-01',
           name: 'Hotel',
           category_id: 'travel',
@@ -2218,7 +2218,7 @@ describe('New MCP Tools', () => {
       const singleDayTrip: Transaction[] = [
         {
           transaction_id: 'sd1',
-          amount: -50.0, // Expense
+          amount: 50.0, // Expense (positive in Copilot format)
           date: '2024-11-15',
           name: 'Day Trip',
           category_id: 'travel',
@@ -2248,7 +2248,7 @@ describe('New MCP Tools', () => {
       const gappyTrip: Transaction[] = [
         {
           transaction_id: 'gt1',
-          amount: -100.0, // Expense
+          amount: 100.0, // Expense (positive in Copilot format)
           date: '2024-12-01',
           name: 'Hotel Day 1',
           category_id: 'travel',
@@ -2259,7 +2259,7 @@ describe('New MCP Tools', () => {
         // 3 day gap - should still be same trip
         {
           transaction_id: 'gt2',
-          amount: -75.0, // Expense
+          amount: 75.0, // Expense (positive in Copilot format)
           date: '2024-12-04',
           name: 'Restaurant Day 4',
           category_id: 'food_dining',
@@ -2289,7 +2289,7 @@ describe('New MCP Tools', () => {
       const unknownCountryTransactions: Transaction[] = [
         {
           transaction_id: 'uc1',
-          amount: -100.0, // Expense
+          amount: 100.0, // Expense (positive in Copilot format)
           date: '2024-01-15',
           name: 'Mystery Place',
           category_id: 'travel',
@@ -2298,7 +2298,7 @@ describe('New MCP Tools', () => {
         },
         {
           transaction_id: 'uc2',
-          amount: -50.0, // Expense
+          amount: 50.0, // Expense (positive in Copilot format)
           date: '2024-01-16',
           name: 'Mystery Restaurant',
           category_id: 'travel',
@@ -3163,7 +3163,7 @@ describe('New MCP Tools', () => {
       expect(result.transaction).toBeDefined();
       if (result.transaction) {
         expect(result.transaction.transaction_id).toBe('txn1');
-        expect(result.transaction.amount).toBe(-50.0); // Expense (negative)
+        expect(result.transaction.amount).toBe(50.0); // Expense (positive in Copilot format)
         expect(result.transaction.name).toBe('Coffee Shop');
       }
     });
@@ -3358,7 +3358,7 @@ describe('New MCP Tools', () => {
         // Negative unrealistic transaction (large income)
         {
           transaction_id: 'unrealistic2',
-          amount: -1500000.0,
+          amount: 1500000.0,
           date: '2024-01-28',
           name: 'Suspicious Income',
           category_id: 'income',

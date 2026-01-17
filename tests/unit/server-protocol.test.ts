@@ -12,11 +12,11 @@ import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import type { Transaction, Account } from '../../src/models/index.js';
 
 // Mock data for testing
-// Standard accounting: negative = expenses, positive = income/refunds
+// Copilot Money format: positive = expenses, negative = income/refunds
 const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn1',
-    amount: -50.0, // Expense
+    amount: 50.0, // Expense (positive in Copilot format)
     date: '2025-01-15',
     name: 'Coffee Shop',
     category_id: 'food_dining',
@@ -25,7 +25,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn2',
-    amount: -120.5, // Expense
+    amount: 120.5, // Expense (positive in Copilot format)
     date: '2025-01-20',
     name: 'Grocery Store',
     category_id: 'groceries',
@@ -34,7 +34,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn3',
-    amount: -10.0, // Expense
+    amount: 10.0, // Expense (positive in Copilot format)
     date: '2024-12-15',
     name: 'Parking',
     category_id: 'transportation',
@@ -50,7 +50,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn5',
-    amount: -100.0, // Expense
+    amount: 100.0, // Expense (positive in Copilot format)
     date: '2025-01-10',
     name: 'Foreign Purchase',
     category_id: 'shopping',

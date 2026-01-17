@@ -7,11 +7,11 @@ import { CopilotDatabase } from '../../src/core/database.js';
 import type { Transaction, Account, Recurring } from '../../src/models/index.js';
 
 // Mock the decoder functions
-// Standard accounting: negative = expenses, positive = income
+// Copilot Money format: positive = expenses, negative = income
 const mockTransactions: Transaction[] = [
   {
     transaction_id: 'txn1',
-    amount: -50.0, // Expense
+    amount: 50.0, // Expense (positive in Copilot format)
     date: '2024-01-15',
     name: 'Coffee Shop',
     category_id: 'food_dining',
@@ -19,7 +19,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn2',
-    amount: -120.5, // Expense
+    amount: 120.5, // Expense (positive in Copilot format)
     date: '2024-01-20',
     name: 'Grocery Store',
     category_id: 'groceries',
@@ -27,7 +27,7 @@ const mockTransactions: Transaction[] = [
   },
   {
     transaction_id: 'txn3',
-    amount: -25.0, // Expense
+    amount: 25.0, // Expense (positive in Copilot format)
     date: '2024-02-10',
     original_name: 'Fast Food',
     category_id: 'food_dining',
