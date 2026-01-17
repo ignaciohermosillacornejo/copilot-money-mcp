@@ -37,14 +37,6 @@
       "description": "Get all accounts with balances, optionally filter by account type (checking, savings, credit, investment)"
     },
     {
-      "name": "get_spending",
-      "description": "Unified spending aggregation tool."
-    },
-    {
-      "name": "get_account_balance",
-      "description": "Get balance and details for a specific account by ID"
-    },
-    {
       "name": "get_categories",
       "description": "Get all categories found in transactions with human-readable names, transaction counts, and total amounts"
     },
@@ -59,98 +51,6 @@
     {
       "name": "get_goals",
       "description": "Get financial goals from Copilot's native goal tracking."
-    },
-    {
-      "name": "get_income",
-      "description": "Get income transactions (deposits, paychecks, refunds) with total income and breakdown by source"
-    },
-    {
-      "name": "compare_periods",
-      "description": "Compare spending and income between two time periods with totals, percentage changes, and category-by-category comparison"
-    },
-    {
-      "name": "get_trips",
-      "description": "Detect and group transactions into trips with location, duration, total spent, and category breakdown"
-    },
-    {
-      "name": "get_merchant_analytics",
-      "description": "Unified merchant analytics tool."
-    },
-    {
-      "name": "get_unusual_transactions",
-      "description": "Detect unusual/anomalous transactions significantly above average for merchant or category"
-    },
-    {
-      "name": "export_transactions",
-      "description": "Export transactions to CSV or JSON format for external analysis"
-    },
-    {
-      "name": "get_data_quality_report",
-      "description": "Generate comprehensive data quality report to identify issues like unresolved categories, currency conversion problems, duplicate accounts, and suspicious categorizations. Supports configurable transaction limits (up to 100K) and pagination for large datasets."
-    },
-    {
-      "name": "get_investment_prices",
-      "description": "Get current/latest prices for investments (stocks, crypto, ETFs)."
-    },
-    {
-      "name": "get_investment_splits",
-      "description": "Get stock splits for investments."
-    },
-    {
-      "name": "get_connected_institutions",
-      "description": "Get connected financial institutions (Plaid items)."
-    },
-    {
-      "name": "get_average_transaction_size",
-      "description": "Calculate average transaction amounts grouped by category or merchant."
-    },
-    {
-      "name": "get_category_trends",
-      "description": "Track spending trends by category, comparing current vs previous period."
-    },
-    {
-      "name": "get_budget_analytics",
-      "description": "Unified budget analytics tool."
-    },
-    {
-      "name": "get_investment_analytics",
-      "description": "Unified investment analytics tool."
-    },
-    {
-      "name": "get_portfolio_allocation",
-      "description": "Get portfolio allocation across investment accounts and securities."
-    },
-    {
-      "name": "get_goal_analytics",
-      "description": "Unified goal analytics tool."
-    },
-    {
-      "name": "get_goal_details",
-      "description": "Get goal details with optional includes."
-    },
-    {
-      "name": "get_goal_milestones",
-      "description": "Track goal milestone achievements (25%, 50%, 75%, 100%)."
-    },
-    {
-      "name": "get_account_analytics",
-      "description": "Unified account analytics tool."
-    },
-    {
-      "name": "get_year_over_year",
-      "description": "Compare spending and income year-over-year."
-    },
-    {
-      "name": "get_net_worth",
-      "description": "Calculate total net worth from all accounts (assets - liabilities)."
-    },
-    {
-      "name": "get_savings_rate",
-      "description": "Calculate savings rate (income - spending) / income for a period."
-    },
-    {
-      "name": "get_cash_flow",
-      "description": "Analyze cash flow showing money in vs money out for a period."
     }
   ],
   "tools_generated": false,

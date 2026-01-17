@@ -130,13 +130,6 @@ describe('CopilotMoneyServer E2E', () => {
       }
     });
 
-    test('search_transactions tool works', async () => {
-      const result = await tools.searchTransactions('coffee', 10);
-
-      expect(result.count).toBeDefined();
-      expect(result.transactions).toBeDefined();
-    });
-
     test('get_accounts tool works', async () => {
       const result = await tools.getAccounts();
 
@@ -145,50 +138,13 @@ describe('CopilotMoneyServer E2E', () => {
       expect(result.accounts).toBeDefined();
       expect(result.count).toBe(result.accounts.length);
     });
-
-    test('get_spending_by_category tool works', async () => {
-      const result = await tools.getSpendingByCategory({
-        start_date: '2025-01-01',
-        end_date: '2025-01-31',
-      });
-
-      expect(result.period).toBeDefined();
-      expect(result.total_spending).toBeDefined();
-      expect(result.categories).toBeDefined();
-
-      // Verify categories are sorted
-      const categories = result.categories;
-      for (let i = 0; i < categories.length - 1; i++) {
-        expect(categories[i].total_spending >= categories[i + 1].total_spending).toBe(true);
-      }
-    });
-
-    test('get_account_balance tool works', async () => {
-      const result = await tools.getAccountBalance('acc1');
-
-      expect(result.account_id).toBe('acc1');
-      expect(result.current_balance).toBeDefined();
-    });
-
-    test('get_account_balance throws for invalid account', async () => {
-      await expect(tools.getAccountBalance('nonexistent_123')).rejects.toThrow('Account not found');
-    });
   });
 
   describe('response serialization', () => {
     test('all tool responses can be serialized to JSON', async () => {
       const toolsToTest = [
         { func: () => tools.getTransactions({ limit: 5 }) },
-        { func: () => tools.searchTransactions('test') },
         { func: () => tools.getAccounts() },
-        {
-          func: () =>
-            tools.getSpendingByCategory({
-              start_date: '2025-01-01',
-              end_date: '2025-01-31',
-            }),
-        },
-        { func: () => tools.getAccountBalance('acc1') },
       ];
 
       for (const { func } of toolsToTest) {
@@ -201,17 +157,6 @@ describe('CopilotMoneyServer E2E', () => {
   });
 
   describe('data accuracy', () => {
-    test('spending aggregation is mathematically correct', async () => {
-      const result = await tools.getSpendingByCategory({
-        start_date: '2025-01-01',
-        end_date: '2025-01-31',
-      });
-
-      const categoryTotal = result.categories.reduce((sum, cat) => sum + cat.total_spending, 0);
-
-      expect(Math.abs(result.total_spending - categoryTotal)).toBeLessThan(0.01);
-    });
-
     test('account balance totals are correct', async () => {
       const result = await tools.getAccounts();
 
@@ -219,27 +164,9 @@ describe('CopilotMoneyServer E2E', () => {
 
       expect(Math.abs(result.total_balance - calculatedTotal)).toBeLessThan(0.01);
     });
-
-    test('category transaction counts are accurate', async () => {
-      const result = await tools.getSpendingByCategory({
-        start_date: '2025-01-01',
-        end_date: '2025-01-31',
-      });
-
-      for (const cat of result.categories) {
-        expect(cat.transaction_count).toBeGreaterThan(0);
-        expect(cat.total_spending).toBeGreaterThan(0);
-      }
-    });
   });
 
   describe('empty results', () => {
-    test('handles empty transaction results gracefully', async () => {
-      const result = await tools.searchTransactions('xyznonexistent123');
-      expect(result.count).toBe(0);
-      expect(result.transactions).toEqual([]);
-    });
-
     test('handles impossible date ranges', async () => {
       const result = await tools.getTransactions({
         start_date: '1900-01-01',
