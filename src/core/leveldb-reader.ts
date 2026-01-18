@@ -323,13 +323,17 @@ function parseBinaryKey(keyBuffer: Buffer): { collection: string; documentId: st
   }
 
   const documentId = segments[segments.length - 1];
-  const collection = segments[segments.length - 2];
+  const lastCollection = segments[segments.length - 2];
 
   // Skip certain collections that aren't actual document storage
   // (skipCollections is declared at the top of this function)
-  if (!documentId || !collection || skipCollections.includes(collection)) {
+  if (!documentId || !lastCollection || skipCollections.includes(lastCollection)) {
     return null;
   }
+
+  // Return full collection path (all segments except documentId) for subcollections
+  // e.g., users/{user_id}/financial_goals/{goal_id}/financial_goal_history
+  const collection = segments.slice(0, -1).join('/');
 
   return { collection, documentId };
 }
