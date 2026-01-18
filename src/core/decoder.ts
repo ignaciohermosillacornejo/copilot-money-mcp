@@ -864,7 +864,8 @@ function processGoalHistory(
     return null;
   }
 
-  const extractedGoalId = collection.split('/')[1] ?? getString(fields, 'goal_id');
+  // Collection path: users/{user_id}/financial_goals/{goal_id}/financial_goal_history
+  const extractedGoalId = collection.split('/')[3] ?? getString(fields, 'goal_id');
 
   const historyData: Record<string, unknown> = {
     month,
@@ -877,25 +878,47 @@ function processGoalHistory(
     if (value) historyData[field] = value;
   }
 
+  // Try direct current_amount field first (may not exist)
   const currentAmount = getNumber(fields, 'current_amount');
   if (currentAmount !== undefined) historyData.current_amount = currentAmount;
 
   const targetAmount = getNumber(fields, 'target_amount');
   if (targetAmount !== undefined) historyData.target_amount = targetAmount;
 
+  // Extract total_contribution if available
+  const totalContribution = getNumber(fields, 'total_contribution');
+  if (totalContribution !== undefined) {
+    historyData.total_contribution = totalContribution;
+  }
+
+  // Parse daily_data - Copilot stores "balance" not "amount" in each daily entry
   const dailyDataMap = getMap(fields, 'daily_data');
   if (dailyDataMap) {
     const dailyData: Record<string, DailySnapshot> = {};
+    let latestDate = '';
+    let latestBalance: number | undefined;
+
     for (const [date, value] of dailyDataMap) {
       if (date.startsWith(month) && value.type === 'map') {
-        const amount = getNumber(value.value, 'amount');
-        if (amount !== undefined) {
-          dailyData[date] = { amount, date };
+        // Try "balance" first (actual Copilot format), then "amount" (fallback)
+        const balance = getNumber(value.value, 'balance') ?? getNumber(value.value, 'amount');
+        if (balance !== undefined) {
+          dailyData[date] = { amount: balance, date };
+          // Track the latest date to get current_amount
+          if (date > latestDate) {
+            latestDate = date;
+            latestBalance = balance;
+          }
         }
       }
     }
     if (Object.keys(dailyData).length > 0) {
       historyData.daily_data = dailyData;
+    }
+
+    // If current_amount wasn't set directly, use the latest balance from daily_data
+    if (currentAmount === undefined && latestBalance !== undefined) {
+      historyData.current_amount = latestBalance;
     }
   }
 
@@ -1104,6 +1127,14 @@ function processUserAccount(
  * @param dbPath - Path to the LevelDB database
  * @returns All collections decoded and deduplicated
  */
+/**
+ * Helper to check if a collection path matches a target collection name.
+ * Handles both simple names ("transactions") and full paths ("users/{user_id}/transactions").
+ */
+function collectionMatches(collection: string, target: string): boolean {
+  return collection === target || collection.endsWith(`/${target}`);
+}
+
 export async function decodeAllCollections(dbPath: string): Promise<AllCollectionsResult> {
   const rawTransactions: Transaction[] = [];
   const rawAccounts: Account[] = [];
@@ -1122,39 +1153,43 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     const { fields, documentId, collection, key } = doc;
 
     // Route document to appropriate processor based on collection
-    if (collection === 'transactions') {
+    // Note: User accounts (users/{user_id}/accounts) must be checked before regular accounts
+    if (collection.includes('users/') && collection.endsWith('/accounts')) {
+      const userAccount = processUserAccount(fields, documentId, collection);
+      if (userAccount) rawUserAccounts.push(userAccount);
+    } else if (collectionMatches(collection, 'transactions')) {
       const txn = processTransaction(fields, documentId);
       if (txn) rawTransactions.push(txn);
-    } else if (collection === 'accounts') {
+    } else if (collectionMatches(collection, 'accounts')) {
       const acc = processAccount(fields, documentId);
       if (acc) rawAccounts.push(acc);
-    } else if (collection === 'recurring') {
+    } else if (collectionMatches(collection, 'recurring')) {
       const rec = processRecurring(fields, documentId);
       if (rec) rawRecurring.push(rec);
-    } else if (collection === 'budgets') {
+    } else if (collectionMatches(collection, 'budgets')) {
       const budget = processBudget(fields, documentId);
       if (budget) rawBudgets.push(budget);
-    } else if (collection === 'financial_goals') {
+    } else if (collectionMatches(collection, 'financial_goals')) {
       const goal = processGoal(fields, documentId);
       if (goal) rawGoals.push(goal);
     } else if (collection.endsWith('/financial_goal_history')) {
       const history = processGoalHistory(fields, documentId, collection);
       if (history) rawGoalHistory.push(history);
-    } else if (collection === 'investment_prices' || collection.includes('investment_prices/')) {
+    } else if (
+      collectionMatches(collection, 'investment_prices') ||
+      collection.includes('investment_prices/')
+    ) {
       const price = processInvestmentPrice(fields, documentId, key);
       if (price) rawInvestmentPrices.push(price);
-    } else if (collection === 'investment_splits') {
+    } else if (collectionMatches(collection, 'investment_splits')) {
       const split = processInvestmentSplit(fields, documentId);
       if (split) rawInvestmentSplits.push(split);
-    } else if (collection === 'items') {
+    } else if (collectionMatches(collection, 'items')) {
       const item = processItem(fields, documentId);
       if (item) rawItems.push(item);
-    } else if (collection === 'categories') {
+    } else if (collectionMatches(collection, 'categories')) {
       const category = processCategory(fields, documentId);
       if (category) rawCategories.push(category);
-    } else if (collection.includes('users/') && collection.endsWith('/accounts')) {
-      const userAccount = processUserAccount(fields, documentId, collection);
-      if (userAccount) rawUserAccounts.push(userAccount);
     }
   }
 

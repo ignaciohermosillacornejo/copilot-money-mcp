@@ -1281,11 +1281,13 @@ export class CopilotMoneyTools {
   async getGoals(options: { active_only?: boolean } = {}): Promise<{
     count: number;
     total_target: number;
+    total_saved: number;
     goals: Array<{
       goal_id: string;
       name?: string;
       emoji?: string;
       target_amount?: number;
+      current_amount?: number;
       monthly_contribution?: number;
       status?: string;
       tracking_type?: string;
@@ -1299,22 +1301,41 @@ export class CopilotMoneyTools {
 
     const goals = await this.db.getGoals(active_only);
 
-    // Calculate total target amount across all goals
+    // Get goal history to join current_amount with goals
+    // We need the most recent month's data for each goal
+    const goalHistory = await this.db.getGoalHistory();
+
+    // Build a map of goal_id -> latest current_amount
+    const currentAmountMap = new Map<string, number>();
+    for (const history of goalHistory) {
+      const existing = currentAmountMap.get(history.goal_id);
+      // Only update if this is a newer month or no existing value
+      if (existing === undefined && history.current_amount !== undefined) {
+        currentAmountMap.set(history.goal_id, history.current_amount);
+      }
+    }
+
+    // Calculate totals across all goals
     let totalTarget = 0;
+    let totalSaved = 0;
     for (const goal of goals) {
       if (goal.savings?.target_amount) {
         totalTarget += goal.savings.target_amount;
       }
+      const currentAmount = currentAmountMap.get(goal.goal_id) ?? 0;
+      totalSaved += currentAmount;
     }
 
     return {
       count: goals.length,
       total_target: roundAmount(totalTarget),
+      total_saved: roundAmount(totalSaved),
       goals: goals.map((g) => ({
         goal_id: g.goal_id,
         name: g.name,
         emoji: g.emoji,
         target_amount: g.savings?.target_amount,
+        current_amount: currentAmountMap.get(g.goal_id),
         monthly_contribution: g.savings?.tracking_type_monthly_contribution,
         status: g.savings?.status,
         tracking_type: g.savings?.tracking_type,
