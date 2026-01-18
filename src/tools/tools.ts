@@ -1305,13 +1305,18 @@ export class CopilotMoneyTools {
     // We need the most recent month's data for each goal
     const goalHistory = await this.db.getGoalHistory();
 
-    // Build a map of goal_id -> latest current_amount
-    const currentAmountMap = new Map<string, number>();
+    // Build a map of goal_id -> { month, current_amount } tracking the latest month
+    const currentAmountMap = new Map<string, { month: string; amount: number }>();
     for (const history of goalHistory) {
+      if (history.current_amount === undefined) continue;
+
       const existing = currentAmountMap.get(history.goal_id);
-      // Only update if this is a newer month or no existing value
-      if (existing === undefined && history.current_amount !== undefined) {
-        currentAmountMap.set(history.goal_id, history.current_amount);
+      // Update if no existing value OR this is a newer month
+      if (!existing || history.month > existing.month) {
+        currentAmountMap.set(history.goal_id, {
+          month: history.month,
+          amount: history.current_amount,
+        });
       }
     }
 
@@ -1322,7 +1327,7 @@ export class CopilotMoneyTools {
       if (goal.savings?.target_amount) {
         totalTarget += goal.savings.target_amount;
       }
-      const currentAmount = currentAmountMap.get(goal.goal_id) ?? 0;
+      const currentAmount = currentAmountMap.get(goal.goal_id)?.amount ?? 0;
       totalSaved += currentAmount;
     }
 
@@ -1335,7 +1340,7 @@ export class CopilotMoneyTools {
         name: g.name,
         emoji: g.emoji,
         target_amount: g.savings?.target_amount,
-        current_amount: currentAmountMap.get(g.goal_id),
+        current_amount: currentAmountMap.get(g.goal_id)?.amount,
         monthly_contribution: g.savings?.tracking_type_monthly_contribution,
         status: g.savings?.status,
         tracking_type: g.savings?.tracking_type,
