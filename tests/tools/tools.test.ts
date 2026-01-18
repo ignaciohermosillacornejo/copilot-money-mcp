@@ -489,9 +489,56 @@ describe('CopilotMoneyTools', () => {
         result.data as { categories: { transaction_count: number; total_amount: number }[] }
       ).categories;
 
+      // All categories should have valid count and amount fields (including $0)
       for (const cat of categories) {
-        expect(cat.transaction_count).toBeGreaterThan(0);
+        expect(cat.transaction_count).toBeGreaterThanOrEqual(0);
         expect(cat.total_amount).toBeGreaterThanOrEqual(0);
+      }
+
+      // Should include categories with transactions
+      const categoriesWithTransactions = categories.filter((c) => c.transaction_count > 0);
+      expect(categoriesWithTransactions.length).toBeGreaterThan(0);
+    });
+
+    test('filters by period', async () => {
+      const result = await tools.getCategories({ period: 'this_month' });
+      expect(result.view).toBe('list');
+      expect(result.period).toBe('this_month');
+    });
+
+    test('filters by date range', async () => {
+      const result = await tools.getCategories({
+        start_date: '2024-03-01',
+        end_date: '2024-03-31',
+      });
+      expect(result.view).toBe('list');
+      expect(result.period).toContain('2024-03');
+    });
+
+    test('includes parent category info', async () => {
+      const result = await tools.getCategories();
+      const categories = (
+        result.data as {
+          categories: {
+            category_id: string;
+            parent_id: string | null;
+            parent_name: string | null;
+          }[];
+        }
+      ).categories;
+
+      // Find a subcategory that should have a parent
+      const restaurants = categories.find((c) => c.category_id === 'restaurants');
+      if (restaurants) {
+        expect(restaurants.parent_id).toBe('food_and_drink');
+        expect(restaurants.parent_name).toBe('Food & Drink');
+      }
+
+      // Root categories should have null parent
+      const foodDrink = categories.find((c) => c.category_id === 'food_and_drink');
+      if (foodDrink) {
+        expect(foodDrink.parent_id).toBeNull();
+        expect(foodDrink.parent_name).toBeNull();
       }
     });
   });

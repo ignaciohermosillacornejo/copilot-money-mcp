@@ -12,6 +12,8 @@ import { getTransactionDisplayName, getRecurringDisplayName } from '../models/in
 import {
   getRootCategories,
   getCategoryChildren,
+  getCategory,
+  getCategoryParent,
   searchCategories as searchCategoriesInHierarchy,
 } from '../models/category-full.js';
 
@@ -790,13 +792,24 @@ export class CopilotMoneyTools {
       parent_id?: string;
       query?: string;
       type?: 'income' | 'expense' | 'transfer';
+      period?: string;
+      start_date?: string;
+      end_date?: string;
     } = {}
   ): Promise<{
     view: string;
     count: number;
+    period?: string;
     data: unknown;
   }> {
-    const { view = 'list', parent_id, query, type } = options;
+    const { view = 'list', parent_id, query, type, period } = options;
+    let start_date = validateDate(options.start_date, 'start_date');
+    let end_date = validateDate(options.end_date, 'end_date');
+
+    // If period is specified, parse it to start/end dates
+    if (period) {
+      [start_date, end_date] = parsePeriod(period);
+    }
 
     // If parent_id is specified, get subcategories
     if (parent_id) {
@@ -890,12 +903,17 @@ export class CopilotMoneyTools {
 
       case 'list':
       default: {
-        const allTransactions = await this.db.getAllTransactions();
+        // Get transactions with date filtering if period/dates specified
+        const transactions = await this.db.getTransactions({
+          startDate: start_date,
+          endDate: end_date,
+          limit: 50000, // Get all for aggregation
+        });
 
         // Count transactions and amounts per category
         const categoryStats = new Map<string, { count: number; totalAmount: number }>();
 
-        for (const txn of allTransactions) {
+        for (const txn of transactions) {
           const categoryId = getCategoryIdOrDefault(txn.category_id);
           const stats = categoryStats.get(categoryId) || {
             count: 0,
@@ -906,21 +924,47 @@ export class CopilotMoneyTools {
           categoryStats.set(categoryId, stats);
         }
 
-        // Convert to list
+        // Include all known categories, even those with $0 (like UI does)
+        const allKnownCategories = getRootCategories();
+        for (const rootCat of allKnownCategories) {
+          // Add root category if not already present
+          if (!categoryStats.has(rootCat.id)) {
+            categoryStats.set(rootCat.id, { count: 0, totalAmount: 0 });
+          }
+          // Add all child categories
+          const children = getCategoryChildren(rootCat.id);
+          for (const child of children) {
+            if (!categoryStats.has(child.id)) {
+              categoryStats.set(child.id, { count: 0, totalAmount: 0 });
+            }
+          }
+        }
+
+        // Convert to list with parent category info
         const categories = (
           await Promise.all(
-            Array.from(categoryStats.entries()).map(async ([category_id, stats]) => ({
-              category_id,
-              category_name: await this.resolveCategoryName(category_id),
-              transaction_count: stats.count,
-              total_amount: roundAmount(stats.totalAmount),
-            }))
+            Array.from(categoryStats.entries()).map(async ([category_id, stats]) => {
+              const categoryNode = getCategory(category_id);
+              const parentNode = getCategoryParent(category_id);
+              return {
+                category_id,
+                category_name: await this.resolveCategoryName(category_id),
+                parent_id: parentNode?.id ?? null,
+                parent_name: parentNode?.display_name ?? null,
+                transaction_count: stats.count,
+                total_amount: roundAmount(stats.totalAmount),
+                type: categoryNode?.type ?? null,
+              };
+            })
           )
-        ).sort((a, b) => b.transaction_count - a.transaction_count);
+        ).sort((a, b) => b.total_amount - a.total_amount); // Sort by amount (like UI)
 
         return {
           view: 'list',
           count: categories.length,
+          period:
+            period ??
+            (start_date || end_date ? `${start_date ?? ''} to ${end_date ?? ''}` : 'all_time'),
           data: { categories },
         };
       }
@@ -1549,10 +1593,11 @@ export function createToolSchemas(): ToolSchema[] {
       name: 'get_categories',
       description:
         'Unified category retrieval tool. Supports multiple views: ' +
-        'list (default) - categories used in transactions with counts/amounts; ' +
+        'list (default) - categories with transaction counts/amounts for a time period; ' +
         'tree - full Plaid category taxonomy as hierarchical tree; ' +
         'search - search categories by keyword. Use parent_id to get subcategories. ' +
-        'Replaces get_category_hierarchy, get_subcategories, search_categories.',
+        'For list view, use period (e.g., "this_month") or start_date/end_date to filter by date. ' +
+        'Includes all categories, even those with $0 spent (matching UI behavior).',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1561,6 +1606,20 @@ export function createToolSchemas(): ToolSchema[] {
             enum: ['list', 'tree', 'search'],
             description:
               'View mode: list (categories in transactions), tree (full hierarchy), search (find by keyword)',
+          },
+          period: {
+            type: 'string',
+            description:
+              "Time period for list view (e.g., 'this_month', 'last_month', 'last_30_days', 'this_year'). " +
+              'Takes precedence over start_date/end_date if provided.',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Start date for list view (YYYY-MM-DD format)',
+          },
+          end_date: {
+            type: 'string',
+            description: 'End date for list view (YYYY-MM-DD format)',
           },
           parent_id: {
             type: 'string',
