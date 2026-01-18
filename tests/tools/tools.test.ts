@@ -124,6 +124,74 @@ const mockUserAccounts = [
   },
 ];
 
+// Mock goals for testing
+const mockGoals = [
+  {
+    goal_id: 'goal1',
+    name: 'Emergency Fund',
+    emoji: '🏦',
+    created_date: '2024-01-01',
+    savings: {
+      target_amount: 10000,
+      tracking_type: 'monthly_contribution',
+      tracking_type_monthly_contribution: 500,
+      start_date: '2024-01-01',
+      status: 'active',
+      is_ongoing: false,
+      inflates_budget: true,
+    },
+  },
+  {
+    goal_id: 'goal2',
+    name: 'Vacation Fund',
+    emoji: '✈️',
+    created_date: '2024-02-01',
+    savings: {
+      target_amount: 3000,
+      tracking_type: 'end_date',
+      start_date: '2024-02-01',
+      status: 'active',
+      is_ongoing: true,
+      inflates_budget: false,
+    },
+  },
+];
+
+// Mock goal history - deliberately in WRONG order (oldest first) to test the fix
+// This ensures we don't rely on sort order to get the latest month
+const mockGoalHistoryWrongOrder = [
+  {
+    goal_id: 'goal1',
+    month: '2024-01', // Older month
+    current_amount: 500,
+    user_id: 'user1',
+  },
+  {
+    goal_id: 'goal1',
+    month: '2024-03', // Latest month - should use this value
+    current_amount: 1500,
+    user_id: 'user1',
+  },
+  {
+    goal_id: 'goal1',
+    month: '2024-02', // Middle month
+    current_amount: 1000,
+    user_id: 'user1',
+  },
+  {
+    goal_id: 'goal2',
+    month: '2024-02', // Older month
+    current_amount: 200,
+    user_id: 'user1',
+  },
+  {
+    goal_id: 'goal2',
+    month: '2024-03', // Latest month - should use this value
+    current_amount: 800,
+    user_id: 'user1',
+  },
+];
+
 describe('CopilotMoneyTools', () => {
   let db: CopilotDatabase;
   let tools: CopilotMoneyTools;
@@ -425,6 +493,98 @@ describe('CopilotMoneyTools', () => {
         expect(cat.transaction_count).toBeGreaterThan(0);
         expect(cat.total_amount).toBeGreaterThanOrEqual(0);
       }
+    });
+  });
+
+  describe('getGoals', () => {
+    test('returns goals with current_amount from goal history', async () => {
+      (db as any)._goals = [...mockGoals];
+      (db as any)._goalHistory = [...mockGoalHistoryWrongOrder];
+
+      const result = await tools.getGoals({});
+
+      expect(result.count).toBe(2);
+      expect(result.total_target).toBe(13000);
+      expect(result.total_saved).toBe(2300); // 1500 + 800
+
+      const emergencyFund = result.goals.find((g) => g.goal_id === 'goal1');
+      expect(emergencyFund?.name).toBe('Emergency Fund');
+      expect(emergencyFund?.target_amount).toBe(10000);
+      expect(emergencyFund?.current_amount).toBe(1500); // Latest month (2024-03)
+      expect(emergencyFund?.monthly_contribution).toBe(500);
+
+      const vacationFund = result.goals.find((g) => g.goal_id === 'goal2');
+      expect(vacationFund?.name).toBe('Vacation Fund');
+      expect(vacationFund?.target_amount).toBe(3000);
+      expect(vacationFund?.current_amount).toBe(800); // Latest month (2024-03)
+    });
+
+    test('uses latest month regardless of history order (regression test)', async () => {
+      // This test specifically guards against the bug where we took the first
+      // history entry instead of the latest month's entry
+      (db as any)._goals = [
+        { goal_id: 'test_goal', name: 'Test', savings: { target_amount: 1000 } },
+      ];
+
+      // Deliberately put oldest entry FIRST - this is the bug scenario
+      (db as any)._goalHistory = [
+        { goal_id: 'test_goal', month: '2023-01', current_amount: 100 }, // OLD - first in array
+        { goal_id: 'test_goal', month: '2023-06', current_amount: 600 }, // NEWER
+        { goal_id: 'test_goal', month: '2023-12', current_amount: 999 }, // LATEST - should use this
+        { goal_id: 'test_goal', month: '2023-03', current_amount: 300 }, // OLD
+      ];
+
+      const result = await tools.getGoals({});
+
+      // Must use 2023-12's value (999), NOT 2023-01's value (100)
+      expect(result.goals[0]?.current_amount).toBe(999);
+      expect(result.total_saved).toBe(999);
+    });
+
+    test('handles goals with no history', async () => {
+      (db as any)._goals = [...mockGoals];
+      (db as any)._goalHistory = []; // No history
+
+      const result = await tools.getGoals({});
+
+      expect(result.count).toBe(2);
+      expect(result.total_saved).toBe(0);
+      expect(result.goals[0]?.current_amount).toBeUndefined();
+      expect(result.goals[1]?.current_amount).toBeUndefined();
+    });
+
+    test('handles history entries with undefined current_amount', async () => {
+      (db as any)._goals = [{ goal_id: 'goal1', name: 'Test', savings: { target_amount: 1000 } }];
+      (db as any)._goalHistory = [
+        { goal_id: 'goal1', month: '2024-01' }, // No current_amount
+        { goal_id: 'goal1', month: '2024-02', current_amount: 500 },
+        { goal_id: 'goal1', month: '2024-03' }, // No current_amount
+      ];
+
+      const result = await tools.getGoals({});
+
+      // Should use 2024-02's value since it's the latest with a defined current_amount
+      expect(result.goals[0]?.current_amount).toBe(500);
+    });
+
+    test('filters active goals when active_only is true', async () => {
+      const goalsWithInactive = [
+        ...mockGoals,
+        {
+          goal_id: 'goal3',
+          name: 'Paused Goal',
+          savings: { target_amount: 5000, status: 'paused' },
+        },
+      ];
+      (db as any)._goals = goalsWithInactive;
+      (db as any)._goalHistory = [];
+
+      const result = await tools.getGoals({ active_only: true });
+
+      expect(result.count).toBe(2);
+      expect(result.goals.map((g) => g.name)).toContain('Emergency Fund');
+      expect(result.goals.map((g) => g.name)).toContain('Vacation Fund');
+      expect(result.goals.map((g) => g.name)).not.toContain('Paused Goal');
     });
   });
 });
