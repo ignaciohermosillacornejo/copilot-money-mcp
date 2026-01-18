@@ -427,6 +427,107 @@ describe('CopilotMoneyTools', () => {
       }
     });
   });
+
+  describe('getBudgets', () => {
+    test('returns budgets with category names resolved', async () => {
+      (db as any)._budgets = [
+        {
+          budget_id: 'budget1',
+          name: 'Food Budget',
+          amount: 500,
+          period: 'monthly',
+          category_id: 'food_and_drink',
+          is_active: true,
+        },
+      ];
+      (db as any)._userCategories = [];
+
+      const result = await tools.getBudgets({});
+
+      expect(result.count).toBe(1);
+      expect(result.budgets[0].category_name).toBe('Food & Drink');
+    });
+
+    test('filters out budgets with orphaned category references', async () => {
+      (db as any)._budgets = [
+        {
+          budget_id: 'valid_plaid',
+          amount: 100,
+          category_id: 'food_and_drink', // Known Plaid category
+          is_active: true,
+        },
+        {
+          budget_id: 'valid_user',
+          amount: 200,
+          category_id: 'user_cat_1', // User-defined category
+          is_active: true,
+        },
+        {
+          budget_id: 'orphan',
+          amount: 50,
+          category_id: 'rXFkilafMIseI6OMZ6ze', // Orphaned (deleted category)
+          is_active: true,
+        },
+        {
+          budget_id: 'no_category',
+          amount: 75, // No category - should keep
+          is_active: true,
+        },
+      ];
+      // Set up user category map (must set the cache directly as _categoryNameMap)
+      (db as any)._categoryNameMap = new Map([['user_cat_1', 'My Custom Category']]);
+
+      const result = await tools.getBudgets({});
+
+      expect(result.count).toBe(3);
+      expect(result.budgets.map((b) => b.budget_id)).toContain('valid_plaid');
+      expect(result.budgets.map((b) => b.budget_id)).toContain('valid_user');
+      expect(result.budgets.map((b) => b.budget_id)).toContain('no_category');
+      expect(result.budgets.map((b) => b.budget_id)).not.toContain('orphan');
+    });
+
+    test('calculates total_budgeted excluding orphaned budgets', async () => {
+      (db as any)._budgets = [
+        {
+          budget_id: 'valid',
+          amount: 100,
+          period: 'monthly',
+          category_id: 'food_and_drink',
+          is_active: true,
+        },
+        {
+          budget_id: 'orphan',
+          amount: 9999, // Should not be included in total
+          period: 'monthly',
+          category_id: 'deleted_category_id_xyz',
+          is_active: true,
+        },
+      ];
+      (db as any)._userCategories = [];
+
+      const result = await tools.getBudgets({});
+
+      expect(result.count).toBe(1);
+      expect(result.total_budgeted).toBe(100);
+    });
+
+    test('keeps budgets with numeric Plaid category IDs', async () => {
+      (db as any)._budgets = [
+        {
+          budget_id: 'numeric_cat',
+          amount: 150,
+          category_id: '13005000', // Numeric Plaid ID for Food & Drink > Restaurant
+          is_active: true,
+        },
+      ];
+      (db as any)._userCategories = [];
+
+      const result = await tools.getBudgets({});
+
+      expect(result.count).toBe(1);
+      expect(result.budgets[0].category_name).toBe('Food & Drink > Restaurant');
+    });
+  });
 });
 
 describe('createToolSchemas', () => {

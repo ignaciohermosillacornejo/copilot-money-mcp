@@ -6,7 +6,12 @@
 
 import { CopilotDatabase } from '../core/database.js';
 import { parsePeriod } from '../utils/date.js';
-import { getCategoryName, isTransferCategory, isIncomeCategory } from '../utils/categories.js';
+import {
+  getCategoryName,
+  isTransferCategory,
+  isIncomeCategory,
+  isKnownPlaidCategory,
+} from '../utils/categories.js';
 import type { Transaction, Account } from '../models/index.js';
 import { getTransactionDisplayName, getRecurringDisplayName } from '../models/index.js';
 import {
@@ -1230,7 +1235,15 @@ export class CopilotMoneyTools {
   }> {
     const { active_only = false } = options;
 
-    const budgets = await this.db.getBudgets(active_only);
+    const allBudgets = await this.db.getBudgets(active_only);
+
+    // Filter out budgets with orphaned category references (deleted categories)
+    const categoryMap = await this.getUserCategoryMap();
+    const budgets = allBudgets.filter((b) => {
+      if (!b.category_id) return true; // Keep budgets without category
+      // Keep if category exists in user categories or Plaid categories
+      return categoryMap.has(b.category_id) || isKnownPlaidCategory(b.category_id);
+    });
 
     // Calculate total budgeted amount (monthly equivalent)
     let totalBudgeted = 0;
