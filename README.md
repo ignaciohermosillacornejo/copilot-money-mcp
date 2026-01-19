@@ -340,6 +340,24 @@ The `period` parameter supports these shortcuts:
 - `this_year` - Current calendar year
 - `last_year` - Previous calendar year
 
+## Known Limitations
+
+### Local Cache Size
+
+This MCP server reads from Copilot Money's **local Firestore cache**, not directly from the cloud. The cache typically contains:
+- **~500 recent transactions** (not your full history)
+- Accounts, budgets, goals, and recurring transactions
+- Data synced during recent app usage
+
+**Why this limitation exists:** Copilot Money uses Firebase/Firestore with App Check security, which prevents direct cloud database access. The local cache is an offline copy maintained by the app for performance.
+
+**To maximize cached data:**
+1. Open the Copilot Money app regularly
+2. Scroll through your transaction history to trigger sync
+3. The cache updates when you interact with the app
+
+**What you get:** While you may have thousands of transactions in Copilot Money, only recently accessed/synced data is available locally. This is sufficient for most queries (recent spending, current budgets, recurring charges) but won't include your complete historical data.
+
 ## Troubleshooting
 
 ### Database Not Found
