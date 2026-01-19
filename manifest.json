@@ -37,6 +37,10 @@
       "description": "Get information about the local data cache, including the date range of cached transactions and total count"
     },
     {
+      "name": "refresh_database",
+      "description": "Refresh the in-memory cache by reloading data from the local Copilot Money database. Use when the user has recently synced new transactions."
+    },
+    {
       "name": "get_accounts",
       "description": "Get all accounts with balances, optionally filter by account type (checking, savings, credit, investment)"
     },

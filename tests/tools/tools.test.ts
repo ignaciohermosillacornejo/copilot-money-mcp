@@ -637,9 +637,9 @@ describe('CopilotMoneyTools', () => {
 });
 
 describe('createToolSchemas', () => {
-  test('returns 7 tool schemas', async () => {
+  test('returns 8 tool schemas', async () => {
     const schemas = createToolSchemas();
-    expect(schemas).toHaveLength(7);
+    expect(schemas).toHaveLength(8);
   });
 
   test('all tools have readOnlyHint: true', async () => {
@@ -666,16 +666,17 @@ describe('createToolSchemas', () => {
     const schemas = createToolSchemas();
     const names = schemas.map((s) => s.name);
 
-    // Core 7 tools
+    // Core 8 tools
     expect(names).toContain('get_transactions');
     expect(names).toContain('get_cache_info');
+    expect(names).toContain('refresh_database');
     expect(names).toContain('get_accounts');
     expect(names).toContain('get_categories');
     expect(names).toContain('get_recurring_transactions');
     expect(names).toContain('get_budgets');
     expect(names).toContain('get_goals');
 
-    // Should have exactly 7 tools
-    expect(names.length).toBe(7);
+    // Should have exactly 8 tools
+    expect(names.length).toBe(8);
   });
 });

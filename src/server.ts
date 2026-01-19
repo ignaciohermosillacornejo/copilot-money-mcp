@@ -105,6 +105,10 @@ export class CopilotMoneyServer {
           result = await this.tools.getCacheInfo();
           break;
 
+        case 'refresh_database':
+          result = await this.tools.refreshDatabase();
+          break;
+
         case 'get_accounts':
           result = await this.tools.getAccounts(
             typedArgs as Parameters<typeof this.tools.getAccounts>[0]

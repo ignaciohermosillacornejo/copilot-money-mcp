@@ -110,10 +110,20 @@ function findCopilotDatabase(): string | undefined {
 }
 
 /**
+ * Cache TTL in milliseconds (5 minutes).
+ * After this time, cached data is considered stale and will be reloaded.
+ */
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
+/**
  * Abstraction layer for querying Copilot Money data.
  *
  * Wraps the decoder and provides filtering capabilities.
  * All data access methods are async due to LevelDB iteration.
+ *
+ * The cache has a 5-minute TTL - after this time, data is automatically
+ * reloaded from disk on the next query. You can also manually refresh
+ * using `clearCache()`.
  */
 export class CopilotDatabase {
   private dbPath: string | undefined;
@@ -147,6 +157,9 @@ export class CopilotDatabase {
   // Batch loading state
   private _loadingAllCollections: Promise<AllCollectionsResult> | null = null;
   private _allCollectionsLoaded = false;
+
+  // Cache TTL tracking
+  private _cacheLoadedAt: number | null = null;
 
   /**
    * Initialize database connection.
@@ -193,13 +206,100 @@ export class CopilotDatabase {
   }
 
   /**
+   * Check if the in-memory cache has expired (older than TTL).
+   *
+   * @returns true if cache is stale or not loaded, false if still valid
+   */
+  private isCacheStale(): boolean {
+    if (this._cacheLoadedAt === null) {
+      return true; // Not loaded yet
+    }
+    return Date.now() - this._cacheLoadedAt > CACHE_TTL_MS;
+  }
+
+  /**
+   * Clear all cached data, forcing a fresh reload on next query.
+   *
+   * This is useful when:
+   * - User has synced new data in Copilot Money app
+   * - Cache TTL has expired (called automatically)
+   * - Manual refresh is requested
+   *
+   * @returns Information about what was cleared
+   */
+  clearCache(): { cleared: boolean; message: string } {
+    const wasLoaded = this._allCollectionsLoaded;
+    const hadData = this._transactions !== null;
+
+    // Clear all cached data
+    this._transactions = null;
+    this._accounts = null;
+    this._recurring = null;
+    this._budgets = null;
+    this._goals = null;
+    this._goalHistory = null;
+    this._investmentPrices = null;
+    this._investmentSplits = null;
+    this._items = null;
+    this._userCategories = null;
+    this._categoryNameMap = null;
+    this._userAccounts = null;
+    this._accountNameMap = null;
+
+    // Clear in-flight loading promises
+    this._loadingTransactions = null;
+    this._loadingAccounts = null;
+    this._loadingRecurring = null;
+    this._loadingBudgets = null;
+    this._loadingGoals = null;
+    this._loadingGoalHistory = null;
+    this._loadingInvestmentPrices = null;
+    this._loadingInvestmentSplits = null;
+    this._loadingItems = null;
+    this._loadingUserCategories = null;
+    this._loadingUserAccounts = null;
+    this._loadingAllCollections = null;
+
+    // Reset batch loading state
+    this._allCollectionsLoaded = false;
+    this._cacheLoadedAt = null;
+
+    if (wasLoaded || hadData) {
+      return {
+        cleared: true,
+        message: 'Cache cleared successfully. Fresh data will be loaded on next query.',
+      };
+    }
+    return {
+      cleared: false,
+      message: 'Cache was already empty.',
+    };
+  }
+
+  /**
+   * Get the timestamp when cache was last loaded.
+   *
+   * @returns Unix timestamp in milliseconds, or null if not loaded
+   */
+  getCacheLoadedAt(): number | null {
+    return this._cacheLoadedAt;
+  }
+
+  /**
    * Load all collections in a single database pass for optimal performance.
    *
    * This is ~10x faster than loading each collection individually because
    * it only iterates through the database once instead of once per collection.
+   *
+   * Automatically clears stale cache (older than TTL) before loading.
    */
   private async loadAllCollections(): Promise<void> {
-    // Return if already loaded
+    // Check if cache is stale and clear if needed
+    if (this._allCollectionsLoaded && this.isCacheStale()) {
+      this.clearCache();
+    }
+
+    // Return if already loaded (and not stale)
     if (this._allCollectionsLoaded) {
       return;
     }
@@ -229,6 +329,7 @@ export class CopilotDatabase {
       this._userAccounts = result.userAccounts;
 
       this._allCollectionsLoaded = true;
+      this._cacheLoadedAt = Date.now();
     } finally {
       this._loadingAllCollections = null;
     }
