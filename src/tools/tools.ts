@@ -293,18 +293,74 @@ export class CopilotMoneyTools {
 
   /**
    * Resolve transaction IDs to transaction history for recurring items.
+   * Falls back to match_string/name search when stored IDs reference purged transactions.
    *
    * @param transactionIds - Array of transaction IDs
+   * @param matchString - Optional merchant match pattern to search by
+   * @param recurringName - Optional recurring item name for fallback search
    * @returns Array of transaction history entries sorted by date descending
    */
   private async resolveTransactionHistory(
-    transactionIds?: string[]
+    transactionIds?: string[],
+    matchString?: string,
+    recurringName?: string
   ): Promise<Array<{ transaction_id: string; date: string; amount: number; merchant: string }>> {
-    if (!transactionIds?.length) return [];
     const transactions = await this.db.getTransactions({ limit: 50000 });
-    return transactionIds
+
+    // First try to resolve by transaction IDs
+    const byId = (transactionIds || [])
       .map((id) => transactions.find((t) => t.transaction_id === id))
-      .filter((t): t is Transaction => t !== undefined)
+      .filter((t): t is Transaction => t !== undefined);
+
+    // If we found enough transactions by ID, use those
+    if (byId.length >= 5) {
+      return byId
+        .map((t) => ({
+          transaction_id: t.transaction_id,
+          date: t.date,
+          amount: t.amount,
+          merchant: getTransactionDisplayName(t),
+        }))
+        .sort((a, b) => b.date.localeCompare(a.date))
+        .slice(0, 20);
+    }
+
+    // Build search patterns from match_string and recurring name
+    // Be conservative to avoid false positives - only use match_string and full name
+    const searchPatterns: string[] = [];
+    if (matchString) searchPatterns.push(matchString.toLowerCase());
+    if (recurringName) {
+      // Only add full name, not individual words (too many false positives)
+      searchPatterns.push(recurringName.toLowerCase());
+    }
+
+    if (searchPatterns.length === 0) {
+      return byId
+        .map((t) => ({
+          transaction_id: t.transaction_id,
+          date: t.date,
+          amount: t.amount,
+          merchant: getTransactionDisplayName(t),
+        }))
+        .sort((a, b) => b.date.localeCompare(a.date))
+        .slice(0, 20);
+    }
+
+    // Fall back to searching by patterns (many old transaction IDs are purged)
+    const byPattern = transactions.filter((t) => {
+      const name = (t.name || '').toLowerCase();
+      const originalName = (t.original_name || '').toLowerCase();
+      const combined = name + ' ' + originalName;
+      return searchPatterns.some((pattern) => combined.includes(pattern));
+    });
+
+    // Combine both results, deduplicate by transaction_id
+    const combined = new Map<string, Transaction>();
+    for (const t of [...byId, ...byPattern]) {
+      combined.set(t.transaction_id, t);
+    }
+
+    return Array.from(combined.values())
       .map((t) => ({
         transaction_id: t.transaction_id,
         date: t.date,
@@ -312,7 +368,7 @@ export class CopilotMoneyTools {
         merchant: getTransactionDisplayName(t),
       }))
       .sort((a, b) => b.date.localeCompare(a.date))
-      .slice(0, 20); // Limit to recent 20
+      .slice(0, 20);
   }
 
   /**
@@ -1408,7 +1464,11 @@ export class CopilotMoneyTools {
             account_name: rec.account_id
               ? await this.resolveAccountName(rec.account_id)
               : undefined,
-            transaction_history: await this.resolveTransactionHistory(rec.transaction_ids),
+            transaction_history: await this.resolveTransactionHistory(
+              rec.transaction_ids,
+              rec.match_string,
+              getRecurringDisplayName(rec)
+            ),
           }))
         );
 
