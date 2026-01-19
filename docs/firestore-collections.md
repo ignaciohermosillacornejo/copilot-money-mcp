@@ -155,17 +155,47 @@ Monthly budget configurations.
 
 **Path:** `users/{user_id}/recurring/{recurring_id}`
 
-Recurring transaction patterns detected or defined by user.
+Recurring transaction patterns (subscriptions, bills) detected or defined by user.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `recurring_id` | string | Unique identifier |
-| `name` | string | Recurring item name |
-| `amount` | number | Expected amount |
-| `frequency` | string | Frequency (`"monthly"`, `"weekly"`, etc.) |
-| `category_id` | string | Associated category |
-| `next_date` | string | Next expected date |
-| `is_income` | boolean | Whether this is income |
+| `id` | string | Unique identifier (stored as `id`, mapped to `recurring_id`) |
+| `name` | string | Display name (user-editable) |
+| `emoji` | string | Display emoji for UI |
+| `amount` | number | Expected amount (positive = expense) |
+| `min_amount` | number | Minimum amount for matching range |
+| `max_amount` | number | Maximum amount for matching range |
+| `frequency` | string | Frequency (see values below) |
+| `state` | string | Status: `"active"`, `"paused"`, `"archived"` |
+| `latest_date` | string | Last payment date (YYYY-MM-DD) |
+| `category_id` | string | Internal category ID |
+| `plaid_category_id` | string | Plaid category ID (e.g., `"18009000"`) |
+| `match_string` | string | Merchant name pattern for matching transactions |
+| `transaction_ids` | string[] | Array of associated transaction IDs |
+| `included_transaction_ids` | string[] | Manually included transaction IDs |
+| `excluded_transaction_ids` | string[] | Manually excluded transaction IDs |
+| `days_filter` | number | Day of month filter for matching |
+| `skip_filter_update` | boolean | Whether to skip automatic filter updates |
+| `identification_method` | string | How the recurring was detected (e.g., `"new_existing"`) |
+| `_origin` | string | Source of the record (e.g., `"firebase"`) |
+
+**Frequency Values:**
+- `daily`, `weekly`, `biweekly` (every 2 weeks)
+- `monthly`, `bimonthly` (every 2 months), `quarterly` (every 3 months)
+- `quadmonthly` (every 4 months), `semiannually` (every 6 months)
+- `annually` / `yearly`
+
+**Important Notes:**
+- `state` replaces the older `is_active` boolean field
+- `latest_date` is the actual field name (not `last_date`)
+- `next_date` is NOT stored - must be calculated from `latest_date` + `frequency`
+- `id` field contains the recurring_id (not `recurring_id`)
+- The UI groups items by state and payment status:
+  - **This Month**: Active items with `latest_date` in current month (paid) or calculated `next_date` in current month (upcoming)
+  - **Overdue**: Active items where calculated `next_date` is before today
+  - **In the Future**: Active items where calculated `next_date` is after current month
+  - **Paused**: Items with `state: "paused"`
+  - **Archived**: Items with `state: "archived"`
 
 ---
 
@@ -287,4 +317,5 @@ Transactions can be excluded via:
 
 | Date | Changes |
 |------|---------|
+| 2026-01-18 | Updated `recurring` collection with complete field list: `state`, `emoji`, `latest_date`, `match_string`, `min_amount`/`max_amount`, `transaction_ids`, `plaid_category_id`, etc. Added UI grouping logic notes. |
 | 2026-01-18 | Initial documentation. Added goal history parsing fixes. |

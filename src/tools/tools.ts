@@ -280,6 +280,42 @@ export class CopilotMoneyTools {
   }
 
   /**
+   * Resolve account ID to account name.
+   *
+   * @param accountId - The account ID to look up
+   * @returns Account name or undefined if not found
+   */
+  private async resolveAccountName(accountId: string): Promise<string | undefined> {
+    const accounts = await this.db.getAccounts();
+    const account = accounts.find((a) => a.account_id === accountId);
+    return account?.name;
+  }
+
+  /**
+   * Resolve transaction IDs to transaction history for recurring items.
+   *
+   * @param transactionIds - Array of transaction IDs
+   * @returns Array of transaction history entries sorted by date descending
+   */
+  private async resolveTransactionHistory(
+    transactionIds?: string[]
+  ): Promise<Array<{ transaction_id: string; date: string; amount: number; merchant: string }>> {
+    if (!transactionIds?.length) return [];
+    const transactions = await this.db.getTransactions({ limit: 50000 });
+    return transactionIds
+      .map((id) => transactions.find((t) => t.transaction_id === id))
+      .filter((t): t is Transaction => t !== undefined)
+      .map((t) => ({
+        transaction_id: t.transaction_id,
+        date: t.date,
+        amount: t.amount,
+        merchant: getTransactionDisplayName(t),
+      }))
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 20); // Limit to recent 20
+  }
+
+  /**
    * Get transactions with optional filters.
    *
    * Enhanced to support multiple query modes:
@@ -985,6 +1021,8 @@ export class CopilotMoneyTools {
     start_date?: string;
     end_date?: string;
     include_copilot_subscriptions?: boolean;
+    name?: string;
+    recurring_id?: string;
   }): Promise<{
     period: { start_date?: string; end_date?: string };
     count: number;
@@ -1003,15 +1041,81 @@ export class CopilotMoneyTools {
       next_expected_date?: string;
       transactions: Array<{ date: string; amount: number }>;
     }>;
-    copilot_subscriptions?: Array<{
+    copilot_subscriptions?: {
+      summary: {
+        total_active: number;
+        total_paused: number;
+        total_archived: number;
+        monthly_cost_estimate: number;
+        paid_this_month: number;
+        left_to_pay_this_month: number;
+      };
+      this_month: Array<{
+        recurring_id: string;
+        name: string;
+        emoji?: string;
+        amount?: number;
+        frequency?: string;
+        display_date: string;
+        is_paid: boolean;
+        category_name?: string;
+      }>;
+      overdue: Array<{
+        recurring_id: string;
+        name: string;
+        emoji?: string;
+        amount?: number;
+        frequency?: string;
+        next_date?: string;
+        category_name?: string;
+      }>;
+      future: Array<{
+        recurring_id: string;
+        name: string;
+        emoji?: string;
+        amount?: number;
+        frequency?: string;
+        next_date?: string;
+        category_name?: string;
+      }>;
+      paused: Array<{
+        recurring_id: string;
+        name: string;
+        emoji?: string;
+        amount?: number;
+        frequency?: string;
+        category_name?: string;
+      }>;
+      archived: Array<{
+        recurring_id: string;
+        name: string;
+        emoji?: string;
+        amount?: number;
+        frequency?: string;
+        category_name?: string;
+      }>;
+    };
+    detail_view?: Array<{
       recurring_id: string;
       name: string;
+      emoji?: string;
       amount?: number;
       frequency?: string;
+      category_name?: string;
+      state?: string;
       next_date?: string;
       last_date?: string;
-      category_name?: string;
-      is_active?: boolean;
+      min_amount?: number;
+      max_amount?: number;
+      match_string?: string;
+      account_id?: string;
+      account_name?: string;
+      transaction_history?: Array<{
+        transaction_id: string;
+        date: string;
+        amount: number;
+        merchant: string;
+      }>;
     }>;
   }> {
     const { min_occurrences = 2 } = options;
@@ -1207,35 +1311,264 @@ export class CopilotMoneyTools {
     // Include Copilot's native subscription data if requested (default: true)
     const includeCopilotSubs = options.include_copilot_subscriptions !== false;
     let copilotSubscriptions:
-      | Array<{
-          recurring_id: string;
-          name: string;
-          amount?: number;
-          frequency?: string;
-          next_date?: string;
-          last_date?: string;
-          category_name?: string;
-          is_active?: boolean;
-        }>
+      | {
+          summary: {
+            total_active: number;
+            total_paused: number;
+            total_archived: number;
+            monthly_cost_estimate: number;
+            paid_this_month: number;
+            left_to_pay_this_month: number;
+          };
+          this_month: Array<{
+            recurring_id: string;
+            name: string;
+            emoji?: string;
+            amount?: number;
+            frequency?: string;
+            display_date: string;
+            is_paid: boolean;
+            category_name?: string;
+          }>;
+          overdue: Array<{
+            recurring_id: string;
+            name: string;
+            emoji?: string;
+            amount?: number;
+            frequency?: string;
+            next_date?: string;
+            category_name?: string;
+          }>;
+          future: Array<{
+            recurring_id: string;
+            name: string;
+            emoji?: string;
+            amount?: number;
+            frequency?: string;
+            next_date?: string;
+            category_name?: string;
+          }>;
+          paused: Array<{
+            recurring_id: string;
+            name: string;
+            emoji?: string;
+            amount?: number;
+            frequency?: string;
+            category_name?: string;
+          }>;
+          archived: Array<{
+            recurring_id: string;
+            name: string;
+            emoji?: string;
+            amount?: number;
+            frequency?: string;
+            category_name?: string;
+          }>;
+        }
       | undefined;
 
     if (includeCopilotSubs) {
       const copilotRecurring = await this.db.getRecurring();
-      if (copilotRecurring.length > 0) {
-        copilotSubscriptions = await Promise.all(
-          copilotRecurring.map(async (rec) => ({
+
+      // Handle name/ID filtering with detail view
+      const isDetailRequest = !!(options.name || options.recurring_id);
+      if (isDetailRequest && copilotRecurring.length > 0) {
+        let filteredRecurring = copilotRecurring;
+
+        if (options.recurring_id) {
+          filteredRecurring = copilotRecurring.filter(
+            (r) => r.recurring_id === options.recurring_id
+          );
+        } else if (options.name) {
+          const searchName = options.name.toLowerCase();
+          filteredRecurring = copilotRecurring.filter((r) => {
+            const displayName = getRecurringDisplayName(r).toLowerCase();
+            return displayName.includes(searchName);
+          });
+        }
+
+        // Return detailed view for filtered items
+        const detailView = await Promise.all(
+          filteredRecurring.map(async (rec) => ({
             recurring_id: rec.recurring_id,
             name: getRecurringDisplayName(rec),
+            emoji: rec.emoji,
             amount: rec.amount,
             frequency: rec.frequency,
-            next_date: rec.next_date,
-            last_date: rec.last_date,
             category_name: rec.category_id
               ? await this.resolveCategoryName(rec.category_id)
               : undefined,
-            is_active: rec.is_active,
+            state: rec.state ?? 'active',
+            next_date: rec.next_date,
+            last_date: rec.last_date,
+            min_amount: rec.min_amount,
+            max_amount: rec.max_amount,
+            match_string: rec.match_string,
+            account_id: rec.account_id,
+            account_name: rec.account_id
+              ? await this.resolveAccountName(rec.account_id)
+              : undefined,
+            transaction_history: await this.resolveTransactionHistory(rec.transaction_ids),
           }))
         );
+
+        return {
+          period: { start_date, end_date },
+          count: 0,
+          total_monthly_cost: 0,
+          recurring: [],
+          detail_view: detailView,
+        };
+      }
+
+      if (copilotRecurring.length > 0) {
+        // Get current date info for grouping (use string comparisons to avoid timezone issues)
+        const now = new Date();
+        const today = now.toISOString().split('T')[0]!;
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const thisMonthPrefix = `${year}-${month}`; // e.g., "2026-01"
+        const thisMonthEndStr = `${year}-${month}-31`; // Use 31 for all months (comparison will still work)
+
+        // Group by state first (items without state default to active)
+        const active = copilotRecurring.filter(
+          (r) => r.state === 'active' || r.state === undefined
+        );
+        const paused = copilotRecurring.filter((r) => r.state === 'paused');
+        const archived = copilotRecurring.filter((r) => r.state === 'archived');
+
+        // Helper to resolve category and create base item
+        const createItem = async (rec: (typeof copilotRecurring)[0]) => ({
+          recurring_id: rec.recurring_id,
+          name: getRecurringDisplayName(rec),
+          emoji: rec.emoji,
+          amount: rec.amount,
+          frequency: rec.frequency,
+          category_name: rec.category_id
+            ? await this.resolveCategoryName(rec.category_id)
+            : undefined,
+        });
+
+        // Classify active items into this_month, overdue, future
+        const thisMonthItems: Array<{
+          recurring_id: string;
+          name: string;
+          emoji?: string;
+          amount?: number;
+          frequency?: string;
+          display_date: string;
+          is_paid: boolean;
+          category_name?: string;
+        }> = [];
+        const overdueItems: Array<{
+          recurring_id: string;
+          name: string;
+          emoji?: string;
+          amount?: number;
+          frequency?: string;
+          next_date?: string;
+          category_name?: string;
+        }> = [];
+        const futureItems: Array<{
+          recurring_id: string;
+          name: string;
+          emoji?: string;
+          amount?: number;
+          frequency?: string;
+          next_date?: string;
+          category_name?: string;
+        }> = [];
+
+        let paidThisMonth = 0;
+        let leftToPayThisMonth = 0;
+        let monthlyCostEstimate = 0;
+
+        for (const rec of active) {
+          const baseItem = await createItem(rec);
+
+          // Calculate monthly cost estimate
+          if (rec.amount) {
+            const freq = rec.frequency?.toLowerCase();
+            if (freq === 'monthly') monthlyCostEstimate += Math.abs(rec.amount);
+            else if (freq === 'biweekly' || freq === 'bi-weekly')
+              monthlyCostEstimate += Math.abs(rec.amount) * 2;
+            else if (freq === 'weekly') monthlyCostEstimate += Math.abs(rec.amount) * 4;
+            else if (freq === 'quarterly') monthlyCostEstimate += Math.abs(rec.amount) / 3;
+            else if (freq === 'yearly' || freq === 'annually')
+              monthlyCostEstimate += Math.abs(rec.amount) / 12;
+            else if (freq === 'semiannually' || freq === 'semi-annually')
+              monthlyCostEstimate += Math.abs(rec.amount) / 6;
+          }
+
+          // Check if paid this month using string comparison (avoids timezone issues)
+          const isPaidThisMonth = rec.last_date?.startsWith(thisMonthPrefix);
+
+          if (isPaidThisMonth) {
+            // Already paid this month - show in "this_month" with is_paid=true
+            thisMonthItems.push({
+              ...baseItem,
+              display_date: rec.last_date!,
+              is_paid: true,
+            });
+            paidThisMonth += Math.abs(rec.amount || 0);
+          } else if (rec.next_date && rec.next_date < today) {
+            // Next date is in the past - overdue
+            overdueItems.push({
+              ...baseItem,
+              next_date: rec.next_date,
+            });
+            leftToPayThisMonth += Math.abs(rec.amount || 0);
+          } else if (rec.next_date && rec.next_date <= thisMonthEndStr) {
+            // Next date is this month but not yet paid
+            thisMonthItems.push({
+              ...baseItem,
+              display_date: rec.next_date,
+              is_paid: false,
+            });
+            leftToPayThisMonth += Math.abs(rec.amount || 0);
+          } else if (rec.next_date) {
+            // Next date is after this month
+            futureItems.push({
+              ...baseItem,
+              next_date: rec.next_date,
+            });
+          } else {
+            // No next_date available - put in future as unknown
+            futureItems.push({
+              ...baseItem,
+              next_date: undefined,
+            });
+          }
+        }
+
+        // Sort items by date
+        thisMonthItems.sort((a, b) => a.display_date.localeCompare(b.display_date));
+        overdueItems.sort((a, b) => (a.next_date || '').localeCompare(b.next_date || ''));
+        futureItems.sort((a, b) => (a.next_date || 'z').localeCompare(b.next_date || 'z'));
+
+        // Create paused and archived arrays
+        const pausedItems = await Promise.all(paused.map(createItem));
+        const archivedItems = await Promise.all(archived.map(createItem));
+
+        // Sort by name
+        pausedItems.sort((a, b) => a.name.localeCompare(b.name));
+        archivedItems.sort((a, b) => a.name.localeCompare(b.name));
+
+        copilotSubscriptions = {
+          summary: {
+            total_active: active.length,
+            total_paused: paused.length,
+            total_archived: archived.length,
+            monthly_cost_estimate: roundAmount(monthlyCostEstimate),
+            paid_this_month: roundAmount(paidThisMonth),
+            left_to_pay_this_month: roundAmount(leftToPayThisMonth),
+          },
+          this_month: thisMonthItems,
+          overdue: overdueItems,
+          future: futureItems,
+          paused: pausedItems,
+          archived: archivedItems,
+        };
       }
     }
 
@@ -1244,9 +1577,7 @@ export class CopilotMoneyTools {
       count: recurring.length,
       total_monthly_cost: roundAmount(totalMonthlyCost),
       recurring,
-      ...(copilotSubscriptions && copilotSubscriptions.length > 0
-        ? { copilot_subscriptions: copilotSubscriptions }
-        : {}),
+      ...(copilotSubscriptions ? { copilot_subscriptions: copilotSubscriptions } : {}),
     };
   }
 
@@ -1679,6 +2010,19 @@ export function createToolSchemas(): ToolSchema[] {
               "Include Copilot's native subscription tracking data (default: true). " +
               'Returns copilot_subscriptions array with user-confirmed subscriptions.',
             default: true,
+          },
+          name: {
+            type: 'string',
+            description:
+              'Filter by name (case-insensitive partial match). When filtering, returns detailed ' +
+              'view with additional fields like min_amount, max_amount, match_string, account info, ' +
+              'and transaction history.',
+          },
+          recurring_id: {
+            type: 'string',
+            description:
+              'Filter by exact recurring ID. When filtering, returns detailed view with additional ' +
+              'fields like min_amount, max_amount, match_string, account info, and transaction history.',
           },
         },
       },

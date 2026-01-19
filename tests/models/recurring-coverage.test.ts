@@ -106,10 +106,29 @@ describe('recurring.ts', () => {
       }
     });
 
-    test('rejects invalid frequency values', () => {
+    test('accepts any frequency string value', () => {
+      // frequency is now a string type to accommodate various Copilot values
       const result = RecurringSchema.safeParse({
         recurring_id: 'rec-1',
-        frequency: 'semi-annually', // not a valid enum value
+        frequency: 'custom-frequency',
+      });
+      expect(result.success).toBe(true);
+    });
+
+    test('validates state field with valid values', () => {
+      for (const state of ['active', 'paused', 'archived']) {
+        const result = RecurringSchema.safeParse({
+          recurring_id: 'rec-1',
+          state,
+        });
+        expect(result.success).toBe(true);
+      }
+    });
+
+    test('rejects invalid state values', () => {
+      const result = RecurringSchema.safeParse({
+        recurring_id: 'rec-1',
+        state: 'unknown-state',
       });
       expect(result.success).toBe(false);
     });
@@ -121,12 +140,15 @@ describe('recurring.ts', () => {
       expect(KNOWN_FREQUENCIES).toContain('weekly');
       expect(KNOWN_FREQUENCIES).toContain('biweekly');
       expect(KNOWN_FREQUENCIES).toContain('monthly');
+      expect(KNOWN_FREQUENCIES).toContain('bimonthly');
       expect(KNOWN_FREQUENCIES).toContain('quarterly');
+      expect(KNOWN_FREQUENCIES).toContain('quadmonthly');
+      expect(KNOWN_FREQUENCIES).toContain('semiannually');
       expect(KNOWN_FREQUENCIES).toContain('yearly');
     });
 
-    test('has exactly 6 frequency values', () => {
-      expect(KNOWN_FREQUENCIES.length).toBe(6);
+    test('has expected number of frequency values', () => {
+      expect(KNOWN_FREQUENCIES.length).toBe(9);
     });
   });
 

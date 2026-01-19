@@ -124,6 +124,69 @@ function getMap(
 }
 
 /**
+ * Extract an array of strings from a Firestore array field.
+ */
+function getStringArray(fields: Map<string, FirestoreValue>, key: string): string[] | undefined {
+  const value = fields.get(key);
+  if (value?.type === 'array') {
+    const strings: string[] = [];
+    for (const item of value.value) {
+      if (item.type === 'string') {
+        strings.push(item.value);
+      }
+    }
+    return strings.length > 0 ? strings : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Calculate the next payment date from a last payment date and frequency.
+ */
+function calculateNextDate(lastDate: string, frequency: string | undefined): string | undefined {
+  if (!lastDate || !frequency) return undefined;
+
+  const date = new Date(lastDate);
+  if (isNaN(date.getTime())) return undefined;
+
+  switch (frequency.toLowerCase()) {
+    case 'daily':
+      date.setDate(date.getDate() + 1);
+      break;
+    case 'weekly':
+      date.setDate(date.getDate() + 7);
+      break;
+    case 'biweekly':
+      date.setDate(date.getDate() + 14);
+      break;
+    case 'monthly':
+      date.setMonth(date.getMonth() + 1);
+      break;
+    case 'bimonthly':
+      date.setMonth(date.getMonth() + 2);
+      break;
+    case 'quarterly':
+      date.setMonth(date.getMonth() + 3);
+      break;
+    case 'quadmonthly':
+      date.setMonth(date.getMonth() + 4);
+      break;
+    case 'semiannually':
+      date.setMonth(date.getMonth() + 6);
+      break;
+    case 'yearly':
+    case 'annually':
+      date.setFullYear(date.getFullYear() + 1);
+      break;
+    default:
+      // Unknown frequency, assume monthly
+      date.setMonth(date.getMonth() + 1);
+  }
+
+  return date.toISOString().split('T')[0];
+}
+
+/**
  * Decode all transactions from LevelDB database.
  */
 export async function decodeTransactions(dbPath: string): Promise<Transaction[]> {
@@ -721,21 +784,24 @@ function processAccount(fields: Map<string, FirestoreValue>, docId: string): Acc
  * Internal helper to process a recurring document.
  */
 function processRecurring(fields: Map<string, FirestoreValue>, docId: string): Recurring | null {
-  const recurringId = getString(fields, 'recurring_id') ?? docId;
+  // Use 'id' field as the recurring_id (Copilot stores it as 'id')
+  const recurringId = getString(fields, 'recurring_id') ?? getString(fields, 'id') ?? docId;
 
   const recData: Record<string, unknown> = {
     recurring_id: recurringId,
   };
 
+  // String fields - map Copilot field names to our schema
   const stringFields = [
     'name',
     'merchant_name',
     'frequency',
-    'next_date',
-    'last_date',
     'category_id',
     'account_id',
     'iso_currency_code',
+    'emoji',
+    'match_string',
+    'plaid_category_id',
   ];
 
   for (const field of stringFields) {
@@ -743,11 +809,54 @@ function processRecurring(fields: Map<string, FirestoreValue>, docId: string): R
     if (value) recData[field] = value;
   }
 
+  // Handle state field (Copilot uses 'state' not 'is_active')
+  const state = getString(fields, 'state');
+  if (state === 'active' || state === 'paused' || state === 'archived') {
+    recData.state = state;
+    // Derive is_active from state for backwards compatibility
+    recData.is_active = state === 'active';
+  } else {
+    // Fall back to is_active boolean if present
+    const isActive = getBoolean(fields, 'is_active');
+    if (isActive !== undefined) recData.is_active = isActive;
+  }
+
+  // Number fields
   const amount = getNumber(fields, 'amount');
   if (amount !== undefined) recData.amount = amount;
 
-  const isActive = getBoolean(fields, 'is_active');
-  if (isActive !== undefined) recData.is_active = isActive;
+  const minAmount = getNumber(fields, 'min_amount');
+  if (minAmount !== undefined) recData.min_amount = minAmount;
+
+  const maxAmount = getNumber(fields, 'max_amount');
+  if (maxAmount !== undefined) recData.max_amount = maxAmount;
+
+  const daysFilter = getNumber(fields, 'days_filter');
+  if (daysFilter !== undefined) recData.days_filter = daysFilter;
+
+  // Date fields - Copilot uses 'latest_date' not 'last_date'
+  const latestDate = getString(fields, 'latest_date');
+  if (latestDate) {
+    recData.last_date = latestDate;
+
+    // Calculate next_date from latest_date + frequency
+    const frequency = getString(fields, 'frequency');
+    const nextDate = calculateNextDate(latestDate, frequency);
+    if (nextDate) {
+      recData.next_date = nextDate;
+    }
+  }
+
+  // Also check for explicit next_date and last_date fields
+  const explicitNextDate = getString(fields, 'next_date');
+  if (explicitNextDate) recData.next_date = explicitNextDate;
+
+  const explicitLastDate = getString(fields, 'last_date');
+  if (explicitLastDate) recData.last_date = explicitLastDate;
+
+  // Transaction IDs array
+  const transactionIds = getStringArray(fields, 'transaction_ids');
+  if (transactionIds) recData.transaction_ids = transactionIds;
 
   try {
     return RecurringSchema.parse(recData);
