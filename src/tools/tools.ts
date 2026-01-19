@@ -367,6 +367,8 @@ export class CopilotMoneyTools {
     transactions: Array<Transaction & { category_name?: string; normalized_merchant?: string }>;
     // Additional fields for special types
     type_specific_data?: Record<string, unknown>;
+    // Cache limitation warning
+    _cache_warning?: string;
   }> {
     const {
       period,
@@ -556,6 +558,9 @@ export class CopilotMoneyTools {
       }))
     );
 
+    // Check if query may be limited by cache
+    const cacheWarning = await this.db.checkCacheLimitation(start_date, end_date);
+
     return {
       count: enrichedTransactions.length,
       total_count: totalCount,
@@ -563,6 +568,7 @@ export class CopilotMoneyTools {
       has_more: hasMore,
       transactions: enrichedTransactions,
       ...(typeSpecificData && { type_specific_data: typeSpecificData }),
+      ...(cacheWarning && { _cache_warning: cacheWarning }),
     };
   }
 
@@ -766,6 +772,64 @@ export class CopilotMoneyTools {
       return true;
     });
   }
+  /**
+   * Get information about the local data cache.
+   *
+   * @returns Cache metadata including date range and transaction count
+   */
+  async getCacheInfo(): Promise<{
+    oldest_transaction_date: string | null;
+    newest_transaction_date: string | null;
+    transaction_count: number;
+    cache_note: string;
+  }> {
+    return await this.db.getCacheInfo();
+  }
+
+  /**
+   * Refresh the database cache by clearing in-memory data and reloading from disk.
+   *
+   * Use this when:
+   * - User has synced new transactions in Copilot Money app
+   * - You suspect the data is stale
+   * - User explicitly requests fresh data
+   *
+   * Note: The cache also auto-refreshes every 5 minutes.
+   *
+   * @returns Status of the refresh operation with cache info
+   */
+  async refreshDatabase(): Promise<{
+    refreshed: boolean;
+    message: string;
+    cache_info: {
+      oldest_transaction_date: string | null;
+      newest_transaction_date: string | null;
+      transaction_count: number;
+    };
+  }> {
+    // Clear the cache
+    const clearResult = this.db.clearCache();
+
+    // Also clear the local category/account maps in tools
+    this._userCategoryMap = null;
+    this._excludedCategoryIds = null;
+
+    // Trigger a reload by fetching cache info (which loads transactions)
+    const cacheInfo = await this.db.getCacheInfo();
+
+    return {
+      refreshed: clearResult.cleared,
+      message: clearResult.cleared
+        ? `Cache refreshed. Now contains ${cacheInfo.transaction_count} transactions from ${cacheInfo.oldest_transaction_date} to ${cacheInfo.newest_transaction_date}.`
+        : 'Cache was already empty. Data loaded fresh.',
+      cache_info: {
+        oldest_transaction_date: cacheInfo.oldest_transaction_date,
+        newest_transaction_date: cacheInfo.newest_transaction_date,
+        transaction_count: cacheInfo.transaction_count,
+      },
+    };
+  }
+
   /**
    * Get all accounts with balances.
    *
@@ -1889,6 +1953,35 @@ export function createToolSchemas(): ToolSchema[] {
             default: 10,
           },
         },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_cache_info',
+      description:
+        'Get information about the local data cache, including the date range of cached transactions ' +
+        'and total count. Useful for understanding data availability before running historical queries. ' +
+        'This tool reads from a local cache that may not contain your complete transaction history.',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'refresh_database',
+      description:
+        'Refresh the in-memory cache by reloading data from the local Copilot Money database. ' +
+        'Use this when the user has recently synced new transactions in the Copilot Money app, ' +
+        'or when you suspect the cached data is stale. The cache also auto-refreshes every 5 minutes. ' +
+        'Returns the updated cache info after refresh.',
+      inputSchema: {
+        type: 'object',
+        properties: {},
       },
       annotations: {
         readOnlyHint: true,
