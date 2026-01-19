@@ -42,7 +42,7 @@
     },
     {
       "name": "get_recurring_transactions",
-      "description": "Identify recurring/subscription charges with frequency, monthly cost, confidence score, and next expected charge date"
+      "description": "Identify recurring/subscription charges with frequency, monthly cost, confidence score, and next expected charge date. Filter by name or recurring_id for detailed view with transaction history and account info."
     },
     {
       "name": "get_budgets",
