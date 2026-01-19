@@ -367,6 +367,8 @@ export class CopilotMoneyTools {
     transactions: Array<Transaction & { category_name?: string; normalized_merchant?: string }>;
     // Additional fields for special types
     type_specific_data?: Record<string, unknown>;
+    // Cache limitation warning
+    _cache_warning?: string;
   }> {
     const {
       period,
@@ -556,6 +558,9 @@ export class CopilotMoneyTools {
       }))
     );
 
+    // Check if query may be limited by cache
+    const cacheWarning = await this.db.checkCacheLimitation(start_date, end_date);
+
     return {
       count: enrichedTransactions.length,
       total_count: totalCount,
@@ -563,6 +568,7 @@ export class CopilotMoneyTools {
       has_more: hasMore,
       transactions: enrichedTransactions,
       ...(typeSpecificData && { type_specific_data: typeSpecificData }),
+      ...(cacheWarning && { _cache_warning: cacheWarning }),
     };
   }
 
@@ -766,6 +772,20 @@ export class CopilotMoneyTools {
       return true;
     });
   }
+  /**
+   * Get information about the local data cache.
+   *
+   * @returns Cache metadata including date range and transaction count
+   */
+  async getCacheInfo(): Promise<{
+    oldest_transaction_date: string | null;
+    newest_transaction_date: string | null;
+    transaction_count: number;
+    cache_note: string;
+  }> {
+    return await this.db.getCacheInfo();
+  }
+
   /**
    * Get all accounts with balances.
    *
@@ -1889,6 +1909,20 @@ export function createToolSchemas(): ToolSchema[] {
             default: 10,
           },
         },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_cache_info',
+      description:
+        'Get information about the local data cache, including the date range of cached transactions ' +
+        'and total count. Useful for understanding data availability before running historical queries. ' +
+        'This tool reads from a local cache that may not contain your complete transaction history.',
+      inputSchema: {
+        type: 'object',
+        properties: {},
       },
       annotations: {
         readOnlyHint: true,

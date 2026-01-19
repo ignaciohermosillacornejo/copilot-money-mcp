@@ -1081,4 +1081,68 @@ export class CopilotDatabase {
 
     return result;
   }
+
+  /**
+   * Get cache information including date range and transaction count.
+   * Useful for warning users when queries may be limited by cache size.
+   *
+   * @returns Cache metadata including date range and count
+   */
+  async getCacheInfo(): Promise<{
+    oldest_transaction_date: string | null;
+    newest_transaction_date: string | null;
+    transaction_count: number;
+    cache_note: string;
+  }> {
+    const transactions = await this.loadTransactions();
+    if (transactions.length === 0) {
+      return {
+        oldest_transaction_date: null,
+        newest_transaction_date: null,
+        transaction_count: 0,
+        cache_note: 'No transactions in local cache. Open Copilot Money app to sync data.',
+      };
+    }
+
+    const dates = transactions.map((t) => t.date).sort();
+    const oldestDate = dates[0] ?? null;
+    const newestDate = dates[dates.length - 1] ?? null;
+
+    return {
+      oldest_transaction_date: oldestDate,
+      newest_transaction_date: newestDate,
+      transaction_count: transactions.length,
+      cache_note:
+        `Local cache contains ${transactions.length} transactions from ${oldestDate} to ${newestDate}. ` +
+        'This is a subset of your full transaction history. ' +
+        'Open Copilot Money app and browse transactions to sync more data.',
+    };
+  }
+
+  /**
+   * Check if a date range query may be limited by cache availability.
+   * Returns a warning message if the query extends before the oldest cached transaction.
+   *
+   * @param startDate - Query start date (YYYY-MM-DD)
+   * @param endDate - Query end date (YYYY-MM-DD) - optional
+   * @returns Warning message if cache may limit results, null otherwise
+   */
+  async checkCacheLimitation(startDate?: string, _endDate?: string): Promise<string | null> {
+    if (!startDate) return null;
+
+    const cacheInfo = await this.getCacheInfo();
+    if (!cacheInfo.oldest_transaction_date) return null;
+
+    // If query starts before oldest cached data, warn the user
+    if (startDate < cacheInfo.oldest_transaction_date) {
+      return (
+        `Note: Your query starts at ${startDate}, but local cache only contains transactions from ` +
+        `${cacheInfo.oldest_transaction_date} to ${cacheInfo.newest_transaction_date} (${cacheInfo.transaction_count} total). ` +
+        'Earlier transactions may exist in Copilot Money but are not cached locally. ' +
+        'Open the Copilot Money app and scroll through older transactions to cache more data.'
+      );
+    }
+
+    return null;
+  }
 }
