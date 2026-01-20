@@ -636,6 +636,227 @@ describe('CopilotMoneyTools', () => {
   });
 });
 
+describe('CopilotMoneyTools - Location Filtering', () => {
+  let db: CopilotDatabase;
+  let tools: CopilotMoneyTools;
+
+  beforeEach(() => {
+    db = new CopilotDatabase('/fake/path');
+    tools = new CopilotMoneyTools(db);
+    (db as any)._allCollectionsLoaded = true;
+    (db as any)._accounts = mockAccounts;
+    (db as any)._userCategories = [];
+    (db as any)._userAccounts = [];
+  });
+
+  test('filters by lat/lon coordinates within radius', async () => {
+    // San Francisco coordinates: 37.7749, -122.4194
+    const transactionsWithLocation: Transaction[] = [
+      {
+        transaction_id: 'txn_sf',
+        amount: 50.0,
+        date: '2024-01-15',
+        name: 'SF Restaurant',
+        category_id: 'food_dining',
+        account_id: 'acc1',
+        lat: 37.7749,
+        lon: -122.4194,
+      },
+      {
+        transaction_id: 'txn_oakland',
+        amount: 30.0,
+        date: '2024-01-16',
+        name: 'Oakland Store',
+        category_id: 'shopping',
+        account_id: 'acc1',
+        lat: 37.8044,
+        lon: -122.2712, // ~15km from SF
+      },
+      {
+        transaction_id: 'txn_la',
+        amount: 100.0,
+        date: '2024-01-17',
+        name: 'LA Store',
+        category_id: 'shopping',
+        account_id: 'acc1',
+        lat: 34.0522,
+        lon: -118.2437, // ~560km from SF
+      },
+      {
+        transaction_id: 'txn_no_location',
+        amount: 25.0,
+        date: '2024-01-18',
+        name: 'No Location',
+        category_id: 'shopping',
+        account_id: 'acc1',
+      },
+    ];
+    (db as any)._transactions = transactionsWithLocation;
+
+    // Search near SF with 20km radius - should find SF and Oakland
+    const result = await tools.getTransactions({
+      lat: 37.7749,
+      lon: -122.4194,
+      radius_km: 20,
+    });
+
+    expect(result.count).toBe(2);
+    expect(result.transactions.map((t) => t.transaction_id)).toContain('txn_sf');
+    expect(result.transactions.map((t) => t.transaction_id)).toContain('txn_oakland');
+    expect(result.transactions.map((t) => t.transaction_id)).not.toContain('txn_la');
+    expect(result.transactions.map((t) => t.transaction_id)).not.toContain('txn_no_location');
+  });
+
+  test('filters by city name', async () => {
+    const transactionsWithCity: Transaction[] = [
+      {
+        transaction_id: 'txn_sf_city',
+        amount: 50.0,
+        date: '2024-01-15',
+        name: 'SF Restaurant',
+        category_id: 'food_dining',
+        account_id: 'acc1',
+        city: 'San Francisco',
+      },
+      {
+        transaction_id: 'txn_la_city',
+        amount: 100.0,
+        date: '2024-01-17',
+        name: 'LA Store',
+        category_id: 'shopping',
+        account_id: 'acc1',
+        city: 'Los Angeles',
+      },
+    ];
+    (db as any)._transactions = transactionsWithCity;
+
+    const result = await tools.getTransactions({ city: 'San Francisco' });
+
+    expect(result.count).toBe(1);
+    expect(result.transactions[0].transaction_id).toBe('txn_sf_city');
+  });
+
+  test('defaults to 10km radius when not specified', async () => {
+    const transactionsWithLocation: Transaction[] = [
+      {
+        transaction_id: 'txn_close',
+        amount: 50.0,
+        date: '2024-01-15',
+        name: 'Close Store',
+        category_id: 'shopping',
+        account_id: 'acc1',
+        lat: 37.78,
+        lon: -122.42, // ~1km from center
+      },
+      {
+        transaction_id: 'txn_far',
+        amount: 30.0,
+        date: '2024-01-16',
+        name: 'Far Store',
+        category_id: 'shopping',
+        account_id: 'acc1',
+        lat: 37.9,
+        lon: -122.5, // ~15km from center
+      },
+    ];
+    (db as any)._transactions = transactionsWithLocation;
+
+    // Search without radius_km - should use default 10km
+    const result = await tools.getTransactions({
+      lat: 37.7749,
+      lon: -122.4194,
+    });
+
+    expect(result.count).toBe(1);
+    expect(result.transactions[0].transaction_id).toBe('txn_close');
+  });
+});
+
+describe('CopilotMoneyTools - Recurring Transactions Detail View', () => {
+  let db: CopilotDatabase;
+  let tools: CopilotMoneyTools;
+
+  beforeEach(() => {
+    db = new CopilotDatabase('/fake/path');
+    tools = new CopilotMoneyTools(db);
+    (db as any)._allCollectionsLoaded = true;
+    (db as any)._accounts = mockAccounts;
+    (db as any)._userCategories = [];
+    (db as any)._userAccounts = [];
+  });
+
+  test('returns detail view with transaction history when filtering by name', async () => {
+    const mockRecurring = [
+      {
+        recurring_id: 'rec1',
+        name: 'Netflix',
+        amount: 15.99,
+        merchant_name: 'Netflix',
+        category_id: 'entertainment',
+        account_id: 'acc1',
+        frequency: 'monthly',
+        state: 'active',
+        transaction_ids: ['txn1', 'txn2'],
+      },
+    ];
+    const mockTransactionsForHistory: Transaction[] = [
+      {
+        transaction_id: 'txn1',
+        amount: 15.99,
+        date: '2024-01-01',
+        name: 'Netflix',
+        category_id: 'entertainment',
+        account_id: 'acc1',
+      },
+      {
+        transaction_id: 'txn2',
+        amount: 15.99,
+        date: '2024-02-01',
+        name: 'Netflix',
+        category_id: 'entertainment',
+        account_id: 'acc1',
+      },
+    ];
+    (db as any)._recurring = mockRecurring;
+    (db as any)._transactions = mockTransactionsForHistory;
+
+    const result = await tools.getRecurringTransactions({ name: 'Netflix' });
+
+    expect(result.detail_view).toBeDefined();
+    expect(result.detail_view?.length).toBe(1);
+    expect(result.detail_view?.[0].name).toBe('Netflix');
+    expect(result.detail_view?.[0].transaction_history).toBeDefined();
+    expect(result.detail_view?.[0].transaction_history?.length).toBe(2);
+    // Transaction history is sorted by date descending, so txn2 (Feb) comes first
+    expect(result.detail_view?.[0].transaction_history?.[0].transaction_id).toBe('txn2');
+    expect(result.detail_view?.[0].transaction_history?.[1].transaction_id).toBe('txn1');
+  });
+
+  test('returns empty transaction history when no transaction_ids', async () => {
+    const mockRecurring = [
+      {
+        recurring_id: 'rec1',
+        name: 'Spotify',
+        amount: 9.99,
+        merchant_name: 'Spotify',
+        category_id: 'entertainment',
+        account_id: 'acc1',
+        frequency: 'monthly',
+        state: 'active',
+        // No transaction_ids
+      },
+    ];
+    (db as any)._recurring = mockRecurring;
+    (db as any)._transactions = [];
+
+    const result = await tools.getRecurringTransactions({ name: 'Spotify' });
+
+    expect(result.detail_view).toBeDefined();
+    expect(result.detail_view?.length).toBe(1);
+    expect(result.detail_view?.[0].transaction_history).toEqual([]);
+  });
+});
+
 describe('createToolSchemas', () => {
   test('returns 8 tool schemas', async () => {
     const schemas = createToolSchemas();

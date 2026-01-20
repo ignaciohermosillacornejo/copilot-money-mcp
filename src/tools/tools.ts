@@ -1488,7 +1488,7 @@ export class CopilotMoneyTools {
       if (copilotRecurring.length > 0) {
         // Get current date info for grouping (use string comparisons to avoid timezone issues)
         const now = new Date();
-        const today = now.toISOString().split('T')[0]!;
+        const today = now.toISOString().split('T')[0] ?? '';
         const year = now.getFullYear();
         const month = String(now.getMonth() + 1).padStart(2, '0');
         const thisMonthPrefix = `${year}-${month}`; // e.g., "2026-01"
@@ -1567,11 +1567,11 @@ export class CopilotMoneyTools {
           // Check if paid this month using string comparison (avoids timezone issues)
           const isPaidThisMonth = rec.last_date?.startsWith(thisMonthPrefix);
 
-          if (isPaidThisMonth) {
+          if (isPaidThisMonth && rec.last_date) {
             // Already paid this month - show in "this_month" with is_paid=true
             thisMonthItems.push({
               ...baseItem,
-              display_date: rec.last_date!,
+              display_date: rec.last_date,
               is_paid: true,
             });
             paidThisMonth += Math.abs(rec.amount || 0);

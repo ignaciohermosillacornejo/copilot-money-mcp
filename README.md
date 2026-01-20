@@ -108,16 +108,16 @@ After installing the MCP server, Claude Desktop will request **one-time approval
 **MCP Tool Call:**
 ```json
 {
-  "tool": "get_spending",
+  "tool": "get_transactions",
   "arguments": {
-    "group_by": "category",
+    "category": "food_and_drink",
     "period": "last_month"
   }
 }
 ```
 
 **Claude's Answer:**
-> "Last month you spent $487.50 on dining out across 23 transactions. Your largest spending category was groceries at $612.80. Overall, you spent $1,847.32 across 8 categories."
+> "Last month you spent $487.50 on dining out across 23 transactions. Your largest expense was $67.50 at The Italian Place on January 15th."
 
 ---
 
@@ -163,70 +163,18 @@ After installing the MCP server, Claude Desktop will request **one-time approval
 
 ## Available Tools
 
-The MCP server provides **28 read-only tools** using a parameter-driven design for comprehensive financial analysis:
-
-### Core Data (6 tools)
+The MCP server provides **8 read-only tools** for querying your financial data:
 
 | Tool | Description |
 |------|-------------|
-| `get_transactions` | Query transactions with filters (date, category, merchant, amount, account, region) |
-| `get_accounts` | List all accounts with balances, optionally filter by type |
-| `get_account_balance` | Get balance and details for a specific account by ID |
-| `get_categories` | List all transaction categories with counts and totals |
-| `get_income` | Get income transactions with breakdown by source |
-| `export_transactions` | Export transactions to CSV or JSON format |
-
-### Spending Analysis (4 tools)
-
-| Tool | Description |
-|------|-------------|
-| `get_spending` | Unified spending analysis with `group_by` parameter (category, merchant, day_of_week, time_period) |
-| `get_merchant_analytics` | Merchant insights with `sort_by` parameter (total_spent, frequency, average, recency) |
-| `get_average_transaction_size` | Average transaction amounts by category or merchant |
-| `get_category_trends` | Spending trends comparing current vs previous period |
-
-### Budgets (2 tools)
-
-| Tool | Description |
-|------|-------------|
-| `get_budgets` | Get budgets with optional period filter |
-| `get_budget_analytics` | Budget analysis with `analysis` parameter (utilization, vs_actual, recommendations, alerts) |
-
-### Goals (4 tools)
-
-| Tool | Description |
-|------|-------------|
-| `get_goals` | List financial goals with optional status filter |
-| `get_goal_details` | Get goal details with optional includes (history, contributions, projections) |
-| `get_goal_analytics` | Goal analysis with `analysis` parameter (progress, at_risk, recommendations) |
-| `get_goal_milestones` | Track milestone achievements (25%, 50%, 75%, 100%) |
-
-### Investments (4 tools)
-
-| Tool | Description |
-|------|-------------|
-| `get_investment_prices` | Current prices for stocks, crypto, ETFs |
-| `get_investment_splits` | Stock splits with ratios and dates |
-| `get_portfolio_allocation` | Portfolio allocation across accounts/securities |
-| `get_investment_analytics` | Investment analysis with `analysis` parameter (performance, dividends, fees) |
-
-### Account Insights (3 tools)
-
-| Tool | Description |
-|------|-------------|
-| `get_connected_institutions` | Get connected financial institutions with health status |
-| `get_account_analytics` | Account analysis with `analysis` parameter (activity, balance_trends, fees) |
-| `compare_periods` | Compare spending/income between two time periods |
-
-### Discovery & Patterns (5 tools)
-
-| Tool | Description |
-|------|-------------|
-| `get_recurring_transactions` | Identify subscriptions and recurring charges |
-| `get_trips` | Detect and group transactions into trips by location |
-| `get_unusual_transactions` | Anomaly detection for flagged transactions |
-| `get_year_over_year` | Year-over-year spending/income comparison |
-| `get_data_quality_report` | Data quality issues (duplicates, categorization problems) |
+| `get_transactions` | Query transactions with filters (date, category, merchant, amount, account, location). Supports period shortcuts, text search, and special types (foreign, refunds, duplicates). |
+| `get_accounts` | List all accounts with balances, optionally filter by type (checking, savings, credit, investment). |
+| `get_categories` | List all transaction categories with human-readable names, transaction counts, and spending totals. Filter by date range. |
+| `get_recurring_transactions` | Identify subscriptions and recurring charges with frequency, monthly cost, and next expected date. Filter by name for detailed view. |
+| `get_budgets` | Get budgets from Copilot's native budget tracking with spending vs. limit comparisons. |
+| `get_goals` | Get financial goals with progress tracking, monthly history, and savings status. |
+| `get_cache_info` | Get information about the local data cache, including date range and transaction count. |
+| `refresh_database` | Refresh the in-memory cache to pick up newly synced data from Copilot Money. Cache auto-refreshes every 5 minutes. |
 
 See tool schemas in Claude Desktop or use the MCP Inspector for complete parameter documentation.
 
@@ -292,7 +240,7 @@ copilot-money-mcp/
 - **Language:** TypeScript 5.3+
 - **Validation:** Zod schemas
 - **Database:** LevelDB (classic-level) + Protocol Buffers
-- **Testing:** Bun test runner (624 tests, 100% passing)
+- **Testing:** Bun test runner (726 tests, 100% passing)
 - **MCP SDK:** @modelcontextprotocol/sdk v1.2
 
 ## Testing
@@ -309,8 +257,8 @@ npm run test:coverage
 ```
 
 **Test Coverage:**
-- ✅ 624 tests passing
-- ✅ 2110+ assertions
+- ✅ 726 tests passing
+- ✅ 1870+ assertions
 - ✅ Core decoder tests
 - ✅ Database abstraction tests
 - ✅ Tool implementation tests
@@ -339,6 +287,22 @@ The `period` parameter supports these shortcuts:
 - `ytd` - Year-to-date (Jan 1 - today)
 - `this_year` - Current calendar year
 - `last_year` - Previous calendar year
+
+## Configuration
+
+### Cache TTL
+
+The MCP server caches data in memory for 5 minutes by default. You can configure this via environment variable:
+
+```bash
+# Set cache TTL to 10 minutes
+COPILOT_CACHE_TTL_MINUTES=10 copilot-money-mcp
+
+# Disable caching (always reload from disk)
+COPILOT_CACHE_TTL_MINUTES=0 copilot-money-mcp
+```
+
+You can also manually refresh the cache using the `refresh_database` tool.
 
 ## Known Limitations
 

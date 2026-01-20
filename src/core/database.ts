@@ -110,10 +110,25 @@ function findCopilotDatabase(): string | undefined {
 }
 
 /**
- * Cache TTL in milliseconds (5 minutes).
- * After this time, cached data is considered stale and will be reloaded.
+ * Default cache TTL in minutes.
  */
-const CACHE_TTL_MS = 5 * 60 * 1000;
+const DEFAULT_CACHE_TTL_MINUTES = 5;
+
+/**
+ * Get cache TTL in milliseconds.
+ * Can be configured via COPILOT_CACHE_TTL_MINUTES environment variable.
+ * Defaults to 5 minutes. Set to 0 to disable caching (always reload).
+ */
+function getCacheTTLMs(): number {
+  const envValue = process.env.COPILOT_CACHE_TTL_MINUTES;
+  if (envValue !== undefined) {
+    const minutes = parseInt(envValue, 10);
+    if (!isNaN(minutes) && minutes >= 0) {
+      return minutes * 60 * 1000;
+    }
+  }
+  return DEFAULT_CACHE_TTL_MINUTES * 60 * 1000;
+}
 
 /**
  * Abstraction layer for querying Copilot Money data.
@@ -214,7 +229,11 @@ export class CopilotDatabase {
     if (this._cacheLoadedAt === null) {
       return true; // Not loaded yet
     }
-    return Date.now() - this._cacheLoadedAt > CACHE_TTL_MS;
+    const ttlMs = getCacheTTLMs();
+    if (ttlMs === 0) {
+      return true; // TTL of 0 means always reload
+    }
+    return Date.now() - this._cacheLoadedAt > ttlMs;
   }
 
   /**
@@ -348,7 +367,7 @@ export class CopilotDatabase {
     // Use batch loading for optimal performance
     if (!this._allCollectionsLoaded) {
       await this.loadAllCollections();
-      return this._transactions!;
+      return this._transactions ?? [];
     }
 
     // Fallback to individual loading (shouldn't normally happen)
@@ -376,7 +395,7 @@ export class CopilotDatabase {
 
     if (!this._allCollectionsLoaded) {
       await this.loadAllCollections();
-      return this._accounts!;
+      return this._accounts ?? [];
     }
 
     if (this._loadingAccounts !== null) {
@@ -403,7 +422,7 @@ export class CopilotDatabase {
 
     if (!this._allCollectionsLoaded) {
       await this.loadAllCollections();
-      return this._recurring!;
+      return this._recurring ?? [];
     }
 
     if (this._loadingRecurring !== null) {
@@ -430,7 +449,7 @@ export class CopilotDatabase {
 
     if (!this._allCollectionsLoaded) {
       await this.loadAllCollections();
-      return this._budgets!;
+      return this._budgets ?? [];
     }
 
     if (this._loadingBudgets !== null) {
@@ -457,7 +476,7 @@ export class CopilotDatabase {
 
     if (!this._allCollectionsLoaded) {
       await this.loadAllCollections();
-      return this._goals!;
+      return this._goals ?? [];
     }
 
     if (this._loadingGoals !== null) {
@@ -484,7 +503,7 @@ export class CopilotDatabase {
 
     if (!this._allCollectionsLoaded) {
       await this.loadAllCollections();
-      return this._goalHistory!;
+      return this._goalHistory ?? [];
     }
 
     if (this._loadingGoalHistory !== null) {
@@ -511,7 +530,7 @@ export class CopilotDatabase {
 
     if (!this._allCollectionsLoaded) {
       await this.loadAllCollections();
-      return this._investmentPrices!;
+      return this._investmentPrices ?? [];
     }
 
     if (this._loadingInvestmentPrices !== null) {
@@ -538,7 +557,7 @@ export class CopilotDatabase {
 
     if (!this._allCollectionsLoaded) {
       await this.loadAllCollections();
-      return this._investmentSplits!;
+      return this._investmentSplits ?? [];
     }
 
     if (this._loadingInvestmentSplits !== null) {
@@ -565,7 +584,7 @@ export class CopilotDatabase {
 
     if (!this._allCollectionsLoaded) {
       await this.loadAllCollections();
-      return this._items!;
+      return this._items ?? [];
     }
 
     if (this._loadingItems !== null) {
@@ -592,7 +611,7 @@ export class CopilotDatabase {
 
     if (!this._allCollectionsLoaded) {
       await this.loadAllCollections();
-      return this._userCategories!;
+      return this._userCategories ?? [];
     }
 
     if (this._loadingUserCategories !== null) {
@@ -619,7 +638,7 @@ export class CopilotDatabase {
 
     if (!this._allCollectionsLoaded) {
       await this.loadAllCollections();
-      return this._userAccounts!;
+      return this._userAccounts ?? [];
     }
 
     if (this._loadingUserAccounts !== null) {
