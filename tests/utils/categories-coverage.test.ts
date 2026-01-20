@@ -11,6 +11,7 @@ import {
   getCategoryName,
   isTransferCategory,
   isIncomeCategory,
+  isKnownPlaidCategory,
   CATEGORY_NAMES,
   TRANSFER_CATEGORIES,
   INCOME_CATEGORIES,
@@ -163,6 +164,36 @@ describe('categories.ts coverage tests', () => {
 
     test('should return false for non-income category', () => {
       expect(isIncomeCategory('groceries')).toBe(false);
+    });
+  });
+
+  describe('isKnownPlaidCategory', () => {
+    test('should return true for exact match snake_case category', () => {
+      expect(isKnownPlaidCategory('food_and_drink')).toBe(true);
+    });
+
+    test('should return true for exact match numeric category', () => {
+      expect(isKnownPlaidCategory('13000000')).toBe(true);
+    });
+
+    test('should return true for lowercase match', () => {
+      expect(isKnownPlaidCategory('INCOME')).toBe(true);
+    });
+
+    test('should return true for mixed case match', () => {
+      expect(isKnownPlaidCategory('Food_And_Drink')).toBe(true);
+    });
+
+    test('should return false for unknown Firestore ID (orphaned category)', () => {
+      expect(isKnownPlaidCategory('rXFkilafMIseI6OMZ6ze')).toBe(false);
+    });
+
+    test('should return false for random string', () => {
+      expect(isKnownPlaidCategory('not_a_real_category_xyz')).toBe(false);
+    });
+
+    test('should return false for user-defined category ID pattern', () => {
+      expect(isKnownPlaidCategory('abc123def456')).toBe(false);
     });
   });
 });

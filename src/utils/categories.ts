@@ -997,3 +997,21 @@ export function isIncomeCategory(categoryId: string | undefined): boolean {
     lowerCategory.includes('wage')
   );
 }
+
+/**
+ * Check if a category ID is a known Plaid category.
+ *
+ * This is useful for filtering out orphaned references to deleted user categories.
+ * If a category_id doesn't resolve to either a user category or a known Plaid category,
+ * it's likely a deleted/orphaned category reference.
+ *
+ * @param categoryId - The category ID to check
+ * @returns true if the category is a known Plaid category
+ */
+export function isKnownPlaidCategory(categoryId: string): boolean {
+  // Check exact match
+  if (categoryId in CATEGORY_NAMES) return true;
+
+  // Check lowercase version
+  return categoryId.toLowerCase() in CATEGORY_NAMES;
+}
