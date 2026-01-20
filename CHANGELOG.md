@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-01-20
+
+### Fixed
+- Filter out budgets with orphaned category references from `get_budgets` results
+- Prevents raw Firestore IDs (like `rXFkilafMIseI6OMZ6ze`) from leaking through as `category_name`
+- Added `isKnownPlaidCategory()` helper function to validate category IDs
+
+## [1.2.0] - 2026-01-18
+
+### Added
+- **5-minute cache TTL**: Database automatically refreshes after 5 minutes of inactivity
+- **`refresh_database` tool**: Force refresh the database cache on demand
+- **`get_cache_info` tool**: View cache status and database statistics
+- **Name filter for `get_recurring_transactions`**: Filter recurring items by name pattern
+- **Detail view for `get_recurring_transactions`**: Get full transaction history for a specific recurring item
+- **Date filtering for `get_categories`**: Filter categories by date range to match UI behavior
+
+### Changed
+- Improved transaction history resolution with fallback search
+
 ## [1.1.0] - 2026-01-12
 
 ### Added
