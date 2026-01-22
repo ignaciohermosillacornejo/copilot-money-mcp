@@ -367,6 +367,85 @@ describe('CopilotMoneyTools', () => {
       expect(result.count).toBe(1);
       expect(result.transactions[0].pending).toBe(true);
     });
+
+    test('filters by query (free-text search)', async () => {
+      const result = await tools.getTransactions({ query: 'coffee' });
+      expect(result.count).toBe(1);
+      expect(result.transactions[0].name).toBe('Coffee Shop');
+    });
+
+    test('query search is case-insensitive', async () => {
+      const result = await tools.getTransactions({ query: 'GROCERY' });
+      expect(result.count).toBe(1);
+      expect(result.transactions[0].name).toBe('Grocery Store');
+    });
+
+    test('filters by tag', async () => {
+      const taggedTxn: Transaction = {
+        transaction_id: 'txn_tagged',
+        amount: 55.0,
+        date: '2024-01-30',
+        name: 'Business Lunch #work #expense',
+        category_id: 'food_dining',
+        account_id: 'acc1',
+      };
+      (db as any)._transactions = [...mockTransactions, taggedTxn];
+
+      const result = await tools.getTransactions({ tag: 'work' });
+      expect(result.count).toBe(1);
+      expect(result.transactions[0].name).toContain('#work');
+    });
+
+    test('filters by tag with # prefix', async () => {
+      const taggedTxn: Transaction = {
+        transaction_id: 'txn_tagged2',
+        amount: 65.0,
+        date: '2024-01-30',
+        name: 'Office Supplies #business',
+        category_id: 'shopping',
+        account_id: 'acc1',
+      };
+      (db as any)._transactions = [...mockTransactions, taggedTxn];
+
+      const result = await tools.getTransactions({ tag: '#business' });
+      expect(result.count).toBe(1);
+      expect(result.transactions[0].name).toContain('#business');
+    });
+
+    test('filters by transaction_type hsa_eligible', async () => {
+      const medicalTxn: Transaction = {
+        transaction_id: 'txn_medical',
+        amount: 150.0,
+        date: '2024-01-30',
+        name: 'CVS Pharmacy',
+        category_id: 'medical_pharmacies_and_supplements',
+        account_id: 'acc1',
+      };
+      (db as any)._transactions = [...mockTransactions, medicalTxn];
+
+      const result = await tools.getTransactions({ transaction_type: 'hsa_eligible' });
+      expect(result.count).toBe(1);
+      expect(result.transactions[0].name).toBe('CVS Pharmacy');
+      expect(result.type_specific_data?.total_hsa_eligible).toBeDefined();
+    });
+
+    test('filters by transaction_type tagged', async () => {
+      const taggedTxn: Transaction = {
+        transaction_id: 'txn_with_tag',
+        amount: 75.0,
+        date: '2024-01-30',
+        name: 'Team Dinner #team',
+        category_id: 'food_dining',
+        account_id: 'acc1',
+      };
+      (db as any)._transactions = [...mockTransactions, taggedTxn];
+
+      const result = await tools.getTransactions({ transaction_type: 'tagged' });
+      expect(result.count).toBe(1);
+      expect(result.transactions[0].name).toContain('#');
+      expect(result.type_specific_data?.tags).toBeDefined();
+      expect(Array.isArray(result.type_specific_data?.tags)).toBe(true);
+    });
   });
 
   describe('getAccounts', () => {
@@ -540,6 +619,59 @@ describe('CopilotMoneyTools', () => {
         expect(foodDrink.parent_id).toBeNull();
         expect(foodDrink.parent_name).toBeNull();
       }
+    });
+
+    test('returns tree view with hierarchy', async () => {
+      const result = await tools.getCategories({ view: 'tree' });
+
+      expect(result.view).toBe('tree');
+      expect(result.count).toBeGreaterThan(0);
+      const data = result.data as { categories: { id: string; children: unknown[] }[] };
+      expect(data.categories).toBeDefined();
+      expect(Array.isArray(data.categories)).toBe(true);
+
+      // Each root category should have children array
+      for (const cat of data.categories) {
+        expect(cat.id).toBeDefined();
+        expect(Array.isArray(cat.children)).toBe(true);
+      }
+    });
+
+    test('returns search view with matching categories', async () => {
+      const result = await tools.getCategories({ view: 'search', query: 'groceries' });
+
+      expect(result.view).toBe('search');
+      const data = result.data as {
+        query: string;
+        categories: { name: string; display_name: string }[];
+      };
+      expect(data.query).toBe('groceries');
+      expect(data.categories).toBeDefined();
+      expect(Array.isArray(data.categories)).toBe(true);
+      expect(data.categories.length).toBeGreaterThan(0);
+
+      // At least one result should contain 'groceries'
+      const hasGroceries = data.categories.some(
+        (cat) =>
+          cat.name.toLowerCase().includes('groceries') ||
+          cat.display_name.toLowerCase().includes('groceries')
+      );
+      expect(hasGroceries).toBe(true);
+    });
+
+    test('returns subcategories view when parent_id provided', async () => {
+      const result = await tools.getCategories({ parent_id: 'food_and_drink' });
+
+      expect(result.view).toBe('subcategories');
+      const data = result.data as {
+        parent_id: string;
+        parent_name: string;
+        subcategories: { id: string; name: string }[];
+      };
+      expect(data.parent_id).toBe('food_and_drink');
+      expect(data.parent_name).toBe('Food & Drink');
+      expect(Array.isArray(data.subcategories)).toBe(true);
+      expect(data.subcategories.length).toBeGreaterThan(0);
     });
   });
 
@@ -955,6 +1087,101 @@ describe('CopilotMoneyTools - Recurring Transactions Detail View', () => {
     expect(result.detail_view).toBeDefined();
     expect(result.detail_view?.length).toBe(1);
     expect(result.detail_view?.[0].transaction_history).toEqual([]);
+  });
+
+  test('detects pattern-based recurring from repeated transactions', async () => {
+    // Create multiple transactions with the same merchant over time
+    const recurringTransactions: Transaction[] = [
+      {
+        transaction_id: 'gym1',
+        amount: 50.0,
+        date: '2024-01-15',
+        name: 'Planet Fitness',
+        category_id: 'personal_care_gyms_and_fitness_centers',
+        account_id: 'acc1',
+      },
+      {
+        transaction_id: 'gym2',
+        amount: 50.0,
+        date: '2024-02-15',
+        name: 'Planet Fitness',
+        category_id: 'personal_care_gyms_and_fitness_centers',
+        account_id: 'acc1',
+      },
+      {
+        transaction_id: 'gym3',
+        amount: 50.0,
+        date: '2024-03-15',
+        name: 'Planet Fitness',
+        category_id: 'personal_care_gyms_and_fitness_centers',
+        account_id: 'acc1',
+      },
+    ];
+    (db as any)._recurring = []; // No Copilot native recurring
+    (db as any)._transactions = recurringTransactions;
+
+    // Explicitly set date range to cover the test transactions
+    const result = await tools.getRecurringTransactions({
+      start_date: '2024-01-01',
+      end_date: '2024-04-01',
+    });
+
+    // Should detect pattern-based recurring
+    expect(result.count).toBeGreaterThan(0);
+    const planetFitness = result.recurring.find((r) => r.merchant === 'Planet Fitness');
+    expect(planetFitness).toBeDefined();
+    expect(planetFitness?.occurrences).toBe(3);
+    expect(planetFitness?.average_amount).toBe(50);
+    expect(planetFitness?.transactions).toBeDefined();
+    expect(planetFitness?.transactions?.length).toBeLessThanOrEqual(5);
+  });
+
+  test('returns copilot subscriptions with grouped items by state', async () => {
+    // Create mock Copilot recurring with various states
+    const mockRecurringForCalendar = [
+      {
+        recurring_id: 'rec_active',
+        name: 'Netflix',
+        amount: 15.99,
+        merchant_name: 'Netflix',
+        category_id: 'entertainment',
+        account_id: 'acc1',
+        frequency: 'monthly',
+        state: 'active',
+        next_date: '2026-02-01',
+      },
+      {
+        recurring_id: 'rec_paused',
+        name: 'Gym',
+        amount: 50.0,
+        merchant_name: 'Planet Fitness',
+        category_id: 'fitness',
+        account_id: 'acc1',
+        frequency: 'monthly',
+        state: 'paused',
+      },
+      {
+        recurring_id: 'rec_archived',
+        name: 'Old Service',
+        amount: 9.99,
+        frequency: 'monthly',
+        state: 'archived',
+      },
+    ];
+    (db as any)._recurring = mockRecurringForCalendar;
+    (db as any)._transactions = [];
+
+    // Call without name filter to get the copilot_subscriptions view
+    const result = await tools.getRecurringTransactions({});
+
+    // Verify copilot_subscriptions structure
+    expect(result.copilot_subscriptions).toBeDefined();
+    expect(result.copilot_subscriptions?.summary).toBeDefined();
+    expect(result.copilot_subscriptions?.summary?.total_active).toBe(1);
+    expect(result.copilot_subscriptions?.summary?.total_paused).toBe(1);
+    expect(result.copilot_subscriptions?.summary?.total_archived).toBe(1);
+    expect(result.copilot_subscriptions?.paused?.length).toBe(1);
+    expect(result.copilot_subscriptions?.archived?.length).toBe(1);
   });
 });
 
