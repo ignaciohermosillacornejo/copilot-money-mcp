@@ -65,7 +65,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.2.0",
     "classic-level": "^1.4.1",
-    "protobufjs": "^7.2.6",
+    "protobufjs": "^8.0.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
