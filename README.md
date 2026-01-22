@@ -65,6 +65,30 @@ Then add to your Claude Desktop configuration (`~/Library/Application Support/Cl
 }
 ```
 
+### Installation for Cursor
+
+1. Install the package globally:
+   ```bash
+   npm install -g copilot-money-mcp
+   ```
+
+2. Open Cursor Settings (`Cmd + ,`)
+
+3. Search for "MCP" or go to **Features > MCP Servers**
+
+4. Add the server configuration:
+   ```json
+   {
+     "mcpServers": {
+       "copilot-money": {
+         "command": "copilot-money-mcp"
+       }
+     }
+   }
+   ```
+
+5. Restart Cursor
+
 ### Manual Installation for Development
 
 ```bash
