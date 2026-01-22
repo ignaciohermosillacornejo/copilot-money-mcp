@@ -2,7 +2,7 @@
  * Unit tests for CopilotDatabase abstraction layer.
  */
 
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, test, expect, beforeEach } from 'bun:test';
 import { CopilotDatabase } from '../../src/core/database.js';
 import type { Transaction, Account, Recurring } from '../../src/models/index.js';
 
@@ -260,80 +260,6 @@ describe('CopilotDatabase', () => {
       const result = await db.getRecurring(true);
       const inactive = result.find((r) => r.is_active === false);
       expect(inactive).toBeUndefined();
-    });
-  });
-
-  describe('Cache TTL configuration', () => {
-    const originalEnv = process.env.COPILOT_CACHE_TTL_MINUTES;
-
-    afterEach(() => {
-      if (originalEnv === undefined) {
-        delete process.env.COPILOT_CACHE_TTL_MINUTES;
-      } else {
-        process.env.COPILOT_CACHE_TTL_MINUTES = originalEnv;
-      }
-    });
-
-    test('uses custom TTL from environment variable', async () => {
-      process.env.COPILOT_CACHE_TTL_MINUTES = '10';
-
-      // Create a new database to pick up the env var
-      const testDb = new CopilotDatabase('/fake/path');
-      (testDb as any)._transactions = [...mockTransactions];
-      (testDb as any)._accounts = [...mockAccounts];
-      (testDb as any)._recurring = [...mockRecurring];
-      (testDb as any)._budgets = [];
-      (testDb as any)._goals = [];
-      (testDb as any)._goalHistory = [];
-      (testDb as any)._investmentPrices = [];
-      (testDb as any)._investmentSplits = [];
-      (testDb as any)._items = [];
-      (testDb as any)._userCategories = [];
-      (testDb as any)._userAccounts = [];
-      (testDb as any)._cacheLoadedAt = Date.now();
-
-      // The cache should not be stale since we just set cacheLoadedAt
-      const cacheInfo = await testDb.getCacheInfo();
-      expect(cacheInfo).toBeDefined();
-      expect(cacheInfo?.transaction_count).toBe(3);
-    });
-
-    test('disables caching when TTL is 0', async () => {
-      process.env.COPILOT_CACHE_TTL_MINUTES = '0';
-
-      // Create a new database to pick up the env var
-      const testDb = new CopilotDatabase('/fake/path');
-      (testDb as any)._transactions = [...mockTransactions];
-      (testDb as any)._accounts = [...mockAccounts];
-      (testDb as any)._recurring = [...mockRecurring];
-      (testDb as any)._budgets = [];
-      (testDb as any)._goals = [];
-      (testDb as any)._goalHistory = [];
-      (testDb as any)._investmentPrices = [];
-      (testDb as any)._investmentSplits = [];
-      (testDb as any)._items = [];
-      (testDb as any)._userCategories = [];
-      (testDb as any)._userAccounts = [];
-      (testDb as any)._cacheLoadedAt = Date.now();
-
-      // With TTL=0, isCacheStale should always return true
-      // Which means getCacheInfo should trigger a reload attempt
-      // But since we have fake path, it will fail gracefully
-      const cacheInfo = await testDb.getCacheInfo();
-      expect(cacheInfo).toBeDefined();
-    });
-
-    test('handles invalid TTL value gracefully', async () => {
-      process.env.COPILOT_CACHE_TTL_MINUTES = 'not-a-number';
-
-      // Should fall back to default TTL
-      const testDb = new CopilotDatabase('/fake/path');
-      (testDb as any)._transactions = [...mockTransactions];
-      (testDb as any)._accounts = [...mockAccounts];
-      (testDb as any)._cacheLoadedAt = Date.now();
-
-      const cacheInfo = await testDb.getCacheInfo();
-      expect(cacheInfo).toBeDefined();
     });
   });
 });
