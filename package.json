@@ -42,8 +42,8 @@
   "scripts": {
     "dev": "bun run src/server.ts",
     "dev:debug": "bun --inspect run src/server.ts",
-    "build": "bun build src/cli.ts --outdir dist --target node --format esm && chmod +x dist/cli.js",
-    "build:bundle": "bun build src/server.ts --outdir dist --target node --format esm",
+    "build": "bun build src/cli.ts --outdir dist --target node --format esm --external classic-level && chmod +x dist/cli.js",
+    "build:bundle": "bun build src/server.ts --outdir dist --target node --format esm --external classic-level",
     "test": "bun test",
     "test:watch": "bun test --watch",
     "test:coverage": "bun test --coverage",
