@@ -6,14 +6,26 @@ on:
 
 jobs:
   auto-merge:
-    # Only run when the review is an approval
-    if: github.event.review.state == 'approved'
+    # Only run when the owner approves
+    if: |
+      github.event.review.state == 'approved' &&
+      github.event.review.user.login == 'ignaciohermosillacornejo'
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
 
     steps:
+      - name: Verify approver is owner
+        run: |
+          APPROVER="${{ github.event.review.user.login }}"
+          echo "Approval from: $APPROVER"
+          if [[ "$APPROVER" != "ignaciohermosillacornejo" ]]; then
+            echo "::error::Only the repository owner can trigger auto-merge"
+            exit 1
+          fi
+          echo "✅ Owner approval verified"
+
       - name: Enable auto-merge
         env:
           GH_TOKEN: ${{ github.token }}

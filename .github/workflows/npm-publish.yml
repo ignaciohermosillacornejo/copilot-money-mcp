@@ -13,6 +13,8 @@ on:
 
 env:
   BUN_VERSION: 'latest'
+  # Only these users can publish packages
+  TRUSTED_PUBLISHERS: 'ignaciohermosillacornejo'
 
 permissions:
   contents: read
@@ -22,8 +24,26 @@ jobs:
   publish:
     name: Publish to npm
     runs-on: ubuntu-latest
+    # Only run for releases created by trusted publishers, or manual dispatch by owner
+    if: |
+      (github.event_name == 'release' && github.event.release.author.login == 'ignaciohermosillacornejo') ||
+      (github.event_name == 'workflow_dispatch' && github.actor == 'ignaciohermosillacornejo')
 
     steps:
+      - name: Verify publisher is trusted
+        run: |
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            PUBLISHER="${{ github.event.release.author.login }}"
+          else
+            PUBLISHER="${{ github.actor }}"
+          fi
+          echo "Publisher: $PUBLISHER"
+          if [[ "$PUBLISHER" != "ignaciohermosillacornejo" ]]; then
+            echo "::error::Publisher '$PUBLISHER' is not authorized to publish packages"
+            exit 1
+          fi
+          echo "Publisher '$PUBLISHER' is authorized"
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
