@@ -15,10 +15,10 @@ With **5,253 transactions** in our demo database, naive implementations could ea
 
 #### 1. Concise Output Format
 
-Use compact string formatting instead of verbose JSON:
+Use compact structured data instead of verbose JSON:
 
-```python
-# ❌ BAD: Verbose JSON (100+ tokens per transaction)
+```typescript
+// ❌ BAD: Verbose JSON (100+ tokens per transaction)
 {
   "transaction_id": "txn_abc123...",
   "amount": 42.50,
@@ -26,14 +26,19 @@ Use compact string formatting instead of verbose JSON:
   "name": "Starbucks",
   "original_name": "STARBUCKS #12345",
   "category_id": "cat_food_dining",
-  # ... 15 more fields
+  // ... 15 more fields
 }
 
-# ✅ GOOD: Compact format (20-30 tokens per transaction)
-"2026-01-10 | Starbucks | $42.50 | Food & Dining"
+// ✅ GOOD: Essential fields only (20-30 tokens per transaction)
+{
+  "date": "2026-01-10",
+  "name": "Starbucks",
+  "amount": 42.50,
+  "category_name": "Food & Dining"
+}
 ```
 
-**Implementation:** `src/copilot_money_mcp/utils/formatting.py`
+**Implementation:** `src/tools/tools.ts` - enriched transaction mapping
 
 #### 2. Smart Defaults
 
@@ -48,22 +53,14 @@ Document limits clearly in tool descriptions so Claude knows the constraints.
 
 Aggregation tools return totals/counts before details:
 
-```python
-# ✅ GOOD: Summary first, then samples
-"""
-Found 234 grocery transactions totaling $5,432.10 in January 2026.
-
-Top merchants:
-1. Whole Foods: $1,234.56 (45 transactions)
-2. Trader Joe's: $892.30 (32 transactions)
-3. Safeway: $654.21 (28 transactions)
-...and 12 more merchants
-
-Recent transactions:
-2026-01-10 | Whole Foods | $87.23 | Groceries
-2026-01-09 | Trader Joe's | $45.67 | Groceries
-...and 229 more transactions
-"""
+```typescript
+// ✅ GOOD: Summary first, then paginated data
+{
+  "count": 50,
+  "total_count": 234,
+  "has_more": true,
+  "transactions": [/* limited results */]
+}
 ```
 
 #### 4. Token Budget Awareness
@@ -72,30 +69,32 @@ Recent transactions:
 
 | Tool | Default Output | Estimated Tokens | Status |
 |------|----------------|------------------|--------|
-| `get_transactions` (50) | 50 compact lines | 2K-5K | ✅ Safe |
-| `spending_summary` | Aggregated totals | 500-1K | ✅ Safe |
-| `account_balances` | ~14 accounts | 200-500 | ✅ Safe |
-| `search_transactions` (20) | 20 compact lines | 1K-2K | ✅ Safe |
-| **All 5,253 transactions** | Full JSON dump | **200K-300K** | ❌ NEVER |
+| `get_transactions` (50) | 50 enriched transactions | 2K-5K | ✅ Safe |
+| `get_categories` | Aggregated by category | 500-1K | ✅ Safe |
+| `get_accounts` | All accounts (~10-20) | 200-500 | ✅ Safe |
+| `get_recurring_transactions` | Recurring items | 1K-3K | ✅ Safe |
+| `get_budgets` | Budget list | 200-500 | ✅ Safe |
+| `get_goals` | Goal list | 200-500 | ✅ Safe |
+| **Unlimited transactions** | Full JSON dump | **200K-300K** | ❌ NEVER |
 
 ### Implementation Guidelines
 
-1. **Create formatting utilities** (`utils/formatting.py`):
-   - `format_transaction_compact(txn) -> str`
-   - `format_summary_response(data, total_count) -> str`
-   - `truncate_with_message(items, limit) -> str`
+1. **Use TypeScript utilities** (`src/tools/tools.ts`):
+   - Enrich transactions with human-readable category names
+   - Include pagination metadata (count, total_count, has_more)
+   - Use `roundAmount()` for consistent decimal formatting
 
 2. **Always show counts**:
-   - "Showing 50 of 234 transactions"
-   - "...and 184 more transactions"
+   - Return `count` (current page) and `total_count` (all matching)
+   - Include `has_more` boolean for pagination awareness
 
 3. **Prioritize recent data**:
    - Sort by date descending (most recent first)
    - Recent data is usually more relevant
 
-4. **Consider verbose mode**:
-   - Optional `verbose=True` parameter for detailed output
-   - Default to concise format
+4. **Default limits**:
+   - `get_transactions`: 50 results default
+   - All tools have sensible defaults that fit context windows
 
 ### Testing Context Efficiency
 
@@ -114,5 +113,5 @@ If context is still an issue:
 
 ---
 
-**Last Updated:** 2026-01-11
-**Status:** Documented for Phase 3 implementation
+**Last Updated:** 2026-01-21
+**Status:** Implemented in v1.2.1

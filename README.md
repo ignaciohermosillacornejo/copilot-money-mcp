@@ -73,13 +73,13 @@ git clone https://github.com/ignaciohermosillacornejo/copilot-money-mcp.git
 cd copilot-money-mcp
 
 # Install dependencies
-npm install
+bun install
 
 # Build the project
-npm run build
+bun run build
 
 # Run tests
-npm test
+bun test
 ```
 
 ## First-Time Setup
@@ -184,27 +184,30 @@ See tool schemas in Claude Desktop or use the MCP Inspector for complete paramet
 
 ```bash
 # Install dependencies
-npm install
+bun install
 
 # Run tests
-npm test
+bun test
 
 # Build for production
-npm run build
+bun run build
 
 # Build .mcpb bundle
-npm run pack:mcpb
+bun run pack:mcpb
 
 # Type checking
-npm run typecheck
+bun run typecheck
 
 # Linting
-npm run lint
-npm run lint:fix
+bun run lint
+bun run lint:fix
 
 # Formatting
-npm run format
-npm run format:check
+bun run format
+bun run format:check
+
+# Run all checks (typecheck + lint + format + test)
+bun run check
 ```
 
 ### Project Structure
@@ -240,25 +243,25 @@ copilot-money-mcp/
 - **Language:** TypeScript 5.3+
 - **Validation:** Zod schemas
 - **Database:** LevelDB (classic-level) + Protocol Buffers
-- **Testing:** Bun test runner (726 tests, 100% passing)
+- **Testing:** Bun test runner (772 tests, 100% passing)
 - **MCP SDK:** @modelcontextprotocol/sdk v1.2
 
 ## Testing
 
 ```bash
 # Run all tests
-npm test
+bun test
 
 # Watch mode
-npm run test:watch
+bun test --watch
 
-# Coverage report
-npm run test:coverage
+# Run specific test file
+bun test tests/tools/tools.test.ts
 ```
 
 **Test Coverage:**
-- ✅ 726 tests passing
-- ✅ 1870+ assertions
+- ✅ 772 tests passing
+- ✅ 1920+ assertions
 - ✅ Core decoder tests
 - ✅ Database abstraction tests
 - ✅ Tool implementation tests

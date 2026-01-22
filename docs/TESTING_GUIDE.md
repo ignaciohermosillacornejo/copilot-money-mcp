@@ -10,13 +10,14 @@ Before testing, ensure you have:
    - Download from: https://claude.ai/desktop
 
 2. **Copilot Money** installed with local database
-   - The server expects the database at: `~/Library/Application Support/Money by Copilot/firestore-v3/Default.sqlite`
+   - The server reads from the local LevelDB cache at: `~/Library/Containers/com.copilot.production/Data/Library/Application Support/firestore/__FIRAPP_DEFAULT/copilot-production-22904/main`
    - Make sure you have transaction data in Copilot Money
 
-3. **Node.js 18+** (comes bundled with Claude Desktop, but verify)
+3. **Bun or Node.js 18+**
    ```bash
+   bun --version  # Recommended
+   # or
    node --version
-   # Should show v18.0.0 or higher
    ```
 
 ## Installation Methods
@@ -98,12 +99,15 @@ Start a new conversation in Claude Desktop and ask:
 What MCP tools do you have access to?
 ```
 
-You should see 5 tools listed:
-- `get_transactions`
-- `search_transactions`
-- `get_accounts`
-- `get_spending_by_category`
-- `get_account_balance`
+You should see 8 tools listed:
+- `get_transactions` - Query transactions with filtering
+- `get_accounts` - List all accounts with balances
+- `get_categories` - Get spending by category
+- `get_recurring_transactions` - Find recurring/subscription charges
+- `get_budgets` - View budget tracking
+- `get_goals` - View financial goals
+- `get_cache_info` - Check database cache status
+- `refresh_database` - Refresh the database cache
 
 ### First-Time Tool Approvals ⚠️
 
@@ -118,7 +122,7 @@ You should see 5 tools listed:
 3. Options: "Allow" or "Deny"
 
 **Expected behavior:**
-- **5 separate approvals** - One for each tool when first used
+- **8 separate approvals** - One for each tool when first used
 - **One-time only** - After approving, no more prompts for that tool
 - **Persistent** - Approvals survive Claude Desktop restarts
 
@@ -131,9 +135,9 @@ You should see 5 tools listed:
 1. Click "Allow" when prompted
 2. Continue with your query
 3. If you use a different tool, approve it when prompted
-4. After approving all 5 tools once, testing becomes seamless
+4. After approving all 8 tools once, testing becomes seamless
 
-**Tip:** Try using all 5 tools in your first test session to get all approvals out of the way at once!
+**Tip:** Try using multiple tools in your first test session to get approvals out of the way!
 
 ## Testing All Tools
 
@@ -171,34 +175,34 @@ Show me all my grocery purchases from the last 30 days
 
 ---
 
-### Test 2: search_transactions
+### Test 2: get_categories
 
 **Basic Query:**
 ```
-Show me all Starbucks purchases
+Show me my spending by category this month
 ```
 
 **Expected Response:**
-- List of all transactions with "Starbucks" in the merchant name or description
-- Should include partial matches
+- List of categories with transaction counts and totals
+- Categories sorted by amount (highest first)
 
 **Advanced Queries:**
 ```
-Find Amazon transactions in the last 30 days
-Search for "delivery" in my transactions
-Show me all purchases from "Whole Foods"
+Break down my spending by category for last month
+What are my top spending categories?
+Show me category spending for Q1
 ```
 
 **Expected Results:**
-- Full-text search works across merchant names and descriptions
-- Case-insensitive matching
-- Results are relevant
+- Categories are aggregated correctly
+- Amounts are accurate
+- Period filtering works
 
 **What to Verify:**
-- ✅ Search finds all matching transactions
-- ✅ Case-insensitive search works
-- ✅ Partial matches are included
-- ✅ No false positives (unrelated transactions)
+- ✅ All categories with transactions are listed
+- ✅ Amounts match Copilot Money
+- ✅ Period filtering works correctly
+- ✅ Parent category info is included
 
 ---
 
@@ -237,72 +241,90 @@ What accounts do I have?
 
 ---
 
-### Test 4: get_spending_by_category
+### Test 4: get_recurring_transactions
 
 **Basic Query:**
 ```
-How much did I spend on dining out last month?
+Show me my recurring charges and subscriptions
 ```
 
 **Expected Response:**
-- Spending breakdown by category
-- Categories sorted by amount (highest to lowest)
-- Total spending for the period
+- List of detected recurring transactions
+- Includes frequency (monthly, weekly, etc.)
+- Estimated monthly cost
 
 **Advanced Queries:**
 ```
-Break down my spending by category for 2026
-What are my top spending categories last year?
-Show me my spending breakdown for the last 30 days
-Analyze my spending by category this month
+What subscriptions am I paying for?
+Show me details for my Netflix subscription
+Find all my monthly recurring charges
 ```
 
 **Expected Results:**
-- Categories are aggregated correctly
-- Amounts are accurate
-- Sorting works (highest to lowest)
-- Period filtering works
+- Recurring items are detected correctly
+- Frequency is accurate
+- Next expected date is shown
+- Transaction history is available
 
 **What to Verify:**
-- ✅ All categories are included
-- ✅ Amounts match Copilot Money
-- ✅ Sorting is correct
-- ✅ Period filtering works
-- ✅ No duplicate categories
+- ✅ Recurring items are identified
+- ✅ Frequency detection is accurate
+- ✅ Amounts are correct
+- ✅ Detail view works with name filter
+- ✅ No false positives
 
 ---
 
-### Test 5: get_account_balance
+### Test 5: get_budgets
 
 **Basic Query:**
 ```
-What's the balance of my checking account?
+Show me my budgets
 ```
 
 **Expected Response:**
-- Specific account details:
-  - Account name
-  - Balance (current and available)
-  - Account type
-  - Currency
+- List of budgets with:
+  - Budget name/category
+  - Budgeted amount
+  - Period (monthly, yearly, etc.)
 
 **Advanced Queries:**
 ```
-Show me my Chase checking account balance
-What's the balance on my credit card?
-Get details for account [account_id]
+What are my active budgets?
+Show me my grocery budget
+How much have I budgeted in total?
 ```
 
 **Expected Results:**
-- Finds the correct account by name
-- Balance matches Copilot Money
-- Account details are complete
+- All budgets are listed
+- Amounts are accurate
+- Active/inactive filtering works
 
 **What to Verify:**
-- ✅ Account is found correctly
-- ✅ Balance is accurate
-- ✅ Account details are complete
-- ✅ No errors if account not found
+- ✅ All budgets are listed
+- ✅ Amounts are correct
+- ✅ Category names are resolved (not raw IDs)
+- ✅ Total budgeted is calculated
+
+---
+
+### Test 6: get_goals
+
+**Basic Query:**
+```
+Show me my financial goals
+```
+
+**Expected Response:**
+- List of goals with:
+  - Goal name
+  - Target amount
+  - Current progress
+
+**What to Verify:**
+- ✅ All goals are listed
+- ✅ Progress is accurate
+- ✅ Target amounts are correct
 
 ---
 
@@ -349,10 +371,10 @@ Test how the server handles errors:
 
 ### Test 1: Database Not Found
 
-1. **Temporarily rename the database**:
+1. **Temporarily rename the database directory**:
    ```bash
-   mv ~/Library/Application\ Support/Money\ by\ Copilot/firestore-v3/Default.sqlite \
-      ~/Library/Application\ Support/Money\ by\ Copilot/firestore-v3/Default.sqlite.backup
+   mv ~/Library/Containers/com.copilot.production/Data/Library/Application\ Support/firestore \
+      ~/Library/Containers/com.copilot.production/Data/Library/Application\ Support/firestore.backup
    ```
 
 2. **Try a query**: "Show me my transactions"
@@ -364,8 +386,8 @@ Test how the server handles errors:
 
 4. **Restore the database**:
    ```bash
-   mv ~/Library/Application\ Support/Money\ by\ Copilot/firestore-v3/Default.sqlite.backup \
-      ~/Library/Application\ Support/Money\ by\ Copilot/firestore-v3/Default.sqlite
+   mv ~/Library/Containers/com.copilot.production/Data/Library/Application\ Support/firestore.backup \
+      ~/Library/Containers/com.copilot.production/Data/Library/Application\ Support/firestore
    ```
 
 ### Test 2: Invalid Date Period
@@ -421,14 +443,14 @@ Verify the server doesn't modify data:
 1. **Note current transaction count** in Copilot Money
 2. **Run multiple queries** through Claude Desktop
 3. **Check Copilot Money** - transaction count should be unchanged
-4. **Check database file**:
+4. **Check database files**:
    ```bash
-   ls -l ~/Library/Application\ Support/Money\ by\ Copilot/firestore-v3/Default.sqlite
+   ls -l ~/Library/Containers/com.copilot.production/Data/Library/Application\ Support/firestore/__FIRAPP_DEFAULT/copilot-production-22904/main/*.ldb
    ```
-   Modification time should not change
+   Modification times should not change from MCP queries
 
 **Expected Result**:
-- Database file not modified
+- Database files not modified by MCP
 - No new transactions created
 - All data remains unchanged
 
@@ -490,9 +512,9 @@ Test with complex, natural queries:
 1. Verify Copilot Money is installed
 2. Check database path:
    ```bash
-   ls -la ~/Library/Application\ Support/Money\ by\ Copilot/firestore-v3/Default.sqlite
+   ls -la ~/Library/Containers/com.copilot.production/Data/Library/Application\ Support/firestore/__FIRAPP_DEFAULT/copilot-production-22904/main/
    ```
-3. If using a custom path, update server config
+3. If using a custom path, use the `--db-path` CLI argument
 
 ### Issue: Tools Not Working
 
@@ -512,11 +534,12 @@ Test with complex, natural queries:
 **Solution:**
 1. Check database size:
    ```bash
-   du -h ~/Library/Application\ Support/Money\ by\ Copilot/firestore-v3/Default.sqlite
+   du -sh ~/Library/Containers/com.copilot.production/Data/Library/Application\ Support/firestore/__FIRAPP_DEFAULT/copilot-production-22904/main/
    ```
 2. Check available memory in Activity Monitor
 3. Close other applications
-4. Try restarting Claude Desktop
+4. Try refreshing the cache: ask Claude to "refresh the database"
+5. Try restarting Claude Desktop
 
 ---
 
@@ -546,7 +569,7 @@ Report issues at: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/
 
 Before considering testing complete, verify:
 
-- [ ] All 5 tools work correctly
+- [ ] All 8 tools work correctly
 - [ ] Response times are acceptable (<5s)
 - [ ] Memory usage is reasonable (<100MB)
 - [ ] Error handling is graceful
@@ -555,7 +578,7 @@ Before considering testing complete, verify:
 - [ ] Data accuracy matches Copilot Money
 - [ ] Complex queries are handled well
 - [ ] Server survives multiple queries
-- [ ] Logs show no errors or warnings
+- [ ] Cache refresh works correctly
 
 ---
 

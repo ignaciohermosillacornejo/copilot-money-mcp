@@ -958,6 +958,108 @@ describe('CopilotMoneyTools - Recurring Transactions Detail View', () => {
   });
 });
 
+describe('getCacheInfo', () => {
+  let db: CopilotDatabase;
+  let tools: CopilotMoneyTools;
+
+  beforeEach(() => {
+    db = new CopilotDatabase('/fake/path');
+    // Mock the database with test data
+    (db as any)._transactions = [...mockTransactions];
+    (db as any)._accounts = [...mockAccounts];
+    (db as any)._recurring = [];
+    (db as any)._budgets = [];
+    (db as any)._goals = [];
+    (db as any)._goalHistory = [];
+    (db as any)._investmentPrices = [];
+    (db as any)._investmentSplits = [];
+    (db as any)._items = [];
+    (db as any)._userCategories = [];
+    (db as any)._userAccounts = [];
+    (db as any)._categoryNameMap = new Map<string, string>();
+    (db as any)._accountNameMap = new Map<string, string>();
+
+    tools = new CopilotMoneyTools(db);
+  });
+
+  test('returns cache info with transaction date range', async () => {
+    const result = await tools.getCacheInfo();
+
+    expect(result.transaction_count).toBe(4);
+    expect(result.oldest_transaction_date).toBe('2024-01-15');
+    expect(result.newest_transaction_date).toBe('2024-02-10');
+    expect(result.cache_note).toContain('4 transactions');
+  });
+
+  test('returns null dates for empty database', async () => {
+    (db as any)._transactions = [];
+
+    const result = await tools.getCacheInfo();
+
+    expect(result.transaction_count).toBe(0);
+    expect(result.oldest_transaction_date).toBeNull();
+    expect(result.newest_transaction_date).toBeNull();
+    expect(result.cache_note).toContain('No transactions');
+  });
+});
+
+describe('refreshDatabase', () => {
+  let db: CopilotDatabase;
+  let tools: CopilotMoneyTools;
+
+  beforeEach(() => {
+    db = new CopilotDatabase('/fake/path');
+    // Mock the database with test data
+    (db as any)._transactions = [...mockTransactions];
+    (db as any)._accounts = [...mockAccounts];
+    (db as any)._recurring = [];
+    (db as any)._budgets = [];
+    (db as any)._goals = [];
+    (db as any)._goalHistory = [];
+    (db as any)._investmentPrices = [];
+    (db as any)._investmentSplits = [];
+    (db as any)._items = [];
+    (db as any)._userCategories = [];
+    (db as any)._userAccounts = [];
+    (db as any)._categoryNameMap = new Map<string, string>();
+    (db as any)._accountNameMap = new Map<string, string>();
+
+    tools = new CopilotMoneyTools(db);
+  });
+
+  test('clearCache clears internal state', () => {
+    // First verify data is loaded
+    expect((db as any)._transactions).toHaveLength(4);
+
+    // Clear the cache
+    const result = db.clearCache();
+
+    expect(result.cleared).toBe(true);
+    expect((db as any)._transactions).toBeNull();
+    expect((db as any)._accounts).toBeNull();
+  });
+
+  test('refreshDatabase return structure is correct', async () => {
+    // Mock getCacheInfo to avoid disk access after clearCache
+    const mockCacheInfo = {
+      oldest_transaction_date: '2024-01-01',
+      newest_transaction_date: '2024-03-01',
+      transaction_count: 100,
+      cache_note: 'Test cache info',
+    };
+    db.getCacheInfo = async () => mockCacheInfo;
+
+    const result = await tools.refreshDatabase();
+
+    expect(result.refreshed).toBe(true);
+    expect(result.message).toContain('refreshed');
+    expect(result.cache_info).toBeDefined();
+    expect(result.cache_info.transaction_count).toBe(100);
+    expect(result.cache_info.oldest_transaction_date).toBe('2024-01-01');
+    expect(result.cache_info.newest_transaction_date).toBe('2024-03-01');
+  });
+});
+
 describe('createToolSchemas', () => {
   test('returns 8 tool schemas', async () => {
     const schemas = createToolSchemas();

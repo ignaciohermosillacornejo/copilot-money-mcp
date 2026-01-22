@@ -509,39 +509,25 @@ While the MCP server returns data, you can ask Claude to:
 
 ## Tool Reference (Behind the Scenes)
 
-When you ask questions, Claude uses these tools automatically:
+When you ask questions, Claude uses these 8 tools automatically:
 
 | Your Question | Tool Used |
 |---------------|-----------|
 | "Show my transactions" | `get_transactions` |
-| "Search for Amazon" | `search_transactions` |
+| "Search for Amazon" | `get_transactions` (with merchant filter) |
 | "What are my accounts?" | `get_accounts` |
-| "Spending by category" | `get_spending_by_category` |
-| "Balance of checking" | `get_account_balance` |
+| "Spending by category" | `get_categories` |
 | "What categories exist?" | `get_categories` |
 | "Find subscriptions" | `get_recurring_transactions` |
-| "Show my income" | `get_income` |
-| "Top merchants" | `get_spending_by_merchant` |
-| "Compare months" | `compare_periods` |
-| "Foreign transactions" | `get_foreign_transactions` |
-| "Show refunds" | `get_refunds` |
-| "Find duplicates" | `get_duplicate_transactions` |
-| "Show credits" | `get_credits` |
-| "Spending by day" | `get_spending_by_day_of_week` |
-| "Analyze my trip" | `get_trips` |
-| "Find transaction ID" | `get_transaction_by_id` |
-| "Top merchants" | `get_top_merchants` |
-| "Unusual transactions" | `get_unusual_transactions` |
-| "Export data" | `export_transactions` |
-| "HSA eligible" | `get_hsa_fsa_eligible` |
-| "Spending rate" | `get_spending_rate` |
-| "Data quality" | `get_data_quality_report` |
+| "Show my budgets" | `get_budgets` |
+| "What are my goals?" | `get_goals` |
+| "Check cache status" | `get_cache_info` |
+| "Refresh database" | `refresh_database` |
 
 ---
 
 **For more information:**
 - [README](../README.md) - Installation and setup
-- [Data Quality Guide](DATA_QUALITY_GUIDE.md) - How to use the data quality tool
 - [Testing Guide](TESTING_GUIDE.md) - For developers
 
 Have a query pattern that's not listed here? [Open an issue](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues) to suggest additions!

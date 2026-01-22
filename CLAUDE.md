@@ -6,7 +6,7 @@ MCP (Model Context Protocol) server that enables AI-powered queries of Copilot M
 
 ```bash
 bun install          # Install dependencies
-bun test             # Run tests (624 tests)
+bun test             # Run tests (772 tests)
 bun run build        # Build for production
 bun run pack:mcpb    # Create .mcpb bundle for Claude Desktop
 bun run check        # Run typecheck + lint + format:check + test
@@ -47,7 +47,7 @@ src/
 
 ## Key Files
 
-- **`src/tools/tools.ts`** - All 28 MCP tools are implemented here. Each tool has a `toolName_impl` method.
+- **`src/tools/tools.ts`** - All 8 MCP tools are implemented here as async methods in the `CopilotMoneyTools` class.
 - **`src/core/database.ts`** - `CopilotDatabase` class with methods like `getTransactions()`, `getAccounts()`, `getIncome()`, etc.
 - **`src/core/decoder.ts`** - Binary decoder that reads LevelDB files and parses Firestore Protocol Buffers.
 - **`manifest.json`** - MCP bundle metadata for .mcpb packaging.
@@ -69,8 +69,8 @@ src/
 ### Tool Implementation Pattern
 Each MCP tool follows this pattern:
 1. Define input schema with Zod in `createToolSchemas()`
-2. Implement `toolName_impl(args)` method in `CopilotMoneyTools` class
-3. Register in the tool handlers switch statement
+2. Implement async method in `CopilotMoneyTools` class (e.g., `getTransactions()`)
+3. Register in the tool handlers switch statement in `src/server.ts`
 4. Add to `manifest.json` tools array
 
 ## Important Notes
@@ -83,8 +83,8 @@ Each MCP tool follows this pattern:
 
 ### Adding a New Tool
 1. Add Zod schema in `createToolSchemas()` in `src/tools/tools.ts`
-2. Implement `newTool_impl()` method in `CopilotMoneyTools` class
-3. Add case to tool handler switch statement
+2. Implement async method in `CopilotMoneyTools` class (e.g., `getNewTool()`)
+3. Add case to tool handler switch statement in `src/server.ts`
 4. Add tool to `manifest.json`
 5. Run `bun run sync-manifest` to verify manifest matches code
 6. Add tests in `tests/tools/tools.test.ts`
