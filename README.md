@@ -87,7 +87,7 @@ Then add to your Claude Desktop configuration (`~/Library/Application Support/Cl
    }
    ```
 
-5. Restart Cursor
+5. Done
 
 ### Manual Installation for Development
 
