@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-01-21
+
+### Fixed
+- **Cursor/Electron compatibility**: Fixed native module loading error in Cursor and other Electron-based editors
+  - Added dual distribution strategy: bundled build for Claude Desktop (.mcpb), external native modules for npm
+  - Resolves "No native build was found for platform=darwin arch=arm64 runtime=electron abi=141" error
+
+### Changed
+- Build scripts now use separate targets for npm (`build`) and .mcpb (`build:mcpb`)
+
 ## [1.2.1] - 2026-01-20
 
 ### Fixed
