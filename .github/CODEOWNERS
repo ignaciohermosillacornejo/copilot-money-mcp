@@ -1,0 +1,37 @@
+# CODEOWNERS - Defines code ownership for PR review requirements
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# IMPORTANT: For this file to work, you must enable "Require review from Code Owners"
+# in GitHub branch protection rules for the main branch.
+
+# Default: owner reviews all changes
+* @ignaciohermosillacornejo
+
+# Critical security paths - ONLY owner can approve
+# These paths require explicit owner approval and cannot be auto-merged by Claude
+
+# GitHub Actions and workflows - highest risk for supply chain attacks
+.github/ @ignaciohermosillacornejo
+
+# Package configuration - controls dependencies and publishing
+package.json @ignaciohermosillacornejo
+package-lock.json @ignaciohermosillacornejo
+bun.lockb @ignaciohermosillacornejo
+
+# Build and bundle configuration
+manifest.json @ignaciohermosillacornejo
+tsconfig.json @ignaciohermosillacornejo
+eslint.config.js @ignaciohermosillacornejo
+.prettierrc.json @ignaciohermosillacornejo
+
+# Scripts that run during build/publish
+scripts/ @ignaciohermosillacornejo
+
+# Security and contribution policies
+SECURITY.md @ignaciohermosillacornejo
+CONTRIBUTING.md @ignaciohermosillacornejo
+PRIVACY.md @ignaciohermosillacornejo
+LICENSE @ignaciohermosillacornejo
+
+# Claude instructions - affects AI behavior
+CLAUDE.md @ignaciohermosillacornejo
