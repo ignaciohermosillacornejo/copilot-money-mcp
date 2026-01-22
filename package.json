@@ -42,8 +42,9 @@
   "scripts": {
     "dev": "bun run src/server.ts",
     "dev:debug": "bun --inspect run src/server.ts",
-    "build": "bun build src/cli.ts --outdir dist --target node --format esm && chmod +x dist/cli.js",
-    "build:bundle": "bun build src/server.ts --outdir dist --target node --format esm",
+    "build": "bun build src/cli.ts --outdir dist --target node --format esm --external classic-level && chmod +x dist/cli.js",
+    "build:bundle": "bun build src/server.ts --outdir dist --target node --format esm --external classic-level",
+    "build:mcpb": "bun build src/cli.ts --outdir dist --target node --format esm && chmod +x dist/cli.js",
     "test": "bun test",
     "test:watch": "bun test --watch",
     "test:coverage": "bun test --coverage",
@@ -58,7 +59,7 @@
     "audit-reviews:dry": "bun run scripts/audit-pr-reviews.ts --dry-run",
     "fix": "bun run lint:fix && bun run format",
     "clean": "rm -rf dist coverage .bun-build",
-    "pack:mcpb": "bun run build:bundle && bun run build && bunx @anthropic-ai/mcpb pack",
+    "pack:mcpb": "bun run build:mcpb && bunx @anthropic-ai/mcpb pack",
     "prepublishOnly": "bun run clean && bun run build && bun test",
     "prepare": "husky"
   },
