@@ -71,7 +71,7 @@
   "devDependencies": {
     "@anthropic-ai/mcpb": "latest",
     "@types/bun": "^1.1.0",
-    "@types/node": "^20.11.16",
+    "@types/node": "^25.0.10",
     "eslint": "^9.0.0",
     "eslint-config-prettier": "^10.0.0",
     "globals": "^16.0.0",
