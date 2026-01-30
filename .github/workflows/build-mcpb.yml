@@ -59,7 +59,7 @@ jobs:
           ls -la copilot-money-mcp.mcpb
 
       - name: Upload .mcpb artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: copilot-money-mcp-bundle
           path: copilot-money-mcp.mcpb
