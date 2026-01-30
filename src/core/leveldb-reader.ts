@@ -129,8 +129,11 @@ function releaseTempDatabase(srcPath: string): void {
 function cleanupTempDatabase(tempPath: string): void {
   try {
     fs.rmSync(tempPath, { recursive: true, force: true });
-  } catch {
-    // Ignore cleanup errors - temp files will be cleaned up eventually
+  } catch (error) {
+    // Log cleanup errors for debugging - temp files will be cleaned up eventually by the OS
+    console.error(
+      `[WARN] Failed to clean up temp database at ${tempPath}: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 }
 
@@ -466,9 +469,11 @@ export async function* iterateDocuments(
         };
 
         count++;
-      } catch {
-        // Skip documents that fail to parse
-        // This can happen if the protobuf is corrupted or uses an unknown format
+      } catch (error) {
+        // Log parsing errors for debugging - can indicate corrupted data or unknown format
+        console.error(
+          `[WARN] Failed to parse document ${parsed.collection}/${parsed.documentId}: ${error instanceof Error ? error.message : String(error)}`
+        );
         continue;
       }
     }
@@ -623,7 +628,11 @@ export class LevelDBReader {
         };
 
         count++;
-      } catch {
+      } catch (error) {
+        // Log parsing errors for debugging - can indicate corrupted data or unknown format
+        console.error(
+          `[WARN] Failed to parse document ${parsed.collection}/${parsed.documentId}: ${error instanceof Error ? error.message : String(error)}`
+        );
         continue;
       }
     }
