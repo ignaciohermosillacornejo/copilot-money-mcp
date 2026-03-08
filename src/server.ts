@@ -115,6 +115,10 @@ export class CopilotMoneyServer {
           );
           break;
 
+        case 'get_connection_status':
+          result = await this.tools.getConnectionStatus();
+          break;
+
         case 'get_categories':
           result = await this.tools.getCategories(
             (typedArgs as Parameters<typeof this.tools.getCategories>[0]) || {}

@@ -149,7 +149,7 @@ describe('CopilotMoneyServer.handleListTools', () => {
     }
   });
 
-  test('returns all 8 tools', () => {
+  test('returns all 9 tools', () => {
     const response = server.handleListTools();
 
     const expectedTools = [
@@ -157,6 +157,7 @@ describe('CopilotMoneyServer.handleListTools', () => {
       'get_cache_info',
       'refresh_database',
       'get_accounts',
+      'get_connection_status',
       'get_categories',
       'get_recurring_transactions',
       'get_budgets',
@@ -167,7 +168,7 @@ describe('CopilotMoneyServer.handleListTools', () => {
     for (const expected of expectedTools) {
       expect(actualNames).toContain(expected);
     }
-    expect(response.tools.length).toBe(8);
+    expect(response.tools.length).toBe(9);
   });
 
   test('tool schemas have valid JSON schema format', () => {

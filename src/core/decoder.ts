@@ -1147,6 +1147,12 @@ function processItem(fields: Map<string, FirestoreValue>, docId: string): Item |
     'created_at',
     'updated_at',
     'webhook',
+    'status_transactions_last_successful_update',
+    'status_transactions_last_failed_update',
+    'status_investments_last_successful_update',
+    'status_investments_last_failed_update',
+    'latest_fetch',
+    'latest_investments_fetch',
   ];
 
   for (const field of stringFields) {
@@ -1156,6 +1162,12 @@ function processItem(fields: Map<string, FirestoreValue>, docId: string): Item |
 
   const needsUpdateValue = getBoolean(fields, 'needs_update');
   if (needsUpdateValue !== undefined) itemData.needs_update = needsUpdateValue;
+
+  const loginRequiredValue = getBoolean(fields, 'login_required');
+  if (loginRequiredValue !== undefined) itemData.login_required = loginRequiredValue;
+
+  const disconnectedValue = getBoolean(fields, 'disconnected');
+  if (disconnectedValue !== undefined) itemData.disconnected = disconnectedValue;
 
   const validated = ItemSchema.safeParse(itemData);
   return validated.success ? validated.data : null;

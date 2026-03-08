@@ -389,6 +389,60 @@ describe('decoder coverage', () => {
       expect(items.length).toBe(1);
       expect(items[0]?.error_code).toBe('ITEM_LOGIN_REQUIRED');
     });
+
+    test('decodes per-product sync timestamps from real Firestore field names', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'items-sync-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'items',
+          id: 'item1',
+          fields: {
+            item_id: 'item1',
+            institution_name: 'Test Bank',
+            institution_id: 'ins_123',
+            status_transactions_last_successful_update: '2026-03-08T06:22:07.086Z',
+            status_transactions_last_failed_update: '2025-12-31T01:22:59.825Z',
+            status_investments_last_successful_update: '2026-03-07T10:19:36.388Z',
+            latest_fetch: '2026-03-08T06:22:13.305Z',
+            login_required: false,
+            disconnected: false,
+            billed_products: ['transactions'],
+          },
+        },
+      ]);
+
+      const items = await decodeItems(dbPath);
+
+      expect(items.length).toBe(1);
+      expect(items[0]?.status_transactions_last_successful_update).toBe('2026-03-08T06:22:07.086Z');
+      expect(items[0]?.status_transactions_last_failed_update).toBe('2025-12-31T01:22:59.825Z');
+      expect(items[0]?.status_investments_last_successful_update).toBe('2026-03-07T10:19:36.388Z');
+      expect(items[0]?.latest_fetch).toBe('2026-03-08T06:22:13.305Z');
+      expect(items[0]?.login_required).toBe(false);
+      expect(items[0]?.disconnected).toBe(false);
+    });
+
+    test('decodes login_required flag correctly', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'items-login-required-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'items',
+          id: 'item1',
+          fields: {
+            item_id: 'item1',
+            institution_name: 'Test Bank',
+            login_required: true,
+            disconnected: false,
+          },
+        },
+      ]);
+
+      const items = await decodeItems(dbPath);
+
+      expect(items.length).toBe(1);
+      expect(items[0]?.login_required).toBe(true);
+      expect(items[0]?.disconnected).toBe(false);
+    });
   });
 
   describe('decodeInvestmentSplits', () => {

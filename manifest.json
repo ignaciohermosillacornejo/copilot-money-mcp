@@ -45,6 +45,10 @@
       "description": "Get all accounts with balances, optionally filter by account type (checking, savings, credit, investment)"
     },
     {
+      "name": "get_connection_status",
+      "description": "Get connection status for all linked financial institutions, including last sync timestamps for transactions and investments, login requirements, and error states"
+    },
+    {
       "name": "get_categories",
       "description": "Get all categories found in transactions with human-readable names, transaction counts, and total amounts"
     },

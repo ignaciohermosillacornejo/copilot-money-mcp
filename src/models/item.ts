@@ -52,9 +52,21 @@ export const ItemSchema = z
 
     // Connection status
     connection_status: z.string().optional(), // "active", "error", "disconnected"
-    last_successful_update: z.string().optional(), // ISO timestamp of last successful sync
-    last_failed_update: z.string().optional(), // ISO timestamp of last failed sync
+    last_successful_update: z.string().optional(), // ISO timestamp of last successful sync (generic fallback)
+    last_failed_update: z.string().optional(), // ISO timestamp of last failed sync (generic fallback)
     consent_expiration_time: z.string().optional(), // When user consent expires
+
+    // Per-product sync timestamps (real Firestore field names from Copilot/Plaid)
+    status_transactions_last_successful_update: z.string().optional(), // Last successful transaction sync
+    status_transactions_last_failed_update: z.string().optional(), // Last failed transaction sync
+    status_investments_last_successful_update: z.string().optional(), // Last successful investment sync
+    status_investments_last_failed_update: z.string().optional(), // Last failed investment sync
+    latest_fetch: z.string().optional(), // Most recent fetch timestamp (any product)
+    latest_investments_fetch: z.string().optional(), // Most recent investments fetch timestamp
+
+    // Connection flags
+    login_required: z.boolean().optional(), // Whether user re-authentication is needed
+    disconnected: z.boolean().optional(), // Whether the item has been disconnected
 
     // Error information
     error_code: z.string().optional(), // Plaid error code
