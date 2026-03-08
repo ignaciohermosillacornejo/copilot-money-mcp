@@ -1288,9 +1288,9 @@ describe('refreshDatabase', () => {
 });
 
 describe('createToolSchemas', () => {
-  test('returns 8 tool schemas', async () => {
+  test('returns 9 tool schemas', async () => {
     const schemas = createToolSchemas();
-    expect(schemas).toHaveLength(8);
+    expect(schemas).toHaveLength(9);
   });
 
   test('all tools have readOnlyHint: true', async () => {
@@ -1317,17 +1317,136 @@ describe('createToolSchemas', () => {
     const schemas = createToolSchemas();
     const names = schemas.map((s) => s.name);
 
-    // Core 8 tools
+    // Core tools
     expect(names).toContain('get_transactions');
     expect(names).toContain('get_cache_info');
     expect(names).toContain('refresh_database');
     expect(names).toContain('get_accounts');
+    expect(names).toContain('get_connection_status');
     expect(names).toContain('get_categories');
     expect(names).toContain('get_recurring_transactions');
     expect(names).toContain('get_budgets');
     expect(names).toContain('get_goals');
 
-    // Should have exactly 8 tools
-    expect(names.length).toBe(8);
+    // Should have exactly 9 tools
+    expect(names.length).toBe(9);
+  });
+});
+
+describe('getConnectionStatus', () => {
+  let db: CopilotDatabase;
+  let tools: CopilotMoneyTools;
+
+  const mockItems = [
+    {
+      item_id: 'item1',
+      institution_name: 'Chase',
+      institution_id: 'ins_56',
+      billed_products: ['transactions'],
+      status_transactions_last_successful_update: '2026-03-08T06:14:29.057Z',
+      status_transactions_last_failed_update: null,
+      latest_fetch: '2026-03-08T06:14:34.117Z',
+      login_required: false,
+      disconnected: false,
+      consent_expiration_time: null,
+      error_code: null,
+      error_message: null,
+    },
+    {
+      item_id: 'item2',
+      institution_name: 'Wells Fargo',
+      institution_id: 'ins_127991',
+      billed_products: ['transactions'],
+      status_transactions_last_successful_update: '2026-03-07T05:40:00.864Z',
+      latest_fetch: '2026-03-07T14:51:45.246Z',
+      login_required: true,
+      disconnected: false,
+      consent_expiration_time: null,
+      error_code: null,
+      error_message: null,
+    },
+    {
+      item_id: 'item3',
+      institution_name: 'Fidelity',
+      institution_id: 'akoya_fidelity',
+      billed_products: ['investments'],
+      status_investments_last_successful_update: '2026-03-08T15:52:47.181Z',
+      latest_investments_fetch: '2026-03-08T15:52:47.481Z',
+      login_required: false,
+      disconnected: false,
+      consent_expiration_time: '2027-01-06T03:00:29Z',
+      error_code: null,
+      error_message: null,
+    },
+  ];
+
+  beforeEach(() => {
+    db = new CopilotDatabase('/fake/path');
+    (db as any)._transactions = [...mockTransactions];
+    (db as any)._accounts = [...mockAccounts];
+    (db as any)._recurring = [];
+    (db as any)._budgets = [];
+    (db as any)._goals = [];
+    (db as any)._goalHistory = [];
+    (db as any)._investmentPrices = [];
+    (db as any)._investmentSplits = [];
+    (db as any)._items = [...mockItems];
+    (db as any)._userCategories = [];
+    (db as any)._userAccounts = [];
+    (db as any)._categoryNameMap = new Map<string, string>();
+    (db as any)._accountNameMap = new Map<string, string>();
+
+    tools = new CopilotMoneyTools(db);
+  });
+
+  test('returns connection status for all institutions', async () => {
+    const result = await tools.getConnectionStatus();
+
+    expect(result.connections.length).toBe(3);
+    expect(result.summary.total).toBe(3);
+  });
+
+  test('correctly identifies connected institutions', async () => {
+    const result = await tools.getConnectionStatus();
+
+    const chase = result.connections.find((c) => c.institution_name === 'Chase');
+    expect(chase?.status).toBe('connected');
+    expect(chase?.login_required).toBe(false);
+    expect(chase?.last_transactions_update).toBe('2026-03-08T06:14:29.057Z');
+    expect(chase?.latest_fetch).toBe('2026-03-08T06:14:34.117Z');
+  });
+
+  test('correctly identifies login_required institutions', async () => {
+    const result = await tools.getConnectionStatus();
+
+    const wells = result.connections.find((c) => c.institution_name === 'Wells Fargo');
+    expect(wells?.status).toBe('login_required');
+    expect(wells?.login_required).toBe(true);
+  });
+
+  test('returns per-product sync timestamps', async () => {
+    const result = await tools.getConnectionStatus();
+
+    const fidelity = result.connections.find((c) => c.institution_name === 'Fidelity');
+    expect(fidelity?.last_investments_update).toBe('2026-03-08T15:52:47.181Z');
+    expect(fidelity?.consent_expires).toBe('2027-01-06T03:00:29Z');
+  });
+
+  test('summary counts are accurate', async () => {
+    const result = await tools.getConnectionStatus();
+
+    expect(result.summary.connected).toBe(2); // Chase + Fidelity
+    expect(result.summary.needs_attention).toBe(1); // Wells Fargo (login_required)
+  });
+
+  test('returns empty connections for no items', async () => {
+    (db as any)._items = [];
+
+    const result = await tools.getConnectionStatus();
+
+    expect(result.connections.length).toBe(0);
+    expect(result.summary.total).toBe(0);
+    expect(result.summary.connected).toBe(0);
+    expect(result.summary.needs_attention).toBe(0);
   });
 });

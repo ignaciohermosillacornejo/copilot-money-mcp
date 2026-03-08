@@ -875,6 +875,88 @@ export class CopilotMoneyTools {
       accounts,
     };
   }
+
+  /**
+   * Get connection status for all linked financial institutions.
+   *
+   * Shows per-institution sync health including last successful update timestamps
+   * for transactions and investments, login requirements, and error states.
+   *
+   * @returns Connection status for each institution plus a summary
+   */
+  async getConnectionStatus(): Promise<{
+    connections: Array<{
+      item_id: string;
+      institution_name: string;
+      institution_id: string | undefined;
+      status: 'connected' | 'login_required' | 'disconnected' | 'error';
+      products: string[];
+      last_transactions_update: string | null;
+      last_transactions_failed: string | null;
+      last_investments_update: string | null;
+      last_investments_failed: string | null;
+      latest_fetch: string | null;
+      login_required: boolean;
+      disconnected: boolean;
+      consent_expires: string | null;
+      error_code: string | null;
+      error_message: string | null;
+    }>;
+    summary: {
+      total: number;
+      connected: number;
+      needs_attention: number;
+    };
+  }> {
+    const items = await this.db.getItems();
+
+    const connections = items.map((item) => {
+      // Derive status from available fields
+      let status: 'connected' | 'login_required' | 'disconnected' | 'error';
+      if (item.login_required === true || item.needs_update === true) {
+        status = 'login_required';
+      } else if (item.disconnected === true || item.connection_status === 'disconnected') {
+        status = 'disconnected';
+      } else if (item.error_code && item.error_code !== 'ITEM_NO_ERROR') {
+        status = 'error';
+      } else {
+        status = 'connected';
+      }
+
+      return {
+        item_id: item.item_id,
+        institution_name: item.institution_name ?? item.institution_id ?? item.item_id,
+        institution_id: item.institution_id,
+        status,
+        products: item.billed_products ?? [],
+        last_transactions_update: item.status_transactions_last_successful_update ?? null,
+        last_transactions_failed: item.status_transactions_last_failed_update ?? null,
+        last_investments_update: item.status_investments_last_successful_update ?? null,
+        last_investments_failed: item.status_investments_last_failed_update ?? null,
+        latest_fetch: item.latest_fetch ?? null,
+        login_required: item.login_required ?? false,
+        disconnected: item.disconnected ?? false,
+        consent_expires:
+          item.consent_expiration_time && item.consent_expiration_time !== ''
+            ? item.consent_expiration_time
+            : null,
+        error_code: item.error_code ?? null,
+        error_message: item.error_message ?? null,
+      };
+    });
+
+    const needsAttention = connections.filter((c) => c.status !== 'connected').length;
+
+    return {
+      connections,
+      summary: {
+        total: connections.length,
+        connected: connections.length - needsAttention,
+        needs_attention: needsAttention,
+      },
+    };
+  }
+
   /**
    * Unified category retrieval tool.
    *
@@ -2021,6 +2103,21 @@ export function createToolSchemas(): ToolSchema[] {
             default: false,
           },
         },
+      },
+      annotations: {
+        readOnlyHint: true,
+      },
+    },
+    {
+      name: 'get_connection_status',
+      description:
+        'Get connection status for all linked financial institutions. ' +
+        'Shows per-institution sync health including last successful update timestamps ' +
+        'for transactions and investments, login requirements, and error states. ' +
+        'Use this to check when accounts were last synced or to identify connections needing attention.',
+      inputSchema: {
+        type: 'object',
+        properties: {},
       },
       annotations: {
         readOnlyHint: true,

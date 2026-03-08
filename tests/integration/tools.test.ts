@@ -200,7 +200,7 @@ describe('CopilotMoneyTools Integration', () => {
   describe('tool schemas', () => {
     test('returns correct number of tool schemas', async () => {
       const schemas = createToolSchemas();
-      expect(schemas.length).toBe(8);
+      expect(schemas.length).toBe(9);
     });
 
     test('all tools have readOnlyHint annotation', async () => {
@@ -227,18 +227,19 @@ describe('CopilotMoneyTools Integration', () => {
       const schemas = createToolSchemas();
       const names = schemas.map((s) => s.name);
 
-      // Core 8 tools
+      // Core tools
       expect(names).toContain('get_transactions');
       expect(names).toContain('get_cache_info');
       expect(names).toContain('refresh_database');
       expect(names).toContain('get_accounts');
+      expect(names).toContain('get_connection_status');
       expect(names).toContain('get_categories');
       expect(names).toContain('get_recurring_transactions');
       expect(names).toContain('get_budgets');
       expect(names).toContain('get_goals');
 
-      // Should have exactly 8 tools
-      expect(names.length).toBe(8);
+      // Should have exactly 9 tools
+      expect(names.length).toBe(9);
     });
   });
 
@@ -267,6 +268,140 @@ describe('CopilotMoneyTools Integration', () => {
 
       expect(result.count).toBe(0);
       expect(result.transactions).toEqual([]);
+    });
+  });
+
+  describe('getConnectionStatus', () => {
+    test('returns empty connections when no items', async () => {
+      const result = await tools.getConnectionStatus();
+
+      expect(result.connections).toEqual([]);
+      expect(result.summary.total).toBe(0);
+      expect(result.summary.connected).toBe(0);
+      expect(result.summary.needs_attention).toBe(0);
+    });
+
+    test('returns connection with all expected fields', async () => {
+      const db = new CopilotDatabase('/fake/path');
+      (db as any)._transactions = [];
+      (db as any)._accounts = [];
+      (db as any)._recurring = [];
+      (db as any)._budgets = [];
+      (db as any)._goals = [];
+      (db as any)._goalHistory = [];
+      (db as any)._investmentPrices = [];
+      (db as any)._investmentSplits = [];
+      (db as any)._items = [
+        {
+          item_id: 'item1',
+          institution_name: 'Chase',
+          institution_id: 'ins_56',
+          billed_products: ['transactions'],
+          status_transactions_last_successful_update: '2026-03-08T06:14:29.057Z',
+          latest_fetch: '2026-03-08T06:14:34.117Z',
+          login_required: false,
+          disconnected: false,
+        },
+      ];
+      (db as any)._userCategories = [];
+      (db as any)._userAccounts = [];
+      (db as any)._categoryNameMap = new Map();
+      (db as any)._accountNameMap = new Map();
+      const localTools = new CopilotMoneyTools(db);
+
+      const result = await localTools.getConnectionStatus();
+
+      expect(result.connections.length).toBe(1);
+      const conn = result.connections[0];
+      expect(conn).toBeDefined();
+      if (conn) {
+        expect(conn.item_id).toBe('item1');
+        expect(conn.institution_name).toBe('Chase');
+        expect(conn.institution_id).toBe('ins_56');
+        expect(conn.status).toBe('connected');
+        expect(conn.products).toEqual(['transactions']);
+        expect(conn.last_transactions_update).toBe('2026-03-08T06:14:29.057Z');
+        expect(conn.last_transactions_failed).toBeNull();
+        expect(conn.last_investments_update).toBeNull();
+        expect(conn.latest_fetch).toBe('2026-03-08T06:14:34.117Z');
+        expect(conn.login_required).toBe(false);
+        expect(conn.disconnected).toBe(false);
+        expect(conn.consent_expires).toBeNull();
+        expect(conn.error_code).toBeNull();
+        expect(conn.error_message).toBeNull();
+      }
+    });
+
+    test('identifies login_required status', async () => {
+      const db = new CopilotDatabase('/fake/path');
+      (db as any)._transactions = [];
+      (db as any)._accounts = [];
+      (db as any)._recurring = [];
+      (db as any)._budgets = [];
+      (db as any)._goals = [];
+      (db as any)._goalHistory = [];
+      (db as any)._investmentPrices = [];
+      (db as any)._investmentSplits = [];
+      (db as any)._items = [
+        {
+          item_id: 'item_locked',
+          institution_name: 'Wells Fargo',
+          institution_id: 'ins_127991',
+          billed_products: ['transactions'],
+          login_required: true,
+          disconnected: false,
+        },
+      ];
+      (db as any)._userCategories = [];
+      (db as any)._userAccounts = [];
+      (db as any)._categoryNameMap = new Map();
+      (db as any)._accountNameMap = new Map();
+      const localTools = new CopilotMoneyTools(db);
+
+      const result = await localTools.getConnectionStatus();
+
+      expect(result.connections[0]?.status).toBe('login_required');
+      expect(result.summary.needs_attention).toBe(1);
+      expect(result.summary.connected).toBe(0);
+    });
+
+    test('identifies disconnected status', async () => {
+      const db = new CopilotDatabase('/fake/path');
+      (db as any)._transactions = [];
+      (db as any)._accounts = [];
+      (db as any)._recurring = [];
+      (db as any)._budgets = [];
+      (db as any)._goals = [];
+      (db as any)._goalHistory = [];
+      (db as any)._investmentPrices = [];
+      (db as any)._investmentSplits = [];
+      (db as any)._items = [
+        {
+          item_id: 'item_disc',
+          institution_name: 'Old Bank',
+          institution_id: 'ins_old',
+          billed_products: [],
+          login_required: false,
+          disconnected: true,
+        },
+      ];
+      (db as any)._userCategories = [];
+      (db as any)._userAccounts = [];
+      (db as any)._categoryNameMap = new Map();
+      (db as any)._accountNameMap = new Map();
+      const localTools = new CopilotMoneyTools(db);
+
+      const result = await localTools.getConnectionStatus();
+
+      expect(result.connections[0]?.status).toBe('disconnected');
+      expect(result.summary.needs_attention).toBe(1);
+    });
+
+    test('response is JSON serializable', async () => {
+      const result = await tools.getConnectionStatus();
+      const json = JSON.stringify(result);
+      const parsed = JSON.parse(json);
+      expect(parsed.summary.total).toBe(result.summary.total);
     });
   });
 });
