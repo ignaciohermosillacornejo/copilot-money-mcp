@@ -21,7 +21,6 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
-      id-token: write
 
     steps:
       # SECURITY: Always checkout the BASE branch, never the PR head.
@@ -43,6 +42,9 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ env.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Provide GitHub token explicitly to bypass OIDC token exchange,
+          # which fails for non-pull_request events (anthropics/claude-code-action#713)
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           # track_progress not supported with workflow_run events
           prompt: |
             You are a code reviewer for the copilot-money-mcp project.
