@@ -46,38 +46,53 @@ jobs:
             REPO: ${{ github.repository }}
             PR: #${{ github.event.pull_request.number }}
 
-            Review this PR with focus on:
+            ## Instructions
 
-            1. **Code Quality** - Clean code, error handling, readability
-            2. **Security** - Vulnerabilities, input validation, data privacy
-            3. **Performance** - Bottlenecks, memory leaks, efficient data access
-            4. **Testing** - Coverage, edge cases, test quality
-            5. **TypeScript** - Proper typing, no `any` abuse, type safety
-            6. **MCP Protocol** - Correct tool definitions, proper server implementation
-            7. **Data Privacy** - No logging of sensitive financial data
+            1. Run `gh pr diff ${{ github.event.pull_request.number }}` to get the full diff.
+            2. Run `gh pr view ${{ github.event.pull_request.number }}` for PR metadata.
+            3. Read any source files you need for additional context using the Read tool.
+            4. Analyze the changes with focus on:
+               - **Code Quality** — Clean code, error handling, readability
+               - **Security** — Vulnerabilities, input validation, data privacy
+               - **Performance** — Bottlenecks, memory leaks, efficient data access
+               - **Testing** — Coverage, edge cases, test quality
+               - **TypeScript** — Proper typing, no `any` abuse, type safety
+               - **MCP Protocol** — Correct tool definitions, proper server implementation
+               - **Data Privacy** — No logging of sensitive financial data
+            5. Draft your ENTIRE review internally before posting anything.
+            6. Post exactly ONE summary comment using `gh pr comment ${{ github.event.pull_request.number }}`.
 
-            For each issue found:
-            - Post an inline comment on the specific line
-            - Explain the problem clearly
-            - Propose a code snippet showing the fix
+            ## Comment format
 
-            Format your review comments like this:
-            **[AI Review]**
-            **Issue:** <description>
-            **Proposed Fix:**
-            ```typescript
-            // suggested code
+            Your single summary comment must use this structure:
+
             ```
-            **Reasoning:** <why this improves the code>
+            ## AI Code Review — PR #<number>: <title>
 
-            Use `gh pr diff` to see changes, then use `gh pr comment` for inline feedback.
-            Be constructive. Praise good patterns too.
+            ### Overall Assessment
+            <1-2 sentence summary>
 
-            After reviewing, post a summary comment with your overall assessment.
-            Use `gh pr comment` to post your summary.
+            ### Issues Found
+            For each issue:
+            - **[severity]** `file:line` — <description>
+              **Fix:** <brief suggestion or code snippet>
+
+            ### Good Patterns
+            <brief praise for well-written code>
+            ```
+
+            ## CRITICAL RULES — read carefully
+
+            - Post EXACTLY ONE comment. Do NOT post multiple comments.
+            - Do NOT post test messages, drafts, or experimental comments.
+            - Do NOT post file contents (CLAUDE.md, CONTRIBUTING.md, etc.) as comments.
+            - Do NOT iterate on comment formatting by posting multiple versions.
+            - Draft the full review in your reasoning, then post the final version once.
+            - If the PR has no issues, still post one summary comment saying so.
+            - Be constructive. Praise good patterns too.
 
           # SECURITY: Allow read-only gh commands and commenting — block approve/merge
           claude_args: |
             --model claude-sonnet-4-6
-            --allowedTools "Bash(gh pr comment*),Bash(gh pr diff*),Bash(gh pr view*),Bash(gh pr review --comment*),Bash(gh api */pulls/*/comments*),Bash(gh api */pulls/*/reviews*),Bash(gh api */issues/*/comments*),Read,Grep,Glob"
+            --allowedTools "Bash(gh pr comment*),Bash(gh pr diff*),Bash(gh pr view*),Read,Grep,Glob"
             --disallowedTools "Bash(gh pr review --approve*),Bash(gh pr merge*),Bash(gh pr close*)"
