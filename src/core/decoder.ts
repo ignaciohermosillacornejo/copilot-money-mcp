@@ -10,11 +10,7 @@ import { type FirestoreValue, toPlainObject } from './protobuf-parser.js';
 
 // Re-export for potential use by other modules
 export { toPlainObject } from './protobuf-parser.js';
-import {
-  Transaction,
-  TransactionSchema,
-  getTransactionDisplayName,
-} from '../models/transaction.js';
+import { Transaction, TransactionSchema } from '../models/transaction.js';
 import { Account, AccountSchema, getAccountDisplayName } from '../models/account.js';
 import { Recurring, RecurringSchema } from '../models/recurring.js';
 import { Budget, BudgetSchema } from '../models/budget.js';
@@ -187,6 +183,58 @@ function calculateNextDate(lastDate: string, frequency: string | undefined): str
 }
 
 /**
+ * Deduplicate transactions by transaction_id.
+ * LevelDB may store the same Firestore document multiple times;
+ * this collapses true duplicates without dropping distinct transactions
+ * that happen to share the same merchant/amount/date.
+ */
+function deduplicateTransactions(transactions: Transaction[]): Transaction[] {
+  const seen = new Set<string>();
+  const unique: Transaction[] = [];
+
+  for (const txn of transactions) {
+    if (!seen.has(txn.transaction_id)) {
+      seen.add(txn.transaction_id);
+      unique.push(txn);
+    }
+  }
+
+  return unique;
+}
+
+/**
+ * Reconcile pending and posted versions of the same transaction.
+ * When a charge posts, two versions can coexist in LevelDB:
+ * - A pending version (pending=true)
+ * - A posted version (pending=false/undefined) with pending_transaction_id
+ *   pointing to the pending transaction's ID
+ *
+ * This function drops the pending version when a matching posted version exists,
+ * preventing double-counting in aggregations like category totals.
+ *
+ * Returns transactions sorted by date descending.
+ */
+function reconcilePendingTransactions(transactions: Transaction[]): Transaction[] {
+  // Collect transaction IDs that have been superseded by a posted version
+  const supersededPendingIds = new Set<string>();
+  for (const txn of transactions) {
+    if (!txn.pending && txn.pending_transaction_id) {
+      supersededPendingIds.add(txn.pending_transaction_id);
+    }
+  }
+
+  // Filter out superseded pending transactions
+  const reconciled = transactions.filter(
+    (txn) => !(txn.pending && supersededPendingIds.has(txn.transaction_id))
+  );
+
+  // Sort by date descending
+  reconciled.sort((a, b) => (a.date > b.date ? -1 : a.date < b.date ? 1 : 0));
+
+  return reconciled;
+}
+
+/**
  * Decode all transactions from LevelDB database.
  */
 export async function decodeTransactions(dbPath: string): Promise<Transaction[]> {
@@ -197,23 +245,13 @@ export async function decodeTransactions(dbPath: string): Promise<Transaction[]>
     if (txn) transactions.push(txn);
   }
 
-  // Deduplicate by (display_name, amount, date)
-  const seen = new Set<string>();
-  const unique: Transaction[] = [];
+  // Deduplicate by transaction_id (Firestore document ID)
+  // This correctly collapses only true LevelDB-level duplicates (same document stored more than once)
+  // without dropping distinct transactions that happen to share display_name/amount/date
+  const deduped = deduplicateTransactions(transactions);
 
-  for (const txn of transactions) {
-    const displayName = getTransactionDisplayName(txn);
-    const key = `${displayName}|${txn.amount}|${txn.date}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      unique.push(txn);
-    }
-  }
-
-  // Sort by date descending
-  unique.sort((a, b) => (a.date > b.date ? -1 : a.date < b.date ? 1 : 0));
-
-  return unique;
+  // Reconcile pending/posted pairs and sort by date descending
+  return reconcilePendingTransactions(deduped);
 }
 
 /**
@@ -1304,18 +1342,8 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
 
   // Deduplicate and sort each collection
 
-  // Transactions: dedupe by (display_name, amount, date), sort by date desc
-  const txnSeen = new Set<string>();
-  const transactions: Transaction[] = [];
-  for (const txn of rawTransactions) {
-    const displayName = getTransactionDisplayName(txn);
-    const key = `${displayName}|${txn.amount}|${txn.date}`;
-    if (!txnSeen.has(key)) {
-      txnSeen.add(key);
-      transactions.push(txn);
-    }
-  }
-  transactions.sort((a, b) => (a.date > b.date ? -1 : a.date < b.date ? 1 : 0));
+  // Transactions: dedupe by transaction_id, reconcile pending/posted pairs, sort by date desc
+  const transactions = reconcilePendingTransactions(deduplicateTransactions(rawTransactions));
 
   // Accounts: dedupe by (name, mask)
   const accSeen = new Set<string>();

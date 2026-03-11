@@ -715,7 +715,7 @@ describe('decoder coverage', () => {
       expect(result.investmentSplits[0]?.split_ratio).toBe('4:1');
     });
 
-    test('deduplicates transactions by display name, amount, and date', async () => {
+    test('deduplicates transactions by transaction_id, not by name/amount/date', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'all-collections-dedupe-db');
       await createTestDatabase(dbPath, [
         {
@@ -735,15 +735,107 @@ describe('decoder coverage', () => {
             transaction_id: 'txn2',
             amount: 50.0,
             date: '2024-01-15',
-            name: 'Coffee Shop', // Same name/amount/date = duplicate
+            name: 'Coffee Shop', // Same name/amount/date but different transaction_id
           },
         },
       ]);
 
       const result = await decodeAllCollections(dbPath);
 
-      // Should be deduplicated to 1
+      // Both should be kept — they are distinct transactions with different IDs
+      expect(result.transactions.length).toBe(2);
+    });
+
+    test('deduplicates true LevelDB duplicates (same transaction_id)', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'all-collections-true-dedupe-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'transactions',
+          id: 'txn1',
+          fields: {
+            transaction_id: 'txn1',
+            amount: 50.0,
+            date: '2024-01-15',
+            name: 'Coffee Shop',
+          },
+        },
+        {
+          collection: 'transactions',
+          id: 'txn1',
+          fields: {
+            transaction_id: 'txn1',
+            amount: 50.0,
+            date: '2024-01-15',
+            name: 'Coffee Shop',
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      // Same transaction_id = true duplicate, should be collapsed to 1
       expect(result.transactions.length).toBe(1);
+    });
+
+    test('reconciles pending and posted versions of same transaction', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'all-collections-pending-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'transactions',
+          id: 'pending-txn-1',
+          fields: {
+            transaction_id: 'pending-txn-1',
+            amount: 75.0,
+            date: '2024-01-15',
+            name: 'BRIGHT HORIZONS PAYMENT',
+            pending: true,
+            category_id: 'childcare',
+          },
+        },
+        {
+          collection: 'transactions',
+          id: 'posted-txn-1',
+          fields: {
+            transaction_id: 'posted-txn-1',
+            amount: 75.0,
+            date: '2024-01-15',
+            name: 'BRIGHT HORIZONS',
+            pending: false,
+            pending_transaction_id: 'pending-txn-1',
+            category_id: 'childcare',
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      // Pending version should be dropped since posted version references it
+      expect(result.transactions.length).toBe(1);
+      expect(result.transactions[0]?.transaction_id).toBe('posted-txn-1');
+      expect(result.transactions[0]?.pending).toBe(false);
+    });
+
+    test('keeps pending transactions when no posted version exists', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'all-collections-pending-only-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'transactions',
+          id: 'pending-txn-1',
+          fields: {
+            transaction_id: 'pending-txn-1',
+            amount: 75.0,
+            date: '2024-01-15',
+            name: 'BRIGHT HORIZONS PAYMENT',
+            pending: true,
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      // Pending transaction with no posted counterpart should be kept
+      expect(result.transactions.length).toBe(1);
+      expect(result.transactions[0]?.pending).toBe(true);
     });
 
     test('handles empty database', async () => {
