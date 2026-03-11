@@ -43,6 +43,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ env.CLAUDE_CODE_OAUTH_TOKEN }}
+          # track_progress not supported with workflow_run events
           prompt: |
             You are a code reviewer for the copilot-money-mcp project.
 
@@ -80,4 +81,6 @@ jobs:
             Use `gh pr comment` to post your summary.
 
           # SECURITY: Only allow read and comment commands - NO approve/review commands
-          claude_args: '--model claude-sonnet-4-20250514 --allowedTools "Bash(gh pr comment*),Bash(gh pr diff*),Bash(gh pr view*),Read,Grep,Glob"'
+          claude_args: |
+            --model claude-4-0-sonnet-20250805
+            --allowedTools "Bash(gh pr comment*),Bash(gh pr diff*),Bash(gh pr view*),Read,Grep,Glob"
