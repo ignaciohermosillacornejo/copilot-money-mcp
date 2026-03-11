@@ -11,6 +11,7 @@ import {
   decodeInvestmentSplits,
   decodeAllCollections,
   decodeGoalHistory,
+  decodeTransactions,
 } from '../../src/core/decoder.js';
 import { createTestDatabase, cleanupAllTempDatabases } from '../../src/core/leveldb-reader.js';
 import type { FirestoreValue } from '../../src/core/protobuf-parser.js';
@@ -751,7 +752,7 @@ describe('decoder coverage', () => {
       await createTestDatabase(dbPath, [
         {
           collection: 'transactions',
-          id: 'txn1',
+          id: 'doc-key-a',
           fields: {
             transaction_id: 'txn1',
             amount: 50.0,
@@ -761,7 +762,7 @@ describe('decoder coverage', () => {
         },
         {
           collection: 'transactions',
-          id: 'txn1',
+          id: 'doc-key-b',
           fields: {
             transaction_id: 'txn1',
             amount: 50.0,
@@ -836,6 +837,39 @@ describe('decoder coverage', () => {
       // Pending transaction with no posted counterpart should be kept
       expect(result.transactions.length).toBe(1);
       expect(result.transactions[0]?.pending).toBe(true);
+    });
+
+    test('decodeTransactions: reconciles pending/posted pairs', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'decode-txns-pending-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'transactions',
+          id: 'pending-1',
+          fields: {
+            transaction_id: 'pending-1',
+            amount: 50.0,
+            date: '2024-01-15',
+            name: 'BRIGHT HORIZONS PAYMENT',
+            pending: true,
+          },
+        },
+        {
+          collection: 'transactions',
+          id: 'posted-1',
+          fields: {
+            transaction_id: 'posted-1',
+            amount: 50.0,
+            date: '2024-01-15',
+            name: 'BRIGHT HORIZONS',
+            pending: false,
+            pending_transaction_id: 'pending-1',
+          },
+        },
+      ]);
+
+      const txns = await decodeTransactions(dbPath);
+      expect(txns.length).toBe(1);
+      expect(txns[0]?.transaction_id).toBe('posted-1');
     });
 
     test('handles empty database', async () => {

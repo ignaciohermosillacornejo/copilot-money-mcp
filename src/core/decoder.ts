@@ -211,8 +211,6 @@ function deduplicateTransactions(transactions: Transaction[]): Transaction[] {
  *
  * This function drops the pending version when a matching posted version exists,
  * preventing double-counting in aggregations like category totals.
- *
- * Returns transactions sorted by date descending.
  */
 function reconcilePendingTransactions(transactions: Transaction[]): Transaction[] {
   // Collect transaction IDs that have been superseded by a posted version
@@ -224,14 +222,9 @@ function reconcilePendingTransactions(transactions: Transaction[]): Transaction[
   }
 
   // Filter out superseded pending transactions
-  const reconciled = transactions.filter(
+  return transactions.filter(
     (txn) => !(txn.pending && supersededPendingIds.has(txn.transaction_id))
   );
-
-  // Sort by date descending
-  reconciled.sort((a, b) => (a.date > b.date ? -1 : a.date < b.date ? 1 : 0));
-
-  return reconciled;
 }
 
 /**
@@ -250,8 +243,12 @@ export async function decodeTransactions(dbPath: string): Promise<Transaction[]>
   // without dropping distinct transactions that happen to share display_name/amount/date
   const deduped = deduplicateTransactions(transactions);
 
-  // Reconcile pending/posted pairs and sort by date descending
-  return reconcilePendingTransactions(deduped);
+  // Reconcile pending/posted pairs
+  const reconciled = reconcilePendingTransactions(deduped);
+
+  // Sort by date descending
+  reconciled.sort((a, b) => (a.date > b.date ? -1 : a.date < b.date ? 1 : 0));
+  return reconciled;
 }
 
 /**
@@ -1344,6 +1341,7 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
 
   // Transactions: dedupe by transaction_id, reconcile pending/posted pairs, sort by date desc
   const transactions = reconcilePendingTransactions(deduplicateTransactions(rawTransactions));
+  transactions.sort((a, b) => (a.date > b.date ? -1 : a.date < b.date ? 1 : 0));
 
   // Accounts: dedupe by (name, mask)
   const accSeen = new Set<string>();
