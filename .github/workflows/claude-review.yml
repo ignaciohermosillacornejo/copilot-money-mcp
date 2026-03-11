@@ -1,21 +1,13 @@
 name: AI Code Review
 
 on:
-  # Trigger after the Tests workflow completes on any PR.
-  # workflow_run runs in the base repo context (has secrets) and its event type
-  # is accepted by Anthropic's OIDC exchange (unlike pull_request_target).
-  # See: https://github.com/anthropics/claude-code-action/issues/713
-  workflow_run:
-    workflows: ["Tests"]
-    types: [completed]
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
 
 jobs:
   review:
-    # Only run on PR events (not pushes to main), skip draft PRs, and only on success
-    if: >
-      github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.conclusion == 'completed' &&
-      github.event.workflow_run.pull_requests[0].number > 0
+    # Skip draft PRs
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -25,9 +17,11 @@ jobs:
     steps:
       # SECURITY: Always checkout the BASE branch, never the PR head.
       # This workflow uses `gh pr diff` to read changes — it never executes PR code.
+      # This is critical for fork PRs: pull_request_target has secret access,
+      # so checking out untrusted PR code would be a security vulnerability.
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.workflow_run.head_branch }}
+          ref: ${{ github.event.pull_request.base.ref }}
           fetch-depth: 0
 
       - name: Load secrets from 1Password
@@ -42,15 +36,15 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ env.CLAUDE_CODE_OAUTH_TOKEN }}
-          # Provide GitHub token explicitly to bypass OIDC token exchange,
-          # which fails for non-pull_request events (anthropics/claude-code-action#713)
+          # Pass GitHub token explicitly to bypass OIDC token exchange,
+          # which rejects pull_request_target events.
+          # See: https://github.com/anthropics/claude-code-action/issues/713
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          # track_progress not supported with workflow_run events
           prompt: |
             You are a code reviewer for the copilot-money-mcp project.
 
             REPO: ${{ github.repository }}
-            PR: #${{ github.event.workflow_run.pull_requests[0].number }}
+            PR: #${{ github.event.pull_request.number }}
 
             Review this PR with focus on:
 
