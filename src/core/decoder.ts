@@ -5,6 +5,9 @@
  * using proper protocol buffer parsing instead of brittle pattern matching.
  */
 
+import { Worker } from 'node:worker_threads';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import { iterateDocuments } from './leveldb-reader.js';
 import { type FirestoreValue, toPlainObject } from './protobuf-parser.js';
 
@@ -1502,4 +1505,53 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     categories,
     userAccounts,
   };
+}
+
+/**
+ * Decode all collections in an isolated worker thread.
+ *
+ * This wraps `decodeAllCollections` in a worker thread to prevent memory leaks
+ * from classic-level's native addon. The native LevelDB block cache allocates 256KB
+ * ArrayBuffers that are held as weak GC roots but never collected because V8 doesn't
+ * see enough heap pressure (the buffers are external memory). Each cache refresh
+ * leaks ~7MB, accumulating ~88MB/hour.
+ *
+ * By running in a worker thread, when the worker terminates, its entire V8 isolate
+ * is destroyed — including all native-allocated ArrayBuffers — guaranteeing cleanup.
+ *
+ * The results are sent back via structured clone (postMessage), creating independent
+ * copies with no ties to the worker's native memory.
+ *
+ * @param dbPath - Path to the LevelDB database
+ * @returns All collections decoded and deduplicated
+ */
+export function decodeAllCollectionsIsolated(dbPath: string): Promise<AllCollectionsResult> {
+  return new Promise((resolve, reject) => {
+    const workerPath = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      'decode-worker.js'
+    );
+
+    const worker = new Worker(workerPath, {
+      workerData: { dbPath },
+    });
+
+    worker.on('message', (msg: { type: string; data?: AllCollectionsResult; message?: string }) => {
+      if (msg.type === 'result' && msg.data) {
+        resolve(msg.data);
+      } else if (msg.type === 'error') {
+        reject(new Error(msg.message ?? 'Worker decoding failed'));
+      }
+    });
+
+    worker.on('error', (err: Error) => {
+      reject(err);
+    });
+
+    worker.on('exit', (code: number) => {
+      if (code !== 0) {
+        reject(new Error(`Decode worker exited with code ${code}`));
+      }
+    });
+  });
 }

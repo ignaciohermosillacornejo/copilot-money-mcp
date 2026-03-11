@@ -20,7 +20,7 @@ import {
   decodeItems,
   decodeCategories,
   decodeUserAccounts,
-  decodeAllCollections,
+  decodeAllCollectionsIsolated,
   UserAccountCustomization,
   AllCollectionsResult,
 } from './decoder.js';
@@ -329,8 +329,9 @@ export class CopilotDatabase {
       return;
     }
 
-    // Start batch loading
-    this._loadingAllCollections = decodeAllCollections(this.requireDbPath());
+    // Start batch loading in an isolated worker thread to prevent memory leaks
+    // from classic-level's native ArrayBuffer accumulation
+    this._loadingAllCollections = decodeAllCollectionsIsolated(this.requireDbPath());
     try {
       const result = await this._loadingAllCollections;
 

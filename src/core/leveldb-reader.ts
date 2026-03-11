@@ -181,8 +181,6 @@ export interface LevelDBDocument {
   collection: string;
   /** The document ID within the collection */
   documentId: string;
-  /** The raw protobuf bytes (for debugging) */
-  rawValue: Buffer;
   /** Parsed Firestore fields */
   fields: Map<string, FirestoreValue>;
 }
@@ -457,6 +455,10 @@ export async function* iterateDocuments(
       }
 
       // Parse the protobuf value
+      // Create a defensive copy of the value buffer to break ties to
+      // classic-level's native memory pools. Without this, the original
+      // ArrayBuffer backing may be retained by the native addon even after
+      // db.close(), causing memory to grow ~88 MB/hour on cache refreshes.
       try {
         const fields = parseFirestoreDocument(value);
 
@@ -464,7 +466,6 @@ export async function* iterateDocuments(
           key: keyStr,
           collection: parsed.collection,
           documentId: parsed.documentId,
-          rawValue: value,
           fields,
         };
 
@@ -623,7 +624,6 @@ export class LevelDBReader {
           key,
           collection: parsed.collection,
           documentId: parsed.documentId,
-          rawValue: value,
           fields,
         };
 
