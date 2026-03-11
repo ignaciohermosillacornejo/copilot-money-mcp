@@ -82,5 +82,5 @@ jobs:
 
           # SECURITY: Only allow read and comment commands - NO approve/review commands
           claude_args: |
-            --model claude-4-0-sonnet-20250805
+            --model claude-sonnet-4-6
             --allowedTools "Bash(gh pr comment*),Bash(gh pr diff*),Bash(gh pr view*),Read,Grep,Glob"
