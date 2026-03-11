@@ -76,7 +76,8 @@ jobs:
             After reviewing, post a summary comment with your overall assessment.
             Use `gh pr comment` to post your summary.
 
-          # SECURITY: Only allow read and comment commands - NO approve/review commands
+          # SECURITY: Allow read-only gh commands and commenting — block approve/merge
           claude_args: |
             --model claude-sonnet-4-6
-            --allowedTools "Bash(gh pr comment*),Bash(gh pr diff*),Bash(gh pr view*),Read,Grep,Glob"
+            --allowedTools "Bash(gh pr comment*),Bash(gh pr diff*),Bash(gh pr view*),Bash(gh pr review --comment*),Bash(gh api */pulls/*/comments*),Bash(gh api */pulls/*/reviews*),Bash(gh api */issues/*/comments*),Read,Grep,Glob"
+            --disallowedTools "Bash(gh pr review --approve*),Bash(gh pr merge*),Bash(gh pr close*)"
