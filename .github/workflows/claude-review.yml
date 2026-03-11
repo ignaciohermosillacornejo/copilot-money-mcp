@@ -1,7 +1,7 @@
 name: AI Code Review
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, ready_for_review]
 
 jobs:
@@ -16,8 +16,13 @@ jobs:
       id-token: write
 
     steps:
+      # SECURITY: Always checkout the BASE branch, never the PR head.
+      # This workflow uses `gh pr diff` to read changes — it never executes PR code.
+      # This is critical for fork PRs: pull_request_target has secret access,
+      # so checking out untrusted PR code would be a security vulnerability.
       - uses: actions/checkout@v6
         with:
+          ref: ${{ github.event.pull_request.base.ref }}
           fetch-depth: 0
 
       - name: Load secrets from 1Password
