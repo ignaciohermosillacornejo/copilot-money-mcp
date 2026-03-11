@@ -454,11 +454,10 @@ export async function* iterateDocuments(
         }
       }
 
-      // Parse the protobuf value
-      // Create a defensive copy of the value buffer to break ties to
-      // classic-level's native memory pools. Without this, the original
-      // ArrayBuffer backing may be retained by the native addon even after
-      // db.close(), causing memory to grow ~88 MB/hour on cache refreshes.
+      // Parse the protobuf value.
+      // Note: rawValue is intentionally omitted from the yielded document to avoid
+      // retaining references to classic-level's native ArrayBuffers. The primary
+      // memory leak fix is worker-thread isolation in decodeAllCollectionsIsolated.
       try {
         const fields = parseFirestoreDocument(value);
 

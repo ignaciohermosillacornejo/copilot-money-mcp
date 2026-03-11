@@ -22,6 +22,10 @@ async function main(): Promise<void> {
     throw new Error('decode-worker must be run as a worker thread');
   }
 
+  if (!workerData || typeof (workerData as Record<string, unknown>).dbPath !== 'string') {
+    throw new Error('decode-worker: invalid workerData — expected { dbPath: string }');
+  }
+
   const { dbPath } = workerData as WorkerInput;
   const port = parentPort;
 

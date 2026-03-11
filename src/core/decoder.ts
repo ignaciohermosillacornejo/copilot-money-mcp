@@ -1525,33 +1525,56 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
  * @param dbPath - Path to the LevelDB database
  * @returns All collections decoded and deduplicated
  */
-export function decodeAllCollectionsIsolated(dbPath: string): Promise<AllCollectionsResult> {
+export function decodeAllCollectionsIsolated(
+  dbPath: string,
+  timeoutMs = 30_000
+): Promise<AllCollectionsResult> {
   return new Promise((resolve, reject) => {
+    const selfUrl = import.meta.url;
+    const workerExt = selfUrl.endsWith('.ts') ? '.ts' : '.js';
     const workerPath = path.resolve(
-      path.dirname(fileURLToPath(import.meta.url)),
-      'decode-worker.js'
+      path.dirname(fileURLToPath(selfUrl)),
+      'decode-worker' + workerExt
     );
 
     const worker = new Worker(workerPath, {
       workerData: { dbPath },
     });
 
+    let settled = false;
+    const settle = (fn: () => void): void => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        fn();
+      }
+    };
+
+    const timer = setTimeout(() => {
+      settle(() => {
+        void worker.terminate();
+        reject(new Error(`Decode worker timed out after ${timeoutMs}ms`));
+      });
+    }, timeoutMs);
+
     worker.on('message', (msg: { type: string; data?: AllCollectionsResult; message?: string }) => {
       if (msg.type === 'result' && msg.data) {
-        resolve(msg.data);
+        settle(() => resolve(msg.data as AllCollectionsResult));
       } else if (msg.type === 'error') {
-        reject(new Error(msg.message ?? 'Worker decoding failed'));
+        settle(() => reject(new Error(msg.message ?? 'Worker decoding failed')));
       }
     });
 
     worker.on('error', (err: Error) => {
-      reject(err);
+      settle(() => reject(err));
     });
 
     worker.on('exit', (code: number) => {
-      if (code !== 0) {
-        reject(new Error(`Decode worker exited with code ${code}`));
-      }
+      settle(() => {
+        if (code !== 0) {
+          reject(new Error(`Decode worker exited with code ${code}`));
+        }
+      });
     });
   });
 }
