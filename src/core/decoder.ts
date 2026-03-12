@@ -1570,11 +1570,15 @@ export function decodeAllCollectionsIsolated(
     });
 
     worker.on('exit', (code: number) => {
-      settle(() => {
-        if (code !== 0) {
-          reject(new Error(`Decode worker exited with code ${code}`));
-        }
-      });
+      settle(() =>
+        reject(
+          new Error(
+            code === 0
+              ? 'Decode worker exited without sending result'
+              : `Decode worker exited with code ${code}`
+          )
+        )
+      );
     });
   });
 }
