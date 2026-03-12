@@ -25,7 +25,7 @@
     "node": ">=18.0.0"
   },
   "type": "module",
-  "main": "dist/index.js",
+  "main": "dist/server.js",
   "bin": {
     "copilot-money-mcp": "dist/cli.js"
   },
