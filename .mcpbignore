@@ -65,3 +65,14 @@ tsconfig.json
 .prettierrc.json
 vitest.config.ts
 jest.config.js
+eslint.config.js
+
+# CI and dev tooling
+.husky/
+.github/
+scripts/
+
+# Dev-only documentation
+CONTRIBUTING.md
+AGENTS.md
+CLAUDE.md
