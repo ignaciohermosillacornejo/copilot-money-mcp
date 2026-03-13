@@ -72,25 +72,39 @@ const mockAccounts: Account[] = [
   },
 ];
 
+/**
+ * Helper to create a fresh database instance with all required fields initialized.
+ * Optionally override default mock data.
+ */
+function createMockDatabase(overrides?: {
+  transactions?: Transaction[];
+  accounts?: Account[];
+  items?: any[];
+}) {
+  const db = new CopilotDatabase('/fake/path');
+  (db as any)._transactions = overrides?.transactions
+    ? [...overrides.transactions]
+    : [...mockTransactions];
+  (db as any)._accounts = overrides?.accounts ? [...overrides.accounts] : [...mockAccounts];
+  (db as any)._recurring = [];
+  (db as any)._budgets = [];
+  (db as any)._goals = [];
+  (db as any)._goalHistory = [];
+  (db as any)._investmentPrices = [];
+  (db as any)._investmentSplits = [];
+  (db as any)._items = overrides?.items ?? [];
+  (db as any)._userCategories = [];
+  (db as any)._userAccounts = [];
+  (db as any)._categoryNameMap = new Map<string, string>();
+  (db as any)._accountNameMap = new Map<string, string>();
+  return db;
+}
+
 describe('CopilotMoneyTools Integration', () => {
   let tools: CopilotMoneyTools;
 
   beforeEach(() => {
-    const db = new CopilotDatabase('/fake/path');
-    (db as any)._transactions = [...mockTransactions];
-    (db as any)._accounts = [...mockAccounts];
-    // Add required cache fields for async database methods
-    (db as any)._recurring = [];
-    (db as any)._budgets = [];
-    (db as any)._goals = [];
-    (db as any)._goalHistory = [];
-    (db as any)._investmentPrices = [];
-    (db as any)._investmentSplits = [];
-    (db as any)._items = [];
-    (db as any)._userCategories = [];
-    (db as any)._userAccounts = [];
-    (db as any)._categoryNameMap = new Map<string, string>();
-    (db as any)._accountNameMap = new Map<string, string>();
+    const db = createMockDatabase();
     tools = new CopilotMoneyTools(db);
   });
 
@@ -282,31 +296,22 @@ describe('CopilotMoneyTools Integration', () => {
     });
 
     test('returns connection with all expected fields', async () => {
-      const db = new CopilotDatabase('/fake/path');
-      (db as any)._transactions = [];
-      (db as any)._accounts = [];
-      (db as any)._recurring = [];
-      (db as any)._budgets = [];
-      (db as any)._goals = [];
-      (db as any)._goalHistory = [];
-      (db as any)._investmentPrices = [];
-      (db as any)._investmentSplits = [];
-      (db as any)._items = [
-        {
-          item_id: 'item1',
-          institution_name: 'Chase',
-          institution_id: 'ins_56',
-          billed_products: ['transactions'],
-          status_transactions_last_successful_update: '2026-03-08T06:14:29.057Z',
-          latest_fetch: '2026-03-08T06:14:34.117Z',
-          login_required: false,
-          disconnected: false,
-        },
-      ];
-      (db as any)._userCategories = [];
-      (db as any)._userAccounts = [];
-      (db as any)._categoryNameMap = new Map();
-      (db as any)._accountNameMap = new Map();
+      const db = createMockDatabase({
+        transactions: [],
+        accounts: [],
+        items: [
+          {
+            item_id: 'item1',
+            institution_name: 'Chase',
+            institution_id: 'ins_56',
+            billed_products: ['transactions'],
+            status_transactions_last_successful_update: '2026-03-08T06:14:29.057Z',
+            latest_fetch: '2026-03-08T06:14:34.117Z',
+            login_required: false,
+            disconnected: false,
+          },
+        ],
+      });
       const localTools = new CopilotMoneyTools(db);
 
       const result = await localTools.getConnectionStatus();
@@ -333,29 +338,20 @@ describe('CopilotMoneyTools Integration', () => {
     });
 
     test('identifies login_required status', async () => {
-      const db = new CopilotDatabase('/fake/path');
-      (db as any)._transactions = [];
-      (db as any)._accounts = [];
-      (db as any)._recurring = [];
-      (db as any)._budgets = [];
-      (db as any)._goals = [];
-      (db as any)._goalHistory = [];
-      (db as any)._investmentPrices = [];
-      (db as any)._investmentSplits = [];
-      (db as any)._items = [
-        {
-          item_id: 'item_locked',
-          institution_name: 'Wells Fargo',
-          institution_id: 'ins_127991',
-          billed_products: ['transactions'],
-          login_required: true,
-          disconnected: false,
-        },
-      ];
-      (db as any)._userCategories = [];
-      (db as any)._userAccounts = [];
-      (db as any)._categoryNameMap = new Map();
-      (db as any)._accountNameMap = new Map();
+      const db = createMockDatabase({
+        transactions: [],
+        accounts: [],
+        items: [
+          {
+            item_id: 'item_locked',
+            institution_name: 'Wells Fargo',
+            institution_id: 'ins_127991',
+            billed_products: ['transactions'],
+            login_required: true,
+            disconnected: false,
+          },
+        ],
+      });
       const localTools = new CopilotMoneyTools(db);
 
       const result = await localTools.getConnectionStatus();
@@ -366,29 +362,20 @@ describe('CopilotMoneyTools Integration', () => {
     });
 
     test('identifies disconnected status', async () => {
-      const db = new CopilotDatabase('/fake/path');
-      (db as any)._transactions = [];
-      (db as any)._accounts = [];
-      (db as any)._recurring = [];
-      (db as any)._budgets = [];
-      (db as any)._goals = [];
-      (db as any)._goalHistory = [];
-      (db as any)._investmentPrices = [];
-      (db as any)._investmentSplits = [];
-      (db as any)._items = [
-        {
-          item_id: 'item_disc',
-          institution_name: 'Old Bank',
-          institution_id: 'ins_old',
-          billed_products: [],
-          login_required: false,
-          disconnected: true,
-        },
-      ];
-      (db as any)._userCategories = [];
-      (db as any)._userAccounts = [];
-      (db as any)._categoryNameMap = new Map();
-      (db as any)._accountNameMap = new Map();
+      const db = createMockDatabase({
+        transactions: [],
+        accounts: [],
+        items: [
+          {
+            item_id: 'item_disc',
+            institution_name: 'Old Bank',
+            institution_id: 'ins_old',
+            billed_products: [],
+            login_required: false,
+            disconnected: true,
+          },
+        ],
+      });
       const localTools = new CopilotMoneyTools(db);
 
       const result = await localTools.getConnectionStatus();

@@ -14,6 +14,7 @@ import {
 } from '../utils/categories.js';
 import type { Transaction, Account } from '../models/index.js';
 import { getTransactionDisplayName, getRecurringDisplayName } from '../models/index.js';
+import { isItemHealthy, itemNeedsAttention, getItemDisplayName } from '../models/item.js';
 import {
   getRootCategories,
   getCategoryChildren,
@@ -896,6 +897,7 @@ export class CopilotMoneyTools {
       last_investments_update: string | null;
       last_investments_failed: string | null;
       latest_fetch: string | null;
+      latest_investments_fetch: string | null;
       login_required: boolean;
       disconnected: boolean;
       consent_expires: string | null;
@@ -911,13 +913,18 @@ export class CopilotMoneyTools {
     const items = await this.db.getItems();
 
     const connections = items.map((item) => {
-      // Derive status from available fields
+      // Derive status using item.ts helpers
       let status: 'connected' | 'login_required' | 'disconnected' | 'error';
-      if (item.login_required === true || item.needs_update === true) {
-        status = 'login_required';
-      } else if (item.disconnected === true || item.connection_status === 'disconnected') {
+      if (item.disconnected === true || item.connection_status === 'disconnected') {
         status = 'disconnected';
-      } else if (item.error_code && item.error_code !== 'ITEM_NO_ERROR') {
+      } else if (
+        (item.error_code && item.error_code !== 'ITEM_NO_ERROR') ||
+        item.connection_status === 'error'
+      ) {
+        status = 'error';
+      } else if (item.login_required === true || itemNeedsAttention(item)) {
+        status = 'login_required';
+      } else if (!isItemHealthy(item)) {
         status = 'error';
       } else {
         status = 'connected';
@@ -925,7 +932,7 @@ export class CopilotMoneyTools {
 
       return {
         item_id: item.item_id,
-        institution_name: item.institution_name ?? item.institution_id ?? item.item_id,
+        institution_name: getItemDisplayName(item),
         institution_id: item.institution_id,
         status,
         products: item.billed_products ?? [],
@@ -934,12 +941,10 @@ export class CopilotMoneyTools {
         last_investments_update: item.status_investments_last_successful_update ?? null,
         last_investments_failed: item.status_investments_last_failed_update ?? null,
         latest_fetch: item.latest_fetch ?? null,
+        latest_investments_fetch: item.latest_investments_fetch ?? null,
         login_required: item.login_required ?? false,
         disconnected: item.disconnected ?? false,
-        consent_expires:
-          item.consent_expiration_time && item.consent_expiration_time !== ''
-            ? item.consent_expiration_time
-            : null,
+        consent_expires: item.consent_expiration_time || null,
         error_code: item.error_code ?? null,
         error_message: item.error_message ?? null,
       };
