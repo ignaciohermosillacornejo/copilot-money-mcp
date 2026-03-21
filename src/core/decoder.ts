@@ -1520,6 +1520,21 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
 }
 
 /**
+ * Get the decode timeout in milliseconds from environment or default.
+ * Can be set via DECODE_TIMEOUT_MS environment variable or --timeout CLI flag.
+ */
+function getDecodeTimeoutMs(): number {
+  const envValue = process.env.DECODE_TIMEOUT_MS;
+  if (envValue !== undefined) {
+    const ms = parseInt(envValue, 10);
+    if (!isNaN(ms) && ms > 0) {
+      return ms;
+    }
+  }
+  return 300_000; // 5 minutes default (was 30s)
+}
+
+/**
  * Decode all collections in an isolated worker thread.
  *
  * This wraps `decodeAllCollections` in a worker thread to prevent memory leaks
@@ -1539,7 +1554,7 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
  */
 export function decodeAllCollectionsIsolated(
   dbPath: string,
-  timeoutMs = 30_000
+  timeoutMs = getDecodeTimeoutMs()
 ): Promise<AllCollectionsResult> {
   return new Promise((resolve, reject) => {
     const selfUrl = import.meta.url;

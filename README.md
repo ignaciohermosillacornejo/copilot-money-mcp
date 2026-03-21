@@ -331,6 +331,39 @@ COPILOT_CACHE_TTL_MINUTES=0 copilot-money-mcp
 
 You can also manually refresh the cache using the `refresh_database` tool.
 
+### Decode Timeout
+
+For large databases (500MB+), you may need to increase the decode timeout. The default is 5 minutes (300,000ms).
+
+**Via environment variable:**
+```bash
+DECODE_TIMEOUT_MS=600000 copilot-money-mcp
+```
+
+**Via CLI flag:**
+```bash
+copilot-money-mcp --timeout 600000
+```
+
+**In Claude Desktop config** (with increased Node.js memory for 1GB+ databases):
+```json
+{
+  "mcpServers": {
+    "copilot-money": {
+      "command": "node",
+      "args": [
+        "--max-old-space-size=4096",
+        "/path/to/copilot-money-mcp/dist/cli.js",
+        "--db-path",
+        "/path/to/your/database",
+        "--timeout",
+        "600000"
+      ]
+    }
+  }
+}
+```
+
 ## Known Limitations
 
 ### Local Cache Size
@@ -358,6 +391,14 @@ If you see "Database not available":
 2. Check database location: `~/Library/Containers/com.copilot.production/Data/Library/Application Support/firestore/__FIRAPP_DEFAULT/copilot-production-22904/main`
 3. Verify `.ldb` files exist in the directory
 4. Provide custom path: `copilot-money-mcp --db-path /path/to/database`
+
+### Decode Worker Timed Out (Large Databases)
+
+If you see `Decode worker timed out after 300000ms`:
+1. Your database may be too large for the default 5-minute timeout
+2. Increase the timeout: `copilot-money-mcp --timeout 600000` (10 minutes)
+3. For databases over 1GB, also increase Node.js memory: `node --max-old-space-size=4096 dist/cli.js --timeout 600000`
+4. Set via environment variable: `DECODE_TIMEOUT_MS=600000`
 
 ### No Transactions Found
 

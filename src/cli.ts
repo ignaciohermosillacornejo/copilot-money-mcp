@@ -8,16 +8,26 @@ import { runServer } from './server.js';
 /**
  * Parse command-line arguments.
  */
-function parseArgs(): { dbPath?: string; verbose: boolean } {
+function parseArgs(): { dbPath?: string; verbose: boolean; timeoutMs?: number } {
   const args = process.argv.slice(2);
   let dbPath: string | undefined;
   let verbose = false;
+  let timeoutMs: number | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
 
     if (arg === '--db-path' && i + 1 < args.length) {
       dbPath = args[i + 1];
+      i++;
+    } else if (arg === '--timeout' && i + 1 < args.length) {
+      const ms = parseInt(args[i + 1], 10);
+      if (!isNaN(ms) && ms > 0) {
+        timeoutMs = ms;
+      } else {
+        console.error(`Invalid --timeout value: ${args[i + 1]} (must be a positive integer in milliseconds)`);
+        process.exit(1);
+      }
       i++;
     } else if (arg === '--verbose' || arg === '-v') {
       verbose = true;
@@ -30,10 +40,12 @@ Usage:
 
 Options:
   --db-path <path>    Path to LevelDB database (default: Copilot Money's default location)
+  --timeout <ms>      Decode timeout in milliseconds (default: 300000 = 5 minutes)
   --verbose, -v       Enable verbose logging
   --help, -h          Show this help message
 
 Environment:
+  DECODE_TIMEOUT_MS   Override decode timeout (same as --timeout flag)
   The server uses stdio transport and logs to stderr.
   Claude Desktop will communicate with it via stdin/stdout.
 `);
@@ -41,7 +53,7 @@ Environment:
     }
   }
 
-  return { dbPath, verbose };
+  return { dbPath, verbose, timeoutMs };
 }
 
 /**
@@ -70,7 +82,12 @@ function configureLogging(verbose: boolean): void {
  * Main entry point.
  */
 async function main(): Promise<void> {
-  const { dbPath, verbose } = parseArgs();
+  const { dbPath, verbose, timeoutMs } = parseArgs();
+
+  // Set decode timeout env var if provided via CLI flag
+  if (timeoutMs !== undefined) {
+    process.env.DECODE_TIMEOUT_MS = String(timeoutMs);
+  }
 
   // Configure logging
   configureLogging(verbose);
