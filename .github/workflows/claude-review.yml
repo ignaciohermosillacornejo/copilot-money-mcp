@@ -6,8 +6,8 @@ on:
 
 jobs:
   review:
-    # Skip draft PRs
-    if: github.event.pull_request.draft == false
+    # Skip draft PRs and forked PRs (secrets are unavailable for forks)
+    if: github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       contents: read
