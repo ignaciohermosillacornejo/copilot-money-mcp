@@ -21,11 +21,14 @@ function parseArgs(): { dbPath?: string; verbose: boolean; timeoutMs?: number } 
       dbPath = args[i + 1];
       i++;
     } else if (arg === '--timeout' && i + 1 < args.length) {
-      const ms = parseInt(args[i + 1], 10);
+      const rawValue = args[i + 1] as string;
+      const ms = parseInt(rawValue, 10);
       if (!isNaN(ms) && ms > 0) {
         timeoutMs = ms;
       } else {
-        console.error(`Invalid --timeout value: ${args[i + 1]} (must be a positive integer in milliseconds)`);
+        console.error(
+          `Invalid --timeout value: ${rawValue} (must be a positive integer in milliseconds)`
+        );
         process.exit(1);
       }
       i++;
@@ -40,7 +43,7 @@ Usage:
 
 Options:
   --db-path <path>    Path to LevelDB database (default: Copilot Money's default location)
-  --timeout <ms>      Decode timeout in milliseconds (default: 300000 = 5 minutes)
+  --timeout <ms>      Decode timeout in milliseconds (default: 90000 = 90 seconds)
   --verbose, -v       Enable verbose logging
   --help, -h          Show this help message
 
@@ -84,11 +87,6 @@ function configureLogging(verbose: boolean): void {
 async function main(): Promise<void> {
   const { dbPath, verbose, timeoutMs } = parseArgs();
 
-  // Set decode timeout env var if provided via CLI flag
-  if (timeoutMs !== undefined) {
-    process.env.DECODE_TIMEOUT_MS = String(timeoutMs);
-  }
-
   // Configure logging
   configureLogging(verbose);
 
@@ -105,7 +103,7 @@ async function main(): Promise<void> {
     }
 
     // Run the server
-    await runServer(dbPath);
+    await runServer(dbPath, timeoutMs);
   } catch (error) {
     console.error('Server error:', error);
     process.exit(1);

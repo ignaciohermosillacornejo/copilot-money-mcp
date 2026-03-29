@@ -33,9 +33,10 @@ export class CopilotMoneyServer {
    *
    * @param dbPath - Optional path to LevelDB database.
    *                If undefined, uses default Copilot Money location.
+   * @param decodeTimeoutMs - Optional timeout for decode operations in milliseconds.
    */
-  constructor(dbPath?: string) {
-    this.db = new CopilotDatabase(dbPath);
+  constructor(dbPath?: string, decodeTimeoutMs?: number) {
+    this.db = new CopilotDatabase(dbPath, decodeTimeoutMs);
     this.tools = new CopilotMoneyTools(this.db);
     this.server = new Server(
       {
@@ -227,7 +228,7 @@ export class CopilotMoneyServer {
  * @param dbPath - Optional path to LevelDB database.
  *                If undefined, uses default Copilot Money location.
  */
-export async function runServer(dbPath?: string): Promise<void> {
-  const server = new CopilotMoneyServer(dbPath);
+export async function runServer(dbPath?: string, decodeTimeoutMs?: number): Promise<void> {
+  const server = new CopilotMoneyServer(dbPath, decodeTimeoutMs);
   await server.run();
 }

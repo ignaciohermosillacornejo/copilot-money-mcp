@@ -1523,7 +1523,7 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
  * Get the decode timeout in milliseconds from environment or default.
  * Can be set via DECODE_TIMEOUT_MS environment variable or --timeout CLI flag.
  */
-function getDecodeTimeoutMs(): number {
+export function getDecodeTimeoutMs(): number {
   const envValue = process.env.DECODE_TIMEOUT_MS;
   if (envValue !== undefined) {
     const ms = parseInt(envValue, 10);
@@ -1531,7 +1531,7 @@ function getDecodeTimeoutMs(): number {
       return ms;
     }
   }
-  return 300_000; // 5 minutes default (was 30s)
+  return 90_000; // 90 seconds default
 }
 
 /**
