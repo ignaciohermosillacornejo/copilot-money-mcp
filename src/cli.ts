@@ -21,11 +21,14 @@ function parseArgs(): { dbPath?: string; verbose: boolean; timeoutMs?: number } 
       dbPath = args[i + 1];
       i++;
     } else if (arg === '--timeout' && i + 1 < args.length) {
-      const ms = parseInt(args[i + 1], 10);
+      const rawValue = args[i + 1] as string;
+      const ms = parseInt(rawValue, 10);
       if (!isNaN(ms) && ms > 0) {
         timeoutMs = ms;
       } else {
-        console.error(`Invalid --timeout value: ${args[i + 1]} (must be a positive integer in milliseconds)`);
+        console.error(
+          `Invalid --timeout value: ${rawValue} (must be a positive integer in milliseconds)`
+        );
         process.exit(1);
       }
       i++;
