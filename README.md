@@ -333,7 +333,7 @@ You can also manually refresh the cache using the `refresh_database` tool.
 
 ### Decode Timeout
 
-For large databases (500MB+), you may need to increase the decode timeout. The default is 5 minutes (300,000ms).
+For large databases (500MB+), you may need to increase the decode timeout. The default is 90 seconds (90,000ms).
 
 **Via environment variable:**
 ```bash
@@ -394,10 +394,10 @@ If you see "Database not available":
 
 ### Decode Worker Timed Out (Large Databases)
 
-If you see `Decode worker timed out after 300000ms`:
-1. Your database may be too large for the default 5-minute timeout
-2. Increase the timeout: `copilot-money-mcp --timeout 600000` (10 minutes)
-3. For databases over 1GB, also increase Node.js memory: `node --max-old-space-size=4096 dist/cli.js --timeout 600000`
+If you see "Decode worker timed out after Xms":
+1. Your database may be too large for the default 90-second timeout
+2. Increase the timeout: `copilot-money-mcp --timeout 300000` (5 minutes)
+3. For databases over 1GB, also increase Node.js memory: `node --max-old-space-size=4096 dist/cli.js --timeout 300000`
 4. Set via environment variable: `DECODE_TIMEOUT_MS=600000`
 
 ### No Transactions Found
