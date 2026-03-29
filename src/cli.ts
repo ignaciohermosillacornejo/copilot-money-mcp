@@ -43,7 +43,7 @@ Usage:
 
 Options:
   --db-path <path>    Path to LevelDB database (default: Copilot Money's default location)
-  --timeout <ms>      Decode timeout in milliseconds (default: 300000 = 5 minutes)
+  --timeout <ms>      Decode timeout in milliseconds (default: 90000 = 90 seconds)
   --verbose, -v       Enable verbose logging
   --help, -h          Show this help message
 
@@ -87,11 +87,6 @@ function configureLogging(verbose: boolean): void {
 async function main(): Promise<void> {
   const { dbPath, verbose, timeoutMs } = parseArgs();
 
-  // Set decode timeout env var if provided via CLI flag
-  if (timeoutMs !== undefined) {
-    process.env.DECODE_TIMEOUT_MS = String(timeoutMs);
-  }
-
   // Configure logging
   configureLogging(verbose);
 
@@ -108,7 +103,7 @@ async function main(): Promise<void> {
     }
 
     // Run the server
-    await runServer(dbPath);
+    await runServer(dbPath, timeoutMs);
   } catch (error) {
     console.error('Server error:', error);
     process.exit(1);

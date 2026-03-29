@@ -176,19 +176,25 @@ export class CopilotDatabase {
   // Cache TTL tracking
   private _cacheLoadedAt: number | null = null;
 
+  // Optional decode timeout override
+  private decodeTimeoutMs?: number;
+
   /**
    * Initialize database connection.
    *
    * @param dbPath - Path to LevelDB database directory.
    *                If undefined, auto-detects Copilot Money location.
+   * @param decodeTimeoutMs - Optional timeout for decode operations in milliseconds.
+   *                         If undefined, falls back to DECODE_TIMEOUT_MS env var or default.
    */
-  constructor(dbPath?: string) {
+  constructor(dbPath?: string, decodeTimeoutMs?: number) {
     if (dbPath) {
       this.dbPath = dbPath;
     } else {
       // Auto-detect database location
       this.dbPath = findCopilotDatabase();
     }
+    this.decodeTimeoutMs = decodeTimeoutMs;
   }
 
   /**
@@ -331,7 +337,10 @@ export class CopilotDatabase {
 
     // Start batch loading in an isolated worker thread to prevent memory leaks
     // from classic-level's native ArrayBuffer accumulation
-    this._loadingAllCollections = decodeAllCollectionsIsolated(this.requireDbPath());
+    this._loadingAllCollections = decodeAllCollectionsIsolated(
+      this.requireDbPath(),
+      this.decodeTimeoutMs
+    );
     try {
       const result = await this._loadingAllCollections;
 
