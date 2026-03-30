@@ -867,8 +867,13 @@ export class CopilotMoneyTools {
       accounts = accounts.filter((acc) => !hiddenIds.has(acc.account_id));
     }
 
-    // Calculate total balance
-    const totalBalance = accounts.reduce((sum, acc) => sum + acc.current_balance, 0);
+    // Calculate total balance (subtract debt from net worth)
+    const totalBalance = accounts.reduce((sum, acc) => {
+      if (acc.account_type === "loan" || acc.account_type === "credit") {
+        return sum - acc.current_balance; // Subtract debt
+      }
+      return sum + acc.current_balance; // Add assets
+    }, 0);
 
     return {
       count: accounts.length,
