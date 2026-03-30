@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-03-29
+
+### Fixed
+- **Decode timeout**: Made decode timeout configurable via `--timeout` CLI flag, with a sensible default of 90 seconds
+- Threaded timeout config through the stack instead of using environment variables
+- Prevented promise hang when decode worker exits without sending a result
+
+### Changed
+- CI: Skip AI code review on Dependabot and forked PRs
+
+## [1.3.0] - 2026-03-15
+
+### Added
+- **`get_connection_status` tool**: Check bank sync/connection health status for linked accounts
+
+### Fixed
+- Corrected `package.json` main field to `dist/server.js`
+- Isolated LevelDB decoding in worker thread to prevent memory leaks
+- Used `transaction_id` for dedup and reconcile pending/posted transaction pairs
+
+### Changed
+- Excluded dev artifacts and internal docs from `.mcpb` bundle
+- Removed legacy Python config files (`.coveragerc`, `pytest.ini`)
+- Cleaned up Python-specific entries from `.gitignore`
+
 ## [1.2.2] - 2026-01-21
 
 ### Fixed
