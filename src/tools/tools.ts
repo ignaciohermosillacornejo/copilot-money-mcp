@@ -2103,8 +2103,9 @@ export function createToolSchemas(): ToolSchema[] {
     {
       name: 'get_accounts',
       description:
-        'Get all accounts with balances. Optionally filter by account type ' +
-        '(checking, savings, credit, investment). Now checks both account_type ' +
+        'Get all accounts with balances, plus summary fields: total_balance (net worth = assets minus liabilities), ' +
+        'total_assets, and total_liabilities. Optionally filter by account type ' +
+        '(checking, savings, credit, investment). Checks both account_type ' +
         'and subtype fields for better filtering (e.g., finds checking accounts ' +
         "even when account_type is 'depository'). By default, hidden accounts are excluded.",
       inputSchema: {
