@@ -1450,3 +1450,154 @@ describe('getConnectionStatus', () => {
     expect(result.summary.needs_attention).toBe(0);
   });
 });
+
+describe('getAccounts - total balance calculation', () => {
+  let db: CopilotDatabase;
+  let tools: CopilotMoneyTools;
+
+  beforeEach(() => {
+    db = new CopilotDatabase('/fake/path');
+    (db as any)._transactions = [];
+    (db as any)._accounts = [];
+    (db as any)._recurring = [];
+    (db as any)._budgets = [];
+    (db as any)._goals = [];
+    (db as any)._goalHistory = [];
+    (db as any)._investmentPrices = [];
+    (db as any)._investmentSplits = [];
+    (db as any)._items = [];
+    (db as any)._userCategories = [];
+    (db as any)._userAccounts = [];
+    (db as any)._categoryNameMap = new Map<string, string>();
+    (db as any)._accountNameMap = new Map<string, string>();
+
+    tools = new CopilotMoneyTools(db);
+  });
+
+  test('calculates total balance with mixed account types', async () => {
+    // Mock accounts with assets and liabilities
+    const mixedAccounts: Account[] = [
+      {
+        account_id: 'checking1',
+        current_balance: 1000.0,
+        account_type: 'depository', // ASSET
+        name: 'Checking',
+      },
+      {
+        account_id: 'investment1',
+        current_balance: 5000.0,
+        account_type: 'investment', // ASSET
+        name: 'Brokerage',
+      },
+      {
+        account_id: 'mortgage1',
+        current_balance: 300000.0,
+        account_type: 'loan', // LIABILITY
+        name: 'Mortgage',
+      },
+      {
+        account_id: 'credit1',
+        current_balance: 2000.0,
+        account_type: 'credit', // LIABILITY
+        name: 'Credit Card',
+      },
+    ];
+
+    (db as any)._accounts = mixedAccounts;
+    (db as any)._userAccounts = [];
+
+    const result = await tools.getAccounts();
+
+    // Total Balance = Assets - Liabilities
+    // = (1000 + 5000) - (300000 + 2000) = 6000 - 302000 = -296000
+    expect(result.total_balance).toBe(-296000.0);
+    expect(result.count).toBe(4);
+  });
+
+  test('handles only asset accounts', async () => {
+    const assetAccounts: Account[] = [
+      {
+        account_id: 'checking1',
+        current_balance: 1000.0,
+        account_type: 'depository',
+        name: 'Checking',
+      },
+      {
+        account_id: 'investment1',
+        current_balance: 5000.0,
+        account_type: 'investment',
+        name: 'Brokerage',
+      },
+    ];
+
+    (db as any)._accounts = assetAccounts;
+    (db as any)._userAccounts = [];
+
+    const result = await tools.getAccounts();
+    expect(result.total_balance).toBe(6000.0); // 1000 + 5000
+  });
+
+  test('handles only liability accounts', async () => {
+    const liabilityAccounts: Account[] = [
+      {
+        account_id: 'mortgage1',
+        current_balance: 300000.0,
+        account_type: 'loan',
+        name: 'Mortgage',
+      },
+      {
+        account_id: 'credit1',
+        current_balance: 2000.0,
+        account_type: 'credit',
+        name: 'Credit Card',
+      },
+    ];
+
+    (db as any)._accounts = liabilityAccounts;
+    (db as any)._userAccounts = [];
+
+    const result = await tools.getAccounts();
+    expect(result.total_balance).toBe(-302000.0); // -(300000 + 2000)
+  });
+
+  test('handles real estate accounts as assets', async () => {
+    const realEstateAccounts: Account[] = [
+      {
+        account_id: 'house1',
+        current_balance: 500000.0,
+        account_type: 'real-estate',
+        name: 'Primary Home',
+      },
+      {
+        account_id: 'mortgage1',
+        current_balance: 400000.0,
+        account_type: 'loan',
+        name: 'Mortgage',
+      },
+    ];
+
+    (db as any)._accounts = realEstateAccounts;
+    (db as any)._userAccounts = [];
+
+    const result = await tools.getAccounts();
+    // Home equity = 500000 - 400000 = 100000
+    expect(result.total_balance).toBe(100000.0);
+  });
+
+  test('handles unknown account types as assets (legacy behavior)', async () => {
+    const unknownAccounts: Account[] = [
+      {
+        account_id: 'unknown1',
+        current_balance: 1000.0,
+        account_type: 'unknown_type',
+        name: 'Unknown Account',
+      },
+    ];
+
+    (db as any)._accounts = unknownAccounts;
+    (db as any)._userAccounts = [];
+
+    const result = await tools.getAccounts();
+    expect(result.total_balance).toBe(1000.0); // Treated as asset
+  });
+});
