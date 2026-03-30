@@ -2114,7 +2114,8 @@ export function createToolSchemas(): ToolSchema[] {
           account_type: {
             type: 'string',
             description:
-              'Filter by account type (checking, savings, credit, investment, depository)',
+              'Filter by account type (checking, savings, credit, loan, investment, depository). ' +
+              'Note: summary totals (total_assets, total_liabilities, total_balance) reflect only the filtered subset.',
           },
           include_hidden: {
             type: 'boolean',
