@@ -1511,6 +1511,8 @@ describe('getAccounts - total balance calculation', () => {
     // Total Balance = Assets - Liabilities
     // = (1000 + 5000) - (300000 + 2000) = 6000 - 302000 = -296000
     expect(result.total_balance).toBe(-296000.0);
+    expect(result.total_assets).toBe(6000.0);
+    expect(result.total_liabilities).toBe(302000.0);
     expect(result.count).toBe(4);
   });
 
@@ -1535,6 +1537,8 @@ describe('getAccounts - total balance calculation', () => {
 
     const result = await tools.getAccounts();
     expect(result.total_balance).toBe(6000.0); // 1000 + 5000
+    expect(result.total_assets).toBe(6000.0);
+    expect(result.total_liabilities).toBe(0);
   });
 
   test('handles only liability accounts', async () => {
@@ -1558,6 +1562,8 @@ describe('getAccounts - total balance calculation', () => {
 
     const result = await tools.getAccounts();
     expect(result.total_balance).toBe(-302000.0); // -(300000 + 2000)
+    expect(result.total_assets).toBe(0);
+    expect(result.total_liabilities).toBe(302000.0);
   });
 
   test('handles real estate accounts as assets', async () => {
@@ -1582,6 +1588,8 @@ describe('getAccounts - total balance calculation', () => {
     const result = await tools.getAccounts();
     // Home equity = 500000 - 400000 = 100000
     expect(result.total_balance).toBe(100000.0);
+    expect(result.total_assets).toBe(500000.0);
+    expect(result.total_liabilities).toBe(400000.0);
   });
 
   test('handles unknown account types as assets (legacy behavior)', async () => {
@@ -1599,5 +1607,7 @@ describe('getAccounts - total balance calculation', () => {
 
     const result = await tools.getAccounts();
     expect(result.total_balance).toBe(1000.0); // Treated as asset
+    expect(result.total_assets).toBe(1000.0);
+    expect(result.total_liabilities).toBe(0);
   });
 });

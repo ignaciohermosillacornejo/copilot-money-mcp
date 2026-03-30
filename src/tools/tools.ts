@@ -850,6 +850,8 @@ export class CopilotMoneyTools {
   ): Promise<{
     count: number;
     total_balance: number;
+    total_assets: number;
+    total_liabilities: number;
     accounts: Account[];
   }> {
     const { account_type, include_hidden = false } = options;
@@ -867,17 +869,23 @@ export class CopilotMoneyTools {
       accounts = accounts.filter((acc) => !hiddenIds.has(acc.account_id));
     }
 
-    // Calculate total balance (subtract debt from net worth)
-    const totalBalance = accounts.reduce((sum, acc) => {
+    // Calculate totals by asset/liability classification
+    let totalAssets = 0;
+    let totalLiabilities = 0;
+    for (const acc of accounts) {
       if (acc.account_type === 'loan' || acc.account_type === 'credit') {
-        return sum - acc.current_balance; // Subtract debt
+        totalLiabilities += acc.current_balance;
+      } else {
+        totalAssets += acc.current_balance;
       }
-      return sum + acc.current_balance; // Add assets
-    }, 0);
+    }
+    const totalBalance = totalAssets - totalLiabilities;
 
     return {
       count: accounts.length,
       total_balance: roundAmount(totalBalance),
+      total_assets: roundAmount(totalAssets),
+      total_liabilities: roundAmount(totalLiabilities),
       accounts,
     };
   }
