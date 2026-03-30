@@ -8,11 +8,6 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "rootDir": "./src",
-    "baseUrl": "./",
-    "paths": {
-      "@/*": ["src/*"]
-    },
-
     /* Emit */
     "outDir": "./dist",
     "declaration": true,
