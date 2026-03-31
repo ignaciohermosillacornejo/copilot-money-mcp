@@ -154,7 +154,7 @@ collection === target || collection.endsWith(`/${target}`)
 **App-visible data from this collection:**
 - Balance chart uses `balance_history` subcollection (separate)
 - Account balance change % shown in list view
-- Credit limit shown as "/ $27,500.00" next to balance for credit cards
+- Credit limit shown next to balance for credit cards (e.g., "/ $XX,XXX.00")
 - "Goals" section on checking accounts links via `financial_goals.associated_accounts`
 
 ---
@@ -577,13 +577,13 @@ Amazon order integration. Matches Amazon orders to bank transactions.
 
 | Field | Type | Description |
 |---|---|---|
-| `id` | string | Amazon order ID (e.g., "111-0005209-8579475") |
+| `id` | string | Amazon order ID (e.g., "111-XXXXXXX-XXXXXXX") |
 | `date` | string | Order date (YYYY-MM-DD) |
 | `account_id` | string | Linked bank account (hashed) |
 | `match_state` | string | `"AUTO"` - how order was matched to transactions |
 | `items` | array | Order items: `[{ id, name, price, quantity, link }]` |
 | `details` | object | `{ beforeTax, shipping, subtotal, tax, total }` |
-| `payment` | object | `{ card: "1178" }` - last 4 digits |
+| `payment` | object | `{ card: "XXXX" }` - last 4 digits of card |
 | `transactions` | array | Matched transaction IDs |
 | `copilot_tx` | object | Transaction-to-items mapping (keyed by tx ID) |
 
