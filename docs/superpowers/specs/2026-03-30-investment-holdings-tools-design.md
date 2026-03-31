@@ -62,11 +62,11 @@ Each element in the `holdings` array is a full Plaid holding object:
 
 | Metric | Formula | Example (SCHX) |
 |---|---|---|
-| Average cost | `cost_basis / quantity` | $77,047.42 / 3,517.551 = **$21.90** |
-| Total return ($) | `institution_value - cost_basis` | $88,185.00 - $77,047.42 = **$11,137.58** |
-| Total return (%) | `(institution_value - cost_basis) / cost_basis × 100` | **14.46%** |
+| Average cost | `cost_basis / quantity` | `cost_basis / quantity` = per-share cost |
+| Total return ($) | `institution_value - cost_basis` | current value minus total invested |
+| Total return (%) | `(institution_value - cost_basis) / cost_basis × 100` | percentage gain/loss |
 
-Exact matches confirmed for SCHX ($21.90), META ($562.50), and DASH ($220.46).
+Verified: computed values match the app's displayed average cost exactly for multiple securities (tested with ETF, equity, and stock plan positions).
 
 **Important notes:**
 - `cost_basis` is null for cash-equivalent positions (money market funds, USD)
