@@ -253,20 +253,55 @@ User overrides for account display. Must be checked BEFORE main `accounts` since
 ### `users/{user_id}/categories`
 
 **Path:** `users/{user_id}/categories/{category_id}`
-**App view:** Categories list with parent/child hierarchy, category detail panel
+**App view:** Categories list (Regular Categories / Excluded Categories), category detail panel
+**32 documents**
 
-| Field | Type | Description |
-|---|---|---|
-| `category_id` | string | Unique identifier |
-| `name` | string | Category name |
-| `emoji` | string | Display emoji |
-| `parent_id` | string | Parent category (for subcategories) |
-| `is_income` | boolean | Income category flag |
-| `order` | number | Display sort order |
+| Field | Type | Description | In Schema? |
+|---|---|---|---|
+| `category_id` | string | Unique identifier (= doc ID or `id` field) | Yes |
+| `name` | string | Category name (e.g., "Restaurants", "Car") | Yes |
+| `emoji` | string | Display emoji (e.g., "🍔", "🔧") | Yes |
+| `color` | string | Hex color for category dot/badge (e.g., "#8002E3") | Yes |
+| `bg_color` | string | Background color for badges (e.g., "#FAF5FD") | Yes |
+| `parent_category_id` | string | Parent category ID (for subcategories) | Yes |
+| `children_category_ids` | string[] | Child category IDs | Yes |
+| `order` | number | Display sort order within parent | Yes |
+| `excluded` | boolean | Excluded from spending reports | Yes |
+| `is_other` | boolean | Whether this is the "Other" catch-all category | Yes |
+| `auto_budget_lock` | boolean | Locked from automatic budget adjustments | Yes |
+| `auto_delete_lock` | boolean | Locked from automatic deletion | Yes |
+| `plaid_category_ids` | string[] | Plaid category IDs mapped to this custom category (e.g., `["18021000", "19025000"]`) | Yes |
+| `partial_name_rules` | string[] | Merchant name substrings for auto-categorization | Yes |
+| `user_id` | string | Owner user ID | Yes |
+| `budget_id` | string | Associated budget ID | No (in Firestore, not in schema) |
+| `children_categories` | unknown | Alternate children field | No (in Firestore, not in schema) |
+| `_origin` | string | Source (e.g., `"firebase"`) | No (dropped by strict schema) |
 
-**App shows:** Hierarchical tree (Food > Restaurants, Bars & Pubs, Groceries, Coffee), spending per category with bar charts, "Last" (previous month) comparison, Key metrics (spent per year, avg monthly), transaction list.
+**Category hierarchy:**
+- Parent categories have `children_category_ids` listing their subcategories
+- Subcategories have `parent_category_id` pointing to parent
+- Parent categories show a count badge (e.g., "4") in the UI
+- Standalone categories (Subscriptions, Transportation, Healthcare, etc.) have no parent or children
 
-**Note:** Copilot also uses Plaid's standard category taxonomy (hardcoded, not stored in Firestore).
+**Category sections in the app:**
+- **Regular Categories**: `excluded: false` (default). Shown hierarchically with parent > children.
+- **Excluded Categories**: `excluded: true`. Transactions in excluded categories don't count toward spending totals. (e.g., "Work")
+
+**Plaid category mapping:**
+- `plaid_category_ids` maps Plaid numeric IDs to this custom category for auto-categorization
+- `partial_name_rules` provides merchant-name-based auto-categorization
+- Copilot also has a hardcoded Plaid taxonomy (`src/utils/categories.ts`, `src/models/category-full.ts`)
+
+**Detail panel (for category groups):**
+- Color dot + emoji + name, subcategory badges
+- "Spent in [Month]" total, over-budget amount
+- Monthly spending bar chart (multi-year)
+- Key metrics: Spent per year, Avg monthly spend (2022-2026)
+- Transaction list for current month
+
+**Three-dot menu:** Ungroup categories, Spending category type (Regular / Excluded)
+
+**Note:** `is_income` does NOT exist in the Firestore data. Income is determined by the hardcoded Plaid taxonomy, not a category field. The old doc incorrectly listed this. Also, `parent_id` was wrong — the actual field name is `parent_category_id`.
 
 ---
 
