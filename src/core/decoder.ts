@@ -2294,7 +2294,7 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     }
   }
 
-  // Amazon orders: dedupe by order_id
+  // Amazon orders: dedupe by order_id, sort by date descending
   const amzOrdSeen = new Set<string>();
   const amazonOrders: AmazonOrder[] = [];
   for (const order of rawAmazonOrders) {
@@ -2303,6 +2303,11 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
       amazonOrders.push(order);
     }
   }
+  amazonOrders.sort((a, b) => {
+    const dateA = a.date ?? '';
+    const dateB = b.date ?? '';
+    return dateB.localeCompare(dateA);
+  });
 
   return {
     transactions,
