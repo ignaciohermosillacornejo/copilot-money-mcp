@@ -121,6 +121,16 @@ function isDecoded(rawCollection: string): boolean {
     return true;
   if (collectionMatches(rawCollection, 'orders') && rawCollection.includes('amazon/')) return true;
   if (rawCollection === 'amazon' || /^amazon\/[^/]+$/.test(rawCollection)) return true;
+  if (collectionMatches(rawCollection, 'subscriptions')) return true;
+  if (collectionMatches(rawCollection, 'invites')) return true;
+  if (collectionMatches(rawCollection, 'user_items')) return true;
+  if (collectionMatches(rawCollection, 'feature_tracking')) return true;
+  if (collectionMatches(rawCollection, 'support')) return true;
+  if (
+    rawCollection.includes('/financial_goals/') &&
+    !rawCollection.endsWith('/financial_goal_history')
+  )
+    return true;
 
   return false;
 }
