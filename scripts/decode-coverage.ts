@@ -115,6 +115,7 @@ function isDecoded(rawCollection: string): boolean {
   if (rawCollection.endsWith('/t') && rawCollection.includes('changes/')) return true;
   if (rawCollection.endsWith('/a') && rawCollection.includes('changes/')) return true;
   if (collectionMatches(rawCollection, 'changes')) return true;
+  if (collectionMatches(rawCollection, 'securities')) return true;
 
   return false;
 }

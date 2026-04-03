@@ -46,6 +46,7 @@ import {
   AccountChange,
   AccountChangeSchema,
 } from '../models/change.js';
+import { Security, SecuritySchema } from '../models/security.js';
 
 /**
  * Extract a primitive value from a FirestoreValue.
@@ -698,6 +699,7 @@ export interface AllCollectionsResult {
   changes: Change[];
   transactionChanges: TransactionChange[];
   accountChanges: AccountChange[];
+  securities: Security[];
 }
 
 /**
@@ -1653,6 +1655,53 @@ function processSubChange<T>(
 }
 
 /**
+ * Internal helper to process a security document.
+ */
+function processSecurity(fields: Map<string, FirestoreValue>, docId: string): Security | null {
+  const data: Record<string, unknown> = { security_id: docId };
+
+  const stringFields = [
+    'ticker_symbol',
+    'name',
+    'type',
+    'provider_type',
+    'close_price_as_of',
+    'iso_currency_code',
+    'isin',
+    'cusip',
+    'sedol',
+    'institution_id',
+    'institution_security_id',
+    'market_identifier_code',
+    'last_update',
+    'next_update',
+    'source',
+    'unofficial_currency_code',
+    'cik',
+    'proxy_security_id',
+  ];
+  for (const field of stringFields) {
+    const value = getString(fields, field);
+    if (value !== undefined) data[field] = value;
+  }
+
+  const numericFields = ['close_price', 'current_price', 'update_frequency'];
+  for (const field of numericFields) {
+    const value = getNumber(fields, field);
+    if (value !== undefined) data[field] = value;
+  }
+
+  const booleanFields = ['is_cash_equivalent', 'comparison', 'trades_24_7'];
+  for (const field of booleanFields) {
+    const value = getBoolean(fields, field);
+    if (value !== undefined) data[field] = value;
+  }
+
+  const validated = SecuritySchema.safeParse(data);
+  return validated.success ? validated.data : null;
+}
+
+/**
  * Helper to check if a collection path matches a target collection name.
  * Handles both simple names ("transactions") and full paths ("users/{user_id}/transactions").
  */
@@ -1690,6 +1739,7 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
   const rawChanges: Change[] = [];
   const rawTransactionChanges: TransactionChange[] = [];
   const rawAccountChanges: AccountChange[] = [];
+  const rawSecurities: Security[] = [];
 
   // Single pass through the database
   for await (const doc of iterateDocuments(dbPath)) {
@@ -1775,6 +1825,9 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     } else if (collectionMatches(collection, 'changes')) {
       const change = processChange(fields, documentId);
       if (change) rawChanges.push(change);
+    } else if (collectionMatches(collection, 'securities')) {
+      const security = processSecurity(fields, documentId);
+      if (security) rawSecurities.push(security);
     }
   }
 
@@ -2028,6 +2081,16 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     }
   }
 
+  // Securities: dedupe by security_id
+  const secSeen = new Set<string>();
+  const securities: Security[] = [];
+  for (const sec of rawSecurities) {
+    if (!secSeen.has(sec.security_id)) {
+      secSeen.add(sec.security_id);
+      securities.push(sec);
+    }
+  }
+
   return {
     transactions,
     accounts,
@@ -2049,6 +2112,7 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     changes,
     transactionChanges,
     accountChanges,
+    securities,
   };
 }
 

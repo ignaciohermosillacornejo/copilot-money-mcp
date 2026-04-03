@@ -104,6 +104,8 @@ export { PlaidAccountSchema, type PlaidAccount, type Holding } from './plaid-acc
 
 export { BalanceHistorySchema, type BalanceHistory } from './balance-history.js';
 
+export { SecuritySchema, type Security } from './security.js';
+
 export {
   HoldingsHistoryMetaSchema,
   type HoldingsHistoryMeta,
