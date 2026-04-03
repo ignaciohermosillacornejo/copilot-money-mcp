@@ -2179,7 +2179,10 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
       collection.includes('/financial_goals/') &&
       !collection.endsWith('/financial_goal_history')
     ) {
-      // Financial goals sentinel/parent docs — decoded but no data to extract
+      // Sentinel/parent docs at users/{uid}/financial_goals/{goal_id} exist because
+      // financial_goal_history is a subcollection underneath them. These documents are
+      // typically empty (no fields) — their presence just anchors the subcollection path.
+      // We match them here so they don't appear as "undecoded" in coverage reports.
     }
   }
 

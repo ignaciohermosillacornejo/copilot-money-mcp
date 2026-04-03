@@ -55,6 +55,17 @@ describe('SubscriptionSchema', () => {
     }
   });
 
+  test('accepts numeric expires_date_ms', () => {
+    const result = SubscriptionSchema.safeParse({
+      subscription_id: 'sub-123',
+      expires_date_ms: 1735689600000,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.expires_date_ms).toBe(1735689600000);
+    }
+  });
+
   test('rejects missing subscription_id', () => {
     const result = SubscriptionSchema.safeParse({
       product_id: 'copilot_yearly',

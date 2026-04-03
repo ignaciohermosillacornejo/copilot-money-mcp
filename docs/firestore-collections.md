@@ -4,7 +4,7 @@ Complete documentation of all Firestore collections cached locally by Copilot Mo
 
 **Last verified:** 2026-04-02 | **App version:** macOS (App Store) | **Total documents:** ~55,953 across ~35 unique collection patterns
 
-**Decode coverage:** 100% (55,953 / 55,953 documents) — run `bun run scripts/decode-coverage.ts` for latest numbers
+**Decode coverage:** 55.3% (30,941 / 55,953 documents) — run `bun run scripts/decode-coverage.ts` for latest numbers
 
 ## Database Location
 
@@ -47,23 +47,23 @@ collection === target || collection.endsWith(`/${target}`)
 | `investment_prices/{hash}/hf` | ~850 | Yes | High-frequency price subcollection |
 | `investment_splits` | ~17 | Yes | Stock split records |
 | `items` | ~13 | Yes | Plaid item connections |
-| `items/{id}/accounts/{id}` | ~6,867 | Yes | Plaid account docs (with holdings) |
-| `items/{id}/accounts/{id}/balance_history` | ~4,945 | Yes | Daily account balance history |
-| `items/{id}/accounts/{id}/transactions` | ~1,367 | Yes | Plaid raw transactions |
-| `items/{id}/accounts/{id}/holdings_history/{hash}` | ~630 | Yes | Holdings snapshot metadata |
-| `items/{id}/accounts/{id}/holdings_history/{hash}/history` | ~84 | Yes | Daily holdings price/quantity |
-| `items/{id}/accounts` | ~23 | Yes | Plaid account listing per item |
-| `investment_performance` | ~10 | Yes | Performance tracking metadata |
-| `investment_performance/{hash}` | ~8,088 | Yes | Performance data per security |
-| `investment_performance/{hash}/twr_holding` | ~887 | Yes | Time-weighted return per holding |
-| `securities` | ~17 | Yes | Security master data |
-| `amazon/{id}` | ~72 | Yes | Amazon integration metadata |
-| `amazon/{id}/orders` | ~72 | Yes | Amazon order details |
-| `changes/{id}` | ~995 | Yes | Sync/change tracking |
-| `changes/{id}/t` | ~535 | Yes | Transaction changes |
-| `changes/{id}/a` | ~381 | Yes | Account changes |
-| `users/{user_id}/tags` | ~8 | Yes | Transaction tags |
-| `users` | 1 | Yes | User profile/settings |
+| `items/{id}/accounts/{id}` | ~6,867 | No | Plaid account docs (with holdings) |
+| `items/{id}/accounts/{id}/balance_history` | ~4,945 | No | Daily account balance history |
+| `items/{id}/accounts/{id}/transactions` | ~1,367 | No | Plaid raw transactions |
+| `items/{id}/accounts/{id}/holdings_history/{hash}` | ~630 | No | Holdings snapshot metadata |
+| `items/{id}/accounts/{id}/holdings_history/{hash}/history` | ~84 | No | Daily holdings price/quantity |
+| `items/{id}/accounts` | ~23 | No | Plaid account listing per item |
+| `investment_performance` | ~10 | No | Performance tracking metadata |
+| `investment_performance/{hash}` | ~8,088 | No | Performance data per security |
+| `investment_performance/{hash}/twr_holding` | ~887 | No | Time-weighted return per holding |
+| `securities` | ~17 | No | Security master data |
+| `amazon/{id}` | ~72 | No | Amazon integration metadata |
+| `amazon/{id}/orders` | ~72 | No | Amazon order details |
+| `changes/{id}` | ~995 | No | Sync/change tracking |
+| `changes/{id}/t` | ~535 | No | Transaction changes |
+| `changes/{id}/a` | ~381 | No | Account changes |
+| `users/{user_id}/tags` | ~8 | No | Transaction tags |
+| `users` | 1 | No | User profile/settings |
 | `subscriptions` | 1 | Yes | App subscription data |
 | `invites` | 2 | Yes | Referral invite codes |
 | `user_items` | 1 | Yes | User-to-item mapping |
