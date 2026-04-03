@@ -100,6 +100,8 @@ export {
   type TwrHolding,
 } from './investment-performance.js';
 
+export { PlaidAccountSchema, type PlaidAccount, type Holding } from './plaid-account.js';
+
 export {
   type CategoryNode,
   getCategory,

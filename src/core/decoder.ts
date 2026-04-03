@@ -29,6 +29,7 @@ import {
   TwrHolding,
   TwrHoldingSchema,
 } from '../models/investment-performance.js';
+import { PlaidAccount, PlaidAccountSchema } from '../models/plaid-account.js';
 
 /**
  * Extract a primitive value from a FirestoreValue.
@@ -674,6 +675,7 @@ export interface AllCollectionsResult {
   userAccounts: UserAccountCustomization[];
   investmentPerformance: InvestmentPerformance[];
   twrHoldings: TwrHolding[];
+  plaidAccounts: PlaidAccount[];
 }
 
 /**
@@ -1371,6 +1373,69 @@ function processTwrHolding(
 }
 
 /**
+ * Internal helper to process a plaid account document (items/{id}/accounts/{id}).
+ */
+function processPlaidAccount(
+  fields: Map<string, FirestoreValue>,
+  docId: string,
+  collection: string
+): PlaidAccount | null {
+  const data: Record<string, unknown> = {
+    plaid_account_id: docId,
+  };
+
+  // Extract item_id from collection path: items/{item_id}/accounts/{doc_id}
+  const parts = collection.split('/');
+  const itemsIdx = parts.indexOf('items');
+  if (itemsIdx >= 0 && itemsIdx + 1 < parts.length) {
+    data.item_id = parts[itemsIdx + 1];
+  }
+
+  const stringFields = [
+    'account_id',
+    'name',
+    'official_name',
+    'mask',
+    'account_type',
+    'subtype',
+    'iso_currency_code',
+  ];
+  for (const field of stringFields) {
+    const value = getString(fields, field);
+    if (value !== undefined) data[field] = value;
+  }
+
+  const numberFields = ['current_balance', 'available_balance', 'limit'];
+  for (const field of numberFields) {
+    const value = getNumber(fields, field);
+    if (value !== undefined) data[field] = value;
+  }
+
+  // Check for null limit
+  const limitField = fields.get('limit');
+  if (limitField && limitField.type === 'null') {
+    data.limit = null;
+  }
+
+  // Extract holdings array
+  const holdingsField = fields.get('holdings');
+  if (holdingsField && holdingsField.type === 'array') {
+    const holdings: Record<string, unknown>[] = [];
+    for (const item of holdingsField.value) {
+      if (item.type === 'map') {
+        holdings.push(toPlainObject(item.value));
+      }
+    }
+    if (holdings.length > 0) {
+      data.holdings = holdings;
+    }
+  }
+
+  const validated = PlaidAccountSchema.safeParse(data);
+  return validated.success ? validated.data : null;
+}
+
+/**
  * Batch decode all collections from LevelDB database in a single pass.
  *
  * This is significantly faster than calling individual decode functions
@@ -1401,6 +1466,7 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
   const rawUserAccounts: UserAccountCustomization[] = [];
   const rawInvestmentPerformance: InvestmentPerformance[] = [];
   const rawTwrHoldings: TwrHolding[] = [];
+  const rawPlaidAccounts: PlaidAccount[] = [];
 
   // Single pass through the database
   for await (const doc of iterateDocuments(dbPath)) {
@@ -1411,6 +1477,16 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     if (collection.includes('users/') && collection.endsWith('/accounts')) {
       const userAccount = processUserAccount(fields, documentId, collection);
       if (userAccount) rawUserAccounts.push(userAccount);
+    } else if (
+      collection.includes('items/') &&
+      collection.includes('/accounts/') &&
+      !collection.endsWith('/accounts') &&
+      !collection.endsWith('/balance_history') &&
+      !collection.endsWith('/transactions') &&
+      !collection.includes('/holdings_history')
+    ) {
+      const plaidAccount = processPlaidAccount(fields, documentId, collection);
+      if (plaidAccount) rawPlaidAccounts.push(plaidAccount);
     } else if (collectionMatches(collection, 'transactions')) {
       const txn = processTransaction(fields, documentId);
       if (txn) rawTransactions.push(txn);
@@ -1628,6 +1704,16 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     }
   }
 
+  // Plaid accounts: dedupe by plaid_account_id
+  const plaidAccSeen = new Set<string>();
+  const plaidAccounts: PlaidAccount[] = [];
+  for (const acc of rawPlaidAccounts) {
+    if (!plaidAccSeen.has(acc.plaid_account_id)) {
+      plaidAccSeen.add(acc.plaid_account_id);
+      plaidAccounts.push(acc);
+    }
+  }
+
   return {
     transactions,
     accounts,
@@ -1642,6 +1728,7 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     userAccounts,
     investmentPerformance,
     twrHoldings,
+    plaidAccounts,
   };
 }
 
