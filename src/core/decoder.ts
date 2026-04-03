@@ -49,6 +49,12 @@ import {
 import { Security, SecuritySchema } from '../models/security.js';
 import { UserProfile, UserProfileSchema } from '../models/user-profile.js';
 import { Tag, TagSchema } from '../models/tag.js';
+import {
+  AmazonIntegration,
+  AmazonIntegrationSchema,
+  AmazonOrder,
+  AmazonOrderSchema,
+} from '../models/amazon.js';
 
 /**
  * Extract a primitive value from a FirestoreValue.
@@ -704,6 +710,8 @@ export interface AllCollectionsResult {
   securities: Security[];
   userProfiles: UserProfile[];
   tags: Tag[];
+  amazonIntegrations: AmazonIntegration[];
+  amazonOrders: AmazonOrder[];
 }
 
 /**
@@ -1782,6 +1790,74 @@ function processUserProfile(
 }
 
 /**
+ * Internal helper to process an Amazon integration document.
+ */
+function processAmazonIntegration(
+  fields: Map<string, FirestoreValue>,
+  docId: string
+): AmazonIntegration | null {
+  const data: Record<string, unknown> = { amazon_id: docId };
+
+  // Extract any fields generically
+  for (const [key, value] of fields.entries()) {
+    const extracted = extractValue(value);
+    if (extracted !== undefined) data[key] = extracted;
+  }
+
+  const validated = AmazonIntegrationSchema.safeParse(data);
+  return validated.success ? validated.data : null;
+}
+
+/**
+ * Internal helper to process an Amazon order document.
+ */
+function processAmazonOrder(
+  fields: Map<string, FirestoreValue>,
+  docId: string,
+  collection: string
+): AmazonOrder | null {
+  const data: Record<string, unknown> = { order_id: docId };
+
+  // Extract amazon_user_id from collection path: amazon/{user_id}/orders
+  const parts = collection.split('/');
+  const amazonIdx = parts.indexOf('amazon');
+  if (amazonIdx >= 0 && amazonIdx + 1 < parts.length) {
+    data.amazon_user_id = parts[amazonIdx + 1];
+  }
+
+  // String fields
+  for (const field of ['date', 'account_id', 'match_state']) {
+    const value = getString(fields, field) ?? getDateString(fields, field);
+    if (value !== undefined) data[field] = value;
+  }
+
+  // Items array
+  const itemsValue = fields.get('items');
+  if (itemsValue?.type === 'array') {
+    data.items = itemsValue.value.map((v) => extractValue(v));
+  }
+
+  // Details map
+  const detailsMap = getMap(fields, 'details');
+  if (detailsMap) {
+    data.details = toPlainObject(detailsMap);
+  }
+
+  // Payment map
+  const paymentMap = getMap(fields, 'payment');
+  if (paymentMap) {
+    data.payment = toPlainObject(paymentMap);
+  }
+
+  // Transactions string array
+  const transactions = getStringArray(fields, 'transactions');
+  if (transactions) data.transactions = transactions;
+
+  const validated = AmazonOrderSchema.safeParse(data);
+  return validated.success ? validated.data : null;
+}
+
+/**
  * Helper to check if a collection path matches a target collection name.
  * Handles both simple names ("transactions") and full paths ("users/{user_id}/transactions").
  */
@@ -1822,6 +1898,8 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
   const rawSecurities: Security[] = [];
   const rawUserProfiles: UserProfile[] = [];
   const rawTags: Tag[] = [];
+  const rawAmazonIntegrations: AmazonIntegration[] = [];
+  const rawAmazonOrders: AmazonOrder[] = [];
 
   // Single pass through the database
   for await (const doc of iterateDocuments(dbPath)) {
@@ -1917,6 +1995,12 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
       // Match both top-level users and users/{user_id} parent-pointer sentinel docs.
       const profile = processUserProfile(fields, documentId);
       if (profile) rawUserProfiles.push(profile);
+    } else if (collectionMatches(collection, 'orders') && collection.includes('amazon/')) {
+      const order = processAmazonOrder(fields, documentId, collection);
+      if (order) rawAmazonOrders.push(order);
+    } else if (collection === 'amazon' || /^amazon\/[^/]+$/.test(collection)) {
+      const ai = processAmazonIntegration(fields, documentId);
+      if (ai) rawAmazonIntegrations.push(ai);
     }
   }
 
@@ -2200,6 +2284,26 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     }
   }
 
+  // Amazon integrations: dedupe by amazon_id
+  const amzIntSeen = new Set<string>();
+  const amazonIntegrations: AmazonIntegration[] = [];
+  for (const ai of rawAmazonIntegrations) {
+    if (!amzIntSeen.has(ai.amazon_id)) {
+      amzIntSeen.add(ai.amazon_id);
+      amazonIntegrations.push(ai);
+    }
+  }
+
+  // Amazon orders: dedupe by order_id
+  const amzOrdSeen = new Set<string>();
+  const amazonOrders: AmazonOrder[] = [];
+  for (const order of rawAmazonOrders) {
+    if (!amzOrdSeen.has(order.order_id)) {
+      amzOrdSeen.add(order.order_id);
+      amazonOrders.push(order);
+    }
+  }
+
   return {
     transactions,
     accounts,
@@ -2224,6 +2328,8 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     securities,
     userProfiles,
     tags,
+    amazonIntegrations,
+    amazonOrders,
   };
 }
 
