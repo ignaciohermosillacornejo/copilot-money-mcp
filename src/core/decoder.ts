@@ -1449,22 +1449,28 @@ function processBalanceHistory(
   const data: Record<string, unknown> = {};
 
   // Extract item_id and account_id from path: items/{item_id}/accounts/{account_id}/balance_history
+  // Extract item_id and account_id from path — return null if path can't be parsed
   const parts = collection.split('/');
   const itemsIdx = parts.indexOf('items');
-  let itemId = 'unknown';
-  if (itemsIdx >= 0 && itemsIdx + 1 < parts.length) {
-    itemId = parts[itemsIdx + 1] ?? 'unknown';
-    data.item_id = itemId;
-  }
   const accountsIdx = parts.indexOf('accounts');
-  let accountId = 'unknown';
-  if (accountsIdx >= 0 && accountsIdx + 1 < parts.length) {
-    accountId = parts[accountsIdx + 1] ?? 'unknown';
-    data.account_id = accountId;
+  if (
+    itemsIdx < 0 ||
+    itemsIdx + 1 >= parts.length ||
+    accountsIdx < 0 ||
+    accountsIdx + 1 >= parts.length
+  ) {
+    return null;
   }
+  const itemId = parts[itemsIdx + 1]!;
+  const accountId = parts[accountsIdx + 1]!;
+  data.item_id = itemId;
+  data.account_id = accountId;
+
+  // Validate date format from doc ID
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(docId)) return null;
 
   data.balance_id = `${itemId}:${accountId}:${docId}`;
-  data.date = docId; // doc ID is the date (YYYY-MM-DD)
+  data.date = docId;
 
   const numericFields = ['current_balance', 'available_balance', 'limit'];
   for (const field of numericFields) {
@@ -1472,8 +1478,22 @@ function processBalanceHistory(
     if (value !== undefined) data[field] = value;
   }
 
+  // Handle null limit (credit cards may have explicit null)
+  const limitField = fields.get('limit');
+  if (limitField && limitField.type === 'null') {
+    data.limit = null;
+  }
+
   const validated = BalanceHistorySchema.safeParse(data);
   return validated.success ? validated.data : null;
+}
+
+/**
+ * Helper to check if a collection path matches a target collection name.
+ * Handles both simple names ("transactions") and full paths ("users/{user_id}/transactions").
+ */
+export function collectionMatches(collection: string, target: string): boolean {
+  return collection === target || collection.endsWith(`/${target}`);
 }
 
 /**
@@ -1485,14 +1505,6 @@ function processBalanceHistory(
  * @param dbPath - Path to the LevelDB database
  * @returns All collections decoded and deduplicated
  */
-/**
- * Helper to check if a collection path matches a target collection name.
- * Handles both simple names ("transactions") and full paths ("users/{user_id}/transactions").
- */
-export function collectionMatches(collection: string, target: string): boolean {
-  return collection === target || collection.endsWith(`/${target}`);
-}
-
 export async function decodeAllCollections(dbPath: string): Promise<AllCollectionsResult> {
   const rawTransactions: Transaction[] = [];
   const rawAccounts: Account[] = [];
@@ -1523,6 +1535,9 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
       const bh = processBalanceHistory(fields, documentId, collection);
       if (bh) rawBalanceHistory.push(bh);
     } else if (
+      // Plaid account docs: items/{id}/accounts/{account_id}
+      // Exclude known subcollections — update this list when adding new ones:
+      //   /balance_history, /transactions, /holdings_history
       collection.includes('items/') &&
       collection.includes('/accounts/') &&
       !collection.endsWith('/accounts') &&
