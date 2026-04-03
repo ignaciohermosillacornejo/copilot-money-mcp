@@ -18,7 +18,8 @@ export const SubscriptionSchema = z
     user_id: z.string().optional(),
     will_auto_renew: z.boolean().optional(),
     is_eligible_for_initial_offer: z.boolean().optional(),
-    expires_date_ms: z.string().optional(),
+    // App Store sends this as a string-encoded Unix ms timestamp, but accept number too
+    expires_date_ms: z.union([z.string(), z.number()]).optional(),
     created_timestamp: z.string().optional(),
     original_transaction_id: z.string().optional(),
   })
