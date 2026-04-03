@@ -111,6 +111,7 @@ function isDecoded(rawCollection: string): boolean {
   if (collectionMatches(rawCollection, 'investment_splits')) return true;
   if (collectionMatches(rawCollection, 'items') || /^items\/[^/]+$/.test(rawCollection))
     return true;
+  if (collectionMatches(rawCollection, 'tags')) return true;
   if (collectionMatches(rawCollection, 'categories')) return true;
   if (rawCollection.endsWith('/t') && rawCollection.includes('changes/')) return true;
   if (rawCollection.endsWith('/a') && rawCollection.includes('changes/')) return true;

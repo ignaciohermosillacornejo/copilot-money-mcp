@@ -48,6 +48,7 @@ import {
 } from '../models/change.js';
 import { Security, SecuritySchema } from '../models/security.js';
 import { UserProfile, UserProfileSchema } from '../models/user-profile.js';
+import { Tag, TagSchema } from '../models/tag.js';
 
 /**
  * Extract a primitive value from a FirestoreValue.
@@ -702,6 +703,7 @@ export interface AllCollectionsResult {
   accountChanges: AccountChange[];
   securities: Security[];
   userProfiles: UserProfile[];
+  tags: Tag[];
 }
 
 /**
@@ -1462,6 +1464,25 @@ function processPlaidAccount(
 }
 
 /**
+ * Internal helper to process a tag document.
+ * Path: users/{user_id}/tags/{tag_id}
+ */
+function processTag(fields: Map<string, FirestoreValue>, docId: string): Tag | null {
+  const data: Record<string, unknown> = {
+    tag_id: docId,
+  };
+
+  const stringFields = ['name', 'color_name', 'hex_color'];
+  for (const field of stringFields) {
+    const value = getString(fields, field);
+    if (value !== undefined) data[field] = value;
+  }
+
+  const validated = TagSchema.safeParse(data);
+  return validated.success ? validated.data : null;
+}
+
+/**
  * Internal helper to process a balance history document.
  * Path: items/{item_id}/accounts/{account_id}/balance_history/{date}
  */
@@ -1800,6 +1821,7 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
   const rawAccountChanges: AccountChange[] = [];
   const rawSecurities: Security[] = [];
   const rawUserProfiles: UserProfile[] = [];
+  const rawTags: Tag[] = [];
 
   // Single pass through the database
   for await (const doc of iterateDocuments(dbPath)) {
@@ -1873,6 +1895,9 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
       // Parent-pointer docs (items/{item_id}) have empty fields and processItem returns null.
       const item = processItem(fields, documentId);
       if (item) rawItems.push(item);
+    } else if (collectionMatches(collection, 'tags')) {
+      const tag = processTag(fields, documentId);
+      if (tag) rawTags.push(tag);
     } else if (collectionMatches(collection, 'categories')) {
       const category = processCategory(fields, documentId);
       if (category) rawCategories.push(category);
@@ -2165,6 +2190,16 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     }
   }
 
+  // Tags: dedupe by tag_id
+  const tagSeen = new Set<string>();
+  const tags: Tag[] = [];
+  for (const tag of rawTags) {
+    if (!tagSeen.has(tag.tag_id)) {
+      tagSeen.add(tag.tag_id);
+      tags.push(tag);
+    }
+  }
+
   return {
     transactions,
     accounts,
@@ -2188,6 +2223,7 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     accountChanges,
     securities,
     userProfiles,
+    tags,
   };
 }
 

@@ -108,6 +108,8 @@ export { SecuritySchema, type Security } from './security.js';
 
 export { UserProfileSchema, type UserProfile } from './user-profile.js';
 
+export { TagSchema, type Tag, getTagDisplayName } from './tag.js';
+
 export {
   HoldingsHistoryMetaSchema,
   type HoldingsHistoryMeta,
