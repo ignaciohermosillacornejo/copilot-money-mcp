@@ -79,6 +79,16 @@ function normalizeCollectionPath(collection: string): string {
 function isDecoded(rawCollection: string): boolean {
   // Mirror the exact if/else order from decodeAllCollections:
   if (rawCollection.includes('users/') && rawCollection.endsWith('/accounts')) return true;
+  if (rawCollection.endsWith('/balance_history')) return true;
+  if (
+    rawCollection.includes('items/') &&
+    rawCollection.includes('/accounts/') &&
+    !rawCollection.endsWith('/accounts') &&
+    !rawCollection.endsWith('/balance_history') &&
+    !rawCollection.endsWith('/transactions') &&
+    !rawCollection.includes('/holdings_history')
+  )
+    return true;
   if (collectionMatches(rawCollection, 'transactions')) return true;
   if (collectionMatches(rawCollection, 'accounts')) return true;
   if (collectionMatches(rawCollection, 'recurring')) return true;
@@ -97,7 +107,8 @@ function isDecoded(rawCollection: string): boolean {
   )
     return true;
   if (collectionMatches(rawCollection, 'investment_splits')) return true;
-  if (collectionMatches(rawCollection, 'items')) return true;
+  if (collectionMatches(rawCollection, 'items') || /^items\/[^/]+$/.test(rawCollection))
+    return true;
   if (collectionMatches(rawCollection, 'categories')) return true;
 
   return false;

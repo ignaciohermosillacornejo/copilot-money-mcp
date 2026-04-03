@@ -29,6 +29,8 @@ import {
   TwrHolding,
   TwrHoldingSchema,
 } from '../models/investment-performance.js';
+import { PlaidAccount, PlaidAccountSchema } from '../models/plaid-account.js';
+import { BalanceHistory, BalanceHistorySchema } from '../models/balance-history.js';
 
 /**
  * Extract a primitive value from a FirestoreValue.
@@ -674,6 +676,8 @@ export interface AllCollectionsResult {
   userAccounts: UserAccountCustomization[];
   investmentPerformance: InvestmentPerformance[];
   twrHoldings: TwrHolding[];
+  plaidAccounts: PlaidAccount[];
+  balanceHistory: BalanceHistory[];
 }
 
 /**
@@ -1371,14 +1375,119 @@ function processTwrHolding(
 }
 
 /**
- * Batch decode all collections from LevelDB database in a single pass.
- *
- * This is significantly faster than calling individual decode functions
- * because it only iterates through the database once instead of once per collection.
- *
- * @param dbPath - Path to the LevelDB database
- * @returns All collections decoded and deduplicated
+ * Internal helper to process a plaid account document (items/{id}/accounts/{id}).
  */
+function processPlaidAccount(
+  fields: Map<string, FirestoreValue>,
+  docId: string,
+  collection: string
+): PlaidAccount | null {
+  const data: Record<string, unknown> = {
+    plaid_account_id: docId,
+  };
+
+  // Extract item_id from collection path: items/{item_id}/accounts/{doc_id}
+  const parts = collection.split('/');
+  const itemsIdx = parts.indexOf('items');
+  if (itemsIdx >= 0 && itemsIdx + 1 < parts.length) {
+    data.item_id = parts[itemsIdx + 1];
+  }
+
+  const stringFields = [
+    'account_id',
+    'name',
+    'official_name',
+    'mask',
+    'account_type',
+    'subtype',
+    'iso_currency_code',
+  ];
+  for (const field of stringFields) {
+    const value = getString(fields, field);
+    if (value !== undefined) data[field] = value;
+  }
+
+  const numberFields = ['current_balance', 'available_balance', 'limit'];
+  for (const field of numberFields) {
+    const value = getNumber(fields, field);
+    if (value !== undefined) data[field] = value;
+  }
+
+  // Check for null limit
+  const limitField = fields.get('limit');
+  if (limitField && limitField.type === 'null') {
+    data.limit = null;
+  }
+
+  // Extract holdings array
+  const holdingsField = fields.get('holdings');
+  if (holdingsField && holdingsField.type === 'array') {
+    const holdings: Record<string, unknown>[] = [];
+    for (const item of holdingsField.value) {
+      if (item.type === 'map') {
+        holdings.push(toPlainObject(item.value));
+      }
+    }
+    if (holdings.length > 0) {
+      data.holdings = holdings;
+    }
+  }
+
+  const validated = PlaidAccountSchema.safeParse(data);
+  return validated.success ? validated.data : null;
+}
+
+/**
+ * Internal helper to process a balance history document.
+ * Path: items/{item_id}/accounts/{account_id}/balance_history/{date}
+ */
+function processBalanceHistory(
+  fields: Map<string, FirestoreValue>,
+  docId: string,
+  collection: string
+): BalanceHistory | null {
+  const data: Record<string, unknown> = {};
+
+  // Extract item_id and account_id from path: items/{item_id}/accounts/{account_id}/balance_history
+  // Extract item_id and account_id from path — return null if path can't be parsed
+  const parts = collection.split('/');
+  const itemsIdx = parts.indexOf('items');
+  const accountsIdx = parts.indexOf('accounts');
+  if (
+    itemsIdx < 0 ||
+    itemsIdx + 1 >= parts.length ||
+    accountsIdx < 0 ||
+    accountsIdx + 1 >= parts.length
+  ) {
+    return null;
+  }
+  const itemId = parts[itemsIdx + 1]!;
+  const accountId = parts[accountsIdx + 1]!;
+  data.item_id = itemId;
+  data.account_id = accountId;
+
+  // Validate date format from doc ID
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(docId)) return null;
+
+  data.balance_id = `${itemId}:${accountId}:${docId}`;
+  data.date = docId;
+
+  const numericFields = ['current_balance', 'available_balance', 'limit'];
+  for (const field of numericFields) {
+    const value = getNumber(fields, field);
+    if (value !== undefined) data[field] = value;
+  }
+
+  // Handle null limit (credit cards may have explicit null)
+  const limitField = fields.get('limit');
+  if (limitField && limitField.type === 'null') {
+    data.limit = null;
+  }
+
+  const validated = BalanceHistorySchema.safeParse(data);
+  return validated.success ? validated.data : null;
+}
+
 /**
  * Helper to check if a collection path matches a target collection name.
  * Handles both simple names ("transactions") and full paths ("users/{user_id}/transactions").
@@ -1387,6 +1496,15 @@ export function collectionMatches(collection: string, target: string): boolean {
   return collection === target || collection.endsWith(`/${target}`);
 }
 
+/**
+ * Batch decode all collections from LevelDB database in a single pass.
+ *
+ * This is significantly faster than calling individual decode functions
+ * because it only iterates through the database once instead of once per collection.
+ *
+ * @param dbPath - Path to the LevelDB database
+ * @returns All collections decoded and deduplicated
+ */
 export async function decodeAllCollections(dbPath: string): Promise<AllCollectionsResult> {
   const rawTransactions: Transaction[] = [];
   const rawAccounts: Account[] = [];
@@ -1401,6 +1519,8 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
   const rawUserAccounts: UserAccountCustomization[] = [];
   const rawInvestmentPerformance: InvestmentPerformance[] = [];
   const rawTwrHoldings: TwrHolding[] = [];
+  const rawPlaidAccounts: PlaidAccount[] = [];
+  const rawBalanceHistory: BalanceHistory[] = [];
 
   // Single pass through the database
   for await (const doc of iterateDocuments(dbPath)) {
@@ -1411,6 +1531,22 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     if (collection.includes('users/') && collection.endsWith('/accounts')) {
       const userAccount = processUserAccount(fields, documentId, collection);
       if (userAccount) rawUserAccounts.push(userAccount);
+    } else if (collection.endsWith('/balance_history')) {
+      const bh = processBalanceHistory(fields, documentId, collection);
+      if (bh) rawBalanceHistory.push(bh);
+    } else if (
+      // Plaid account docs: items/{id}/accounts/{account_id}
+      // Exclude known subcollections — update this list when adding new ones:
+      //   /balance_history, /transactions, /holdings_history
+      collection.includes('items/') &&
+      collection.includes('/accounts/') &&
+      !collection.endsWith('/accounts') &&
+      !collection.endsWith('/balance_history') &&
+      !collection.endsWith('/transactions') &&
+      !collection.includes('/holdings_history')
+    ) {
+      const plaidAccount = processPlaidAccount(fields, documentId, collection);
+      if (plaidAccount) rawPlaidAccounts.push(plaidAccount);
     } else if (collectionMatches(collection, 'transactions')) {
       const txn = processTransaction(fields, documentId);
       if (txn) rawTransactions.push(txn);
@@ -1447,7 +1583,9 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     } else if (collectionMatches(collection, 'investment_splits')) {
       const split = processInvestmentSplit(fields, documentId);
       if (split) rawInvestmentSplits.push(split);
-    } else if (collectionMatches(collection, 'items')) {
+    } else if (collectionMatches(collection, 'items') || /^items\/[^/]+$/.test(collection)) {
+      // Match both top-level items and items/{item_id} parent-pointer docs.
+      // Parent-pointer docs (items/{item_id}) have empty fields and processItem returns null.
       const item = processItem(fields, documentId);
       if (item) rawItems.push(item);
     } else if (collectionMatches(collection, 'categories')) {
@@ -1628,6 +1766,36 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     }
   }
 
+  // Plaid accounts: dedupe by plaid_account_id
+  const plaidAccSeen = new Set<string>();
+  const plaidAccounts: PlaidAccount[] = [];
+  for (const acc of rawPlaidAccounts) {
+    if (!plaidAccSeen.has(acc.plaid_account_id)) {
+      plaidAccSeen.add(acc.plaid_account_id);
+      plaidAccounts.push(acc);
+    }
+  }
+
+  // Balance history: dedupe by balance_id, sort by account then date desc
+  const bhSeen = new Set<string>();
+  const balanceHistory: BalanceHistory[] = [];
+  for (const bh of rawBalanceHistory) {
+    if (!bhSeen.has(bh.balance_id)) {
+      bhSeen.add(bh.balance_id);
+      balanceHistory.push(bh);
+    }
+  }
+  balanceHistory.sort((a, b) => {
+    const accA = a.account_id ?? '';
+    const accB = b.account_id ?? '';
+    if (accA !== accB) {
+      return accA.localeCompare(accB);
+    }
+    const dateA = a.date ?? '';
+    const dateB = b.date ?? '';
+    return dateB.localeCompare(dateA);
+  });
+
   return {
     transactions,
     accounts,
@@ -1642,6 +1810,8 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     userAccounts,
     investmentPerformance,
     twrHoldings,
+    plaidAccounts,
+    balanceHistory,
   };
 }
 
