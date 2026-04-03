@@ -5,13 +5,14 @@
  * Iterates every document in the database, groups by collection path pattern,
  * and reports decoded vs undecoded counts.
  *
- * Usage: bun run scripts/decode-coverage.ts
+ * Usage: bun run scripts/decode-coverage.ts [--db-path=/path/to/db]
  */
 
 import { existsSync, readdirSync, statSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { iterateDocuments } from '../src/core/leveldb-reader.js';
+import { collectionMatches } from '../src/core/decoder.js';
 
 function findRealDatabase(): string | undefined {
   const home = homedir();
@@ -38,6 +39,10 @@ function findRealDatabase(): string | undefined {
   return undefined;
 }
 
+/**
+ * Get database size in MB.
+ * LevelDB keeps all .ldb/.sst files flat in the directory — no subdirectory traversal needed.
+ */
 function getDatabaseSizeMB(dbPath: string): number {
   let totalSize = 0;
   const files = readdirSync(dbPath);
@@ -66,34 +71,51 @@ function normalizeCollectionPath(collection: string): string {
 
 /**
  * Check if a raw collection path is decoded by matching against decodeAllCollections logic.
- * Mirrors the if/else chain in decoder.ts exactly: uses collectionMatches(collection, target)
- * which checks (collection === target || collection.endsWith('/' + target)).
+ * Uses the exported collectionMatches helper from decoder.ts to stay in sync.
+ *
+ * IMPORTANT: Keep this in sync with the if/else chain in decoder.ts decodeAllCollections().
+ * When adding new collection decoders, add the corresponding check here.
  */
 function isDecoded(rawCollection: string): boolean {
-  function matches(target: string): boolean {
-    return rawCollection === target || rawCollection.endsWith(`/${target}`);
-  }
-
   // Mirror the exact if/else order from decodeAllCollections:
   if (rawCollection.includes('users/') && rawCollection.endsWith('/accounts')) return true;
-  if (matches('transactions')) return true;
-  if (matches('accounts')) return true;
-  if (matches('recurring')) return true;
-  if (matches('budgets')) return true;
-  if (matches('financial_goals')) return true;
+  if (collectionMatches(rawCollection, 'transactions')) return true;
+  if (collectionMatches(rawCollection, 'accounts')) return true;
+  if (collectionMatches(rawCollection, 'recurring')) return true;
+  if (collectionMatches(rawCollection, 'budgets')) return true;
+  if (collectionMatches(rawCollection, 'financial_goals')) return true;
   if (rawCollection.endsWith('/financial_goal_history')) return true;
-  if (matches('investment_prices') || rawCollection.includes('investment_prices/')) return true;
-  if (matches('investment_splits')) return true;
-  if (matches('items')) return true;
-  if (matches('categories')) return true;
+  if (
+    collectionMatches(rawCollection, 'investment_prices') ||
+    rawCollection.includes('investment_prices/')
+  )
+    return true;
+  if (rawCollection.endsWith('/twr_holding')) return true;
+  if (
+    collectionMatches(rawCollection, 'investment_performance') ||
+    rawCollection.includes('investment_performance/')
+  )
+    return true;
+  if (collectionMatches(rawCollection, 'investment_splits')) return true;
+  if (collectionMatches(rawCollection, 'items')) return true;
+  if (collectionMatches(rawCollection, 'categories')) return true;
 
   return false;
 }
 
+function parseDbPath(): string | undefined {
+  for (const arg of process.argv.slice(2)) {
+    if (arg.startsWith('--db-path=')) {
+      return arg.split('=')[1];
+    }
+  }
+  return undefined;
+}
+
 async function main() {
-  const dbPath = findRealDatabase();
+  const dbPath = parseDbPath() ?? findRealDatabase();
   if (!dbPath) {
-    console.error('Could not find Copilot Money database');
+    console.error('Could not find Copilot Money database. Use --db-path=/path/to/db');
     process.exit(1);
   }
 
@@ -136,27 +158,37 @@ async function main() {
   const decodedCollections = [...decodedByPattern.entries()].sort((a, b) => b[1] - a[1]);
   const undecodedCollections = [...undecodedByPattern.entries()].sort((a, b) => b[1] - a[1]);
 
-  const pct = ((decodedDocs / totalDocs) * 100).toFixed(1);
+  const pct = totalDocs > 0 ? ((decodedDocs / totalDocs) * 100).toFixed(1) : '0.0';
 
   // Report
   console.log('='.repeat(70));
-  console.log(`DECODE COVERAGE: ${decodedDocs.toLocaleString()} / ${totalDocs.toLocaleString()} documents (${pct}%)`);
+  console.log(
+    `DECODE COVERAGE: ${decodedDocs.toLocaleString()} / ${totalDocs.toLocaleString()} documents (${pct}%)`
+  );
   console.log('='.repeat(70));
 
-  console.log(`\nDECODED (${decodedCollections.length} collection patterns, ${decodedDocs.toLocaleString()} docs):`);
+  console.log(
+    `\nDECODED (${decodedCollections.length} collection patterns, ${decodedDocs.toLocaleString()} docs):`
+  );
   for (const [pattern, count] of decodedCollections) {
     console.log(`  ${count.toString().padStart(8)}  ${pattern}`);
   }
 
-  console.log(`\nNOT DECODED (${undecodedCollections.length} collection patterns, ${undecodedDocs.toLocaleString()} docs):`);
+  console.log(
+    `\nNOT DECODED (${undecodedCollections.length} collection patterns, ${undecodedDocs.toLocaleString()} docs):`
+  );
   for (const [pattern, count] of undecodedCollections) {
     console.log(`  ${count.toString().padStart(8)}  ${pattern}`);
   }
 
   const totalPatterns = decodedCollections.length + undecodedCollections.length;
   console.log(`\n${'='.repeat(70)}`);
-  console.log(`Collections: ${totalPatterns} total | ${decodedCollections.length} decoded | ${undecodedCollections.length} remaining`);
-  console.log(`Documents:   ${totalDocs.toLocaleString()} total | ${decodedDocs.toLocaleString()} decoded (${pct}%) | ${undecodedDocs.toLocaleString()} remaining`);
+  console.log(
+    `Collections: ${totalPatterns} total | ${decodedCollections.length} decoded | ${undecodedCollections.length} remaining`
+  );
+  console.log(
+    `Documents:   ${totalDocs.toLocaleString()} total | ${decodedDocs.toLocaleString()} decoded (${pct}%) | ${undecodedDocs.toLocaleString()} remaining`
+  );
 }
 
 main().catch(console.error);

@@ -94,6 +94,13 @@ export {
 } from './item.js';
 
 export {
+  InvestmentPerformanceSchema,
+  type InvestmentPerformance,
+  TwrHoldingSchema,
+  type TwrHolding,
+} from './investment-performance.js';
+
+export {
   type CategoryNode,
   getCategory,
   getCategoryPath,

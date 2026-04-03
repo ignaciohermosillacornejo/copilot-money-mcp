@@ -23,6 +23,12 @@ import { InvestmentPrice, InvestmentPriceSchema } from '../models/investment-pri
 import { InvestmentSplit, InvestmentSplitSchema } from '../models/investment-split.js';
 import { Item, ItemSchema } from '../models/item.js';
 import { Category, CategorySchema } from '../models/category.js';
+import {
+  InvestmentPerformance,
+  InvestmentPerformanceSchema,
+  TwrHolding,
+  TwrHoldingSchema,
+} from '../models/investment-performance.js';
 
 /**
  * Extract a primitive value from a FirestoreValue.
@@ -666,6 +672,8 @@ export interface AllCollectionsResult {
   items: Item[];
   categories: Category[];
   userAccounts: UserAccountCustomization[];
+  investmentPerformance: InvestmentPerformance[];
+  twrHoldings: TwrHolding[];
 }
 
 /**
@@ -1278,6 +1286,91 @@ function processUserAccount(
 }
 
 /**
+ * Internal helper to process an investment performance document.
+ */
+function processInvestmentPerformance(
+  fields: Map<string, FirestoreValue>,
+  docId: string
+): InvestmentPerformance | null {
+  const data: Record<string, unknown> = {
+    performance_id: docId,
+  };
+
+  // String fields — check both snake_case and camelCase variants
+  const securityId = getString(fields, 'security_id') ?? getString(fields, 'securityId');
+  if (securityId) data.security_id = securityId;
+
+  const type = getString(fields, 'type');
+  if (type) data.type = type;
+
+  const userId = getString(fields, 'user_id') ?? getString(fields, 'userId');
+  if (userId) data.user_id = userId;
+
+  const lastUpdate = getString(fields, 'last_update') ?? getString(fields, 'lastUpdate');
+  if (lastUpdate) data.last_update = lastUpdate;
+
+  // Number fields
+  const position = getNumber(fields, 'position');
+  if (position !== undefined) data.position = position;
+
+  // String array fields
+  const access = getStringArray(fields, 'access');
+  if (access) data.access = access;
+
+  const validated = InvestmentPerformanceSchema.safeParse(data);
+  return validated.success ? validated.data : null;
+}
+
+/**
+ * Internal helper to process a TWR holding document.
+ */
+function processTwrHolding(
+  fields: Map<string, FirestoreValue>,
+  docId: string,
+  key: string
+): TwrHolding | null {
+  // Extract security hash from the key path: investment_performance/{hash}/twr_holding
+  let securityHash = 'unknown';
+  const segments = key.split('/');
+  for (let i = 0; i < segments.length; i++) {
+    if (segments[i] === 'investment_performance' && i + 1 < segments.length) {
+      securityHash = segments[i + 1]!;
+      break;
+    }
+  }
+
+  const data: Record<string, unknown> = {
+    twr_id: `${securityHash}:${docId}`,
+  };
+
+  const securityId = getString(fields, 'security_id') ?? getString(fields, 'securityId');
+  if (securityId) data.security_id = securityId;
+
+  // The document ID is the month (YYYY-MM format)
+  if (/^\d{4}-\d{2}$/.test(docId)) {
+    data.month = docId;
+  }
+
+  // Extract history map: epoch-ms keys → { value: number }
+  const historyMap = getMap(fields, 'history');
+  if (historyMap) {
+    const history: Record<string, { value: number }> = {};
+    for (const [epochKey, val] of historyMap) {
+      if (val.type === 'map') {
+        const valueField = val.value.get('value');
+        if (valueField && (valueField.type === 'double' || valueField.type === 'integer')) {
+          history[epochKey] = { value: valueField.value };
+        }
+      }
+    }
+    if (Object.keys(history).length > 0) data.history = history;
+  }
+
+  const validated = TwrHoldingSchema.safeParse(data);
+  return validated.success ? validated.data : null;
+}
+
+/**
  * Batch decode all collections from LevelDB database in a single pass.
  *
  * This is significantly faster than calling individual decode functions
@@ -1290,7 +1383,7 @@ function processUserAccount(
  * Helper to check if a collection path matches a target collection name.
  * Handles both simple names ("transactions") and full paths ("users/{user_id}/transactions").
  */
-function collectionMatches(collection: string, target: string): boolean {
+export function collectionMatches(collection: string, target: string): boolean {
   return collection === target || collection.endsWith(`/${target}`);
 }
 
@@ -1306,6 +1399,8 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
   const rawItems: Item[] = [];
   const rawCategories: Category[] = [];
   const rawUserAccounts: UserAccountCustomization[] = [];
+  const rawInvestmentPerformance: InvestmentPerformance[] = [];
+  const rawTwrHoldings: TwrHolding[] = [];
 
   // Single pass through the database
   for await (const doc of iterateDocuments(dbPath)) {
@@ -1340,6 +1435,15 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     ) {
       const price = processInvestmentPrice(fields, documentId, key);
       if (price) rawInvestmentPrices.push(price);
+    } else if (collection.endsWith('/twr_holding')) {
+      const twr = processTwrHolding(fields, documentId, key);
+      if (twr) rawTwrHoldings.push(twr);
+    } else if (
+      collectionMatches(collection, 'investment_performance') ||
+      collection.includes('investment_performance/')
+    ) {
+      const perf = processInvestmentPerformance(fields, documentId);
+      if (perf) rawInvestmentPerformance.push(perf);
     } else if (collectionMatches(collection, 'investment_splits')) {
       const split = processInvestmentSplit(fields, documentId);
       if (split) rawInvestmentSplits.push(split);
@@ -1504,6 +1608,26 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     }
   }
 
+  // Investment performance: dedupe by performance_id
+  const perfSeen = new Set<string>();
+  const investmentPerformance: InvestmentPerformance[] = [];
+  for (const perf of rawInvestmentPerformance) {
+    if (!perfSeen.has(perf.performance_id)) {
+      perfSeen.add(perf.performance_id);
+      investmentPerformance.push(perf);
+    }
+  }
+
+  // TWR holdings: dedupe by twr_id
+  const twrSeen = new Set<string>();
+  const twrHoldings: TwrHolding[] = [];
+  for (const twr of rawTwrHoldings) {
+    if (!twrSeen.has(twr.twr_id)) {
+      twrSeen.add(twr.twr_id);
+      twrHoldings.push(twr);
+    }
+  }
+
   return {
     transactions,
     accounts,
@@ -1516,6 +1640,8 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     items,
     categories,
     userAccounts,
+    investmentPerformance,
+    twrHoldings,
   };
 }
 
