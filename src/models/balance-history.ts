@@ -10,9 +10,9 @@ import { z } from 'zod';
 export const BalanceHistorySchema = z
   .object({
     balance_id: z.string(), // constructed: {item_id}:{account_id}:{date}
-    date: z.string().optional(),
-    item_id: z.string().optional(),
-    account_id: z.string().optional(),
+    date: z.string(),
+    item_id: z.string(),
+    account_id: z.string(),
     current_balance: z.number().optional(),
     available_balance: z.number().optional(),
     limit: z.number().nullable().optional(),

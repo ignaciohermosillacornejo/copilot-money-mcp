@@ -6,13 +6,19 @@ import { describe, test, expect } from 'bun:test';
 import { BalanceHistorySchema } from '../../src/models/balance-history.js';
 
 describe('BalanceHistorySchema', () => {
-  test('validates minimal document with just balance_id', () => {
+  test('validates minimal document with required fields', () => {
     const result = BalanceHistorySchema.safeParse({
       balance_id: 'item-1:acc-1:2025-01-15',
+      date: '2025-01-15',
+      item_id: 'item-1',
+      account_id: 'acc-1',
     });
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.balance_id).toBe('item-1:acc-1:2025-01-15');
+      expect(result.data.date).toBe('2025-01-15');
+      expect(result.data.item_id).toBe('item-1');
+      expect(result.data.account_id).toBe('acc-1');
     }
   });
 
@@ -41,6 +47,9 @@ describe('BalanceHistorySchema', () => {
   test('allows null limit', () => {
     const result = BalanceHistorySchema.safeParse({
       balance_id: 'item-1:acc-1:2025-01-15',
+      date: '2025-01-15',
+      item_id: 'item-1',
+      account_id: 'acc-1',
       limit: null,
     });
     expect(result.success).toBe(true);
@@ -52,6 +61,9 @@ describe('BalanceHistorySchema', () => {
   test('passes through unknown fields', () => {
     const result = BalanceHistorySchema.safeParse({
       balance_id: 'item-1:acc-1:2025-01-15',
+      date: '2025-01-15',
+      item_id: 'item-1',
+      account_id: 'acc-1',
       some_future_field: 'hello',
     });
     expect(result.success).toBe(true);
