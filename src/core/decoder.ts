@@ -30,6 +30,7 @@ import {
   TwrHoldingSchema,
 } from '../models/investment-performance.js';
 import { PlaidAccount, PlaidAccountSchema } from '../models/plaid-account.js';
+import { BalanceHistory, BalanceHistorySchema } from '../models/balance-history.js';
 
 /**
  * Extract a primitive value from a FirestoreValue.
@@ -676,6 +677,7 @@ export interface AllCollectionsResult {
   investmentPerformance: InvestmentPerformance[];
   twrHoldings: TwrHolding[];
   plaidAccounts: PlaidAccount[];
+  balanceHistory: BalanceHistory[];
 }
 
 /**
@@ -1436,6 +1438,45 @@ function processPlaidAccount(
 }
 
 /**
+ * Internal helper to process a balance history document.
+ * Path: items/{item_id}/accounts/{account_id}/balance_history/{date}
+ */
+function processBalanceHistory(
+  fields: Map<string, FirestoreValue>,
+  docId: string,
+  collection: string
+): BalanceHistory | null {
+  const data: Record<string, unknown> = {};
+
+  // Extract item_id and account_id from path: items/{item_id}/accounts/{account_id}/balance_history
+  const parts = collection.split('/');
+  const itemsIdx = parts.indexOf('items');
+  let itemId = 'unknown';
+  if (itemsIdx >= 0 && itemsIdx + 1 < parts.length) {
+    itemId = parts[itemsIdx + 1] ?? 'unknown';
+    data.item_id = itemId;
+  }
+  const accountsIdx = parts.indexOf('accounts');
+  let accountId = 'unknown';
+  if (accountsIdx >= 0 && accountsIdx + 1 < parts.length) {
+    accountId = parts[accountsIdx + 1] ?? 'unknown';
+    data.account_id = accountId;
+  }
+
+  data.balance_id = `${itemId}:${accountId}:${docId}`;
+  data.date = docId; // doc ID is the date (YYYY-MM-DD)
+
+  const numericFields = ['current_balance', 'available_balance', 'limit'];
+  for (const field of numericFields) {
+    const value = getNumber(fields, field);
+    if (value !== undefined) data[field] = value;
+  }
+
+  const validated = BalanceHistorySchema.safeParse(data);
+  return validated.success ? validated.data : null;
+}
+
+/**
  * Batch decode all collections from LevelDB database in a single pass.
  *
  * This is significantly faster than calling individual decode functions
@@ -1467,6 +1508,7 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
   const rawInvestmentPerformance: InvestmentPerformance[] = [];
   const rawTwrHoldings: TwrHolding[] = [];
   const rawPlaidAccounts: PlaidAccount[] = [];
+  const rawBalanceHistory: BalanceHistory[] = [];
 
   // Single pass through the database
   for await (const doc of iterateDocuments(dbPath)) {
@@ -1477,6 +1519,9 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     if (collection.includes('users/') && collection.endsWith('/accounts')) {
       const userAccount = processUserAccount(fields, documentId, collection);
       if (userAccount) rawUserAccounts.push(userAccount);
+    } else if (collection.endsWith('/balance_history')) {
+      const bh = processBalanceHistory(fields, documentId, collection);
+      if (bh) rawBalanceHistory.push(bh);
     } else if (
       collection.includes('items/') &&
       collection.includes('/accounts/') &&
@@ -1714,6 +1759,26 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     }
   }
 
+  // Balance history: dedupe by balance_id, sort by account then date desc
+  const bhSeen = new Set<string>();
+  const balanceHistory: BalanceHistory[] = [];
+  for (const bh of rawBalanceHistory) {
+    if (!bhSeen.has(bh.balance_id)) {
+      bhSeen.add(bh.balance_id);
+      balanceHistory.push(bh);
+    }
+  }
+  balanceHistory.sort((a, b) => {
+    const accA = a.account_id ?? '';
+    const accB = b.account_id ?? '';
+    if (accA !== accB) {
+      return accA.localeCompare(accB);
+    }
+    const dateA = a.date ?? '';
+    const dateB = b.date ?? '';
+    return dateB.localeCompare(dateA);
+  });
+
   return {
     transactions,
     accounts,
@@ -1729,6 +1794,7 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     investmentPerformance,
     twrHoldings,
     plaidAccounts,
+    balanceHistory,
   };
 }
 
