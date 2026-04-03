@@ -55,6 +55,18 @@ import {
   AmazonOrder,
   AmazonOrderSchema,
 } from '../models/amazon.js';
+import {
+  Subscription,
+  SubscriptionSchema,
+  Invite,
+  InviteSchema,
+  UserItems,
+  UserItemsSchema,
+  FeatureTracking,
+  FeatureTrackingSchema,
+  Support,
+  SupportSchema,
+} from '../models/app-metadata.js';
 
 /**
  * Extract a primitive value from a FirestoreValue.
@@ -712,6 +724,11 @@ export interface AllCollectionsResult {
   tags: Tag[];
   amazonIntegrations: AmazonIntegration[];
   amazonOrders: AmazonOrder[];
+  subscriptions: Subscription[];
+  invites: Invite[];
+  userItems: UserItems[];
+  featureTracking: FeatureTracking[];
+  supportDocs: Support[];
 }
 
 /**
@@ -1858,6 +1875,143 @@ function processAmazonOrder(
 }
 
 /**
+ * Internal helper to process a subscription document.
+ */
+function processSubscription(
+  fields: Map<string, FirestoreValue>,
+  docId: string
+): Subscription | null {
+  const data: Record<string, unknown> = {
+    subscription_id: getString(fields, 'subscription_id') ?? docId,
+  };
+
+  for (const key of [
+    'product_id',
+    'provider',
+    'environment',
+    'user_id',
+    'expires_date_ms',
+    'created_timestamp',
+    'original_transaction_id',
+  ]) {
+    const v = getString(fields, key);
+    if (v !== undefined) data[key] = v;
+  }
+
+  const price = getNumber(fields, 'price');
+  if (price !== undefined) data.price = price;
+
+  for (const key of ['will_auto_renew', 'is_eligible_for_initial_offer']) {
+    const v = getBoolean(fields, key);
+    if (v !== undefined) data[key] = v;
+  }
+
+  // Pass through any remaining fields
+  for (const [key, value] of fields) {
+    if (!(key in data)) {
+      const extracted = extractValue(value);
+      if (extracted !== undefined) data[key] = extracted;
+    }
+  }
+
+  const validated = SubscriptionSchema.safeParse(data);
+  return validated.success ? validated.data : null;
+}
+
+/**
+ * Internal helper to process an invite document.
+ */
+function processInvite(fields: Map<string, FirestoreValue>, docId: string): Invite | null {
+  const data: Record<string, unknown> = {
+    invite_id: getString(fields, 'invite_id') ?? docId,
+  };
+
+  for (const key of ['code', 'inviter_id', 'product_id']) {
+    const v = getString(fields, key);
+    if (v !== undefined) data[key] = v;
+  }
+
+  for (const key of ['is_available', 'is_unlimited', 'assigned', 'offer_reviewed']) {
+    const v = getBoolean(fields, key);
+    if (v !== undefined) data[key] = v;
+  }
+
+  // Pass through any remaining fields
+  for (const [key, value] of fields) {
+    if (!(key in data)) {
+      const extracted = extractValue(value);
+      if (extracted !== undefined) data[key] = extracted;
+    }
+  }
+
+  const validated = InviteSchema.safeParse(data);
+  return validated.success ? validated.data : null;
+}
+
+/**
+ * Internal helper to process a user_items document.
+ */
+function processUserItems(fields: Map<string, FirestoreValue>, docId: string): UserItems | null {
+  const data: Record<string, unknown> = {
+    user_items_id: getString(fields, 'user_items_id') ?? docId,
+  };
+
+  // Pass through all fields
+  for (const [key, value] of fields) {
+    if (!(key in data)) {
+      const extracted = extractValue(value);
+      if (extracted !== undefined) data[key] = extracted;
+    }
+  }
+
+  const validated = UserItemsSchema.safeParse(data);
+  return validated.success ? validated.data : null;
+}
+
+/**
+ * Internal helper to process a feature_tracking document.
+ */
+function processFeatureTracking(
+  fields: Map<string, FirestoreValue>,
+  docId: string
+): FeatureTracking | null {
+  const data: Record<string, unknown> = {
+    feature_tracking_id: getString(fields, 'feature_tracking_id') ?? docId,
+  };
+
+  // Pass through all fields
+  for (const [key, value] of fields) {
+    if (!(key in data)) {
+      const extracted = extractValue(value);
+      if (extracted !== undefined) data[key] = extracted;
+    }
+  }
+
+  const validated = FeatureTrackingSchema.safeParse(data);
+  return validated.success ? validated.data : null;
+}
+
+/**
+ * Internal helper to process a support document.
+ */
+function processSupport(fields: Map<string, FirestoreValue>, docId: string): Support | null {
+  const data: Record<string, unknown> = {
+    support_id: getString(fields, 'support_id') ?? docId,
+  };
+
+  // Pass through all fields
+  for (const [key, value] of fields) {
+    if (!(key in data)) {
+      const extracted = extractValue(value);
+      if (extracted !== undefined) data[key] = extracted;
+    }
+  }
+
+  const validated = SupportSchema.safeParse(data);
+  return validated.success ? validated.data : null;
+}
+
+/**
  * Helper to check if a collection path matches a target collection name.
  * Handles both simple names ("transactions") and full paths ("users/{user_id}/transactions").
  */
@@ -1900,6 +2054,11 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
   const rawTags: Tag[] = [];
   const rawAmazonIntegrations: AmazonIntegration[] = [];
   const rawAmazonOrders: AmazonOrder[] = [];
+  const rawSubscriptions: Subscription[] = [];
+  const rawInvites: Invite[] = [];
+  const rawUserItems: UserItems[] = [];
+  const rawFeatureTracking: FeatureTracking[] = [];
+  const rawSupportDocs: Support[] = [];
 
   // Single pass through the database
   for await (const doc of iterateDocuments(dbPath)) {
@@ -2001,6 +2160,26 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     } else if (collection === 'amazon' || /^amazon\/[^/]+$/.test(collection)) {
       const ai = processAmazonIntegration(fields, documentId);
       if (ai) rawAmazonIntegrations.push(ai);
+    } else if (collectionMatches(collection, 'subscriptions')) {
+      const sub = processSubscription(fields, documentId);
+      if (sub) rawSubscriptions.push(sub);
+    } else if (collectionMatches(collection, 'invites')) {
+      const inv = processInvite(fields, documentId);
+      if (inv) rawInvites.push(inv);
+    } else if (collectionMatches(collection, 'user_items')) {
+      const ui = processUserItems(fields, documentId);
+      if (ui) rawUserItems.push(ui);
+    } else if (collectionMatches(collection, 'feature_tracking')) {
+      const ft = processFeatureTracking(fields, documentId);
+      if (ft) rawFeatureTracking.push(ft);
+    } else if (collectionMatches(collection, 'support')) {
+      const sup = processSupport(fields, documentId);
+      if (sup) rawSupportDocs.push(sup);
+    } else if (
+      collection.includes('/financial_goals/') &&
+      !collection.endsWith('/financial_goal_history')
+    ) {
+      // Financial goals sentinel/parent docs — decoded but no data to extract
     }
   }
 
@@ -2309,6 +2488,56 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     return dateB.localeCompare(dateA);
   });
 
+  // Subscriptions: dedupe by subscription_id
+  const subSeen = new Set<string>();
+  const subscriptions: Subscription[] = [];
+  for (const sub of rawSubscriptions) {
+    if (!subSeen.has(sub.subscription_id)) {
+      subSeen.add(sub.subscription_id);
+      subscriptions.push(sub);
+    }
+  }
+
+  // Invites: dedupe by invite_id
+  const invSeen = new Set<string>();
+  const invites: Invite[] = [];
+  for (const inv of rawInvites) {
+    if (!invSeen.has(inv.invite_id)) {
+      invSeen.add(inv.invite_id);
+      invites.push(inv);
+    }
+  }
+
+  // User items: dedupe by user_items_id
+  const uiSeen = new Set<string>();
+  const userItems: UserItems[] = [];
+  for (const ui of rawUserItems) {
+    if (!uiSeen.has(ui.user_items_id)) {
+      uiSeen.add(ui.user_items_id);
+      userItems.push(ui);
+    }
+  }
+
+  // Feature tracking: dedupe by feature_tracking_id
+  const ftSeen = new Set<string>();
+  const featureTracking: FeatureTracking[] = [];
+  for (const ft of rawFeatureTracking) {
+    if (!ftSeen.has(ft.feature_tracking_id)) {
+      ftSeen.add(ft.feature_tracking_id);
+      featureTracking.push(ft);
+    }
+  }
+
+  // Support docs: dedupe by support_id
+  const supSeen = new Set<string>();
+  const supportDocs: Support[] = [];
+  for (const sup of rawSupportDocs) {
+    if (!supSeen.has(sup.support_id)) {
+      supSeen.add(sup.support_id);
+      supportDocs.push(sup);
+    }
+  }
+
   return {
     transactions,
     accounts,
@@ -2335,6 +2564,11 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     tags,
     amazonIntegrations,
     amazonOrders,
+    subscriptions,
+    invites,
+    userItems,
+    featureTracking,
+    supportDocs,
   };
 }
 

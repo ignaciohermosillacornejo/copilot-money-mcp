@@ -134,6 +134,19 @@ export {
 } from './amazon.js';
 
 export {
+  SubscriptionSchema,
+  type Subscription,
+  InviteSchema,
+  type Invite,
+  UserItemsSchema,
+  type UserItems,
+  FeatureTrackingSchema,
+  type FeatureTracking,
+  SupportSchema,
+  type Support,
+} from './app-metadata.js';
+
+export {
   type CategoryNode,
   getCategory,
   getCategoryPath,
