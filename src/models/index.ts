@@ -112,6 +112,15 @@ export {
 } from './holdings-history.js';
 
 export {
+  ChangeSchema,
+  type Change,
+  TransactionChangeSchema,
+  type TransactionChange,
+  AccountChangeSchema,
+  type AccountChange,
+} from './change.js';
+
+export {
   type CategoryNode,
   getCategory,
   getCategoryPath,

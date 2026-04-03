@@ -5,6 +5,7 @@
  * using proper protocol buffer parsing instead of brittle pattern matching.
  */
 
+import { type ZodType } from 'zod';
 import { Worker } from 'node:worker_threads';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -37,6 +38,14 @@ import {
   HoldingsHistory,
   HoldingsHistorySchema,
 } from '../models/holdings-history.js';
+import {
+  Change,
+  ChangeSchema,
+  TransactionChange,
+  TransactionChangeSchema,
+  AccountChange,
+  AccountChangeSchema,
+} from '../models/change.js';
 
 /**
  * Extract a primitive value from a FirestoreValue.
@@ -686,6 +695,9 @@ export interface AllCollectionsResult {
   balanceHistory: BalanceHistory[];
   holdingsHistoryMeta: HoldingsHistoryMeta[];
   holdingsHistory: HoldingsHistory[];
+  changes: Change[];
+  transactionChanges: TransactionChange[];
+  accountChanges: AccountChange[];
 }
 
 /**
@@ -1600,6 +1612,45 @@ function processHoldingsHistory(
 }
 
 /**
+ * Internal helper to process a top-level change document.
+ */
+function processChange(fields: Map<string, FirestoreValue>, docId: string): Change | null {
+  const data: Record<string, unknown> = { change_id: docId };
+  for (const [key, value] of fields) {
+    const extracted = extractValue(value);
+    if (extracted !== undefined) data[key] = extracted;
+  }
+  const validated = ChangeSchema.safeParse(data);
+  return validated.success ? validated.data : null;
+}
+
+/**
+ * Shared helper to process a change sub-document (changes/{id}/t or changes/{id}/a).
+ * Extracts parent_change_id from path and all fields from the document.
+ */
+function processSubChange<T>(
+  fields: Map<string, FirestoreValue>,
+  docId: string,
+  collection: string,
+  schema: ZodType<T>
+): T | null {
+  const data: Record<string, unknown> = { change_id: docId };
+  const parts = collection.split('/');
+  const changesIdx = parts.indexOf('changes');
+  if (changesIdx >= 0 && changesIdx + 1 < parts.length) {
+    data.parent_change_id = parts[changesIdx + 1];
+  }
+  for (const [key, value] of fields) {
+    if (!(key in data)) {
+      const extracted = extractValue(value);
+      if (extracted !== undefined) data[key] = extracted;
+    }
+  }
+  const validated = schema.safeParse(data);
+  return validated.success ? validated.data : null;
+}
+
+/**
  * Helper to check if a collection path matches a target collection name.
  * Handles both simple names ("transactions") and full paths ("users/{user_id}/transactions").
  */
@@ -1634,6 +1685,9 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
   const rawBalanceHistory: BalanceHistory[] = [];
   const rawHoldingsHistoryMeta: HoldingsHistoryMeta[] = [];
   const rawHoldingsHistory: HoldingsHistory[] = [];
+  const rawChanges: Change[] = [];
+  const rawTransactionChanges: TransactionChange[] = [];
+  const rawAccountChanges: AccountChange[] = [];
 
   // Single pass through the database
   for await (const doc of iterateDocuments(dbPath)) {
@@ -1710,6 +1764,15 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     } else if (collectionMatches(collection, 'categories')) {
       const category = processCategory(fields, documentId);
       if (category) rawCategories.push(category);
+    } else if (collection.endsWith('/t') && collection.includes('changes/')) {
+      const tc = processSubChange(fields, documentId, collection, TransactionChangeSchema);
+      if (tc) rawTransactionChanges.push(tc);
+    } else if (collection.endsWith('/a') && collection.includes('changes/')) {
+      const ac = processSubChange(fields, documentId, collection, AccountChangeSchema);
+      if (ac) rawAccountChanges.push(ac);
+    } else if (collectionMatches(collection, 'changes')) {
+      const change = processChange(fields, documentId);
+      if (change) rawChanges.push(change);
     }
   }
 
@@ -1935,6 +1998,34 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     }
   }
 
+  // Changes: dedupe by change_id
+  const changeSeen = new Set<string>();
+  const changes: Change[] = [];
+  for (const c of rawChanges) {
+    if (!changeSeen.has(c.change_id)) {
+      changeSeen.add(c.change_id);
+      changes.push(c);
+    }
+  }
+
+  const tcSeen = new Set<string>();
+  const transactionChanges: TransactionChange[] = [];
+  for (const tc of rawTransactionChanges) {
+    if (!tcSeen.has(tc.change_id)) {
+      tcSeen.add(tc.change_id);
+      transactionChanges.push(tc);
+    }
+  }
+
+  const acSeen = new Set<string>();
+  const accountChanges: AccountChange[] = [];
+  for (const ac of rawAccountChanges) {
+    if (!acSeen.has(ac.change_id)) {
+      acSeen.add(ac.change_id);
+      accountChanges.push(ac);
+    }
+  }
+
   return {
     transactions,
     accounts,
@@ -1953,6 +2044,9 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     balanceHistory,
     holdingsHistoryMeta,
     holdingsHistory,
+    changes,
+    transactionChanges,
+    accountChanges,
   };
 }
 
