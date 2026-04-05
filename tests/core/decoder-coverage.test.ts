@@ -2007,6 +2007,46 @@ describe('decoder coverage', () => {
       expect(result.userProfiles[0]?.user_id).toBe('user2');
     });
 
+    test('extracts all user profile fields including maps, arrays, and timestamps', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'user-profile-full-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'users',
+          id: 'user-full',
+          fields: {
+            public_id: 'pub789',
+            budgeting_enabled: true,
+            accounts_config: { acc1: { hidden: true } },
+            auto_terms_timestamps: { tos_v1: '2024-01-01' },
+            fcm_tokens: ['token-abc', 'token-def'],
+            finance_goals_review_timestamps: { '2024-01': '2024-01-15' },
+            latest_spending_trigger: { __type: 'timestamp', seconds: 1710460800, nanos: 0 },
+            ml_report: { score: 0.95 },
+            notifications: { push_enabled: true },
+            rollovers_starte_date: '2024-01-01',
+            terms_timestamps: { accepted: '2024-01-01' },
+            _origin: 'mobile',
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+      expect(result.userProfiles.length).toBe(1);
+      const profile = result.userProfiles[0]!;
+      expect(profile.user_id).toBe('user-full');
+      expect(profile.public_id).toBe('pub789');
+      expect(profile.accounts_config).toEqual({ acc1: { hidden: true } });
+      expect(profile.auto_terms_timestamps).toEqual({ tos_v1: '2024-01-01' });
+      expect(profile.fcm_tokens).toEqual(['token-abc', 'token-def']);
+      expect(profile.finance_goals_review_timestamps).toEqual({ '2024-01': '2024-01-15' });
+      expect(profile.latest_spending_trigger).toBe('2024-03-15');
+      expect(profile.ml_report).toEqual({ score: 0.95 });
+      expect(profile.notifications).toEqual({ push_enabled: true });
+      expect(profile.rollovers_starte_date).toBe('2024-01-01');
+      expect(profile.terms_timestamps).toEqual({ accepted: '2024-01-01' });
+      expect(profile._origin).toBe('mobile');
+    });
+
     test('decodes amazon integrations via decodeAllCollections', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'amazon-int-db');
       await createTestDatabase(dbPath, [

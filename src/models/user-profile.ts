@@ -23,6 +23,16 @@ export const UserProfileSchema = z
     service_ends_on_ms: z.number().optional(),
     items_disconnect_on_ms: z.number().optional(),
     intelligence_categories_review_count: z.number().optional(),
+    accounts_config: z.record(z.string(), z.unknown()).optional(),
+    auto_terms_timestamps: z.record(z.string(), z.unknown()).optional(),
+    fcm_tokens: z.array(z.string()).optional(),
+    finance_goals_review_timestamps: z.record(z.string(), z.unknown()).optional(),
+    latest_spending_trigger: z.string().optional(),
+    ml_report: z.record(z.string(), z.unknown()).optional(),
+    notifications: z.record(z.string(), z.unknown()).optional(),
+    rollovers_starte_date: z.string().optional(), // typo in Firestore — kept intentionally
+    terms_timestamps: z.record(z.string(), z.unknown()).optional(),
+    _origin: z.string().optional(),
   })
   .passthrough();
 

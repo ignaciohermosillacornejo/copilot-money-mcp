@@ -2087,6 +2087,35 @@ function processUserProfile(
     if (value !== undefined) data[field] = value;
   }
 
+  // Map fields
+  const mapFields = [
+    'accounts_config',
+    'auto_terms_timestamps',
+    'finance_goals_review_timestamps',
+    'ml_report',
+    'notifications',
+    'terms_timestamps',
+  ];
+  for (const field of mapFields) {
+    const mapValue = getMap(fields, field);
+    if (mapValue) data[field] = toPlainObject(mapValue);
+  }
+
+  // Array fields
+  const fcmTokens = getStringArray(fields, 'fcm_tokens');
+  if (fcmTokens) data.fcm_tokens = fcmTokens;
+
+  // Timestamp fields
+  const latestSpendingTrigger = getDateString(fields, 'latest_spending_trigger');
+  if (latestSpendingTrigger) data.latest_spending_trigger = latestSpendingTrigger;
+
+  // Additional string fields
+  const rolloversStarteDate = getString(fields, 'rollovers_starte_date');
+  if (rolloversStarteDate !== undefined) data.rollovers_starte_date = rolloversStarteDate;
+
+  const origin = getString(fields, '_origin');
+  if (origin !== undefined) data._origin = origin;
+
   const validated = UserProfileSchema.safeParse(data);
   return validated.success ? validated.data : null;
 }
