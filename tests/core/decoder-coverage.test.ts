@@ -1002,6 +1002,93 @@ describe('decoder coverage', () => {
       expect(txns[0]?.transaction_id).toBe('posted-1');
     });
 
+    test('extracts all new transaction fields', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'txn-new-fields-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'transactions',
+          id: 'txn-full',
+          fields: {
+            transaction_id: 'txn-full',
+            amount: 42.5,
+            date: '2024-03-10',
+            name: 'Coffee Shop',
+            original_name: 'COFFEE SHOP #123',
+            original_clean_name: 'Coffee Shop',
+            name_override: 'My Coffee',
+            original_transaction_id: 'orig-txn-1',
+            created_timestamp: { __type: 'timestamp', seconds: 1710000000, nanos: 0 },
+            user_note: 'Weekly coffee',
+            plaid_category_strings: ['Food and Drink', 'Coffee Shop'],
+            is_manual: false,
+            recurring: true,
+            recurring_id: 'rec-123',
+            skip_balance_adjust: false,
+            intelligence_suggested_category_ids: ['cat-1', 'cat-2'],
+            intelligence_chosen_category_id: 'cat-1',
+            intelligence_powered: true,
+            pending_amount: 40.0,
+            plaid_pending_transaction_id: 'plaid-pending-1',
+            posted_transaction_id: 'posted-txn-1',
+            tag_ids: ['tag-a', 'tag-b'],
+            internal_tx_match: { match_id: 'match-1', confidence: 0.95 },
+            old_category_id: 'old-cat-1',
+            venmo_extra_data: { sender: 'alice', note: 'lunch' },
+            _origin: 'plaid',
+            account_type: 'checking',
+            user_deleted: false,
+            from_investment: 'true_string',
+          },
+        },
+        {
+          // Test from_investment as boolean
+          collection: 'transactions',
+          id: 'txn-invest-bool',
+          fields: {
+            transaction_id: 'txn-invest-bool',
+            amount: 100.0,
+            date: '2024-03-11',
+            from_investment: true,
+          },
+        },
+      ]);
+
+      const txns = await decodeTransactions(dbPath);
+      expect(txns.length).toBe(2);
+
+      const full = txns.find((t) => t.transaction_id === 'txn-full')!;
+      expect(full).toBeDefined();
+      expect(full.original_clean_name).toBe('Coffee Shop');
+      expect(full.name_override).toBe('My Coffee');
+      expect(full.original_transaction_id).toBe('orig-txn-1');
+      expect(full.created_timestamp).toBe('2024-03-09');
+      expect(full.user_note).toBe('Weekly coffee');
+      expect(full.plaid_category_strings).toEqual(['Food and Drink', 'Coffee Shop']);
+      expect(full.is_manual).toBe(false);
+      expect(full.recurring).toBe(true);
+      expect(full.recurring_id).toBe('rec-123');
+      expect(full.skip_balance_adjust).toBe(false);
+      expect(full.intelligence_suggested_category_ids).toEqual(['cat-1', 'cat-2']);
+      expect(full.intelligence_chosen_category_id).toBe('cat-1');
+      expect(full.intelligence_powered).toBe(true);
+      expect(full.pending_amount).toBe(40.0);
+      expect(full.plaid_pending_transaction_id).toBe('plaid-pending-1');
+      expect(full.posted_transaction_id).toBe('posted-txn-1');
+      expect(full.tag_ids).toEqual(['tag-a', 'tag-b']);
+      expect(full.internal_tx_match).toEqual({ match_id: 'match-1', confidence: 0.95 });
+      expect(full.old_category_id).toBe('old-cat-1');
+      expect(full.venmo_extra_data).toEqual({ sender: 'alice', note: 'lunch' });
+      expect(full._origin).toBe('plaid');
+      expect(full.account_type).toBe('checking');
+      expect(full.user_deleted).toBe(false);
+      expect(full.from_investment).toBe('true_string');
+
+      // Test from_investment as boolean fallback
+      const investBool = txns.find((t) => t.transaction_id === 'txn-invest-bool')!;
+      expect(investBool).toBeDefined();
+      expect(investBool.from_investment).toBe(true);
+    });
+
     test('handles empty database', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'all-collections-empty-db');
       await createTestDatabase(dbPath, []);
