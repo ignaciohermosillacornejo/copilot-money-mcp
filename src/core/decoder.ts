@@ -756,12 +756,14 @@ function processTransaction(
     'name',
     'original_name',
     'original_clean_name',
+    'name_override',
     'account_id',
     'item_id',
     'user_id',
     'category_id',
     'plaid_category_id',
     'category_id_source',
+    'account_type',
     'original_date',
     'pending_transaction_id',
     'iso_currency_code',
@@ -778,11 +780,25 @@ function processTransaction(
     'ppd_id',
     'by_order_of',
     'from_investment',
+    'user_note',
+    '_origin',
+    'intelligence_chosen_category_id',
+    'recurring_id',
+    'plaid_pending_transaction_id',
+    'posted_transaction_id',
+    'original_transaction_id',
+    'old_category_id',
   ];
 
   for (const field of stringFields) {
     const value = getString(fields, field);
     if (value) txnData[field] = value;
+  }
+
+  // from_investment can be stored as boolean in DB; capture it either way
+  if (!txnData.from_investment) {
+    const fromInvestmentBool = getBoolean(fields, 'from_investment');
+    if (fromInvestmentBool !== undefined) txnData.from_investment = fromInvestmentBool;
   }
 
   const booleanFields = [
@@ -792,6 +808,11 @@ function processTransaction(
     'plaid_deleted',
     'is_amazon',
     'account_dashboard_active',
+    'is_manual',
+    'recurring',
+    'skip_balance_adjust',
+    'user_deleted',
+    'intelligence_powered',
   ];
 
   for (const field of booleanFields) {
@@ -799,11 +820,35 @@ function processTransaction(
     if (value !== undefined) txnData[field] = value;
   }
 
-  const numericFields = ['original_amount', 'lat', 'lon'];
+  const numericFields = ['original_amount', 'lat', 'lon', 'pending_amount'];
 
   for (const field of numericFields) {
     const value = getNumber(fields, field);
     if (value !== undefined) txnData[field] = value;
+  }
+
+  // Date/timestamp fields
+  const createdTimestamp = getDateString(fields, 'created_timestamp');
+  if (createdTimestamp) txnData.created_timestamp = createdTimestamp;
+
+  // String array fields
+  const stringArrayFields = [
+    'plaid_category_strings',
+    'intelligence_suggested_category_ids',
+    'tag_ids',
+  ];
+
+  for (const field of stringArrayFields) {
+    const value = getStringArray(fields, field);
+    if (value) txnData[field] = value;
+  }
+
+  // Map fields (converted to plain objects)
+  const mapFields = ['internal_tx_match', 'venmo_extra_data'];
+
+  for (const field of mapFields) {
+    const mapValue = getMap(fields, field);
+    if (mapValue) txnData[field] = toPlainObject(mapValue);
   }
 
   const copilotType = getString(fields, 'type');
