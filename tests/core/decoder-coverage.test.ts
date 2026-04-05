@@ -3013,6 +3013,39 @@ describe('decoder coverage', () => {
       expect(items[2]?.item_id).toBe('item_b');
     });
 
+    test('extracts all new category fields', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'category-new-fields-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'categories',
+          id: 'cat-full',
+          fields: {
+            category_id: 'cat-full',
+            name: 'Dining Out',
+            plaid_category_ids: ['13005000', '13005001'],
+            partial_name_rules: ['restaurant', 'cafe'],
+            children_category_ids: ['cat-child-1', 'cat-child-2'],
+            children_categories: ['cat-child-3'],
+            budget_id: 'bud-dining',
+            _origin: 'user',
+            id: 'cat-internal-id',
+          },
+        },
+      ]);
+
+      const categories = await decodeCategories(dbPath);
+
+      expect(categories.length).toBe(1);
+      const cat = categories[0]!;
+      expect(cat.plaid_category_ids).toEqual(['13005000', '13005001']);
+      expect(cat.partial_name_rules).toEqual(['restaurant', 'cafe']);
+      expect(cat.children_category_ids).toEqual(['cat-child-1', 'cat-child-2']);
+      expect(cat.children_categories).toEqual(['cat-child-3']);
+      expect(cat.budget_id).toBe('bud-dining');
+      expect(cat._origin).toBe('user');
+      expect(cat.id).toBe('cat-internal-id');
+    });
+
     test('categories sort by order then name', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'sort-categories-db');
       await createTestDatabase(dbPath, [

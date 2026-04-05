@@ -46,8 +46,14 @@ export const CategorySchema = z
 
     // Metadata
     user_id: z.string().optional(),
+
+    // Additional fields
+    children_categories: z.array(z.string()).optional(),
+    budget_id: z.string().optional(),
+    _origin: z.string().optional(),
+    id: z.string().optional(),
   })
-  .strict();
+  .passthrough();
 
 export type Category = z.infer<typeof CategorySchema>;
 

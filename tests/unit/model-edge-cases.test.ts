@@ -108,12 +108,12 @@ describe('CategorySchema validation', () => {
     expect(result.success).toBe(false);
   });
 
-  test('rejects unknown fields due to strict mode', () => {
+  test('allows unknown fields (passthrough mode)', () => {
     const result = CategorySchema.safeParse({
       category_id: 'cat_3',
-      unknown_field: 'should fail',
+      unknown_field: 'should pass',
     });
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
   });
 });
 

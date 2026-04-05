@@ -1473,6 +1473,25 @@ function processCategory(fields: Map<string, FirestoreValue>, docId: string): Ca
     if (value !== undefined) categoryData[field] = value;
   }
 
+  // Array fields
+  const arrayFields = [
+    'plaid_category_ids',
+    'partial_name_rules',
+    'children_category_ids',
+    'children_categories',
+  ];
+  for (const field of arrayFields) {
+    const value = getStringArray(fields, field);
+    if (value) categoryData[field] = value;
+  }
+
+  // Additional string fields
+  const additionalStringFields = ['budget_id', '_origin', 'id'];
+  for (const field of additionalStringFields) {
+    const value = getString(fields, field);
+    if (value) categoryData[field] = value;
+  }
+
   const validated = CategorySchema.safeParse(categoryData);
   return validated.success ? validated.data : null;
 }
