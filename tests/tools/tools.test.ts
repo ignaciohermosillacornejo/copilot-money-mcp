@@ -1611,3 +1611,49 @@ describe('getAccounts - total balance calculation', () => {
     expect(result.total_liabilities).toBe(0);
   });
 });
+
+describe('database securities accessors', () => {
+  let db: CopilotDatabase;
+
+  beforeEach(() => {
+    db = new CopilotDatabase('/fake/path');
+    (db as any)._securities = [
+      {
+        security_id: 'hash1',
+        ticker_symbol: 'AAPL',
+        name: 'Apple Inc.',
+        type: 'equity',
+        current_price: 150.0,
+        is_cash_equivalent: false,
+      },
+      {
+        security_id: 'hash2',
+        ticker_symbol: 'SCHX',
+        name: 'Schwab U.S. Large-Cap ETF',
+        type: 'etf',
+        current_price: 25.0,
+        is_cash_equivalent: false,
+      },
+      {
+        security_id: 'hash3',
+        ticker_symbol: 'USD',
+        name: 'United States Dollar',
+        type: 'cash',
+        current_price: 1.0,
+        is_cash_equivalent: true,
+      },
+    ];
+  });
+
+  test('getSecurities returns all securities', async () => {
+    const result = await db.getSecurities();
+    expect(result.length).toBe(3);
+  });
+
+  test('getSecurityMap returns map keyed by security_id', async () => {
+    const map = await db.getSecurityMap();
+    expect(map.size).toBe(3);
+    expect(map.get('hash1')?.ticker_symbol).toBe('AAPL');
+    expect(map.get('hash2')?.ticker_symbol).toBe('SCHX');
+  });
+});

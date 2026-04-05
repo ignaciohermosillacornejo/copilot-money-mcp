@@ -37,6 +37,7 @@ import {
   Item,
   getTransactionDisplayName,
 } from '../models/index.js';
+import type { Security, HoldingsHistory } from '../models/index.js';
 import { getCategoryName } from '../utils/categories.js';
 
 /**
@@ -155,6 +156,8 @@ export class CopilotDatabase {
   private _categoryNameMap: Map<string, string> | null = null;
   private _userAccounts: UserAccountCustomization[] | null = null;
   private _accountNameMap: Map<string, string> | null = null;
+  private _securities: Security[] | null = null;
+  private _holdingsHistory: HoldingsHistory[] | null = null;
 
   // Promises for in-flight loads to prevent duplicate loading
   private _loadingTransactions: Promise<Transaction[]> | null = null;
@@ -270,6 +273,8 @@ export class CopilotDatabase {
     this._categoryNameMap = null;
     this._userAccounts = null;
     this._accountNameMap = null;
+    this._securities = null;
+    this._holdingsHistory = null;
 
     // Clear in-flight loading promises
     this._loadingTransactions = null;
@@ -356,6 +361,8 @@ export class CopilotDatabase {
       this._items = result.items;
       this._userCategories = result.categories;
       this._userAccounts = result.userAccounts;
+      this._securities = result.securities;
+      this._holdingsHistory = result.holdingsHistory;
 
       this._allCollectionsLoaded = true;
       this._cacheLoadedAt = Date.now();
@@ -662,6 +669,36 @@ export class CopilotDatabase {
     } finally {
       this._loadingUserAccounts = null;
     }
+  }
+
+  /**
+   * Load securities with caching.
+   * Uses batch loading for optimal performance on first access.
+   */
+  private async loadSecurities(): Promise<Security[]> {
+    if (this._securities !== null) {
+      return this._securities;
+    }
+    if (!this._allCollectionsLoaded) {
+      await this.loadAllCollections();
+      return this._securities ?? [];
+    }
+    return this._securities ?? [];
+  }
+
+  /**
+   * Load holdings history with caching.
+   * Uses batch loading for optimal performance on first access.
+   */
+  private async loadHoldingsHistory(): Promise<HoldingsHistory[]> {
+    if (this._holdingsHistory !== null) {
+      return this._holdingsHistory;
+    }
+    if (!this._allCollectionsLoaded) {
+      await this.loadAllCollections();
+      return this._holdingsHistory ?? [];
+    }
+    return this._holdingsHistory ?? [];
   }
 
   /**
@@ -1166,6 +1203,57 @@ export class CopilotDatabase {
       result = result.filter((s) => s.split_date && s.split_date <= endDate);
     }
 
+    return result;
+  }
+
+  /**
+   * Get all securities from the database.
+   *
+   * Securities represent stocks, ETFs, mutual funds, cash equivalents, etc.
+   *
+   * @returns Array of Security objects
+   */
+  async getSecurities(): Promise<Security[]> {
+    return this.loadSecurities();
+  }
+
+  /**
+   * Get a map of securities keyed by security_id for fast lookups.
+   *
+   * @returns Map<security_id, Security>
+   */
+  async getSecurityMap(): Promise<Map<string, Security>> {
+    const securities = await this.loadSecurities();
+    const map = new Map<string, Security>();
+    for (const s of securities) {
+      map.set(s.security_id, s);
+    }
+    return map;
+  }
+
+  /**
+   * Get holdings history with optional filters.
+   *
+   * @param options - Filter options
+   * @param options.securityId - Filter by security_id
+   * @param options.accountId - Filter by account_id
+   * @returns Array of HoldingsHistory objects
+   */
+  async getHoldingsHistory(
+    options: {
+      securityId?: string;
+      accountId?: string;
+    } = {}
+  ): Promise<HoldingsHistory[]> {
+    const { securityId, accountId } = options;
+    const allHistory = await this.loadHoldingsHistory();
+    let result = [...allHistory];
+    if (securityId) {
+      result = result.filter((h) => h.security_id === securityId);
+    }
+    if (accountId) {
+      result = result.filter((h) => h.account_id === accountId);
+    }
     return result;
   }
 
