@@ -1719,22 +1719,82 @@ function processPlaidAccount(
     'account_type',
     'subtype',
     'iso_currency_code',
+    'institution_id',
+    'institution_name',
+    'original_subtype',
+    'original_type',
+    'color',
+    'logo',
+    'logo_content_type',
+    'nickname',
+    '_origin',
+    'id',
+    'user_id',
+    'custom_color',
+    'group_id',
+    'item_id',
   ];
   for (const field of stringFields) {
     const value = getString(fields, field);
     if (value !== undefined) data[field] = value;
   }
 
-  const numberFields = ['current_balance', 'available_balance', 'limit'];
+  const numberFields = ['current_balance', 'available_balance', 'original_current_balance'];
   for (const field of numberFields) {
     const value = getNumber(fields, field);
     if (value !== undefined) data[field] = value;
   }
 
-  // Check for null limit
-  const limitField = fields.get('limit');
-  if (limitField && limitField.type === 'null') {
-    data.limit = null;
+  // Handle limit with null check
+  const limitVal = getNumber(fields, 'limit');
+  if (limitVal !== undefined) {
+    data.limit = limitVal;
+  } else {
+    const limitField = fields.get('limit');
+    if (limitField && limitField.type === 'null') {
+      data.limit = null;
+    }
+  }
+
+  const booleanFields = [
+    'historical_update',
+    'investments_performance_enabled',
+    'holdings_initialized',
+    'provider_deleted',
+    'savings_active',
+    'dashboard_active',
+    'live_balance_backend_disabled',
+    'live_balance_user_disabled',
+    'user_hidden',
+    'user_deleted',
+    'is_manual',
+    'group_leader',
+  ];
+  for (const field of booleanFields) {
+    const value = getBoolean(fields, field);
+    if (value !== undefined) data[field] = value;
+  }
+
+  // Timestamp fields
+  const latestBalanceUpdate = getDateString(fields, 'latest_balance_update');
+  if (latestBalanceUpdate) data.latest_balance_update = latestBalanceUpdate;
+
+  // Verification status (string or null)
+  const vs = getString(fields, 'verification_status');
+  if (vs !== undefined) {
+    data.verification_status = vs;
+  } else {
+    const vsField = fields.get('verification_status');
+    if (vsField && vsField.type === 'null') {
+      data.verification_status = null;
+    }
+  }
+
+  // Map fields
+  const mapFieldNames = ['metadata', 'merged'];
+  for (const field of mapFieldNames) {
+    const mapValue = getMap(fields, field);
+    if (mapValue) data[field] = toPlainObject(mapValue);
   }
 
   // Extract holdings array
@@ -1820,6 +1880,9 @@ function processBalanceHistory(
   if (limitField && limitField.type === 'null') {
     data.limit = null;
   }
+
+  const origin = getString(fields, '_origin');
+  if (origin !== undefined) data._origin = origin;
 
   const validated = BalanceHistorySchema.safeParse(data);
   return validated.success ? validated.data : null;

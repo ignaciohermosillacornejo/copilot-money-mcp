@@ -3359,6 +3359,109 @@ describe('decoder coverage', () => {
     });
   });
 
+  describe('plaid account extended fields', () => {
+    test('extracts all new plaid account fields', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'plaid-acc-full-db');
+      await createDeepTestDatabase(dbPath, [
+        {
+          collection: 'items/item2/accounts/pacc2',
+          id: 'data',
+          fields: {
+            account_id: 'acc_plaid_2',
+            name: 'Investment Account',
+            item_id: 'item2',
+            historical_update: true,
+            institution_id: 'ins_123',
+            institution_name: 'Big Bank',
+            investments_performance_enabled: true,
+            holdings_initialized: true,
+            latest_balance_update: { __type: 'timestamp', seconds: 1710460800, nanos: 0 },
+            original_current_balance: 10000,
+            original_subtype: '401k',
+            original_type: 'investment',
+            provider_deleted: false,
+            savings_active: true,
+            color: '#FF5733',
+            logo: 'base64logo',
+            logo_content_type: 'image/png',
+            dashboard_active: true,
+            live_balance_backend_disabled: false,
+            live_balance_user_disabled: false,
+            nickname: 'My 401k',
+            verification_status: null,
+            user_hidden: false,
+            user_deleted: false,
+            _origin: 'plaid',
+            id: 'plaid_id_1',
+            user_id: 'user123',
+            is_manual: false,
+            custom_color: '#AABBCC',
+            metadata: { source: 'plaid_v2' },
+            group_id: 'grp1',
+            group_leader: true,
+            merged: { old_id: 'pacc_old' },
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+      expect(result.plaidAccounts.length).toBe(1);
+      const pa = result.plaidAccounts[0]!;
+      expect(pa.historical_update).toBe(true);
+      expect(pa.institution_id).toBe('ins_123');
+      expect(pa.institution_name).toBe('Big Bank');
+      expect(pa.investments_performance_enabled).toBe(true);
+      expect(pa.holdings_initialized).toBe(true);
+      expect(pa.latest_balance_update).toBe('2024-03-15');
+      expect(pa.original_current_balance).toBe(10000);
+      expect(pa.original_subtype).toBe('401k');
+      expect(pa.original_type).toBe('investment');
+      expect(pa.provider_deleted).toBe(false);
+      expect(pa.savings_active).toBe(true);
+      expect(pa.color).toBe('#FF5733');
+      expect(pa.logo).toBe('base64logo');
+      expect(pa.logo_content_type).toBe('image/png');
+      expect(pa.dashboard_active).toBe(true);
+      expect(pa.live_balance_backend_disabled).toBe(false);
+      expect(pa.live_balance_user_disabled).toBe(false);
+      expect(pa.nickname).toBe('My 401k');
+      expect(pa.verification_status).toBeNull();
+      expect(pa.user_hidden).toBe(false);
+      expect(pa.user_deleted).toBe(false);
+      expect(pa._origin).toBe('plaid');
+      expect(pa.id).toBe('plaid_id_1');
+      expect(pa.user_id).toBe('user123');
+      expect(pa.is_manual).toBe(false);
+      expect(pa.custom_color).toBe('#AABBCC');
+      expect(pa.metadata).toEqual({ source: 'plaid_v2' });
+      expect(pa.group_id).toBe('grp1');
+      expect(pa.group_leader).toBe(true);
+      expect(pa.merged).toEqual({ old_id: 'pacc_old' });
+      expect(pa.item_id).toBe('item2');
+    });
+  });
+
+  describe('balance history _origin field', () => {
+    test('extracts _origin from balance history documents', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'bh-origin-db');
+      await createDeepTestDatabase(dbPath, [
+        {
+          collection: 'items/item1/accounts/acc1/balance_history',
+          id: '2024-03-15',
+          fields: {
+            current_balance: 7500,
+            _origin: 'plaid',
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+      expect(result.balanceHistory.length).toBe(1);
+      expect(result.balanceHistory[0]!._origin).toBe('plaid');
+      expect(result.balanceHistory[0]!.current_balance).toBe(7500);
+    });
+  });
+
   describe('investment split adjustments', () => {
     test('captures date-keyed adjustment factors', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'split-adjustments-db');

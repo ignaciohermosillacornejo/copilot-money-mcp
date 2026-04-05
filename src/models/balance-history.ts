@@ -16,6 +16,7 @@ export const BalanceHistorySchema = z
     current_balance: z.number().optional(),
     available_balance: z.number().optional(),
     limit: z.number().nullable().optional(),
+    _origin: z.string().optional(),
   })
   .passthrough();
 
