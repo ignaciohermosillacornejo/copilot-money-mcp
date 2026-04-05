@@ -13,6 +13,7 @@ import {
   decodeGoalHistory,
   decodeTransactions,
   decodeCategories,
+  getDecodeTimeoutMs,
 } from '../../src/core/decoder.js';
 import {
   createTestDatabase,
@@ -215,7 +216,7 @@ describe('decoder coverage', () => {
 
       const prices = await decodeInvestmentPrices(dbPath);
 
-      expect(prices.length).toBeGreaterThan(0);
+      expect(prices.length).toBe(2);
     });
 
     test('filters by ticker symbol', async () => {
@@ -2232,7 +2233,6 @@ describe('decoder coverage', () => {
       const original = process.env.DECODE_TIMEOUT_MS;
       delete process.env.DECODE_TIMEOUT_MS;
 
-      const { getDecodeTimeoutMs } = require('../../src/core/decoder.js');
       expect(getDecodeTimeoutMs()).toBe(90_000);
 
       if (original !== undefined) process.env.DECODE_TIMEOUT_MS = original;
@@ -2242,7 +2242,6 @@ describe('decoder coverage', () => {
       const original = process.env.DECODE_TIMEOUT_MS;
       process.env.DECODE_TIMEOUT_MS = '30000';
 
-      const { getDecodeTimeoutMs } = require('../../src/core/decoder.js');
       expect(getDecodeTimeoutMs()).toBe(30000);
 
       if (original !== undefined) {
@@ -2256,7 +2255,6 @@ describe('decoder coverage', () => {
       const original = process.env.DECODE_TIMEOUT_MS;
       process.env.DECODE_TIMEOUT_MS = 'not-a-number';
 
-      const { getDecodeTimeoutMs } = require('../../src/core/decoder.js');
       expect(getDecodeTimeoutMs()).toBe(90_000);
 
       if (original !== undefined) {
@@ -2270,7 +2268,6 @@ describe('decoder coverage', () => {
       const original = process.env.DECODE_TIMEOUT_MS;
       process.env.DECODE_TIMEOUT_MS = '0';
 
-      const { getDecodeTimeoutMs } = require('../../src/core/decoder.js');
       expect(getDecodeTimeoutMs()).toBe(90_000);
 
       if (original !== undefined) {
@@ -2284,7 +2281,6 @@ describe('decoder coverage', () => {
       const original = process.env.DECODE_TIMEOUT_MS;
       process.env.DECODE_TIMEOUT_MS = '-5000';
 
-      const { getDecodeTimeoutMs } = require('../../src/core/decoder.js');
       expect(getDecodeTimeoutMs()).toBe(90_000);
 
       if (original !== undefined) {
@@ -2345,13 +2341,8 @@ describe('decoder coverage', () => {
       ]);
 
       const { decodeAllCollectionsIsolated } = await import('../../src/core/decoder.js');
-      // Use a very short timeout — the worker will likely not finish in 1ms
-      try {
-        await decodeAllCollectionsIsolated(dbPath, 1);
-        // If it somehow succeeds in 1ms, that's fine too
-      } catch (err: unknown) {
-        expect((err as Error).message).toContain('timed out');
-      }
+      // 1ms timeout — worker can't possibly finish in time
+      await expect(decodeAllCollectionsIsolated(dbPath, 1)).rejects.toThrow('timed out');
     }, 30_000);
   });
 

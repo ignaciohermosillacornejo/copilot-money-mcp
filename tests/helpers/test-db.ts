@@ -19,7 +19,6 @@ export interface TestTransaction {
   date?: string;
   name?: string;
   original_name?: string;
-  merchant?: string;
   category_id?: string;
   city?: string;
   region?: string;
@@ -191,7 +190,6 @@ export async function createTransactionDb(
       date: t.date,
       name: t.name,
       original_name: t.original_name,
-      merchant: t.merchant,
       category_id: t.category_id,
       city: t.city,
       region: t.region,
