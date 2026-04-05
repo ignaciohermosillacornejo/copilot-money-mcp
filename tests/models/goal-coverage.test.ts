@@ -461,7 +461,7 @@ describe('Goal model helpers', () => {
           inflates_budget: true,
           is_ongoing: false,
         },
-        associated_accounts: ['acc1', 'acc2'],
+        associated_accounts: { acc1: true, acc2: true },
         created_with_allocations: true,
       };
 

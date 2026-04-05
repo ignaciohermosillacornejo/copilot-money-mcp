@@ -1182,16 +1182,43 @@ function processGoal(fields: Map<string, FirestoreValue>, docId: string): Goal |
     goal_id: goalId,
   };
 
-  const stringFields = ['name', 'recommendation_id', 'emoji', 'created_date', 'user_id'];
+  const stringFields = [
+    'name',
+    'recommendation_id',
+    'created_date',
+    'user_id',
+    'associated_category_id',
+    'status',
+    'type',
+  ];
 
   for (const field of stringFields) {
     const value = getString(fields, field);
     if (value) goalData[field] = value;
   }
 
-  const createdWithAllocations = getBoolean(fields, 'created_with_allocations');
-  if (createdWithAllocations !== undefined) {
-    goalData.created_with_allocations = createdWithAllocations;
+  // emoji: may be a direct string or a MAP {emoji: "🎯"}
+  const emojiStr = getString(fields, 'emoji');
+  if (emojiStr) {
+    goalData.emoji = emojiStr;
+  } else {
+    const emojiMap = getMap(fields, 'emoji');
+    if (emojiMap) {
+      const inner = getString(emojiMap, 'emoji');
+      if (inner) goalData.emoji = inner;
+    }
+  }
+
+  const boolFields = ['created_with_allocations', 'is_met_early', 'party_mode_activated'];
+  for (const field of boolFields) {
+    const value = getBoolean(fields, field);
+    if (value !== undefined) goalData[field] = value;
+  }
+
+  // associated_accounts is a MAP (possibly empty {}), not an array
+  const associatedAccountsMap = getMap(fields, 'associated_accounts');
+  if (associatedAccountsMap) {
+    goalData.associated_accounts = toPlainObject(associatedAccountsMap);
   }
 
   const savingsMap = getMap(fields, 'savings');

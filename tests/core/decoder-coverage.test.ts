@@ -3095,4 +3095,86 @@ describe('decoder coverage', () => {
       expect(result.balanceHistory.length).toBe(0);
     });
   });
+
+  describe('goal field extraction', () => {
+    test('extracts all goal fields including new fields', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'goal-all-fields-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'financial_goals',
+          id: 'goal1',
+          fields: {
+            goal_id: 'goal1',
+            name: 'Vacation Fund',
+            recommendation_id: 'vacation-fund',
+            created_date: '2024-06-01',
+            user_id: 'user1',
+            associated_category_id: 'cat-travel',
+            status: 'active',
+            type: 'savings',
+            is_met_early: false,
+            party_mode_activated: true,
+            created_with_allocations: true,
+            associated_accounts: { acc1: true, acc2: true },
+            emoji: '✈️',
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+      expect(result.goals.length).toBe(1);
+      const goal = result.goals[0]!;
+      expect(goal.goal_id).toBe('goal1');
+      expect(goal.name).toBe('Vacation Fund');
+      expect(goal.recommendation_id).toBe('vacation-fund');
+      expect(goal.created_date).toBe('2024-06-01');
+      expect(goal.user_id).toBe('user1');
+      expect(goal.associated_category_id).toBe('cat-travel');
+      expect(goal.status).toBe('active');
+      expect(goal.type).toBe('savings');
+      expect(goal.is_met_early).toBe(false);
+      expect(goal.party_mode_activated).toBe(true);
+      expect(goal.created_with_allocations).toBe(true);
+      expect(goal.associated_accounts).toEqual({ acc1: true, acc2: true });
+      expect(goal.emoji).toBe('✈️');
+    });
+
+    test('extracts emoji from nested map {emoji: "🎯"}', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'goal-emoji-map-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'financial_goals',
+          id: 'goal2',
+          fields: {
+            goal_id: 'goal2',
+            name: 'Target Goal',
+            emoji: { emoji: '🎯' },
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+      expect(result.goals.length).toBe(1);
+      expect(result.goals[0]!.emoji).toBe('🎯');
+    });
+
+    test('handles empty associated_accounts map', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'goal-empty-accounts-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'financial_goals',
+          id: 'goal3',
+          fields: {
+            goal_id: 'goal3',
+            name: 'Empty Accounts Goal',
+            associated_accounts: {},
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+      expect(result.goals.length).toBe(1);
+      expect(result.goals[0]!.associated_accounts).toEqual({});
+    });
+  });
 });

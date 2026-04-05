@@ -50,8 +50,17 @@ export const GoalSchema = z
     // Savings configuration (nested object)
     savings: SavingsConfigSchema.optional(),
 
+    // Classification
+    associated_category_id: z.string().optional(),
+    status: z.string().optional(),
+    type: z.string().optional(),
+
+    // Flags
+    is_met_early: z.boolean().optional(),
+    party_mode_activated: z.boolean().optional(),
+
     // Related data
-    associated_accounts: z.array(z.string()).optional(),
+    associated_accounts: z.record(z.string(), z.unknown()).optional(),
     created_with_allocations: z.boolean().optional(),
   })
   .passthrough(); // Allow additional fields we haven't discovered yet
