@@ -12,7 +12,7 @@ import {
   isIncomeCategory,
   isKnownPlaidCategory,
 } from '../utils/categories.js';
-import type { Transaction, Account } from '../models/index.js';
+import type { Transaction, Account, InvestmentPrice, InvestmentSplit } from '../models/index.js';
 import { getTransactionDisplayName, getRecurringDisplayName } from '../models/index.js';
 import { isItemHealthy, itemNeedsAttention, getItemDisplayName } from '../models/item.js';
 import {
@@ -1903,6 +1903,109 @@ export class CopilotMoneyTools {
       })),
     };
   }
+
+  /**
+   * Get investment price history with optional filters.
+   *
+   * @param options - Filter options
+   * @returns Object with price data and pagination info
+   */
+  async getInvestmentPrices(
+    options: {
+      ticker_symbol?: string;
+      start_date?: string;
+      end_date?: string;
+      price_type?: 'daily' | 'hf';
+      limit?: number;
+      offset?: number;
+    } = {}
+  ): Promise<{
+    count: number;
+    total_count: number;
+    offset: number;
+    has_more: boolean;
+    tickers: string[];
+    prices: InvestmentPrice[];
+  }> {
+    const { ticker_symbol, start_date, end_date, price_type } = options;
+    const validatedLimit = validateLimit(options.limit, DEFAULT_QUERY_LIMIT);
+    const validatedOffset = validateOffset(options.offset);
+
+    if (start_date) validateDate(start_date, 'start_date');
+    if (end_date) validateDate(end_date, 'end_date');
+
+    const prices = await this.db.getInvestmentPrices({
+      tickerSymbol: ticker_symbol,
+      startDate: start_date,
+      endDate: end_date,
+      priceType: price_type,
+    });
+
+    const tickerSet = new Set<string>();
+    for (const p of prices) {
+      if (p.ticker_symbol) tickerSet.add(p.ticker_symbol);
+    }
+
+    const totalCount = prices.length;
+    const hasMore = validatedOffset + validatedLimit < totalCount;
+    const paged = prices.slice(validatedOffset, validatedOffset + validatedLimit);
+
+    return {
+      count: paged.length,
+      total_count: totalCount,
+      offset: validatedOffset,
+      has_more: hasMore,
+      tickers: [...tickerSet].sort(),
+      prices: paged,
+    };
+  }
+
+  /**
+   * Get stock split history with optional filters.
+   *
+   * @param options - Filter options
+   * @returns Object with split data and pagination info
+   */
+  async getInvestmentSplits(
+    options: {
+      ticker_symbol?: string;
+      start_date?: string;
+      end_date?: string;
+      limit?: number;
+      offset?: number;
+    } = {}
+  ): Promise<{
+    count: number;
+    total_count: number;
+    offset: number;
+    has_more: boolean;
+    splits: InvestmentSplit[];
+  }> {
+    const { ticker_symbol, start_date, end_date } = options;
+    const validatedLimit = validateLimit(options.limit, DEFAULT_QUERY_LIMIT);
+    const validatedOffset = validateOffset(options.offset);
+
+    if (start_date) validateDate(start_date, 'start_date');
+    if (end_date) validateDate(end_date, 'end_date');
+
+    const splits = await this.db.getInvestmentSplits({
+      tickerSymbol: ticker_symbol,
+      startDate: start_date,
+      endDate: end_date,
+    });
+
+    const totalCount = splits.length;
+    const hasMore = validatedOffset + validatedLimit < totalCount;
+    const paged = splits.slice(validatedOffset, validatedOffset + validatedLimit);
+
+    return {
+      count: paged.length,
+      total_count: totalCount,
+      offset: validatedOffset,
+      has_more: hasMore,
+      splits: paged,
+    };
+  }
 }
 
 /**
@@ -2294,6 +2397,69 @@ export function createToolSchemas(): ToolSchema[] {
       annotations: {
         readOnlyHint: true,
       },
+    },
+    {
+      name: 'get_investment_prices',
+      description:
+        'Get investment price history for portfolio tracking. Returns daily and high-frequency ' +
+        'price data for stocks, ETFs, mutual funds, and crypto. Filter by ticker symbol, date range, ' +
+        'or price type (daily/hf). Includes OHLCV data when available.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          ticker_symbol: {
+            type: 'string',
+            description: 'Filter by ticker symbol (e.g., "AAPL", "BTC-USD", "VTSAX")',
+          },
+          start_date: { type: 'string', description: 'Start date (YYYY-MM-DD or YYYY-MM)' },
+          end_date: { type: 'string', description: 'End date (YYYY-MM-DD or YYYY-MM)' },
+          price_type: {
+            type: 'string',
+            enum: ['daily', 'hf'],
+            description:
+              'Filter by price type: daily (monthly aggregates) or hf (high-frequency intraday)',
+          },
+          limit: {
+            type: 'integer',
+            description: 'Maximum number of results (default: 100, max: 10000)',
+            default: 100,
+          },
+          offset: {
+            type: 'integer',
+            description: 'Number of results to skip for pagination (default: 0)',
+            default: 0,
+          },
+        },
+      },
+      annotations: { readOnlyHint: true },
+    },
+    {
+      name: 'get_investment_splits',
+      description:
+        'Get stock split history. Returns split ratios, dates, and multipliers for ' +
+        'accurate historical price and share calculations. Filter by ticker symbol or date range.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          ticker_symbol: {
+            type: 'string',
+            description: 'Filter by ticker symbol (e.g., "AAPL", "TSLA")',
+          },
+          start_date: { type: 'string', description: 'Start date (YYYY-MM-DD)' },
+          end_date: { type: 'string', description: 'End date (YYYY-MM-DD)' },
+          limit: {
+            type: 'integer',
+            description: 'Maximum number of results (default: 100, max: 10000)',
+            default: 100,
+          },
+          offset: {
+            type: 'integer',
+            description: 'Number of results to skip for pagination (default: 0)',
+            default: 0,
+          },
+        },
+      },
+      annotations: { readOnlyHint: true },
     },
   ];
 }

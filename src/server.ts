@@ -144,6 +144,18 @@ export class CopilotMoneyServer {
           );
           break;
 
+        case 'get_investment_prices':
+          result = await this.tools.getInvestmentPrices(
+            (typedArgs as Parameters<typeof this.tools.getInvestmentPrices>[0]) || {}
+          );
+          break;
+
+        case 'get_investment_splits':
+          result = await this.tools.getInvestmentSplits(
+            (typedArgs as Parameters<typeof this.tools.getInvestmentSplits>[0]) || {}
+          );
+          break;
+
         default:
           return {
             content: [

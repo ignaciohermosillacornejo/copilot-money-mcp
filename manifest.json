@@ -63,6 +63,14 @@
     {
       "name": "get_goals",
       "description": "Get financial goals from Copilot's native goal tracking."
+    },
+    {
+      "name": "get_investment_prices",
+      "description": "Get investment price history for portfolio tracking. Returns daily and high-frequency price data for stocks, ETFs, mutual funds, and crypto."
+    },
+    {
+      "name": "get_investment_splits",
+      "description": "Get stock split history. Returns split ratios, dates, and multipliers for accurate historical price and share calculations."
     }
   ],
   "tools_generated": false,

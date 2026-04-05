@@ -1288,9 +1288,9 @@ describe('refreshDatabase', () => {
 });
 
 describe('createToolSchemas', () => {
-  test('returns 9 tool schemas', async () => {
+  test('returns 11 tool schemas', async () => {
     const schemas = createToolSchemas();
-    expect(schemas).toHaveLength(9);
+    expect(schemas).toHaveLength(11);
   });
 
   test('all tools have readOnlyHint: true', async () => {
@@ -1327,9 +1327,11 @@ describe('createToolSchemas', () => {
     expect(names).toContain('get_recurring_transactions');
     expect(names).toContain('get_budgets');
     expect(names).toContain('get_goals');
+    expect(names).toContain('get_investment_prices');
+    expect(names).toContain('get_investment_splits');
 
-    // Should have exactly 9 tools
-    expect(names.length).toBe(9);
+    // Should have exactly 11 tools
+    expect(names.length).toBe(11);
   });
 });
 
@@ -1655,5 +1657,156 @@ describe('database securities accessors', () => {
     expect(map.size).toBe(3);
     expect(map.get('hash1')?.ticker_symbol).toBe('AAPL');
     expect(map.get('hash2')?.ticker_symbol).toBe('SCHX');
+  });
+});
+
+describe('getInvestmentPrices', () => {
+  let db: CopilotDatabase;
+  let tools: CopilotMoneyTools;
+
+  beforeEach(() => {
+    db = new CopilotDatabase('/fake/path');
+    (db as any)._allCollectionsLoaded = true;
+    (db as any)._accounts = [];
+    (db as any)._userCategories = [];
+    (db as any)._userAccounts = [];
+    (db as any)._investmentPrices = [
+      {
+        investment_id: 'hash1',
+        ticker_symbol: 'AAPL',
+        price: 150.0,
+        date: '2024-01-15',
+        price_type: 'hf',
+      },
+      {
+        investment_id: 'hash1',
+        ticker_symbol: 'AAPL',
+        month: '2024-01',
+        close_price: 148.0,
+        price_type: 'daily',
+      },
+      {
+        investment_id: 'hash2',
+        ticker_symbol: 'SCHX',
+        price: 25.0,
+        date: '2024-01-15',
+        price_type: 'hf',
+      },
+      {
+        investment_id: 'hash2',
+        ticker_symbol: 'SCHX',
+        month: '2024-02',
+        close_price: 26.0,
+        price_type: 'daily',
+      },
+    ];
+    tools = new CopilotMoneyTools(db);
+  });
+
+  test('returns all prices', async () => {
+    const result = await tools.getInvestmentPrices({});
+    expect(result.count).toBe(4);
+    expect(result.total_count).toBe(4);
+    expect(result).toHaveProperty('tickers');
+    expect(result).toHaveProperty('prices');
+  });
+
+  test('filters by ticker_symbol', async () => {
+    const result = await tools.getInvestmentPrices({ ticker_symbol: 'AAPL' });
+    expect(result.count).toBe(2);
+    for (const p of result.prices) {
+      expect(p.ticker_symbol).toBe('AAPL');
+    }
+  });
+
+  test('filters by price_type', async () => {
+    const result = await tools.getInvestmentPrices({ price_type: 'daily' });
+    expect(result.count).toBe(2);
+    for (const p of result.prices) {
+      expect(p.price_type).toBe('daily');
+    }
+  });
+
+  test('respects limit and offset', async () => {
+    const result = await tools.getInvestmentPrices({ limit: 2, offset: 1 });
+    expect(result.count).toBe(2);
+    expect(result.total_count).toBe(4);
+    expect(result.offset).toBe(1);
+    expect(result.has_more).toBe(true);
+  });
+
+  test('returns unique tickers list', async () => {
+    const result = await tools.getInvestmentPrices({});
+    expect(result.tickers).toContain('AAPL');
+    expect(result.tickers).toContain('SCHX');
+    expect(result.tickers.length).toBe(2);
+  });
+});
+
+describe('getInvestmentSplits', () => {
+  let db: CopilotDatabase;
+  let tools: CopilotMoneyTools;
+
+  beforeEach(() => {
+    db = new CopilotDatabase('/fake/path');
+    (db as any)._allCollectionsLoaded = true;
+    (db as any)._accounts = [];
+    (db as any)._userCategories = [];
+    (db as any)._userAccounts = [];
+    (db as any)._investmentSplits = [
+      {
+        split_id: 's1',
+        ticker_symbol: 'AAPL',
+        split_date: '2020-08-31',
+        split_ratio: '4:1',
+        multiplier: 4,
+      },
+      {
+        split_id: 's2',
+        ticker_symbol: 'TSLA',
+        split_date: '2022-08-25',
+        split_ratio: '3:1',
+        multiplier: 3,
+      },
+      {
+        split_id: 's3',
+        ticker_symbol: 'AAPL',
+        split_date: '2014-06-09',
+        split_ratio: '7:1',
+        multiplier: 7,
+      },
+    ];
+    tools = new CopilotMoneyTools(db);
+  });
+
+  test('returns all splits', async () => {
+    const result = await tools.getInvestmentSplits({});
+    expect(result.count).toBe(3);
+    expect(result.total_count).toBe(3);
+    expect(result).toHaveProperty('splits');
+  });
+
+  test('filters by ticker_symbol', async () => {
+    const result = await tools.getInvestmentSplits({ ticker_symbol: 'AAPL' });
+    expect(result.count).toBe(2);
+    for (const s of result.splits) {
+      expect(s.ticker_symbol).toBe('AAPL');
+    }
+  });
+
+  test('filters by date range', async () => {
+    const result = await tools.getInvestmentSplits({
+      start_date: '2020-01-01',
+      end_date: '2021-12-31',
+    });
+    expect(result.count).toBe(1);
+    expect(result.splits[0].ticker_symbol).toBe('AAPL');
+  });
+
+  test('respects limit and offset', async () => {
+    const result = await tools.getInvestmentSplits({ limit: 1, offset: 0 });
+    expect(result.count).toBe(1);
+    expect(result.total_count).toBe(3);
+    expect(result.has_more).toBe(true);
   });
 });
