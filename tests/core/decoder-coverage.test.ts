@@ -2559,6 +2559,232 @@ describe('decoder coverage', () => {
     });
   });
 
+  describe('account field completeness', () => {
+    test('extracts all new account fields', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'account-all-fields-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'accounts',
+          id: 'acc-full',
+          fields: {
+            account_id: 'acc-full',
+            id: 'acc-full-id',
+            name: 'Full Investment Account',
+            official_name: 'Official Full Account',
+            current_balance: 50000.555,
+            original_current_balance: 49999.444,
+            available_balance: 48000.0,
+            account_type: 'investment',
+            subtype: 'brokerage',
+            original_type: 'investment',
+            original_subtype: 'brokerage',
+            mask: '1234',
+            institution_name: 'Fidelity',
+            item_id: 'item-1',
+            institution_id: 'ins-1',
+            iso_currency_code: 'USD',
+            color: '#FF0000',
+            custom_color: '#00FF00',
+            logo: 'https://logo.url/fidelity.png',
+            logo_content_type: 'image/png',
+            _origin: 'plaid',
+            nickname: 'My Brokerage',
+            group_id: 'grp-1',
+            historical_update: true,
+            dashboard_active: true,
+            savings_active: false,
+            provider_deleted: false,
+            live_balance_backend_disabled: false,
+            live_balance_user_disabled: true,
+            holdings_initialized: true,
+            investments_performance_enabled: true,
+            is_manual: false,
+            user_hidden: false,
+            user_deleted: false,
+            group_leader: true,
+            verification_status: 'verified',
+            latest_balance_update: {
+              __type: 'timestamp',
+              seconds: 1704067200, // 2024-01-01
+              nanos: 0,
+            },
+            holdings: [
+              {
+                security_id: 'sec-1',
+                account_id: 'acc-full',
+                cost_basis: 10000.0,
+                institution_price: 150.5,
+                institution_value: 15050.0,
+                quantity: 100,
+                iso_currency_code: 'USD',
+                vested_quantity: 80,
+                vested_value: 12040.0,
+              },
+            ],
+            metadata: { source: 'plaid', last_sync: 'yesterday' },
+            merged: { from_account: 'old-acc-1' },
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.accounts.length).toBe(1);
+      const acc = result.accounts[0]!;
+
+      // Core fields
+      expect(acc.account_id).toBe('acc-full');
+      expect(acc.id).toBe('acc-full-id');
+      expect(acc.name).toBe('Full Investment Account');
+      expect(acc.official_name).toBe('Official Full Account');
+      expect(acc.current_balance).toBe(50000.56); // rounded
+      expect(acc.original_current_balance).toBe(49999.44); // rounded
+      expect(acc.available_balance).toBe(48000);
+      expect(acc.account_type).toBe('investment');
+      expect(acc.subtype).toBe('brokerage');
+      expect(acc.original_type).toBe('investment');
+      expect(acc.original_subtype).toBe('brokerage');
+
+      // String fields
+      expect(acc.color).toBe('#FF0000');
+      expect(acc.custom_color).toBe('#00FF00');
+      expect(acc.logo).toBe('https://logo.url/fidelity.png');
+      expect(acc.logo_content_type).toBe('image/png');
+      expect(acc._origin).toBe('plaid');
+      expect(acc.nickname).toBe('My Brokerage');
+      expect(acc.group_id).toBe('grp-1');
+
+      // Boolean flags
+      expect(acc.historical_update).toBe(true);
+      expect(acc.dashboard_active).toBe(true);
+      expect(acc.savings_active).toBe(false);
+      expect(acc.provider_deleted).toBe(false);
+      expect(acc.live_balance_backend_disabled).toBe(false);
+      expect(acc.live_balance_user_disabled).toBe(true);
+      expect(acc.holdings_initialized).toBe(true);
+      expect(acc.investments_performance_enabled).toBe(true);
+      expect(acc.is_manual).toBe(false);
+      expect(acc.user_hidden).toBe(false);
+      expect(acc.user_deleted).toBe(false);
+      expect(acc.group_leader).toBe(true);
+
+      // Verification status
+      expect(acc.verification_status).toBe('verified');
+
+      // Timestamp
+      expect(acc.latest_balance_update).toBe('2024-01-01');
+
+      // Holdings
+      expect(acc.holdings).toBeDefined();
+      expect(acc.holdings!.length).toBe(1);
+      expect(acc.holdings![0]!.security_id).toBe('sec-1');
+      expect(acc.holdings![0]!.cost_basis).toBe(10000);
+      expect(acc.holdings![0]!.quantity).toBe(100);
+
+      // Complex objects
+      expect(acc.metadata).toEqual({ source: 'plaid', last_sync: 'yesterday' });
+      expect(acc.merged).toEqual({ from_account: 'old-acc-1' });
+    });
+
+    test('account with null limit (credit card)', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'account-null-limit-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'accounts',
+          id: 'cc1',
+          fields: {
+            account_id: 'cc1',
+            name: 'Credit Card',
+            current_balance: 1500.0,
+            account_type: 'credit',
+            limit: null,
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.accounts.length).toBe(1);
+      expect(result.accounts[0]!.limit).toBeNull();
+    });
+
+    test('account with numeric limit', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'account-numeric-limit-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'accounts',
+          id: 'cc2',
+          fields: {
+            account_id: 'cc2',
+            name: 'Credit Card 2',
+            current_balance: 500.0,
+            account_type: 'credit',
+            limit: 10000,
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.accounts.length).toBe(1);
+      expect(result.accounts[0]!.limit).toBe(10000);
+    });
+
+    test('account with null verification_status', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'account-null-verification-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'accounts',
+          id: 'acc-v',
+          fields: {
+            account_id: 'acc-v',
+            name: 'Verified Account',
+            current_balance: 100.0,
+            verification_status: null,
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.accounts.length).toBe(1);
+      expect(result.accounts[0]!.verification_status).toBeNull();
+    });
+
+    test('original_* fields stored separately even when used as fallback', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'account-original-stored-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'accounts',
+          id: 'acc-orig',
+          fields: {
+            account_id: 'acc-orig',
+            name: 'Original Fields Account',
+            // No current_balance — falls back to original_current_balance
+            original_current_balance: 999.99,
+            // No type — falls back to original_type
+            original_type: 'depository',
+            // No subtype — falls back to original_subtype
+            original_subtype: 'savings',
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.accounts.length).toBe(1);
+      const acc = result.accounts[0]!;
+      // Used as fallback
+      expect(acc.current_balance).toBe(999.99);
+      expect(acc.account_type).toBe('depository');
+      expect(acc.subtype).toBe('savings');
+      // Also stored separately
+      expect(acc.original_current_balance).toBe(999.99);
+      expect(acc.original_type).toBe('depository');
+      expect(acc.original_subtype).toBe('savings');
+    });
+  });
+
   describe('goal history with daily_data and total_contribution', () => {
     test('goal history with daily_data map and total_contribution', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'goal-history-daily-db');

@@ -888,12 +888,23 @@ function processAccount(fields: Map<string, FirestoreValue>, docId: string): Acc
     'item_id',
     'iso_currency_code',
     'institution_id',
+    'color',
+    'custom_color',
+    'logo',
+    'logo_content_type',
+    '_origin',
+    'nickname',
+    'group_id',
   ];
 
   for (const field of stringFields) {
     const value = getString(fields, field);
     if (value) accData[field] = value;
   }
+
+  // id field — store separately from account_id
+  const idField = getString(fields, 'id');
+  if (idField) accData.id = idField;
 
   const accountType =
     getString(fields, 'type') ??
@@ -904,16 +915,90 @@ function processAccount(fields: Map<string, FirestoreValue>, docId: string): Acc
   const subtype = getString(fields, 'subtype') ?? getString(fields, 'original_subtype');
   if (subtype) accData.subtype = subtype;
 
+  // Always store original_* fields separately even when used as fallback
+  const originalType = getString(fields, 'original_type');
+  if (originalType) accData.original_type = originalType;
+
+  const originalSubtype = getString(fields, 'original_subtype');
+  if (originalSubtype) accData.original_subtype = originalSubtype;
+
+  const originalCurrentBalance = getNumber(fields, 'original_current_balance');
+  if (originalCurrentBalance !== undefined) {
+    accData.original_current_balance = Math.round(originalCurrentBalance * 100) / 100;
+  }
+
   const availableBalance = getNumber(fields, 'available_balance');
   if (availableBalance !== undefined) {
     accData.available_balance = Math.round(availableBalance * 100) / 100;
   }
 
-  // Extract user_deleted flag - accounts that were deleted or merged
-  const userDeleted = getBoolean(fields, 'user_deleted');
-  if (userDeleted !== undefined) {
-    accData.user_deleted = userDeleted;
+  // Check for null limit (credit cards) vs numeric limit
+  const limitField = fields.get('limit');
+  if (limitField) {
+    if (limitField.type === 'null') {
+      accData.limit = null;
+    } else {
+      const limitVal = getNumber(fields, 'limit');
+      if (limitVal !== undefined) accData.limit = limitVal;
+    }
   }
+
+  // Boolean flags
+  const booleanFields = [
+    'user_deleted',
+    'historical_update',
+    'dashboard_active',
+    'savings_active',
+    'provider_deleted',
+    'live_balance_backend_disabled',
+    'live_balance_user_disabled',
+    'holdings_initialized',
+    'investments_performance_enabled',
+    'is_manual',
+    'user_hidden',
+    'group_leader',
+  ];
+
+  for (const field of booleanFields) {
+    const value = getBoolean(fields, field);
+    if (value !== undefined) accData[field] = value;
+  }
+
+  // verification_status — can be string or null
+  const verificationField = fields.get('verification_status');
+  if (verificationField) {
+    if (verificationField.type === 'null') {
+      accData.verification_status = null;
+    } else {
+      const vs = getString(fields, 'verification_status');
+      if (vs) accData.verification_status = vs;
+    }
+  }
+
+  // Timestamp fields
+  const latestBalanceUpdate = getDateString(fields, 'latest_balance_update');
+  if (latestBalanceUpdate) accData.latest_balance_update = latestBalanceUpdate;
+
+  // Holdings array (investment accounts)
+  const holdingsField = fields.get('holdings');
+  if (holdingsField && holdingsField.type === 'array') {
+    const holdings: Record<string, unknown>[] = [];
+    for (const item of holdingsField.value) {
+      if (item.type === 'map') {
+        holdings.push(toPlainObject(item.value));
+      }
+    }
+    if (holdings.length > 0) {
+      accData.holdings = holdings;
+    }
+  }
+
+  // Complex map fields
+  const metadataMap = getMap(fields, 'metadata');
+  if (metadataMap) accData.metadata = toPlainObject(metadataMap);
+
+  const mergedMap = getMap(fields, 'merged');
+  if (mergedMap) accData.merged = toPlainObject(mergedMap);
 
   if (!accData.name && !accData.official_name) {
     return null;
