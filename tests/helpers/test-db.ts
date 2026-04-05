@@ -462,7 +462,6 @@ export async function createCombinedDb(
           date: t.date,
           name: t.name,
           original_name: t.original_name,
-          merchant: t.merchant,
           category_id: t.category_id,
           city: t.city,
           region: t.region,
