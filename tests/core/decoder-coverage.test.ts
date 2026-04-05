@@ -3318,4 +3318,43 @@ describe('decoder coverage', () => {
       expect(result.goals[0]!.associated_accounts).toEqual({});
     });
   });
+
+  describe('investment split adjustments', () => {
+    test('captures date-keyed adjustment factors', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'split-adjustments-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'investment_splits',
+          id: 'split-adj1',
+          fields: {
+            '2022-03-11': 0.5,
+            '2024-10-11': 0.333,
+          },
+        },
+      ]);
+
+      const splits = await decodeInvestmentSplits(dbPath);
+      expect(splits.length).toBe(1);
+      expect(splits[0]!.adjustments).toEqual({
+        '2022-03-11': 0.5,
+        '2024-10-11': 0.333,
+      });
+    });
+
+    test('handles empty investment split document (zero fields)', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'split-empty-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'investment_splits',
+          id: 'split-empty1',
+          fields: {},
+        },
+      ]);
+
+      const splits = await decodeInvestmentSplits(dbPath);
+      expect(splits.length).toBe(1);
+      expect(splits[0]!.split_id).toBe('split-empty1');
+      expect(splits[0]!.adjustments).toBeUndefined();
+    });
+  });
 });

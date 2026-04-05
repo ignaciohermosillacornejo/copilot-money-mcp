@@ -1416,6 +1416,20 @@ function processInvestmentSplit(
     if (value !== undefined) splitData[field] = value;
   }
 
+  // Collect date-keyed adjustment factors (e.g., "2022-03-11": 0.5)
+  const knownFields = new Set(['split_id', ...stringFields, ...numericFields]);
+  const dateKeyRegex = /^\d{4}-\d{2}-\d{2}$/;
+  const adjustments: Record<string, number> = {};
+  for (const [key, value] of fields.entries()) {
+    if (knownFields.has(key)) continue;
+    if (dateKeyRegex.test(key) && (value.type === 'double' || value.type === 'integer')) {
+      adjustments[key] = value.value;
+    }
+  }
+  if (Object.keys(adjustments).length > 0) {
+    splitData.adjustments = adjustments;
+  }
+
   const validated = InvestmentSplitSchema.safeParse(splitData);
   return validated.success ? validated.data : null;
 }

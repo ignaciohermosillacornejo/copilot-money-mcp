@@ -61,6 +61,9 @@ export const InvestmentSplitSchema = z
     ex_date: z.string().optional(), // Ex-dividend/split date
     description: z.string().optional(), // Human-readable description
     source: z.string().optional(), // Data source identifier
+
+    // Date-keyed adjustment factors (e.g., {"2022-03-11": 0.5, "2024-10-11": 0.333})
+    adjustments: z.record(z.string(), z.number()).optional(),
   })
   .passthrough(); // Allow additional fields we haven't discovered yet
 
