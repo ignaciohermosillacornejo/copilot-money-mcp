@@ -4,7 +4,7 @@
  * Tests the investment split model, schema validation, and helper functions.
  */
 
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect, mock } from 'bun:test';
 import {
   InvestmentSplitSchema,
   parseSplitRatio,
@@ -470,6 +470,22 @@ describe('formatSplitDate', () => {
     expect(formatted).toContain('July');
     expect(formatted).toContain('15');
     expect(formatted).toContain('2022');
+  });
+
+  test('catch block: returns raw date when toLocaleDateString throws', () => {
+    const original = Date.prototype.toLocaleDateString;
+    Date.prototype.toLocaleDateString = () => {
+      throw new Error('locale not supported');
+    };
+    try {
+      const split: InvestmentSplit = {
+        split_id: 'split_1',
+        split_date: '2020-08-31',
+      };
+      expect(formatSplitDate(split)).toBe('2020-08-31');
+    } finally {
+      Date.prototype.toLocaleDateString = original;
+    }
   });
 });
 

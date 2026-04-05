@@ -12,6 +12,10 @@ import {
   decodeAllCollections,
   decodeGoalHistory,
   decodeTransactions,
+  decodeAccounts,
+  decodeRecurring,
+  decodeBudgets,
+  decodeGoals,
   decodeCategories,
   getDecodeTimeoutMs,
 } from '../../src/core/decoder.js';
@@ -3495,6 +3499,203 @@ describe('decoder coverage', () => {
       expect(splits.length).toBe(1);
       expect(splits[0]!.split_id).toBe('split-empty1');
       expect(splits[0]!.adjustments).toBeUndefined();
+    });
+  });
+
+  describe('schema parse catch blocks', () => {
+    test('processTransaction catch: amount exceeding 10M fails schema refine', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'txn-schema-fail-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'transactions',
+          id: 'txn-valid',
+          fields: {
+            transaction_id: 'txn-valid',
+            amount: 50.0,
+            date: '2024-01-15',
+            name: 'Valid Transaction',
+          },
+        },
+        {
+          collection: 'transactions',
+          id: 'txn-huge',
+          fields: {
+            transaction_id: 'txn-huge',
+            amount: 20000000, // Exceeds 10M refine limit
+            date: '2024-01-15',
+            name: 'Huge Transaction',
+          },
+        },
+      ]);
+
+      const txns = await decodeTransactions(dbPath);
+      // The huge transaction should be silently dropped by the catch block
+      expect(txns.length).toBe(1);
+      expect(txns[0]?.transaction_id).toBe('txn-valid');
+    });
+
+    test('processRecurring catch: invalid date format fails schema regex', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'rec-schema-fail-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'recurring',
+          id: 'rec-valid',
+          fields: {
+            recurring_id: 'rec-valid',
+            name: 'Netflix',
+            amount: 15.99,
+          },
+        },
+        {
+          collection: 'recurring',
+          id: 'rec-bad-date',
+          fields: {
+            recurring_id: 'rec-bad-date',
+            name: 'Bad Date Recurring',
+            next_date: 'not-a-date', // Fails DATE_REGEX in schema
+          },
+        },
+      ]);
+
+      const recurring = await decodeRecurring(dbPath);
+      expect(recurring.length).toBe(1);
+      expect(recurring[0]?.recurring_id).toBe('rec-valid');
+    });
+
+    test('processBudget catch: invalid period enum fails schema', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'budget-schema-fail-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'budgets',
+          id: 'bud-valid',
+          fields: {
+            budget_id: 'bud-valid',
+            name: 'Food',
+            amount: 500,
+          },
+        },
+        {
+          collection: 'budgets',
+          id: 'bud-bad-period',
+          fields: {
+            budget_id: 'bud-bad-period',
+            name: 'Bad Budget',
+            period: 'biweekly', // Not in the enum
+          },
+        },
+      ]);
+
+      const budgets = await decodeBudgets(dbPath);
+      expect(budgets.length).toBe(1);
+      expect(budgets[0]?.budget_id).toBe('bud-valid');
+    });
+
+    test('processAccount catch: NaN balance fails schema number validation', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'acc-schema-fail-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'accounts',
+          id: 'acc-valid',
+          fields: {
+            account_id: 'acc-valid',
+            name: 'Valid Account',
+            current_balance: 1000.0,
+          },
+        },
+        {
+          collection: 'accounts',
+          id: 'acc-nan',
+          fields: {
+            account_id: 'acc-nan',
+            name: 'NaN Account',
+            current_balance: NaN, // z.number() rejects NaN
+          },
+        },
+      ]);
+
+      const accounts = await decodeAccounts(dbPath);
+      expect(accounts.length).toBe(1);
+      expect(accounts[0]?.account_id).toBe('acc-valid');
+    });
+
+    test('processGoalHistory catch: invalid created_date format fails schema regex', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'goal-hist-schema-fail-db');
+      await createDeepTestDatabase(dbPath, [
+        {
+          collection: 'financial_goals/goal1/financial_goal_history',
+          id: '2024-01',
+          fields: {
+            goal_id: 'goal1',
+            current_amount: 5000,
+          },
+        },
+        {
+          collection: 'financial_goals/goal2/financial_goal_history',
+          id: '2024-02',
+          fields: {
+            goal_id: 'goal2',
+            current_amount: 3000,
+            created_date: 'not-a-date', // Fails DATE_REGEX in schema
+          },
+        },
+      ]);
+
+      const histories = await decodeGoalHistory(dbPath);
+      expect(histories.length).toBe(1);
+      expect(histories[0]?.goal_id).toBe('goal1');
+    });
+
+    test('processGoal catch: invalid created_date format fails schema regex', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'goal-schema-fail-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'financial_goals',
+          id: 'goal-valid',
+          fields: {
+            goal_id: 'goal-valid',
+            name: 'Emergency Fund',
+          },
+        },
+        {
+          collection: 'financial_goals',
+          id: 'goal-bad-date',
+          fields: {
+            goal_id: 'goal-bad-date',
+            name: 'Bad Goal',
+            created_date: 'January 1st', // Fails DATE_REGEX
+          },
+        },
+      ]);
+
+      const goals = await decodeGoals(dbPath);
+      expect(goals.length).toBe(1);
+      expect(goals[0]?.goal_id).toBe('goal-valid');
+    });
+  });
+
+  describe('processPlaidAccount field coverage', () => {
+    test('plaid account with numeric limit and string verification_status', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'plaid-acc-fields-db');
+      // Use 5-segment path so binary key routing picks up /accounts/ in the middle
+      await createDeepTestDatabase(dbPath, [
+        {
+          collection: 'items/item1/accounts/pacc1',
+          id: 'data',
+          fields: {
+            name: 'Chase Credit',
+            type: 'credit',
+            subtype: 'credit card',
+            current_balance: 1500.0,
+            limit: 5000,
+            verification_status: 'automatically_verified',
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+      expect(result.plaidAccounts.length).toBe(1);
+      expect(result.plaidAccounts[0]?.limit).toBe(5000);
+      expect(result.plaidAccounts[0]?.verification_status).toBe('automatically_verified');
     });
   });
 });

@@ -3,7 +3,7 @@
  */
 
 import { describe, test, expect } from 'bun:test';
-import { TagSchema } from '../../src/models/tag.js';
+import { TagSchema, getTagDisplayName } from '../../src/models/tag.js';
 
 describe('TagSchema', () => {
   test('validates minimal document with just tag_id', () => {
@@ -48,5 +48,19 @@ describe('TagSchema', () => {
       name: 'Vacation',
     });
     expect(result.success).toBe(false);
+  });
+});
+
+describe('getTagDisplayName', () => {
+  test('returns name when available', () => {
+    expect(getTagDisplayName({ tag_id: 'tag-1', name: 'Vacation' })).toBe('Vacation');
+  });
+
+  test('falls back to tag_id when name is undefined', () => {
+    expect(getTagDisplayName({ tag_id: 'tag-abc123' })).toBe('tag-abc123');
+  });
+
+  test('falls back to tag_id when name is empty string', () => {
+    expect(getTagDisplayName({ tag_id: 'tag-1', name: '' })).toBe('tag-1');
   });
 });

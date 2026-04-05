@@ -5,7 +5,7 @@
  * to trigger in normal operation.
  */
 
-import { describe, test, expect, beforeEach } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { CopilotDatabase } from '../../src/core/database.js';
 import { extractValue } from '../../src/core/decoder.js';
 import type { FirestoreValue } from '../../src/core/protobuf-parser.js';
@@ -226,6 +226,58 @@ describe('CopilotDatabase error handling', () => {
       // @ts-expect-error - setting to empty string
       db.dbPath = '';
       expect(db.isAvailable()).toBe(false);
+    });
+  });
+
+  describe('getCacheTTLMs via COPILOT_CACHE_TTL_MINUTES env var', () => {
+    let originalEnv: string | undefined;
+
+    beforeEach(() => {
+      originalEnv = process.env.COPILOT_CACHE_TTL_MINUTES;
+    });
+
+    afterEach(() => {
+      if (originalEnv === undefined) {
+        delete process.env.COPILOT_CACHE_TTL_MINUTES;
+      } else {
+        process.env.COPILOT_CACHE_TTL_MINUTES = originalEnv;
+      }
+    });
+
+    test('cache TTL=0 means always reload (isCacheStale returns true)', async () => {
+      process.env.COPILOT_CACHE_TTL_MINUTES = '0';
+
+      const db = new CopilotDatabase();
+      // @ts-expect-error - accessing private property for testing
+      db._cacheLoadedAt = Date.now(); // Simulate recently loaded cache
+
+      // isCacheStale should return true because TTL=0 means always reload
+      // @ts-expect-error - accessing private method for testing
+      expect(db.isCacheStale()).toBe(true);
+    });
+
+    test('valid COPILOT_CACHE_TTL_MINUTES env var is used', async () => {
+      process.env.COPILOT_CACHE_TTL_MINUTES = '10';
+
+      const db = new CopilotDatabase();
+      // @ts-expect-error - accessing private property for testing
+      db._cacheLoadedAt = Date.now(); // Just loaded
+
+      // With 10 minute TTL, cache should NOT be stale
+      // @ts-expect-error - accessing private method for testing
+      expect(db.isCacheStale()).toBe(false);
+    });
+
+    test('invalid COPILOT_CACHE_TTL_MINUTES falls back to default', async () => {
+      process.env.COPILOT_CACHE_TTL_MINUTES = 'not-a-number';
+
+      const db = new CopilotDatabase();
+      // @ts-expect-error - accessing private property for testing
+      db._cacheLoadedAt = Date.now(); // Just loaded
+
+      // Should use default 5 min TTL, cache should NOT be stale
+      // @ts-expect-error - accessing private method for testing
+      expect(db.isCacheStale()).toBe(false);
     });
   });
 });

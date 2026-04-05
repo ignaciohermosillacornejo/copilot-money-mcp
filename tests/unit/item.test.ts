@@ -367,6 +367,22 @@ describe('getItemAccountCount', () => {
 });
 
 describe('formatLastUpdate', () => {
+  test('catch block: returns raw timestamp when toLocaleDateString throws', () => {
+    const original = Date.prototype.toLocaleDateString;
+    Date.prototype.toLocaleDateString = () => {
+      throw new Error('locale not supported');
+    };
+    try {
+      const item: Item = {
+        item_id: 'item_1',
+        last_successful_update: '2024-01-15T10:30:00Z',
+      };
+      expect(formatLastUpdate(item)).toBe('2024-01-15T10:30:00Z');
+    } finally {
+      Date.prototype.toLocaleDateString = original;
+    }
+  });
+
   test('formats last_successful_update', () => {
     const item: Item = {
       item_id: 'item_1',
@@ -413,6 +429,31 @@ describe('formatLastUpdate', () => {
 });
 
 describe('isConsentExpiringSoon', () => {
+  test('catch block: returns false when Date constructor throws', () => {
+    const OriginalDate = globalThis.Date;
+    const MockDate = function (...args: unknown[]) {
+      if (args.length > 0 && args[0] === 'THROW_TRIGGER') {
+        throw new Error('invalid date');
+      }
+      // @ts-expect-error - forwarding constructor
+      return new OriginalDate(...args);
+    } as unknown as DateConstructor;
+    MockDate.now = OriginalDate.now;
+    MockDate.parse = OriginalDate.parse;
+    MockDate.UTC = OriginalDate.UTC;
+    MockDate.prototype = OriginalDate.prototype;
+    globalThis.Date = MockDate;
+    try {
+      const item: Item = {
+        item_id: 'item_1',
+        consent_expiration_time: 'THROW_TRIGGER',
+      };
+      expect(isConsentExpiringSoon(item)).toBe(false);
+    } finally {
+      globalThis.Date = OriginalDate;
+    }
+  });
+
   test('returns false when no consent_expiration_time', () => {
     const item: Item = {
       item_id: 'item_1',
