@@ -3096,6 +3096,75 @@ describe('decoder coverage', () => {
     });
   });
 
+  describe('item field extraction', () => {
+    test('extracts all item fields including new fields', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'item-all-fields-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'items',
+          id: 'item1',
+          fields: {
+            item_id: 'item1',
+            user_id: 'user1',
+            institution_id: 'ins_3',
+            institution_name: 'Chase',
+            connection_status: 'active',
+            _origin: 'plaid',
+            creation_timestamp: { __type: 'timestamp', seconds: 1700000000, nanos: 0 },
+            historical_update: true,
+            is_manual: false,
+            provider: 'plaid',
+            country_code: 'US',
+            plaid_user_id: 'plaid-user-123',
+            products: ['transactions', 'investments'],
+            update_type: 'background',
+            access_token: 'access-sandbox-abc',
+            new_accounts_available: false,
+            user_disconnected: false,
+            login_required_dismissed: false,
+            new_accounts_available_dismissed: true,
+            disconnect_attempted: { __type: 'timestamp', seconds: 1700100000, nanos: 0 },
+            disconnect_attempted_error: 'TIMEOUT',
+            deleted_access_token: 'old-token',
+            fetch_data: { last_fetch: 'ok', status: 'done' },
+            id: 'item1',
+            latest_investments_refresh: { __type: 'timestamp', seconds: 1700200000, nanos: 0 },
+            status_last_webhook_code_sent: 'DEFAULT_UPDATE',
+            status_last_webhook_sent_at: '2024-01-15T10:00:00Z',
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+      expect(result.items.length).toBe(1);
+      const item = result.items[0]!;
+      expect(item.item_id).toBe('item1');
+      expect(item.institution_name).toBe('Chase');
+      expect(item._origin).toBe('plaid');
+      expect(item.creation_timestamp).toBeDefined();
+      expect(item.historical_update).toBe(true);
+      expect(item.is_manual).toBe(false);
+      expect(item.provider).toBe('plaid');
+      expect(item.country_code).toBe('US');
+      expect(item.plaid_user_id).toBe('plaid-user-123');
+      expect(item.products).toEqual(['transactions', 'investments']);
+      expect(item.update_type).toBe('background');
+      expect(item.access_token).toBe('access-sandbox-abc');
+      expect(item.new_accounts_available).toBe(false);
+      expect(item.user_disconnected).toBe(false);
+      expect(item.login_required_dismissed).toBe(false);
+      expect(item.new_accounts_available_dismissed).toBe(true);
+      expect(item.disconnect_attempted).toBeDefined();
+      expect(item.disconnect_attempted_error).toBe('TIMEOUT');
+      expect(item.deleted_access_token).toBe('old-token');
+      expect(item.fetch_data).toEqual({ last_fetch: 'ok', status: 'done' });
+      expect(item.id).toBe('item1');
+      expect(item.latest_investments_refresh).toBeDefined();
+      expect(item.status_last_webhook_code_sent).toBe('DEFAULT_UPDATE');
+      expect(item.status_last_webhook_sent_at).toBe('2024-01-15T10:00:00Z');
+    });
+  });
+
   describe('goal field extraction', () => {
     test('extracts all goal fields including new fields', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'goal-all-fields-db');
