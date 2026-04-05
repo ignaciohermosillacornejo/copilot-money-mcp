@@ -88,12 +88,12 @@ describe('recurring.ts', () => {
       expect(result.success).toBe(false);
     });
 
-    test('rejects unknown properties (strict mode)', () => {
+    test('allows unknown properties (passthrough mode)', () => {
       const result = RecurringSchema.safeParse({
         recurring_id: 'rec-1',
         unknown_field: 'value',
       });
-      expect(result.success).toBe(false);
+      expect(result.success).toBe(true);
     });
 
     test('validates all known frequency values', () => {

@@ -78,8 +78,16 @@ export const RecurringSchema = z
 
     // Metadata
     iso_currency_code: z.string().optional(),
+
+    // Additional fields
+    excluded_transaction_ids: z.array(z.string()).optional(),
+    included_transaction_ids: z.array(z.string()).optional(),
+    skip_filter_update: z.boolean().optional(),
+    identification_method: z.string().optional(),
+    _origin: z.string().optional(),
+    latest_date: z.string().regex(DATE_REGEX, 'Must be YYYY-MM-DD format').optional(),
   })
-  .strict();
+  .passthrough();
 
 export type Recurring = z.infer<typeof RecurringSchema>;
 

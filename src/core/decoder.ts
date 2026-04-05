@@ -1089,6 +1089,27 @@ function processRecurring(fields: Map<string, FirestoreValue>, docId: string): R
   const transactionIds = getStringArray(fields, 'transaction_ids');
   if (transactionIds) recData.transaction_ids = transactionIds;
 
+  // Additional array fields
+  const excludedTransactionIds = getStringArray(fields, 'excluded_transaction_ids');
+  if (excludedTransactionIds) recData.excluded_transaction_ids = excludedTransactionIds;
+
+  const includedTransactionIds = getStringArray(fields, 'included_transaction_ids');
+  if (includedTransactionIds) recData.included_transaction_ids = includedTransactionIds;
+
+  // Additional boolean fields
+  const skipFilterUpdate = getBoolean(fields, 'skip_filter_update');
+  if (skipFilterUpdate !== undefined) recData.skip_filter_update = skipFilterUpdate;
+
+  // Additional string fields
+  const identificationMethod = getString(fields, 'identification_method');
+  if (identificationMethod) recData.identification_method = identificationMethod;
+
+  const origin = getString(fields, '_origin');
+  if (origin) recData._origin = origin;
+
+  // Always store latest_date if present
+  if (latestDate) recData.latest_date = latestDate;
+
   try {
     return RecurringSchema.parse(recData);
   } catch {

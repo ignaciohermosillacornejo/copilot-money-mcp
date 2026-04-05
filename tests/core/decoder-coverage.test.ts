@@ -1471,6 +1471,41 @@ describe('decoder coverage', () => {
       expect(monthly?.next_date).toBe('2024-02-15'); // +1 month
     });
 
+    test('extracts all new recurring fields', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'recurring-new-fields-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'recurring',
+          id: 'rec-full',
+          fields: {
+            recurring_id: 'rec-full',
+            name: 'Full Recurring',
+            amount: 49.99,
+            frequency: 'monthly',
+            latest_date: '2024-03-01',
+            excluded_transaction_ids: ['exc-1', 'exc-2'],
+            included_transaction_ids: ['inc-1'],
+            skip_filter_update: true,
+            identification_method: 'merchant_match',
+            _origin: 'plaid',
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.recurring.length).toBe(1);
+      const rec = result.recurring[0]!;
+      expect(rec.excluded_transaction_ids).toEqual(['exc-1', 'exc-2']);
+      expect(rec.included_transaction_ids).toEqual(['inc-1']);
+      expect(rec.skip_filter_update).toBe(true);
+      expect(rec.identification_method).toBe('merchant_match');
+      expect(rec._origin).toBe('plaid');
+      expect(rec.latest_date).toBe('2024-03-01');
+      // latest_date should also populate last_date
+      expect(rec.last_date).toBe('2024-03-01');
+    });
+
     test('handles investment prices with sorting', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'investment-prices-sort-db');
       await createTestDatabase(dbPath, [
