@@ -735,6 +735,37 @@ export function encodeFirestoreValue(value: unknown): Buffer {
     return Buffer.concat([tag, length, arrayContent]);
   }
 
+  if (typeof value === 'object' && '__type' in (value as Record<string, unknown>)) {
+    const typed = value as Record<string, unknown>;
+
+    if (typed.__type === 'timestamp') {
+      // Timestamp: field 10, length-delimited message { seconds: varint (field 1) }
+      const seconds = (typed.seconds as number) ?? 0;
+      const nanos = (typed.nanos as number) ?? 0;
+      const innerParts: Buffer[] = [];
+      if (seconds !== 0) {
+        innerParts.push(Buffer.from([0x08])); // field 1, varint
+        innerParts.push(encodeVarint(seconds));
+      }
+      if (nanos !== 0) {
+        innerParts.push(Buffer.from([0x10])); // field 2, varint
+        innerParts.push(encodeVarint(nanos));
+      }
+      const inner = Buffer.concat(innerParts);
+      const tag = Buffer.from([0x52]); // Field 10, wire type 2
+      const length = encodeVarint(inner.length);
+      return Buffer.concat([tag, length, inner]);
+    }
+
+    if (typed.__type === 'reference') {
+      // Reference: field 5, length-delimited string
+      const refBytes = Buffer.from(typed.value as string, 'utf-8');
+      const tag = Buffer.from([0x2a]); // Field 5, wire type 2
+      const length = encodeVarint(refBytes.length);
+      return Buffer.concat([tag, length, refBytes]);
+    }
+  }
+
   if (typeof value === 'object') {
     // Map: field 6, length-delimited
     const entries: Buffer[] = [];

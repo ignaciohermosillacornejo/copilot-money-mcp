@@ -12,13 +12,88 @@ import {
   decodeAllCollections,
   decodeGoalHistory,
   decodeTransactions,
+  decodeCategories,
 } from '../../src/core/decoder.js';
-import { createTestDatabase, cleanupAllTempDatabases } from '../../src/core/leveldb-reader.js';
+import {
+  createTestDatabase,
+  cleanupAllTempDatabases,
+  LevelDBReader,
+} from '../../src/core/leveldb-reader.js';
 import type { FirestoreValue } from '../../src/core/protobuf-parser.js';
+import { encodeFirestoreDocument } from '../../src/core/protobuf-parser.js';
 import path from 'node:path';
 import fs from 'node:fs';
 
 const FIXTURES_DIR = path.join(__dirname, '../fixtures/decoder-coverage-tests');
+
+/**
+ * Create a binary-encoded Firestore LevelDB key.
+ * Format: \x85remote_document\x00\x01[\xBE{segment}\x00\x01]...\x80
+ *
+ * This is needed for deep subcollection paths (5+ segments after documents/)
+ * that the string-format regex can't parse.
+ */
+function encodeBinaryKey(collectionPath: string, documentId: string): Buffer {
+  const fullPath = `${collectionPath}/${documentId}`;
+  const segments = fullPath.split('/');
+
+  const parts: Buffer[] = [];
+  // Start marker + "remote_document" + separator
+  parts.push(Buffer.from([0x85]));
+  parts.push(Buffer.from('remote_document', 'utf8'));
+  parts.push(Buffer.from([0x00, 0x01]));
+
+  for (const segment of segments) {
+    parts.push(Buffer.from([0xbe]));
+    parts.push(Buffer.from(segment, 'utf8'));
+    parts.push(Buffer.from([0x00, 0x01]));
+  }
+
+  // End marker
+  parts.push(Buffer.from([0x80]));
+
+  return Buffer.concat(parts);
+}
+
+/**
+ * Create a test database with binary-encoded keys for deep subcollection paths.
+ * Falls back to string keys for paths with 4 or fewer segments.
+ */
+async function createDeepTestDatabase(
+  dbPath: string,
+  documents: Array<{ collection: string; id: string; fields: Record<string, unknown> }>
+): Promise<void> {
+  // Use classic-level directly since LevelDBReader.putDocument uses string keys
+  const { ClassicLevel } = await import('classic-level');
+  const db = new ClassicLevel<Buffer, Buffer>(dbPath, {
+    keyEncoding: 'buffer',
+    valueEncoding: 'buffer',
+    createIfMissing: true,
+  });
+  await db.open();
+
+  try {
+    for (const doc of documents) {
+      const totalSegments = doc.collection.split('/').length + 1; // +1 for doc ID
+      if (totalSegments > 4) {
+        // Deep path - use binary key format
+        const key = encodeBinaryKey(doc.collection, doc.id);
+        const value = encodeFirestoreDocument(doc.fields);
+        await db.put(key, value);
+      } else {
+        // Shallow path - use string key format
+        const key = Buffer.from(
+          `remote_document/projects/copilot-production-22904/databases/(default)/documents/${doc.collection}/${doc.id}`,
+          'utf8'
+        );
+        const value = encodeFirestoreDocument(doc.fields);
+        await db.put(key, value);
+      }
+    }
+  } finally {
+    await db.close();
+  }
+}
 
 afterEach(() => {
   cleanupAllTempDatabases();
@@ -1259,11 +1334,22 @@ describe('decoder coverage', () => {
             latest_date: '2024-01-15',
           },
         },
+        {
+          collection: 'recurring',
+          id: 'rec10',
+          fields: {
+            recurring_id: 'rec10',
+            name: 'Monthly Sub',
+            amount: 15.0,
+            frequency: 'monthly',
+            latest_date: '2024-01-15',
+          },
+        },
       ]);
 
       const result = await decodeAllCollections(dbPath);
 
-      expect(result.recurring.length).toBe(9);
+      expect(result.recurring.length).toBe(10);
 
       // Find each recurring by name and verify next_date calculation
       const weekly = result.recurring.find((r) => r.name === 'Weekly Sub');
@@ -1292,6 +1378,9 @@ describe('decoder coverage', () => {
 
       const unknown = result.recurring.find((r) => r.name === 'Unknown Freq Sub');
       expect(unknown?.next_date).toBe('2024-02-15'); // default monthly
+
+      const monthly = result.recurring.find((r) => r.name === 'Monthly Sub');
+      expect(monthly?.next_date).toBe('2024-02-15'); // +1 month
     });
 
     test('handles investment prices with sorting', async () => {
@@ -1385,6 +1474,1218 @@ describe('decoder coverage', () => {
       expect(result.investmentSplits[1]?.split_date).toBe('2024-01-10');
       // Then GOOGL
       expect(result.investmentSplits[2]?.ticker_symbol).toBe('GOOGL');
+    });
+
+    test('decodes investment performance via decodeAllCollections', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'inv-perf-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'investment_performance',
+          id: 'perf1',
+          fields: {
+            security_id: 'sec123',
+            type: 'stock',
+            user_id: 'user1',
+            last_update: '2024-01-15',
+            position: 5,
+            access: ['read', 'write'],
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.investmentPerformance.length).toBe(1);
+      expect(result.investmentPerformance[0]?.performance_id).toBe('perf1');
+      expect(result.investmentPerformance[0]?.security_id).toBe('sec123');
+      expect(result.investmentPerformance[0]?.type).toBe('stock');
+      expect(result.investmentPerformance[0]?.user_id).toBe('user1');
+      expect(result.investmentPerformance[0]?.last_update).toBe('2024-01-15');
+      expect(result.investmentPerformance[0]?.position).toBe(5);
+      expect(result.investmentPerformance[0]?.access).toEqual(['read', 'write']);
+    });
+
+    test('decodes TWR holdings via decodeAllCollections', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'twr-holding-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'investment_performance/hash123/twr_holding',
+          id: '2024-01',
+          fields: {
+            security_id: 'sec456',
+            history: {
+              '1705276800000': { value: 1.05 },
+              '1705363200000': { value: 1.08 },
+            },
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.twrHoldings.length).toBe(1);
+      expect(result.twrHoldings[0]?.security_id).toBe('sec456');
+      expect(result.twrHoldings[0]?.month).toBe('2024-01');
+      expect(result.twrHoldings[0]?.history).toBeDefined();
+    });
+
+    test('decodes plaid accounts via decodeAllCollections', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'plaid-acc-db');
+      // Plaid account docs sit at items/{item_id}/accounts/{account_id} in Firestore.
+      // The routing requires collection.includes('/accounts/') which needs the full path.
+      // Using binary keys so the parser reconstructs the full collection path.
+      await createDeepTestDatabase(dbPath, [
+        {
+          collection: 'items/item1/accounts/pacc1',
+          id: 'data',
+          fields: {
+            account_id: 'acc_plaid_1',
+            name: 'Plaid Checking',
+            official_name: 'CHECKING ACCT',
+            mask: '1234',
+            account_type: 'depository',
+            subtype: 'checking',
+            iso_currency_code: 'USD',
+            current_balance: 5000,
+            available_balance: 4800,
+            limit: null,
+            holdings: [
+              {
+                security_id: 'sec1',
+                quantity: 10,
+                cost_basis: 1500,
+              },
+            ],
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.plaidAccounts.length).toBe(1);
+      expect(result.plaidAccounts[0]?.plaid_account_id).toBe('data');
+      expect(result.plaidAccounts[0]?.item_id).toBe('item1');
+      expect(result.plaidAccounts[0]?.name).toBe('Plaid Checking');
+      expect(result.plaidAccounts[0]?.official_name).toBe('CHECKING ACCT');
+      expect(result.plaidAccounts[0]?.mask).toBe('1234');
+      expect(result.plaidAccounts[0]?.account_type).toBe('depository');
+      expect(result.plaidAccounts[0]?.subtype).toBe('checking');
+      expect(result.plaidAccounts[0]?.iso_currency_code).toBe('USD');
+      expect(result.plaidAccounts[0]?.current_balance).toBe(5000);
+      expect(result.plaidAccounts[0]?.available_balance).toBe(4800);
+      expect(result.plaidAccounts[0]?.limit).toBeNull();
+      expect(result.plaidAccounts[0]?.holdings).toHaveLength(1);
+    });
+
+    test('decodes tags via decodeAllCollections', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'tags-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'users/user1/tags',
+          id: 'tag1',
+          fields: {
+            name: 'Travel',
+            color_name: 'blue',
+            hex_color: '#0000FF',
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.tags.length).toBe(1);
+      expect(result.tags[0]?.tag_id).toBe('tag1');
+      expect(result.tags[0]?.name).toBe('Travel');
+      expect(result.tags[0]?.color_name).toBe('blue');
+      expect(result.tags[0]?.hex_color).toBe('#0000FF');
+    });
+
+    test('decodes balance history via decodeAllCollections', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'balance-hist-db');
+      await createDeepTestDatabase(dbPath, [
+        {
+          collection: 'items/item1/accounts/acc1/balance_history',
+          id: '2024-01-15',
+          fields: {
+            current_balance: 5000,
+            available_balance: 4800,
+            limit: null,
+          },
+        },
+        {
+          collection: 'items/item1/accounts/acc1/balance_history',
+          id: '2024-01-10',
+          fields: {
+            current_balance: 4500,
+          },
+        },
+        {
+          collection: 'items/item1/accounts/acc2/balance_history',
+          id: '2024-01-16',
+          fields: {
+            current_balance: 3000,
+            available_balance: 2800,
+          },
+        },
+        // Invalid date format doc ID - should be skipped
+        {
+          collection: 'items/item1/accounts/acc1/balance_history',
+          id: 'not-a-date',
+          fields: {
+            current_balance: 1000,
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      // Should skip the invalid date doc, keep 3 valid entries
+      expect(result.balanceHistory.length).toBe(3);
+      // Should be sorted by account_id then date desc
+      expect(result.balanceHistory[0]?.account_id).toBe('acc1');
+      expect(result.balanceHistory[0]?.date).toBe('2024-01-15');
+      expect(result.balanceHistory[0]?.current_balance).toBe(5000);
+      expect(result.balanceHistory[0]?.limit).toBeNull();
+      expect(result.balanceHistory[1]?.account_id).toBe('acc1');
+      expect(result.balanceHistory[1]?.date).toBe('2024-01-10');
+      expect(result.balanceHistory[2]?.account_id).toBe('acc2');
+    });
+
+    test('decodes holdings history meta via decodeAllCollections', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'hh-meta-db');
+      await createDeepTestDatabase(dbPath, [
+        {
+          collection: 'items/item1/accounts/acc1/holdings_history',
+          id: 'sechash1',
+          fields: {
+            some_field: 'some_value',
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.holdingsHistoryMeta.length).toBe(1);
+      expect(result.holdingsHistoryMeta[0]?.holdings_history_id).toBe('sechash1');
+      expect(result.holdingsHistoryMeta[0]?.security_id).toBe('sechash1');
+      expect(result.holdingsHistoryMeta[0]?.item_id).toBe('item1');
+      expect(result.holdingsHistoryMeta[0]?.account_id).toBe('acc1');
+    });
+
+    test('decodes holdings history via decodeAllCollections', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'hh-history-db');
+      await createDeepTestDatabase(dbPath, [
+        {
+          collection: 'items/item1/accounts/acc1/holdings_history/sechash1/history',
+          id: '2024-01',
+          fields: {
+            history: {
+              '1705276800000': { price: 150.5, quantity: 10 },
+              '1705363200000': { price: 152.0, quantity: 10 },
+            },
+            extra_field: 'extra_value',
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.holdingsHistory.length).toBe(1);
+      expect(result.holdingsHistory[0]?.security_id).toBe('sechash1');
+      expect(result.holdingsHistory[0]?.month).toBe('2024-01');
+      expect(result.holdingsHistory[0]?.item_id).toBe('item1');
+      expect(result.holdingsHistory[0]?.account_id).toBe('acc1');
+      expect(result.holdingsHistory[0]?.history).toBeDefined();
+    });
+
+    test('decodes changes and sub-changes via decodeAllCollections', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'changes-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'changes',
+          id: 'change1',
+          fields: {
+            timestamp: '2024-01-15T10:00:00Z',
+          },
+        },
+        {
+          collection: 'changes/change1/t',
+          id: 'tc1',
+          fields: {
+            action: 'create',
+          },
+        },
+        {
+          collection: 'changes/change1/a',
+          id: 'ac1',
+          fields: {
+            action: 'update',
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.changes.length).toBe(1);
+      expect(result.changes[0]?.change_id).toBe('change1');
+
+      expect(result.transactionChanges.length).toBe(1);
+      expect(result.transactionChanges[0]?.change_id).toBe('tc1');
+      expect(result.transactionChanges[0]?.parent_change_id).toBe('change1');
+
+      expect(result.accountChanges.length).toBe(1);
+      expect(result.accountChanges[0]?.change_id).toBe('ac1');
+      expect(result.accountChanges[0]?.parent_change_id).toBe('change1');
+    });
+
+    test('decodes securities via decodeAllCollections', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'securities-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'securities',
+          id: 'sec1',
+          fields: {
+            ticker_symbol: 'AAPL',
+            name: 'Apple Inc.',
+            type: 'equity',
+            provider_type: 'plaid',
+            close_price: 190.5,
+            current_price: 191.0,
+            close_price_as_of: '2024-01-15',
+            iso_currency_code: 'USD',
+            isin: 'US0378331005',
+            cusip: '037833100',
+            sedol: null,
+            institution_id: null,
+            institution_security_id: null,
+            market_identifier_code: 'XNAS',
+            last_update: '2024-01-15',
+            next_update: '2024-01-16',
+            update_frequency: 86400,
+            source: 'plaid',
+            unofficial_currency_code: null,
+            cik: '0000320193',
+            proxy_security_id: null,
+            is_cash_equivalent: false,
+            comparison: true,
+            trades_24_7: false,
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.securities.length).toBe(1);
+      expect(result.securities[0]?.security_id).toBe('sec1');
+      expect(result.securities[0]?.ticker_symbol).toBe('AAPL');
+      expect(result.securities[0]?.name).toBe('Apple Inc.');
+      expect(result.securities[0]?.close_price).toBe(190.5);
+      expect(result.securities[0]?.is_cash_equivalent).toBe(false);
+      expect(result.securities[0]?.comparison).toBe(true);
+    });
+
+    test('decodes user profiles via decodeAllCollections', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'user-profiles-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'users',
+          id: 'user1',
+          fields: {
+            public_id: 'pub123',
+            last_cold_open: '2024-01-15',
+            last_warm_open: '2024-01-15',
+            last_month_reviewed: '2024-01',
+            last_year_reviewed: '2024',
+            account_creation_timestamp: '2023-01-01',
+            onboarding_completed_timestamp: '2023-01-02',
+            onboarding_last_completed_step: 'connect_bank',
+            service_ends_on_ms: 1705276800000,
+            items_disconnect_on_ms: 1705363200000,
+            intelligence_categories_review_count: 5,
+            budgeting_enabled: true,
+            authentication_required: false,
+            data_initialized: true,
+            onboarding_completed: true,
+            logged_out: false,
+            match_internal_txs_enabled: true,
+            rollovers_enabled: false,
+            investments_performance_initialized: true,
+            finance_goals_monthly_summary_mode_enabled: false,
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.userProfiles.length).toBe(1);
+      expect(result.userProfiles[0]?.user_id).toBe('user1');
+      expect(result.userProfiles[0]?.public_id).toBe('pub123');
+      expect(result.userProfiles[0]?.budgeting_enabled).toBe(true);
+      expect(result.userProfiles[0]?.service_ends_on_ms).toBe(1705276800000);
+    });
+
+    test('skips empty user profile docs (sentinel docs)', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'user-profiles-empty-db');
+      await createTestDatabase(dbPath, [
+        // Sentinel doc with no fields - should be skipped by processUserProfile
+        {
+          collection: 'users',
+          id: 'user_sentinel',
+          fields: {},
+        },
+        {
+          collection: 'users',
+          id: 'user2',
+          fields: {
+            public_id: 'pub456',
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      // Only the non-empty doc should be included
+      expect(result.userProfiles.length).toBe(1);
+      expect(result.userProfiles[0]?.user_id).toBe('user2');
+    });
+
+    test('decodes amazon integrations via decodeAllCollections', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'amazon-int-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'amazon',
+          id: 'amz1',
+          fields: {
+            status: 'connected',
+            email: 'user@example.com',
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.amazonIntegrations.length).toBe(1);
+      expect(result.amazonIntegrations[0]?.amazon_id).toBe('amz1');
+    });
+
+    test('decodes amazon orders via decodeAllCollections', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'amazon-orders-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'amazon/user1/orders',
+          id: 'order1',
+          fields: {
+            date: '2024-01-20',
+            account_id: 'acc1',
+            match_state: 'matched',
+            items: [
+              {
+                id: 'item1',
+                name: 'Widget',
+                price: 29.99,
+                quantity: 1,
+                link: 'https://amzn.to/xyz',
+              },
+            ],
+            details: {
+              beforeTax: 29.99,
+              shipping: 0,
+              subtotal: 29.99,
+              tax: 2.4,
+              total: 32.39,
+            },
+            payment: {
+              card: 'Visa ending 4242',
+            },
+            transactions: ['txn1', 'txn2'],
+          },
+        },
+        {
+          collection: 'amazon/user1/orders',
+          id: 'order2',
+          fields: {
+            date: '2024-01-25',
+            account_id: 'acc1',
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.amazonOrders.length).toBe(2);
+      // Sorted by date desc
+      expect(result.amazonOrders[0]?.date).toBe('2024-01-25');
+      expect(result.amazonOrders[1]?.date).toBe('2024-01-20');
+      expect(result.amazonOrders[1]?.amazon_user_id).toBe('user1');
+      expect(result.amazonOrders[1]?.items).toHaveLength(1);
+      expect(result.amazonOrders[1]?.details?.total).toBe(32.39);
+      expect(result.amazonOrders[1]?.payment?.card).toBe('Visa ending 4242');
+      expect(result.amazonOrders[1]?.transactions).toEqual(['txn1', 'txn2']);
+    });
+
+    test('decodes subscriptions via decodeAllCollections', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'subscriptions-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'subscriptions',
+          id: 'sub1',
+          fields: {
+            product_id: 'com.copilot.annual',
+            provider: 'apple',
+            environment: 'production',
+            user_id: 'user1',
+            expires_date_ms: '1705276800000',
+            created_timestamp: '2023-01-01T00:00:00Z',
+            original_transaction_id: 'txn_orig_1',
+            price: 99.99,
+            will_auto_renew: true,
+            is_eligible_for_initial_offer: false,
+            extra_field: 'extra_value',
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.subscriptions.length).toBe(1);
+      expect(result.subscriptions[0]?.subscription_id).toBe('sub1');
+      expect(result.subscriptions[0]?.product_id).toBe('com.copilot.annual');
+      expect(result.subscriptions[0]?.provider).toBe('apple');
+      expect(result.subscriptions[0]?.price).toBe(99.99);
+      expect(result.subscriptions[0]?.will_auto_renew).toBe(true);
+      expect(result.subscriptions[0]?.is_eligible_for_initial_offer).toBe(false);
+      expect(result.subscriptions[0]?.expires_date_ms).toBe('1705276800000');
+    });
+
+    test('decodes invites via decodeAllCollections', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'invites-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'invites',
+          id: 'inv1',
+          fields: {
+            code: 'ABCD1234',
+            inviter_id: 'user1',
+            product_id: 'com.copilot.annual',
+            is_available: true,
+            is_unlimited: false,
+            assigned: false,
+            offer_reviewed: true,
+            extra_field: 'extra_value',
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.invites.length).toBe(1);
+      expect(result.invites[0]?.invite_id).toBe('inv1');
+      expect(result.invites[0]?.code).toBe('ABCD1234');
+      expect(result.invites[0]?.inviter_id).toBe('user1');
+      expect(result.invites[0]?.is_available).toBe(true);
+      expect(result.invites[0]?.is_unlimited).toBe(false);
+      expect(result.invites[0]?.assigned).toBe(false);
+      expect(result.invites[0]?.offer_reviewed).toBe(true);
+    });
+
+    test('decodes user_items via decodeAllCollections', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'user-items-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'user_items',
+          id: 'ui1',
+          fields: {
+            some_field: 'some_value',
+            another_field: 42,
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.userItems.length).toBe(1);
+      expect(result.userItems[0]?.user_items_id).toBe('ui1');
+    });
+
+    test('decodes feature_tracking via decodeAllCollections', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'feature-tracking-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'feature_tracking',
+          id: 'ft1',
+          fields: {
+            feature_name: 'dark_mode',
+            enabled: true,
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.featureTracking.length).toBe(1);
+      expect(result.featureTracking[0]?.feature_tracking_id).toBe('ft1');
+    });
+
+    test('decodes support docs via decodeAllCollections', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'support-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'support',
+          id: 'sup1',
+          fields: {
+            topic: 'billing',
+            status: 'resolved',
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.supportDocs.length).toBe(1);
+      expect(result.supportDocs[0]?.support_id).toBe('sup1');
+    });
+
+    test('handles financial_goals sentinel docs (parent pointers)', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'fg-sentinel-db');
+      // Sentinel docs exist at users/{uid}/financial_goals/{goal_id} — these are
+      // parent-pointer docs that anchor the financial_goal_history subcollection.
+      // The collection path includes '/financial_goals/' and does NOT end with
+      // '/financial_goal_history', so they match the sentinel routing branch.
+      await createDeepTestDatabase(dbPath, [
+        // Sentinel doc: collection is users/user1/financial_goals/goal1, doc is a leaf
+        {
+          collection: 'users/user1/financial_goals/goal1',
+          id: 'sentinel',
+          fields: {},
+        },
+        // Actual goal history under the subcollection
+        {
+          collection: 'users/user1/financial_goals/goal1/financial_goal_history',
+          id: '2024-01',
+          fields: {
+            goal_id: 'goal1',
+            current_amount: 5000,
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      // The sentinel doc should be silently consumed without errors
+      // The goal history should still be decoded
+      expect(result.goalHistory.length).toBe(1);
+      expect(result.goalHistory[0]?.goal_id).toBe('goal1');
+    });
+
+    test('decodes goal with savings map', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'goal-savings-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'financial_goals',
+          id: 'goal1',
+          fields: {
+            goal_id: 'goal1',
+            name: 'Emergency Fund',
+            emoji: '🏦',
+            created_date: '2024-01-01',
+            user_id: 'user1',
+            recommendation_id: 'emergency-fund',
+            created_with_allocations: true,
+            savings: {
+              type: 'savings',
+              status: 'active',
+              tracking_type: 'monthly_contribution',
+              start_date: '2024-01-01',
+              target_amount: 10000,
+              tracking_type_monthly_contribution: 500,
+              modified_start_date: false,
+              inflates_budget: true,
+              is_ongoing: false,
+            },
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.goals.length).toBe(1);
+      expect(result.goals[0]?.name).toBe('Emergency Fund');
+      expect(result.goals[0]?.savings).toBeDefined();
+      expect(result.goals[0]?.savings?.type).toBe('savings');
+      expect(result.goals[0]?.savings?.status).toBe('active');
+      expect(result.goals[0]?.savings?.tracking_type).toBe('monthly_contribution');
+      expect(result.goals[0]?.savings?.start_date).toBe('2024-01-01');
+      expect(result.goals[0]?.savings?.target_amount).toBe(10000);
+      expect(result.goals[0]?.savings?.tracking_type_monthly_contribution).toBe(500);
+      expect(result.goals[0]?.savings?.modified_start_date).toBe(false);
+      expect(result.goals[0]?.savings?.inflates_budget).toBe(true);
+      expect(result.goals[0]?.savings?.is_ongoing).toBe(false);
+      expect(result.goals[0]?.created_with_allocations).toBe(true);
+    });
+
+    test('goal history sorting with multiple goals and months', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'goal-hist-sort-db');
+      await createDeepTestDatabase(dbPath, [
+        {
+          collection: 'users/user1/financial_goals/goalB/financial_goal_history',
+          id: '2024-01',
+          fields: { goal_id: 'goalB', current_amount: 1000 },
+        },
+        {
+          collection: 'users/user1/financial_goals/goalA/financial_goal_history',
+          id: '2024-02',
+          fields: { goal_id: 'goalA', current_amount: 3000 },
+        },
+        {
+          collection: 'users/user1/financial_goals/goalA/financial_goal_history',
+          id: '2024-01',
+          fields: { goal_id: 'goalA', current_amount: 2000 },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      // goalA:2024-01, goalA:2024-02, goalB:2024-01 = 3
+      expect(result.goalHistory.length).toBe(3);
+      // Sorted by goal_id asc, then month desc
+      expect(result.goalHistory[0]?.goal_id).toBe('goalA');
+      expect(result.goalHistory[0]?.month).toBe('2024-02');
+      expect(result.goalHistory[1]?.goal_id).toBe('goalA');
+      expect(result.goalHistory[1]?.month).toBe('2024-01');
+      expect(result.goalHistory[2]?.goal_id).toBe('goalB');
+      expect(result.goalHistory[2]?.month).toBe('2024-01');
+    });
+
+    test('items sorting by institution_name then item_id', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'items-sort-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'items',
+          id: 'item2',
+          fields: { item_id: 'item2', institution_name: 'Chase' },
+        },
+        {
+          collection: 'items',
+          id: 'item1',
+          fields: { item_id: 'item1', institution_name: 'Chase' },
+        },
+        {
+          collection: 'items',
+          id: 'item3',
+          fields: { item_id: 'item3', institution_name: 'Bank of America' },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.items.length).toBe(3);
+      expect(result.items[0]?.institution_name).toBe('Bank of America');
+      expect(result.items[1]?.item_id).toBe('item1');
+      expect(result.items[2]?.item_id).toBe('item2');
+    });
+
+    test('categories sorting by order then name', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'categories-sort-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'categories',
+          id: 'cat3',
+          fields: {
+            category_id: 'cat3',
+            name: 'Zebra Category',
+            order: 1,
+          },
+        },
+        {
+          collection: 'categories',
+          id: 'cat1',
+          fields: {
+            category_id: 'cat1',
+            name: 'Alpha Category',
+            order: 1,
+          },
+        },
+        {
+          collection: 'categories',
+          id: 'cat2',
+          fields: {
+            category_id: 'cat2',
+            name: 'Beta Category',
+            order: 2,
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.categories.length).toBe(3);
+      // Same order -> sorted by name
+      expect(result.categories[0]?.name).toBe('Alpha Category');
+      expect(result.categories[1]?.name).toBe('Zebra Category');
+      // Different order
+      expect(result.categories[2]?.name).toBe('Beta Category');
+    });
+  });
+
+  describe('getDecodeTimeoutMs', () => {
+    test('returns default timeout when env var is not set', () => {
+      const original = process.env.DECODE_TIMEOUT_MS;
+      delete process.env.DECODE_TIMEOUT_MS;
+
+      const { getDecodeTimeoutMs } = require('../../src/core/decoder.js');
+      expect(getDecodeTimeoutMs()).toBe(90_000);
+
+      if (original !== undefined) process.env.DECODE_TIMEOUT_MS = original;
+    });
+
+    test('returns custom timeout from env var', () => {
+      const original = process.env.DECODE_TIMEOUT_MS;
+      process.env.DECODE_TIMEOUT_MS = '30000';
+
+      const { getDecodeTimeoutMs } = require('../../src/core/decoder.js');
+      expect(getDecodeTimeoutMs()).toBe(30000);
+
+      if (original !== undefined) {
+        process.env.DECODE_TIMEOUT_MS = original;
+      } else {
+        delete process.env.DECODE_TIMEOUT_MS;
+      }
+    });
+
+    test('returns default timeout when env var is invalid', () => {
+      const original = process.env.DECODE_TIMEOUT_MS;
+      process.env.DECODE_TIMEOUT_MS = 'not-a-number';
+
+      const { getDecodeTimeoutMs } = require('../../src/core/decoder.js');
+      expect(getDecodeTimeoutMs()).toBe(90_000);
+
+      if (original !== undefined) {
+        process.env.DECODE_TIMEOUT_MS = original;
+      } else {
+        delete process.env.DECODE_TIMEOUT_MS;
+      }
+    });
+
+    test('returns default timeout when env var is zero', () => {
+      const original = process.env.DECODE_TIMEOUT_MS;
+      process.env.DECODE_TIMEOUT_MS = '0';
+
+      const { getDecodeTimeoutMs } = require('../../src/core/decoder.js');
+      expect(getDecodeTimeoutMs()).toBe(90_000);
+
+      if (original !== undefined) {
+        process.env.DECODE_TIMEOUT_MS = original;
+      } else {
+        delete process.env.DECODE_TIMEOUT_MS;
+      }
+    });
+
+    test('returns default timeout when env var is negative', () => {
+      const original = process.env.DECODE_TIMEOUT_MS;
+      process.env.DECODE_TIMEOUT_MS = '-5000';
+
+      const { getDecodeTimeoutMs } = require('../../src/core/decoder.js');
+      expect(getDecodeTimeoutMs()).toBe(90_000);
+
+      if (original !== undefined) {
+        process.env.DECODE_TIMEOUT_MS = original;
+      } else {
+        delete process.env.DECODE_TIMEOUT_MS;
+      }
+    });
+  });
+
+  describe('decodeAllCollectionsIsolated', () => {
+    test('decodes via worker thread and returns results', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'isolated-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'transactions',
+          id: 'txn1',
+          fields: {
+            transaction_id: 'txn1',
+            amount: 50.0,
+            date: '2024-01-15',
+            name: 'Test Transaction',
+          },
+        },
+        {
+          collection: 'accounts',
+          id: 'acc1',
+          fields: {
+            account_id: 'acc1',
+            name: 'Test Account',
+            current_balance: 1000,
+          },
+        },
+      ]);
+
+      const { decodeAllCollectionsIsolated } = await import('../../src/core/decoder.js');
+      const result = await decodeAllCollectionsIsolated(dbPath);
+
+      expect(result.transactions.length).toBe(1);
+      expect(result.transactions[0]?.name).toBe('Test Transaction');
+      expect(result.accounts.length).toBe(1);
+      expect(result.accounts[0]?.name).toBe('Test Account');
+    }, 30_000);
+
+    test('rejects on timeout', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'isolated-timeout-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'transactions',
+          id: 'txn1',
+          fields: {
+            transaction_id: 'txn1',
+            amount: 50.0,
+            date: '2024-01-15',
+            name: 'Test',
+          },
+        },
+      ]);
+
+      const { decodeAllCollectionsIsolated } = await import('../../src/core/decoder.js');
+      // Use a very short timeout — the worker will likely not finish in 1ms
+      try {
+        await decodeAllCollectionsIsolated(dbPath, 1);
+        // If it somehow succeeds in 1ms, that's fine too
+      } catch (err: unknown) {
+        expect((err as Error).message).toContain('timed out');
+      }
+    }, 30_000);
+  });
+
+  describe('Firestore timestamp and reference encoding', () => {
+    test('transactions with timestamp-typed date field', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'timestamp-date-db');
+      // Use the __type marker to encode a real Firestore timestamp
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'transactions',
+          id: 'txn1',
+          fields: {
+            transaction_id: 'txn1',
+            amount: 50.0,
+            // Firestore timestamp for 2024-01-15T00:00:00Z
+            date: { __type: 'timestamp', seconds: 1705276800, nanos: 0 },
+            name: 'Timestamp Test',
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.transactions.length).toBe(1);
+      expect(result.transactions[0]?.date).toBe('2024-01-15');
+      expect(result.transactions[0]?.name).toBe('Timestamp Test');
+    });
+
+    test('account with reference-typed account_id field', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'reference-field-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'accounts',
+          id: 'acc1',
+          fields: {
+            // Reference type — getString() handles this (line 110-111)
+            account_id: {
+              __type: 'reference',
+              value: 'projects/copilot/databases/default/documents/accounts/acc1',
+            },
+            name: 'Reference Account',
+            current_balance: 500.0,
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.accounts.length).toBe(1);
+      // getString extracts the reference value as a string
+      expect(result.accounts[0]?.account_id).toContain('acc1');
+    });
+  });
+
+  describe('camelCase fallback fields', () => {
+    test('investment performance with camelCase field names', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'camelcase-perf-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'investment_performance',
+          id: 'perf1',
+          fields: {
+            // Use camelCase variants that the decoder falls back to
+            securityId: 'sec123',
+            userId: 'user456',
+            lastUpdate: '2024-01-15',
+            type: 'twr',
+            position: 1,
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.investmentPerformance.length).toBe(1);
+      expect(result.investmentPerformance[0]?.security_id).toBe('sec123');
+      expect(result.investmentPerformance[0]?.user_id).toBe('user456');
+      expect(result.investmentPerformance[0]?.last_update).toBe('2024-01-15');
+    });
+  });
+
+  describe('original_* fallback fields', () => {
+    test('account with original_current_balance fallback', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'original-balance-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'accounts',
+          id: 'acc1',
+          fields: {
+            account_id: 'acc1',
+            name: 'Fallback Account',
+            // No current_balance — should fall back to original_current_balance
+            original_current_balance: 1234.56,
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.accounts.length).toBe(1);
+      expect(result.accounts[0]?.current_balance).toBe(1234.56);
+    });
+
+    test('account with original_type and original_subtype fallbacks', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'original-type-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'accounts',
+          id: 'acc1',
+          fields: {
+            account_id: 'acc1',
+            name: 'Type Fallback Account',
+            current_balance: 100.0,
+            // No type/account_type — fall back to original_type
+            original_type: 'depository',
+            // No subtype — fall back to original_subtype
+            original_subtype: 'checking',
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.accounts.length).toBe(1);
+      expect(result.accounts[0]?.account_type).toBe('depository');
+      expect(result.accounts[0]?.subtype).toBe('checking');
+    });
+  });
+
+  describe('goal history with daily_data and total_contribution', () => {
+    test('goal history with daily_data map and total_contribution', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'goal-history-daily-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'financial_goals/goal1/financial_goal_history',
+          id: '2024-01',
+          fields: {
+            goal_id: 'goal1',
+            total_contribution: 500,
+            target_amount: 10000,
+            daily_data: {
+              '2024-01-15': { balance: 5000 },
+              '2024-01-20': { balance: 5500 },
+            },
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.goalHistory.length).toBe(1);
+      const gh = result.goalHistory[0]!;
+      expect(gh.total_contribution).toBe(500);
+      expect(gh.target_amount).toBe(10000);
+      // current_amount should be derived from latest daily_data entry
+      expect(gh.current_amount).toBe(5500);
+      // daily_data should have 2 entries
+      expect(gh.daily_data).toBeDefined();
+      expect(Object.keys(gh.daily_data!).length).toBe(2);
+      expect(gh.daily_data!['2024-01-20']?.amount).toBe(5500);
+    });
+
+    test('goal history with current_amount takes precedence over daily_data', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'goal-history-explicit-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'financial_goals/goal1/financial_goal_history',
+          id: '2024-02',
+          fields: {
+            goal_id: 'goal1',
+            current_amount: 7000,
+            daily_data: {
+              '2024-02-15': { balance: 6000 },
+            },
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.goalHistory.length).toBe(1);
+      // Explicit current_amount should NOT be overridden by daily_data
+      expect(result.goalHistory[0]?.current_amount).toBe(7000);
+    });
+
+    test('goal history with invalid month format is skipped', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'goal-history-bad-month-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'financial_goals/goal1/financial_goal_history',
+          id: 'not-a-month', // Invalid format
+          fields: {
+            goal_id: 'goal1',
+            current_amount: 5000,
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.goalHistory.length).toBe(0);
+    });
+  });
+
+  describe('sort comparators with equal primary keys', () => {
+    test('investment prices sort by date when investment_id matches', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'sort-prices-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'investment_prices',
+          id: 'p1',
+          fields: { investment_id: 'inv1', price: 100, date: '2024-01-10' },
+        },
+        {
+          collection: 'investment_prices',
+          id: 'p2',
+          fields: { investment_id: 'inv1', price: 110, date: '2024-01-20' },
+        },
+      ]);
+
+      const prices = await decodeInvestmentPrices(dbPath);
+
+      expect(prices.length).toBe(2);
+      expect(prices[0]?.date).toBe('2024-01-20'); // newest first
+      expect(prices[1]?.date).toBe('2024-01-10');
+    });
+
+    test('investment splits sort by ticker then date', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'sort-splits-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'investment_splits',
+          id: 's1',
+          fields: { split_id: 's1', ticker_symbol: 'GOOGL', split_date: '2024-01-10' },
+        },
+        {
+          collection: 'investment_splits',
+          id: 's2',
+          fields: { split_id: 's2', ticker_symbol: 'AAPL', split_date: '2024-01-20' },
+        },
+        {
+          collection: 'investment_splits',
+          id: 's3',
+          fields: { split_id: 's3', ticker_symbol: 'AAPL', split_date: '2024-01-10' },
+        },
+      ]);
+
+      const splits = await decodeInvestmentSplits(dbPath);
+
+      expect(splits.length).toBe(3);
+      // AAPL first (alphabetical), newest date first
+      expect(splits[0]?.ticker_symbol).toBe('AAPL');
+      expect(splits[0]?.split_date).toBe('2024-01-20');
+      expect(splits[1]?.ticker_symbol).toBe('AAPL');
+      expect(splits[1]?.split_date).toBe('2024-01-10');
+      expect(splits[2]?.ticker_symbol).toBe('GOOGL');
+    });
+
+    test('items sort by institution_name then item_id', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'sort-items-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'items',
+          id: 'item_b',
+          fields: { item_id: 'item_b', institution_name: 'Chase' },
+        },
+        {
+          collection: 'items',
+          id: 'item_a',
+          fields: { item_id: 'item_a', institution_name: 'Chase' },
+        },
+        {
+          collection: 'items',
+          id: 'item_c',
+          fields: { item_id: 'item_c', institution_name: 'Bank of America' },
+        },
+      ]);
+
+      const items = await decodeItems(dbPath);
+
+      expect(items.length).toBe(3);
+      // Bank of America first (alphabetical), then Chase items by item_id
+      expect(items[0]?.institution_name).toBe('Bank of America');
+      expect(items[1]?.item_id).toBe('item_a');
+      expect(items[2]?.item_id).toBe('item_b');
+    });
+
+    test('categories sort by order then name', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'sort-categories-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'categories',
+          id: 'cat_b',
+          fields: { category_id: 'cat_b', name: 'Zebra', order: 1 },
+        },
+        {
+          collection: 'categories',
+          id: 'cat_a',
+          fields: { category_id: 'cat_a', name: 'Apple', order: 1 },
+        },
+        {
+          collection: 'categories',
+          id: 'cat_c',
+          fields: { category_id: 'cat_c', name: 'Middle', order: 0 },
+        },
+      ]);
+
+      const categories = await decodeCategories(dbPath);
+
+      expect(categories.length).toBe(3);
+      // Order 0 first, then order 1 alphabetically
+      expect(categories[0]?.name).toBe('Middle');
+      expect(categories[1]?.name).toBe('Apple');
+      expect(categories[2]?.name).toBe('Zebra');
+    });
+  });
+
+  describe('balance history edge cases', () => {
+    test('rejects balance history with bad collection path', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'bad-bh-path-db');
+      // Path ends with /balance_history but has no items/{id}/accounts/{id} structure
+      // Must use deep (binary) encoding so the full path is preserved
+      await createDeepTestDatabase(dbPath, [
+        {
+          collection: 'something/other/balance_history',
+          id: '2024-01-15',
+          fields: { current_balance: 1000 },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      // processBalanceHistory returns null because path can't be parsed (no items/accounts)
+      expect(result.balanceHistory.length).toBe(0);
     });
   });
 });

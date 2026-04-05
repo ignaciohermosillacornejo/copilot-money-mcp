@@ -20,7 +20,6 @@ import {
   createRecurringDb,
   createBudgetDb,
   createGoalDb,
-  createGoalHistoryDb,
   createCategoryDb,
   createEmptyDb,
   cleanupTestDb,
