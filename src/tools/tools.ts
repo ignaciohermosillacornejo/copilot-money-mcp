@@ -2006,6 +2006,169 @@ export class CopilotMoneyTools {
       splits: paged,
     };
   }
+
+  async getHoldings(
+    options: {
+      account_id?: string;
+      ticker_symbol?: string;
+      include_history?: boolean;
+      limit?: number;
+      offset?: number;
+    } = {}
+  ): Promise<{
+    count: number;
+    total_count: number;
+    offset: number;
+    has_more: boolean;
+    holdings: Array<{
+      security_id: string;
+      ticker_symbol?: string;
+      name?: string;
+      type?: string;
+      account_id: string;
+      account_name?: string;
+      quantity: number;
+      institution_price: number;
+      institution_value: number;
+      cost_basis?: number;
+      average_cost?: number;
+      total_return?: number;
+      total_return_percent?: number;
+      is_cash_equivalent?: boolean;
+      iso_currency_code?: string;
+      history?: Array<{
+        month: string;
+        snapshots: Record<string, { price?: number; quantity?: number }>;
+      }>;
+    }>;
+  }> {
+    const { account_id, ticker_symbol, include_history = false } = options;
+    const validatedLimit = validateLimit(options.limit, DEFAULT_QUERY_LIMIT);
+    const validatedOffset = validateOffset(options.offset);
+
+    // Load data sources
+    const accounts = await this.db.getAccounts();
+    const securityMap = await this.db.getSecurityMap();
+
+    // Build ticker → security_id lookup for ticker_symbol filtering
+    let tickerSecurityIds: Set<string> | undefined;
+    if (ticker_symbol) {
+      tickerSecurityIds = new Set<string>();
+      for (const [id, sec] of securityMap) {
+        if (sec.ticker_symbol?.toLowerCase() === ticker_symbol.toLowerCase()) {
+          tickerSecurityIds.add(id);
+        }
+      }
+    }
+
+    // Extract and enrich holdings from investment accounts
+    type HoldingEntry = {
+      security_id: string;
+      ticker_symbol?: string;
+      name?: string;
+      type?: string;
+      account_id: string;
+      account_name?: string;
+      quantity: number;
+      institution_price: number;
+      institution_value: number;
+      cost_basis?: number;
+      average_cost?: number;
+      total_return?: number;
+      total_return_percent?: number;
+      is_cash_equivalent?: boolean;
+      iso_currency_code?: string;
+      history?: Array<{
+        month: string;
+        snapshots: Record<string, { price?: number; quantity?: number }>;
+      }>;
+    };
+
+    const holdings: HoldingEntry[] = [];
+
+    for (const acct of accounts) {
+      if (!acct.holdings || acct.holdings.length === 0) continue;
+      if (account_id && acct.account_id !== account_id) continue;
+
+      for (const h of acct.holdings) {
+        if (
+          !h.security_id ||
+          h.quantity === undefined ||
+          h.institution_price === undefined ||
+          h.institution_value === undefined
+        )
+          continue;
+
+        // Apply ticker filter
+        if (tickerSecurityIds && !tickerSecurityIds.has(h.security_id)) continue;
+
+        // Enrich with security data
+        const sec = securityMap.get(h.security_id);
+
+        const entry: HoldingEntry = {
+          security_id: h.security_id,
+          ticker_symbol: sec?.ticker_symbol,
+          name: sec?.name,
+          type: sec?.type,
+          account_id: acct.account_id,
+          account_name: acct.name ?? acct.official_name,
+          quantity: h.quantity,
+          institution_price: h.institution_price,
+          institution_value: h.institution_value,
+          is_cash_equivalent: sec?.is_cash_equivalent,
+          iso_currency_code: h.iso_currency_code ?? sec?.iso_currency_code,
+        };
+
+        // Compute cost basis derived fields
+        if (h.cost_basis != null && h.cost_basis !== 0) {
+          entry.cost_basis = roundAmount(h.cost_basis);
+          entry.average_cost = roundAmount(h.cost_basis / h.quantity);
+          entry.total_return = roundAmount(h.institution_value - h.cost_basis);
+          entry.total_return_percent = roundAmount(
+            ((h.institution_value - h.cost_basis) / Math.abs(h.cost_basis)) * 100
+          );
+        }
+
+        holdings.push(entry);
+      }
+    }
+
+    // Attach history if requested
+    if (include_history) {
+      const allHistory = await this.db.getHoldingsHistory();
+
+      for (const holding of holdings) {
+        const matchingHistory = allHistory.filter(
+          (hh) =>
+            hh.security_id === holding.security_id &&
+            (!hh.account_id || hh.account_id === holding.account_id)
+        );
+
+        if (matchingHistory.length > 0) {
+          holding.history = matchingHistory
+            .filter((hh) => hh.month && hh.history)
+            .map((hh) => ({
+              month: hh.month!,
+              snapshots: hh.history!,
+            }))
+            .sort((a, b) => b.month.localeCompare(a.month));
+        }
+      }
+    }
+
+    // Paginate
+    const totalCount = holdings.length;
+    const hasMore = validatedOffset + validatedLimit < totalCount;
+    const paged = holdings.slice(validatedOffset, validatedOffset + validatedLimit);
+
+    return {
+      count: paged.length,
+      total_count: totalCount,
+      offset: validatedOffset,
+      has_more: hasMore,
+      holdings: paged,
+    };
+  }
 }
 
 /**
@@ -2447,6 +2610,41 @@ export function createToolSchemas(): ToolSchema[] {
           },
           start_date: { type: 'string', description: 'Start date (YYYY-MM-DD)' },
           end_date: { type: 'string', description: 'End date (YYYY-MM-DD)' },
+          limit: {
+            type: 'integer',
+            description: 'Maximum number of results (default: 100, max: 10000)',
+            default: 100,
+          },
+          offset: {
+            type: 'integer',
+            description: 'Number of results to skip for pagination (default: 0)',
+            default: 0,
+          },
+        },
+      },
+      annotations: { readOnlyHint: true },
+    },
+    {
+      name: 'get_holdings',
+      description:
+        'Get current investment holdings with position-level detail. Returns ticker, name, ' +
+        'quantity, current price, equity value, average cost, and total return per holding. ' +
+        'Joins data from account holdings, securities, and optionally historical snapshots. ' +
+        'Filter by account or ticker symbol. Note: cost_basis may be unavailable for ' +
+        'cash-equivalent positions.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          account_id: { type: 'string', description: 'Filter by investment account ID' },
+          ticker_symbol: {
+            type: 'string',
+            description: 'Filter by ticker symbol (e.g., "AAPL", "SCHX")',
+          },
+          include_history: {
+            type: 'boolean',
+            description: 'Include monthly price/quantity snapshots per holding (default: false)',
+            default: false,
+          },
           limit: {
             type: 'integer',
             description: 'Maximum number of results (default: 100, max: 10000)',

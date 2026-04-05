@@ -156,6 +156,12 @@ export class CopilotMoneyServer {
           );
           break;
 
+        case 'get_holdings':
+          result = await this.tools.getHoldings(
+            (typedArgs as Parameters<typeof this.tools.getHoldings>[0]) || {}
+          );
+          break;
+
         default:
           return {
             content: [

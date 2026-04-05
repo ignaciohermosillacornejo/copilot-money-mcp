@@ -214,7 +214,7 @@ describe('CopilotMoneyTools Integration', () => {
   describe('tool schemas', () => {
     test('returns correct number of tool schemas', async () => {
       const schemas = createToolSchemas();
-      expect(schemas.length).toBe(11);
+      expect(schemas.length).toBe(12);
     });
 
     test('all tools have readOnlyHint annotation', async () => {
@@ -253,9 +253,10 @@ describe('CopilotMoneyTools Integration', () => {
       expect(names).toContain('get_goals');
       expect(names).toContain('get_investment_prices');
       expect(names).toContain('get_investment_splits');
+      expect(names).toContain('get_holdings');
 
-      // Should have exactly 11 tools
-      expect(names.length).toBe(11);
+      // Should have exactly 12 tools
+      expect(names.length).toBe(12);
     });
   });
 

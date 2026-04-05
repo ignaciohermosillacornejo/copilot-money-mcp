@@ -71,6 +71,10 @@
     {
       "name": "get_investment_splits",
       "description": "Get stock split history. Returns split ratios, dates, and multipliers for accurate historical price and share calculations."
+    },
+    {
+      "name": "get_holdings",
+      "description": "Get current investment holdings with position-level detail including ticker, quantity, price, average cost, and total return per holding."
     }
   ],
   "tools_generated": false,

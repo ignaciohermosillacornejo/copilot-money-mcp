@@ -5,7 +5,7 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { CopilotMoneyTools, createToolSchemas } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
-import type { Transaction, Account } from '../../src/models/index.js';
+import type { Transaction, Account, Security, HoldingsHistory } from '../../src/models/index.js';
 
 // Mock data
 // Copilot Money format: positive = expenses, negative = income
@@ -1288,9 +1288,9 @@ describe('refreshDatabase', () => {
 });
 
 describe('createToolSchemas', () => {
-  test('returns 11 tool schemas', async () => {
+  test('returns 12 tool schemas', async () => {
     const schemas = createToolSchemas();
-    expect(schemas).toHaveLength(11);
+    expect(schemas).toHaveLength(12);
   });
 
   test('all tools have readOnlyHint: true', async () => {
@@ -1329,9 +1329,10 @@ describe('createToolSchemas', () => {
     expect(names).toContain('get_goals');
     expect(names).toContain('get_investment_prices');
     expect(names).toContain('get_investment_splits');
+    expect(names).toContain('get_holdings');
 
-    // Should have exactly 11 tools
-    expect(names.length).toBe(11);
+    // Should have exactly 12 tools
+    expect(names.length).toBe(12);
   });
 });
 
@@ -1807,6 +1808,205 @@ describe('getInvestmentSplits', () => {
     const result = await tools.getInvestmentSplits({ limit: 1, offset: 0 });
     expect(result.count).toBe(1);
     expect(result.total_count).toBe(3);
+    expect(result.has_more).toBe(true);
+  });
+});
+
+const mockSecurities: Security[] = [
+  {
+    security_id: 'sec_aapl',
+    ticker_symbol: 'AAPL',
+    name: 'Apple Inc.',
+    type: 'equity',
+    current_price: 190.0,
+    is_cash_equivalent: false,
+    iso_currency_code: 'USD',
+  },
+  {
+    security_id: 'sec_schx',
+    ticker_symbol: 'SCHX',
+    name: 'Schwab U.S. Large-Cap ETF',
+    type: 'etf',
+    current_price: 25.0,
+    is_cash_equivalent: false,
+    iso_currency_code: 'USD',
+  },
+  {
+    security_id: 'sec_usd',
+    ticker_symbol: 'USD',
+    name: 'United States Dollar',
+    type: 'cash',
+    current_price: 1.0,
+    is_cash_equivalent: true,
+    iso_currency_code: 'USD',
+  },
+];
+
+const mockAccountsWithHoldings: Account[] = [
+  {
+    account_id: 'inv_acc1',
+    current_balance: 100000,
+    name: 'Individual Brokerage',
+    account_type: 'investment',
+    holdings: [
+      {
+        security_id: 'sec_aapl',
+        account_id: 'inv_acc1',
+        cost_basis: 15000,
+        institution_price: 190.0,
+        institution_value: 19000,
+        quantity: 100,
+        iso_currency_code: 'USD',
+      },
+      {
+        security_id: 'sec_schx',
+        account_id: 'inv_acc1',
+        cost_basis: 5000,
+        institution_price: 25.0,
+        institution_value: 7500,
+        quantity: 300,
+        iso_currency_code: 'USD',
+      },
+      {
+        security_id: 'sec_usd',
+        account_id: 'inv_acc1',
+        cost_basis: null,
+        institution_price: 1.0,
+        institution_value: 500,
+        quantity: 500,
+        iso_currency_code: 'USD',
+      },
+    ],
+  },
+  {
+    account_id: 'inv_acc2',
+    current_balance: 50000,
+    name: 'Retirement 401k',
+    account_type: 'investment',
+    holdings: [
+      {
+        security_id: 'sec_schx',
+        account_id: 'inv_acc2',
+        cost_basis: 8000,
+        institution_price: 25.0,
+        institution_value: 12500,
+        quantity: 500,
+        iso_currency_code: 'USD',
+      },
+    ],
+  },
+];
+
+const mockHoldingsHistoryData: HoldingsHistory[] = [
+  {
+    history_id: 'sec_aapl:2024-01',
+    security_id: 'sec_aapl',
+    account_id: 'inv_acc1',
+    month: '2024-01',
+    history: {
+      '2024-01-15': { price: 185.0, quantity: 100 },
+      '2024-01-31': { price: 188.0, quantity: 100 },
+    },
+  },
+  {
+    history_id: 'sec_aapl:2024-02',
+    security_id: 'sec_aapl',
+    account_id: 'inv_acc1',
+    month: '2024-02',
+    history: { '2024-02-15': { price: 189.0, quantity: 100 } },
+  },
+];
+
+describe('getHoldings', () => {
+  let db: CopilotDatabase;
+  let tools: CopilotMoneyTools;
+
+  beforeEach(() => {
+    db = new CopilotDatabase('/fake/path');
+    (db as any)._allCollectionsLoaded = true;
+    (db as any)._transactions = [];
+    (db as any)._accounts = [...mockAccountsWithHoldings];
+    (db as any)._recurring = [];
+    (db as any)._budgets = [];
+    (db as any)._goals = [];
+    (db as any)._goalHistory = [];
+    (db as any)._investmentPrices = [];
+    (db as any)._investmentSplits = [];
+    (db as any)._items = [];
+    (db as any)._userCategories = [];
+    (db as any)._userAccounts = [];
+    (db as any)._securities = [...mockSecurities];
+    (db as any)._holdingsHistory = [...mockHoldingsHistoryData];
+    tools = new CopilotMoneyTools(db);
+  });
+
+  test('returns all holdings enriched with security data', async () => {
+    const result = await tools.getHoldings({});
+    expect(result.total_count).toBe(4);
+    expect(result.count).toBe(4);
+
+    const aapl = result.holdings.find((h) => h.ticker_symbol === 'AAPL');
+    expect(aapl).toBeDefined();
+    expect(aapl!.name).toBe('Apple Inc.');
+    expect(aapl!.type).toBe('equity');
+    expect(aapl!.quantity).toBe(100);
+    expect(aapl!.institution_price).toBe(190.0);
+    expect(aapl!.institution_value).toBe(19000);
+    expect(aapl!.account_name).toBe('Individual Brokerage');
+  });
+
+  test('computes average_cost and total_return when cost_basis is present', async () => {
+    const result = await tools.getHoldings({});
+    const aapl = result.holdings.find((h) => h.ticker_symbol === 'AAPL');
+    expect(aapl!.cost_basis).toBe(15000);
+    expect(aapl!.average_cost).toBe(150);
+    expect(aapl!.total_return).toBe(4000);
+    expect(aapl!.total_return_percent).toBeCloseTo(26.67, 1);
+  });
+
+  test('omits average_cost and total_return when cost_basis is null', async () => {
+    const result = await tools.getHoldings({});
+    const usd = result.holdings.find((h) => h.ticker_symbol === 'USD');
+    expect(usd).toBeDefined();
+    expect(usd!.cost_basis).toBeUndefined();
+    expect(usd!.average_cost).toBeUndefined();
+    expect(usd!.total_return).toBeUndefined();
+  });
+
+  test('filters by account_id', async () => {
+    const result = await tools.getHoldings({ account_id: 'inv_acc2' });
+    expect(result.count).toBe(1);
+    expect(result.holdings[0].ticker_symbol).toBe('SCHX');
+    expect(result.holdings[0].account_name).toBe('Retirement 401k');
+  });
+
+  test('filters by ticker_symbol', async () => {
+    const result = await tools.getHoldings({ ticker_symbol: 'SCHX' });
+    expect(result.count).toBe(2);
+    for (const h of result.holdings) {
+      expect(h.ticker_symbol).toBe('SCHX');
+    }
+  });
+
+  test('does not include history by default', async () => {
+    const result = await tools.getHoldings({});
+    for (const h of result.holdings) {
+      expect(h.history).toBeUndefined();
+    }
+  });
+
+  test('includes history when include_history is true', async () => {
+    const result = await tools.getHoldings({ include_history: true });
+    const aapl = result.holdings.find((h) => h.ticker_symbol === 'AAPL');
+    expect(aapl!.history).toBeDefined();
+    expect(aapl!.history!.length).toBe(2);
+  });
+
+  test('respects limit and offset', async () => {
+    const result = await tools.getHoldings({ limit: 2, offset: 1 });
+    expect(result.count).toBe(2);
+    expect(result.total_count).toBe(4);
+    expect(result.offset).toBe(1);
     expect(result.has_more).toBe(true);
   });
 });
