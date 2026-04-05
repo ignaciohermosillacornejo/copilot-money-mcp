@@ -1471,6 +1471,41 @@ describe('decoder coverage', () => {
       expect(monthly?.next_date).toBe('2024-02-15'); // +1 month
     });
 
+    test('extracts all new budget fields', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'budget-new-fields-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'budgets',
+          id: 'bud-full',
+          fields: {
+            budget_id: 'bud-full',
+            name: 'Groceries',
+            amount: 500,
+            period: 'monthly',
+            category_id: 'cat-food',
+            is_active: true,
+            id: 'bud-internal-id',
+            amounts: {
+              '2024-01': 450.0,
+              '2024-02': 550.5,
+              '2024-03': 500,
+            },
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.budgets.length).toBe(1);
+      const bud = result.budgets[0]!;
+      expect(bud.id).toBe('bud-internal-id');
+      expect(bud.amounts).toEqual({
+        '2024-01': 450,
+        '2024-02': 550.5,
+        '2024-03': 500,
+      });
+    });
+
     test('extracts all new recurring fields', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'recurring-new-fields-db');
       await createTestDatabase(dbPath, [

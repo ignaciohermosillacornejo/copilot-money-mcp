@@ -1147,6 +1147,24 @@ function processBudget(fields: Map<string, FirestoreValue>, docId: string): Budg
   const isActive = getBoolean(fields, 'is_active');
   if (isActive !== undefined) budgetData.is_active = isActive;
 
+  // Monthly budget overrides map (e.g. "2024-02": 150)
+  const amountsMap = getMap(fields, 'amounts');
+  if (amountsMap) {
+    const amounts: Record<string, number> = {};
+    for (const [key, value] of amountsMap) {
+      if (value.type === 'double' || value.type === 'integer') {
+        amounts[key] = value.value;
+      }
+    }
+    if (Object.keys(amounts).length > 0) {
+      budgetData.amounts = amounts;
+    }
+  }
+
+  // ID field
+  const id = getString(fields, 'id');
+  if (id) budgetData.id = id;
+
   try {
     return BudgetSchema.parse(budgetData);
   } catch {

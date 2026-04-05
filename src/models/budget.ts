@@ -47,8 +47,12 @@ export const BudgetSchema = z
 
     // Metadata
     iso_currency_code: z.string().optional(),
+
+    // Additional fields
+    amounts: z.record(z.string(), z.number()).optional(),
+    id: z.string().optional(),
   })
-  .strict();
+  .passthrough();
 
 export type Budget = z.infer<typeof BudgetSchema>;
 
