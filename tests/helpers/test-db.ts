@@ -50,12 +50,13 @@ export interface TestRecurring {
   name?: string;
   amount?: number;
   frequency?: string;
-  next_date?: string;
-  last_date?: string;
+  latest_date?: string; // Real Copilot field name; decoder maps to last_date + calculates next_date
+  next_date?: string; // Explicit override (rarely set in real data)
+  last_date?: string; // Explicit override (rarely set in real data)
   account_id?: string;
   category_id?: string;
   is_active?: boolean;
-  merchant?: string;
+  merchant_name?: string;
 }
 
 export interface TestBudget {
@@ -68,25 +69,37 @@ export interface TestBudget {
   spent?: number;
 }
 
+export interface TestGoalSavings {
+  type?: string;
+  status?: string;
+  target_amount?: number;
+  tracking_type?: string;
+  tracking_type_monthly_contribution?: number;
+  start_date?: string;
+  modified_start_date?: boolean;
+  inflates_budget?: boolean;
+  is_ongoing?: boolean;
+}
+
 export interface TestGoal {
   goal_id: string;
   name?: string;
-  target_amount?: number;
-  current_amount?: number;
-  target_date?: string;
-  goal_type?: string;
-  is_active?: boolean;
-  account_id?: string;
+  recommendation_id?: string;
+  emoji?: string;
+  created_date?: string;
+  user_id?: string;
+  savings?: TestGoalSavings;
+  created_with_allocations?: boolean;
 }
 
 export interface TestGoalHistory {
-  goal_history_id: string;
-  goal_id?: string;
-  month?: string;
-  daily_snapshots?: Array<{
-    date?: string;
-    amount?: number;
-  }>;
+  goal_id: string;
+  month: string; // YYYY-MM format, used as doc ID
+  current_amount?: number;
+  target_amount?: number;
+  total_contribution?: number;
+  user_id?: string;
+  daily_data?: Record<string, { balance: number }>;
 }
 
 export interface TestInvestmentPrice {
@@ -231,12 +244,13 @@ export async function createRecurringDb(dbPath: string, recurring: TestRecurring
       name: r.name,
       amount: r.amount,
       frequency: r.frequency,
+      latest_date: r.latest_date,
       next_date: r.next_date,
       last_date: r.last_date,
       account_id: r.account_id,
       category_id: r.category_id,
       is_active: r.is_active,
-      merchant: r.merchant,
+      merchant_name: r.merchant_name,
     },
   }));
 
@@ -274,12 +288,12 @@ export async function createGoalDb(dbPath: string, goals: TestGoal[]): Promise<v
     fields: {
       goal_id: g.goal_id,
       name: g.name,
-      target_amount: g.target_amount,
-      current_amount: g.current_amount,
-      target_date: g.target_date,
-      goal_type: g.goal_type,
-      is_active: g.is_active,
-      account_id: g.account_id,
+      recommendation_id: g.recommendation_id,
+      emoji: g.emoji,
+      created_date: g.created_date,
+      user_id: g.user_id,
+      savings: g.savings,
+      created_with_allocations: g.created_with_allocations,
     },
   }));
 
@@ -294,13 +308,16 @@ export async function createGoalHistoryDb(
   history: TestGoalHistory[]
 ): Promise<void> {
   const documents = history.map((h) => ({
-    collection: 'goalHistory',
-    id: h.goal_history_id,
+    // Real path: users/{user_id}/financial_goals/{goal_id}/financial_goal_history/{month}
+    collection: `financial_goals/${h.goal_id}/financial_goal_history`,
+    id: h.month, // Doc ID is the month (YYYY-MM)
     fields: {
-      goal_history_id: h.goal_history_id,
       goal_id: h.goal_id,
-      month: h.month,
-      daily_snapshots: h.daily_snapshots,
+      current_amount: h.current_amount,
+      target_amount: h.target_amount,
+      total_contribution: h.total_contribution,
+      user_id: h.user_id,
+      daily_data: h.daily_data,
     },
   }));
 
@@ -315,7 +332,7 @@ export async function createInvestmentPriceDb(
   prices: TestInvestmentPrice[]
 ): Promise<void> {
   const documents = prices.map((p) => ({
-    collection: 'investmentPrices',
+    collection: 'investment_prices',
     id: p.investment_id,
     fields: {
       investment_id: p.investment_id,
@@ -346,7 +363,7 @@ export async function createInvestmentSplitDb(
   splits: TestInvestmentSplit[]
 ): Promise<void> {
   const documents = splits.map((s) => ({
-    collection: 'investmentSplits',
+    collection: 'investment_splits',
     id: s.split_id,
     fields: {
       split_id: s.split_id,
@@ -494,12 +511,13 @@ export async function createCombinedDb(
           name: r.name,
           amount: r.amount,
           frequency: r.frequency,
+          latest_date: r.latest_date,
           next_date: r.next_date,
           last_date: r.last_date,
           account_id: r.account_id,
           category_id: r.category_id,
           is_active: r.is_active,
-          merchant: r.merchant,
+          merchant_name: r.merchant_name,
         },
       });
     }
@@ -531,12 +549,12 @@ export async function createCombinedDb(
         fields: {
           goal_id: g.goal_id,
           name: g.name,
-          target_amount: g.target_amount,
-          current_amount: g.current_amount,
-          target_date: g.target_date,
-          goal_type: g.goal_type,
-          is_active: g.is_active,
-          account_id: g.account_id,
+          recommendation_id: g.recommendation_id,
+          emoji: g.emoji,
+          created_date: g.created_date,
+          user_id: g.user_id,
+          savings: g.savings,
+          created_with_allocations: g.created_with_allocations,
         },
       });
     }
@@ -545,13 +563,15 @@ export async function createCombinedDb(
   if (data.goalHistory) {
     for (const h of data.goalHistory) {
       documents.push({
-        collection: 'goalHistory',
-        id: h.goal_history_id,
+        collection: `financial_goals/${h.goal_id}/financial_goal_history`,
+        id: h.month,
         fields: {
-          goal_history_id: h.goal_history_id,
           goal_id: h.goal_id,
-          month: h.month,
-          daily_snapshots: h.daily_snapshots,
+          current_amount: h.current_amount,
+          target_amount: h.target_amount,
+          total_contribution: h.total_contribution,
+          user_id: h.user_id,
+          daily_data: h.daily_data,
         },
       });
     }
@@ -560,7 +580,7 @@ export async function createCombinedDb(
   if (data.investmentPrices) {
     for (const p of data.investmentPrices) {
       documents.push({
-        collection: 'investmentPrices',
+        collection: 'investment_prices',
         id: p.investment_id,
         fields: {
           investment_id: p.investment_id,
@@ -585,7 +605,7 @@ export async function createCombinedDb(
   if (data.investmentSplits) {
     for (const s of data.investmentSplits) {
       documents.push({
-        collection: 'investmentSplits',
+        collection: 'investment_splits',
         id: s.split_id,
         fields: {
           split_id: s.split_id,
