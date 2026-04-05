@@ -52,6 +52,12 @@ export const SecuritySchema = z
     unofficial_currency_code: z.string().nullable().optional(),
     cik: z.string().nullable().optional(),
     proxy_security_id: z.string().nullable().optional(),
+
+    // Additional fields
+    option_contract: z.string().nullable().optional(),
+    _origin: z.string().optional(),
+    info: z.record(z.string(), z.unknown()).optional(),
+    update_datetime: z.string().nullable().optional(),
   })
   .passthrough();
 

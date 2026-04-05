@@ -1959,7 +1959,9 @@ function processSubChange<T>(
  * Internal helper to process a security document.
  */
 function processSecurity(fields: Map<string, FirestoreValue>, docId: string): Security | null {
-  const data: Record<string, unknown> = { security_id: docId };
+  // security_id: try field first, fall back to docId
+  const securityId = getString(fields, 'security_id') ?? docId;
+  const data: Record<string, unknown> = { security_id: securityId };
 
   const stringFields = [
     'ticker_symbol',
@@ -1980,6 +1982,8 @@ function processSecurity(fields: Map<string, FirestoreValue>, docId: string): Se
     'unofficial_currency_code',
     'cik',
     'proxy_security_id',
+    '_origin',
+    'update_datetime',
   ];
   for (const field of stringFields) {
     const value = getString(fields, field);
@@ -1997,6 +2001,20 @@ function processSecurity(fields: Map<string, FirestoreValue>, docId: string): Se
     const value = getBoolean(fields, field);
     if (value !== undefined) data[field] = value;
   }
+
+  // option_contract: may be null or a string
+  const optionContractField = fields.get('option_contract');
+  if (optionContractField) {
+    if (optionContractField.type === 'null') {
+      data.option_contract = null;
+    } else if (optionContractField.type === 'string') {
+      data.option_contract = optionContractField.value;
+    }
+  }
+
+  // info map
+  const infoMap = getMap(fields, 'info');
+  if (infoMap) data.info = toPlainObject(infoMap);
 
   const validated = SecuritySchema.safeParse(data);
   return validated.success ? validated.data : null;

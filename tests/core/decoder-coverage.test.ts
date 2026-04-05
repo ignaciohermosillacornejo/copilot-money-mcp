@@ -3096,6 +3096,78 @@ describe('decoder coverage', () => {
     });
   });
 
+  describe('security field extraction', () => {
+    test('extracts all security fields including new fields', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'security-all-fields-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'securities',
+          id: 'sec1',
+          fields: {
+            security_id: 'sec-real-id',
+            ticker_symbol: 'AAPL',
+            name: 'Apple Inc.',
+            type: 'equity',
+            close_price: 175.5,
+            is_cash_equivalent: false,
+            _origin: 'plaid',
+            option_contract: null,
+            info: { exchange: 'NASDAQ', sector: 'Technology' },
+            update_datetime: '2024-01-15T10:00:00Z',
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+      expect(result.securities.length).toBe(1);
+      const sec = result.securities[0]!;
+      // security_id from field takes precedence over docId
+      expect(sec.security_id).toBe('sec-real-id');
+      expect(sec.ticker_symbol).toBe('AAPL');
+      expect(sec.name).toBe('Apple Inc.');
+      expect(sec._origin).toBe('plaid');
+      expect(sec.option_contract).toBeNull();
+      expect(sec.info).toEqual({ exchange: 'NASDAQ', sector: 'Technology' });
+      expect(sec.update_datetime).toBe('2024-01-15T10:00:00Z');
+    });
+
+    test('security_id falls back to docId when field is absent', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'security-docid-fallback-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'securities',
+          id: 'sec-from-doc',
+          fields: {
+            ticker_symbol: 'GOOG',
+            name: 'Alphabet Inc.',
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+      expect(result.securities.length).toBe(1);
+      expect(result.securities[0]!.security_id).toBe('sec-from-doc');
+    });
+
+    test('option_contract stores string when present', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'security-option-contract-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'securities',
+          id: 'sec2',
+          fields: {
+            security_id: 'sec2',
+            option_contract: 'AAPL240119C00150000',
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+      expect(result.securities.length).toBe(1);
+      expect(result.securities[0]!.option_contract).toBe('AAPL240119C00150000');
+    });
+  });
+
   describe('item field extraction', () => {
     test('extracts all item fields including new fields', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'item-all-fields-db');
