@@ -84,6 +84,30 @@ export const ItemSchema = z
     created_at: z.string().optional(), // When item was created
     updated_at: z.string().optional(), // Last update timestamp
     webhook: z.string().optional(), // Webhook URL for updates
+
+    // Origin and provider
+    _origin: z.string().optional(),
+    creation_timestamp: z.string().optional(),
+    historical_update: z.boolean().optional(),
+    is_manual: z.boolean().optional(),
+    provider: z.string().optional(),
+    country_code: z.string().optional(),
+    plaid_user_id: z.string().optional(),
+    products: z.array(z.string()).optional(),
+    update_type: z.string().optional(),
+    access_token: z.string().optional(),
+    new_accounts_available: z.boolean().optional(),
+    user_disconnected: z.boolean().optional(),
+    login_required_dismissed: z.boolean().optional(),
+    new_accounts_available_dismissed: z.boolean().optional(),
+    disconnect_attempted: z.string().optional(),
+    disconnect_attempted_error: z.string().optional(),
+    deleted_access_token: z.string().optional(),
+    fetch_data: z.record(z.string(), z.unknown()).optional(),
+    id: z.string().optional(),
+    latest_investments_refresh: z.string().optional(),
+    status_last_webhook_code_sent: z.string().optional(),
+    status_last_webhook_sent_at: z.string().optional(),
   })
   .passthrough(); // Allow additional fields we haven't discovered yet
 

@@ -1450,6 +1450,17 @@ function processItem(fields: Map<string, FirestoreValue>, docId: string): Item |
     'status_investments_last_failed_update',
     'latest_fetch',
     'latest_investments_fetch',
+    '_origin',
+    'provider',
+    'country_code',
+    'plaid_user_id',
+    'update_type',
+    'access_token',
+    'disconnect_attempted_error',
+    'deleted_access_token',
+    'id',
+    'status_last_webhook_code_sent',
+    'status_last_webhook_sent_at',
   ];
 
   for (const field of stringFields) {
@@ -1457,14 +1468,41 @@ function processItem(fields: Map<string, FirestoreValue>, docId: string): Item |
     if (value) itemData[field] = value;
   }
 
-  const needsUpdateValue = getBoolean(fields, 'needs_update');
-  if (needsUpdateValue !== undefined) itemData.needs_update = needsUpdateValue;
+  // Timestamp fields
+  const timestampFields = [
+    'creation_timestamp',
+    'disconnect_attempted',
+    'latest_investments_refresh',
+  ];
+  for (const field of timestampFields) {
+    const value = getDateString(fields, field);
+    if (value) itemData[field] = value;
+  }
 
-  const loginRequiredValue = getBoolean(fields, 'login_required');
-  if (loginRequiredValue !== undefined) itemData.login_required = loginRequiredValue;
+  // Boolean fields
+  const boolFields = [
+    'needs_update',
+    'login_required',
+    'disconnected',
+    'historical_update',
+    'is_manual',
+    'new_accounts_available',
+    'user_disconnected',
+    'login_required_dismissed',
+    'new_accounts_available_dismissed',
+  ];
+  for (const field of boolFields) {
+    const value = getBoolean(fields, field);
+    if (value !== undefined) itemData[field] = value;
+  }
 
-  const disconnectedValue = getBoolean(fields, 'disconnected');
-  if (disconnectedValue !== undefined) itemData.disconnected = disconnectedValue;
+  // Array fields
+  const products = getStringArray(fields, 'products');
+  if (products) itemData.products = products;
+
+  // Map fields
+  const fetchDataMap = getMap(fields, 'fetch_data');
+  if (fetchDataMap) itemData.fetch_data = toPlainObject(fetchDataMap);
 
   const validated = ItemSchema.safeParse(itemData);
   return validated.success ? validated.data : null;
