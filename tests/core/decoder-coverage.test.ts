@@ -3230,14 +3230,12 @@ describe('decoder coverage', () => {
             plaid_user_id: 'plaid-user-123',
             products: ['transactions', 'investments'],
             update_type: 'background',
-            access_token: 'access-sandbox-abc',
             new_accounts_available: false,
             user_disconnected: false,
             login_required_dismissed: false,
             new_accounts_available_dismissed: true,
             disconnect_attempted: { __type: 'timestamp', seconds: 1700100000, nanos: 0 },
             disconnect_attempted_error: 'TIMEOUT',
-            deleted_access_token: 'old-token',
             fetch_data: { last_fetch: 'ok', status: 'done' },
             id: 'item1',
             latest_investments_refresh: { __type: 'timestamp', seconds: 1700200000, nanos: 0 },
@@ -3261,14 +3259,13 @@ describe('decoder coverage', () => {
       expect(item.plaid_user_id).toBe('plaid-user-123');
       expect(item.products).toEqual(['transactions', 'investments']);
       expect(item.update_type).toBe('background');
-      expect(item.access_token).toBe('access-sandbox-abc');
       expect(item.new_accounts_available).toBe(false);
       expect(item.user_disconnected).toBe(false);
       expect(item.login_required_dismissed).toBe(false);
       expect(item.new_accounts_available_dismissed).toBe(true);
       expect(item.disconnect_attempted).toBeDefined();
       expect(item.disconnect_attempted_error).toBe('TIMEOUT');
-      expect(item.deleted_access_token).toBe('old-token');
+      // access_token and deleted_access_token intentionally NOT extracted (Plaid credentials)
       expect(item.fetch_data).toEqual({ last_fetch: 'ok', status: 'done' });
       expect(item.id).toBe('item1');
       expect(item.latest_investments_refresh).toBeDefined();

@@ -796,7 +796,7 @@ function processTransaction(
   }
 
   // from_investment can be stored as boolean in DB; capture it either way
-  if (!txnData.from_investment) {
+  if (txnData.from_investment === undefined) {
     const fromInvestmentBool = getBoolean(fields, 'from_investment');
     if (fromInvestmentBool !== undefined) txnData.from_investment = fromInvestmentBool;
   }
@@ -1107,7 +1107,8 @@ function processRecurring(fields: Map<string, FirestoreValue>, docId: string): R
   const origin = getString(fields, '_origin');
   if (origin) recData._origin = origin;
 
-  // Always store latest_date if present
+  // Store latest_date alongside last_date — Firestore uses latest_date as the canonical
+  // field name, but our schema exposes last_date for readability. Both kept for consumers.
   if (latestDate) recData.latest_date = latestDate;
 
   try {
@@ -1469,9 +1470,7 @@ function processItem(fields: Map<string, FirestoreValue>, docId: string): Item |
     'country_code',
     'plaid_user_id',
     'update_type',
-    'access_token',
     'disconnect_attempted_error',
-    'deleted_access_token',
     'id',
     'status_last_webhook_code_sent',
     'status_last_webhook_sent_at',
