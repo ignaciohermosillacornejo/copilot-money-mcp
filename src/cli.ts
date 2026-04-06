@@ -8,11 +8,17 @@ import { runServer } from './server.js';
 /**
  * Parse command-line arguments.
  */
-function parseArgs(): { dbPath?: string; verbose: boolean; timeoutMs?: number } {
+function parseArgs(): {
+  dbPath?: string;
+  verbose: boolean;
+  timeoutMs?: number;
+  writeEnabled: boolean;
+} {
   const args = process.argv.slice(2);
   let dbPath: string | undefined;
   let verbose = false;
   let timeoutMs: number | undefined;
+  let writeEnabled = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -34,6 +40,8 @@ function parseArgs(): { dbPath?: string; verbose: boolean; timeoutMs?: number } 
       i++;
     } else if (arg === '--verbose' || arg === '-v') {
       verbose = true;
+    } else if (arg === '--write') {
+      writeEnabled = true;
     } else if (arg === '--help' || arg === '-h') {
       console.error(`
 Copilot Money MCP Server - Expose financial data through MCP
@@ -44,6 +52,7 @@ Usage:
 Options:
   --db-path <path>    Path to LevelDB database (default: Copilot Money's default location)
   --timeout <ms>      Decode timeout in milliseconds (default: 90000 = 90 seconds)
+  --write             Enable write tools (read-only by default)
   --verbose, -v       Enable verbose logging
   --help, -h          Show this help message
 
@@ -56,7 +65,7 @@ Environment:
     }
   }
 
-  return { dbPath, verbose, timeoutMs };
+  return { dbPath, verbose, timeoutMs, writeEnabled };
 }
 
 /**
@@ -85,7 +94,7 @@ function configureLogging(verbose: boolean): void {
  * Main entry point.
  */
 async function main(): Promise<void> {
-  const { dbPath, verbose, timeoutMs } = parseArgs();
+  const { dbPath, verbose, timeoutMs, writeEnabled } = parseArgs();
 
   // Configure logging
   configureLogging(verbose);
@@ -99,11 +108,14 @@ async function main(): Promise<void> {
       } else {
         console.log('Using default Copilot Money database location');
       }
+      if (writeEnabled) {
+        console.log('Write mode ENABLED — write tools will be available');
+      }
       /* eslint-enable no-console */
     }
 
     // Run the server
-    await runServer(dbPath, timeoutMs);
+    await runServer(dbPath, timeoutMs, writeEnabled);
   } catch (error) {
     console.error('Server error:', error);
     process.exit(1);

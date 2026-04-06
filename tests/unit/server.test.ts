@@ -6,6 +6,7 @@ import { describe, test, expect, beforeEach, mock } from 'bun:test';
 import { CopilotMoneyServer, runServer } from '../../src/server.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
+import { createWriteToolSchemas } from '../../src/tools/index.js';
 import type { Transaction, Account } from '../../src/models/index.js';
 
 // Mock data
@@ -222,5 +223,62 @@ describe('runServer function', () => {
 
     // Note: We can't await these as they'll hang waiting for stdio
     // In a real test environment, we'd mock the transport
+  });
+});
+
+describe('CopilotMoneyServer write mode', () => {
+  test('handleListTools returns only read tools by default', () => {
+    const server = new CopilotMoneyServer();
+    const result = server.handleListTools();
+    const toolNames = result.tools.map((t) => t.name);
+
+    expect(toolNames).toContain('get_transactions');
+    expect(toolNames).not.toContain('set_transaction_category');
+  });
+
+  test('handleListTools returns read + write tools when writeEnabled', () => {
+    const server = new CopilotMoneyServer(undefined, undefined, true);
+    const result = server.handleListTools();
+    const toolNames = result.tools.map((t) => t.name);
+
+    expect(toolNames).toContain('get_transactions');
+    expect(toolNames).toContain('set_transaction_category');
+  });
+
+  test('write tool has correct annotations', () => {
+    const server = new CopilotMoneyServer(undefined, undefined, true);
+    const result = server.handleListTools();
+    const writeTool = result.tools.find((t) => t.name === 'set_transaction_category');
+
+    expect(writeTool).toBeDefined();
+    expect(writeTool!.annotations).toEqual({
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+    });
+  });
+
+  test('handleCallTool rejects write tool when not in write mode', async () => {
+    const server = new CopilotMoneyServer();
+    const result = await server.handleCallTool('set_transaction_category', {
+      transaction_id: 'txn1',
+      category_id: 'food',
+    });
+
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { text: string }).text).toContain('Unknown tool');
+  });
+});
+
+describe('createWriteToolSchemas', () => {
+  test('returns write tool schemas with proper annotations', () => {
+    const schemas = createWriteToolSchemas();
+    expect(schemas.length).toBeGreaterThanOrEqual(1);
+
+    const setCat = schemas.find((s) => s.name === 'set_transaction_category');
+    expect(setCat).toBeDefined();
+    expect(setCat!.annotations?.readOnlyHint).toBe(false);
+    expect(setCat!.inputSchema.required).toContain('transaction_id');
+    expect(setCat!.inputSchema.required).toContain('category_id');
   });
 });

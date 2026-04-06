@@ -13,7 +13,10 @@ import {
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import { CopilotDatabase } from './core/database.js';
-import { CopilotMoneyTools, createToolSchemas } from './tools/index.js';
+import { CopilotMoneyTools, createToolSchemas, createWriteToolSchemas } from './tools/index.js';
+import { FirestoreClient } from './core/firestore-client.js';
+import { FirebaseAuth } from './core/auth/firebase-auth.js';
+import { extractRefreshToken } from './core/auth/browser-token.js';
 
 // Read version from package.json
 import { createRequire } from 'module';
@@ -27,6 +30,7 @@ export class CopilotMoneyServer {
   private db: CopilotDatabase;
   private tools: CopilotMoneyTools;
   private server: Server;
+  private writeEnabled: boolean;
 
   /**
    * Initialize the MCP server.
@@ -34,10 +38,19 @@ export class CopilotMoneyServer {
    * @param dbPath - Optional path to LevelDB database.
    *                If undefined, uses default Copilot Money location.
    * @param decodeTimeoutMs - Optional timeout for decode operations in milliseconds.
+   * @param writeEnabled - If true, register write tools and enable Firestore writes.
    */
-  constructor(dbPath?: string, decodeTimeoutMs?: number) {
+  constructor(dbPath?: string, decodeTimeoutMs?: number, writeEnabled = false) {
     this.db = new CopilotDatabase(dbPath, decodeTimeoutMs);
-    this.tools = new CopilotMoneyTools(this.db);
+    this.writeEnabled = writeEnabled;
+
+    let firestoreClient: FirestoreClient | undefined;
+    if (writeEnabled) {
+      const auth = new FirebaseAuth(() => extractRefreshToken());
+      firestoreClient = new FirestoreClient(auth);
+    }
+
+    this.tools = new CopilotMoneyTools(this.db, firestoreClient);
     this.server = new Server(
       {
         name: 'copilot-money-mcp',
@@ -58,8 +71,12 @@ export class CopilotMoneyServer {
    * Exposed for testing purposes.
    */
   handleListTools(): { tools: Tool[] } {
-    const schemas = createToolSchemas();
-    const tools: Tool[] = schemas.map((schema) => ({
+    const readSchemas = createToolSchemas();
+    const allSchemas = this.writeEnabled
+      ? [...readSchemas, ...createWriteToolSchemas()]
+      : readSchemas;
+
+    const tools: Tool[] = allSchemas.map((schema) => ({
       name: schema.name,
       description: schema.description,
       inputSchema: schema.inputSchema,
@@ -245,8 +262,14 @@ export class CopilotMoneyServer {
  *
  * @param dbPath - Optional path to LevelDB database.
  *                If undefined, uses default Copilot Money location.
+ * @param decodeTimeoutMs - Optional timeout for decode operations in milliseconds.
+ * @param writeEnabled - If true, register write tools and enable Firestore writes.
  */
-export async function runServer(dbPath?: string, decodeTimeoutMs?: number): Promise<void> {
-  const server = new CopilotMoneyServer(dbPath, decodeTimeoutMs);
+export async function runServer(
+  dbPath?: string,
+  decodeTimeoutMs?: number,
+  writeEnabled = false
+): Promise<void> {
+  const server = new CopilotMoneyServer(dbPath, decodeTimeoutMs, writeEnabled);
   await server.run();
 }

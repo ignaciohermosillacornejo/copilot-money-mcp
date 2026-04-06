@@ -5,6 +5,7 @@
  */
 
 import { CopilotDatabase } from '../core/database.js';
+import type { FirestoreClient } from '../core/firestore-client.js';
 import { parsePeriod } from '../utils/date.js';
 import {
   getCategoryName,
@@ -255,6 +256,7 @@ export interface HoldingEntry {
  */
 export class CopilotMoneyTools {
   private db: CopilotDatabase;
+  private firestoreClient: FirestoreClient | null;
   private _userCategoryMap: Map<string, string> | null = null;
   private _excludedCategoryIds: Set<string> | null = null;
 
@@ -262,9 +264,24 @@ export class CopilotMoneyTools {
    * Initialize tools with a database connection.
    *
    * @param database - CopilotDatabase instance
+   * @param firestoreClient - Optional Firestore client for write operations
    */
-  constructor(database: CopilotDatabase) {
+  constructor(database: CopilotDatabase, firestoreClient?: FirestoreClient) {
     this.db = database;
+    this.firestoreClient = firestoreClient ?? null;
+  }
+
+  /**
+   * Return the Firestore client, or throw if write mode is not enabled.
+   * Used by write tools (e.g. set_transaction_category).
+   */
+  protected getFirestoreClient(): FirestoreClient {
+    if (!this.firestoreClient) {
+      throw new Error(
+        'Write mode is not enabled. Start the server with --write to use write tools.'
+      );
+    }
+    return this.firestoreClient;
   }
 
   /**
@@ -2174,6 +2191,8 @@ export interface ToolSchema {
   };
   annotations?: {
     readOnlyHint?: boolean;
+    destructiveHint?: boolean;
+    idempotentHint?: boolean;
   };
 }
 
@@ -2647,6 +2666,44 @@ export function createToolSchemas(): ToolSchema[] {
         },
       },
       annotations: { readOnlyHint: true },
+    },
+  ];
+}
+
+/**
+ * Create MCP tool schemas for write tools.
+ *
+ * These tools modify Copilot Money data via the Firestore REST API and are
+ * only registered when the server is started with the --write flag.
+ *
+ * @returns List of write tool schema definitions
+ */
+export function createWriteToolSchemas(): ToolSchema[] {
+  return [
+    {
+      name: 'set_transaction_category',
+      description:
+        'Change the category of a transaction. Requires transaction_id (from get_transactions) ' +
+        'and category_id (from get_categories). Writes directly to Copilot Money via Firestore.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          transaction_id: {
+            type: 'string',
+            description: 'Transaction ID to update (from get_transactions results)',
+          },
+          category_id: {
+            type: 'string',
+            description: 'New category ID to assign (from get_categories results)',
+          },
+        },
+        required: ['transaction_id', 'category_id'],
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
     },
   ];
 }
