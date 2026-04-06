@@ -3,6 +3,7 @@ import {
   toFirestoreValue,
   fromFirestoreValue,
   toFirestoreFields,
+  fromFirestoreFields,
   type FirestoreRestValue,
 } from '../../../src/core/format/firestore-rest.js';
 
@@ -99,5 +100,32 @@ describe('toFirestoreFields', () => {
   test('skips undefined values', () => {
     const result = toFirestoreFields({ a: 'yes', b: undefined });
     expect(result).toEqual({ a: { stringValue: 'yes' } });
+  });
+});
+
+describe('fromFirestoreFields', () => {
+  test('converts document fields back to plain object', () => {
+    const result = fromFirestoreFields({
+      name: { stringValue: 'Alice' },
+      age: { integerValue: '30' },
+      active: { booleanValue: true },
+    });
+    expect(result).toEqual({ name: 'Alice', age: 30, active: true });
+  });
+
+  test('returns empty object for empty fields', () => {
+    expect(fromFirestoreFields({})).toEqual({});
+  });
+});
+
+describe('toFirestoreValue error handling', () => {
+  test('throws on unsupported type', () => {
+    expect(() => toFirestoreValue(Symbol())).toThrow('Unsupported value type: symbol');
+  });
+});
+
+describe('fromFirestoreValue additional coverage', () => {
+  test('decodes false boolean', () => {
+    expect(fromFirestoreValue({ booleanValue: false })).toBe(false);
   });
 });

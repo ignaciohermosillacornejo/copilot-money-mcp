@@ -62,6 +62,17 @@ export function fromFirestoreValue(val: FirestoreRestValue): unknown {
 }
 
 /**
+ * Convert Firestore REST document fields back to a plain TypeScript object.
+ */
+export function fromFirestoreFields(fields: FirestoreFields): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    result[key] = fromFirestoreValue(value);
+  }
+  return result;
+}
+
+/**
  * Convert a flat TypeScript object to Firestore REST document fields.
  * Skips undefined values.
  */
