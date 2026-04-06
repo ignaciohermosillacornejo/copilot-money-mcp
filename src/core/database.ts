@@ -1141,17 +1141,24 @@ export class CopilotDatabase {
     const allPrices = await this.loadInvestmentPrices();
     let result = [...allPrices];
 
-    // Apply ticker symbol filter
+    // Apply ticker symbol filter (case-insensitive)
     if (tickerSymbol) {
-      result = result.filter((p) => p.ticker_symbol === tickerSymbol);
+      const lower = tickerSymbol.toLowerCase();
+      result = result.filter((p) => p.ticker_symbol?.toLowerCase() === lower);
     }
 
-    // Apply date range filters
+    // Apply date range filters (check both p.date for hf and p.month for daily)
     if (startDate) {
-      result = result.filter((p) => p.date && p.date >= startDate);
+      result = result.filter((p) => {
+        const d = p.date ?? p.month;
+        return d && d >= startDate;
+      });
     }
     if (endDate) {
-      result = result.filter((p) => p.date && p.date <= endDate);
+      result = result.filter((p) => {
+        const d = p.date ?? p.month;
+        return d && d <= endDate;
+      });
     }
 
     // Apply price type filter
@@ -1190,9 +1197,10 @@ export class CopilotDatabase {
     const allSplits = await this.loadInvestmentSplits();
     let result = [...allSplits];
 
-    // Apply ticker symbol filter
+    // Apply ticker symbol filter (case-insensitive)
     if (tickerSymbol) {
-      result = result.filter((s) => s.ticker_symbol === tickerSymbol);
+      const lower = tickerSymbol.toLowerCase();
+      result = result.filter((s) => s.ticker_symbol?.toLowerCase() === lower);
     }
 
     // Apply date range filters
