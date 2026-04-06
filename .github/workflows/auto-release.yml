@@ -10,8 +10,11 @@ jobs:
   release:
     name: Create release on version bump
     runs-on: ubuntu-latest
-    # Only trusted publishers can trigger releases
-    if: github.event.head_commit.author.username == 'ignaciohermosillacornejo'
+    # Only the repo owner can trigger releases
+    if: github.actor == 'ignaciohermosillacornejo'
+    concurrency:
+      group: release-${{ github.ref }}
+      cancel-in-progress: false
     permissions:
       contents: write
 
@@ -49,6 +52,8 @@ jobs:
       - name: Extract changelog
         if: steps.version.outputs.changed == 'true'
         id: changelog
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
           VERSION="${{ steps.version.outputs.current }}"
           # Extract the section for this version from CHANGELOG.md
@@ -64,12 +69,11 @@ jobs:
 
           if [ -z "$NOTES" ]; then
             echo "No changelog entry found for $VERSION, using commit message"
-            NOTES="${{ github.event.head_commit.message }}"
+            NOTES="$COMMIT_MSG"
           fi
 
           # Write to file to avoid escaping issues
           echo "$NOTES" > /tmp/release-notes.md
-          echo "has_notes=true" >> "$GITHUB_OUTPUT"
 
       - name: Create release
         if: steps.version.outputs.changed == 'true'
