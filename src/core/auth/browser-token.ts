@@ -70,6 +70,7 @@ function searchLevelDBDir(dirPath: string): string | undefined {
       const content = readFileSync(join(dirPath, file), 'latin1');
       const matches = content.match(REFRESH_TOKEN_REGEX);
       if (matches && matches.length > 0) {
+        // Pick the longest match — newer Firebase tokens tend to be longer
         return matches.reduce((a, b) => (a.length >= b.length ? a : b));
       }
     } catch {
@@ -101,6 +102,7 @@ function searchFirefoxProfiles(profilesDir: string): string | undefined {
             const content = readFileSync(join(idbDir, file), 'latin1');
             const matches = content.match(REFRESH_TOKEN_REGEX);
             if (matches && matches.length > 0) {
+              // Pick the longest match — newer Firebase tokens tend to be longer
               return matches.reduce((a, b) => (a.length >= b.length ? a : b));
             }
           } catch {
@@ -132,6 +134,7 @@ function searchSafariDatabases(dbDir: string): string | undefined {
             const content = readFileSync(fullPath, 'latin1');
             const matches = content.match(REFRESH_TOKEN_REGEX);
             if (matches && matches.length > 0) {
+              // Pick the longest match — newer Firebase tokens tend to be longer
               return matches.reduce((a, b) => (a.length >= b.length ? a : b));
             }
           } catch {
