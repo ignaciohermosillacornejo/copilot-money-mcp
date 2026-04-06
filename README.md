@@ -187,7 +187,7 @@ After installing the MCP server, Claude Desktop will request **one-time approval
 
 ## Available Tools
 
-The MCP server provides **8 read-only tools** for querying your financial data:
+The MCP server provides **12 read-only tools** for querying your financial data:
 
 | Tool | Description |
 |------|-------------|
@@ -197,6 +197,10 @@ The MCP server provides **8 read-only tools** for querying your financial data:
 | `get_recurring_transactions` | Identify subscriptions and recurring charges with frequency, monthly cost, and next expected date. Filter by name for detailed view. |
 | `get_budgets` | Get budgets from Copilot's native budget tracking with spending vs. limit comparisons. |
 | `get_goals` | Get financial goals with progress tracking, monthly history, and savings status. |
+| `get_connection_status` | Check bank sync/connection health for linked financial institutions, including last sync timestamps and error states. |
+| `get_holdings` | Get current investment holdings with ticker, quantity, price, average cost, and total return per holding. |
+| `get_investment_prices` | Get historical price data (daily + high-frequency) for stocks, ETFs, mutual funds, and crypto. |
+| `get_investment_splits` | Get stock split history with ratios, dates, and multipliers for accurate historical calculations. |
 | `get_cache_info` | Get information about the local data cache, including date range and transaction count. |
 | `refresh_database` | Refresh the in-memory cache to pick up newly synced data from Copilot Money. Cache auto-refreshes every 5 minutes. |
 

@@ -176,6 +176,35 @@ This guide provides example natural language queries you can use with the Copilo
 
 ---
 
+## Investment Portfolio
+
+### Current Holdings
+
+```
+"What are my current holdings?"
+"Show my portfolio by account"
+"Which holdings have the best total return?"
+"What's the total value of my investments?"
+```
+
+### Price History
+
+```
+"What's the price history of AAPL?"
+"Show me the daily prices for VTI this year"
+"How has my crypto performed in the last 90 days?"
+```
+
+### Stock Splits
+
+```
+"Show me any stock splits"
+"Have any of my holdings had splits recently?"
+"What stock splits happened in the last year?"
+```
+
+---
+
 ## Subscriptions & Recurring
 
 ### Finding Subscriptions
@@ -509,7 +538,7 @@ While the MCP server returns data, you can ask Claude to:
 
 ## Tool Reference (Behind the Scenes)
 
-When you ask questions, Claude uses these 8 tools automatically:
+When you ask questions, Claude uses these 12 tools automatically:
 
 | Your Question | Tool Used |
 |---------------|-----------|
@@ -521,6 +550,10 @@ When you ask questions, Claude uses these 8 tools automatically:
 | "Find subscriptions" | `get_recurring_transactions` |
 | "Show my budgets" | `get_budgets` |
 | "What are my goals?" | `get_goals` |
+| "Check bank connection status" | `get_connection_status` |
+| "What are my holdings?" | `get_holdings` |
+| "Price history of AAPL" | `get_investment_prices` |
+| "Show stock splits" | `get_investment_splits` |
 | "Check cache status" | `get_cache_info` |
 | "Refresh database" | `refresh_database` |
 

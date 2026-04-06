@@ -10,6 +10,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Total balance calculation**: Fixed `getAccounts()` total balance calculation to properly subtract debt from assets instead of adding all balances as positive values. This resolves inflated balance calculations for users with loans, mortgages, and credit cards.
 
+## [1.5.0] - 2026-03-29
+
+### Added
+- **`get_holdings` tool**: Current investment positions with ticker, name, quantity, price, average cost, and total return per holding
+- **`get_investment_prices` tool**: Historical price data (daily + high-frequency) for stocks, ETFs, mutual funds, and crypto
+- **`get_investment_splits` tool**: Stock split history with ratios, dates, and multipliers
+- Database accessors for securities and holdings history collections
+- Full decode coverage for all 35 Firestore collection paths (securities, balance_history, holdings_history, investment_performance, tags, amazon, changes, user profile, app metadata)
+
+### Changed
+- Tool count increased from 9 to 12
+- Ticker symbol filters are now case-insensitive across all investment tools
+
+### Fixed
+- Date range filter now correctly handles daily prices that use month format (`p.month` fallback)
+- Division guard prevents `Infinity` when holding quantity is zero
+
 ## [1.4.0] - 2026-03-29
 
 ### Fixed

@@ -47,7 +47,7 @@ src/
 
 ## Key Files
 
-- **`src/tools/tools.ts`** - All 8 MCP tools are implemented here as async methods in the `CopilotMoneyTools` class.
+- **`src/tools/tools.ts`** - All 12 MCP tools are implemented here as async methods in the `CopilotMoneyTools` class. Includes investment tools (`get_holdings`, `get_investment_prices`, `get_investment_splits`).
 - **`src/core/database.ts`** - `CopilotDatabase` class with methods like `getTransactions()`, `getAccounts()`, `getIncome()`, etc.
 - **`src/core/decoder.ts`** - Binary decoder that reads LevelDB files and parses Firestore Protocol Buffers.
 - **`manifest.json`** - MCP bundle metadata for .mcpb packaging.
