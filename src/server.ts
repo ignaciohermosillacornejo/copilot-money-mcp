@@ -179,6 +179,12 @@ export class CopilotMoneyServer {
           );
           break;
 
+        case 'set_transaction_category':
+          result = await this.tools.setTransactionCategory(
+            typedArgs as Parameters<typeof this.tools.setTransactionCategory>[0]
+          );
+          break;
+
         default:
           return {
             content: [

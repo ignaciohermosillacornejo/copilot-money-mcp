@@ -266,7 +266,7 @@ describe('CopilotMoneyServer write mode', () => {
     });
 
     expect(result.isError).toBe(true);
-    expect((result.content[0] as { text: string }).text).toContain('Unknown tool');
+    expect((result.content[0] as { text: string }).text).toContain('--write mode');
   });
 });
 

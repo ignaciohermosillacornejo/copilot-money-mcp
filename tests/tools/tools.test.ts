@@ -2077,3 +2077,125 @@ describe('getHoldings', () => {
     }
   });
 });
+
+describe('setTransactionCategory', () => {
+  let tools: CopilotMoneyTools;
+  let mockDb: CopilotDatabase;
+  let updateCalls: { collection: string; docId: string; fields: any; mask: string[] }[];
+
+  beforeEach(() => {
+    mockDb = new CopilotDatabase('/nonexistent');
+    (mockDb as any).dbPath = '/fake';
+    (mockDb as any)._transactions = [
+      {
+        transaction_id: 'txn1',
+        amount: 50,
+        date: '2024-01-15',
+        name: 'Coffee Shop',
+        category_id: 'food_and_drink_coffee',
+        user_id: 'user123',
+      },
+      {
+        transaction_id: 'txn2',
+        amount: 100,
+        date: '2024-01-16',
+        name: 'Gas Station',
+        category_id: 'transportation_gas',
+        user_id: 'user123',
+      },
+    ];
+    (mockDb as any)._userCategories = [
+      { category_id: 'food_and_drink_coffee', name: 'Coffee', excluded: false },
+      { category_id: 'transportation_gas', name: 'Gas', excluded: false },
+      { category_id: 'shopping_groceries', name: 'Groceries', excluded: false },
+    ];
+    (mockDb as any)._allCollectionsLoaded = true;
+
+    updateCalls = [];
+    const mockFirestoreClient = {
+      updateDocument: async (collection: string, docId: string, fields: any, mask: string[]) => {
+        updateCalls.push({ collection, docId, fields, mask });
+      },
+    };
+
+    tools = new CopilotMoneyTools(mockDb, mockFirestoreClient as any);
+  });
+
+  test('updates transaction category successfully', async () => {
+    const result = await tools.setTransactionCategory({
+      transaction_id: 'txn1',
+      category_id: 'shopping_groceries',
+    });
+    expect(result.success).toBe(true);
+    expect(result.transaction_id).toBe('txn1');
+    expect(result.old_category_id).toBe('food_and_drink_coffee');
+    expect(result.new_category_id).toBe('shopping_groceries');
+  });
+
+  test('calls Firestore with correct parameters', async () => {
+    await tools.setTransactionCategory({
+      transaction_id: 'txn1',
+      category_id: 'shopping_groceries',
+    });
+    expect(updateCalls).toHaveLength(1);
+    expect(updateCalls[0].collection).toBe('transactions');
+    expect(updateCalls[0].docId).toBe('txn1');
+    expect(updateCalls[0].mask).toEqual(['category_id']);
+    expect(updateCalls[0].fields).toEqual({
+      category_id: { stringValue: 'shopping_groceries' },
+    });
+  });
+
+  test('patches cache after successful write', async () => {
+    await tools.setTransactionCategory({
+      transaction_id: 'txn1',
+      category_id: 'shopping_groceries',
+    });
+    const txn = (mockDb as any)._transactions.find((t: any) => t.transaction_id === 'txn1');
+    expect(txn.category_id).toBe('shopping_groceries');
+  });
+
+  test('throws when transaction_id not found', async () => {
+    await expect(
+      tools.setTransactionCategory({
+        transaction_id: 'nonexistent',
+        category_id: 'shopping_groceries',
+      })
+    ).rejects.toThrow('Transaction not found: nonexistent');
+  });
+
+  test('throws when category_id not found', async () => {
+    await expect(
+      tools.setTransactionCategory({ transaction_id: 'txn1', category_id: 'nonexistent_category' })
+    ).rejects.toThrow('Category not found: nonexistent_category');
+  });
+
+  test('does not modify cache on Firestore error', async () => {
+    const failingClient = {
+      updateDocument: async () => {
+        throw new Error('Firestore update failed (500)');
+      },
+    };
+    const failTools = new CopilotMoneyTools(mockDb, failingClient as any);
+
+    await expect(
+      failTools.setTransactionCategory({
+        transaction_id: 'txn1',
+        category_id: 'shopping_groceries',
+      })
+    ).rejects.toThrow('Firestore update failed');
+
+    const txn = (mockDb as any)._transactions.find((t: any) => t.transaction_id === 'txn1');
+    expect(txn.category_id).toBe('food_and_drink_coffee');
+  });
+
+  test('throws when no Firestore client configured (read-only mode)', async () => {
+    const readOnlyTools = new CopilotMoneyTools(mockDb);
+    await expect(
+      readOnlyTools.setTransactionCategory({
+        transaction_id: 'txn1',
+        category_id: 'shopping_groceries',
+      })
+    ).rejects.toThrow('Write operations require --write mode');
+  });
+});

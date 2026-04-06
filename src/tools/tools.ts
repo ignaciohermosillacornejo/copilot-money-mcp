@@ -6,6 +6,7 @@
 
 import { CopilotDatabase } from '../core/database.js';
 import type { FirestoreClient } from '../core/firestore-client.js';
+import { toFirestoreFields } from '../core/format/firestore-rest.js';
 import { parsePeriod } from '../utils/date.js';
 import {
   getCategoryName,
@@ -2173,6 +2174,67 @@ export class CopilotMoneyTools {
       offset: validatedOffset,
       has_more: hasMore,
       holdings: paged,
+    };
+  }
+
+  /**
+   * Change the category of a transaction.
+   *
+   * Validates both IDs exist, writes to Firestore, then patches the cache.
+   */
+  async setTransactionCategory(args: { transaction_id: string; category_id: string }): Promise<{
+    success: boolean;
+    transaction_id: string;
+    old_category_id: string | undefined;
+    new_category_id: string;
+    old_category_name: string;
+    new_category_name: string;
+  }> {
+    if (!this.firestoreClient) {
+      throw new Error(
+        'Write operations require --write mode. Restart the server with --write flag.'
+      );
+    }
+
+    const { transaction_id, category_id } = args;
+
+    // Validate transaction exists
+    const transactions = await this.db.getAllTransactions();
+    const txn = transactions.find((t) => t.transaction_id === transaction_id);
+    if (!txn) {
+      throw new Error(`Transaction not found: ${transaction_id}`);
+    }
+
+    // Validate category exists
+    const categories = await this.db.getUserCategories();
+    const category = categories.find((c) => c.category_id === category_id);
+    if (!category) {
+      throw new Error(`Category not found: ${category_id}`);
+    }
+
+    const oldCategoryId = txn.category_id;
+    const userCategoryMap = await this.getUserCategoryMap();
+    const oldCategoryName = oldCategoryId
+      ? getCategoryName(oldCategoryId, userCategoryMap)
+      : 'Uncategorized';
+    const newCategoryName = getCategoryName(category_id, userCategoryMap);
+
+    // Write to Firestore
+    const firestoreFields = toFirestoreFields({ category_id });
+    await this.firestoreClient.updateDocument('transactions', transaction_id, firestoreFields, [
+      'category_id',
+    ]);
+
+    // Optimistic cache update
+    this.db.patchCachedTransaction(transaction_id, { category_id });
+
+    return {
+      success: true,
+      transaction_id,
+      old_category_id: oldCategoryId,
+      new_category_id: category_id,
+      old_category_name: oldCategoryName,
+      new_category_name: newCategoryName,
     };
   }
 }
