@@ -124,7 +124,7 @@ Response: { id_token, refresh_token, expires_in, token_type, user_id }
 ```
 
 - Single public method: `getIdToken(): Promise<string>`
-- Caches ID token in memory, auto-refreshes when expired (~1 hour lifetime)
+- Caches ID token in memory, auto-refreshes when expired (Firebase ID tokens have a fixed 3600-second lifetime, returned in the `expires_in` response field)
 - If refresh token becomes invalid, re-extracts from browser automatically
 - Tokens are in-memory only — no disk persistence. Server restart = re-extract (sub-second)
 
@@ -242,6 +242,7 @@ Each PR follows the same pattern: add format mapping, add write tool method, add
 - **Shared format layer:** Round-trip tests — encode a TypeScript object to Firestore format, decode it back, assert equality. Run against existing test fixtures to validate read compatibility.
 - **Write tools:** Integration tests with mocked Firestore client. Verify input validation, cache patching, and return format.
 - **No real Firestore writes in CI.** All external calls are mocked.
+- **Coverage target:** 100% line coverage ideally, 95%+ minimum for all new modules.
 
 ## 10. Security Considerations
 
