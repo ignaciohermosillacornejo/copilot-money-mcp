@@ -2120,7 +2120,7 @@ export class CopilotMoneyTools {
         };
 
         // Compute cost basis derived fields
-        if (h.cost_basis != null && h.cost_basis !== 0) {
+        if (h.cost_basis != null && h.cost_basis !== 0 && h.quantity !== 0) {
           entry.cost_basis = roundAmount(h.cost_basis);
           entry.average_cost = roundAmount(h.cost_basis / h.quantity);
           entry.total_return = roundAmount(h.institution_value - h.cost_basis);

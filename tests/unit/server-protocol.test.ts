@@ -149,7 +149,7 @@ describe('CopilotMoneyServer.handleListTools', () => {
     }
   });
 
-  test('returns all 11 tools', () => {
+  test('returns all 12 tools', () => {
     const response = server.handleListTools();
 
     const expectedTools = [
