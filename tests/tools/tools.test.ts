@@ -1742,6 +1742,29 @@ describe('getInvestmentPrices', () => {
     expect(result.tickers).toContain('SCHX');
     expect(result.tickers.length).toBe(2);
   });
+
+  test('ticker_symbol filter is case-insensitive', async () => {
+    const result = await tools.getInvestmentPrices({ ticker_symbol: 'aapl' });
+    expect(result.count).toBe(2);
+    for (const p of result.prices) {
+      expect(p.ticker_symbol).toBe('AAPL');
+    }
+  });
+
+  test('daily prices are not excluded by date filter (month fallback)', async () => {
+    // Daily prices have p.month (e.g., "2024-01") instead of p.date.
+    // The database filter falls back to p.month so daily prices aren't silently dropped.
+    const allDaily = await tools.getInvestmentPrices({ price_type: 'daily' });
+    expect(allDaily.count).toBe(2);
+
+    // A broad date range should include all daily prices
+    const filtered = await tools.getInvestmentPrices({
+      price_type: 'daily',
+      start_date: '2023-01-01',
+      end_date: '2025-12-31',
+    });
+    expect(filtered.count).toBe(2);
+  });
 });
 
 describe('getInvestmentSplits', () => {
@@ -1809,6 +1832,12 @@ describe('getInvestmentSplits', () => {
     expect(result.count).toBe(1);
     expect(result.total_count).toBe(3);
     expect(result.has_more).toBe(true);
+  });
+
+  test('ticker_symbol filter is case-insensitive', async () => {
+    const result = await tools.getInvestmentSplits({ ticker_symbol: 'tsla' });
+    expect(result.count).toBe(1);
+    expect(result.splits[0].ticker_symbol).toBe('TSLA');
   });
 });
 
@@ -2008,5 +2037,42 @@ describe('getHoldings', () => {
     expect(result.total_count).toBe(4);
     expect(result.offset).toBe(1);
     expect(result.has_more).toBe(true);
+  });
+
+  test('omits cost basis fields when quantity is zero', async () => {
+    (db as any)._accounts = [
+      {
+        account_id: 'inv_zero',
+        current_balance: 0,
+        name: 'Zero Qty Account',
+        account_type: 'investment',
+        holdings: [
+          {
+            security_id: 'sec_aapl',
+            account_id: 'inv_zero',
+            cost_basis: 500,
+            institution_price: 190.0,
+            institution_value: 0,
+            quantity: 0,
+            iso_currency_code: 'USD',
+          },
+        ],
+      },
+    ];
+
+    const result = await tools.getHoldings({});
+    expect(result.count).toBe(1);
+    expect(result.holdings[0].quantity).toBe(0);
+    expect(result.holdings[0].cost_basis).toBeUndefined();
+    expect(result.holdings[0].average_cost).toBeUndefined();
+    expect(result.holdings[0].total_return).toBeUndefined();
+  });
+
+  test('ticker_symbol filter is case-insensitive', async () => {
+    const result = await tools.getHoldings({ ticker_symbol: 'schx' });
+    expect(result.count).toBe(2);
+    for (const h of result.holdings) {
+      expect(h.ticker_symbol).toBe('SCHX');
+    }
   });
 });

@@ -226,6 +226,31 @@ export function normalizeMerchantName(name: string): string {
 }
 
 /**
+ * A single investment holding enriched with security metadata and computed returns.
+ */
+export interface HoldingEntry {
+  security_id: string;
+  ticker_symbol?: string;
+  name?: string;
+  type?: string;
+  account_id: string;
+  account_name?: string;
+  quantity: number;
+  institution_price: number;
+  institution_value: number;
+  cost_basis?: number;
+  average_cost?: number;
+  total_return?: number;
+  total_return_percent?: number;
+  is_cash_equivalent?: boolean;
+  iso_currency_code?: string;
+  history?: Array<{
+    month: string;
+    snapshots: Record<string, { price?: number; quantity?: number }>;
+  }>;
+}
+
+/**
  * Collection of MCP tools for querying Copilot Money data.
  */
 export class CopilotMoneyTools {
@@ -2007,6 +2032,12 @@ export class CopilotMoneyTools {
     };
   }
 
+  /**
+   * Get current investment holdings with cost basis and returns.
+   *
+   * Joins holdings (from account documents) with securities for enrichment.
+   * Computes average cost and total return when cost_basis is available.
+   */
   async getHoldings(
     options: {
       account_id?: string;
@@ -2020,27 +2051,7 @@ export class CopilotMoneyTools {
     total_count: number;
     offset: number;
     has_more: boolean;
-    holdings: Array<{
-      security_id: string;
-      ticker_symbol?: string;
-      name?: string;
-      type?: string;
-      account_id: string;
-      account_name?: string;
-      quantity: number;
-      institution_price: number;
-      institution_value: number;
-      cost_basis?: number;
-      average_cost?: number;
-      total_return?: number;
-      total_return_percent?: number;
-      is_cash_equivalent?: boolean;
-      iso_currency_code?: string;
-      history?: Array<{
-        month: string;
-        snapshots: Record<string, { price?: number; quantity?: number }>;
-      }>;
-    }>;
+    holdings: HoldingEntry[];
   }> {
     const { account_id, ticker_symbol, include_history = false } = options;
     const validatedLimit = validateLimit(options.limit, DEFAULT_QUERY_LIMIT);
@@ -2062,28 +2073,6 @@ export class CopilotMoneyTools {
     }
 
     // Extract and enrich holdings from investment accounts
-    type HoldingEntry = {
-      security_id: string;
-      ticker_symbol?: string;
-      name?: string;
-      type?: string;
-      account_id: string;
-      account_name?: string;
-      quantity: number;
-      institution_price: number;
-      institution_value: number;
-      cost_basis?: number;
-      average_cost?: number;
-      total_return?: number;
-      total_return_percent?: number;
-      is_cash_equivalent?: boolean;
-      iso_currency_code?: string;
-      history?: Array<{
-        month: string;
-        snapshots: Record<string, { price?: number; quantity?: number }>;
-      }>;
-    };
-
     const holdings: HoldingEntry[] = [];
 
     for (const acct of accounts) {
