@@ -4,7 +4,7 @@ Complete documentation of all Firestore collections cached locally by Copilot Mo
 
 **Last verified:** 2026-04-05 | **App version:** macOS (App Store) | **Total documents:** ~55,953 across ~35 unique collection patterns
 
-**Decode coverage:** 100% (55,953 / 55,953 documents) — all 35 collection paths decoded
+**Decode coverage:** 100% — all 35 collection paths fully decoded (document counts vary per user database)
 
 ## Database Location
 
