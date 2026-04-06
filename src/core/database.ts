@@ -307,6 +307,24 @@ export class CopilotDatabase {
   }
 
   /**
+   * Patch a specific transaction in the in-memory cache.
+   *
+   * Used after a successful Firestore write to keep the cache consistent
+   * without reloading the entire database from LevelDB.
+   *
+   * @param transactionId - The transaction_id to update
+   * @param fields - Partial transaction fields to merge
+   * @returns true if the transaction was found and patched, false otherwise
+   */
+  patchCachedTransaction(transactionId: string, fields: Partial<Transaction>): boolean {
+    if (!this._transactions) return false;
+    const txn = this._transactions.find((t) => t.transaction_id === transactionId);
+    if (!txn) return false;
+    Object.assign(txn, fields);
+    return true;
+  }
+
+  /**
    * Get the timestamp when cache was last loaded.
    *
    * @returns Unix timestamp in milliseconds, or null if not loaded

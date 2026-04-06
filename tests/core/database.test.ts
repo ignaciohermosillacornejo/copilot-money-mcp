@@ -263,6 +263,59 @@ describe('CopilotDatabase', () => {
     });
   });
 
+  describe('patchCachedTransaction', () => {
+    test('updates category_id on cached transaction', async () => {
+      (db as any)._transactions = [
+        { transaction_id: 'txn1', amount: 50, date: '2024-01-15', category_id: 'old_cat' },
+        { transaction_id: 'txn2', amount: 30, date: '2024-01-16', category_id: 'other' },
+      ];
+
+      const result = db.patchCachedTransaction('txn1', { category_id: 'new_cat' });
+      expect(result).toBe(true);
+      const txns = await db.getAllTransactions();
+      const txn1 = txns.find((t) => t.transaction_id === 'txn1');
+      expect(txn1?.category_id).toBe('new_cat');
+    });
+
+    test('returns false when transaction not in cache', () => {
+      (db as any)._transactions = [{ transaction_id: 'txn1', amount: 50, date: '2024-01-15' }];
+      const result = db.patchCachedTransaction('nonexistent', { category_id: 'x' });
+      expect(result).toBe(false);
+    });
+
+    test('returns false when cache is empty', () => {
+      (db as any)._transactions = null;
+      const result = db.patchCachedTransaction('txn1', { category_id: 'x' });
+      expect(result).toBe(false);
+    });
+
+    test('does not affect other transactions', () => {
+      (db as any)._transactions = [
+        { transaction_id: 'txn1', amount: 50, date: '2024-01-15', category_id: 'old' },
+        { transaction_id: 'txn2', amount: 30, date: '2024-01-16', category_id: 'keep' },
+      ];
+      db.patchCachedTransaction('txn1', { category_id: 'new' });
+      const txn2 = ((db as any)._transactions as any[]).find((t) => t.transaction_id === 'txn2');
+      expect(txn2?.category_id).toBe('keep');
+    });
+
+    test('can patch multiple fields at once', () => {
+      (db as any)._transactions = [
+        {
+          transaction_id: 'txn1',
+          amount: 50,
+          date: '2024-01-15',
+          category_id: 'old',
+          user_reviewed: false,
+        },
+      ];
+      db.patchCachedTransaction('txn1', { category_id: 'new', user_reviewed: true });
+      const txn = ((db as any)._transactions as any[])[0];
+      expect(txn.category_id).toBe('new');
+      expect(txn.user_reviewed).toBe(true);
+    });
+  });
+
   describe('Cache TTL configuration', () => {
     const originalEnv = process.env.COPILOT_CACHE_TTL_MINUTES;
 
