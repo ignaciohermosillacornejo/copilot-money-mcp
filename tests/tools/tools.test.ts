@@ -2066,6 +2066,7 @@ describe('getHoldings', () => {
     expect(result.holdings[0].cost_basis).toBeUndefined();
     expect(result.holdings[0].average_cost).toBeUndefined();
     expect(result.holdings[0].total_return).toBeUndefined();
+    expect(result.holdings[0].total_return_percent).toBeUndefined();
   });
 
   test('ticker_symbol filter is case-insensitive', async () => {
