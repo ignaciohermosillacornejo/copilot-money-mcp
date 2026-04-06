@@ -244,7 +244,7 @@ describe('CopilotDatabase error handling', () => {
       }
     });
 
-    test('cache TTL=0 means always reload (isCacheStale returns true)', async () => {
+    test('cache TTL=0 means always reload (isCacheStale returns true)', () => {
       process.env.COPILOT_CACHE_TTL_MINUTES = '0';
 
       const db = new CopilotDatabase();
@@ -256,7 +256,7 @@ describe('CopilotDatabase error handling', () => {
       expect(db.isCacheStale()).toBe(true);
     });
 
-    test('valid COPILOT_CACHE_TTL_MINUTES env var is used', async () => {
+    test('valid COPILOT_CACHE_TTL_MINUTES env var is used', () => {
       process.env.COPILOT_CACHE_TTL_MINUTES = '10';
 
       const db = new CopilotDatabase();
@@ -268,7 +268,7 @@ describe('CopilotDatabase error handling', () => {
       expect(db.isCacheStale()).toBe(false);
     });
 
-    test('invalid COPILOT_CACHE_TTL_MINUTES falls back to default', async () => {
+    test('invalid COPILOT_CACHE_TTL_MINUTES falls back to default', () => {
       process.env.COPILOT_CACHE_TTL_MINUTES = 'not-a-number';
 
       const db = new CopilotDatabase();
