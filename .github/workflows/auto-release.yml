@@ -1,0 +1,83 @@
+name: Auto Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'package.json'
+
+jobs:
+  release:
+    name: Create release on version bump
+    runs-on: ubuntu-latest
+    # Only trusted publishers can trigger releases
+    if: github.event.head_commit.author.username == 'ignaciohermosillacornejo'
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 2  # Need previous commit to detect version change
+
+      - name: Check for version bump
+        id: version
+        run: |
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          echo "current=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+
+          # Check if tag already exists
+          if git rev-parse "v$CURRENT_VERSION" >/dev/null 2>&1; then
+            echo "Tag v$CURRENT_VERSION already exists, skipping"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Check if version actually changed in this push
+          git show HEAD~1:package.json > /tmp/old-package.json 2>/dev/null || true
+          OLD_VERSION=$(node -p "try { require('/tmp/old-package.json').version } catch { '' }")
+
+          if [ "$CURRENT_VERSION" != "$OLD_VERSION" ]; then
+            echo "Version changed: $OLD_VERSION -> $CURRENT_VERSION"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Version unchanged ($CURRENT_VERSION), skipping"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Extract changelog
+        if: steps.version.outputs.changed == 'true'
+        id: changelog
+        run: |
+          VERSION="${{ steps.version.outputs.current }}"
+          # Extract the section for this version from CHANGELOG.md
+          # Matches from "## [x.y.z]" until the next "## [" or end of file
+          NOTES=$(awk -v ver="$VERSION" '
+            /^## \[/ {
+              if (found) exit
+              if (index($0, "[" ver "]")) found=1
+              next
+            }
+            found { print }
+          ' CHANGELOG.md)
+
+          if [ -z "$NOTES" ]; then
+            echo "No changelog entry found for $VERSION, using commit message"
+            NOTES="${{ github.event.head_commit.message }}"
+          fi
+
+          # Write to file to avoid escaping issues
+          echo "$NOTES" > /tmp/release-notes.md
+          echo "has_notes=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create release
+        if: steps.version.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ steps.version.outputs.current }}"
+          gh release create "v$VERSION" \
+            --title "v$VERSION" \
+            --notes-file /tmp/release-notes.md \
+            --target "${{ github.sha }}"
