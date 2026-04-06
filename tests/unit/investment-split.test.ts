@@ -472,6 +472,7 @@ describe('formatSplitDate', () => {
     expect(formatted).toContain('2022');
   });
 
+  // Safe to monkey-patch: Bun runs tests within a file serially
   test('catch block: returns raw date when toLocaleDateString throws', () => {
     const original = Date.prototype.toLocaleDateString;
     Date.prototype.toLocaleDateString = () => {

@@ -367,6 +367,7 @@ describe('getItemAccountCount', () => {
 });
 
 describe('formatLastUpdate', () => {
+  // Safe to monkey-patch: Bun runs tests within a file serially
   test('catch block: returns raw timestamp when toLocaleDateString throws', () => {
     const original = Date.prototype.toLocaleDateString;
     Date.prototype.toLocaleDateString = () => {
