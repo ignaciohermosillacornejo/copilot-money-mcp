@@ -54,7 +54,14 @@ export const BROWSER_CONFIGS: BrowserConfig[] = [
   },
   {
     name: 'Safari',
-    paths: [join(homedir(), 'Library/Safari/Databases')],
+    paths: [
+      // Safari 17+ stores IndexedDB in the app container with hashed directory names
+      join(
+        homedir(),
+        'Library/Containers/com.apple.Safari/Data/Library/WebKit/WebsiteData/Default'
+      ),
+      join(homedir(), 'Library/Safari/Databases'),
+    ],
     type: 'safari',
   },
   {
