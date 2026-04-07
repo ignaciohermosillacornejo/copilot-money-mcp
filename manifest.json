@@ -93,6 +93,22 @@
       "description": "Mark one or more transactions as reviewed (or unreviewed)."
     },
     {
+      "name": "set_transaction_excluded",
+      "description": "Exclude or include a transaction in spending reports."
+    },
+    {
+      "name": "set_transaction_name",
+      "description": "Rename a transaction display name."
+    },
+    {
+      "name": "set_internal_transfer",
+      "description": "Mark or unmark a transaction as an internal transfer."
+    },
+    {
+      "name": "set_transaction_goal",
+      "description": "Link or unlink a transaction to a financial goal."
+    },
+    {
       "name": "create_tag",
       "description": "Create a new user-defined tag for categorizing transactions."
     },
@@ -103,6 +119,42 @@
     {
       "name": "create_category",
       "description": "Create a new custom category in Copilot Money."
+    },
+    {
+      "name": "update_category",
+      "description": "Update an existing user-defined category."
+    },
+    {
+      "name": "delete_category",
+      "description": "Delete a user-defined category."
+    },
+    {
+      "name": "create_budget",
+      "description": "Create a new budget for a spending category."
+    },
+    {
+      "name": "update_budget",
+      "description": "Update an existing budget."
+    },
+    {
+      "name": "delete_budget",
+      "description": "Delete a budget."
+    },
+    {
+      "name": "set_recurring_state",
+      "description": "Change the state of a recurring item (active, paused, archived)."
+    },
+    {
+      "name": "delete_recurring",
+      "description": "Delete a recurring item."
+    },
+    {
+      "name": "update_goal",
+      "description": "Update a financial goal's properties."
+    },
+    {
+      "name": "delete_goal",
+      "description": "Delete a financial goal."
     }
   ],
   "tools_generated": false,

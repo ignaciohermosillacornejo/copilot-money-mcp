@@ -97,10 +97,23 @@ export class CopilotMoneyServer {
     'set_transaction_category',
     'set_transaction_note',
     'set_transaction_tags',
+    'set_transaction_excluded',
+    'set_transaction_name',
+    'set_internal_transfer',
+    'set_transaction_goal',
     'review_transactions',
     'create_tag',
     'delete_tag',
     'create_category',
+    'update_category',
+    'delete_category',
+    'create_budget',
+    'update_budget',
+    'delete_budget',
+    'set_recurring_state',
+    'delete_recurring',
+    'update_goal',
+    'delete_goal',
   ]);
 
   async handleCallTool(name: string, typedArgs?: Record<string, unknown>): Promise<CallToolResult> {
@@ -226,6 +239,30 @@ export class CopilotMoneyServer {
           );
           break;
 
+        case 'set_transaction_excluded':
+          result = await this.tools.setTransactionExcluded(
+            typedArgs as Parameters<typeof this.tools.setTransactionExcluded>[0]
+          );
+          break;
+
+        case 'set_transaction_name':
+          result = await this.tools.setTransactionName(
+            typedArgs as Parameters<typeof this.tools.setTransactionName>[0]
+          );
+          break;
+
+        case 'set_internal_transfer':
+          result = await this.tools.setInternalTransfer(
+            typedArgs as Parameters<typeof this.tools.setInternalTransfer>[0]
+          );
+          break;
+
+        case 'set_transaction_goal':
+          result = await this.tools.setTransactionGoal(
+            typedArgs as Parameters<typeof this.tools.setTransactionGoal>[0]
+          );
+          break;
+
         case 'create_tag':
           result = await this.tools.createTag(
             typedArgs as Parameters<typeof this.tools.createTag>[0]
@@ -241,6 +278,60 @@ export class CopilotMoneyServer {
         case 'create_category':
           result = await this.tools.createCategory(
             typedArgs as Parameters<typeof this.tools.createCategory>[0]
+          );
+          break;
+
+        case 'update_category':
+          result = await this.tools.updateCategory(
+            typedArgs as Parameters<typeof this.tools.updateCategory>[0]
+          );
+          break;
+
+        case 'delete_category':
+          result = await this.tools.deleteCategory(
+            typedArgs as Parameters<typeof this.tools.deleteCategory>[0]
+          );
+          break;
+
+        case 'create_budget':
+          result = await this.tools.createBudget(
+            typedArgs as Parameters<typeof this.tools.createBudget>[0]
+          );
+          break;
+
+        case 'update_budget':
+          result = await this.tools.updateBudget(
+            typedArgs as Parameters<typeof this.tools.updateBudget>[0]
+          );
+          break;
+
+        case 'delete_budget':
+          result = await this.tools.deleteBudget(
+            typedArgs as Parameters<typeof this.tools.deleteBudget>[0]
+          );
+          break;
+
+        case 'set_recurring_state':
+          result = await this.tools.setRecurringState(
+            typedArgs as Parameters<typeof this.tools.setRecurringState>[0]
+          );
+          break;
+
+        case 'delete_recurring':
+          result = await this.tools.deleteRecurring(
+            typedArgs as Parameters<typeof this.tools.deleteRecurring>[0]
+          );
+          break;
+
+        case 'update_goal':
+          result = await this.tools.updateGoal(
+            typedArgs as Parameters<typeof this.tools.updateGoal>[0]
+          );
+          break;
+
+        case 'delete_goal':
+          result = await this.tools.deleteGoal(
+            typedArgs as Parameters<typeof this.tools.deleteGoal>[0]
           );
           break;
 

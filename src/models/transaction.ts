@@ -101,6 +101,9 @@ export const TransactionSchema = z
     // Tags
     tag_ids: z.array(z.string()).optional(),
 
+    // Goal link
+    goal_id: z.string().optional(), // Financial goal this transaction is linked to
+
     // Complex nested data
     internal_tx_match: z.record(z.string(), z.unknown()).optional(),
     venmo_extra_data: z.record(z.string(), z.unknown()).optional(),
