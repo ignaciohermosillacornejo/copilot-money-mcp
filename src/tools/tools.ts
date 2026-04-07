@@ -2233,8 +2233,10 @@ export class CopilotMoneyTools {
     const firestoreFields = toFirestoreFields({ category_id });
     await client.updateDocument(collectionPath, transaction_id, firestoreFields, ['category_id']);
 
-    // Optimistic cache update
-    this.db.patchCachedTransaction(transaction_id, { category_id });
+    // Optimistic cache update — if the transaction was evicted, clear cache to force re-read
+    if (!this.db.patchCachedTransaction(transaction_id, { category_id })) {
+      this.db.clearCache();
+    }
 
     return {
       success: true,
