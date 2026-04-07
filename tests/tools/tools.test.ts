@@ -2196,6 +2196,6 @@ describe('setTransactionCategory', () => {
         transaction_id: 'txn1',
         category_id: 'shopping_groceries',
       })
-    ).rejects.toThrow('Write operations require --write mode');
+    ).rejects.toThrow('Write mode is not enabled');
   });
 });

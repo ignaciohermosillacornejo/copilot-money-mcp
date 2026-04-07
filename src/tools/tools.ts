@@ -2190,13 +2190,17 @@ export class CopilotMoneyTools {
     old_category_name: string;
     new_category_name: string;
   }> {
-    if (!this.firestoreClient) {
-      throw new Error(
-        'Write operations require --write mode. Restart the server with --write flag.'
-      );
-    }
+    const client = this.getFirestoreClient();
 
     const { transaction_id, category_id } = args;
+
+    // Validate IDs contain only safe characters
+    if (!/^[A-Za-z0-9_-]+$/.test(transaction_id)) {
+      throw new Error(`Invalid transaction_id format: ${transaction_id}`);
+    }
+    if (!/^[A-Za-z0-9_-]+$/.test(category_id)) {
+      throw new Error(`Invalid category_id format: ${category_id}`);
+    }
 
     // Validate transaction exists
     const transactions = await this.db.getAllTransactions();
@@ -2221,9 +2225,7 @@ export class CopilotMoneyTools {
 
     // Write to Firestore
     const firestoreFields = toFirestoreFields({ category_id });
-    await this.firestoreClient.updateDocument('transactions', transaction_id, firestoreFields, [
-      'category_id',
-    ]);
+    await client.updateDocument('transactions', transaction_id, firestoreFields, ['category_id']);
 
     // Optimistic cache update
     this.db.patchCachedTransaction(transaction_id, { category_id });
