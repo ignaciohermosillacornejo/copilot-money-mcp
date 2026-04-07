@@ -2900,6 +2900,11 @@ describe('createTag', () => {
     expect(result.name).toBe('vacation');
     expect(result.tag_id).toBe('vacation');
   });
+
+  test('throws when tag already exists', async () => {
+    (mockDb as any)._tags = [{ tag_id: 'vacation', name: 'Vacation' }];
+    await expect(tools.createTag({ name: 'vacation' })).rejects.toThrow('already exists');
+  });
 });
 
 describe('deleteTag', () => {
