@@ -2780,6 +2780,8 @@ describe('createTag', () => {
     (mockDb as any).dbPath = '/fake';
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (mockDb as any)._allCollectionsLoaded = true;
+    (mockDb as any)._cacheLoadedAt = Date.now();
+    (mockDb as any)._tags = [];
 
     createCalls = [];
     const mockFirestoreClient = {
@@ -2911,6 +2913,11 @@ describe('deleteTag', () => {
     (mockDb as any).dbPath = '/fake';
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (mockDb as any)._allCollectionsLoaded = true;
+    (mockDb as any)._cacheLoadedAt = Date.now();
+    (mockDb as any)._tags = [
+      { tag_id: 'vacation', name: 'Vacation' },
+      { tag_id: 'business', name: 'Business Expense' },
+    ];
 
     deleteCalls = [];
     const mockFirestoreClient = {
@@ -2931,20 +2938,20 @@ describe('deleteTag', () => {
     const result = await tools.deleteTag({ tag_id: 'vacation' });
     expect(result.success).toBe(true);
     expect(result.tag_id).toBe('vacation');
-    expect(result.deleted_name).toBe('vacation');
+    expect(result.deleted_name).toBe('Vacation');
   });
 
   test('calls Firestore deleteDocument with correct path', async () => {
-    await tools.deleteTag({ tag_id: 'test_tag' });
+    await tools.deleteTag({ tag_id: 'business' });
     expect(deleteCalls).toHaveLength(1);
     expect(deleteCalls[0].collection).toBe('users/user123/tags');
-    expect(deleteCalls[0].docId).toBe('test_tag');
+    expect(deleteCalls[0].docId).toBe('business');
   });
 
   test('clears cache after deleting tag', async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (mockDb as any)._transactions = [{ transaction_id: 'txn1', amount: 10, date: '2024-01-01' }];
-    await tools.deleteTag({ tag_id: 'test' });
+    await tools.deleteTag({ tag_id: 'vacation' });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((mockDb as any)._transactions).toBeNull();
   });
@@ -2957,6 +2964,12 @@ describe('deleteTag', () => {
 
   test('throws on tag_id with spaces', async () => {
     await expect(tools.deleteTag({ tag_id: 'bad id' })).rejects.toThrow('Invalid tag_id format');
+  });
+
+  test('throws when tag not found', async () => {
+    await expect(tools.deleteTag({ tag_id: 'nonexistent' })).rejects.toThrow(
+      'Tag not found: nonexistent'
+    );
   });
 
   test('does not modify cache on Firestore error', async () => {
@@ -2974,7 +2987,7 @@ describe('deleteTag', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (mockDb as any)._transactions = [{ transaction_id: 'txn1' }];
 
-    await expect(failTools.deleteTag({ tag_id: 'test' })).rejects.toThrow(
+    await expect(failTools.deleteTag({ tag_id: 'vacation' })).rejects.toThrow(
       'Firestore delete failed'
     );
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
