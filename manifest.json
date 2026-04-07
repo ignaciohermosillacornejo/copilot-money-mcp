@@ -75,6 +75,10 @@
     {
       "name": "get_holdings",
       "description": "Get current investment holdings with position-level detail including ticker, quantity, price, average cost, and total return per holding."
+    },
+    {
+      "name": "set_transaction_category",
+      "description": "Change the category of a transaction."
     }
   ],
   "tools_generated": false,

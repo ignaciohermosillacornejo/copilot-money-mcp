@@ -4,12 +4,13 @@
  *
  * Usage: bun run sync-manifest
  *
- * This script reads the tool schemas from createToolSchemas() and updates
- * the manifest.json tools array to match, preserving custom descriptions
- * where they exist but adding any missing tools.
+ * This script reads the tool schemas from createToolSchemas() and
+ * createWriteToolSchemas() and updates the manifest.json tools array to
+ * match, preserving custom descriptions where they exist but adding any
+ * missing tools.
  */
 
-import { createToolSchemas } from '../src/tools/tools.js';
+import { createToolSchemas, createWriteToolSchemas } from '../src/tools/tools.js';
 import { readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -59,7 +60,7 @@ function truncateDescription(description: string, maxLength: number = 150): stri
 
 function main() {
   const manifest: Manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-  const schemas = createToolSchemas();
+  const schemas = [...createToolSchemas(), ...createWriteToolSchemas()];
 
   // Build a map of existing manifest tool descriptions (to preserve custom ones)
   const existingDescriptions = new Map<string, string>();

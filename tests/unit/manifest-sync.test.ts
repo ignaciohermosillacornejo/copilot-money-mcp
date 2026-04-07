@@ -6,7 +6,7 @@
  */
 
 import { describe, test, expect } from 'bun:test';
-import { createToolSchemas } from '../../src/tools/tools.js';
+import { createToolSchemas, createWriteToolSchemas } from '../../src/tools/tools.js';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
@@ -20,7 +20,7 @@ interface Manifest {
 }
 
 describe('Manifest Tool Sync', () => {
-  const actualSchemas = createToolSchemas();
+  const actualSchemas = [...createToolSchemas(), ...createWriteToolSchemas()];
   const manifestPath = join(import.meta.dir, '../../manifest.json');
   const manifest: Manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
 
