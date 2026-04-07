@@ -5,7 +5,7 @@
  * for Copilot Money Firebase refresh tokens (prefixed with "AMf-").
  */
 
-import { readdirSync, readFileSync, existsSync } from 'fs';
+import { readdirSync, readFileSync, existsSync, statSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 
@@ -141,6 +141,7 @@ function searchSafariDatabases(dbDir: string): string | undefined {
           if (found) return found;
         } else if (entry.isFile()) {
           try {
+            if (statSync(fullPath).size > 10_000_000) continue;
             const content = readFileSync(fullPath, 'latin1');
             const matches = content.match(REFRESH_TOKEN_REGEX);
             if (matches && matches.length > 0) {
