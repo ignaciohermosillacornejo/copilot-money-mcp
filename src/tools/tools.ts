@@ -2586,12 +2586,19 @@ export class CopilotMoneyTools {
     }
 
     const oldGoalId = txn.goal_id || null;
-    // When unlinking, write empty string to Firestore
+    // Write empty string to Firestore when unlinking, but undefined to cache for model consistency
     const firestoreGoalId = goal_id ?? '';
 
-    await this.writeTransactionFields(transaction_id, collectionPath, {
-      goal_id: firestoreGoalId,
-    });
+    const client = this.getFirestoreClient();
+    const firestoreFields = toFirestoreFields({ goal_id: firestoreGoalId });
+    await client.updateDocument(collectionPath, transaction_id, firestoreFields, ['goal_id']);
+    if (
+      !this.db.patchCachedTransaction(transaction_id, {
+        goal_id: goal_id ?? undefined,
+      })
+    ) {
+      this.db.clearCache();
+    }
 
     return {
       success: true,
@@ -2776,6 +2783,9 @@ export class CopilotMoneyTools {
       updateMask.push('emoji');
     }
     if (color !== undefined) {
+      if (!/^#[0-9A-Fa-f]{6}$/.test(color)) {
+        throw new Error(`Invalid color format: ${color} (expected #RRGGBB)`);
+      }
       fieldsToUpdate.color = color;
       updateMask.push('color');
     }
@@ -2785,9 +2795,9 @@ export class CopilotMoneyTools {
     }
     if (parent_category_id !== undefined) {
       if (parent_category_id !== null) {
-        // Validate parent exists
-        if (!/^[A-Za-z0-9_-]+$/.test(parent_category_id)) {
-          throw new Error(`Invalid parent_category_id format: ${parent_category_id}`);
+        validateDocId(parent_category_id, 'parent_category_id');
+        if (parent_category_id === category_id) {
+          throw new Error('A category cannot be its own parent');
         }
         const parent = existingCategories.find((c) => c.category_id === parent_category_id);
         if (!parent) {
@@ -3004,16 +3014,19 @@ export class CopilotMoneyTools {
     }
 
     if (period !== undefined) {
-      const validPeriods = ['monthly', 'yearly', 'weekly', 'daily'];
-      if (!validPeriods.includes(period)) {
-        throw new Error(`Invalid period: ${period}. Must be one of: ${validPeriods.join(', ')}`);
+      if (!(KNOWN_PERIODS as readonly string[]).includes(period)) {
+        throw new Error(`Invalid period: ${period}. Must be one of: ${KNOWN_PERIODS.join(', ')}`);
       }
       updateFields.period = period;
       updatedFieldNames.push('period');
     }
 
     if (name !== undefined) {
-      updateFields.name = name;
+      const trimmedName = name.trim();
+      if (!trimmedName) {
+        throw new Error('Budget name must not be empty');
+      }
+      updateFields.name = trimmedName;
       updatedFieldNames.push('name');
     }
 
@@ -3217,7 +3230,14 @@ export class CopilotMoneyTools {
     // Validate goal_id format
     validateDocId(goal_id, 'goal_id');
 
-    // Validate at least one field to update
+    // Validate goal exists first (include inactive goals)
+    const goals = await this.db.getGoals(false);
+    const goal = goals.find((g) => g.goal_id === goal_id);
+    if (!goal) {
+      throw new Error(`Goal not found: ${goal_id}`);
+    }
+
+    // Build dynamic update fields
     const fieldsToUpdate: Record<string, unknown> = {};
     const updateMask: string[] = [];
 
@@ -3233,39 +3253,31 @@ export class CopilotMoneyTools {
       updateMask.push('emoji');
     }
 
-    // Nested savings fields — build a savings sub-object
+    // Nested savings fields — use a single 'savings' mask entry so Firestore
+    // merges the sub-object correctly via the REST PATCH API
     const savingsUpdate: Record<string, unknown> = {};
     if (target_amount !== undefined) {
       if (target_amount <= 0) {
         throw new Error('target_amount must be greater than 0');
       }
       savingsUpdate.target_amount = target_amount;
-      updateMask.push('savings.target_amount');
     }
     if (monthly_contribution !== undefined) {
       if (monthly_contribution < 0) {
         throw new Error('monthly_contribution must be >= 0');
       }
       savingsUpdate.tracking_type_monthly_contribution = monthly_contribution;
-      updateMask.push('savings.tracking_type_monthly_contribution');
     }
     if (status !== undefined) {
       savingsUpdate.status = status;
-      updateMask.push('savings.status');
     }
     if (Object.keys(savingsUpdate).length > 0) {
       fieldsToUpdate.savings = savingsUpdate;
+      updateMask.push('savings');
     }
 
     if (updateMask.length === 0) {
       throw new Error('No fields to update');
-    }
-
-    // Validate goal exists (include inactive goals)
-    const goals = await this.db.getGoals(false);
-    const goal = goals.find((g) => g.goal_id === goal_id);
-    if (!goal) {
-      throw new Error(`Goal not found: ${goal_id}`);
     }
 
     // Resolve user_id
