@@ -2207,20 +2207,20 @@ export class CopilotMoneyTools {
       throw new Error('Category name must not be empty');
     }
 
+    const existingCategories = await this.db.getUserCategories();
+
     // Validate parent_category_id if provided
     if (parent_category_id) {
       if (!/^[A-Za-z0-9_-]+$/.test(parent_category_id)) {
         throw new Error(`Invalid parent_category_id format: ${parent_category_id}`);
       }
-      const categories = await this.db.getUserCategories();
-      const parent = categories.find((c) => c.category_id === parent_category_id);
+      const parent = existingCategories.find((c) => c.category_id === parent_category_id);
       if (!parent) {
         throw new Error(`Parent category not found: ${parent_category_id}`);
       }
     }
 
     // Check for duplicate name
-    const existingCategories = await this.db.getUserCategories();
     const duplicate = existingCategories.find(
       (c) => c.name?.toLowerCase() === name.trim().toLowerCase()
     );
@@ -2502,19 +2502,19 @@ export class CopilotMoneyTools {
       resolvedTxns.push(txn);
     }
 
-    // Write to Firestore and patch cache for each transaction
+    // Write to Firestore in parallel and patch cache
     const firestoreFields = toFirestoreFields({ user_reviewed: reviewed });
-    for (const txn of resolvedTxns) {
-      const collectionPath = `items/${txn.item_id}/accounts/${txn.account_id}/transactions`;
-      await client.updateDocument(collectionPath, txn.transaction_id, firestoreFields, [
-        'user_reviewed',
-      ]);
-
-      // Optimistic cache update — if the transaction was evicted, clear cache to force re-read
-      if (!this.db.patchCachedTransaction(txn.transaction_id, { user_reviewed: reviewed })) {
-        this.db.clearCache();
-      }
-    }
+    await Promise.all(
+      resolvedTxns.map(async (txn) => {
+        const collectionPath = `items/${txn.item_id}/accounts/${txn.account_id}/transactions`;
+        await client.updateDocument(collectionPath, txn.transaction_id, firestoreFields, [
+          'user_reviewed',
+        ]);
+        if (!this.db.patchCachedTransaction(txn.transaction_id, { user_reviewed: reviewed })) {
+          this.db.clearCache();
+        }
+      })
+    );
 
     return {
       success: true,
@@ -2559,6 +2559,13 @@ export class CopilotMoneyTools {
     // Validate hex_color format if provided
     if (hex_color !== undefined && !/^#[0-9A-Fa-f]{6}$/.test(hex_color)) {
       throw new Error(`Invalid hex_color format: ${hex_color} (expected #RRGGBB)`);
+    }
+
+    // Check for duplicate tag
+    const existingTags = await this.db.getTags();
+    const duplicate = existingTags.find((t) => t.tag_id === tag_id);
+    if (duplicate) {
+      throw new Error(`Tag "${trimmedName}" already exists (id: ${tag_id})`);
     }
 
     // Resolve user_id for the Firestore path users/{user_id}/tags/{tag_id}
@@ -2612,6 +2619,13 @@ export class CopilotMoneyTools {
       throw new Error(`Invalid tag_id format: ${tag_id}`);
     }
 
+    // Validate tag exists
+    const existingTags = await this.db.getTags();
+    const tag = existingTags.find((t) => t.tag_id === tag_id);
+    if (!tag) {
+      throw new Error(`Tag not found: ${tag_id}`);
+    }
+
     // Resolve user_id for the Firestore path users/{user_id}/tags/{tag_id}
     const userId = await client.requireUserId();
 
@@ -2624,7 +2638,7 @@ export class CopilotMoneyTools {
     return {
       success: true,
       tag_id,
-      deleted_name: tag_id,
+      deleted_name: tag.name ?? tag_id,
     };
   }
 }
@@ -3260,7 +3274,7 @@ export function createWriteToolSchemas(): ToolSchema[] {
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
-        idempotentHint: true,
+        idempotentHint: false,
       },
     },
     {

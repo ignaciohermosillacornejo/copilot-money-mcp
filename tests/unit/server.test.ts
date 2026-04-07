@@ -274,7 +274,7 @@ describe('CopilotMoneyServer write mode', () => {
     expect(tool!.annotations).toEqual({
       readOnlyHint: false,
       destructiveHint: false,
-      idempotentHint: true,
+      idempotentHint: false,
     });
   });
 

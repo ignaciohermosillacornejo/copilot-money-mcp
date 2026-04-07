@@ -37,7 +37,7 @@ import {
   Item,
   getTransactionDisplayName,
 } from '../models/index.js';
-import type { Security, HoldingsHistory } from '../models/index.js';
+import type { Security, HoldingsHistory, Tag } from '../models/index.js';
 import { getCategoryName } from '../utils/categories.js';
 
 /**
@@ -157,6 +157,7 @@ export class CopilotDatabase {
   private _userAccounts: UserAccountCustomization[] | null = null;
   private _accountNameMap: Map<string, string> | null = null;
   private _securities: Security[] | null = null;
+  private _tags: Tag[] | null = null;
   private _holdingsHistory: HoldingsHistory[] | null = null;
 
   // Promises for in-flight loads to prevent duplicate loading
@@ -275,6 +276,7 @@ export class CopilotDatabase {
     this._accountNameMap = null;
     this._securities = null;
     this._holdingsHistory = null;
+    this._tags = null;
 
     // Clear in-flight loading promises
     this._loadingTransactions = null;
@@ -381,6 +383,7 @@ export class CopilotDatabase {
       this._userAccounts = result.userAccounts;
       this._securities = result.securities;
       this._holdingsHistory = result.holdingsHistory;
+      this._tags = result.tags;
 
       this._allCollectionsLoaded = true;
       this._cacheLoadedAt = Date.now();
@@ -982,6 +985,11 @@ export class CopilotDatabase {
   async getUserCategories(): Promise<Category[]> {
     const userCategories = await this.loadUserCategories();
     return [...userCategories];
+  }
+
+  async getTags(): Promise<Tag[]> {
+    await this.loadAllCollections();
+    return [...(this._tags ?? [])];
   }
 
   /**
