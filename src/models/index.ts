@@ -20,9 +20,14 @@ export {
 
 export { CategorySchema, type Category } from './category.js';
 
-export { RecurringSchema, type Recurring, getRecurringDisplayName } from './recurring.js';
+export {
+  RecurringSchema,
+  type Recurring,
+  getRecurringDisplayName,
+  RECURRING_STATES,
+} from './recurring.js';
 
-export { BudgetSchema, type Budget, getBudgetDisplayName } from './budget.js';
+export { BudgetSchema, type Budget, getBudgetDisplayName, KNOWN_PERIODS } from './budget.js';
 
 export {
   GoalSchema,

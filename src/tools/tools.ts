@@ -15,7 +15,12 @@ import {
   isKnownPlaidCategory,
 } from '../utils/categories.js';
 import type { Transaction, Account, InvestmentPrice, InvestmentSplit } from '../models/index.js';
-import { getTransactionDisplayName, getRecurringDisplayName } from '../models/index.js';
+import {
+  getTransactionDisplayName,
+  getRecurringDisplayName,
+  KNOWN_PERIODS,
+  RECURRING_STATES,
+} from '../models/index.js';
 import { isItemHealthy, itemNeedsAttention, getItemDisplayName } from '../models/item.js';
 import {
   getRootCategories,
@@ -28,6 +33,19 @@ import {
 // ============================================
 // Category Constants
 // ============================================
+
+// ============================================
+// Shared Validation Helpers
+// ============================================
+
+const SAFE_ID_RE = /^[A-Za-z0-9_-]+$/;
+
+/** Validate that a document ID contains only safe characters. */
+function validateDocId(id: string, label: string): void {
+  if (!SAFE_ID_RE.test(id)) {
+    throw new Error(`Invalid ${label} format: ${id}`);
+  }
+}
 
 /**
  * Plaid category ID for foreign transaction fees (snake_case format).
@@ -2211,9 +2229,7 @@ export class CopilotMoneyTools {
 
     // Validate parent_category_id if provided
     if (parent_category_id) {
-      if (!/^[A-Za-z0-9_-]+$/.test(parent_category_id)) {
-        throw new Error(`Invalid parent_category_id format: ${parent_category_id}`);
-      }
+      validateDocId(parent_category_id, 'parent_category_id');
       const parent = existingCategories.find((c) => c.category_id === parent_category_id);
       if (!parent) {
         throw new Error(`Parent category not found: ${parent_category_id}`);
@@ -2278,6 +2294,50 @@ export class CopilotMoneyTools {
   }
 
   /**
+   * Resolve a transaction by ID: validate format, find in cache, verify Firestore path fields.
+   * Returns the transaction and its Firestore collection path.
+   */
+  private async resolveTransaction(transactionId: string): Promise<{
+    txn: Transaction;
+    collectionPath: string;
+  }> {
+    validateDocId(transactionId, 'transaction_id');
+
+    const transactions = await this.db.getAllTransactions();
+    const txn = transactions.find((t) => t.transaction_id === transactionId);
+    if (!txn) {
+      throw new Error(`Transaction not found: ${transactionId}`);
+    }
+    if (!txn.item_id || !txn.account_id) {
+      throw new Error(
+        `Transaction ${transactionId} is missing item_id or account_id — cannot determine Firestore path`
+      );
+    }
+    return {
+      txn,
+      collectionPath: `items/${txn.item_id}/accounts/${txn.account_id}/transactions`,
+    };
+  }
+
+  /**
+   * Write a partial update to a transaction and patch the cache.
+   */
+  private async writeTransactionFields(
+    transactionId: string,
+    collectionPath: string,
+    fields: Record<string, unknown>
+  ): Promise<void> {
+    const client = this.getFirestoreClient();
+    const firestoreFields = toFirestoreFields(fields);
+    const updateMask = Object.keys(fields);
+    await client.updateDocument(collectionPath, transactionId, firestoreFields, updateMask);
+
+    if (!this.db.patchCachedTransaction(transactionId, fields as Partial<Transaction>)) {
+      this.db.clearCache();
+    }
+  }
+
+  /**
    * Change the category of a transaction.
    *
    * Validates both IDs exist, writes to Firestore, then patches the cache.
@@ -2290,24 +2350,10 @@ export class CopilotMoneyTools {
     old_category_name: string;
     new_category_name: string;
   }> {
-    const client = this.getFirestoreClient();
-
     const { transaction_id, category_id } = args;
+    validateDocId(category_id, 'category_id');
 
-    // Validate IDs contain only safe characters
-    if (!/^[A-Za-z0-9_-]+$/.test(transaction_id)) {
-      throw new Error(`Invalid transaction_id format: ${transaction_id}`);
-    }
-    if (!/^[A-Za-z0-9_-]+$/.test(category_id)) {
-      throw new Error(`Invalid category_id format: ${category_id}`);
-    }
-
-    // Validate transaction exists
-    const transactions = await this.db.getAllTransactions();
-    const txn = transactions.find((t) => t.transaction_id === transaction_id);
-    if (!txn) {
-      throw new Error(`Transaction not found: ${transaction_id}`);
-    }
+    const { txn, collectionPath } = await this.resolveTransaction(transaction_id);
 
     // Validate category exists
     const categories = await this.db.getUserCategories();
@@ -2323,20 +2369,7 @@ export class CopilotMoneyTools {
       : 'Uncategorized';
     const newCategoryName = getCategoryName(category_id, userCategoryMap);
 
-    // Write to Firestore — transactions are nested: items/{itemId}/accounts/{accountId}/transactions
-    if (!txn.item_id || !txn.account_id) {
-      throw new Error(
-        `Transaction ${transaction_id} is missing item_id or account_id — cannot determine Firestore path`
-      );
-    }
-    const collectionPath = `items/${txn.item_id}/accounts/${txn.account_id}/transactions`;
-    const firestoreFields = toFirestoreFields({ category_id });
-    await client.updateDocument(collectionPath, transaction_id, firestoreFields, ['category_id']);
-
-    // Optimistic cache update — if the transaction was evicted, clear cache to force re-read
-    if (!this.db.patchCachedTransaction(transaction_id, { category_id })) {
-      this.db.clearCache();
-    }
+    await this.writeTransactionFields(transaction_id, collectionPath, { category_id });
 
     return {
       success: true,
@@ -2359,38 +2392,11 @@ export class CopilotMoneyTools {
     old_note: string;
     new_note: string;
   }> {
-    const client = this.getFirestoreClient();
-
     const { transaction_id, note } = args;
-
-    // Validate transaction_id contains only safe characters
-    if (!/^[A-Za-z0-9_-]+$/.test(transaction_id)) {
-      throw new Error(`Invalid transaction_id format: ${transaction_id}`);
-    }
-
-    // Validate transaction exists
-    const transactions = await this.db.getAllTransactions();
-    const txn = transactions.find((t) => t.transaction_id === transaction_id);
-    if (!txn) {
-      throw new Error(`Transaction not found: ${transaction_id}`);
-    }
-
+    const { txn, collectionPath } = await this.resolveTransaction(transaction_id);
     const oldNote = txn.user_note ?? '';
 
-    // Write to Firestore — transactions are nested: items/{itemId}/accounts/{accountId}/transactions
-    if (!txn.item_id || !txn.account_id) {
-      throw new Error(
-        `Transaction ${transaction_id} is missing item_id or account_id — cannot determine Firestore path`
-      );
-    }
-    const collectionPath = `items/${txn.item_id}/accounts/${txn.account_id}/transactions`;
-    const firestoreFields = toFirestoreFields({ user_note: note });
-    await client.updateDocument(collectionPath, transaction_id, firestoreFields, ['user_note']);
-
-    // Optimistic cache update — if the transaction was evicted, clear cache to force re-read
-    if (!this.db.patchCachedTransaction(transaction_id, { user_note: note })) {
-      this.db.clearCache();
-    }
+    await this.writeTransactionFields(transaction_id, collectionPath, { user_note: note });
 
     return {
       success: true,
@@ -2411,44 +2417,15 @@ export class CopilotMoneyTools {
     old_tag_ids: string[];
     new_tag_ids: string[];
   }> {
-    const client = this.getFirestoreClient();
-
     const { transaction_id, tag_ids } = args;
-
-    // Validate IDs contain only safe characters
-    if (!/^[A-Za-z0-9_-]+$/.test(transaction_id)) {
-      throw new Error(`Invalid transaction_id format: ${transaction_id}`);
-    }
     for (const tagId of tag_ids) {
-      if (!/^[A-Za-z0-9_-]+$/.test(tagId)) {
-        throw new Error(`Invalid tag_id format: ${tagId}`);
-      }
+      validateDocId(tagId, 'tag_id');
     }
 
-    // Validate transaction exists
-    const transactions = await this.db.getAllTransactions();
-    const txn = transactions.find((t) => t.transaction_id === transaction_id);
-    if (!txn) {
-      throw new Error(`Transaction not found: ${transaction_id}`);
-    }
-
-    // Write to Firestore — transactions are nested: items/{itemId}/accounts/{accountId}/transactions
-    if (!txn.item_id || !txn.account_id) {
-      throw new Error(
-        `Transaction ${transaction_id} is missing item_id or account_id — cannot determine Firestore path`
-      );
-    }
-
+    const { txn, collectionPath } = await this.resolveTransaction(transaction_id);
     const oldTagIds = txn.tag_ids || [];
 
-    const collectionPath = `items/${txn.item_id}/accounts/${txn.account_id}/transactions`;
-    const firestoreFields = toFirestoreFields({ tag_ids });
-    await client.updateDocument(collectionPath, transaction_id, firestoreFields, ['tag_ids']);
-
-    // Optimistic cache update — if the transaction was evicted, clear cache to force re-read
-    if (!this.db.patchCachedTransaction(transaction_id, { tag_ids })) {
-      this.db.clearCache();
-    }
+    await this.writeTransactionFields(transaction_id, collectionPath, { tag_ids });
 
     return {
       success: true,
@@ -2477,11 +2454,8 @@ export class CopilotMoneyTools {
       throw new Error('transaction_ids must be a non-empty array');
     }
 
-    // Validate all IDs contain only safe characters
     for (const id of transaction_ids) {
-      if (!/^[A-Za-z0-9_-]+$/.test(id)) {
-        throw new Error(`Invalid transaction_id format: ${id}`);
-      }
+      validateDocId(id, 'transaction_id');
     }
 
     // Validate all transactions exist and collect them
@@ -2533,42 +2507,12 @@ export class CopilotMoneyTools {
     transaction_id: string;
     excluded: boolean;
   }> {
-    const client = this.getFirestoreClient();
-
     const { transaction_id, excluded } = args;
+    const { collectionPath } = await this.resolveTransaction(transaction_id);
 
-    // Validate transaction_id contains only safe characters
-    if (!/^[A-Za-z0-9_-]+$/.test(transaction_id)) {
-      throw new Error(`Invalid transaction_id format: ${transaction_id}`);
-    }
+    await this.writeTransactionFields(transaction_id, collectionPath, { excluded });
 
-    // Validate transaction exists
-    const transactions = await this.db.getAllTransactions();
-    const txn = transactions.find((t) => t.transaction_id === transaction_id);
-    if (!txn) {
-      throw new Error(`Transaction not found: ${transaction_id}`);
-    }
-
-    // Write to Firestore — transactions are nested: items/{itemId}/accounts/{accountId}/transactions
-    if (!txn.item_id || !txn.account_id) {
-      throw new Error(
-        `Transaction ${transaction_id} is missing item_id or account_id — cannot determine Firestore path`
-      );
-    }
-    const collectionPath = `items/${txn.item_id}/accounts/${txn.account_id}/transactions`;
-    const firestoreFields = toFirestoreFields({ excluded });
-    await client.updateDocument(collectionPath, transaction_id, firestoreFields, ['excluded']);
-
-    // Optimistic cache update — if the transaction was evicted, clear cache to force re-read
-    if (!this.db.patchCachedTransaction(transaction_id, { excluded })) {
-      this.db.clearCache();
-    }
-
-    return {
-      success: true,
-      transaction_id,
-      excluded,
-    };
+    return { success: true, transaction_id, excluded };
   }
 
   /**
@@ -2582,51 +2526,19 @@ export class CopilotMoneyTools {
     old_name: string;
     new_name: string;
   }> {
-    const client = this.getFirestoreClient();
-
     const { transaction_id, name } = args;
 
-    // Validate transaction_id contains only safe characters
-    if (!/^[A-Za-z0-9_-]+$/.test(transaction_id)) {
-      throw new Error(`Invalid transaction_id format: ${transaction_id}`);
-    }
-
-    // Validate name is non-empty after trimming
     const trimmedName = name.trim();
     if (!trimmedName) {
       throw new Error('Transaction name must not be empty');
     }
 
-    // Validate transaction exists
-    const transactions = await this.db.getAllTransactions();
-    const txn = transactions.find((t) => t.transaction_id === transaction_id);
-    if (!txn) {
-      throw new Error(`Transaction not found: ${transaction_id}`);
-    }
-
+    const { txn, collectionPath } = await this.resolveTransaction(transaction_id);
     const oldName = txn.name ?? txn.original_name ?? '';
 
-    // Write to Firestore — transactions are nested: items/{itemId}/accounts/{accountId}/transactions
-    if (!txn.item_id || !txn.account_id) {
-      throw new Error(
-        `Transaction ${transaction_id} is missing item_id or account_id — cannot determine Firestore path`
-      );
-    }
-    const collectionPath = `items/${txn.item_id}/accounts/${txn.account_id}/transactions`;
-    const firestoreFields = toFirestoreFields({ name: trimmedName });
-    await client.updateDocument(collectionPath, transaction_id, firestoreFields, ['name']);
+    await this.writeTransactionFields(transaction_id, collectionPath, { name: trimmedName });
 
-    // Optimistic cache update — if the transaction was evicted, clear cache to force re-read
-    if (!this.db.patchCachedTransaction(transaction_id, { name: trimmedName })) {
-      this.db.clearCache();
-    }
-
-    return {
-      success: true,
-      transaction_id,
-      old_name: oldName,
-      new_name: trimmedName,
-    };
+    return { success: true, transaction_id, old_name: oldName, new_name: trimmedName };
   }
 
   /**
@@ -2639,44 +2551,12 @@ export class CopilotMoneyTools {
     transaction_id: string;
     internal_transfer: boolean;
   }> {
-    const client = this.getFirestoreClient();
-
     const { transaction_id, internal_transfer } = args;
+    const { collectionPath } = await this.resolveTransaction(transaction_id);
 
-    // Validate transaction_id contains only safe characters
-    if (!/^[A-Za-z0-9_-]+$/.test(transaction_id)) {
-      throw new Error(`Invalid transaction_id format: ${transaction_id}`);
-    }
+    await this.writeTransactionFields(transaction_id, collectionPath, { internal_transfer });
 
-    // Validate transaction exists
-    const transactions = await this.db.getAllTransactions();
-    const txn = transactions.find((t) => t.transaction_id === transaction_id);
-    if (!txn) {
-      throw new Error(`Transaction not found: ${transaction_id}`);
-    }
-
-    // Write to Firestore — transactions are nested: items/{itemId}/accounts/{accountId}/transactions
-    if (!txn.item_id || !txn.account_id) {
-      throw new Error(
-        `Transaction ${transaction_id} is missing item_id or account_id — cannot determine Firestore path`
-      );
-    }
-    const collectionPath = `items/${txn.item_id}/accounts/${txn.account_id}/transactions`;
-    const firestoreFields = toFirestoreFields({ internal_transfer });
-    await client.updateDocument(collectionPath, transaction_id, firestoreFields, [
-      'internal_transfer',
-    ]);
-
-    // Optimistic cache update — if the transaction was evicted, clear cache to force re-read
-    if (!this.db.patchCachedTransaction(transaction_id, { internal_transfer })) {
-      this.db.clearCache();
-    }
-
-    return {
-      success: true,
-      transaction_id,
-      internal_transfer,
-    };
+    return { success: true, transaction_id, internal_transfer };
   }
 
   /**
@@ -2691,26 +2571,10 @@ export class CopilotMoneyTools {
     old_goal_id: string | null;
     new_goal_id: string | null;
   }> {
-    const client = this.getFirestoreClient();
-
     const { transaction_id, goal_id } = args;
+    if (goal_id !== null) validateDocId(goal_id, 'goal_id');
 
-    // Validate transaction_id contains only safe characters
-    if (!/^[A-Za-z0-9_-]+$/.test(transaction_id)) {
-      throw new Error(`Invalid transaction_id format: ${transaction_id}`);
-    }
-
-    // Validate goal_id format when not unlinking
-    if (goal_id !== null && !/^[A-Za-z0-9_-]+$/.test(goal_id)) {
-      throw new Error(`Invalid goal_id format: ${goal_id}`);
-    }
-
-    // Validate transaction exists
-    const transactions = await this.db.getAllTransactions();
-    const txn = transactions.find((t) => t.transaction_id === transaction_id);
-    if (!txn) {
-      throw new Error(`Transaction not found: ${transaction_id}`);
-    }
+    const { txn, collectionPath } = await this.resolveTransaction(transaction_id);
 
     // Validate goal exists when linking
     if (goal_id !== null) {
@@ -2722,23 +2586,12 @@ export class CopilotMoneyTools {
     }
 
     const oldGoalId = txn.goal_id || null;
-
-    // Write to Firestore — transactions are nested: items/{itemId}/accounts/{accountId}/transactions
-    if (!txn.item_id || !txn.account_id) {
-      throw new Error(
-        `Transaction ${transaction_id} is missing item_id or account_id — cannot determine Firestore path`
-      );
-    }
-    const collectionPath = `items/${txn.item_id}/accounts/${txn.account_id}/transactions`;
     // When unlinking, write empty string to Firestore
     const firestoreGoalId = goal_id ?? '';
-    const firestoreFields = toFirestoreFields({ goal_id: firestoreGoalId });
-    await client.updateDocument(collectionPath, transaction_id, firestoreFields, ['goal_id']);
 
-    // Optimistic cache update — if the transaction was evicted, clear cache to force re-read
-    if (!this.db.patchCachedTransaction(transaction_id, { goal_id: firestoreGoalId })) {
-      this.db.clearCache();
-    }
+    await this.writeTransactionFields(transaction_id, collectionPath, {
+      goal_id: firestoreGoalId,
+    });
 
     return {
       success: true,
@@ -2840,9 +2693,7 @@ export class CopilotMoneyTools {
     const { tag_id } = args;
 
     // Validate tag_id format
-    if (!/^[A-Za-z0-9_-]+$/.test(tag_id)) {
-      throw new Error(`Invalid tag_id format: ${tag_id}`);
-    }
+    validateDocId(tag_id, 'tag_id');
 
     // Validate tag exists
     const existingTags = await this.db.getTags();
@@ -2890,9 +2741,7 @@ export class CopilotMoneyTools {
     const { category_id, name, emoji, color, excluded, parent_category_id } = args;
 
     // Validate category_id format
-    if (!/^[A-Za-z0-9_-]+$/.test(category_id)) {
-      throw new Error(`Invalid category_id format: ${category_id}`);
-    }
+    validateDocId(category_id, 'category_id');
 
     // Validate category exists
     const existingCategories = await this.db.getUserCategories();
@@ -2989,9 +2838,7 @@ export class CopilotMoneyTools {
     const { category_id } = args;
 
     // Validate category_id format
-    if (!/^[A-Za-z0-9_-]+$/.test(category_id)) {
-      throw new Error(`Invalid category_id format: ${category_id}`);
-    }
+    validateDocId(category_id, 'category_id');
 
     // Validate category exists
     const existingCategories = await this.db.getUserCategories();
@@ -3042,9 +2889,7 @@ export class CopilotMoneyTools {
     const { category_id, amount, period = 'monthly', name } = args;
 
     // Validate category_id format
-    if (!/^[A-Za-z0-9_-]+$/.test(category_id)) {
-      throw new Error(`Invalid category_id format: ${category_id}`);
-    }
+    validateDocId(category_id, 'category_id');
 
     // Validate amount is positive
     if (amount <= 0) {
@@ -3052,9 +2897,8 @@ export class CopilotMoneyTools {
     }
 
     // Validate period
-    const validPeriods = ['monthly', 'yearly', 'weekly', 'daily'];
-    if (!validPeriods.includes(period)) {
-      throw new Error(`Invalid period: ${period}. Must be one of: ${validPeriods.join(', ')}`);
+    if (!(KNOWN_PERIODS as readonly string[]).includes(period)) {
+      throw new Error(`Invalid period: ${period}. Must be one of: ${KNOWN_PERIODS.join(', ')}`);
     }
 
     // Validate category exists
@@ -3138,9 +2982,7 @@ export class CopilotMoneyTools {
     const { budget_id, amount, period, name, is_active } = args;
 
     // Validate budget_id format
-    if (!/^[A-Za-z0-9_-]+$/.test(budget_id)) {
-      throw new Error(`Invalid budget_id format: ${budget_id}`);
-    }
+    validateDocId(budget_id, 'budget_id');
 
     // Validate budget exists
     const existingBudgets = await this.db.getBudgets();
@@ -3220,9 +3062,7 @@ export class CopilotMoneyTools {
     const { budget_id } = args;
 
     // Validate budget_id format
-    if (!/^[A-Za-z0-9_-]+$/.test(budget_id)) {
-      throw new Error(`Invalid budget_id format: ${budget_id}`);
-    }
+    validateDocId(budget_id, 'budget_id');
 
     // Validate budget exists
     const existingBudgets = await this.db.getBudgets();
@@ -3268,14 +3108,11 @@ export class CopilotMoneyTools {
     const { recurring_id, state } = args;
 
     // Validate recurring_id format
-    if (!/^[A-Za-z0-9_-]+$/.test(recurring_id)) {
-      throw new Error(`Invalid recurring_id format: ${recurring_id}`);
-    }
+    validateDocId(recurring_id, 'recurring_id');
 
     // Validate state
-    const validStates = ['active', 'paused', 'archived'];
-    if (!validStates.includes(state)) {
-      throw new Error(`Invalid state: ${state}. Must be one of: ${validStates.join(', ')}`);
+    if (!(RECURRING_STATES as readonly string[]).includes(state)) {
+      throw new Error(`Invalid state: ${state}. Must be one of: ${RECURRING_STATES.join(', ')}`);
     }
 
     // Validate recurring exists (false = include inactive)
@@ -3328,9 +3165,7 @@ export class CopilotMoneyTools {
     const { recurring_id } = args;
 
     // Validate recurring_id format
-    if (!/^[A-Za-z0-9_-]+$/.test(recurring_id)) {
-      throw new Error(`Invalid recurring_id format: ${recurring_id}`);
-    }
+    validateDocId(recurring_id, 'recurring_id');
 
     // Validate recurring exists
     const allRecurring = await this.db.getRecurring(false);
@@ -3380,9 +3215,7 @@ export class CopilotMoneyTools {
     const { goal_id, name, emoji, target_amount, monthly_contribution, status } = args;
 
     // Validate goal_id format
-    if (!/^[A-Za-z0-9_-]+$/.test(goal_id)) {
-      throw new Error(`Invalid goal_id format: ${goal_id}`);
-    }
+    validateDocId(goal_id, 'goal_id');
 
     // Validate at least one field to update
     const fieldsToUpdate: Record<string, unknown> = {};
@@ -3469,9 +3302,7 @@ export class CopilotMoneyTools {
     const { goal_id } = args;
 
     // Validate goal_id format
-    if (!/^[A-Za-z0-9_-]+$/.test(goal_id)) {
-      throw new Error(`Invalid goal_id format: ${goal_id}`);
-    }
+    validateDocId(goal_id, 'goal_id');
 
     // Validate goal exists (include inactive goals)
     const goals = await this.db.getGoals(false);
