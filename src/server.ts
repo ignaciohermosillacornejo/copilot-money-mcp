@@ -93,7 +93,22 @@ export class CopilotMoneyServer {
    * @param name - Tool name
    * @param typedArgs - Tool arguments
    */
+  private static readonly WRITE_TOOLS = new Set(['set_transaction_category']);
+
   async handleCallTool(name: string, typedArgs?: Record<string, unknown>): Promise<CallToolResult> {
+    // Block write tools when not in write mode (before db check so the error is clear)
+    if (CopilotMoneyServer.WRITE_TOOLS.has(name) && !this.writeEnabled) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Write operations require --write mode. Restart the server with --write flag.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
     // Check if database is available
     if (!this.db.isAvailable()) {
       return {
