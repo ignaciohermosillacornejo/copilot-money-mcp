@@ -30,6 +30,12 @@ export const BROWSER_CONFIGS: BrowserConfig[] = [
   {
     name: 'Chrome',
     paths: [
+      // Firebase Web SDK v9+ stores auth tokens in IndexedDB, not Local Storage.
+      // Search the Copilot Money IndexedDB first (most reliable source).
+      join(
+        homedir(),
+        'Library/Application Support/Google/Chrome/Default/IndexedDB/https_app.copilot.money_0.indexeddb.leveldb'
+      ),
       join(homedir(), 'Library/Application Support/Google/Chrome/Default/Local Storage/leveldb'),
       join(homedir(), 'Library/Application Support/Google/Chrome/Profile 1/Local Storage/leveldb'),
     ],
@@ -38,6 +44,10 @@ export const BROWSER_CONFIGS: BrowserConfig[] = [
   {
     name: 'Arc',
     paths: [
+      join(
+        homedir(),
+        'Library/Application Support/Arc/User Data/Default/IndexedDB/https_app.copilot.money_0.indexeddb.leveldb'
+      ),
       join(homedir(), 'Library/Application Support/Arc/User Data/Default/Local Storage/leveldb'),
     ],
     type: 'chromium',

@@ -2223,9 +2223,10 @@ export class CopilotMoneyTools {
       : 'Uncategorized';
     const newCategoryName = getCategoryName(category_id, userCategoryMap);
 
-    // Write to Firestore
+    // Write to Firestore — transactions are nested: items/{itemId}/accounts/{accountId}/transactions
+    const collectionPath = `items/${txn.item_id}/accounts/${txn.account_id}/transactions`;
     const firestoreFields = toFirestoreFields({ category_id });
-    await client.updateDocument('transactions', transaction_id, firestoreFields, ['category_id']);
+    await client.updateDocument(collectionPath, transaction_id, firestoreFields, ['category_id']);
 
     // Optimistic cache update
     this.db.patchCachedTransaction(transaction_id, { category_id });

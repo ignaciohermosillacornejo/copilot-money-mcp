@@ -8,9 +8,10 @@
 
 import type { TokenResult } from './browser-token.js';
 
-// Public client-side Firebase Web API key — intentionally not a secret.
-// Scoped by Firebase security rules; safe to commit.
-const FIREBASE_API_KEY = 'AIzaSyBi2Ht5k9K94Yi6McMSGyKeOcHC7vEsN_I';
+// Public client-side Firebase Web API key for copilot-production-22904 — intentionally
+// not a secret. Scoped by Firebase security rules; safe to commit.
+// Note: this is the *web platform* key (from app.copilot.money), not the iOS key.
+const FIREBASE_API_KEY = 'AIzaSyAMgjkeOSkHj4J4rlswOkD16N3WQOoNPpk';
 const TOKEN_ENDPOINT = `https://securetoken.googleapis.com/v1/token?key=${FIREBASE_API_KEY}`;
 const EXPIRY_MARGIN_MS = 60_000;
 

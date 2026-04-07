@@ -2094,6 +2094,8 @@ describe('setTransactionCategory', () => {
         name: 'Coffee Shop',
         category_id: 'food_and_drink_coffee',
         user_id: 'user123',
+        item_id: 'item1',
+        account_id: 'acct1',
       },
       {
         transaction_id: 'txn2',
@@ -2102,6 +2104,8 @@ describe('setTransactionCategory', () => {
         name: 'Gas Station',
         category_id: 'transportation_gas',
         user_id: 'user123',
+        item_id: 'item1',
+        account_id: 'acct2',
       },
     ];
     (mockDb as any)._userCategories = [
@@ -2138,7 +2142,7 @@ describe('setTransactionCategory', () => {
       category_id: 'shopping_groceries',
     });
     expect(updateCalls).toHaveLength(1);
-    expect(updateCalls[0].collection).toBe('transactions');
+    expect(updateCalls[0].collection).toBe('items/item1/accounts/acct1/transactions');
     expect(updateCalls[0].docId).toBe('txn1');
     expect(updateCalls[0].mask).toEqual(['category_id']);
     expect(updateCalls[0].fields).toEqual({
