@@ -2224,6 +2224,11 @@ export class CopilotMoneyTools {
     const newCategoryName = getCategoryName(category_id, userCategoryMap);
 
     // Write to Firestore — transactions are nested: items/{itemId}/accounts/{accountId}/transactions
+    if (!txn.item_id || !txn.account_id) {
+      throw new Error(
+        `Transaction ${transaction_id} is missing item_id or account_id — cannot determine Firestore path`
+      );
+    }
     const collectionPath = `items/${txn.item_id}/accounts/${txn.account_id}/transactions`;
     const firestoreFields = toFirestoreFields({ category_id });
     await client.updateDocument(collectionPath, transaction_id, firestoreFields, ['category_id']);
