@@ -93,7 +93,15 @@ export class CopilotMoneyServer {
    * @param name - Tool name
    * @param typedArgs - Tool arguments
    */
-  private static readonly WRITE_TOOLS = new Set(['set_transaction_category']);
+  private static readonly WRITE_TOOLS = new Set([
+    'set_transaction_category',
+    'set_transaction_note',
+    'set_transaction_tags',
+    'review_transactions',
+    'create_tag',
+    'delete_tag',
+    'create_category',
+  ]);
 
   async handleCallTool(name: string, typedArgs?: Record<string, unknown>): Promise<CallToolResult> {
     // Block write tools when not in write mode (before db check so the error is clear)
@@ -197,6 +205,42 @@ export class CopilotMoneyServer {
         case 'set_transaction_category':
           result = await this.tools.setTransactionCategory(
             typedArgs as Parameters<typeof this.tools.setTransactionCategory>[0]
+          );
+          break;
+
+        case 'set_transaction_note':
+          result = await this.tools.setTransactionNote(
+            typedArgs as Parameters<typeof this.tools.setTransactionNote>[0]
+          );
+          break;
+
+        case 'set_transaction_tags':
+          result = await this.tools.setTransactionTags(
+            typedArgs as Parameters<typeof this.tools.setTransactionTags>[0]
+          );
+          break;
+
+        case 'review_transactions':
+          result = await this.tools.reviewTransactions(
+            typedArgs as Parameters<typeof this.tools.reviewTransactions>[0]
+          );
+          break;
+
+        case 'create_tag':
+          result = await this.tools.createTag(
+            typedArgs as Parameters<typeof this.tools.createTag>[0]
+          );
+          break;
+
+        case 'delete_tag':
+          result = await this.tools.deleteTag(
+            typedArgs as Parameters<typeof this.tools.deleteTag>[0]
+          );
+          break;
+
+        case 'create_category':
+          result = await this.tools.createCategory(
+            typedArgs as Parameters<typeof this.tools.createCategory>[0]
           );
           break;
 

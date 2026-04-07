@@ -2178,6 +2178,106 @@ export class CopilotMoneyTools {
   }
 
   /**
+   * Create a new user-defined category in Copilot Money.
+   *
+   * Generates a unique category_id, writes to Firestore, then clears the cache
+   * so the new category is visible on next query.
+   */
+  async createCategory(args: {
+    name: string;
+    emoji?: string;
+    color?: string;
+    parent_category_id?: string;
+    excluded?: boolean;
+  }): Promise<{
+    success: boolean;
+    category_id: string;
+    name: string;
+    emoji?: string;
+    color?: string;
+    parent_category_id?: string;
+    excluded: boolean;
+  }> {
+    const client = this.getFirestoreClient();
+
+    const { name, emoji, color, parent_category_id, excluded = false } = args;
+
+    // Validate name is non-empty
+    if (!name.trim()) {
+      throw new Error('Category name must not be empty');
+    }
+
+    // Validate parent_category_id if provided
+    if (parent_category_id) {
+      if (!/^[A-Za-z0-9_-]+$/.test(parent_category_id)) {
+        throw new Error(`Invalid parent_category_id format: ${parent_category_id}`);
+      }
+      const categories = await this.db.getUserCategories();
+      const parent = categories.find((c) => c.category_id === parent_category_id);
+      if (!parent) {
+        throw new Error(`Parent category not found: ${parent_category_id}`);
+      }
+    }
+
+    // Check for duplicate name
+    const existingCategories = await this.db.getUserCategories();
+    const duplicate = existingCategories.find(
+      (c) => c.name?.toLowerCase() === name.trim().toLowerCase()
+    );
+    if (duplicate) {
+      throw new Error(
+        `Category with name "${name.trim()}" already exists (id: ${duplicate.category_id})`
+      );
+    }
+
+    // Generate a unique category_id
+    const categoryId = `custom_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
+
+    // Determine user_id: prefer existing categories, fall back to auth layer
+    const userIdFromCategories = existingCategories.find((c) => c.user_id)?.user_id;
+    const userId = userIdFromCategories ?? (await client.requireUserId());
+
+    // Build document fields
+    const docFields: Record<string, unknown> = {
+      category_id: categoryId,
+      name: name.trim(),
+      excluded,
+    };
+    if (emoji) docFields.emoji = emoji;
+    if (color) docFields.color = color;
+    if (parent_category_id) docFields.parent_category_id = parent_category_id;
+
+    // Write to Firestore
+    const collectionPath = `users/${userId}/categories`;
+    const firestoreFields = toFirestoreFields(docFields);
+    await client.createDocument(collectionPath, categoryId, firestoreFields);
+
+    // Clear cache so the new category is visible on next query
+    this.db.clearCache();
+    this._userCategoryMap = null;
+
+    const result: {
+      success: boolean;
+      category_id: string;
+      name: string;
+      emoji?: string;
+      color?: string;
+      parent_category_id?: string;
+      excluded: boolean;
+    } = {
+      success: true,
+      category_id: categoryId,
+      name: name.trim(),
+      excluded,
+    };
+    if (emoji) result.emoji = emoji;
+    if (color) result.color = color;
+    if (parent_category_id) result.parent_category_id = parent_category_id;
+
+    return result;
+  }
+
+  /**
    * Change the category of a transaction.
    *
    * Validates both IDs exist, writes to Firestore, then patches the cache.
@@ -2245,6 +2345,286 @@ export class CopilotMoneyTools {
       new_category_id: category_id,
       old_category_name: oldCategoryName,
       new_category_name: newCategoryName,
+    };
+  }
+
+  /**
+   * Set or clear the user note on a transaction.
+   *
+   * Validates the transaction exists, writes to Firestore, then patches the cache.
+   */
+  async setTransactionNote(args: { transaction_id: string; note: string }): Promise<{
+    success: boolean;
+    transaction_id: string;
+    old_note: string;
+    new_note: string;
+  }> {
+    const client = this.getFirestoreClient();
+
+    const { transaction_id, note } = args;
+
+    // Validate transaction_id contains only safe characters
+    if (!/^[A-Za-z0-9_-]+$/.test(transaction_id)) {
+      throw new Error(`Invalid transaction_id format: ${transaction_id}`);
+    }
+
+    // Validate transaction exists
+    const transactions = await this.db.getAllTransactions();
+    const txn = transactions.find((t) => t.transaction_id === transaction_id);
+    if (!txn) {
+      throw new Error(`Transaction not found: ${transaction_id}`);
+    }
+
+    const oldNote = txn.user_note ?? '';
+
+    // Write to Firestore — transactions are nested: items/{itemId}/accounts/{accountId}/transactions
+    if (!txn.item_id || !txn.account_id) {
+      throw new Error(
+        `Transaction ${transaction_id} is missing item_id or account_id — cannot determine Firestore path`
+      );
+    }
+    const collectionPath = `items/${txn.item_id}/accounts/${txn.account_id}/transactions`;
+    const firestoreFields = toFirestoreFields({ user_note: note });
+    await client.updateDocument(collectionPath, transaction_id, firestoreFields, ['user_note']);
+
+    // Optimistic cache update — if the transaction was evicted, clear cache to force re-read
+    if (!this.db.patchCachedTransaction(transaction_id, { user_note: note })) {
+      this.db.clearCache();
+    }
+
+    return {
+      success: true,
+      transaction_id,
+      old_note: oldNote,
+      new_note: note,
+    };
+  }
+
+  /**
+   * Set the tags on a transaction.
+   *
+   * Validates transaction exists, writes tag_ids to Firestore, then patches the cache.
+   */
+  async setTransactionTags(args: { transaction_id: string; tag_ids: string[] }): Promise<{
+    success: boolean;
+    transaction_id: string;
+    old_tag_ids: string[];
+    new_tag_ids: string[];
+  }> {
+    const client = this.getFirestoreClient();
+
+    const { transaction_id, tag_ids } = args;
+
+    // Validate IDs contain only safe characters
+    if (!/^[A-Za-z0-9_-]+$/.test(transaction_id)) {
+      throw new Error(`Invalid transaction_id format: ${transaction_id}`);
+    }
+    for (const tagId of tag_ids) {
+      if (!/^[A-Za-z0-9_-]+$/.test(tagId)) {
+        throw new Error(`Invalid tag_id format: ${tagId}`);
+      }
+    }
+
+    // Validate transaction exists
+    const transactions = await this.db.getAllTransactions();
+    const txn = transactions.find((t) => t.transaction_id === transaction_id);
+    if (!txn) {
+      throw new Error(`Transaction not found: ${transaction_id}`);
+    }
+
+    // Write to Firestore — transactions are nested: items/{itemId}/accounts/{accountId}/transactions
+    if (!txn.item_id || !txn.account_id) {
+      throw new Error(
+        `Transaction ${transaction_id} is missing item_id or account_id — cannot determine Firestore path`
+      );
+    }
+
+    const oldTagIds = txn.tag_ids || [];
+
+    const collectionPath = `items/${txn.item_id}/accounts/${txn.account_id}/transactions`;
+    const firestoreFields = toFirestoreFields({ tag_ids });
+    await client.updateDocument(collectionPath, transaction_id, firestoreFields, ['tag_ids']);
+
+    // Optimistic cache update — if the transaction was evicted, clear cache to force re-read
+    if (!this.db.patchCachedTransaction(transaction_id, { tag_ids })) {
+      this.db.clearCache();
+    }
+
+    return {
+      success: true,
+      transaction_id,
+      old_tag_ids: oldTagIds,
+      new_tag_ids: tag_ids,
+    };
+  }
+
+  /**
+   * Mark one or more transactions as reviewed (or unreviewed).
+   *
+   * Validates all transaction IDs, writes user_reviewed to Firestore for each,
+   * then patches the in-memory cache.
+   */
+  async reviewTransactions(args: { transaction_ids: string[]; reviewed?: boolean }): Promise<{
+    success: boolean;
+    reviewed_count: number;
+    transaction_ids: string[];
+  }> {
+    const client = this.getFirestoreClient();
+
+    const { transaction_ids, reviewed = true } = args;
+
+    if (!Array.isArray(transaction_ids) || transaction_ids.length === 0) {
+      throw new Error('transaction_ids must be a non-empty array');
+    }
+
+    // Validate all IDs contain only safe characters
+    for (const id of transaction_ids) {
+      if (!/^[A-Za-z0-9_-]+$/.test(id)) {
+        throw new Error(`Invalid transaction_id format: ${id}`);
+      }
+    }
+
+    // Validate all transactions exist and collect them
+    const allTransactions = await this.db.getAllTransactions();
+    const txnMap = new Map(allTransactions.map((t) => [t.transaction_id, t]));
+
+    const resolvedTxns = [];
+    for (const id of transaction_ids) {
+      const txn = txnMap.get(id);
+      if (!txn) {
+        throw new Error(`Transaction not found: ${id}`);
+      }
+      if (!txn.item_id || !txn.account_id) {
+        throw new Error(
+          `Transaction ${id} is missing item_id or account_id — cannot determine Firestore path`
+        );
+      }
+      resolvedTxns.push(txn);
+    }
+
+    // Write to Firestore and patch cache for each transaction
+    const firestoreFields = toFirestoreFields({ user_reviewed: reviewed });
+    for (const txn of resolvedTxns) {
+      const collectionPath = `items/${txn.item_id}/accounts/${txn.account_id}/transactions`;
+      await client.updateDocument(collectionPath, txn.transaction_id, firestoreFields, [
+        'user_reviewed',
+      ]);
+
+      // Optimistic cache update — if the transaction was evicted, clear cache to force re-read
+      if (!this.db.patchCachedTransaction(txn.transaction_id, { user_reviewed: reviewed })) {
+        this.db.clearCache();
+      }
+    }
+
+    return {
+      success: true,
+      reviewed_count: resolvedTxns.length,
+      transaction_ids: resolvedTxns.map((t) => t.transaction_id),
+    };
+  }
+
+  /**
+   * Create a new user-defined tag.
+   *
+   * Generates a deterministic tag_id from the name, validates it does not
+   * already exist, writes to Firestore, then clears the cache so the next
+   * read picks up the new tag.
+   */
+  async createTag(args: { name: string; color_name?: string; hex_color?: string }): Promise<{
+    success: boolean;
+    tag_id: string;
+    name: string;
+    color_name?: string;
+    hex_color?: string;
+  }> {
+    const client = this.getFirestoreClient();
+
+    const { name, color_name, hex_color } = args;
+
+    // Validate name is non-empty
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      throw new Error('Tag name must not be empty');
+    }
+
+    // Generate deterministic tag_id from name (lowercase, spaces to underscores, strip special chars)
+    const tag_id = trimmedName
+      .toLowerCase()
+      .replace(/\s+/g, '_')
+      .replace(/[^a-z0-9_-]/g, '');
+    if (!tag_id) {
+      throw new Error(`Cannot generate a valid tag_id from name: ${trimmedName}`);
+    }
+
+    // Validate hex_color format if provided
+    if (hex_color !== undefined && !/^#[0-9A-Fa-f]{6}$/.test(hex_color)) {
+      throw new Error(`Invalid hex_color format: ${hex_color} (expected #RRGGBB)`);
+    }
+
+    // Resolve user_id for the Firestore path users/{user_id}/tags/{tag_id}
+    const userId = await client.requireUserId();
+
+    // Build fields for Firestore
+    const docFields: Record<string, unknown> = { name: trimmedName };
+    if (color_name !== undefined) docFields.color_name = color_name;
+    if (hex_color !== undefined) docFields.hex_color = hex_color;
+
+    const firestoreFields = toFirestoreFields(docFields);
+    const collectionPath = `users/${userId}/tags`;
+    await client.createDocument(collectionPath, tag_id, firestoreFields);
+
+    // Clear the cache so the next read picks up the new tag from LevelDB
+    this.db.clearCache();
+
+    const result: {
+      success: boolean;
+      tag_id: string;
+      name: string;
+      color_name?: string;
+      hex_color?: string;
+    } = {
+      success: true,
+      tag_id,
+      name: trimmedName,
+    };
+    if (color_name !== undefined) result.color_name = color_name;
+    if (hex_color !== undefined) result.hex_color = hex_color;
+    return result;
+  }
+
+  /**
+   * Delete an existing user-defined tag.
+   *
+   * Validates the tag exists in the local cache, deletes from Firestore,
+   * then clears the cache.
+   */
+  async deleteTag(args: { tag_id: string }): Promise<{
+    success: boolean;
+    tag_id: string;
+    deleted_name: string;
+  }> {
+    const client = this.getFirestoreClient();
+
+    const { tag_id } = args;
+
+    // Validate tag_id format
+    if (!/^[A-Za-z0-9_-]+$/.test(tag_id)) {
+      throw new Error(`Invalid tag_id format: ${tag_id}`);
+    }
+
+    // Resolve user_id for the Firestore path users/{user_id}/tags/{tag_id}
+    const userId = await client.requireUserId();
+
+    const collectionPath = `users/${userId}/tags`;
+    await client.deleteDocument(collectionPath, tag_id);
+
+    // Clear the cache so the next read reflects the deletion
+    this.db.clearCache();
+
+    return {
+      success: true,
+      tag_id,
+      deleted_name: tag_id,
     };
   }
 }
@@ -2775,6 +3155,176 @@ export function createWriteToolSchemas(): ToolSchema[] {
         readOnlyHint: false,
         destructiveHint: false,
         idempotentHint: true,
+      },
+    },
+    {
+      name: 'set_transaction_note',
+      description:
+        'Set or clear the user note on a transaction. Pass an empty string to clear the note. ' +
+        'Requires transaction_id (from get_transactions). Writes directly to Copilot Money via Firestore.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          transaction_id: {
+            type: 'string',
+            description: 'Transaction ID to update (from get_transactions results)',
+          },
+          note: {
+            type: 'string',
+            description: 'Note text. Pass empty string to clear.',
+          },
+        },
+        required: ['transaction_id', 'note'],
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    {
+      name: 'set_transaction_tags',
+      description:
+        'Set the tags on a transaction. Pass an array of tag_ids. Pass empty array to clear all tags.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          transaction_id: {
+            type: 'string',
+            description: 'Transaction ID to update (from get_transactions results)',
+          },
+          tag_ids: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Array of tag IDs to set on the transaction. Pass empty array to clear.',
+          },
+        },
+        required: ['transaction_id', 'tag_ids'],
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    {
+      name: 'review_transactions',
+      description:
+        'Mark one or more transactions as reviewed (or unreviewed). ' +
+        'Accepts an array of transaction_ids. Writes directly to Copilot Money via Firestore.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          transaction_ids: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Transaction IDs to mark as reviewed',
+          },
+          reviewed: {
+            type: 'boolean',
+            description: 'Set to true to mark as reviewed, false to unmark. Defaults to true.',
+          },
+        },
+        required: ['transaction_ids'],
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    {
+      name: 'create_tag',
+      description:
+        'Create a new user-defined tag for categorizing transactions. Tags appear in the ' +
+        'Copilot Money app and can be referenced via hashtags in transaction names (e.g. #vacation). ' +
+        'Optionally set a color. Writes directly to Copilot Money via Firestore.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description: 'Tag name (e.g. "vacation", "business expense")',
+          },
+          color_name: {
+            type: 'string',
+            description: 'Optional color name (e.g. "blue", "red")',
+          },
+          hex_color: {
+            type: 'string',
+            description: 'Optional hex color code (e.g. "#FF5733")',
+          },
+        },
+        required: ['name'],
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    {
+      name: 'delete_tag',
+      description:
+        'Delete a user-defined tag. The tag_id can be obtained from transaction names ' +
+        '(hashtags like #vacation) or from the tag definitions in the local cache. ' +
+        'Writes directly to Copilot Money via Firestore.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          tag_id: {
+            type: 'string',
+            description: 'Tag ID to delete',
+          },
+        },
+        required: ['tag_id'],
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+      },
+    },
+    {
+      name: 'create_category',
+      description:
+        'Create a new custom category in Copilot Money. Provide a name (required) ' +
+        'and optionally an emoji, color, parent category, or excluded flag. ' +
+        'Returns the generated category_id. The new category can then be used ' +
+        'with set_transaction_category.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description: 'Display name for the new category (e.g., "Subscriptions")',
+          },
+          emoji: {
+            type: 'string',
+            description: 'Emoji icon for the category (e.g., "🎬")',
+          },
+          color: {
+            type: 'string',
+            description: 'Hex color code for the category (e.g., "#FF5733")',
+          },
+          parent_category_id: {
+            type: 'string',
+            description:
+              'Parent category ID to nest under (from get_categories). ' +
+              'Creates a subcategory when provided.',
+          },
+          excluded: {
+            type: 'boolean',
+            description: 'Exclude this category from spending totals (default: false)',
+            default: false,
+          },
+        },
+        required: ['name'],
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
       },
     },
   ];

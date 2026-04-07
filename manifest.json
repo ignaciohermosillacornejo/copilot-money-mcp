@@ -79,6 +79,30 @@
     {
       "name": "set_transaction_category",
       "description": "Change the category of a transaction."
+    },
+    {
+      "name": "set_transaction_note",
+      "description": "Set or clear the user note on a transaction."
+    },
+    {
+      "name": "set_transaction_tags",
+      "description": "Set the tags on a transaction."
+    },
+    {
+      "name": "review_transactions",
+      "description": "Mark one or more transactions as reviewed (or unreviewed)."
+    },
+    {
+      "name": "create_tag",
+      "description": "Create a new user-defined tag for categorizing transactions."
+    },
+    {
+      "name": "delete_tag",
+      "description": "Delete a user-defined tag."
+    },
+    {
+      "name": "create_category",
+      "description": "Create a new custom category in Copilot Money."
     }
   ],
   "tools_generated": false,

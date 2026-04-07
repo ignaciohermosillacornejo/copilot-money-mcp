@@ -234,6 +234,9 @@ describe('CopilotMoneyServer write mode', () => {
 
     expect(toolNames).toContain('get_transactions');
     expect(toolNames).not.toContain('set_transaction_category');
+    expect(toolNames).not.toContain('set_transaction_note');
+    expect(toolNames).not.toContain('create_tag');
+    expect(toolNames).not.toContain('delete_tag');
   });
 
   test('handleListTools returns read + write tools when writeEnabled', () => {
@@ -243,6 +246,10 @@ describe('CopilotMoneyServer write mode', () => {
 
     expect(toolNames).toContain('get_transactions');
     expect(toolNames).toContain('set_transaction_category');
+    expect(toolNames).toContain('set_transaction_note');
+    expect(toolNames).toContain('create_tag');
+    expect(toolNames).toContain('delete_tag');
+    expect(toolNames).toContain('create_category');
   });
 
   test('write tool has correct annotations', () => {
@@ -258,6 +265,45 @@ describe('CopilotMoneyServer write mode', () => {
     });
   });
 
+  test('create_tag has correct annotations', () => {
+    const server = new CopilotMoneyServer(undefined, undefined, true);
+    const result = server.handleListTools();
+    const tool = result.tools.find((t) => t.name === 'create_tag');
+
+    expect(tool).toBeDefined();
+    expect(tool!.annotations).toEqual({
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+    });
+  });
+
+  test('delete_tag has destructiveHint set', () => {
+    const server = new CopilotMoneyServer(undefined, undefined, true);
+    const result = server.handleListTools();
+    const tool = result.tools.find((t) => t.name === 'delete_tag');
+
+    expect(tool).toBeDefined();
+    expect(tool!.annotations).toEqual({
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+    });
+  });
+
+  test('create_category has correct annotations', () => {
+    const server = new CopilotMoneyServer(undefined, undefined, true);
+    const result = server.handleListTools();
+    const tool = result.tools.find((t) => t.name === 'create_category');
+
+    expect(tool).toBeDefined();
+    expect(tool!.annotations).toEqual({
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+    });
+  });
+
   test('handleCallTool rejects write tool when not in write mode', async () => {
     const server = new CopilotMoneyServer();
     const result = await server.handleCallTool('set_transaction_category', {
@@ -268,17 +314,96 @@ describe('CopilotMoneyServer write mode', () => {
     expect(result.isError).toBe(true);
     expect((result.content[0] as { text: string }).text).toContain('--write mode');
   });
+
+  test('handleCallTool rejects set_transaction_note when not in write mode', async () => {
+    const server = new CopilotMoneyServer();
+    const result = await server.handleCallTool('set_transaction_note', {
+      transaction_id: 'txn1',
+      note: 'test',
+    });
+
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { text: string }).text).toContain('--write mode');
+  });
+
+  test('handleCallTool rejects create_tag when not in write mode', async () => {
+    const server = new CopilotMoneyServer();
+    const result = await server.handleCallTool('create_tag', { name: 'test' });
+
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { text: string }).text).toContain('--write mode');
+  });
+
+  test('handleCallTool rejects delete_tag when not in write mode', async () => {
+    const server = new CopilotMoneyServer();
+    const result = await server.handleCallTool('delete_tag', { tag_id: 'test' });
+
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { text: string }).text).toContain('--write mode');
+  });
+
+  test('handleCallTool rejects create_category when not in write mode', async () => {
+    const server = new CopilotMoneyServer();
+    const result = await server.handleCallTool('create_category', {
+      name: 'Test',
+    });
+
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { text: string }).text).toContain('--write mode');
+  });
+
+  test('handleListTools includes create_category when writeEnabled', () => {
+    const server = new CopilotMoneyServer(undefined, undefined, true);
+    const result = server.handleListTools();
+    const toolNames = result.tools.map((t) => t.name);
+
+    expect(toolNames).toContain('create_category');
+  });
 });
 
 describe('createWriteToolSchemas', () => {
   test('returns write tool schemas with proper annotations', () => {
     const schemas = createWriteToolSchemas();
-    expect(schemas.length).toBeGreaterThanOrEqual(1);
+    expect(schemas.length).toBeGreaterThanOrEqual(7);
 
     const setCat = schemas.find((s) => s.name === 'set_transaction_category');
     expect(setCat).toBeDefined();
     expect(setCat!.annotations?.readOnlyHint).toBe(false);
     expect(setCat!.inputSchema.required).toContain('transaction_id');
     expect(setCat!.inputSchema.required).toContain('category_id');
+
+    const setNote = schemas.find((s) => s.name === 'set_transaction_note');
+    expect(setNote).toBeDefined();
+    expect(setNote!.annotations?.readOnlyHint).toBe(false);
+    expect(setNote!.annotations?.idempotentHint).toBe(true);
+    expect(setNote!.inputSchema.required).toContain('transaction_id');
+    expect(setNote!.inputSchema.required).toContain('note');
+  });
+
+  test('create_tag schema requires name', () => {
+    const schemas = createWriteToolSchemas();
+    const createTag = schemas.find((s) => s.name === 'create_tag');
+    expect(createTag).toBeDefined();
+    expect(createTag!.inputSchema.required).toEqual(['name']);
+    expect(createTag!.inputSchema.properties).toHaveProperty('name');
+    expect(createTag!.inputSchema.properties).toHaveProperty('color_name');
+    expect(createTag!.inputSchema.properties).toHaveProperty('hex_color');
+  });
+
+  test('delete_tag schema requires tag_id', () => {
+    const schemas = createWriteToolSchemas();
+    const deleteTag = schemas.find((s) => s.name === 'delete_tag');
+    expect(deleteTag).toBeDefined();
+    expect(deleteTag!.inputSchema.required).toEqual(['tag_id']);
+    expect(deleteTag!.inputSchema.properties).toHaveProperty('tag_id');
+  });
+
+  test('includes create_category schema', () => {
+    const schemas = createWriteToolSchemas();
+    const createCat = schemas.find((s) => s.name === 'create_category');
+    expect(createCat).toBeDefined();
+    expect(createCat!.annotations?.readOnlyHint).toBe(false);
+    expect(createCat!.annotations?.idempotentHint).toBe(false);
+    expect(createCat!.inputSchema.required).toEqual(['name']);
   });
 });

@@ -118,4 +118,109 @@ describe('FirestoreClient', () => {
     ).rejects.toThrow('Firestore update failed');
     restoreFetch();
   });
+
+  // --- getUserId / requireUserId ---
+
+  test('getUserId delegates to auth', () => {
+    expect(client.getUserId()).toBe('user123');
+  });
+
+  test('getUserId returns null when auth has no userId', () => {
+    const noIdAuth = createMockAuth('token', undefined as unknown as string);
+    // Simulate null userId — getUserId on our mock returns the passed value
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (noIdAuth as any).getUserId = () => null;
+    const c = new FirestoreClient(noIdAuth);
+    expect(c.getUserId()).toBeNull();
+  });
+
+  test('requireUserId returns userId after token exchange', async () => {
+    mockFetch({});
+    const uid = await client.requireUserId();
+    expect(uid).toBe('user123');
+    restoreFetch();
+  });
+
+  test('requireUserId throws when userId is null after exchange', async () => {
+    const badAuth = createMockAuth('token');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (badAuth as any).getUserId = () => null;
+    const c = new FirestoreClient(badAuth);
+    mockFetch({});
+    await expect(c.requireUserId()).rejects.toThrow('Firebase user ID unavailable');
+    restoreFetch();
+  });
+
+  // --- createDocument ---
+
+  test('createDocument sends POST with documentId query param', async () => {
+    mockFetch({ name: 'doc', fields: {} });
+    await client.createDocument('users/u1/tags', 'my_tag', {
+      name: { stringValue: 'My Tag' },
+    });
+
+    expect(fetchCalls).toHaveLength(1);
+    const url = new URL(fetchCalls[0].url);
+    expect(url.pathname).toContain('/users/u1/tags');
+    expect(url.searchParams.get('documentId')).toBe('my_tag');
+    expect(fetchCalls[0].options.method).toBe('POST');
+
+    const body = JSON.parse(fetchCalls[0].options.body as string);
+    expect(body).toEqual({ fields: { name: { stringValue: 'My Tag' } } });
+    restoreFetch();
+  });
+
+  test('createDocument sends correct JSON body', async () => {
+    mockFetch({ name: 'doc', fields: {} });
+    await client.createDocument('users/uid/categories', 'cat_123', {
+      name: { stringValue: 'Test' },
+      excluded: { booleanValue: false },
+    });
+
+    const body = JSON.parse(fetchCalls[0].options.body as string);
+    expect(body).toEqual({
+      fields: {
+        name: { stringValue: 'Test' },
+        excluded: { booleanValue: false },
+      },
+    });
+    restoreFetch();
+  });
+
+  test('createDocument throws on non-OK response', async () => {
+    mockFetch({ error: { code: 409, message: 'Already exists' } }, 409);
+    await expect(
+      client.createDocument('users/u1/tags', 'dup', { name: { stringValue: 'Dup' } })
+    ).rejects.toThrow('Firestore create failed');
+    restoreFetch();
+  });
+
+  // --- deleteDocument ---
+
+  test('deleteDocument sends DELETE with correct path', async () => {
+    mockFetch({});
+    await client.deleteDocument('users/u1/tags', 'my_tag');
+
+    expect(fetchCalls).toHaveLength(1);
+    expect(fetchCalls[0].options.method).toBe('DELETE');
+    const url = new URL(fetchCalls[0].url);
+    expect(url.pathname).toContain('/users/u1/tags/my_tag');
+    restoreFetch();
+  });
+
+  test('deleteDocument sends Authorization header', async () => {
+    mockFetch({});
+    await client.deleteDocument('users/u1/tags', 'my_tag');
+    const headers = fetchCalls[0].options.headers as Record<string, string>;
+    expect(headers['Authorization']).toBe('Bearer test-id-token');
+    restoreFetch();
+  });
+
+  test('deleteDocument throws on non-OK response', async () => {
+    mockFetch({ error: { code: 404, message: 'Not found' } }, 404);
+    await expect(client.deleteDocument('users/u1/tags', 'missing')).rejects.toThrow(
+      'Firestore delete failed'
+    );
+    restoreFetch();
+  });
 });

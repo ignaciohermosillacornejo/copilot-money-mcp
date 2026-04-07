@@ -2203,3 +2203,953 @@ describe('setTransactionCategory', () => {
     ).rejects.toThrow('Write mode is not enabled');
   });
 });
+
+describe('setTransactionNote', () => {
+  let tools: CopilotMoneyTools;
+  let mockDb: CopilotDatabase;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let updateCalls: { collection: string; docId: string; fields: any; mask: string[] }[];
+
+  beforeEach(() => {
+    mockDb = new CopilotDatabase('/nonexistent');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any).dbPath = '/fake';
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any)._transactions = [
+      {
+        transaction_id: 'txn1',
+        amount: 50,
+        date: '2024-01-15',
+        name: 'Coffee Shop',
+        category_id: 'food_and_drink_coffee',
+        user_note: 'original note',
+        user_id: 'user123',
+        item_id: 'item1',
+        account_id: 'acct1',
+      },
+      {
+        transaction_id: 'txn2',
+        amount: 100,
+        date: '2024-01-16',
+        name: 'Gas Station',
+        category_id: 'transportation_gas',
+        user_id: 'user123',
+        item_id: 'item1',
+        account_id: 'acct2',
+      },
+    ];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any)._userCategories = [
+      { category_id: 'food_and_drink_coffee', name: 'Coffee', excluded: false },
+    ];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any)._allCollectionsLoaded = true;
+
+    updateCalls = [];
+    const mockFirestoreClient = {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      updateDocument: async (collection: string, docId: string, fields: any, mask: string[]) => {
+        updateCalls.push({ collection, docId, fields, mask });
+      },
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    tools = new CopilotMoneyTools(mockDb, mockFirestoreClient as any);
+  });
+
+  test('sets note on transaction successfully', async () => {
+    const result = await tools.setTransactionNote({
+      transaction_id: 'txn1',
+      note: 'new note',
+    });
+    expect(result.success).toBe(true);
+    expect(result.transaction_id).toBe('txn1');
+    expect(result.old_note).toBe('original note');
+    expect(result.new_note).toBe('new note');
+  });
+
+  test('clears note when empty string is passed', async () => {
+    const result = await tools.setTransactionNote({
+      transaction_id: 'txn1',
+      note: '',
+    });
+    expect(result.success).toBe(true);
+    expect(result.old_note).toBe('original note');
+    expect(result.new_note).toBe('');
+  });
+
+  test('returns empty string for old_note when user_note is undefined', async () => {
+    const result = await tools.setTransactionNote({
+      transaction_id: 'txn2',
+      note: 'first note',
+    });
+    expect(result.success).toBe(true);
+    expect(result.old_note).toBe('');
+    expect(result.new_note).toBe('first note');
+  });
+
+  test('calls Firestore with correct parameters', async () => {
+    await tools.setTransactionNote({
+      transaction_id: 'txn1',
+      note: 'test note',
+    });
+    expect(updateCalls).toHaveLength(1);
+    expect(updateCalls[0].collection).toBe('items/item1/accounts/acct1/transactions');
+    expect(updateCalls[0].docId).toBe('txn1');
+    expect(updateCalls[0].mask).toEqual(['user_note']);
+    expect(updateCalls[0].fields).toEqual({
+      user_note: { stringValue: 'test note' },
+    });
+  });
+
+  test('patches cache after successful write', async () => {
+    await tools.setTransactionNote({
+      transaction_id: 'txn1',
+      note: 'cached note',
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const txn = (mockDb as any)._transactions.find((t: any) => t.transaction_id === 'txn1');
+    expect(txn.user_note).toBe('cached note');
+  });
+
+  test('throws when transaction_id not found', async () => {
+    await expect(
+      tools.setTransactionNote({
+        transaction_id: 'nonexistent',
+        note: 'some note',
+      })
+    ).rejects.toThrow('Transaction not found: nonexistent');
+  });
+
+  test('throws on invalid transaction_id format', async () => {
+    await expect(
+      tools.setTransactionNote({
+        transaction_id: 'txn/../evil',
+        note: 'some note',
+      })
+    ).rejects.toThrow('Invalid transaction_id format');
+  });
+
+  test('throws when transaction is missing item_id', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any)._transactions = [
+      {
+        transaction_id: 'txn_no_item',
+        amount: 50,
+        date: '2024-01-15',
+        name: 'Test',
+        user_id: 'user123',
+        account_id: 'acct1',
+      },
+    ];
+    await expect(
+      tools.setTransactionNote({
+        transaction_id: 'txn_no_item',
+        note: 'some note',
+      })
+    ).rejects.toThrow('missing item_id or account_id');
+  });
+
+  test('does not modify cache on Firestore error', async () => {
+    const failingClient = {
+      updateDocument: async () => {
+        throw new Error('Firestore update failed (500)');
+      },
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const failTools = new CopilotMoneyTools(mockDb, failingClient as any);
+
+    await expect(
+      failTools.setTransactionNote({
+        transaction_id: 'txn1',
+        note: 'should not persist',
+      })
+    ).rejects.toThrow('Firestore update failed');
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const txn = (mockDb as any)._transactions.find((t: any) => t.transaction_id === 'txn1');
+    expect(txn.user_note).toBe('original note');
+  });
+
+  test('throws when no Firestore client configured (read-only mode)', async () => {
+    const readOnlyTools = new CopilotMoneyTools(mockDb);
+    await expect(
+      readOnlyTools.setTransactionNote({
+        transaction_id: 'txn1',
+        note: 'some note',
+      })
+    ).rejects.toThrow('Write mode is not enabled');
+  });
+});
+
+describe('setTransactionTags', () => {
+  let tools: CopilotMoneyTools;
+  let mockDb: CopilotDatabase;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let updateCalls: { collection: string; docId: string; fields: any; mask: string[] }[];
+
+  beforeEach(() => {
+    mockDb = new CopilotDatabase('/nonexistent');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any).dbPath = '/fake';
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any)._transactions = [
+      {
+        transaction_id: 'txn1',
+        amount: 50,
+        date: '2024-01-15',
+        name: 'Coffee Shop',
+        category_id: 'food_and_drink_coffee',
+        tag_ids: ['tag1', 'tag2'],
+        user_id: 'user123',
+        item_id: 'item1',
+        account_id: 'acct1',
+      },
+      {
+        transaction_id: 'txn2',
+        amount: 100,
+        date: '2024-01-16',
+        name: 'Gas Station',
+        category_id: 'transportation_gas',
+        user_id: 'user123',
+        item_id: 'item1',
+        account_id: 'acct2',
+      },
+    ];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any)._allCollectionsLoaded = true;
+
+    updateCalls = [];
+    const mockFirestoreClient = {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      updateDocument: async (collection: string, docId: string, fields: any, mask: string[]) => {
+        updateCalls.push({ collection, docId, fields, mask });
+      },
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    tools = new CopilotMoneyTools(mockDb, mockFirestoreClient as any);
+  });
+
+  test('sets tags on a transaction successfully', async () => {
+    const result = await tools.setTransactionTags({
+      transaction_id: 'txn1',
+      tag_ids: ['tag3', 'tag4'],
+    });
+    expect(result.success).toBe(true);
+    expect(result.transaction_id).toBe('txn1');
+    expect(result.old_tag_ids).toEqual(['tag1', 'tag2']);
+    expect(result.new_tag_ids).toEqual(['tag3', 'tag4']);
+  });
+
+  test('clears tags with empty array', async () => {
+    const result = await tools.setTransactionTags({
+      transaction_id: 'txn1',
+      tag_ids: [],
+    });
+    expect(result.success).toBe(true);
+    expect(result.old_tag_ids).toEqual(['tag1', 'tag2']);
+    expect(result.new_tag_ids).toEqual([]);
+  });
+
+  test('returns empty old_tag_ids when transaction has no tags', async () => {
+    const result = await tools.setTransactionTags({
+      transaction_id: 'txn2',
+      tag_ids: ['tag1'],
+    });
+    expect(result.success).toBe(true);
+    expect(result.old_tag_ids).toEqual([]);
+    expect(result.new_tag_ids).toEqual(['tag1']);
+  });
+
+  test('calls Firestore with correct parameters', async () => {
+    await tools.setTransactionTags({
+      transaction_id: 'txn1',
+      tag_ids: ['tag3'],
+    });
+    expect(updateCalls).toHaveLength(1);
+    expect(updateCalls[0].collection).toBe('items/item1/accounts/acct1/transactions');
+    expect(updateCalls[0].docId).toBe('txn1');
+    expect(updateCalls[0].mask).toEqual(['tag_ids']);
+    expect(updateCalls[0].fields).toEqual({
+      tag_ids: { arrayValue: { values: [{ stringValue: 'tag3' }] } },
+    });
+  });
+
+  test('calls Firestore with empty array fields', async () => {
+    await tools.setTransactionTags({
+      transaction_id: 'txn1',
+      tag_ids: [],
+    });
+    expect(updateCalls).toHaveLength(1);
+    expect(updateCalls[0].fields).toEqual({
+      tag_ids: { arrayValue: { values: [] } },
+    });
+  });
+
+  test('patches cache after successful write', async () => {
+    await tools.setTransactionTags({
+      transaction_id: 'txn1',
+      tag_ids: ['tag5'],
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const txn = (mockDb as any)._transactions.find((t: any) => t.transaction_id === 'txn1');
+    expect(txn.tag_ids).toEqual(['tag5']);
+  });
+
+  test('throws when transaction_id not found', async () => {
+    await expect(
+      tools.setTransactionTags({
+        transaction_id: 'nonexistent',
+        tag_ids: ['tag1'],
+      })
+    ).rejects.toThrow('Transaction not found: nonexistent');
+  });
+
+  test('throws when transaction_id has invalid format', async () => {
+    await expect(
+      tools.setTransactionTags({
+        transaction_id: 'invalid/id',
+        tag_ids: ['tag1'],
+      })
+    ).rejects.toThrow('Invalid transaction_id format');
+  });
+
+  test('throws when a tag_id has invalid format', async () => {
+    await expect(
+      tools.setTransactionTags({
+        transaction_id: 'txn1',
+        tag_ids: ['valid-tag', 'invalid/tag'],
+      })
+    ).rejects.toThrow('Invalid tag_id format');
+  });
+
+  test('throws when transaction is missing item_id', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any)._transactions.push({
+      transaction_id: 'txn_no_item',
+      amount: 10,
+      date: '2024-01-17',
+      name: 'Orphan',
+      account_id: 'acct1',
+    });
+    await expect(
+      tools.setTransactionTags({
+        transaction_id: 'txn_no_item',
+        tag_ids: ['tag1'],
+      })
+    ).rejects.toThrow('missing item_id or account_id');
+  });
+
+  test('does not modify cache on Firestore error', async () => {
+    const failingClient = {
+      updateDocument: async () => {
+        throw new Error('Firestore update failed (500)');
+      },
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const failTools = new CopilotMoneyTools(mockDb, failingClient as any);
+
+    await expect(
+      failTools.setTransactionTags({
+        transaction_id: 'txn1',
+        tag_ids: ['tag5'],
+      })
+    ).rejects.toThrow('Firestore update failed');
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const txn = (mockDb as any)._transactions.find((t: any) => t.transaction_id === 'txn1');
+    expect(txn.tag_ids).toEqual(['tag1', 'tag2']);
+  });
+
+  test('throws when no Firestore client configured (read-only mode)', async () => {
+    const readOnlyTools = new CopilotMoneyTools(mockDb);
+    await expect(
+      readOnlyTools.setTransactionTags({
+        transaction_id: 'txn1',
+        tag_ids: ['tag1'],
+      })
+    ).rejects.toThrow('Write mode is not enabled');
+  });
+});
+
+describe('reviewTransactions', () => {
+  let tools: CopilotMoneyTools;
+  let mockDb: CopilotDatabase;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let updateCalls: { collection: string; docId: string; fields: any; mask: string[] }[];
+
+  beforeEach(() => {
+    mockDb = new CopilotDatabase('/nonexistent');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any).dbPath = '/fake';
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any)._transactions = [
+      {
+        transaction_id: 'txn1',
+        amount: 50,
+        date: '2024-01-15',
+        name: 'Coffee Shop',
+        category_id: 'food_and_drink_coffee',
+        user_id: 'user123',
+        item_id: 'item1',
+        account_id: 'acct1',
+        user_reviewed: false,
+      },
+      {
+        transaction_id: 'txn2',
+        amount: 100,
+        date: '2024-01-16',
+        name: 'Gas Station',
+        category_id: 'transportation_gas',
+        user_id: 'user123',
+        item_id: 'item1',
+        account_id: 'acct2',
+        user_reviewed: false,
+      },
+      {
+        transaction_id: 'txn3',
+        amount: 25,
+        date: '2024-01-17',
+        name: 'Bookstore',
+        category_id: 'shopping_general',
+        user_id: 'user123',
+        item_id: 'item2',
+        account_id: 'acct3',
+      },
+    ];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any)._allCollectionsLoaded = true;
+
+    updateCalls = [];
+    const mockFirestoreClient = {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      updateDocument: async (collection: string, docId: string, fields: any, mask: string[]) => {
+        updateCalls.push({ collection, docId, fields, mask });
+      },
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    tools = new CopilotMoneyTools(mockDb, mockFirestoreClient as any);
+  });
+
+  test('marks a single transaction as reviewed', async () => {
+    const result = await tools.reviewTransactions({
+      transaction_ids: ['txn1'],
+    });
+    expect(result.success).toBe(true);
+    expect(result.reviewed_count).toBe(1);
+    expect(result.transaction_ids).toEqual(['txn1']);
+  });
+
+  test('marks multiple transactions as reviewed', async () => {
+    const result = await tools.reviewTransactions({
+      transaction_ids: ['txn1', 'txn2', 'txn3'],
+    });
+    expect(result.success).toBe(true);
+    expect(result.reviewed_count).toBe(3);
+    expect(result.transaction_ids).toEqual(['txn1', 'txn2', 'txn3']);
+  });
+
+  test('calls Firestore with correct nested paths and fields', async () => {
+    await tools.reviewTransactions({
+      transaction_ids: ['txn1', 'txn2'],
+    });
+    expect(updateCalls).toHaveLength(2);
+    expect(updateCalls[0].collection).toBe('items/item1/accounts/acct1/transactions');
+    expect(updateCalls[0].docId).toBe('txn1');
+    expect(updateCalls[0].mask).toEqual(['user_reviewed']);
+    expect(updateCalls[0].fields).toEqual({
+      user_reviewed: { booleanValue: true },
+    });
+    expect(updateCalls[1].collection).toBe('items/item1/accounts/acct2/transactions');
+    expect(updateCalls[1].docId).toBe('txn2');
+  });
+
+  test('supports reviewed=false to unmark transactions', async () => {
+    const result = await tools.reviewTransactions({
+      transaction_ids: ['txn1'],
+      reviewed: false,
+    });
+    expect(result.success).toBe(true);
+    expect(updateCalls[0].fields).toEqual({
+      user_reviewed: { booleanValue: false },
+    });
+  });
+
+  test('defaults reviewed to true when not specified', async () => {
+    await tools.reviewTransactions({
+      transaction_ids: ['txn1'],
+    });
+    expect(updateCalls[0].fields).toEqual({
+      user_reviewed: { booleanValue: true },
+    });
+  });
+
+  test('patches cache after successful write', async () => {
+    await tools.reviewTransactions({
+      transaction_ids: ['txn1', 'txn2'],
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const txn1 = (mockDb as any)._transactions.find((t: any) => t.transaction_id === 'txn1');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const txn2 = (mockDb as any)._transactions.find((t: any) => t.transaction_id === 'txn2');
+    expect(txn1.user_reviewed).toBe(true);
+    expect(txn2.user_reviewed).toBe(true);
+  });
+
+  test('throws when transaction_id not found', async () => {
+    await expect(
+      tools.reviewTransactions({
+        transaction_ids: ['nonexistent'],
+      })
+    ).rejects.toThrow('Transaction not found: nonexistent');
+  });
+
+  test('throws when transaction_ids is empty', async () => {
+    await expect(
+      tools.reviewTransactions({
+        transaction_ids: [],
+      })
+    ).rejects.toThrow('transaction_ids must be a non-empty array');
+  });
+
+  test('throws on invalid transaction_id format', async () => {
+    await expect(
+      tools.reviewTransactions({
+        transaction_ids: ['valid_id', 'invalid/id'],
+      })
+    ).rejects.toThrow('Invalid transaction_id format: invalid/id');
+  });
+
+  test('throws when transaction is missing item_id', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any)._transactions.push({
+      transaction_id: 'txn_no_item',
+      amount: 10,
+      date: '2024-01-18',
+      name: 'Mystery',
+      account_id: 'acct1',
+    });
+    await expect(
+      tools.reviewTransactions({
+        transaction_ids: ['txn_no_item'],
+      })
+    ).rejects.toThrow('missing item_id or account_id');
+  });
+
+  test('does not modify cache on Firestore error', async () => {
+    const failingClient = {
+      updateDocument: async () => {
+        throw new Error('Firestore update failed (500)');
+      },
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const failTools = new CopilotMoneyTools(mockDb, failingClient as any);
+
+    await expect(
+      failTools.reviewTransactions({
+        transaction_ids: ['txn1'],
+      })
+    ).rejects.toThrow('Firestore update failed');
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const txn = (mockDb as any)._transactions.find((t: any) => t.transaction_id === 'txn1');
+    expect(txn.user_reviewed).toBe(false);
+  });
+
+  test('throws when no Firestore client configured (read-only mode)', async () => {
+    const readOnlyTools = new CopilotMoneyTools(mockDb);
+    await expect(
+      readOnlyTools.reviewTransactions({
+        transaction_ids: ['txn1'],
+      })
+    ).rejects.toThrow('Write mode is not enabled');
+  });
+});
+
+describe('createTag', () => {
+  let tools: CopilotMoneyTools;
+  let mockDb: CopilotDatabase;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let createCalls: { collection: string; docId: string; fields: any }[];
+
+  beforeEach(() => {
+    mockDb = new CopilotDatabase('/nonexistent');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any).dbPath = '/fake';
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any)._allCollectionsLoaded = true;
+
+    createCalls = [];
+    const mockFirestoreClient = {
+      requireUserId: async () => 'user123',
+      getUserId: () => 'user123',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      createDocument: async (collection: string, docId: string, fields: any) => {
+        createCalls.push({ collection, docId, fields });
+      },
+      updateDocument: async () => {},
+      deleteDocument: async () => {},
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    tools = new CopilotMoneyTools(mockDb, mockFirestoreClient as any);
+  });
+
+  test('creates a tag with name only', async () => {
+    const result = await tools.createTag({ name: 'vacation' });
+    expect(result.success).toBe(true);
+    expect(result.tag_id).toBe('vacation');
+    expect(result.name).toBe('vacation');
+    expect(result.color_name).toBeUndefined();
+    expect(result.hex_color).toBeUndefined();
+  });
+
+  test('creates a tag with color', async () => {
+    const result = await tools.createTag({
+      name: 'Business',
+      color_name: 'blue',
+      hex_color: '#0000FF',
+    });
+    expect(result.success).toBe(true);
+    expect(result.tag_id).toBe('business');
+    expect(result.name).toBe('Business');
+    expect(result.color_name).toBe('blue');
+    expect(result.hex_color).toBe('#0000FF');
+  });
+
+  test('generates tag_id from multi-word name', async () => {
+    const result = await tools.createTag({ name: 'business expense' });
+    expect(result.tag_id).toBe('business_expense');
+  });
+
+  test('calls Firestore createDocument with correct path', async () => {
+    await tools.createTag({ name: 'test', color_name: 'red' });
+    expect(createCalls).toHaveLength(1);
+    expect(createCalls[0].collection).toBe('users/user123/tags');
+    expect(createCalls[0].docId).toBe('test');
+    expect(createCalls[0].fields).toEqual({
+      name: { stringValue: 'test' },
+      color_name: { stringValue: 'red' },
+    });
+  });
+
+  test('clears cache after creating tag', async () => {
+    // Seed cache
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any)._transactions = [{ transaction_id: 'txn1', amount: 10, date: '2024-01-01' }];
+    await tools.createTag({ name: 'test' });
+    // clearCache sets _transactions to null
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((mockDb as any)._transactions).toBeNull();
+  });
+
+  test('throws on empty name', async () => {
+    await expect(tools.createTag({ name: '' })).rejects.toThrow('Tag name must not be empty');
+  });
+
+  test('throws on whitespace-only name', async () => {
+    await expect(tools.createTag({ name: '   ' })).rejects.toThrow('Tag name must not be empty');
+  });
+
+  test('throws on invalid hex_color format', async () => {
+    await expect(tools.createTag({ name: 'test', hex_color: 'red' })).rejects.toThrow(
+      'Invalid hex_color format'
+    );
+  });
+
+  test('throws on short hex_color', async () => {
+    await expect(tools.createTag({ name: 'test', hex_color: '#FFF' })).rejects.toThrow(
+      'Invalid hex_color format'
+    );
+  });
+
+  test('does not modify cache on Firestore error', async () => {
+    const failingClient = {
+      requireUserId: async () => 'user123',
+      getUserId: () => 'user123',
+      createDocument: async () => {
+        throw new Error('Firestore create failed (500)');
+      },
+      updateDocument: async () => {},
+      deleteDocument: async () => {},
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const failTools = new CopilotMoneyTools(mockDb, failingClient as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any)._transactions = [{ transaction_id: 'txn1' }];
+
+    await expect(failTools.createTag({ name: 'test' })).rejects.toThrow('Firestore create failed');
+    // Cache should NOT have been cleared since error happened before clearCache
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((mockDb as any)._transactions).not.toBeNull();
+  });
+
+  test('throws when no Firestore client configured (read-only mode)', async () => {
+    const readOnlyTools = new CopilotMoneyTools(mockDb);
+    await expect(readOnlyTools.createTag({ name: 'test' })).rejects.toThrow(
+      'Write mode is not enabled'
+    );
+  });
+
+  test('trims whitespace from name', async () => {
+    const result = await tools.createTag({ name: '  vacation  ' });
+    expect(result.name).toBe('vacation');
+    expect(result.tag_id).toBe('vacation');
+  });
+});
+
+describe('deleteTag', () => {
+  let tools: CopilotMoneyTools;
+  let mockDb: CopilotDatabase;
+  let deleteCalls: { collection: string; docId: string }[];
+
+  beforeEach(() => {
+    mockDb = new CopilotDatabase('/nonexistent');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any).dbPath = '/fake';
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any)._allCollectionsLoaded = true;
+
+    deleteCalls = [];
+    const mockFirestoreClient = {
+      requireUserId: async () => 'user123',
+      getUserId: () => 'user123',
+      deleteDocument: async (collection: string, docId: string) => {
+        deleteCalls.push({ collection, docId });
+      },
+      updateDocument: async () => {},
+      createDocument: async () => {},
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    tools = new CopilotMoneyTools(mockDb, mockFirestoreClient as any);
+  });
+
+  test('deletes a tag successfully', async () => {
+    const result = await tools.deleteTag({ tag_id: 'vacation' });
+    expect(result.success).toBe(true);
+    expect(result.tag_id).toBe('vacation');
+    expect(result.deleted_name).toBe('vacation');
+  });
+
+  test('calls Firestore deleteDocument with correct path', async () => {
+    await tools.deleteTag({ tag_id: 'test_tag' });
+    expect(deleteCalls).toHaveLength(1);
+    expect(deleteCalls[0].collection).toBe('users/user123/tags');
+    expect(deleteCalls[0].docId).toBe('test_tag');
+  });
+
+  test('clears cache after deleting tag', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any)._transactions = [{ transaction_id: 'txn1', amount: 10, date: '2024-01-01' }];
+    await tools.deleteTag({ tag_id: 'test' });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((mockDb as any)._transactions).toBeNull();
+  });
+
+  test('throws on invalid tag_id format', async () => {
+    await expect(tools.deleteTag({ tag_id: 'bad/id' })).rejects.toThrow(
+      'Invalid tag_id format: bad/id'
+    );
+  });
+
+  test('throws on tag_id with spaces', async () => {
+    await expect(tools.deleteTag({ tag_id: 'bad id' })).rejects.toThrow('Invalid tag_id format');
+  });
+
+  test('does not modify cache on Firestore error', async () => {
+    const failingClient = {
+      requireUserId: async () => 'user123',
+      getUserId: () => 'user123',
+      deleteDocument: async () => {
+        throw new Error('Firestore delete failed (500)');
+      },
+      updateDocument: async () => {},
+      createDocument: async () => {},
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const failTools = new CopilotMoneyTools(mockDb, failingClient as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any)._transactions = [{ transaction_id: 'txn1' }];
+
+    await expect(failTools.deleteTag({ tag_id: 'test' })).rejects.toThrow(
+      'Firestore delete failed'
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((mockDb as any)._transactions).not.toBeNull();
+  });
+
+  test('throws when no Firestore client configured (read-only mode)', async () => {
+    const readOnlyTools = new CopilotMoneyTools(mockDb);
+    await expect(readOnlyTools.deleteTag({ tag_id: 'test' })).rejects.toThrow(
+      'Write mode is not enabled'
+    );
+  });
+});
+
+describe('createCategory', () => {
+  let tools: CopilotMoneyTools;
+  let mockDb: CopilotDatabase;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let createCalls: { collection: string; docId: string; fields: any }[];
+
+  beforeEach(() => {
+    mockDb = new CopilotDatabase('/nonexistent');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any).dbPath = '/fake';
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any)._userCategories = [
+      { category_id: 'food_and_drink', name: 'Food & Drink', excluded: false, user_id: 'user123' },
+      { category_id: 'shopping', name: 'Shopping', excluded: false, user_id: 'user123' },
+    ];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any)._allCollectionsLoaded = true;
+
+    createCalls = [];
+    const mockFirestoreClient = {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      createDocument: async (collection: string, docId: string, fields: any) => {
+        createCalls.push({ collection, docId, fields });
+      },
+      requireUserId: async () => 'user123',
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    tools = new CopilotMoneyTools(mockDb, mockFirestoreClient as any);
+  });
+
+  test('creates category with name only', async () => {
+    const result = await tools.createCategory({ name: 'Entertainment' });
+    expect(result.success).toBe(true);
+    expect(result.name).toBe('Entertainment');
+    expect(result.category_id).toMatch(/^custom_[a-f0-9]{16}$/);
+    expect(result.excluded).toBe(false);
+  });
+
+  test('creates category with all optional fields', async () => {
+    const result = await tools.createCategory({
+      name: 'Streaming',
+      emoji: '🎬',
+      color: '#FF5733',
+      parent_category_id: 'shopping',
+      excluded: true,
+    });
+    expect(result.success).toBe(true);
+    expect(result.name).toBe('Streaming');
+    expect(result.emoji).toBe('🎬');
+    expect(result.color).toBe('#FF5733');
+    expect(result.parent_category_id).toBe('shopping');
+    expect(result.excluded).toBe(true);
+  });
+
+  test('calls Firestore createDocument with correct collection path', async () => {
+    await tools.createCategory({ name: 'Test Category' });
+    expect(createCalls).toHaveLength(1);
+    expect(createCalls[0].collection).toBe('users/user123/categories');
+    expect(createCalls[0].docId).toMatch(/^custom_[a-f0-9]{16}$/);
+    expect(createCalls[0].fields).toHaveProperty('name');
+    expect(createCalls[0].fields.name).toEqual({ stringValue: 'Test Category' });
+    expect(createCalls[0].fields.category_id).toEqual({
+      stringValue: createCalls[0].docId,
+    });
+  });
+
+  test('clears cache after successful create', async () => {
+    // Load categories first to populate cache
+    await mockDb.getUserCategories();
+    await tools.createCategory({ name: 'New Cat' });
+    // After clearing, _userCategories should be null
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((mockDb as any)._userCategories).toBeNull();
+  });
+
+  test('throws when name is empty', async () => {
+    await expect(tools.createCategory({ name: '' })).rejects.toThrow(
+      'Category name must not be empty'
+    );
+    await expect(tools.createCategory({ name: '   ' })).rejects.toThrow(
+      'Category name must not be empty'
+    );
+  });
+
+  test('throws when category name already exists (case-insensitive)', async () => {
+    await expect(tools.createCategory({ name: 'Shopping' })).rejects.toThrow('already exists');
+    await expect(tools.createCategory({ name: 'SHOPPING' })).rejects.toThrow('already exists');
+  });
+
+  test('throws when parent_category_id not found', async () => {
+    await expect(
+      tools.createCategory({ name: 'Sub', parent_category_id: 'nonexistent' })
+    ).rejects.toThrow('Parent category not found: nonexistent');
+  });
+
+  test('throws when parent_category_id has invalid format', async () => {
+    await expect(
+      tools.createCategory({ name: 'Sub', parent_category_id: 'bad/id' })
+    ).rejects.toThrow('Invalid parent_category_id format');
+  });
+
+  test('trims whitespace from name', async () => {
+    const result = await tools.createCategory({ name: '  Entertainment  ' });
+    expect(result.name).toBe('Entertainment');
+    expect(createCalls[0].fields.name).toEqual({ stringValue: 'Entertainment' });
+  });
+
+  test('does not include optional fields when not provided', async () => {
+    await tools.createCategory({ name: 'Minimal' });
+    const fields = createCalls[0].fields;
+    expect(fields).not.toHaveProperty('emoji');
+    expect(fields).not.toHaveProperty('color');
+    expect(fields).not.toHaveProperty('parent_category_id');
+  });
+
+  test('does not write to Firestore on validation error', async () => {
+    await expect(tools.createCategory({ name: '' })).rejects.toThrow();
+    expect(createCalls).toHaveLength(0);
+  });
+
+  test('does not clear cache on Firestore error', async () => {
+    const failingClient = {
+      createDocument: async () => {
+        throw new Error('Firestore create failed (500)');
+      },
+      requireUserId: async () => 'user123',
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const failTools = new CopilotMoneyTools(mockDb, failingClient as any);
+
+    await expect(failTools.createCategory({ name: 'Fail Cat' })).rejects.toThrow(
+      'Firestore create failed'
+    );
+
+    // Cache should NOT have been cleared since create failed
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((mockDb as any)._userCategories).not.toBeNull();
+  });
+
+  test('throws when no Firestore client configured (read-only mode)', async () => {
+    const readOnlyTools = new CopilotMoneyTools(mockDb);
+    await expect(readOnlyTools.createCategory({ name: 'Test' })).rejects.toThrow(
+      'Write mode is not enabled'
+    );
+  });
+
+  test('falls back to auth userId when no categories have user_id', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any)._userCategories = [{ category_id: 'food', name: 'Food', excluded: false }];
+    const mockFirestoreClient = {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      createDocument: async (collection: string, docId: string, fields: any) => {
+        createCalls.push({ collection, docId, fields });
+      },
+      requireUserId: async () => 'auth-user-456',
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const authTools = new CopilotMoneyTools(mockDb, mockFirestoreClient as any);
+
+    await authTools.createCategory({ name: 'New Category' });
+    expect(createCalls[createCalls.length - 1].collection).toBe('users/auth-user-456/categories');
+  });
+});
