@@ -27,6 +27,7 @@ import type {
   TwrHolding,
   InvestmentPrice,
   InvestmentSplit,
+  HoldingsHistory,
 } from '../../src/models/index.js';
 import type { FirestoreClient } from '../../src/core/firestore-client.js';
 
@@ -1540,5 +1541,897 @@ describe('handleCallTool — write tool validation', () => {
     });
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('not found');
+  });
+});
+
+// ============================================
+// Edge case tests — pagination, cost basis, downsampling
+// ============================================
+
+describe('transaction pagination edge cases', () => {
+  let tools: CopilotMoneyTools;
+
+  // Explicit pagination test data — 6 transactions with no transfer/excluded categories
+  const paginationTransactions: Transaction[] = [
+    {
+      transaction_id: 'p1',
+      amount: 10,
+      date: '2025-01-10',
+      name: 'Item 1',
+      category_id: 'food_dining',
+      account_id: 'acc1',
+      item_id: 'item1',
+    },
+    {
+      transaction_id: 'p2',
+      amount: 20,
+      date: '2025-01-11',
+      name: 'Item 2',
+      category_id: 'food_dining',
+      account_id: 'acc1',
+      item_id: 'item1',
+    },
+    {
+      transaction_id: 'p3',
+      amount: 30,
+      date: '2025-01-12',
+      name: 'Item 3',
+      category_id: 'groceries',
+      account_id: 'acc1',
+      item_id: 'item1',
+    },
+    {
+      transaction_id: 'p4',
+      amount: 40,
+      date: '2025-01-13',
+      name: 'Item 4',
+      category_id: 'groceries',
+      account_id: 'acc2',
+      item_id: 'item1',
+    },
+    {
+      transaction_id: 'p5',
+      amount: 50,
+      date: '2025-01-14',
+      name: 'Item 5',
+      category_id: 'entertainment',
+      account_id: 'acc2',
+      item_id: 'item1',
+    },
+    {
+      transaction_id: 'p6',
+      amount: 60,
+      date: '2025-01-15',
+      name: 'Item 6',
+      category_id: 'entertainment',
+      account_id: 'acc2',
+      item_id: 'item1',
+    },
+  ];
+
+  beforeEach(() => {
+    const db = new CopilotDatabase(FAKE_DB_DIR);
+    db._injectDataForTesting({
+      transactions: [...paginationTransactions],
+      accounts: [...mockAccounts],
+      recurring: [],
+      budgets: [],
+      goals: [],
+      goalHistory: [],
+      investmentPrices: [],
+      investmentSplits: [],
+      items: [],
+      userCategories: [],
+      userAccounts: [],
+      categoryNameMap: new Map<string, string>(),
+      accountNameMap: new Map<string, string>(),
+    });
+    tools = new CopilotMoneyTools(db);
+  });
+
+  test('offset greater than total count returns empty', async () => {
+    // First get the actual total so we don't hardcode
+    const all = await tools.getTransactions({ limit: 10000 });
+    const total = all.total_count;
+    expect(total).toBe(paginationTransactions.length);
+
+    const result = await tools.getTransactions({ offset: total + 100, limit: 10 });
+    expect(result.count).toBe(0);
+    expect(result.transactions).toEqual([]);
+    expect(result.total_count).toBe(total);
+    expect(result.has_more).toBe(false);
+  });
+
+  test('limit=1 returns exactly one result with has_more', async () => {
+    const result = await tools.getTransactions({ limit: 1 });
+    expect(result.count).toBe(1);
+    expect(result.transactions.length).toBe(1);
+    expect(result.total_count).toBeGreaterThan(1);
+    expect(result.has_more).toBe(true);
+  });
+
+  test('very large offset with small limit returns empty', async () => {
+    const result = await tools.getTransactions({ offset: 100000, limit: 5 });
+    expect(result.count).toBe(0);
+    expect(result.transactions).toEqual([]);
+    expect(result.has_more).toBe(false);
+  });
+
+  test('offset + limit exceeding total still returns correct total_count', async () => {
+    const all = await tools.getTransactions({ limit: 10000 });
+    const total = all.total_count;
+
+    const result = await tools.getTransactions({ offset: 9990, limit: 10 });
+    expect(result.count).toBe(0);
+    expect(result.transactions).toEqual([]);
+    expect(result.total_count).toBe(total);
+    expect(result.has_more).toBe(false);
+  });
+
+  test('offset exactly at total count returns empty', async () => {
+    const all = await tools.getTransactions({ limit: 10000 });
+    const total = all.total_count;
+
+    const result = await tools.getTransactions({ offset: total, limit: 10 });
+    expect(result.count).toBe(0);
+    expect(result.transactions).toEqual([]);
+    expect(result.has_more).toBe(false);
+  });
+
+  test('offset one less than total count returns exactly one item', async () => {
+    const all = await tools.getTransactions({ limit: 10000 });
+    const total = all.total_count;
+
+    const result = await tools.getTransactions({ offset: total - 1, limit: 10 });
+    expect(result.count).toBe(1);
+    expect(result.transactions.length).toBe(1);
+    expect(result.has_more).toBe(false);
+  });
+
+  test('combined filters with pagination — category + date_range + limit + offset', async () => {
+    // First, figure out how many food_dining transactions exist in the date range
+    const allFiltered = await tools.getTransactions({
+      category: 'food_dining',
+      start_date: '2025-01-01',
+      end_date: '2025-01-31',
+      limit: 10000,
+    });
+    expect(allFiltered.total_count).toBeGreaterThanOrEqual(2);
+
+    // Page through with limit=1
+    const page1 = await tools.getTransactions({
+      category: 'food_dining',
+      start_date: '2025-01-01',
+      end_date: '2025-01-31',
+      limit: 1,
+      offset: 0,
+    });
+    expect(page1.count).toBe(1);
+    expect(page1.has_more).toBe(true);
+    expect(page1.total_count).toBe(allFiltered.total_count);
+
+    const page2 = await tools.getTransactions({
+      category: 'food_dining',
+      start_date: '2025-01-01',
+      end_date: '2025-01-31',
+      limit: 1,
+      offset: 1,
+    });
+    expect(page2.count).toBe(1);
+    expect(page2.total_count).toBe(allFiltered.total_count);
+
+    // Pages return different transactions
+    expect(page1.transactions[0].transaction_id).not.toBe(page2.transactions[0].transaction_id);
+  });
+
+  test('limit exceeding MAX_QUERY_LIMIT is clamped', async () => {
+    const result = await tools.getTransactions({ limit: 99999 });
+    // validateLimit clamps to MAX_QUERY_LIMIT (10000), but with few test records
+    // the result count equals the actual data size
+    expect(result.count).toBeLessThanOrEqual(10000);
+    expect(result.count).toBe(result.total_count);
+  });
+
+  test('negative offset is clamped to 0', async () => {
+    const result = await tools.getTransactions({ offset: -5, limit: 10 });
+    expect(result.offset).toBe(0);
+    expect(result.count).toBeGreaterThan(0);
+  });
+});
+
+describe('holdings cost basis edge cases', () => {
+  test('cost_basis = null does NOT compute average_cost or total_return', async () => {
+    const db = new CopilotDatabase(FAKE_DB_DIR);
+    const accounts: Account[] = [
+      {
+        account_id: 'inv1',
+        current_balance: 10000,
+        name: 'Test Investment',
+        account_type: 'investment',
+        holdings: [
+          {
+            security_id: 'sec1',
+            account_id: 'inv1',
+            cost_basis: null as unknown as number,
+            institution_price: 150,
+            institution_value: 15000,
+            quantity: 100,
+            iso_currency_code: 'USD',
+          },
+        ],
+      },
+    ];
+    db._injectDataForTesting({
+      accounts,
+      securities: [...mockSecurities],
+      transactions: [],
+      recurring: [],
+      budgets: [],
+      goals: [],
+      goalHistory: [],
+      investmentPrices: [],
+      investmentSplits: [],
+      items: [],
+      userCategories: [],
+      userAccounts: [],
+      categoryNameMap: new Map(),
+      accountNameMap: new Map(),
+    });
+    const tools = new CopilotMoneyTools(db);
+    const result = await tools.getHoldings({});
+    expect(result.count).toBe(1);
+    const holding = result.holdings[0];
+    expect(holding.cost_basis).toBeUndefined();
+    expect(holding.average_cost).toBeUndefined();
+    expect(holding.total_return).toBeUndefined();
+    expect(holding.total_return_percent).toBeUndefined();
+  });
+
+  test('cost_basis = 0 does NOT compute derived fields', async () => {
+    const db = new CopilotDatabase(FAKE_DB_DIR);
+    const accounts: Account[] = [
+      {
+        account_id: 'inv1',
+        current_balance: 10000,
+        name: 'Test Investment',
+        account_type: 'investment',
+        holdings: [
+          {
+            security_id: 'sec1',
+            account_id: 'inv1',
+            cost_basis: 0,
+            institution_price: 150,
+            institution_value: 15000,
+            quantity: 100,
+            iso_currency_code: 'USD',
+          },
+        ],
+      },
+    ];
+    db._injectDataForTesting({
+      accounts,
+      securities: [...mockSecurities],
+      transactions: [],
+      recurring: [],
+      budgets: [],
+      goals: [],
+      goalHistory: [],
+      investmentPrices: [],
+      investmentSplits: [],
+      items: [],
+      userCategories: [],
+      userAccounts: [],
+      categoryNameMap: new Map(),
+      accountNameMap: new Map(),
+    });
+    const tools = new CopilotMoneyTools(db);
+    const result = await tools.getHoldings({});
+    expect(result.count).toBe(1);
+    const holding = result.holdings[0];
+    expect(holding.cost_basis).toBeUndefined();
+    expect(holding.average_cost).toBeUndefined();
+    expect(holding.total_return).toBeUndefined();
+  });
+
+  test('quantity = 0 does NOT compute average_cost (division by zero guard)', async () => {
+    const db = new CopilotDatabase(FAKE_DB_DIR);
+    const accounts: Account[] = [
+      {
+        account_id: 'inv1',
+        current_balance: 0,
+        name: 'Test Investment',
+        account_type: 'investment',
+        holdings: [
+          {
+            security_id: 'sec1',
+            account_id: 'inv1',
+            cost_basis: 5000,
+            institution_price: 0,
+            institution_value: 0,
+            quantity: 0,
+            iso_currency_code: 'USD',
+          },
+        ],
+      },
+    ];
+    db._injectDataForTesting({
+      accounts,
+      securities: [...mockSecurities],
+      transactions: [],
+      recurring: [],
+      budgets: [],
+      goals: [],
+      goalHistory: [],
+      investmentPrices: [],
+      investmentSplits: [],
+      items: [],
+      userCategories: [],
+      userAccounts: [],
+      categoryNameMap: new Map(),
+      accountNameMap: new Map(),
+    });
+    const tools = new CopilotMoneyTools(db);
+    const result = await tools.getHoldings({});
+    expect(result.count).toBe(1);
+    const holding = result.holdings[0];
+    // quantity=0 means the cost_basis guard (h.quantity !== 0) should prevent computation
+    expect(holding.average_cost).toBeUndefined();
+    expect(holding.cost_basis).toBeUndefined();
+  });
+
+  test('include_history=true with no history records', async () => {
+    const db = new CopilotDatabase(FAKE_DB_DIR);
+    db._injectDataForTesting({
+      accounts: [...mockAccounts],
+      securities: [...mockSecurities],
+      holdingsHistory: [],
+      transactions: [],
+      recurring: [],
+      budgets: [],
+      goals: [],
+      goalHistory: [],
+      investmentPrices: [],
+      investmentSplits: [],
+      items: [],
+      userCategories: [],
+      userAccounts: [],
+      categoryNameMap: new Map(),
+      accountNameMap: new Map(),
+    });
+    const tools = new CopilotMoneyTools(db);
+    const result = await tools.getHoldings({ include_history: true });
+    expect(result.count).toBeGreaterThan(0);
+    for (const holding of result.holdings) {
+      expect(holding.history).toBeUndefined();
+    }
+  });
+
+  test('include_history=true with matching history records', async () => {
+    const db = new CopilotDatabase(FAKE_DB_DIR);
+    const holdingsHistory: HoldingsHistory[] = [
+      {
+        history_id: 'sec1:2025-01',
+        security_id: 'sec1',
+        account_id: 'acc3',
+        month: '2025-01',
+        history: {
+          '1736899200000': { price: 180.0, quantity: 100 },
+          '1736985600000': { price: 182.5, quantity: 100 },
+        },
+      },
+      {
+        history_id: 'sec1:2024-12',
+        security_id: 'sec1',
+        account_id: 'acc3',
+        month: '2024-12',
+        history: {
+          '1735689600000': { price: 175.0, quantity: 95 },
+        },
+      },
+    ];
+    db._injectDataForTesting({
+      accounts: [...mockAccounts],
+      securities: [...mockSecurities],
+      holdingsHistory,
+      transactions: [],
+      recurring: [],
+      budgets: [],
+      goals: [],
+      goalHistory: [],
+      investmentPrices: [],
+      investmentSplits: [],
+      items: [],
+      userCategories: [],
+      userAccounts: [],
+      categoryNameMap: new Map(),
+      accountNameMap: new Map(),
+    });
+    const tools = new CopilotMoneyTools(db);
+    const result = await tools.getHoldings({
+      include_history: true,
+      ticker_symbol: 'AAPL',
+    });
+    expect(result.count).toBe(1);
+    const holding = result.holdings[0];
+    expect(holding.history).toBeDefined();
+    expect(holding.history!.length).toBe(2);
+    // Sorted by month descending
+    expect(holding.history![0].month).toBe('2025-01');
+    expect(holding.history![1].month).toBe('2024-12');
+  });
+
+  test('filter by account_id + ticker_symbol together', async () => {
+    const db = new CopilotDatabase(FAKE_DB_DIR);
+    db._injectDataForTesting({
+      accounts: [...mockAccounts],
+      securities: [...mockSecurities],
+      transactions: [],
+      recurring: [],
+      budgets: [],
+      goals: [],
+      goalHistory: [],
+      investmentPrices: [],
+      investmentSplits: [],
+      items: [],
+      userCategories: [],
+      userAccounts: [],
+      categoryNameMap: new Map(),
+      accountNameMap: new Map(),
+    });
+    const tools = new CopilotMoneyTools(db);
+
+    // acc3 has both AAPL and VTI holdings
+    const result = await tools.getHoldings({
+      account_id: 'acc3',
+      ticker_symbol: 'AAPL',
+    });
+    expect(result.count).toBe(1);
+    expect(result.holdings[0].ticker_symbol).toBe('AAPL');
+    expect(result.holdings[0].account_id).toBe('acc3');
+  });
+
+  test('non-existent account_id returns empty', async () => {
+    const db = new CopilotDatabase(FAKE_DB_DIR);
+    db._injectDataForTesting({
+      accounts: [...mockAccounts],
+      securities: [...mockSecurities],
+      transactions: [],
+      recurring: [],
+      budgets: [],
+      goals: [],
+      goalHistory: [],
+      investmentPrices: [],
+      investmentSplits: [],
+      items: [],
+      userCategories: [],
+      userAccounts: [],
+      categoryNameMap: new Map(),
+      accountNameMap: new Map(),
+    });
+    const tools = new CopilotMoneyTools(db);
+    const result = await tools.getHoldings({ account_id: 'nonexistent' });
+    expect(result.count).toBe(0);
+    expect(result.holdings).toEqual([]);
+    expect(result.total_count).toBe(0);
+  });
+
+  test('non-existent ticker_symbol returns empty', async () => {
+    const db = new CopilotDatabase(FAKE_DB_DIR);
+    db._injectDataForTesting({
+      accounts: [...mockAccounts],
+      securities: [...mockSecurities],
+      transactions: [],
+      recurring: [],
+      budgets: [],
+      goals: [],
+      goalHistory: [],
+      investmentPrices: [],
+      investmentSplits: [],
+      items: [],
+      userCategories: [],
+      userAccounts: [],
+      categoryNameMap: new Map(),
+      accountNameMap: new Map(),
+    });
+    const tools = new CopilotMoneyTools(db);
+    const result = await tools.getHoldings({ ticker_symbol: 'ZZZZ' });
+    expect(result.count).toBe(0);
+    expect(result.holdings).toEqual([]);
+  });
+
+  test('accounts with no holdings array are skipped', async () => {
+    const db = new CopilotDatabase(FAKE_DB_DIR);
+    const accounts: Account[] = [
+      {
+        account_id: 'checking1',
+        current_balance: 5000,
+        name: 'Checking',
+        account_type: 'checking',
+        // no holdings property
+      },
+      {
+        account_id: 'inv1',
+        current_balance: 10000,
+        name: 'Investment',
+        account_type: 'investment',
+        holdings: [
+          {
+            security_id: 'sec1',
+            account_id: 'inv1',
+            cost_basis: 15000,
+            institution_price: 185.5,
+            institution_value: 18550,
+            quantity: 100,
+            iso_currency_code: 'USD',
+          },
+        ],
+      },
+    ];
+    db._injectDataForTesting({
+      accounts,
+      securities: [...mockSecurities],
+      transactions: [],
+      recurring: [],
+      budgets: [],
+      goals: [],
+      goalHistory: [],
+      investmentPrices: [],
+      investmentSplits: [],
+      items: [],
+      userCategories: [],
+      userAccounts: [],
+      categoryNameMap: new Map(),
+      accountNameMap: new Map(),
+    });
+    const tools = new CopilotMoneyTools(db);
+    const result = await tools.getHoldings({});
+    // Only the investment account's holding should appear
+    expect(result.count).toBe(1);
+    expect(result.holdings[0].account_id).toBe('inv1');
+  });
+});
+
+describe('balance history downsampling edge cases', () => {
+  /**
+   * Helper to create a db + tools with custom balance history data.
+   */
+  function createBalanceTools(balanceHistory: BalanceHistory[]): CopilotMoneyTools {
+    const db = new CopilotDatabase(FAKE_DB_DIR);
+    db._injectDataForTesting({
+      balanceHistory,
+      accounts: [...mockAccounts],
+      transactions: [],
+      recurring: [],
+      budgets: [],
+      goals: [],
+      goalHistory: [],
+      investmentPrices: [],
+      investmentSplits: [],
+      items: [],
+      userCategories: [],
+      userAccounts: [],
+      securities: [],
+      categoryNameMap: new Map(),
+      accountNameMap: new Map([
+        ['acc1', 'Checking Account'],
+        ['acc2', 'Savings Account'],
+      ]),
+    });
+    return new CopilotMoneyTools(db);
+  }
+
+  test('weekly downsampling keeps last date per week per account', async () => {
+    // Week of 2025-01-13 (Mon) to 2025-01-19 (Sun)
+    const history: BalanceHistory[] = [
+      {
+        balance_id: 'b1',
+        date: '2025-01-13',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1000,
+      },
+      {
+        balance_id: 'b2',
+        date: '2025-01-15',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1100,
+      },
+      {
+        balance_id: 'b3',
+        date: '2025-01-17',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1200,
+      },
+      // Next week: 2025-01-20 (Mon)
+      {
+        balance_id: 'b4',
+        date: '2025-01-20',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1300,
+      },
+      {
+        balance_id: 'b5',
+        date: '2025-01-22',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1400,
+      },
+    ];
+    const tools = createBalanceTools(history);
+    const result = await tools.getBalanceHistory({ granularity: 'weekly' });
+    // Should keep last date per week: 2025-01-17 (week 3) and 2025-01-22 (week 4)
+    expect(result.total_count).toBe(2);
+    const dates = result.balance_history.map((r) => r.date);
+    expect(dates).toContain('2025-01-17');
+    expect(dates).toContain('2025-01-22');
+    expect(dates).not.toContain('2025-01-13');
+    expect(dates).not.toContain('2025-01-15');
+    expect(dates).not.toContain('2025-01-20');
+  });
+
+  test('monthly downsampling keeps last date per month per account', async () => {
+    const history: BalanceHistory[] = [
+      {
+        balance_id: 'b1',
+        date: '2025-01-05',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1000,
+      },
+      {
+        balance_id: 'b2',
+        date: '2025-01-20',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1100,
+      },
+      {
+        balance_id: 'b3',
+        date: '2025-01-31',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1200,
+      },
+      {
+        balance_id: 'b4',
+        date: '2025-02-10',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1300,
+      },
+      {
+        balance_id: 'b5',
+        date: '2025-02-28',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1400,
+      },
+    ];
+    const tools = createBalanceTools(history);
+    const result = await tools.getBalanceHistory({ granularity: 'monthly' });
+    expect(result.total_count).toBe(2);
+    const dates = result.balance_history.map((r) => r.date);
+    expect(dates).toContain('2025-01-31');
+    expect(dates).toContain('2025-02-28');
+  });
+
+  test('downsampling with multiple accounts groups correctly', async () => {
+    const history: BalanceHistory[] = [
+      {
+        balance_id: 'b1',
+        date: '2025-01-10',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1000,
+      },
+      {
+        balance_id: 'b2',
+        date: '2025-01-20',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1100,
+      },
+      {
+        balance_id: 'b3',
+        date: '2025-01-10',
+        item_id: 'item1',
+        account_id: 'acc2',
+        current_balance: 500,
+      },
+      {
+        balance_id: 'b4',
+        date: '2025-01-25',
+        item_id: 'item1',
+        account_id: 'acc2',
+        current_balance: 600,
+      },
+    ];
+    const tools = createBalanceTools(history);
+    const result = await tools.getBalanceHistory({ granularity: 'monthly' });
+    // Each account should keep one entry (last date in January)
+    expect(result.total_count).toBe(2);
+    const acc1Entry = result.balance_history.find((r) => r.account_id === 'acc1');
+    const acc2Entry = result.balance_history.find((r) => r.account_id === 'acc2');
+    expect(acc1Entry!.date).toBe('2025-01-20');
+    expect(acc2Entry!.date).toBe('2025-01-25');
+    expect(result.accounts.sort()).toEqual(['acc1', 'acc2']);
+  });
+
+  test('pagination applied AFTER downsampling', async () => {
+    const history: BalanceHistory[] = [
+      {
+        balance_id: 'b1',
+        date: '2025-01-15',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1000,
+      },
+      {
+        balance_id: 'b2',
+        date: '2025-01-31',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1100,
+      },
+      {
+        balance_id: 'b3',
+        date: '2025-02-15',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1200,
+      },
+      {
+        balance_id: 'b4',
+        date: '2025-02-28',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1300,
+      },
+      {
+        balance_id: 'b5',
+        date: '2025-03-15',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1400,
+      },
+      {
+        balance_id: 'b6',
+        date: '2025-03-31',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1500,
+      },
+    ];
+    const tools = createBalanceTools(history);
+
+    // Monthly downsampling → 3 entries (Jan, Feb, Mar). Paginate with limit=2.
+    const page1 = await tools.getBalanceHistory({
+      granularity: 'monthly',
+      limit: 2,
+      offset: 0,
+    });
+    expect(page1.total_count).toBe(3);
+    expect(page1.count).toBe(2);
+    expect(page1.has_more).toBe(true);
+
+    const page2 = await tools.getBalanceHistory({
+      granularity: 'monthly',
+      limit: 2,
+      offset: 2,
+    });
+    expect(page2.total_count).toBe(3);
+    expect(page2.count).toBe(1);
+    expect(page2.has_more).toBe(false);
+  });
+
+  test('has_more flag accuracy after downsampling', async () => {
+    const history: BalanceHistory[] = [
+      {
+        balance_id: 'b1',
+        date: '2025-01-10',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1000,
+      },
+      {
+        balance_id: 'b2',
+        date: '2025-01-20',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1100,
+      },
+    ];
+    const tools = createBalanceTools(history);
+
+    // Monthly downsampling → 1 entry. limit=1 exactly matches.
+    const result = await tools.getBalanceHistory({
+      granularity: 'monthly',
+      limit: 1,
+    });
+    expect(result.total_count).toBe(1);
+    expect(result.count).toBe(1);
+    expect(result.has_more).toBe(false);
+  });
+
+  test('date filtering combined with downsampling', async () => {
+    const history: BalanceHistory[] = [
+      {
+        balance_id: 'b1',
+        date: '2025-01-15',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1000,
+      },
+      {
+        balance_id: 'b2',
+        date: '2025-02-15',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1100,
+      },
+      {
+        balance_id: 'b3',
+        date: '2025-03-15',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1200,
+      },
+    ];
+    const tools = createBalanceTools(history);
+
+    // Filter to Jan-Feb only, then downsample monthly
+    const result = await tools.getBalanceHistory({
+      granularity: 'monthly',
+      start_date: '2025-01-01',
+      end_date: '2025-02-28',
+    });
+    expect(result.total_count).toBe(2);
+    const dates = result.balance_history.map((r) => r.date);
+    expect(dates).toContain('2025-01-15');
+    expect(dates).toContain('2025-02-15');
+    expect(dates).not.toContain('2025-03-15');
+  });
+
+  test('empty result set returns zeros', async () => {
+    const tools = createBalanceTools([]);
+    const result = await tools.getBalanceHistory({ granularity: 'daily' });
+    expect(result.count).toBe(0);
+    expect(result.total_count).toBe(0);
+    expect(result.has_more).toBe(false);
+    expect(result.balance_history).toEqual([]);
+    expect(result.accounts).toEqual([]);
+  });
+
+  test('daily granularity returns all records without downsampling', async () => {
+    const history: BalanceHistory[] = [
+      {
+        balance_id: 'b1',
+        date: '2025-01-15',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1000,
+      },
+      {
+        balance_id: 'b2',
+        date: '2025-01-16',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1100,
+      },
+      {
+        balance_id: 'b3',
+        date: '2025-01-17',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1200,
+      },
+    ];
+    const tools = createBalanceTools(history);
+    const result = await tools.getBalanceHistory({ granularity: 'daily' });
+    expect(result.total_count).toBe(3);
+    expect(result.count).toBe(3);
   });
 });
