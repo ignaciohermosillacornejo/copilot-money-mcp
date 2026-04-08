@@ -340,6 +340,27 @@ describe('createRecurring', () => {
     }
   });
 
+  test('throws on invalid start_date format', async () => {
+    await expect(
+      tools.createRecurring({
+        name: 'Netflix',
+        amount: 15.99,
+        frequency: 'monthly',
+        start_date: 'not-a-date',
+      })
+    ).rejects.toThrow('Invalid start_date format');
+  });
+
+  test('accepts valid start_date format', async () => {
+    const result = await tools.createRecurring({
+      name: 'Netflix',
+      amount: 15.99,
+      frequency: 'monthly',
+      start_date: '2024-06-15',
+    });
+    expect(result.success).toBe(true);
+  });
+
   test('throws when no Firestore client configured (read-only mode)', async () => {
     const readOnlyTools = new CopilotMoneyTools(mockDb);
     await expect(
@@ -524,13 +545,17 @@ describe('createGoal', () => {
     ).rejects.toThrow('monthly_contribution must be >= 0');
   });
 
-  test('allows zero monthly_contribution', async () => {
+  test('allows zero monthly_contribution and sets tracking_type to monthly_contribution', async () => {
     const result = await tools.createGoal({
       name: 'Emergency Fund',
       target_amount: 10000,
       monthly_contribution: 0,
     });
     expect(result.success).toBe(true);
+    const fields = createCalls[0].fields;
+    const savings = fields.savings?.mapValue?.fields;
+    expect(savings.tracking_type).toEqual({ stringValue: 'monthly_contribution' });
+    expect(savings.tracking_type_monthly_contribution).toEqual({ integerValue: '0' });
   });
 
   test('trims whitespace from name', async () => {
@@ -546,6 +571,21 @@ describe('createGoal', () => {
     await expect(
       readOnlyTools.createGoal({ name: 'Emergency Fund', target_amount: 10000 })
     ).rejects.toThrow('Write mode is not enabled');
+  });
+
+  test('throws on invalid start_date format', async () => {
+    await expect(
+      tools.createGoal({ name: 'Emergency Fund', target_amount: 10000, start_date: 'not-a-date' })
+    ).rejects.toThrow('Invalid start_date format');
+  });
+
+  test('accepts valid start_date format', async () => {
+    const result = await tools.createGoal({
+      name: 'Emergency Fund',
+      target_amount: 10000,
+      start_date: '2024-06-15',
+    });
+    expect(result.success).toBe(true);
   });
 
   test('does not modify cache on Firestore error', async () => {
