@@ -18,7 +18,7 @@ bun run fix          # Run lint:fix + format
 ### Data Flow
 1. Copilot Money stores data in local LevelDB/Firestore cache
 2. `src/core/decoder.ts` reads `.ldb` files and parses Protocol Buffers
-3. `src/core/database.ts` provides filtered access to transactions/accounts
+3. `src/core/database.ts` provides cached, filtered access to all collections
 4. `src/tools/tools.ts` exposes MCP tools via Model Context Protocol
 5. `src/server.ts` handles MCP protocol communication
 

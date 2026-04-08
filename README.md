@@ -28,7 +28,7 @@ An [MCP](https://modelcontextprotocol.io/) server that gives AI assistants acces
 Your financial data never leaves your machine. See our [Privacy Policy](PRIVACY.md) for details.
 
 - No data collection or transmission
-- No external API calls
+- No external API calls (write mode uses local Firestore REST API only)
 - No analytics or telemetry
 - Read-only by default
 - Open source — verify the code yourself
