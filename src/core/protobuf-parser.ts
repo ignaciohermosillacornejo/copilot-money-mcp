@@ -231,8 +231,7 @@ export function parseFirestoreValue(data: Buffer, start: number = 0, end?: numbe
         if (wireType !== WireType.Varint) {
           throw new Error(`Expected varint for boolean, got wire type ${wireType}`);
         }
-        const { value, bytesRead } = decodeVarint(data, pos);
-        pos += bytesRead;
+        const { value } = decodeVarint(data, pos);
         return { type: 'boolean', value: value !== 0 };
       }
 
@@ -240,8 +239,7 @@ export function parseFirestoreValue(data: Buffer, start: number = 0, end?: numbe
         if (wireType !== WireType.Varint) {
           throw new Error(`Expected varint for integer, got wire type ${wireType}`);
         }
-        const { value, bytesRead } = decodeVarint(data, pos);
-        pos += bytesRead;
+        const { value } = decodeVarint(data, pos);
         return { type: 'integer', value };
       }
 
@@ -250,7 +248,6 @@ export function parseFirestoreValue(data: Buffer, start: number = 0, end?: numbe
           throw new Error(`Expected fixed64 for double, got wire type ${wireType}`);
         }
         const value = data.readDoubleLE(pos);
-        pos += 8;
         return { type: 'double', value };
       }
 
@@ -261,7 +258,6 @@ export function parseFirestoreValue(data: Buffer, start: number = 0, end?: numbe
         const { value: length, bytesRead } = decodeVarint(data, pos);
         pos += bytesRead;
         const value = data.subarray(pos, pos + length).toString('utf-8');
-        pos += length;
         return { type: 'reference', value };
       }
 
@@ -272,7 +268,6 @@ export function parseFirestoreValue(data: Buffer, start: number = 0, end?: numbe
         const { value: length, bytesRead } = decodeVarint(data, pos);
         pos += bytesRead;
         const value = data.subarray(pos, pos + length).toString('utf-8');
-        pos += length;
         return { type: 'string', value };
       }
 
@@ -283,7 +278,6 @@ export function parseFirestoreValue(data: Buffer, start: number = 0, end?: numbe
         const { value: length, bytesRead } = decodeVarint(data, pos);
         pos += bytesRead;
         const value = Buffer.from(data.subarray(pos, pos + length));
-        pos += length;
         return { type: 'bytes', value };
       }
 
@@ -291,8 +285,7 @@ export function parseFirestoreValue(data: Buffer, start: number = 0, end?: numbe
         if (wireType !== WireType.Varint) {
           throw new Error(`Expected varint for null, got wire type ${wireType}`);
         }
-        const { bytesRead } = decodeVarint(data, pos);
-        pos += bytesRead;
+        decodeVarint(data, pos);
         return { type: 'null', value: null };
       }
 
@@ -303,7 +296,6 @@ export function parseFirestoreValue(data: Buffer, start: number = 0, end?: numbe
         const { value: length, bytesRead } = decodeVarint(data, pos);
         pos += bytesRead;
         const timestamp = parseTimestamp(data, pos, pos + length);
-        pos += length;
         return { type: 'timestamp', value: timestamp };
       }
 
@@ -314,7 +306,6 @@ export function parseFirestoreValue(data: Buffer, start: number = 0, end?: numbe
         const { value: length, bytesRead } = decodeVarint(data, pos);
         pos += bytesRead;
         const geopoint = parseGeoPoint(data, pos, pos + length);
-        pos += length;
         return { type: 'geopoint', value: geopoint };
       }
 
@@ -325,7 +316,6 @@ export function parseFirestoreValue(data: Buffer, start: number = 0, end?: numbe
         const { value: length, bytesRead } = decodeVarint(data, pos);
         pos += bytesRead;
         const map = parseMapValue(data, pos, pos + length);
-        pos += length;
         return { type: 'map', value: map };
       }
 
@@ -336,7 +326,6 @@ export function parseFirestoreValue(data: Buffer, start: number = 0, end?: numbe
         const { value: length, bytesRead } = decodeVarint(data, pos);
         pos += bytesRead;
         const array = parseArrayValue(data, pos, pos + length);
-        pos += length;
         return { type: 'array', value: array };
       }
 

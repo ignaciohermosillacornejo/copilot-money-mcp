@@ -70,6 +70,7 @@
   },
   "devDependencies": {
     "@anthropic-ai/mcpb": "latest",
+    "@eslint/js": "^10.0.1",
     "@types/bun": "^1.1.0",
     "@types/node": "^25.0.10",
     "eslint": "^10.2.0",
