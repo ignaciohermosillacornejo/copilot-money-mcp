@@ -197,7 +197,13 @@ function isLikelyAddressed(suggestion: string, prState: string): boolean {
     suggestion.toLowerCase().includes(kw)
   );
 
+  // Skip open PRs — suggestions may still be addressed before merge
+  if (prState === 'OPEN') {
+    return true;
+  }
+
   // For merged PRs, only flag non-blocking items as potentially unaddressed
+  // (blocking issues are assumed to have been addressed before merge)
   if (prState === 'MERGED') {
     return !isNonBlocking;
   }
@@ -334,7 +340,9 @@ async function markAsAudited(prNumber: number): Promise<void> {
 /**
  * Audit a single PR
  */
-async function auditPR(pr: PR): Promise<UnaddressedSuggestion[]> {
+async function auditPR(
+  pr: PR
+): Promise<{ suggestions: UnaddressedSuggestion[]; hasClaudeReview: boolean }> {
   console.log(`Auditing PR #${pr.number}: ${pr.title}`);
 
   const suggestions: UnaddressedSuggestion[] = [];
@@ -346,62 +354,46 @@ async function auditPR(pr: PR): Promise<UnaddressedSuggestion[]> {
     getPRReviews(pr.number),
   ]);
 
-  // Process inline diff comments
+  // Collect all Claude review bodies from all sources
+  const allReviewBodies: Array<{ body: string; path?: string; line?: number }> = [];
+
   for (const comment of diffComments) {
     if (!isReviewBotComment(comment.user.login)) continue;
-
-    const extracted = extractSuggestions(comment.body);
-    for (const suggestion of extracted) {
-      if (!isLikelyAddressed(suggestion, pr.state)) {
-        suggestions.push({
-          prNumber: pr.number,
-          prTitle: pr.title,
-          suggestion,
-          file: comment.path,
-          line: comment.line,
-          priority: determinePriority(suggestion),
-        });
-      }
-    }
+    if (!isClaudeReviewComment(comment.body)) continue;
+    allReviewBodies.push({ body: comment.body, path: comment.path, line: comment.line });
   }
 
-  // Process issue comments (where claude-code-action posts reviews)
   for (const comment of issueComments) {
     if (!isReviewBotComment(comment.user.login)) continue;
     if (!isClaudeReviewComment(comment.body)) continue;
-
-    const extracted = extractSuggestions(comment.body);
-    for (const suggestion of extracted) {
-      if (!isLikelyAddressed(suggestion, pr.state)) {
-        suggestions.push({
-          prNumber: pr.number,
-          prTitle: pr.title,
-          suggestion,
-          priority: determinePriority(suggestion),
-        });
-      }
-    }
+    allReviewBodies.push({ body: comment.body });
   }
 
-  // Process review bodies
   for (const review of reviews) {
     if (!isReviewBotComment(review.user.login)) continue;
-    if (!review.body) continue;
+    if (!review.body || !isClaudeReviewComment(review.body)) continue;
+    allReviewBodies.push({ body: review.body });
+  }
 
-    const extracted = extractSuggestions(review.body);
+  const hasClaudeReview = allReviewBodies.length > 0;
+
+  for (const entry of allReviewBodies) {
+    const extracted = extractSuggestions(entry.body);
     for (const suggestion of extracted) {
       if (!isLikelyAddressed(suggestion, pr.state)) {
         suggestions.push({
           prNumber: pr.number,
           prTitle: pr.title,
           suggestion,
+          file: entry.path,
+          line: entry.line,
           priority: determinePriority(suggestion),
         });
       }
     }
   }
 
-  return suggestions;
+  return { suggestions, hasClaudeReview };
 }
 
 /**
@@ -450,7 +442,7 @@ async function main(): Promise<void> {
 
   for (let i = 0; i < prs.length; i++) {
     const pr = prs[i];
-    const suggestions = await auditPR(pr);
+    const { suggestions, hasClaudeReview } = await auditPR(pr);
 
     if (suggestions.length > 0) {
       // Check if issue already exists
@@ -462,8 +454,11 @@ async function main(): Promise<void> {
       }
     }
 
-    // Mark as audited
-    await markAsAudited(pr.number);
+    // Only mark as audited if a Claude review was found — PRs without reviews
+    // should be re-checked in case a review is posted later
+    if (hasClaudeReview) {
+      await markAsAudited(pr.number);
+    }
 
     // Rate limiting: add delay between PRs (except for last one)
     if (i < prs.length - 1) {
