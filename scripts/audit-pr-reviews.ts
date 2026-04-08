@@ -264,7 +264,8 @@ async function getPRReviews(prNumber: number): Promise<PRReview[]> {
  */
 async function issueExists(prNumber: number, suggestion: string): Promise<boolean> {
   try {
-    const searchQuery = `repo:{owner}/{repo} is:issue "PR #${prNumber}" in:body`;
+    // gh issue list already scopes to the current repo; no repo: qualifier needed
+    const searchQuery = `is:issue "PR #${prNumber}" in:body`;
     const result = await $`gh issue list --search ${searchQuery} --json number,body`.text();
     const issues = JSON.parse(result);
 
@@ -377,9 +378,16 @@ async function auditPR(
 
   const hasClaudeReview = allReviewBodies.length > 0;
 
+  // Deduplicate suggestions across review bodies (same text can appear in
+  // both a diff comment and an issue comment summary)
+  const seenSuggestions = new Set<string>();
+
   for (const entry of allReviewBodies) {
     const extracted = extractSuggestions(entry.body);
     for (const suggestion of extracted) {
+      if (seenSuggestions.has(suggestion)) continue;
+      seenSuggestions.add(suggestion);
+
       if (!isLikelyAddressed(suggestion, pr.state)) {
         suggestions.push({
           prNumber: pr.number,
