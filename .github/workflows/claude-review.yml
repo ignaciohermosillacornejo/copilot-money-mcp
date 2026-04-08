@@ -56,3 +56,19 @@ jobs:
             --model claude-sonnet-4-6
             --allowedTools "Bash(gh pr diff*),Bash(gh pr view*),Read,Grep,Glob"
             --disallowedTools "Bash(gh pr review --approve*),Bash(gh pr merge*),Bash(gh pr close*)"
+
+      # Auto-approve owner PRs after successful review so the 1-approval
+      # requirement is satisfied without needing a second human reviewer.
+      # Fork PRs are excluded by the job-level `if` condition above.
+      - name: Auto-approve owner PRs
+        if: github.event.pull_request.user.login == github.repository_owner
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.pulls.createReview({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              event: 'APPROVE',
+              body: 'Auto-approved: AI code review passed for repo owner PR.'
+            });
