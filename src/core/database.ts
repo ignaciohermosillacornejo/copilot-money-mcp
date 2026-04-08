@@ -337,6 +337,9 @@ export class CopilotDatabase {
     securities?: Security[];
     tags?: Tag[];
     holdingsHistory?: HoldingsHistory[];
+    balanceHistory?: BalanceHistory[];
+    investmentPerformance?: InvestmentPerformance[];
+    twrHoldings?: TwrHolding[];
     categoryNameMap?: Map<string, string>;
     accountNameMap?: Map<string, string>;
   }): void {
@@ -354,6 +357,10 @@ export class CopilotDatabase {
     if (data.securities !== undefined) this._securities = data.securities;
     if (data.tags !== undefined) this._tags = data.tags;
     if (data.holdingsHistory !== undefined) this._holdingsHistory = data.holdingsHistory;
+    if (data.balanceHistory !== undefined) this._balanceHistory = data.balanceHistory;
+    if (data.investmentPerformance !== undefined)
+      this._investmentPerformance = data.investmentPerformance;
+    if (data.twrHoldings !== undefined) this._twrHoldings = data.twrHoldings;
     if (data.categoryNameMap !== undefined) this._categoryNameMap = data.categoryNameMap;
     if (data.accountNameMap !== undefined) this._accountNameMap = data.accountNameMap;
     this._allCollectionsLoaded = true;
