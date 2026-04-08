@@ -584,6 +584,45 @@ describe('protobuf-parser', () => {
       const decoded = parseFirestoreValue(buf);
       expect(decoded.type).toBe('map');
     });
+
+    test('encodes timestamp with nanos', () => {
+      const ts = { __type: 'timestamp', seconds: 1000, nanos: 500000 };
+      const buf = encodeFirestoreValue(ts);
+      const decoded = parseFirestoreValue(buf);
+      expect(decoded.type).toBe('timestamp');
+      const val = decoded.value as { seconds: number; nanos: number };
+      expect(val.seconds).toBe(1000);
+      expect(val.nanos).toBe(500000);
+    });
+
+    test('encodes timestamp with zero seconds and non-zero nanos', () => {
+      const ts = { __type: 'timestamp', seconds: 0, nanos: 123 };
+      const buf = encodeFirestoreValue(ts);
+      const decoded = parseFirestoreValue(buf);
+      expect(decoded.type).toBe('timestamp');
+      const val = decoded.value as { seconds: number; nanos: number };
+      expect(val.seconds).toBe(0);
+      expect(val.nanos).toBe(123);
+    });
+
+    test('encodes reference value', () => {
+      const ref = { __type: 'reference', value: 'projects/test/databases/db/documents/col/doc' };
+      const buf = encodeFirestoreValue(ref);
+      const decoded = parseFirestoreValue(buf);
+      expect(decoded.type).toBe('reference');
+      expect(decoded.value).toBe('projects/test/databases/db/documents/col/doc');
+    });
+
+    test('encodes object with unknown __type as map', () => {
+      // An object with __type that is not timestamp/reference should fall through to map encoding
+      const val = { __type: 'unknown_special', foo: 'bar' };
+      const buf = encodeFirestoreValue(val);
+      const decoded = parseFirestoreValue(buf);
+      expect(decoded.type).toBe('map');
+      const map = decoded.value as Map<string, FirestoreValue>;
+      expect(map.get('__type')).toEqual({ type: 'string', value: 'unknown_special' });
+      expect(map.get('foo')).toEqual({ type: 'string', value: 'bar' });
+    });
   });
 
   describe('parseFirestoreDocument additional coverage', () => {

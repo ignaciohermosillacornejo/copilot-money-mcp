@@ -105,6 +105,100 @@ describe('extractRefreshToken', () => {
     expect(result.browser).toBe('FirstBrowser');
   });
 
+  test('extracts token from Firefox profile IndexedDB', async () => {
+    // Firefox stores tokens at: <profilesDir>/<profile>/storage/default/<origin>/idb/<file>
+    const profileDir = join(tempDir, 'abcd1234.default-release');
+    const idbDir = join(profileDir, 'storage/default/https+++app.copilot.money/idb');
+    mkdirSync(idbDir, { recursive: true });
+
+    const fakeToken = 'AMf-' + 'F'.repeat(200);
+    writeFileSync(join(idbDir, '1234567890.sqlite'), `data ${fakeToken} more`);
+
+    const overrides: BrowserConfig[] = [{ name: 'Firefox', paths: [tempDir], type: 'firefox' }];
+
+    const result = await extractRefreshToken(overrides);
+    expect(result.token).toBe(fakeToken);
+    expect(result.browser).toBe('Firefox');
+  });
+
+  test('extracts token from Safari database directory', async () => {
+    // Safari searches recursively up to depth 4
+    const nestedDir = join(tempDir, 'copilot', 'data');
+    mkdirSync(nestedDir, { recursive: true });
+
+    const fakeToken = 'AMf-' + 'S'.repeat(200);
+    writeFileSync(join(nestedDir, 'IndexedDB.sqlite3'), `prefix ${fakeToken} suffix`);
+
+    const overrides: BrowserConfig[] = [{ name: 'Safari', paths: [tempDir], type: 'safari' }];
+
+    const result = await extractRefreshToken(overrides);
+    expect(result.token).toBe(fakeToken);
+    expect(result.browser).toBe('Safari');
+  });
+
+  test('Safari skips files larger than 10MB', async () => {
+    const fakeToken = 'AMf-' + 'L'.repeat(200);
+    // Create a file > 10MB
+    const bigContent = 'x'.repeat(10_000_001) + fakeToken;
+    writeFileSync(join(tempDir, 'big.sqlite'), bigContent);
+
+    const overrides: BrowserConfig[] = [{ name: 'Safari', paths: [tempDir], type: 'safari' }];
+
+    await expect(extractRefreshToken(overrides)).rejects.toThrow('No Copilot Money session found');
+  });
+
+  test('Safari respects max depth of 4', async () => {
+    // Create a file at depth 5 — should not be found
+    const deepDir = join(tempDir, 'a', 'b', 'c', 'd', 'e');
+    mkdirSync(deepDir, { recursive: true });
+
+    const fakeToken = 'AMf-' + 'D'.repeat(200);
+    writeFileSync(join(deepDir, 'token.db'), fakeToken);
+
+    const overrides: BrowserConfig[] = [{ name: 'Safari', paths: [tempDir], type: 'safari' }];
+
+    await expect(extractRefreshToken(overrides)).rejects.toThrow('No Copilot Money session found');
+  });
+
+  test('Firefox skips profiles without copilot origin', async () => {
+    const profileDir = join(tempDir, 'abcd1234.default');
+    const idbDir = join(profileDir, 'storage/default/https+++other-site.com/idb');
+    mkdirSync(idbDir, { recursive: true });
+
+    const fakeToken = 'AMf-' + 'N'.repeat(200);
+    writeFileSync(join(idbDir, 'data.sqlite'), fakeToken);
+
+    const overrides: BrowserConfig[] = [{ name: 'Firefox', paths: [tempDir], type: 'firefox' }];
+
+    await expect(extractRefreshToken(overrides)).rejects.toThrow('No Copilot Money session found');
+  });
+
+  test('Firefox handles non-existent profiles directory', async () => {
+    const overrides: BrowserConfig[] = [
+      { name: 'Firefox', paths: ['/nonexistent/firefox/path'], type: 'firefox' },
+    ];
+
+    await expect(extractRefreshToken(overrides)).rejects.toThrow('No Copilot Money session found');
+  });
+
+  test('Safari handles non-existent database directory', async () => {
+    const overrides: BrowserConfig[] = [
+      { name: 'Safari', paths: ['/nonexistent/safari/path'], type: 'safari' },
+    ];
+
+    await expect(extractRefreshToken(overrides)).rejects.toThrow('No Copilot Money session found');
+  });
+
+  test('chromium handles unreadable directory gracefully', async () => {
+    // Directory that exists but readdir would fail on specific files
+    const ldbDir = join(tempDir, 'leveldb');
+    mkdirSync(ldbDir, { recursive: true });
+    // Empty directory — no tokens found but no crash
+    const overrides: BrowserConfig[] = [{ name: 'TestBrowser', paths: [ldbDir], type: 'chromium' }];
+
+    await expect(extractRefreshToken(overrides)).rejects.toThrow('No Copilot Money session found');
+  });
+
   test('skips first browser if no token, finds in second', async () => {
     const dir1 = join(tempDir, 'browser1');
     const dir2 = join(tempDir, 'browser2');
