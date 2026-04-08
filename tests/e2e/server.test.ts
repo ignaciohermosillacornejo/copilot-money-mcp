@@ -204,21 +204,21 @@ describe('CopilotMoneyServer E2E', () => {
 
   beforeEach(() => {
     const db = new CopilotDatabase('/fake/path');
-    (db as any)._transactions = [...mockTransactions];
-    (db as any)._accounts = [...mockAccounts];
-    // Add required cache fields for async database methods
-    (db as any)._recurring = [];
-    (db as any)._budgets = [];
-    (db as any)._goals = [];
-    (db as any)._goalHistory = [];
-    (db as any)._investmentPrices = [];
-    (db as any)._investmentSplits = [];
-    (db as any)._items = [];
-    (db as any)._userCategories = [];
-    (db as any)._userAccounts = [];
-    // Empty maps — name resolution returns empty strings in tests
-    (db as any)._categoryNameMap = new Map<string, string>();
-    (db as any)._accountNameMap = new Map<string, string>();
+    db._injectDataForTesting({
+      transactions: [...mockTransactions],
+      accounts: [...mockAccounts],
+      recurring: [],
+      budgets: [],
+      goals: [],
+      goalHistory: [],
+      investmentPrices: [],
+      investmentSplits: [],
+      items: [],
+      userCategories: [],
+      userAccounts: [],
+      categoryNameMap: new Map<string, string>(),
+      accountNameMap: new Map<string, string>(),
+    });
 
     server = new CopilotMoneyServer('/fake/path');
     // Override server's database
@@ -385,25 +385,24 @@ describe('CopilotMoneyServer E2E', () => {
 /** Create a CopilotDatabase pre-loaded with mock data. */
 function createMockDb(): CopilotDatabase {
   const db = new CopilotDatabase(FAKE_DB_DIR);
-  (db as any)._transactions = [...mockTransactions];
-  (db as any)._accounts = [...mockAccounts];
-  (db as any)._recurring = [...mockRecurring];
-  (db as any)._budgets = [...mockBudgets];
-  (db as any)._goals = [...mockGoals];
-  (db as any)._goalHistory = [...mockGoalHistory];
-  (db as any)._investmentPrices = [];
-  (db as any)._investmentSplits = [];
-  (db as any)._items = [...mockItems];
-  (db as any)._userCategories = [...mockUserCategories];
-  (db as any)._userAccounts = [];
-  // Empty maps — name resolution returns empty strings in tests
-  (db as any)._categoryNameMap = new Map<string, string>();
-  (db as any)._accountNameMap = new Map<string, string>();
-  (db as any)._tags = [...mockTags];
-  (db as any)._holdingsHistory = [];
-  (db as any)._securities = [];
-  (db as any)._allCollectionsLoaded = true;
-  (db as any)._cacheLoadedAt = Date.now();
+  db._injectDataForTesting({
+    transactions: [...mockTransactions],
+    accounts: [...mockAccounts],
+    recurring: [...mockRecurring],
+    budgets: [...mockBudgets],
+    goals: [...mockGoals],
+    goalHistory: [...mockGoalHistory],
+    investmentPrices: [],
+    investmentSplits: [],
+    items: [...mockItems],
+    userCategories: [...mockUserCategories],
+    userAccounts: [],
+    categoryNameMap: new Map<string, string>(),
+    accountNameMap: new Map<string, string>(),
+    tags: [...mockTags],
+    holdingsHistory: [],
+    securities: [],
+  });
   return db;
 }
 

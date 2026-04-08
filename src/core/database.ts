@@ -309,6 +309,50 @@ export class CopilotDatabase {
   }
 
   /**
+   * Inject mock data for testing. Replaces internal caches with provided data.
+   * Fields not provided are left unchanged.
+   * Automatically marks the cache as fully loaded.
+   * @internal
+   */
+  _injectDataForTesting(data: {
+    transactions?: Transaction[];
+    accounts?: Account[];
+    recurring?: Recurring[];
+    budgets?: Budget[];
+    goals?: Goal[];
+    goalHistory?: GoalHistory[];
+    investmentPrices?: InvestmentPrice[];
+    investmentSplits?: InvestmentSplit[];
+    items?: Item[];
+    userCategories?: Category[];
+    userAccounts?: UserAccountCustomization[];
+    securities?: Security[];
+    tags?: Tag[];
+    holdingsHistory?: HoldingsHistory[];
+    categoryNameMap?: Map<string, string>;
+    accountNameMap?: Map<string, string>;
+  }): void {
+    if (data.transactions !== undefined) this._transactions = data.transactions;
+    if (data.accounts !== undefined) this._accounts = data.accounts;
+    if (data.recurring !== undefined) this._recurring = data.recurring;
+    if (data.budgets !== undefined) this._budgets = data.budgets;
+    if (data.goals !== undefined) this._goals = data.goals;
+    if (data.goalHistory !== undefined) this._goalHistory = data.goalHistory;
+    if (data.investmentPrices !== undefined) this._investmentPrices = data.investmentPrices;
+    if (data.investmentSplits !== undefined) this._investmentSplits = data.investmentSplits;
+    if (data.items !== undefined) this._items = data.items;
+    if (data.userCategories !== undefined) this._userCategories = data.userCategories;
+    if (data.userAccounts !== undefined) this._userAccounts = data.userAccounts;
+    if (data.securities !== undefined) this._securities = data.securities;
+    if (data.tags !== undefined) this._tags = data.tags;
+    if (data.holdingsHistory !== undefined) this._holdingsHistory = data.holdingsHistory;
+    if (data.categoryNameMap !== undefined) this._categoryNameMap = data.categoryNameMap;
+    if (data.accountNameMap !== undefined) this._accountNameMap = data.accountNameMap;
+    this._allCollectionsLoaded = true;
+    this._cacheLoadedAt = Date.now();
+  }
+
+  /**
    * Patch a specific transaction in the in-memory cache.
    *
    * Used after a successful Firestore write to keep the cache consistent
