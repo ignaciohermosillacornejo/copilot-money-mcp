@@ -128,6 +128,8 @@ describe('write tool dispatch (writeEnabled=true)', () => {
 
     // Stub every write method to return STUB_RESULT
     for (const spec of Object.values(WRITE_TOOL_SPECS)) {
+      if (!(spec.method in (tools as object)))
+        throw new Error(`Unknown method on tools: ${spec.method}`);
       (tools as unknown as Record<string, unknown>)[spec.method] = async () => STUB_RESULT;
     }
 
