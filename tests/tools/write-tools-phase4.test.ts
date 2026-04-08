@@ -445,10 +445,12 @@ describe('reviewTransactions', () => {
     );
   });
 
-  test('throws when a transaction is not found', async () => {
+  test('throws when a transaction is not found and writes nothing', async () => {
     await expect(
       tools.reviewTransactions({ transaction_ids: ['txn1', 'missing'] })
     ).rejects.toThrow('Transaction not found: missing');
+    // Validation happens before any Firestore writes — pin the atomicity guarantee
+    expect(updateCalls).toHaveLength(0);
   });
 
   test('throws on invalid transaction_id format', async () => {
