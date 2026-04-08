@@ -4,7 +4,7 @@ import {
   BROWSER_CONFIGS,
   type BrowserConfig,
 } from '../../../src/core/auth/browser-token.js';
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'fs';
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, symlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -213,7 +213,6 @@ describe('extractRefreshToken', () => {
     const ldbDir = join(tempDir, 'leveldb-unreadable');
     mkdirSync(ldbDir, { recursive: true });
     // Create a symlink to a non-existent file — readFileSync will throw ENOENT
-    const { symlinkSync } = await import('fs');
     symlinkSync('/nonexistent/target/file', join(ldbDir, '000001.ldb'));
 
     const overrides: BrowserConfig[] = [{ name: 'TestBrowser', paths: [ldbDir], type: 'chromium' }];
@@ -226,7 +225,6 @@ describe('extractRefreshToken', () => {
     const idbDir = join(profileDir, 'storage/default/https+++app.copilot.money/idb');
     mkdirSync(idbDir, { recursive: true });
     // Create a symlink to a non-existent file
-    const { symlinkSync } = await import('fs');
     symlinkSync('/nonexistent/target', join(idbDir, 'data.sqlite'));
 
     const overrides: BrowserConfig[] = [{ name: 'Firefox', paths: [tempDir], type: 'firefox' }];
@@ -249,7 +247,6 @@ describe('extractRefreshToken', () => {
     const safariDir = join(tempDir, 'safari-unreadable');
     mkdirSync(safariDir, { recursive: true });
     // Create a symlink to a non-existent file — statSync will throw
-    const { symlinkSync } = await import('fs');
     symlinkSync('/nonexistent/target', join(safariDir, 'token.db'));
 
     const overrides: BrowserConfig[] = [{ name: 'Safari', paths: [safariDir], type: 'safari' }];

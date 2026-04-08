@@ -99,8 +99,9 @@ describe('CLI entry point', () => {
     test('--db-path with a custom path produces no parse error', async () => {
       const { stderr } = await runCli(['--db-path', '/tmp/fake-db']);
 
-      expect(stderr).not.toContain('Invalid');
-      expect(stderr).not.toContain('Error');
+      // Only check for arg-parsing errors; the server may log
+      // "Server error: ..." to stderr when runServer() throws on EOF.
+      expect(stderr).not.toContain('Invalid --db-path');
     });
   });
 

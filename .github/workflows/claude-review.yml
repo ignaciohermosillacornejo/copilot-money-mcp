@@ -57,8 +57,10 @@ jobs:
             --allowedTools "Bash(gh pr diff*),Bash(gh pr view*),Read,Grep,Glob"
             --disallowedTools "Bash(gh pr review --approve*),Bash(gh pr merge*),Bash(gh pr close*)"
 
-      # Auto-approve owner PRs after successful review so the 1-approval
-      # requirement is satisfied without needing a second human reviewer.
+      # Auto-approve owner PRs after the review step completes so the
+      # 1-approval branch protection is satisfied without a second reviewer.
+      # Note: this approves if the review step didn't error — it does NOT
+      # gate on whether the AI flagged issues (Claude exits 0 either way).
       # Fork PRs are excluded by the job-level `if` condition above.
       - name: Auto-approve owner PRs
         if: github.event.pull_request.user.login == github.repository_owner
@@ -70,5 +72,5 @@ jobs:
               repo: context.repo.repo,
               pull_number: context.payload.pull_request.number,
               event: 'APPROVE',
-              body: 'Auto-approved: AI code review passed for repo owner PR.'
+              body: 'Auto-approved: AI code review completed for repo owner PR.'
             });
