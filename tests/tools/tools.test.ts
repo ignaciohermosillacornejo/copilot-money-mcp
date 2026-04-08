@@ -3684,3 +3684,139 @@ describe('getGoalHistory', () => {
     expect(result.count).toBeLessThanOrEqual(1);
   });
 });
+
+describe('updateRecurring', () => {
+  let tools: CopilotMoneyTools;
+  let mockDb: CopilotDatabase;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let updateCalls: { collection: string; docId: string; fields: any; mask: string[] }[];
+
+  beforeEach(() => {
+    mockDb = new CopilotDatabase('/nonexistent');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any).dbPath = '/fake';
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any)._recurring = [
+      {
+        recurring_id: 'rec-1',
+        name: 'Netflix',
+        amount: 15.99,
+        merchant_name: 'Netflix',
+        category_id: 'entertainment',
+        account_id: 'acc1',
+        frequency: 'monthly',
+        state: 'active',
+        match_string: 'NETFLIX',
+        transaction_ids: ['txn1', 'txn2'],
+      },
+    ];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any)._allCollectionsLoaded = true;
+
+    updateCalls = [];
+    const mockFirestoreClient = {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      updateDocument: async (collection: string, docId: string, fields: any, mask: string[]) => {
+        updateCalls.push({ collection, docId, fields, mask });
+      },
+      requireUserId: async () => 'user123',
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    tools = new CopilotMoneyTools(mockDb, mockFirestoreClient as any);
+  });
+
+  test('throws if recurring_id is missing', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await expect(tools.updateRecurring({} as any)).rejects.toThrow();
+  });
+
+  test('throws if recurring not found', async () => {
+    await expect(
+      tools.updateRecurring({ recurring_id: 'nonexistent', name: 'Test' })
+    ).rejects.toThrow('Recurring not found');
+  });
+
+  test('throws if no fields to update', async () => {
+    await expect(tools.updateRecurring({ recurring_id: 'rec-1' })).rejects.toThrow(
+      'No fields to update'
+    );
+  });
+
+  test('throws if name is empty', async () => {
+    await expect(tools.updateRecurring({ recurring_id: 'rec-1', name: '  ' })).rejects.toThrow(
+      'name must not be empty'
+    );
+  });
+
+  test('throws if amount <= 0', async () => {
+    await expect(tools.updateRecurring({ recurring_id: 'rec-1', amount: -5 })).rejects.toThrow(
+      'amount must be greater than 0'
+    );
+  });
+
+  test('throws if frequency is invalid', async () => {
+    await expect(
+      tools.updateRecurring({ recurring_id: 'rec-1', frequency: 'hourly' })
+    ).rejects.toThrow('Invalid frequency');
+  });
+
+  test('throws if match_string is empty', async () => {
+    await expect(
+      tools.updateRecurring({ recurring_id: 'rec-1', match_string: '  ' })
+    ).rejects.toThrow('match_string must not be empty');
+  });
+
+  test('updates name successfully', async () => {
+    const result = await tools.updateRecurring({
+      recurring_id: 'rec-1',
+      name: 'Updated Name',
+    });
+    expect(result.success).toBe(true);
+    expect(result.recurring_id).toBe('rec-1');
+    expect(result.updated_fields).toContain('name');
+  });
+
+  test('updates multiple fields', async () => {
+    const result = await tools.updateRecurring({
+      recurring_id: 'rec-1',
+      name: 'New Name',
+      amount: 50,
+      frequency: 'monthly',
+    });
+    expect(result.updated_fields).toEqual(expect.arrayContaining(['name', 'amount', 'frequency']));
+  });
+
+  test('updates match_string and transaction_ids', async () => {
+    const result = await tools.updateRecurring({
+      recurring_id: 'rec-1',
+      match_string: 'NETFLIX',
+      transaction_ids: ['tx-1', 'tx-2'],
+    });
+    expect(result.updated_fields).toContain('match_string');
+    expect(result.updated_fields).toContain('transaction_ids');
+  });
+
+  test('calls Firestore with correct collection path and mask', async () => {
+    await tools.updateRecurring({
+      recurring_id: 'rec-1',
+      name: 'Updated Netflix',
+    });
+    expect(updateCalls).toHaveLength(1);
+    expect(updateCalls[0].collection).toBe('users/user123/recurring');
+    expect(updateCalls[0].docId).toBe('rec-1');
+    expect(updateCalls[0].mask).toEqual(['name']);
+  });
+
+  test('clears cache after successful update', async () => {
+    // Load recurring first to populate cache
+    await mockDb.getRecurring();
+    await tools.updateRecurring({
+      recurring_id: 'rec-1',
+      name: 'Updated',
+    });
+    // After clearing, _recurring should be null
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((mockDb as any)._recurring).toBeNull();
+  });
+});
