@@ -70,14 +70,18 @@ jobs:
       - name: Run PR Review Audit
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           ARGS=""
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
+          if [ "$INPUT_DRY_RUN" = "true" ]; then
             ARGS="$ARGS --dry-run"
           fi
-          if [ -n "${{ inputs.pr_number }}" ]; then
-            ARGS="$ARGS --pr ${{ inputs.pr_number }}"
-          elif [ "${{ github.event_name }}" = "pull_request" ]; then
-            ARGS="$ARGS --pr ${{ github.event.pull_request.number }}"
+          if [ -n "$INPUT_PR_NUMBER" ]; then
+            ARGS="$ARGS --pr $INPUT_PR_NUMBER"
+          elif [ "$EVENT_NAME" = "pull_request" ]; then
+            ARGS="$ARGS --pr $EVENT_PR_NUMBER"
           fi
           bun run scripts/audit-pr-reviews.ts $ARGS

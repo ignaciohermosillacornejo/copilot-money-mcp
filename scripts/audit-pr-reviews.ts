@@ -16,8 +16,9 @@
 import { $ } from 'bun';
 
 const AUDITED_LABEL = 'audited';
-// Reviews are posted by claude-code-action using GITHUB_TOKEN, which shows as github-actions[bot]
-const REVIEW_BOT_USERNAMES = ['github-actions', 'github-actions[bot]', 'claude', 'claude[bot]'];
+// Reviews are posted by claude-code-action using GITHUB_TOKEN, which shows as github-actions[bot].
+// The GitHub API returns the exact string 'github-actions[bot]'.
+const REVIEW_BOT_USERNAMES = ['github-actions[bot]'];
 const DRY_RUN = process.argv.includes('--dry-run');
 
 // Validate and parse PR number to prevent command injection
@@ -86,10 +87,8 @@ function isReviewBotComment(user: string): boolean {
  */
 function isClaudeReviewComment(body: string): boolean {
   return (
-    body.includes('PR Review') ||
-    body.includes('Claude finished') ||
-    body.includes('### Issues') ||
-    body.includes('### Suggestions')
+    (body.includes('### PR Review') || body.includes('Claude finished')) &&
+    body.includes('actions/runs/')
   );
 }
 
@@ -221,7 +220,7 @@ async function getPRs(): Promise<PR[]> {
 async function getPRComments(prNumber: number): Promise<PRComment[]> {
   try {
     const result =
-      await $`gh api repos/{owner}/{repo}/pulls/${prNumber}/comments`.text();
+      await $`gh api repos/{owner}/{repo}/pulls/${prNumber}/comments --paginate`.text();
     return JSON.parse(result);
   } catch {
     return [];
@@ -234,7 +233,7 @@ async function getPRComments(prNumber: number): Promise<PRComment[]> {
 async function getPRIssueComments(prNumber: number): Promise<PRComment[]> {
   try {
     const result =
-      await $`gh api repos/{owner}/{repo}/issues/${prNumber}/comments`.text();
+      await $`gh api repos/{owner}/{repo}/issues/${prNumber}/comments --paginate`.text();
     return JSON.parse(result);
   } catch {
     return [];
@@ -247,7 +246,7 @@ async function getPRIssueComments(prNumber: number): Promise<PRComment[]> {
 async function getPRReviews(prNumber: number): Promise<PRReview[]> {
   try {
     const result =
-      await $`gh api repos/{owner}/{repo}/pulls/${prNumber}/reviews`.text();
+      await $`gh api repos/{owner}/{repo}/pulls/${prNumber}/reviews --paginate`.text();
     return JSON.parse(result);
   } catch {
     return [];
@@ -422,17 +421,19 @@ async function main(): Promise<void> {
     }
   }
 
-  // Get PRs to audit
-  let prs = await getPRs();
-
-  // Filter to specific PR if requested
+  // Get PRs to audit — fetch only the target PR when a specific number is given
+  let prs: PR[];
   if (SPECIFIC_PR) {
-    prs = prs.filter((pr) => pr.number === SPECIFIC_PR);
-    if (prs.length === 0) {
+    try {
+      const result =
+        await $`gh pr view ${SPECIFIC_PR} --json number,title,state,labels`.text();
+      prs = [JSON.parse(result)];
+    } catch {
       console.error(`PR #${SPECIFIC_PR} not found`);
       process.exit(1);
     }
   } else {
+    prs = await getPRs();
     // Filter out already audited PRs
     prs = prs.filter((pr) => !pr.labels.some((l) => l.name === AUDITED_LABEL));
   }
