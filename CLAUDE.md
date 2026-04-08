@@ -1,6 +1,6 @@
 # Copilot Money MCP Server
 
-MCP (Model Context Protocol) server that enables AI-powered queries of Copilot Money personal finance data by reading locally cached Firestore data (LevelDB + Protocol Buffers).
+MCP (Model Context Protocol) server that enables AI-powered queries and management of Copilot Money personal finance data by reading locally cached Firestore data (LevelDB + Protocol Buffers). 41 tools (17 read + 24 write). Read-only by default, write tools opt-in via `--write` flag.
 
 ## Quick Reference
 
@@ -27,27 +27,30 @@ bun run fix          # Run lint:fix + format
 ```
 src/
 ├── core/
-│   ├── database.ts     # CopilotDatabase - main data access layer
-│   └── decoder.ts      # LevelDB binary decoder for Firestore protobufs
+│   ├── database.ts          # CopilotDatabase - cached data access layer
+│   ├── decoder.ts           # LevelDB binary decoder for Firestore protobufs
+│   ├── firestore-client.ts  # Firestore REST API client (write operations)
+│   ├── auth/                # Firebase authentication for writes
+│   └── format/              # Firestore field serialization
 ├── models/
 │   ├── transaction.ts  # Transaction Zod schema
 │   ├── account.ts      # Account Zod schema
 │   ├── budget.ts       # Budget Zod schema
 │   ├── goal.ts         # Goal Zod schema
 │   ├── category.ts     # Category mappings (Plaid taxonomy)
-│   └── ...             # Other entity schemas
+│   └── ...             # Other entity schemas (30+ models)
 ├── tools/
-│   └── tools.ts        # All MCP tool implementations (~3000 lines)
+│   └── tools.ts        # All MCP tool implementations (41 tools)
 ├── utils/
 │   ├── date.ts         # Date period parsing (this_month, last_30_days, etc.)
 │   └── categories.ts   # Category name resolution
 ├── server.ts           # MCP server (CopilotMoneyServer class)
-└── cli.ts              # CLI entry point with --db-path option
+└── cli.ts              # CLI entry point with --db-path and --write options
 ```
 
 ## Key Files
 
-- **`src/tools/tools.ts`** - All 12 MCP tools are implemented here as async methods in the `CopilotMoneyTools` class. Includes investment tools (`get_holdings`, `get_investment_prices`, `get_investment_splits`).
+- **`src/tools/tools.ts`** - All 41 MCP tools (17 read + 24 write) are implemented here as async methods in the `CopilotMoneyTools` class. Read schemas in `createToolSchemas()`, write schemas in `createWriteToolSchemas()`.
 - **`src/core/database.ts`** - `CopilotDatabase` class with methods like `getTransactions()`, `getAccounts()`, `getIncome()`, etc.
 - **`src/core/decoder.ts`** - Binary decoder that reads LevelDB files and parses Firestore Protocol Buffers.
 - **`manifest.json`** - MCP bundle metadata for .mcpb packaging.
@@ -58,7 +61,8 @@ src/
 - TypeScript strict mode
 - Zod for runtime validation of all data models
 - ESLint + Prettier enforced via pre-commit hooks
-- All tools marked with `readOnlyHint: true` (never modifies user data)
+- Read tools marked with `readOnlyHint: true`, write tools with `readOnlyHint: false`
+- Write tools gated behind `WRITE_TOOLS` set in server.ts, require `--write` CLI flag
 
 ### Testing
 - Bun test runner
@@ -68,25 +72,26 @@ src/
 
 ### Tool Implementation Pattern
 Each MCP tool follows this pattern:
-1. Define input schema with Zod in `createToolSchemas()`
-2. Implement async method in `CopilotMoneyTools` class (e.g., `getTransactions()`)
+1. Define input schema in `createToolSchemas()` (read) or `createWriteToolSchemas()` (write)
+2. Implement async method in `CopilotMoneyTools` class
 3. Register in the tool handlers switch statement in `src/server.ts`
-4. Add to `manifest.json` tools array
+4. For write tools: add to `WRITE_TOOLS` set in `src/server.ts`
+5. Run `bun run sync-manifest` to update `manifest.json`
 
 ## Important Notes
 
 - **Privacy First**: 100% local processing, zero network requests
-- **Read-Only**: Never modifies Copilot Money database
+- **Read-Only by Default**: Write tools require `--write` flag
 - **Database Location**: `~/Library/Containers/com.copilot.production/Data/Library/Application Support/firestore/__FIRAPP_DEFAULT/copilot-production-22904/main`
 
 ## Common Tasks
 
 ### Adding a New Tool
-1. Add Zod schema in `createToolSchemas()` in `src/tools/tools.ts`
-2. Implement async method in `CopilotMoneyTools` class (e.g., `getNewTool()`)
+1. Add schema in `createToolSchemas()` (read) or `createWriteToolSchemas()` (write) in `src/tools/tools.ts`
+2. Implement async method in `CopilotMoneyTools` class
 3. Add case to tool handler switch statement in `src/server.ts`
-4. Add tool to `manifest.json`
-5. Run `bun run sync-manifest` to verify manifest matches code
+4. For write tools: add to `WRITE_TOOLS` set in `src/server.ts`
+5. Run `bun run sync-manifest` to update and verify `manifest.json`
 6. Add tests in `tests/tools/tools.test.ts`
 
 ### Debugging

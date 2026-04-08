@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "copilot-money-mcp",
   "display_name": "Copilot Money MCP Server",
-  "description": "AI-powered personal finance queries using local Copilot Money data. Query transactions, analyze spending, and track accounts with natural language.",
+  "description": "Query and manage your personal finances with AI using local Copilot Money data. 41 tools for transactions, investments, budgets, goals, and more.",
   "version": "1.5.0",
   "icon": "icon.png",
   "author": {
@@ -22,6 +22,7 @@
   "keywords": [
     "personal-finance",
     "transactions",
+    "investments",
     "budgeting",
     "spending-analysis",
     "local-data",
