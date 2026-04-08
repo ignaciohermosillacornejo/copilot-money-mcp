@@ -3473,6 +3473,9 @@ export class CopilotMoneyTools {
     if (category_id !== undefined) validateDocId(category_id, 'category_id');
     if (account_id !== undefined) validateDocId(account_id, 'account_id');
 
+    // Validate start_date format
+    if (start_date !== undefined) validateDate(start_date, 'start_date');
+
     // Generate unique recurring_id
     const recurringId = crypto.randomUUID();
 
@@ -3550,6 +3553,9 @@ export class CopilotMoneyTools {
       throw new Error('monthly_contribution must be >= 0');
     }
 
+    // Validate start_date format
+    if (start_date !== undefined) validateDate(start_date, 'start_date');
+
     // Generate unique goal_id
     const goalId = crypto.randomUUID();
 
@@ -3565,7 +3571,7 @@ export class CopilotMoneyTools {
         type: 'savings',
         status: 'active',
         target_amount,
-        tracking_type: monthly_contribution ? 'monthly_contribution' : 'manual',
+        tracking_type: monthly_contribution !== undefined ? 'monthly_contribution' : 'manual',
         tracking_type_monthly_contribution: monthly_contribution ?? 0,
         start_date: start_date ?? today,
         is_ongoing: false,
