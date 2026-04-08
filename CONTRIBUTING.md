@@ -1,405 +1,163 @@
-# Contributing to Copilot Money MCP Server
+# Contributing
 
-Thank you for your interest in contributing to the Copilot Money MCP Server! This document provides guidelines and instructions for contributing.
-
-## Table of Contents
-
-- [Code of Conduct](#code-of-conduct)
-- [Getting Started](#getting-started)
-- [Development Setup](#development-setup)
-- [Development Workflow](#development-workflow)
-- [Testing](#testing)
-- [Code Style](#code-style)
-- [Pull Request Process](#pull-request-process)
-- [Reporting Issues](#reporting-issues)
-
-## Code of Conduct
-
-This project follows the [Contributor Covenant Code of Conduct](https://www.contributor-covenant.org/version/2/1/code_of_conduct/). By participating, you are expected to uphold this code.
-
-## Getting Started
-
-### Prerequisites
-
-- **Node.js**: Version 18 or higher
-- **Bun**: Latest version (for development)
-- **Copilot Money**: Installed on macOS for testing
-- **Git**: For version control
-
-### Fork and Clone
-
-1. Fork the repository on GitHub
-2. Clone your fork locally:
-   ```bash
-   git clone https://github.com/YOUR_USERNAME/copilot-money-mcp.git
-   cd copilot-money-mcp
-   ```
-3. Add upstream remote:
-   ```bash
-   git remote add upstream https://github.com/ignaciohermosillacornejo/copilot-money-mcp.git
-   ```
+Contributions welcome! This guide covers development setup, architecture, and how to extend the project.
 
 ## Development Setup
 
-1. **Install dependencies:**
-   ```bash
-   npm install
-   ```
+### Prerequisites
 
-2. **Verify setup:**
-   ```bash
-   bun test
-   npm run typecheck
-   npm run lint
-   ```
+- **Bun** (latest) or **Node.js 18+**
+- **Copilot Money** installed on macOS (for integration testing)
 
-3. **Build the project:**
-   ```bash
-   npm run build
-   ```
-
-## Development Workflow
-
-### Creating a Branch
-
-Always create a new branch for your work:
+### Getting Started
 
 ```bash
-git checkout -b feature/your-feature-name
-# or
-git checkout -b fix/issue-description
-```
+# Clone the repository
+git clone https://github.com/ignaciohermosillacornejo/copilot-money-mcp.git
+cd copilot-money-mcp
 
-Branch naming conventions:
-- `feature/` - New features
-- `fix/` - Bug fixes
-- `docs/` - Documentation updates
-- `refactor/` - Code refactoring
-- `test/` - Test improvements
+# Install dependencies
+bun install
 
-### Making Changes
-
-1. **Make your changes** in the appropriate files
-2. **Write tests** for new functionality
-3. **Update documentation** if needed
-4. **Run tests** to ensure nothing breaks:
-   ```bash
-   bun test
-   ```
-5. **Check types and linting:**
-   ```bash
-   npm run typecheck
-   npm run lint
-   ```
-
-### Commit Messages
-
-We follow [Conventional Commits](https://www.conventionalcommits.org/):
-
-```
-<type>(<scope>): <subject>
-
-<body>
-
-<footer>
-```
-
-Types:
-- `feat`: New feature
-- `fix`: Bug fix
-- `docs`: Documentation only
-- `style`: Code style changes (formatting, etc.)
-- `refactor`: Code refactoring
-- `test`: Adding or updating tests
-- `chore`: Maintenance tasks
-
-Examples:
-```
-feat(tools): add new transaction filtering options
-
-Add support for filtering transactions by:
-- Multiple merchants
-- Date ranges with custom formats
-- Transaction types (debit/credit)
-
-Closes #123
-```
-
-```
-fix(decoder): handle empty string values in binary data
-
-The decoder was crashing when encountering empty strings
-in the LevelDB binary format. Added defensive checks.
-
-Fixes #456
-```
-
-## Testing
-
-### Running Tests
-
-```bash
-# Run all tests
+# Run tests
 bun test
 
-# Watch mode (re-run on changes)
-bun test --watch
-
-# Coverage report
-bun test --coverage
+# Build for production
+bun run build
 ```
 
-### Writing Tests
-
-- Place tests in the `tests/` directory
-- Use descriptive test names
-- Follow the existing test structure
-- Aim for >80% code coverage
-
-Example test structure:
-
-```typescript
-import { describe, test, expect } from "bun:test";
-
-describe("MyNewFeature", () => {
-  test("should handle basic case", () => {
-    const result = myNewFeature({ input: "test" });
-    expect(result).toBe("expected");
-  });
-
-  test("should handle edge case", () => {
-    const result = myNewFeature({ input: "" });
-    expect(result).toBe(null);
-  });
-
-  test("should throw on invalid input", () => {
-    expect(() => myNewFeature({ input: null })).toThrow();
-  });
-});
-```
-
-### Test Requirements
-
-All pull requests must:
-- Include tests for new functionality
-- Maintain or improve code coverage
-- Pass all existing tests
-- Not introduce TypeScript errors or ESLint warnings
-
-## Code Style
-
-### TypeScript Guidelines
-
-- Use **strict mode** (already configured)
-- Prefer **explicit types** over `any`
-- Use **Zod schemas** for validation
-- Follow **functional programming** patterns when appropriate
-- Avoid mutations when possible
-
-### Formatting
-
-We use Prettier for code formatting:
+### Build Commands
 
 ```bash
-# Format all files
-npm run format
-
-# Check formatting
-npm run format:check
+bun install            # Install dependencies
+bun test               # Run tests
+bun run build          # Build for production
+bun run pack:mcpb      # Create .mcpb bundle for Claude Desktop
+bun run check          # Run typecheck + lint + format:check + test
+bun run fix            # Run lint:fix + format
+bun run sync-manifest  # Verify manifest.json matches code
 ```
 
-### Linting
+## Architecture
 
-We use ESLint with TypeScript support:
+### Data Flow
 
-```bash
-# Run linter
-npm run lint
+1. Copilot Money stores data in a local LevelDB/Firestore cache on macOS
+2. `src/core/decoder.ts` reads `.ldb` files and parses Firestore Protocol Buffers
+3. `src/core/database.ts` provides cached, filtered access to all 35 collections
+4. `src/tools/tools.ts` implements 41 MCP tools (17 read + 24 write)
+5. `src/server.ts` handles MCP protocol communication and tool routing
+6. Write tools use `src/core/firestore-client.ts` to modify data via the Firestore REST API
 
-# Auto-fix issues
-npm run lint:fix
-```
-
-### Code Organization
+### Project Structure
 
 ```
 src/
-├── models/          # Zod schemas and types
-├── core/            # Core functionality (decoder, database)
-├── utils/           # Utility functions
-├── tools/           # MCP tool implementations
-├── server.ts        # MCP server
-└── cli.ts           # CLI entry point
+├── core/
+│   ├── database.ts          # CopilotDatabase — cached data access layer
+│   ├── decoder.ts           # LevelDB binary decoder for Firestore protobufs
+│   ├── firestore-client.ts  # Firestore REST API client (write operations)
+│   ├── leveldb-reader.ts    # Low-level LevelDB iteration
+│   ├── protobuf-parser.ts   # Protocol Buffer wire format parser
+│   ├── auth/                # Firebase authentication for writes
+│   └── format/              # Firestore field serialization
+├── models/                  # Zod schemas for all Firestore collections
+│   ├── transaction.ts       # Transaction schema
+│   ├── account.ts           # Account schema
+│   ├── budget.ts            # Budget schema
+│   ├── goal.ts              # Goal + GoalHistory schemas
+│   ├── recurring.ts         # Recurring transaction schema
+│   ├── security.ts          # Security master data schema
+│   ├── investment-*.ts      # Investment price, performance, splits
+│   ├── balance-history.ts   # Balance history schema
+│   └── ...                  # Other entity schemas (tag, category, etc.)
+├── tools/
+│   └── tools.ts             # All MCP tool implementations
+├── utils/
+│   ├── date.ts              # Date period parsing (this_month, last_30_days, etc.)
+│   └── categories.ts        # Category name resolution
+├── server.ts                # MCP server (CopilotMoneyServer class)
+└── cli.ts                   # CLI entry point with --db-path and --write flags
 ```
-
-## Pull Request Process
-
-### Before Submitting
-
-1. **Update from upstream:**
-   ```bash
-   git fetch upstream
-   git rebase upstream/main
-   ```
-
-2. **Run all checks:**
-   ```bash
-   npm run typecheck
-   npm run lint
-   bun test
-   npm run build
-   ```
-
-3. **Update documentation:**
-   - Update README.md if adding features
-   - Add JSDoc comments for new functions
-   - Update CHANGELOG.md (see below)
-
-4. **Test the .mcpb bundle** (for significant changes):
-   ```bash
-   npm run pack:mcpb
-   # Install and test in Claude Desktop
-   ```
-
-### Submitting a Pull Request
-
-1. Push your branch to your fork:
-   ```bash
-   git push origin feature/your-feature-name
-   ```
-
-2. Open a pull request on GitHub
-
-3. Fill out the PR template:
-   - **Description**: What does this PR do?
-   - **Motivation**: Why is this change needed?
-   - **Testing**: How was this tested?
-   - **Screenshots**: If applicable
-   - **Breaking changes**: Any breaking changes?
-
-4. Wait for review and address feedback
-
-### PR Review Criteria
-
-Your PR will be evaluated on:
-- **Functionality**: Does it work as intended?
-- **Tests**: Are there adequate tests?
-- **Code quality**: Is the code clean and maintainable?
-- **Documentation**: Is it well documented?
-- **Privacy**: Does it maintain privacy commitments?
-- **Performance**: Does it maintain or improve performance?
-
-### After Approval
-
-Once approved, a maintainer will merge your PR. The changes will be included in the next release.
-
-## Reporting Issues
-
-### Bug Reports
-
-When reporting bugs, include:
-
-1. **Description**: Clear description of the bug
-2. **Steps to reproduce**: Minimal steps to reproduce the issue
-3. **Expected behavior**: What should happen
-4. **Actual behavior**: What actually happens
-5. **Environment**:
-   - OS version (macOS version)
-   - Node.js version
-   - Copilot Money version
-   - MCP server version
-6. **Logs**: Relevant error messages or logs
-
-### Feature Requests
-
-When requesting features, include:
-
-1. **Description**: What feature do you want?
-2. **Motivation**: Why is this feature needed?
-3. **Use case**: How would you use this feature?
-4. **Alternatives**: Have you considered alternatives?
-
-## Project Structure
 
 ### Key Files
 
-- `src/core/decoder.ts` - Binary LevelDB/Protobuf decoder (most complex)
-- `src/core/database.ts` - Database abstraction layer
-- `src/tools/tools.ts` - MCP tool implementations
-- `src/server.ts` - MCP server implementation
-- `PRIVACY.md` - Privacy policy (critical for .mcpb compliance)
-- `manifest.json` - MCP bundle metadata
+- **`src/tools/tools.ts`** — All 41 tools as async methods in `CopilotMoneyTools`. Read tool schemas in `createToolSchemas()`, write tool schemas in `createWriteToolSchemas()`.
+- **`src/core/database.ts`** — `CopilotDatabase` class with 5-minute cache TTL, batch loading via `decodeAllCollections()`, and filtered accessors.
+- **`src/core/decoder.ts`** — Binary decoder that reads LevelDB and parses Firestore Protocol Buffers. Decodes 35 collection paths.
+- **`src/server.ts`** — MCP server with tool routing switch. `WRITE_TOOLS` set gates write operations behind the `--write` flag.
+- **`manifest.json`** — MCP bundle metadata. Keep in sync with `bun run sync-manifest`.
 
-### Critical Components
+## Adding a New Read Tool
 
-1. **Binary Decoder** (`src/core/decoder.ts`)
-   - Parses LevelDB binary format
-   - Decodes Protocol Buffers data
-   - Most complex component - be careful with changes
+1. **Database method** (if needed) — Add a cached accessor in `src/core/database.ts`:
+   - Add cache field (`private _myData: MyType[] | null = null`)
+   - Add to `clearCache()` (`this._myData = null`)
+   - Add to `loadAllCollections()` cache population
+   - Add private loader following the `loadGoalHistory()` pattern
+   - Add public accessor with filter options
 
-2. **MCP Tools** (`src/tools/tools.ts`)
-   - All tools MUST have `readOnlyHint: true`
-   - This is mandatory for .mcpb approval
-   - Don't remove or modify these annotations
+2. **Tool method** — Add an async method to `CopilotMoneyTools` in `src/tools/tools.ts`:
+   - Validate params (`validateDate`, `validateMonth`, `validateLimit`, etc.)
+   - Call `this.db.getX()` with filters
+   - Paginate with `slice()` + standard metadata
+   - Return `{ count, total_count, offset, has_more, data }`
 
-3. **Privacy Policy** (`PRIVACY.md`)
-   - Must remain accurate
-   - Changes require careful review
-   - Referenced in manifest.json
+3. **Schema** — Add to `createToolSchemas()` with `readOnlyHint: true`
 
-## Development Tips
+4. **Server** — Add a `case` to the switch in `src/server.ts`
 
-### Local Testing with Claude Desktop
+5. **Manifest** — Run `bun run sync-manifest` to auto-update
 
-1. Build the project:
-   ```bash
-   npm run build
-   ```
+6. **Tests** — Add to `tests/tools/tools.test.ts` using mock data via `(db as any)._fieldName = [...]`
 
-2. Configure Claude Desktop to use local version:
-   ```json
-   {
-     "mcpServers": {
-       "copilot-money-dev": {
-         "command": "/path/to/copilot-money-mcp/dist/cli.js"
-       }
-     }
-   }
-   ```
+## Adding a New Write Tool
 
-3. Restart Claude Desktop and test
+Same as read tools, plus:
 
-### Debugging
+1. Schema goes in `createWriteToolSchemas()` (not `createToolSchemas()`)
+2. Add tool name to the `WRITE_TOOLS` set in `src/server.ts`
+3. Use `this.getFirestoreClient()` then `client.updateDocument()` or `client.createDocument()`
+4. Clear cache after writes: `this.db.clearCache()`
+5. Use validation helpers: `validateDocId()`, `validateDate()`, `validateMonth()`, `validateHexColor()`
+6. Follow the `updateGoal()` pattern for partial updates with dynamic `updateMask`
 
-Enable verbose logging:
+## Testing
 
 ```bash
-node dist/cli.js --verbose
+bun test                                    # Run all tests
+bun test --watch                            # Watch mode
+bun test tests/tools/tools.test.ts          # Specific file
+bun test --filter "getBalanceHistory"        # Pattern match
 ```
 
-Logs go to stderr (stdout is reserved for MCP protocol).
+Tests mirror the `src/` structure in `tests/`. Synthetic fixtures in `tests/fixtures/synthetic-db/`.
 
-### Performance Testing
+### Writing Tests
 
-For performance-critical changes:
+- Use `(db as any)._fieldName = [...]` to inject mock data in `beforeEach`
+- Write tool tests need a mock `FirestoreClient` (see existing write tool tests)
+- Run `bun run check` before submitting to catch typecheck, lint, and format issues
 
-```bash
-# Time a query
-time node dist/cli.js
-```
+## Code Style
 
-Target performance:
-- Transaction decoding: <2s
-- Query performance: <5s
-- Memory usage: <100MB
+- TypeScript strict mode
+- Zod for runtime validation of all data models
+- ESLint + Prettier enforced via pre-commit hooks
+- Read tools: `readOnlyHint: true`
+- Write tools: `readOnlyHint: false`, gated by `WRITE_TOOLS` set
+- Conventional commits (`feat:`, `fix:`, `docs:`, `test:`, `chore:`)
 
-## Questions?
+## Submitting Changes
 
-If you have questions:
-- Open a [GitHub Discussion](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/discussions)
-- Open an [Issue](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues)
-- Check existing issues and discussions first
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feat/amazing-feature`)
+3. Make changes with tests
+4. Run `bun run check` to verify
+5. Push and open a Pull Request
 
-## Thank You!
+## Reporting Issues
 
-Your contributions make this project better for everyone. We appreciate your time and effort! 🙏
+When reporting bugs, include: OS version, Node.js version, Copilot Money version, error messages, and steps to reproduce.
+
+For feature requests, describe the use case and why it would be useful.
