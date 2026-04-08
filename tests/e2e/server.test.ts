@@ -21,6 +21,10 @@ import type {
   Item,
   Category,
   Tag,
+  BalanceHistory,
+  Security,
+  InvestmentPerformance,
+  TwrHolding,
 } from '../../src/models/index.js';
 import type { FirestoreClient } from '../../src/core/firestore-client.js';
 
@@ -196,6 +200,84 @@ const mockUserCategories: Category[] = [
 const mockTags: Tag[] = [
   { tag_id: 'tag_vacation', name: 'Vacation' },
   { tag_id: 'tag_work', name: 'Work Expense' },
+];
+
+const mockBalanceHistory: BalanceHistory[] = [
+  {
+    balance_id: 'item1:acc1:2025-01-15',
+    date: '2025-01-15',
+    item_id: 'item1',
+    account_id: 'acc1',
+    current_balance: 1500.0,
+    available_balance: 1400.0,
+  },
+  {
+    balance_id: 'item1:acc1:2025-01-16',
+    date: '2025-01-16',
+    item_id: 'item1',
+    account_id: 'acc1',
+    current_balance: 1450.0,
+    available_balance: 1350.0,
+  },
+  {
+    balance_id: 'item1:acc2:2025-01-15',
+    date: '2025-01-15',
+    item_id: 'item1',
+    account_id: 'acc2',
+    current_balance: 500.0,
+    available_balance: 500.0,
+  },
+];
+
+const mockSecurities: Security[] = [
+  {
+    security_id: 'sec1',
+    ticker_symbol: 'AAPL',
+    name: 'Apple Inc.',
+    type: 'equity',
+    close_price: 185.5,
+    iso_currency_code: 'USD',
+  },
+  {
+    security_id: 'sec2',
+    ticker_symbol: 'VTI',
+    name: 'Vanguard Total Stock Market ETF',
+    type: 'etf',
+    close_price: 240.0,
+    iso_currency_code: 'USD',
+  },
+];
+
+const mockInvestmentPerformance: InvestmentPerformance[] = [
+  {
+    performance_id: 'perf1',
+    security_id: 'sec1',
+    type: 'security',
+  },
+  {
+    performance_id: 'perf2',
+    security_id: 'sec2',
+    type: 'security',
+  },
+];
+
+const mockTwrHoldings: TwrHolding[] = [
+  {
+    twr_id: 'twr1',
+    security_id: 'sec1',
+    month: '2025-01',
+    history: {
+      '1736899200000': { value: 0.05 },
+    },
+  },
+  {
+    twr_id: 'twr2',
+    security_id: 'sec2',
+    month: '2025-01',
+    history: {
+      '1736899200000': { value: 0.03 },
+    },
+  },
 ];
 
 describe('CopilotMoneyServer E2E', () => {
@@ -401,7 +483,10 @@ function createMockDb(): CopilotDatabase {
     accountNameMap: new Map<string, string>(),
     tags: [...mockTags],
     holdingsHistory: [],
-    securities: [],
+    securities: [...mockSecurities],
+    balanceHistory: [...mockBalanceHistory],
+    investmentPerformance: [...mockInvestmentPerformance],
+    twrHoldings: [...mockTwrHoldings],
   });
   return db;
 }
@@ -638,5 +723,678 @@ describe('handleCallTool — error handling', () => {
     });
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Error');
+  });
+});
+
+// ============================================
+// E2E tests for read tools — new coverage
+// ============================================
+
+describe('handleCallTool — read tools (extended)', () => {
+  let server: CopilotMoneyServer;
+
+  beforeEach(() => {
+    const db = createMockDb();
+    server = new CopilotMoneyServer(FAKE_DB_DIR);
+    const tools = new CopilotMoneyTools(db);
+    server._injectForTesting(db, tools);
+  });
+
+  test('get_balance_history returns daily balance snapshots', async () => {
+    const result = await server.handleCallTool('get_balance_history', {
+      granularity: 'daily',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(typeof data.count).toBe('number');
+    expect(typeof data.total_count).toBe('number');
+    expect(data.balance_history).toBeArray();
+    expect(data.count).toBe(mockBalanceHistory.length);
+    expect(data.accounts).toBeArray();
+    expect(data.accounts.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test('get_balance_history filters by account_id', async () => {
+    const result = await server.handleCallTool('get_balance_history', {
+      account_id: 'acc1',
+      granularity: 'daily',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.count).toBe(2); // acc1 has 2 entries
+    for (const entry of data.balance_history) {
+      expect(entry.account_id).toBe('acc1');
+    }
+  });
+
+  test('get_balance_history supports monthly granularity', async () => {
+    const result = await server.handleCallTool('get_balance_history', {
+      granularity: 'monthly',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    // Monthly downsamples: keeps last date per account per month
+    expect(data.balance_history).toBeArray();
+    expect(data.count).toBeLessThanOrEqual(mockBalanceHistory.length);
+  });
+
+  test('get_balance_history filters by date range', async () => {
+    const result = await server.handleCallTool('get_balance_history', {
+      start_date: '2025-01-16',
+      end_date: '2025-01-16',
+      granularity: 'daily',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    for (const entry of data.balance_history) {
+      expect(entry.date).toBe('2025-01-16');
+    }
+  });
+
+  test('get_balance_history returns pagination fields', async () => {
+    const result = await server.handleCallTool('get_balance_history', {
+      granularity: 'daily',
+      limit: 1,
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.count).toBe(1);
+    expect(data.total_count).toBe(mockBalanceHistory.length);
+    expect(data.has_more).toBe(true);
+    expect(data.offset).toBe(0);
+  });
+
+  test('get_securities returns security master data', async () => {
+    const result = await server.handleCallTool('get_securities', {});
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.count).toBe(mockSecurities.length);
+    expect(data.securities).toBeArray();
+    expect(data.securities[0].security_id).toBeString();
+    expect(data.securities[0].ticker_symbol).toBeString();
+  });
+
+  test('get_securities filters by ticker_symbol', async () => {
+    const result = await server.handleCallTool('get_securities', {
+      ticker_symbol: 'AAPL',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.count).toBe(1);
+    expect(data.securities[0].ticker_symbol).toBe('AAPL');
+    expect(data.securities[0].name).toBe('Apple Inc.');
+  });
+
+  test('get_securities filters by type', async () => {
+    const result = await server.handleCallTool('get_securities', {
+      type: 'etf',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.count).toBe(1);
+    expect(data.securities[0].ticker_symbol).toBe('VTI');
+  });
+
+  test('get_securities returns pagination fields', async () => {
+    const result = await server.handleCallTool('get_securities', {
+      limit: 1,
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.count).toBe(1);
+    expect(data.total_count).toBe(mockSecurities.length);
+    expect(data.has_more).toBe(true);
+  });
+
+  test('get_investment_performance returns enriched performance data', async () => {
+    const result = await server.handleCallTool('get_investment_performance', {});
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.count).toBe(mockInvestmentPerformance.length);
+    expect(data.performance).toBeArray();
+    // Should be enriched with security data
+    const applePerf = data.performance.find((p: any) => p.security_id === 'sec1');
+    expect(applePerf).toBeDefined();
+    expect(applePerf.ticker_symbol).toBe('AAPL');
+    expect(applePerf.name).toBe('Apple Inc.');
+  });
+
+  test('get_investment_performance filters by ticker_symbol', async () => {
+    const result = await server.handleCallTool('get_investment_performance', {
+      ticker_symbol: 'VTI',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.count).toBe(1);
+    expect(data.performance[0].ticker_symbol).toBe('VTI');
+  });
+
+  test('get_investment_performance filters by security_id', async () => {
+    const result = await server.handleCallTool('get_investment_performance', {
+      security_id: 'sec1',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.count).toBe(1);
+    expect(data.performance[0].security_id).toBe('sec1');
+  });
+
+  test('get_twr_returns returns enriched TWR data', async () => {
+    const result = await server.handleCallTool('get_twr_returns', {});
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.count).toBe(mockTwrHoldings.length);
+    expect(data.twr_returns).toBeArray();
+    // Should be enriched with security data
+    const appleTwr = data.twr_returns.find((t: any) => t.security_id === 'sec1');
+    expect(appleTwr).toBeDefined();
+    expect(appleTwr.ticker_symbol).toBe('AAPL');
+    expect(appleTwr.month).toBe('2025-01');
+  });
+
+  test('get_twr_returns filters by ticker_symbol', async () => {
+    const result = await server.handleCallTool('get_twr_returns', {
+      ticker_symbol: 'AAPL',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.count).toBe(1);
+    expect(data.twr_returns[0].security_id).toBe('sec1');
+  });
+
+  test('get_twr_returns filters by month range', async () => {
+    const result = await server.handleCallTool('get_twr_returns', {
+      start_month: '2025-01',
+      end_month: '2025-01',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    for (const entry of data.twr_returns) {
+      expect(entry.month).toBe('2025-01');
+    }
+  });
+
+  test('get_goal_history returns enriched goal history', async () => {
+    const result = await server.handleCallTool('get_goal_history', {});
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.count).toBe(mockGoalHistory.length);
+    expect(data.goal_history).toBeArray();
+    // Should be enriched with goal names
+    const emergencyHistory = data.goal_history.find((h: any) => h.goal_id === 'goal1');
+    expect(emergencyHistory).toBeDefined();
+    expect(emergencyHistory.goal_name).toBe('Emergency Fund');
+    expect(emergencyHistory.current_amount).toBe(6000);
+  });
+
+  test('get_goal_history filters by goal_id', async () => {
+    const result = await server.handleCallTool('get_goal_history', {
+      goal_id: 'goal2',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.count).toBe(1);
+    expect(data.goal_history[0].goal_id).toBe('goal2');
+    expect(data.goal_history[0].goal_name).toBe('Vacation');
+    expect(data.goal_history[0].current_amount).toBe(1200);
+  });
+
+  test('get_goal_history returns pagination fields', async () => {
+    const result = await server.handleCallTool('get_goal_history', {
+      limit: 1,
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.count).toBe(1);
+    expect(data.total_count).toBe(mockGoalHistory.length);
+    expect(data.has_more).toBe(true);
+    expect(data.offset).toBe(0);
+  });
+
+  test('get_holdings returns holdings data', async () => {
+    // With empty holdings data, should return empty array
+    const result = await server.handleCallTool('get_holdings', {});
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(typeof data.count).toBe('number');
+    expect(data.holdings).toBeArray();
+  });
+
+  test('get_investment_prices returns price data', async () => {
+    const result = await server.handleCallTool('get_investment_prices', {});
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(typeof data.count).toBe('number');
+    expect(data.prices).toBeArray();
+  });
+
+  test('get_investment_splits returns split data', async () => {
+    const result = await server.handleCallTool('get_investment_splits', {});
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(typeof data.count).toBe('number');
+    expect(data.splits).toBeArray();
+  });
+});
+
+// ============================================
+// E2E tests for write tools — extended coverage
+// ============================================
+
+describe('handleCallTool — write tools (extended)', () => {
+  let writeServer: CopilotMoneyServer;
+  let db: CopilotDatabase;
+
+  beforeEach(() => {
+    db = createMockDb();
+    writeServer = new CopilotMoneyServer(FAKE_DB_DIR, undefined, true);
+    const writeTools = new CopilotMoneyTools(db, createMockFirestoreClient());
+    writeServer._injectForTesting(db, writeTools);
+  });
+
+  // -- Transaction write tools --
+
+  test('set_transaction_note sets a note', async () => {
+    const result = await writeServer.handleCallTool('set_transaction_note', {
+      transaction_id: 'txn1',
+      note: 'Lunch with team',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.transaction_id).toBe('txn1');
+    expect(data.new_note).toBe('Lunch with team');
+  });
+
+  test('set_transaction_tags assigns tags to a transaction', async () => {
+    const result = await writeServer.handleCallTool('set_transaction_tags', {
+      transaction_id: 'txn1',
+      tag_ids: ['tag_vacation', 'tag_work'],
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.transaction_id).toBe('txn1');
+    expect(data.new_tag_ids).toEqual(['tag_vacation', 'tag_work']);
+  });
+
+  test('review_transactions marks transactions as reviewed', async () => {
+    const result = await writeServer.handleCallTool('review_transactions', {
+      transaction_ids: ['txn1', 'txn2'],
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.reviewed_count).toBe(2);
+    expect(data.transaction_ids).toEqual(['txn1', 'txn2']);
+  });
+
+  test('review_transactions can unmark reviewed', async () => {
+    const result = await writeServer.handleCallTool('review_transactions', {
+      transaction_ids: ['txn1'],
+      reviewed: false,
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.reviewed_count).toBe(1);
+  });
+
+  test('set_transaction_excluded excludes a transaction', async () => {
+    const result = await writeServer.handleCallTool('set_transaction_excluded', {
+      transaction_id: 'txn1',
+      excluded: true,
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.transaction_id).toBe('txn1');
+    expect(data.excluded).toBe(true);
+  });
+
+  test('set_transaction_name renames a transaction', async () => {
+    const result = await writeServer.handleCallTool('set_transaction_name', {
+      transaction_id: 'txn1',
+      name: 'Morning Coffee',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.transaction_id).toBe('txn1');
+    expect(data.old_name).toBe('Coffee Shop');
+    expect(data.new_name).toBe('Morning Coffee');
+  });
+
+  test('set_internal_transfer marks as internal transfer', async () => {
+    const result = await writeServer.handleCallTool('set_internal_transfer', {
+      transaction_id: 'txn1',
+      internal_transfer: true,
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.transaction_id).toBe('txn1');
+    expect(data.internal_transfer).toBe(true);
+  });
+
+  test('set_transaction_goal links a transaction to a goal', async () => {
+    const result = await writeServer.handleCallTool('set_transaction_goal', {
+      transaction_id: 'txn1',
+      goal_id: 'goal1',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.transaction_id).toBe('txn1');
+    expect(data.new_goal_id).toBe('goal1');
+  });
+
+  test('set_transaction_goal unlinks a goal with null', async () => {
+    const result = await writeServer.handleCallTool('set_transaction_goal', {
+      transaction_id: 'txn1',
+      goal_id: null,
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.new_goal_id).toBeNull();
+  });
+
+  // -- Tag write tools --
+
+  test('delete_tag deletes an existing tag', async () => {
+    const result = await writeServer.handleCallTool('delete_tag', {
+      tag_id: 'tag_vacation',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.tag_id).toBe('tag_vacation');
+    expect(data.deleted_name).toBe('Vacation');
+  });
+
+  test('update_tag renames an existing tag', async () => {
+    const result = await writeServer.handleCallTool('update_tag', {
+      tag_id: 'tag_vacation',
+      name: 'Holiday',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.tag_id).toBe('tag_vacation');
+    expect(data.updated_fields).toContain('name');
+  });
+
+  // -- Category write tools --
+
+  test('create_category creates a new category', async () => {
+    const result = await writeServer.handleCallTool('create_category', {
+      name: 'Side Projects',
+      emoji: '🛠️',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.name).toBe('Side Projects');
+    expect(data.emoji).toBe('🛠️');
+    expect(data.category_id).toBeString();
+  });
+
+  test('update_category updates an existing category', async () => {
+    const result = await writeServer.handleCallTool('update_category', {
+      category_id: 'custom_cat_1',
+      name: 'Updated Dining',
+      emoji: '🍕',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.category_id).toBe('custom_cat_1');
+    expect(data.updated_fields).toContain('name');
+    expect(data.updated_fields).toContain('emoji');
+  });
+
+  test('delete_category deletes an existing category', async () => {
+    const result = await writeServer.handleCallTool('delete_category', {
+      category_id: 'custom_cat_1',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.category_id).toBe('custom_cat_1');
+    expect(data.deleted_name).toBe('Custom Dining');
+  });
+
+  // -- Budget write tools --
+
+  test('update_budget updates an existing budget', async () => {
+    const result = await writeServer.handleCallTool('update_budget', {
+      budget_id: 'budget1',
+      amount: 600,
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.budget_id).toBe('budget1');
+    expect(data.updated_fields).toContain('amount');
+  });
+
+  test('delete_budget deletes an existing budget', async () => {
+    const result = await writeServer.handleCallTool('delete_budget', {
+      budget_id: 'budget1',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.budget_id).toBe('budget1');
+    expect(data.deleted_name).toBeString();
+  });
+
+  // -- Recurring write tools --
+
+  test('set_recurring_state pauses a recurring item', async () => {
+    const result = await writeServer.handleCallTool('set_recurring_state', {
+      recurring_id: 'rec1',
+      state: 'paused',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.recurring_id).toBe('rec1');
+    expect(data.old_state).toBe('active');
+    expect(data.new_state).toBe('paused');
+    expect(data.name).toBeString();
+  });
+
+  test('delete_recurring deletes a recurring item', async () => {
+    const result = await writeServer.handleCallTool('delete_recurring', {
+      recurring_id: 'rec1',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.recurring_id).toBe('rec1');
+    expect(data.deleted_name).toBeString();
+  });
+
+  test('create_recurring creates a new recurring item', async () => {
+    const result = await writeServer.handleCallTool('create_recurring', {
+      name: 'Spotify',
+      amount: 9.99,
+      frequency: 'monthly',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.name).toBe('Spotify');
+    expect(data.amount).toBe(9.99);
+    expect(data.frequency).toBe('monthly');
+    expect(data.recurring_id).toBeString();
+  });
+
+  test('update_recurring updates a recurring item', async () => {
+    const result = await writeServer.handleCallTool('update_recurring', {
+      recurring_id: 'rec1',
+      name: 'Netflix Premium',
+      amount: 22.99,
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.recurring_id).toBe('rec1');
+    expect(data.updated_fields).toContain('name');
+    expect(data.updated_fields).toContain('amount');
+  });
+
+  // -- Goal write tools --
+
+  test('create_goal creates a new goal', async () => {
+    const result = await writeServer.handleCallTool('create_goal', {
+      name: 'New Car',
+      target_amount: 30000,
+      monthly_contribution: 1000,
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.name).toBe('New Car');
+    expect(data.target_amount).toBe(30000);
+    expect(data.goal_id).toBeString();
+  });
+
+  test('update_goal updates a goal', async () => {
+    const result = await writeServer.handleCallTool('update_goal', {
+      goal_id: 'goal1',
+      name: 'Emergency Fund V2',
+      target_amount: 15000,
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.goal_id).toBe('goal1');
+    expect(data.updated_fields).toContain('name');
+    expect(data.updated_fields).toContain('savings');
+  });
+
+  test('delete_goal deletes a goal', async () => {
+    const result = await writeServer.handleCallTool('delete_goal', {
+      goal_id: 'goal1',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.goal_id).toBe('goal1');
+    expect(data.deleted_name).toBe('Emergency Fund');
+  });
+});
+
+// ============================================
+// E2E tests for write tool validation errors
+// ============================================
+
+describe('handleCallTool — write tool validation', () => {
+  let writeServer: CopilotMoneyServer;
+
+  beforeEach(() => {
+    const db = createMockDb();
+    writeServer = new CopilotMoneyServer(FAKE_DB_DIR, undefined, true);
+    const writeTools = new CopilotMoneyTools(db, createMockFirestoreClient());
+    writeServer._injectForTesting(db, writeTools);
+  });
+
+  test('set_transaction_category with nonexistent transaction returns error', async () => {
+    const result = await writeServer.handleCallTool('set_transaction_category', {
+      transaction_id: 'nonexistent',
+      category_id: 'food_dining',
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('not found');
+  });
+
+  test('create_tag with empty name returns error', async () => {
+    const result = await writeServer.handleCallTool('create_tag', {
+      name: '   ',
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('empty');
+  });
+
+  test('delete_tag with nonexistent tag returns error', async () => {
+    const result = await writeServer.handleCallTool('delete_tag', {
+      tag_id: 'nonexistent',
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('not found');
+  });
+
+  test('update_category with no fields returns error', async () => {
+    const result = await writeServer.handleCallTool('update_category', {
+      category_id: 'custom_cat_1',
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('No fields');
+  });
+
+  test('create_recurring with invalid frequency returns error', async () => {
+    const result = await writeServer.handleCallTool('create_recurring', {
+      name: 'Bad Recurring',
+      amount: 10,
+      frequency: 'hourly',
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Invalid frequency');
+  });
+
+  test('create_goal with zero target returns error', async () => {
+    const result = await writeServer.handleCallTool('create_goal', {
+      name: 'Bad Goal',
+      target_amount: 0,
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('greater than 0');
+  });
+
+  test('update_goal with nonexistent goal returns error', async () => {
+    const result = await writeServer.handleCallTool('update_goal', {
+      goal_id: 'nonexistent',
+      name: 'Updated Name',
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('not found');
+  });
+
+  test('set_recurring_state with invalid state returns error', async () => {
+    const result = await writeServer.handleCallTool('set_recurring_state', {
+      recurring_id: 'rec1',
+      state: 'invalid_state',
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Invalid state');
+  });
+
+  test('review_transactions with empty array returns error', async () => {
+    const result = await writeServer.handleCallTool('review_transactions', {
+      transaction_ids: [],
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('non-empty');
+  });
+
+  test('set_transaction_name with empty name returns error', async () => {
+    const result = await writeServer.handleCallTool('set_transaction_name', {
+      transaction_id: 'txn1',
+      name: '   ',
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('empty');
+  });
+
+  test('set_transaction_goal with nonexistent goal returns error', async () => {
+    const result = await writeServer.handleCallTool('set_transaction_goal', {
+      transaction_id: 'txn1',
+      goal_id: 'nonexistent_goal',
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('not found');
   });
 });
