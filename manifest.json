@@ -155,6 +155,18 @@
     {
       "name": "delete_goal",
       "description": "Delete a financial goal."
+    },
+    {
+      "name": "update_tag",
+      "description": "Update an existing tag's name or color."
+    },
+    {
+      "name": "create_recurring",
+      "description": "Create a new recurring/subscription item."
+    },
+    {
+      "name": "create_goal",
+      "description": "Create a new financial goal."
     }
   ],
   "tools_generated": false,

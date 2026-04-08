@@ -110,6 +110,12 @@ export const UNREALISTIC_AMOUNT_THRESHOLD = 1_000_000;
  */
 export const MAX_VALID_AMOUNT = 10_000_000;
 
+/**
+ * Accepted frequency values for creating recurring items.
+ * Subset of KNOWN_FREQUENCIES from the model -- only user-facing values.
+ */
+const VALID_RECURRING_FREQUENCIES = ['weekly', 'biweekly', 'monthly', 'yearly'] as const;
+
 // ============================================
 // Validation Helpers
 // ============================================
@@ -3345,6 +3351,243 @@ export class CopilotMoneyTools {
       deleted_name: goal.name ?? goal_id,
     };
   }
+
+  /**
+   * Update an existing tag's name and/or color.
+   *
+   * Validates the tag exists, builds a dynamic update mask for only the
+   * provided fields, writes to Firestore, then clears the cache.
+   */
+  async updateTag(args: {
+    tag_id: string;
+    name?: string;
+    color_name?: string;
+    hex_color?: string;
+  }): Promise<{
+    success: boolean;
+    tag_id: string;
+    updated_fields: string[];
+  }> {
+    const client = this.getFirestoreClient();
+
+    const { tag_id, name, color_name, hex_color } = args;
+
+    // Validate tag_id format
+    validateDocId(tag_id, 'tag_id');
+
+    // Validate tag exists
+    const existingTags = await this.db.getTags();
+    const tag = existingTags.find((t) => t.tag_id === tag_id);
+    if (!tag) {
+      throw new Error(`Tag not found: ${tag_id}`);
+    }
+
+    // Build dynamic update fields
+    const fieldsToUpdate: Record<string, unknown> = {};
+    const updateMask: string[] = [];
+
+    if (name !== undefined) {
+      const trimmedName = name.trim();
+      if (!trimmedName) {
+        throw new Error('Tag name must not be empty');
+      }
+      fieldsToUpdate.name = trimmedName;
+      updateMask.push('name');
+    }
+    if (color_name !== undefined) {
+      fieldsToUpdate.color_name = color_name;
+      updateMask.push('color_name');
+    }
+    if (hex_color !== undefined) {
+      validateHexColor(hex_color);
+      fieldsToUpdate.hex_color = hex_color;
+      updateMask.push('hex_color');
+    }
+
+    if (updateMask.length === 0) {
+      throw new Error('No fields to update. Provide at least one of: name, color_name, hex_color');
+    }
+
+    // Resolve user_id
+    const userId = await client.requireUserId();
+
+    // Write to Firestore with dynamic update mask
+    const collectionPath = `users/${userId}/tags`;
+    const firestoreFields = toFirestoreFields(fieldsToUpdate);
+    await client.updateDocument(collectionPath, tag_id, firestoreFields, updateMask);
+
+    // Clear cache so the updated tag is visible on next query
+    this.db.clearCache();
+
+    return {
+      success: true,
+      tag_id,
+      updated_fields: updateMask,
+    };
+  }
+
+  /**
+   * Create a new recurring/subscription item.
+   *
+   * Generates a unique recurring_id, writes to Firestore, then clears the cache
+   * so the new recurring item is visible on next query.
+   */
+  async createRecurring(args: {
+    name: string;
+    amount: number;
+    frequency: string;
+    category_id?: string;
+    account_id?: string;
+    merchant_name?: string;
+    start_date?: string;
+  }): Promise<{
+    success: boolean;
+    recurring_id: string;
+    name: string;
+    amount: number;
+    frequency: string;
+  }> {
+    const client = this.getFirestoreClient();
+
+    const { name, amount, frequency, category_id, account_id, merchant_name, start_date } = args;
+
+    // Validate name is non-empty
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      throw new Error('Recurring name must not be empty');
+    }
+
+    // Validate amount is positive
+    if (amount <= 0) {
+      throw new Error('Recurring amount must be greater than 0');
+    }
+
+    // Validate frequency
+    if (!(VALID_RECURRING_FREQUENCIES as readonly string[]).includes(frequency)) {
+      throw new Error(
+        `Invalid frequency: ${frequency}. Must be one of: ${VALID_RECURRING_FREQUENCIES.join(', ')}`
+      );
+    }
+
+    // Validate optional IDs
+    if (category_id !== undefined) validateDocId(category_id, 'category_id');
+    if (account_id !== undefined) validateDocId(account_id, 'account_id');
+
+    // Generate unique recurring_id
+    const recurringId = crypto.randomUUID();
+
+    // Resolve user_id
+    const userId = await client.requireUserId();
+
+    // Build document fields
+    const today = new Date().toISOString().slice(0, 10);
+    const docFields: Record<string, unknown> = {
+      recurring_id: recurringId,
+      name: trimmedName,
+      amount,
+      frequency,
+      is_active: true,
+      state: 'active',
+      latest_date: start_date ?? today,
+    };
+    if (category_id !== undefined) docFields.category_id = category_id;
+    if (account_id !== undefined) docFields.account_id = account_id;
+    if (merchant_name !== undefined) docFields.merchant_name = merchant_name;
+    if (start_date !== undefined) docFields.start_date = start_date;
+
+    // Write to Firestore
+    const collectionPath = `users/${userId}/recurring`;
+    const firestoreFields = toFirestoreFields(docFields);
+    await client.createDocument(collectionPath, recurringId, firestoreFields);
+
+    // Clear cache so the new recurring item is visible on next query
+    this.db.clearCache();
+
+    return {
+      success: true,
+      recurring_id: recurringId,
+      name: trimmedName,
+      amount,
+      frequency,
+    };
+  }
+
+  /**
+   * Create a new financial goal.
+   *
+   * Generates a unique goal_id, writes to Firestore with a savings sub-object,
+   * then clears the cache so the new goal is visible on next query.
+   */
+  async createGoal(args: {
+    name: string;
+    target_amount: number;
+    emoji?: string;
+    monthly_contribution?: number;
+    start_date?: string;
+  }): Promise<{
+    success: boolean;
+    goal_id: string;
+    name: string;
+    target_amount: number;
+  }> {
+    const client = this.getFirestoreClient();
+
+    const { name, target_amount, emoji, monthly_contribution, start_date } = args;
+
+    // Validate name is non-empty
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      throw new Error('Goal name must not be empty');
+    }
+
+    // Validate target_amount is positive
+    if (target_amount <= 0) {
+      throw new Error('target_amount must be greater than 0');
+    }
+
+    // Validate monthly_contribution if provided
+    if (monthly_contribution !== undefined && monthly_contribution < 0) {
+      throw new Error('monthly_contribution must be >= 0');
+    }
+
+    // Generate unique goal_id
+    const goalId = crypto.randomUUID();
+
+    // Resolve user_id
+    const userId = await client.requireUserId();
+
+    // Build document fields
+    const today = new Date().toISOString().slice(0, 10);
+    const docFields: Record<string, unknown> = {
+      goal_id: goalId,
+      name: trimmedName,
+      savings: {
+        type: 'savings',
+        status: 'active',
+        target_amount,
+        tracking_type: monthly_contribution ? 'monthly_contribution' : 'manual',
+        tracking_type_monthly_contribution: monthly_contribution ?? 0,
+        start_date: start_date ?? today,
+        is_ongoing: false,
+      },
+    };
+    if (emoji !== undefined) docFields.emoji = emoji;
+
+    // Write to Firestore
+    const collectionPath = `users/${userId}/financial_goals`;
+    const firestoreFields = toFirestoreFields(docFields);
+    await client.createDocument(collectionPath, goalId, firestoreFields);
+
+    // Clear cache so the new goal is visible on next query
+    this.db.clearCache();
+
+    return {
+      success: true,
+      goal_id: goalId,
+      name: trimmedName,
+      target_amount,
+    };
+  }
 }
 
 /**
@@ -4416,6 +4659,127 @@ export function createWriteToolSchemas(): ToolSchema[] {
         readOnlyHint: false,
         destructiveHint: true,
         idempotentHint: true,
+      },
+    },
+    {
+      name: 'update_tag',
+      description:
+        'Update an existing tag. Provide tag_id (required) and at least one of name, ' +
+        'color_name, or hex_color. Only the specified fields are updated. ' +
+        'Writes directly to Copilot Money via Firestore.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          tag_id: {
+            type: 'string',
+            description: 'Tag ID to update',
+          },
+          name: {
+            type: 'string',
+            description: 'New display name for the tag',
+          },
+          color_name: {
+            type: 'string',
+            description: 'New color name (e.g. "blue", "red")',
+          },
+          hex_color: {
+            type: 'string',
+            description: 'New hex color code (e.g. "#FF5733")',
+          },
+        },
+        required: ['tag_id'],
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    {
+      name: 'create_recurring',
+      description:
+        'Create a new recurring/subscription item. Requires a name, amount, and frequency. ' +
+        'Optionally set category, account, merchant name, or start date. ' +
+        'Writes directly to Copilot Money via Firestore.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description: 'Name of the recurring item (e.g. "Netflix", "Gym Membership")',
+          },
+          amount: {
+            type: 'number',
+            description: 'Recurring amount (must be greater than 0)',
+          },
+          frequency: {
+            type: 'string',
+            enum: ['weekly', 'biweekly', 'monthly', 'yearly'],
+            description: 'How often the charge recurs',
+          },
+          category_id: {
+            type: 'string',
+            description: 'Category ID for this recurring item (from get_categories)',
+          },
+          account_id: {
+            type: 'string',
+            description: 'Account ID for this recurring item (from get_accounts)',
+          },
+          merchant_name: {
+            type: 'string',
+            description: 'Merchant name for the recurring charge',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Start date in ISO format (YYYY-MM-DD). Defaults to today.',
+          },
+        },
+        required: ['name', 'amount', 'frequency'],
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
+    {
+      name: 'create_goal',
+      description:
+        'Create a new financial goal. Requires a name and target amount. ' +
+        'Optionally set an emoji, monthly contribution, or start date. ' +
+        'Writes directly to Copilot Money via Firestore.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description: 'Name of the financial goal (e.g. "Emergency Fund", "Vacation")',
+          },
+          target_amount: {
+            type: 'number',
+            description: 'Target savings amount (must be greater than 0)',
+          },
+          emoji: {
+            type: 'string',
+            description: 'Emoji icon for the goal (e.g. "🏖️")',
+          },
+          monthly_contribution: {
+            type: 'number',
+            description:
+              'Monthly contribution amount (must be >= 0). ' +
+              'Sets tracking to monthly_contribution mode when provided.',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Start date in ISO format (YYYY-MM-DD). Defaults to today.',
+          },
+        },
+        required: ['name', 'target_amount'],
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
       },
     },
   ];
