@@ -16,7 +16,9 @@
 import { $ } from 'bun';
 
 const AUDITED_LABEL = 'audited';
-const CLAUDE_USERNAMES = ['claude', 'claude[bot]'];
+// Reviews are posted by claude-code-action using GITHUB_TOKEN, which shows as github-actions[bot].
+// The GitHub API returns the exact string 'github-actions[bot]'.
+const REVIEW_BOT_USERNAMES = ['github-actions[bot]'];
 const DRY_RUN = process.argv.includes('--dry-run');
 
 // Validate and parse PR number to prevent command injection
@@ -72,11 +74,21 @@ interface UnaddressedSuggestion {
 }
 
 /**
- * Check if a comment is from Claude
+ * Check if a comment is from the review bot
  */
-function isClaudeComment(user: string): boolean {
-  return CLAUDE_USERNAMES.some(
+function isReviewBotComment(user: string): boolean {
+  return REVIEW_BOT_USERNAMES.some(
     (name) => user.toLowerCase() === name.toLowerCase()
+  );
+}
+
+/**
+ * Check if a comment body looks like a Claude code review (not just any bot comment)
+ */
+function isClaudeReviewComment(body: string): boolean {
+  return (
+    (body.includes('### PR Review') || body.includes('Claude finished')) &&
+    body.includes('actions/runs/')
   );
 }
 
@@ -108,6 +120,12 @@ function extractSuggestions(text: string): string[] {
     /(?:TODO|FIXME|NOTE)[:\s]+([^.]{10,200}\.)/gi,
     /\*\*(?:suggestion|issue|problem|concern)[:\s]*\*\*[:\s]*([^.]{10,200}\.)/gi,
     /(?:^|\n)-\s*\[?\s*\]?\s*([^\n]{10,200}(?:should|could|consider|add|fix|update|replace)[^\n]{0,100})/gi,
+    // Match review section headers like "#### Bug:", "#### Missing validation"
+    /####\s+(?:Bug|Missing|Issue)[:\s]+([^\n]{10,200})/gi,
+    // Match numbered items like "**1. something**"
+    /\*\*\d+\.\s+([^*]{10,200})\*\*/gi,
+    // Match "[Fix this →]" links — the preceding paragraph is the suggestion
+    /([^\n]{20,300})\s*\[Fix this/gi,
   ];
 
   for (const pattern of suggestionPatterns) {
@@ -179,7 +197,13 @@ function isLikelyAddressed(suggestion: string, prState: string): boolean {
     suggestion.toLowerCase().includes(kw)
   );
 
+  // Skip open PRs — suggestions may still be addressed before merge
+  if (prState === 'OPEN') {
+    return true;
+  }
+
   // For merged PRs, only flag non-blocking items as potentially unaddressed
+  // (blocking issues are assumed to have been addressed before merge)
   if (prState === 'MERGED') {
     return !isNonBlocking;
   }
@@ -202,7 +226,20 @@ async function getPRs(): Promise<PR[]> {
 async function getPRComments(prNumber: number): Promise<PRComment[]> {
   try {
     const result =
-      await $`gh api repos/{owner}/{repo}/pulls/${prNumber}/comments`.text();
+      await $`gh api repos/{owner}/{repo}/pulls/${prNumber}/comments --paginate`.text();
+    return JSON.parse(result);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Get issue comments for a PR (where claude-code-action posts review results)
+ */
+async function getPRIssueComments(prNumber: number): Promise<PRComment[]> {
+  try {
+    const result =
+      await $`gh api repos/{owner}/{repo}/issues/${prNumber}/comments --paginate`.text();
     return JSON.parse(result);
   } catch {
     return [];
@@ -215,7 +252,7 @@ async function getPRComments(prNumber: number): Promise<PRComment[]> {
 async function getPRReviews(prNumber: number): Promise<PRReview[]> {
   try {
     const result =
-      await $`gh api repos/{owner}/{repo}/pulls/${prNumber}/reviews`.text();
+      await $`gh api repos/{owner}/{repo}/pulls/${prNumber}/reviews --paginate`.text();
     return JSON.parse(result);
   } catch {
     return [];
@@ -227,7 +264,8 @@ async function getPRReviews(prNumber: number): Promise<PRReview[]> {
  */
 async function issueExists(prNumber: number, suggestion: string): Promise<boolean> {
   try {
-    const searchQuery = `repo:{owner}/{repo} is:issue "PR #${prNumber}" in:body`;
+    // gh issue list already scopes to the current repo; no repo: qualifier needed
+    const searchQuery = `is:issue "PR #${prNumber}" in:body`;
     const result = await $`gh issue list --search ${searchQuery} --json number,body`.text();
     const issues = JSON.parse(result);
 
@@ -303,55 +341,67 @@ async function markAsAudited(prNumber: number): Promise<void> {
 /**
  * Audit a single PR
  */
-async function auditPR(pr: PR): Promise<UnaddressedSuggestion[]> {
+async function auditPR(
+  pr: PR
+): Promise<{ suggestions: UnaddressedSuggestion[]; hasClaudeReview: boolean }> {
   console.log(`Auditing PR #${pr.number}: ${pr.title}`);
 
   const suggestions: UnaddressedSuggestion[] = [];
 
-  // Get comments and reviews
-  const [comments, reviews] = await Promise.all([
+  // Get all comment sources: diff comments, issue comments, and reviews
+  const [diffComments, issueComments, reviews] = await Promise.all([
     getPRComments(pr.number),
+    getPRIssueComments(pr.number),
     getPRReviews(pr.number),
   ]);
 
-  // Process inline comments
-  for (const comment of comments) {
-    if (!isClaudeComment(comment.user.login)) continue;
+  // Collect all Claude review bodies from all sources
+  const allReviewBodies: Array<{ body: string; path?: string; line?: number }> = [];
 
-    const extracted = extractSuggestions(comment.body);
-    for (const suggestion of extracted) {
-      if (!isLikelyAddressed(suggestion, pr.state)) {
-        suggestions.push({
-          prNumber: pr.number,
-          prTitle: pr.title,
-          suggestion,
-          file: comment.path,
-          line: comment.line,
-          priority: determinePriority(suggestion),
-        });
-      }
-    }
+  for (const comment of diffComments) {
+    if (!isReviewBotComment(comment.user.login)) continue;
+    if (!comment.body || !isClaudeReviewComment(comment.body)) continue;
+    allReviewBodies.push({ body: comment.body, path: comment.path, line: comment.line });
   }
 
-  // Process review bodies
+  for (const comment of issueComments) {
+    if (!isReviewBotComment(comment.user.login)) continue;
+    if (!comment.body || !isClaudeReviewComment(comment.body)) continue;
+    allReviewBodies.push({ body: comment.body });
+  }
+
   for (const review of reviews) {
-    if (!isClaudeComment(review.user.login)) continue;
-    if (!review.body) continue;
+    if (!isReviewBotComment(review.user.login)) continue;
+    if (!review.body || !isClaudeReviewComment(review.body)) continue;
+    allReviewBodies.push({ body: review.body });
+  }
 
-    const extracted = extractSuggestions(review.body);
+  const hasClaudeReview = allReviewBodies.length > 0;
+
+  // Deduplicate suggestions across review bodies (same text can appear in
+  // both a diff comment and an issue comment summary)
+  const seenSuggestions = new Set<string>();
+
+  for (const entry of allReviewBodies) {
+    const extracted = extractSuggestions(entry.body);
     for (const suggestion of extracted) {
+      if (seenSuggestions.has(suggestion)) continue;
+      seenSuggestions.add(suggestion);
+
       if (!isLikelyAddressed(suggestion, pr.state)) {
         suggestions.push({
           prNumber: pr.number,
           prTitle: pr.title,
           suggestion,
+          file: entry.path,
+          line: entry.line,
           priority: determinePriority(suggestion),
         });
       }
     }
   }
 
-  return suggestions;
+  return { suggestions, hasClaudeReview };
 }
 
 /**
@@ -371,17 +421,19 @@ async function main(): Promise<void> {
     }
   }
 
-  // Get PRs to audit
-  let prs = await getPRs();
-
-  // Filter to specific PR if requested
+  // Get PRs to audit — fetch only the target PR when a specific number is given
+  let prs: PR[];
   if (SPECIFIC_PR) {
-    prs = prs.filter((pr) => pr.number === SPECIFIC_PR);
-    if (prs.length === 0) {
+    try {
+      const result =
+        await $`gh pr view ${SPECIFIC_PR} --json number,title,state,labels`.text();
+      prs = [JSON.parse(result)];
+    } catch {
       console.error(`PR #${SPECIFIC_PR} not found`);
       process.exit(1);
     }
   } else {
+    prs = await getPRs();
     // Filter out already audited PRs
     prs = prs.filter((pr) => !pr.labels.some((l) => l.name === AUDITED_LABEL));
   }
@@ -398,20 +450,29 @@ async function main(): Promise<void> {
 
   for (let i = 0; i < prs.length; i++) {
     const pr = prs[i];
-    const suggestions = await auditPR(pr);
+    const { suggestions, hasClaudeReview } = await auditPR(pr);
 
     if (suggestions.length > 0) {
-      // Check if issue already exists
-      const exists = await issueExists(pr.number, suggestions[0].suggestion);
-      if (!exists) {
-        allSuggestions.set(pr.number, suggestions);
+      // Filter out suggestions that already have an existing issue
+      const newSuggestions: UnaddressedSuggestion[] = [];
+      for (const suggestion of suggestions) {
+        const exists = await issueExists(pr.number, suggestion.suggestion);
+        if (!exists) {
+          newSuggestions.push(suggestion);
+        }
+      }
+      if (newSuggestions.length > 0) {
+        allSuggestions.set(pr.number, newSuggestions);
       } else {
-        console.log(`  Issue already exists for PR #${pr.number}, skipping`);
+        console.log(`  All suggestions already have issues for PR #${pr.number}, skipping`);
       }
     }
 
-    // Mark as audited
-    await markAsAudited(pr.number);
+    // Only mark as audited if a Claude review was found — PRs without reviews
+    // should be re-checked in case a review is posted later
+    if (hasClaudeReview) {
+      await markAsAudited(pr.number);
+    }
 
     // Rate limiting: add delay between PRs (except for last one)
     if (i < prs.length - 1) {
