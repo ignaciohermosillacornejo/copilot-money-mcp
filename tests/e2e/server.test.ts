@@ -1725,10 +1725,12 @@ describe('transaction pagination edge cases', () => {
   });
 
   test('limit exceeding MAX_QUERY_LIMIT is clamped', async () => {
+    // With only 6 test records we can't exercise the upper-bound clamp path
+    // (would need >10000 records). Instead we verify the query still returns
+    // all available data, confirming the clamped limit is >= the dataset size.
+    const all = await tools.getTransactions({ limit: 10000 });
     const result = await tools.getTransactions({ limit: 99999 });
-    // validateLimit clamps to MAX_QUERY_LIMIT (10000), but with few test records
-    // the result count equals the actual data size
-    expect(result.count).toBeLessThanOrEqual(10000);
+    expect(result.count).toBe(all.total_count);
     expect(result.count).toBe(result.total_count);
   });
 
@@ -1740,30 +1742,19 @@ describe('transaction pagination edge cases', () => {
 });
 
 describe('holdings cost basis edge cases', () => {
-  test('cost_basis = null does NOT compute average_cost or total_return', async () => {
+  /**
+   * Helper to create tools with custom accounts/securities/history for holdings tests.
+   */
+  function createHoldingsTools(opts: {
+    accounts?: Account[];
+    securities?: Security[];
+    holdingsHistory?: HoldingsHistory[];
+  }): CopilotMoneyTools {
     const db = new CopilotDatabase(FAKE_DB_DIR);
-    const accounts: Account[] = [
-      {
-        account_id: 'inv1',
-        current_balance: 10000,
-        name: 'Test Investment',
-        account_type: 'investment',
-        holdings: [
-          {
-            security_id: 'sec1',
-            account_id: 'inv1',
-            cost_basis: null as unknown as number,
-            institution_price: 150,
-            institution_value: 15000,
-            quantity: 100,
-            iso_currency_code: 'USD',
-          },
-        ],
-      },
-    ];
     db._injectDataForTesting({
-      accounts,
-      securities: [...mockSecurities],
+      accounts: opts.accounts ?? [...mockAccounts],
+      securities: opts.securities ?? [...mockSecurities],
+      holdingsHistory: opts.holdingsHistory ?? [],
       transactions: [],
       recurring: [],
       budgets: [],
@@ -1777,7 +1768,32 @@ describe('holdings cost basis edge cases', () => {
       categoryNameMap: new Map(),
       accountNameMap: new Map(),
     });
-    const tools = new CopilotMoneyTools(db);
+    return new CopilotMoneyTools(db);
+  }
+
+  test('cost_basis = null does NOT compute average_cost or total_return', async () => {
+    const tools = createHoldingsTools({
+      accounts: [
+        {
+          account_id: 'inv1',
+          current_balance: 10000,
+          name: 'Test Investment',
+          account_type: 'investment',
+          holdings: [
+            {
+              security_id: 'sec1',
+              account_id: 'inv1',
+              // Plaid can return null at runtime even though TS types it as number
+              cost_basis: null as unknown as number,
+              institution_price: 150,
+              institution_value: 15000,
+              quantity: 100,
+              iso_currency_code: 'USD',
+            },
+          ],
+        },
+      ],
+    });
     const result = await tools.getHoldings({});
     expect(result.count).toBe(1);
     const holding = result.holdings[0];
@@ -1788,43 +1804,27 @@ describe('holdings cost basis edge cases', () => {
   });
 
   test('cost_basis = 0 does NOT compute derived fields', async () => {
-    const db = new CopilotDatabase(FAKE_DB_DIR);
-    const accounts: Account[] = [
-      {
-        account_id: 'inv1',
-        current_balance: 10000,
-        name: 'Test Investment',
-        account_type: 'investment',
-        holdings: [
-          {
-            security_id: 'sec1',
-            account_id: 'inv1',
-            cost_basis: 0,
-            institution_price: 150,
-            institution_value: 15000,
-            quantity: 100,
-            iso_currency_code: 'USD',
-          },
-        ],
-      },
-    ];
-    db._injectDataForTesting({
-      accounts,
-      securities: [...mockSecurities],
-      transactions: [],
-      recurring: [],
-      budgets: [],
-      goals: [],
-      goalHistory: [],
-      investmentPrices: [],
-      investmentSplits: [],
-      items: [],
-      userCategories: [],
-      userAccounts: [],
-      categoryNameMap: new Map(),
-      accountNameMap: new Map(),
+    const tools = createHoldingsTools({
+      accounts: [
+        {
+          account_id: 'inv1',
+          current_balance: 10000,
+          name: 'Test Investment',
+          account_type: 'investment',
+          holdings: [
+            {
+              security_id: 'sec1',
+              account_id: 'inv1',
+              cost_basis: 0,
+              institution_price: 150,
+              institution_value: 15000,
+              quantity: 100,
+              iso_currency_code: 'USD',
+            },
+          ],
+        },
+      ],
     });
-    const tools = new CopilotMoneyTools(db);
     const result = await tools.getHoldings({});
     expect(result.count).toBe(1);
     const holding = result.holdings[0];
@@ -1834,43 +1834,27 @@ describe('holdings cost basis edge cases', () => {
   });
 
   test('quantity = 0 does NOT compute average_cost (division by zero guard)', async () => {
-    const db = new CopilotDatabase(FAKE_DB_DIR);
-    const accounts: Account[] = [
-      {
-        account_id: 'inv1',
-        current_balance: 0,
-        name: 'Test Investment',
-        account_type: 'investment',
-        holdings: [
-          {
-            security_id: 'sec1',
-            account_id: 'inv1',
-            cost_basis: 5000,
-            institution_price: 0,
-            institution_value: 0,
-            quantity: 0,
-            iso_currency_code: 'USD',
-          },
-        ],
-      },
-    ];
-    db._injectDataForTesting({
-      accounts,
-      securities: [...mockSecurities],
-      transactions: [],
-      recurring: [],
-      budgets: [],
-      goals: [],
-      goalHistory: [],
-      investmentPrices: [],
-      investmentSplits: [],
-      items: [],
-      userCategories: [],
-      userAccounts: [],
-      categoryNameMap: new Map(),
-      accountNameMap: new Map(),
+    const tools = createHoldingsTools({
+      accounts: [
+        {
+          account_id: 'inv1',
+          current_balance: 0,
+          name: 'Test Investment',
+          account_type: 'investment',
+          holdings: [
+            {
+              security_id: 'sec1',
+              account_id: 'inv1',
+              cost_basis: 5000,
+              institution_price: 0,
+              institution_value: 0,
+              quantity: 0,
+              iso_currency_code: 'USD',
+            },
+          ],
+        },
+      ],
     });
-    const tools = new CopilotMoneyTools(db);
     const result = await tools.getHoldings({});
     expect(result.count).toBe(1);
     const holding = result.holdings[0];
@@ -1880,25 +1864,7 @@ describe('holdings cost basis edge cases', () => {
   });
 
   test('include_history=true with no history records', async () => {
-    const db = new CopilotDatabase(FAKE_DB_DIR);
-    db._injectDataForTesting({
-      accounts: [...mockAccounts],
-      securities: [...mockSecurities],
-      holdingsHistory: [],
-      transactions: [],
-      recurring: [],
-      budgets: [],
-      goals: [],
-      goalHistory: [],
-      investmentPrices: [],
-      investmentSplits: [],
-      items: [],
-      userCategories: [],
-      userAccounts: [],
-      categoryNameMap: new Map(),
-      accountNameMap: new Map(),
-    });
-    const tools = new CopilotMoneyTools(db);
+    const tools = createHoldingsTools({ holdingsHistory: [] });
     const result = await tools.getHoldings({ include_history: true });
     expect(result.count).toBeGreaterThan(0);
     for (const holding of result.holdings) {
@@ -1907,46 +1873,29 @@ describe('holdings cost basis edge cases', () => {
   });
 
   test('include_history=true with matching history records', async () => {
-    const db = new CopilotDatabase(FAKE_DB_DIR);
-    const holdingsHistory: HoldingsHistory[] = [
-      {
-        history_id: 'sec1:2025-01',
-        security_id: 'sec1',
-        account_id: 'acc3',
-        month: '2025-01',
-        history: {
-          '1736899200000': { price: 180.0, quantity: 100 },
-          '1736985600000': { price: 182.5, quantity: 100 },
+    const tools = createHoldingsTools({
+      holdingsHistory: [
+        {
+          history_id: 'sec1:2025-01',
+          security_id: 'sec1',
+          account_id: 'acc3',
+          month: '2025-01',
+          history: {
+            '1736899200000': { price: 180.0, quantity: 100 },
+            '1736985600000': { price: 182.5, quantity: 100 },
+          },
         },
-      },
-      {
-        history_id: 'sec1:2024-12',
-        security_id: 'sec1',
-        account_id: 'acc3',
-        month: '2024-12',
-        history: {
-          '1735689600000': { price: 175.0, quantity: 95 },
+        {
+          history_id: 'sec1:2024-12',
+          security_id: 'sec1',
+          account_id: 'acc3',
+          month: '2024-12',
+          history: {
+            '1735689600000': { price: 175.0, quantity: 95 },
+          },
         },
-      },
-    ];
-    db._injectDataForTesting({
-      accounts: [...mockAccounts],
-      securities: [...mockSecurities],
-      holdingsHistory,
-      transactions: [],
-      recurring: [],
-      budgets: [],
-      goals: [],
-      goalHistory: [],
-      investmentPrices: [],
-      investmentSplits: [],
-      items: [],
-      userCategories: [],
-      userAccounts: [],
-      categoryNameMap: new Map(),
-      accountNameMap: new Map(),
+      ],
     });
-    const tools = new CopilotMoneyTools(db);
     const result = await tools.getHoldings({
       include_history: true,
       ticker_symbol: 'AAPL',
@@ -1961,25 +1910,7 @@ describe('holdings cost basis edge cases', () => {
   });
 
   test('filter by account_id + ticker_symbol together', async () => {
-    const db = new CopilotDatabase(FAKE_DB_DIR);
-    db._injectDataForTesting({
-      accounts: [...mockAccounts],
-      securities: [...mockSecurities],
-      transactions: [],
-      recurring: [],
-      budgets: [],
-      goals: [],
-      goalHistory: [],
-      investmentPrices: [],
-      investmentSplits: [],
-      items: [],
-      userCategories: [],
-      userAccounts: [],
-      categoryNameMap: new Map(),
-      accountNameMap: new Map(),
-    });
-    const tools = new CopilotMoneyTools(db);
-
+    const tools = createHoldingsTools({});
     // acc3 has both AAPL and VTI holdings
     const result = await tools.getHoldings({
       account_id: 'acc3',
@@ -1991,24 +1922,7 @@ describe('holdings cost basis edge cases', () => {
   });
 
   test('non-existent account_id returns empty', async () => {
-    const db = new CopilotDatabase(FAKE_DB_DIR);
-    db._injectDataForTesting({
-      accounts: [...mockAccounts],
-      securities: [...mockSecurities],
-      transactions: [],
-      recurring: [],
-      budgets: [],
-      goals: [],
-      goalHistory: [],
-      investmentPrices: [],
-      investmentSplits: [],
-      items: [],
-      userCategories: [],
-      userAccounts: [],
-      categoryNameMap: new Map(),
-      accountNameMap: new Map(),
-    });
-    const tools = new CopilotMoneyTools(db);
+    const tools = createHoldingsTools({});
     const result = await tools.getHoldings({ account_id: 'nonexistent' });
     expect(result.count).toBe(0);
     expect(result.holdings).toEqual([]);
@@ -2016,74 +1930,41 @@ describe('holdings cost basis edge cases', () => {
   });
 
   test('non-existent ticker_symbol returns empty', async () => {
-    const db = new CopilotDatabase(FAKE_DB_DIR);
-    db._injectDataForTesting({
-      accounts: [...mockAccounts],
-      securities: [...mockSecurities],
-      transactions: [],
-      recurring: [],
-      budgets: [],
-      goals: [],
-      goalHistory: [],
-      investmentPrices: [],
-      investmentSplits: [],
-      items: [],
-      userCategories: [],
-      userAccounts: [],
-      categoryNameMap: new Map(),
-      accountNameMap: new Map(),
-    });
-    const tools = new CopilotMoneyTools(db);
+    const tools = createHoldingsTools({});
     const result = await tools.getHoldings({ ticker_symbol: 'ZZZZ' });
     expect(result.count).toBe(0);
     expect(result.holdings).toEqual([]);
   });
 
   test('accounts with no holdings array are skipped', async () => {
-    const db = new CopilotDatabase(FAKE_DB_DIR);
-    const accounts: Account[] = [
-      {
-        account_id: 'checking1',
-        current_balance: 5000,
-        name: 'Checking',
-        account_type: 'checking',
-        // no holdings property
-      },
-      {
-        account_id: 'inv1',
-        current_balance: 10000,
-        name: 'Investment',
-        account_type: 'investment',
-        holdings: [
-          {
-            security_id: 'sec1',
-            account_id: 'inv1',
-            cost_basis: 15000,
-            institution_price: 185.5,
-            institution_value: 18550,
-            quantity: 100,
-            iso_currency_code: 'USD',
-          },
-        ],
-      },
-    ];
-    db._injectDataForTesting({
-      accounts,
-      securities: [...mockSecurities],
-      transactions: [],
-      recurring: [],
-      budgets: [],
-      goals: [],
-      goalHistory: [],
-      investmentPrices: [],
-      investmentSplits: [],
-      items: [],
-      userCategories: [],
-      userAccounts: [],
-      categoryNameMap: new Map(),
-      accountNameMap: new Map(),
+    const tools = createHoldingsTools({
+      accounts: [
+        {
+          account_id: 'checking1',
+          current_balance: 5000,
+          name: 'Checking',
+          account_type: 'checking',
+          // no holdings property
+        },
+        {
+          account_id: 'inv1',
+          current_balance: 10000,
+          name: 'Investment',
+          account_type: 'investment',
+          holdings: [
+            {
+              security_id: 'sec1',
+              account_id: 'inv1',
+              cost_basis: 15000,
+              institution_price: 185.5,
+              institution_value: 18550,
+              quantity: 100,
+              iso_currency_code: 'USD',
+            },
+          ],
+        },
+      ],
     });
-    const tools = new CopilotMoneyTools(db);
     const result = await tools.getHoldings({});
     // Only the investment account's holding should appear
     expect(result.count).toBe(1);
