@@ -138,9 +138,11 @@ describe('extractRefreshToken', () => {
 
   test('Safari skips files larger than 10MB', async () => {
     const fakeToken = 'AMf-' + 'L'.repeat(200);
-    // Create a file > 10MB
-    const bigContent = 'x'.repeat(10_000_001) + fakeToken;
-    writeFileSync(join(tempDir, 'big.sqlite'), bigContent);
+    // Create a file > 10MB using a sparse buffer to avoid 10MB heap allocation
+    const filePath = join(tempDir, 'big.sqlite');
+    writeFileSync(filePath, Buffer.alloc(10_000_001));
+    const { appendFileSync } = await import('fs');
+    appendFileSync(filePath, fakeToken);
 
     const overrides: BrowserConfig[] = [{ name: 'Safari', paths: [tempDir], type: 'safari' }];
 
