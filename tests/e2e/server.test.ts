@@ -4,10 +4,10 @@
  * Tests the full server protocol including tool functionality.
  */
 
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, test, expect, beforeEach } from 'bun:test';
+import { afterAll, describe, test, expect, beforeEach } from 'bun:test';
 import { CopilotMoneyServer } from '../../src/server.js';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
@@ -26,6 +26,7 @@ import type {
 // Temp directory with a dummy .ldb so CopilotDatabase.isAvailable() returns true
 const FAKE_DB_DIR = mkdtempSync(join(tmpdir(), 'copilot-test-'));
 writeFileSync(join(FAKE_DB_DIR, 'dummy.ldb'), '');
+afterAll(() => rmSync(FAKE_DB_DIR, { recursive: true, force: true }));
 
 // Mock data for E2E tests
 // Copilot Money format: positive = expenses, negative = income
@@ -616,6 +617,9 @@ describe('handleCallTool — error handling', () => {
 
     const result = await server.handleCallTool('get_cache_info');
     expect(result.content[0].text).toContain('Database not available');
+    // Server intentionally omits isError for unavailable DB (server.ts:134-145)
+    // so the LLM receives the message as guidance rather than a hard error.
+    expect(result.isError).toBeUndefined();
   });
 
   test('malformed args to write tool returns isError', async () => {
