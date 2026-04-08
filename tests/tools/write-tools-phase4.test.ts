@@ -328,7 +328,9 @@ describe('setTransactionTags', () => {
     });
     expect(updateCalls).toHaveLength(1);
     expect(updateCalls[0].mask).toEqual(['tag_ids']);
-    expect(updateCalls[0].fields.tag_ids).toBeDefined();
+    expect(updateCalls[0].fields.tag_ids).toEqual({
+      arrayValue: { values: [{ stringValue: 'vacation' }] },
+    });
   });
 
   test('returns empty old_tag_ids when transaction has none', async () => {
@@ -413,8 +415,8 @@ describe('reviewTransactions', () => {
   test('defaults reviewed to true', async () => {
     await tools.reviewTransactions({ transaction_ids: ['txn1'] });
     expect(updateCalls).toHaveLength(1);
-    // The fields should contain user_reviewed: true
     expect(updateCalls[0].mask).toEqual(['user_reviewed']);
+    expect(updateCalls[0].fields.user_reviewed).toEqual({ booleanValue: true });
   });
 
   test('can mark transactions as unreviewed', async () => {
