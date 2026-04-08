@@ -4,11 +4,28 @@
  * Tests the full server protocol including tool functionality.
  */
 
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { CopilotMoneyServer } from '../../src/server.js';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
-import type { Transaction, Account } from '../../src/models/index.js';
+import type {
+  Transaction,
+  Account,
+  Recurring,
+  Budget,
+  Goal,
+  GoalHistory,
+  Item,
+  Category,
+  Tag,
+} from '../../src/models/index.js';
+
+// Temp directory with a dummy .ldb so CopilotDatabase.isAvailable() returns true
+const FAKE_DB_DIR = mkdtempSync(join(tmpdir(), 'copilot-test-'));
+writeFileSync(join(FAKE_DB_DIR, 'dummy.ldb'), '');
 
 // Mock data for E2E tests
 // Copilot Money format: positive = expenses, negative = income
@@ -20,6 +37,7 @@ const mockTransactions: Transaction[] = [
     name: 'Coffee Shop',
     category_id: 'food_dining',
     account_id: 'acc1',
+    item_id: 'item1',
   },
   {
     transaction_id: 'txn2',
@@ -28,6 +46,7 @@ const mockTransactions: Transaction[] = [
     name: 'Grocery Store',
     category_id: 'groceries',
     account_id: 'acc1',
+    item_id: 'item1',
   },
   {
     transaction_id: 'txn3',
@@ -36,6 +55,7 @@ const mockTransactions: Transaction[] = [
     name: 'Parking',
     category_id: 'transportation',
     account_id: 'acc2',
+    item_id: 'item1',
   },
   {
     transaction_id: 'txn4',
@@ -44,6 +64,7 @@ const mockTransactions: Transaction[] = [
     name: 'Fast Food',
     category_id: 'food_dining',
     account_id: 'acc1',
+    item_id: 'item1',
   },
 ];
 
@@ -60,6 +81,119 @@ const mockAccounts: Account[] = [
     name: 'Savings Account',
     account_type: 'savings',
   },
+];
+
+const mockRecurring: Recurring[] = [
+  {
+    recurring_id: 'rec1',
+    name: 'Netflix',
+    amount: 15.99,
+    frequency: 'monthly',
+    state: 'active',
+    next_date: '2025-02-01',
+    last_date: '2025-01-01',
+    category_id: 'entertainment',
+  },
+  {
+    recurring_id: 'rec2',
+    name: 'Gym Membership',
+    amount: 49.99,
+    frequency: 'monthly',
+    state: 'active',
+    next_date: '2025-02-15',
+    last_date: '2025-01-15',
+    category_id: 'personal_care',
+  },
+];
+
+const mockBudgets: Budget[] = [
+  {
+    budget_id: 'budget1',
+    name: 'Food Budget',
+    amount: 500,
+    period: 'monthly',
+    category_id: 'food_dining',
+    is_active: true,
+  },
+  {
+    budget_id: 'budget2',
+    name: 'Transportation Budget',
+    amount: 200,
+    period: 'monthly',
+    category_id: 'transportation',
+    is_active: true,
+  },
+];
+
+const mockGoals: Goal[] = [
+  {
+    goal_id: 'goal1',
+    name: 'Emergency Fund',
+    emoji: '🏦',
+    savings: {
+      target_amount: 10000,
+      tracking_type: 'monthly_contribution',
+      tracking_type_monthly_contribution: 500,
+      status: 'active',
+      start_date: '2024-01-01',
+    },
+    created_date: '2024-01-01',
+  },
+  {
+    goal_id: 'goal2',
+    name: 'Vacation',
+    emoji: '✈️',
+    savings: {
+      target_amount: 5000,
+      tracking_type: 'monthly_contribution',
+      tracking_type_monthly_contribution: 200,
+      status: 'active',
+      start_date: '2024-06-01',
+    },
+    created_date: '2024-06-01',
+  },
+];
+
+const mockGoalHistory: GoalHistory[] = [
+  {
+    goal_id: 'goal1',
+    month: '2025-01',
+    current_amount: 6000,
+  },
+  {
+    goal_id: 'goal2',
+    month: '2025-01',
+    current_amount: 1200,
+  },
+];
+
+const mockItems: Item[] = [
+  {
+    item_id: 'item1',
+    institution_name: 'Chase Bank',
+    institution_id: 'ins_3',
+    connection_status: 'active',
+    billed_products: ['transactions'],
+    status_transactions_last_successful_update: '2025-01-20T12:00:00Z',
+  },
+];
+
+const mockUserCategories: Category[] = [
+  {
+    category_id: 'custom_cat_1',
+    name: 'Custom Dining',
+    emoji: '🍔',
+    excluded: false,
+  },
+  {
+    category_id: 'food_dining',
+    name: 'Food & Dining',
+  },
+];
+
+const mockTags: Tag[] = [
+  { tag_id: 'tag_vacation', name: 'Vacation' },
+  { tag_id: 'tag_work', name: 'Work Expense' },
 ];
 
 describe('CopilotMoneyServer E2E', () => {
@@ -238,5 +372,261 @@ describe('CopilotMoneyServer E2E', () => {
       const dbUnavailable = new CopilotDatabase('/nonexistent/path');
       expect(dbUnavailable.isAvailable()).toBe(false);
     });
+  });
+});
+
+// ============================================
+// handleCallTool E2E tests
+// ============================================
+
+/** Create a CopilotDatabase pre-loaded with mock data. */
+function createMockDb(): CopilotDatabase {
+  const db = new CopilotDatabase(FAKE_DB_DIR);
+  (db as any)._transactions = [...mockTransactions];
+  (db as any)._accounts = [...mockAccounts];
+  (db as any)._recurring = [...mockRecurring];
+  (db as any)._budgets = [...mockBudgets];
+  (db as any)._goals = [...mockGoals];
+  (db as any)._goalHistory = [...mockGoalHistory];
+  (db as any)._investmentPrices = [];
+  (db as any)._investmentSplits = [];
+  (db as any)._items = [...mockItems];
+  (db as any)._userCategories = [...mockUserCategories];
+  (db as any)._userAccounts = [];
+  (db as any)._categoryNameMap = new Map<string, string>();
+  (db as any)._accountNameMap = new Map<string, string>();
+  (db as any)._tags = [...mockTags];
+  (db as any)._holdingsHistory = [];
+  (db as any)._securities = [];
+  (db as any)._allCollectionsLoaded = true;
+  (db as any)._cacheLoadedAt = Date.now();
+  return db;
+}
+
+/** No-op Firestore client for write-tool tests. */
+function createMockFirestoreClient(): any {
+  return {
+    requireUserId: async () => 'test-user-123',
+    getUserId: () => 'test-user-123',
+    updateDocument: async () => {},
+    createDocument: async () => {},
+    deleteDocument: async () => {},
+  };
+}
+
+/** Parse the JSON text from a handleCallTool result. */
+function parseToolResult(result: {
+  content: Array<{ type: string; text: string }>;
+  isError?: boolean;
+}): unknown {
+  expect(result.content).toBeArray();
+  expect(result.content.length).toBeGreaterThanOrEqual(1);
+  expect(result.content[0].type).toBe('text');
+  return JSON.parse(result.content[0].text);
+}
+
+describe('handleCallTool — read tools', () => {
+  let server: CopilotMoneyServer;
+
+  beforeEach(() => {
+    const db = createMockDb();
+    server = new CopilotMoneyServer(FAKE_DB_DIR);
+    const tools = new CopilotMoneyTools(db);
+    server._injectForTesting(db, tools);
+  });
+
+  test('get_cache_info returns date range and count', async () => {
+    const result = await server.handleCallTool('get_cache_info');
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.transaction_count).toBe(mockTransactions.length);
+    expect(data.oldest_transaction_date).toBe('2025-01-15');
+    expect(data.newest_transaction_date).toBe('2025-01-20');
+    expect(data.cache_note).toBeString();
+  });
+
+  test('refresh_database clears cache then reloads (graceful error without real LevelDB)', async () => {
+    // refresh_database explicitly clears the in-memory cache and reloads from disk.
+    // With mock data (no real LevelDB files), the reload produces an error which
+    // handleCallTool catches gracefully.
+    const result = await server.handleCallTool('refresh_database');
+    expect(result.isError).toBe(true);
+    expect(result.content[0].type).toBe('text');
+    expect(result.content[0].text).toContain('Error');
+  });
+
+  test('get_categories returns list view with count', async () => {
+    const result = await server.handleCallTool('get_categories', {});
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.view).toBe('list');
+    expect(typeof data.count).toBe('number');
+    expect(data.data).toBeDefined();
+    expect(data.data.categories).toBeArray();
+  });
+
+  test('get_recurring_transactions returns recurring list', async () => {
+    const result = await server.handleCallTool('get_recurring_transactions', {});
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(typeof data.count).toBe('number');
+    expect(typeof data.total_monthly_cost).toBe('number');
+    expect(data.recurring).toBeArray();
+    expect(data.period).toBeDefined();
+  });
+
+  test('get_budgets returns budget list with totals', async () => {
+    const result = await server.handleCallTool('get_budgets', {});
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.count).toBe(mockBudgets.length);
+    expect(typeof data.total_budgeted).toBe('number');
+    expect(data.budgets).toBeArray();
+    expect(data.budgets.length).toBe(mockBudgets.length);
+    expect(data.budgets[0].budget_id).toBeString();
+  });
+
+  test('get_goals returns goals with progress', async () => {
+    const result = await server.handleCallTool('get_goals', {});
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.count).toBe(mockGoals.length);
+    expect(typeof data.total_target).toBe('number');
+    expect(typeof data.total_saved).toBe('number');
+    expect(data.goals).toBeArray();
+    expect(data.goals.length).toBe(mockGoals.length);
+    // Verify goal history was joined (current_amount populated from mockGoalHistory)
+    const emergencyFund = data.goals.find((g: any) => g.goal_id === 'goal1');
+    expect(emergencyFund.current_amount).toBe(6000);
+    expect(emergencyFund.target_amount).toBe(10000);
+  });
+
+  test('get_connection_status returns summary and connections', async () => {
+    const result = await server.handleCallTool('get_connection_status');
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.summary).toBeDefined();
+    expect(typeof data.summary.total).toBe('number');
+    expect(typeof data.summary.connected).toBe('number');
+    expect(typeof data.summary.needs_attention).toBe('number');
+    expect(data.connections).toBeArray();
+    expect(data.connections.length).toBe(mockItems.length);
+    expect(data.connections[0].institution_name).toBe('Chase Bank');
+    expect(data.connections[0].status).toBe('connected');
+  });
+
+  test('get_transactions through handleCallTool returns structured data', async () => {
+    const result = await server.handleCallTool('get_transactions', { limit: 10 });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(typeof data.count).toBe('number');
+    expect(data.transactions).toBeArray();
+    expect(data.count).toBeLessThanOrEqual(10);
+  });
+
+  test('get_accounts through handleCallTool returns structured data', async () => {
+    const result = await server.handleCallTool('get_accounts', {});
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(typeof data.count).toBe('number');
+    expect(typeof data.total_balance).toBe('number');
+    expect(data.accounts).toBeArray();
+  });
+});
+
+describe('handleCallTool — write tools', () => {
+  let writeServer: CopilotMoneyServer;
+  let db: CopilotDatabase;
+
+  beforeEach(() => {
+    db = createMockDb();
+    writeServer = new CopilotMoneyServer(FAKE_DB_DIR, undefined, true);
+    const writeTools = new CopilotMoneyTools(db, createMockFirestoreClient());
+    writeServer._injectForTesting(db, writeTools);
+  });
+
+  test('set_transaction_category updates category', async () => {
+    const result = await writeServer.handleCallTool('set_transaction_category', {
+      transaction_id: 'txn1',
+      category_id: 'custom_cat_1',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.transaction_id).toBe('txn1');
+    expect(data.new_category_id).toBe('custom_cat_1');
+    expect(data.old_category_id).toBe('food_dining');
+  });
+
+  test('create_tag creates a new tag', async () => {
+    const result = await writeServer.handleCallTool('create_tag', {
+      name: 'Business Trip',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.tag_id).toBe('business_trip');
+    expect(data.name).toBe('Business Trip');
+  });
+
+  test('create_budget creates a new budget', async () => {
+    const result = await writeServer.handleCallTool('create_budget', {
+      category_id: 'custom_cat_1',
+      amount: 300,
+      period: 'monthly',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.category_id).toBe('custom_cat_1');
+    expect(data.amount).toBe(300);
+    expect(data.period).toBe('monthly');
+    expect(data.budget_id).toBeString();
+  });
+});
+
+describe('handleCallTool — error handling', () => {
+  test('unknown tool returns isError with message', async () => {
+    const db = createMockDb();
+    const server = new CopilotMoneyServer(FAKE_DB_DIR);
+    server._injectForTesting(db, new CopilotMoneyTools(db));
+
+    const result = await server.handleCallTool('nonexistent_tool', {});
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Unknown tool');
+  });
+
+  test('write tool on read-only server returns isError with --write hint', async () => {
+    const db = createMockDb();
+    const server = new CopilotMoneyServer(FAKE_DB_DIR);
+    server._injectForTesting(db, new CopilotMoneyTools(db));
+
+    const result = await server.handleCallTool('set_transaction_category', {
+      transaction_id: 'txn1',
+      category_id: 'food_dining',
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('--write');
+  });
+
+  test('database unavailable returns informative message', async () => {
+    const badDb = new CopilotDatabase('/nonexistent/path');
+    const server = new CopilotMoneyServer(FAKE_DB_DIR);
+    server._injectForTesting(badDb, new CopilotMoneyTools(badDb));
+
+    const result = await server.handleCallTool('get_cache_info');
+    expect(result.content[0].text).toContain('Database not available');
+  });
+
+  test('malformed args to write tool returns isError', async () => {
+    const db = createMockDb();
+    const writeServer = new CopilotMoneyServer(FAKE_DB_DIR, undefined, true);
+    writeServer._injectForTesting(db, new CopilotMoneyTools(db, createMockFirestoreClient()));
+
+    const result = await writeServer.handleCallTool('set_transaction_category', {
+      category_id: 'food_dining',
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Error');
   });
 });
