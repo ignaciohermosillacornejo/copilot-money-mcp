@@ -197,6 +197,76 @@ describe('extractRefreshToken', () => {
     await expect(extractRefreshToken(overrides)).rejects.toThrow('No Copilot Money session found');
   });
 
+  test('chromium: handles unreadable directory (readdirSync catch)', async () => {
+    // Create a file where a directory is expected — readdirSync will throw ENOTDIR
+    const fakeDirPath = join(tempDir, 'not-a-dir');
+    writeFileSync(fakeDirPath, 'I am a file, not a directory');
+
+    const overrides: BrowserConfig[] = [
+      { name: 'TestBrowser', paths: [fakeDirPath], type: 'chromium' },
+    ];
+
+    await expect(extractRefreshToken(overrides)).rejects.toThrow('No Copilot Money session found');
+  });
+
+  test('chromium: handles unreadable .ldb file (readFileSync catch)', async () => {
+    const ldbDir = join(tempDir, 'leveldb-unreadable');
+    mkdirSync(ldbDir, { recursive: true });
+    // Create a symlink to a non-existent file — readFileSync will throw ENOENT
+    const { symlinkSync } = await import('fs');
+    symlinkSync('/nonexistent/target/file', join(ldbDir, '000001.ldb'));
+
+    const overrides: BrowserConfig[] = [{ name: 'TestBrowser', paths: [ldbDir], type: 'chromium' }];
+
+    await expect(extractRefreshToken(overrides)).rejects.toThrow('No Copilot Money session found');
+  });
+
+  test('firefox: handles unreadable IDB file (readFileSync catch)', async () => {
+    const profileDir = join(tempDir, 'profile.default');
+    const idbDir = join(profileDir, 'storage/default/https+++app.copilot.money/idb');
+    mkdirSync(idbDir, { recursive: true });
+    // Create a symlink to a non-existent file
+    const { symlinkSync } = await import('fs');
+    symlinkSync('/nonexistent/target', join(idbDir, 'data.sqlite'));
+
+    const overrides: BrowserConfig[] = [{ name: 'Firefox', paths: [tempDir], type: 'firefox' }];
+
+    await expect(extractRefreshToken(overrides)).rejects.toThrow('No Copilot Money session found');
+  });
+
+  test('firefox: handles unreadable profiles dir (outer catch)', async () => {
+    // Point to a file instead of directory — readdirSync with withFileTypes will throw
+    const fakePath = join(tempDir, 'firefox-file');
+    writeFileSync(fakePath, 'not a directory');
+
+    // But existsSync will return true — the outer catch should handle the ENOTDIR
+    const overrides: BrowserConfig[] = [{ name: 'Firefox', paths: [fakePath], type: 'firefox' }];
+
+    await expect(extractRefreshToken(overrides)).rejects.toThrow('No Copilot Money session found');
+  });
+
+  test('safari: handles unreadable file (readFileSync/statSync catch)', async () => {
+    const safariDir = join(tempDir, 'safari-unreadable');
+    mkdirSync(safariDir, { recursive: true });
+    // Create a symlink to a non-existent file — statSync will throw
+    const { symlinkSync } = await import('fs');
+    symlinkSync('/nonexistent/target', join(safariDir, 'token.db'));
+
+    const overrides: BrowserConfig[] = [{ name: 'Safari', paths: [safariDir], type: 'safari' }];
+
+    await expect(extractRefreshToken(overrides)).rejects.toThrow('No Copilot Money session found');
+  });
+
+  test('safari: handles unreadable top-level dir (outer catch)', async () => {
+    // Point to a file instead of directory
+    const fakePath = join(tempDir, 'safari-file');
+    writeFileSync(fakePath, 'not a directory');
+
+    const overrides: BrowserConfig[] = [{ name: 'Safari', paths: [fakePath], type: 'safari' }];
+
+    await expect(extractRefreshToken(overrides)).rejects.toThrow('No Copilot Money session found');
+  });
+
   test('skips first browser if no token, finds in second', async () => {
     const dir1 = join(tempDir, 'browser1');
     const dir2 = join(tempDir, 'browser2');
