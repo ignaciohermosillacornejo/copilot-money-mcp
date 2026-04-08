@@ -21,6 +21,9 @@ import {
   KNOWN_PERIODS,
   RECURRING_STATES,
 } from '../models/index.js';
+import type { InvestmentPerformance, TwrHolding } from '../models/investment-performance.js';
+import type { Security } from '../models/security.js';
+import type { GoalHistory } from '../models/goal-history.js';
 import { isItemHealthy, itemNeedsAttention, getItemDisplayName } from '../models/item.js';
 import {
   getRootCategories,
@@ -33,6 +36,23 @@ import {
 // ============================================
 // Category Constants
 // ============================================
+
+// ============================================
+// Date Helpers
+// ============================================
+
+/**
+ * Returns the ISO 8601 week key (YYYY-Www) for a given YYYY-MM-DD date string.
+ * Used for downsampling daily balance history to weekly granularity.
+ */
+function getISOWeekKey(dateStr: string): string {
+  const d = new Date(dateStr + 'T00:00:00Z');
+  const dayOfWeek = d.getUTCDay() || 7; // Mon=1, Sun=7
+  d.setUTCDate(d.getUTCDate() + 4 - dayOfWeek); // Thursday of the week
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNum = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(weekNum).padStart(2, '0')}`;
+}
 
 // ============================================
 // Shared Validation Helpers
@@ -3594,6 +3614,349 @@ export class CopilotMoneyTools {
       target_amount,
     };
   }
+
+  /**
+   * Get daily balance snapshots for accounts over time.
+   *
+   * Supports daily, weekly, and monthly granularity. Weekly and monthly modes
+   * downsample by keeping the last data point per period.
+   */
+  async getBalanceHistory(options: {
+    account_id?: string;
+    start_date?: string;
+    end_date?: string;
+    granularity: 'daily' | 'weekly' | 'monthly';
+    limit?: number;
+    offset?: number;
+  }): Promise<{
+    count: number;
+    total_count: number;
+    offset: number;
+    has_more: boolean;
+    accounts: string[];
+    balance_history: Array<{
+      date: string;
+      account_id: string;
+      account_name?: string;
+      current_balance?: number;
+      available_balance?: number;
+      limit?: number;
+    }>;
+  }> {
+    const { account_id, start_date, end_date, granularity } = options;
+    const validatedLimit = validateLimit(options.limit, DEFAULT_QUERY_LIMIT);
+    const validatedOffset = validateOffset(options.offset);
+
+    if (!granularity) {
+      throw new Error('granularity is required — must be "daily", "weekly", or "monthly"');
+    }
+    const validGranularities = ['daily', 'weekly', 'monthly'] as const;
+    if (!(validGranularities as readonly string[]).includes(granularity)) {
+      throw new Error(
+        `Invalid granularity: ${granularity}. Must be one of: ${validGranularities.join(', ')}`
+      );
+    }
+    if (start_date) validateDate(start_date, 'start_date');
+    if (end_date) validateDate(end_date, 'end_date');
+
+    const raw = await this.db.getBalanceHistory({
+      accountId: account_id,
+      startDate: start_date,
+      endDate: end_date,
+    });
+
+    // Downsample if needed
+    let sampled = raw;
+    if (granularity === 'weekly' || granularity === 'monthly') {
+      // Group by account_id + period key, keep last date per group
+      const grouped = new Map<string, (typeof raw)[0]>();
+      for (const row of raw) {
+        const periodKey =
+          granularity === 'monthly'
+            ? `${row.account_id}:${row.date.slice(0, 7)}` // YYYY-MM
+            : `${row.account_id}:${getISOWeekKey(row.date)}`; // YYYY-Www
+        const existing = grouped.get(periodKey);
+        if (!existing || row.date > existing.date) {
+          grouped.set(periodKey, row);
+        }
+      }
+      sampled = [...grouped.values()].sort((a, b) => {
+        const acctCmp = a.account_id.localeCompare(b.account_id);
+        if (acctCmp !== 0) return acctCmp;
+        return b.date.localeCompare(a.date);
+      });
+    }
+
+    // Enrich with account names
+    const accountNameMap = await this.db.getAccountNameMap();
+    const accountSet = new Set<string>();
+
+    const enriched = sampled.map((row) => {
+      accountSet.add(row.account_id);
+      return {
+        date: row.date,
+        account_id: row.account_id,
+        account_name: accountNameMap.get(row.account_id),
+        current_balance: row.current_balance,
+        available_balance: row.available_balance,
+        limit: row.limit ?? undefined,
+      };
+    });
+
+    const totalCount = enriched.length;
+    const hasMore = validatedOffset + validatedLimit < totalCount;
+    const paged = enriched.slice(validatedOffset, validatedOffset + validatedLimit);
+
+    return {
+      count: paged.length,
+      total_count: totalCount,
+      offset: validatedOffset,
+      has_more: hasMore,
+      accounts: [...accountSet].sort(),
+      balance_history: paged,
+    };
+  }
+
+  /**
+   * Get per-security investment performance data.
+   */
+  async getInvestmentPerformance(
+    options: {
+      ticker_symbol?: string;
+      security_id?: string;
+      limit?: number;
+      offset?: number;
+    } = {}
+  ): Promise<{
+    count: number;
+    total_count: number;
+    offset: number;
+    has_more: boolean;
+    performance: Array<
+      InvestmentPerformance & {
+        ticker_symbol?: string;
+        name?: string;
+      }
+    >;
+  }> {
+    const { ticker_symbol, security_id } = options;
+    const validatedLimit = validateLimit(options.limit, DEFAULT_QUERY_LIMIT);
+    const validatedOffset = validateOffset(options.offset);
+
+    const securityMap = await this.db.getSecurityMap();
+
+    // Resolve ticker_symbol to security IDs
+    let tickerSecurityIds: Set<string> | undefined;
+    if (ticker_symbol) {
+      tickerSecurityIds = new Set<string>();
+      for (const [id, sec] of securityMap) {
+        if (sec.ticker_symbol?.toLowerCase() === ticker_symbol.toLowerCase()) {
+          tickerSecurityIds.add(id);
+        }
+      }
+    }
+
+    let data = await this.db.getInvestmentPerformance(
+      security_id ? { securityId: security_id } : {}
+    );
+
+    // Apply ticker filter
+    if (tickerSecurityIds) {
+      data = data.filter((p) => p.security_id && tickerSecurityIds.has(p.security_id));
+    }
+
+    // Enrich with security data
+    const enriched = data.map((p) => {
+      const sec = p.security_id ? securityMap.get(p.security_id) : undefined;
+      return {
+        ...p,
+        ticker_symbol: sec?.ticker_symbol,
+        name: sec?.name,
+      };
+    });
+
+    const totalCount = enriched.length;
+    const hasMore = validatedOffset + validatedLimit < totalCount;
+    const paged = enriched.slice(validatedOffset, validatedOffset + validatedLimit);
+
+    return {
+      count: paged.length,
+      total_count: totalCount,
+      offset: validatedOffset,
+      has_more: hasMore,
+      performance: paged,
+    };
+  }
+
+  /**
+   * Get time-weighted return (TWR) monthly data for investment holdings.
+   */
+  async getTwrReturns(
+    options: {
+      ticker_symbol?: string;
+      security_id?: string;
+      start_month?: string;
+      end_month?: string;
+      limit?: number;
+      offset?: number;
+    } = {}
+  ): Promise<{
+    count: number;
+    total_count: number;
+    offset: number;
+    has_more: boolean;
+    twr_returns: Array<
+      TwrHolding & {
+        ticker_symbol?: string;
+        name?: string;
+      }
+    >;
+  }> {
+    const { ticker_symbol, security_id, start_month, end_month } = options;
+    const validatedLimit = validateLimit(options.limit, DEFAULT_QUERY_LIMIT);
+    const validatedOffset = validateOffset(options.offset);
+
+    const securityMap = await this.db.getSecurityMap();
+
+    // Resolve ticker to security IDs
+    let tickerSecurityIds: Set<string> | undefined;
+    if (ticker_symbol) {
+      tickerSecurityIds = new Set<string>();
+      for (const [id, sec] of securityMap) {
+        if (sec.ticker_symbol?.toLowerCase() === ticker_symbol.toLowerCase()) {
+          tickerSecurityIds.add(id);
+        }
+      }
+    }
+
+    let data = await this.db.getTwrHoldings({
+      securityId: security_id,
+      startMonth: start_month,
+      endMonth: end_month,
+    });
+
+    // Apply ticker filter
+    if (tickerSecurityIds) {
+      data = data.filter((t) => t.security_id && tickerSecurityIds.has(t.security_id));
+    }
+
+    // Enrich with security data
+    const enriched = data.map((t) => {
+      const sec = t.security_id ? securityMap.get(t.security_id) : undefined;
+      return {
+        ...t,
+        ticker_symbol: sec?.ticker_symbol,
+        name: sec?.name,
+      };
+    });
+
+    const totalCount = enriched.length;
+    const hasMore = validatedOffset + validatedLimit < totalCount;
+    const paged = enriched.slice(validatedOffset, validatedOffset + validatedLimit);
+
+    return {
+      count: paged.length,
+      total_count: totalCount,
+      offset: validatedOffset,
+      has_more: hasMore,
+      twr_returns: paged,
+    };
+  }
+
+  /**
+   * Get security master data — stocks, ETFs, mutual funds, and cash equivalents.
+   */
+  async getSecurities(
+    options: {
+      ticker_symbol?: string;
+      type?: string;
+      limit?: number;
+      offset?: number;
+    } = {}
+  ): Promise<{
+    count: number;
+    total_count: number;
+    offset: number;
+    has_more: boolean;
+    securities: Security[];
+  }> {
+    const { ticker_symbol, type } = options;
+    const validatedLimit = validateLimit(options.limit, DEFAULT_QUERY_LIMIT);
+    const validatedOffset = validateOffset(options.offset);
+
+    const securities = await this.db.getSecurities({
+      tickerSymbol: ticker_symbol,
+      type,
+    });
+
+    const totalCount = securities.length;
+    const hasMore = validatedOffset + validatedLimit < totalCount;
+    const paged = securities.slice(validatedOffset, validatedOffset + validatedLimit);
+
+    return {
+      count: paged.length,
+      total_count: totalCount,
+      offset: validatedOffset,
+      has_more: hasMore,
+      securities: paged,
+    };
+  }
+
+  /**
+   * Get monthly progress snapshots for financial goals.
+   */
+  async getGoalHistory(
+    options: {
+      goal_id?: string;
+      start_month?: string;
+      end_month?: string;
+      limit?: number;
+      offset?: number;
+    } = {}
+  ): Promise<{
+    count: number;
+    total_count: number;
+    offset: number;
+    has_more: boolean;
+    goal_history: Array<
+      GoalHistory & {
+        goal_name?: string;
+      }
+    >;
+  }> {
+    const { goal_id, start_month, end_month } = options;
+    const validatedLimit = validateLimit(options.limit, DEFAULT_QUERY_LIMIT);
+    const validatedOffset = validateOffset(options.offset);
+
+    const history = await this.db.getGoalHistory(goal_id, {
+      startMonth: start_month,
+      endMonth: end_month,
+    });
+
+    // Build goal name map for enrichment
+    const goals = await this.db.getGoals(false);
+    const goalNameMap = new Map<string, string>();
+    for (const g of goals) {
+      if (g.name) goalNameMap.set(g.goal_id, g.name);
+    }
+
+    const enriched = history.map((h) => ({
+      ...h,
+      goal_name: goalNameMap.get(h.goal_id),
+    }));
+
+    const totalCount = enriched.length;
+    const hasMore = validatedOffset + validatedLimit < totalCount;
+    const paged = enriched.slice(validatedOffset, validatedOffset + validatedLimit);
+
+    return {
+      count: paged.length,
+      total_count: totalCount,
+      offset: validatedOffset,
+      has_more: hasMore,
+      goal_history: paged,
+    };
+  }
 }
 
 /**
@@ -4071,6 +4434,186 @@ export function createToolSchemas(): ToolSchema[] {
             type: 'boolean',
             description: 'Include monthly price/quantity snapshots per holding (default: false)',
             default: false,
+          },
+          limit: {
+            type: 'integer',
+            description: 'Maximum number of results (default: 100, max: 10000)',
+            default: 100,
+          },
+          offset: {
+            type: 'integer',
+            description: 'Number of results to skip for pagination (default: 0)',
+            default: 0,
+          },
+        },
+      },
+      annotations: { readOnlyHint: true },
+    },
+    {
+      name: 'get_balance_history',
+      description:
+        'Get daily balance snapshots for accounts over time. Returns current_balance, ' +
+        'available_balance, and limit per day. Requires a granularity parameter (daily, weekly, ' +
+        'or monthly) to control response size. Weekly and monthly modes downsample by keeping ' +
+        'the last data point per period. Filter by account_id and date range.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          account_id: {
+            type: 'string',
+            description: 'Filter by account ID',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Start date (YYYY-MM-DD)',
+          },
+          end_date: {
+            type: 'string',
+            description: 'End date (YYYY-MM-DD)',
+          },
+          granularity: {
+            type: 'string',
+            enum: ['daily', 'weekly', 'monthly'],
+            description:
+              'Required. Controls response density: daily (every day), weekly (one per week), ' +
+              'or monthly (one per month). Use weekly or monthly for longer time ranges.',
+          },
+          limit: {
+            type: 'integer',
+            description: 'Maximum number of results (default: 100, max: 10000)',
+            default: 100,
+          },
+          offset: {
+            type: 'integer',
+            description: 'Number of results to skip for pagination (default: 0)',
+            default: 0,
+          },
+        },
+        required: ['granularity'],
+      },
+      annotations: { readOnlyHint: true },
+    },
+    {
+      name: 'get_investment_performance',
+      description:
+        'Get per-security investment performance data. Returns raw performance documents ' +
+        'from Firestore, enriched with ticker symbol and name from the securities collection. ' +
+        'Filter by ticker symbol or security ID.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          ticker_symbol: {
+            type: 'string',
+            description: 'Filter by ticker symbol (e.g., "AAPL", "VTSAX")',
+          },
+          security_id: {
+            type: 'string',
+            description: 'Filter by security ID (SHA256 hash)',
+          },
+          limit: {
+            type: 'integer',
+            description: 'Maximum number of results (default: 100, max: 10000)',
+            default: 100,
+          },
+          offset: {
+            type: 'integer',
+            description: 'Number of results to skip for pagination (default: 0)',
+            default: 0,
+          },
+        },
+      },
+      annotations: { readOnlyHint: true },
+    },
+    {
+      name: 'get_twr_returns',
+      description:
+        'Get time-weighted return (TWR) monthly data for investment holdings. Returns raw ' +
+        'monthly TWR documents with epoch-millisecond keyed history entries. ' +
+        'Filter by ticker symbol, security ID, or month range (YYYY-MM).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          ticker_symbol: {
+            type: 'string',
+            description: 'Filter by ticker symbol (e.g., "AAPL", "VTSAX")',
+          },
+          security_id: {
+            type: 'string',
+            description: 'Filter by security ID (SHA256 hash)',
+          },
+          start_month: {
+            type: 'string',
+            description: 'Start month (YYYY-MM)',
+          },
+          end_month: {
+            type: 'string',
+            description: 'End month (YYYY-MM)',
+          },
+          limit: {
+            type: 'integer',
+            description: 'Maximum number of results (default: 100, max: 10000)',
+            default: 100,
+          },
+          offset: {
+            type: 'integer',
+            description: 'Number of results to skip for pagination (default: 0)',
+            default: 0,
+          },
+        },
+      },
+      annotations: { readOnlyHint: true },
+    },
+    {
+      name: 'get_securities',
+      description:
+        'Get security master data — stocks, ETFs, mutual funds, and cash equivalents. ' +
+        'Returns ticker symbol, name, type, current price, ISIN/CUSIP identifiers, ' +
+        'and update metadata. Filter by ticker symbol or security type.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          ticker_symbol: {
+            type: 'string',
+            description: 'Filter by ticker symbol (e.g., "AAPL", "VTSAX")',
+          },
+          type: {
+            type: 'string',
+            description: 'Filter by security type (e.g., "equity", "etf", "mutual fund")',
+          },
+          limit: {
+            type: 'integer',
+            description: 'Maximum number of results (default: 100, max: 10000)',
+            default: 100,
+          },
+          offset: {
+            type: 'integer',
+            description: 'Number of results to skip for pagination (default: 0)',
+            default: 0,
+          },
+        },
+      },
+      annotations: { readOnlyHint: true },
+    },
+    {
+      name: 'get_goal_history',
+      description:
+        'Get monthly progress snapshots for financial goals. Returns current_amount, ' +
+        'target_amount, daily data points, and contribution records per month. ' +
+        'Filter by goal_id or month range (YYYY-MM).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          goal_id: {
+            type: 'string',
+            description: 'Filter by goal ID',
+          },
+          start_month: {
+            type: 'string',
+            description: 'Start month (YYYY-MM)',
+          },
+          end_month: {
+            type: 'string',
+            description: 'End month (YYYY-MM)',
           },
           limit: {
             type: 'integer',

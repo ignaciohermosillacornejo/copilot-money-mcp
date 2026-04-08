@@ -77,6 +77,26 @@
       "description": "Get current investment holdings with position-level detail including ticker, quantity, price, average cost, and total return per holding."
     },
     {
+      "name": "get_balance_history",
+      "description": "Get daily balance snapshots for accounts over time. Requires granularity (daily, weekly, or monthly) to control response size."
+    },
+    {
+      "name": "get_investment_performance",
+      "description": "Get per-security investment performance data, enriched with ticker symbol and name from the securities collection."
+    },
+    {
+      "name": "get_twr_returns",
+      "description": "Get time-weighted return (TWR) monthly data for investment holdings. Filter by ticker symbol, security ID, or month range."
+    },
+    {
+      "name": "get_securities",
+      "description": "Get security master data — stocks, ETFs, mutual funds, and cash equivalents. Filter by ticker symbol or security type."
+    },
+    {
+      "name": "get_goal_history",
+      "description": "Get monthly progress snapshots for financial goals. Filter by goal_id or month range."
+    },
+    {
       "name": "set_transaction_category",
       "description": "Change the category of a transaction."
     },

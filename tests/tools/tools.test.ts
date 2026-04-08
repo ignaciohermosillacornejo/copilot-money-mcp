@@ -204,8 +204,8 @@ describe('CopilotMoneyTools', () => {
     // Add required cache fields for async database methods
     (db as any)._recurring = [];
     (db as any)._budgets = [];
-    (db as any)._goals = [];
-    (db as any)._goalHistory = [];
+    (db as any)._goals = [...mockGoals];
+    (db as any)._goalHistory = [...mockGoalHistoryWrongOrder];
     (db as any)._investmentPrices = [];
     (db as any)._investmentSplits = [];
     (db as any)._items = [];
@@ -213,6 +213,105 @@ describe('CopilotMoneyTools', () => {
     (db as any)._userAccounts = [];
     (db as any)._categoryNameMap = new Map<string, string>();
     (db as any)._accountNameMap = new Map<string, string>();
+    // Mock data for new tools
+    (db as any)._securities = [
+      {
+        security_id: 'sec-1',
+        ticker_symbol: 'AAPL',
+        name: 'Apple Inc.',
+        type: 'equity',
+        current_price: 175.5,
+      },
+      {
+        security_id: 'sec-2',
+        ticker_symbol: 'VTSAX',
+        name: 'Vanguard Total Stock Market',
+        type: 'mutual fund',
+        current_price: 105.2,
+      },
+      {
+        security_id: 'sec-3',
+        ticker_symbol: 'BND',
+        name: 'Vanguard Bond ETF',
+        type: 'etf',
+        current_price: 72.3,
+      },
+    ];
+    (db as any)._balanceHistory = [
+      {
+        balance_id: 'i1:acc-1:2024-01-01',
+        date: '2024-01-01',
+        item_id: 'i1',
+        account_id: 'acc-1',
+        current_balance: 1000,
+      },
+      {
+        balance_id: 'i1:acc-1:2024-01-08',
+        date: '2024-01-08',
+        item_id: 'i1',
+        account_id: 'acc-1',
+        current_balance: 1100,
+      },
+      {
+        balance_id: 'i1:acc-1:2024-01-15',
+        date: '2024-01-15',
+        item_id: 'i1',
+        account_id: 'acc-1',
+        current_balance: 1200,
+      },
+      {
+        balance_id: 'i1:acc-1:2024-01-22',
+        date: '2024-01-22',
+        item_id: 'i1',
+        account_id: 'acc-1',
+        current_balance: 1300,
+      },
+      {
+        balance_id: 'i1:acc-1:2024-01-29',
+        date: '2024-01-29',
+        item_id: 'i1',
+        account_id: 'acc-1',
+        current_balance: 1400,
+      },
+      {
+        balance_id: 'i1:acc-1:2024-02-05',
+        date: '2024-02-05',
+        item_id: 'i1',
+        account_id: 'acc-1',
+        current_balance: 1500,
+      },
+      {
+        balance_id: 'i1:acc-2:2024-01-01',
+        date: '2024-01-01',
+        item_id: 'i1',
+        account_id: 'acc-2',
+        current_balance: 5000,
+      },
+    ];
+    (db as any)._investmentPerformance = [
+      { performance_id: 'perf-1', security_id: 'sec-1', type: 'equity' },
+      { performance_id: 'perf-2', security_id: 'sec-2', type: 'etf' },
+    ];
+    (db as any)._twrHoldings = [
+      {
+        twr_id: 'twr-1',
+        security_id: 'sec-1',
+        month: '2024-01',
+        history: { '1704067200000': { value: 100 } },
+      },
+      {
+        twr_id: 'twr-2',
+        security_id: 'sec-1',
+        month: '2024-02',
+        history: { '1706745600000': { value: 105 } },
+      },
+      {
+        twr_id: 'twr-3',
+        security_id: 'sec-2',
+        month: '2024-03',
+        history: { '1709251200000': { value: 200 } },
+      },
+    ];
 
     tools = new CopilotMoneyTools(db);
   });
@@ -1288,9 +1387,9 @@ describe('refreshDatabase', () => {
 });
 
 describe('createToolSchemas', () => {
-  test('returns 12 tool schemas', async () => {
+  test('returns 17 tool schemas', async () => {
     const schemas = createToolSchemas();
-    expect(schemas).toHaveLength(12);
+    expect(schemas).toHaveLength(17);
   });
 
   test('all tools have readOnlyHint: true', async () => {
@@ -1330,9 +1429,15 @@ describe('createToolSchemas', () => {
     expect(names).toContain('get_investment_prices');
     expect(names).toContain('get_investment_splits');
     expect(names).toContain('get_holdings');
+    // New tools
+    expect(names).toContain('get_balance_history');
+    expect(names).toContain('get_investment_performance');
+    expect(names).toContain('get_twr_returns');
+    expect(names).toContain('get_securities');
+    expect(names).toContain('get_goal_history');
 
-    // Should have exactly 12 tools
-    expect(names.length).toBe(12);
+    // Should have exactly 17 tools
+    expect(names.length).toBe(17);
   });
 });
 
@@ -3169,5 +3274,413 @@ describe('createCategory', () => {
 
     await authTools.createCategory({ name: 'New Category' });
     expect(createCalls[createCalls.length - 1].collection).toBe('users/auth-user-456/categories');
+  });
+});
+
+describe('getBalanceHistory', () => {
+  let db: CopilotDatabase;
+  let tools: CopilotMoneyTools;
+
+  beforeEach(() => {
+    db = new CopilotDatabase('/fake/path');
+    (db as any)._accounts = [];
+    (db as any)._accountNameMap = new Map<string, string>([
+      ['acc-1', 'Checking'],
+      ['acc-2', 'Savings'],
+    ]);
+    (db as any)._balanceHistory = [
+      {
+        balance_id: 'i1:acc-1:2024-01-01',
+        date: '2024-01-01',
+        item_id: 'i1',
+        account_id: 'acc-1',
+        current_balance: 1000,
+      },
+      {
+        balance_id: 'i1:acc-1:2024-01-08',
+        date: '2024-01-08',
+        item_id: 'i1',
+        account_id: 'acc-1',
+        current_balance: 1100,
+      },
+      {
+        balance_id: 'i1:acc-1:2024-01-15',
+        date: '2024-01-15',
+        item_id: 'i1',
+        account_id: 'acc-1',
+        current_balance: 1200,
+      },
+      {
+        balance_id: 'i1:acc-1:2024-01-22',
+        date: '2024-01-22',
+        item_id: 'i1',
+        account_id: 'acc-1',
+        current_balance: 1300,
+      },
+      {
+        balance_id: 'i1:acc-1:2024-01-29',
+        date: '2024-01-29',
+        item_id: 'i1',
+        account_id: 'acc-1',
+        current_balance: 1400,
+      },
+      {
+        balance_id: 'i1:acc-1:2024-02-05',
+        date: '2024-02-05',
+        item_id: 'i1',
+        account_id: 'acc-1',
+        current_balance: 1500,
+      },
+      {
+        balance_id: 'i1:acc-2:2024-01-01',
+        date: '2024-01-01',
+        item_id: 'i1',
+        account_id: 'acc-2',
+        current_balance: 5000,
+      },
+    ];
+    tools = new CopilotMoneyTools(db);
+  });
+
+  test('requires granularity parameter', async () => {
+    await expect(tools.getBalanceHistory({} as any)).rejects.toThrow('granularity is required');
+  });
+
+  test('rejects invalid granularity', async () => {
+    await expect(tools.getBalanceHistory({ granularity: 'hourly' as any })).rejects.toThrow(
+      'Invalid granularity'
+    );
+  });
+
+  test('returns daily balance history', async () => {
+    const result = await tools.getBalanceHistory({ granularity: 'daily' });
+    expect(result.count).toBeGreaterThanOrEqual(0);
+    expect(result).toHaveProperty('total_count');
+    expect(result).toHaveProperty('has_more');
+    expect(result).toHaveProperty('balance_history');
+  });
+
+  test('downsamples to weekly', async () => {
+    const daily = await tools.getBalanceHistory({ granularity: 'daily' });
+    const weekly = await tools.getBalanceHistory({ granularity: 'weekly' });
+    expect(weekly.total_count).toBeLessThanOrEqual(daily.total_count);
+  });
+
+  test('downsamples to monthly', async () => {
+    const daily = await tools.getBalanceHistory({ granularity: 'daily' });
+    const monthly = await tools.getBalanceHistory({ granularity: 'monthly' });
+    expect(monthly.total_count).toBeLessThanOrEqual(daily.total_count);
+  });
+
+  test('filters by account_id', async () => {
+    const result = await tools.getBalanceHistory({
+      granularity: 'daily',
+      account_id: 'acc-1',
+    });
+    for (const h of result.balance_history) {
+      expect(h.account_id).toBe('acc-1');
+    }
+  });
+
+  test('paginates with limit and offset', async () => {
+    const result = await tools.getBalanceHistory({
+      granularity: 'daily',
+      limit: 2,
+      offset: 0,
+    });
+    expect(result.count).toBeLessThanOrEqual(2);
+  });
+
+  test('enriches with account name', async () => {
+    const result = await tools.getBalanceHistory({ granularity: 'daily', account_id: 'acc-1' });
+    if (result.count > 0) {
+      expect(result.balance_history[0]?.account_name).toBe('Checking');
+    }
+  });
+});
+
+describe('getInvestmentPerformance', () => {
+  let db: CopilotDatabase;
+  let tools: CopilotMoneyTools;
+
+  beforeEach(() => {
+    db = new CopilotDatabase('/fake/path');
+    (db as any)._securities = [
+      {
+        security_id: 'sec-1',
+        ticker_symbol: 'AAPL',
+        name: 'Apple Inc.',
+        type: 'equity',
+        current_price: 175.5,
+      },
+      {
+        security_id: 'sec-2',
+        ticker_symbol: 'VTSAX',
+        name: 'Vanguard Total Stock Market',
+        type: 'mutual fund',
+        current_price: 105.2,
+      },
+    ];
+    (db as any)._investmentPerformance = [
+      { performance_id: 'perf-1', security_id: 'sec-1', type: 'equity' },
+      { performance_id: 'perf-2', security_id: 'sec-2', type: 'etf' },
+    ];
+    tools = new CopilotMoneyTools(db);
+  });
+
+  test('returns all performance data', async () => {
+    const result = await tools.getInvestmentPerformance();
+    expect(result).toHaveProperty('count');
+    expect(result).toHaveProperty('performance');
+    expect(Array.isArray(result.performance)).toBe(true);
+  });
+
+  test('filters by ticker_symbol', async () => {
+    const result = await tools.getInvestmentPerformance({ ticker_symbol: 'AAPL' });
+    expect(Array.isArray(result.performance)).toBe(true);
+    expect(result.performance.length).toBe(1);
+  });
+
+  test('filters by security_id', async () => {
+    const result = await tools.getInvestmentPerformance({ security_id: 'sec-1' });
+    for (const p of result.performance) {
+      expect(p.security_id).toBe('sec-1');
+    }
+  });
+
+  test('enriches with ticker_symbol from security map', async () => {
+    const result = await tools.getInvestmentPerformance();
+    if (result.count > 0) {
+      const hasEnrichedField = result.performance.some(
+        (p) => p.ticker_symbol !== undefined || p.name !== undefined
+      );
+      expect(hasEnrichedField).toBe(true);
+    }
+  });
+
+  test('paginates with limit and offset', async () => {
+    const result = await tools.getInvestmentPerformance({ limit: 1 });
+    expect(result.count).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('getTwrReturns', () => {
+  let db: CopilotDatabase;
+  let tools: CopilotMoneyTools;
+
+  beforeEach(() => {
+    db = new CopilotDatabase('/fake/path');
+    (db as any)._securities = [
+      {
+        security_id: 'sec-1',
+        ticker_symbol: 'AAPL',
+        name: 'Apple Inc.',
+        type: 'equity',
+        current_price: 175.5,
+      },
+      {
+        security_id: 'sec-2',
+        ticker_symbol: 'VTSAX',
+        name: 'Vanguard Total Stock Market',
+        type: 'mutual fund',
+        current_price: 105.2,
+      },
+    ];
+    (db as any)._twrHoldings = [
+      {
+        twr_id: 'twr-1',
+        security_id: 'sec-1',
+        month: '2024-01',
+        history: { '1704067200000': { value: 100 } },
+      },
+      {
+        twr_id: 'twr-2',
+        security_id: 'sec-1',
+        month: '2024-02',
+        history: { '1706745600000': { value: 105 } },
+      },
+      {
+        twr_id: 'twr-3',
+        security_id: 'sec-2',
+        month: '2024-03',
+        history: { '1709251200000': { value: 200 } },
+      },
+    ];
+    tools = new CopilotMoneyTools(db);
+  });
+
+  test('returns all TWR data', async () => {
+    const result = await tools.getTwrReturns();
+    expect(result).toHaveProperty('count');
+    expect(result).toHaveProperty('twr_returns');
+  });
+
+  test('filters by security_id', async () => {
+    const result = await tools.getTwrReturns({ security_id: 'sec-1' });
+    for (const t of result.twr_returns) {
+      expect(t.security_id).toBe('sec-1');
+    }
+  });
+
+  test('filters by month range', async () => {
+    const result = await tools.getTwrReturns({
+      start_month: '2024-01',
+      end_month: '2024-06',
+    });
+    for (const t of result.twr_returns) {
+      if (t.month) {
+        expect(t.month >= '2024-01').toBe(true);
+        expect(t.month <= '2024-06').toBe(true);
+      }
+    }
+  });
+
+  test('enriches with ticker_symbol from security map', async () => {
+    const result = await tools.getTwrReturns();
+    if (result.count > 0) {
+      expect(result.twr_returns[0]).toHaveProperty('ticker_symbol');
+    }
+  });
+
+  test('paginates with limit', async () => {
+    const result = await tools.getTwrReturns({ limit: 1 });
+    expect(result.count).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('getSecurities', () => {
+  let db: CopilotDatabase;
+  let tools: CopilotMoneyTools;
+
+  beforeEach(() => {
+    db = new CopilotDatabase('/fake/path');
+    (db as any)._securities = [
+      {
+        security_id: 'sec-1',
+        ticker_symbol: 'AAPL',
+        name: 'Apple Inc.',
+        type: 'equity',
+        current_price: 175.5,
+      },
+      {
+        security_id: 'sec-2',
+        ticker_symbol: 'VTSAX',
+        name: 'Vanguard Total Stock Market',
+        type: 'mutual fund',
+        current_price: 105.2,
+      },
+      {
+        security_id: 'sec-3',
+        ticker_symbol: 'BND',
+        name: 'Vanguard Bond ETF',
+        type: 'etf',
+        current_price: 72.3,
+      },
+    ];
+    tools = new CopilotMoneyTools(db);
+  });
+
+  test('returns all securities', async () => {
+    const result = await tools.getSecurities();
+    expect(result).toHaveProperty('count');
+    expect(result).toHaveProperty('securities');
+    expect(Array.isArray(result.securities)).toBe(true);
+    expect(result.count).toBe(3);
+  });
+
+  test('filters by ticker_symbol case-insensitively', async () => {
+    const result = await tools.getSecurities({ ticker_symbol: 'aapl' });
+    for (const s of result.securities) {
+      expect(s.ticker_symbol?.toLowerCase()).toBe('aapl');
+    }
+    expect(result.count).toBe(1);
+  });
+
+  test('filters by type', async () => {
+    const result = await tools.getSecurities({ type: 'etf' });
+    for (const s of result.securities) {
+      expect(s.type).toBe('etf');
+    }
+    expect(result.count).toBe(1);
+  });
+
+  test('paginates with limit and offset', async () => {
+    const result = await tools.getSecurities({ limit: 1 });
+    expect(result.count).toBeLessThanOrEqual(1);
+    expect(result).toHaveProperty('has_more');
+    expect(result.has_more).toBe(true);
+  });
+
+  test('returns empty when no match', async () => {
+    const result = await tools.getSecurities({ ticker_symbol: 'XYZ' });
+    expect(result.count).toBe(0);
+    expect(result.securities).toHaveLength(0);
+  });
+});
+
+describe('getGoalHistory', () => {
+  let db: CopilotDatabase;
+  let tools: CopilotMoneyTools;
+
+  beforeEach(() => {
+    db = new CopilotDatabase('/fake/path');
+    (db as any)._goals = [
+      {
+        goal_id: 'goal-1',
+        name: 'Emergency Fund',
+        savings: { target_amount: 10000, status: 'active' },
+      },
+      {
+        goal_id: 'goal-2',
+        name: 'Vacation Fund',
+        savings: { target_amount: 3000, status: 'active' },
+      },
+    ];
+    (db as any)._goalHistory = [
+      { goal_id: 'goal-1', month: '2024-01', current_amount: 500 },
+      { goal_id: 'goal-1', month: '2024-02', current_amount: 1000 },
+      { goal_id: 'goal-1', month: '2024-06', current_amount: 3000 },
+      { goal_id: 'goal-2', month: '2024-03', current_amount: 200 },
+    ];
+    tools = new CopilotMoneyTools(db);
+  });
+
+  test('returns all goal history', async () => {
+    const result = await tools.getGoalHistory();
+    expect(result).toHaveProperty('count');
+    expect(result).toHaveProperty('goal_history');
+    expect(result.total_count).toBe(4);
+  });
+
+  test('filters by goal_id', async () => {
+    const result = await tools.getGoalHistory({ goal_id: 'goal-1' });
+    for (const h of result.goal_history) {
+      expect(h.goal_id).toBe('goal-1');
+    }
+    expect(result.total_count).toBe(3);
+  });
+
+  test('filters by month range', async () => {
+    const result = await tools.getGoalHistory({
+      start_month: '2024-01',
+      end_month: '2024-06',
+    });
+    for (const h of result.goal_history) {
+      expect(h.month >= '2024-01').toBe(true);
+      expect(h.month <= '2024-06').toBe(true);
+    }
+  });
+
+  test('enriches with goal_name', async () => {
+    const result = await tools.getGoalHistory({ goal_id: 'goal-1' });
+    if (result.count > 0) {
+      expect(result.goal_history[0]).toHaveProperty('goal_name');
+      expect(result.goal_history[0]?.goal_name).toBe('Emergency Fund');
+    }
+  });
+
+  test('paginates with limit and offset', async () => {
+    const result = await tools.getGoalHistory({ limit: 1 });
+    expect(result.count).toBeLessThanOrEqual(1);
   });
 });

@@ -218,6 +218,36 @@ export class CopilotMoneyServer {
           );
           break;
 
+        case 'get_balance_history':
+          result = await this.tools.getBalanceHistory(
+            typedArgs as Parameters<typeof this.tools.getBalanceHistory>[0]
+          );
+          break;
+
+        case 'get_investment_performance':
+          result = await this.tools.getInvestmentPerformance(
+            (typedArgs as Parameters<typeof this.tools.getInvestmentPerformance>[0]) || {}
+          );
+          break;
+
+        case 'get_twr_returns':
+          result = await this.tools.getTwrReturns(
+            (typedArgs as Parameters<typeof this.tools.getTwrReturns>[0]) || {}
+          );
+          break;
+
+        case 'get_securities':
+          result = await this.tools.getSecurities(
+            (typedArgs as Parameters<typeof this.tools.getSecurities>[0]) || {}
+          );
+          break;
+
+        case 'get_goal_history':
+          result = await this.tools.getGoalHistory(
+            (typedArgs as Parameters<typeof this.tools.getGoalHistory>[0]) || {}
+          );
+          break;
+
         case 'set_transaction_category':
           result = await this.tools.setTransactionCategory(
             typedArgs as Parameters<typeof this.tools.setTransactionCategory>[0]
