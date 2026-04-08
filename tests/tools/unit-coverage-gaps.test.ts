@@ -6,7 +6,7 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
-import type { Transaction, Category, Tag, Goal } from '../../src/models/index.js';
+import type { Transaction, Account, Category, Tag, Goal, Budget } from '../../src/models/index.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -16,11 +16,11 @@ import type { Transaction, Category, Tag, Goal } from '../../src/models/index.js
 function createMockDb(
   overrides: {
     transactions?: Transaction[];
-    accounts?: any[];
+    accounts?: Account[];
     userCategories?: Category[];
     tags?: Tag[];
     goals?: Goal[];
-    budgets?: any[];
+    budgets?: Budget[];
   } = {}
 ): CopilotDatabase {
   const db = new CopilotDatabase('/nonexistent');
@@ -49,29 +49,15 @@ function createMockDb(
   return db;
 }
 
-/** A mock FirestoreClient that records every write. */
-function createSpyClient() {
-  const calls: Array<{
-    method: string;
-    path: string;
-    docId: string;
-    fields?: any;
-    mask?: string[];
-  }> = [];
-  const client = {
+/** A no-op FirestoreClient stub for write tools. */
+function createMockClient() {
+  return {
     requireUserId: async () => 'test-user-123',
     getUserId: () => 'test-user-123',
-    createDocument: async (path: string, docId: string, fields: any) => {
-      calls.push({ method: 'create', path, docId, fields });
-    },
-    updateDocument: async (path: string, docId: string, fields: any, mask: string[]) => {
-      calls.push({ method: 'update', path, docId, fields, mask });
-    },
-    deleteDocument: async (path: string, docId: string) => {
-      calls.push({ method: 'delete', path, docId });
-    },
-  };
-  return { client: client as any, calls };
+    createDocument: async () => {},
+    updateDocument: async () => {},
+    deleteDocument: async () => {},
+  } as any;
 }
 
 // ---------------------------------------------------------------------------
@@ -192,7 +178,7 @@ describe('refreshDatabase — expanded', () => {
     expect(result.message).toContain('already empty');
   });
 
-  test('is idempotent — two consecutive refreshes both return success', async () => {
+  test('second consecutive refresh returns refreshed=false after cache was cleared', async () => {
     const db = createMockDb({
       transactions: [{ transaction_id: 't1', amount: 5, date: '2024-02-01', account_id: 'a1' }],
     });
@@ -247,19 +233,23 @@ describe('cross-tool interactions', () => {
     extra: {
       transactions?: Transaction[];
       categories?: Category[];
-      budgets?: any[];
+      budgets?: Budget[];
+      tags?: Tag[];
+      goals?: Goal[];
     } = {}
   ) {
     const a = db as any;
     a._transactions = extra.transactions ?? [{ ...baseTxn }];
     a._userCategories = extra.categories ?? [...baseCategories];
     a._budgets = extra.budgets ?? [];
+    a._tags = extra.tags ?? [];
+    a._goals = extra.goals ?? [{ goal_id: 'goal1', name: 'Emergency Fund' }];
     a._allCollectionsLoaded = true;
     a._cacheLoadedAt = Date.now();
   }
 
   beforeEach(() => {
-    const { client } = createSpyClient();
+    const client = createMockClient();
     db = createMockDb({
       transactions: [{ ...baseTxn }],
       userCategories: [...baseCategories],
@@ -398,7 +388,7 @@ describe('write-tool edge cases', () => {
   };
 
   beforeEach(() => {
-    const { client } = createSpyClient();
+    const client = createMockClient();
     db = createMockDb({
       transactions: [{ ...writeTxn }],
       userCategories: [
