@@ -253,11 +253,11 @@ The `period` parameter supports these shortcuts:
 
 ## Known Limitations
 
-### Local Cache Size
+### Local Cache Dependency
 
-This server reads from Copilot Money's **local Firestore cache**, not the cloud. The cache typically contains ~500 recent transactions plus accounts, budgets, goals, and recurring data synced during app usage.
+This server reads from Copilot Money's **local Firestore cache**, not the cloud. Firestore's offline persistence caches every document the app has ever fetched, so the local database generally contains all transactions, accounts, budgets, goals, and other data you've viewed in the app. The default Firestore cache size is 100 MB (enough for tens of thousands of transactions), and older documents are only evicted via LRU garbage collection if that limit is exceeded.
 
-**To maximize cached data:** Open the Copilot Money app regularly and scroll through your transaction history to trigger sync.
+**To maximize cached data:** Open the Copilot Money app and browse through your data (transaction history, accounts, budgets) to ensure it has been fetched and cached locally.
 
 ## Troubleshooting
 
