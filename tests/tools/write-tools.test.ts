@@ -114,6 +114,15 @@ describe('setTransactionExcluded', () => {
     });
   });
 
+  test('unexcludes a transaction (excluded: false)', async () => {
+    const result = await tools.setTransactionExcluded({
+      transaction_id: 'txn1',
+      excluded: false,
+    });
+    expect(result.success).toBe(true);
+    expect(result.excluded).toBe(false);
+  });
+
   test('throws when transaction not found', async () => {
     await expect(
       tools.setTransactionExcluded({ transaction_id: 'nonexistent', excluded: true })
@@ -402,12 +411,24 @@ describe('updateCategory', () => {
     expect(result.updated_fields).toEqual(['color']);
   });
 
+  test('updates excluded field', async () => {
+    const result = await tools.updateCategory({ category_id: 'cat1', excluded: true });
+    expect(result.success).toBe(true);
+    expect(result.updated_fields).toEqual(['excluded']);
+    expect(updateCalls[0].fields).toEqual({ excluded: { booleanValue: true } });
+  });
+
   test('calls Firestore with correct collection path', async () => {
     await tools.updateCategory({ category_id: 'cat1', name: 'Dining' });
     expect(updateCalls).toHaveLength(1);
     expect(updateCalls[0].collection).toBe('users/user123/categories');
     expect(updateCalls[0].docId).toBe('cat1');
     expect(updateCalls[0].mask).toEqual(['name']);
+  });
+
+  test('clears cache after successful write', async () => {
+    await tools.updateCategory({ category_id: 'cat1', name: 'Dining' });
+    expect((mockDb as any)._userCategories).toBeNull();
   });
 });
 
@@ -521,6 +542,11 @@ describe('createBudget', () => {
     expect(createCalls).toHaveLength(1);
     expect(createCalls[0].collection).toBe('users/user123/budgets');
     expect(createCalls[0].docId).toMatch(/^budget_/);
+  });
+
+  test('clears cache after successful write', async () => {
+    await tools.createBudget({ category_id: 'transport', amount: 200 });
+    expect((mockDb as any)._budgets).toBeNull();
   });
 });
 
@@ -694,7 +720,7 @@ describe('setRecurringState', () => {
     expect(result.new_state).toBe('active');
   });
 
-  test('calls Firestore with both state and is_active', async () => {
+  test('calls Firestore with both state and is_active (archived → false)', async () => {
     await tools.setRecurringState({ recurring_id: 'rec1', state: 'archived' });
     expect(updateCalls).toHaveLength(1);
     expect(updateCalls[0].collection).toBe('users/user123/recurring');
@@ -704,6 +730,20 @@ describe('setRecurringState', () => {
       state: { stringValue: 'archived' },
       is_active: { booleanValue: false },
     });
+  });
+
+  test('calls Firestore with is_active: true when activating', async () => {
+    await tools.setRecurringState({ recurring_id: 'rec2', state: 'active' });
+    expect(updateCalls).toHaveLength(1);
+    expect(updateCalls[0].fields).toEqual({
+      state: { stringValue: 'active' },
+      is_active: { booleanValue: true },
+    });
+  });
+
+  test('clears cache after successful write', async () => {
+    await tools.setRecurringState({ recurring_id: 'rec1', state: 'paused' });
+    expect((mockDb as any)._recurring).toBeNull();
   });
 });
 
@@ -798,6 +838,12 @@ describe('updateGoal', () => {
     await expect(tools.updateGoal({ goal_id: 'goal1' })).rejects.toThrow('No fields to update');
   });
 
+  test('allows monthly_contribution of 0', async () => {
+    const result = await tools.updateGoal({ goal_id: 'goal1', monthly_contribution: 0 });
+    expect(result.success).toBe(true);
+    expect(result.updated_fields).toEqual(['savings']);
+  });
+
   test('rejects target_amount <= 0', async () => {
     await expect(tools.updateGoal({ goal_id: 'goal1', target_amount: 0 })).rejects.toThrow(
       'target_amount must be greater than 0'
@@ -831,6 +877,11 @@ describe('updateGoal', () => {
     expect(savingsField.mapValue.fields.tracking_type_monthly_contribution).toEqual({
       integerValue: '750',
     });
+  });
+
+  test('clears cache after successful write', async () => {
+    await tools.updateGoal({ goal_id: 'goal1', name: 'Updated' });
+    expect((mockDb as any)._goals).toBeNull();
   });
 });
 
