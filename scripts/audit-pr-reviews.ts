@@ -197,8 +197,8 @@ function isLikelyAddressed(suggestion: string, prState: string): boolean {
     suggestion.toLowerCase().includes(kw)
   );
 
-  // Skip open PRs — suggestions may still be addressed before merge
-  if (prState === 'OPEN') {
+  // OPEN and CLOSED PRs: suggestions may not apply (not merged / abandoned)
+  if (prState === 'OPEN' || prState === 'CLOSED') {
     return true;
   }
 
