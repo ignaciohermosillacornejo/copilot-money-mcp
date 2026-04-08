@@ -3616,6 +3616,152 @@ export class CopilotMoneyTools {
   }
 
   /**
+   * Update an existing recurring/subscription item.
+   *
+   * Validates the recurring item exists, builds a dynamic update mask from the
+   * provided fields, writes to Firestore, then clears the cache.
+   */
+  async updateRecurring(args: {
+    recurring_id: string;
+    name?: string;
+    amount?: number;
+    frequency?: string;
+    category_id?: string;
+    account_id?: string;
+    merchant_name?: string;
+    emoji?: string;
+    match_string?: string;
+    transaction_ids?: string[];
+    excluded_transaction_ids?: string[];
+    included_transaction_ids?: string[];
+    days_filter?: number;
+  }): Promise<{
+    success: boolean;
+    recurring_id: string;
+    name: string;
+    updated_fields: string[];
+  }> {
+    const client = this.getFirestoreClient();
+
+    const {
+      recurring_id,
+      name,
+      amount,
+      frequency,
+      category_id,
+      account_id,
+      merchant_name,
+      emoji,
+      match_string,
+      transaction_ids,
+      excluded_transaction_ids,
+      included_transaction_ids,
+      days_filter,
+    } = args;
+
+    // Validate recurring_id format
+    validateDocId(recurring_id, 'recurring_id');
+
+    // Verify recurring exists (include inactive)
+    const allRecurring = await this.db.getRecurring(false);
+    const recurring = allRecurring.find((r) => r.recurring_id === recurring_id);
+    if (!recurring) {
+      throw new Error(`Recurring not found: ${recurring_id}`);
+    }
+
+    // Build dynamic update fields
+    const fieldsToUpdate: Record<string, unknown> = {};
+    const updateMask: string[] = [];
+
+    if (name !== undefined) {
+      if (!name.trim()) {
+        throw new Error('Recurring name must not be empty');
+      }
+      fieldsToUpdate.name = name.trim();
+      updateMask.push('name');
+    }
+    if (amount !== undefined) {
+      if (amount <= 0) {
+        throw new Error('amount must be greater than 0');
+      }
+      fieldsToUpdate.amount = amount;
+      updateMask.push('amount');
+    }
+    if (frequency !== undefined) {
+      if (!(VALID_RECURRING_FREQUENCIES as readonly string[]).includes(frequency)) {
+        throw new Error(
+          `Invalid frequency: ${frequency}. Must be one of: ${VALID_RECURRING_FREQUENCIES.join(', ')}`
+        );
+      }
+      fieldsToUpdate.frequency = frequency;
+      updateMask.push('frequency');
+    }
+    if (category_id !== undefined) {
+      validateDocId(category_id, 'category_id');
+      fieldsToUpdate.category_id = category_id;
+      updateMask.push('category_id');
+    }
+    if (account_id !== undefined) {
+      validateDocId(account_id, 'account_id');
+      fieldsToUpdate.account_id = account_id;
+      updateMask.push('account_id');
+    }
+    if (merchant_name !== undefined) {
+      fieldsToUpdate.merchant_name = merchant_name;
+      updateMask.push('merchant_name');
+    }
+    if (emoji !== undefined) {
+      fieldsToUpdate.emoji = emoji;
+      updateMask.push('emoji');
+    }
+    if (match_string !== undefined) {
+      if (!match_string.trim()) {
+        throw new Error('match_string must not be empty');
+      }
+      fieldsToUpdate.match_string = match_string.trim();
+      updateMask.push('match_string');
+    }
+    if (transaction_ids !== undefined) {
+      fieldsToUpdate.transaction_ids = transaction_ids;
+      updateMask.push('transaction_ids');
+    }
+    if (excluded_transaction_ids !== undefined) {
+      fieldsToUpdate.excluded_transaction_ids = excluded_transaction_ids;
+      updateMask.push('excluded_transaction_ids');
+    }
+    if (included_transaction_ids !== undefined) {
+      fieldsToUpdate.included_transaction_ids = included_transaction_ids;
+      updateMask.push('included_transaction_ids');
+    }
+    if (days_filter !== undefined) {
+      fieldsToUpdate.days_filter = days_filter;
+      updateMask.push('days_filter');
+    }
+
+    if (updateMask.length === 0) {
+      throw new Error('No fields to update');
+    }
+
+    // Resolve user_id and write
+    const userId = await client.requireUserId();
+    const collectionPath = `users/${userId}/recurring`;
+    const firestoreFields = toFirestoreFields(fieldsToUpdate);
+    await client.updateDocument(collectionPath, recurring_id, firestoreFields, updateMask);
+
+    // Clear cache
+    this.db.clearCache();
+
+    const displayName = name?.trim() ?? recurring.name ?? recurring.merchant_name ?? recurring_id;
+
+    return {
+      success: true,
+      recurring_id,
+      name: displayName,
+      updated_fields: updateMask,
+    };
+  }
+
+  /**
    * Get daily balance snapshots for accounts over time.
    *
    * Supports daily, weekly, and monthly granularity. Weekly and monthly modes
@@ -5329,6 +5475,84 @@ export function createWriteToolSchemas(): ToolSchema[] {
         readOnlyHint: false,
         destructiveHint: false,
         idempotentHint: false,
+      },
+    },
+    {
+      name: 'update_recurring',
+      description:
+        'Update an existing recurring/subscription item. Can modify name, amount, frequency, ' +
+        'category, account, match string, and transaction ID lists. ' +
+        'Useful for fixing recurring detection — update match_string and transaction_ids ' +
+        'to teach Copilot which transactions belong to this recurring charge. ' +
+        'Writes directly to Copilot Money via Firestore.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          recurring_id: {
+            type: 'string',
+            description: 'ID of the recurring item to update (from get_recurring_transactions)',
+          },
+          name: {
+            type: 'string',
+            description: 'New display name for the recurring charge',
+          },
+          amount: {
+            type: 'number',
+            description: 'Expected recurring amount (must be > 0)',
+          },
+          frequency: {
+            type: 'string',
+            enum: ['weekly', 'biweekly', 'monthly', 'yearly'],
+            description: 'How often this charge recurs',
+          },
+          category_id: {
+            type: 'string',
+            description: 'Category ID to assign (from get_categories)',
+          },
+          account_id: {
+            type: 'string',
+            description: 'Account ID this recurring charge is associated with',
+          },
+          merchant_name: {
+            type: 'string',
+            description: 'Merchant name for the recurring charge',
+          },
+          emoji: {
+            type: 'string',
+            description: 'Emoji icon for the recurring item',
+          },
+          match_string: {
+            type: 'string',
+            description:
+              'Pattern used to auto-match incoming transactions to this recurring item ' +
+              '(e.g., "NETFLIX" matches transactions with "NETFLIX" in the name)',
+          },
+          transaction_ids: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Transaction IDs that belong to this recurring item',
+          },
+          excluded_transaction_ids: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Transaction IDs explicitly excluded from this recurring item',
+          },
+          included_transaction_ids: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Transaction IDs explicitly included in this recurring item',
+          },
+          days_filter: {
+            type: 'number',
+            description: 'Expected day-of-month for matching (e.g., 1 for charges on the 1st)',
+          },
+        },
+        required: ['recurring_id'],
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
       },
     },
   ];

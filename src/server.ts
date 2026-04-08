@@ -117,6 +117,7 @@ export class CopilotMoneyServer {
     'update_tag',
     'create_recurring',
     'create_goal',
+    'update_recurring',
   ]);
 
   async handleCallTool(name: string, typedArgs?: Record<string, unknown>): Promise<CallToolResult> {
@@ -383,6 +384,12 @@ export class CopilotMoneyServer {
         case 'create_goal':
           result = await this.tools.createGoal(
             typedArgs as Parameters<typeof this.tools.createGoal>[0]
+          );
+          break;
+
+        case 'update_recurring':
+          result = await this.tools.updateRecurring(
+            typedArgs as Parameters<typeof this.tools.updateRecurring>[0]
           );
           break;
 

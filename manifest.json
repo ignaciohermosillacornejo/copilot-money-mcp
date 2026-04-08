@@ -187,6 +187,10 @@
     {
       "name": "create_goal",
       "description": "Create a new financial goal."
+    },
+    {
+      "name": "update_recurring",
+      "description": "Update a recurring/subscription item — name, amount, frequency, match string, and transaction IDs."
     }
   ],
   "tools_generated": false,
