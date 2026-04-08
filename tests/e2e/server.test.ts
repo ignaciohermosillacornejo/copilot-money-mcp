@@ -25,6 +25,8 @@ import type {
   Security,
   InvestmentPerformance,
   TwrHolding,
+  InvestmentPrice,
+  InvestmentSplit,
 } from '../../src/models/index.js';
 import type { FirestoreClient } from '../../src/core/firestore-client.js';
 
@@ -86,6 +88,32 @@ const mockAccounts: Account[] = [
     current_balance: 500.0,
     name: 'Savings Account',
     account_type: 'savings',
+  },
+  {
+    account_id: 'acc3',
+    current_balance: 50000.0,
+    name: 'Brokerage Account',
+    account_type: 'investment',
+    holdings: [
+      {
+        security_id: 'sec1',
+        account_id: 'acc3',
+        cost_basis: 15000,
+        institution_price: 185.5,
+        institution_value: 18550,
+        quantity: 100,
+        iso_currency_code: 'USD',
+      },
+      {
+        security_id: 'sec2',
+        account_id: 'acc3',
+        cost_basis: 20000,
+        institution_price: 240.0,
+        institution_value: 24000,
+        quantity: 100,
+        iso_currency_code: 'USD',
+      },
+    ],
   },
 ];
 
@@ -277,6 +305,34 @@ const mockTwrHoldings: TwrHolding[] = [
     history: {
       '1736899200000': { value: 0.03 },
     },
+  },
+];
+
+const mockInvestmentPrices: InvestmentPrice[] = [
+  {
+    investment_id: 'price1',
+    ticker_symbol: 'AAPL',
+    close_price: 185.5,
+    month: '2025-01',
+    price_type: 'daily',
+  },
+  {
+    investment_id: 'price2',
+    ticker_symbol: 'VTI',
+    close_price: 240.0,
+    month: '2025-01',
+    price_type: 'daily',
+  },
+];
+
+const mockInvestmentSplits: InvestmentSplit[] = [
+  {
+    split_id: 'split1',
+    ticker_symbol: 'AAPL',
+    split_date: '2020-08-28',
+    split_ratio: '4:1',
+    to_factor: 4,
+    from_factor: 1,
   },
 ];
 
@@ -474,8 +530,8 @@ function createMockDb(): CopilotDatabase {
     budgets: [...mockBudgets],
     goals: [...mockGoals],
     goalHistory: [...mockGoalHistory],
-    investmentPrices: [],
-    investmentSplits: [],
+    investmentPrices: [...mockInvestmentPrices],
+    investmentSplits: [...mockInvestmentSplits],
     items: [...mockItems],
     userCategories: [...mockUserCategories],
     userAccounts: [],
@@ -951,29 +1007,98 @@ describe('handleCallTool — read tools (extended)', () => {
     expect(data.offset).toBe(0);
   });
 
-  test('get_holdings returns holdings data', async () => {
-    // With empty holdings data, should return empty array
+  test('get_holdings returns enriched holdings with cost basis', async () => {
     const result = await server.handleCallTool('get_holdings', {});
     expect(result.isError).toBeUndefined();
     const data = parseToolResult(result) as any;
-    expect(typeof data.count).toBe('number');
+    expect(data.count).toBe(2); // 2 holdings in acc3
     expect(data.holdings).toBeArray();
+    const appleHolding = data.holdings.find((h: any) => h.security_id === 'sec1');
+    expect(appleHolding).toBeDefined();
+    expect(appleHolding.ticker_symbol).toBe('AAPL');
+    expect(appleHolding.quantity).toBe(100);
+    expect(appleHolding.institution_price).toBe(185.5);
+    expect(appleHolding.cost_basis).toBe(15000);
+    expect(appleHolding.total_return).toBeDefined();
+    expect(appleHolding.account_id).toBe('acc3');
   });
 
-  test('get_investment_prices returns price data', async () => {
+  test('get_holdings filters by ticker_symbol', async () => {
+    const result = await server.handleCallTool('get_holdings', {
+      ticker_symbol: 'VTI',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.count).toBe(1);
+    expect(data.holdings[0].ticker_symbol).toBe('VTI');
+  });
+
+  test('get_investment_prices returns price data with tickers', async () => {
     const result = await server.handleCallTool('get_investment_prices', {});
     expect(result.isError).toBeUndefined();
     const data = parseToolResult(result) as any;
-    expect(typeof data.count).toBe('number');
+    expect(data.count).toBe(mockInvestmentPrices.length);
     expect(data.prices).toBeArray();
+    expect(data.tickers).toBeArray();
+    expect(data.tickers).toContain('AAPL');
+    expect(data.tickers).toContain('VTI');
+    expect(data.prices[0].close_price).toBeDefined();
+  });
+
+  test('get_investment_prices filters by ticker_symbol', async () => {
+    const result = await server.handleCallTool('get_investment_prices', {
+      ticker_symbol: 'AAPL',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.count).toBe(1);
+    expect(data.prices[0].ticker_symbol).toBe('AAPL');
+    expect(data.prices[0].close_price).toBe(185.5);
   });
 
   test('get_investment_splits returns split data', async () => {
     const result = await server.handleCallTool('get_investment_splits', {});
     expect(result.isError).toBeUndefined();
     const data = parseToolResult(result) as any;
-    expect(typeof data.count).toBe('number');
+    expect(data.count).toBe(mockInvestmentSplits.length);
     expect(data.splits).toBeArray();
+    expect(data.splits[0].ticker_symbol).toBe('AAPL');
+    expect(data.splits[0].split_ratio).toBe('4:1');
+    expect(data.splits[0].split_date).toBe('2020-08-28');
+  });
+
+  test('get_investment_splits filters by ticker_symbol', async () => {
+    const result = await server.handleCallTool('get_investment_splits', {
+      ticker_symbol: 'AAPL',
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.count).toBe(1);
+    expect(data.splits[0].ticker_symbol).toBe('AAPL');
+  });
+
+  test('get_balance_history with offset skips entries', async () => {
+    const result = await server.handleCallTool('get_balance_history', {
+      granularity: 'daily',
+      limit: 1,
+      offset: 1,
+    });
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.count).toBe(1);
+    expect(data.offset).toBe(1);
+    // The returned entry should be different from the first page
+    const firstPage = await server.handleCallTool('get_balance_history', {
+      granularity: 'daily',
+      limit: 1,
+    });
+    const firstData = parseToolResult(firstPage) as any;
+    const secondEntry = data.balance_history[0];
+    const firstEntry = firstData.balance_history[0];
+    // Entries should differ by date or account_id
+    const secondKey = `${secondEntry.account_id}:${secondEntry.date}`;
+    const firstKey = `${firstEntry.account_id}:${firstEntry.date}`;
+    expect(secondKey).not.toBe(firstKey);
   });
 });
 
@@ -1273,6 +1398,7 @@ describe('handleCallTool — write tools (extended)', () => {
     expect(data.success).toBe(true);
     expect(data.goal_id).toBe('goal1');
     expect(data.updated_fields).toContain('name');
+    // Firestore uses 'savings' as the mask key for nested fields like target_amount
     expect(data.updated_fields).toContain('savings');
   });
 
@@ -1300,6 +1426,24 @@ describe('handleCallTool — write tool validation', () => {
     writeServer = new CopilotMoneyServer(FAKE_DB_DIR, undefined, true);
     const writeTools = new CopilotMoneyTools(db, createMockFirestoreClient());
     writeServer._injectForTesting(db, writeTools);
+  });
+
+  test('set_transaction_note with nonexistent transaction returns error', async () => {
+    const result = await writeServer.handleCallTool('set_transaction_note', {
+      transaction_id: 'nonexistent',
+      note: 'test',
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('not found');
+  });
+
+  test('set_transaction_tags with nonexistent transaction returns error', async () => {
+    const result = await writeServer.handleCallTool('set_transaction_tags', {
+      transaction_id: 'nonexistent',
+      tag_ids: ['tag_vacation'],
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('not found');
   });
 
   test('set_transaction_category with nonexistent transaction returns error', async () => {
