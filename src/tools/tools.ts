@@ -172,6 +172,20 @@ function validateDate(date: string | undefined, paramName: string): string | und
 }
 
 /**
+ * Validates that a month string matches YYYY-MM format.
+ *
+ * @param month - The month string to validate
+ * @param paramName - Parameter name for error messages
+ * @throws Error if month format is invalid
+ */
+function validateMonth(month: string | undefined, paramName: string): void {
+  if (month === undefined) return;
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    throw new Error(`Invalid ${paramName}: "${month}". Expected format: YYYY-MM`);
+  }
+}
+
+/**
  * Validates offset parameter for pagination.
  *
  * @param offset - The requested offset
@@ -3959,6 +3973,8 @@ export class CopilotMoneyTools {
     >;
   }> {
     const { ticker_symbol, security_id, start_month, end_month } = options;
+    validateMonth(start_month, 'start_month');
+    validateMonth(end_month, 'end_month');
     const validatedLimit = validateLimit(options.limit, DEFAULT_QUERY_LIMIT);
     const validatedOffset = validateOffset(options.offset);
 
@@ -4071,6 +4087,8 @@ export class CopilotMoneyTools {
     >;
   }> {
     const { goal_id, start_month, end_month } = options;
+    validateMonth(start_month, 'start_month');
+    validateMonth(end_month, 'end_month');
     const validatedLimit = validateLimit(options.limit, DEFAULT_QUERY_LIMIT);
     const validatedOffset = validateOffset(options.offset);
 
@@ -4673,8 +4691,8 @@ export function createToolSchemas(): ToolSchema[] {
     {
       name: 'get_twr_returns',
       description:
-        'Get time-weighted return (TWR) monthly data for investment holdings. Returns raw ' +
-        'monthly TWR documents with epoch-millisecond keyed history entries. ' +
+        'Get time-weighted return (TWR) monthly data for investment holdings. Returns ' +
+        'monthly TWR records with epoch-millisecond keyed history entries. ' +
         'Filter by ticker symbol, security ID, or month range (YYYY-MM).',
       inputSchema: {
         type: 'object',

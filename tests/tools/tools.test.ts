@@ -3546,6 +3546,21 @@ describe('getTwrReturns', () => {
     const result = await tools.getTwrReturns({ limit: 1 });
     expect(result.count).toBeLessThanOrEqual(1);
   });
+
+  test('rejects invalid start_month format', async () => {
+    await expect(tools.getTwrReturns({ start_month: '2024-1' })).rejects.toThrow(
+      'Invalid start_month'
+    );
+    await expect(tools.getTwrReturns({ start_month: '2024-01-01' })).rejects.toThrow(
+      'Invalid start_month'
+    );
+  });
+
+  test('rejects invalid end_month format', async () => {
+    await expect(tools.getTwrReturns({ end_month: 'Jan2024' })).rejects.toThrow(
+      'Invalid end_month'
+    );
+  });
 });
 
 describe('getSecurities', () => {
@@ -3682,6 +3697,21 @@ describe('getGoalHistory', () => {
   test('paginates with limit and offset', async () => {
     const result = await tools.getGoalHistory({ limit: 1 });
     expect(result.count).toBeLessThanOrEqual(1);
+  });
+
+  test('rejects invalid start_month format', async () => {
+    await expect(tools.getGoalHistory({ start_month: '2024-1' })).rejects.toThrow(
+      'Invalid start_month'
+    );
+    await expect(tools.getGoalHistory({ start_month: '2024-01-01' })).rejects.toThrow(
+      'Invalid start_month'
+    );
+  });
+
+  test('rejects invalid end_month format', async () => {
+    await expect(tools.getGoalHistory({ end_month: 'Jan2024' })).rejects.toThrow(
+      'Invalid end_month'
+    );
   });
 });
 

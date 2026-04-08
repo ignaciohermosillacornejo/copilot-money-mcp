@@ -221,7 +221,7 @@ export class CopilotMoneyServer {
 
         case 'get_balance_history':
           result = await this.tools.getBalanceHistory(
-            typedArgs as Parameters<typeof this.tools.getBalanceHistory>[0]
+            (typedArgs as Parameters<typeof this.tools.getBalanceHistory>[0]) || {}
           );
           break;
 
