@@ -657,11 +657,10 @@ describe('CopilotMoneyTools Integration', () => {
 
       // Our mock transactions use food_dining, groceries, income, shopping
       const foodCategory = data.categories.find((c: any) => c.category_id === 'food_dining');
-      if (foodCategory) {
-        expect(foodCategory.transaction_count).toBe(2);
-        expect(foodCategory.total_amount).toBeGreaterThan(0);
-        expect(foodCategory.category_name).toBeDefined();
-      }
+      expect(foodCategory).toBeDefined();
+      expect(foodCategory!.transaction_count).toBe(2);
+      expect(foodCategory!.total_amount).toBeGreaterThan(0);
+      expect(foodCategory!.category_name).toBeDefined();
     });
 
     test('tree view returns hierarchical data', async () => {
@@ -750,10 +749,9 @@ describe('CopilotMoneyTools Integration', () => {
       expect(result.budgets.length).toBe(result.count);
 
       const foodBudget = result.budgets.find((b) => b.budget_id === 'bud1');
-      if (foodBudget) {
-        expect(foodBudget.amount).toBe(500);
-        expect(foodBudget.period).toBe('monthly');
-      }
+      expect(foodBudget).toBeDefined();
+      expect(foodBudget!.amount).toBe(500);
+      expect(foodBudget!.period).toBe('monthly');
     });
 
     test('active_only filter excludes inactive budgets', async () => {
