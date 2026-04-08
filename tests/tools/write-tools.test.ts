@@ -121,6 +121,7 @@ describe('setTransactionExcluded', () => {
     });
     expect(result.success).toBe(true);
     expect(result.excluded).toBe(false);
+    expect(updateCalls[0].fields).toEqual({ excluded: { booleanValue: false } });
   });
 
   test('throws when transaction not found', async () => {
