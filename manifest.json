@@ -170,6 +170,11 @@
     }
   ],
   "tools_generated": false,
+  "compatibility": {
+    "runtimes": {
+      "node": ">=18.0.0"
+    }
+  },
   "server": {
     "type": "node",
     "entry_point": "dist/cli.js",
