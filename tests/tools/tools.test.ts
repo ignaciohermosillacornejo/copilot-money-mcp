@@ -2857,13 +2857,13 @@ describe('createTag', () => {
 
   test('throws on invalid hex_color format', async () => {
     await expect(tools.createTag({ name: 'test', hex_color: 'red' })).rejects.toThrow(
-      'Invalid hex_color format'
+      'Invalid color format'
     );
   });
 
   test('throws on short hex_color', async () => {
     await expect(tools.createTag({ name: 'test', hex_color: '#FFF' })).rejects.toThrow(
-      'Invalid hex_color format'
+      'Invalid color format'
     );
   });
 

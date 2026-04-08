@@ -47,6 +47,15 @@ function validateDocId(id: string, label: string): void {
   }
 }
 
+const HEX_COLOR_RE = /^#[0-9A-Fa-f]{6}$/;
+
+/** Validate that a color string is a valid #RRGGBB hex code. */
+function validateHexColor(color: string): void {
+  if (!HEX_COLOR_RE.test(color)) {
+    throw new Error(`Invalid color format: ${color} (expected #RRGGBB)`);
+  }
+}
+
 /**
  * Plaid category ID for foreign transaction fees (snake_case format).
  * @see https://plaid.com/docs/api/products/transactions/#categoriesget
@@ -2260,7 +2269,10 @@ export class CopilotMoneyTools {
       excluded,
     };
     if (emoji) docFields.emoji = emoji;
-    if (color) docFields.color = color;
+    if (color) {
+      validateHexColor(color);
+      docFields.color = color;
+    }
     if (parent_category_id) docFields.parent_category_id = parent_category_id;
 
     // Write to Firestore
@@ -2641,10 +2653,7 @@ export class CopilotMoneyTools {
       throw new Error(`Cannot generate a valid tag_id from name: ${trimmedName}`);
     }
 
-    // Validate hex_color format if provided
-    if (hex_color !== undefined && !/^#[0-9A-Fa-f]{6}$/.test(hex_color)) {
-      throw new Error(`Invalid hex_color format: ${hex_color} (expected #RRGGBB)`);
-    }
+    if (hex_color !== undefined) validateHexColor(hex_color);
 
     // Check for duplicate tag
     const existingTags = await this.db.getTags();
@@ -2783,9 +2792,7 @@ export class CopilotMoneyTools {
       updateMask.push('emoji');
     }
     if (color !== undefined) {
-      if (!/^#[0-9A-Fa-f]{6}$/.test(color)) {
-        throw new Error(`Invalid color format: ${color} (expected #RRGGBB)`);
-      }
+      validateHexColor(color);
       fieldsToUpdate.color = color;
       updateMask.push('color');
     }
