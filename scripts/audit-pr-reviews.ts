@@ -359,13 +359,13 @@ async function auditPR(
 
   for (const comment of diffComments) {
     if (!isReviewBotComment(comment.user.login)) continue;
-    if (!isClaudeReviewComment(comment.body)) continue;
+    if (!comment.body || !isClaudeReviewComment(comment.body)) continue;
     allReviewBodies.push({ body: comment.body, path: comment.path, line: comment.line });
   }
 
   for (const comment of issueComments) {
     if (!isReviewBotComment(comment.user.login)) continue;
-    if (!isClaudeReviewComment(comment.body)) continue;
+    if (!comment.body || !isClaudeReviewComment(comment.body)) continue;
     allReviewBodies.push({ body: comment.body });
   }
 
@@ -445,12 +445,18 @@ async function main(): Promise<void> {
     const { suggestions, hasClaudeReview } = await auditPR(pr);
 
     if (suggestions.length > 0) {
-      // Check if issue already exists
-      const exists = await issueExists(pr.number, suggestions[0].suggestion);
-      if (!exists) {
-        allSuggestions.set(pr.number, suggestions);
+      // Filter out suggestions that already have an existing issue
+      const newSuggestions: UnaddressedSuggestion[] = [];
+      for (const suggestion of suggestions) {
+        const exists = await issueExists(pr.number, suggestion.suggestion);
+        if (!exists) {
+          newSuggestions.push(suggestion);
+        }
+      }
+      if (newSuggestions.length > 0) {
+        allSuggestions.set(pr.number, newSuggestions);
       } else {
-        console.log(`  Issue already exists for PR #${pr.number}, skipping`);
+        console.log(`  All suggestions already have issues for PR #${pr.number}, skipping`);
       }
     }
 

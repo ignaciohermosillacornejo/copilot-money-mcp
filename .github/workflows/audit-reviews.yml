@@ -84,4 +84,6 @@ jobs:
           elif [ "$EVENT_NAME" = "pull_request" ]; then
             ARGS="$ARGS --pr $EVENT_PR_NUMBER"
           fi
+          # $ARGS is intentionally unquoted — word-splitting is needed to expand
+          # "--pr 123" into two separate arguments for the script
           bun run scripts/audit-pr-reviews.ts $ARGS
