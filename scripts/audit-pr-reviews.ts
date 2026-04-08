@@ -16,7 +16,8 @@
 import { $ } from 'bun';
 
 const AUDITED_LABEL = 'audited';
-const CLAUDE_USERNAMES = ['claude', 'claude[bot]'];
+// Reviews are posted by claude-code-action using GITHUB_TOKEN, which shows as github-actions[bot]
+const REVIEW_BOT_USERNAMES = ['github-actions', 'github-actions[bot]', 'claude', 'claude[bot]'];
 const DRY_RUN = process.argv.includes('--dry-run');
 
 // Validate and parse PR number to prevent command injection
@@ -72,11 +73,23 @@ interface UnaddressedSuggestion {
 }
 
 /**
- * Check if a comment is from Claude
+ * Check if a comment is from the review bot
  */
-function isClaudeComment(user: string): boolean {
-  return CLAUDE_USERNAMES.some(
+function isReviewBotComment(user: string): boolean {
+  return REVIEW_BOT_USERNAMES.some(
     (name) => user.toLowerCase() === name.toLowerCase()
+  );
+}
+
+/**
+ * Check if a comment body looks like a Claude code review (not just any bot comment)
+ */
+function isClaudeReviewComment(body: string): boolean {
+  return (
+    body.includes('PR Review') ||
+    body.includes('Claude finished') ||
+    body.includes('### Issues') ||
+    body.includes('### Suggestions')
   );
 }
 
@@ -108,6 +121,12 @@ function extractSuggestions(text: string): string[] {
     /(?:TODO|FIXME|NOTE)[:\s]+([^.]{10,200}\.)/gi,
     /\*\*(?:suggestion|issue|problem|concern)[:\s]*\*\*[:\s]*([^.]{10,200}\.)/gi,
     /(?:^|\n)-\s*\[?\s*\]?\s*([^\n]{10,200}(?:should|could|consider|add|fix|update|replace)[^\n]{0,100})/gi,
+    // Match review section headers like "#### Bug:", "#### Missing validation"
+    /####\s+(?:Bug|Missing|Issue)[:\s]+([^\n]{10,200})/gi,
+    // Match numbered items like "**1. something**"
+    /\*\*\d+\.\s+([^*]{10,200})\*\*/gi,
+    // Match "[Fix this →]" links — the preceding paragraph is the suggestion
+    /([^\n]{20,300})\s*\[Fix this/gi,
   ];
 
   for (const pattern of suggestionPatterns) {
@@ -203,6 +222,19 @@ async function getPRComments(prNumber: number): Promise<PRComment[]> {
   try {
     const result =
       await $`gh api repos/{owner}/{repo}/pulls/${prNumber}/comments`.text();
+    return JSON.parse(result);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Get issue comments for a PR (where claude-code-action posts review results)
+ */
+async function getPRIssueComments(prNumber: number): Promise<PRComment[]> {
+  try {
+    const result =
+      await $`gh api repos/{owner}/{repo}/issues/${prNumber}/comments`.text();
     return JSON.parse(result);
   } catch {
     return [];
@@ -308,15 +340,16 @@ async function auditPR(pr: PR): Promise<UnaddressedSuggestion[]> {
 
   const suggestions: UnaddressedSuggestion[] = [];
 
-  // Get comments and reviews
-  const [comments, reviews] = await Promise.all([
+  // Get all comment sources: diff comments, issue comments, and reviews
+  const [diffComments, issueComments, reviews] = await Promise.all([
     getPRComments(pr.number),
+    getPRIssueComments(pr.number),
     getPRReviews(pr.number),
   ]);
 
-  // Process inline comments
-  for (const comment of comments) {
-    if (!isClaudeComment(comment.user.login)) continue;
+  // Process inline diff comments
+  for (const comment of diffComments) {
+    if (!isReviewBotComment(comment.user.login)) continue;
 
     const extracted = extractSuggestions(comment.body);
     for (const suggestion of extracted) {
@@ -333,9 +366,27 @@ async function auditPR(pr: PR): Promise<UnaddressedSuggestion[]> {
     }
   }
 
+  // Process issue comments (where claude-code-action posts reviews)
+  for (const comment of issueComments) {
+    if (!isReviewBotComment(comment.user.login)) continue;
+    if (!isClaudeReviewComment(comment.body)) continue;
+
+    const extracted = extractSuggestions(comment.body);
+    for (const suggestion of extracted) {
+      if (!isLikelyAddressed(suggestion, pr.state)) {
+        suggestions.push({
+          prNumber: pr.number,
+          prTitle: pr.title,
+          suggestion,
+          priority: determinePriority(suggestion),
+        });
+      }
+    }
+  }
+
   // Process review bodies
   for (const review of reviews) {
-    if (!isClaudeComment(review.user.login)) continue;
+    if (!isReviewBotComment(review.user.login)) continue;
     if (!review.body) continue;
 
     const extracted = extractSuggestions(review.body);

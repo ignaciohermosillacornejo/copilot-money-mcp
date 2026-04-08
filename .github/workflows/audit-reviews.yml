@@ -1,6 +1,10 @@
 name: Audit PR Reviews
 
 on:
+  # Run after every PR merge
+  pull_request:
+    types: [closed]
+
   # Run manually from Actions tab
   workflow_dispatch:
     inputs:
@@ -14,12 +18,14 @@ on:
         required: false
         type: string
 
-  # Run weekly on Sundays at midnight
+  # Run weekly on Sundays at midnight (catch-all)
   schedule:
     - cron: '0 0 * * 0'
 
 jobs:
   audit:
+    # Skip PRs that were closed without merging
+    if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     permissions:
       issues: write
@@ -71,5 +77,7 @@ jobs:
           fi
           if [ -n "${{ inputs.pr_number }}" ]; then
             ARGS="$ARGS --pr ${{ inputs.pr_number }}"
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            ARGS="$ARGS --pr ${{ github.event.pull_request.number }}"
           fi
           bun run scripts/audit-pr-reviews.ts $ARGS
