@@ -55,8 +55,7 @@ describe('searchTransactions', () => {
   });
 
   test('respects limit parameter', async () => {
-    // All three transactions contain letters that would match a broad query
-    // Use a partial match that hits multiple transactions
+    // Empty string matches all transactions; limit=2 caps the result
     const results = await db.searchTransactions('', 2);
     expect(results).toHaveLength(2);
   });
