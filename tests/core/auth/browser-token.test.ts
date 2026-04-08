@@ -189,11 +189,9 @@ describe('extractRefreshToken', () => {
     await expect(extractRefreshToken(overrides)).rejects.toThrow('No Copilot Money session found');
   });
 
-  test('chromium handles unreadable directory gracefully', async () => {
-    // Directory that exists but readdir would fail on specific files
+  test('chromium handles empty directory gracefully', async () => {
     const ldbDir = join(tempDir, 'leveldb');
     mkdirSync(ldbDir, { recursive: true });
-    // Empty directory — no tokens found but no crash
     const overrides: BrowserConfig[] = [{ name: 'TestBrowser', paths: [ldbDir], type: 'chromium' }];
 
     await expect(extractRefreshToken(overrides)).rejects.toThrow('No Copilot Money session found');
