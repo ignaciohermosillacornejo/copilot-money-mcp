@@ -4,7 +4,9 @@
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { CopilotDatabase } from '../../src/core/database.js';
-import type { Transaction, Account, Recurring } from '../../src/models/index.js';
+import type { Transaction, Account, Recurring, Security } from '../../src/models/index.js';
+import type { BalanceHistory } from '../../src/models/balance-history.js';
+import type { InvestmentPerformance, TwrHolding } from '../../src/models/investment-performance.js';
 
 // Mock the decoder functions
 // Copilot Money format: positive = expenses, negative = income
@@ -387,6 +389,275 @@ describe('CopilotDatabase', () => {
 
       const cacheInfo = await testDb.getCacheInfo();
       expect(cacheInfo).toBeDefined();
+    });
+  });
+
+  describe('getBalanceHistory', () => {
+    const mockBalanceHistory: BalanceHistory[] = [
+      {
+        balance_id: 'item1:acc1:2024-01-15',
+        date: '2024-01-15',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1500,
+        available_balance: 1450,
+      },
+      {
+        balance_id: 'item1:acc1:2024-02-01',
+        date: '2024-02-01',
+        item_id: 'item1',
+        account_id: 'acc1',
+        current_balance: 1600,
+        available_balance: 1550,
+      },
+      {
+        balance_id: 'item1:acc2:2024-01-15',
+        date: '2024-01-15',
+        item_id: 'item1',
+        account_id: 'acc2',
+        current_balance: 5000,
+        available_balance: 5000,
+      },
+    ];
+
+    beforeEach(() => {
+      (db as any)._balanceHistory = [...mockBalanceHistory];
+      (db as any)._allCollectionsLoaded = true;
+    });
+
+    test('returns all balance history when no filters applied', async () => {
+      const result = await db.getBalanceHistory();
+      expect(result).toHaveLength(3);
+    });
+
+    test('filters by accountId', async () => {
+      const result = await db.getBalanceHistory({ accountId: 'acc1' });
+      expect(result).toHaveLength(2);
+      expect(result.every((h) => h.account_id === 'acc1')).toBe(true);
+    });
+
+    test('filters by startDate', async () => {
+      const result = await db.getBalanceHistory({ startDate: '2024-02-01' });
+      expect(result).toHaveLength(1);
+      expect(result[0].date).toBe('2024-02-01');
+    });
+
+    test('filters by endDate', async () => {
+      const result = await db.getBalanceHistory({ endDate: '2024-01-31' });
+      expect(result).toHaveLength(2);
+      expect(result.every((h) => h.date <= '2024-01-31')).toBe(true);
+    });
+
+    test('combines accountId and date filters', async () => {
+      const result = await db.getBalanceHistory({ accountId: 'acc1', startDate: '2024-02-01' });
+      expect(result).toHaveLength(1);
+      expect(result[0].balance_id).toBe('item1:acc1:2024-02-01');
+    });
+
+    test('returns empty array when no data matches', async () => {
+      const result = await db.getBalanceHistory({ accountId: 'nonexistent' });
+      expect(result).toHaveLength(0);
+    });
+
+    test('sorts by account_id asc then date desc', async () => {
+      const history = await db.getBalanceHistory();
+      for (let i = 1; i < history.length; i++) {
+        const prev = history[i - 1]!;
+        const curr = history[i]!;
+        if (prev.account_id === curr.account_id) {
+          expect(prev.date >= curr.date).toBe(true);
+        } else {
+          expect(prev.account_id < curr.account_id).toBe(true);
+        }
+      }
+    });
+  });
+
+  describe('getInvestmentPerformance', () => {
+    const mockPerformance: InvestmentPerformance[] = [
+      {
+        performance_id: 'perf1',
+        security_id: 'sec_aapl',
+        type: 'equity',
+        position: 10,
+      },
+      {
+        performance_id: 'perf2',
+        security_id: 'sec_tsla',
+        type: 'equity',
+        position: 5,
+      },
+      {
+        performance_id: 'perf3',
+        // no security_id — top-level aggregate doc
+        type: 'aggregate',
+      },
+    ];
+
+    beforeEach(() => {
+      (db as any)._investmentPerformance = [...mockPerformance];
+      (db as any)._allCollectionsLoaded = true;
+    });
+
+    test('returns all performance records when no filters applied', async () => {
+      const result = await db.getInvestmentPerformance();
+      expect(result).toHaveLength(3);
+    });
+
+    test('filters by securityId', async () => {
+      const result = await db.getInvestmentPerformance({ securityId: 'sec_aapl' });
+      expect(result).toHaveLength(1);
+      expect(result[0].performance_id).toBe('perf1');
+    });
+
+    test('returns empty array when securityId does not match', async () => {
+      const result = await db.getInvestmentPerformance({ securityId: 'nonexistent' });
+      expect(result).toHaveLength(0);
+    });
+  });
+
+  describe('getTwrHoldings', () => {
+    const mockTwrHoldings: TwrHolding[] = [
+      {
+        twr_id: 'twr1',
+        security_id: 'sec_aapl',
+        month: '2024-01',
+        history: { '1704067200000': { value: 0.05 } },
+      },
+      {
+        twr_id: 'twr2',
+        security_id: 'sec_aapl',
+        month: '2024-02',
+        history: { '1706745600000': { value: 0.03 } },
+      },
+      {
+        twr_id: 'twr3',
+        security_id: 'sec_tsla',
+        month: '2024-01',
+        history: { '1704067200000': { value: -0.02 } },
+      },
+    ];
+
+    beforeEach(() => {
+      (db as any)._twrHoldings = [...mockTwrHoldings];
+      (db as any)._allCollectionsLoaded = true;
+    });
+
+    test('returns all TWR holdings when no filters applied', async () => {
+      const result = await db.getTwrHoldings();
+      expect(result).toHaveLength(3);
+    });
+
+    test('filters by securityId', async () => {
+      const result = await db.getTwrHoldings({ securityId: 'sec_aapl' });
+      expect(result).toHaveLength(2);
+      expect(result.every((t) => t.security_id === 'sec_aapl')).toBe(true);
+    });
+
+    test('filters by startMonth', async () => {
+      const result = await db.getTwrHoldings({ startMonth: '2024-02' });
+      expect(result).toHaveLength(1);
+      expect(result[0].month).toBe('2024-02');
+    });
+
+    test('filters by endMonth', async () => {
+      const result = await db.getTwrHoldings({ endMonth: '2024-01' });
+      expect(result).toHaveLength(2);
+      expect(result.every((t) => t.month! <= '2024-01')).toBe(true);
+    });
+
+    test('combines securityId and month filters', async () => {
+      const result = await db.getTwrHoldings({ securityId: 'sec_aapl', startMonth: '2024-02' });
+      expect(result).toHaveLength(1);
+      expect(result[0].twr_id).toBe('twr2');
+    });
+
+    test('returns empty array when no data matches', async () => {
+      const result = await db.getTwrHoldings({ securityId: 'nonexistent' });
+      expect(result).toHaveLength(0);
+    });
+  });
+
+  describe('getSecurities', () => {
+    const mockSecurities: Security[] = [
+      {
+        security_id: 'sec_aapl',
+        ticker_symbol: 'AAPL',
+        name: 'Apple Inc.',
+        type: 'equity',
+        current_price: 175.0,
+      },
+      {
+        security_id: 'sec_spy',
+        ticker_symbol: 'SPY',
+        name: 'SPDR S&P 500 ETF Trust',
+        type: 'etf',
+        current_price: 450.0,
+      },
+      {
+        security_id: 'sec_tsla',
+        ticker_symbol: 'TSLA',
+        name: 'Tesla, Inc.',
+        type: 'equity',
+        current_price: 200.0,
+      },
+      {
+        security_id: 'sec_vmmxx',
+        ticker_symbol: 'VMMXX',
+        name: 'Vanguard Federal Money Market Fund',
+        type: 'mutual fund',
+        is_cash_equivalent: true,
+      },
+    ];
+
+    beforeEach(() => {
+      (db as any)._securities = [...mockSecurities];
+      (db as any)._allCollectionsLoaded = true;
+    });
+
+    test('returns all securities when no filters applied', async () => {
+      const result = await db.getSecurities();
+      expect(result).toHaveLength(4);
+    });
+
+    test('filters by tickerSymbol (exact, case-insensitive)', async () => {
+      const result = await db.getSecurities({ tickerSymbol: 'aapl' });
+      expect(result).toHaveLength(1);
+      expect(result[0].security_id).toBe('sec_aapl');
+    });
+
+    test('tickerSymbol filter is case-insensitive', async () => {
+      const result = await db.getSecurities({ tickerSymbol: 'TSLA' });
+      expect(result).toHaveLength(1);
+      expect(result[0].ticker_symbol).toBe('TSLA');
+    });
+
+    test('filters by type', async () => {
+      const result = await db.getSecurities({ type: 'equity' });
+      expect(result).toHaveLength(2);
+      expect(result.every((s) => s.type === 'equity')).toBe(true);
+    });
+
+    test('filters by type etf', async () => {
+      const result = await db.getSecurities({ type: 'etf' });
+      expect(result).toHaveLength(1);
+      expect(result[0].ticker_symbol).toBe('SPY');
+    });
+
+    test('combines tickerSymbol and type filters', async () => {
+      const result = await db.getSecurities({ tickerSymbol: 'AAPL', type: 'equity' });
+      expect(result).toHaveLength(1);
+      expect(result[0].security_id).toBe('sec_aapl');
+    });
+
+    test('returns empty array when tickerSymbol does not match', async () => {
+      const result = await db.getSecurities({ tickerSymbol: 'NONEXISTENT' });
+      expect(result).toHaveLength(0);
+    });
+
+    test('returns empty array when type does not match', async () => {
+      const result = await db.getSecurities({ type: 'bond' });
+      expect(result).toHaveLength(0);
     });
   });
 });

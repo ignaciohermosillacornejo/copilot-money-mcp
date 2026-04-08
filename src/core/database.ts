@@ -38,6 +38,8 @@ import {
   getTransactionDisplayName,
 } from '../models/index.js';
 import type { Security, HoldingsHistory, Tag } from '../models/index.js';
+import type { BalanceHistory } from '../models/balance-history.js';
+import type { InvestmentPerformance, TwrHolding } from '../models/investment-performance.js';
 import { getCategoryName } from '../utils/categories.js';
 
 /**
@@ -159,6 +161,9 @@ export class CopilotDatabase {
   private _securities: Security[] | null = null;
   private _tags: Tag[] | null = null;
   private _holdingsHistory: HoldingsHistory[] | null = null;
+  private _balanceHistory: BalanceHistory[] | null = null;
+  private _investmentPerformance: InvestmentPerformance[] | null = null;
+  private _twrHoldings: TwrHolding[] | null = null;
 
   // Promises for in-flight loads to prevent duplicate loading
   private _loadingTransactions: Promise<Transaction[]> | null = null;
@@ -277,6 +282,9 @@ export class CopilotDatabase {
     this._securities = null;
     this._holdingsHistory = null;
     this._tags = null;
+    this._balanceHistory = null;
+    this._investmentPerformance = null;
+    this._twrHoldings = null;
 
     // Clear in-flight loading promises
     this._loadingTransactions = null;
@@ -428,6 +436,9 @@ export class CopilotDatabase {
       this._securities = result.securities;
       this._holdingsHistory = result.holdingsHistory;
       this._tags = result.tags;
+      this._balanceHistory = result.balanceHistory;
+      this._investmentPerformance = result.investmentPerformance;
+      this._twrHoldings = result.twrHoldings;
 
       this._allCollectionsLoaded = true;
       this._cacheLoadedAt = Date.now();
@@ -764,6 +775,51 @@ export class CopilotDatabase {
       return this._holdingsHistory ?? [];
     }
     return this._holdingsHistory ?? [];
+  }
+
+  /**
+   * Load balance history with caching.
+   * Uses batch loading for optimal performance on first access.
+   */
+  private async loadBalanceHistory(): Promise<BalanceHistory[]> {
+    if (this._balanceHistory !== null) {
+      return this._balanceHistory;
+    }
+    if (!this._allCollectionsLoaded) {
+      await this.loadAllCollections();
+      return this._balanceHistory ?? [];
+    }
+    return this._balanceHistory ?? [];
+  }
+
+  /**
+   * Load investment performance with caching.
+   * Uses batch loading for optimal performance on first access.
+   */
+  private async loadInvestmentPerformance(): Promise<InvestmentPerformance[]> {
+    if (this._investmentPerformance !== null) {
+      return this._investmentPerformance;
+    }
+    if (!this._allCollectionsLoaded) {
+      await this.loadAllCollections();
+      return this._investmentPerformance ?? [];
+    }
+    return this._investmentPerformance ?? [];
+  }
+
+  /**
+   * Load TWR holdings with caching.
+   * Uses batch loading for optimal performance on first access.
+   */
+  private async loadTwrHoldings(): Promise<TwrHolding[]> {
+    if (this._twrHoldings !== null) {
+      return this._twrHoldings;
+    }
+    if (!this._allCollectionsLoaded) {
+      await this.loadAllCollections();
+      return this._twrHoldings ?? [];
+    }
+    return this._twrHoldings ?? [];
   }
 
   /**
@@ -1289,10 +1345,23 @@ export class CopilotDatabase {
    *
    * Securities represent stocks, ETFs, mutual funds, cash equivalents, etc.
    *
+   * @param options - Filter options
+   * @param options.tickerSymbol - Filter by ticker symbol (case-insensitive exact match)
+   * @param options.type - Filter by security type (e.g., "equity", "etf", "mutual fund")
    * @returns Array of Security objects
    */
-  async getSecurities(): Promise<Security[]> {
-    return this.loadSecurities();
+  async getSecurities(options: { tickerSymbol?: string; type?: string } = {}): Promise<Security[]> {
+    const { tickerSymbol, type } = options;
+    const all = await this.loadSecurities();
+    let result = [...all];
+    if (tickerSymbol) {
+      const lower = tickerSymbol.toLowerCase();
+      result = result.filter((s) => s.ticker_symbol?.toLowerCase() === lower);
+    }
+    if (type) {
+      result = result.filter((s) => s.type === type);
+    }
+    return result;
   }
 
   /**
@@ -1413,6 +1482,91 @@ export class CopilotDatabase {
         'This is a subset of your full transaction history. ' +
         'Open Copilot Money app and browse transactions to sync more data.',
     };
+  }
+
+  /**
+   * Get balance history (daily account balance snapshots) with optional filters.
+   *
+   * @param options - Filter options
+   * @param options.accountId - Filter by account_id
+   * @param options.startDate - Filter by date >= this (YYYY-MM-DD)
+   * @param options.endDate - Filter by date <= this (YYYY-MM-DD)
+   * @returns Array of BalanceHistory objects
+   */
+  async getBalanceHistory(
+    options: {
+      accountId?: string;
+      startDate?: string;
+      endDate?: string;
+    } = {}
+  ): Promise<BalanceHistory[]> {
+    const { accountId, startDate, endDate } = options;
+    const all = await this.loadBalanceHistory();
+    let result = [...all];
+
+    if (accountId) {
+      result = result.filter((h) => h.account_id === accountId);
+    }
+    if (startDate) {
+      result = result.filter((h) => h.date >= startDate);
+    }
+    if (endDate) {
+      result = result.filter((h) => h.date <= endDate);
+    }
+
+    result.sort((a, b) => {
+      const acctCmp = a.account_id.localeCompare(b.account_id);
+      if (acctCmp !== 0) return acctCmp;
+      return b.date.localeCompare(a.date); // date desc
+    });
+
+    return result;
+  }
+
+  /**
+   * Get investment performance data with optional filters.
+   *
+   * @param options - Filter options
+   * @param options.securityId - Filter by security_id
+   * @returns Array of InvestmentPerformance objects
+   */
+  async getInvestmentPerformance(
+    options: { securityId?: string } = {}
+  ): Promise<InvestmentPerformance[]> {
+    const { securityId } = options;
+    const all = await this.loadInvestmentPerformance();
+    let result = [...all];
+    if (securityId) {
+      result = result.filter((p) => p.security_id === securityId);
+    }
+    return result;
+  }
+
+  /**
+   * Get TWR (Time-Weighted Return) holdings with optional filters.
+   *
+   * @param options - Filter options
+   * @param options.securityId - Filter by security_id
+   * @param options.startMonth - Filter by month >= this (YYYY-MM)
+   * @param options.endMonth - Filter by month <= this (YYYY-MM)
+   * @returns Array of TwrHolding objects
+   */
+  async getTwrHoldings(
+    options: { securityId?: string; startMonth?: string; endMonth?: string } = {}
+  ): Promise<TwrHolding[]> {
+    const { securityId, startMonth, endMonth } = options;
+    const all = await this.loadTwrHoldings();
+    let result = [...all];
+    if (securityId) {
+      result = result.filter((t) => t.security_id === securityId);
+    }
+    if (startMonth) {
+      result = result.filter((t) => t.month && t.month >= startMonth);
+    }
+    if (endMonth) {
+      result = result.filter((t) => t.month && t.month <= endMonth);
+    }
+    return result;
   }
 
   /**
