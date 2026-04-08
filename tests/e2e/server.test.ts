@@ -22,6 +22,7 @@ import type {
   Category,
   Tag,
 } from '../../src/models/index.js';
+import type { FirestoreClient } from '../../src/core/firestore-client.js';
 
 // Temp directory with a dummy .ldb so CopilotDatabase.isAvailable() returns true
 const FAKE_DB_DIR = mkdtempSync(join(tmpdir(), 'copilot-test-'));
@@ -215,6 +216,7 @@ describe('CopilotMoneyServer E2E', () => {
     (db as any)._items = [];
     (db as any)._userCategories = [];
     (db as any)._userAccounts = [];
+    // Empty maps — name resolution returns empty strings in tests
     (db as any)._categoryNameMap = new Map<string, string>();
     (db as any)._accountNameMap = new Map<string, string>();
 
@@ -394,6 +396,7 @@ function createMockDb(): CopilotDatabase {
   (db as any)._items = [...mockItems];
   (db as any)._userCategories = [...mockUserCategories];
   (db as any)._userAccounts = [];
+  // Empty maps — name resolution returns empty strings in tests
   (db as any)._categoryNameMap = new Map<string, string>();
   (db as any)._accountNameMap = new Map<string, string>();
   (db as any)._tags = [...mockTags];
@@ -405,14 +408,18 @@ function createMockDb(): CopilotDatabase {
 }
 
 /** No-op Firestore client for write-tool tests. */
-function createMockFirestoreClient(): any {
-  return {
+function createMockFirestoreClient(): FirestoreClient {
+  const mock: Pick<
+    FirestoreClient,
+    'requireUserId' | 'getUserId' | 'updateDocument' | 'createDocument' | 'deleteDocument'
+  > = {
     requireUserId: async () => 'test-user-123',
     getUserId: () => 'test-user-123',
     updateDocument: async () => {},
     createDocument: async () => {},
     deleteDocument: async () => {},
   };
+  return mock as unknown as FirestoreClient;
 }
 
 /** Parse the JSON text from a handleCallTool result. */
@@ -461,7 +468,7 @@ describe('handleCallTool — read tools', () => {
     expect(result.isError).toBeUndefined();
     const data = parseToolResult(result) as any;
     expect(data.view).toBe('list');
-    expect(typeof data.count).toBe('number');
+    expect(data.count).toBeGreaterThanOrEqual(1);
     expect(data.data).toBeDefined();
     expect(data.data.categories).toBeArray();
   });
