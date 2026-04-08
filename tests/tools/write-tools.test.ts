@@ -183,6 +183,15 @@ describe('setTransactionName', () => {
     );
   });
 
+  test('trims whitespace from name', async () => {
+    const result = await tools.setTransactionName({
+      transaction_id: 'txn1',
+      name: '  Trimmed Name  ',
+    });
+    expect(result.new_name).toBe('Trimmed Name');
+    expect(updateCalls[0].fields).toEqual({ name: { stringValue: 'Trimmed Name' } });
+  });
+
   test('returns old name from original_name fallback', async () => {
     (mockDb as any)._transactions = [
       {
@@ -700,6 +709,7 @@ describe('setRecurringState', () => {
   });
 
   test('rejects invalid state', async () => {
+    // `as any` needed because TypeScript's union type won't accept 'deleted'
     await expect(
       tools.setRecurringState({ recurring_id: 'rec1', state: 'deleted' as any })
     ).rejects.toThrow('Invalid state: deleted');
