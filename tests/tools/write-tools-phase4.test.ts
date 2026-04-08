@@ -1,5 +1,5 @@
 /**
- * E2E tests for the remaining 8 write tools.
+ * E2E tests for the remaining 7 write tools.
  *
  * Covers: setTransactionCategory, setTransactionNote, setTransactionTags,
  * reviewTransactions, createTag, deleteTag, createCategory.
@@ -144,7 +144,7 @@ describe('setTransactionCategory', () => {
     expect(result.new_category_name).toBe('Shopping');
   });
 
-  test('calls Firestore with correct path and mask', async () => {
+  test('calls Firestore with correct path, mask, and field value', async () => {
     await tools.setTransactionCategory({
       transaction_id: 'txn1',
       category_id: 'shopping',
@@ -153,6 +153,7 @@ describe('setTransactionCategory', () => {
     expect(updateCalls[0].collection).toBe('items/item1/accounts/acct1/transactions');
     expect(updateCalls[0].docId).toBe('txn1');
     expect(updateCalls[0].mask).toEqual(['category_id']);
+    expect(updateCalls[0].fields.category_id).toEqual({ stringValue: 'shopping' });
   });
 
   test('throws on invalid category_id format', async () => {
@@ -233,7 +234,7 @@ describe('setTransactionNote', () => {
     expect(result.new_note).toBe('');
   });
 
-  test('calls Firestore with user_note field', async () => {
+  test('calls Firestore with user_note field and correct value', async () => {
     await tools.setTransactionNote({
       transaction_id: 'txn1',
       note: 'New note',
@@ -241,6 +242,7 @@ describe('setTransactionNote', () => {
     expect(updateCalls).toHaveLength(1);
     expect(updateCalls[0].mask).toEqual(['user_note']);
     expect(updateCalls[0].collection).toBe('items/item1/accounts/acct1/transactions');
+    expect(updateCalls[0].fields.user_note).toEqual({ stringValue: 'New note' });
   });
 
   test('returns empty old_note when transaction has no prior note', async () => {
@@ -319,13 +321,14 @@ describe('setTransactionTags', () => {
     expect(result.new_tag_ids).toEqual([]);
   });
 
-  test('calls Firestore with tag_ids field', async () => {
+  test('calls Firestore with tag_ids field and correct value', async () => {
     await tools.setTransactionTags({
       transaction_id: 'txn1',
       tag_ids: ['vacation'],
     });
     expect(updateCalls).toHaveLength(1);
     expect(updateCalls[0].mask).toEqual(['tag_ids']);
+    expect(updateCalls[0].fields.tag_ids).toBeDefined();
   });
 
   test('returns empty old_tag_ids when transaction has none', async () => {
@@ -342,6 +345,12 @@ describe('setTransactionTags', () => {
     await expect(
       tools.setTransactionTags({ transaction_id: 'txn1', tag_ids: ['good', 'bad/id'] })
     ).rejects.toThrow('Invalid tag_id format');
+  });
+
+  test('throws on invalid transaction_id format', async () => {
+    await expect(
+      tools.setTransactionTags({ transaction_id: 'bad/id', tag_ids: ['tag1'] })
+    ).rejects.toThrow('Invalid transaction_id format');
   });
 
   test('throws when transaction not found', async () => {
@@ -415,6 +424,7 @@ describe('reviewTransactions', () => {
     });
     expect(result.success).toBe(true);
     expect(result.reviewed_count).toBe(1);
+    expect(updateCalls[0].fields.user_reviewed).toEqual({ booleanValue: false });
   });
 
   test('calls Firestore for each transaction', async () => {
