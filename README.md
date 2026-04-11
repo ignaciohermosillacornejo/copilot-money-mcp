@@ -6,7 +6,7 @@
 [![Node.js 18+](https://img.shields.io/badge/node-18+-green.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue.svg)](https://www.typescriptlang.org/)
 [![Tests](https://img.shields.io/badge/tests-1400+-brightgreen.svg)](https://github.com/ignaciohermosillacornejo/copilot-money-mcp)
-[![Tools](https://img.shields.io/badge/tools-41-blue.svg)](https://github.com/ignaciohermosillacornejo/copilot-money-mcp)
+[![Tools](https://img.shields.io/badge/tools-35-blue.svg)](https://github.com/ignaciohermosillacornejo/copilot-money-mcp)
 
 ## Disclaimer
 
@@ -16,10 +16,10 @@
 
 An [MCP](https://modelcontextprotocol.io/) server that gives AI assistants access to your Copilot Money personal finance data. It reads from the locally cached Firestore database (LevelDB + Protocol Buffers) on your Mac. **Reads are 100% local with zero network requests.** Optional write mode (opt-in via `--write`) sends your requested changes directly to Copilot Money's Firebase/Firestore backend — the same backend the Copilot Money app itself uses — authenticated with your own credentials, never through any third-party service.
 
-**41 tools** across spending, investments, budgets, goals, and more:
+**35 tools** across spending, investments, budgets, goals, and more:
 
 - **17 read tools** — query transactions, accounts, holdings, balances, categories, recurring charges, budgets, goals, investment performance, and more
-- **24 write tools** (opt-in) — categorize transactions, manage tags, create budgets, update recurring items, and organize your finances
+- **18 write tools** (opt-in) — consolidate transaction changes, manage tags, create budgets, update recurring items, and organize your finances
 
 **Read-only by default.** Write tools require explicitly starting the server with `--write` to enable.
 
@@ -146,7 +146,7 @@ Uses `get_recurring_transactions`.
 
 > "Set up Netflix as a monthly recurring charge"
 
-Uses write tools like `set_transaction_category`, `set_transaction_tags`, `create_budget`, `update_recurring`, and more. Requires `--write` flag.
+Uses write tools like `update_transaction`, `create_budget`, `update_recurring`, and more. Requires `--write` flag.
 
 ## Available Tools
 
@@ -172,11 +172,11 @@ Uses write tools like `set_transaction_category`, `set_transaction_tags`, `creat
 | `get_cache_info` | Local cache metadata — date range, transaction count, cache age. |
 | `refresh_database` | Reload data from disk. Cache auto-refreshes every 5 minutes. |
 
-### Write Tools (24) — requires `--write` flag
+### Write Tools (18) — requires `--write` flag
 
 | Category | Tools |
 |----------|-------|
-| **Transactions** | `set_transaction_category`, `set_transaction_name`, `set_transaction_note`, `set_transaction_tags`, `set_transaction_excluded`, `set_transaction_goal`, `set_internal_transfer`, `review_transactions` |
+| **Transactions** | `update_transaction` (multi-field patch), `review_transactions` |
 | **Tags** | `create_tag`, `update_tag`, `delete_tag` |
 | **Categories** | `create_category`, `update_category`, `delete_category` |
 | **Budgets** | `create_budget`, `update_budget`, `delete_budget` |
