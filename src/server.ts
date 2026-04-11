@@ -95,13 +95,6 @@ export class CopilotMoneyServer {
    */
   private static readonly WRITE_TOOLS = new Set([
     'update_transaction',
-    'set_transaction_category',
-    'set_transaction_note',
-    'set_transaction_tags',
-    'set_transaction_excluded',
-    'set_transaction_name',
-    'set_internal_transfer',
-    'set_transaction_goal',
     'review_transactions',
     'create_tag',
     'delete_tag',
@@ -255,51 +248,9 @@ export class CopilotMoneyServer {
             typedArgs as Parameters<typeof this.tools.updateTransaction>[0]
           );
           break;
-        case 'set_transaction_category':
-          result = await this.tools.setTransactionCategory(
-            typedArgs as Parameters<typeof this.tools.setTransactionCategory>[0]
-          );
-          break;
-
-        case 'set_transaction_note':
-          result = await this.tools.setTransactionNote(
-            typedArgs as Parameters<typeof this.tools.setTransactionNote>[0]
-          );
-          break;
-
-        case 'set_transaction_tags':
-          result = await this.tools.setTransactionTags(
-            typedArgs as Parameters<typeof this.tools.setTransactionTags>[0]
-          );
-          break;
-
         case 'review_transactions':
           result = await this.tools.reviewTransactions(
             typedArgs as Parameters<typeof this.tools.reviewTransactions>[0]
-          );
-          break;
-
-        case 'set_transaction_excluded':
-          result = await this.tools.setTransactionExcluded(
-            typedArgs as Parameters<typeof this.tools.setTransactionExcluded>[0]
-          );
-          break;
-
-        case 'set_transaction_name':
-          result = await this.tools.setTransactionName(
-            typedArgs as Parameters<typeof this.tools.setTransactionName>[0]
-          );
-          break;
-
-        case 'set_internal_transfer':
-          result = await this.tools.setInternalTransfer(
-            typedArgs as Parameters<typeof this.tools.setInternalTransfer>[0]
-          );
-          break;
-
-        case 'set_transaction_goal':
-          result = await this.tools.setTransactionGoal(
-            typedArgs as Parameters<typeof this.tools.setTransactionGoal>[0]
           );
           break;
 

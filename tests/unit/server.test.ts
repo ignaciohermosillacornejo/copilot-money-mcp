@@ -447,7 +447,7 @@ describe('CopilotMoneyServer write mode', () => {
 describe('createWriteToolSchemas', () => {
   test('returns write tool schemas with proper annotations', () => {
     const schemas = createWriteToolSchemas();
-    expect(schemas.length).toBeGreaterThanOrEqual(20);
+    expect(schemas.length).toBeGreaterThanOrEqual(15);
 
     const updateTxn = schemas.find((s) => s.name === 'update_transaction');
     expect(updateTxn).toBeDefined();

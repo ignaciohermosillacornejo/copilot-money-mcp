@@ -102,36 +102,8 @@
       "description": "Update one or more fields on a transaction in a single atomic write."
     },
     {
-      "name": "set_transaction_category",
-      "description": "Change the category of a transaction."
-    },
-    {
-      "name": "set_transaction_note",
-      "description": "Set or clear the user note on a transaction."
-    },
-    {
-      "name": "set_transaction_tags",
-      "description": "Set the tags on a transaction."
-    },
-    {
       "name": "review_transactions",
       "description": "Mark one or more transactions as reviewed (or unreviewed)."
-    },
-    {
-      "name": "set_transaction_excluded",
-      "description": "Exclude or include a transaction in spending reports."
-    },
-    {
-      "name": "set_transaction_name",
-      "description": "Rename a transaction display name."
-    },
-    {
-      "name": "set_internal_transfer",
-      "description": "Mark or unmark a transaction as an internal transfer."
-    },
-    {
-      "name": "set_transaction_goal",
-      "description": "Link or unlink a transaction to a financial goal."
     },
     {
       "name": "create_tag",
