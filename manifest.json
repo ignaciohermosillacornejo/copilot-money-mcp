@@ -98,6 +98,10 @@
       "description": "Get monthly progress snapshots for financial goals. Filter by goal_id or month range."
     },
     {
+      "name": "update_transaction",
+      "description": "Update one or more fields on a transaction in a single atomic write."
+    },
+    {
       "name": "set_transaction_category",
       "description": "Change the category of a transaction."
     },

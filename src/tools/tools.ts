@@ -2488,6 +2488,128 @@ export class CopilotMoneyTools {
   }
 
   /**
+   * Update one or more fields on a transaction in a single atomic write.
+   *
+   * Consolidates the behavior of the previous 7 set_transaction_* tools.
+   * Omitted fields are preserved. note="" clears the note. tag_ids=[]
+   * clears all tags. goal_id=null unlinks (Firestore gets "", cache gets undefined).
+   */
+  async updateTransaction(args: {
+    transaction_id: string;
+    category_id?: string;
+    note?: string;
+    tag_ids?: string[];
+    excluded?: boolean;
+    name?: string;
+    internal_transfer?: boolean;
+    goal_id?: string | null;
+  }): Promise<{
+    success: true;
+    transaction_id: string;
+    updated: string[];
+  }> {
+    const { transaction_id } = args;
+
+    // Reject unknown fields (equivalent to JSON Schema additionalProperties: false,
+    // but re-checked here as a defense in depth in case the method is called directly
+    // without going through the MCP dispatch layer).
+    const allowedKeys = new Set([
+      'transaction_id',
+      'category_id',
+      'note',
+      'tag_ids',
+      'excluded',
+      'name',
+      'internal_transfer',
+      'goal_id',
+    ]);
+    for (const key of Object.keys(args)) {
+      if (!allowedKeys.has(key)) {
+        throw new Error(`update_transaction: unknown field "${key}"`);
+      }
+    }
+
+    // Require at least one mutable field besides transaction_id.
+    const mutableKeys = Object.keys(args).filter((k) => k !== 'transaction_id');
+    if (mutableKeys.length === 0) {
+      throw new Error('update_transaction requires at least one field to update');
+    }
+
+    // Per-field validation (runs BEFORE any Firestore call for atomicity).
+    let trimmedName: string | undefined;
+    if ('name' in args && args.name !== undefined) {
+      trimmedName = args.name.trim();
+      if (trimmedName.length === 0) {
+        throw new Error('Transaction name must not be empty');
+      }
+    }
+    if ('category_id' in args && args.category_id !== undefined) {
+      validateDocId(args.category_id, 'category_id');
+    }
+    if ('goal_id' in args && args.goal_id !== null && args.goal_id !== undefined) {
+      validateDocId(args.goal_id, 'goal_id');
+      const goals = await this.db.getGoals();
+      const goal = goals.find((g) => g.goal_id === args.goal_id);
+      if (!goal) {
+        throw new Error(`Goal not found: ${args.goal_id}`);
+      }
+    }
+
+    // Resolve the transaction and its Firestore path.
+    const { collectionPath } = await this.resolveTransaction(transaction_id);
+
+    // Build two parallel field maps by key presence (NOT by destructuring — see spec).
+    const firestoreFields: Record<string, unknown> = {};
+    const cacheFields: Partial<Transaction> = {};
+
+    if ('category_id' in args && args.category_id !== undefined) {
+      firestoreFields.category_id = args.category_id;
+      cacheFields.category_id = args.category_id;
+    }
+    if ('note' in args && args.note !== undefined) {
+      firestoreFields.user_note = args.note;
+      cacheFields.user_note = args.note;
+    }
+    if ('tag_ids' in args && args.tag_ids !== undefined) {
+      firestoreFields.tag_ids = args.tag_ids;
+      cacheFields.tag_ids = args.tag_ids;
+    }
+    if ('excluded' in args && args.excluded !== undefined) {
+      firestoreFields.excluded = args.excluded;
+      cacheFields.excluded = args.excluded;
+    }
+    if ('name' in args && trimmedName !== undefined) {
+      firestoreFields.name = trimmedName;
+      cacheFields.name = trimmedName;
+    }
+    if ('internal_transfer' in args && args.internal_transfer !== undefined) {
+      firestoreFields.internal_transfer = args.internal_transfer;
+      cacheFields.internal_transfer = args.internal_transfer;
+    }
+    if ('goal_id' in args) {
+      // Firestore wants empty string to unlink; cache wants undefined (matches Zod model).
+      firestoreFields.goal_id = args.goal_id ?? '';
+      cacheFields.goal_id = args.goal_id ?? undefined;
+    }
+
+    // Single atomic Firestore write + cache patch.
+    const client = this.getFirestoreClient();
+    const firestoreValue = toFirestoreFields(firestoreFields);
+    const updateMask = Object.keys(firestoreFields);
+    await client.updateDocument(collectionPath, transaction_id, firestoreValue, updateMask);
+
+    if (!this.db.patchCachedTransaction(transaction_id, cacheFields)) {
+      this.db.clearCache();
+    }
+
+    return {
+      success: true,
+      transaction_id,
+      updated: updateMask,
+    };
+  }
+
+  /**
    * Mark one or more transactions as reviewed (or unreviewed).
    *
    * Validates all transaction IDs, writes user_reviewed to Firestore for each,
@@ -4806,6 +4928,62 @@ export function createToolSchemas(): ToolSchema[] {
  */
 export function createWriteToolSchemas(): ToolSchema[] {
   return [
+    {
+      name: 'update_transaction',
+      description:
+        'Update one or more fields on a transaction in a single atomic write. ' +
+        'Pass transaction_id plus any combination of category_id, note, tag_ids, ' +
+        'excluded, name, internal_transfer, or goal_id. Omitted fields are preserved ' +
+        '(e.g., sending only tag_ids does not erase the note). Pass note="" to clear ' +
+        'the note. Pass tag_ids=[] to clear all tags. Pass goal_id=null to unlink the ' +
+        'goal. At least one mutable field must be provided besides transaction_id.',
+      inputSchema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          transaction_id: {
+            type: 'string',
+            description: 'Transaction ID to update (from get_transactions results)',
+          },
+          category_id: {
+            type: 'string',
+            description: 'New category ID to assign (from get_categories results)',
+          },
+          note: {
+            type: 'string',
+            description: 'User note text. Pass empty string to clear.',
+          },
+          tag_ids: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Tag IDs to set. Pass empty array to clear all tags.',
+          },
+          excluded: {
+            type: 'boolean',
+            description: 'Whether the transaction is excluded from spending reports.',
+          },
+          name: {
+            type: 'string',
+            description: 'Display name (will be trimmed; must be non-empty if present).',
+          },
+          internal_transfer: {
+            type: 'boolean',
+            description: 'Whether the transaction is an internal transfer.',
+          },
+          goal_id: {
+            type: ['string', 'null'],
+            description:
+              'Financial goal ID to link to. Pass null to unlink the existing goal.',
+          },
+        },
+        required: ['transaction_id'],
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
     {
       name: 'set_transaction_category',
       description:
