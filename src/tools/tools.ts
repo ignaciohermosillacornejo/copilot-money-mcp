@@ -341,7 +341,6 @@ export class CopilotMoneyTools {
 
   /**
    * Return the Firestore client, or throw if write mode is not enabled.
-   * Used by write tools (e.g. set_transaction_category).
    */
   protected getFirestoreClient(): FirestoreClient {
     if (!this.firestoreClient) {
@@ -2372,122 +2371,6 @@ export class CopilotMoneyTools {
   }
 
   /**
-   * Write a partial update to a transaction and patch the cache.
-   */
-  private async writeTransactionFields(
-    transactionId: string,
-    collectionPath: string,
-    fields: Record<string, unknown>
-  ): Promise<void> {
-    const client = this.getFirestoreClient();
-    const firestoreFields = toFirestoreFields(fields);
-    const updateMask = Object.keys(fields);
-    await client.updateDocument(collectionPath, transactionId, firestoreFields, updateMask);
-
-    if (!this.db.patchCachedTransaction(transactionId, fields as Partial<Transaction>)) {
-      this.db.clearCache();
-    }
-  }
-
-  /**
-   * Change the category of a transaction.
-   *
-   * Validates both IDs exist, writes to Firestore, then patches the cache.
-   */
-  async setTransactionCategory(args: { transaction_id: string; category_id: string }): Promise<{
-    success: boolean;
-    transaction_id: string;
-    old_category_id: string | undefined;
-    new_category_id: string;
-    old_category_name: string;
-    new_category_name: string;
-  }> {
-    const { transaction_id, category_id } = args;
-    validateDocId(category_id, 'category_id');
-
-    const { txn, collectionPath } = await this.resolveTransaction(transaction_id);
-
-    // Validate category exists
-    const categories = await this.db.getUserCategories();
-    const category = categories.find((c) => c.category_id === category_id);
-    if (!category) {
-      throw new Error(`Category not found: ${category_id}`);
-    }
-
-    const oldCategoryId = txn.category_id;
-    const userCategoryMap = await this.getUserCategoryMap();
-    const oldCategoryName = oldCategoryId
-      ? getCategoryName(oldCategoryId, userCategoryMap)
-      : 'Uncategorized';
-    const newCategoryName = getCategoryName(category_id, userCategoryMap);
-
-    await this.writeTransactionFields(transaction_id, collectionPath, { category_id });
-
-    return {
-      success: true,
-      transaction_id,
-      old_category_id: oldCategoryId,
-      new_category_id: category_id,
-      old_category_name: oldCategoryName,
-      new_category_name: newCategoryName,
-    };
-  }
-
-  /**
-   * Set or clear the user note on a transaction.
-   *
-   * Validates the transaction exists, writes to Firestore, then patches the cache.
-   */
-  async setTransactionNote(args: { transaction_id: string; note: string }): Promise<{
-    success: boolean;
-    transaction_id: string;
-    old_note: string;
-    new_note: string;
-  }> {
-    const { transaction_id, note } = args;
-    const { txn, collectionPath } = await this.resolveTransaction(transaction_id);
-    const oldNote = txn.user_note ?? '';
-
-    await this.writeTransactionFields(transaction_id, collectionPath, { user_note: note });
-
-    return {
-      success: true,
-      transaction_id,
-      old_note: oldNote,
-      new_note: note,
-    };
-  }
-
-  /**
-   * Set the tags on a transaction.
-   *
-   * Validates transaction exists, writes tag_ids to Firestore, then patches the cache.
-   */
-  async setTransactionTags(args: { transaction_id: string; tag_ids: string[] }): Promise<{
-    success: boolean;
-    transaction_id: string;
-    old_tag_ids: string[];
-    new_tag_ids: string[];
-  }> {
-    const { transaction_id, tag_ids } = args;
-    for (const tagId of tag_ids) {
-      validateDocId(tagId, 'tag_id');
-    }
-
-    const { txn, collectionPath } = await this.resolveTransaction(transaction_id);
-    const oldTagIds = txn.tag_ids || [];
-
-    await this.writeTransactionFields(transaction_id, collectionPath, { tag_ids });
-
-    return {
-      success: true,
-      transaction_id,
-      old_tag_ids: oldTagIds,
-      new_tag_ids: tag_ids,
-    };
-  }
-
-  /**
    * Update one or more fields on a transaction in a single atomic write.
    *
    * Consolidates the behavior of the previous 7 set_transaction_* tools.
@@ -2678,117 +2561,6 @@ export class CopilotMoneyTools {
       success: true,
       reviewed_count: resolvedTxns.length,
       transaction_ids: resolvedTxns.map((t) => t.transaction_id),
-    };
-  }
-
-  /**
-   * Toggle the excluded flag on a transaction (hides/shows in spending reports).
-   *
-   * Validates the transaction exists, writes to Firestore, then patches the cache.
-   */
-  async setTransactionExcluded(args: { transaction_id: string; excluded: boolean }): Promise<{
-    success: boolean;
-    transaction_id: string;
-    excluded: boolean;
-  }> {
-    const { transaction_id, excluded } = args;
-    const { collectionPath } = await this.resolveTransaction(transaction_id);
-
-    await this.writeTransactionFields(transaction_id, collectionPath, { excluded });
-
-    return { success: true, transaction_id, excluded };
-  }
-
-  /**
-   * Rename a transaction's display name.
-   *
-   * Validates the transaction exists, writes to Firestore, then patches the cache.
-   */
-  async setTransactionName(args: { transaction_id: string; name: string }): Promise<{
-    success: boolean;
-    transaction_id: string;
-    old_name: string;
-    new_name: string;
-  }> {
-    const { transaction_id, name } = args;
-
-    const trimmedName = name.trim();
-    if (!trimmedName) {
-      throw new Error('Transaction name must not be empty');
-    }
-
-    const { txn, collectionPath } = await this.resolveTransaction(transaction_id);
-    const oldName = txn.name ?? txn.original_name ?? '';
-
-    await this.writeTransactionFields(transaction_id, collectionPath, { name: trimmedName });
-
-    return { success: true, transaction_id, old_name: oldName, new_name: trimmedName };
-  }
-
-  /**
-   * Mark or unmark a transaction as an internal transfer.
-   *
-   * Validates the transaction exists, writes to Firestore, then patches the cache.
-   */
-  async setInternalTransfer(args: { transaction_id: string; internal_transfer: boolean }): Promise<{
-    success: boolean;
-    transaction_id: string;
-    internal_transfer: boolean;
-  }> {
-    const { transaction_id, internal_transfer } = args;
-    const { collectionPath } = await this.resolveTransaction(transaction_id);
-
-    await this.writeTransactionFields(transaction_id, collectionPath, { internal_transfer });
-
-    return { success: true, transaction_id, internal_transfer };
-  }
-
-  /**
-   * Link or unlink a transaction to a financial goal.
-   *
-   * Validates the transaction and goal exist, writes to Firestore, then patches the cache.
-   * Pass goal_id: null to unlink.
-   */
-  async setTransactionGoal(args: { transaction_id: string; goal_id: string | null }): Promise<{
-    success: boolean;
-    transaction_id: string;
-    old_goal_id: string | null;
-    new_goal_id: string | null;
-  }> {
-    const { transaction_id, goal_id } = args;
-    if (goal_id !== null) validateDocId(goal_id, 'goal_id');
-
-    const { txn, collectionPath } = await this.resolveTransaction(transaction_id);
-
-    // Validate goal exists when linking
-    if (goal_id !== null) {
-      const goals = await this.db.getGoals();
-      const goal = goals.find((g) => g.goal_id === goal_id);
-      if (!goal) {
-        throw new Error(`Goal not found: ${goal_id}`);
-      }
-    }
-
-    const oldGoalId = txn.goal_id || null;
-    // Write empty string to Firestore when unlinking, but undefined to cache for model consistency
-    const firestoreGoalId = goal_id ?? '';
-
-    const client = this.getFirestoreClient();
-    const firestoreFields = toFirestoreFields({ goal_id: firestoreGoalId });
-    await client.updateDocument(collectionPath, transaction_id, firestoreFields, ['goal_id']);
-    if (
-      !this.db.patchCachedTransaction(transaction_id, {
-        goal_id: goal_id ?? undefined,
-      })
-    ) {
-      this.db.clearCache();
-    }
-
-    return {
-      success: true,
-      transaction_id,
-      old_goal_id: oldGoalId,
-      new_goal_id: goal_id,
     };
   }
 
@@ -4982,86 +4754,10 @@ export function createWriteToolSchemas(): ToolSchema[] {
           },
           goal_id: {
             type: ['string', 'null'],
-            description:
-              'Financial goal ID to link to. Pass null to unlink the existing goal.',
+            description: 'Financial goal ID to link to. Pass null to unlink the existing goal.',
           },
         },
         required: ['transaction_id'],
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: true,
-      },
-    },
-    {
-      name: 'set_transaction_category',
-      description:
-        'Change the category of a transaction. Requires transaction_id (from get_transactions) ' +
-        'and category_id (from get_categories). Writes directly to Copilot Money via Firestore.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          transaction_id: {
-            type: 'string',
-            description: 'Transaction ID to update (from get_transactions results)',
-          },
-          category_id: {
-            type: 'string',
-            description: 'New category ID to assign (from get_categories results)',
-          },
-        },
-        required: ['transaction_id', 'category_id'],
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: true,
-      },
-    },
-    {
-      name: 'set_transaction_note',
-      description:
-        'Set or clear the user note on a transaction. Pass an empty string to clear the note. ' +
-        'Requires transaction_id (from get_transactions). Writes directly to Copilot Money via Firestore.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          transaction_id: {
-            type: 'string',
-            description: 'Transaction ID to update (from get_transactions results)',
-          },
-          note: {
-            type: 'string',
-            description: 'Note text. Pass empty string to clear.',
-          },
-        },
-        required: ['transaction_id', 'note'],
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: true,
-      },
-    },
-    {
-      name: 'set_transaction_tags',
-      description:
-        'Set the tags on a transaction. Pass an array of tag_ids. Pass empty array to clear all tags.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          transaction_id: {
-            type: 'string',
-            description: 'Transaction ID to update (from get_transactions results)',
-          },
-          tag_ids: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'Array of tag IDs to set on the transaction. Pass empty array to clear.',
-          },
-        },
-        required: ['transaction_id', 'tag_ids'],
       },
       annotations: {
         readOnlyHint: false,
@@ -5088,107 +4784,6 @@ export function createWriteToolSchemas(): ToolSchema[] {
           },
         },
         required: ['transaction_ids'],
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: true,
-      },
-    },
-    {
-      name: 'set_transaction_excluded',
-      description:
-        'Exclude or include a transaction in spending reports. ' +
-        'Requires transaction_id (from get_transactions). Writes directly to Copilot Money via Firestore.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          transaction_id: {
-            type: 'string',
-            description: 'Transaction ID to update (from get_transactions results)',
-          },
-          excluded: {
-            type: 'boolean',
-            description: 'Set to true to exclude from spending reports, false to include.',
-          },
-        },
-        required: ['transaction_id', 'excluded'],
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: true,
-      },
-    },
-    {
-      name: 'set_transaction_name',
-      description:
-        'Rename a transaction display name. ' +
-        'Requires transaction_id (from get_transactions). Writes directly to Copilot Money via Firestore.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          transaction_id: {
-            type: 'string',
-            description: 'Transaction ID to update (from get_transactions results)',
-          },
-          name: {
-            type: 'string',
-            description: 'New display name for the transaction. Must be non-empty.',
-          },
-        },
-        required: ['transaction_id', 'name'],
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: true,
-      },
-    },
-    {
-      name: 'set_internal_transfer',
-      description:
-        'Mark or unmark a transaction as an internal transfer between accounts. ' +
-        'Requires transaction_id (from get_transactions). Writes directly to Copilot Money via Firestore.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          transaction_id: {
-            type: 'string',
-            description: 'Transaction ID to update (from get_transactions results)',
-          },
-          internal_transfer: {
-            type: 'boolean',
-            description: 'Set to true to mark as internal transfer, false to unmark.',
-          },
-        },
-        required: ['transaction_id', 'internal_transfer'],
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: true,
-      },
-    },
-    {
-      name: 'set_transaction_goal',
-      description:
-        'Link or unlink a transaction to a financial goal. ' +
-        'Requires transaction_id (from get_transactions) and goal_id (from get_goals). ' +
-        'Pass goal_id: null to unlink. Writes directly to Copilot Money via Firestore.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          transaction_id: {
-            type: 'string',
-            description: 'Transaction ID to update (from get_transactions results)',
-          },
-          goal_id: {
-            type: ['string', 'null'],
-            description: 'Goal ID to link (from get_goals results), or null to unlink.',
-          },
-        },
-        required: ['transaction_id', 'goal_id'],
       },
       annotations: {
         readOnlyHint: false,
@@ -5254,7 +4849,7 @@ export function createWriteToolSchemas(): ToolSchema[] {
         'Create a new custom category in Copilot Money. Provide a name (required) ' +
         'and optionally an emoji, color, parent category, or excluded flag. ' +
         'Returns the generated category_id. The new category can then be used ' +
-        'with set_transaction_category.',
+        'with update_transaction.',
       inputSchema: {
         type: 'object',
         properties: {
