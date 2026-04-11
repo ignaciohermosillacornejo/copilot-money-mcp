@@ -233,6 +233,7 @@ describe('CopilotMoneyServer write mode', () => {
     const toolNames = result.tools.map((t) => t.name);
 
     expect(toolNames).toContain('get_transactions');
+    expect(toolNames).not.toContain('update_transaction');
     expect(toolNames).not.toContain('set_transaction_category');
     expect(toolNames).not.toContain('set_transaction_note');
     expect(toolNames).not.toContain('create_tag');
@@ -245,6 +246,7 @@ describe('CopilotMoneyServer write mode', () => {
     const toolNames = result.tools.map((t) => t.name);
 
     expect(toolNames).toContain('get_transactions');
+    expect(toolNames).toContain('update_transaction');
     expect(toolNames).toContain('set_transaction_category');
     expect(toolNames).toContain('set_transaction_note');
     expect(toolNames).toContain('set_transaction_excluded');
@@ -320,6 +322,17 @@ describe('CopilotMoneyServer write mode', () => {
   test('handleCallTool rejects write tool when not in write mode', async () => {
     const server = new CopilotMoneyServer();
     const result = await server.handleCallTool('set_transaction_category', {
+      transaction_id: 'txn1',
+      category_id: 'food',
+    });
+
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { text: string }).text).toContain('--write mode');
+  });
+
+  test('handleCallTool rejects update_transaction when not in write mode', async () => {
+    const server = new CopilotMoneyServer();
+    const result = await server.handleCallTool('update_transaction', {
       transaction_id: 'txn1',
       category_id: 'food',
     });
@@ -522,6 +535,13 @@ describe('createWriteToolSchemas', () => {
     expect(setNote!.annotations?.idempotentHint).toBe(true);
     expect(setNote!.inputSchema.required).toContain('transaction_id');
     expect(setNote!.inputSchema.required).toContain('note');
+
+    const updateTxn = schemas.find((s) => s.name === 'update_transaction');
+    expect(updateTxn).toBeDefined();
+    expect(updateTxn!.annotations?.readOnlyHint).toBe(false);
+    expect(updateTxn!.annotations?.idempotentHint).toBe(true);
+    expect(updateTxn!.inputSchema.required).toEqual(['transaction_id']);
+    expect(updateTxn!.inputSchema.additionalProperties).toBe(false);
   });
 
   test('create_tag schema requires name', () => {

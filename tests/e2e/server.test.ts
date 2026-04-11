@@ -732,6 +732,41 @@ describe('handleCallTool — write tools', () => {
     expect(data.period).toBe('monthly');
     expect(data.budget_id).toBeString();
   });
+
+  test('update_transaction multi-field call produces one write', async () => {
+    const result = await writeServer.handleCallTool('update_transaction', {
+      transaction_id: 'txn1',
+      category_id: 'custom_cat_1',
+      note: 'e2e test note',
+      tag_ids: [],
+    });
+    expect(result.isError).toBeUndefined();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.transaction_id).toBe('txn1');
+    expect(data.updated.sort()).toEqual(['category_id', 'tag_ids', 'user_note']);
+  });
+
+  test('update_transaction with goal_id: null unlinks the goal', async () => {
+    const result = await writeServer.handleCallTool('update_transaction', {
+      transaction_id: 'txn1',
+      goal_id: null,
+    });
+    expect(result.isError).toBeUndefined();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.updated).toEqual(['goal_id']);
+  });
+
+  test('update_transaction rejects empty patch', async () => {
+    const result = await writeServer.handleCallTool('update_transaction', {
+      transaction_id: 'txn1',
+    });
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { text: string }).text).toMatch(/at least one field/i);
+  });
 });
 
 describe('handleCallTool — error handling', () => {
