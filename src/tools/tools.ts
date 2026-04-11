@@ -2373,9 +2373,10 @@ export class CopilotMoneyTools {
   /**
    * Update one or more fields on a transaction in a single atomic write.
    *
-   * Consolidates the behavior of the previous 7 set_transaction_* tools.
-   * Omitted fields are preserved. note="" clears the note. tag_ids=[]
-   * clears all tags. goal_id=null unlinks (Firestore gets "", cache gets undefined).
+   * Supported fields: category_id, note, tag_ids, excluded, name,
+   * internal_transfer, goal_id. Omitted fields are preserved. note=""
+   * clears the note. tag_ids=[] clears all tags. goal_id=null unlinks
+   * (Firestore gets "", cache gets undefined).
    */
   async updateTransaction(args: {
     transaction_id: string;
