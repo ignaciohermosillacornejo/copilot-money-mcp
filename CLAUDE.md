@@ -80,7 +80,7 @@ Each MCP tool follows this pattern:
 
 ## Important Notes
 
-- **Privacy First**: 100% local processing, zero network requests
+- **Privacy First**: Reads are 100% local with zero network requests. Opt-in writes (`--write`) send authenticated requests directly to Copilot Money's own Firebase/Firestore backend via `src/core/firestore-client.ts` — no third-party services, no project-operated servers.
 - **Read-Only by Default**: Write tools require `--write` flag
 - **Database Location**: `~/Library/Containers/com.copilot.production/Data/Library/Application Support/firestore/__FIRAPP_DEFAULT/copilot-production-22904/main`
 

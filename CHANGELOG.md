@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Write mode (opt-in via `--write`)**: 24 new write tools for managing Copilot Money data. Read-only remains the default — write tools are completely disabled unless the server is started with `--write`.
+  - Transactions: `set_transaction_category`, `set_transaction_name`, `set_transaction_note`, `set_transaction_tags`, `set_transaction_excluded`, `set_transaction_goal`, `set_internal_transfer`, `review_transactions`
+  - Tags: `create_tag`, `update_tag`, `delete_tag`
+  - Categories: `create_category`, `update_category`, `delete_category`
+  - Budgets: `create_budget`, `update_budget`, `delete_budget`
+  - Goals: `create_goal`, `update_goal`, `delete_goal`
+  - Recurring: `create_recurring`, `update_recurring`, `set_recurring_state`, `delete_recurring`
+- **Firestore REST client** (`src/core/firestore-client.ts`): Authenticates to Copilot Money's Firebase/Firestore backend using a Firebase refresh token extracted from the local Copilot Money session. Write tools send authenticated requests directly to Google's Firestore REST API — the same backend the Copilot Money app itself uses. No third-party services or project-operated servers are involved.
+- Tool count increased from 17 to 41 (17 read + 24 write).
+
+### Changed
+- **[PRIVACY.md](PRIVACY.md)** updated to document opt-in write mode and the Firebase/Firestore network access required for writes. Default read-only mode remains 100% local with zero network requests.
+
 ### Fixed
 - **Total balance calculation**: Fixed `getAccounts()` total balance calculation to properly subtract debt from assets instead of adding all balances as positive values. This resolves inflated balance calculations for users with loans, mortgages, and credit cards.
 

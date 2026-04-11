@@ -14,7 +14,7 @@
 
 ## Overview
 
-An [MCP](https://modelcontextprotocol.io/) server that gives AI assistants access to your Copilot Money personal finance data. It reads from the locally cached Firestore database (LevelDB + Protocol Buffers) on your Mac — **100% local processing**, no network requests, all data stays on your machine.
+An [MCP](https://modelcontextprotocol.io/) server that gives AI assistants access to your Copilot Money personal finance data. It reads from the locally cached Firestore database (LevelDB + Protocol Buffers) on your Mac. **Reads are 100% local with zero network requests.** Optional write mode (opt-in via `--write`) sends your requested changes directly to Copilot Money's Firebase/Firestore backend — the same backend the Copilot Money app itself uses — authenticated with your own credentials, never through any third-party service.
 
 **41 tools** across spending, investments, budgets, goals, and more:
 
@@ -25,12 +25,12 @@ An [MCP](https://modelcontextprotocol.io/) server that gives AI assistants acces
 
 ## Privacy First
 
-Your financial data never leaves your machine. See our [Privacy Policy](PRIVACY.md) for details.
+We never collect, store, or transmit your data to any server operated by this project — we don't have any. See our [Privacy Policy](PRIVACY.md) for details.
 
-- No data collection or transmission
-- No external API calls (write mode uses local Firestore REST API only)
-- No analytics or telemetry
-- Read-only by default
+- No analytics, telemetry, or tracking of any kind
+- Reads are fully local — zero network requests
+- Read-only by default (write tools disabled unless you pass `--write`)
+- In opt-in write mode, requests go directly from your machine to Copilot Money's own Firebase/Firestore backend using your own credentials — never through any third-party service
 - Open source — verify the code yourself
 
 ## Quick Start
@@ -198,7 +198,7 @@ By default, the server starts in **read-only mode**. To enable write tools, star
 }
 ```
 
-Write tools modify your Copilot Money data via the local Firestore cache. Changes sync back to Copilot Money when the app is open.
+Write tools modify your Copilot Money data by sending authenticated requests directly to Copilot Money's Firebase/Firestore backend — the same backend the Copilot Money app uses — so your changes are immediately reflected in your account. Writes authenticate using a Firebase refresh token extracted from your local Copilot Money session; your credentials never leave your machine except in the authenticated request to Google's Firebase/Firestore endpoints. No third-party services are involved. See [PRIVACY.md](PRIVACY.md) for full details.
 
 ## Configuration
 

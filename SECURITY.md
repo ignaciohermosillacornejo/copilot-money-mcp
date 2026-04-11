@@ -42,12 +42,13 @@ Instead, please report security issues via one of these methods:
 
 This project implements several security measures:
 
-1. **Local Processing Only**: All data processing happens locally. No network requests are made.
-2. **Read-Only Access**: The MCP server cannot modify the Copilot Money database.
-3. **No Data Exfiltration**: No telemetry, analytics, or data transmission.
-4. **OIDC Publishing**: npm packages are published using OIDC trusted publishing with provenance.
-5. **Code Review**: All PRs require owner approval for security-critical paths.
-6. **Dependency Auditing**: Regular security audits of dependencies.
+1. **Local-First Processing**: All query processing happens locally. In the default read-only mode, zero network requests are made.
+2. **Read-Only by Default**: Write tools are disabled unless the server is explicitly started with the `--write` flag. When enabled, writes are sent only to Copilot Money's own Firebase/Firestore backend, authenticated over HTTPS with the user's own credentials — no third-party services.
+3. **No Data Exfiltration**: No telemetry, analytics, or tracking. No data is ever sent to any server operated by this project.
+4. **In-Memory Credentials**: In write mode, the Firebase refresh token is held only in memory and is never logged, persisted, or transmitted to anyone other than Google's Firebase token-exchange endpoint.
+5. **OIDC Publishing**: npm packages are published using OIDC trusted publishing with provenance.
+6. **Code Review**: All PRs require owner approval for security-critical paths.
+7. **Dependency Auditing**: Regular security audits of dependencies.
 
 ### Scope
 
