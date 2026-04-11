@@ -6,7 +6,7 @@
  * setTransactionName, setInternalTransfer, and setTransactionGoal.
  */
 
-import { describe, test, expect, beforeEach } from 'bun:test';
+import { describe, test, expect } from 'bun:test';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 
@@ -94,7 +94,10 @@ describe('updateTransaction — single-field updates', () => {
 
   test('note: non-empty string sets user_note', async () => {
     const { tools, updateCalls } = makeTools();
-    await tools.updateTransaction({ transaction_id: 'txn1', note: 'hello' });
+    const result = await tools.updateTransaction({ transaction_id: 'txn1', note: 'hello' });
+    expect(result.success).toBe(true);
+    expect(result.transaction_id).toBe('txn1');
+    expect(result.updated).toEqual(['user_note']);
     expect(updateCalls[0].mask).toEqual(['user_note']);
     expect(updateCalls[0].fields).toEqual({ user_note: { stringValue: 'hello' } });
   });
@@ -151,6 +154,13 @@ describe('updateTransaction — single-field updates', () => {
     await tools.updateTransaction({ transaction_id: 'txn1', internal_transfer: true });
     expect(updateCalls[0].mask).toEqual(['internal_transfer']);
     expect(updateCalls[0].fields).toEqual({ internal_transfer: { booleanValue: true } });
+  });
+
+  test('internal_transfer: false unmarks transfer', async () => {
+    const { tools, updateCalls } = makeTools();
+    await tools.updateTransaction({ transaction_id: 'txn1', internal_transfer: false });
+    expect(updateCalls[0].mask).toEqual(['internal_transfer']);
+    expect(updateCalls[0].fields).toEqual({ internal_transfer: { booleanValue: false } });
   });
 
   test('goal_id: links to an existing goal', async () => {
@@ -274,7 +284,7 @@ describe('updateTransaction — validation errors', () => {
     await expect(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       tools.updateTransaction({ transaction_id: 'txn1', bogus_field: 'x' } as any)
-    ).rejects.toThrow();
+    ).rejects.toThrow(/unknown field/i);
     expect(updateCalls).toHaveLength(0);
   });
 
