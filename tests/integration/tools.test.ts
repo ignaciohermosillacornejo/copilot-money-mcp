@@ -971,7 +971,7 @@ describe('CopilotMoneyTools Integration', () => {
       writeTools = new CopilotMoneyTools(db, client);
     });
 
-    test('updateTransaction multi-field call writes once', async () => {
+    test('updateTransaction multi-field call returns updated field list', async () => {
       const result = await writeTools.updateTransaction({
         transaction_id: 'wtxn1',
         category_id: 'custom_food',
