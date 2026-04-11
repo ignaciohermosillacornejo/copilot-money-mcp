@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tool count increased from 17 to 41 (17 read + 24 write).
 
 ### Changed
-- **[PRIVACY.md](PRIVACY.md)** updated to document opt-in write mode and the Firebase/Firestore network access required for writes. Default read-only mode remains 100% local with zero network requests.
+- **Documentation**: [PRIVACY.md](PRIVACY.md), [README.md](README.md), [SECURITY.md](SECURITY.md), [CLAUDE.md](CLAUDE.md), [docs/TESTING_GUIDE.md](docs/TESTING_GUIDE.md), [docs/MCPB_COMPLIANCE.md](docs/MCPB_COMPLIANCE.md), and [docs/REVERSE_ENGINEERING_FINDING.md](docs/REVERSE_ENGINEERING_FINDING.md) updated to accurately reflect opt-in write mode and the Firebase/Firestore network access required for writes. Default read-only mode remains 100% local with zero network requests.
 
 ### Fixed
 - **Total balance calculation**: Fixed `getAccounts()` total balance calculation to properly subtract debt from assets instead of adding all balances as positive values. This resolves inflated balance calculations for users with loans, mortgages, and credit cards.

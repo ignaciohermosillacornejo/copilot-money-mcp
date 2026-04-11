@@ -459,7 +459,22 @@ Verify that in read-only mode the server doesn't modify data:
 - No new transactions created
 - All data remains unchanged
 
-> In **write mode** (`--write`), the server *can* legitimately modify your Copilot Money data through the Firestore REST API. Write tests belong in the write-tool test suite, not here.
+> In **write mode** (`--write`), the server *can* legitimately modify your Copilot Money data through the Firestore REST API. Write tests belong in the write-tool test suite (see below), not here.
+
+### Write Mode Testing (Future Work)
+
+A dedicated end-to-end write-mode testing guide does not yet exist and is expected follow-up work. For now, the automated write-tool test suite under `tests/tools/` exercises the write code paths against a mocked `FirestoreClient`, and contributors adding new write tools should follow the existing patterns there.
+
+When an end-to-end guide is added, it should cover at minimum:
+
+1. **Safe environment setup**: Use a disposable Copilot Money account (or a non-production database copy) — writes *will* hit the real Firebase/Firestore backend and modify real data.
+2. **Start the server with `--write`**: Verify write tools are registered, and that attempting a write without `--write` returns the gating error message.
+3. **Credential handling**: Confirm the Firebase refresh token is held only in memory, is never written to disk or logs, and that the server exits cleanly without leaking credentials in error output.
+4. **Network destinations**: Use Activity Monitor / `tcpdump` / a proxy to confirm write-mode traffic is limited to `*.googleapis.com` (`securetoken.googleapis.com` for auth, `firestore.googleapis.com` for writes). No other destinations should appear.
+5. **Per-tool round-trips**: For each write tool, execute the tool, verify the change is visible in the Copilot Money app after sync, then revert it (cleanup). Document any tools that cannot be reverted via another tool.
+6. **Failure modes**: Expired / invalid refresh tokens, Firestore permission errors, and malformed document IDs should all surface clear, non-sensitive error messages.
+
+Contributions welcome — see [CONTRIBUTING.md](../CONTRIBUTING.md) for the "Adding a New Write Tool" pattern.
 
 ---
 
