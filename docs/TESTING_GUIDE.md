@@ -422,28 +422,33 @@ Show me spending on category "INVALID_CATEGORY"
 
 ## Privacy & Security Tests
 
-### Test 1: No Network Requests
+> **Note:** These tests assume the default **read-only mode**. If you start the server with `--write`, write tools are enabled and the server will make authenticated HTTPS requests to Copilot Money's Firebase/Firestore backend to apply your requested changes — so Tests 1 and 2 below will not hold. Run these tests without the `--write` flag.
 
-1. **Disconnect from the internet**:
+### Test 1: No Network Requests (Read-Only Mode)
+
+1. **Start the server without `--write`** (default mode).
+
+2. **Disconnect from the internet**:
    - Turn off Wi-Fi
    - Or use Network Link Conditioner to block all traffic
 
-2. **Try several queries**:
-   - All queries should still work
+3. **Try several read queries**:
+   - All read queries should still work
    - No "network error" messages
 
-3. **Expected Result**:
-   - All tools work offline
+4. **Expected Result**:
+   - All read tools work offline
    - No network requests attempted
 
-### Test 2: Read-Only Access
+### Test 2: Read-Only Access (Default Mode)
 
-Verify the server doesn't modify data:
+Verify that in read-only mode the server doesn't modify data:
 
-1. **Note current transaction count** in Copilot Money
-2. **Run multiple queries** through Claude Desktop
-3. **Check Copilot Money** - transaction count should be unchanged
-4. **Check database files**:
+1. **Start the server without `--write`** (default mode).
+2. **Note current transaction count** in Copilot Money
+3. **Run multiple read queries** through Claude Desktop
+4. **Check Copilot Money** - transaction count should be unchanged
+5. **Check database files**:
    ```bash
    ls -l ~/Library/Containers/com.copilot.production/Data/Library/Application\ Support/firestore/__FIRAPP_DEFAULT/copilot-production-22904/main/*.ldb
    ```
@@ -453,6 +458,8 @@ Verify the server doesn't modify data:
 - Database files not modified by MCP
 - No new transactions created
 - All data remains unchanged
+
+> In **write mode** (`--write`), the server *can* legitimately modify your Copilot Money data through the Firestore REST API. Write tests belong in the write-tool test suite, not here.
 
 ---
 
@@ -574,7 +581,7 @@ Before considering testing complete, verify:
 - [ ] Memory usage is reasonable (<100MB)
 - [ ] Error handling is graceful
 - [ ] No crashes or hangs
-- [ ] Privacy is maintained (no network requests)
+- [ ] Privacy is maintained (no network requests in default read-only mode)
 - [ ] Data accuracy matches Copilot Money
 - [ ] Complex queries are handled well
 - [ ] Server survives multiple queries

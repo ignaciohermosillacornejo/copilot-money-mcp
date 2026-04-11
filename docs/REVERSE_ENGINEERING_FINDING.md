@@ -960,9 +960,9 @@ CMD ["copilot-money-mcp"]
 
 ## Security Considerations
 
-1. **Data is local only** - No network requests, all data stays on your machine
-2. **Read-only access** - We only read from LevelDB, never write
-3. **No credentials stored** - No API keys or auth tokens needed
+1. **Reads are local only** - In the default read-only mode, zero network requests are made; all data stays on your machine
+2. **Read-only by default** - Write tools are disabled unless the server is explicitly started with `--write`. When enabled, writes go only to Copilot Money's own Firebase/Firestore backend — never to any third-party service
+3. **In-memory credentials** - Write mode uses a Firebase refresh token extracted from the local Copilot Money session; held only in memory, never logged or persisted
 4. **File permissions** - Respects macOS sandbox (data is in user's Library folder)
 
 ## Limitations

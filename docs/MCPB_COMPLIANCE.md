@@ -78,10 +78,10 @@ We do not collect, store, or transmit any of your data.
 We do not share your data with anyone.
 ```
 
-**Our Status:** ✅ PRIVACY.md exists (4,174 bytes)
+**Our Status:** ✅ PRIVACY.md exists
 - Location: `/PRIVACY.md`
-- Covers: Data collection, access, usage, sharing, security
-- Commitments: 100% local, read-only, no transmission, no telemetry
+- Covers: Data collection, access, usage, sharing, security, opt-in write mode, Firebase/Firestore network access
+- Commitments: Read-only by default with zero network requests; opt-in `--write` mode sends authenticated requests directly to Copilot Money's own Firebase/Firestore backend (no third-party services); no telemetry or analytics
 
 **B. manifest.json v0.3 with privacy_policies array**
 ```json
@@ -103,19 +103,20 @@ We do not share your data with anyone.
 
 **C. README.md privacy section**
 ```markdown
-## Privacy & Security
+## Privacy First
 
-Your data never leaves your machine. See our [Privacy Policy](PRIVACY.md).
+We never collect, store, or transmit your data to any server operated by this project. See our [Privacy Policy](PRIVACY.md).
 
-- ✅ No data collection or transmission
-- ✅ No external API calls
-- ✅ Read-only access
+- ✅ No analytics, telemetry, or tracking
+- ✅ Reads are fully local — zero network requests
+- ✅ Read-only by default (write tools disabled unless `--write` is passed)
+- ✅ Opt-in writes go directly to Copilot Money's own Firebase/Firestore backend — never through a third party
 ```
 
 **Our Status:** ✅ README.md has privacy section
-- Section: "Privacy First" (lines 20-28)
+- Section: "Privacy First"
 - Link to PRIVACY.md
-- Clear privacy commitments listed
+- Clear privacy commitments listed (reads fully local, read-only by default, opt-in writes go only to Copilot Money's own Firebase/Firestore backend)
 
 **Verification:**
 ```bash
@@ -439,8 +440,9 @@ Expected: Specific account details with balance
 - [ ] No errors or crashes
 - [ ] Performance <5s per query
 - [ ] Error messages are helpful
-- [ ] No network requests (verify with Activity Monitor)
-- [ ] Privacy: Data stays local
+- [ ] No network requests in default read-only mode (verify with Activity Monitor)
+- [ ] In `--write` mode, network traffic should go only to `*.googleapis.com` (Firebase/Firestore) — no other destinations
+- [ ] Privacy: Read data stays local; write data goes only to Copilot Money's own Firebase/Firestore backend
 - [ ] No console errors in Claude Desktop logs
 
 ---
@@ -489,7 +491,7 @@ Edit `servers.json`:
     {
       "id": "copilot-money-mcp",
       "name": "Copilot Money MCP Server",
-      "description": "AI-powered personal finance queries using local Copilot Money data. 100% local processing, no data transmission.",
+      "description": "AI-powered personal finance queries and management using locally cached Copilot Money data. Reads are 100% local with zero network requests; opt-in write mode (--write) sends changes directly to Copilot Money's own Firebase/Firestore backend.",
       "repository": "https://github.com/ignaciohermosillacornejo/copilot-money-mcp",
       "mcpb_url": "https://github.com/ignaciohermosillacornejo/copilot-money-mcp/releases/download/v1.0.0/copilot-money-mcp.mcpb",
       "privacy_policy": "https://github.com/ignaciohermosillacornejo/copilot-money-mcp/blob/main/PRIVACY.md",
@@ -527,7 +529,7 @@ gh pr create \
 - ✅ 142 tests passing
 - ✅ Tested in Claude Desktop
 
-**Privacy:** 100% local processing, no data transmission, read-only access"
+**Privacy:** Read-only by default with zero network requests; opt-in --write mode sends changes directly to Copilot Money's own Firebase/Firestore backend (no third-party services, no project-operated servers)."
 ```
 
 **5. Wait for Review**
