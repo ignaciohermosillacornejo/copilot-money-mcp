@@ -4038,6 +4038,7 @@ export interface ToolSchema {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- JSON Schema properties require flexible typing
     properties: Record<string, any>;
     required?: string[];
+    additionalProperties?: boolean;
   };
   annotations?: {
     readOnlyHint?: boolean;
