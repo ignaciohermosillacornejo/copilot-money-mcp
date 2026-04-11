@@ -1,9 +1,10 @@
 /**
- * Unit tests for the consolidated update_transaction tool.
+ * Unit tests for the update_transaction tool.
  *
- * Covers the 7 fields previously split across setTransactionCategory,
- * setTransactionNote, setTransactionTags, setTransactionExcluded,
- * setTransactionName, setInternalTransfer, and setTransactionGoal.
+ * Covers single-field updates, multi-field atomicity, omitted-key
+ * preservation, per-field validation, atomicity on validation failure,
+ * and in-memory cache patching across all 7 mutable fields:
+ * category_id, note, tag_ids, excluded, name, internal_transfer, goal_id.
  */
 
 import { describe, test, expect } from 'bun:test';
@@ -102,7 +103,7 @@ describe('updateTransaction — single-field updates', () => {
     expect(updateCalls[0].fields).toEqual({ user_note: { stringValue: 'hello' } });
   });
 
-  test('note: empty string clears the note (matches existing setTransactionNote)', async () => {
+  test('note: empty string clears the user_note field', async () => {
     const { tools, updateCalls } = makeTools();
     await tools.updateTransaction({ transaction_id: 'txn1', note: '' });
     expect(updateCalls[0].mask).toEqual(['user_note']);
