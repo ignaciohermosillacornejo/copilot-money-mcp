@@ -1,7 +1,7 @@
 {
   "name": "copilot-money-mcp",
-  "version": "1.5.0",
-  "description": "MCP server for Copilot Money - query and manage personal finances with AI using local data (41 tools)",
+  "version": "1.6.0",
+  "description": "MCP server for Copilot Money - query and manage personal finances with AI using local data (35 tools)",
   "keywords": [
     "mcp",
     "copilot-money",

@@ -24,6 +24,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Total balance calculation**: Fixed `getAccounts()` total balance calculation to properly subtract debt from assets instead of adding all balances as positive values. This resolves inflated balance calculations for users with loans, mortgages, and credit cards.
 
+## [1.6.0] - 2026-04-10
+
+### Changed
+- **Consolidated 7 transaction setter tools into one `update_transaction` tool.**
+  The new tool accepts a partial patch with any combination of: `category_id`,
+  `note`, `tag_ids`, `excluded`, `name`, `internal_transfer`, `goal_id`. Multi-field
+  updates are atomic (single Firestore call). Omitted fields are preserved — sending
+  `{id, tag_ids: [...]}` cannot accidentally erase the note. `goal_id: null` unlinks
+  the goal. Net tool count: 41 → 35.
+
+### Removed
+- `set_transaction_category`, `set_transaction_note`, `set_transaction_tags`,
+  `set_transaction_excluded`, `set_transaction_name`, `set_internal_transfer`,
+  `set_transaction_goal`. Use `update_transaction` instead. Not marked as breaking
+  because the write tools have never been published.
+- Private helper `writeTransactionFields` (zero remaining callers after the setters
+  were removed).
+
 ## [1.5.0] - 2026-04-05
 
 ### Added

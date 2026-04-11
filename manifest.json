@@ -2,8 +2,8 @@
   "manifest_version": "0.3",
   "name": "copilot-money-mcp",
   "display_name": "Copilot Money MCP Server",
-  "description": "Query and manage your personal finances with AI using local Copilot Money data. 41 tools for transactions, investments, budgets, goals, and more.",
-  "version": "1.5.0",
+  "description": "Query and manage your personal finances with AI using local Copilot Money data. 35 tools for transactions, investments, budgets, goals, and more.",
+  "version": "1.6.0",
   "icon": "icon.png",
   "author": {
     "name": "Ignacio Hermosilla",
