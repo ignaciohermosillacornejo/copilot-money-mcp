@@ -206,7 +206,8 @@
     "mcp_config": {
       "command": "node",
       "args": [
-        "${__dirname}/dist/cli.js"
+        "${__dirname}/dist/cli.js",
+        "--write"
       ]
     }
   }

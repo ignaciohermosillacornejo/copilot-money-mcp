@@ -237,6 +237,20 @@
     }
     .code-block .copy-btn:hover { color: var(--text); border-color: var(--text-muted); }
     .code-block .copy-btn.copied { color: var(--green); border-color: var(--green); }
+    .config-variant { margin-top: 14px; padding-left: 36px; }
+    .config-variant .code-block { margin-top: 6px; }
+    .variant-label {
+      display: inline-block; font-size: 0.7rem; font-weight: 700;
+      padding: 3px 10px; border-radius: 12px;
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .variant-label.read { background: var(--green-glow); color: var(--green); }
+    .variant-label.write { background: rgba(251, 146, 60, 0.15); color: var(--orange); }
+    .tab-content .step p.write-note {
+      padding-left: 0; margin-top: 8px; font-size: 0.85rem;
+    }
+    .tab-content .inline-link { color: var(--accent); text-decoration: none; }
+    .tab-content .inline-link:hover { text-decoration: underline; }
 
     /* --- Privacy Banner --- */
     .privacy-banner {
@@ -360,17 +374,18 @@
       <div class="step">
         <span class="step-num">1</span>
         <span class="step-title">Download the .mcpb bundle</span>
-        <p>Get the latest <code>.mcpb</code> file from <a href="https://github.com/ignaciohermosillacornejo/copilot-money-mcp/releases" style="color:var(--accent)">GitHub Releases</a>.</p>
+        <p>Get the latest <code>.mcpb</code> file from <a class="inline-link" href="https://github.com/ignaciohermosillacornejo/copilot-money-mcp/releases">GitHub Releases</a>.</p>
       </div>
       <div class="step">
         <span class="step-num">2</span>
         <span class="step-title">Double-click to install</span>
-        <p>Double-click the <code>.mcpb</code> file. Claude Desktop will install it automatically.</p>
+        <p>Double-click the <code>.mcpb</code> file. Claude Desktop will install it automatically — no terminal, no config file editing.</p>
       </div>
       <div class="step">
         <span class="step-num">3</span>
         <span class="step-title">Restart Claude Desktop and start asking!</span>
         <p>"How much did I spend on food this month?" — Claude will use your Copilot Money data to answer.</p>
+        <p class="write-note">All 41 tools (read + write) are enabled by default. To run read-only, open Claude Desktop &rarr; Settings &rarr; Extensions &rarr; Copilot Money MCP and toggle off the write tools you don't want.</p>
       </div>
     </div>
 
@@ -386,13 +401,27 @@
         <span class="step-num">2</span>
         <span class="step-title">Add to ChatGPT config</span>
         <p>Edit <code>~/.chatgpt/mcp.json</code>:</p>
-        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>{
+        <div class="config-variant">
+          <span class="variant-label read">Read-only</span>
+          <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>{
   "mcpServers": {
     "copilot-money": {
       "command": "copilot-money-mcp"
     }
   }
 }</div>
+        </div>
+        <div class="config-variant">
+          <span class="variant-label write">Read + Write</span>
+          <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>{
+  "mcpServers": {
+    "copilot-money": {
+      "command": "copilot-money-mcp",
+      "args": ["--write"]
+    }
+  }
+}</div>
+        </div>
       </div>
       <div class="step">
         <span class="step-num">3</span>
@@ -412,13 +441,21 @@
         <span class="step-num">2</span>
         <span class="step-title">Add to Codex config</span>
         <p>Edit <code>~/.codex/config.toml</code> (TOML format):</p>
-        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>[mcp_servers.copilot_money]
+        <div class="config-variant">
+          <span class="variant-label read">Read-only</span>
+          <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>[mcp_servers.copilot_money]
 command = "copilot-money-mcp"</div>
+        </div>
+        <div class="config-variant">
+          <span class="variant-label write">Read + Write</span>
+          <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>[mcp_servers.copilot_money]
+command = "copilot-money-mcp"
+args = ["--write"]</div>
+        </div>
       </div>
       <div class="step">
         <span class="step-num">3</span>
         <span class="step-title">Start Codex and ask about your finances!</span>
-        <p>To enable write tools, add <code>args = ["--write"]</code> to the config.</p>
       </div>
     </div>
 
@@ -434,13 +471,27 @@ command = "copilot-money-mcp"</div>
         <span class="step-num">2</span>
         <span class="step-title">Add to Gemini CLI settings</span>
         <p>Edit <code>~/.gemini/settings.json</code>:</p>
-        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>{
+        <div class="config-variant">
+          <span class="variant-label read">Read-only</span>
+          <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>{
   "mcpServers": {
     "copilot-money": {
       "command": "copilot-money-mcp"
     }
   }
 }</div>
+        </div>
+        <div class="config-variant">
+          <span class="variant-label write">Read + Write</span>
+          <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>{
+  "mcpServers": {
+    "copilot-money": {
+      "command": "copilot-money-mcp",
+      "args": ["--write"]
+    }
+  }
+}</div>
+        </div>
       </div>
       <div class="step">
         <span class="step-num">3</span>
@@ -460,13 +511,27 @@ command = "copilot-money-mcp"</div>
         <span class="step-num">2</span>
         <span class="step-title">Add to Cursor config</span>
         <p>Edit <code>~/.cursor/mcp.json</code>:</p>
-        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>{
+        <div class="config-variant">
+          <span class="variant-label read">Read-only</span>
+          <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>{
   "mcpServers": {
     "copilot-money": {
       "command": "copilot-money-mcp"
     }
   }
 }</div>
+        </div>
+        <div class="config-variant">
+          <span class="variant-label write">Read + Write</span>
+          <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>{
+  "mcpServers": {
+    "copilot-money": {
+      "command": "copilot-money-mcp",
+      "args": ["--write"]
+    }
+  }
+}</div>
+        </div>
       </div>
       <div class="step">
         <span class="step-num">3</span>
@@ -486,13 +551,27 @@ command = "copilot-money-mcp"</div>
         <span class="step-num">2</span>
         <span class="step-title">Add to VS Code settings</span>
         <p>Open Settings (<code>Cmd+,</code>) and search for "MCP", or edit <code>settings.json</code>:</p>
-        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>{
+        <div class="config-variant">
+          <span class="variant-label read">Read-only</span>
+          <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>{
   "github.copilot.chat.mcp.servers": {
     "copilot-money": {
       "command": "copilot-money-mcp"
     }
   }
 }</div>
+        </div>
+        <div class="config-variant">
+          <span class="variant-label write">Read + Write</span>
+          <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>{
+  "github.copilot.chat.mcp.servers": {
+    "copilot-money": {
+      "command": "copilot-money-mcp",
+      "args": ["--write"]
+    }
+  }
+}</div>
+        </div>
       </div>
       <div class="step">
         <span class="step-num">3</span>
@@ -512,13 +591,27 @@ command = "copilot-money-mcp"</div>
         <span class="step-num">2</span>
         <span class="step-title">Add to Windsurf config</span>
         <p>Edit <code>~/.codeium/windsurf/mcp_config.json</code>:</p>
-        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>{
+        <div class="config-variant">
+          <span class="variant-label read">Read-only</span>
+          <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>{
   "mcpServers": {
     "copilot-money": {
       "command": "copilot-money-mcp"
     }
   }
 }</div>
+        </div>
+        <div class="config-variant">
+          <span class="variant-label write">Read + Write</span>
+          <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>{
+  "mcpServers": {
+    "copilot-money": {
+      "command": "copilot-money-mcp",
+      "args": ["--write"]
+    }
+  }
+}</div>
+        </div>
       </div>
       <div class="step">
         <span class="step-num">3</span>
@@ -537,7 +630,15 @@ command = "copilot-money-mcp"</div>
       <div class="step">
         <span class="step-num">2</span>
         <span class="step-title">Add in Cline MCP settings</span>
-        <p>Open Cline sidebar &rarr; MCP Servers &rarr; Add Server. Use command: <code>copilot-money-mcp</code></p>
+        <p>Open Cline sidebar &rarr; MCP Servers &rarr; Add Server.</p>
+        <div class="config-variant">
+          <span class="variant-label read">Read-only</span>
+          <p class="write-note">Command: <code>copilot-money-mcp</code></p>
+        </div>
+        <div class="config-variant">
+          <span class="variant-label write">Read + Write</span>
+          <p class="write-note">Command: <code>copilot-money-mcp</code> &nbsp;·&nbsp; Args: <code>--write</code></p>
+        </div>
       </div>
       <div class="step">
         <span class="step-num">3</span>
@@ -555,9 +656,11 @@ command = "copilot-money-mcp"</div>
       </div>
       <div class="step">
         <span class="step-num">2</span>
-        <span class="step-title">Or use npx (no install needed)</span>
-        <p>Add this to your client's MCP config:</p>
-        <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>{
+        <span class="step-title">Add to your client's MCP config</span>
+        <p>Using <code>npx</code> means no install step needed:</p>
+        <div class="config-variant">
+          <span class="variant-label read">Read-only</span>
+          <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>{
   "mcpServers": {
     "copilot-money": {
       "command": "npx",
@@ -565,11 +668,22 @@ command = "copilot-money-mcp"</div>
     }
   }
 }</div>
+        </div>
+        <div class="config-variant">
+          <span class="variant-label write">Read + Write</span>
+          <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>{
+  "mcpServers": {
+    "copilot-money": {
+      "command": "npx",
+      "args": ["-y", "copilot-money-mcp", "--write"]
+    }
+  }
+}</div>
+        </div>
       </div>
       <div class="step">
         <span class="step-num">3</span>
-        <span class="step-title">Enable write mode (optional)</span>
-        <p>To enable write tools, add <code>"--write"</code> to the args array.</p>
+        <span class="step-title">Restart your client and start asking!</span>
       </div>
     </div>
   </div>
