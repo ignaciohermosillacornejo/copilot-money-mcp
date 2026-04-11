@@ -296,6 +296,22 @@ describe('updateTransaction — validation errors', () => {
     expect(updateCalls).toHaveLength(0);
   });
 
+  test('non-existent category_id throws', async () => {
+    const { tools, updateCalls } = makeTools();
+    await expect(
+      tools.updateTransaction({ transaction_id: 'txn1', category_id: 'ghost_category' })
+    ).rejects.toThrow(/Category not found/i);
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  test('malformed tag_id throws', async () => {
+    const { tools, updateCalls } = makeTools();
+    await expect(
+      tools.updateTransaction({ transaction_id: 'txn1', tag_ids: ['valid_tag', 'bad/tag'] })
+    ).rejects.toThrow();
+    expect(updateCalls).toHaveLength(0);
+  });
+
   test('non-existent goal_id throws', async () => {
     const { tools, updateCalls } = makeTools();
     await expect(
@@ -350,6 +366,24 @@ describe('updateTransaction — atomicity on validation failure', () => {
       (t: any) => t.transaction_id === 'txn1'
     );
     expect(cachedTxn.category_id).toBe('food'); // unchanged
+  });
+
+  test('valid note + invalid category_id: no write, no cache mutation', async () => {
+    const { tools, mockDb, updateCalls } = makeTools();
+    await expect(
+      tools.updateTransaction({
+        transaction_id: 'txn1',
+        note: 'this should not persist',
+        category_id: 'ghost_category',
+      })
+    ).rejects.toThrow(/Category not found/i);
+    expect(updateCalls).toHaveLength(0);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cachedTxn = (mockDb as any)._transactions.find(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (t: any) => t.transaction_id === 'txn1'
+    );
+    expect(cachedTxn.user_note).toBe('pre-existing note'); // unchanged
   });
 });
 

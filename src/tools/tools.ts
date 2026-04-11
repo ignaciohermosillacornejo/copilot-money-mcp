@@ -2545,6 +2545,16 @@ export class CopilotMoneyTools {
     }
     if ('category_id' in args && args.category_id !== undefined) {
       validateDocId(args.category_id, 'category_id');
+      const categories = await this.db.getUserCategories();
+      const category = categories.find((c) => c.category_id === args.category_id);
+      if (!category) {
+        throw new Error(`Category not found: ${args.category_id}`);
+      }
+    }
+    if ('tag_ids' in args && args.tag_ids !== undefined) {
+      for (const tagId of args.tag_ids) {
+        validateDocId(tagId, 'tag_id');
+      }
     }
     if ('goal_id' in args && args.goal_id !== null && args.goal_id !== undefined) {
       validateDocId(args.goal_id, 'goal_id');
