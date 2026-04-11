@@ -971,37 +971,14 @@ describe('CopilotMoneyTools Integration', () => {
       writeTools = new CopilotMoneyTools(db, client);
     });
 
-    test('setTransactionCategory updates category', async () => {
-      const result = await writeTools.setTransactionCategory({
+    test('updateTransaction multi-field call writes once', async () => {
+      const result = await writeTools.updateTransaction({
         transaction_id: 'wtxn1',
         category_id: 'custom_food',
+        note: 'integration test',
       });
-
       expect(result.success).toBe(true);
-      expect(result.transaction_id).toBe('wtxn1');
-      expect(result.new_category_id).toBe('custom_food');
-      expect(result.old_category_id).toBe('food_and_drink');
-    });
-
-    test('setTransactionNote sets note', async () => {
-      const result = await writeTools.setTransactionNote({
-        transaction_id: 'wtxn1',
-        note: 'Morning coffee',
-      });
-
-      expect(result.success).toBe(true);
-      expect(result.transaction_id).toBe('wtxn1');
-      expect(result.new_note).toBe('Morning coffee');
-    });
-
-    test('setTransactionTags sets tag_ids', async () => {
-      const result = await writeTools.setTransactionTags({
-        transaction_id: 'wtxn1',
-        tag_ids: ['tax_deductible'],
-      });
-
-      expect(result.success).toBe(true);
-      expect(result.new_tag_ids).toEqual(['tax_deductible']);
+      expect(result.updated.sort()).toEqual(['category_id', 'user_note']);
     });
 
     test('reviewTransactions marks reviewed', async () => {
@@ -1014,47 +991,6 @@ describe('CopilotMoneyTools Integration', () => {
       expect(result.reviewed_count).toBe(2);
       expect(result.transaction_ids).toContain('wtxn1');
       expect(result.transaction_ids).toContain('wtxn2');
-    });
-
-    test('setTransactionExcluded excludes transaction', async () => {
-      const result = await writeTools.setTransactionExcluded({
-        transaction_id: 'wtxn1',
-        excluded: true,
-      });
-
-      expect(result.success).toBe(true);
-      expect(result.excluded).toBe(true);
-    });
-
-    test('setTransactionName renames transaction', async () => {
-      const result = await writeTools.setTransactionName({
-        transaction_id: 'wtxn1',
-        name: 'Fancy Coffee Shop',
-      });
-
-      expect(result.success).toBe(true);
-      expect(result.old_name).toBe('Coffee Shop');
-      expect(result.new_name).toBe('Fancy Coffee Shop');
-    });
-
-    test('setInternalTransfer marks transfer', async () => {
-      const result = await writeTools.setInternalTransfer({
-        transaction_id: 'wtxn1',
-        internal_transfer: true,
-      });
-
-      expect(result.success).toBe(true);
-      expect(result.internal_transfer).toBe(true);
-    });
-
-    test('setTransactionGoal links transaction to goal', async () => {
-      const result = await writeTools.setTransactionGoal({
-        transaction_id: 'wtxn1',
-        goal_id: 'goal1',
-      });
-
-      expect(result.success).toBe(true);
-      expect(result.new_goal_id).toBe('goal1');
     });
 
     test('createTag creates new tag', async () => {

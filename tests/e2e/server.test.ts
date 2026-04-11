@@ -694,19 +694,6 @@ describe('handleCallTool — write tools', () => {
     writeServer._injectForTesting(db, writeTools);
   });
 
-  test('set_transaction_category updates category', async () => {
-    const result = await writeServer.handleCallTool('set_transaction_category', {
-      transaction_id: 'txn1',
-      category_id: 'custom_cat_1',
-    });
-    expect(result.isError).toBeUndefined();
-    const data = parseToolResult(result) as any;
-    expect(data.success).toBe(true);
-    expect(data.transaction_id).toBe('txn1');
-    expect(data.new_category_id).toBe('custom_cat_1');
-    expect(data.old_category_id).toBe('food_dining');
-  });
-
   test('create_tag creates a new tag', async () => {
     const result = await writeServer.handleCallTool('create_tag', {
       name: 'Business Trip',
@@ -803,7 +790,7 @@ describe('handleCallTool — error handling', () => {
     const server = new CopilotMoneyServer(FAKE_DB_DIR);
     server._injectForTesting(db, new CopilotMoneyTools(db));
 
-    const result = await server.handleCallTool('set_transaction_category', {
+    const result = await server.handleCallTool('update_transaction', {
       transaction_id: 'txn1',
       category_id: 'food_dining',
     });
@@ -828,7 +815,7 @@ describe('handleCallTool — error handling', () => {
     const writeServer = new CopilotMoneyServer(FAKE_DB_DIR, undefined, true);
     writeServer._injectForTesting(db, new CopilotMoneyTools(db, createMockFirestoreClient()));
 
-    const result = await writeServer.handleCallTool('set_transaction_category', {
+    const result = await writeServer.handleCallTool('update_transaction', {
       category_id: 'food_dining',
     });
     expect(result.isError).toBe(true);
@@ -1173,30 +1160,6 @@ describe('handleCallTool — write tools (extended)', () => {
 
   // -- Transaction write tools --
 
-  test('set_transaction_note sets a note', async () => {
-    const result = await writeServer.handleCallTool('set_transaction_note', {
-      transaction_id: 'txn1',
-      note: 'Lunch with team',
-    });
-    expect(result.isError).toBeUndefined();
-    const data = parseToolResult(result) as any;
-    expect(data.success).toBe(true);
-    expect(data.transaction_id).toBe('txn1');
-    expect(data.new_note).toBe('Lunch with team');
-  });
-
-  test('set_transaction_tags assigns tags to a transaction', async () => {
-    const result = await writeServer.handleCallTool('set_transaction_tags', {
-      transaction_id: 'txn1',
-      tag_ids: ['tag_vacation', 'tag_work'],
-    });
-    expect(result.isError).toBeUndefined();
-    const data = parseToolResult(result) as any;
-    expect(data.success).toBe(true);
-    expect(data.transaction_id).toBe('txn1');
-    expect(data.new_tag_ids).toEqual(['tag_vacation', 'tag_work']);
-  });
-
   test('review_transactions marks transactions as reviewed', async () => {
     const result = await writeServer.handleCallTool('review_transactions', {
       transaction_ids: ['txn1', 'txn2'],
@@ -1217,66 +1180,6 @@ describe('handleCallTool — write tools (extended)', () => {
     const data = parseToolResult(result) as any;
     expect(data.success).toBe(true);
     expect(data.reviewed_count).toBe(1);
-  });
-
-  test('set_transaction_excluded excludes a transaction', async () => {
-    const result = await writeServer.handleCallTool('set_transaction_excluded', {
-      transaction_id: 'txn1',
-      excluded: true,
-    });
-    expect(result.isError).toBeUndefined();
-    const data = parseToolResult(result) as any;
-    expect(data.success).toBe(true);
-    expect(data.transaction_id).toBe('txn1');
-    expect(data.excluded).toBe(true);
-  });
-
-  test('set_transaction_name renames a transaction', async () => {
-    const result = await writeServer.handleCallTool('set_transaction_name', {
-      transaction_id: 'txn1',
-      name: 'Morning Coffee',
-    });
-    expect(result.isError).toBeUndefined();
-    const data = parseToolResult(result) as any;
-    expect(data.success).toBe(true);
-    expect(data.transaction_id).toBe('txn1');
-    expect(data.old_name).toBe('Coffee Shop');
-    expect(data.new_name).toBe('Morning Coffee');
-  });
-
-  test('set_internal_transfer marks as internal transfer', async () => {
-    const result = await writeServer.handleCallTool('set_internal_transfer', {
-      transaction_id: 'txn1',
-      internal_transfer: true,
-    });
-    expect(result.isError).toBeUndefined();
-    const data = parseToolResult(result) as any;
-    expect(data.success).toBe(true);
-    expect(data.transaction_id).toBe('txn1');
-    expect(data.internal_transfer).toBe(true);
-  });
-
-  test('set_transaction_goal links a transaction to a goal', async () => {
-    const result = await writeServer.handleCallTool('set_transaction_goal', {
-      transaction_id: 'txn1',
-      goal_id: 'goal1',
-    });
-    expect(result.isError).toBeUndefined();
-    const data = parseToolResult(result) as any;
-    expect(data.success).toBe(true);
-    expect(data.transaction_id).toBe('txn1');
-    expect(data.new_goal_id).toBe('goal1');
-  });
-
-  test('set_transaction_goal unlinks a goal with null', async () => {
-    const result = await writeServer.handleCallTool('set_transaction_goal', {
-      transaction_id: 'txn1',
-      goal_id: null,
-    });
-    expect(result.isError).toBeUndefined();
-    const data = parseToolResult(result) as any;
-    expect(data.success).toBe(true);
-    expect(data.new_goal_id).toBeNull();
   });
 
   // -- Tag write tools --
@@ -1482,33 +1385,6 @@ describe('handleCallTool — write tool validation', () => {
     writeServer._injectForTesting(db, writeTools);
   });
 
-  test('set_transaction_note with nonexistent transaction returns error', async () => {
-    const result = await writeServer.handleCallTool('set_transaction_note', {
-      transaction_id: 'nonexistent',
-      note: 'test',
-    });
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('not found');
-  });
-
-  test('set_transaction_tags with nonexistent transaction returns error', async () => {
-    const result = await writeServer.handleCallTool('set_transaction_tags', {
-      transaction_id: 'nonexistent',
-      tag_ids: ['tag_vacation'],
-    });
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('not found');
-  });
-
-  test('set_transaction_category with nonexistent transaction returns error', async () => {
-    const result = await writeServer.handleCallTool('set_transaction_category', {
-      transaction_id: 'nonexistent',
-      category_id: 'food_dining',
-    });
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('not found');
-  });
-
   test('create_tag with empty name returns error', async () => {
     const result = await writeServer.handleCallTool('create_tag', {
       name: '   ',
@@ -1578,23 +1454,6 @@ describe('handleCallTool — write tool validation', () => {
     expect(result.content[0].text).toContain('non-empty');
   });
 
-  test('set_transaction_name with empty name returns error', async () => {
-    const result = await writeServer.handleCallTool('set_transaction_name', {
-      transaction_id: 'txn1',
-      name: '   ',
-    });
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('empty');
-  });
-
-  test('set_transaction_goal with nonexistent goal returns error', async () => {
-    const result = await writeServer.handleCallTool('set_transaction_goal', {
-      transaction_id: 'txn1',
-      goal_id: 'nonexistent_goal',
-    });
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('not found');
-  });
 });
 
 // ============================================

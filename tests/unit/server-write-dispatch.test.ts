@@ -18,37 +18,9 @@ const WRITE_TOOL_SPECS: Record<string, { method: string; args: Record<string, un
     method: 'updateTransaction',
     args: { transaction_id: 'txn1', category_id: 'food' },
   },
-  set_transaction_category: {
-    method: 'setTransactionCategory',
-    args: { transaction_id: 'txn1', category_id: 'food' },
-  },
-  set_transaction_note: {
-    method: 'setTransactionNote',
-    args: { transaction_id: 'txn1', note: 'test note' },
-  },
-  set_transaction_tags: {
-    method: 'setTransactionTags',
-    args: { transaction_id: 'txn1', tag_ids: ['tag1'] },
-  },
   review_transactions: {
     method: 'reviewTransactions',
     args: { transaction_ids: ['txn1'], reviewed: true },
-  },
-  set_transaction_excluded: {
-    method: 'setTransactionExcluded',
-    args: { transaction_id: 'txn1', excluded: true },
-  },
-  set_transaction_name: {
-    method: 'setTransactionName',
-    args: { transaction_id: 'txn1', name: 'New Name' },
-  },
-  set_internal_transfer: {
-    method: 'setInternalTransfer',
-    args: { transaction_id: 'txn1', internal_transfer: true },
-  },
-  set_transaction_goal: {
-    method: 'setTransactionGoal',
-    args: { transaction_id: 'txn1', goal_id: 'goal1' },
   },
   create_tag: {
     method: 'createTag',

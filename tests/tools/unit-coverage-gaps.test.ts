@@ -277,53 +277,21 @@ describe('cross-tool interactions', () => {
     expect(budgetResult.amount).toBe(15);
   });
 
-  test('createTag then setTransactionTags with the new tag_id', async () => {
+  test('createTag then update_transaction sets the new tag', async () => {
     const tagResult = await tools.createTag({ name: 'urgent' });
     expect(tagResult.success).toBe(true);
 
     repopulateCache();
 
-    const tagSetResult = await tools.setTransactionTags({
+    const updateResult = await tools.updateTransaction({
       transaction_id: 'txn_cross',
       tag_ids: [tagResult.tag_id],
     });
-    expect(tagSetResult.success).toBe(true);
-    expect(tagSetResult.new_tag_ids).toEqual([tagResult.tag_id]);
+    expect(updateResult.success).toBe(true);
+    expect(updateResult.updated).toEqual(['tag_ids']);
   });
 
-  test('setTransactionGoal link then unlink', async () => {
-    const linkResult = await tools.setTransactionGoal({
-      transaction_id: 'txn_cross',
-      goal_id: 'goal1',
-    });
-    expect(linkResult.success).toBe(true);
-    expect(linkResult.new_goal_id).toBe('goal1');
-
-    const unlinkResult = await tools.setTransactionGoal({
-      transaction_id: 'txn_cross',
-      goal_id: null,
-    });
-    expect(unlinkResult.success).toBe(true);
-    expect(unlinkResult.new_goal_id).toBeNull();
-  });
-
-  test('setTransactionCategory then setTransactionNote on same transaction', async () => {
-    const catResult = await tools.setTransactionCategory({
-      transaction_id: 'txn_cross',
-      category_id: 'shopping',
-    });
-    expect(catResult.success).toBe(true);
-    expect(catResult.new_category_id).toBe('shopping');
-
-    const noteResult = await tools.setTransactionNote({
-      transaction_id: 'txn_cross',
-      note: 'Updated note',
-    });
-    expect(noteResult.success).toBe(true);
-    expect(noteResult.new_note).toBe('Updated note');
-  });
-
-  test('createCategory then setTransactionCategory with it', async () => {
+  test('createCategory then update_transaction assigns it', async () => {
     const catResult = await tools.createCategory({ name: 'Custom Cat' });
     expect(catResult.success).toBe(true);
 
@@ -331,12 +299,12 @@ describe('cross-tool interactions', () => {
       categories: [...baseCategories, { category_id: catResult.category_id, name: 'Custom Cat' }],
     });
 
-    const setResult = await tools.setTransactionCategory({
+    const updateResult = await tools.updateTransaction({
       transaction_id: 'txn_cross',
       category_id: catResult.category_id,
     });
-    expect(setResult.success).toBe(true);
-    expect(setResult.new_category_id).toBe(catResult.category_id);
+    expect(updateResult.success).toBe(true);
+    expect(updateResult.updated).toEqual(['category_id']);
   });
 
   test('reviewTransactions then unmark', async () => {
@@ -399,37 +367,6 @@ describe('write-tool edge cases', () => {
       budgets: [],
     });
     tools = new CopilotMoneyTools(db, client);
-  });
-
-  test('setTransactionName with a 500-character name succeeds', async () => {
-    const longName = 'A'.repeat(500);
-    const result = await tools.setTransactionName({
-      transaction_id: 'txn_edge',
-      name: longName,
-    });
-    expect(result.success).toBe(true);
-    expect(result.new_name).toBe(longName);
-    expect(result.new_name).toHaveLength(500);
-  });
-
-  test('setTransactionNote with empty string clears the note', async () => {
-    const result = await tools.setTransactionNote({
-      transaction_id: 'txn_edge',
-      note: '',
-    });
-    expect(result.success).toBe(true);
-    expect(result.old_note).toBe('old note');
-    expect(result.new_note).toBe('');
-  });
-
-  test('setTransactionTags with empty array clears all tags', async () => {
-    const result = await tools.setTransactionTags({
-      transaction_id: 'txn_edge',
-      tag_ids: [],
-    });
-    expect(result.success).toBe(true);
-    expect(result.old_tag_ids).toEqual(['existing_tag']);
-    expect(result.new_tag_ids).toEqual([]);
   });
 
   test('createTag with Unicode-only name throws (no valid id chars)', async () => {

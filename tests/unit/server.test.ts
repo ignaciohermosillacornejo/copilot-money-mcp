@@ -234,8 +234,6 @@ describe('CopilotMoneyServer write mode', () => {
 
     expect(toolNames).toContain('get_transactions');
     expect(toolNames).not.toContain('update_transaction');
-    expect(toolNames).not.toContain('set_transaction_category');
-    expect(toolNames).not.toContain('set_transaction_note');
     expect(toolNames).not.toContain('create_tag');
     expect(toolNames).not.toContain('delete_tag');
   });
@@ -247,12 +245,6 @@ describe('CopilotMoneyServer write mode', () => {
 
     expect(toolNames).toContain('get_transactions');
     expect(toolNames).toContain('update_transaction');
-    expect(toolNames).toContain('set_transaction_category');
-    expect(toolNames).toContain('set_transaction_note');
-    expect(toolNames).toContain('set_transaction_excluded');
-    expect(toolNames).toContain('set_transaction_name');
-    expect(toolNames).toContain('set_internal_transfer');
-    expect(toolNames).toContain('set_transaction_goal');
     expect(toolNames).toContain('create_tag');
     expect(toolNames).toContain('delete_tag');
     expect(toolNames).toContain('create_category');
@@ -270,7 +262,7 @@ describe('CopilotMoneyServer write mode', () => {
   test('write tool has correct annotations', () => {
     const server = new CopilotMoneyServer(undefined, undefined, true);
     const result = server.handleListTools();
-    const writeTool = result.tools.find((t) => t.name === 'set_transaction_category');
+    const writeTool = result.tools.find((t) => t.name === 'update_transaction');
 
     expect(writeTool).toBeDefined();
     expect(writeTool!.annotations).toEqual({
@@ -321,31 +313,9 @@ describe('CopilotMoneyServer write mode', () => {
 
   test('handleCallTool rejects write tool when not in write mode', async () => {
     const server = new CopilotMoneyServer();
-    const result = await server.handleCallTool('set_transaction_category', {
-      transaction_id: 'txn1',
-      category_id: 'food',
-    });
-
-    expect(result.isError).toBe(true);
-    expect((result.content[0] as { text: string }).text).toContain('--write mode');
-  });
-
-  test('handleCallTool rejects update_transaction when not in write mode', async () => {
-    const server = new CopilotMoneyServer();
     const result = await server.handleCallTool('update_transaction', {
       transaction_id: 'txn1',
       category_id: 'food',
-    });
-
-    expect(result.isError).toBe(true);
-    expect((result.content[0] as { text: string }).text).toContain('--write mode');
-  });
-
-  test('handleCallTool rejects set_transaction_note when not in write mode', async () => {
-    const server = new CopilotMoneyServer();
-    const result = await server.handleCallTool('set_transaction_note', {
-      transaction_id: 'txn1',
-      note: 'test',
     });
 
     expect(result.isError).toBe(true);
@@ -372,50 +342,6 @@ describe('CopilotMoneyServer write mode', () => {
     const server = new CopilotMoneyServer();
     const result = await server.handleCallTool('create_category', {
       name: 'Test',
-    });
-
-    expect(result.isError).toBe(true);
-    expect((result.content[0] as { text: string }).text).toContain('--write mode');
-  });
-
-  test('handleCallTool rejects set_transaction_excluded when not in write mode', async () => {
-    const server = new CopilotMoneyServer();
-    const result = await server.handleCallTool('set_transaction_excluded', {
-      transaction_id: 'txn1',
-      excluded: true,
-    });
-
-    expect(result.isError).toBe(true);
-    expect((result.content[0] as { text: string }).text).toContain('--write mode');
-  });
-
-  test('handleCallTool rejects set_transaction_name when not in write mode', async () => {
-    const server = new CopilotMoneyServer();
-    const result = await server.handleCallTool('set_transaction_name', {
-      transaction_id: 'txn1',
-      name: 'New Name',
-    });
-
-    expect(result.isError).toBe(true);
-    expect((result.content[0] as { text: string }).text).toContain('--write mode');
-  });
-
-  test('handleCallTool rejects set_internal_transfer when not in write mode', async () => {
-    const server = new CopilotMoneyServer();
-    const result = await server.handleCallTool('set_internal_transfer', {
-      transaction_id: 'txn1',
-      internal_transfer: true,
-    });
-
-    expect(result.isError).toBe(true);
-    expect((result.content[0] as { text: string }).text).toContain('--write mode');
-  });
-
-  test('handleCallTool rejects set_transaction_goal when not in write mode', async () => {
-    const server = new CopilotMoneyServer();
-    const result = await server.handleCallTool('set_transaction_goal', {
-      transaction_id: 'txn1',
-      goal_id: 'goal1',
     });
 
     expect(result.isError).toBe(true);
@@ -522,19 +448,6 @@ describe('createWriteToolSchemas', () => {
   test('returns write tool schemas with proper annotations', () => {
     const schemas = createWriteToolSchemas();
     expect(schemas.length).toBeGreaterThanOrEqual(20);
-
-    const setCat = schemas.find((s) => s.name === 'set_transaction_category');
-    expect(setCat).toBeDefined();
-    expect(setCat!.annotations?.readOnlyHint).toBe(false);
-    expect(setCat!.inputSchema.required).toContain('transaction_id');
-    expect(setCat!.inputSchema.required).toContain('category_id');
-
-    const setNote = schemas.find((s) => s.name === 'set_transaction_note');
-    expect(setNote).toBeDefined();
-    expect(setNote!.annotations?.readOnlyHint).toBe(false);
-    expect(setNote!.annotations?.idempotentHint).toBe(true);
-    expect(setNote!.inputSchema.required).toContain('transaction_id');
-    expect(setNote!.inputSchema.required).toContain('note');
 
     const updateTxn = schemas.find((s) => s.name === 'update_transaction');
     expect(updateTxn).toBeDefined();
