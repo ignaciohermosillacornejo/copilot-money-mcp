@@ -259,6 +259,12 @@
     .tab-content .step p.write-note {
       padding-left: 0; margin-top: 8px; font-size: 0.85rem;
     }
+    .tab-content .step p.field-label {
+      margin-top: 10px; margin-bottom: 2px;
+      font-size: 0.7rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.5px;
+      color: var(--text-muted);
+    }
     .tab-content .inline-link { color: var(--accent); text-decoration: none; }
     .tab-content .inline-link:hover { text-decoration: underline; }
 
@@ -652,15 +658,19 @@ args = ["--write"]</div>
       <div class="step">
         <span class="step-num">2</span>
         <span class="step-title">Add in Cline MCP settings</span>
-        <p>Open Cline sidebar &rarr; MCP Servers &rarr; Add Server.</p>
+        <p>Open Cline sidebar &rarr; MCP Servers &rarr; Add Server. Paste the values into the Command and Args fields.</p>
         <div class="config-grid">
           <div class="config-variant">
             <span class="variant-label read">Read-only</span>
-            <p class="write-note">Command: <code>copilot-money-mcp</code></p>
+            <p class="write-note field-label">Command</p>
+            <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>copilot-money-mcp</div>
           </div>
           <div class="config-variant">
             <span class="variant-label write">Read + Write</span>
-            <p class="write-note">Command: <code>copilot-money-mcp</code> &nbsp;·&nbsp; Args: <code>--write</code></p>
+            <p class="write-note field-label">Command</p>
+            <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>copilot-money-mcp</div>
+            <p class="write-note field-label">Args</p>
+            <div class="code-block"><button class="copy-btn" onclick="copyCode(this)">Copy</button>--write</div>
           </div>
         </div>
       </div>
@@ -884,7 +894,11 @@ args = ["--write"]</div>
   // Copy to clipboard
   function copyCode(btn) {
     const block = btn.parentElement;
-    const code = block.textContent.replace('Copy', '').replace('Copied!', '').trim();
+    // Clone the block and strip buttons so we grab the code exactly,
+    // regardless of current button state ("Copy" vs "Copied!").
+    const clone = block.cloneNode(true);
+    clone.querySelectorAll('.copy-btn').forEach(b => b.remove());
+    const code = clone.textContent.trim();
     navigator.clipboard.writeText(code).then(() => {
       btn.textContent = 'Copied!';
       btn.classList.add('copied');
