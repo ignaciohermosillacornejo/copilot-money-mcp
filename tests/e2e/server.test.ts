@@ -767,6 +767,24 @@ describe('handleCallTool — write tools', () => {
     expect(result.isError).toBe(true);
     expect((result.content[0] as { text: string }).text).toMatch(/at least one field/i);
   });
+
+  test('update_transaction with whitespace-only name returns error', async () => {
+    const result = await writeServer.handleCallTool('update_transaction', {
+      transaction_id: 'txn1',
+      name: '   ',
+    });
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { text: string }).text).toMatch(/name must not be empty/i);
+  });
+
+  test('update_transaction with nonexistent goal_id returns error', async () => {
+    const result = await writeServer.handleCallTool('update_transaction', {
+      transaction_id: 'txn1',
+      goal_id: 'nonexistent_goal_id',
+    });
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { text: string }).text).toMatch(/Goal not found/i);
+  });
 });
 
 describe('handleCallTool — error handling', () => {
