@@ -4,7 +4,7 @@ import {
   BROWSER_CONFIGS,
   type BrowserConfig,
 } from '../../../src/core/auth/browser-token.js';
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync, symlinkSync } from 'fs';
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, symlinkSync, chmodSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -251,14 +251,17 @@ describe('extractRefreshToken', () => {
     // Create a real file then revoke read permission — statSync succeeds but readFileSync throws EACCES
     const filePath = join(safariDir, 'token.db');
     writeFileSync(filePath, 'some content');
-    const { chmodSync } = await import('fs');
     chmodSync(filePath, 0o000);
 
     const overrides: BrowserConfig[] = [{ name: 'Safari', paths: [safariDir], type: 'safari' }];
 
-    await expect(extractRefreshToken(overrides)).rejects.toThrow('No Copilot Money session found');
-    // Restore permissions for cleanup
-    chmodSync(filePath, 0o644);
+    try {
+      await expect(extractRefreshToken(overrides)).rejects.toThrow(
+        'No Copilot Money session found'
+      );
+    } finally {
+      chmodSync(filePath, 0o644);
+    }
   });
 
   test('safari: handles unreadable top-level dir (outer catch)', async () => {
