@@ -1453,7 +1453,6 @@ describe('handleCallTool — write tool validation', () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('non-empty');
   });
-
 });
 
 // ============================================
