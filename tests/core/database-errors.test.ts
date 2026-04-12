@@ -279,6 +279,18 @@ describe('CopilotDatabase error handling', () => {
       // @ts-expect-error - accessing private method for testing
       expect(db.isCacheStale()).toBe(false);
     });
+
+    test('negative COPILOT_CACHE_TTL_MINUTES falls back to default', () => {
+      process.env.COPILOT_CACHE_TTL_MINUTES = '-5';
+
+      const db = new CopilotDatabase();
+      // @ts-expect-error - accessing private property for testing
+      db._cacheLoadedAt = Date.now();
+
+      // Negative value should be rejected, fall back to default 5 min TTL
+      // @ts-expect-error - accessing private method for testing
+      expect(db.isCacheStale()).toBe(false);
+    });
   });
 });
 

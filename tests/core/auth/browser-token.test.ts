@@ -248,12 +248,17 @@ describe('extractRefreshToken', () => {
   test('safari: handles unreadable file (readFileSync/statSync catch)', async () => {
     const safariDir = join(tempDir, 'safari-unreadable');
     mkdirSync(safariDir, { recursive: true });
-    // Create a symlink to a non-existent file — statSync will throw
-    symlinkSync('/nonexistent/target', join(safariDir, 'token.db'));
+    // Create a real file then revoke read permission — statSync succeeds but readFileSync throws EACCES
+    const filePath = join(safariDir, 'token.db');
+    writeFileSync(filePath, 'some content');
+    const { chmodSync } = await import('fs');
+    chmodSync(filePath, 0o000);
 
     const overrides: BrowserConfig[] = [{ name: 'Safari', paths: [safariDir], type: 'safari' }];
 
     await expect(extractRefreshToken(overrides)).rejects.toThrow('No Copilot Money session found');
+    // Restore permissions for cleanup
+    chmodSync(filePath, 0o644);
   });
 
   test('safari: handles unreadable top-level dir (outer catch)', async () => {
