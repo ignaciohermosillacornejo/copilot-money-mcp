@@ -37,6 +37,7 @@ function makeTools(overrides?: {
   transactions?: unknown[];
   goals?: unknown[];
   categories?: unknown[];
+  tags?: unknown[];
 }) {
   const mockDb = new CopilotDatabase('/nonexistent');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -66,7 +67,14 @@ function makeTools(overrides?: {
     { category_id: 'groceries', name: 'Groceries' },
   ];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (mockDb as any)._tags = overrides?.tags ?? [
+    { tag_id: 'tag1', name: 'Important' },
+    { tag_id: 'tag2', name: 'Recurring' },
+  ];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (mockDb as any)._allCollectionsLoaded = true;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (mockDb as any)._cacheLoadedAt = Date.now();
 
   const updateCalls: UpdateCall[] = [];
   const mockClient = makeMockFirestoreClient(updateCalls);
@@ -310,6 +318,14 @@ describe('updateTransaction — validation errors', () => {
     expect(updateCalls).toHaveLength(0);
   });
 
+  test('non-existent tag_id throws', async () => {
+    const { tools, updateCalls } = makeTools();
+    await expect(
+      tools.updateTransaction({ transaction_id: 'txn1', tag_ids: ['tag1', 'ghost_tag'] })
+    ).rejects.toThrow(/Tag not found.*ghost_tag/i);
+    expect(updateCalls).toHaveLength(0);
+  });
+
   test('malformed tag_id throws', async () => {
     const { tools, updateCalls } = makeTools();
     await expect(
@@ -452,6 +468,24 @@ describe('updateTransaction — atomicity on validation failure', () => {
       (t: any) => t.transaction_id === 'txn1'
     );
     expect(cachedTxn.category_id).toBe('food'); // unchanged
+  });
+
+  test('valid note + non-existent tag_id: no write, no cache mutation', async () => {
+    const { tools, mockDb, updateCalls } = makeTools();
+    await expect(
+      tools.updateTransaction({
+        transaction_id: 'txn1',
+        note: 'should not persist',
+        tag_ids: ['tag1', 'ghost_tag'],
+      })
+    ).rejects.toThrow(/Tag not found.*ghost_tag/i);
+    expect(updateCalls).toHaveLength(0);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cachedTxn = (mockDb as any)._transactions.find(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (t: any) => t.transaction_id === 'txn1'
+    );
+    expect(cachedTxn.user_note).toBe('pre-existing note'); // unchanged
   });
 
   test('valid note + invalid category_id: no write, no cache mutation', async () => {

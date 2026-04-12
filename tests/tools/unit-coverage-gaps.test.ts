@@ -281,7 +281,9 @@ describe('cross-tool interactions', () => {
     const tagResult = await tools.createTag({ name: 'urgent' });
     expect(tagResult.success).toBe(true);
 
-    repopulateCache();
+    repopulateCache({
+      tags: [{ tag_id: tagResult.tag_id, name: 'urgent' }],
+    });
 
     const updateResult = await tools.updateTransaction({
       transaction_id: 'txn_cross',

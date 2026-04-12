@@ -2448,6 +2448,14 @@ export class CopilotMoneyTools {
       for (const tagId of args.tag_ids) {
         validateDocId(tagId, 'tag_id');
       }
+      if (args.tag_ids.length > 0) {
+        const tags = await this.db.getTags();
+        for (const tagId of args.tag_ids) {
+          if (!tags.find((t) => t.tag_id === tagId)) {
+            throw new Error(`Tag not found: ${tagId}`);
+          }
+        }
+      }
     }
     if ('goal_id' in args && args.goal_id !== null && args.goal_id !== undefined) {
       validateDocId(args.goal_id, 'goal_id');
