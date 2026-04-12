@@ -21,8 +21,15 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
-        with:
-          fetch-depth: 2  # Need previous commit to detect version change
+
+      - name: Fetch pre-push state for version comparison
+        run: |
+          # Fetch the commit that was HEAD before this push, so we can compare
+          # package.json across the entire push (not just HEAD vs HEAD~1).
+          BEFORE="${{ github.event.before }}"
+          if [ "$BEFORE" != "0000000000000000000000000000000000000000" ] && [ -n "$BEFORE" ]; then
+            git fetch --depth=1 origin "$BEFORE"
+          fi
 
       - name: Check for version bump
         id: version
@@ -30,16 +37,23 @@ jobs:
           CURRENT_VERSION=$(node -p "require('./package.json').version")
           echo "current=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
 
-          # Check if tag already exists
+          # Check if tag already exists (fetch tags first)
+          git fetch --tags --quiet
           if git rev-parse "v$CURRENT_VERSION" >/dev/null 2>&1; then
             echo "Tag v$CURRENT_VERSION already exists, skipping"
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          # Check if version actually changed in this push
-          git show HEAD~1:package.json > /tmp/old-package.json 2>/dev/null || true
-          OLD_VERSION=$(node -p "try { require('/tmp/old-package.json').version } catch { '' }")
+          # Compare against the state before this push (handles multi-commit pushes)
+          BEFORE="${{ github.event.before }}"
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || [ -z "$BEFORE" ]; then
+            echo "Initial push, treating as version change"
+            OLD_VERSION=""
+          else
+            git show "$BEFORE":package.json > /tmp/old-package.json 2>/dev/null || true
+            OLD_VERSION=$(node -p "try { require('/tmp/old-package.json').version } catch { '' }")
+          fi
 
           if [ "$CURRENT_VERSION" != "$OLD_VERSION" ]; then
             echo "Version changed: $OLD_VERSION -> $CURRENT_VERSION"
