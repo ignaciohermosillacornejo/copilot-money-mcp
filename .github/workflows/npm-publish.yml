@@ -18,7 +18,6 @@ env:
 
 permissions:
   contents: read
-  packages: write
   id-token: write  # Required for npm OIDC trusted publishing
 
 jobs:
@@ -105,16 +104,3 @@ jobs:
       - name: Publish to npm
         if: github.event.inputs.dry_run != 'true'
         run: npm publish --provenance --access public --verbose
-
-      - name: Publish to GitHub Packages
-        if: github.event.inputs.dry_run != 'true'
-        run: |
-          # GitHub Packages requires a scoped name matching the repo owner
-          node -e "
-            const pkg = require('./package.json');
-            pkg.name = '@ignaciohermosillacornejo/copilot-money-mcp';
-            require('fs').writeFileSync('./package.json', JSON.stringify(pkg, null, 2) + '\n');
-          "
-          npm publish --registry https://npm.pkg.github.com
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
