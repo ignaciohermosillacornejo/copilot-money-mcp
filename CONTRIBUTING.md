@@ -45,7 +45,7 @@ bun run sync-manifest  # Verify manifest.json matches code
 1. Copilot Money stores data in a local LevelDB/Firestore cache on macOS
 2. `src/core/decoder.ts` reads `.ldb` files and parses Firestore Protocol Buffers
 3. `src/core/database.ts` provides cached, filtered access to all collections
-4. `src/tools/tools.ts` implements 41 MCP tools (17 read + 24 write)
+4. `src/tools/tools.ts` implements 35 MCP tools (17 read + 18 write)
 5. `src/server.ts` handles MCP protocol communication and tool routing
 6. Write tools use `src/core/firestore-client.ts` to modify data via the Firestore REST API
 
@@ -82,7 +82,7 @@ src/
 
 ### Key Files
 
-- **`src/tools/tools.ts`** — All 41 tools as async methods in `CopilotMoneyTools`. Read tool schemas in `createToolSchemas()`, write tool schemas in `createWriteToolSchemas()`.
+- **`src/tools/tools.ts`** — All 35 tools as async methods in `CopilotMoneyTools`. Read tool schemas in `createToolSchemas()`, write tool schemas in `createWriteToolSchemas()`.
 - **`src/core/database.ts`** — `CopilotDatabase` class with 5-minute cache TTL, batch loading via `decodeAllCollectionsIsolated()` (worker thread), and filtered accessors.
 - **`src/core/decoder.ts`** — Binary decoder that reads LevelDB and parses Firestore Protocol Buffers. Decodes 30+ collection paths.
 - **`src/server.ts`** — MCP server with tool routing switch. `WRITE_TOOLS` set gates write operations behind the `--write` flag.

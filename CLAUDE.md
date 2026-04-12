@@ -1,6 +1,6 @@
 # Copilot Money MCP Server
 
-MCP (Model Context Protocol) server that enables AI-powered queries and management of Copilot Money personal finance data by reading locally cached Firestore data (LevelDB + Protocol Buffers). 41 tools (17 read + 24 write). Read-only by default, write tools opt-in via `--write` flag.
+MCP (Model Context Protocol) server that enables AI-powered queries and management of Copilot Money personal finance data by reading locally cached Firestore data (LevelDB + Protocol Buffers). 35 tools (17 read + 18 write). Read-only by default, write tools opt-in via `--write` flag.
 
 ## Quick Reference
 
@@ -40,7 +40,7 @@ src/
 │   ├── category.ts     # Category mappings (Plaid taxonomy)
 │   └── ...             # Other entity schemas (30+ models)
 ├── tools/
-│   └── tools.ts        # All MCP tool implementations (41 tools)
+│   └── tools.ts        # All MCP tool implementations (35 tools)
 ├── utils/
 │   ├── date.ts         # Date period parsing (this_month, last_30_days, etc.)
 │   └── categories.ts   # Category name resolution
@@ -50,7 +50,7 @@ src/
 
 ## Key Files
 
-- **`src/tools/tools.ts`** - All 41 MCP tools (17 read + 24 write) are implemented here as async methods in the `CopilotMoneyTools` class. Read schemas in `createToolSchemas()`, write schemas in `createWriteToolSchemas()`.
+- **`src/tools/tools.ts`** - All 35 MCP tools (17 read + 18 write) are implemented here as async methods in the `CopilotMoneyTools` class. Read schemas in `createToolSchemas()`, write schemas in `createWriteToolSchemas()`.
 - **`src/core/database.ts`** - `CopilotDatabase` class with methods like `getTransactions()`, `getAccounts()`, `getIncome()`, etc.
 - **`src/core/decoder.ts`** - Binary decoder that reads LevelDB files and parses Firestore Protocol Buffers.
 - **`manifest.json`** - MCP bundle metadata for .mcpb packaging.
@@ -60,7 +60,7 @@ src/
 ### Code Style
 - TypeScript strict mode
 - Zod for runtime validation of all data models
-- ESLint + Prettier enforced via pre-commit hooks
+- ESLint + Prettier enforced via pre-push hook (`bun run check`)
 - Read tools marked with `readOnlyHint: true`, write tools with `readOnlyHint: false`
 - Write tools gated behind `WRITE_TOOLS` set in server.ts, require `--write` CLI flag
 
