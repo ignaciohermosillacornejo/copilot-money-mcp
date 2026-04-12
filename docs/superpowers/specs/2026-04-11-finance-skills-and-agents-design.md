@@ -32,14 +32,16 @@ Four skills, three focused workflows plus one orchestrator:
 **Purpose:** Answer "how am I doing?" in 30 seconds.
 
 **What it does:**
-- Compares current month spending (by category) against trailing 3-month and 6-month averages — flags categories significantly above average
-- Lists new charges that don't match any known merchant or recurring pattern — potential anomalies or accidental subscriptions
-- Shows subscriptions/recurrings sorted by cost, flags any that missed their expected date (possible cancellation or billing issue)
-- Calculates "runway" — based on current balances, recurring obligations, and average discretionary spend, roughly how many weeks of normal spending can be sustained
-- Summarizes net cash flow for the month so far (income minus all outflows)
+- Opens with a single "free money" number: what's truly available for discretionary spending right now (income minus obligations, savings targets, amortized irregular expenses, buffer)
+- Compares current month spending by category against 90-day rolling averages, using variance-appropriate thresholds: >20% for stable categories (utilities), >50% for medium (groceries), >100% for high-variance (dining). Requires minimum $25-50 absolute increase to avoid noise.
+- Lists new charges that don't match any known merchant or recurring pattern — potential anomalies. Uses 3-tier prioritization: always surface (fraud indicators, forgotten subs, duplicates), selective (unknown merchants), digest-only (spending spikes)
+- Shows subscriptions/recurrings sorted by cost, flags any that missed their expected date by 7+ days (possible cancellation or billing issue), and flags price drift (>5% for <$50, >3% for $50-200)
+- Calculates runway: total discretionary capacity / average daily discretionary spend = days remaining
+- Frames everything prospectively: "You have $X left for dining this week" not "You spent $X on dining last month"
+- Caps output to 3-5 actionable items max to avoid alert fatigue
 - Respects user preferences from `user-profile.md` (e.g., don't flag small coffee purchases)
 
-**Key principle:** Read-only. No changes, just awareness. Primary candidate for scheduled automation.
+**Key principle:** Read-only. One number + a few actionable flags. Prospective framing, not retrospective reporting. Primary candidate for scheduled automation.
 
 ### `/finance-trip` — Trip Expense Tracking
 
@@ -60,13 +62,20 @@ Four skills, three focused workflows plus one orchestrator:
 **Purpose:** Open-ended financial advisor for questions like "can I afford a weekend trip to Napa?"
 
 **What it does:**
-- Understands user's full financial picture by pulling accounts, balances, recurring obligations, recent trends
-- Answers affordability questions by considering: current balances, upcoming known obligations, average discretionary spending, savings targets from `user-profile.md`
-- Can invoke sub-skill workflows when appropriate ("let me check your recent spending trends" -> pulse logic; "let me make sure your data is clean first" -> suggests running cleanup)
+- Answers affordability questions using a dual-check model:
+  1. **Budget check:** Does it fit within Free Money? (`Net Income − Fixed Obligations − Savings Target − Amortized Irregular Expenses − Committed Discretionary − Buffer`)
+  2. **Cash flow check:** Will account balances stay above buffer threshold on the specific date(s) payment clears? Projects daily balances forward accounting for known income and expenses.
+- Scales analysis depth by magnitude: small (<$50) gets a quick check, medium ($50-500) gets budget context, large ($500-5K) gets full dual-check + tradeoff analysis, major (>$5K) gets multi-month projection
+- Never gives binary yes/no. Presents: signal (comfortably affordable / tight but possible / would create strain) + key number (remaining capacity after purchase) + tradeoffs ("you'd need to cut dining by $80/week for 3 weeks") + risk flags (variable income, upcoming irregular expenses, seasonal context)
+- For variable income: uses 25th percentile of last 6 months as conservative baseline with explicit uncertainty language
+- Accounts for credit card timing: knows statement closing dates, calculates float, flags when cash won't be available for full balance payment
+- Flags seasonal context proactively (October → holiday spending ahead, summer → utility spikes)
+- Pre-computes financial state and confirms with user rather than interrogating ("I see you earn ~$X/month and pay $Y in rent — is that right?")
+- Can invoke sub-skill workflows when appropriate
 - Explicit about being a data-informed assistant, not giving certified financial advice
-- Uses `user-profile.md` extensively for personalized context (income, fixed obligations, splurge thresholds, account roles)
+- Uses `user-profile.md` extensively; updates it when user provides new financial context
 
-**Key principle:** This is a prompt, not code. It's the "personality" layer that knows how to reason about finances using raw MCP tool calls.
+**Key principle:** Affordability is a constraint-satisfaction problem, not a balance check. Always show the reasoning, never just the answer.
 
 ### Future: `/finance-invest`
 
@@ -87,18 +96,30 @@ skills/user-profile.md
 
 ## Income & Obligations
 - Primary income: ~$X/month, deposited [frequency]
+- Income type: [stable/variable] — if variable, conservative baseline uses 25th percentile of last 6 months
 - Rent/mortgage: $X/month
-- Other fixed obligations: [list]
+- Other fixed obligations: [list with amounts]
+
+## Savings & Goals
+- Savings target: $X/month or X% of income
+- Active savings goals: [list from Copilot goals]
+- Emergency fund status: [adequate/building/nonexistent]
+
+## Irregular Expenses (Sinking Funds)
+- Annual/semi-annual payments detected from history: [auto-populated]
+- Monthly amortized reserve: ~$X/month total
+- Examples: car maintenance, insurance, holidays, medical, etc.
 
 ## Preferences
 - Spending I don't want flagged: [e.g., daily coffee, small convenience store runs]
 - Categories I care most about: [e.g., dining, travel, subscriptions]
 - "Splurge" threshold: $X for a single discretionary purchase
-- Savings target: $X/month or X% of income
+- Buffer preference: [X% of income — default 10% for stable, 20% for variable]
 
 ## Accounts
 - Primary checking: [which account is the "main" one]
-- Credit cards: [which ones, how you use them]
+- Credit cards: [name, statement closing date, how used — e.g., "Amex for dining, Chase for travel"]
+- Account roles: [which accounts are for spending vs. saving vs. bills]
 
 ## Trip Tracking
 - Default trip tag color: [preference]
@@ -107,6 +128,7 @@ skills/user-profile.md
 ## Cleanup Preferences
 - Category overrides: [e.g., "Uber Eats is always Dining, not Transport"]
 - Merchants to ignore in cleanup: [e.g., known internal transfers]
+- Recurring charges the user has confirmed are intentional: [list]
 ```
 
 ### Maintenance
@@ -236,9 +258,48 @@ Focus: Heuristics and reasoning patterns (not ML models) for flagging unexpected
 
 Focus: How to reason about discretionary spending capacity using account balances, recurring obligations, spending history, income patterns, and savings goals. What financial planners consider. The simplest useful mental model for "truly free money this month."
 
-Research results will be incorporated into skill prompts once available.
+Research results have been incorporated into the skill designs below (Section 8).
 
-## 7. Implementation Order
+## 7. Research Findings (Incorporated)
+
+Three deep research sessions were completed. Key findings that shaped the skill designs:
+
+### From "Personal Finance Automation — What's Actually Useful?"
+
+- **Subscription waste is the #1 target.** Americans spend $219/month on subscriptions but estimate $86 (2.5x perception gap). $32/month wasted on forgotten subs. 72% on autopay with no conscious reapproval. Price drift ($1-3 increases) adds $15-30/month unnoticed.
+- **Passive tracking doesn't change behavior.** Mint had 25M users and still failed — automated tracking reduces cognitive engagement alongside friction. Manual/prompted decisions are what work.
+- **Prospective framing beats retrospective.** "You have $400 left for dining this week" changes behavior; "You spent $380 on dining last month" mostly doesn't. Restore the "pain of paying" that digital transactions erode.
+- **Precommitment is the most powerful intervention.** Thaler's Save More Tomorrow: savings rates from 3.5% to 13.6%. Prompt allocation *before* payday, not after.
+- **Conversational interfaces get 20x engagement** vs. dashboards (Cleo AI benchmark). Our skills are inherently conversational — this is the right modality.
+- **Financial advisor first meeting is ~60-70% automatable** with transaction data. Pre-compute and confirm ("I see you earn ~$X/month and pay $Y in rent — is that right?"), don't interrogate.
+- **One number beats twelve charts.** PocketGuard's "In My Pocket" is the most praised budgeting nudge — collapses complexity into a single actionable figure.
+- **Alert fatigue is real.** 67% of PFM users abandon within the first month. Optimal cadence: payday nudges, mid-month pace checks, anomaly-triggered alerts — not daily summaries. 4-hour cooldown between similar alerts.
+
+### From "Anomaly Detection in Personal Spending"
+
+- **Hybrid architecture works best.** LLMs achieve only 32% accuracy on pure numerical anomaly detection, but excels at merchant disambiguation, contextual reasoning, and explanation. Pre-compute statistics, feed as natural language, let LLM judge and explain.
+- **Convert data to prose, not CSV.** "On March 15, you spent $47.23 at Walmart in Groceries. Your average Walmart transaction is $52.30" dramatically improves LLM accuracy vs. tabular format.
+- **3-tier alert prioritization:**
+  - Tier 1 (always alert): fraud indicators, forgotten subscriptions, duplicate charges, recurring amount changes
+  - Tier 2 (selective): unknown merchants, budget overspend
+  - Tier 3 (digest only): spending category spikes, dormant category reactivation
+- **Max 3-5 meaningful alerts per week.** Under 20% false positive rate. 64% of users delete apps sending 5+ notifications/week.
+- **Subscription detection thresholds:** Monthly = 28-31 days ±3; need ≥3 instances. Amount drift: >5% for <$50, >3% for $50-200. Missed cycle: flag after 7 days past expected date.
+- **Category spike thresholds:** Low variance (utilities): >20% above average. Medium (groceries): >50%. High (dining): >100% (2x). Require minimum $25-50 absolute increase.
+- **Duplicate detection:** Same merchant, exact amount within 24h = high confidence. Allow 2-3 same-day for coffee/fast food.
+
+### From "The 'Can I Afford This?' Problem"
+
+- **Core formula:** `Free Money = Net Income − Fixed Obligations − Savings Target − Amortized Irregular Expenses − Committed Discretionary − Buffer`
+- **Two independent checks required:** Budget check (does it fit allocated discretionary?) AND cash flow check (will the account stay positive on the day it clears?). These can produce contradictory answers.
+- **Variable income:** Use 25th percentile of last 6 months as conservative baseline. Buffer: 5-10% for stable income, 15-25% for variable.
+- **Amortized irregular expenses** (sinking funds): Typical household $1,000-1,200/month across 8-15 categories. Auto-detect from transaction history by scanning for annual/semi-annual payments.
+- **Credit card timing matters:** Purchase on day 1 of cycle = 55 days float; last day = 21-25 days. Agent should know statement closing dates.
+- **Never binary yes/no.** Present: signal (comfortable/tight/strain) + key number (remaining capacity) + tradeoff analysis + risk flags + reasoning transparency.
+- **Magnitude tiers:** Small (<$50), Medium ($50-500), Large ($500-5K), Major (>$5K). Depth of analysis scales with magnitude.
+- **Seasonal awareness:** Holiday spending $900-1,200/person, underestimated by 20-30%. Proactively warn in October. Utility bills swing 40-60% seasonally.
+
+## 8. Implementation Order
 
 1. **Testing infrastructure** — snapshot scripts + `review_transactions` concurrency cap (enables safe iteration)
 2. **User profile** — empty `user-profile.md` with structure (skills need this from day one)
