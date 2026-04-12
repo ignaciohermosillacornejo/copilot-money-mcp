@@ -2414,12 +2414,21 @@ export class CopilotMoneyTools {
     }
 
     // Require at least one mutable field besides transaction_id.
-    const mutableKeys = Object.keys(args).filter((k) => k !== 'transaction_id');
+    // Treat explicit `undefined` values as absent so callers cannot accidentally
+    // unlink goal_id / overwrite fields by passing undefined (MCP clients never
+    // send undefined, but direct TS callers can).
+    const mutableKeys = Object.keys(args).filter(
+      (k) => k !== 'transaction_id' && (args as Record<string, unknown>)[k] !== undefined
+    );
     if (mutableKeys.length === 0) {
       throw new Error('update_transaction requires at least one field to update');
     }
 
-    // Per-field validation (runs BEFORE any Firestore call for atomicity).
+    // Resolve the transaction and its Firestore path FIRST so "Transaction not found"
+    // is the primary error when both the transaction and a field are invalid.
+    const { collectionPath } = await this.resolveTransaction(transaction_id);
+
+    // Per-field validation (runs BEFORE any Firestore write for atomicity).
     let trimmedName: string | undefined;
     if ('name' in args && args.name !== undefined) {
       trimmedName = args.name.trim();
@@ -2449,10 +2458,9 @@ export class CopilotMoneyTools {
       }
     }
 
-    // Resolve the transaction and its Firestore path.
-    const { collectionPath } = await this.resolveTransaction(transaction_id);
-
     // Build two parallel field maps by key presence (NOT by destructuring — see spec).
+    // The `!== undefined` guards treat explicit undefined as absent, matching the
+    // mutableKeys check above.
     const firestoreFields: Record<string, unknown> = {};
     const cacheFields: Partial<Transaction> = {};
 
@@ -2480,8 +2488,10 @@ export class CopilotMoneyTools {
       firestoreFields.internal_transfer = args.internal_transfer;
       cacheFields.internal_transfer = args.internal_transfer;
     }
-    if ('goal_id' in args) {
-      // Firestore wants empty string to unlink; cache wants undefined (matches Zod model).
+    if ('goal_id' in args && args.goal_id !== undefined) {
+      // goal_id: null unlinks → Firestore gets empty string, cache gets undefined.
+      // goal_id: undefined is treated as absent (skipped) to prevent direct TS
+      // callers from accidentally unlinking by passing undefined.
       firestoreFields.goal_id = args.goal_id ?? '';
       cacheFields.goal_id = args.goal_id ?? undefined;
     }
@@ -2496,10 +2506,15 @@ export class CopilotMoneyTools {
       this.db.clearCache();
     }
 
+    // Map Firestore field names back to API names for the response so callers see
+    // `note` (not `user_note`) — matches what they sent.
+    const firestoreToApiName: Record<string, string> = { user_note: 'note' };
+    const updated = updateMask.map((k) => firestoreToApiName[k] ?? k);
+
     return {
       success: true,
       transaction_id,
-      updated: updateMask,
+      updated,
     };
   }
 

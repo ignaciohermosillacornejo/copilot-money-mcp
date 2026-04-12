@@ -978,7 +978,7 @@ describe('CopilotMoneyTools Integration', () => {
         note: 'integration test',
       });
       expect(result.success).toBe(true);
-      expect(result.updated.sort()).toEqual(['category_id', 'user_note']);
+      expect(result.updated.sort()).toEqual(['category_id', 'note']);
     });
 
     test('reviewTransactions marks reviewed', async () => {

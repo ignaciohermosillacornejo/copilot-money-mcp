@@ -93,12 +93,14 @@ describe('updateTransaction — single-field updates', () => {
     expect(updateCalls[0].fields).toEqual({ category_id: { stringValue: 'groceries' } });
   });
 
-  test('note: non-empty string sets user_note', async () => {
+  test('note: non-empty string sets user_note, updated returns API name "note"', async () => {
     const { tools, updateCalls } = makeTools();
     const result = await tools.updateTransaction({ transaction_id: 'txn1', note: 'hello' });
     expect(result.success).toBe(true);
     expect(result.transaction_id).toBe('txn1');
-    expect(result.updated).toEqual(['user_note']);
+    // `updated` returns API-facing names (the caller sent `note`, not `user_note`)
+    expect(result.updated).toEqual(['note']);
+    // Wire-level mask uses the Firestore field name
     expect(updateCalls[0].mask).toEqual(['user_note']);
     expect(updateCalls[0].fields).toEqual({ user_note: { stringValue: 'hello' } });
   });
@@ -204,19 +206,22 @@ describe('updateTransaction — single-field updates', () => {
 describe('updateTransaction — multi-field atomic', () => {
   test('three fields in one patch produce one updateDocument call with merged mask', async () => {
     const { tools, updateCalls } = makeTools();
-    await tools.updateTransaction({
+    const result = await tools.updateTransaction({
       transaction_id: 'txn1',
       category_id: 'groceries',
       note: 'weekly shopping',
       tag_ids: ['tag1'],
     });
     expect(updateCalls).toHaveLength(1);
+    // Wire-level mask uses Firestore field names
     expect(updateCalls[0].mask.sort()).toEqual(['category_id', 'tag_ids', 'user_note']);
     expect(updateCalls[0].fields).toEqual({
       category_id: { stringValue: 'groceries' },
       user_note: { stringValue: 'weekly shopping' },
       tag_ids: { arrayValue: { values: [{ stringValue: 'tag1' }] } },
     });
+    // Response `updated` uses API-facing names (caller sent `note`, not `user_note`)
+    expect(result.updated.sort()).toEqual(['category_id', 'note', 'tag_ids']);
   });
 
   test('multi-field with goal_id unlink: Firestore empty string, cache undefined', async () => {
@@ -329,6 +334,17 @@ describe('updateTransaction — validation errors', () => {
     expect(updateCalls).toHaveLength(0);
   });
 
+  test('nonexistent transaction_id + invalid category_id surfaces "Transaction not found"', async () => {
+    // Validation order: transaction existence is the primary precondition. If both
+    // the transaction and a field are invalid, the caller should see the transaction
+    // error first so they know the txn_id is wrong before chasing field issues.
+    const { tools, updateCalls } = makeTools();
+    await expect(
+      tools.updateTransaction({ transaction_id: 'missing', category_id: 'ghost_category' })
+    ).rejects.toThrow(/Transaction not found/i);
+    expect(updateCalls).toHaveLength(0);
+  });
+
   test('transaction missing item_id or account_id throws', async () => {
     const { tools, updateCalls } = makeTools({
       transactions: [
@@ -347,6 +363,75 @@ describe('updateTransaction — validation errors', () => {
       tools.updateTransaction({ transaction_id: 'txn1', category_id: 'food' })
     ).rejects.toThrow(/item_id or account_id/i);
     expect(updateCalls).toHaveLength(0);
+  });
+
+  test('goal_id: undefined is treated as absent (no silent unlink)', async () => {
+    // Medium-priority finding from review: `'goal_id' in args` is true even for
+    // explicit `undefined`, which would otherwise silently unlink the goal.
+    // We treat explicit undefined as "field not provided" — direct TS callers
+    // can't accidentally unlink by passing undefined.
+    const { tools, mockDb, updateCalls } = makeTools({
+      transactions: [
+        {
+          transaction_id: 'txn1',
+          amount: 50,
+          date: '2024-01-15',
+          name: 'Coffee Shop',
+          category_id: 'food',
+          user_id: 'user123',
+          item_id: 'item1',
+          account_id: 'acct1',
+          goal_id: 'goal1',
+        },
+      ],
+    });
+    // Only goal_id: undefined, nothing else → should error as empty patch.
+    await expect(
+      tools.updateTransaction({ transaction_id: 'txn1', goal_id: undefined })
+    ).rejects.toThrow(/at least one field/i);
+    expect(updateCalls).toHaveLength(0);
+    // Cache still has the original goal_id — no silent unlink.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cachedTxn = (mockDb as any)._transactions.find(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (t: any) => t.transaction_id === 'txn1'
+    );
+    expect(cachedTxn.goal_id).toBe('goal1');
+  });
+
+  test('category_id set + goal_id: undefined writes only category_id', async () => {
+    // If another field is present, goal_id: undefined is still skipped —
+    // the write is category_id only, and goal_id stays linked.
+    const { tools, mockDb, updateCalls } = makeTools({
+      transactions: [
+        {
+          transaction_id: 'txn1',
+          amount: 50,
+          date: '2024-01-15',
+          name: 'Coffee Shop',
+          category_id: 'food',
+          user_id: 'user123',
+          item_id: 'item1',
+          account_id: 'acct1',
+          goal_id: 'goal1',
+        },
+      ],
+    });
+    const result = await tools.updateTransaction({
+      transaction_id: 'txn1',
+      category_id: 'groceries',
+      goal_id: undefined,
+    });
+    expect(updateCalls).toHaveLength(1);
+    expect(updateCalls[0].mask).toEqual(['category_id']);
+    expect(result.updated).toEqual(['category_id']);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cachedTxn = (mockDb as any)._transactions.find(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (t: any) => t.transaction_id === 'txn1'
+    );
+    expect(cachedTxn.goal_id).toBe('goal1'); // unchanged
+    expect(cachedTxn.category_id).toBe('groceries');
   });
 });
 

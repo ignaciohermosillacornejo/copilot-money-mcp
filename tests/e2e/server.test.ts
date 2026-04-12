@@ -732,7 +732,7 @@ describe('handleCallTool — write tools', () => {
     const data = parseToolResult(result) as any;
     expect(data.success).toBe(true);
     expect(data.transaction_id).toBe('txn1');
-    expect(data.updated.sort()).toEqual(['category_id', 'tag_ids', 'user_note']);
+    expect(data.updated.sort()).toEqual(['category_id', 'note', 'tag_ids']);
   });
 
   test('update_transaction with goal_id: null unlinks the goal', async () => {
