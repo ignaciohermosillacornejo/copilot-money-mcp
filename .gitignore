@@ -45,6 +45,9 @@ scripts/
 # Generated test fixtures
 tests/fixtures/mixed-files-db/
 
+# LevelDB snapshots (contain personal financial data)
+snapshots/
+
 # LevelDB files (except synthetic test fixtures)
 *.ldb
 !tests/fixtures/synthetic-db/*.ldb
