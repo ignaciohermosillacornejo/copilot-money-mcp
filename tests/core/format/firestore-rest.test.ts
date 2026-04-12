@@ -128,4 +128,17 @@ describe('fromFirestoreValue additional coverage', () => {
   test('decodes false boolean', () => {
     expect(fromFirestoreValue({ booleanValue: false })).toBe(false);
   });
+
+  test('decodes timestampValue', () => {
+    expect(fromFirestoreValue({ timestampValue: '2024-01-15T12:00:00Z' })).toBe(
+      '2024-01-15T12:00:00Z'
+    );
+  });
+
+  test('throws on unknown Firestore value type', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(() => fromFirestoreValue({ unknownType: 'value' } as any)).toThrow(
+      'Unknown Firestore value type'
+    );
+  });
 });
