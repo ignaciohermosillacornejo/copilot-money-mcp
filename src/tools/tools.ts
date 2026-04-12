@@ -131,6 +131,12 @@ export const UNREALISTIC_AMOUNT_THRESHOLD = 1_000_000;
 export const MAX_VALID_AMOUNT = 10_000_000;
 
 /**
+ * Maximum number of concurrent Firestore writes when reviewing transactions.
+ * Batching prevents overwhelming Firestore with a large number of simultaneous requests.
+ */
+export const REVIEW_BATCH_SIZE = 10;
+
+/**
  * Accepted frequency values for creating recurring items.
  * Subset of KNOWN_FREQUENCIES from the model -- only user-facing values.
  */
@@ -2567,8 +2573,7 @@ export class CopilotMoneyTools {
       resolvedTxns.push(txn);
     }
 
-    // Batch writes to avoid overwhelming Firestore (max 10 concurrent)
-    const REVIEW_BATCH_SIZE = 10;
+    // Batch writes to avoid overwhelming Firestore (max REVIEW_BATCH_SIZE concurrent)
     const firestoreFields = toFirestoreFields({ user_reviewed: reviewed });
     for (let i = 0; i < resolvedTxns.length; i += REVIEW_BATCH_SIZE) {
       const batch = resolvedTxns.slice(i, i + REVIEW_BATCH_SIZE);
