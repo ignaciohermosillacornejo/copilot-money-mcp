@@ -4589,7 +4589,7 @@ export function createToolSchemas(): ToolSchema[] {
     {
       name: 'get_investment_performance',
       description:
-        'Get per-security investment performance data. Returns raw performance documents ' +
+        'Get per-security investment performance data. Returns structured performance records ' +
         'from Firestore, enriched with ticker symbol and name from the securities collection. ' +
         'Filter by ticker symbol or security ID.',
       inputSchema: {
