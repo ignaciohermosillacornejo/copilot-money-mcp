@@ -10,9 +10,10 @@
   <meta property="og:title" content="Copilot Money MCP Server">
   <meta property="og:description" content="AI-powered personal finance tools. Local-first, privacy-first. Works with Claude, Cursor, Codex CLI, Gemini CLI, and more.">
   <meta property="og:type" content="website">
-  <meta property="og:image" content="icon.png">
+  <meta property="og:url" content="https://ignaciohermosillacornejo.github.io/copilot-money-mcp/">
+  <meta property="og:image" content="https://ignaciohermosillacornejo.github.io/copilot-money-mcp/icon.png">
   <meta name="twitter:card" content="summary">
-  <meta name="twitter:image" content="icon.png">
+  <meta name="twitter:image" content="https://ignaciohermosillacornejo.github.io/copilot-money-mcp/icon.png">
   <style>
     :root {
       --bg: #0a0a0f;
@@ -647,16 +648,11 @@ args = ["--write"]</div>
 
     <!-- npm generic -->
     <div class="tab-content" data-tab="npm" role="tabpanel" id="tab-panel-npm" aria-labelledby="tab-btn-npm" hidden>
-      <h3>Any MCP Client (via npm)</h3>
+      <h3>Any MCP Client (via npx)</h3>
       <div class="step">
         <span class="step-num">1</span>
-        <span class="step-title">Install globally</span>
-        <div class="code-block"><button class="copy-btn" type="button" aria-label="Copy to clipboard">Copy</button>npm install -g copilot-money-mcp</div>
-      </div>
-      <div class="step">
-        <span class="step-num">2</span>
         <span class="step-title">Add to your client's MCP config</span>
-        <p>Using <code>npx</code> means no install step needed:</p>
+        <p>Using <code>npx</code> means no install step needed — it downloads and runs <code>copilot-money-mcp</code> on demand:</p>
         <div class="config-grid">
           <div class="config-variant">
             <span class="variant-label read">Read-only</span>
@@ -683,8 +679,9 @@ args = ["--write"]</div>
         </div>
       </div>
       <div class="step">
-        <span class="step-num">3</span>
+        <span class="step-num">2</span>
         <span class="step-title">Restart your client and start asking!</span>
+        <p>Prefer a global install? Run <code>npm install -g copilot-money-mcp</code> and swap <code>"npx"</code> for <code>"copilot-money-mcp"</code> (and drop <code>"-y", "copilot-money-mcp"</code> from args).</p>
       </div>
     </div>
   </div>
