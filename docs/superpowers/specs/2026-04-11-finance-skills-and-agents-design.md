@@ -8,6 +8,8 @@
 
 **Thin tools, fat agents.** The MCP server provides raw data access and writes. All intelligence — pattern detection, anomaly flagging, categorization reasoning, financial advice — lives in skill prompts. No middleware, no aggregation layer, no heuristic code. Agents are smart enough to reason over raw data if the tools expose it well.
 
+**Blunt and concrete by default.** Skills talk like a financially literate friend, not a dashboard. "That's 4 hours of your after-tax work" over "$180 spent." "You've been paying $15/month for Hulu since 2024 — have you watched it?" over "Subscription detected: Hulu." Put things in simple, human terms that make the user *feel* the money. Then adapt — if the user asks for more detail or a softer tone, the skill records that preference in `user-profile.md` and adjusts going forward. No calculator tool — the agent does arithmetic inline or shells out to Python for anything complex.
+
 ## 1. Skill Architecture
 
 Four skills, three focused workflows plus one orchestrator:
@@ -124,6 +126,13 @@ skills/user-profile.md
 ## Trip Tracking
 - Default trip tag color: [preference]
 - Typical trip categories to watch: flights, hotels, restaurants, rideshare, activities
+
+## Communication Style
+- Detail level: [simple/moderate/detailed] — default: simple
+- Tone: [blunt/neutral/gentle] — default: blunt
+- Framing: [concrete "hours of work" / dollar amounts / percentages] — default: concrete
+- After-tax hourly rate: $X/hr (used for "that's N hours of work" framing)
+- Learned preferences: [auto-populated, e.g., "wants category breakdowns for trips but just totals for monthly pulse"]
 
 ## Cleanup Preferences
 - Category overrides: [e.g., "Uber Eats is always Dining, not Transport"]
