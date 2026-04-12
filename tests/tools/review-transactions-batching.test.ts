@@ -5,57 +5,9 @@
  * rather than all at once, without hitting a real Firestore backend.
  */
 
-import { describe, test, expect, beforeEach } from 'bun:test';
-import { CopilotMoneyTools } from '../../src/tools/tools.js';
+import { describe, test, expect } from 'bun:test';
+import { CopilotMoneyTools, REVIEW_BATCH_SIZE } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
-
-// ---------------------------------------------------------------------------
-// Batch math helpers
-// ---------------------------------------------------------------------------
-
-/** Returns the number of batches needed to process `total` items `batchSize` at a time. */
-function batchCount(total: number, batchSize: number): number {
-  if (total === 0) return 0;
-  return Math.ceil(total / batchSize);
-}
-
-/** Returns the size of the last batch given `total` items and `batchSize`. */
-function lastBatchSize(total: number, batchSize: number): number {
-  if (total === 0) return 0;
-  const remainder = total % batchSize;
-  return remainder === 0 ? batchSize : remainder;
-}
-
-describe('batch math helpers', () => {
-  test('0 items → 0 batches', () => {
-    expect(batchCount(0, 10)).toBe(0);
-  });
-
-  test('1 item → 1 batch of 1', () => {
-    expect(batchCount(1, 10)).toBe(1);
-    expect(lastBatchSize(1, 10)).toBe(1);
-  });
-
-  test('exactly 10 items → 1 batch of 10', () => {
-    expect(batchCount(10, 10)).toBe(1);
-    expect(lastBatchSize(10, 10)).toBe(10);
-  });
-
-  test('11 items → 2 batches, last batch has 1', () => {
-    expect(batchCount(11, 10)).toBe(2);
-    expect(lastBatchSize(11, 10)).toBe(1);
-  });
-
-  test('25 items → 3 batches, last batch has 5', () => {
-    expect(batchCount(25, 10)).toBe(3);
-    expect(lastBatchSize(25, 10)).toBe(5);
-  });
-
-  test('20 items → 2 batches of 10', () => {
-    expect(batchCount(20, 10)).toBe(2);
-    expect(lastBatchSize(20, 10)).toBe(10);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // Concurrency tracking mock helpers
@@ -127,8 +79,6 @@ function makeMockDb(txnIds: string[]): CopilotDatabase {
 // ---------------------------------------------------------------------------
 
 describe('review_transactions batching', () => {
-  const BATCH_SIZE = 10;
-
   test('single transaction: 1 write, peak concurrency = 1', async () => {
     const updateCalls: Array<{ collection: string; docId: string }> = [];
     const peakConcurrency = { value: 0 };
@@ -159,7 +109,7 @@ describe('review_transactions batching', () => {
     expect(result.success).toBe(true);
     expect(result.reviewed_count).toBe(10);
     expect(updateCalls).toHaveLength(10);
-    expect(peakConcurrency.value).toBeLessThanOrEqual(BATCH_SIZE);
+    expect(peakConcurrency.value).toBeLessThanOrEqual(REVIEW_BATCH_SIZE);
   });
 
   test('11 transactions: 2 batches, peak concurrency never exceeds 10', async () => {
@@ -177,7 +127,7 @@ describe('review_transactions batching', () => {
     expect(result.reviewed_count).toBe(11);
     expect(updateCalls).toHaveLength(11);
     // With batching, peak should never exceed batch size
-    expect(peakConcurrency.value).toBeLessThanOrEqual(BATCH_SIZE);
+    expect(peakConcurrency.value).toBeLessThanOrEqual(REVIEW_BATCH_SIZE);
   });
 
   test('25 transactions: all writes issued, peak concurrency ≤ 10', async () => {
@@ -194,9 +144,9 @@ describe('review_transactions batching', () => {
     expect(result.success).toBe(true);
     expect(result.reviewed_count).toBe(25);
     expect(updateCalls).toHaveLength(25);
-    expect(peakConcurrency.value).toBeLessThanOrEqual(BATCH_SIZE);
+    expect(peakConcurrency.value).toBeLessThanOrEqual(REVIEW_BATCH_SIZE);
     // 3 batches of (10, 10, 5) — peak within any batch is at most 10
-    expect(batchCount(25, BATCH_SIZE)).toBe(3);
+    expect(Math.ceil(25 / REVIEW_BATCH_SIZE)).toBe(3);
   });
 
   test('returned transaction_ids match input order', async () => {
