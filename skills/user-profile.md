@@ -26,8 +26,8 @@
 - Framing: dollar amounts
 
 ## Cleanup Preferences
-- ENC (Isabel Gacitua) = Healthcare — psychologist, recurring
-- PayPal Jennifer Altman = Services — English teacher, recurring (~$150/session)
+- ENC (Isabel G.) = Healthcare — psychologist, recurring
+- PayPal Jennifer A. = Services — English teacher, recurring (~$150/session)
 - SP Sculptique = Personal Care — recurring purchase
 - WSDOT GoodToGo = Car — WA State toll pass, recurring
 - Astound = Utilities — ISP, recurring

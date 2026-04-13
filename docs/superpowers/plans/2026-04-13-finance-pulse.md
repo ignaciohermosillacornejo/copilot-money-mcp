@@ -121,8 +121,8 @@ If `skills/user-profile.md` has empty Income & Obligations section, bootstrap it
    - Credit cards: list with recent activity level
    - Present: "Your primary checking appears to be [name]. Savings in [name]. Cards: [list]. Right?"
 
-4. **Detect irregular expenses.** Scan 90-day history for:
-   - Annual/semi-annual charges (large one-off amounts from merchants that appear yearly)
+4. **Detect irregular expenses.** Pull a separate 13-month transaction window (NOT the 90-day window used for trends — annual charges need a full year to detect). Scan for:
+   - Annual/semi-annual charges (large one-off amounts from merchants that appear yearly — e.g., car insurance, Amazon Prime annual, domain renewals)
    - Known irregular categories: car maintenance, medical, insurance premiums
    - Amortize detected amounts to monthly: annual ÷ 12, semi-annual ÷ 6
    - Present: "I found these irregular expenses: [list]. Monthly reserve: ~$X"
@@ -318,16 +318,18 @@ The skill lives at `skills/finance-pulse/SKILL.md` with proper frontmatter. Clau
 Run: `head -4 skills/finance-pulse/SKILL.md`
 Expected: frontmatter with `name: finance-pulse`
 
-- [ ] **Step 2: Create the weekly scheduled trigger**
+- [ ] **Step 2: Create the weekly scheduled trigger (MANUAL — requires human interaction)**
 
-Use the Claude Code `schedule` skill to create a weekly trigger that runs `/finance-pulse` every Sunday evening. This is done interactively — invoke `/schedule` and configure:
+> **Note for agentic workers:** This step requires interactive `/schedule` invocation. Skip it during automated execution — flag it as a follow-up for the user.
+
+Ask the user to invoke `/schedule` in Claude Code and configure:
 
 - Name: `weekly-pulse`
 - Schedule: Sunday at 6pm (user's local time)
 - Command: Run `/finance-pulse` in read-only mode, output report
 - Repository: current repo (copilot-money-mcp)
 
-Note: If the user prefers a different cadence or doesn't want scheduling yet, skip this step. The skill works perfectly as an on-demand `/finance-pulse` invocation.
+If the user prefers a different cadence or doesn't want scheduling yet, skip this step. The skill works perfectly as an on-demand `/finance-pulse` invocation.
 
 - [ ] **Step 3: Commit any schedule configuration changes**
 

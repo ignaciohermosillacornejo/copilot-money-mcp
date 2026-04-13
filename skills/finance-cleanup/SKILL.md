@@ -23,7 +23,7 @@ Walk the user through a structured cleanup of their Copilot Money transaction da
    - `get_categories` — full category list
    - `get_accounts` — to map account IDs to names
 
-   - For any payment app accounts found (Venmo, PayPal, etc.), also pull their transactions separately — these contain the descriptive names and categories that bank-side stubs lack.
+   - For any payment app accounts found (Venmo, PayPal, Zelle, CashApp), also pull their transactions separately — these contain the descriptive names and categories that bank-side stubs lack.
 
    Run all reads before any analysis. Cache the results mentally — you will cross-reference heavily.
 
@@ -118,7 +118,7 @@ After all fixes are applied, update `skills/user-profile.md` with any new prefer
 - Any categories the user said to never touch.
 - Frequency preferences (e.g., "run cleanup monthly").
 
-**Tell the user exactly what you are saving before writing.** Example: "I'm adding to your profile: 'ENC (Isabel Gacitua) = Healthcare (psychologist)', 'Skip Coinbase account for cleanup'. OK?"
+**Tell the user exactly what you are saving before writing.** Example: "I'm adding to your profile: 'ENC = Healthcare (psychologist)', 'Skip Coinbase account for cleanup'. OK?"
 
 ## Phase 6 — Summary
 
@@ -129,7 +129,7 @@ End with a brief summary:
 
 ## Rules
 
-1. **Never write without asking.** Every write operation must be explicitly approved by the user first.
+1. **Never write without asking — except confident batch fixes.** Every write operation must be explicitly approved by the user first. The one exception: when Phase 3 identifies high-confidence fixes (merchant's dominant category is >80%, or user profile has an explicit mapping), you may apply them directly and report what you changed afterward. This avoids dialog fatigue on obvious fixes while still requiring approval for anything uncertain.
 2. **Dry-run first.** Always present findings (Phase 3) before applying any fixes (Phase 4). No exceptions.
 3. **Respect the profile.** `skills/user-profile.md` preferences override statistical analysis. If the profile says a merchant is categorized a certain way, do not flag it.
 4. **Be honest about uncertainty.** If you cannot confidently identify a merchant or determine the right category, say so. Let the user decide.
