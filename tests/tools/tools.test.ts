@@ -2776,7 +2776,7 @@ describe('createCategory', () => {
     expect(fields.name).toEqual({ stringValue: 'Test Category' });
     expect(fields.emoji).toEqual({ stringValue: '📁' });
     expect(fields.color).toEqual({ stringValue: '#808080' });
-    expect(fields.bg_color).toBeDefined();
+    expect(fields.bg_color).toEqual({ stringValue: '#F9F9F9' });
     expect(fields.order).toEqual({ integerValue: '6' }); // max(0, 5) + 1
     expect(fields.excluded).toEqual({ booleanValue: false });
     expect(fields.is_other).toEqual({ booleanValue: false });

@@ -2274,8 +2274,8 @@ export class CopilotMoneyTools {
     success: boolean;
     category_id: string;
     name: string;
-    emoji?: string;
-    color?: string;
+    emoji: string;
+    color: string;
     parent_category_id?: string;
     excluded: boolean;
   }> {
@@ -2324,11 +2324,12 @@ export class CopilotMoneyTools {
     // is_other, auto_budget_lock, auto_delete_lock, and empty arrays for
     // plaid_category_ids and partial_name_rules.
     const trimmedName = name.trim();
-    const categoryColor = color ?? '#808080';
     if (color) validateHexColor(color);
+    const categoryColor = color ?? '#808080';
+    const categoryEmoji = emoji ?? '📁';
     const docFields: Record<string, unknown> = {
       name: trimmedName,
-      emoji: emoji ?? '📁',
+      emoji: categoryEmoji,
       color: categoryColor,
       bg_color: hexToBgColor(categoryColor),
       order: maxOrder + 1,
@@ -2359,18 +2360,18 @@ export class CopilotMoneyTools {
       success: boolean;
       category_id: string;
       name: string;
-      emoji?: string;
-      color?: string;
+      emoji: string;
+      color: string;
       parent_category_id?: string;
       excluded: boolean;
     } = {
       success: true,
       category_id: categoryId,
       name: trimmedName,
+      emoji: categoryEmoji,
+      color: categoryColor,
       excluded,
     };
-    if (emoji ?? '📁') result.emoji = emoji ?? '📁';
-    if (categoryColor) result.color = categoryColor;
     if (parent_category_id) result.parent_category_id = parent_category_id;
 
     return result;
@@ -2797,7 +2798,8 @@ export class CopilotMoneyTools {
     if (color !== undefined) {
       validateHexColor(color);
       fieldsToUpdate.color = color;
-      updateMask.push('color');
+      fieldsToUpdate.bg_color = hexToBgColor(color);
+      updateMask.push('color', 'bg_color');
     }
     if (excluded !== undefined) {
       fieldsToUpdate.excluded = excluded;

@@ -69,14 +69,6 @@ export class FirestoreClient {
   }
 
   /**
-   * Create a new document in a Firestore collection.
-   *
-   * Uses the Firestore REST API createDocument endpoint with a client-supplied
-   * document ID.
-   *
-   * @see https://firebase.google.com/docs/firestore/reference/rest/v1/projects.databases.documents/createDocument
-   */
-  /**
    * Read a single document from Firestore.
    *
    * @see https://firebase.google.com/docs/firestore/reference/rest/v1/projects.databases.documents/get
