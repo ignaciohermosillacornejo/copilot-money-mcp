@@ -2687,7 +2687,9 @@ describe('createCategory', () => {
   let tools: CopilotMoneyTools;
   let mockDb: CopilotDatabase;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let createCalls: { collection: string; docId: string; fields: any }[];
+  let createCalls: { collection: string; docId: string | undefined; fields: any }[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let updateCalls: { collection: string; docId: string; fields: any; mask: string[] }[];
 
   beforeEach(() => {
     mockDb = new CopilotDatabase('/nonexistent');
@@ -2695,17 +2697,39 @@ describe('createCategory', () => {
     (mockDb as any).dbPath = '/fake';
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (mockDb as any)._userCategories = [
-      { category_id: 'food_and_drink', name: 'Food & Drink', excluded: false, user_id: 'user123' },
-      { category_id: 'shopping', name: 'Shopping', excluded: false, user_id: 'user123' },
+      {
+        category_id: 'food_and_drink',
+        name: 'Food & Drink',
+        excluded: false,
+        user_id: 'user123',
+        order: 0,
+      },
+      {
+        category_id: 'shopping',
+        name: 'Shopping',
+        excluded: false,
+        user_id: 'user123',
+        order: 5,
+      },
     ];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (mockDb as any)._allCollectionsLoaded = true;
 
     createCalls = [];
+    updateCalls = [];
     const mockFirestoreClient = {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      createDocument: async (collection: string, docId: string, fields: any) => {
+      createDocument: async (
+        collection: string,
+        docId: string | undefined,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        fields: any
+      ) => {
         createCalls.push({ collection, docId, fields });
+        return 'auto_generated_id_123';
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      updateDocument: async (collection: string, docId: string, fields: any, mask: string[]) => {
+        updateCalls.push({ collection, docId, fields, mask });
       },
       requireUserId: async () => 'user123',
     };
@@ -2718,8 +2742,11 @@ describe('createCategory', () => {
     const result = await tools.createCategory({ name: 'Entertainment' });
     expect(result.success).toBe(true);
     expect(result.name).toBe('Entertainment');
-    expect(result.category_id).toMatch(/^custom_[a-f0-9]{16}$/);
+    expect(result.category_id).toBe('auto_generated_id_123');
     expect(result.excluded).toBe(false);
+    // Default emoji and color should be set
+    expect(result.emoji).toBe('📁');
+    expect(result.color).toBe('#808080');
   });
 
   test('creates category with all optional fields', async () => {
@@ -2738,16 +2765,34 @@ describe('createCategory', () => {
     expect(result.excluded).toBe(true);
   });
 
-  test('calls Firestore createDocument with correct collection path', async () => {
+  test('calls Firestore createDocument with auto-generated ID and app-compatible fields', async () => {
     await tools.createCategory({ name: 'Test Category' });
     expect(createCalls).toHaveLength(1);
     expect(createCalls[0].collection).toBe('users/user123/categories');
-    expect(createCalls[0].docId).toMatch(/^custom_[a-f0-9]{16}$/);
-    expect(createCalls[0].fields).toHaveProperty('name');
-    expect(createCalls[0].fields.name).toEqual({ stringValue: 'Test Category' });
-    expect(createCalls[0].fields.category_id).toEqual({
-      stringValue: createCalls[0].docId,
-    });
+    // docId should be undefined for Firestore auto-generated ID
+    expect(createCalls[0].docId).toBeUndefined();
+    // Check app-required fields are present
+    const fields = createCalls[0].fields;
+    expect(fields.name).toEqual({ stringValue: 'Test Category' });
+    expect(fields.emoji).toEqual({ stringValue: '📁' });
+    expect(fields.color).toEqual({ stringValue: '#808080' });
+    expect(fields.bg_color).toBeDefined();
+    expect(fields.order).toEqual({ integerValue: '6' }); // max(0, 5) + 1
+    expect(fields.excluded).toEqual({ booleanValue: false });
+    expect(fields.is_other).toEqual({ booleanValue: false });
+    expect(fields.auto_budget_lock).toEqual({ booleanValue: false });
+    expect(fields.auto_delete_lock).toEqual({ booleanValue: false });
+    expect(fields.plaid_category_ids).toEqual({ arrayValue: { values: [] } });
+    expect(fields.partial_name_rules).toEqual({ arrayValue: { values: [] } });
+  });
+
+  test('patches id field after creation', async () => {
+    await tools.createCategory({ name: 'Test' });
+    expect(updateCalls).toHaveLength(1);
+    expect(updateCalls[0].collection).toBe('users/user123/categories');
+    expect(updateCalls[0].docId).toBe('auto_generated_id_123');
+    expect(updateCalls[0].fields.id).toEqual({ stringValue: 'auto_generated_id_123' });
+    expect(updateCalls[0].mask).toEqual(['id']);
   });
 
   test('clears cache after successful create', async () => {
@@ -2791,11 +2836,11 @@ describe('createCategory', () => {
     expect(createCalls[0].fields.name).toEqual({ stringValue: 'Entertainment' });
   });
 
-  test('does not include optional fields when not provided', async () => {
+  test('includes default emoji, color, and app fields when not provided', async () => {
     await tools.createCategory({ name: 'Minimal' });
     const fields = createCalls[0].fields;
-    expect(fields).not.toHaveProperty('emoji');
-    expect(fields).not.toHaveProperty('color');
+    expect(fields.emoji).toEqual({ stringValue: '📁' });
+    expect(fields.color).toEqual({ stringValue: '#808080' });
     expect(fields).not.toHaveProperty('parent_category_id');
   });
 
@@ -2809,6 +2854,7 @@ describe('createCategory', () => {
       createDocument: async () => {
         throw new Error('Firestore create failed (500)');
       },
+      updateDocument: async () => {},
       requireUserId: async () => 'user123',
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2834,9 +2880,18 @@ describe('createCategory', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (mockDb as any)._userCategories = [{ category_id: 'food', name: 'Food', excluded: false }];
     const mockFirestoreClient = {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      createDocument: async (collection: string, docId: string, fields: any) => {
+      createDocument: async (
+        collection: string,
+        docId: string | undefined,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        fields: any
+      ) => {
         createCalls.push({ collection, docId, fields });
+        return 'auto_generated_id_456';
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      updateDocument: async (collection: string, docId: string, fields: any, mask: string[]) => {
+        updateCalls.push({ collection, docId, fields, mask });
       },
       requireUserId: async () => 'auth-user-456',
     };

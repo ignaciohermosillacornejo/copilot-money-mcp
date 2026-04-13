@@ -341,7 +341,7 @@ function createMockDatabase(overrides?: {
 function createMockFirestoreClient() {
   return {
     requireUserId: async () => 'test-user-123',
-    createDocument: async () => {},
+    createDocument: async (_col: string, docId: string | undefined) => docId ?? 'auto_generated_id',
     updateDocument: async () => {},
     deleteDocument: async () => {},
   } as any;
@@ -1020,7 +1020,7 @@ describe('CopilotMoneyTools Integration', () => {
       });
 
       expect(result.success).toBe(true);
-      expect(result.category_id).toMatch(/^custom_/);
+      expect(result.category_id).toBe('auto_generated_id');
       expect(result.name).toBe('Pet Supplies');
     });
 
