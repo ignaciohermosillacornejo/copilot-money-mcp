@@ -209,9 +209,33 @@ describe('CopilotMoneyTools', () => {
     (db as any)._investmentPrices = [];
     (db as any)._investmentSplits = [];
     (db as any)._items = [];
-    (db as any)._userCategories = [];
+    (db as any)._userCategories = [
+      { category_id: 'food_and_drink', name: 'Food & Drink', emoji: '🍔', order: 0 },
+      {
+        category_id: 'groceries',
+        name: 'Groceries',
+        emoji: '🥑',
+        parent_category_id: 'food_and_drink',
+        order: 1,
+      },
+      {
+        category_id: 'restaurants',
+        name: 'Restaurants',
+        emoji: '🍽',
+        parent_category_id: 'food_and_drink',
+        order: 2,
+      },
+      { category_id: 'shopping', name: 'Shopping', emoji: '🛍', order: 3 },
+      { category_id: 'education', name: 'Education & Coaching', emoji: '💸', order: 4 },
+    ];
     (db as any)._userAccounts = [];
-    (db as any)._categoryNameMap = new Map<string, string>();
+    (db as any)._categoryNameMap = new Map<string, string>([
+      ['food_and_drink', 'Food & Drink'],
+      ['groceries', 'Groceries'],
+      ['restaurants', 'Restaurants'],
+      ['shopping', 'Shopping'],
+      ['education', 'Education & Coaching'],
+    ]);
     (db as any)._accountNameMap = new Map<string, string>();
     // Mock data for new tools
     (db as any)._securities = [
@@ -791,13 +815,21 @@ describe('CopilotMoneyTools', () => {
 
       expect(result.view).toBe('tree');
       expect(result.count).toBeGreaterThan(0);
-      const data = result.data as { categories: { id: string; children: unknown[] }[] };
+      const data = result.data as {
+        categories: { category_id: string; category_name: string; children: unknown[] }[];
+      };
       expect(data.categories).toBeDefined();
       expect(Array.isArray(data.categories)).toBe(true);
 
+      // Root categories should be those without parent_category_id
+      const foodDrink = data.categories.find((c) => c.category_id === 'food_and_drink');
+      expect(foodDrink).toBeDefined();
+      expect(foodDrink!.category_name).toBe('Food & Drink');
+      expect(foodDrink!.children.length).toBe(2); // Groceries, Restaurants
+
       // Each root category should have children array
       for (const cat of data.categories) {
-        expect(cat.id).toBeDefined();
+        expect(cat.category_id).toBeDefined();
         expect(Array.isArray(cat.children)).toBe(true);
       }
     });
@@ -808,20 +840,14 @@ describe('CopilotMoneyTools', () => {
       expect(result.view).toBe('search');
       const data = result.data as {
         query: string;
-        categories: { name: string; display_name: string }[];
+        categories: { category_id: string; category_name: string }[];
       };
       expect(data.query).toBe('groceries');
       expect(data.categories).toBeDefined();
       expect(Array.isArray(data.categories)).toBe(true);
-      expect(data.categories.length).toBeGreaterThan(0);
-
-      // At least one result should contain 'groceries'
-      const hasGroceries = data.categories.some(
-        (cat) =>
-          cat.name.toLowerCase().includes('groceries') ||
-          cat.display_name.toLowerCase().includes('groceries')
-      );
-      expect(hasGroceries).toBe(true);
+      expect(data.categories.length).toBe(1);
+      expect(data.categories[0].category_id).toBe('groceries');
+      expect(data.categories[0].category_name).toBe('Groceries');
     });
 
     test('returns subcategories view when parent_id provided', async () => {
@@ -831,12 +857,16 @@ describe('CopilotMoneyTools', () => {
       const data = result.data as {
         parent_id: string;
         parent_name: string;
-        subcategories: { id: string; name: string }[];
+        subcategories: { category_id: string; category_name: string }[];
       };
       expect(data.parent_id).toBe('food_and_drink');
       expect(data.parent_name).toBe('Food & Drink');
       expect(Array.isArray(data.subcategories)).toBe(true);
-      expect(data.subcategories.length).toBeGreaterThan(0);
+      expect(data.subcategories.length).toBe(2);
+      expect(data.subcategories.map((s) => s.category_name).sort()).toEqual([
+        'Groceries',
+        'Restaurants',
+      ]);
     });
   });
 

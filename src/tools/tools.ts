@@ -25,13 +25,7 @@ import type { InvestmentPerformance, TwrHolding } from '../models/investment-per
 import type { Security } from '../models/security.js';
 import type { GoalHistory } from '../models/goal-history.js';
 import { isItemHealthy, itemNeedsAttention, getItemDisplayName } from '../models/item.js';
-import {
-  getRootCategories,
-  getCategoryChildren,
-  getCategory,
-  getCategoryParent,
-  searchCategories as searchCategoriesInHierarchy,
-} from '../models/category-full.js';
+import type { Category } from '../models/category.js';
 
 // ============================================
 // Category Constants
@@ -1120,7 +1114,6 @@ export class CopilotMoneyTools {
       view?: 'list' | 'tree' | 'search';
       parent_id?: string;
       query?: string;
-      type?: 'income' | 'expense' | 'transfer';
       period?: string;
       start_date?: string;
       end_date?: string;
@@ -1131,7 +1124,7 @@ export class CopilotMoneyTools {
     period?: string;
     data: unknown;
   }> {
-    const { view = 'list', parent_id, query, type, period } = options;
+    const { view = 'list', parent_id, query, period } = options;
     let start_date = validateDate(options.start_date, 'start_date');
     let end_date = validateDate(options.end_date, 'end_date');
 
@@ -1142,27 +1135,25 @@ export class CopilotMoneyTools {
 
     // If parent_id is specified, get subcategories
     if (parent_id) {
-      const rootCats = getRootCategories();
-      const parent = rootCats.find((cat) => cat.id === parent_id);
+      const allUserCats = await this.db.getUserCategories();
+      const parent = allUserCats.find((c) => c.category_id === parent_id);
 
       if (!parent) {
-        throw new Error(`Category not found or has no subcategories: ${parent_id}`);
+        throw new Error(`Category not found: ${parent_id}`);
       }
 
-      const children = getCategoryChildren(parent_id);
+      const children = allUserCats.filter((c) => c.parent_category_id === parent_id);
 
       return {
         view: 'subcategories',
         count: children.length,
         data: {
-          parent_id: parent.id,
-          parent_name: parent.display_name,
+          parent_id: parent.category_id,
+          parent_name: parent.name,
           subcategories: children.map((child) => ({
-            id: child.id,
-            name: child.name,
-            display_name: child.display_name,
-            path: child.path,
-            type: child.type,
+            category_id: child.category_id,
+            category_name: child.name,
+            emoji: child.emoji ?? null,
           })),
         },
       };
@@ -1170,25 +1161,30 @@ export class CopilotMoneyTools {
 
     switch (view) {
       case 'tree': {
-        // Get root categories, optionally filtered by type
-        let rootCats = getRootCategories();
-        if (type) {
-          rootCats = rootCats.filter((cat) => cat.type === type);
+        // Build hierarchy from user categories
+        const allUserCats = await this.db.getUserCategories();
+
+        // Separate root categories (no parent) and children
+        const roots = allUserCats.filter((c) => !c.parent_category_id);
+        const childMap = new Map<string, Category[]>();
+        for (const cat of allUserCats) {
+          if (cat.parent_category_id) {
+            const siblings = childMap.get(cat.parent_category_id) ?? [];
+            siblings.push(cat);
+            childMap.set(cat.parent_category_id, siblings);
+          }
         }
 
-        // Build hierarchy
-        const categories = rootCats.map((root) => {
-          const children = getCategoryChildren(root.id);
+        const categories = roots.map((root) => {
+          const children = childMap.get(root.category_id) ?? [];
           return {
-            id: root.id,
-            name: root.name,
-            display_name: root.display_name,
-            type: root.type,
+            category_id: root.category_id,
+            category_name: root.name,
+            emoji: root.emoji ?? null,
             children: children.map((child) => ({
-              id: child.id,
-              name: child.name,
-              display_name: child.display_name,
-              path: child.path,
+              category_id: child.category_id,
+              category_name: child.name,
+              emoji: child.emoji ?? null,
             })),
           };
         });
@@ -1198,10 +1194,7 @@ export class CopilotMoneyTools {
         return {
           view: 'tree',
           count: totalCount,
-          data: {
-            type_filter: type,
-            categories,
-          },
+          data: { categories },
         };
       }
 
@@ -1210,21 +1203,20 @@ export class CopilotMoneyTools {
           throw new Error('Search query is required for search view');
         }
 
-        const results = searchCategoriesInHierarchy(query.trim());
+        const searchTerm = query.trim().toLowerCase();
+        const userCats = await this.db.getUserCategories();
+        const matches = userCats.filter((c) => c.name?.toLowerCase().includes(searchTerm));
 
         return {
           view: 'search',
-          count: results.length,
+          count: matches.length,
           data: {
             query: query.trim(),
-            categories: results.map((cat) => ({
-              id: cat.id,
-              name: cat.name,
-              display_name: cat.display_name,
-              path: cat.path,
-              type: cat.type,
-              depth: cat.depth,
-              is_leaf: cat.is_leaf,
+            categories: matches.map((cat) => ({
+              category_id: cat.category_id,
+              category_name: cat.name,
+              emoji: cat.emoji ?? null,
+              parent_category_id: cat.parent_category_id ?? null,
             })),
           },
         };
@@ -1253,36 +1245,32 @@ export class CopilotMoneyTools {
           categoryStats.set(categoryId, stats);
         }
 
-        // Include all known categories, even those with $0 (like UI does)
-        const allKnownCategories = getRootCategories();
-        for (const rootCat of allKnownCategories) {
-          // Add root category if not already present
-          if (!categoryStats.has(rootCat.id)) {
-            categoryStats.set(rootCat.id, { count: 0, totalAmount: 0 });
-          }
-          // Add all child categories
-          const children = getCategoryChildren(rootCat.id);
-          for (const child of children) {
-            if (!categoryStats.has(child.id)) {
-              categoryStats.set(child.id, { count: 0, totalAmount: 0 });
-            }
+        // Include all user-created categories, even those with $0 (matching app UI)
+        const userCategories = await this.db.getUserCategories();
+        for (const cat of userCategories) {
+          if (!categoryStats.has(cat.category_id)) {
+            categoryStats.set(cat.category_id, { count: 0, totalAmount: 0 });
           }
         }
 
-        // Convert to list with parent category info
+        // Build a lookup from user categories for parent/emoji info
+        const userCatMap = new Map(userCategories.map((c) => [c.category_id, c]));
+
+        // Convert to list
         const categories = (
           await Promise.all(
             Array.from(categoryStats.entries()).map(async ([category_id, stats]) => {
-              const categoryNode = getCategory(category_id);
-              const parentNode = getCategoryParent(category_id);
+              const userCat = userCatMap.get(category_id);
               return {
                 category_id,
                 category_name: await this.resolveCategoryName(category_id),
-                parent_id: parentNode?.id ?? null,
-                parent_name: parentNode?.display_name ?? null,
+                parent_id: userCat?.parent_category_id ?? null,
+                parent_name: userCat?.parent_category_id
+                  ? (userCatMap.get(userCat.parent_category_id)?.name ?? null)
+                  : null,
                 transaction_count: stats.count,
                 total_amount: roundAmount(stats.totalAmount),
-                type: categoryNode?.type ?? null,
+                emoji: userCat?.emoji ?? null,
               };
             })
           )
@@ -4333,9 +4321,9 @@ export function createToolSchemas(): ToolSchema[] {
       name: 'get_categories',
       description:
         'Unified category retrieval tool. Supports multiple views: ' +
-        'list (default) - categories with transaction counts/amounts for a time period; ' +
-        'tree - full Plaid category taxonomy as hierarchical tree; ' +
-        'search - search categories by keyword. Use parent_id to get subcategories. ' +
+        'list (default) - user categories with transaction counts/amounts for a time period; ' +
+        'tree - user categories as hierarchical tree; ' +
+        'search - search user categories by keyword. Use parent_id to get subcategories. ' +
         'For list view, use period (e.g., "this_month") or start_date/end_date to filter by date. ' +
         'Includes all categories, even those with $0 spent (matching UI behavior).',
       inputSchema: {
@@ -4345,7 +4333,7 @@ export function createToolSchemas(): ToolSchema[] {
             type: 'string',
             enum: ['list', 'tree', 'search'],
             description:
-              'View mode: list (categories in transactions), tree (full hierarchy), search (find by keyword)',
+              'View mode: list (categories with spend totals), tree (parent/child hierarchy), search (find by keyword)',
           },
           period: {
             type: 'string',
@@ -4368,11 +4356,6 @@ export function createToolSchemas(): ToolSchema[] {
           query: {
             type: 'string',
             description: "Search query (required for 'search' view)",
-          },
-          type: {
-            type: 'string',
-            enum: ['income', 'expense', 'transfer'],
-            description: "Filter by category type (for 'tree' view)",
           },
         },
       },
