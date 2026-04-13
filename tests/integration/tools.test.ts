@@ -324,12 +324,27 @@ function createMockDatabase(overrides?: {
   (db as any)._investmentPrices = overrides?.investmentPrices ?? [];
   (db as any)._investmentSplits = overrides?.investmentSplits ?? [];
   (db as any)._items = overrides?.items ?? [];
-  (db as any)._userCategories = overrides?.userCategories ?? [];
+  const defaultUserCategories: Category[] = [
+    { category_id: 'food_dining', name: 'Food & Dining', emoji: '🍔', order: 0 },
+    {
+      category_id: 'groceries',
+      name: 'Groceries',
+      emoji: '🥑',
+      parent_category_id: 'food_dining',
+      order: 1,
+    },
+    { category_id: 'income', name: 'Income', emoji: '💰', order: 2 },
+    { category_id: 'shopping', name: 'Shopping', emoji: '🛍', order: 3 },
+  ];
+  (db as any)._userCategories = overrides?.userCategories ?? [...defaultUserCategories];
   (db as any)._userAccounts = [];
   (db as any)._tags = overrides?.tags ?? [];
   (db as any)._securities = overrides?.securities ?? [];
   (db as any)._holdingsHistory = [];
-  (db as any)._categoryNameMap = new Map<string, string>();
+  const cats = (db as any)._userCategories as Category[];
+  (db as any)._categoryNameMap = new Map<string, string>(
+    cats.filter((c: Category) => c.name).map((c: Category) => [c.category_id, c.name!])
+  );
   (db as any)._accountNameMap = new Map<string, string>();
   // Mark as loaded so individual getters don't trigger disk reload
   (db as any)._allCollectionsLoaded = true;
@@ -676,9 +691,9 @@ describe('CopilotMoneyTools Integration', () => {
       expect(result.count).toBeGreaterThan(0);
       const data = result.data as { categories: any[] };
       expect(data.categories.length).toBeGreaterThan(0);
-      // Each root should have an id, name, and children array
+      // Each root should have a category_id, category_name, and children array
       const root = data.categories[0];
-      expect(root.id).toBeDefined();
+      expect(root.category_id).toBeDefined();
       expect(root.children).toBeDefined();
     });
 
@@ -689,6 +704,7 @@ describe('CopilotMoneyTools Integration', () => {
       const data = result.data as { query: string; categories: any[] };
       expect(data.query).toBe('food');
       expect(data.categories.length).toBeGreaterThan(0);
+      expect(data.categories[0].category_name).toContain('Food');
     });
   });
 
