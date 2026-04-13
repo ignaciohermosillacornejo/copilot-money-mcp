@@ -87,7 +87,7 @@ Examples of good phrasing:
 - If you are uncertain about a finding, say so explicitly. "I'm not sure about this one — $12.99 from 'SP * SOMETHING' could be Spotify or a Shopify purchase."
 
 **Transaction presentation format:** When showing a transaction to the user, always include:
-- Full `name` or `original_name` (NOT the truncated `normalized_merchant` — users need the full text to recall context, e.g., "ENC *ISABEL GACITUA C.SANTIAGO" not "ENC")
+- Full `name` or `original_name` (NOT the truncated `normalized_merchant` — users need the full text to recall context, e.g., "ENC *DOCTOR NAME C.SANTIAGO" not "ENC")
 - Date, amount, account name, and full category name (not category ID)
 
 **Do NOT use AskUserQuestion for large batches.** The interactive question tool is too slow when there are 10+ items needing decisions. Instead:
@@ -136,4 +136,4 @@ End with a brief summary:
 5. **Use Bash with Python for math.** For aggregations, frequency calculations, or any arithmetic involving more than ~10 values, use Python via the Bash tool. Do not do mental math on large sets.
 6. **Batch size.** Present 3-5 findings at a time. Never dump everything at once.
 7. **No invented data.** Only reference transactions, merchants, and amounts that actually appear in the MCP tool results. Never fabricate examples.
-8. **Show full merchant names.** When presenting transactions to the user, always show the full `original_name` or `name` field — not the truncated `normalized_merchant`. Users need the full text to recall what a transaction was (e.g., "ENC *ISABEL GACITUA C.SANTIAGO" is identifiable, "ENC" is not).
+8. **Show full merchant names.** When presenting transactions to the user, always show the full `original_name` or `name` field — not the truncated `normalized_merchant`. Users need the full text to recall what a transaction was (e.g., "ENC *DOCTOR NAME C.SANTIAGO" is identifiable, "ENC" is not).
