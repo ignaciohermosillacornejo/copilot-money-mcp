@@ -245,24 +245,28 @@ describe('extractRefreshToken', () => {
     await expect(extractRefreshToken(overrides)).rejects.toThrow('No Copilot Money session found');
   });
 
-  test('safari: handles unreadable file (readFileSync/statSync catch)', async () => {
-    const safariDir = join(tempDir, 'safari-unreadable');
-    mkdirSync(safariDir, { recursive: true });
-    // Create a real file then revoke read permission — statSync succeeds but readFileSync throws EACCES
-    const filePath = join(safariDir, 'token.db');
-    writeFileSync(filePath, 'some content');
-    chmodSync(filePath, 0o000);
+  // chmod 0o000 is bypassed when running as root (e.g., some Docker setups)
+  test.skipIf(process.getuid?.() === 0)(
+    'safari: handles unreadable file (readFileSync/statSync catch)',
+    async () => {
+      const safariDir = join(tempDir, 'safari-unreadable');
+      mkdirSync(safariDir, { recursive: true });
+      // Create a real file then revoke read permission — statSync succeeds but readFileSync throws EACCES
+      const filePath = join(safariDir, 'token.db');
+      writeFileSync(filePath, 'some content');
+      chmodSync(filePath, 0o000);
 
-    const overrides: BrowserConfig[] = [{ name: 'Safari', paths: [safariDir], type: 'safari' }];
+      const overrides: BrowserConfig[] = [{ name: 'Safari', paths: [safariDir], type: 'safari' }];
 
-    try {
-      await expect(extractRefreshToken(overrides)).rejects.toThrow(
-        'No Copilot Money session found'
-      );
-    } finally {
-      chmodSync(filePath, 0o644);
+      try {
+        await expect(extractRefreshToken(overrides)).rejects.toThrow(
+          'No Copilot Money session found'
+        );
+      } finally {
+        chmodSync(filePath, 0o644);
+      }
     }
-  });
+  );
 
   test('safari: handles unreadable top-level dir (outer catch)', async () => {
     // Point to a file instead of directory
