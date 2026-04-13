@@ -136,3 +136,8 @@ If the question reveals new financial context (e.g., "I'm getting a raise next m
 7. **Explicit about limitations.** "I'm working from your transaction history — I don't know about cash income, side gigs, or expenses paid outside these accounts."
 8. **Not financial advice.** If the question ventures into investment advice, tax strategy, or legal territory, say: "This is data-informed reasoning, not certified financial advice. Talk to a professional for [specific topic]."
 9. **Invoke sub-skills when appropriate.** If the user's question would be better served by `/finance-pulse`, `/finance-cleanup`, or `/finance-trip`, suggest it. Don't try to replicate their functionality.
+10. **Income is intentionally uncategorized.** Income transactions (negative amounts) have no category. This is by design — don't flag it.
+11. **Large datasets go to disk.** MCP tool responses >100KB are saved to temp files. Use Python via Bash to process them — do not try to read them into context.
+12. **Reference existing budgets.** The user has budgets in Copilot Money (`get_budgets`). Use budget amounts as context for affordability checks — "your $300 restaurant budget is already at $280 this month" is more useful than raw averages.
+13. **No savings goals = no savings deduction.** If `get_goals` returns 0, Free Money doesn't reserve for savings. Flag this in affordability analysis: "Note: you have no savings target set, so this calculation doesn't protect any savings."
+14. **MCP reads are local, writes are remote.** Data comes from the local LevelDB cache, which syncs from Firestore via the Copilot Money app. There may be a lag between what the app shows and what the MCP returns. Call `refresh_database` if data seems stale.
