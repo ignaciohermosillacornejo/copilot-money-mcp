@@ -18,7 +18,8 @@
 <!-- Auto-populated: which accounts serve which purpose -->
 
 ## Trip Tracking
-<!-- Auto-populated from /finance-trip usage -->
+<!-- Only active/recent trips (within 3 weeks of end date). Concluded trips are tracked via tags in Copilot Money, not here. -->
+- Home city: <!-- e.g., Seattle, WA -->
 
 ## Communication Style
 - Detail level: simple
