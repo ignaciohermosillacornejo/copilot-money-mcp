@@ -603,14 +603,9 @@ export class CopilotMoneyTools {
       const normalizedTag = tag.startsWith('#')
         ? tag.substring(1).toLowerCase()
         : tag.toLowerCase();
-      const tagRegex = new RegExp(`#${normalizedTag}\\b`, 'i');
-      transactions = transactions.filter((txn) => {
-        const name = txn.name || txn.original_name || '';
-        if (tagRegex.test(name)) return true;
-        // Also check tag_ids array (tags set via update_transaction)
-        if (txn.tag_ids?.some((id) => id.toLowerCase() === normalizedTag)) return true;
-        return false;
-      });
+      transactions = transactions.filter((txn) =>
+        txn.tag_ids?.some((id) => id.toLowerCase() === normalizedTag)
+      );
     }
 
     // ============================================
@@ -830,26 +825,12 @@ export class CopilotMoneyTools {
       }
 
       case 'tagged': {
-        const taggedTxns = transactions.filter((txn) => {
-          const name = txn.name || txn.original_name || '';
-          if (/#\w+/.test(name)) return true;
-          // Also include transactions with tag_ids set via update_transaction
-          if (txn.tag_ids && txn.tag_ids.length > 0) return true;
-          return false;
-        });
+        const taggedTxns = transactions.filter((txn) => txn.tag_ids && txn.tag_ids.length > 0);
         const tagMap = new Map<string, number>();
         for (const txn of taggedTxns) {
-          const name = txn.name || txn.original_name || '';
-          const tags = name.match(/#\w+/g) || [];
-          for (const t of tags) {
-            tagMap.set(t.toLowerCase(), (tagMap.get(t.toLowerCase()) || 0) + 1);
-          }
-          // Also count tags from tag_ids
-          if (txn.tag_ids) {
-            for (const id of txn.tag_ids) {
-              const tagKey = `#${id.toLowerCase()}`;
-              tagMap.set(tagKey, (tagMap.get(tagKey) || 0) + 1);
-            }
+          for (const id of txn.tag_ids!) {
+            const tagKey = id.toLowerCase();
+            tagMap.set(tagKey, (tagMap.get(tagKey) || 0) + 1);
           }
         }
         return {
@@ -4111,7 +4092,7 @@ export function createToolSchemas(): ToolSchema[] {
         '(3) Text search: Use query for free-text merchant search. ' +
         '(4) Special types: Use transaction_type for foreign/refunds/credits/duplicates/hsa_eligible/tagged. ' +
         '(5) Location-based: Use city or lat/lon with radius_km. ' +
-        '(6) Tag filter: Use tag to find #tagged transactions. ' +
+        '(6) Tag filter: Use tag to find transactions with a specific tag. ' +
         'Returns human-readable category names and normalized merchant names.',
       inputSchema: {
         type: 'object',
@@ -4211,12 +4192,12 @@ export function createToolSchemas(): ToolSchema[] {
             enum: ['foreign', 'refunds', 'credits', 'duplicates', 'hsa_eligible', 'tagged'],
             description:
               'Filter by special type: foreign (international), refunds, credits (cashback/rewards), ' +
-              'duplicates (potential duplicate transactions), hsa_eligible (medical expenses), tagged (#hashtag)',
+              'duplicates (potential duplicate transactions), hsa_eligible (medical expenses), tagged (has tags)',
           },
           // NEW: Tag filter
           tag: {
             type: 'string',
-            description: 'Filter by hashtag (with or without #)',
+            description: 'Filter by tag name (e.g. "vacation")',
           },
           // NEW: Location filters
           city: {
@@ -4842,7 +4823,7 @@ export function createWriteToolSchemas(): ToolSchema[] {
       name: 'create_tag',
       description:
         'Create a new user-defined tag for categorizing transactions. Tags appear in the ' +
-        'Copilot Money app and can be referenced via hashtags in transaction names (e.g. #vacation). ' +
+        'Copilot Money app and are stored in the tag_ids field on transactions. ' +
         'Optionally set a color. Writes directly to Copilot Money via Firestore.',
       inputSchema: {
         type: 'object',
@@ -4871,9 +4852,8 @@ export function createWriteToolSchemas(): ToolSchema[] {
     {
       name: 'delete_tag',
       description:
-        'Delete a user-defined tag. The tag_id can be obtained from transaction names ' +
-        '(hashtags like #vacation) or from the tag definitions in the local cache. ' +
-        'Writes directly to Copilot Money via Firestore.',
+        'Delete a user-defined tag. The tag_id can be obtained from the tag definitions ' +
+        'in the local cache. Writes directly to Copilot Money via Firestore.',
       inputSchema: {
         type: 'object',
         properties: {

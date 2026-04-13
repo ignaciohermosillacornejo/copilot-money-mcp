@@ -484,72 +484,64 @@ describe('CopilotMoneyTools', () => {
         transaction_id: 'txn_tagged',
         amount: 55.0,
         date: '2024-01-30',
-        name: 'Business Lunch #work #expense',
+        name: 'Business Lunch',
         category_id: 'food_dining',
         account_id: 'acc1',
+        tag_ids: ['work', 'expense'],
       };
       (db as any)._transactions = [...mockTransactions, taggedTxn];
 
       const result = await tools.getTransactions({ tag: 'work' });
       expect(result.count).toBe(1);
-      expect(result.transactions[0].name).toContain('#work');
+      expect(result.transactions[0].tag_ids).toContain('work');
     });
 
-    test('filters by tag with # prefix', async () => {
+    test('filters by tag with # prefix strips the #', async () => {
       const taggedTxn: Transaction = {
         transaction_id: 'txn_tagged2',
         amount: 65.0,
         date: '2024-01-30',
-        name: 'Office Supplies #business',
+        name: 'Office Supplies',
         category_id: 'shopping',
         account_id: 'acc1',
+        tag_ids: ['business'],
       };
       (db as any)._transactions = [...mockTransactions, taggedTxn];
 
       const result = await tools.getTransactions({ tag: '#business' });
       expect(result.count).toBe(1);
-      expect(result.transactions[0].name).toContain('#business');
+      expect(result.transactions[0].tag_ids).toContain('business');
     });
 
-    test('filters by tag using tag_ids field', async () => {
-      const tagIdTxn: Transaction = {
-        transaction_id: 'txn_tag_ids',
+    test('filters by tag is case-insensitive', async () => {
+      const taggedTxn: Transaction = {
+        transaction_id: 'txn_tag_case',
         amount: 200.0,
         date: '2024-01-30',
         name: 'Hotel Bora Bora',
         category_id: 'travel',
         account_id: 'acc1',
-        tag_ids: ['frenchpolynesia'],
+        tag_ids: ['FrenchPolynesia'],
       };
-      (db as any)._transactions = [...mockTransactions, tagIdTxn];
+      (db as any)._transactions = [...mockTransactions, taggedTxn];
 
       const result = await tools.getTransactions({ tag: 'frenchpolynesia' });
       expect(result.count).toBe(1);
-      expect(result.transactions[0].transaction_id).toBe('txn_tag_ids');
     });
 
-    test('filters by tag matches both name hashtags and tag_ids', async () => {
-      const nameTagTxn: Transaction = {
-        transaction_id: 'txn_name_tag',
+    test('filters by tag excludes transactions without tag_ids', async () => {
+      const untaggedTxn: Transaction = {
+        transaction_id: 'txn_no_tags',
         amount: 50.0,
         date: '2024-01-30',
-        name: 'Dinner #vacation',
+        name: 'Dinner',
         category_id: 'food_dining',
         account_id: 'acc1',
       };
-      const idTagTxn: Transaction = {
-        transaction_id: 'txn_id_tag',
-        amount: 100.0,
-        date: '2024-01-30',
-        name: 'Snorkeling Tour',
-        category_id: 'travel',
-        account_id: 'acc1',
-        tag_ids: ['vacation'],
-      };
-      (db as any)._transactions = [...mockTransactions, nameTagTxn, idTagTxn];
+      (db as any)._transactions = [...mockTransactions, untaggedTxn];
 
       const result = await tools.getTransactions({ tag: 'vacation' });
-      expect(result.count).toBe(2);
+      expect(result.count).toBe(0);
     });
 
     test('filters by transaction_type hsa_eligible', async () => {
@@ -574,22 +566,23 @@ describe('CopilotMoneyTools', () => {
         transaction_id: 'txn_with_tag',
         amount: 75.0,
         date: '2024-01-30',
-        name: 'Team Dinner #team',
+        name: 'Team Dinner',
         category_id: 'food_dining',
         account_id: 'acc1',
+        tag_ids: ['team'],
       };
       (db as any)._transactions = [...mockTransactions, taggedTxn];
 
       const result = await tools.getTransactions({ transaction_type: 'tagged' });
       expect(result.count).toBe(1);
-      expect(result.transactions[0].name).toContain('#');
+      expect(result.transactions[0].tag_ids).toContain('team');
       expect(result.type_specific_data?.tags).toBeDefined();
       expect(Array.isArray(result.type_specific_data?.tags)).toBe(true);
     });
 
-    test('transaction_type tagged includes transactions with tag_ids', async () => {
-      const tagIdTxn: Transaction = {
-        transaction_id: 'txn_tag_ids_only',
+    test('transaction_type tagged returns tag counts', async () => {
+      const txn1: Transaction = {
+        transaction_id: 'txn_tag1',
         amount: 300.0,
         date: '2024-01-30',
         name: 'Scuba Diving',
@@ -597,14 +590,26 @@ describe('CopilotMoneyTools', () => {
         account_id: 'acc1',
         tag_ids: ['frenchpolynesia', 'vacation'],
       };
-      (db as any)._transactions = [...mockTransactions, tagIdTxn];
+      const txn2: Transaction = {
+        transaction_id: 'txn_tag2',
+        amount: 100.0,
+        date: '2024-01-30',
+        name: 'Hotel',
+        category_id: 'travel',
+        account_id: 'acc1',
+        tag_ids: ['vacation'],
+      };
+      (db as any)._transactions = [...mockTransactions, txn1, txn2];
 
       const result = await tools.getTransactions({ transaction_type: 'tagged' });
-      expect(result.count).toBe(1);
-      expect(result.transactions[0].transaction_id).toBe('txn_tag_ids_only');
+      expect(result.count).toBe(2);
       const tagNames = result.type_specific_data?.tags?.map((t: { tag: string }) => t.tag);
-      expect(tagNames).toContain('#frenchpolynesia');
-      expect(tagNames).toContain('#vacation');
+      expect(tagNames).toContain('frenchpolynesia');
+      expect(tagNames).toContain('vacation');
+      const vacationTag = result.type_specific_data?.tags?.find(
+        (t: { tag: string }) => t.tag === 'vacation'
+      );
+      expect(vacationTag?.count).toBe(2);
     });
   });
 
