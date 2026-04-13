@@ -59,7 +59,7 @@ If `skills/user-profile.md` has empty Income & Obligations section, bootstrap it
    - Credit cards: list with recent activity level
    - Present: "Your primary checking appears to be [name]. Savings in [name]. Cards: [list]. Right?"
 
-4. **Detect irregular expenses.** Pull a separate 13-month transaction window (NOT the 90-day window used for trends — annual charges need a full year to detect). Scan for:
+4. **Detect irregular expenses.** Pull a separate 13-month transaction window using `start_date` and `end_date` (e.g., `start_date: "2025-03-13"`, `end_date: "2026-04-13"` — there is no "last_13_months" period shorthand). This is NOT the 90-day window used for trends — annual charges need a full year to detect. Scan for:
    - Annual/semi-annual charges (large one-off amounts from merchants that appear yearly — e.g., car insurance, Amazon Prime annual, domain renewals)
    - Known irregular categories: car maintenance, medical, insurance premiums
    - Amortize detected amounts to monthly: annual ÷ 12, semi-annual ÷ 6
@@ -83,7 +83,7 @@ Steps:
 1. Sum fixed obligations from profile (or detected in bootstrap)
 2. Sum savings targets from `get_goals` or profile
 3. Sum amortized irregular expenses from profile
-4. Sum this month's discretionary spending (total spending minus fixed obligations minus savings contributions)
+4. Sum this month's discretionary spending: total spending minus transactions that match fixed obligation merchants (by name/category). Do NOT subtract the profile's fixed amount — subtract the actual charges from those merchants. This ensures over-charges (e.g., rent higher than usual) are correctly captured rather than silently inflating Free Money.
 5. Free Money = Net Income − Fixed − Savings − Irregular − Already Spent
 
 Also compute:
