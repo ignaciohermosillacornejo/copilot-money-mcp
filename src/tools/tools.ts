@@ -606,7 +606,10 @@ export class CopilotMoneyTools {
       const tagRegex = new RegExp(`#${normalizedTag}\\b`, 'i');
       transactions = transactions.filter((txn) => {
         const name = txn.name || txn.original_name || '';
-        return tagRegex.test(name);
+        if (tagRegex.test(name)) return true;
+        // Also check tag_ids array (tags set via update_transaction)
+        if (txn.tag_ids?.some((id) => id.toLowerCase() === normalizedTag)) return true;
+        return false;
       });
     }
 
@@ -829,7 +832,10 @@ export class CopilotMoneyTools {
       case 'tagged': {
         const taggedTxns = transactions.filter((txn) => {
           const name = txn.name || txn.original_name || '';
-          return /#\w+/.test(name);
+          if (/#\w+/.test(name)) return true;
+          // Also include transactions with tag_ids set via update_transaction
+          if (txn.tag_ids && txn.tag_ids.length > 0) return true;
+          return false;
         });
         const tagMap = new Map<string, number>();
         for (const txn of taggedTxns) {
@@ -837,6 +843,13 @@ export class CopilotMoneyTools {
           const tags = name.match(/#\w+/g) || [];
           for (const t of tags) {
             tagMap.set(t.toLowerCase(), (tagMap.get(t.toLowerCase()) || 0) + 1);
+          }
+          // Also count tags from tag_ids
+          if (txn.tag_ids) {
+            for (const id of txn.tag_ids) {
+              const tagKey = `#${id.toLowerCase()}`;
+              tagMap.set(tagKey, (tagMap.get(tagKey) || 0) + 1);
+            }
           }
         }
         return {
