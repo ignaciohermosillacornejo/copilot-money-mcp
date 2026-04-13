@@ -7,22 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- **Write mode (opt-in via `--write`)**: 24 new write tools for managing Copilot Money data. Read-only remains the default — write tools are completely disabled unless the server is started with `--write`.
-  - Transactions: `set_transaction_category`, `set_transaction_name`, `set_transaction_note`, `set_transaction_tags`, `set_transaction_excluded`, `set_transaction_goal`, `set_internal_transfer`, `review_transactions`
-  - Tags: `create_tag`, `update_tag`, `delete_tag`
-  - Categories: `create_category`, `update_category`, `delete_category`
-  - Budgets: `create_budget`, `update_budget`, `delete_budget`
-  - Goals: `create_goal`, `update_goal`, `delete_goal`
-  - Recurring: `create_recurring`, `update_recurring`, `set_recurring_state`, `delete_recurring`
-- **Firestore REST client** (`src/core/firestore-client.ts`): Authenticates to Copilot Money's Firebase/Firestore backend using a Firebase refresh token extracted from the local Copilot Money session. Write tools send authenticated requests directly to Google's Firestore REST API — the same backend the Copilot Money app itself uses. No third-party services or project-operated servers are involved.
-- Tool count increased from 17 to 41 (17 read + 24 write).
-
-### Changed
-- **Documentation**: [PRIVACY.md](PRIVACY.md), [README.md](README.md), [SECURITY.md](SECURITY.md), [CLAUDE.md](CLAUDE.md), [docs/TESTING_GUIDE.md](docs/TESTING_GUIDE.md), [docs/MCPB_COMPLIANCE.md](docs/MCPB_COMPLIANCE.md), and [docs/REVERSE_ENGINEERING_FINDING.md](docs/REVERSE_ENGINEERING_FINDING.md) updated to accurately reflect opt-in write mode and the Firebase/Firestore network access required for writes. Default read-only mode remains 100% local with zero network requests.
+## [1.6.1] - 2026-04-13
 
 ### Fixed
-- **Total balance calculation**: Fixed `getAccounts()` total balance calculation to properly subtract debt from assets instead of adding all balances as positive values. This resolves inflated balance calculations for users with loans, mortgages, and credit cards.
+- **`create_category` writes app-compatible documents** (#232): MCP-created categories were invisible to the Copilot Money app because they were missing required fields (`id`, `emoji`, `color`, `bg_color`, `order`, `is_other`, `auto_budget_lock`, `auto_delete_lock`, `plaid_category_ids`, `partial_name_rules`) and used a `custom_*` ID format the app doesn't recognize. Now uses Firestore auto-generated IDs and writes all app-required fields with sensible defaults.
+- **`get_categories` uses user categories instead of Plaid taxonomy** (#238): The tool was built around the Plaid taxonomy (~120 static categories) as the primary system, but the app only uses user-created categories. List view returned 144 categories (mostly Plaid noise), search only found unusable Plaid IDs, and ~10 real user categories were invisible. All views now use user categories from LevelDB exclusively.
+- **`update_category` syncs `bg_color` when `color` changes**: Previously, updating a category's color left the background tint stale.
+- **Tag filter uses `tag_ids` field** (#224): Tag-based transaction filtering now checks the `tag_ids` array instead of scanning for `#hashtags` in transaction names.
+
+### Added
+- **`FirestoreClient.getDocument()`**: New method for reading individual documents from Firestore REST API.
+- **Finance skills**: `/finance-pulse` (30-second financial check-in), `/finance-trip` (travel expense tracking), `/finance` (orchestrator).
+
+### Changed
+- `createDocument` now supports auto-generated Firestore document IDs (pass `undefined` as `documentId`) and returns the created document ID.
+- CI: bumped `actions/github-script` v7→v9, `codecov/codecov-action` v5→v6, `softprops/action-gh-release` v2→v3.
 
 ## [1.6.0] - 2026-04-10
 
