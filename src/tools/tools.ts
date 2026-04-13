@@ -25,7 +25,7 @@ import type { InvestmentPerformance, TwrHolding } from '../models/investment-per
 import type { Security } from '../models/security.js';
 import type { GoalHistory } from '../models/goal-history.js';
 import { isItemHealthy, itemNeedsAttention, getItemDisplayName } from '../models/item.js';
-import type { Category } from '../models/category.js';
+import { type Category, getCategoryDisplayName } from '../models/category.js';
 
 // ============================================
 // Category Constants
@@ -1149,10 +1149,10 @@ export class CopilotMoneyTools {
         count: children.length,
         data: {
           parent_id: parent.category_id,
-          parent_name: parent.name,
+          parent_name: getCategoryDisplayName(parent),
           subcategories: children.map((child) => ({
             category_id: child.category_id,
-            category_name: child.name,
+            category_name: getCategoryDisplayName(child),
             emoji: child.emoji ?? null,
           })),
         },
@@ -1179,11 +1179,11 @@ export class CopilotMoneyTools {
           const children = childMap.get(root.category_id) ?? [];
           return {
             category_id: root.category_id,
-            category_name: root.name,
+            category_name: getCategoryDisplayName(root),
             emoji: root.emoji ?? null,
             children: children.map((child) => ({
               category_id: child.category_id,
-              category_name: child.name,
+              category_name: getCategoryDisplayName(child),
               emoji: child.emoji ?? null,
             })),
           };
@@ -1214,7 +1214,7 @@ export class CopilotMoneyTools {
             query: query.trim(),
             categories: matches.map((cat) => ({
               category_id: cat.category_id,
-              category_name: cat.name,
+              category_name: getCategoryDisplayName(cat),
               emoji: cat.emoji ?? null,
               parent_category_id: cat.parent_category_id ?? null,
             })),
@@ -1264,9 +1264,13 @@ export class CopilotMoneyTools {
               return {
                 category_id,
                 category_name: await this.resolveCategoryName(category_id),
-                parent_id: userCat?.parent_category_id ?? null,
+                parent_category_id: userCat?.parent_category_id ?? null,
                 parent_name: userCat?.parent_category_id
-                  ? (userCatMap.get(userCat.parent_category_id)?.name ?? null)
+                  ? getCategoryDisplayName(
+                      userCatMap.get(userCat.parent_category_id) ?? {
+                        category_id: userCat.parent_category_id,
+                      }
+                    )
                   : null,
                 transaction_count: stats.count,
                 total_amount: roundAmount(stats.totalAmount),

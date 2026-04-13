@@ -789,7 +789,7 @@ describe('CopilotMoneyTools', () => {
         result.data as {
           categories: {
             category_id: string;
-            parent_id: string | null;
+            parent_category_id: string | null;
             parent_name: string | null;
           }[];
         }
@@ -798,14 +798,14 @@ describe('CopilotMoneyTools', () => {
       // Find a subcategory that should have a parent
       const restaurants = categories.find((c) => c.category_id === 'restaurants');
       if (restaurants) {
-        expect(restaurants.parent_id).toBe('food_and_drink');
+        expect(restaurants.parent_category_id).toBe('food_and_drink');
         expect(restaurants.parent_name).toBe('Food & Drink');
       }
 
       // Root categories should have null parent
       const foodDrink = categories.find((c) => c.category_id === 'food_and_drink');
       if (foodDrink) {
-        expect(foodDrink.parent_id).toBeNull();
+        expect(foodDrink.parent_category_id).toBeNull();
         expect(foodDrink.parent_name).toBeNull();
       }
     });
