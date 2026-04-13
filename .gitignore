@@ -45,6 +45,10 @@ scripts/
 # Generated test fixtures
 tests/fixtures/mixed-files-db/
 
+# User financial profile (auto-populated with personal data by finance skills)
+# Only the template (user-profile.template.md) is committed
+skills/user-profile.md
+
 # LevelDB snapshots (contain personal financial data)
 snapshots/
 

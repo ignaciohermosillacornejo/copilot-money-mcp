@@ -16,7 +16,8 @@
 skills/
 ├── finance-pulse/
 │   └── SKILL.md              # The skill prompt — all logic lives here
-├── user-profile.md            # Already exists — pulse populates Income, Accounts, Irregular sections
+├── user-profile.template.md   # Committed template — copied to user-profile.md on first run
+├── user-profile.md            # Gitignored — auto-populated with personal data by skills
 ```
 
 No new source files. No test files (skill is a prompt, tested by running it against real data with snapshots).
@@ -44,7 +45,7 @@ Give the user a 30-second financial check-in. One number, a few flags, prospecti
 
 ## Phase 1 — Gather Data
 
-1. **Read the user profile.** Open `skills/user-profile.md`. Note:
+1. **Read the user profile.** Open `skills/user-profile.md`. If it doesn't exist, copy `skills/user-profile.template.md` to `skills/user-profile.md` first. Note:
    - Income & Obligations (if populated): monthly income, rent, fixed costs
    - Savings & Goals: targets and active goals
    - Irregular Expenses: amortized monthly reserve
@@ -121,8 +122,8 @@ If `skills/user-profile.md` has empty Income & Obligations section, bootstrap it
    - Credit cards: list with recent activity level
    - Present: "Your primary checking appears to be [name]. Savings in [name]. Cards: [list]. Right?"
 
-4. **Detect irregular expenses.** Scan 90-day history for:
-   - Annual/semi-annual charges (large one-off amounts from merchants that appear yearly)
+4. **Detect irregular expenses.** Pull a separate 13-month transaction window (NOT the 90-day window used for trends — annual charges need a full year to detect). Scan for:
+   - Annual/semi-annual charges (large one-off amounts from merchants that appear yearly — e.g., car insurance, Amazon Prime annual, domain renewals)
    - Known irregular categories: car maintenance, medical, insurance premiums
    - Amortize detected amounts to monthly: annual ÷ 12, semi-annual ÷ 6
    - Present: "I found these irregular expenses: [list]. Monthly reserve: ~$X"
@@ -318,16 +319,18 @@ The skill lives at `skills/finance-pulse/SKILL.md` with proper frontmatter. Clau
 Run: `head -4 skills/finance-pulse/SKILL.md`
 Expected: frontmatter with `name: finance-pulse`
 
-- [ ] **Step 2: Create the weekly scheduled trigger**
+- [ ] **Step 2: Create the weekly scheduled trigger (MANUAL — requires human interaction)**
 
-Use the Claude Code `schedule` skill to create a weekly trigger that runs `/finance-pulse` every Sunday evening. This is done interactively — invoke `/schedule` and configure:
+> **Note for agentic workers:** This step requires interactive `/schedule` invocation. Skip it during automated execution — flag it as a follow-up for the user.
+
+Ask the user to invoke `/schedule` in Claude Code and configure:
 
 - Name: `weekly-pulse`
 - Schedule: Sunday at 6pm (user's local time)
 - Command: Run `/finance-pulse` in read-only mode, output report
 - Repository: current repo (copilot-money-mcp)
 
-Note: If the user prefers a different cadence or doesn't want scheduling yet, skip this step. The skill works perfectly as an on-demand `/finance-pulse` invocation.
+If the user prefers a different cadence or doesn't want scheduling yet, skip this step. The skill works perfectly as an on-demand `/finance-pulse` invocation.
 
 - [ ] **Step 3: Commit any schedule configuration changes**
 

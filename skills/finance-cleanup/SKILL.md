@@ -9,7 +9,7 @@ Walk the user through a structured cleanup of their Copilot Money transaction da
 
 ## Phase 1 — Gather Data
 
-1. **Read the user profile.** Open `skills/user-profile.md` and note any existing preferences, especially under "Cleanup Preferences" and "Preferences." These override your judgment — if the profile says "Uber Eats = Dining," never flag Uber Eats as miscategorized.
+1. **Read the user profile.** Open `skills/user-profile.md`. If it doesn't exist, copy `skills/user-profile.template.md` to `skills/user-profile.md` first. Note any existing preferences, especially under "Cleanup Preferences" and "Preferences." These override your judgment — if the profile says "Uber Eats = Dining," never flag Uber Eats as miscategorized.
 
 2. **Ask about scope.** Before pulling data, ask the user:
    - Full cleanup or focused? (e.g., "just recurrings" or "just uncategorized")
@@ -23,7 +23,7 @@ Walk the user through a structured cleanup of their Copilot Money transaction da
    - `get_categories` — full category list
    - `get_accounts` — to map account IDs to names
 
-   - For any payment app accounts found (Venmo, PayPal, etc.), also pull their transactions separately — these contain the descriptive names and categories that bank-side stubs lack.
+   - For any payment app accounts found (Venmo, PayPal, Zelle, CashApp), also pull their transactions separately — these contain the descriptive names and categories that bank-side stubs lack.
 
    Run all reads before any analysis. Cache the results mentally — you will cross-reference heavily.
 
@@ -87,7 +87,7 @@ Examples of good phrasing:
 - If you are uncertain about a finding, say so explicitly. "I'm not sure about this one — $12.99 from 'SP * SOMETHING' could be Spotify or a Shopify purchase."
 
 **Transaction presentation format:** When showing a transaction to the user, always include:
-- Full `name` or `original_name` (NOT the truncated `normalized_merchant` — users need the full text to recall context, e.g., "ENC *ISABEL GACITUA C.SANTIAGO" not "ENC")
+- Full `name` or `original_name` (NOT the truncated `normalized_merchant` — users need the full text to recall context, e.g., "ENC *DOCTOR NAME C.SANTIAGO" not "ENC")
 - Date, amount, account name, and full category name (not category ID)
 
 **Do NOT use AskUserQuestion for large batches.** The interactive question tool is too slow when there are 10+ items needing decisions. Instead:
@@ -118,7 +118,7 @@ After all fixes are applied, update `skills/user-profile.md` with any new prefer
 - Any categories the user said to never touch.
 - Frequency preferences (e.g., "run cleanup monthly").
 
-**Tell the user exactly what you are saving before writing.** Example: "I'm adding to your profile: 'ENC (Isabel Gacitua) = Healthcare (psychologist)', 'Skip Coinbase account for cleanup'. OK?"
+**Tell the user exactly what you are saving before writing.** Example: "I'm adding to your profile: 'ENC = Healthcare (psychologist)', 'Skip Coinbase account for cleanup'. OK?"
 
 ## Phase 6 — Summary
 
@@ -129,11 +129,11 @@ End with a brief summary:
 
 ## Rules
 
-1. **Never write without asking.** Every write operation must be explicitly approved by the user first.
+1. **Never write without asking — except confident batch fixes.** Every write operation must be explicitly approved by the user first. The one exception: when Phase 3 identifies high-confidence fixes (merchant's dominant category is >80%, or user profile has an explicit mapping), you may apply them directly and report what you changed afterward. This avoids dialog fatigue on obvious fixes while still requiring approval for anything uncertain.
 2. **Dry-run first.** Always present findings (Phase 3) before applying any fixes (Phase 4). No exceptions.
 3. **Respect the profile.** `skills/user-profile.md` preferences override statistical analysis. If the profile says a merchant is categorized a certain way, do not flag it.
 4. **Be honest about uncertainty.** If you cannot confidently identify a merchant or determine the right category, say so. Let the user decide.
 5. **Use Bash with Python for math.** For aggregations, frequency calculations, or any arithmetic involving more than ~10 values, use Python via the Bash tool. Do not do mental math on large sets.
 6. **Batch size.** Present 3-5 findings at a time. Never dump everything at once.
 7. **No invented data.** Only reference transactions, merchants, and amounts that actually appear in the MCP tool results. Never fabricate examples.
-8. **Show full merchant names.** When presenting transactions to the user, always show the full `original_name` or `name` field — not the truncated `normalized_merchant`. Users need the full text to recall what a transaction was (e.g., "ENC *ISABEL GACITUA C.SANTIAGO" is identifiable, "ENC" is not).
+8. **Show full merchant names.** When presenting transactions to the user, always show the full `original_name` or `name` field — not the truncated `normalized_merchant`. Users need the full text to recall what a transaction was (e.g., "ENC *DOCTOR NAME C.SANTIAGO" is identifiable, "ENC" is not).
