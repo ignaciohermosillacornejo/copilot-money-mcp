@@ -26,9 +26,4 @@
 - Framing: dollar amounts
 
 ## Cleanup Preferences
-- ENC (Isabel G.) = Healthcare — psychologist, recurring
-- PayPal Jennifer A. = Services — English teacher, recurring (~$150/session)
-- SP Sculptique = Personal Care — recurring purchase
-- WSDOT GoodToGo = Car — WA State toll pass, recurring
-- Astound = Utilities — ISP, recurring
-- GetJusto / MP*GetJusto / MERPAGO*GetJusto = Restaurants — food delivery (Chile), recurring
+<!-- Auto-populated as you approve/reject cleanup suggestions -->

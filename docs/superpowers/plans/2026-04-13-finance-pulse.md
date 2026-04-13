@@ -16,7 +16,8 @@
 skills/
 ├── finance-pulse/
 │   └── SKILL.md              # The skill prompt — all logic lives here
-├── user-profile.md            # Already exists — pulse populates Income, Accounts, Irregular sections
+├── user-profile.template.md   # Committed template — copied to user-profile.md on first run
+├── user-profile.md            # Gitignored — auto-populated with personal data by skills
 ```
 
 No new source files. No test files (skill is a prompt, tested by running it against real data with snapshots).
@@ -44,7 +45,7 @@ Give the user a 30-second financial check-in. One number, a few flags, prospecti
 
 ## Phase 1 — Gather Data
 
-1. **Read the user profile.** Open `skills/user-profile.md`. Note:
+1. **Read the user profile.** Open `skills/user-profile.md`. If it doesn't exist, copy `skills/user-profile.template.md` to `skills/user-profile.md` first. Note:
    - Income & Obligations (if populated): monthly income, rent, fixed costs
    - Savings & Goals: targets and active goals
    - Irregular Expenses: amortized monthly reserve
