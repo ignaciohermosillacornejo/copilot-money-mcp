@@ -64,7 +64,7 @@ jobs:
       # Fork PRs are excluded by the job-level `if` condition above.
       - name: Auto-approve owner PRs
         if: github.event.pull_request.user.login == github.repository_owner
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             await github.rest.pulls.createReview({
