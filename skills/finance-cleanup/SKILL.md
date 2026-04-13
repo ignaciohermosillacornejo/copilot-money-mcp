@@ -23,6 +23,8 @@ Walk the user through a structured cleanup of their Copilot Money transaction da
    - `get_categories` — full category list
    - `get_accounts` — to map account IDs to names
 
+   - For any payment app accounts found (Venmo, PayPal, etc.), also pull their transactions separately — these contain the descriptive names and categories that bank-side stubs lack.
+
    Run all reads before any analysis. Cache the results mentally — you will cross-reference heavily.
 
 ## Phase 2 — Detect Issues
@@ -39,12 +41,15 @@ For each merchant that appears 3+ times in the 6-month history:
 
 ### 2.2 Misclassified Transfers
 
+**Payment app accounts (Venmo, PayPal, etc.):** These create two-sided transactions — a generic stub on the bank/checking side (e.g., "VENMO" with no detail, marked as internal transfer) and a richly-described transaction on the payment app account side (e.g., "Bar Whistler to Fernando Alamos" with proper category). Before flagging bank-side payment app stubs as false transfers, check if the payment app account exists (`get_accounts`) and whether the real transaction lives there. If both sides exist, the bank-side stub is correctly marked as a transfer — leave it alone.
+
 Two directions to check:
 
 **False transfers (marked Internal Transfer but probably not):**
 - Transaction category is "Internal Transfer" or similar transfer category.
 - The merchant name is a recognizable business (not a bank/brokerage name).
 - No matching opposite-sign transaction of the same amount exists within 48 hours across any account.
+- **Exception:** Bank-side stubs for payment apps (Venmo, PayPal, Zelle, CashApp) that have a matching transaction on the payment app's own account are legitimate transfers — skip these.
 
 **Missing transfers (should be Internal Transfer but are not):**
 - Two transactions with the same absolute amount, opposite signs, within 48 hours, across different accounts.
@@ -60,7 +65,7 @@ Scan the 6-month transaction history for merchants appearing 3+ times at regular
 
 ### 2.4 Quick Wins
 
-- **No category:** Transactions with no category assigned.
+- **No category:** Transactions with no category assigned. **Exception:** Income/credit transactions (negative amounts) without a category are intentionally uncategorized — do not flag them.
 - **Old unreviewed:** Unreviewed transactions older than 90 days.
 - **Duplicates:** Same merchant + same amount within 24 hours. Allow 2-3 occurrences for common small purchases (coffee shops, transit, parking) before flagging.
 
@@ -81,6 +86,14 @@ Examples of good phrasing:
 - Wait for the user to approve, reject, or modify each batch before moving on.
 - If you are uncertain about a finding, say so explicitly. "I'm not sure about this one — $12.99 from 'SP * SOMETHING' could be Spotify or a Shopify purchase."
 
+**Transaction presentation format:** When showing a transaction to the user, always include:
+- Full `name` or `original_name` (NOT the truncated `normalized_merchant` — users need the full text to recall context, e.g., "ENC *ISABEL GACITUA C.SANTIAGO" not "ENC")
+- Date, amount, account name, and full category name (not category ID)
+
+**Do NOT use AskUserQuestion for large batches.** The interactive question tool is too slow when there are 10+ items needing decisions. Instead:
+1. For **confident fixes** (clear from merchant name, dominant category, or user profile): apply directly, then report what you changed.
+2. For **uncertain items**: present them in a markdown table with full names and your best-guess recommendation. Let the user respond in free text — they can approve all, override specific items, or ask for more context. This is much faster than 4-questions-at-a-time dialogs.
+
 **Never auto-approve. Never skip the presentation phase.**
 
 ## Phase 4 — Apply Fixes
@@ -100,12 +113,12 @@ After each batch of writes:
 
 After all fixes are applied, update `skills/user-profile.md` with any new preferences learned during this session:
 
-- New merchant-to-category mappings the user confirmed (under "Cleanup Preferences" or "Preferences").
+- New merchant-to-category mappings the user confirmed — **only for recurring merchants/professionals** (e.g., a psychologist, English teacher, ISP). Do not save one-off purchases or single-visit merchants (a restaurant visited once, a parking lot, a taxi). The profile should contain preferences that will be useful in future cleanup sessions.
 - Any accounts the user said to always skip.
 - Any categories the user said to never touch.
 - Frequency preferences (e.g., "run cleanup monthly").
 
-**Tell the user exactly what you are saving before writing.** Example: "I'm adding to your profile: 'Uber Eats = Dining', 'Skip Coinbase account for cleanup'. OK?"
+**Tell the user exactly what you are saving before writing.** Example: "I'm adding to your profile: 'ENC (Isabel Gacitua) = Healthcare (psychologist)', 'Skip Coinbase account for cleanup'. OK?"
 
 ## Phase 6 — Summary
 
@@ -123,3 +136,4 @@ End with a brief summary:
 5. **Use Bash with Python for math.** For aggregations, frequency calculations, or any arithmetic involving more than ~10 values, use Python via the Bash tool. Do not do mental math on large sets.
 6. **Batch size.** Present 3-5 findings at a time. Never dump everything at once.
 7. **No invented data.** Only reference transactions, merchants, and amounts that actually appear in the MCP tool results. Never fabricate examples.
+8. **Show full merchant names.** When presenting transactions to the user, always show the full `original_name` or `name` field — not the truncated `normalized_merchant`. Users need the full text to recall what a transaction was (e.g., "ENC *ISABEL GACITUA C.SANTIAGO" is identifiable, "ENC" is not).
