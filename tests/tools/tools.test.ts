@@ -511,6 +511,47 @@ describe('CopilotMoneyTools', () => {
       expect(result.transactions[0].name).toContain('#business');
     });
 
+    test('filters by tag using tag_ids field', async () => {
+      const tagIdTxn: Transaction = {
+        transaction_id: 'txn_tag_ids',
+        amount: 200.0,
+        date: '2024-01-30',
+        name: 'Hotel Bora Bora',
+        category_id: 'travel',
+        account_id: 'acc1',
+        tag_ids: ['frenchpolynesia'],
+      };
+      (db as any)._transactions = [...mockTransactions, tagIdTxn];
+
+      const result = await tools.getTransactions({ tag: 'frenchpolynesia' });
+      expect(result.count).toBe(1);
+      expect(result.transactions[0].transaction_id).toBe('txn_tag_ids');
+    });
+
+    test('filters by tag matches both name hashtags and tag_ids', async () => {
+      const nameTagTxn: Transaction = {
+        transaction_id: 'txn_name_tag',
+        amount: 50.0,
+        date: '2024-01-30',
+        name: 'Dinner #vacation',
+        category_id: 'food_dining',
+        account_id: 'acc1',
+      };
+      const idTagTxn: Transaction = {
+        transaction_id: 'txn_id_tag',
+        amount: 100.0,
+        date: '2024-01-30',
+        name: 'Snorkeling Tour',
+        category_id: 'travel',
+        account_id: 'acc1',
+        tag_ids: ['vacation'],
+      };
+      (db as any)._transactions = [...mockTransactions, nameTagTxn, idTagTxn];
+
+      const result = await tools.getTransactions({ tag: 'vacation' });
+      expect(result.count).toBe(2);
+    });
+
     test('filters by transaction_type hsa_eligible', async () => {
       const medicalTxn: Transaction = {
         transaction_id: 'txn_medical',
@@ -544,6 +585,26 @@ describe('CopilotMoneyTools', () => {
       expect(result.transactions[0].name).toContain('#');
       expect(result.type_specific_data?.tags).toBeDefined();
       expect(Array.isArray(result.type_specific_data?.tags)).toBe(true);
+    });
+
+    test('transaction_type tagged includes transactions with tag_ids', async () => {
+      const tagIdTxn: Transaction = {
+        transaction_id: 'txn_tag_ids_only',
+        amount: 300.0,
+        date: '2024-01-30',
+        name: 'Scuba Diving',
+        category_id: 'travel',
+        account_id: 'acc1',
+        tag_ids: ['frenchpolynesia', 'vacation'],
+      };
+      (db as any)._transactions = [...mockTransactions, tagIdTxn];
+
+      const result = await tools.getTransactions({ transaction_type: 'tagged' });
+      expect(result.count).toBe(1);
+      expect(result.transactions[0].transaction_id).toBe('txn_tag_ids_only');
+      const tagNames = result.type_specific_data?.tags?.map((t: { tag: string }) => t.tag);
+      expect(tagNames).toContain('#frenchpolynesia');
+      expect(tagNames).toContain('#vacation');
     });
   });
 
