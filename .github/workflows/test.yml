@@ -50,7 +50,7 @@ jobs:
 
       - name: Upload unit test coverage to Codecov
         if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && github.actor != 'dependabot[bot]'
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           files: coverage/lcov.info
           flags: unit
@@ -77,7 +77,7 @@ jobs:
 
       - name: Upload E2E test coverage to Codecov
         if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && github.actor != 'dependabot[bot]'
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           files: coverage/lcov.info
           flags: e2e
