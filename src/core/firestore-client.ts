@@ -10,7 +10,7 @@
  */
 
 import type { FirebaseAuth } from './auth/firebase-auth.js';
-import type { FirestoreFields } from './format/firestore-rest.js';
+import type { FirestoreFields, FirestoreRestValue } from './format/firestore-rest.js';
 
 const FIRESTORE_PROJECT_ID = 'copilot-production-22904';
 const FIRESTORE_BASE_URL = 'https://firestore.googleapis.com/v1';
@@ -76,15 +76,45 @@ export class FirestoreClient {
    *
    * @see https://firebase.google.com/docs/firestore/reference/rest/v1/projects.databases.documents/createDocument
    */
+  /**
+   * Read a single document from Firestore.
+   *
+   * @see https://firebase.google.com/docs/firestore/reference/rest/v1/projects.databases.documents/get
+   */
+  async getDocument(
+    collectionPath: string,
+    documentId: string
+  ): Promise<Record<string, FirestoreRestValue>> {
+    const idToken = await this.auth.getIdToken();
+    const docPath = `projects/${FIRESTORE_PROJECT_ID}/databases/(default)/documents/${collectionPath}/${documentId}`;
+
+    const response = await fetch(`${FIRESTORE_BASE_URL}/${docPath}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(`Firestore get failed (${response.status}): ${errorBody}`);
+    }
+
+    const doc = (await response.json()) as { fields?: Record<string, FirestoreRestValue> };
+    return doc.fields ?? {};
+  }
+
   async createDocument(
     collectionPath: string,
-    documentId: string,
+    documentId: string | undefined,
     fields: FirestoreFields
-  ): Promise<void> {
+  ): Promise<string> {
     const idToken = await this.auth.getIdToken();
     const parentPath = `projects/${FIRESTORE_PROJECT_ID}/databases/(default)/documents`;
     const url = new URL(`${FIRESTORE_BASE_URL}/${parentPath}/${collectionPath}`);
-    url.searchParams.set('documentId', documentId);
+    if (documentId) {
+      url.searchParams.set('documentId', documentId);
+    }
 
     const response = await fetch(url.toString(), {
       method: 'POST',
@@ -99,6 +129,11 @@ export class FirestoreClient {
       const errorBody = await response.text();
       throw new Error(`Firestore create failed (${response.status}): ${errorBody}`);
     }
+
+    const doc = (await response.json()) as { name: string };
+    // Extract document ID from the full resource name
+    // e.g. "projects/.../documents/users/uid/categories/abc123" → "abc123"
+    return doc.name.split('/').pop()!;
   }
 
   /**

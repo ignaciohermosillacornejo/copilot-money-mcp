@@ -33,7 +33,8 @@ describe('updateTag', () => {
       requireUserId: async () => 'user123',
       getUserId: () => 'user123',
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      createDocument: async () => {},
+      createDocument: async (_col: string, docId: string | undefined) =>
+        docId ?? 'auto_generated_id',
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       updateDocument: async (collection: string, docId: string, fields: any, mask: string[]) => {
         updateCalls.push({ collection, docId, fields, mask });
@@ -173,8 +174,9 @@ describe('createRecurring', () => {
       requireUserId: async () => 'user123',
       getUserId: () => 'user123',
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      createDocument: async (collection: string, docId: string, fields: any) => {
+      createDocument: async (collection: string, docId: string | undefined, fields: any) => {
         createCalls.push({ collection, docId, fields });
+        return docId ?? 'auto_generated_id';
       },
       updateDocument: async () => {},
       deleteDocument: async () => {},
@@ -393,8 +395,9 @@ describe('createGoal', () => {
       requireUserId: async () => 'user123',
       getUserId: () => 'user123',
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      createDocument: async (collection: string, docId: string, fields: any) => {
+      createDocument: async (collection: string, docId: string | undefined, fields: any) => {
         createCalls.push({ collection, docId, fields });
+        return docId ?? 'auto_generated_id';
       },
       updateDocument: async () => {},
       deleteDocument: async () => {},

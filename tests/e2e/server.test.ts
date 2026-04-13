@@ -557,7 +557,7 @@ function createMockFirestoreClient(): FirestoreClient {
     requireUserId: async () => 'test-user-123',
     getUserId: () => 'test-user-123',
     updateDocument: async () => {},
-    createDocument: async () => {},
+    createDocument: async (_col: string, docId: string | undefined) => docId ?? 'auto_generated_id',
     deleteDocument: async () => {},
   };
   return mock as unknown as FirestoreClient;

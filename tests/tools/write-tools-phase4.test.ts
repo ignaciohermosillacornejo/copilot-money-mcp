@@ -49,8 +49,9 @@ function makeMockFirestoreClient(opts?: {
       updateCalls.push({ collection, docId, fields, mask });
     },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    createDocument: async (collection: string, docId: string, fields: any) => {
+    createDocument: async (collection: string, docId: string | undefined, fields: any) => {
       createCalls.push({ collection, docId, fields });
+      return docId ?? 'auto_generated_id';
     },
     deleteDocument: async (collection: string, docId: string) => {
       deleteCalls.push({ collection, docId });
@@ -437,7 +438,7 @@ describe('createCategory', () => {
   test('creates a category with name only', async () => {
     const result = await tools.createCategory({ name: 'Hobbies' });
     expect(result.success).toBe(true);
-    expect(result.category_id).toMatch(/^custom_/);
+    expect(result.category_id).toBe('auto_generated_id');
     expect(result.name).toBe('Hobbies');
     expect(result.excluded).toBe(false);
   });
@@ -458,11 +459,12 @@ describe('createCategory', () => {
     expect(result.excluded).toBe(true);
   });
 
-  test('calls Firestore createDocument with correct path', async () => {
-    const result = await tools.createCategory({ name: 'Hobbies' });
+  test('calls Firestore createDocument with correct path and auto-generated ID', async () => {
+    await tools.createCategory({ name: 'Hobbies' });
     expect(createCalls).toHaveLength(1);
     expect(createCalls[0].collection).toBe('users/user123/categories');
-    expect(createCalls[0].docId).toBe(result.category_id);
+    // docId should be undefined — Firestore auto-generates the ID
+    expect(createCalls[0].docId).toBeUndefined();
   });
 
   test('includes optional fields in Firestore document', async () => {
@@ -477,11 +479,11 @@ describe('createCategory', () => {
     expect(fields.color).toEqual({ stringValue: '#FF5500' });
   });
 
-  test('omits optional fields from Firestore when not provided', async () => {
+  test('uses default emoji and color when not provided', async () => {
     await tools.createCategory({ name: 'Hobbies' });
     const fields = createCalls[0].fields;
-    expect(fields.emoji).toBeUndefined();
-    expect(fields.color).toBeUndefined();
+    expect(fields.emoji).toEqual({ stringValue: '📁' });
+    expect(fields.color).toEqual({ stringValue: '#808080' });
     expect(fields.parent_category_id).toBeUndefined();
   });
 

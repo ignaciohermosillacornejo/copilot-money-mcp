@@ -28,7 +28,7 @@ function makeMockFirestoreClient(updateCalls: UpdateCall[]) {
       updateCalls.push({ collection, docId, fields, mask });
     },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    createDocument: async () => {},
+    createDocument: async (_col: string, docId: string | undefined) => docId ?? 'auto_generated_id',
     deleteDocument: async () => {},
   };
 }

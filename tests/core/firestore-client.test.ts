@@ -154,11 +154,14 @@ describe('FirestoreClient', () => {
   // --- createDocument ---
 
   test('createDocument sends POST with documentId query param', async () => {
-    mockFetch({ name: 'doc', fields: {} });
-    await client.createDocument('users/u1/tags', 'my_tag', {
+    mockFetch({
+      name: 'projects/copilot-production-22904/databases/(default)/documents/users/u1/tags/my_tag',
+    });
+    const returnedId = await client.createDocument('users/u1/tags', 'my_tag', {
       name: { stringValue: 'My Tag' },
     });
 
+    expect(returnedId).toBe('my_tag');
     expect(fetchCalls).toHaveLength(1);
     const url = new URL(fetchCalls[0].url);
     expect(url.pathname).toContain('/users/u1/tags');
@@ -170,8 +173,24 @@ describe('FirestoreClient', () => {
     restoreFetch();
   });
 
+  test('createDocument without documentId uses auto-generated ID', async () => {
+    mockFetch({
+      name: 'projects/copilot-production-22904/databases/(default)/documents/users/uid/categories/AbCdEfGh12345678',
+    });
+    const returnedId = await client.createDocument('users/uid/categories', undefined, {
+      name: { stringValue: 'Test' },
+    });
+
+    expect(returnedId).toBe('AbCdEfGh12345678');
+    const url = new URL(fetchCalls[0].url);
+    expect(url.searchParams.has('documentId')).toBe(false);
+    restoreFetch();
+  });
+
   test('createDocument sends correct JSON body', async () => {
-    mockFetch({ name: 'doc', fields: {} });
+    mockFetch({
+      name: 'projects/copilot-production-22904/databases/(default)/documents/users/uid/categories/cat_123',
+    });
     await client.createDocument('users/uid/categories', 'cat_123', {
       name: { stringValue: 'Test' },
       excluded: { booleanValue: false },
@@ -192,6 +211,45 @@ describe('FirestoreClient', () => {
     await expect(
       client.createDocument('users/u1/tags', 'dup', { name: { stringValue: 'Dup' } })
     ).rejects.toThrow('Firestore create failed');
+    restoreFetch();
+  });
+
+  // --- getDocument ---
+
+  test('getDocument sends GET with correct path', async () => {
+    mockFetch({
+      name: 'projects/copilot-production-22904/databases/(default)/documents/users/u1/categories/cat1',
+      fields: {
+        name: { stringValue: 'Food' },
+        excluded: { booleanValue: false },
+      },
+    });
+    const fields = await client.getDocument('users/u1/categories', 'cat1');
+    expect(fetchCalls).toHaveLength(1);
+    expect(fetchCalls[0].options.method).toBe('GET');
+    const url = new URL(fetchCalls[0].url);
+    expect(url.pathname).toContain('/users/u1/categories/cat1');
+    expect(fields).toEqual({
+      name: { stringValue: 'Food' },
+      excluded: { booleanValue: false },
+    });
+    restoreFetch();
+  });
+
+  test('getDocument returns empty object when no fields', async () => {
+    mockFetch({
+      name: 'projects/copilot-production-22904/databases/(default)/documents/users/u1/categories/cat1',
+    });
+    const fields = await client.getDocument('users/u1/categories', 'cat1');
+    expect(fields).toEqual({});
+    restoreFetch();
+  });
+
+  test('getDocument throws on non-OK response', async () => {
+    mockFetch({ error: { code: 404, message: 'Not found' } }, 404);
+    await expect(client.getDocument('users/u1/categories', 'missing')).rejects.toThrow(
+      'Firestore get failed'
+    );
     restoreFetch();
   });
 

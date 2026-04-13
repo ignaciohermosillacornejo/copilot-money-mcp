@@ -77,6 +77,21 @@ function validateHexColor(color: string): void {
 }
 
 /**
+ * Derive a light background tint from a hex color, matching the Copilot app's
+ * `bg_color` convention (e.g. #BC00E3 → #FDF5FE).
+ * Blends the color at ~5% opacity over white.
+ */
+function hexToBgColor(hex: string): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const t = 0.05; // tint strength
+  const blend = (c: number) => Math.round(255 - t * (255 - c));
+  const toHex = (n: number) => n.toString(16).padStart(2, '0').toUpperCase();
+  return `#${toHex(blend(r))}${toHex(blend(g))}${toHex(blend(b))}`;
+}
+
+/**
  * Plaid category ID for foreign transaction fees (snake_case format).
  * @see https://plaid.com/docs/api/products/transactions/#categoriesget
  */
@@ -2294,30 +2309,47 @@ export class CopilotMoneyTools {
       );
     }
 
-    // Generate a unique category_id
-    const categoryId = `custom_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
-
     // Determine user_id: prefer existing categories, fall back to auth layer
     const userIdFromCategories = existingCategories.find((c) => c.user_id)?.user_id;
     const userId = userIdFromCategories ?? (await client.requireUserId());
 
-    // Build document fields
+    // Compute next order value (max existing order + 1)
+    const maxOrder = existingCategories.reduce(
+      (max, c) => Math.max(max, typeof c.order === 'number' ? c.order : -1),
+      -1
+    );
+
+    // Build document fields matching app-created category structure.
+    // The app requires: id, name, emoji, color, bg_color, order, excluded,
+    // is_other, auto_budget_lock, auto_delete_lock, and empty arrays for
+    // plaid_category_ids and partial_name_rules.
+    const trimmedName = name.trim();
+    const categoryColor = color ?? '#808080';
+    if (color) validateHexColor(color);
     const docFields: Record<string, unknown> = {
-      category_id: categoryId,
-      name: name.trim(),
+      name: trimmedName,
+      emoji: emoji ?? '📁',
+      color: categoryColor,
+      bg_color: hexToBgColor(categoryColor),
+      order: maxOrder + 1,
       excluded,
+      is_other: false,
+      auto_budget_lock: false,
+      auto_delete_lock: false,
+      plaid_category_ids: [],
+      partial_name_rules: [],
     };
-    if (emoji) docFields.emoji = emoji;
-    if (color) {
-      validateHexColor(color);
-      docFields.color = color;
-    }
     if (parent_category_id) docFields.parent_category_id = parent_category_id;
 
-    // Write to Firestore
+    // Write to Firestore with auto-generated document ID (matching app behavior)
     const collectionPath = `users/${userId}/categories`;
     const firestoreFields = toFirestoreFields(docFields);
-    await client.createDocument(collectionPath, categoryId, firestoreFields);
+    const categoryId = await client.createDocument(collectionPath, undefined, firestoreFields);
+
+    // Patch the `id` field to match the auto-generated document ID.
+    // App-created categories store `id` equal to the Firestore document ID.
+    const idFields = toFirestoreFields({ id: categoryId });
+    await client.updateDocument(collectionPath, categoryId, idFields, ['id']);
 
     // Clear cache so the new category is visible on next query
     this.db.clearCache();
@@ -2334,11 +2366,11 @@ export class CopilotMoneyTools {
     } = {
       success: true,
       category_id: categoryId,
-      name: name.trim(),
+      name: trimmedName,
       excluded,
     };
-    if (emoji) result.emoji = emoji;
-    if (color) result.color = color;
+    if (emoji ?? '📁') result.emoji = emoji ?? '📁';
+    if (categoryColor) result.color = categoryColor;
     if (parent_category_id) result.parent_category_id = parent_category_id;
 
     return result;
