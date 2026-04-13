@@ -44,6 +44,7 @@ Track trip expenses by finding transactions in a date range, using location and 
    - Recurring charges that happen regardless of travel (subscriptions, rent, utilities, phone)
    - Transactions already tagged with this trip (if re-run)
    - Internal transfers
+   - **Home-location spending during trip dates.** The user may still have charges from their home city (Seattle) while traveling — e.g., Lime scooters, local tolls (WSDOT), local restaurants, Venmo payments to friends. Don't assume all spending during trip dates is trip spending. Check the merchant name for home-city indicators before classifying travel-adjacent categories as "probably trip."
 
 4. **Group into tiers:**
    - **Definitely trip:** Strong signals. Will be auto-suggested.
