@@ -97,9 +97,9 @@ Track trip expenses by finding transactions in a date range, using location and 
    >
    > Per-day average: $[X/days]
 
-4. **Update user profile.** Add the trip to the Trip Tracking section:
+4. **Update user profile.** Only add the trip to the Trip Tracking section if it ended **within the last 3 weeks** (stragglers may still post). Remove concluded trips older than 3 weeks — the tag in Copilot Money is the source of truth, not the profile. Format for active/recent trips:
    ```
-   - [Trip Name]: [dates], $[total], [N] transactions
+   - [Trip Name]: [dates], tag: #[tag], stragglers possible until [end_date + 3 weeks]
    ```
 
 ## Phase 5 — Straggler Follow-up (optional)
