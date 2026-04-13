@@ -132,7 +132,7 @@ describe('updateCategory', () => {
     // Valid color should succeed
     const result = await tools.updateCategory({ category_id: 'cat1', color: '#FF5733' });
     expect(result.success).toBe(true);
-    expect(result.updated_fields).toEqual(['color']);
+    expect(result.updated_fields).toEqual(['color', 'bg_color']);
   });
 
   test('updates excluded field', async () => {
