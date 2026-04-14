@@ -125,25 +125,11 @@ const RUN_REAL_DB_TESTS = process.env.RUN_REAL_DB_TESTS === '1';
 const REAL_DB_PATH = findRealDatabase();
 const HAS_REAL_DB = REAL_DB_PATH !== undefined && RUN_REAL_DB_TESTS;
 
-// Helper to format statistics
 interface DataStats {
   count: number;
   validCount: number;
   invalidCount: number;
   errors: string[];
-  sampleFields?: Record<string, number>;
-}
-
-function getFieldStats<T extends Record<string, unknown>>(items: T[]): Record<string, number> {
-  const stats: Record<string, number> = {};
-  for (const item of items) {
-    for (const [key, value] of Object.entries(item)) {
-      if (value !== undefined && value !== null) {
-        stats[key] = (stats[key] ?? 0) + 1;
-      }
-    }
-  }
-  return stats;
 }
 
 // Validation helper
@@ -320,21 +306,10 @@ describeWithRealDb('Real Copilot Money Database Integration', () => {
       expect(stats.invalidCount).toBe(0);
     });
 
-    test('transactions have required fields', () => {
-      for (const txn of data.transactions.slice(0, 100)) {
-        expect(txn.transaction_id).toBeDefined();
-        expect(typeof txn.transaction_id).toBe('string');
-        expect(txn.amount).toBeDefined();
-        expect(typeof txn.amount).toBe('number');
-        expect(txn.date).toBeDefined();
-        expect(txn.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-      }
-    });
-
-    test('transaction dates are valid', () => {
-      const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+    test('transaction dates parse to valid Date objects', () => {
+      // Schema already enforces YYYY-MM-DD format via regex; this adds the
+      // runtime parse check (e.g., 2025-02-31 would match the regex but fail here).
       for (const txn of data.transactions) {
-        expect(txn.date).toMatch(datePattern);
         const parsed = new Date(txn.date);
         expect(parsed.toString()).not.toBe('Invalid Date');
       }
@@ -344,18 +319,6 @@ describeWithRealDb('Real Copilot Money Database Integration', () => {
       for (const txn of data.transactions) {
         expect(Math.abs(txn.amount)).toBeLessThan(10_000_000);
         expect(Number.isFinite(txn.amount)).toBe(true);
-      }
-    });
-
-    test('reports field population rates', () => {
-      const sampleSize = Math.min(100, data.transactions.length);
-      const fieldStats = getFieldStats(data.transactions.slice(0, sampleSize));
-
-      console.log(`\n📈 Transaction Field Population (sample of ${sampleSize}):`);
-      const sortedFields = Object.entries(fieldStats).sort(([, a], [, b]) => b - a);
-      for (const [field, count] of sortedFields) {
-        const pct = Math.round((count / sampleSize) * 100);
-        console.log(`   ${field}: ${pct}%`);
       }
     });
   });
@@ -395,17 +358,6 @@ describeWithRealDb('Real Copilot Money Database Integration', () => {
         if (acc.account_type) {
           expect(knownTypes).toContain(acc.account_type.toLowerCase());
         }
-      }
-    });
-
-    test('reports field population rates', () => {
-      const fieldStats = getFieldStats(data.accounts);
-
-      console.log(`\n📈 Account Field Population (${data.accounts.length} accounts):`);
-      const sortedFields = Object.entries(fieldStats).sort(([, a], [, b]) => b - a);
-      for (const [field, count] of sortedFields) {
-        const pct = Math.round((count / data.accounts.length) * 100);
-        console.log(`   ${field}: ${pct}%`);
       }
     });
   });
@@ -606,7 +558,7 @@ describeWithRealDb('Real Copilot Money Database Integration', () => {
       expect(orphanRate).toBeLessThan(0.1); // Less than 10% orphans
     });
 
-    test('transactions reference valid categories (if user categories exist)', () => {
+    test('transaction custom category references resolve (if user categories exist)', () => {
       if (data.categoryNameMap.size === 0) {
         console.log('   (No user categories - skipping category validation)');
         return;
@@ -626,87 +578,11 @@ describeWithRealDb('Real Copilot Money Database Integration', () => {
         }
       }
 
-      console.log(`   Custom category references: ${customCategoryCount}`);
-      console.log(`   Unmapped custom categories: ${unmappedCustomCount}`);
+      // Allow a small fraction of unmapped custom categories (deleted categories
+      // may still be referenced by historical transactions), but a large gap
+      // indicates a real decoding or resolution bug.
+      const unmappedRate = customCategoryCount > 0 ? unmappedCustomCount / customCategoryCount : 0;
+      expect(unmappedRate).toBeLessThan(0.1);
     });
-  });
-
-  describe('Data Quality Metrics', () => {
-    test('reports overall data summary', () => {
-      console.log(`\n📊 Overall Data Summary:`);
-      console.log(`   ═══════════════════════════════════════`);
-      console.log(`   Transactions: ${data.transactions.length.toLocaleString()}`);
-      console.log(`   Accounts: ${data.accounts.length}`);
-      console.log(`   Recurring: ${data.recurring.length}`);
-      console.log(`   Budgets: ${data.budgets.length}`);
-      console.log(`   Goals: ${data.goals.length}`);
-      console.log(`   Items: ${data.items.length}`);
-      console.log(`   ═══════════════════════════════════════`);
-
-      // Calculate date range of transactions
-      if (data.transactions.length > 0) {
-        const dates = data.transactions.map((t) => t.date).sort();
-        console.log(`   Transaction date range: ${dates[0]} to ${dates[dates.length - 1]}`);
-      }
-
-      // Calculate total balance
-      const totalBalance = data.accounts.reduce((sum, acc) => sum + acc.current_balance, 0);
-      console.log(
-        `   Total balance across accounts: $${totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-      );
-    });
-
-    test('reports account type breakdown', () => {
-      const typeCount: Record<string, number> = {};
-      for (const acc of data.accounts) {
-        const type = acc.account_type ?? 'unknown';
-        typeCount[type] = (typeCount[type] ?? 0) + 1;
-      }
-
-      console.log(`\n📊 Account Type Breakdown:`);
-      for (const [type, count] of Object.entries(typeCount).sort(([, a], [, b]) => b - a)) {
-        console.log(`   ${type}: ${count}`);
-      }
-    });
-  });
-});
-
-// Test that runs even without real database to report status
-describe('Real Database Availability', () => {
-  test('reports whether real database was found', () => {
-    const dbPath = findRealDatabase();
-    if (HAS_REAL_DB) {
-      console.log(`\n✅ Real Copilot Money database found at:`);
-      console.log(`   ${REAL_DB_PATH}`);
-      console.log('');
-      console.log('⚠️  IMPORTANT: Quit the Copilot Money app before running tests!');
-      console.log('   LevelDB does not allow concurrent access from multiple processes.');
-      console.log('');
-      console.log('   Running full integration test suite...\n');
-    } else if (dbPath && !RUN_REAL_DB_TESTS) {
-      console.log(`\n📂 Real Copilot Money database found at:`);
-      console.log(`   ${dbPath}`);
-      console.log('');
-      console.log('⏭️  Real database tests are SKIPPED by default (opt-in).');
-      console.log('   Large databases can take several minutes to load.\n');
-      console.log('   To run these tests:');
-      console.log('   1. Quit the Copilot Money app (Cmd+Q)');
-      console.log(
-        '   2. Run: RUN_REAL_DB_TESTS=1 bun test tests/integration/real-database.test.ts'
-      );
-      console.log('   3. Restart Copilot Money when done\n');
-    } else {
-      console.log('\n⚠️  No real Copilot Money database found.');
-      console.log('   Integration tests will be skipped.');
-      console.log('   This is expected in CI environments.\n');
-      console.log('   To run these tests:');
-      console.log('   1. Install Copilot Money on macOS');
-      console.log('   2. Sign in and sync your data');
-      console.log('   3. Quit the Copilot Money app (Cmd+Q)');
-      console.log(
-        '   4. Run: RUN_REAL_DB_TESTS=1 bun test tests/integration/real-database.test.ts\n'
-      );
-    }
-    expect(true).toBe(true); // Always passes
   });
 });

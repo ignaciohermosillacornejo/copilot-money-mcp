@@ -12,6 +12,7 @@ import {
   LevelDBReader,
   createTestDatabase,
   cleanupAllTempDatabases,
+  _getTempDbCache,
 } from '../../src/core/leveldb-reader.js';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -463,17 +464,18 @@ describe('leveldb-reader', () => {
       const dbPath = path.join(FIXTURES_DIR, 'cleanup-test-db');
       await createTestDatabase(dbPath, [{ collection: 'test', id: 'doc1', fields: { x: 1 } }]);
 
-      // Iterate to create a temp copy
+      // Iterate to create a temp copy (populates the cache)
       const docs = [];
       for await (const doc of iterateDocuments(dbPath)) {
         docs.push(doc);
       }
+      expect(_getTempDbCache().size).toBeGreaterThan(0);
 
       // Clean up all temp databases
       cleanupAllTempDatabases();
 
-      // Should not throw, just cleanup
-      expect(true).toBe(true);
+      // Verify the cache is actually emptied
+      expect(_getTempDbCache().size).toBe(0);
     });
   });
 
