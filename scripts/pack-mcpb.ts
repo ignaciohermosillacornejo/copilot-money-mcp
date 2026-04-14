@@ -52,21 +52,22 @@ function copyInto(src: string, dest: string): void {
 if (existsSync(outputPath)) rmSync(outputPath);
 if (existsSync(stagingDir)) rmSync(stagingDir, { recursive: true, force: true });
 
-run('bun run build:bundle', repoRoot);
 run('bun run build', repoRoot);
 
 mkdirSync(stagingDir, { recursive: true });
-for (const path of STAGED_FILES) copyInto(path, stagingDir);
+try {
+  for (const path of STAGED_FILES) copyInto(path, stagingDir);
 
-// Install production deps into the staging dir. --ignore-scripts skips lifecycle
-// hooks (husky, etc.) that we don't need; classic-level's native build is not
-// required because node-gyp-build picks an appropriate prebuilt binary at load
-// time from node_modules/classic-level/prebuilds/.
-run('npm install --omit=dev --ignore-scripts --no-audit --no-fund', stagingDir);
+  // Install production deps into the staging dir. --ignore-scripts skips lifecycle
+  // hooks (husky, etc.) that we don't need; classic-level's native build is not
+  // required because node-gyp-build picks an appropriate prebuilt binary at load
+  // time from node_modules/classic-level/prebuilds/.
+  run('npm install --omit=dev --ignore-scripts --no-audit --no-fund', stagingDir);
 
-run(`bunx @anthropic-ai/mcpb pack . ${JSON.stringify(outputPath)}`, stagingDir);
-
-rmSync(stagingDir, { recursive: true, force: true });
+  run(`bunx @anthropic-ai/mcpb pack . ${JSON.stringify(outputPath)}`, stagingDir);
+} finally {
+  rmSync(stagingDir, { recursive: true, force: true });
+}
 
 if (!existsSync(outputPath)) {
   console.error(`Expected bundle at ${outputPath} but it was not created`);
