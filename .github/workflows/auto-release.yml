@@ -111,9 +111,11 @@ jobs:
   publish:
     name: Publish to npm
     needs: release
-    if: needs.release.outputs.changed == 'true'
+    if: needs.release.outputs.changed == 'true' && github.actor == 'ignaciohermosillacornejo'
     permissions:
       contents: read
       id-token: write  # Required for npm OIDC trusted publishing
     uses: ./.github/workflows/npm-publish.yml
+    with:
+      dry_run: false
     secrets: inherit
