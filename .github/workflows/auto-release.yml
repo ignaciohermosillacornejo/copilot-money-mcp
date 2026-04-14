@@ -105,6 +105,24 @@ jobs:
             --notes-file /tmp/release-notes.md \
             --target "${{ github.sha }}"
 
+      - name: Setup Bun
+        if: steps.version.outputs.changed == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        if: steps.version.outputs.changed == 'true'
+        run: bun install
+
+      - name: Build and attach .mcpb bundle
+        if: steps.version.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bun run pack:mcpb
+          gh release upload "v${{ steps.version.outputs.current }}" copilot-money-mcp.mcpb
+
   # Publishing is chained directly via workflow_call rather than relying on the
   # release event, because releases created with the default GITHUB_TOKEN do not
   # trigger downstream `release: published` workflows.

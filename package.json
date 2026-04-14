@@ -64,7 +64,7 @@
     "audit-reviews:dry": "bun run scripts/audit-pr-reviews.ts --dry-run",
     "fix": "bun run lint:fix && bun run format",
     "clean": "rm -rf dist coverage .bun-build",
-    "pack:mcpb": "bun run build:bundle && bun run build && bunx @anthropic-ai/mcpb pack",
+    "pack:mcpb": "bun run scripts/pack-mcpb.ts",
     "prepublishOnly": "bun run clean && bun run build && bun test",
     "prepare": "husky"
   },
