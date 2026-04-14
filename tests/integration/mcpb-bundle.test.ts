@@ -102,18 +102,24 @@ async function startAndInitialize(
     env: { ...process.env, NODE_PATH: '' },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
-  send(proc, {
-    jsonrpc: '2.0',
-    id: 0,
-    method: 'initialize',
-    params: {
-      protocolVersion: '2025-11-25',
-      capabilities: {},
-      clientInfo: { name: 'mcpb-regression-test', version: '0.0.0' },
-    },
-  });
-  const initializeResult = await readResponse(proc, 0, 10_000);
-  return { proc, initializeResult };
+  try {
+    send(proc, {
+      jsonrpc: '2.0',
+      id: 0,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2025-11-25',
+        capabilities: {},
+        clientInfo: { name: 'mcpb-regression-test', version: '0.0.0' },
+      },
+    });
+    const initializeResult = await readResponse(proc, 0, 10_000);
+    return { proc, initializeResult };
+  } catch (err) {
+    // The caller never receives `proc`, so kill it here instead of leaking it.
+    proc.kill('SIGTERM');
+    throw err;
+  }
 }
 
 describe('mcpb bundle', () => {
