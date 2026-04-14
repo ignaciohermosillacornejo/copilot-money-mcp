@@ -28,6 +28,9 @@ dist/
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
 
+# GraphQL capture output — gitignored until operator personally reviews
+docs/graphql-capture/
+
 # TypeScript
 *.tsbuildinfo
 
@@ -45,8 +48,9 @@ Thumbs.db
 # Project specific
 # Demo database contains real financial data - do NOT commit
 tests/fixtures/demo_database/
-# Development/debug scripts
-scripts/
+# Development/debug scripts (except tracked subdirectories)
+scripts/*
+!scripts/graphql-capture/
 # Generated test fixtures
 tests/fixtures/mixed-files-db/
 
