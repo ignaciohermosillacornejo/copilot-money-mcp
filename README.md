@@ -23,6 +23,14 @@ An [MCP](https://modelcontextprotocol.io/) server that gives AI assistants acces
 
 **Read-only by default.** Write tools require explicitly starting the server with `--write` to enable.
 
+## Demo
+
+Organizing transactions with natural language — categorize, tag, and clean up your feed in one pass:
+
+<p align="center">
+  <img src="docs/demos/organize.gif" alt="Organizing transactions with natural language" width="720" />
+</p>
+
 ## Privacy First
 
 We never collect, store, or transmit your data to any server operated by this project — we don't have any. See our [Privacy Policy](PRIVACY.md) for details.
