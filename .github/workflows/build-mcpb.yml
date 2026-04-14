@@ -1,112 +1,97 @@
-name: build release
+name: Build & Release .mcpb
 
 on:
-  push:
-    tags:
-      - 'v*'
-  workflow_dispatch:
+  workflow_call:
     inputs:
-      create_release:
-        description: 'Create a release'
-        required: true
-        type: boolean
-        default: true
       version:
-        description: 'Version tag for the release (e.g., v1.0.0)'
+        description: Release version without the `v` prefix (e.g. "1.6.2")
         required: true
         type: string
-
-env:
-  BUN_VERSION: '1.1.38'
+      target_sha:
+        description: Commit SHA to check out, build, and tag at
+        required: true
+        type: string
+      dry_run:
+        description: Build only; upload the bundle as an artifact and skip release creation
+        required: false
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without the `v` prefix (e.g. "1.6.2")
+        required: true
+        type: string
+      target_sha:
+        description: Commit SHA to check out. Defaults to the selected branch's HEAD.
+        required: false
+        type: string
+      dry_run:
+        description: Build only; upload the bundle as an artifact and skip release creation
+        required: false
+        type: boolean
+        default: false
 
 jobs:
-  build:
-    name: Build .mcpb Bundle
+  build-and-release:
+    name: Build and release .mcpb
     runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Run type checking
-        run: bun run typecheck
-
-      - name: Run linting
-        run: bun run lint
-
-      - name: Check formatting
-        run: bun run format:check
-
-      - name: Run tests
-        run: bun test
-
-      - name: Build .mcpb bundle
-        run: bun run pack:mcpb
-
-      - name: Verify .mcpb file exists
-        run: |
-          if [ ! -f copilot-money-mcp.mcpb ]; then
-            echo "Error: .mcpb file not found"
-            exit 1
-          fi
-          ls -la copilot-money-mcp.mcpb
-
-      - name: Upload .mcpb artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: copilot-money-mcp-bundle
-          path: copilot-money-mcp.mcpb
-          retention-days: 30
-
-  release:
-    name: Create Release
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.create_release)
-    runs-on: ubuntu-latest
-
     permissions:
       contents: write
 
     steps:
-      - name: Download .mcpb artifact
-        uses: actions/download-artifact@v8
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.target_sha || github.sha }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build .mcpb bundle
+        run: bun run pack:mcpb
+
+      - name: Extract changelog notes
+        if: ${{ !inputs.dry_run }}
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          NOTES=$(awk -v ver="$VERSION" '
+            /^## \[/ {
+              if (found) exit
+              if (index($0, "[" ver "]")) found=1
+              next
+            }
+            found { print }
+          ' CHANGELOG.md)
+          if [ -z "$NOTES" ]; then
+            echo "No changelog entry for v$VERSION, using default message"
+            NOTES="Release v$VERSION"
+          fi
+          echo "$NOTES" > /tmp/release-notes.md
+
+      - name: Create release with bundle
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          TARGET: ${{ inputs.target_sha || github.sha }}
+        run: |
+          gh release create "v$VERSION" \
+            --title "v$VERSION" \
+            --notes-file /tmp/release-notes.md \
+            --target "$TARGET" \
+            copilot-money-mcp.mcpb
+
+      - name: Upload artifact (dry run)
+        if: ${{ inputs.dry_run }}
+        uses: actions/upload-artifact@v7
         with:
           name: copilot-money-mcp-bundle
-
-      - name: Verify .mcpb file exists
-        run: |
-          if [ ! -f copilot-money-mcp.mcpb ]; then
-            echo "Error: .mcpb file not found"
-            exit 1
-          fi
-          ls -la copilot-money-mcp.mcpb
-
-      - name: Determine if prerelease
-        id: prerelease
-        run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            TAG="${{ inputs.version }}"
-          else
-            TAG="${GITHUB_REF#refs/tags/}"
-          fi
-          if [[ "$TAG" =~ (alpha|beta|rc|preview|dev) ]]; then
-            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
-          files: copilot-money-mcp.mcpb
-          generate_release_notes: true
-          draft: false
-          prerelease: ${{ steps.prerelease.outputs.is_prerelease == 'true' }}
+          path: copilot-money-mcp.mcpb
+          retention-days: 7
