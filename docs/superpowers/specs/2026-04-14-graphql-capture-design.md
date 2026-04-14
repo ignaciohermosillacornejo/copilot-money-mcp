@@ -91,6 +91,14 @@ For each area the agent:
 
 At the end of each area the agent reports: operations captured (queries/mutations by name), screens visited, anything it skipped and why. User approves before moving to the next area.
 
+**Autonomy upgrade after area 1.** The first area is a forcing function to validate the full pipeline (interceptor → drain → scrub → per-operation doc → flow doc). If after reviewing area 1's output the user is satisfied with the capture quality and scrubbing, they can grant the agent permission to continue through the remaining areas without per-area approval. The agent still:
+
+- Stops and asks before any destructive / money-moving action (rules from the "Safety" section are unchanged — autonomy covers pacing, not scope)
+- Writes its per-area report to the flow doc so the user can inspect any area after the fact
+- Stops and asks if it encounters anything unexpected (new top-level surface not in the crawl plan, auth errors, suspected rate limiting, etc.)
+
+If something in a later area looks off during user spot-checks, the user can always pause the agent and have it re-capture a specific flow with more detail.
+
 ### Safety — what the agent will and will not trigger
 
 **Will trigger** (reversible / read-only):
