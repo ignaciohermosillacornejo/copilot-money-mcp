@@ -321,6 +321,12 @@ describe('CopilotDatabase', () => {
   describe('Cache TTL configuration', () => {
     const originalEnv = process.env.COPILOT_CACHE_TTL_MINUTES;
 
+    // Mirrors DEFAULT_CACHE_TTL_MINUTES in src/core/database.ts. If that
+    // constant changes, update this value and the fresh/stale boundaries
+    // below that straddle it.
+    const DEFAULT_TTL_MINUTES = 5;
+    const MINUTE_MS = 60 * 1000;
+
     afterEach(() => {
       if (originalEnv === undefined) {
         delete process.env.COPILOT_CACHE_TTL_MINUTES;
@@ -330,17 +336,18 @@ describe('CopilotDatabase', () => {
     });
 
     test('uses custom TTL from environment variable', () => {
-      process.env.COPILOT_CACHE_TTL_MINUTES = '10';
+      const customTtlMinutes = 10;
+      process.env.COPILOT_CACHE_TTL_MINUTES = String(customTtlMinutes);
 
       const testDb = new CopilotDatabase('/fake/path');
       // Just-loaded cache is fresh under a 10-minute TTL.
       (testDb as any)._cacheLoadedAt = Date.now();
       expect((testDb as any).isCacheStale()).toBe(false);
 
-      // Cache loaded 9 minutes ago is still fresh; 11 minutes ago is stale.
-      (testDb as any)._cacheLoadedAt = Date.now() - 9 * 60 * 1000;
+      // Straddle the 10-minute boundary.
+      (testDb as any)._cacheLoadedAt = Date.now() - (customTtlMinutes - 1) * MINUTE_MS;
       expect((testDb as any).isCacheStale()).toBe(false);
-      (testDb as any)._cacheLoadedAt = Date.now() - 11 * 60 * 1000;
+      (testDb as any)._cacheLoadedAt = Date.now() - (customTtlMinutes + 1) * MINUTE_MS;
       expect((testDb as any).isCacheStale()).toBe(true);
     });
 
@@ -357,10 +364,10 @@ describe('CopilotDatabase', () => {
       process.env.COPILOT_CACHE_TTL_MINUTES = 'not-a-number';
 
       const testDb = new CopilotDatabase('/fake/path');
-      // Default TTL is 5 minutes; 4 min old is fresh, 6 min old is stale.
-      (testDb as any)._cacheLoadedAt = Date.now() - 4 * 60 * 1000;
+      // Straddle the default-TTL boundary.
+      (testDb as any)._cacheLoadedAt = Date.now() - (DEFAULT_TTL_MINUTES - 1) * MINUTE_MS;
       expect((testDb as any).isCacheStale()).toBe(false);
-      (testDb as any)._cacheLoadedAt = Date.now() - 6 * 60 * 1000;
+      (testDb as any)._cacheLoadedAt = Date.now() - (DEFAULT_TTL_MINUTES + 1) * MINUTE_MS;
       expect((testDb as any).isCacheStale()).toBe(true);
     });
 
@@ -368,9 +375,9 @@ describe('CopilotDatabase', () => {
       process.env.COPILOT_CACHE_TTL_MINUTES = '-5';
 
       const testDb = new CopilotDatabase('/fake/path');
-      (testDb as any)._cacheLoadedAt = Date.now() - 4 * 60 * 1000;
+      (testDb as any)._cacheLoadedAt = Date.now() - (DEFAULT_TTL_MINUTES - 1) * MINUTE_MS;
       expect((testDb as any).isCacheStale()).toBe(false);
-      (testDb as any)._cacheLoadedAt = Date.now() - 6 * 60 * 1000;
+      (testDb as any)._cacheLoadedAt = Date.now() - (DEFAULT_TTL_MINUTES + 1) * MINUTE_MS;
       expect((testDb as any).isCacheStale()).toBe(true);
     });
 
