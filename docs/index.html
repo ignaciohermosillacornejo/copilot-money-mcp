@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Copilot Money MCP Server — AI-Powered Personal Finance</title>
-  <meta name="description" content="Query and manage your personal finances with AI. 35 tools for transactions, investments, budgets, goals, and more. Local-first, privacy-first.">
+  <meta name="description" content="Query your personal finances with AI. 17 read-only tools for transactions, investments, budgets, goals, and more. Local-first, privacy-first.">
   <link rel="icon" type="image/png" href="icon.png">
   <link rel="apple-touch-icon" href="icon.png">
   <meta property="og:title" content="Copilot Money MCP Server">
@@ -386,9 +386,9 @@
 
 <!-- Stats -->
 <div class="stats">
-  <div class="stat"><div class="num">35</div><div class="label">AI Tools</div></div>
-  <div class="stat"><div class="num">17</div><div class="label">Read Tools</div></div>
-  <div class="stat"><div class="num">18</div><div class="label">Write Tools</div></div>
+  <div class="stat"><div class="num">17</div><div class="label">AI Tools</div></div>
+  <div class="stat"><div class="num">100%</div><div class="label">Local Reads</div></div>
+  <div class="stat"><div class="num">0</div><div class="label">Third Parties</div></div>
   <div class="stat"><div class="num">100%</div><div class="label">Open Source</div></div>
 </div>
 
@@ -427,7 +427,6 @@
         <span class="step-num">3</span>
         <span class="step-title">Restart Claude Desktop and start asking!</span>
         <p>"How much did I spend on food this month?" — Claude will use your Copilot Money data to answer.</p>
-        <p class="write-note">All 35 tools (read + write) are enabled by default. To run read-only, open Claude Desktop &rarr; Settings &rarr; Extensions &rarr; Copilot Money MCP and toggle off the write tools you don't want.</p>
       </div>
     </div>
 
@@ -443,19 +442,8 @@
         <span class="step-num">2</span>
         <span class="step-title">Add to Codex config</span>
         <p>Edit <code>~/.codex/config.toml</code> (TOML format):</p>
-        <div class="config-grid">
-          <div class="config-variant">
-            <span class="variant-label read">Read-only</span>
-            <div class="code-block"><button class="copy-btn" type="button" aria-label="Copy to clipboard">Copy</button>[mcp_servers.copilot_money]
+        <div class="code-block"><button class="copy-btn" type="button" aria-label="Copy to clipboard">Copy</button>[mcp_servers.copilot_money]
 command = "copilot-money-mcp"</div>
-          </div>
-          <div class="config-variant">
-            <span class="variant-label write">Read + Write</span>
-            <div class="code-block"><button class="copy-btn" type="button" aria-label="Copy to clipboard">Copy</button>[mcp_servers.copilot_money]
-command = "copilot-money-mcp"
-args = ["--write"]</div>
-          </div>
-        </div>
       </div>
       <div class="step">
         <span class="step-num">3</span>
@@ -475,29 +463,13 @@ args = ["--write"]</div>
         <span class="step-num">2</span>
         <span class="step-title">Add to Gemini CLI settings</span>
         <p>Edit <code>~/.gemini/settings.json</code>:</p>
-        <div class="config-grid">
-          <div class="config-variant">
-            <span class="variant-label read">Read-only</span>
-            <div class="code-block"><button class="copy-btn" type="button" aria-label="Copy to clipboard">Copy</button>{
+        <div class="code-block"><button class="copy-btn" type="button" aria-label="Copy to clipboard">Copy</button>{
   "mcpServers": {
     "copilot-money": {
       "command": "copilot-money-mcp"
     }
   }
 }</div>
-          </div>
-          <div class="config-variant">
-            <span class="variant-label write">Read + Write</span>
-            <div class="code-block"><button class="copy-btn" type="button" aria-label="Copy to clipboard">Copy</button>{
-  "mcpServers": {
-    "copilot-money": {
-      "command": "copilot-money-mcp",
-      "args": ["--write"]
-    }
-  }
-}</div>
-          </div>
-        </div>
       </div>
       <div class="step">
         <span class="step-num">3</span>
@@ -517,29 +489,13 @@ args = ["--write"]</div>
         <span class="step-num">2</span>
         <span class="step-title">Add to Cursor config</span>
         <p>Edit <code>~/.cursor/mcp.json</code>:</p>
-        <div class="config-grid">
-          <div class="config-variant">
-            <span class="variant-label read">Read-only</span>
-            <div class="code-block"><button class="copy-btn" type="button" aria-label="Copy to clipboard">Copy</button>{
+        <div class="code-block"><button class="copy-btn" type="button" aria-label="Copy to clipboard">Copy</button>{
   "mcpServers": {
     "copilot-money": {
       "command": "copilot-money-mcp"
     }
   }
 }</div>
-          </div>
-          <div class="config-variant">
-            <span class="variant-label write">Read + Write</span>
-            <div class="code-block"><button class="copy-btn" type="button" aria-label="Copy to clipboard">Copy</button>{
-  "mcpServers": {
-    "copilot-money": {
-      "command": "copilot-money-mcp",
-      "args": ["--write"]
-    }
-  }
-}</div>
-          </div>
-        </div>
       </div>
       <div class="step">
         <span class="step-num">3</span>
@@ -559,10 +515,7 @@ args = ["--write"]</div>
         <span class="step-num">2</span>
         <span class="step-title">Add the server</span>
         <p>VS Code uses a top-level <code>"servers"</code> key and <code>"type": "stdio"</code>:</p>
-        <div class="config-grid">
-          <div class="config-variant">
-            <span class="variant-label read">Read-only</span>
-            <div class="code-block"><button class="copy-btn" type="button" aria-label="Copy to clipboard">Copy</button>{
+        <div class="code-block"><button class="copy-btn" type="button" aria-label="Copy to clipboard">Copy</button>{
   "servers": {
     "copilot-money": {
       "type": "stdio",
@@ -571,20 +524,6 @@ args = ["--write"]</div>
     }
   }
 }</div>
-          </div>
-          <div class="config-variant">
-            <span class="variant-label write">Read + Write</span>
-            <div class="code-block"><button class="copy-btn" type="button" aria-label="Copy to clipboard">Copy</button>{
-  "servers": {
-    "copilot-money": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "copilot-money-mcp", "--write"]
-    }
-  }
-}</div>
-          </div>
-        </div>
       </div>
       <div class="step">
         <span class="step-num">3</span>
@@ -604,29 +543,13 @@ args = ["--write"]</div>
         <span class="step-num">2</span>
         <span class="step-title">Add to Windsurf config</span>
         <p>Edit <code>~/.codeium/windsurf/mcp_config.json</code>:</p>
-        <div class="config-grid">
-          <div class="config-variant">
-            <span class="variant-label read">Read-only</span>
-            <div class="code-block"><button class="copy-btn" type="button" aria-label="Copy to clipboard">Copy</button>{
+        <div class="code-block"><button class="copy-btn" type="button" aria-label="Copy to clipboard">Copy</button>{
   "mcpServers": {
     "copilot-money": {
       "command": "copilot-money-mcp"
     }
   }
 }</div>
-          </div>
-          <div class="config-variant">
-            <span class="variant-label write">Read + Write</span>
-            <div class="code-block"><button class="copy-btn" type="button" aria-label="Copy to clipboard">Copy</button>{
-  "mcpServers": {
-    "copilot-money": {
-      "command": "copilot-money-mcp",
-      "args": ["--write"]
-    }
-  }
-}</div>
-          </div>
-        </div>
       </div>
       <div class="step">
         <span class="step-num">3</span>
@@ -645,21 +568,8 @@ args = ["--write"]</div>
       <div class="step">
         <span class="step-num">2</span>
         <span class="step-title">Add in Cline MCP settings</span>
-        <p>Open Cline sidebar &rarr; MCP Servers &rarr; Add Server. Paste the values into the Command and Args fields.</p>
-        <div class="config-grid">
-          <div class="config-variant">
-            <span class="variant-label read">Read-only</span>
-            <p class="write-note field-label">Command</p>
-            <div class="code-block"><button class="copy-btn" type="button" aria-label="Copy to clipboard">Copy</button>copilot-money-mcp</div>
-          </div>
-          <div class="config-variant">
-            <span class="variant-label write">Read + Write</span>
-            <p class="write-note field-label">Command</p>
-            <div class="code-block"><button class="copy-btn" type="button" aria-label="Copy to clipboard">Copy</button>copilot-money-mcp</div>
-            <p class="write-note field-label">Args</p>
-            <div class="code-block"><button class="copy-btn" type="button" aria-label="Copy to clipboard">Copy</button>--write</div>
-          </div>
-        </div>
+        <p>Open Cline sidebar &rarr; MCP Servers &rarr; Add Server. Set <strong>Command</strong> to:</p>
+        <div class="code-block"><button class="copy-btn" type="button" aria-label="Copy to clipboard">Copy</button>copilot-money-mcp</div>
       </div>
       <div class="step">
         <span class="step-num">3</span>
@@ -674,10 +584,7 @@ args = ["--write"]</div>
         <span class="step-num">1</span>
         <span class="step-title">Add to your client's MCP config</span>
         <p>Using <code>npx</code> means no install step needed — it downloads and runs <code>copilot-money-mcp</code> on demand:</p>
-        <div class="config-grid">
-          <div class="config-variant">
-            <span class="variant-label read">Read-only</span>
-            <div class="code-block"><button class="copy-btn" type="button" aria-label="Copy to clipboard">Copy</button>{
+        <div class="code-block"><button class="copy-btn" type="button" aria-label="Copy to clipboard">Copy</button>{
   "mcpServers": {
     "copilot-money": {
       "command": "npx",
@@ -685,19 +592,6 @@ args = ["--write"]</div>
     }
   }
 }</div>
-          </div>
-          <div class="config-variant">
-            <span class="variant-label write">Read + Write</span>
-            <div class="code-block"><button class="copy-btn" type="button" aria-label="Copy to clipboard">Copy</button>{
-  "mcpServers": {
-    "copilot-money": {
-      "command": "npx",
-      "args": ["-y", "copilot-money-mcp", "--write"]
-    }
-  }
-}</div>
-          </div>
-        </div>
       </div>
       <div class="step">
         <span class="step-num">2</span>
@@ -727,17 +621,6 @@ args = ["--write"]</div>
       </div>
     </div>
 
-    <div class="demo-row reverse">
-      <div class="demo-text">
-        <h3>Organize transactions</h3>
-        <p>"Recategorize this transaction as Groceries" — Edit categories, add tags, review new activity, and manage recurring charges with plain English.</p>
-      </div>
-      <div class="demo-visual">
-        <video src="demos/organize.mp4" width="1112" height="720" autoplay loop muted playsinline preload="metadata" aria-label="Transaction organization demo">
-          <p>Your browser doesn't support HTML video. <a href="demos/organize.mp4">Download the demo</a>.</p>
-        </video>
-      </div>
-    </div>
   </div>
 </section>
 
@@ -745,13 +628,13 @@ args = ["--write"]</div>
 <section id="features">
   <div class="section-label">Features</div>
   <h2>Everything you need</h2>
-  <p class="subtitle">35 tools covering every aspect of your personal finances.</p>
+  <p class="subtitle">17 read-only tools covering every aspect of your personal finances.</p>
 
   <div class="features">
     <div class="feature-card">
       <div class="feature-icon purple">&#128179;</div>
       <h3>Transactions</h3>
-      <p>Query, filter, categorize, tag, and organize transactions. Search by merchant, category, amount, date range, and more.</p>
+      <p>Query and filter transactions by merchant, category, amount, date range, location, and more. Spot refunds, duplicates, and foreign charges.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon green">&#128200;</div>
@@ -776,7 +659,7 @@ args = ["--write"]</div>
     <div class="feature-card">
       <div class="feature-icon orange">&#128274;</div>
       <h3>Privacy First</h3>
-      <p>Reads stay local — zero network. Writes sync via Copilot's own Firestore backend. No servers, no analytics, no data collection. Data you query is shared with your AI provider.</p>
+      <p>Reads are fully local — zero network requests from this server. No servers, no analytics, no data collection. Data you query is shared with your AI provider.</p>
     </div>
   </div>
 </section>
@@ -785,13 +668,12 @@ args = ["--write"]</div>
 <section>
   <div class="privacy-banner">
     <h2>Local-first, no project servers</h2>
-    <p>Reads go straight to your locally cached Copilot Money database — zero network. Writes sync to your own Copilot account via the same Google Firestore backend the app already uses. Nothing is ever sent to us. Note: the AI client you connect (Claude, Cursor, Codex CLI, etc.) is a third party and will see the finance data you query — check its privacy policy.</p>
-    <p style="font-size: 0.85rem; margin-top: 12px;"><strong>Write defaults:</strong> the Claude Desktop <code>.mcpb</code> bundle enables all 35 tools (disable individual write tools from Settings &rarr; Extensions). Every other client's config is read-only by default — add <code>--write</code> to enable.</p>
+    <p>Reads go straight to your locally cached Copilot Money database — zero network requests from this server. Nothing is ever sent to us. Note: the AI client you connect (Claude, Cursor, Codex CLI, etc.) is a third party and will see the finance data you query — check its privacy policy.</p>
     <div class="privacy-checks">
+      <div class="privacy-check"><span class="check">&#10003;</span> Read-only</div>
       <div class="privacy-check"><span class="check">&#10003;</span> No data collection</div>
       <div class="privacy-check"><span class="check">&#10003;</span> No analytics or telemetry</div>
       <div class="privacy-check"><span class="check">&#10003;</span> No project servers</div>
-      <div class="privacy-check"><span class="check">&#10003;</span> Write tools toggleable per-tool</div>
       <div class="privacy-check"><span class="check">&#10003;</span> Open source</div>
     </div>
   </div>

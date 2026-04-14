@@ -97,7 +97,7 @@ function send(proc: ChildProcessWithoutNullStreams, msg: object): void {
 async function startAndInitialize(
   extractDir: string
 ): Promise<{ proc: ChildProcessWithoutNullStreams; initializeResult: JsonRpcResponse }> {
-  const proc = spawn('node', [join(extractDir, 'dist/cli.js'), '--write'], {
+  const proc = spawn('node', [join(extractDir, 'dist/cli.js')], {
     cwd: extractDir,
     env: { ...process.env, NODE_PATH: '' },
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -174,7 +174,8 @@ describe('mcpb bundle', () => {
       const response = await readResponse(proc, 1, 10_000);
       const tools = (response.result as { tools: unknown[] }).tools;
       expect(Array.isArray(tools)).toBe(true);
-      expect(tools.length).toBeGreaterThanOrEqual(35);
+      // Bundled CLI runs read-only; write tools are excluded.
+      expect(tools.length).toBe(17);
     } finally {
       proc.kill('SIGTERM');
     }
