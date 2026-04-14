@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, mock } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { FirestoreClient } from '../../src/core/firestore-client.js';
 import type { FirebaseAuth } from '../../src/core/auth/firebase-auth.js';
 
@@ -38,6 +38,10 @@ describe('FirestoreClient', () => {
     client = new FirestoreClient(mockAuth);
   });
 
+  afterEach(() => {
+    restoreFetch();
+  });
+
   test('sends PATCH request with correct URL and updateMask', async () => {
     mockFetch({
       name: 'projects/copilot-production-22904/databases/(default)/documents/transactions/txn1',
@@ -54,7 +58,6 @@ describe('FirestoreClient', () => {
       '/v1/projects/copilot-production-22904/databases/(default)/documents/transactions/txn1'
     );
     expect(url.searchParams.getAll('updateMask.fieldPaths')).toEqual(['category_id']);
-    restoreFetch();
   });
 
   test('sends Authorization header with Bearer token', async () => {
@@ -64,7 +67,6 @@ describe('FirestoreClient', () => {
     ]);
     const headers = fetchCalls[0].options.headers as Record<string, string>;
     expect(headers['Authorization']).toBe('Bearer test-id-token');
-    restoreFetch();
   });
 
   test('sends correct JSON body with fields', async () => {
@@ -77,7 +79,6 @@ describe('FirestoreClient', () => {
     );
     const body = JSON.parse(fetchCalls[0].options.body as string);
     expect(body).toEqual({ fields: { category_id: { stringValue: 'new_cat' } } });
-    restoreFetch();
   });
 
   test('supports multiple updateMask fields', async () => {
@@ -93,7 +94,6 @@ describe('FirestoreClient', () => {
       'category_id',
       'user_reviewed',
     ]);
-    restoreFetch();
   });
 
   test('throws on non-OK response', async () => {
@@ -103,7 +103,6 @@ describe('FirestoreClient', () => {
         'category_id',
       ])
     ).rejects.toThrow('Firestore update failed');
-    restoreFetch();
   });
 
   test('throws on permission denied', async () => {
@@ -116,7 +115,6 @@ describe('FirestoreClient', () => {
         'category_id',
       ])
     ).rejects.toThrow('Firestore update failed');
-    restoreFetch();
   });
 
   // --- getUserId / requireUserId ---
@@ -138,7 +136,6 @@ describe('FirestoreClient', () => {
     mockFetch({});
     const uid = await client.requireUserId();
     expect(uid).toBe('user123');
-    restoreFetch();
   });
 
   test('requireUserId throws when userId is null after exchange', async () => {
@@ -148,7 +145,6 @@ describe('FirestoreClient', () => {
     const c = new FirestoreClient(badAuth);
     mockFetch({});
     await expect(c.requireUserId()).rejects.toThrow('Firebase user ID unavailable');
-    restoreFetch();
   });
 
   // --- createDocument ---
@@ -170,7 +166,6 @@ describe('FirestoreClient', () => {
 
     const body = JSON.parse(fetchCalls[0].options.body as string);
     expect(body).toEqual({ fields: { name: { stringValue: 'My Tag' } } });
-    restoreFetch();
   });
 
   test('createDocument without documentId uses auto-generated ID', async () => {
@@ -184,7 +179,6 @@ describe('FirestoreClient', () => {
     expect(returnedId).toBe('AbCdEfGh12345678');
     const url = new URL(fetchCalls[0].url);
     expect(url.searchParams.has('documentId')).toBe(false);
-    restoreFetch();
   });
 
   test('createDocument sends correct JSON body', async () => {
@@ -203,7 +197,6 @@ describe('FirestoreClient', () => {
         excluded: { booleanValue: false },
       },
     });
-    restoreFetch();
   });
 
   test('createDocument throws on non-OK response', async () => {
@@ -211,7 +204,6 @@ describe('FirestoreClient', () => {
     await expect(
       client.createDocument('users/u1/tags', 'dup', { name: { stringValue: 'Dup' } })
     ).rejects.toThrow('Firestore create failed');
-    restoreFetch();
   });
 
   // --- getDocument ---
@@ -233,7 +225,6 @@ describe('FirestoreClient', () => {
       name: { stringValue: 'Food' },
       excluded: { booleanValue: false },
     });
-    restoreFetch();
   });
 
   test('getDocument returns empty object when no fields', async () => {
@@ -242,7 +233,6 @@ describe('FirestoreClient', () => {
     });
     const fields = await client.getDocument('users/u1/categories', 'cat1');
     expect(fields).toEqual({});
-    restoreFetch();
   });
 
   test('getDocument throws on non-OK response', async () => {
@@ -250,7 +240,6 @@ describe('FirestoreClient', () => {
     await expect(client.getDocument('users/u1/categories', 'missing')).rejects.toThrow(
       'Firestore get failed'
     );
-    restoreFetch();
   });
 
   // --- deleteDocument ---
@@ -263,7 +252,6 @@ describe('FirestoreClient', () => {
     expect(fetchCalls[0].options.method).toBe('DELETE');
     const url = new URL(fetchCalls[0].url);
     expect(url.pathname).toContain('/users/u1/tags/my_tag');
-    restoreFetch();
   });
 
   test('deleteDocument sends Authorization header', async () => {
@@ -271,7 +259,6 @@ describe('FirestoreClient', () => {
     await client.deleteDocument('users/u1/tags', 'my_tag');
     const headers = fetchCalls[0].options.headers as Record<string, string>;
     expect(headers['Authorization']).toBe('Bearer test-id-token');
-    restoreFetch();
   });
 
   test('deleteDocument throws on non-OK response', async () => {
@@ -279,6 +266,5 @@ describe('FirestoreClient', () => {
     await expect(client.deleteDocument('users/u1/tags', 'missing')).rejects.toThrow(
       'Firestore delete failed'
     );
-    restoreFetch();
   });
 });

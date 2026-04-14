@@ -329,66 +329,55 @@ describe('CopilotDatabase', () => {
       }
     });
 
-    test('uses custom TTL from environment variable', async () => {
+    test('uses custom TTL from environment variable', () => {
       process.env.COPILOT_CACHE_TTL_MINUTES = '10';
 
-      // Create a new database to pick up the env var
       const testDb = new CopilotDatabase('/fake/path');
-      (testDb as any)._transactions = [...mockTransactions];
-      (testDb as any)._accounts = [...mockAccounts];
-      (testDb as any)._recurring = [...mockRecurring];
-      (testDb as any)._budgets = [];
-      (testDb as any)._goals = [];
-      (testDb as any)._goalHistory = [];
-      (testDb as any)._investmentPrices = [];
-      (testDb as any)._investmentSplits = [];
-      (testDb as any)._items = [];
-      (testDb as any)._userCategories = [];
-      (testDb as any)._userAccounts = [];
+      // Just-loaded cache is fresh under a 10-minute TTL.
       (testDb as any)._cacheLoadedAt = Date.now();
+      expect((testDb as any).isCacheStale()).toBe(false);
 
-      // The cache should not be stale since we just set cacheLoadedAt
-      const cacheInfo = await testDb.getCacheInfo();
-      expect(cacheInfo).toBeDefined();
-      expect(cacheInfo?.transaction_count).toBe(3);
+      // Cache loaded 9 minutes ago is still fresh; 11 minutes ago is stale.
+      (testDb as any)._cacheLoadedAt = Date.now() - 9 * 60 * 1000;
+      expect((testDb as any).isCacheStale()).toBe(false);
+      (testDb as any)._cacheLoadedAt = Date.now() - 11 * 60 * 1000;
+      expect((testDb as any).isCacheStale()).toBe(true);
     });
 
-    test('disables caching when TTL is 0', async () => {
+    test('disables caching when TTL is 0', () => {
       process.env.COPILOT_CACHE_TTL_MINUTES = '0';
 
-      // Create a new database to pick up the env var
       const testDb = new CopilotDatabase('/fake/path');
-      (testDb as any)._transactions = [...mockTransactions];
-      (testDb as any)._accounts = [...mockAccounts];
-      (testDb as any)._recurring = [...mockRecurring];
-      (testDb as any)._budgets = [];
-      (testDb as any)._goals = [];
-      (testDb as any)._goalHistory = [];
-      (testDb as any)._investmentPrices = [];
-      (testDb as any)._investmentSplits = [];
-      (testDb as any)._items = [];
-      (testDb as any)._userCategories = [];
-      (testDb as any)._userAccounts = [];
+      // Even with a freshly-loaded cache, TTL=0 means always stale.
       (testDb as any)._cacheLoadedAt = Date.now();
-
-      // With TTL=0, isCacheStale should always return true
-      // Which means getCacheInfo should trigger a reload attempt
-      // But since we have fake path, it will fail gracefully
-      const cacheInfo = await testDb.getCacheInfo();
-      expect(cacheInfo).toBeDefined();
+      expect((testDb as any).isCacheStale()).toBe(true);
     });
 
-    test('handles invalid TTL value gracefully', async () => {
+    test('falls back to default TTL for invalid env value', () => {
       process.env.COPILOT_CACHE_TTL_MINUTES = 'not-a-number';
 
-      // Should fall back to default TTL
       const testDb = new CopilotDatabase('/fake/path');
-      (testDb as any)._transactions = [...mockTransactions];
-      (testDb as any)._accounts = [...mockAccounts];
-      (testDb as any)._cacheLoadedAt = Date.now();
+      // Default TTL is 5 minutes; 4 min old is fresh, 6 min old is stale.
+      (testDb as any)._cacheLoadedAt = Date.now() - 4 * 60 * 1000;
+      expect((testDb as any).isCacheStale()).toBe(false);
+      (testDb as any)._cacheLoadedAt = Date.now() - 6 * 60 * 1000;
+      expect((testDb as any).isCacheStale()).toBe(true);
+    });
 
-      const cacheInfo = await testDb.getCacheInfo();
-      expect(cacheInfo).toBeDefined();
+    test('falls back to default TTL for negative env value', () => {
+      process.env.COPILOT_CACHE_TTL_MINUTES = '-5';
+
+      const testDb = new CopilotDatabase('/fake/path');
+      (testDb as any)._cacheLoadedAt = Date.now() - 4 * 60 * 1000;
+      expect((testDb as any).isCacheStale()).toBe(false);
+      (testDb as any)._cacheLoadedAt = Date.now() - 6 * 60 * 1000;
+      expect((testDb as any).isCacheStale()).toBe(true);
+    });
+
+    test('is stale when cache has never been loaded', () => {
+      const testDb = new CopilotDatabase('/fake/path');
+      expect((testDb as any)._cacheLoadedAt).toBeNull();
+      expect((testDb as any).isCacheStale()).toBe(true);
     });
   });
 

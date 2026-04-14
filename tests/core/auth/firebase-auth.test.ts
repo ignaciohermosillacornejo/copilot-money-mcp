@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, mock } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { FirebaseAuth } from '../../../src/core/auth/firebase-auth.js';
 
 // Mock token extractor
@@ -35,6 +35,10 @@ describe('FirebaseAuth', () => {
     auth = new FirebaseAuth(mockExtractor);
   });
 
+  afterEach(() => {
+    restoreFetch();
+  });
+
   test('exchanges refresh token for ID token', async () => {
     mockFetch({
       id_token: 'fake-id-token',
@@ -49,7 +53,6 @@ describe('FirebaseAuth', () => {
     expect(mockExtractor).toHaveBeenCalledTimes(1);
     expect(fetchCalls).toHaveLength(1);
     expect(fetchCalls[0].url).toContain('securetoken.googleapis.com');
-    restoreFetch();
   });
 
   test('caches token on subsequent calls', async () => {
@@ -67,7 +70,6 @@ describe('FirebaseAuth', () => {
     expect(token2).toBe('cached-token');
     expect(mockExtractor).toHaveBeenCalledTimes(1);
     expect(fetchCalls).toHaveLength(1);
-    restoreFetch();
   });
 
   test('returns userId from token exchange', async () => {
@@ -81,13 +83,11 @@ describe('FirebaseAuth', () => {
 
     await auth.getIdToken();
     expect(auth.getUserId()).toBe('user123');
-    restoreFetch();
   });
 
   test('throws on failed token exchange', async () => {
     mockFetch({ error: { message: 'INVALID_REFRESH_TOKEN' } }, 400);
     await expect(auth.getIdToken()).rejects.toThrow('Firebase token exchange failed');
-    restoreFetch();
   });
 
   test('refreshes expired token', async () => {
@@ -113,6 +113,5 @@ describe('FirebaseAuth', () => {
     const token2 = await auth.getIdToken();
     expect(token2).toBe('refreshed-token');
     expect(fetchCalls).toHaveLength(2);
-    restoreFetch();
   });
 });

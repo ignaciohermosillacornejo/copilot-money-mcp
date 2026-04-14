@@ -74,9 +74,8 @@ describe('getCategory', () => {
 
   test('is case-insensitive', () => {
     const category = getCategory('FOOD_AND_DRINK');
-    // May or may not match depending on implementation
-    // Just check it doesn't throw
-    expect(category === undefined || category.id === 'food_and_drink').toBe(true);
+    expect(category).toBeDefined();
+    expect(category?.id).toBe('food_and_drink');
   });
 });
 

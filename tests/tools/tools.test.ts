@@ -3049,9 +3049,8 @@ describe('getBalanceHistory', () => {
 
   test('enriches with account name', async () => {
     const result = await tools.getBalanceHistory({ granularity: 'daily', account_id: 'acc-1' });
-    if (result.count > 0) {
-      expect(result.balance_history[0]?.account_name).toBe('Checking');
-    }
+    expect(result.count).toBeGreaterThan(0);
+    expect(result.balance_history[0]?.account_name).toBe('Checking');
   });
 });
 
@@ -3106,12 +3105,11 @@ describe('getInvestmentPerformance', () => {
 
   test('enriches with ticker_symbol from security map', async () => {
     const result = await tools.getInvestmentPerformance();
-    if (result.count > 0) {
-      const hasEnrichedField = result.performance.some(
-        (p) => p.ticker_symbol !== undefined || p.name !== undefined
-      );
-      expect(hasEnrichedField).toBe(true);
-    }
+    expect(result.count).toBeGreaterThan(0);
+    const hasEnrichedField = result.performance.some(
+      (p) => p.ticker_symbol !== undefined || p.name !== undefined
+    );
+    expect(hasEnrichedField).toBe(true);
   });
 
   test('paginates with limit and offset', async () => {
@@ -3193,9 +3191,8 @@ describe('getTwrReturns', () => {
 
   test('enriches with ticker_symbol from security map', async () => {
     const result = await tools.getTwrReturns();
-    if (result.count > 0) {
-      expect(result.twr_returns[0]).toHaveProperty('ticker_symbol');
-    }
+    expect(result.count).toBeGreaterThan(0);
+    expect(result.twr_returns[0]).toHaveProperty('ticker_symbol');
   });
 
   test('paginates with limit', async () => {
@@ -3344,10 +3341,9 @@ describe('getGoalHistory', () => {
 
   test('enriches with goal_name', async () => {
     const result = await tools.getGoalHistory({ goal_id: 'goal-1' });
-    if (result.count > 0) {
-      expect(result.goal_history[0]).toHaveProperty('goal_name');
-      expect(result.goal_history[0]?.goal_name).toBe('Emergency Fund');
-    }
+    expect(result.count).toBeGreaterThan(0);
+    expect(result.goal_history[0]).toHaveProperty('goal_name');
+    expect(result.goal_history[0]?.goal_name).toBe('Emergency Fund');
   });
 
   test('paginates with limit and offset', async () => {

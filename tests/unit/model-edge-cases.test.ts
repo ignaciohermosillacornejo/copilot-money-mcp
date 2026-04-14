@@ -162,17 +162,6 @@ describe('investment-split.ts - formatSplitDate edge cases', () => {
     expect(formatted).toContain('2099');
     expect(formatted).toContain('December');
   });
-
-  test('handles date with trailing time component', () => {
-    const split: InvestmentSplit = {
-      split_id: 'split_1',
-      // Note: schema would reject this format, but testing function directly
-      split_date: '2020-08-31',
-    };
-
-    const formatted = formatSplitDate(split);
-    expect(formatted).toBeDefined();
-  });
 });
 
 describe('investment-split.ts - getSplitMultiplier additional cases', () => {

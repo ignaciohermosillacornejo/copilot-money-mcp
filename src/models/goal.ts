@@ -89,7 +89,7 @@ export function getGoalCurrentAmount(_goal: Goal): number | undefined {
  */
 export function getGoalProgress(goal: Goal, currentAmount?: number): number | undefined {
   const target = goal.savings?.target_amount;
-  if (!target || !currentAmount) {
+  if (!target || currentAmount == null) {
     return undefined;
   }
   return Math.min(100, (currentAmount / target) * 100);

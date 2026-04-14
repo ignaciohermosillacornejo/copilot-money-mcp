@@ -7,7 +7,6 @@ import {
   getRecurringDisplayName,
   KNOWN_FREQUENCIES,
   type Recurring,
-  type KnownFrequency,
 } from '../../src/models/recurring';
 
 describe('recurring.ts', () => {
@@ -149,17 +148,6 @@ describe('recurring.ts', () => {
 
     test('has expected number of frequency values', () => {
       expect(KNOWN_FREQUENCIES.length).toBe(9);
-    });
-  });
-
-  describe('KnownFrequency type', () => {
-    test('allows assignment of valid frequencies', () => {
-      const freq1: KnownFrequency = 'daily';
-      const freq2: KnownFrequency = 'monthly';
-      const freq3: KnownFrequency = 'yearly';
-      expect(freq1).toBe('daily');
-      expect(freq2).toBe('monthly');
-      expect(freq3).toBe('yearly');
     });
   });
 });
