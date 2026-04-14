@@ -1,11 +1,3 @@
-/**
- * Additional coverage tests for src/utils/categories.ts
- *
- * This file specifically tests uncovered branches:
- * - Line 925: lowercase category ID matching
- * - Lines 931-934: snake_case to Title Case conversion for unknown categories
- */
-
 import { describe, expect, test } from 'bun:test';
 import {
   getCategoryName,

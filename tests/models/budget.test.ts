@@ -1,8 +1,3 @@
-/**
- * Tests for budget.ts to improve coverage.
- * Specifically tests the getBudgetDisplayName helper function.
- */
-
 import { describe, expect, it } from 'bun:test';
 import { getBudgetDisplayName, type Budget } from '../../src/models/budget';
 
