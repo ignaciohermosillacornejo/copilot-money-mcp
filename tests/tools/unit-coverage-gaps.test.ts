@@ -385,9 +385,12 @@ describe('write-tool edge cases', () => {
   });
 
   test('createTag replaces each stripped char with its own underscore (no collapsing)', async () => {
-    // 'café & bar': 'é' → '_', ' ' → '_', '&' → '' (or '_'), ' ' → '_'.
-    // The contract is that consecutive substitutions remain distinct
-    // underscores rather than being collapsed into one.
+    // 'café & bar' is transformed in two steps:
+    //   1. spaces → '_': 'café_&_bar'
+    //   2. strip non-[a-z0-9_-]: 'é' and '&' dropped → 'caf__bar'
+    // The two underscores come from the spaces flanking '&' (step 1);
+    // 'é' itself is stripped in step 2, not replaced with an underscore.
+    // The contract is that consecutive underscores are NOT collapsed.
     const result = await tools.createTag({ name: 'caf\u00e9 & bar' });
     expect(result.tag_id).toBe('caf__bar');
   });
