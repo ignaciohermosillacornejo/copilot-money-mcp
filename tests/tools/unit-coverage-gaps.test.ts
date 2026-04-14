@@ -384,6 +384,14 @@ describe('write-tool edge cases', () => {
     expect(result.name).toBe('caf\u00e9 latte');
   });
 
+  test('createTag replaces each stripped char with its own underscore (no collapsing)', async () => {
+    // 'café & bar': 'é' → '_', ' ' → '_', '&' → '' (or '_'), ' ' → '_'.
+    // The contract is that consecutive substitutions remain distinct
+    // underscores rather than being collapsed into one.
+    const result = await tools.createTag({ name: 'caf\u00e9 & bar' });
+    expect(result.tag_id).toBe('caf__bar');
+  });
+
   test('createBudget for duplicate category throws', async () => {
     (db as any)._budgets = [
       { budget_id: 'b1', category_id: 'food_and_drink', amount: 200, period: 'monthly' },
