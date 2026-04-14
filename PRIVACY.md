@@ -14,6 +14,21 @@ The server operates in two modes:
 - **Read-only mode (default):** Reads data exclusively from your local Copilot Money database cache. No network requests are made.
 - **Write mode (opt-in, `--write` flag):** Adds the ability to modify your Copilot Money data. Because Copilot Money is backed by Google Firebase/Firestore, write operations require authenticated network requests to Firebase/Firestore on your behalf. See the [Write Mode and Network Access](#write-mode-and-network-access) section below.
 
+## Important: Data Shared With AI Providers
+
+**The MCP server itself is local, but the AI assistant you connect it to is not.** When you use this server with a hosted AI model (Claude Desktop, ChatGPT, Gemini, Cursor, or any other MCP-compatible client that relies on a cloud-hosted model), the tool responses containing your Copilot Money data — transactions, balances, account names, merchants, categories, holdings, and so on — are sent to that AI provider so the model can answer your question.
+
+**That means your financial data will leave your machine and be transmitted to a third-party AI provider**, such as:
+
+- **Anthropic** (if you use Claude Desktop or any Claude-powered client)
+- **OpenAI** (if you use ChatGPT, GPT-based tools, or Cursor with GPT models)
+- **Google** (if you use Gemini or any Google-hosted model)
+- **Any other AI provider** whose model your MCP client connects to
+
+Each provider has its own privacy policy, data retention, and training-data practices, which apply to this data once it is transmitted. This project has no control over how those providers handle your data.
+
+**By using this MCP server with a hosted AI model, you are knowingly and voluntarily sharing your financial data with the provider of that model. You must be comfortable with that trade-off.** If you are not, do not use this tool — consider waiting for an official Copilot Money integration, or running a fully local model that does not transmit data off your machine.
+
 ## Data Collection
 
 **We do not collect, store, or transmit any of your data to our servers or any third party.** The server has no backend, no analytics, and no telemetry.
@@ -63,12 +78,12 @@ All processing happens in memory on your local machine. No data is persisted out
 
 ## Data Sharing
 
-**We do not share your data with anyone.**
+**This project does not collect or share your data with anyone.** However, please read the section above on [Data Shared With AI Providers](#important-data-shared-with-ai-providers) — the AI model you connect this server to will receive your financial data as part of normal MCP tool-call responses.
 
 - No data is sent to our servers (we don't have servers)
-- No data is sent to third parties for analytics, advertising, or tracking
-- No data is sent to Anthropic (beyond what Claude Desktop processes locally)
-- No analytics or crash reports are transmitted
+- No data is sent to third parties for analytics, advertising, or tracking by this project
+- No analytics or crash reports are transmitted by this project
+- **Your AI provider (Anthropic, OpenAI, Google, or whichever model you use) will receive your Copilot Money data** as part of answering your queries — governed by that provider's privacy policy, not this project's
 
 In opt-in write mode, requested changes are sent directly from your machine to Google Firebase/Firestore using your own Copilot Money credentials. This is the same backend Copilot Money itself uses to persist your data — no intermediary server operated by this project is involved. This traffic is governed by Google's and Copilot Money's own privacy policies.
 
@@ -116,18 +131,19 @@ Network traffic in write mode is subject to:
 - [Google's Privacy Policy](https://policies.google.com/privacy) (as Firebase/Firestore is operated by Google)
 - Copilot Money's own terms and privacy policy (as you are modifying data on their backend)
 
-## Claude Desktop Integration
+## AI Client Integration
 
-When integrated with Claude Desktop:
-- Queries are processed by Claude via MCP protocol
-- Claude may temporarily process your financial data to answer questions
-- This processing happens according to [Anthropic's Privacy Policy](https://www.anthropic.com/privacy)
-- You control what queries are sent to Claude
+When integrated with an AI client such as Claude Desktop, ChatGPT, Cursor, or Gemini:
+- Your queries and the tool responses produced by this server are processed by the underlying AI model
+- To answer your questions, the AI model will see the Copilot Money data returned by tool calls (transactions, balances, merchants, categories, holdings, etc.)
+- This data is transmitted to and processed by the AI provider (Anthropic, OpenAI, Google, or another third party, depending on which model you use) according to **that provider's** privacy policy and data retention terms — not this project's
+- Relevant policies include [Anthropic's Privacy Policy](https://www.anthropic.com/privacy), [OpenAI's Privacy Policy](https://openai.com/policies/privacy-policy), and [Google's Privacy Policy](https://policies.google.com/privacy)
+- You control what queries you send and which AI client you connect to this server
 
 ## Third-Party Services
 
 This server does not integrate with any third-party services beyond:
-- **Claude Desktop** (optional, required for AI-powered queries)
+- **Your MCP client's AI provider** (optional but required for AI-powered queries) — e.g., Anthropic (Claude Desktop), OpenAI (ChatGPT, Cursor with GPT), Google (Gemini). Your Copilot Money data is shared with this provider as part of normal MCP tool-call responses. See [Data Shared With AI Providers](#important-data-shared-with-ai-providers).
 - **Copilot Money** (reads the local database created by the app)
 - **Google Firebase / Firestore** (only in opt-in write mode; this is Copilot Money's own backend, accessed directly with your own Copilot Money credentials)
 
@@ -155,4 +171,8 @@ For privacy-related questions or concerns:
 
 ## Summary
 
-**In short:** This server is a local-first tool that reads your Copilot Money data to enable AI-powered queries via Claude Desktop. In its default read-only mode, your data never leaves your machine. If you explicitly opt in to write mode with the `--write` flag, the server can additionally apply your requested changes by talking directly to Copilot Money's own Firebase/Firestore backend using your own credentials. We never collect, store, or transmit your financial information to servers operated by this project — we don't have any.
+**In short:** This server is a local-first tool that reads your Copilot Money data to enable AI-powered queries via an MCP client such as Claude Desktop, ChatGPT, Cursor, or Gemini. This project never collects, stores, or transmits your financial information to servers operated by this project — we don't have any.
+
+**However, the AI assistant you connect this server to will see your Copilot Money data** in order to answer your questions, and that data will be transmitted to the corresponding AI provider (Anthropic, OpenAI, Google, or another third party) according to that provider's privacy policy. By using this MCP server with a hosted AI model, you knowingly accept sharing your financial data with that provider. If you are not comfortable with that, do not use this tool.
+
+If you explicitly opt in to write mode with the `--write` flag, the server can additionally apply your requested changes by talking directly to Copilot Money's own Firebase/Firestore backend using your own credentials.

@@ -33,6 +33,11 @@ We never collect, store, or transmit your data to any server operated by this pr
 - In opt-in write mode, requests go directly from your machine to Copilot Money's own Firebase/Firestore backend using your own credentials — never through any third-party service
 - Open source — verify the code yourself
 
+> [!IMPORTANT]
+> **Heads up about AI providers.** While this server itself runs locally and never sends your data to any server operated by this project, **the AI assistant you connect it to (Claude, ChatGPT, Gemini, etc.) will see your Copilot Money data** as part of answering your questions. That means your financial data will be transmitted to and processed by the provider of whichever model you choose — **Anthropic, OpenAI, Google, or another third party** — subject to that provider's own privacy policy and data retention terms.
+>
+> **By using this MCP server with a hosted AI model, you are knowingly sharing your financial data with that AI provider.** Only use this tool if you are comfortable with that trade-off. If you are not, consider waiting for an official Copilot Money integration or using a fully local model.
+
 ## Quick Start
 
 ### Prerequisites
