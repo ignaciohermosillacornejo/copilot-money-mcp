@@ -28,7 +28,7 @@ An [MCP](https://modelcontextprotocol.io/) server that gives AI assistants acces
 Organizing transactions with natural language — categorize, tag, and clean up your feed in one pass:
 
 <p align="center">
-  <img src="docs/demos/organize.gif" alt="Organizing transactions with natural language" width="720" />
+  <img src="https://github.com/user-attachments/assets/3d652c74-2431-4e76-b77c-165cf5b8c6a8" alt="Organizing transactions with natural language" width="720" />
 </p>
 
 ## Privacy First
