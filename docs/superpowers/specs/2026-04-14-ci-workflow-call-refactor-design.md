@@ -111,7 +111,7 @@ push main (package.json changed)
 2. **`release`** — `needs: detect-version`, `if: needs.detect-version.outputs.changed == 'true' && github.actor == 'ignaciohermosillacornejo'`, `permissions: contents: write`. A `uses: ./.github/workflows/build-mcpb.yml` call with:
    ```yaml
    with:
-     version:    ${{ needs.detect-version.outputs.version }}
+     version:    ${{ needs.detect-version.outputs.current }}
      target_sha: ${{ github.sha }}
      dry_run:    false
    ```
