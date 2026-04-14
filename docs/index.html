@@ -156,11 +156,6 @@
     .demo-visual img, .demo-visual video {
       width: 100%; height: 100%; object-fit: cover;
     }
-    .demo-visual .placeholder {
-      color: var(--text-muted); font-size: 0.85rem;
-      text-align: center; padding: 24px;
-    }
-    .demo-visual .placeholder .icon { font-size: 2rem; margin-bottom: 8px; display: block; }
 
     /* --- Feature Grid --- */
     .features {
@@ -700,7 +695,9 @@ args = ["--write"]</div>
         <p>"How much did I spend on groceries last month?" — Get instant breakdowns by category, merchant, or time period. Spot trends and outliers effortlessly.</p>
       </div>
       <div class="demo-visual">
-        <video src="demos/spending.mp4" autoplay loop muted playsinline preload="metadata" aria-label="Spending analysis demo"></video>
+        <video src="demos/spending.mp4" width="1156" height="720" autoplay loop muted playsinline preload="metadata" aria-label="Spending analysis demo">
+          <p>Your browser doesn't support HTML video. <a href="demos/spending.mp4">Download the demo</a>.</p>
+        </video>
       </div>
     </div>
 
@@ -710,7 +707,9 @@ args = ["--write"]</div>
         <p>"Recategorize this transaction as Groceries" — Edit categories, add tags, review new activity, and manage recurring charges with plain English.</p>
       </div>
       <div class="demo-visual">
-        <video src="demos/organize.mp4" autoplay loop muted playsinline preload="metadata" aria-label="Transaction organization demo"></video>
+        <video src="demos/organize.mp4" width="1112" height="720" autoplay loop muted playsinline preload="metadata" aria-label="Transaction organization demo">
+          <p>Your browser doesn't support HTML video. <a href="demos/organize.mp4">Download the demo</a>.</p>
+        </video>
       </div>
     </div>
   </div>
