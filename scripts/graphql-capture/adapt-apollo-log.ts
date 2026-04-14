@@ -18,12 +18,17 @@ interface LinkLevelEntry {
 }
 
 interface OperationEntry {
-  id: string;
+  id?: string;
   operationName: string;
-  operationType: 'query' | 'mutation' | 'subscription';
+  // Query captures use `operationType`, mutation captures use `type`.
+  operationType?: 'query' | 'mutation' | 'subscription';
+  type?: 'query' | 'mutation' | 'subscription';
   variables: Record<string, unknown>;
   query: string;
-  response: { data: unknown; loading?: boolean; errors?: unknown };
+  // Query captures use `response.data`, mutation captures put `data` at top level.
+  response?: { data: unknown; loading?: boolean; errors?: unknown };
+  data?: unknown;
+  errors?: unknown;
 }
 
 interface ApolloCapture {
@@ -160,18 +165,25 @@ export async function adaptApolloCapture(inputPath: string, outputPath: string):
 
   if (capture.operations?.length) {
     for (const e of capture.operations) {
-      const kind = e.operationType === 'mutation' ? 'mutation' : 'query';
-      entries.push(
-        toRawEntryVerbatim(
-          e.operationName,
-          kind,
-          e.variables,
-          e.query,
-          e.response?.data,
-          capture.capturedAt,
-        ),
-      );
-      verbatim++;
+      const opType = e.operationType ?? e.type;
+      const kind = opType === 'mutation' ? 'mutation' : 'query';
+      const data = e.response?.data ?? e.data;
+      if (e.query && e.query.length > 10) {
+        entries.push(
+          toRawEntryVerbatim(
+            e.operationName,
+            kind,
+            e.variables,
+            e.query,
+            data,
+            capture.capturedAt,
+          ),
+        );
+        verbatim++;
+      } else {
+        entries.push(toRawEntry(e.operationName, kind, e.variables, data, capture.capturedAt));
+        inferred++;
+      }
     }
   }
 
