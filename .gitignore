@@ -24,6 +24,10 @@ dist/
 *.mcpb
 .mcpb-staging/
 
+# Claude Code local state
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
+
 # TypeScript
 *.tsbuildinfo
 
