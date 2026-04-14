@@ -94,11 +94,41 @@ function send(proc: ChildProcessWithoutNullStreams, msg: object): void {
   proc.stdin.write(JSON.stringify(msg) + '\n');
 }
 
+async function startAndInitialize(
+  extractDir: string
+): Promise<{ proc: ChildProcessWithoutNullStreams; initializeResult: JsonRpcResponse }> {
+  const proc = spawn('node', [join(extractDir, 'dist/cli.js'), '--write'], {
+    cwd: extractDir,
+    env: { ...process.env, NODE_PATH: '' },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  send(proc, {
+    jsonrpc: '2.0',
+    id: 0,
+    method: 'initialize',
+    params: {
+      protocolVersion: '2025-11-25',
+      capabilities: {},
+      clientInfo: { name: 'mcpb-regression-test', version: '0.0.0' },
+    },
+  });
+  const initializeResult = await readResponse(proc, 0, 10_000);
+  return { proc, initializeResult };
+}
+
 describe('mcpb bundle', () => {
   let extractDir: string;
   let bundledVersion: string;
 
   beforeAll(() => {
+    // `unzip` is used to extract the bundle the way Claude Desktop does.
+    // Pre-flight so the failure is clear on minimal images (e.g. Alpine).
+    try {
+      execSync('unzip -v', { stdio: 'ignore' });
+    } catch {
+      throw new Error('unzip binary is required to run this test');
+    }
+
     execSync('bun run pack:mcpb', { cwd: repoRoot, stdio: 'inherit' });
     if (!existsSync(bundlePath)) {
       throw new Error(`pack:mcpb did not produce a bundle at ${bundlePath}`);
@@ -119,28 +149,10 @@ describe('mcpb bundle', () => {
   });
 
   test('server starts and responds to initialize with matching version', async () => {
-    const proc = spawn('node', [join(extractDir, 'dist/cli.js'), '--write'], {
-      cwd: extractDir,
-      env: { ...process.env, NODE_PATH: '' },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
+    const { proc, initializeResult } = await startAndInitialize(extractDir);
     try {
-      send(proc, {
-        jsonrpc: '2.0',
-        id: 0,
-        method: 'initialize',
-        params: {
-          protocolVersion: '2025-11-25',
-          capabilities: {},
-          clientInfo: { name: 'mcpb-regression-test', version: '0.0.0' },
-        },
-      });
-
-      const response = await readResponse(proc, 0, 10_000);
-      expect(response.error).toBeUndefined();
-      expect(response.result).toBeDefined();
-      const result = response.result as { serverInfo: { name: string; version: string } };
+      expect(initializeResult.error).toBeUndefined();
+      const result = initializeResult.result as { serverInfo: { name: string; version: string } };
       expect(result.serverInfo.name).toBe('copilot-money-mcp');
       expect(result.serverInfo.version).toBe(bundledVersion);
     } finally {
@@ -149,27 +161,10 @@ describe('mcpb bundle', () => {
   }, 20_000);
 
   test('server advertises the expected number of tools', async () => {
-    const proc = spawn('node', [join(extractDir, 'dist/cli.js'), '--write'], {
-      cwd: extractDir,
-      env: { ...process.env, NODE_PATH: '' },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
+    const { proc } = await startAndInitialize(extractDir);
     try {
-      send(proc, {
-        jsonrpc: '2.0',
-        id: 0,
-        method: 'initialize',
-        params: {
-          protocolVersion: '2025-11-25',
-          capabilities: {},
-          clientInfo: { name: 'mcpb-regression-test', version: '0.0.0' },
-        },
-      });
-      await readResponse(proc, 0, 10_000);
       send(proc, { jsonrpc: '2.0', method: 'notifications/initialized' });
       send(proc, { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
-
       const response = await readResponse(proc, 1, 10_000);
       const tools = (response.result as { tools: unknown[] }).tools;
       expect(Array.isArray(tools)).toBe(true);
