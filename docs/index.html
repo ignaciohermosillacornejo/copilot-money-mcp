@@ -163,8 +163,6 @@
       display: grid; grid-template-columns: 1fr 1fr; gap: 48px;
       align-items: center;
     }
-    .demo-row.reverse { direction: rtl; }
-    .demo-row.reverse > * { direction: ltr; }
     .demo-text h3 { font-size: 1.3rem; font-weight: 700; margin-bottom: 10px; }
     .demo-text p { color: var(--text-muted); font-size: 0.95rem; }
     .demo-visual {
@@ -258,34 +256,6 @@
     }
     .code-block .copy-btn:hover { color: var(--text); border-color: var(--text-muted); }
     .code-block .copy-btn.copied { color: var(--green); border-color: var(--green); }
-    .config-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      margin-top: 14px;
-      padding-left: 36px;
-    }
-    .config-variant { min-width: 0; }
-    .config-variant .code-block { margin-top: 6px; }
-    @media (max-width: 768px) {
-      .config-grid { grid-template-columns: 1fr; padding-left: 0; }
-    }
-    .variant-label {
-      display: inline-block; font-size: 0.7rem; font-weight: 700;
-      padding: 3px 10px; border-radius: 12px;
-      text-transform: uppercase; letter-spacing: 0.5px;
-    }
-    .variant-label.read { background: var(--green-glow); color: var(--green); }
-    .variant-label.write { background: rgba(251, 146, 60, 0.15); color: var(--orange); }
-    .tab-content .step p.write-note {
-      padding-left: 0; margin-top: 8px; font-size: 0.85rem;
-    }
-    .tab-content .step p.field-label {
-      margin-top: 10px; margin-bottom: 2px;
-      font-size: 0.7rem; font-weight: 700;
-      text-transform: uppercase; letter-spacing: 0.5px;
-      color: var(--text-muted);
-    }
     .tab-content .inline-link { color: var(--accent); text-decoration: none; }
     .tab-content .inline-link:hover { text-decoration: underline; }
 
@@ -338,8 +308,7 @@
 
     /* --- Responsive --- */
     @media (max-width: 768px) {
-      .demo-row, .demo-row.reverse { grid-template-columns: 1fr; }
-      .demo-row.reverse { direction: ltr; }
+      .demo-row { grid-template-columns: 1fr; }
       .stats { gap: 24px; }
       .privacy-checks { flex-direction: column; align-items: center; }
       nav .links a:not(.btn-nav) { display: none; }
