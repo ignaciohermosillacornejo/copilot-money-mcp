@@ -6,30 +6,20 @@
 [![Node.js 18+](https://img.shields.io/badge/node-18+-green.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue.svg)](https://www.typescriptlang.org/)
 [![Tests](https://img.shields.io/badge/tests-1400+-brightgreen.svg)](https://github.com/ignaciohermosillacornejo/copilot-money-mcp)
-[![Tools](https://img.shields.io/badge/tools-35-blue.svg)](https://github.com/ignaciohermosillacornejo/copilot-money-mcp)
+[![Tools](https://img.shields.io/badge/tools-17-blue.svg)](https://github.com/ignaciohermosillacornejo/copilot-money-mcp)
 
 ## Disclaimer
 
 **This is an independent, community-driven project and is not affiliated with, endorsed by, or associated with Copilot Money or its parent company in any way.** This tool was created by an independent developer to enable AI-powered queries of locally cached data. "Copilot Money" is a trademark of its respective owner.
 
+> [!NOTE]
+> **Write tools are temporarily unavailable.** Copilot Money has restricted direct Firestore writes from third-party clients. The 18 write tools in this repo still exist as source, but the published CLI runs read-only. A replacement write path is being evaluated. Reads are unaffected.
+
 ## Overview
 
-An [MCP](https://modelcontextprotocol.io/) server that gives AI assistants access to your Copilot Money personal finance data. It reads from the locally cached Firestore database (LevelDB + Protocol Buffers) on your Mac. **Reads are 100% local with zero network requests.** Optional write mode (opt-in via `--write`) sends your requested changes directly to Copilot Money's Firebase/Firestore backend — the same backend the Copilot Money app itself uses — authenticated with your own credentials, never through any third-party service.
+An [MCP](https://modelcontextprotocol.io/) server that gives AI assistants access to your Copilot Money personal finance data. It reads from the locally cached Firestore database (LevelDB + Protocol Buffers) on your Mac. **Reads are 100% local with zero network requests.**
 
-**35 tools** across spending, investments, budgets, goals, and more:
-
-- **17 read tools** — query transactions, accounts, holdings, balances, categories, recurring charges, budgets, goals, investment performance, and more
-- **18 write tools** (opt-in) — consolidate transaction changes, manage tags, create budgets, update recurring items, and organize your finances
-
-**Read-only by default.** Write tools require explicitly starting the server with `--write` to enable.
-
-## Demo
-
-Organizing transactions with natural language — categorize, tag, and clean up your feed in one pass:
-
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/3d652c74-2431-4e76-b77c-165cf5b8c6a8" alt="Organizing transactions with natural language" width="720" />
-</p>
+**17 read tools** across spending, investments, budgets, goals, and more — query transactions, accounts, holdings, balances, categories, recurring charges, budgets, goals, and investment performance.
 
 ## Privacy First
 
@@ -37,8 +27,6 @@ We never collect, store, or transmit your data to any server operated by this pr
 
 - No analytics, telemetry, or tracking of any kind
 - Reads are fully local — zero network requests
-- Read-only by default (write tools disabled unless you pass `--write`)
-- In opt-in write mode, requests go directly from your machine to Copilot Money's own Firebase/Firestore backend using your own credentials — never through any third-party service
 - Open source — verify the code yourself
 
 > [!IMPORTANT]
@@ -149,18 +137,6 @@ Uses `get_budgets`, `get_goals`, `get_goal_history`.
 
 Uses `get_recurring_transactions`.
 
-### Organizing Your Finances (Write Mode)
-
-> "Categorize all my Uber transactions as transportation"
-
-> "Tag my vacation spending with #vacation"
-
-> "Create a $500 monthly dining budget"
-
-> "Set up Netflix as a monthly recurring charge"
-
-Uses write tools like `update_transaction`, `create_budget`, `update_recurring`, and more. Requires `--write` flag.
-
 ## Available Tools
 
 ### Read Tools (17)
@@ -185,33 +161,11 @@ Uses write tools like `update_transaction`, `create_budget`, `update_recurring`,
 | `get_cache_info` | Local cache metadata — date range, transaction count, cache age. |
 | `refresh_database` | Reload data from disk. Cache auto-refreshes every 5 minutes. |
 
-### Write Tools (18) — requires `--write` flag
+### Write Tools — temporarily unavailable
 
-| Category | Tools |
-|----------|-------|
-| **Transactions** | `update_transaction` (multi-field patch), `review_transactions` |
-| **Tags** | `create_tag`, `update_tag`, `delete_tag` |
-| **Categories** | `create_category`, `update_category`, `delete_category` |
-| **Budgets** | `create_budget`, `update_budget`, `delete_budget` |
-| **Goals** | `create_goal`, `update_goal`, `delete_goal` |
-| **Recurring** | `create_recurring`, `update_recurring`, `set_recurring_state`, `delete_recurring` |
+Copilot Money has restricted direct Firestore writes from third-party clients, so the 18 write tools (`update_transaction`, `create_budget`, `create_goal`, `update_recurring`, etc.) no longer succeed against the live backend. The code still lives in `src/` and the tool schemas are preserved for reference and future work, but the published `copilot-money-mcp` CLI runs in read-only mode. Passing `--write` prints a notice and still starts read-only.
 
-## Write Mode
-
-By default, the server starts in **read-only mode**. To enable write tools, start the server with the `--write` flag:
-
-```json
-{
-  "mcpServers": {
-    "copilot-money": {
-      "command": "copilot-money-mcp",
-      "args": ["--write"]
-    }
-  }
-}
-```
-
-Write tools modify your Copilot Money data by sending authenticated requests directly to Copilot Money's Firebase/Firestore backend — the same backend the Copilot Money app uses — so your changes are immediately reflected in your account. Writes authenticate using a Firebase refresh token extracted from your local Copilot Money session; your credentials never leave your machine except in the authenticated request to Google's Firebase/Firestore endpoints. No third-party services are involved. See [PRIVACY.md](PRIVACY.md) for full details.
+A replacement write path (via Copilot Money's GraphQL web API) is being evaluated; progress will be tracked in the repo issues.
 
 ## Configuration
 

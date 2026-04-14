@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-04-14
+
+### Changed
+- **Published CLI is now read-only.** Copilot Money has restricted direct Firestore writes from third-party clients (403 `PERMISSION_DENIED`), so the 18 write tools can no longer succeed against the live backend. The `copilot-money-mcp` CLI shipped via npm and the `.mcpb` bundle now advertises only the 17 read tools; passing `--write` prints a notice and still starts read-only. Write tool source (`src/tools/`, `FirestoreClient`, auth) is preserved on `main` for a future GraphQL-based replacement.
+- `manifest.json`: only the 17 read tools are listed; `mcp_config.args` no longer includes `--write`.
+- `scripts/sync-manifest.ts`: writes only read tools into the manifest.
+- Marketing site (`docs/index.html`): stats row, install tabs, feature cards, and privacy banner reworked around the read-only surface; "Organize transactions" demo removed.
+
 ## [1.6.1] - 2026-04-13
 
 ### Fixed

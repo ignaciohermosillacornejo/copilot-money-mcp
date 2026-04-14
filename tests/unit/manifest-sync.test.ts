@@ -1,12 +1,14 @@
 /**
- * Tests to ensure manifest.json stays in sync with actual tool definitions.
+ * Tests to ensure manifest.json stays in sync with the published tool set.
  *
- * When tools are added, removed, or renamed, this test will fail until
- * manifest.json is updated to match.
+ * The published CLI runs read-only, so the manifest only lists read tools.
+ * Write schemas (`createWriteToolSchemas()`) are intentionally excluded from
+ * `actualSchemas` here — they still exist in the source for a future
+ * GraphQL-based write path, but are not shipped.
  */
 
 import { describe, test, expect } from 'bun:test';
-import { createToolSchemas, createWriteToolSchemas } from '../../src/tools/tools.js';
+import { createToolSchemas } from '../../src/tools/tools.js';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
@@ -20,7 +22,7 @@ interface Manifest {
 }
 
 describe('Manifest Tool Sync', () => {
-  const actualSchemas = [...createToolSchemas(), ...createWriteToolSchemas()];
+  const actualSchemas = createToolSchemas();
   const manifestPath = join(import.meta.dir, '../../manifest.json');
   const manifest: Manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
 

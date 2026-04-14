@@ -2,8 +2,8 @@
   "manifest_version": "0.3",
   "name": "copilot-money-mcp",
   "display_name": "Copilot Money MCP Server",
-  "description": "Query and manage your personal finances with AI using local Copilot Money data. 35 tools for transactions, investments, budgets, goals, and more.",
-  "version": "1.6.1",
+  "description": "Query your personal finances with AI using local Copilot Money data. 17 read-only tools for transactions, investments, budgets, goals, and more.",
+  "version": "1.7.0",
   "icon": "icon.png",
   "author": {
     "name": "Ignacio Hermosilla",
@@ -96,78 +96,6 @@
     {
       "name": "get_goal_history",
       "description": "Get monthly progress snapshots for financial goals. Filter by goal_id or month range."
-    },
-    {
-      "name": "update_transaction",
-      "description": "Update one or more fields on a transaction in a single atomic write."
-    },
-    {
-      "name": "review_transactions",
-      "description": "Mark one or more transactions as reviewed (or unreviewed)."
-    },
-    {
-      "name": "create_tag",
-      "description": "Create a new user-defined tag for categorizing transactions."
-    },
-    {
-      "name": "delete_tag",
-      "description": "Delete a user-defined tag."
-    },
-    {
-      "name": "create_category",
-      "description": "Create a new custom category in Copilot Money."
-    },
-    {
-      "name": "update_category",
-      "description": "Update an existing user-defined category."
-    },
-    {
-      "name": "delete_category",
-      "description": "Delete a user-defined category."
-    },
-    {
-      "name": "create_budget",
-      "description": "Create a new budget for a spending category."
-    },
-    {
-      "name": "update_budget",
-      "description": "Update an existing budget."
-    },
-    {
-      "name": "delete_budget",
-      "description": "Delete a budget."
-    },
-    {
-      "name": "set_recurring_state",
-      "description": "Change the state of a recurring item (active, paused, archived)."
-    },
-    {
-      "name": "delete_recurring",
-      "description": "Delete a recurring item."
-    },
-    {
-      "name": "update_goal",
-      "description": "Update a financial goal's properties."
-    },
-    {
-      "name": "delete_goal",
-      "description": "Delete a financial goal."
-    },
-    {
-      "name": "update_tag",
-      "description": "Update an existing tag's name or color."
-    },
-    {
-      "name": "create_recurring",
-      "description": "Create a new recurring/subscription item."
-    },
-    {
-      "name": "create_goal",
-      "description": "Create a new financial goal."
-    },
-    {
-      "name": "update_recurring",
-      "description": "Update a recurring/subscription item — name, amount, frequency, match string, and transaction IDs."
     }
   ],
   "tools_generated": false,
@@ -181,10 +109,7 @@
     "entry_point": "dist/cli.js",
     "mcp_config": {
       "command": "node",
-      "args": [
-        "${__dirname}/dist/cli.js",
-        "--write"
-      ]
+      "args": ["${__dirname}/dist/cli.js"]
     }
   }
 }

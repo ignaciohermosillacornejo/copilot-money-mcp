@@ -129,10 +129,10 @@ describe('CLI entry point', () => {
       expect(stderr).not.toContain('Invalid');
     });
 
-    test('--write with --verbose logs write mode enabled', async () => {
-      const { stderr } = await runCli(['--write', '--verbose']);
+    test('--write prints a temporarily-unavailable notice', async () => {
+      const { stderr } = await runCli(['--write']);
 
-      expect(stderr).toContain('Write mode ENABLED');
+      expect(stderr).toContain('--write is temporarily unavailable');
     });
   });
 
