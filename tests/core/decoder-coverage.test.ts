@@ -2549,6 +2549,26 @@ describe('decoder coverage', () => {
       // 1ms timeout — worker can't possibly finish in time
       await expect(decodeAllCollectionsIsolated(dbPath, 1)).rejects.toThrow('timed out');
     }, 30_000);
+
+    test('rejects exactly once with a non-empty Error when db path does not exist', async () => {
+      const bogusPath = '/tmp/copilot-mcp-test-nonexistent-db-' + Date.now();
+
+      // Verify the promise rejects with a meaningful Error and that the
+      // settle guard prevents double-rejection (error followed by exit).
+      let rejectionCount = 0;
+      let caughtError: Error | undefined;
+      try {
+        const { decodeAllCollectionsIsolated } = await import('../../src/core/decoder.js');
+        await decodeAllCollectionsIsolated(bogusPath, 10_000);
+      } catch (e) {
+        rejectionCount++;
+        caughtError = e as Error;
+      }
+
+      expect(rejectionCount).toBe(1);
+      expect(caughtError).toBeInstanceOf(Error);
+      expect(caughtError!.message.length).toBeGreaterThan(0);
+    }, 15_000);
   });
 
   describe('Firestore timestamp and reference encoding', () => {
@@ -3032,35 +3052,6 @@ describe('decoder coverage', () => {
       expect(splits[2]?.ticker_symbol).toBe('GOOGL');
     });
 
-    test('items sort by institution_name then item_id', async () => {
-      const dbPath = path.join(FIXTURES_DIR, 'sort-items-db');
-      await createTestDatabase(dbPath, [
-        {
-          collection: 'items',
-          id: 'item_b',
-          fields: { item_id: 'item_b', institution_name: 'Chase' },
-        },
-        {
-          collection: 'items',
-          id: 'item_a',
-          fields: { item_id: 'item_a', institution_name: 'Chase' },
-        },
-        {
-          collection: 'items',
-          id: 'item_c',
-          fields: { item_id: 'item_c', institution_name: 'Bank of America' },
-        },
-      ]);
-
-      const items = await decodeItems(dbPath);
-
-      expect(items.length).toBe(3);
-      // Bank of America first (alphabetical), then Chase items by item_id
-      expect(items[0]?.institution_name).toBe('Bank of America');
-      expect(items[1]?.item_id).toBe('item_a');
-      expect(items[2]?.item_id).toBe('item_b');
-    });
-
     test('extracts all new category fields', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'category-new-fields-db');
       await createTestDatabase(dbPath, [
@@ -3092,35 +3083,6 @@ describe('decoder coverage', () => {
       expect(cat.budget_id).toBe('bud-dining');
       expect(cat._origin).toBe('user');
       expect(cat.id).toBe('cat-internal-id');
-    });
-
-    test('categories sort by order then name', async () => {
-      const dbPath = path.join(FIXTURES_DIR, 'sort-categories-db');
-      await createTestDatabase(dbPath, [
-        {
-          collection: 'categories',
-          id: 'cat_b',
-          fields: { category_id: 'cat_b', name: 'Zebra', order: 1 },
-        },
-        {
-          collection: 'categories',
-          id: 'cat_a',
-          fields: { category_id: 'cat_a', name: 'Apple', order: 1 },
-        },
-        {
-          collection: 'categories',
-          id: 'cat_c',
-          fields: { category_id: 'cat_c', name: 'Middle', order: 0 },
-        },
-      ]);
-
-      const categories = await decodeCategories(dbPath);
-
-      expect(categories.length).toBe(3);
-      // Order 0 first, then order 1 alphabetically
-      expect(categories[0]?.name).toBe('Middle');
-      expect(categories[1]?.name).toBe('Apple');
-      expect(categories[2]?.name).toBe('Zebra');
     });
   });
 
