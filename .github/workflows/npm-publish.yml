@@ -10,6 +10,13 @@ on:
         required: false
         type: boolean
         default: false
+  workflow_call:
+    inputs:
+      dry_run:
+        description: 'Perform a dry run (do not actually publish)'
+        required: false
+        type: boolean
+        default: false
 
 env:
   BUN_VERSION: 'latest'
@@ -24,10 +31,13 @@ jobs:
   publish:
     name: Publish to npm
     runs-on: ubuntu-latest
-    # Only run for releases created by trusted publishers, or manual dispatch by owner
+    # Only run for releases created by trusted publishers, or any other trigger
+    # (workflow_dispatch / workflow_call) initiated by the trusted actor. Note: in a
+    # workflow_call context, github.event_name reflects the calling workflow's event
+    # (e.g. 'push'), not 'workflow_call', so we gate on actor rather than event_name.
     if: |
       (github.event_name == 'release' && github.event.release.author.login == 'ignaciohermosillacornejo') ||
-      (github.event_name == 'workflow_dispatch' && github.actor == 'ignaciohermosillacornejo')
+      (github.event_name != 'release' && github.actor == 'ignaciohermosillacornejo')
 
     steps:
       - name: Verify publisher is trusted
@@ -98,9 +108,9 @@ jobs:
           echo "Version $PACKAGE_VERSION is available for publishing"
 
       - name: Publish to npm (dry run)
-        if: github.event.inputs.dry_run == 'true'
+        if: inputs.dry_run == true || github.event.inputs.dry_run == 'true'
         run: npm publish --dry-run --verbose
 
       - name: Publish to npm
-        if: github.event.inputs.dry_run != 'true'
+        if: inputs.dry_run != true && github.event.inputs.dry_run != 'true'
         run: npm publish --provenance --access public --verbose

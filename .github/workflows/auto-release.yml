@@ -17,6 +17,9 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: write
+    outputs:
+      changed: ${{ steps.version.outputs.changed }}
+      version: ${{ steps.version.outputs.current }}
 
     steps:
       - name: Checkout repository
@@ -101,3 +104,16 @@ jobs:
             --title "v$VERSION" \
             --notes-file /tmp/release-notes.md \
             --target "${{ github.sha }}"
+
+  # Publishing is chained directly via workflow_call rather than relying on the
+  # release event, because releases created with the default GITHUB_TOKEN do not
+  # trigger downstream `release: published` workflows.
+  publish:
+    name: Publish to npm
+    needs: release
+    if: needs.release.outputs.changed == 'true'
+    permissions:
+      contents: read
+      id-token: write  # Required for npm OIDC trusted publishing
+    uses: ./.github/workflows/npm-publish.yml
+    secrets: inherit
