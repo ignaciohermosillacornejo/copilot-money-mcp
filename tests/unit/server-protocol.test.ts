@@ -6,7 +6,7 @@
  */
 
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { CopilotMoneyServer, type ToolResponse } from '../../src/server.js';
+import { CopilotMoneyServer } from '../../src/server.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import type { Transaction, Account } from '../../src/models/index.js';
@@ -519,38 +519,62 @@ describe('CopilotMoneyServer - write mode', () => {
     expect(toolNames).not.toContain('create_category');
   });
 
+  // Single source of truth for the names of every write tool. New write
+  // tools must be added here; the list / annotation / rejection tests
+  // below all derive their coverage from this set so nothing silently
+  // slips through gating.
+  const ALL_WRITE_TOOLS = [
+    'update_transaction',
+    'review_transactions',
+    'create_tag',
+    'update_tag',
+    'delete_tag',
+    'create_category',
+    'update_category',
+    'delete_category',
+    'create_budget',
+    'update_budget',
+    'delete_budget',
+    'create_recurring',
+    'update_recurring',
+    'set_recurring_state',
+    'delete_recurring',
+    'create_goal',
+    'update_goal',
+    'delete_goal',
+  ] as const;
+
   test('handleListTools returns read + write tools when writeEnabled', () => {
     const server = new CopilotMoneyServer(undefined, undefined, true);
     const toolNames = server.handleListTools().tools.map((t) => t.name);
 
     expect(toolNames).toContain('get_transactions');
-    expect(toolNames).toEqual(
-      expect.arrayContaining([
-        'update_transaction',
-        'create_tag',
-        'delete_tag',
-        'create_category',
-        'update_category',
-        'delete_category',
-        'create_budget',
-        'update_budget',
-        'delete_budget',
-        'set_recurring_state',
-        'delete_recurring',
-        'update_goal',
-        'delete_goal',
-      ])
-    );
+    expect(toolNames).toEqual(expect.arrayContaining([...ALL_WRITE_TOOLS]));
   });
 
   // Annotations drive how MCP clients treat each write tool (whether it's
   // safe to retry, whether it destroys data). Regressions here change
-  // client UX without any runtime failure.
-  test.each([
+  // client UX without any runtime failure, so every write tool must
+  // declare its annotations explicitly here.
+  test.each<[string, { readOnlyHint: false; destructiveHint: boolean; idempotentHint: boolean }]>([
     ['update_transaction', { readOnlyHint: false, destructiveHint: false, idempotentHint: true }],
+    ['review_transactions', { readOnlyHint: false, destructiveHint: false, idempotentHint: true }],
     ['create_tag', { readOnlyHint: false, destructiveHint: false, idempotentHint: false }],
+    ['update_tag', { readOnlyHint: false, destructiveHint: false, idempotentHint: true }],
     ['delete_tag', { readOnlyHint: false, destructiveHint: true, idempotentHint: true }],
     ['create_category', { readOnlyHint: false, destructiveHint: false, idempotentHint: false }],
+    ['update_category', { readOnlyHint: false, destructiveHint: false, idempotentHint: true }],
+    ['delete_category', { readOnlyHint: false, destructiveHint: true, idempotentHint: true }],
+    ['create_budget', { readOnlyHint: false, destructiveHint: false, idempotentHint: false }],
+    ['update_budget', { readOnlyHint: false, destructiveHint: false, idempotentHint: true }],
+    ['delete_budget', { readOnlyHint: false, destructiveHint: true, idempotentHint: true }],
+    ['create_recurring', { readOnlyHint: false, destructiveHint: false, idempotentHint: false }],
+    ['update_recurring', { readOnlyHint: false, destructiveHint: false, idempotentHint: true }],
+    ['set_recurring_state', { readOnlyHint: false, destructiveHint: false, idempotentHint: true }],
+    ['delete_recurring', { readOnlyHint: false, destructiveHint: true, idempotentHint: true }],
+    ['create_goal', { readOnlyHint: false, destructiveHint: false, idempotentHint: false }],
+    ['update_goal', { readOnlyHint: false, destructiveHint: false, idempotentHint: true }],
+    ['delete_goal', { readOnlyHint: false, destructiveHint: true, idempotentHint: true }],
   ])('write tool %s has correct annotations', (toolName, expected) => {
     const server = new CopilotMoneyServer(undefined, undefined, true);
     const tool = server.handleListTools().tools.find((t) => t.name === toolName);
@@ -561,9 +585,11 @@ describe('CopilotMoneyServer - write mode', () => {
   // Every write tool must refuse to run when the server was constructed
   // without the --write flag. The argument shapes here don't matter —
   // the rejection happens before validation.
-  test.each([
+  test.each<[string, Record<string, unknown>]>([
     ['update_transaction', { transaction_id: 'txn1', category_id: 'food' }],
+    ['review_transactions', { transaction_ids: ['txn1'], reviewed: true }],
     ['create_tag', { name: 'test' }],
+    ['update_tag', { tag_id: 'tag1', name: 'Updated' }],
     ['delete_tag', { tag_id: 'test' }],
     ['create_category', { name: 'Test' }],
     ['update_category', { category_id: 'test', name: 'New Name' }],
@@ -571,8 +597,11 @@ describe('CopilotMoneyServer - write mode', () => {
     ['create_budget', { category_id: 'food', amount: 500 }],
     ['update_budget', { budget_id: 'budget_123', amount: 600 }],
     ['delete_budget', { budget_id: 'budget_123' }],
+    ['create_recurring', { name: 'Rent', amount: 1200, frequency: 'monthly' }],
+    ['update_recurring', { recurring_id: 'rec_123', name: 'Updated Rent' }],
     ['set_recurring_state', { recurring_id: 'rec_123', state: 'paused' }],
     ['delete_recurring', { recurring_id: 'rec_123' }],
+    ['create_goal', { name: 'Emergency Fund', target_amount: 5000 }],
     ['update_goal', { goal_id: 'goal_123', name: 'New Name' }],
     ['delete_goal', { goal_id: 'goal_123' }],
   ])('handleCallTool rejects %s when not in write mode', async (toolName, args) => {
