@@ -94,17 +94,6 @@ jobs:
           # Write to file to avoid escaping issues
           echo "$NOTES" > /tmp/release-notes.md
 
-      - name: Create release
-        if: steps.version.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          VERSION="${{ steps.version.outputs.current }}"
-          gh release create "v$VERSION" \
-            --title "v$VERSION" \
-            --notes-file /tmp/release-notes.md \
-            --target "${{ github.sha }}"
-
       - name: Setup Bun
         if: steps.version.outputs.changed == 'true'
         uses: oven-sh/setup-bun@v2
@@ -115,13 +104,21 @@ jobs:
         if: steps.version.outputs.changed == 'true'
         run: bun install
 
-      - name: Build and attach .mcpb bundle
+      - name: Build .mcpb bundle
+        if: steps.version.outputs.changed == 'true'
+        run: bun run pack:mcpb
+
+      - name: Create release with bundle
         if: steps.version.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          bun run pack:mcpb
-          gh release upload "v${{ steps.version.outputs.current }}" copilot-money-mcp.mcpb
+          VERSION="${{ steps.version.outputs.current }}"
+          gh release create "v$VERSION" \
+            --title "v$VERSION" \
+            --notes-file /tmp/release-notes.md \
+            --target "${{ github.sha }}" \
+            copilot-money-mcp.mcpb
 
   # Publishing is chained directly via workflow_call rather than relying on the
   # release event, because releases created with the default GITHUB_TOKEN do not
