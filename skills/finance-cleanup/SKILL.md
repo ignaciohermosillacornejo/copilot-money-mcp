@@ -41,7 +41,7 @@ For each merchant that appears 3+ times in the 6-month history:
 
 ### 2.2 Misclassified Transfers
 
-**Payment app accounts (Venmo, PayPal, etc.):** These create two-sided transactions — a generic stub on the bank/checking side (e.g., "VENMO" with no detail, marked as internal transfer) and a richly-described transaction on the payment app account side (e.g., "Bar Whistler to Fernando Alamos" with proper category). Before flagging bank-side payment app stubs as false transfers, check if the payment app account exists (`get_accounts`) and whether the real transaction lives there. If both sides exist, the bank-side stub is correctly marked as a transfer — leave it alone.
+**Payment app accounts (Venmo, PayPal, etc.):** These create two-sided transactions — a generic stub on the bank/checking side (e.g., "VENMO" with no detail, marked as internal transfer) and a richly-described transaction on the payment app account side (e.g., "Bar Whistler to Sam Rivera" with proper category). Before flagging bank-side payment app stubs as false transfers, check if the payment app account exists (`get_accounts`) and whether the real transaction lives there. If both sides exist, the bank-side stub is correctly marked as a transfer — leave it alone.
 
 Two directions to check:
 
