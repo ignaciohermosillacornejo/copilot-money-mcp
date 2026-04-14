@@ -6,20 +6,18 @@ on:
     paths:
       - 'package.json'
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  release:
-    name: Create release on version bump
+  detect-version:
+    name: Detect version bump
     runs-on: ubuntu-latest
-    # Only the repo owner can trigger releases
     if: github.actor == 'ignaciohermosillacornejo'
-    concurrency:
-      group: release-${{ github.ref }}
-      cancel-in-progress: false
-    permissions:
-      contents: write
     outputs:
       changed: ${{ steps.version.outputs.changed }}
-      version: ${{ steps.version.outputs.current }}
+      current: ${{ steps.version.outputs.current }}
 
     steps:
       - name: Checkout repository
@@ -68,68 +66,31 @@ jobs:
             echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Extract changelog
-        if: steps.version.outputs.changed == 'true'
-        id: changelog
-        env:
-          COMMIT_MSG: ${{ github.event.head_commit.message }}
-        run: |
-          VERSION="${{ steps.version.outputs.current }}"
-          # Extract the section for this version from CHANGELOG.md
-          # Matches from "## [x.y.z]" until the next "## [" or end of file
-          NOTES=$(awk -v ver="$VERSION" '
-            /^## \[/ {
-              if (found) exit
-              if (index($0, "[" ver "]")) found=1
-              next
-            }
-            found { print }
-          ' CHANGELOG.md)
-
-          if [ -z "$NOTES" ]; then
-            echo "No changelog entry found for $VERSION, using commit message"
-            NOTES="$COMMIT_MSG"
-          fi
-
-          # Write to file to avoid escaping issues
-          echo "$NOTES" > /tmp/release-notes.md
-
-      - name: Setup Bun
-        if: steps.version.outputs.changed == 'true'
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install dependencies
-        if: steps.version.outputs.changed == 'true'
-        run: bun install
-
-      - name: Build .mcpb bundle
-        if: steps.version.outputs.changed == 'true'
-        run: bun run pack:mcpb
-
-      - name: Create release with bundle
-        if: steps.version.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          VERSION="${{ steps.version.outputs.current }}"
-          gh release create "v$VERSION" \
-            --title "v$VERSION" \
-            --notes-file /tmp/release-notes.md \
-            --target "${{ github.sha }}" \
-            copilot-money-mcp.mcpb
+  # Build the .mcpb and create the GitHub release atomically. Chained via
+  # workflow_call rather than relying on a tag-push trigger, because tags
+  # created with the default GITHUB_TOKEN do not fire `push: tags: v*`.
+  release:
+    name: Build and release .mcpb
+    needs: detect-version
+    if: needs.detect-version.outputs.changed == 'true' && github.actor == 'ignaciohermosillacornejo'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build-mcpb.yml
+    with:
+      version: ${{ needs.detect-version.outputs.current }}
+      target_sha: ${{ github.sha }}
+      dry_run: false
 
   # Publishing is chained directly via workflow_call rather than relying on the
   # release event, because releases created with the default GITHUB_TOKEN do not
   # trigger downstream `release: published` workflows.
   publish:
     name: Publish to npm
-    needs: release
-    if: needs.release.outputs.changed == 'true' && github.actor == 'ignaciohermosillacornejo'
+    needs: [detect-version, release]
+    if: needs.detect-version.outputs.changed == 'true' && github.actor == 'ignaciohermosillacornejo'
     permissions:
       contents: read
-      id-token: write  # Required for npm OIDC trusted publishing
+      id-token: write
     uses: ./.github/workflows/npm-publish.yml
     with:
       dry_run: false
