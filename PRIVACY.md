@@ -67,7 +67,7 @@ This database contains:
 ## Data Usage
 
 Data read from your local database is used exclusively to:
-1. Respond to queries from Claude Desktop via the Model Context Protocol (MCP)
+1. Respond to queries from an AI client (Claude Desktop, ChatGPT, Cursor, etc.) via the Model Context Protocol (MCP)
 2. Perform local calculations (e.g., spending aggregations, category summaries)
 3. Filter and search transactions based on your requests
 
@@ -101,8 +101,8 @@ In opt-in write mode, requested changes are sent directly from your machine to G
 ### Your Control
 
 You maintain full control over your data:
-- The server only runs when you explicitly start it via Claude Desktop
-- You can stop the server at any time by closing Claude Desktop
+- The server only runs when you explicitly start it via your MCP client
+- You can stop the server at any time by closing your MCP client
 - You can uninstall the server at any time
 - Your Copilot Money data remains in its original location
 - **Write mode is strictly opt-in:** Write tools are unavailable unless you explicitly start the server with `--write`. Without this flag, the server cannot modify your Copilot Money data even if instructed to do so
@@ -143,7 +143,7 @@ When integrated with an AI client such as Claude Desktop, ChatGPT, Cursor, or Ge
 ## Third-Party Services
 
 This server does not integrate with any third-party services beyond:
-- **Your MCP client's AI provider** (optional but required for AI-powered queries) — e.g., Anthropic (Claude Desktop), OpenAI (ChatGPT, Cursor with GPT), Google (Gemini). Your Copilot Money data is shared with this provider as part of normal MCP tool-call responses. See [Data Shared With AI Providers](#important-data-shared-with-ai-providers).
+- **Your MCP client's AI provider** (required only if you use the server for AI-powered queries; optional if you call tools programmatically) — e.g., Anthropic (Claude Desktop), OpenAI (ChatGPT, Cursor with GPT), Google (Gemini). Your Copilot Money data is shared with this provider as part of normal MCP tool-call responses. See [Data Shared With AI Providers](#important-data-shared-with-ai-providers).
 - **Copilot Money** (reads the local database created by the app)
 - **Google Firebase / Firestore** (only in opt-in write mode; this is Copilot Money's own backend, accessed directly with your own Copilot Money credentials)
 
