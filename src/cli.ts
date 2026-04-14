@@ -12,11 +12,13 @@ function parseArgs(): {
   dbPath?: string;
   verbose: boolean;
   timeoutMs?: number;
+  writeFlagSeen: boolean;
 } {
   const args = process.argv.slice(2);
   let dbPath: string | undefined;
   let verbose = false;
   let timeoutMs: number | undefined;
+  let writeFlagSeen = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -39,12 +41,7 @@ function parseArgs(): {
     } else if (arg === '--verbose' || arg === '-v') {
       verbose = true;
     } else if (arg === '--write') {
-      console.error(
-        '[copilot-money-mcp] --write is temporarily unavailable: Copilot Money ' +
-          'has restricted direct Firestore writes from third-party clients. ' +
-          'Starting in read-only mode. Status: ' +
-          'https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues'
-      );
+      writeFlagSeen = true;
     } else if (arg === '--help' || arg === '-h') {
       console.error(`
 Copilot Money MCP Server - Expose financial data through MCP
@@ -67,7 +64,7 @@ Environment:
     }
   }
 
-  return { dbPath, verbose, timeoutMs };
+  return { dbPath, verbose, timeoutMs, writeFlagSeen };
 }
 
 /**
@@ -96,10 +93,20 @@ function configureLogging(verbose: boolean): void {
  * Main entry point.
  */
 async function main(): Promise<void> {
-  const { dbPath, verbose, timeoutMs } = parseArgs();
+  const { dbPath, verbose, timeoutMs, writeFlagSeen } = parseArgs();
 
-  // Configure logging
+  // Configure logging first so the --write notice (and any later stderr) picks
+  // up the [ERROR] timestamp prefix in verbose mode.
   configureLogging(verbose);
+
+  if (writeFlagSeen) {
+    console.error(
+      '[copilot-money-mcp] --write is temporarily unavailable: Copilot Money ' +
+        'has restricted direct Firestore writes from third-party clients. ' +
+        'Starting in read-only mode. Status: ' +
+        'https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues'
+    );
+  }
 
   try {
     if (verbose) {
