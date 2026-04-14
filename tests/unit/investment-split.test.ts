@@ -213,6 +213,28 @@ describe('getSplitMultiplier', () => {
 
     expect(getSplitMultiplier(split)).toBeUndefined();
   });
+
+  test('prefers to_factor/from_factor over split_ratio when both present', () => {
+    const split: InvestmentSplit = {
+      split_id: 'split_1',
+      to_factor: 2,
+      from_factor: 1,
+      split_ratio: '4:1', // Would yield 4 if used; factors must win.
+    };
+
+    expect(getSplitMultiplier(split)).toBe(2);
+  });
+
+  test('falls back to split_ratio when only to_factor is set (from_factor missing)', () => {
+    const split: InvestmentSplit = {
+      split_id: 'split_1',
+      to_factor: 4,
+      // from_factor intentionally missing — incomplete factor pair.
+      split_ratio: '3:1',
+    };
+
+    expect(getSplitMultiplier(split)).toBe(3);
+  });
 });
 
 describe('getSplitDisplayString', () => {

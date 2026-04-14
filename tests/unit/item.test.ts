@@ -307,6 +307,29 @@ describe('getItemStatusDescription', () => {
     expect(getItemStatusDescription(item)).toBe('Custom error message');
   });
 
+  test('returns "Connection error" for error status when error_message is missing', () => {
+    const item: Item = {
+      item_id: 'item_1',
+      connection_status: 'error',
+      error_message: undefined,
+    };
+
+    expect(getItemStatusDescription(item)).toBe('Connection error');
+  });
+
+  test('returns raw connection_status for unknown statuses like "pending"', () => {
+    const item: Item = {
+      item_id: 'item_1',
+      connection_status: 'pending',
+      needs_update: false,
+      error_code: undefined,
+    };
+
+    // Not 'active' / 'error' / 'disconnected' — falls through to the
+    // raw status string as the last-resort description.
+    expect(getItemStatusDescription(item)).toBe('pending');
+  });
+
   test('returns Update required when needs_update is true', () => {
     const item: Item = {
       item_id: 'item_1',
