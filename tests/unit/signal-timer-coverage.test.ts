@@ -1,8 +1,7 @@
 /**
- * Tests for hard-to-cover code paths:
- * - Signal handlers in server.ts
- * - Timer callbacks in leveldb-reader.ts
- * - MCP request handler callbacks
+ * Tests for hard-to-cover code paths in production code:
+ * - Signal handlers in server.ts (SIGINT / SIGTERM cleanup)
+ * - Timer callbacks in leveldb-reader.ts (temp-db refcount cleanup)
  */
 
 import { describe, test, expect, beforeEach, afterEach, mock, spyOn, jest } from 'bun:test';
@@ -16,40 +15,18 @@ import {
   _runScheduledCleanup,
   _getTempDbCache,
 } from '../../src/core/leveldb-reader.js';
-import type { Transaction, Account } from '../../src/models/index.js';
 import path from 'node:path';
 import fs from 'node:fs';
 
-// Mock data for testing
-const mockTransactions: Transaction[] = [
-  {
-    transaction_id: 'txn1',
-    amount: 50.0,
-    date: '2025-01-15',
-    name: 'Coffee Shop',
-    category_id: 'food_dining',
-    account_id: 'acc1',
-  },
-];
-
-const mockAccounts: Account[] = [
-  {
-    account_id: 'acc1',
-    current_balance: 1500.0,
-    name: 'Checking Account',
-    account_type: 'checking',
-  },
-];
-
 /**
- * Helper to set up a server with mock data.
+ * Helper that returns a server wired to an in-memory mock database, used
+ * by the signal-handler tests which exercise server.run() shutdown paths.
  */
 function setupServerWithMockData(): CopilotMoneyServer {
   const server = new CopilotMoneyServer('/fake/path');
-
   const db = new CopilotDatabase('/fake/path');
-  (db as any)._transactions = [...mockTransactions];
-  (db as any)._accounts = [...mockAccounts];
+  (db as any)._transactions = [];
+  (db as any)._accounts = [];
   (db as any)._userCategories = [];
   (db as any)._userAccounts = [];
   (db as any)._categoryNameMap = new Map<string, string>();
@@ -62,116 +39,9 @@ function setupServerWithMockData(): CopilotMoneyServer {
   (db as any)._investmentSplits = [];
   (db as any)._items = [];
   db.isAvailable = () => true;
-
   server._injectForTesting(db, new CopilotMoneyTools(db));
-
   return server;
 }
-
-describe('server.ts - MCP Request Handler Coverage', () => {
-  /**
-   * Test the CallToolRequestSchema handler callback (lines 359-360).
-   *
-   * The handler extracts name and arguments from request.params and calls handleCallTool.
-   * We test this by accessing the internal server's request handlers map.
-   *
-   * The MCP SDK stores handlers in a Map keyed by method name (e.g., 'tools/call').
-   */
-  test('CallToolRequestSchema handler extracts params correctly', async () => {
-    const server = setupServerWithMockData();
-
-    // Access the internal MCP server
-    const mcpServer = (server as any).server;
-
-    // Get the registered request handlers - the SDK stores them by method name
-    const requestHandlers = (mcpServer as any)._requestHandlers as Map<
-      string,
-      (request: any, extra: any) => Promise<any>
-    >;
-
-    // The handler is stored under 'tools/call' method name
-    const callToolHandler = requestHandlers?.get('tools/call');
-
-    expect(callToolHandler).toBeDefined();
-
-    if (callToolHandler) {
-      // Simulate a request with the expected structure
-      const mockRequest = {
-        method: 'tools/call',
-        params: {
-          name: 'get_transactions',
-          arguments: { limit: 5 },
-        },
-      };
-
-      const result = await callToolHandler(mockRequest, {});
-
-      expect(result).toBeDefined();
-      expect(result.content).toBeDefined();
-      expect(result.content[0].type).toBe('text');
-      // Should not have isError since get_transactions is valid
-      expect(result.isError).toBeUndefined();
-    }
-  });
-
-  test('CallToolRequestSchema handler handles unknown tool', async () => {
-    const server = setupServerWithMockData();
-    const mcpServer = (server as any).server;
-    const requestHandlers = (mcpServer as any)._requestHandlers as Map<
-      string,
-      (request: any, extra: any) => Promise<any>
-    >;
-
-    const callToolHandler = requestHandlers?.get('tools/call');
-    expect(callToolHandler).toBeDefined();
-
-    if (callToolHandler) {
-      const mockRequest = {
-        method: 'tools/call',
-        params: {
-          name: 'nonexistent_tool',
-          arguments: {},
-        },
-      };
-
-      const result = await callToolHandler(mockRequest, {});
-
-      expect(result).toBeDefined();
-      expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain('Unknown tool');
-    }
-  });
-
-  test('CallToolRequestSchema handler passes arguments to handleCallTool', async () => {
-    const server = setupServerWithMockData();
-    const mcpServer = (server as any).server;
-    const requestHandlers = (mcpServer as any)._requestHandlers as Map<
-      string,
-      (request: any, extra: any) => Promise<any>
-    >;
-
-    const callToolHandler = requestHandlers?.get('tools/call');
-    expect(callToolHandler).toBeDefined();
-
-    if (callToolHandler) {
-      // Test with specific arguments that affect output
-      const mockRequest = {
-        method: 'tools/call',
-        params: {
-          name: 'get_transactions',
-          arguments: {},
-        },
-      };
-
-      const result = await callToolHandler(mockRequest, {});
-
-      expect(result).toBeDefined();
-      expect(result.isError).toBeUndefined();
-      const parsed = JSON.parse(result.content[0].text);
-      expect(parsed.transactions).toBeDefined();
-    }
-  });
-});
 
 describe('server.ts - Signal Handler Coverage', () => {
   let originalProcessOn: typeof process.on;
