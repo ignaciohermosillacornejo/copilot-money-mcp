@@ -506,3 +506,79 @@ describe('CopilotMoneyServer - tool arguments edge cases', () => {
     expect(response.isError).toBeUndefined();
   });
 });
+
+describe('CopilotMoneyServer - write mode', () => {
+  test('handleListTools returns only read tools by default', () => {
+    const server = new CopilotMoneyServer();
+    const toolNames = server.handleListTools().tools.map((t) => t.name);
+
+    expect(toolNames).toContain('get_transactions');
+    expect(toolNames).not.toContain('update_transaction');
+    expect(toolNames).not.toContain('create_tag');
+    expect(toolNames).not.toContain('delete_tag');
+    expect(toolNames).not.toContain('create_category');
+  });
+
+  test('handleListTools returns read + write tools when writeEnabled', () => {
+    const server = new CopilotMoneyServer(undefined, undefined, true);
+    const toolNames = server.handleListTools().tools.map((t) => t.name);
+
+    expect(toolNames).toContain('get_transactions');
+    expect(toolNames).toEqual(
+      expect.arrayContaining([
+        'update_transaction',
+        'create_tag',
+        'delete_tag',
+        'create_category',
+        'update_category',
+        'delete_category',
+        'create_budget',
+        'update_budget',
+        'delete_budget',
+        'set_recurring_state',
+        'delete_recurring',
+        'update_goal',
+        'delete_goal',
+      ])
+    );
+  });
+
+  // Annotations drive how MCP clients treat each write tool (whether it's
+  // safe to retry, whether it destroys data). Regressions here change
+  // client UX without any runtime failure.
+  test.each([
+    ['update_transaction', { readOnlyHint: false, destructiveHint: false, idempotentHint: true }],
+    ['create_tag', { readOnlyHint: false, destructiveHint: false, idempotentHint: false }],
+    ['delete_tag', { readOnlyHint: false, destructiveHint: true, idempotentHint: true }],
+    ['create_category', { readOnlyHint: false, destructiveHint: false, idempotentHint: false }],
+  ])('write tool %s has correct annotations', (toolName, expected) => {
+    const server = new CopilotMoneyServer(undefined, undefined, true);
+    const tool = server.handleListTools().tools.find((t) => t.name === toolName);
+    expect(tool).toBeDefined();
+    expect(tool!.annotations).toEqual(expected);
+  });
+
+  // Every write tool must refuse to run when the server was constructed
+  // without the --write flag. The argument shapes here don't matter —
+  // the rejection happens before validation.
+  test.each([
+    ['update_transaction', { transaction_id: 'txn1', category_id: 'food' }],
+    ['create_tag', { name: 'test' }],
+    ['delete_tag', { tag_id: 'test' }],
+    ['create_category', { name: 'Test' }],
+    ['update_category', { category_id: 'test', name: 'New Name' }],
+    ['delete_category', { category_id: 'test' }],
+    ['create_budget', { category_id: 'food', amount: 500 }],
+    ['update_budget', { budget_id: 'budget_123', amount: 600 }],
+    ['delete_budget', { budget_id: 'budget_123' }],
+    ['set_recurring_state', { recurring_id: 'rec_123', state: 'paused' }],
+    ['delete_recurring', { recurring_id: 'rec_123' }],
+    ['update_goal', { goal_id: 'goal_123', name: 'New Name' }],
+    ['delete_goal', { goal_id: 'goal_123' }],
+  ])('handleCallTool rejects %s when not in write mode', async (toolName, args) => {
+    const server = new CopilotMoneyServer();
+    const result = await server.handleCallTool(toolName, args);
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { text: string }).text).toContain('--write mode');
+  });
+});
