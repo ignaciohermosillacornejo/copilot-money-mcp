@@ -76,11 +76,22 @@
       padding: 140px 24px 80px; text-align: center;
       background: radial-gradient(ellipse at 50% 0%, var(--accent-glow) 0%, transparent 60%);
     }
+    .hero .badges {
+      display: flex; gap: 10px; justify-content: center;
+      flex-wrap: wrap; margin: 16px 0 20px;
+    }
     .hero .badge {
       display: inline-block; padding: 6px 16px;
+      border-radius: 20px; font-size: 0.8rem;
+      font-weight: 600;
+    }
+    .hero .badge.license {
+      background: var(--accent-glow); border: 1px solid rgba(108,99,255,0.3);
+      color: var(--accent);
+    }
+    .hero .badge.unofficial {
       background: rgba(251, 146, 60, 0.12); border: 1px solid rgba(251, 146, 60, 0.4);
-      border-radius: 20px; font-size: 0.8rem; color: var(--orange);
-      font-weight: 600; margin: 16px 0 20px;
+      color: var(--orange);
     }
     .hero .disclaimer {
       max-width: 640px; margin: 0 auto 32px;
@@ -356,8 +367,11 @@
 <!-- Hero -->
 <div class="hero">
   <h1>Ask AI about <span class="gradient">your finances</span></h1>
-  <div class="badge">&#9888; Unofficial &middot; Not affiliated with Copilot Money</div>
-  <p>Connect your Copilot Money data to Claude, Cursor, Codex CLI, and more. This project is an independent, open-source (MIT-licensed) integration — it is not built, endorsed, or supported by Copilot Money.</p>
+  <div class="badges">
+    <div class="badge license">Open Source &middot; MIT License</div>
+    <div class="badge unofficial">&#9888; Unofficial &middot; Not affiliated with Copilot Money</div>
+  </div>
+  <p>Connect your Copilot Money data to Claude, Cursor, Codex CLI, and more. This project is an independent integration — it is not built, endorsed, or supported by Copilot Money.</p>
   <div class="disclaimer">
     <strong>Heads up:</strong> when you use this with an AI client (Claude, Cursor, Codex CLI, etc.), your Copilot Money data — transactions, balances, accounts — is sent to that AI provider so the model can answer your questions. This project has no servers and collects nothing, but the AI provider you choose is a third party that will see your financial data. Review their privacy policy before connecting.
   </div>
