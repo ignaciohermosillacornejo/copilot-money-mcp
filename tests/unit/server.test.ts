@@ -3,7 +3,7 @@
  */
 
 import { describe, test, expect, beforeEach, mock } from 'bun:test';
-import { CopilotMoneyServer, runServer } from '../../src/server.js';
+import { CopilotMoneyServer } from '../../src/server.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { createWriteToolSchemas } from '../../src/tools/index.js';
@@ -203,26 +203,6 @@ describe('CopilotMoneyServer', () => {
       const result = await tools.getTransactions({});
       expect(result).toBeDefined();
     });
-  });
-});
-
-describe('runServer function', () => {
-  test('creates and runs server instance', async () => {
-    // Since runServer calls server.run() which connects to stdio,
-    // we can't easily test it without mocking the transport
-    // Just verify the function exists and accepts optional path
-    expect(typeof runServer).toBe('function');
-
-    // Test that it accepts no arguments
-    const serverPromise = runServer();
-    expect(serverPromise).toBeInstanceOf(Promise);
-
-    // Test that it accepts a path
-    const serverPromise2 = runServer('/test/path');
-    expect(serverPromise2).toBeInstanceOf(Promise);
-
-    // Note: We can't await these as they'll hang waiting for stdio
-    // In a real test environment, we'd mock the transport
   });
 });
 

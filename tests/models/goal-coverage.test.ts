@@ -46,32 +46,11 @@ describe('Goal model helpers', () => {
   });
 
   describe('getGoalCurrentAmount', () => {
-    test('returns undefined for any goal', () => {
+    test('returns undefined — current amount requires historical data not available on Goal alone', () => {
       const goal: Goal = {
         goal_id: 'goal1',
-        name: 'Emergency Fund',
-        savings: {
-          target_amount: 10000,
-        },
+        savings: { target_amount: 10000 },
       };
-
-      // This function always returns undefined as it requires historical data
-      expect(getGoalCurrentAmount(goal)).toBeUndefined();
-    });
-
-    test('returns undefined even with complete goal data', () => {
-      const goal: Goal = {
-        goal_id: 'goal1',
-        name: 'Vacation Fund',
-        savings: {
-          type: 'savings',
-          status: 'active',
-          target_amount: 5000,
-          tracking_type: 'monthly_contribution',
-          tracking_type_monthly_contribution: 500,
-        },
-      };
-
       expect(getGoalCurrentAmount(goal)).toBeUndefined();
     });
   });
@@ -157,7 +136,7 @@ describe('Goal model helpers', () => {
       expect(getGoalProgress(goal, 15000)).toBe(100);
     });
 
-    test('returns undefined for zero currentAmount (known issue: 0 is treated as falsy)', () => {
+    test('returns 0 for zero currentAmount', () => {
       const goal: Goal = {
         goal_id: 'goal1',
         savings: {
@@ -165,10 +144,8 @@ describe('Goal model helpers', () => {
         },
       };
 
-      // KNOWN ISSUE: Implementation uses !currentAmount which treats 0 as falsy.
-      // In financial applications, $0 should be a valid amount returning 0% progress.
-      // Consider updating implementation to: if (!target || currentAmount == null)
-      expect(getGoalProgress(goal, 0)).toBeUndefined();
+      // $0 saved toward a $10,000 goal is 0% progress, not "no data".
+      expect(getGoalProgress(goal, 0)).toBe(0);
     });
 
     test('handles small fractional progress', () => {

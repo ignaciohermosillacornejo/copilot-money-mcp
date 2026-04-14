@@ -374,17 +374,14 @@ describe('CopilotMoneyTools Integration', () => {
     test('returns basic transaction data', async () => {
       const result = await tools.getTransactions({ limit: 10 });
 
-      expect(result.count).toBeDefined();
-      expect(result.transactions).toBeDefined();
       expect(result.count).toBe(result.transactions.length);
       expect(result.count).toBeLessThanOrEqual(10);
+      expect(result.count).toBeGreaterThan(0);
 
-      if (result.transactions.length > 0) {
-        const txn = result.transactions[0];
-        expect(txn.transaction_id).toBeDefined();
-        expect(txn.amount).toBeDefined();
-        expect(txn.date).toBeDefined();
-      }
+      const txn = result.transactions[0];
+      expect(txn.transaction_id).toBeDefined();
+      expect(txn.amount).toBeDefined();
+      expect(txn.date).toBeDefined();
     });
 
     test('filters by date range', async () => {
@@ -453,11 +450,10 @@ describe('CopilotMoneyTools Integration', () => {
     test('account structure is correct', async () => {
       const result = await tools.getAccounts();
 
-      if (result.accounts.length > 0) {
-        const acc = result.accounts[0];
-        expect(acc.account_id).toBeDefined();
-        expect(acc.current_balance).toBeDefined();
-      }
+      expect(result.accounts.length).toBeGreaterThan(0);
+      const acc = result.accounts[0];
+      expect(acc.account_id).toBeDefined();
+      expect(acc.current_balance).toBeDefined();
     });
 
     test('filters by account type', async () => {
