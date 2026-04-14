@@ -2652,6 +2652,13 @@ describe('deleteTag', () => {
     expect(result.deleted_name).toBe('Vacation');
   });
 
+  test('returns tag_id as deleted_name when tag doc has no name field', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any)._tags = [{ tag_id: 'nameless' }];
+    const result = await tools.deleteTag({ tag_id: 'nameless' });
+    expect(result.deleted_name).toBe('nameless');
+  });
+
   test('calls Firestore deleteDocument with correct path', async () => {
     await tools.deleteTag({ tag_id: 'business' });
     expect(deleteCalls).toHaveLength(1);
@@ -2858,6 +2865,12 @@ describe('createCategory', () => {
     await expect(
       tools.createCategory({ name: 'Sub', parent_category_id: 'bad/id' })
     ).rejects.toThrow('Invalid parent_category_id format');
+  });
+
+  test('throws on non-hex color format', async () => {
+    await expect(tools.createCategory({ name: 'Hobbies', color: 'red' })).rejects.toThrow(
+      'Invalid color format'
+    );
   });
 
   test('trims whitespace from name', async () => {
