@@ -25,20 +25,46 @@ const MERCHANT_FIELDS = new Set([
   'merchantName',
   'payee',
   'counterparty',
+  'nameContains',
+  'descriptionContains',
+  'searchText',
+  'searchQuery',
+  'note',
+  'notes',
+  'memo',
 ]);
+
+// Fields that must never be scrubbed — they're schema/metadata, not PII.
+const NEVER_SCRUB = new Set(['__typename', 'type', 'kind', 'status']);
 const NAME_FIELDS = new Set(['name', 'displayName']);
 const EMAIL_FIELDS = new Set(['email', 'emailAddress']);
 const PHONE_FIELDS = new Set(['phone', 'phoneNumber']);
 const AMOUNT_FIELDS = new Set([
   'amount', 'amountCents', 'balance', 'value', 'cost', 'price', 'total',
+  'limit', 'debt', 'debts', 'assets', 'equity', 'net', 'spend', 'earned',
+  'income', 'expense', 'savings',
 ]);
 const ACCOUNT_ID_FIELDS = new Set([
   'accountNumber', 'routingNumber', 'institutionId', 'plaidItemId', 'plaidAccountId',
 ]);
 const ID_FIELDS = new Set(['userId', 'uid', 'householdId', 'id', 'documentId']);
+const OPAQUE_TOKEN_FIELDS = new Set([
+  'cursor', 'nextCursor', 'previousCursor', 'hash', 'token', 'refreshToken',
+  'accessToken', 'sessionToken', 'intercomUserHash',
+]);
+
+// camelCase fields whose suffix indicates a money value are scrubbed, e.g.
+// unassignedRolloverAmount, childBalance, totalSpent, averageCost, netIncome.
+const AMOUNT_SUFFIX_RE =
+  /[a-z](Amount|Balance|Cost|Price|Total|Value|Spent|Earned|Paid|Contributed|Saved|Income|Expense|Debt|Asset|Cash|Deposit|Withdrawal|Transfer|Fee|Interest|Principal|Limit|Equity)$/;
+// Any camelCase field ending in Id (but not "Paid") and holding an id-shaped value.
+const ID_SUFFIX_RE = /[a-z]Id$/;
+// Fields holding opaque tokens (hashes, cursors, bearer tokens).
+const TOKEN_SUFFIX_RE = /(Hash|Token|Cursor)$/;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const LONG_ID_RE = /^[A-Za-z0-9_-]{20,}$/;
+// Long token: alphanumeric plus base64/url-safe-base64 characters, with optional = padding.
+const LONG_ID_RE = /^[A-Za-z0-9_+/=-]{20,}$/;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$/;
 const ENUM_RE = /^[A-Z][A-Z0-9_]{1,}$/;
 
@@ -51,13 +77,16 @@ function scrubValue(key: string, value: unknown): unknown {
   if (Array.isArray(value)) return value.map((item) => scrubValue(key, item));
   if (typeof value === 'object') return scrubObject(value as Record<string, unknown>);
 
+  if (NEVER_SCRUB.has(key)) return value;
   if (MERCHANT_FIELDS.has(key)) return '<merchant>';
   if (NAME_FIELDS.has(key)) return '<name>';
   if (EMAIL_FIELDS.has(key)) return '<email>';
   if (PHONE_FIELDS.has(key)) return '<phone>';
-  if (AMOUNT_FIELDS.has(key)) return '<amount>';
+  if (AMOUNT_FIELDS.has(key) || AMOUNT_SUFFIX_RE.test(key)) return '<amount>';
   if (ACCOUNT_ID_FIELDS.has(key)) return '<account-id>';
+  if (OPAQUE_TOKEN_FIELDS.has(key) || TOKEN_SUFFIX_RE.test(key)) return '<id>';
   if (ID_FIELDS.has(key) && isIdShaped(value)) return '<id>';
+  if (ID_SUFFIX_RE.test(key) && isIdShaped(value)) return '<id>';
 
   if (typeof value === 'string') {
     if (ISO_DATE_RE.test(value)) return value;

@@ -86,3 +86,138 @@ describe('scrubEntry - request body', () => {
     expect(out.requestBody).toBe('plain text');
   });
 });
+
+describe('scrubEntry - amount-suffixed fields', () => {
+  it('scrubs camelCase fields ending in Amount/Balance/Spent/etc', () => {
+    const out = scrubEntry(
+      baseEntry({
+        response: {
+          data: {
+            budget: {
+              unassignedRolloverAmount: 100,
+              childRolloverAmount: 200,
+              goalAmount: 50,
+              totalSpent: 1234.56,
+              netIncome: 5000,
+              averageCost: 12.5,
+            },
+          },
+        },
+      })
+    );
+    const b = (out.response as any).data.budget;
+    expect(b.unassignedRolloverAmount).toBe('<amount>');
+    expect(b.childRolloverAmount).toBe('<amount>');
+    expect(b.goalAmount).toBe('<amount>');
+    expect(b.totalSpent).toBe('<amount>');
+    expect(b.netIncome).toBe('<amount>');
+    expect(b.averageCost).toBe('<amount>');
+  });
+});
+
+describe('scrubEntry - base64-padded ids', () => {
+  it('scrubs base64-padded id values', () => {
+    const out = scrubEntry(
+      baseEntry({
+        response: {
+          data: { row: { id: 'cHRCcGplS096bVpiSGVxaWM2blBZQm45aU04MjoyMDI2LTA0OmJ1ZGdldA==' } },
+        },
+      })
+    );
+    expect((out.response as any).data.row.id).toBe('<id>');
+  });
+});
+
+describe('scrubEntry - *Id suffix fields', () => {
+  it('scrubs categoryId, accountId, itemId, recurringId when value is id-shaped', () => {
+    const out = scrubEntry(
+      baseEntry({
+        response: {
+          data: {
+            row: {
+              categoryId: '5Qqr8qs3GHNCj8H6fIKd',
+              accountId: '09O3QdvbJ8TnZBMMVJL9f01V9zLPE9CVEqzbB',
+              itemId: 'DjR9O8dneNcD04qq1dwzt1wR3qy0qzIZBvep4',
+              recurringId: 'sbH3Q48B4nlvAwzHx2QC',
+              shortId: 'abc',
+            },
+          },
+        },
+      })
+    );
+    const r = (out.response as any).data.row;
+    expect(r.categoryId).toBe('<id>');
+    expect(r.accountId).toBe('<id>');
+    expect(r.itemId).toBe('<id>');
+    expect(r.recurringId).toBe('<id>');
+    expect(r.shortId).toBe('abc');
+  });
+});
+
+describe('scrubEntry - opaque tokens', () => {
+  it('scrubs cursor, hash, and token-suffixed fields', () => {
+    const out = scrubEntry(
+      baseEntry({
+        response: {
+          data: {
+            cursor: 'eyJkYXRlIjoiMjAyNi0wNC0xNCJ9',
+            intercomUserHash: '9bff521b349888619a463debf9af2f65296576c8',
+            accessToken: 'Bearer abc123xyz',
+          },
+        },
+      })
+    );
+    const d = (out.response as any).data;
+    expect(d.cursor).toBe('<id>');
+    expect(d.intercomUserHash).toBe('<id>');
+    expect(d.accessToken).toBe('<id>');
+  });
+});
+
+describe('scrubEntry - preserves GraphQL schema metadata', () => {
+  it('does not scrub __typename even when value looks id-shaped', () => {
+    const out = scrubEntry(
+      baseEntry({
+        response: { data: { x: { __typename: 'TransactionPagination', id: 'abc-short' } } },
+      })
+    );
+    expect((out.response as any).data.x.__typename).toBe('TransactionPagination');
+  });
+});
+
+describe('scrubEntry - search filter variables', () => {
+  it('scrubs nameContains and descriptionContains as merchant-like PII', () => {
+    const body = JSON.stringify({
+      operationName: 'Transactions',
+      query: 'query Transactions($nameContains: String) { ... }',
+      variables: { nameContains: 'STRATECHERY-DITHERING' },
+    });
+    const out = scrubEntry(baseEntry({ requestBody: body }));
+    const parsed = JSON.parse(out.requestBody!);
+    expect(parsed.variables.nameContains).toBe('<merchant>');
+  });
+});
+
+describe('scrubEntry - finance-specific numeric fields', () => {
+  it('scrubs credit limit, debt, assets, equity as amounts', () => {
+    const out = scrubEntry(
+      baseEntry({
+        response: {
+          data: {
+            account: {
+              limit: 21000,
+              debt: 48.81,
+              assets: 16710.1,
+              equity: 5000,
+            },
+          },
+        },
+      })
+    );
+    const a = (out.response as any).data.account;
+    expect(a.limit).toBe('<amount>');
+    expect(a.debt).toBe('<amount>');
+    expect(a.assets).toBe('<amount>');
+    expect(a.equity).toBe('<amount>');
+  });
+});
