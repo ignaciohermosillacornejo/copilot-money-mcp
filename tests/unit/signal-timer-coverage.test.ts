@@ -320,12 +320,22 @@ describe('leveldb-reader.ts - Timer Callback Coverage', () => {
 
   test('scheduledCleanupCallback does not clean up when entry is missing', async () => {
     const dbPath = path.join(FIXTURES_DIR, 'missing-entry-test-db');
+    const cache = _getTempDbCache();
 
-    // Run cleanup on a non-existent path - should not throw
+    // Seed an unrelated entry so we can confirm the cleanup doesn't touch it.
+    const otherPath = path.join(FIXTURES_DIR, 'other-entry-test-db');
+    await createTestDatabase(otherPath, [{ collection: 'test', id: 'doc1', fields: { v: 1 } }]);
+    for await (const _doc of iterateDocuments(otherPath)) {
+      // populate cache
+    }
+    const sizeBefore = cache.size;
+    expect(cache.has(dbPath)).toBe(false);
+
+    // Run cleanup on a non-existent path - should be a no-op (no throw, no mutation)
     _runScheduledCleanup(dbPath);
 
-    // No error should occur
-    expect(true).toBe(true);
+    expect(cache.has(dbPath)).toBe(false);
+    expect(cache.size).toBe(sizeBefore);
   });
 
   test('scheduledCleanupCallback does not clean up when refCount > 0', async () => {
