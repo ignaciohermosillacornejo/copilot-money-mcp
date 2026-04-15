@@ -4062,7 +4062,13 @@ export function createWriteToolSchemas(): ToolSchema[] {
     {
       name: 'set_budget',
       description:
-        'Set the monthly budget amount for a category. amount="0" clears the budget. Pass month="YYYY-MM" for a single-month override; omit for the all-months default. If this fails with "budgeting is disabled," the caller must enable budgeting in Copilot → Settings → General.',
+        'Set the monthly budget amount for a category. amount="0" clears the budget. ' +
+        'Pass month="YYYY-MM" for a single-month override; omit for the all-months default. ' +
+        'Note: if the user has disabled "Enable budgeting" or "Enable rollover" in ' +
+        'Copilot → Settings → General, the budget write still succeeds on the server, but ' +
+        'the value will not appear in the Copilot UI until those toggles are re-enabled. ' +
+        'Rollover behavior also depends on the "Rollover categories" selection in the same ' +
+        'settings pane, which is not writable through this tool.',
       inputSchema: {
         type: 'object' as const,
         properties: {
