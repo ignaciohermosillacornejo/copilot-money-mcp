@@ -10,36 +10,9 @@
  */
 
 import { createWriteToolSchemas } from '../src/tools/tools.js';
+import { truncateDescription, type Manifest } from './manifest-utils.js';
 
-interface ManifestTool {
-  name: string;
-  description: string;
-}
-
-interface Manifest {
-  name: string;
-  display_name: string;
-  description: string;
-  tools: ManifestTool[];
-  server: {
-    mcp_config: {
-      args: string[];
-      [key: string]: unknown;
-    };
-    [key: string]: unknown;
-  };
-  [key: string]: unknown;
-}
-
-function truncateDescription(description: string, maxLength = 150): string {
-  if (!description || !description.trim()) return 'No description available.';
-  const trimmed = description.trim();
-  const sentenceEndMatch = trimmed.match(/^(.+?\.)\s|^(.+?\.)$/);
-  const firstSentence = sentenceEndMatch ? sentenceEndMatch[1] || sentenceEndMatch[2] : null;
-  if (firstSentence && firstSentence.length <= maxLength) return firstSentence;
-  if (trimmed.length <= maxLength) return trimmed.endsWith('.') ? trimmed : trimmed + '.';
-  return trimmed.slice(0, maxLength - 3).trimEnd() + '...';
-}
+export type { Manifest } from './manifest-utils.js';
 
 export function buildWriteManifest(readOnly: Manifest): Manifest {
   const clone: Manifest = JSON.parse(JSON.stringify(readOnly));
@@ -60,9 +33,10 @@ export function buildWriteManifest(readOnly: Manifest): Manifest {
 
   clone.name = `${readOnly.name}-write`;
   clone.display_name = `${readOnly.display_name} (Writes Enabled)`;
+  const readCount = clone.tools.length - writeSchemas.length;
   clone.description =
     'Writes-enabled local build of Copilot Money MCP. ' +
-    `${clone.tools.length} tools (17 read + ${writeSchemas.length} write). ` +
+    `${clone.tools.length} tools (${readCount} read + ${writeSchemas.length} write). ` +
     'For self-install only — not published to Claude Desktop.';
 
   return clone;

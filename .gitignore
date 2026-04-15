@@ -60,6 +60,7 @@ scripts/*
 !scripts/generate-graphql-operations.ts
 !scripts/smoke-graphql.ts
 !scripts/build-write-manifest.ts
+!scripts/manifest-utils.ts
 # License-check scratch directory (created by CI license gate)
 .license-check/
 # Generated test fixtures
@@ -79,3 +80,8 @@ MANIFEST-*
 CURRENT
 LOCK
 *.log
+
+# Whitelist scripts whose names happen to match earlier ignore patterns
+# (the MANIFEST-* LevelDB rule above matches "manifest-utils.ts" on case-
+# insensitive filesystems like default macOS APFS).
+!scripts/manifest-utils.ts
