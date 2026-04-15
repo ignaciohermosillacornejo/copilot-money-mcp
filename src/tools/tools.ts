@@ -3886,7 +3886,7 @@ export function createWriteToolSchemas(): ToolSchema[] {
       name: 'review_transactions',
       description:
         'Mark one or more transactions as reviewed (or unreviewed). ' +
-        'Accepts an array of transaction_ids. Writes directly to Copilot Money via Firestore.',
+        'Accepts an array of transaction_ids. Writes directly to Copilot Money via GraphQL.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -3913,7 +3913,7 @@ export function createWriteToolSchemas(): ToolSchema[] {
       description:
         'Create a new user-defined tag for categorizing transactions. Tags appear in the ' +
         'Copilot Money app and are stored in the tag_ids field on transactions. ' +
-        'Optionally set a color. Writes directly to Copilot Money via Firestore.',
+        'Optionally set a color. Writes directly to Copilot Money via GraphQL.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -3942,7 +3942,7 @@ export function createWriteToolSchemas(): ToolSchema[] {
       name: 'delete_tag',
       description:
         'Delete a user-defined tag. The tag_id can be obtained from the tag definitions ' +
-        'in the local cache. Writes directly to Copilot Money via Firestore.',
+        'in the local cache. Writes directly to Copilot Money via GraphQL.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -4006,7 +4006,7 @@ export function createWriteToolSchemas(): ToolSchema[] {
       description:
         'Update an existing user-defined category. Provide category_id (required) and any ' +
         'fields to change: name, emoji, color, excluded, or parent_category_id (null to ungroup). ' +
-        'Only the specified fields are updated. Writes directly to Copilot Money via Firestore.',
+        'Only the specified fields are updated. Writes directly to Copilot Money via GraphQL.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -4049,7 +4049,7 @@ export function createWriteToolSchemas(): ToolSchema[] {
       name: 'delete_category',
       description:
         'Delete a user-defined category. The category_id can be obtained from get_categories. ' +
-        'Writes directly to Copilot Money via Firestore.',
+        'Writes directly to Copilot Money via GraphQL.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -4129,7 +4129,7 @@ export function createWriteToolSchemas(): ToolSchema[] {
       description:
         'Delete a recurring item (subscription/charge). ' +
         'Requires recurring_id (from get_recurring_transactions). ' +
-        'Writes directly to Copilot Money via Firestore.',
+        'Writes directly to Copilot Money via GraphQL.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -4151,7 +4151,7 @@ export function createWriteToolSchemas(): ToolSchema[] {
       description:
         'Update an existing tag. Provide tag_id (required) and at least one of name, ' +
         'color_name, or hex_color. Only the specified fields are updated. ' +
-        'Writes directly to Copilot Money via Firestore.',
+        'Writes directly to Copilot Money via GraphQL.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -4216,7 +4216,7 @@ export function createWriteToolSchemas(): ToolSchema[] {
         'category, account, match string, and transaction ID lists. ' +
         'Useful for fixing recurring detection — update match_string and transaction_ids ' +
         'to teach Copilot which transactions belong to this recurring charge. ' +
-        'Writes directly to Copilot Money via Firestore.',
+        'Writes directly to Copilot Money via GraphQL.',
       inputSchema: {
         type: 'object',
         properties: {
