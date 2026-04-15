@@ -3514,7 +3514,13 @@ export function createToolSchemas(): ToolSchema[] {
         "Get budgets from Copilot's native budget tracking. " +
         'Retrieves user-defined spending limits and budget rules stored in the app. ' +
         'Returns budget details including amounts, periods (monthly/yearly/weekly), ' +
-        'category associations, and active status. Calculates total budgeted amount as monthly equivalent.',
+        'category associations, and active status. Calculates total budgeted amount as monthly equivalent. ' +
+        'Sync note: after `set_budget` writes, budget changes can take significantly longer ' +
+        'to reflect in this read than other collections (transactions/tags/categories/recurrings ' +
+        'sync in seconds; budgets may take minutes). Do not assume a fresh `set_budget` is ' +
+        'immediately observable here — poll with `refresh_database` or verify directly in the ' +
+        'Copilot app. Per-month overrides written via `set_budget(month=...)` are not surfaced ' +
+        'in this view; only the all-months default `amount` is returned.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -4068,7 +4074,10 @@ export function createWriteToolSchemas(): ToolSchema[] {
         'Copilot → Settings → General, the budget write still succeeds on the server, but ' +
         'the value will not appear in the Copilot UI until those toggles are re-enabled. ' +
         'Rollover behavior also depends on the "Rollover categories" selection in the same ' +
-        'settings pane, which is not writable through this tool.',
+        'settings pane, which is not writable through this tool. ' +
+        'Sync delay: successful writes may not be visible via `get_budgets` for minutes — ' +
+        'budget docs sync on a slower cadence than other collections. Do not retry the write ' +
+        'just because the read does not reflect it yet.',
       inputSchema: {
         type: 'object' as const,
         properties: {
