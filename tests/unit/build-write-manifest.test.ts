@@ -95,6 +95,14 @@ describe('buildWriteManifest', () => {
     expect(fixture.name).toBe(originalName);
   });
 
+  test('description reports an accurate read/write split (no hardcoded read count)', () => {
+    const result = buildWriteManifest(readOnlyFixture());
+    const readCount = createToolSchemas().length;
+    const writeCount = createWriteToolSchemas().length;
+    expect(result.description).toContain(`${readCount} read`);
+    expect(result.description).toContain(`${writeCount} write`);
+  });
+
   test('preserves custom descriptions for read tools already in the manifest', () => {
     const fixture = readOnlyFixture();
     const customTool = fixture.tools[0];
