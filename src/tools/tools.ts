@@ -7,6 +7,10 @@
 import { CopilotDatabase } from '../core/database.js';
 import type { FirestoreClient } from '../core/firestore-client.js';
 import { toFirestoreFields } from '../core/format/firestore-rest.js';
+import type { GraphQLClient } from '../core/graphql/client.js';
+import { GraphQLError } from '../core/graphql/client.js';
+import { editTransaction } from '../core/graphql/transactions.js';
+import { graphQLErrorToMcpError } from './errors.js';
 import { parsePeriod } from '../utils/date.js';
 import {
   getCategoryName,
@@ -340,6 +344,7 @@ export interface HoldingEntry {
 export class CopilotMoneyTools {
   private db: CopilotDatabase;
   private firestoreClient: FirestoreClient | null;
+  private graphqlClient: GraphQLClient | null;
   private _userCategoryMap: Map<string, string> | null = null;
   private _excludedCategoryIds: Set<string> | null = null;
 
@@ -347,11 +352,18 @@ export class CopilotMoneyTools {
    * Initialize tools with a database connection.
    *
    * @param database - CopilotDatabase instance
-   * @param firestoreClient - Optional Firestore client for write operations
+   * @param firestoreClient - Legacy Firestore client; will be removed once all
+   *   write tools migrate to GraphQL (Task 15).
+   * @param graphqlClient - Optional GraphQL client for write operations.
    */
-  constructor(database: CopilotDatabase, firestoreClient?: FirestoreClient) {
+  constructor(
+    database: CopilotDatabase,
+    firestoreClient?: FirestoreClient,
+    graphqlClient?: GraphQLClient
+  ) {
     this.db = database;
     this.firestoreClient = firestoreClient ?? null;
+    this.graphqlClient = graphqlClient ?? null;
   }
 
   /**
@@ -364,6 +376,16 @@ export class CopilotMoneyTools {
       );
     }
     return this.firestoreClient;
+  }
+
+  /**
+   * Return the GraphQL client, or throw if write mode is not enabled.
+   */
+  protected getGraphQLClient(): GraphQLClient {
+    if (!this.graphqlClient) {
+      throw new Error('Write tools require --write flag to be set');
+    }
+    return this.graphqlClient;
   }
 
   /**
@@ -2370,32 +2392,6 @@ export class CopilotMoneyTools {
   }
 
   /**
-   * Resolve a transaction by ID: validate format, find in cache, verify Firestore path fields.
-   * Returns the transaction and its Firestore collection path.
-   */
-  private async resolveTransaction(transactionId: string): Promise<{
-    txn: Transaction;
-    collectionPath: string;
-  }> {
-    validateDocId(transactionId, 'transaction_id');
-
-    const transactions = await this.db.getAllTransactions();
-    const txn = transactions.find((t) => t.transaction_id === transactionId);
-    if (!txn) {
-      throw new Error(`Transaction not found: ${transactionId}`);
-    }
-    if (!txn.item_id || !txn.account_id) {
-      throw new Error(
-        `Transaction ${transactionId} is missing item_id or account_id — cannot determine Firestore path`
-      );
-    }
-    return {
-      txn,
-      collectionPath: `items/${txn.item_id}/accounts/${txn.account_id}/transactions`,
-    };
-  }
-
-  /**
    * Update one or more fields on a transaction in a single atomic write.
    *
    * Supported fields: category_id, note, tag_ids, excluded, name,
@@ -2417,6 +2413,7 @@ export class CopilotMoneyTools {
     transaction_id: string;
     updated: string[];
   }> {
+    const client = this.getGraphQLClient();
     const { transaction_id } = args;
 
     // Reject unknown fields (equivalent to JSON Schema additionalProperties: false,
@@ -2439,9 +2436,6 @@ export class CopilotMoneyTools {
     }
 
     // Require at least one mutable field besides transaction_id.
-    // Treat explicit `undefined` values as absent so callers cannot accidentally
-    // unlink goal_id / overwrite fields by passing undefined (MCP clients never
-    // send undefined, but direct TS callers can).
     const mutableKeys = Object.keys(args).filter(
       (k) => k !== 'transaction_id' && (args as Record<string, unknown>)[k] !== undefined
     );
@@ -2449,23 +2443,21 @@ export class CopilotMoneyTools {
       throw new Error('update_transaction requires at least one field to update');
     }
 
-    // Resolve the transaction and its Firestore path FIRST so "Transaction not found"
-    // is the primary error when both the transaction and a field are invalid.
-    const { collectionPath } = await this.resolveTransaction(transaction_id);
+    validateDocId(transaction_id, 'transaction_id');
 
-    // Per-field validation (runs BEFORE any Firestore write for atomicity).
-    let trimmedName: string | undefined;
-    if ('name' in args && args.name !== undefined) {
-      trimmedName = args.name.trim();
-      if (trimmedName.length === 0) {
-        throw new Error('Transaction name must not be empty');
-      }
+    // Resolve the transaction from the local cache so we can supply accountId /
+    // itemId to the GraphQL mutation.
+    const allTxns = await this.db.getAllTransactions();
+    const txn = allTxns.find((t) => t.transaction_id === transaction_id);
+    if (!txn) {
+      throw new Error(`Transaction not found: ${transaction_id}`);
     }
+
+    // Per-field validation (runs BEFORE any write for atomicity).
     if ('category_id' in args && args.category_id !== undefined) {
       validateDocId(args.category_id, 'category_id');
       const categories = await this.db.getUserCategories();
-      const category = categories.find((c) => c.category_id === args.category_id);
-      if (!category) {
+      if (!categories.find((c) => c.category_id === args.category_id)) {
         throw new Error(`Category not found: ${args.category_id}`);
       }
     }
@@ -2485,70 +2477,68 @@ export class CopilotMoneyTools {
     if ('goal_id' in args && args.goal_id !== null && args.goal_id !== undefined) {
       validateDocId(args.goal_id, 'goal_id');
       const goals = await this.db.getGoals();
-      const goal = goals.find((g) => g.goal_id === args.goal_id);
-      if (!goal) {
+      if (!goals.find((g) => g.goal_id === args.goal_id)) {
         throw new Error(`Goal not found: ${args.goal_id}`);
       }
     }
 
-    // Build two parallel field maps by key presence (NOT by destructuring — see spec).
-    // The `!== undefined` guards treat explicit undefined as absent, matching the
-    // mutableKeys check above.
-    const firestoreFields: Record<string, unknown> = {};
-    const cacheFields: Partial<Transaction> = {};
-
-    if ('category_id' in args && args.category_id !== undefined) {
-      firestoreFields.category_id = args.category_id;
-      cacheFields.category_id = args.category_id;
-    }
-    if ('note' in args && args.note !== undefined) {
-      firestoreFields.user_note = args.note;
-      cacheFields.user_note = args.note;
-    }
-    if ('tag_ids' in args && args.tag_ids !== undefined) {
-      firestoreFields.tag_ids = args.tag_ids;
-      cacheFields.tag_ids = args.tag_ids;
-    }
-    if ('excluded' in args && args.excluded !== undefined) {
-      firestoreFields.excluded = args.excluded;
-      cacheFields.excluded = args.excluded;
-    }
-    if ('name' in args && trimmedName !== undefined) {
-      firestoreFields.name = trimmedName;
-      cacheFields.name = trimmedName;
-    }
-    if ('internal_transfer' in args && args.internal_transfer !== undefined) {
-      firestoreFields.internal_transfer = args.internal_transfer;
-      cacheFields.internal_transfer = args.internal_transfer;
-    }
-    if ('goal_id' in args && args.goal_id !== undefined) {
-      // goal_id: null unlinks → Firestore gets empty string, cache gets undefined.
-      // goal_id: undefined is treated as absent (skipped) to prevent direct TS
-      // callers from accidentally unlinking by passing undefined.
-      firestoreFields.goal_id = args.goal_id ?? '';
-      cacheFields.goal_id = args.goal_id ?? undefined;
+    // Reject fields not supported via the EditTransaction GraphQL mutation.
+    const unsupported: string[] = [];
+    if ('excluded' in args && args.excluded !== undefined) unsupported.push('excluded');
+    if ('name' in args && args.name !== undefined) unsupported.push('name');
+    if ('internal_transfer' in args && args.internal_transfer !== undefined)
+      unsupported.push('internal_transfer');
+    if ('goal_id' in args && args.goal_id !== undefined) unsupported.push('goal_id');
+    if (unsupported.length > 0) {
+      throw new Error(
+        `update_transaction: fields not supported via GraphQL: ${unsupported.join(', ')}. ` +
+          `Only category_id, note, and tag_ids are writable through this tool.`
+      );
     }
 
-    // Single atomic Firestore write + cache patch.
-    const client = this.getFirestoreClient();
-    const firestoreValue = toFirestoreFields(firestoreFields);
-    const updateMask = Object.keys(firestoreFields);
-    await client.updateDocument(collectionPath, transaction_id, firestoreValue, updateMask);
+    // Map MCP fields → EditTransaction input shape.
+    const input: {
+      categoryId?: string;
+      userNotes?: string | null;
+      tagIds?: string[];
+      isReviewed?: boolean;
+    } = {};
+    if ('category_id' in args && args.category_id !== undefined) input.categoryId = args.category_id;
+    if ('note' in args && args.note !== undefined) input.userNotes = args.note;
+    if ('tag_ids' in args && args.tag_ids !== undefined) input.tagIds = args.tag_ids;
 
-    if (!this.db.patchCachedTransaction(transaction_id, cacheFields)) {
-      this.db.clearCache();
+    if (!txn.account_id || !txn.item_id) {
+      throw new Error(
+        `Transaction ${transaction_id} missing account_id or item_id in local cache`
+      );
     }
 
-    // Map Firestore field names back to API names for the response so callers see
-    // `note` (not `user_note`) — matches what they sent.
-    const firestoreToApiName: Record<string, string> = { user_note: 'note' };
-    const updated = updateMask.map((k) => firestoreToApiName[k] ?? k);
-
-    return {
-      success: true,
-      transaction_id,
-      updated,
-    };
+    try {
+      const result = await editTransaction(client, {
+        id: transaction_id,
+        accountId: txn.account_id,
+        itemId: txn.item_id,
+        input,
+      });
+      // Map GraphQL field names back to MCP API names in the response.
+      const graphqlToApiName: Record<string, string> = {
+        categoryId: 'category_id',
+        userNotes: 'note',
+        tagIds: 'tag_ids',
+        isReviewed: 'reviewed',
+      };
+      const updated = Object.keys(result.changed).map((k) => graphqlToApiName[k] ?? k);
+      return {
+        success: true,
+        transaction_id: result.id,
+        updated,
+      };
+    } catch (e) {
+      if (e instanceof GraphQLError) {
+        throw new Error(graphQLErrorToMcpError(e));
+      }
+      throw e;
+    }
   }
 
   /**
@@ -2562,7 +2552,7 @@ export class CopilotMoneyTools {
     reviewed_count: number;
     transaction_ids: string[];
   }> {
-    const client = this.getFirestoreClient();
+    const client = this.getGraphQLClient();
 
     const { transaction_ids, reviewed = true } = args;
 
@@ -2574,45 +2564,42 @@ export class CopilotMoneyTools {
       validateDocId(id, 'transaction_id');
     }
 
-    // Validate all transactions exist and collect them
     const allTransactions = await this.db.getAllTransactions();
     const txnMap = new Map(allTransactions.map((t) => [t.transaction_id, t]));
 
-    const resolvedTxns = [];
-    for (const id of transaction_ids) {
-      const txn = txnMap.get(id);
-      if (!txn) {
-        throw new Error(`Transaction not found: ${id}`);
-      }
-      if (!txn.item_id || !txn.account_id) {
-        throw new Error(
-          `Transaction ${id} is missing item_id or account_id — cannot determine Firestore path`
-        );
-      }
-      resolvedTxns.push(txn);
+    const missing = transaction_ids.filter((id) => !txnMap.has(id));
+    if (missing.length > 0) {
+      throw new Error(`Transactions not found: ${missing.join(', ')}`);
     }
 
-    // Batch writes to avoid overwhelming Firestore (max REVIEW_BATCH_SIZE concurrent)
-    const firestoreFields = toFirestoreFields({ user_reviewed: reviewed });
-    for (let i = 0; i < resolvedTxns.length; i += REVIEW_BATCH_SIZE) {
-      const batch = resolvedTxns.slice(i, i + REVIEW_BATCH_SIZE);
-      await Promise.all(
-        batch.map(async (txn) => {
-          const collectionPath = `items/${txn.item_id}/accounts/${txn.account_id}/transactions`;
-          await client.updateDocument(collectionPath, txn.transaction_id, firestoreFields, [
-            'user_reviewed',
-          ]);
-          if (!this.db.patchCachedTransaction(txn.transaction_id, { user_reviewed: reviewed })) {
-            this.db.clearCache();
-          }
-        })
-      );
+    let reviewed_count = 0;
+    for (const id of transaction_ids) {
+      const txn = txnMap.get(id)!;
+      if (!txn.account_id || !txn.item_id) {
+        throw new Error(`Transaction ${id} missing account_id or item_id in local cache`);
+      }
+      try {
+        await editTransaction(client, {
+          id,
+          accountId: txn.account_id,
+          itemId: txn.item_id,
+          input: { isReviewed: reviewed },
+        });
+        reviewed_count++;
+      } catch (e) {
+        if (e instanceof GraphQLError) {
+          throw new Error(
+            `review_transactions failed at id=${id} (${reviewed_count}/${transaction_ids.length} succeeded): ${graphQLErrorToMcpError(e)}`
+          );
+        }
+        throw e;
+      }
     }
 
     return {
       success: true,
-      reviewed_count: resolvedTxns.length,
-      transaction_ids: resolvedTxns.map((t) => t.transaction_id),
+      reviewed_count,
+      transaction_ids,
     };
   }
 
