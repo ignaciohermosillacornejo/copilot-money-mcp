@@ -31,6 +31,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Validate PR number
+        run: |
+          if ! [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::PR_NUMBER must be a positive integer (got: '$PR_NUMBER')"
+            exit 1
+          fi
+
       - name: Ensure labels exist
         run: |
           gh label create audited          --description "PR has been reviewed in audit" --color 0E8A16 2>/dev/null || true
@@ -133,18 +140,30 @@ jobs:
             --allowedTools "Bash(gh api*),Bash(gh pr view*),Bash(gh pr diff*),Bash(git log*),Bash(git show*),Read,Grep,Glob,Write"
             --disallowedTools "Bash(gh pr review*),Bash(gh pr merge*),Bash(gh pr close*),Bash(gh issue*),Bash(gh pr comment*)"
 
+      - name: Upload audit artifact
+        if: always() && steps.check.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-result-pr-${{ env.PR_NUMBER }}
+          path: audit-result.json
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Create follow-up issue if suggestions remain
         if: steps.check.outputs.skip != 'true'
         run: |
+          # Missing or malformed output means the audit didn't complete.
+          # Fail the step so the "audited" label isn't applied and the run
+          # can be retried via workflow_dispatch.
           if [ ! -f audit-result.json ]; then
-            echo "::warning::audit-result.json not produced — treating as empty."
-            exit 0
+            echo "::error::audit-result.json not produced — Claude step did not complete the audit contract."
+            exit 1
           fi
 
-          if ! jq -e . audit-result.json >/dev/null 2>&1; then
-            echo "::warning::audit-result.json is not valid JSON — skipping issue creation."
+          if ! jq -e '.unaddressed | type == "array"' audit-result.json >/dev/null 2>&1; then
+            echo "::error::audit-result.json is missing or has an invalid 'unaddressed' array."
             cat audit-result.json
-            exit 0
+            exit 1
           fi
 
           COUNT=$(jq '.unaddressed | length' audit-result.json)
