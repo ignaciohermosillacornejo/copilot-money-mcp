@@ -41,6 +41,6 @@ describe('createWriteToolSchemas', () => {
     expect(createCat).toBeDefined();
     expect(createCat!.annotations?.readOnlyHint).toBe(false);
     expect(createCat!.annotations?.idempotentHint).toBe(false);
-    expect(createCat!.inputSchema.required).toEqual(['name']);
+    expect(createCat!.inputSchema.required).toEqual(['name', 'color_name', 'emoji']);
   });
 });

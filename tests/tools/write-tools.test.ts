@@ -65,24 +65,15 @@ describe('updateCategory', () => {
     });
   });
 
-  test('supports parent_id null to ungroup', async () => {
-    const client = createMockGraphQLClient({
-      EditCategory: {
-        editCategory: {
-          category: { id: 'cat1', name: 'Food', colorName: 'BLUE' },
-        },
-      },
-    });
+  test('requires at least one field when parent_id is silently omitted', async () => {
+    // parent_id is no longer part of the tool signature (Copilot GraphQL doesn't
+    // accept parentId on EditCategoryInput). An empty update should reject.
+    const client = createMockGraphQLClient({});
     tools = new CopilotMoneyTools(mockDb, client);
-
-    const result = await tools.updateCategory({ category_id: 'cat1', parent_id: null });
-    expect(result.success).toBe(true);
-    expect(client._calls[0].variables).toEqual({
-      id: 'cat1',
-      spend: false,
-      budget: false,
-      input: { parentId: null },
-    });
+    await expect(tools.updateCategory({ category_id: 'cat1' })).rejects.toThrow(
+      /requires at least one field/
+    );
+    expect(client._calls).toHaveLength(0);
   });
 });
 

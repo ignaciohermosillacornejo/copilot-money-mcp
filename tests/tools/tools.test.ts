@@ -2640,23 +2640,20 @@ describe('createCategory', () => {
     });
   });
 
-  test('passes optional parent_id through', async () => {
-    const client = createMockGraphQLClient({
-      CreateCategory: {
-        createCategory: { id: 'cat-sub', name: 'Sub', colorName: 'BLUE' },
-      },
-    });
+  test('rejects parent_id (not supported by Copilot GraphQL API)', async () => {
+    const client = createMockGraphQLClient({});
     tools = new CopilotMoneyTools(mockDb, client);
 
-    await tools.createCategory({
-      name: 'Sub',
-      color_name: 'BLUE',
-      emoji: '📁',
-      parent_id: 'shopping',
-    });
-    expect(client._calls[0].variables).toMatchObject({
-      input: expect.objectContaining({ parentId: 'shopping' }),
-    });
+    await expect(
+      tools.createCategory({
+        name: 'Sub',
+        color_name: 'BLUE',
+        emoji: '📁',
+        parent_id: 'shopping',
+        // @ts-expect-error — parent_id is intentionally removed from the signature
+      } as any)
+    ).rejects.toThrow(/parent_id is not supported/);
+    expect(client._calls).toHaveLength(0);
   });
 
   test('trims whitespace from name', async () => {
@@ -3181,7 +3178,10 @@ describe('updateRecurring', () => {
     });
   });
 
-  test('dispatches EditRecurring with rule fields mapped to camelCase', async () => {
+  test('dispatches EditRecurring with rule fields mapped to camelCase + Float amounts', async () => {
+    // Server expects Float for minAmount/maxAmount, not String — the MCP boundary
+    // accepts strings (consistent with setBudget) and the per-domain editRecurring
+    // parses to numbers before the wire send.
     const client = createMockGraphQLClient({
       EditRecurring: {
         editRecurring: {
@@ -3190,8 +3190,8 @@ describe('updateRecurring', () => {
             state: 'ACTIVE',
             rule: {
               nameContains: 'NETFLIX',
-              minAmount: '10',
-              maxAmount: '20',
+              minAmount: 10,
+              maxAmount: 20,
               days: [1, 15],
             },
           },
@@ -3216,8 +3216,8 @@ describe('updateRecurring', () => {
       input: {
         rule: {
           nameContains: 'NETFLIX',
-          minAmount: '10',
-          maxAmount: '20',
+          minAmount: 10,
+          maxAmount: 20,
           days: [1, 15],
         },
       },
