@@ -28,8 +28,10 @@ dist/
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
 
-# GraphQL capture output — gitignored until operator personally reviews
-docs/graphql-capture/
+# GraphQL capture — raw captures contain unscrubbed PII (real Firebase JWTs,
+# merchant names, amounts, account IDs). Only the scrubbed/generated output
+# is tracked; raw/ stays local.
+docs/graphql-capture/raw/
 
 # TypeScript
 *.tsbuildinfo
