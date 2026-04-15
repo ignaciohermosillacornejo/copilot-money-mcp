@@ -15,10 +15,12 @@ import { join } from 'path';
 interface McpConfig {
   command: string;
   args?: string[];
-  platform_overrides?: Record<string, { command?: string; args?: string[] }>;
 }
 
 interface Manifest {
+  compatibility?: {
+    platforms?: string[];
+  };
   server: {
     type: string;
     entry_point: string;
@@ -39,7 +41,7 @@ describe('manifest server config', () => {
     expect(mcp_config.command).toBe('${__dirname}/dist/launcher.sh');
   });
 
-  test('win32 override exists so Windows still uses node directly', () => {
-    expect(mcp_config.platform_overrides?.win32?.command).toBe('node');
+  test('extension is declared darwin-only (Copilot Money is macOS-only)', () => {
+    expect(manifest.compatibility?.platforms).toEqual(['darwin']);
   });
 });
