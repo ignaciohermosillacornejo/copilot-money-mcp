@@ -12,9 +12,6 @@
 
 **This is an independent, community-driven project and is not affiliated with, endorsed by, or associated with Copilot Money or its parent company in any way.** This tool was created by an independent developer to enable AI-powered queries of locally cached data. "Copilot Money" is a trademark of its respective owner.
 
-> [!NOTE]
-> **Write tools are temporarily unavailable.** Copilot Money has restricted direct Firestore writes from third-party clients. The 18 write tools in this repo still exist as source, but the published CLI runs read-only. A replacement write path is being evaluated. Reads are unaffected.
-
 ## Overview
 
 An [MCP](https://modelcontextprotocol.io/) server that gives AI assistants access to your Copilot Money personal finance data. It reads from the locally cached Firestore database (LevelDB + Protocol Buffers) on your Mac. **Reads are 100% local with zero network requests.**
@@ -160,12 +157,6 @@ Uses `get_recurring_transactions`.
 | `get_connection_status` | Bank sync health for linked institutions, including last sync timestamps and errors. |
 | `get_cache_info` | Local cache metadata — date range, transaction count, cache age. |
 | `refresh_database` | Reload data from disk. Cache auto-refreshes every 5 minutes. |
-
-### Write Tools — temporarily unavailable
-
-Copilot Money has restricted direct Firestore writes from third-party clients, so the 18 write tools (`update_transaction`, `create_budget`, `create_goal`, `update_recurring`, etc.) no longer succeed against the live backend. The code still lives in `src/` and the tool schemas are preserved for reference and future work, but the published `copilot-money-mcp` CLI runs in read-only mode. Passing `--write` prints a notice and still starts read-only.
-
-A replacement write path (via Copilot Money's GraphQL web API) is being evaluated; progress will be tracked in the repo issues.
 
 ## Configuration
 
