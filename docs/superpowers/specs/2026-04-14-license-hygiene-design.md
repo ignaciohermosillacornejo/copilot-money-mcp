@@ -20,7 +20,7 @@ Tracking: issue #260, item C ("License and supply chain"). This spec implements 
 
 - Add a `License check (production deps)` step to the existing `quality` job in `.github/workflows/test.yml`.
 - Use `license-checker` via `npx --yes license-checker@latest` — no devDep added to `package.json`.
-- Run the check against an isolated `npm ci --omit=dev --ignore-scripts` tree that mirrors what `scripts/pack-mcpb.ts` ships, not against bun's workspace layout.
+- Run the check against an isolated `npm install --omit=dev --ignore-scripts` tree that mirrors what `scripts/pack-mcpb.ts` ships (package.json only, no lockfile), not against bun's workspace layout.
 - Allowlist: `MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0` (verbatim from issue #260 item C).
 - Document a local repro command for developers who want to run the same check before pushing.
 
@@ -59,8 +59,8 @@ One new step at the end of the `quality` job in `.github/workflows/test.yml`, af
 - name: License check (production deps)
   run: |
     mkdir -p .license-check
-    cp package.json package-lock.json .license-check/
-    (cd .license-check && npm ci --omit=dev --ignore-scripts --no-audit --no-fund)
+    cp package.json .license-check/
+    (cd .license-check && npm install --omit=dev --ignore-scripts --no-audit --no-fund)
     npx --yes license-checker@latest \
       --start .license-check \
       --production \
@@ -71,8 +71,8 @@ One new step at the end of the `quality` job in `.github/workflows/test.yml`, af
 
 ### Design decisions and rationale
 
-**`npm ci` in a scratch directory (not `bun install`'s workspace tree).**
-The `.mcpb` bundle's dep graph is produced by `npm install --omit=dev --ignore-scripts` inside `scripts/pack-mcpb.ts`. Scanning an isolated npm-installed tree ensures the CI check sees the same set of packages the bundle ships. Bun's `node_modules/` layout can differ subtly (hoisting, peer-dep resolution) — catching a violation against a tree that is NOT what we ship would be a bug.
+**`npm install` in a scratch directory with `package.json` only (no lockfile), not `bun install`'s workspace tree.**
+The `.mcpb` bundle's dep graph is produced by `npm install --omit=dev --ignore-scripts` inside `scripts/pack-mcpb.ts`, which copies `package.json` into the staging directory but NOT `package-lock.json`. Scanning under the same semantics ensures the CI check sees the same set of packages the bundle ships. Copying the lockfile and switching to `npm ci` was considered and rejected: with the lockfile present npm walks the full resolved tree (including devDep entries) during peer-dep validation, and the project's `typescript@^6` conflicts with `typescript-eslint@8`'s `typescript@">=4.8.4 <6.0.0"` peer constraint. Forcing past that with `--legacy-peer-deps` would pass the check but silence a real signal, and — more importantly — would no longer mirror the bundle's actual install path. Bun's `node_modules/` layout can differ subtly (hoisting, peer-dep resolution) — catching a violation against a tree that is NOT what we ship would be a bug.
 
 **`npx license-checker@latest` rather than adding a devDep.**
 `license-checker` pulls ~30 transitive deps that are only relevant to CI. Adding it to `package.json` pollutes the dev graph (lockfile churn, `bun install` time). `npx --yes ... @latest` keeps it ephemeral. `@latest` is acceptable because the tool is low-churn and any breaking-change fallout surfaces as a visible CI failure, not a silent one. If the tool ever ships a regression, we pin a version in the step.
@@ -92,6 +92,7 @@ Blocking on PRs at the same level as `typecheck`, `lint`, and `format:check`. A 
 ### Files changed
 
 - `.github/workflows/test.yml` — one new step in the `quality` job, ~10 lines.
+- `.gitignore` — add `.license-check/` so the scratch directory created by the CI step is never accidentally committed.
 
 No other files are touched.
 
@@ -101,8 +102,8 @@ No other files are touched.
 
 ```bash
 mkdir -p .license-check
-cp package.json package-lock.json .license-check/
-(cd .license-check && npm ci --omit=dev --ignore-scripts --no-audit --no-fund)
+cp package.json .license-check/
+(cd .license-check && npm install --omit=dev --ignore-scripts --no-audit --no-fund)
 npx --yes license-checker@latest \
   --start .license-check \
   --production \
@@ -116,7 +117,7 @@ Expect exit 0 against the current tree.
 
 **Gate negative-path verification (manual, local only — not committed):**
 
-Temporarily add a known-GPL package (e.g. `readline-sync` which is under WTFPL) to `package.json`, run `npm ci` in the scratch dir, rerun the license-checker command, expect exit 1 with that package's name in the output. Revert the change. This verifies the gate actually rejects disallowed licenses; do not land this as a committed negative test.
+Temporarily add a known-GPL package (e.g. `readline-sync` which is under WTFPL) to `package.json`, run the `npm install` step in the scratch dir, rerun the license-checker command, expect exit 1 with that package's name in the output. Revert the change. This verifies the gate actually rejects disallowed licenses; do not land this as a committed negative test.
 
 **CI verification (in-PR):**
 The new step runs as part of the `quality` job on every PR. The PR that introduces the step exercises the step itself — expect the `quality` job to pass.
