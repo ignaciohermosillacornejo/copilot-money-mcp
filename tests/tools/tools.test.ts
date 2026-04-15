@@ -1062,6 +1062,147 @@ describe('CopilotMoneyTools', () => {
       expect(result.count).toBe(1);
       expect(result.budgets[0].category_name).toBe('Food & Drink > Restaurant');
     });
+
+    // Bug #278 context: Copilot's macOS app stopped writing to the top-level
+    // `amount` field ~2 years ago. Fresh values live in `amounts[YYYY-MM]`
+    // keyed by the current month. Our view must prefer that over the stale
+    // top-level `amount`.
+    describe('current-month from amounts map (issue #278)', () => {
+      const currentMonthKey = (): string => {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      };
+
+      test('prefers amounts[current_month] over stale top-level amount', async () => {
+        const month = currentMonthKey();
+        (db as any)._budgets = [
+          {
+            budget_id: 'stale-top-level',
+            amount: 100, // stale legacy value
+            amounts: { [month]: 250 }, // fresh current-month value
+            category_id: 'food_and_drink',
+          },
+        ];
+        (db as any)._userCategories = [];
+
+        const result = await tools.getBudgets({});
+
+        expect(result.budgets[0]!.amount).toBe(250);
+      });
+
+      test('treats amounts[current_month]=0 as explicit clear (not fallback)', async () => {
+        const month = currentMonthKey();
+        (db as any)._budgets = [
+          {
+            budget_id: 'explicit-zero',
+            amount: 500,
+            amounts: { [month]: 0 },
+            category_id: 'food_and_drink',
+          },
+        ];
+        (db as any)._userCategories = [];
+
+        const result = await tools.getBudgets({});
+
+        expect(result.budgets[0]!.amount).toBe(0);
+      });
+
+      test('falls back to top-level amount when amounts map is missing', async () => {
+        (db as any)._budgets = [
+          {
+            budget_id: 'no-amounts',
+            amount: 400,
+            category_id: 'food_and_drink',
+          },
+        ];
+        (db as any)._userCategories = [];
+
+        const result = await tools.getBudgets({});
+
+        expect(result.budgets[0]!.amount).toBe(400);
+      });
+
+      test('falls back when amounts map has no entry for current month', async () => {
+        (db as any)._budgets = [
+          {
+            budget_id: 'only-historic',
+            amount: 300,
+            amounts: { '2024-02': 175, '2024-04': 200 }, // old months only
+            category_id: 'food_and_drink',
+          },
+        ];
+        (db as any)._userCategories = [];
+
+        const result = await tools.getBudgets({});
+
+        expect(result.budgets[0]!.amount).toBe(300);
+      });
+
+      test('exposes the raw amounts map in the output for history lookups', async () => {
+        const month = currentMonthKey();
+        (db as any)._budgets = [
+          {
+            budget_id: 'history',
+            amount: 100,
+            amounts: { '2024-02': 175, '2024-04': 200, [month]: 250 },
+            category_id: 'food_and_drink',
+          },
+        ];
+        (db as any)._userCategories = [];
+
+        const result = await tools.getBudgets({});
+
+        expect(result.budgets[0]!.amounts).toEqual({
+          '2024-02': 175,
+          '2024-04': 200,
+          [month]: 250,
+        });
+      });
+
+      test('total_budgeted uses current-month override, not stale top-level', async () => {
+        const month = currentMonthKey();
+        (db as any)._budgets = [
+          {
+            budget_id: 'b1',
+            amount: 100, // stale
+            amounts: { [month]: 250 }, // fresh
+            category_id: 'food_and_drink',
+            period: 'monthly',
+          },
+        ];
+        (db as any)._userCategories = [];
+
+        const result = await tools.getBudgets({});
+
+        expect(result.total_budgeted).toBe(250);
+      });
+    });
+
+    // Bug #278 context: 50/86 budget docs in a real LevelDB were empty
+    // tombstones (Firestore's mark-as-deleted representation). Our
+    // `processBudget` surfaced them as `{budget_id}` ghost entries. The
+    // decoder-level guard is tested in tests/core/decoder-*.test.ts; this
+    // test documents the tool-level contract that our view excludes them.
+    test('drops tombstone budgets (no category_id, no amount, no amounts)', async () => {
+      (db as any)._budgets = [
+        {
+          budget_id: 'tombstone-only-id',
+          // no category_id, no amount, no amounts — what processBudget would
+          // previously emit for an empty-field doc
+        },
+        {
+          budget_id: 'real',
+          amount: 100,
+          category_id: 'food_and_drink',
+        },
+      ];
+      (db as any)._userCategories = [];
+
+      const result = await tools.getBudgets({});
+
+      expect(result.count).toBe(1);
+      expect(result.budgets[0]!.budget_id).toBe('real');
+    });
   });
 });
 

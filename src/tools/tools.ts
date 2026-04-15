@@ -1854,6 +1854,7 @@ export class CopilotMoneyTools {
       budget_id: string;
       name?: string;
       amount?: number;
+      amounts?: Record<string, number>;
       period?: string;
       category_id?: string;
       category_name?: string;
@@ -1867,27 +1868,51 @@ export class CopilotMoneyTools {
 
     const allBudgets = await this.db.getBudgets(active_only);
 
+    // Issue #278: Copilot's macOS app stopped writing to the top-level `amount`
+    // field ~2 years ago. Fresh values live in `amounts[YYYY-MM]` keyed by the
+    // current month. Prefer that over the stale top-level `amount`.
+    const now = new Date();
+    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const effectiveAmount = (b: {
+      amount?: number;
+      amounts?: Record<string, number>;
+    }): number | undefined => {
+      const override = b.amounts?.[currentMonth];
+      return override !== undefined ? override : b.amount;
+    };
+
+    // Drop tombstones: Firestore represents deleted docs as empty-field
+    // entries. Our decoder emits those as `{budget_id: docId}` objects with
+    // no category, amount, or amounts. Users see dozens of ghost rows unless
+    // we filter them out here (getCategories does the equivalent filter via
+    // its name guard).
+    const nonTombstone = allBudgets.filter(
+      (b) => b.category_id !== undefined || b.amount !== undefined || b.amounts !== undefined
+    );
+
     // Filter out budgets with orphaned category references (deleted categories)
     const categoryMap = await this.getUserCategoryMap();
-    const budgets = allBudgets.filter((b) => {
+    const budgets = nonTombstone.filter((b) => {
       if (!b.category_id) return true; // Keep budgets without category
       // Keep if category exists in user categories or Plaid categories
       return categoryMap.has(b.category_id) || isKnownPlaidCategory(b.category_id);
     });
 
-    // Calculate total budgeted amount (monthly equivalent)
+    // Calculate total budgeted amount (monthly equivalent) using the
+    // current-month effective amount (may be 0 for explicit clears).
     let totalBudgeted = 0;
     for (const budget of budgets) {
-      if (budget.amount) {
+      const amt = effectiveAmount(budget);
+      if (amt) {
         // Convert to monthly equivalent based on period
         const monthlyAmount =
           budget.period === 'yearly'
-            ? budget.amount / 12
+            ? amt / 12
             : budget.period === 'weekly'
-              ? budget.amount * 4.33 // Average weeks per month
+              ? amt * 4.33 // Average weeks per month
               : budget.period === 'daily'
-                ? budget.amount * 30
-                : budget.amount; // Default to monthly
+                ? amt * 30
+                : amt; // Default to monthly
 
         totalBudgeted += monthlyAmount;
       }
@@ -1897,7 +1922,8 @@ export class CopilotMoneyTools {
       budgets.map(async (b) => ({
         budget_id: b.budget_id,
         name: b.name,
-        amount: b.amount,
+        amount: effectiveAmount(b),
+        ...(b.amounts ? { amounts: b.amounts } : {}),
         period: b.period,
         category_id: b.category_id,
         category_name: b.category_id ? await this.resolveCategoryName(b.category_id) : undefined,
@@ -3512,15 +3538,12 @@ export function createToolSchemas(): ToolSchema[] {
       name: 'get_budgets',
       description:
         "Get budgets from Copilot's native budget tracking. " +
-        'Retrieves user-defined spending limits and budget rules stored in the app. ' +
-        'Returns budget details including amounts, periods (monthly/yearly/weekly), ' +
-        'category associations, and active status. Calculates total budgeted amount as monthly equivalent. ' +
-        'Sync note: after `set_budget` writes, budget changes can take significantly longer ' +
-        'to reflect in this read than other collections (transactions/tags/categories/recurrings ' +
-        'sync in seconds; budgets may take minutes). Do not assume a fresh `set_budget` is ' +
-        'immediately observable here — poll with `refresh_database` or verify directly in the ' +
-        'Copilot app. Per-month overrides written via `set_budget(month=...)` are not surfaced ' +
-        'in this view; only the all-months default `amount` is returned.',
+        'Returns the current-month effective budget per category plus the full ' +
+        '`amounts` map of per-month overrides for history lookups. For parent ' +
+        'categories, the returned `amount` is the resolved total (children + ' +
+        'rollovers) that Copilot displays in the Budgets view. Totals use the ' +
+        'current-month effective amount. ' +
+        'Refresh note: after `set_budget` writes, `refresh_database` then read.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -4074,10 +4097,7 @@ export function createWriteToolSchemas(): ToolSchema[] {
         'Copilot → Settings → General, the budget write still succeeds on the server, but ' +
         'the value will not appear in the Copilot UI until those toggles are re-enabled. ' +
         'Rollover behavior also depends on the "Rollover categories" selection in the same ' +
-        'settings pane, which is not writable through this tool. ' +
-        'Sync delay: successful writes may not be visible via `get_budgets` for minutes — ' +
-        'budget docs sync on a slower cadence than other collections. Do not retry the write ' +
-        'just because the read does not reflect it yet.',
+        'settings pane, which is not writable through this tool.',
       inputSchema: {
         type: 'object' as const,
         properties: {
