@@ -1176,6 +1176,24 @@ describe('CopilotMoneyTools', () => {
 
         expect(result.total_budgeted).toBe(250);
       });
+
+      test('total_budgeted is 0 when current-month override clears a stale non-zero', async () => {
+        const month = currentMonthKey();
+        (db as any)._budgets = [
+          {
+            budget_id: 'cleared-for-month',
+            amount: 300, // stale legacy value
+            amounts: { [month]: 0 }, // explicit clear for current month
+            category_id: 'food_and_drink',
+            period: 'monthly',
+          },
+        ];
+        (db as any)._userCategories = [];
+
+        const result = await tools.getBudgets({});
+
+        expect(result.total_budgeted).toBe(0);
+      });
     });
 
     // Bug #278 context: 50/86 budget docs in a real LevelDB were empty
