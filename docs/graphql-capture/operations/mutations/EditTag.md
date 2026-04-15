@@ -1,7 +1,7 @@
 # EditTag
 
 - **Type:** mutation
-- **Endpoint:** https://app.copilot.money/graphql
+- **Endpoint:** https://app.copilot.money/api/graphql
 - **Fires on:** <fill in from flow docs>
 - **Observations:** 10
 
@@ -10,8 +10,8 @@
 ```graphql
 mutation EditTag($id: ID!, $input: EditTagInput!) {
   editTag(id: $id, input: $input) {
-  ...TagFields
-}
+    ...TagFields
+  }
 }
 
 fragment TagFields on Tag {
@@ -31,7 +31,7 @@ fragment TagFields on Tag {
 ## Example request
 
 ```json
-{"operationName":"EditTag","query":"mutation EditTag($id: ID!, $input: EditTagInput!) {\n  editTag(id: $id, input: $input) {\n  ...TagFields\n}\n}\n\nfragment TagFields on Tag {\n  colorName\n  name\n  id\n}","variables":{"id":"<id>","input":{"name":"<name>"}}}
+{"operationName":"EditTag","query":"mutation EditTag($id: ID!, $input: EditTagInput!) {\n  editTag(id: $id, input: $input) {\n    ...TagFields\n  }\n}\n\nfragment TagFields on Tag {\n  colorName\n  name\n  id\n}","variables":{"id":"<id>","input":{"name":"<name>"}}}
 ```
 
 ## Example response

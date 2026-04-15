@@ -1,7 +1,7 @@
 # Categories
 
 - **Type:** query
-- **Endpoint:** https://app.copilot.money/graphql
+- **Endpoint:** https://app.copilot.money/api/graphql
 - **Fires on:** <fill in from flow docs>
 - **Observations:** 23
 
@@ -112,13 +112,13 @@ fragment BudgetFields on CategoryBudget {
 
 | Name | Type | Required | Example |
 |------|------|----------|---------|
-| spend | string | true | `"<amount>"` |
+| spend | boolean | true | `false` |
 | budget | boolean | true | `false` |
 
 ## Example request
 
 ```json
-{"operationName":"Categories","query":"query Categories($spend: Boolean = false, $budget: Boolean = false, $rollovers: Boolean) {\n  categories {\n    ...CategoryFields\n    spend @include(if: $spend) {\n      ...SpendFields\n      __typename\n    }\n    budget(isRolloverEnabled: $rollovers) @include(if: $budget) {\n      ...BudgetFields\n      __typename\n    }\n    childCategories {\n      ...CategoryFields\n      spend @include(if: $spend) {\n        ...SpendFields\n        __typename\n      }\n      budget(isRolloverEnabled: $rollovers) @include(if: $budget) {\n        ...BudgetFields\n        __typename\n      }\n      __typename\n    }\n    __typename\n  }\n}\n\nfragment SpendMonthlyFields on CategoryMonthlySpent {\n  unpaidRecurringAmount\n  paidRecurringAmount\n  monthName @client\n  comparisonAmount\n  amount\n  month\n  id\n  __typename\n}\n\nfragment BudgetMonthlyFields on CategoryMonthlyBudget {\n  unassignedRolloverAmount\n  childRolloverAmount\n  unassignedAmount\n  resolvedAmount\n  rolloverAmount\n  childAmount\n  goalAmount\n  amount\n  month\n  id\n  __typename\n}\n\nfragment CategoryFields on Category {\n  isRolloverDisabled\n  canBeDeleted\n  isExcluded\n  templateId\n  colorName\n  icon {\n    ... on EmojiUnicode {\n      unicode\n      __typename\n    }\n    ... on Genmoji {\n      id\n      src\n      __typename\n    }\n    __typename\n  }\n  name\n  id\n  __typename\n}\n\nfragment SpendFields on CategorySpend {\n  current {\n    ...SpendMonthlyFields\n    __typename\n  }\n  histories {\n    ...SpendMonthlyFields\n    __typename\n  }\n  __typename\n}\n\nfragment BudgetFields on CategoryBudget {\n  current {\n    ...BudgetMonthlyFields\n    __typename\n  }\n  histories {\n    ...BudgetMonthlyFields\n    __typename\n  }\n  __typename\n}","variables":{"spend":"<amount>","budget":false}}
+{"operationName":"Categories","query":"query Categories($spend: Boolean = false, $budget: Boolean = false, $rollovers: Boolean) {\n  categories {\n    ...CategoryFields\n    spend @include(if: $spend) {\n      ...SpendFields\n      __typename\n    }\n    budget(isRolloverEnabled: $rollovers) @include(if: $budget) {\n      ...BudgetFields\n      __typename\n    }\n    childCategories {\n      ...CategoryFields\n      spend @include(if: $spend) {\n        ...SpendFields\n        __typename\n      }\n      budget(isRolloverEnabled: $rollovers) @include(if: $budget) {\n        ...BudgetFields\n        __typename\n      }\n      __typename\n    }\n    __typename\n  }\n}\n\nfragment SpendMonthlyFields on CategoryMonthlySpent {\n  unpaidRecurringAmount\n  paidRecurringAmount\n  monthName @client\n  comparisonAmount\n  amount\n  month\n  id\n  __typename\n}\n\nfragment BudgetMonthlyFields on CategoryMonthlyBudget {\n  unassignedRolloverAmount\n  childRolloverAmount\n  unassignedAmount\n  resolvedAmount\n  rolloverAmount\n  childAmount\n  goalAmount\n  amount\n  month\n  id\n  __typename\n}\n\nfragment CategoryFields on Category {\n  isRolloverDisabled\n  canBeDeleted\n  isExcluded\n  templateId\n  colorName\n  icon {\n    ... on EmojiUnicode {\n      unicode\n      __typename\n    }\n    ... on Genmoji {\n      id\n      src\n      __typename\n    }\n    __typename\n  }\n  name\n  id\n  __typename\n}\n\nfragment SpendFields on CategorySpend {\n  current {\n    ...SpendMonthlyFields\n    __typename\n  }\n  histories {\n    ...SpendMonthlyFields\n    __typename\n  }\n  __typename\n}\n\nfragment BudgetFields on CategoryBudget {\n  current {\n    ...BudgetMonthlyFields\n    __typename\n  }\n  histories {\n    ...BudgetMonthlyFields\n    __typename\n  }\n  __typename\n}","variables":{"spend":false,"budget":false}}
 ```
 
 ## Example response

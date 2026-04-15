@@ -1,7 +1,7 @@
 # EditTransaction
 
 - **Type:** mutation
-- **Endpoint:** https://app.copilot.money/graphql
+- **Endpoint:** https://app.copilot.money/api/graphql
 - **Fires on:** <fill in from flow docs>
 - **Observations:** 14
 
@@ -125,8 +125,8 @@ fragment CategoryFields on Category {
         },
         "identifierId": "<id>",
         "suggestedCategoryIds": [
-          "5Qqr8qs3GHNCj8H6fIKd",
-          "uVmmgq7OK76xt5HUqHfe"
+          "<id>",
+          "<id>"
         ],
         "datetime": "2026-04-13T07:00:00.000Z",
         "recurringId": null,

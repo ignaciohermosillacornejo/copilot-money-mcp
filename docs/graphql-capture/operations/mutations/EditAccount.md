@@ -1,7 +1,7 @@
 # EditAccount
 
 - **Type:** mutation
-- **Endpoint:** https://app.copilot.money/graphql
+- **Endpoint:** https://app.copilot.money/api/graphql
 - **Fires on:** <fill in from flow docs>
 - **Observations:** 8
 
@@ -10,10 +10,10 @@
 ```graphql
 mutation EditAccount($itemId: ID!, $id: ID!, $input: EditAccountInput!) {
   editAccount(itemId: $itemId, id: $id, input: $input) {
-  account {
-  ...AccountFields
-}
-}
+    account {
+      ...AccountFields
+    }
+  }
 }
 
 fragment AccountFields on Account {
@@ -51,7 +51,7 @@ fragment AccountFields on Account {
 ## Example request
 
 ```json
-{"operationName":"EditAccount","query":"mutation EditAccount($itemId: ID!, $id: ID!, $input: EditAccountInput!) {\n  editAccount(itemId: $itemId, id: $id, input: $input) {\n  account {\n  ...AccountFields\n}\n}\n}\n\nfragment AccountFields on Account {\n  isConcealable @client\n  hasHistoricalUpdates\n  latestBalanceUpdate\n  identifierId @client\n  status @client\n  hasLiveBalance\n  institutionId\n  isUserHidden\n  isUserClosed\n  liveBalance\n  isManual\n  balance\n  subType\n  itemId\n  limit\n  color\n  name\n  type\n  mask\n  id\n}","variables":{"input":{"isUserHidden":true},"itemId":"<id>","id":"<id>"}}
+{"operationName":"EditAccount","query":"mutation EditAccount($itemId: ID!, $id: ID!, $input: EditAccountInput!) {\n  editAccount(itemId: $itemId, id: $id, input: $input) {\n    account {\n      ...AccountFields\n    }\n  }\n}\n\nfragment AccountFields on Account {\n  isConcealable @client\n  hasHistoricalUpdates\n  latestBalanceUpdate\n  identifierId @client\n  status @client\n  hasLiveBalance\n  institutionId\n  isUserHidden\n  isUserClosed\n  liveBalance\n  isManual\n  balance\n  subType\n  itemId\n  limit\n  color\n  name\n  type\n  mask\n  id\n}","variables":{"input":{"isUserHidden":true},"itemId":"<id>","id":"<id>"}}
 ```
 
 ## Example response
@@ -63,11 +63,11 @@ fragment AccountFields on Account {
       "account": {
         "hasHistoricalUpdates": false,
         "latestBalanceUpdate": null,
-        "hasLiveBalance": "<amount>",
+        "hasLiveBalance": true,
         "institutionId": "<account-id>",
         "isUserHidden": true,
         "isUserClosed": false,
-        "liveBalance": "<amount>",
+        "liveBalance": true,
         "isManual": true,
         "balance": "<amount>",
         "subType": "cash management",

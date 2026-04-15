@@ -1,7 +1,7 @@
 # Transactions
 
 - **Type:** query
-- **Endpoint:** https://app.copilot.money/graphql
+- **Endpoint:** https://app.copilot.money/api/graphql
 - **Fires on:** <fill in from flow docs>
 - **Observations:** 4
 
@@ -199,11 +199,11 @@ fragment TransactionPaginationFields on TransactionPagination {
               "latestBalanceUpdate": "2026-04-14T19:53:10.884Z",
               "identifierId": "<id>",
               "status": "2 hours ago",
-              "hasLiveBalance": "<amount>",
+              "hasLiveBalance": true,
               "institutionId": "<account-id>",
               "isUserHidden": false,
               "isUserClosed": false,
-              "liveBalance": "<amount>",
+              "liveBalance": true,
               "isManual": false,
               "balance": "<amount>",
               "subType": "credit card",
@@ -212,7 +212,7 @@ fragment TransactionPaginationFields on TransactionPagination {
               "color": "#006fcf",
               "name": "<name>",
               "type": "CREDIT",
-              "mask": "1000",
+              "mask": "<account-id>",
               "id": "<id>"
             },
             "category": {
@@ -232,8 +232,8 @@ fragment TransactionPaginationFields on TransactionPagination {
             "recurring": null,
             "identifierId": "<id>",
             "suggestedCategoryIds": [
-              "uVmmgq7OK76xt5HUqHfe",
-              "5Qqr8qs3GHNCj8H6fIKd"
+              "<id>",
+              "<id>"
             ],
             "datetime": "2026-04-14T07:00:00.000Z",
             "recurringId": null,
@@ -266,11 +266,11 @@ fragment TransactionPaginationFields on TransactionPagination {
               "latestBalanceUpdate": "2026-04-14T14:05:52.151Z",
               "identifierId": "<id>",
               "status": "8 hours ago",
-              "hasLiveBalance": "<amount>",
+              "hasLiveBalance": true,
               "institutionId": "<account-id>",
               "isUserHidden": false,
               "isUserClosed": false,
-              "liveBalance": "<amount>",
+              "liveBalance": true,
               "isManual": false,
               "balance": "<amount>",
               "subType": "credit card",
@@ -279,7 +279,7 @@ fragment TransactionPaginationFields on TransactionPagination {
               "color": "#117ACA",
               "name": "<name>",
               "type": "CREDIT",
-              "mask": "5559",
+              "mask": "<account-id>",
               "id": "<id>"
             },
             "category": {
@@ -307,8 +307,8 @@ fragment TransactionPaginationFields on TransactionPagination {
             },
             "identifierId": "<id>",
             "suggestedCategoryIds": [
-              "uVmmgq7OK76xt5HUqHfe",
-              "fjjdeoFOSZkcsNPxFgeO"
+              "<id>",
+              "<id>"
             ],
             "datetime": "2026-04-14T07:00:00.000Z",
             "recurringId": "<id>",
@@ -341,11 +341,11 @@ fragment TransactionPaginationFields on TransactionPagination {
               "latestBalanceUpdate": "2026-04-14T19:53:10.884Z",
               "identifierId": "<id>",
               "status": "2 hours ago",
-              "hasLiveBalance": "<amount>",
+              "hasLiveBalance": true,
               "institutionId": "<account-id>",
               "isUserHidden": false,
               "isUserClosed": false,
-              "liveBalance": "<amount>",
+              "liveBalance": true,
               "isManual": false,
               "balance": "<amount>",
               "subType": "credit card",
@@ -354,7 +354,7 @@ fragment TransactionPaginationFields on TransactionPagination {
               "color": "#006fcf",
               "name": "<name>",
               "type": "CREDIT",
-              "mask": "1000",
+              "mask": "<account-id>",
               "id": "<id>"
             },
             "category": {
@@ -374,8 +374,8 @@ fragment TransactionPaginationFields on TransactionPagination {
             "recurring": null,
             "identifierId": "<id>",
             "suggestedCategoryIds": [
-              "5Qqr8qs3GHNCj8H6fIKd",
-              "uVmmgq7OK76xt5HUqHfe"
+              "<id>",
+              "<id>"
             ],
             "datetime": "2026-04-13T07:00:00.000Z",
             "recurringId": null,
@@ -408,11 +408,11 @@ fragment TransactionPaginationFields on TransactionPagination {
               "latestBalanceUpdate": "2026-04-14T14:05:52.151Z",
               "identifierId": "<id>",
               "status": "8 hours ago",
-              "hasLiveBalance": "<amount>",
+              "hasLiveBalance": true,
               "institutionId": "<account-id>",
               "isUserHidden": false,
               "isUserClosed": false,
-              "liveBalance": "<amount>",
+              "liveBalance": true,
               "isManual": false,
               "balance": "<amount>",
               "subType": "credit card",
@@ -421,7 +421,7 @@ fragment TransactionPaginationFields on TransactionPagination {
               "color": "#117ACA",
               "name": "<name>",
               "type": "CREDIT",
-              "mask": "5559",
+              "mask": "<account-id>",
               "id": "<id>"
             },
             "category": {
@@ -441,8 +441,8 @@ fragment TransactionPaginationFields on TransactionPagination {
             "recurring": null,
             "identifierId": "<id>",
             "suggestedCategoryIds": [
-              "5Qqr8qs3GHNCj8H6fIKd",
-              "uVmmgq7OK76xt5HUqHfe"
+              "<id>",
+              "<id>"
             ],
             "datetime": "2026-04-13T07:00:00.000Z",
             "recurringId": null,
@@ -475,11 +475,11 @@ fragment TransactionPaginationFields on TransactionPagination {
               "latestBalanceUpdate": "2026-04-14T19:53:10.884Z",
               "identifierId": "<id>",
               "status": "2 hours ago",
-              "hasLiveBalance": "<amount>",
+              "hasLiveBalance": true,
               "institutionId": "<account-id>",
               "isUserHidden": false,
               "isUserClosed": false,
-              "liveBalance": "<amount>",
+              "liveBalance": true,
               "isManual": false,
               "balance": "<amount>",
               "subType": "credit card",
@@ -488,7 +488,7 @@ fragment TransactionPaginationFields on TransactionPagination {
               "color": "#006fcf",
               "name": "<name>",
               "type": "CREDIT",
-              "mask": "1000",
+              "mask": "<account-id>",
               "id": "<id>"
             },
             "category": {
@@ -508,8 +508,8 @@ fragment TransactionPaginationFields on TransactionPagination {
             "recurring": null,
             "identifierId": "<id>",
             "suggestedCategoryIds": [
-              "HEohn8psPGiY0ihTk02O",
-              "5Qqr8qs3GHNCj8H6fIKd"
+              "<id>",
+              "<id>"
             ],
             "datetime": "2026-04-13T07:00:00.000Z",
             "recurringId": null,
@@ -542,11 +542,11 @@ fragment TransactionPaginationFields on TransactionPagination {
               "latestBalanceUpdate": "2026-04-14T19:53:10.884Z",
               "identifierId": "<id>",
               "status": "2 hours ago",
-              "hasLiveBalance": "<amount>",
+              "hasLiveBalance": true,
               "institutionId": "<account-id>",
               "isUserHidden": false,
               "isUserClosed": false,
-              "liveBalance": "<amount>",
+              "liveBalance": true,
               "isManual": false,
               "balance": "<amount>",
               "subType": "credit card",
@@ -555,7 +555,7 @@ fragment TransactionPaginationFields on TransactionPagination {
               "color": "#006fcf",
               "name": "<name>",
               "type": "CREDIT",
-              "mask": "1000",
+              "mask": "<account-id>",
               "id": "<id>"
             },
             "category": {
@@ -575,8 +575,8 @@ fragment TransactionPaginationFields on TransactionPagination {
             "recurring": null,
             "identifierId": "<id>",
             "suggestedCategoryIds": [
-              "uVmmgq7OK76xt5HUqHfe",
-              "5Qqr8qs3GHNCj8H6fIKd"
+              "<id>",
+              "<id>"
             ],
             "datetime": "2026-04-13T07:00:00.000Z",
             "recurringId": null,
@@ -609,11 +609,11 @@ fragment TransactionPaginationFields on TransactionPagination {
               "latestBalanceUpdate": "2026-04-14T00:54:26.701Z",
               "identifierId": "<id>",
               "status": "21 hours ago",
-              "hasLiveBalance": "<amount>",
+              "hasLiveBalance": true,
               "institutionId": "<account-id>",
               "isUserHidden": false,
               "isUserClosed": false,
-              "liveBalance": "<amount>",
+              "liveBalance": true,
               "isManual": false,
               "balance": "<amount>",
               "subType": "credit card",
@@ -622,7 +622,7 @@ fragment TransactionPaginationFields on TransactionPagination {
               "color": "#F10019",
               "name": "<name>",
               "type": "CREDIT",
-              "mask": "9395",
+              "mask": "<account-id>",
               "id": "<id>"
             },
             "category": {
@@ -642,8 +642,8 @@ fragment TransactionPaginationFields on TransactionPagination {
             "recurring": null,
             "identifierId": "<id>",
             "suggestedCategoryIds": [
-              "5Qqr8qs3GHNCj8H6fIKd",
-              "uVmmgq7OK76xt5HUqHfe"
+              "<id>",
+              "<id>"
             ],
             "datetime": "2026-04-13T07:00:00.000Z",
             "recurringId": null,
@@ -676,11 +676,11 @@ fragment TransactionPaginationFields on TransactionPagination {
               "latestBalanceUpdate": "2026-04-14T14:05:52.151Z",
               "identifierId": "<id>",
               "status": "8 hours ago",
-              "hasLiveBalance": "<amount>",
+              "hasLiveBalance": true,
               "institutionId": "<account-id>",
               "isUserHidden": false,
               "isUserClosed": false,
-              "liveBalance": "<amount>",
+              "liveBalance": true,
               "isManual": false,
               "balance": "<amount>",
               "subType": "checking",
@@ -689,7 +689,7 @@ fragment TransactionPaginationFields on TransactionPagination {
               "color": "#117ACA",
               "name": "<name>",
               "type": "DEPOSITORY",
-              "mask": "0636",
+              "mask": "<account-id>",
               "id": "<id>"
             },
             "category": null,
@@ -727,11 +727,11 @@ fragment TransactionPaginationFields on TransactionPagination {
               "latestBalanceUpdate": "2026-04-14T14:05:52.151Z",
               "identifierId": "<id>",
               "status": "8 hours ago",
-              "hasLiveBalance": "<amount>",
+              "hasLiveBalance": true,
               "institutionId": "<account-id>",
               "isUserHidden": false,
               "isUserClosed": false,
-              "liveBalance": "<amount>",
+              "liveBalance": true,
               "isManual": false,
               "balance": "<amount>",
               "subType": "checking",
@@ -740,7 +740,7 @@ fragment TransactionPaginationFields on TransactionPagination {
               "color": "#117ACA",
               "name": "<name>",
               "type": "DEPOSITORY",
-              "mask": "0636",
+              "mask": "<account-id>",
               "id": "<id>"
             },
             "category": null,
@@ -778,11 +778,11 @@ fragment TransactionPaginationFields on TransactionPagination {
               "latestBalanceUpdate": "2026-04-14T00:54:26.701Z",
               "identifierId": "<id>",
               "status": "21 hours ago",
-              "hasLiveBalance": "<amount>",
+              "hasLiveBalance": true,
               "institutionId": "<account-id>",
               "isUserHidden": false,
               "isUserClosed": false,
-              "liveBalance": "<amount>",
+              "liveBalance": true,
               "isManual": false,
               "balance": "<amount>",
               "subType": "credit card",
@@ -791,7 +791,7 @@ fragment TransactionPaginationFields on TransactionPagination {
               "color": "#F10019",
               "name": "<name>",
               "type": "CREDIT",
-              "mask": "8100",
+              "mask": "<account-id>",
               "id": "<id>"
             },
             "category": {
@@ -811,8 +811,8 @@ fragment TransactionPaginationFields on TransactionPagination {
             "recurring": null,
             "identifierId": "<id>",
             "suggestedCategoryIds": [
-              "5Qqr8qs3GHNCj8H6fIKd",
-              "GFhYKDRRH88Anh9Ik5oH"
+              "<id>",
+              "<id>"
             ],
             "datetime": "2026-04-12T07:00:00.000Z",
             "recurringId": null,
@@ -845,11 +845,11 @@ fragment TransactionPaginationFields on TransactionPagination {
               "latestBalanceUpdate": "2026-04-14T14:05:52.151Z",
               "identifierId": "<id>",
               "status": "8 hours ago",
-              "hasLiveBalance": "<amount>",
+              "hasLiveBalance": true,
               "institutionId": "<account-id>",
               "isUserHidden": false,
               "isUserClosed": false,
-              "liveBalance": "<amount>",
+              "liveBalance": true,
               "isManual": false,
               "balance": "<amount>",
               "subType": "credit card",
@@ -858,7 +858,7 @@ fragment TransactionPaginationFields on TransactionPagination {
               "color": "#117ACA",
               "name": "<name>",
               "type": "CREDIT",
-              "mask": "1178",
+              "mask": "<account-id>",
               "id": "<id>"
             },
             "category": null,
@@ -896,11 +896,11 @@ fragment TransactionPaginationFields on TransactionPagination {
               "latestBalanceUpdate": "2026-04-14T00:54:26.701Z",
               "identifierId": "<id>",
               "status": "21 hours ago",
-              "hasLiveBalance": "<amount>",
+              "hasLiveBalance": true,
               "institutionId": "<account-id>",
               "isUserHidden": false,
               "isUserClosed": false,
-              "liveBalance": "<amount>",
+              "liveBalance": true,
               "isManual": false,
               "balance": "<amount>",
               "subType": "credit card",
@@ -909,7 +909,7 @@ fragment TransactionPaginationFields on TransactionPagination {
               "color": "#F10019",
               "name": "<name>",
               "type": "CREDIT",
-              "mask": "8100",
+              "mask": "<account-id>",
               "id": "<id>"
             },
             "category": null,
@@ -947,11 +947,11 @@ fragment TransactionPaginationFields on TransactionPagination {
               "latestBalanceUpdate": "2026-04-14T00:54:26.701Z",
               "identifierId": "<id>",
               "status": "21 hours ago",
-              "hasLiveBalance": "<amount>",
+              "hasLiveBalance": true,
               "institutionId": "<account-id>",
               "isUserHidden": false,
               "isUserClosed": false,
-              "liveBalance": "<amount>",
+              "liveBalance": true,
               "isManual": false,
               "balance": "<amount>",
               "subType": "credit card",
@@ -960,7 +960,7 @@ fragment TransactionPaginationFields on TransactionPagination {
               "color": "#F10019",
               "name": "<name>",
               "type": "CREDIT",
-              "mask": "9395",
+              "mask": "<account-id>",
               "id": "<id>"
             },
             "category": {
@@ -980,8 +980,8 @@ fragment TransactionPaginationFields on TransactionPagination {
             "recurring": null,
             "identifierId": "<id>",
             "suggestedCategoryIds": [
-              "S8nBYfUO8LGv4GmPALtH",
-              "uVmmgq7OK76xt5HUqHfe"
+              "<id>",
+              "<id>"
             ],
             "datetime": "2026-04-09T07:00:00.000Z",
             "recurringId": null,
@@ -1014,11 +1014,11 @@ fragment TransactionPaginationFields on TransactionPagination {
               "latestBalanceUpdate": "2026-04-14T19:53:10.884Z",
               "identifierId": "<id>",
               "status": "2 hours ago",
-              "hasLiveBalance": "<amount>",
+              "hasLiveBalance": true,
               "institutionId": "<account-id>",
               "isUserHidden": false,
               "isUserClosed": false,
-              "liveBalance": "<amount>",
+              "liveBalance": true,
               "isManual": false,
               "balance": "<amount>",
               "subType": "credit card",
@@ -1027,7 +1027,7 @@ fragment TransactionPaginationFields on TransactionPagination {
               "color": "#006fcf",
               "name": "<name>",
               "type": "CREDIT",
-              "mask": "1000",
+              "mask": "<account-id>",
               "id": "<id>"
             },
             "category": null,
@@ -1065,11 +1065,11 @@ fragment TransactionPaginationFields on TransactionPagination {
               "latestBalanceUpdate": "2026-04-14T14:05:52.151Z",
               "identifierId": "<id>",
               "status": "8 hours ago",
-              "hasLiveBalance": "<amount>",
+              "hasLiveBalance": true,
               "institutionId": "<account-id>",
               "isUserHidden": false,
               "isUserClosed": false,
-              "liveBalance": "<amount>",
+              "liveBalance": true,
               "isManual": false,
               "balance": "<amount>",
               "subType": "checking",
@@ -1078,7 +1078,7 @@ fragment TransactionPaginationFields on TransactionPagination {
               "color": "#117ACA",
               "name": "<name>",
               "type": "DEPOSITORY",
-              "mask": "0636",
+              "mask": "<account-id>",
               "id": "<id>"
             },
             "category": null,
@@ -1116,11 +1116,11 @@ fragment TransactionPaginationFields on TransactionPagination {
               "latestBalanceUpdate": "2026-04-14T14:05:52.151Z",
               "identifierId": "<id>",
               "status": "8 hours ago",
-              "hasLiveBalance": "<amount>",
+              "hasLiveBalance": true,
               "institutionId": "<account-id>",
               "isUserHidden": false,
               "isUserClosed": false,
-              "liveBalance": "<amount>",
+              "liveBalance": true,
               "isManual": false,
               "balance": "<amount>",
               "subType": "checking",
@@ -1129,7 +1129,7 @@ fragment TransactionPaginationFields on TransactionPagination {
               "color": "#117ACA",
               "name": "<name>",
               "type": "DEPOSITORY",
-              "mask": "0636",
+              "mask": "<account-id>",
               "id": "<id>"
             },
             "category": null,
@@ -1167,11 +1167,11 @@ fragment TransactionPaginationFields on TransactionPagination {
               "latestBalanceUpdate": "2026-04-14T14:05:52.151Z",
               "identifierId": "<id>",
               "status": "8 hours ago",
-              "hasLiveBalance": "<amount>",
+              "hasLiveBalance": true,
               "institutionId": "<account-id>",
               "isUserHidden": false,
               "isUserClosed": false,
-              "liveBalance": "<amount>",
+              "liveBalance": true,
               "isManual": false,
               "balance": "<amount>",
               "subType": "checking",
@@ -1180,7 +1180,7 @@ fragment TransactionPaginationFields on TransactionPagination {
               "color": "#117ACA",
               "name": "<name>",
               "type": "DEPOSITORY",
-              "mask": "0636",
+              "mask": "<account-id>",
               "id": "<id>"
             },
             "category": null,
@@ -1218,11 +1218,11 @@ fragment TransactionPaginationFields on TransactionPagination {
               "latestBalanceUpdate": "2026-04-14T14:05:52.151Z",
               "identifierId": "<id>",
               "status": "8 hours ago",
-              "hasLiveBalance": "<amount>",
+              "hasLiveBalance": true,
               "institutionId": "<account-id>",
               "isUserHidden": false,
               "isUserClosed": false,
-              "liveBalance": "<amount>",
+              "liveBalance": true,
               "isManual": false,
               "balance": "<amount>",
               "subType": "checking",
@@ -1231,7 +1231,7 @@ fragment TransactionPaginationFields on TransactionPagination {
               "color": "#117ACA",
               "name": "<name>",
               "type": "DEPOSITORY",
-              "mask": "0636",
+              "mask": "<account-id>",
               "id": "<id>"
             },
             "category": null,
@@ -1269,11 +1269,11 @@ fragment TransactionPaginationFields on TransactionPagination {
               "latestBalanceUpdate": "2026-04-14T00:54:26.701Z",
               "identifierId": "<id>",
               "status": "21 hours ago",
-              "hasLiveBalance": "<amount>",
+              "hasLiveBalance": true,
               "institutionId": "<account-id>",
               "isUserHidden": false,
               "isUserClosed": false,
-              "liveBalance": "<amount>",
+              "liveBalance": true,
               "isManual": false,
               "balance": "<amount>",
               "subType": "credit card",
@@ -1282,7 +1282,7 @@ fragment TransactionPaginationFields on TransactionPagination {
               "color": "#F10019",
               "name": "<name>",
               "type": "CREDIT",
-              "mask": "9395",
+              "mask": "<account-id>",
               "id": "<id>"
             },
             "category": null,
@@ -1320,11 +1320,11 @@ fragment TransactionPaginationFields on TransactionPagination {
               "latestBalanceUpdate": "2026-04-14T14:05:52.151Z",
               "identifierId": "<id>",
               "status": "8 hours ago",
-              "hasLiveBalance": "<amount>",
+              "hasLiveBalance": true,
               "institutionId": "<account-id>",
               "isUserHidden": false,
               "isUserClosed": false,
-              "liveBalance": "<amount>",
+              "liveBalance": true,
               "isManual": false,
               "balance": "<amount>",
               "subType": "credit card",
@@ -1333,7 +1333,7 @@ fragment TransactionPaginationFields on TransactionPagination {
               "color": "#117ACA",
               "name": "<name>",
               "type": "CREDIT",
-              "mask": "5559",
+              "mask": "<account-id>",
               "id": "<id>"
             },
             "category": null,

@@ -1,7 +1,7 @@
 # CreateTag
 
 - **Type:** mutation
-- **Endpoint:** https://app.copilot.money/graphql
+- **Endpoint:** https://app.copilot.money/api/graphql
 - **Fires on:** <fill in from flow docs>
 - **Observations:** 5
 
@@ -10,8 +10,8 @@
 ```graphql
 mutation CreateTag($input: CreateTagInput!) {
   createTag(input: $input) {
-  ...TagFields
-}
+    ...TagFields
+  }
 }
 
 fragment TagFields on Tag {
@@ -30,7 +30,7 @@ fragment TagFields on Tag {
 ## Example request
 
 ```json
-{"operationName":"CreateTag","query":"mutation CreateTag($input: CreateTagInput!) {\n  createTag(input: $input) {\n  ...TagFields\n}\n}\n\nfragment TagFields on Tag {\n  colorName\n  name\n  id\n}","variables":{"input":{"colorName":"PURPLE2","name":"<name>"}}}
+{"operationName":"CreateTag","query":"mutation CreateTag($input: CreateTagInput!) {\n  createTag(input: $input) {\n    ...TagFields\n  }\n}\n\nfragment TagFields on Tag {\n  colorName\n  name\n  id\n}","variables":{"input":{"colorName":"PURPLE2","name":"<name>"}}}
 ```
 
 ## Example response

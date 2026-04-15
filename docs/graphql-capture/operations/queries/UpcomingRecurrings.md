@@ -1,7 +1,7 @@
 # UpcomingRecurrings
 
 - **Type:** query
-- **Endpoint:** https://app.copilot.money/graphql
+- **Endpoint:** https://app.copilot.money/api/graphql
 - **Fires on:** <fill in from flow docs>
 - **Observations:** 1
 
@@ -119,7 +119,7 @@ _(no variables)_
           {
             "__typename": "RecurringPayment",
             "amount": "<amount>",
-            "isPaid": "<amount>",
+            "isPaid": false,
             "date": "2026-04-25"
           }
         ],
@@ -163,7 +163,7 @@ _(no variables)_
           {
             "__typename": "RecurringPayment",
             "amount": "<amount>",
-            "isPaid": "<amount>",
+            "isPaid": false,
             "date": "2026-04-01"
           }
         ],
@@ -207,7 +207,7 @@ _(no variables)_
           {
             "__typename": "RecurringPayment",
             "amount": "<amount>",
-            "isPaid": "<amount>",
+            "isPaid": false,
             "date": "2026-04-16"
           }
         ],
@@ -251,7 +251,7 @@ _(no variables)_
           {
             "__typename": "RecurringPayment",
             "amount": "<amount>",
-            "isPaid": "<amount>",
+            "isPaid": false,
             "date": "2026-04-10"
           }
         ],
@@ -292,7 +292,7 @@ _(no variables)_
           {
             "__typename": "RecurringPayment",
             "amount": "<amount>",
-            "isPaid": "<amount>",
+            "isPaid": false,
             "date": "2026-04-13"
           }
         ],
@@ -336,7 +336,7 @@ _(no variables)_
           {
             "__typename": "RecurringPayment",
             "amount": "<amount>",
-            "isPaid": "<amount>",
+            "isPaid": false,
             "date": "2026-04-01"
           }
         ],
@@ -380,7 +380,7 @@ _(no variables)_
           {
             "__typename": "RecurringPayment",
             "amount": "<amount>",
-            "isPaid": "<amount>",
+            "isPaid": false,
             "date": "2026-04-28"
           }
         ],
@@ -424,7 +424,7 @@ _(no variables)_
           {
             "__typename": "RecurringPayment",
             "amount": "<amount>",
-            "isPaid": "<amount>",
+            "isPaid": false,
             "date": "2026-04-11"
           }
         ],
@@ -468,7 +468,7 @@ _(no variables)_
           {
             "__typename": "RecurringPayment",
             "amount": "<amount>",
-            "isPaid": "<amount>",
+            "isPaid": false,
             "date": "2026-04-17"
           }
         ],
@@ -512,7 +512,7 @@ _(no variables)_
           {
             "__typename": "RecurringPayment",
             "amount": "<amount>",
-            "isPaid": "<amount>",
+            "isPaid": false,
             "date": "2026-04-01"
           }
         ],
@@ -556,7 +556,7 @@ _(no variables)_
           {
             "__typename": "RecurringPayment",
             "amount": "<amount>",
-            "isPaid": "<amount>",
+            "isPaid": false,
             "date": "2026-04-23"
           }
         ],
@@ -600,7 +600,7 @@ _(no variables)_
           {
             "__typename": "RecurringPayment",
             "amount": "<amount>",
-            "isPaid": "<amount>",
+            "isPaid": false,
             "date": "2026-04-16"
           }
         ],
@@ -644,7 +644,7 @@ _(no variables)_
           {
             "__typename": "RecurringPayment",
             "amount": "<amount>",
-            "isPaid": "<amount>",
+            "isPaid": false,
             "date": "2026-04-16"
           }
         ],

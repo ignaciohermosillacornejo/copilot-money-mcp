@@ -46,6 +46,7 @@ const AMOUNT_FIELDS = new Set([
 ]);
 const ACCOUNT_ID_FIELDS = new Set([
   'accountNumber', 'routingNumber', 'institutionId', 'plaidItemId', 'plaidAccountId',
+  'mask', // Plaid/Firebase shorthand for card/account last-4 digits
 ]);
 const ID_FIELDS = new Set(['userId', 'uid', 'householdId', 'id', 'documentId']);
 const OPAQUE_TOKEN_FIELDS = new Set([
@@ -57,8 +58,10 @@ const OPAQUE_TOKEN_FIELDS = new Set([
 // unassignedRolloverAmount, childBalance, totalSpent, averageCost, netIncome.
 const AMOUNT_SUFFIX_RE =
   /[a-z](Amount|Balance|Cost|Price|Total|Value|Spent|Earned|Paid|Contributed|Saved|Income|Expense|Debt|Asset|Cash|Deposit|Withdrawal|Transfer|Fee|Interest|Principal|Limit|Equity)$/;
-// Any camelCase field ending in Id (but not "Paid") and holding an id-shaped value.
-const ID_SUFFIX_RE = /[a-z]Id$/;
+// Any camelCase field ending in Id or Ids and holding an id-shaped value.
+// Plural catches e.g. suggestedCategoryIds[]; each array element is visited
+// with the array's key, so the regex applies to the plural form too.
+const ID_SUFFIX_RE = /[a-z]Ids?$/;
 // Fields holding opaque tokens (hashes, cursors, bearer tokens).
 const TOKEN_SUFFIX_RE = /(Hash|Token|Cursor)$/;
 
@@ -82,7 +85,12 @@ function scrubValue(key: string, value: unknown): unknown {
   if (NAME_FIELDS.has(key)) return '<name>';
   if (EMAIL_FIELDS.has(key)) return '<email>';
   if (PHONE_FIELDS.has(key)) return '<phone>';
-  if (AMOUNT_FIELDS.has(key) || AMOUNT_SUFFIX_RE.test(key)) return '<amount>';
+  if (
+    (AMOUNT_FIELDS.has(key) || AMOUNT_SUFFIX_RE.test(key)) &&
+    typeof value !== 'boolean'
+  ) {
+    return '<amount>';
+  }
   if (ACCOUNT_ID_FIELDS.has(key)) return '<account-id>';
   if (OPAQUE_TOKEN_FIELDS.has(key) || TOKEN_SUFFIX_RE.test(key)) return '<id>';
   if (ID_FIELDS.has(key) && isIdShaped(value)) return '<id>';

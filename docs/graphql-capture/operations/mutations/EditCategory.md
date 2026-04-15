@@ -1,7 +1,7 @@
 # EditCategory
 
 - **Type:** mutation
-- **Endpoint:** https://app.copilot.money/graphql
+- **Endpoint:** https://app.copilot.money/api/graphql
 - **Fires on:** <fill in from flow docs>
 - **Observations:** 13
 
@@ -90,7 +90,7 @@ fragment BudgetFields on CategoryBudget {
 | id | string | true | `"<id>"` |
 | input | object | true | `{"name":"<name>"}` |
 | budget | boolean | false | `false` |
-| spend | string | false | `"<amount>"` |
+| spend | boolean | false | `true` |
 
 ## Example request
 

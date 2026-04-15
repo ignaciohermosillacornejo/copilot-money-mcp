@@ -1,7 +1,7 @@
 # CreateRecurring
 
 - **Type:** mutation
-- **Endpoint:** https://app.copilot.money/graphql
+- **Endpoint:** https://app.copilot.money/api/graphql
 - **Fires on:** <fill in from flow docs>
 - **Observations:** 2
 
@@ -106,7 +106,7 @@ fragment CategoryFields on Category {
         {
           "__typename": "RecurringPayment",
           "amount": "<amount>",
-          "isPaid": "<amount>",
+          "isPaid": true,
           "date": "2026-04-14"
         }
       ],

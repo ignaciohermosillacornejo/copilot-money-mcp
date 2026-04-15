@@ -1,3 +1,4 @@
+import { rename } from 'node:fs/promises';
 import type { RawEntry } from './scrub';
 
 interface DocumentDump {
@@ -32,7 +33,9 @@ export async function mergeDocuments(jsonlPath: string, documentsPath: string): 
     return l;
   });
 
-  await Bun.write(jsonlPath, out.join('\n') + '\n');
+  const tmpPath = jsonlPath + '.tmp';
+  await Bun.write(tmpPath, out.join('\n') + '\n');
+  await rename(tmpPath, jsonlPath);
   console.log(`merged ${merged} entries with verbatim query strings, ${unchanged} unchanged`);
 }
 
