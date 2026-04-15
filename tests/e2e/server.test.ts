@@ -29,7 +29,7 @@ import type {
   InvestmentSplit,
   HoldingsHistory,
 } from '../../src/models/index.js';
-import type { FirestoreClient } from '../../src/core/firestore-client.js';
+import type { GraphQLClient } from '../../src/core/graphql/client.js';
 
 // Temp directory with a dummy .ldb so CopilotDatabase.isAvailable() returns true
 const FAKE_DB_DIR = mkdtempSync(join(tmpdir(), 'copilot-test-'));
@@ -548,19 +548,21 @@ function createMockDb(): CopilotDatabase {
   return db;
 }
 
-/** No-op Firestore client for write-tool tests. */
-function createMockFirestoreClient(): FirestoreClient {
-  const mock: Pick<
-    FirestoreClient,
-    'requireUserId' | 'getUserId' | 'updateDocument' | 'createDocument' | 'deleteDocument'
-  > = {
+/**
+ * No-op write client for write-tool tests.
+ *
+ * TODO(Task 17): replace this stub with a real GraphQL mock once the
+ * tool-level tests are migrated off the Firestore-era shape.
+ */
+function createMockFirestoreClient(): GraphQLClient {
+  const mock = {
     requireUserId: async () => 'test-user-123',
     getUserId: () => 'test-user-123',
     updateDocument: async () => {},
     createDocument: async (_col: string, docId: string | undefined) => docId ?? 'auto_generated_id',
     deleteDocument: async () => {},
   };
-  return mock as unknown as FirestoreClient;
+  return mock as unknown as GraphQLClient;
 }
 
 /** Parse the JSON text from a handleCallTool result. */
