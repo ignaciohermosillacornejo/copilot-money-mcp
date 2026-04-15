@@ -50,7 +50,7 @@ export class CopilotMoneyServer {
       graphqlClient = new GraphQLClient(auth);
     }
 
-    this.tools = new CopilotMoneyTools(this.db, undefined, graphqlClient);
+    this.tools = new CopilotMoneyTools(this.db, graphqlClient);
     this.server = new Server(
       {
         name: 'copilot-money-mcp',
