@@ -20,13 +20,16 @@ describe('createWriteToolSchemas', () => {
     expect(updateTxn!.inputSchema.additionalProperties).toBe(false);
   });
 
-  test('create_tag schema requires name and exposes color fields', () => {
+  test('create_tag schema requires name and exposes color_name only (no hex_color)', () => {
+    // The implementation only reads color_name — hex_color was previously
+    // advertised in the schema but silently ignored by createTag, so it was
+    // removed during the 2.0.1 tool-description audit.
     const createTag = createWriteToolSchemas().find((s) => s.name === 'create_tag');
     expect(createTag).toBeDefined();
     expect(createTag!.inputSchema.required).toEqual(['name']);
     expect(createTag!.inputSchema.properties).toHaveProperty('name');
     expect(createTag!.inputSchema.properties).toHaveProperty('color_name');
-    expect(createTag!.inputSchema.properties).toHaveProperty('hex_color');
+    expect(createTag!.inputSchema.properties).not.toHaveProperty('hex_color');
   });
 
   test('delete_tag schema requires tag_id', () => {
