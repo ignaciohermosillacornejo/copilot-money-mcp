@@ -280,7 +280,9 @@ export class CopilotMoneyServer {
           break;
 
         case 'set_budget':
-          result = await this.tools.setBudget(typedArgs as any);
+          result = await this.tools.setBudget(
+            typedArgs as Parameters<typeof this.tools.setBudget>[0]
+          );
           break;
 
         case 'set_recurring_state':

@@ -532,16 +532,11 @@ describe('CopilotMoneyServer - write mode', () => {
     'create_category',
     'update_category',
     'delete_category',
-    'create_budget',
-    'update_budget',
-    'delete_budget',
+    'set_budget',
     'create_recurring',
     'update_recurring',
     'set_recurring_state',
     'delete_recurring',
-    'create_goal',
-    'update_goal',
-    'delete_goal',
   ] as const;
 
   test('handleListTools returns read + write tools when writeEnabled', () => {
@@ -565,16 +560,11 @@ describe('CopilotMoneyServer - write mode', () => {
     ['create_category', { readOnlyHint: false, destructiveHint: false, idempotentHint: false }],
     ['update_category', { readOnlyHint: false, destructiveHint: false, idempotentHint: true }],
     ['delete_category', { readOnlyHint: false, destructiveHint: true, idempotentHint: true }],
-    ['create_budget', { readOnlyHint: false, destructiveHint: false, idempotentHint: false }],
-    ['update_budget', { readOnlyHint: false, destructiveHint: false, idempotentHint: true }],
-    ['delete_budget', { readOnlyHint: false, destructiveHint: true, idempotentHint: true }],
+    ['set_budget', { readOnlyHint: false, destructiveHint: false, idempotentHint: true }],
     ['create_recurring', { readOnlyHint: false, destructiveHint: false, idempotentHint: false }],
     ['update_recurring', { readOnlyHint: false, destructiveHint: false, idempotentHint: true }],
     ['set_recurring_state', { readOnlyHint: false, destructiveHint: false, idempotentHint: true }],
     ['delete_recurring', { readOnlyHint: false, destructiveHint: true, idempotentHint: true }],
-    ['create_goal', { readOnlyHint: false, destructiveHint: false, idempotentHint: false }],
-    ['update_goal', { readOnlyHint: false, destructiveHint: false, idempotentHint: true }],
-    ['delete_goal', { readOnlyHint: false, destructiveHint: true, idempotentHint: true }],
   ])('write tool %s has correct annotations', (toolName, expected) => {
     const server = new CopilotMoneyServer(undefined, undefined, true);
     const tool = server.handleListTools().tools.find((t) => t.name === toolName);
@@ -594,16 +584,11 @@ describe('CopilotMoneyServer - write mode', () => {
     ['create_category', { name: 'Test' }],
     ['update_category', { category_id: 'test', name: 'New Name' }],
     ['delete_category', { category_id: 'test' }],
-    ['create_budget', { category_id: 'food', amount: 500 }],
-    ['update_budget', { budget_id: 'budget_123', amount: 600 }],
-    ['delete_budget', { budget_id: 'budget_123' }],
-    ['create_recurring', { name: 'Rent', amount: 1200, frequency: 'monthly' }],
-    ['update_recurring', { recurring_id: 'rec_123', name: 'Updated Rent' }],
-    ['set_recurring_state', { recurring_id: 'rec_123', state: 'paused' }],
+    ['set_budget', { category_id: 'food', amount: '500.00' }],
+    ['create_recurring', { transaction_id: 'txn_123', frequency: 'MONTHLY' }],
+    ['update_recurring', { recurring_id: 'rec_123', state: 'PAUSED' }],
+    ['set_recurring_state', { recurring_id: 'rec_123', state: 'PAUSED' }],
     ['delete_recurring', { recurring_id: 'rec_123' }],
-    ['create_goal', { name: 'Emergency Fund', target_amount: 5000 }],
-    ['update_goal', { goal_id: 'goal_123', name: 'New Name' }],
-    ['delete_goal', { goal_id: 'goal_123' }],
   ])('handleCallTool rejects %s when not in write mode', async (toolName, args) => {
     const server = new CopilotMoneyServer();
     const result = await server.handleCallTool(toolName, args);

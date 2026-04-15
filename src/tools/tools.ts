@@ -2266,7 +2266,7 @@ export class CopilotMoneyTools {
         color_name: result.colorName,
       };
     } catch (e) {
-      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e));
+      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
   }
@@ -2383,14 +2383,13 @@ export class CopilotMoneyTools {
       tagIds?: string[];
       isReviewed?: boolean;
     } = {};
-    if ('category_id' in args && args.category_id !== undefined) input.categoryId = args.category_id;
+    if ('category_id' in args && args.category_id !== undefined)
+      input.categoryId = args.category_id;
     if ('note' in args && args.note !== undefined) input.userNotes = args.note;
     if ('tag_ids' in args && args.tag_ids !== undefined) input.tagIds = args.tag_ids;
 
     if (!txn.account_id || !txn.item_id) {
-      throw new Error(
-        `Transaction ${transaction_id} missing account_id or item_id in local cache`
-      );
+      throw new Error(`Transaction ${transaction_id} missing account_id or item_id in local cache`);
     }
 
     try {
@@ -2415,7 +2414,7 @@ export class CopilotMoneyTools {
       };
     } catch (e) {
       if (e instanceof GraphQLError) {
-        throw new Error(graphQLErrorToMcpError(e));
+        throw new Error(graphQLErrorToMcpError(e), { cause: e });
       }
       throw e;
     }
@@ -2469,7 +2468,8 @@ export class CopilotMoneyTools {
       } catch (e) {
         if (e instanceof GraphQLError) {
           throw new Error(
-            `review_transactions failed at id=${id} (${reviewed_count}/${transaction_ids.length} succeeded): ${graphQLErrorToMcpError(e)}`
+            `review_transactions failed at id=${id} (${reviewed_count}/${transaction_ids.length} succeeded): ${graphQLErrorToMcpError(e)}`,
+            { cause: e }
           );
         }
         throw e;
@@ -2510,7 +2510,7 @@ export class CopilotMoneyTools {
         color_name: result.colorName,
       };
     } catch (e) {
-      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e));
+      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
   }
@@ -2531,7 +2531,7 @@ export class CopilotMoneyTools {
       const result = await gqlDeleteTag(client, { id: args.tag_id });
       return { success: true, tag_id: result.id, deleted: true };
     } catch (e) {
-      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e));
+      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
   }
@@ -2569,7 +2569,7 @@ export class CopilotMoneyTools {
         updated: Object.keys(result.changed),
       };
     } catch (e) {
-      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e));
+      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
   }
@@ -2587,7 +2587,7 @@ export class CopilotMoneyTools {
       const result = await gqlDeleteCategory(client, { id: args.category_id });
       return { success: true, category_id: result.id, deleted: true };
     } catch (e) {
-      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e));
+      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
   }
@@ -2598,11 +2598,7 @@ export class CopilotMoneyTools {
    * Dispatches to EditBudget (all-months default) or EditBudgetMonthly
    * (per-month override). amount="0" clears the budget.
    */
-  async setBudget(args: {
-    category_id: string;
-    amount: string;
-    month?: string;
-  }): Promise<{
+  async setBudget(args: { category_id: string; amount: string; month?: string }): Promise<{
     success: true;
     category_id: string;
     amount: string;
@@ -2632,7 +2628,7 @@ export class CopilotMoneyTools {
         cleared: result.cleared,
       };
     } catch (e) {
-      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e));
+      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
   }
@@ -2660,7 +2656,7 @@ export class CopilotMoneyTools {
       });
       return { success: true, recurring_id: result.id, state: args.state };
     } catch (e) {
-      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e));
+      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
   }
@@ -2678,7 +2674,7 @@ export class CopilotMoneyTools {
       const result = await gqlDeleteRecurring(client, { id: args.recurring_id });
       return { success: true, recurring_id: result.id, deleted: true };
     } catch (e) {
-      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e));
+      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
   }
@@ -2706,7 +2702,7 @@ export class CopilotMoneyTools {
       const result = await gqlEditTag(client, { id: args.tag_id, input });
       return { success: true, tag_id: result.id, updated: Object.keys(result.changed) };
     } catch (e) {
-      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e));
+      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
   }
@@ -2717,10 +2713,7 @@ export class CopilotMoneyTools {
    * Generates a unique recurring_id, writes to Firestore, then clears the cache
    * so the new recurring item is visible on next query.
    */
-  async createRecurring(args: {
-    transaction_id: string;
-    frequency: string;
-  }): Promise<{
+  async createRecurring(args: { transaction_id: string; frequency: string }): Promise<{
     success: true;
     recurring_id: string;
     name: string;
@@ -2763,7 +2756,7 @@ export class CopilotMoneyTools {
         frequency: result.frequency,
       };
     } catch (e) {
-      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e));
+      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
   }
@@ -2803,7 +2796,7 @@ export class CopilotMoneyTools {
       const result = await gqlEditRecurring(client, { id: args.recurring_id, input });
       return { success: true, recurring_id: result.id, updated: Object.keys(result.changed) };
     } catch (e) {
-      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e));
+      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
   }

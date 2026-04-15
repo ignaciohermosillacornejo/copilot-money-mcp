@@ -29,7 +29,7 @@ import type {
   InvestmentSplit,
   HoldingsHistory,
 } from '../../src/models/index.js';
-import type { GraphQLClient } from '../../src/core/graphql/client.js';
+import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
 
 // Temp directory with a dummy .ldb so CopilotDatabase.isAvailable() returns true
 const FAKE_DB_DIR = mkdtempSync(join(tmpdir(), 'copilot-test-'));
@@ -549,20 +549,72 @@ function createMockDb(): CopilotDatabase {
 }
 
 /**
- * No-op write client for write-tool tests.
- *
- * TODO(Task 17): replace this stub with a real GraphQL mock once the
- * tool-level tests are migrated off the Firestore-era shape.
+ * Permissive GraphQL client for write-tool e2e tests: responds to every
+ * mutation with a generic success shape. Tests that need to assert specific
+ * request shapes should build their own client via createMockGraphQLClient.
  */
-function createMockFirestoreClient(): GraphQLClient {
-  const mock = {
-    requireUserId: async () => 'test-user-123',
-    getUserId: () => 'test-user-123',
-    updateDocument: async () => {},
-    createDocument: async (_col: string, docId: string | undefined) => docId ?? 'auto_generated_id',
-    deleteDocument: async () => {},
-  };
-  return mock as unknown as GraphQLClient;
+function createMockWriteClient() {
+  return createMockGraphQLClient({
+    EditTransaction: (vars: any) => ({
+      editTransaction: {
+        transaction: {
+          id: vars.id,
+          categoryId: vars.input?.categoryId ?? 'c',
+          userNotes: vars.input?.userNotes ?? null,
+          isReviewed: vars.input?.isReviewed ?? false,
+          tags: (vars.input?.tagIds ?? []).map((id: string) => ({ id })),
+        },
+      },
+    }),
+    CreateTag: (vars: any) => ({
+      createTag: {
+        id: 'tag-created',
+        name: vars.input?.name ?? 'n',
+        colorName: vars.input?.colorName ?? 'PURPLE2',
+      },
+    }),
+    EditTag: (vars: any) => ({
+      editTag: {
+        id: vars.id,
+        name: vars.input?.name ?? 'n',
+        colorName: vars.input?.colorName ?? 'PURPLE2',
+      },
+    }),
+    DeleteTag: { deleteTag: true },
+    CreateCategory: (vars: any) => ({
+      createCategory: {
+        id: 'cat-created',
+        name: vars.input?.name ?? 'n',
+        colorName: vars.input?.colorName ?? 'PURPLE2',
+      },
+    }),
+    EditCategory: (vars: any) => ({
+      editCategory: {
+        category: {
+          id: vars.id,
+          name: vars.input?.name ?? 'n',
+          colorName: vars.input?.colorName ?? 'PURPLE2',
+        },
+      },
+    }),
+    DeleteCategory: { deleteCategory: true },
+    EditBudget: { editCategoryBudget: true },
+    EditBudgetMonthly: { editCategoryBudgetMonthly: true },
+    EditRecurring: (vars: any) => ({
+      editRecurring: {
+        recurring: { id: vars.id, state: vars.input?.state ?? 'ACTIVE' },
+      },
+    }),
+    DeleteRecurring: { deleteRecurring: true },
+    CreateRecurring: (vars: any) => ({
+      createRecurring: {
+        id: 'rec-new',
+        name: 'New Rec',
+        state: 'ACTIVE',
+        frequency: vars.input?.frequency ?? 'MONTHLY',
+      },
+    }),
+  });
 }
 
 /** Parse the JSON text from a handleCallTool result. */
@@ -692,7 +744,7 @@ describe('handleCallTool — write tools', () => {
   beforeEach(() => {
     db = createMockDb();
     writeServer = new CopilotMoneyServer(FAKE_DB_DIR, undefined, true);
-    const writeTools = new CopilotMoneyTools(db, createMockFirestoreClient());
+    const writeTools = new CopilotMoneyTools(db, createMockWriteClient());
     writeServer._injectForTesting(db, writeTools);
   });
 
@@ -703,23 +755,21 @@ describe('handleCallTool — write tools', () => {
     expect(result.isError).toBeUndefined();
     const data = parseToolResult(result) as any;
     expect(data.success).toBe(true);
-    expect(data.tag_id).toBe('business_trip');
+    expect(data.tag_id).toBeString();
     expect(data.name).toBe('Business Trip');
   });
 
-  test('create_budget creates a new budget', async () => {
-    const result = await writeServer.handleCallTool('create_budget', {
+  test('set_budget creates/updates a category budget', async () => {
+    const result = await writeServer.handleCallTool('set_budget', {
       category_id: 'custom_cat_1',
-      amount: 300,
-      period: 'monthly',
+      amount: '300.00',
     });
     expect(result.isError).toBeUndefined();
     const data = parseToolResult(result) as any;
     expect(data.success).toBe(true);
     expect(data.category_id).toBe('custom_cat_1');
-    expect(data.amount).toBe(300);
-    expect(data.period).toBe('monthly');
-    expect(data.budget_id).toBeString();
+    expect(data.amount).toBe('300.00');
+    expect(data.cleared).toBe(false);
   });
 
   test('update_transaction multi-field call produces one write', async () => {
@@ -737,18 +787,6 @@ describe('handleCallTool — write tools', () => {
     expect(data.updated.sort()).toEqual(['category_id', 'note', 'tag_ids']);
   });
 
-  test('update_transaction with goal_id: null unlinks the goal', async () => {
-    const result = await writeServer.handleCallTool('update_transaction', {
-      transaction_id: 'txn1',
-      goal_id: null,
-    });
-    expect(result.isError).toBeUndefined();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const data = parseToolResult(result) as any;
-    expect(data.success).toBe(true);
-    expect(data.updated).toEqual(['goal_id']);
-  });
-
   test('update_transaction rejects empty patch', async () => {
     const result = await writeServer.handleCallTool('update_transaction', {
       transaction_id: 'txn1',
@@ -757,22 +795,23 @@ describe('handleCallTool — write tools', () => {
     expect((result.content[0] as { text: string }).text).toMatch(/at least one field/i);
   });
 
-  test('update_transaction with whitespace-only name returns error', async () => {
+  test('update_transaction with unsupported field "name" returns error', async () => {
+    // `name` is no longer writable via GraphQL EditTransaction.
     const result = await writeServer.handleCallTool('update_transaction', {
       transaction_id: 'txn1',
-      name: '   ',
+      name: 'rename attempt',
     });
     expect(result.isError).toBe(true);
-    expect((result.content[0] as { text: string }).text).toMatch(/name must not be empty/i);
+    expect((result.content[0] as { text: string }).text).toMatch(/not supported via GraphQL/i);
   });
 
-  test('update_transaction with nonexistent goal_id returns error', async () => {
+  test('update_transaction with unsupported field goal_id returns error', async () => {
     const result = await writeServer.handleCallTool('update_transaction', {
       transaction_id: 'txn1',
-      goal_id: 'nonexistent_goal_id',
+      goal_id: 'goal1',
     });
     expect(result.isError).toBe(true);
-    expect((result.content[0] as { text: string }).text).toMatch(/Goal not found/i);
+    expect((result.content[0] as { text: string }).text).toMatch(/not supported via GraphQL/i);
   });
 });
 
@@ -815,7 +854,7 @@ describe('handleCallTool — error handling', () => {
   test('malformed args to write tool returns isError', async () => {
     const db = createMockDb();
     const writeServer = new CopilotMoneyServer(FAKE_DB_DIR, undefined, true);
-    writeServer._injectForTesting(db, new CopilotMoneyTools(db, createMockFirestoreClient()));
+    writeServer._injectForTesting(db, new CopilotMoneyTools(db, createMockWriteClient()));
 
     const result = await writeServer.handleCallTool('update_transaction', {
       category_id: 'food_dining',
@@ -1156,7 +1195,7 @@ describe('handleCallTool — write tools (extended)', () => {
   beforeEach(() => {
     db = createMockDb();
     writeServer = new CopilotMoneyServer(FAKE_DB_DIR, undefined, true);
-    const writeTools = new CopilotMoneyTools(db, createMockFirestoreClient());
+    const writeTools = new CopilotMoneyTools(db, createMockWriteClient());
     writeServer._injectForTesting(db, writeTools);
   });
 
@@ -1194,7 +1233,7 @@ describe('handleCallTool — write tools (extended)', () => {
     const data = parseToolResult(result) as any;
     expect(data.success).toBe(true);
     expect(data.tag_id).toBe('tag_vacation');
-    expect(data.deleted_name).toBe('Vacation');
+    expect(data.deleted).toBe(true);
   });
 
   test('update_tag renames an existing tag', async () => {
@@ -1206,7 +1245,7 @@ describe('handleCallTool — write tools (extended)', () => {
     const data = parseToolResult(result) as any;
     expect(data.success).toBe(true);
     expect(data.tag_id).toBe('tag_vacation');
-    expect(data.updated_fields).toContain('name');
+    expect(data.updated).toContain('name');
   });
 
   // -- Category write tools --
@@ -1214,13 +1253,13 @@ describe('handleCallTool — write tools (extended)', () => {
   test('create_category creates a new category', async () => {
     const result = await writeServer.handleCallTool('create_category', {
       name: 'Side Projects',
+      color_name: 'ORANGE',
       emoji: '🛠️',
     });
     expect(result.isError).toBeUndefined();
     const data = parseToolResult(result) as any;
     expect(data.success).toBe(true);
     expect(data.name).toBe('Side Projects');
-    expect(data.emoji).toBe('🛠️');
     expect(data.category_id).toBeString();
   });
 
@@ -1234,8 +1273,8 @@ describe('handleCallTool — write tools (extended)', () => {
     const data = parseToolResult(result) as any;
     expect(data.success).toBe(true);
     expect(data.category_id).toBe('custom_cat_1');
-    expect(data.updated_fields).toContain('name');
-    expect(data.updated_fields).toContain('emoji');
+    expect(data.updated).toContain('name');
+    expect(data.updated).toContain('emoji');
   });
 
   test('delete_category deletes an existing category', async () => {
@@ -1246,32 +1285,34 @@ describe('handleCallTool — write tools (extended)', () => {
     const data = parseToolResult(result) as any;
     expect(data.success).toBe(true);
     expect(data.category_id).toBe('custom_cat_1');
-    expect(data.deleted_name).toBe('Custom Dining');
+    expect(data.deleted).toBe(true);
   });
 
-  // -- Budget write tools --
+  // -- Budget write tool (set_budget) --
 
-  test('update_budget updates an existing budget', async () => {
-    const result = await writeServer.handleCallTool('update_budget', {
-      budget_id: 'budget1',
-      amount: 600,
+  test('set_budget sets an all-months default budget', async () => {
+    const result = await writeServer.handleCallTool('set_budget', {
+      category_id: 'custom_cat_1',
+      amount: '300.00',
     });
     expect(result.isError).toBeUndefined();
     const data = parseToolResult(result) as any;
     expect(data.success).toBe(true);
-    expect(data.budget_id).toBe('budget1');
-    expect(data.updated_fields).toContain('amount');
+    expect(data.category_id).toBe('custom_cat_1');
+    expect(data.amount).toBe('300.00');
+    expect(data.cleared).toBe(false);
   });
 
-  test('delete_budget deletes an existing budget', async () => {
-    const result = await writeServer.handleCallTool('delete_budget', {
-      budget_id: 'budget1',
+  test('set_budget with month sets a per-month override', async () => {
+    const result = await writeServer.handleCallTool('set_budget', {
+      category_id: 'custom_cat_1',
+      amount: '100.00',
+      month: '2025-03',
     });
     expect(result.isError).toBeUndefined();
     const data = parseToolResult(result) as any;
     expect(data.success).toBe(true);
-    expect(data.budget_id).toBe('budget1');
-    expect(data.deleted_name).toBeString();
+    expect(data.month).toBe('2025-03');
   });
 
   // -- Recurring write tools --
@@ -1279,15 +1320,13 @@ describe('handleCallTool — write tools (extended)', () => {
   test('set_recurring_state pauses a recurring item', async () => {
     const result = await writeServer.handleCallTool('set_recurring_state', {
       recurring_id: 'rec1',
-      state: 'paused',
+      state: 'PAUSED',
     });
     expect(result.isError).toBeUndefined();
     const data = parseToolResult(result) as any;
     expect(data.success).toBe(true);
     expect(data.recurring_id).toBe('rec1');
-    expect(data.old_state).toBe('active');
-    expect(data.new_state).toBe('paused');
-    expect(data.name).toBeString();
+    expect(data.state).toBe('PAUSED');
   });
 
   test('delete_recurring deletes a recurring item', async () => {
@@ -1298,78 +1337,31 @@ describe('handleCallTool — write tools (extended)', () => {
     const data = parseToolResult(result) as any;
     expect(data.success).toBe(true);
     expect(data.recurring_id).toBe('rec1');
-    expect(data.deleted_name).toBeString();
+    expect(data.deleted).toBe(true);
   });
 
-  test('create_recurring creates a new recurring item', async () => {
+  test('create_recurring creates a new recurring item from a transaction', async () => {
     const result = await writeServer.handleCallTool('create_recurring', {
-      name: 'Spotify',
-      amount: 9.99,
-      frequency: 'monthly',
+      transaction_id: 'txn1',
+      frequency: 'MONTHLY',
     });
     expect(result.isError).toBeUndefined();
     const data = parseToolResult(result) as any;
     expect(data.success).toBe(true);
-    expect(data.name).toBe('Spotify');
-    expect(data.amount).toBe(9.99);
-    expect(data.frequency).toBe('monthly');
+    expect(data.frequency).toBe('MONTHLY');
     expect(data.recurring_id).toBeString();
   });
 
-  test('update_recurring updates a recurring item', async () => {
+  test('update_recurring changes state', async () => {
     const result = await writeServer.handleCallTool('update_recurring', {
       recurring_id: 'rec1',
-      name: 'Netflix Premium',
-      amount: 22.99,
+      state: 'PAUSED',
     });
     expect(result.isError).toBeUndefined();
     const data = parseToolResult(result) as any;
     expect(data.success).toBe(true);
     expect(data.recurring_id).toBe('rec1');
-    expect(data.updated_fields).toContain('name');
-    expect(data.updated_fields).toContain('amount');
-  });
-
-  // -- Goal write tools --
-
-  test('create_goal creates a new goal', async () => {
-    const result = await writeServer.handleCallTool('create_goal', {
-      name: 'New Car',
-      target_amount: 30000,
-      monthly_contribution: 1000,
-    });
-    expect(result.isError).toBeUndefined();
-    const data = parseToolResult(result) as any;
-    expect(data.success).toBe(true);
-    expect(data.name).toBe('New Car');
-    expect(data.target_amount).toBe(30000);
-    expect(data.goal_id).toBeString();
-  });
-
-  test('update_goal updates a goal', async () => {
-    const result = await writeServer.handleCallTool('update_goal', {
-      goal_id: 'goal1',
-      name: 'Emergency Fund V2',
-      target_amount: 15000,
-    });
-    expect(result.isError).toBeUndefined();
-    const data = parseToolResult(result) as any;
-    expect(data.success).toBe(true);
-    expect(data.goal_id).toBe('goal1');
-    expect(data.updated_fields).toContain('name');
-    // Firestore uses 'savings' as the mask key for nested fields like target_amount
-    expect(data.updated_fields).toContain('savings');
-  });
-
-  test('delete_goal deletes a goal', async () => {
-    const result = await writeServer.handleCallTool('delete_goal', {
-      goal_id: 'goal1',
-    });
-    expect(result.isError).toBeUndefined();
-    const data = parseToolResult(result) as any;
-    expect(data.success).toBe(true);
-    expect(data.goal_id).toBe('goal1');
-    expect(data.deleted_name).toBe('Emergency Fund');
+    expect(data.updated).toContain('state');
   });
 });
 
@@ -1383,7 +1375,7 @@ describe('handleCallTool — write tool validation', () => {
   beforeEach(() => {
     const db = createMockDb();
     writeServer = new CopilotMoneyServer(FAKE_DB_DIR, undefined, true);
-    const writeTools = new CopilotMoneyTools(db, createMockFirestoreClient());
+    const writeTools = new CopilotMoneyTools(db, createMockWriteClient());
     writeServer._injectForTesting(db, writeTools);
   });
 
@@ -1395,12 +1387,24 @@ describe('handleCallTool — write tool validation', () => {
     expect(result.content[0].text).toContain('empty');
   });
 
-  test('delete_tag with nonexistent tag returns error', async () => {
-    const result = await writeServer.handleCallTool('delete_tag', {
-      tag_id: 'nonexistent',
+  test('delete_tag surfaces GraphQL errors', async () => {
+    // With the GraphQL migration, tag existence is not pre-validated locally;
+    // the backend determines whether the id is valid. We verify here that a
+    // server-side error surfaces as an MCP tool error with descriptive text.
+    const failingTools = new CopilotMoneyTools(
+      createMockDb(),
+      createMockGraphQLClient({
+        DeleteTag: new Error('tag not found'),
+      })
+    );
+    const failingServer = new CopilotMoneyServer(FAKE_DB_DIR, undefined, true);
+    failingServer._injectForTesting(createMockDb(), failingTools);
+
+    const result = await failingServer.handleCallTool('delete_tag', {
+      tag_id: 'whatever',
     });
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('not found');
+    expect(result.content[0].text).toMatch(/tag not found/i);
   });
 
   test('update_category with no fields returns error', async () => {
@@ -1408,35 +1412,16 @@ describe('handleCallTool — write tool validation', () => {
       category_id: 'custom_cat_1',
     });
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('No fields');
+    expect(result.content[0].text).toContain('at least one field');
   });
 
   test('create_recurring with invalid frequency returns error', async () => {
     const result = await writeServer.handleCallTool('create_recurring', {
-      name: 'Bad Recurring',
-      amount: 10,
+      transaction_id: 'wtxn1',
       frequency: 'hourly',
     });
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('Invalid frequency');
-  });
-
-  test('create_goal with zero target returns error', async () => {
-    const result = await writeServer.handleCallTool('create_goal', {
-      name: 'Bad Goal',
-      target_amount: 0,
-    });
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('greater than 0');
-  });
-
-  test('update_goal with nonexistent goal returns error', async () => {
-    const result = await writeServer.handleCallTool('update_goal', {
-      goal_id: 'nonexistent',
-      name: 'Updated Name',
-    });
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('not found');
+    expect(result.content[0].text).toContain('frequency must be one of');
   });
 
   test('set_recurring_state with invalid state returns error', async () => {
@@ -1445,7 +1430,7 @@ describe('handleCallTool — write tool validation', () => {
       state: 'invalid_state',
     });
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('Invalid state');
+    expect(result.content[0].text).toContain('state must be one of');
   });
 
   test('review_transactions with empty array returns error', async () => {

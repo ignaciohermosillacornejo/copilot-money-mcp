@@ -6,6 +6,7 @@ import { describe, test, expect, beforeEach } from 'bun:test';
 import { CopilotMoneyTools, createToolSchemas } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import type { Transaction, Account, Security, HoldingsHistory } from '../../src/models/index.js';
+import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
 
 // Mock data
 // Copilot Money format: positive = expenses, negative = income
@@ -2282,14 +2283,10 @@ describe('getHoldings', () => {
 describe('reviewTransactions', () => {
   let tools: CopilotMoneyTools;
   let mockDb: CopilotDatabase;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let updateCalls: { collection: string; docId: string; fields: any; mask: string[] }[];
 
   beforeEach(() => {
     mockDb = new CopilotDatabase('/nonexistent');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (mockDb as any).dbPath = '/fake';
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (mockDb as any)._transactions = [
       {
         transaction_id: 'txn1',
@@ -2297,7 +2294,6 @@ describe('reviewTransactions', () => {
         date: '2024-01-15',
         name: 'Coffee Shop',
         category_id: 'food_and_drink_coffee',
-        user_id: 'user123',
         item_id: 'item1',
         account_id: 'acct1',
         user_reviewed: false,
@@ -2308,7 +2304,6 @@ describe('reviewTransactions', () => {
         date: '2024-01-16',
         name: 'Gas Station',
         category_id: 'transportation_gas',
-        user_id: 'user123',
         item_id: 'item1',
         account_id: 'acct2',
         user_reviewed: false,
@@ -2319,403 +2314,282 @@ describe('reviewTransactions', () => {
         date: '2024-01-17',
         name: 'Bookstore',
         category_id: 'shopping_general',
-        user_id: 'user123',
-        item_id: 'item2',
         account_id: 'acct3',
       },
     ];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (mockDb as any)._allCollectionsLoaded = true;
-
-    updateCalls = [];
-    const mockFirestoreClient = {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      updateDocument: async (collection: string, docId: string, fields: any, mask: string[]) => {
-        updateCalls.push({ collection, docId, fields, mask });
-      },
-    };
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    tools = new CopilotMoneyTools(mockDb, mockFirestoreClient as any);
   });
 
   test('marks a single transaction as reviewed', async () => {
-    const result = await tools.reviewTransactions({
-      transaction_ids: ['txn1'],
+    const client = createMockGraphQLClient({
+      EditTransaction: {
+        editTransaction: {
+          transaction: {
+            id: 'txn1',
+            categoryId: 'food_and_drink_coffee',
+            userNotes: null,
+            isReviewed: true,
+            tags: [],
+          },
+        },
+      },
     });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    const result = await tools.reviewTransactions({ transaction_ids: ['txn1'] });
     expect(result.success).toBe(true);
     expect(result.reviewed_count).toBe(1);
     expect(result.transaction_ids).toEqual(['txn1']);
+
+    expect(client._calls).toHaveLength(1);
+    expect(client._calls[0].op).toBe('EditTransaction');
+    expect(client._calls[0].variables).toEqual({
+      id: 'txn1',
+      accountId: 'acct1',
+      itemId: 'item1',
+      input: { isReviewed: true },
+    });
   });
 
   test('marks multiple transactions as reviewed', async () => {
-    const result = await tools.reviewTransactions({
-      transaction_ids: ['txn1', 'txn2', 'txn3'],
+    const client = createMockGraphQLClient({
+      EditTransaction: (vars: any) => ({
+        editTransaction: {
+          transaction: {
+            id: vars.id,
+            categoryId: 'c',
+            userNotes: null,
+            isReviewed: true,
+            tags: [],
+          },
+        },
+      }),
     });
-    expect(result.success).toBe(true);
-    expect(result.reviewed_count).toBe(3);
-    expect(result.transaction_ids).toEqual(['txn1', 'txn2', 'txn3']);
-  });
+    tools = new CopilotMoneyTools(mockDb, client);
 
-  test('calls Firestore with correct nested paths and fields', async () => {
-    await tools.reviewTransactions({
-      transaction_ids: ['txn1', 'txn2'],
+    const result = await tools.reviewTransactions({ transaction_ids: ['txn1', 'txn2'] });
+    expect(result.success).toBe(true);
+    expect(result.reviewed_count).toBe(2);
+    expect(client._calls).toHaveLength(2);
+    expect(client._calls[0].variables).toMatchObject({
+      id: 'txn1',
+      accountId: 'acct1',
+      itemId: 'item1',
     });
-    expect(updateCalls).toHaveLength(2);
-    expect(updateCalls[0].collection).toBe('items/item1/accounts/acct1/transactions');
-    expect(updateCalls[0].docId).toBe('txn1');
-    expect(updateCalls[0].mask).toEqual(['user_reviewed']);
-    expect(updateCalls[0].fields).toEqual({
-      user_reviewed: { booleanValue: true },
+    expect(client._calls[1].variables).toMatchObject({
+      id: 'txn2',
+      accountId: 'acct2',
+      itemId: 'item1',
     });
-    expect(updateCalls[1].collection).toBe('items/item1/accounts/acct2/transactions');
-    expect(updateCalls[1].docId).toBe('txn2');
   });
 
   test('supports reviewed=false to unmark transactions', async () => {
+    const client = createMockGraphQLClient({
+      EditTransaction: {
+        editTransaction: {
+          transaction: {
+            id: 'txn1',
+            categoryId: 'c',
+            userNotes: null,
+            isReviewed: false,
+            tags: [],
+          },
+        },
+      },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
     const result = await tools.reviewTransactions({
       transaction_ids: ['txn1'],
       reviewed: false,
     });
     expect(result.success).toBe(true);
-    expect(updateCalls[0].fields).toEqual({
-      user_reviewed: { booleanValue: false },
+    expect(client._calls[0].variables).toMatchObject({
+      input: { isReviewed: false },
     });
   });
 
   test('defaults reviewed to true when not specified', async () => {
-    await tools.reviewTransactions({
-      transaction_ids: ['txn1'],
+    const client = createMockGraphQLClient({
+      EditTransaction: {
+        editTransaction: {
+          transaction: { id: 'txn1', categoryId: 'c', userNotes: null, isReviewed: true, tags: [] },
+        },
+      },
     });
-    expect(updateCalls[0].fields).toEqual({
-      user_reviewed: { booleanValue: true },
-    });
-  });
+    tools = new CopilotMoneyTools(mockDb, client);
 
-  test('patches cache after successful write', async () => {
-    await tools.reviewTransactions({
-      transaction_ids: ['txn1', 'txn2'],
+    await tools.reviewTransactions({ transaction_ids: ['txn1'] });
+    expect(client._calls[0].variables).toMatchObject({
+      input: { isReviewed: true },
     });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const txn1 = (mockDb as any)._transactions.find((t: any) => t.transaction_id === 'txn1');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const txn2 = (mockDb as any)._transactions.find((t: any) => t.transaction_id === 'txn2');
-    expect(txn1.user_reviewed).toBe(true);
-    expect(txn2.user_reviewed).toBe(true);
   });
 
   test('throws when transaction_id not found', async () => {
-    await expect(
-      tools.reviewTransactions({
-        transaction_ids: ['nonexistent'],
-      })
-    ).rejects.toThrow('Transaction not found: nonexistent');
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+    await expect(tools.reviewTransactions({ transaction_ids: ['nonexistent'] })).rejects.toThrow(
+      'Transactions not found: nonexistent'
+    );
   });
 
   test('throws when transaction_ids is empty', async () => {
-    await expect(
-      tools.reviewTransactions({
-        transaction_ids: [],
-      })
-    ).rejects.toThrow('transaction_ids must be a non-empty array');
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+    await expect(tools.reviewTransactions({ transaction_ids: [] })).rejects.toThrow(
+      'transaction_ids must be a non-empty array'
+    );
   });
 
   test('throws on invalid transaction_id format', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
     await expect(
-      tools.reviewTransactions({
-        transaction_ids: ['valid_id', 'invalid/id'],
-      })
+      tools.reviewTransactions({ transaction_ids: ['valid_id', 'invalid/id'] })
     ).rejects.toThrow('Invalid transaction_id format: invalid/id');
   });
 
-  test('throws when transaction is missing item_id', async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (mockDb as any)._transactions.push({
-      transaction_id: 'txn_no_item',
-      amount: 10,
-      date: '2024-01-18',
-      name: 'Mystery',
-      account_id: 'acct1',
+  test('throws when transaction is missing item_id or account_id', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+    await expect(tools.reviewTransactions({ transaction_ids: ['txn3'] })).rejects.toThrow(
+      /missing account_id or item_id/
+    );
+  });
+
+  test('throws on GraphQL error', async () => {
+    const client = createMockGraphQLClient({
+      EditTransaction: new Error('Boom'),
     });
-    await expect(
-      tools.reviewTransactions({
-        transaction_ids: ['txn_no_item'],
-      })
-    ).rejects.toThrow('missing item_id or account_id');
+    tools = new CopilotMoneyTools(mockDb, client);
+    await expect(tools.reviewTransactions({ transaction_ids: ['txn1'] })).rejects.toThrow('Boom');
   });
 
-  test('does not modify cache on Firestore error', async () => {
-    const failingClient = {
-      updateDocument: async () => {
-        throw new Error('Firestore update failed (500)');
-      },
-    };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const failTools = new CopilotMoneyTools(mockDb, failingClient as any);
-
-    await expect(
-      failTools.reviewTransactions({
-        transaction_ids: ['txn1'],
-      })
-    ).rejects.toThrow('Firestore update failed');
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const txn = (mockDb as any)._transactions.find((t: any) => t.transaction_id === 'txn1');
-    expect(txn.user_reviewed).toBe(false);
-  });
-
-  test('throws when no Firestore client configured (read-only mode)', async () => {
+  test('throws when no GraphQL client configured (read-only mode)', async () => {
     const readOnlyTools = new CopilotMoneyTools(mockDb);
-    await expect(
-      readOnlyTools.reviewTransactions({
-        transaction_ids: ['txn1'],
-      })
-    ).rejects.toThrow('Write mode is not enabled');
+    await expect(readOnlyTools.reviewTransactions({ transaction_ids: ['txn1'] })).rejects.toThrow(
+      'Write tools require --write flag to be set'
+    );
   });
 });
 
 describe('createTag', () => {
   let tools: CopilotMoneyTools;
   let mockDb: CopilotDatabase;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let createCalls: { collection: string; docId: string; fields: any }[];
 
   beforeEach(() => {
     mockDb = new CopilotDatabase('/nonexistent');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (mockDb as any).dbPath = '/fake';
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (mockDb as any)._allCollectionsLoaded = true;
     (mockDb as any)._cacheLoadedAt = Date.now();
     (mockDb as any)._tags = [];
-
-    createCalls = [];
-    const mockFirestoreClient = {
-      requireUserId: async () => 'user123',
-      getUserId: () => 'user123',
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      createDocument: async (collection: string, docId: string, fields: any) => {
-        createCalls.push({ collection, docId, fields });
-      },
-      updateDocument: async () => {},
-      deleteDocument: async () => {},
-    };
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    tools = new CopilotMoneyTools(mockDb, mockFirestoreClient as any);
   });
 
-  test('creates a tag with name only', async () => {
+  test('dispatches CreateTag with default color', async () => {
+    const client = createMockGraphQLClient({
+      CreateTag: {
+        createTag: { id: 'tag-123', name: 'vacation', colorName: 'PURPLE2' },
+      },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
     const result = await tools.createTag({ name: 'vacation' });
     expect(result.success).toBe(true);
-    expect(result.tag_id).toBe('vacation');
+    expect(result.tag_id).toBe('tag-123');
     expect(result.name).toBe('vacation');
-    expect(result.color_name).toBeUndefined();
-    expect(result.hex_color).toBeUndefined();
-  });
+    expect(result.color_name).toBe('PURPLE2');
 
-  test('creates a tag with color', async () => {
-    const result = await tools.createTag({
-      name: 'Business',
-      color_name: 'blue',
-      hex_color: '#0000FF',
-    });
-    expect(result.success).toBe(true);
-    expect(result.tag_id).toBe('business');
-    expect(result.name).toBe('Business');
-    expect(result.color_name).toBe('blue');
-    expect(result.hex_color).toBe('#0000FF');
-  });
-
-  test('generates tag_id from multi-word name', async () => {
-    const result = await tools.createTag({ name: 'business expense' });
-    expect(result.tag_id).toBe('business_expense');
-  });
-
-  test('calls Firestore createDocument with correct path', async () => {
-    await tools.createTag({ name: 'test', color_name: 'red' });
-    expect(createCalls).toHaveLength(1);
-    expect(createCalls[0].collection).toBe('users/user123/tags');
-    expect(createCalls[0].docId).toBe('test');
-    expect(createCalls[0].fields).toEqual({
-      name: { stringValue: 'test' },
-      color_name: { stringValue: 'red' },
+    expect(client._calls).toHaveLength(1);
+    expect(client._calls[0].op).toBe('CreateTag');
+    expect(client._calls[0].variables).toEqual({
+      input: { name: 'vacation', colorName: 'PURPLE2' },
     });
   });
 
-  test('clears cache after creating tag', async () => {
-    // Seed cache
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (mockDb as any)._transactions = [{ transaction_id: 'txn1', amount: 10, date: '2024-01-01' }];
-    await tools.createTag({ name: 'test' });
-    // clearCache sets _transactions to null
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((mockDb as any)._transactions).toBeNull();
-  });
-
-  test('throws on empty name', async () => {
-    await expect(tools.createTag({ name: '' })).rejects.toThrow('Tag name must not be empty');
-  });
-
-  test('throws on whitespace-only name', async () => {
-    await expect(tools.createTag({ name: '   ' })).rejects.toThrow('Tag name must not be empty');
-  });
-
-  test('throws on invalid hex_color format', async () => {
-    await expect(tools.createTag({ name: 'test', hex_color: 'red' })).rejects.toThrow(
-      'Invalid color format'
-    );
-  });
-
-  test('throws on short hex_color', async () => {
-    await expect(tools.createTag({ name: 'test', hex_color: '#FFF' })).rejects.toThrow(
-      'Invalid color format'
-    );
-  });
-
-  test('does not modify cache on Firestore error', async () => {
-    const failingClient = {
-      requireUserId: async () => 'user123',
-      getUserId: () => 'user123',
-      createDocument: async () => {
-        throw new Error('Firestore create failed (500)');
+  test('passes through explicit colorName', async () => {
+    const client = createMockGraphQLClient({
+      CreateTag: {
+        createTag: { id: 'tag-xyz', name: 'Business', colorName: 'BLUE' },
       },
-      updateDocument: async () => {},
-      deleteDocument: async () => {},
-    };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const failTools = new CopilotMoneyTools(mockDb, failingClient as any);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (mockDb as any)._transactions = [{ transaction_id: 'txn1' }];
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
 
-    await expect(failTools.createTag({ name: 'test' })).rejects.toThrow('Firestore create failed');
-    // Cache should NOT have been cleared since error happened before clearCache
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((mockDb as any)._transactions).not.toBeNull();
+    const result = await tools.createTag({ name: 'Business', color_name: 'BLUE' });
+    expect(result.color_name).toBe('BLUE');
+    expect(client._calls[0].variables).toEqual({
+      input: { name: 'Business', colorName: 'BLUE' },
+    });
   });
 
-  test('throws when no Firestore client configured (read-only mode)', async () => {
+  test('trims whitespace from name before dispatching', async () => {
+    const client = createMockGraphQLClient({
+      CreateTag: {
+        createTag: { id: 'tag-1', name: 'vacation', colorName: 'PURPLE2' },
+      },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await tools.createTag({ name: '  vacation  ' });
+    expect(client._calls[0].variables).toEqual({
+      input: { name: 'vacation', colorName: 'PURPLE2' },
+    });
+  });
+
+  test('throws on empty name (no dispatch)', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+    await expect(tools.createTag({ name: '' })).rejects.toThrow('Tag name must not be empty');
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('throws on whitespace-only name (no dispatch)', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+    await expect(tools.createTag({ name: '   ' })).rejects.toThrow('Tag name must not be empty');
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('throws when no GraphQL client configured (read-only mode)', async () => {
     const readOnlyTools = new CopilotMoneyTools(mockDb);
     await expect(readOnlyTools.createTag({ name: 'test' })).rejects.toThrow(
-      'Write mode is not enabled'
+      'Write tools require --write flag to be set'
     );
-  });
-
-  test('trims whitespace from name', async () => {
-    const result = await tools.createTag({ name: '  vacation  ' });
-    expect(result.name).toBe('vacation');
-    expect(result.tag_id).toBe('vacation');
-  });
-
-  test('throws when tag already exists', async () => {
-    (mockDb as any)._tags = [{ tag_id: 'vacation', name: 'Vacation' }];
-    await expect(tools.createTag({ name: 'vacation' })).rejects.toThrow('already exists');
   });
 });
 
 describe('deleteTag', () => {
   let tools: CopilotMoneyTools;
   let mockDb: CopilotDatabase;
-  let deleteCalls: { collection: string; docId: string }[];
 
   beforeEach(() => {
     mockDb = new CopilotDatabase('/nonexistent');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (mockDb as any).dbPath = '/fake';
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (mockDb as any)._allCollectionsLoaded = true;
     (mockDb as any)._cacheLoadedAt = Date.now();
     (mockDb as any)._tags = [
       { tag_id: 'vacation', name: 'Vacation' },
       { tag_id: 'business', name: 'Business Expense' },
     ];
-
-    deleteCalls = [];
-    const mockFirestoreClient = {
-      requireUserId: async () => 'user123',
-      getUserId: () => 'user123',
-      deleteDocument: async (collection: string, docId: string) => {
-        deleteCalls.push({ collection, docId });
-      },
-      updateDocument: async () => {},
-      createDocument: async () => {},
-    };
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    tools = new CopilotMoneyTools(mockDb, mockFirestoreClient as any);
   });
 
-  test('deletes a tag successfully', async () => {
+  test('dispatches DeleteTag with id', async () => {
+    const client = createMockGraphQLClient({ DeleteTag: { deleteTag: true } });
+    tools = new CopilotMoneyTools(mockDb, client);
+
     const result = await tools.deleteTag({ tag_id: 'vacation' });
     expect(result.success).toBe(true);
     expect(result.tag_id).toBe('vacation');
-    expect(result.deleted_name).toBe('Vacation');
+    expect(result.deleted).toBe(true);
+
+    expect(client._calls).toHaveLength(1);
+    expect(client._calls[0].op).toBe('DeleteTag');
+    expect(client._calls[0].variables).toEqual({ id: 'vacation' });
   });
 
-  test('returns tag_id as deleted_name when tag doc has no name field', async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (mockDb as any)._tags = [{ tag_id: 'nameless' }];
-    const result = await tools.deleteTag({ tag_id: 'nameless' });
-    expect(result.deleted_name).toBe('nameless');
-  });
-
-  test('calls Firestore deleteDocument with correct path', async () => {
-    await tools.deleteTag({ tag_id: 'business' });
-    expect(deleteCalls).toHaveLength(1);
-    expect(deleteCalls[0].collection).toBe('users/user123/tags');
-    expect(deleteCalls[0].docId).toBe('business');
-  });
-
-  test('clears cache after deleting tag', async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (mockDb as any)._transactions = [{ transaction_id: 'txn1', amount: 10, date: '2024-01-01' }];
-    await tools.deleteTag({ tag_id: 'vacation' });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((mockDb as any)._transactions).toBeNull();
-  });
-
-  test('throws on invalid tag_id format', async () => {
-    await expect(tools.deleteTag({ tag_id: 'bad/id' })).rejects.toThrow(
-      'Invalid tag_id format: bad/id'
-    );
-  });
-
-  test('throws on tag_id with spaces', async () => {
-    await expect(tools.deleteTag({ tag_id: 'bad id' })).rejects.toThrow('Invalid tag_id format');
-  });
-
-  test('throws when tag not found', async () => {
-    await expect(tools.deleteTag({ tag_id: 'nonexistent' })).rejects.toThrow(
-      'Tag not found: nonexistent'
-    );
-  });
-
-  test('does not modify cache on Firestore error', async () => {
-    const failingClient = {
-      requireUserId: async () => 'user123',
-      getUserId: () => 'user123',
-      deleteDocument: async () => {
-        throw new Error('Firestore delete failed (500)');
-      },
-      updateDocument: async () => {},
-      createDocument: async () => {},
-    };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const failTools = new CopilotMoneyTools(mockDb, failingClient as any);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (mockDb as any)._transactions = [{ transaction_id: 'txn1' }];
-
-    await expect(failTools.deleteTag({ tag_id: 'vacation' })).rejects.toThrow(
-      'Firestore delete failed'
-    );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((mockDb as any)._transactions).not.toBeNull();
-  });
-
-  test('throws when no Firestore client configured (read-only mode)', async () => {
+  test('throws when no GraphQL client configured (read-only mode)', async () => {
     const readOnlyTools = new CopilotMoneyTools(mockDb);
     await expect(readOnlyTools.deleteTag({ tag_id: 'test' })).rejects.toThrow(
-      'Write mode is not enabled'
+      'Write tools require --write flag to be set'
     );
   });
 });
@@ -2723,226 +2597,112 @@ describe('deleteTag', () => {
 describe('createCategory', () => {
   let tools: CopilotMoneyTools;
   let mockDb: CopilotDatabase;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let createCalls: { collection: string; docId: string | undefined; fields: any }[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let updateCalls: { collection: string; docId: string; fields: any; mask: string[] }[];
 
   beforeEach(() => {
     mockDb = new CopilotDatabase('/nonexistent');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (mockDb as any).dbPath = '/fake';
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (mockDb as any)._userCategories = [
-      {
-        category_id: 'food_and_drink',
-        name: 'Food & Drink',
-        excluded: false,
-        user_id: 'user123',
-        order: 0,
-      },
-      {
-        category_id: 'shopping',
-        name: 'Shopping',
-        excluded: false,
-        user_id: 'user123',
-        order: 5,
-      },
+      { category_id: 'food_and_drink', name: 'Food & Drink', excluded: false },
+      { category_id: 'shopping', name: 'Shopping', excluded: false },
     ];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (mockDb as any)._allCollectionsLoaded = true;
-
-    createCalls = [];
-    updateCalls = [];
-    const mockFirestoreClient = {
-      createDocument: async (
-        collection: string,
-        docId: string | undefined,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        fields: any
-      ) => {
-        createCalls.push({ collection, docId, fields });
-        return 'auto_generated_id_123';
-      },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      updateDocument: async (collection: string, docId: string, fields: any, mask: string[]) => {
-        updateCalls.push({ collection, docId, fields, mask });
-      },
-      requireUserId: async () => 'user123',
-    };
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    tools = new CopilotMoneyTools(mockDb, mockFirestoreClient as any);
   });
 
-  test('creates category with name only', async () => {
-    const result = await tools.createCategory({ name: 'Entertainment' });
-    expect(result.success).toBe(true);
-    expect(result.name).toBe('Entertainment');
-    expect(result.category_id).toBe('auto_generated_id_123');
-    expect(result.excluded).toBe(false);
-    // Default emoji and color should be set
-    expect(result.emoji).toBe('📁');
-    expect(result.color).toBe('#808080');
-  });
+  test('dispatches CreateCategory with all required fields', async () => {
+    const client = createMockGraphQLClient({
+      CreateCategory: {
+        createCategory: { id: 'cat-new', name: 'Streaming', colorName: 'RED' },
+      },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
 
-  test('creates category with all optional fields', async () => {
     const result = await tools.createCategory({
       name: 'Streaming',
+      color_name: 'RED',
       emoji: '🎬',
-      color: '#FF5733',
-      parent_category_id: 'shopping',
-      excluded: true,
     });
     expect(result.success).toBe(true);
+    expect(result.category_id).toBe('cat-new');
     expect(result.name).toBe('Streaming');
-    expect(result.emoji).toBe('🎬');
-    expect(result.color).toBe('#FF5733');
-    expect(result.parent_category_id).toBe('shopping');
-    expect(result.excluded).toBe(true);
+    expect(result.color_name).toBe('RED');
+
+    expect(client._calls).toHaveLength(1);
+    expect(client._calls[0].op).toBe('CreateCategory');
+    expect(client._calls[0].variables).toEqual({
+      spend: false,
+      budget: false,
+      input: {
+        name: 'Streaming',
+        colorName: 'RED',
+        emoji: '🎬',
+        isExcluded: false,
+      },
+    });
   });
 
-  test('calls Firestore createDocument with auto-generated ID and app-compatible fields', async () => {
-    await tools.createCategory({ name: 'Test Category' });
-    expect(createCalls).toHaveLength(1);
-    expect(createCalls[0].collection).toBe('users/user123/categories');
-    // docId should be undefined for Firestore auto-generated ID
-    expect(createCalls[0].docId).toBeUndefined();
-    // Check app-required fields are present
-    const fields = createCalls[0].fields;
-    expect(fields.name).toEqual({ stringValue: 'Test Category' });
-    expect(fields.emoji).toEqual({ stringValue: '📁' });
-    expect(fields.color).toEqual({ stringValue: '#808080' });
-    expect(fields.bg_color).toEqual({ stringValue: '#F9F9F9' });
-    expect(fields.order).toEqual({ integerValue: '6' }); // max(0, 5) + 1
-    expect(fields.excluded).toEqual({ booleanValue: false });
-    expect(fields.is_other).toEqual({ booleanValue: false });
-    expect(fields.auto_budget_lock).toEqual({ booleanValue: false });
-    expect(fields.auto_delete_lock).toEqual({ booleanValue: false });
-    expect(fields.plaid_category_ids).toEqual({ arrayValue: { values: [] } });
-    expect(fields.partial_name_rules).toEqual({ arrayValue: { values: [] } });
-  });
+  test('passes optional parent_id through', async () => {
+    const client = createMockGraphQLClient({
+      CreateCategory: {
+        createCategory: { id: 'cat-sub', name: 'Sub', colorName: 'BLUE' },
+      },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
 
-  test('patches id field after creation', async () => {
-    await tools.createCategory({ name: 'Test' });
-    expect(updateCalls).toHaveLength(1);
-    expect(updateCalls[0].collection).toBe('users/user123/categories');
-    expect(updateCalls[0].docId).toBe('auto_generated_id_123');
-    expect(updateCalls[0].fields.id).toEqual({ stringValue: 'auto_generated_id_123' });
-    expect(updateCalls[0].mask).toEqual(['id']);
-  });
-
-  test('clears cache after successful create', async () => {
-    // Load categories first to populate cache
-    await mockDb.getUserCategories();
-    await tools.createCategory({ name: 'New Cat' });
-    // After clearing, _userCategories should be null
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((mockDb as any)._userCategories).toBeNull();
-  });
-
-  test('throws when name is empty', async () => {
-    await expect(tools.createCategory({ name: '' })).rejects.toThrow(
-      'Category name must not be empty'
-    );
-    await expect(tools.createCategory({ name: '   ' })).rejects.toThrow(
-      'Category name must not be empty'
-    );
-  });
-
-  test('throws when category name already exists (case-insensitive)', async () => {
-    await expect(tools.createCategory({ name: 'Shopping' })).rejects.toThrow('already exists');
-    await expect(tools.createCategory({ name: 'SHOPPING' })).rejects.toThrow('already exists');
-  });
-
-  test('throws when parent_category_id not found', async () => {
-    await expect(
-      tools.createCategory({ name: 'Sub', parent_category_id: 'nonexistent' })
-    ).rejects.toThrow('Parent category not found: nonexistent');
-  });
-
-  test('throws when parent_category_id has invalid format', async () => {
-    await expect(
-      tools.createCategory({ name: 'Sub', parent_category_id: 'bad/id' })
-    ).rejects.toThrow('Invalid parent_category_id format');
-  });
-
-  test('throws on non-hex color format', async () => {
-    await expect(tools.createCategory({ name: 'Hobbies', color: 'red' })).rejects.toThrow(
-      'Invalid color format'
-    );
+    await tools.createCategory({
+      name: 'Sub',
+      color_name: 'BLUE',
+      emoji: '📁',
+      parent_id: 'shopping',
+    });
+    expect(client._calls[0].variables).toMatchObject({
+      input: expect.objectContaining({ parentId: 'shopping' }),
+    });
   });
 
   test('trims whitespace from name', async () => {
-    const result = await tools.createCategory({ name: '  Entertainment  ' });
-    expect(result.name).toBe('Entertainment');
-    expect(createCalls[0].fields.name).toEqual({ stringValue: 'Entertainment' });
-  });
-
-  test('includes default emoji, color, and app fields when not provided', async () => {
-    await tools.createCategory({ name: 'Minimal' });
-    const fields = createCalls[0].fields;
-    expect(fields.emoji).toEqual({ stringValue: '📁' });
-    expect(fields.color).toEqual({ stringValue: '#808080' });
-    expect(fields).not.toHaveProperty('parent_category_id');
-  });
-
-  test('does not write to Firestore on validation error', async () => {
-    await expect(tools.createCategory({ name: '' })).rejects.toThrow();
-    expect(createCalls).toHaveLength(0);
-  });
-
-  test('does not clear cache on Firestore error', async () => {
-    const failingClient = {
-      createDocument: async () => {
-        throw new Error('Firestore create failed (500)');
+    const client = createMockGraphQLClient({
+      CreateCategory: {
+        createCategory: { id: 'cat-1', name: 'Entertainment', colorName: 'GREEN' },
       },
-      updateDocument: async () => {},
-      requireUserId: async () => 'user123',
-    };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const failTools = new CopilotMoneyTools(mockDb, failingClient as any);
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
 
-    await expect(failTools.createCategory({ name: 'Fail Cat' })).rejects.toThrow(
-      'Firestore create failed'
-    );
-
-    // Cache should NOT have been cleared since create failed
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((mockDb as any)._userCategories).not.toBeNull();
+    await tools.createCategory({ name: '  Entertainment  ', color_name: 'GREEN', emoji: '🎮' });
+    expect(client._calls[0].variables).toMatchObject({
+      input: expect.objectContaining({ name: 'Entertainment' }),
+    });
   });
 
-  test('throws when no Firestore client configured (read-only mode)', async () => {
+  test('throws when name is empty', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+    await expect(
+      tools.createCategory({ name: '', color_name: 'RED', emoji: '🎬' })
+    ).rejects.toThrow('Category name must not be empty');
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('throws when color_name is missing', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+    await expect(tools.createCategory({ name: 'X', color_name: '', emoji: '🎬' })).rejects.toThrow(
+      'color_name is required'
+    );
+  });
+
+  test('throws when emoji is missing', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+    await expect(tools.createCategory({ name: 'X', color_name: 'RED', emoji: '' })).rejects.toThrow(
+      'emoji is required'
+    );
+  });
+
+  test('throws when no GraphQL client configured (read-only mode)', async () => {
     const readOnlyTools = new CopilotMoneyTools(mockDb);
-    await expect(readOnlyTools.createCategory({ name: 'Test' })).rejects.toThrow(
-      'Write mode is not enabled'
-    );
-  });
-
-  test('falls back to auth userId when no categories have user_id', async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (mockDb as any)._userCategories = [{ category_id: 'food', name: 'Food', excluded: false }];
-    const mockFirestoreClient = {
-      createDocument: async (
-        collection: string,
-        docId: string | undefined,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        fields: any
-      ) => {
-        createCalls.push({ collection, docId, fields });
-        return 'auto_generated_id_456';
-      },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      updateDocument: async (collection: string, docId: string, fields: any, mask: string[]) => {
-        updateCalls.push({ collection, docId, fields, mask });
-      },
-      requireUserId: async () => 'auth-user-456',
-    };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const authTools = new CopilotMoneyTools(mockDb, mockFirestoreClient as any);
-
-    await authTools.createCategory({ name: 'New Category' });
-    expect(createCalls[createCalls.length - 1].collection).toBe('users/auth-user-456/categories');
+    await expect(
+      readOnlyTools.createCategory({ name: 'Test', color_name: 'RED', emoji: '🎬' })
+    ).rejects.toThrow('Write tools require --write flag to be set');
   });
 });
 
@@ -3383,135 +3143,110 @@ describe('getGoalHistory', () => {
 describe('updateRecurring', () => {
   let tools: CopilotMoneyTools;
   let mockDb: CopilotDatabase;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let updateCalls: { collection: string; docId: string; fields: any; mask: string[] }[];
 
   beforeEach(() => {
     mockDb = new CopilotDatabase('/nonexistent');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (mockDb as any).dbPath = '/fake';
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (mockDb as any)._recurring = [
-      {
-        recurring_id: 'rec-1',
-        name: 'Netflix',
-        amount: 15.99,
-        merchant_name: 'Netflix',
-        category_id: 'entertainment',
-        account_id: 'acc1',
-        frequency: 'monthly',
-        state: 'active',
-        match_string: 'NETFLIX',
-        transaction_ids: ['txn1', 'txn2'],
-      },
-    ];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (mockDb as any)._recurring = [{ recurring_id: 'rec-1', name: 'Netflix', state: 'ACTIVE' }];
     (mockDb as any)._allCollectionsLoaded = true;
-
-    updateCalls = [];
-    const mockFirestoreClient = {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      updateDocument: async (collection: string, docId: string, fields: any, mask: string[]) => {
-        updateCalls.push({ collection, docId, fields, mask });
-      },
-      requireUserId: async () => 'user123',
-    };
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    tools = new CopilotMoneyTools(mockDb, mockFirestoreClient as any);
   });
 
-  test('throws if recurring_id is missing', async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await expect(tools.updateRecurring({} as any)).rejects.toThrow();
-  });
-
-  test('throws if recurring not found', async () => {
-    await expect(
-      tools.updateRecurring({ recurring_id: 'nonexistent', name: 'Test' })
-    ).rejects.toThrow('Recurring not found');
-  });
-
-  test('throws if no fields to update', async () => {
+  test('throws when no fields to update', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
     await expect(tools.updateRecurring({ recurring_id: 'rec-1' })).rejects.toThrow(
-      'No fields to update'
+      'update_recurring requires at least one field to update'
     );
+    expect(client._calls).toHaveLength(0);
   });
 
-  test('throws if name is empty', async () => {
-    await expect(tools.updateRecurring({ recurring_id: 'rec-1', name: '  ' })).rejects.toThrow(
-      'name must not be empty'
-    );
-  });
-
-  test('throws if amount <= 0', async () => {
-    await expect(tools.updateRecurring({ recurring_id: 'rec-1', amount: -5 })).rejects.toThrow(
-      'amount must be greater than 0'
-    );
-  });
-
-  test('throws if frequency is invalid', async () => {
-    await expect(
-      tools.updateRecurring({ recurring_id: 'rec-1', frequency: 'hourly' })
-    ).rejects.toThrow('Invalid frequency');
-  });
-
-  test('throws if match_string is empty', async () => {
-    await expect(
-      tools.updateRecurring({ recurring_id: 'rec-1', match_string: '  ' })
-    ).rejects.toThrow('match_string must not be empty');
-  });
-
-  test('updates name successfully', async () => {
-    const result = await tools.updateRecurring({
-      recurring_id: 'rec-1',
-      name: 'Updated Name',
+  test('dispatches EditRecurring with state', async () => {
+    const client = createMockGraphQLClient({
+      EditRecurring: {
+        editRecurring: { recurring: { id: 'rec-1', state: 'PAUSED' } },
+      },
     });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    const result = await tools.updateRecurring({ recurring_id: 'rec-1', state: 'PAUSED' });
     expect(result.success).toBe(true);
     expect(result.recurring_id).toBe('rec-1');
-    expect(result.updated_fields).toContain('name');
+    expect(result.updated).toEqual(['state']);
+
+    expect(client._calls).toHaveLength(1);
+    expect(client._calls[0].op).toBe('EditRecurring');
+    expect(client._calls[0].variables).toEqual({
+      id: 'rec-1',
+      input: { state: 'PAUSED' },
+    });
   });
 
-  test('updates multiple fields', async () => {
+  test('dispatches EditRecurring with rule fields mapped to camelCase', async () => {
+    const client = createMockGraphQLClient({
+      EditRecurring: {
+        editRecurring: {
+          recurring: {
+            id: 'rec-1',
+            state: 'ACTIVE',
+            rule: {
+              nameContains: 'NETFLIX',
+              minAmount: '10',
+              maxAmount: '20',
+              days: [1, 15],
+            },
+          },
+        },
+      },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
     const result = await tools.updateRecurring({
       recurring_id: 'rec-1',
-      name: 'New Name',
-      amount: 50,
-      frequency: 'monthly',
+      rule: {
+        name_contains: 'NETFLIX',
+        min_amount: '10',
+        max_amount: '20',
+        days: [1, 15],
+      },
     });
-    expect(result.updated_fields).toEqual(expect.arrayContaining(['name', 'amount', 'frequency']));
+    expect(result.updated).toEqual(['rule']);
+
+    expect(client._calls[0].variables).toEqual({
+      id: 'rec-1',
+      input: {
+        rule: {
+          nameContains: 'NETFLIX',
+          minAmount: '10',
+          maxAmount: '20',
+          days: [1, 15],
+        },
+      },
+    });
   });
 
-  test('updates match_string and transaction_ids', async () => {
+  test('dispatches both state and rule together', async () => {
+    const client = createMockGraphQLClient({
+      EditRecurring: {
+        editRecurring: {
+          recurring: {
+            id: 'rec-1',
+            state: 'ARCHIVED',
+            rule: { days: [5] },
+          },
+        },
+      },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
     const result = await tools.updateRecurring({
       recurring_id: 'rec-1',
-      match_string: 'NETFLIX',
-      transaction_ids: ['tx-1', 'tx-2'],
+      state: 'ARCHIVED',
+      rule: { days: [5] },
     });
-    expect(result.updated_fields).toContain('match_string');
-    expect(result.updated_fields).toContain('transaction_ids');
-  });
-
-  test('calls Firestore with correct collection path and mask', async () => {
-    await tools.updateRecurring({
-      recurring_id: 'rec-1',
-      name: 'Updated Netflix',
+    expect(result.updated).toEqual(expect.arrayContaining(['state', 'rule']));
+    expect(client._calls[0].variables).toEqual({
+      id: 'rec-1',
+      input: { state: 'ARCHIVED', rule: { days: [5] } },
     });
-    expect(updateCalls).toHaveLength(1);
-    expect(updateCalls[0].collection).toBe('users/user123/recurring');
-    expect(updateCalls[0].docId).toBe('rec-1');
-    expect(updateCalls[0].mask).toEqual(['name']);
-  });
-
-  test('clears cache after successful update', async () => {
-    // Load recurring first to populate cache
-    await mockDb.getRecurring();
-    await tools.updateRecurring({
-      recurring_id: 'rec-1',
-      name: 'Updated',
-    });
-    // After clearing, _recurring should be null
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((mockDb as any)._recurring).toBeNull();
   });
 });

@@ -7,6 +7,7 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { CopilotMoneyTools, createToolSchemas } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
+import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
 import type {
   Transaction,
   Account,
@@ -352,8 +353,8 @@ function createMockDatabase(overrides?: {
   return db;
 }
 
-/** Create a mock FirestoreClient for write tool tests. */
-function createMockFirestoreClient() {
+/** Create a mock GraphQLClient for write tool tests. */
+function createMockWriteClient() {
   return {
     requireUserId: async () => 'test-user-123',
     createDocument: async (_col: string, docId: string | undefined) => docId ?? 'auto_generated_id',
@@ -963,11 +964,12 @@ describe('CopilotMoneyTools Integration', () => {
   });
 
   // ============================================
-  // Write Tools — happy-path tests
+  // Write Tools — happy-path tests (GraphQL)
   // ============================================
 
   describe('write tools', () => {
     let writeTools: CopilotMoneyTools;
+    let client: ReturnType<typeof createMockGraphQLClient>;
 
     beforeEach(() => {
       const db = createMockDatabase({
@@ -979,7 +981,67 @@ describe('CopilotMoneyTools Integration', () => {
         goals: [...mockGoals],
         goalHistory: [...mockGoalHistory],
       });
-      const client = createMockFirestoreClient();
+      client = createMockGraphQLClient({
+        EditTransaction: (vars: any) => ({
+          editTransaction: {
+            transaction: {
+              id: vars.id,
+              categoryId: vars.input.categoryId ?? 'c',
+              userNotes: vars.input.userNotes ?? null,
+              isReviewed: vars.input.isReviewed ?? false,
+              tags: (vars.input.tagIds ?? []).map((id: string) => ({ id })),
+            },
+          },
+        }),
+        CreateTag: (vars: any) => ({
+          createTag: {
+            id: 'tag-created',
+            name: vars.input.name,
+            colorName: vars.input.colorName,
+          },
+        }),
+        EditTag: (vars: any) => ({
+          editTag: {
+            id: vars.id,
+            name: vars.input.name ?? 'n',
+            colorName: vars.input.colorName ?? 'PURPLE2',
+          },
+        }),
+        DeleteTag: { deleteTag: true },
+        CreateCategory: (vars: any) => ({
+          createCategory: {
+            id: 'cat-created',
+            name: vars.input.name,
+            colorName: vars.input.colorName,
+          },
+        }),
+        EditCategory: (vars: any) => ({
+          editCategory: {
+            category: {
+              id: vars.id,
+              name: vars.input.name ?? 'Existing',
+              colorName: vars.input.colorName ?? 'PURPLE2',
+            },
+          },
+        }),
+        DeleteCategory: { deleteCategory: true },
+        EditBudget: { editCategoryBudget: true },
+        EditBudgetMonthly: { editCategoryBudgetMonthly: true },
+        EditRecurring: (vars: any) => ({
+          editRecurring: {
+            recurring: { id: vars.id, state: vars.input.state ?? 'ACTIVE' },
+          },
+        }),
+        DeleteRecurring: { deleteRecurring: true },
+        CreateRecurring: (vars: any) => ({
+          createRecurring: {
+            id: 'rec-new',
+            name: 'New Rec',
+            state: 'ACTIVE',
+            frequency: vars.input.frequency,
+          },
+        }),
+      });
       writeTools = new CopilotMoneyTools(db, client);
     });
 
@@ -991,6 +1053,7 @@ describe('CopilotMoneyTools Integration', () => {
       });
       expect(result.success).toBe(true);
       expect(result.updated.sort()).toEqual(['category_id', 'note']);
+      expect(client._calls[0].op).toBe('EditTransaction');
     });
 
     test('reviewTransactions marks reviewed', async () => {
@@ -1005,34 +1068,36 @@ describe('CopilotMoneyTools Integration', () => {
       expect(result.transaction_ids).toContain('wtxn2');
     });
 
-    test('createTag creates new tag', async () => {
+    test('createTag creates new tag via CreateTag', async () => {
       const result = await writeTools.createTag({
         name: 'Work Expense',
-        color_name: 'blue',
+        color_name: 'BLUE',
       });
 
       expect(result.success).toBe(true);
-      expect(result.tag_id).toBe('work_expense');
+      expect(result.tag_id).toBe('tag-created');
       expect(result.name).toBe('Work Expense');
-      expect(result.color_name).toBe('blue');
+      expect(result.color_name).toBe('BLUE');
+      expect(client._calls[0].op).toBe('CreateTag');
     });
 
-    test('deleteTag removes existing tag', async () => {
+    test('deleteTag dispatches DeleteTag', async () => {
       const result = await writeTools.deleteTag({ tag_id: 'tax_deductible' });
 
       expect(result.success).toBe(true);
       expect(result.tag_id).toBe('tax_deductible');
-      expect(result.deleted_name).toBe('Tax Deductible');
+      expect(result.deleted).toBe(true);
     });
 
-    test('createCategory creates new user category', async () => {
+    test('createCategory creates new user category via CreateCategory', async () => {
       const result = await writeTools.createCategory({
         name: 'Pet Supplies',
+        color_name: 'ORANGE',
         emoji: '\uD83D\uDC36',
       });
 
       expect(result.success).toBe(true);
-      expect(result.category_id).toBe('auto_generated_id');
+      expect(result.category_id).toBe('cat-created');
       expect(result.name).toBe('Pet Supplies');
     });
 
@@ -1044,89 +1109,59 @@ describe('CopilotMoneyTools Integration', () => {
 
       expect(result.success).toBe(true);
       expect(result.category_id).toBe('custom_food');
-      expect(result.updated_fields).toContain('name');
+      expect(result.updated).toContain('name');
     });
 
-    test('deleteCategory removes existing category', async () => {
+    test('deleteCategory dispatches DeleteCategory', async () => {
       const result = await writeTools.deleteCategory({
         category_id: 'custom_fun',
       });
 
       expect(result.success).toBe(true);
-      expect(result.deleted_name).toBe('My Fun');
+      expect(result.deleted).toBe(true);
     });
 
-    test('createBudget creates new budget', async () => {
-      // Use a category that exists in mockUserCategories and has no budget yet
-      const result = await writeTools.createBudget({
+    test('set_budget dispatches EditBudget (no month)', async () => {
+      const result = await writeTools.setBudget({
         category_id: 'custom_food',
-        amount: 300,
-        period: 'monthly',
-        name: 'Food Spending',
+        amount: '300.00',
       });
 
       expect(result.success).toBe(true);
-      expect(result.budget_id).toMatch(/^budget_/);
-      expect(result.amount).toBe(300);
-      expect(result.period).toBe('monthly');
+      expect(result.category_id).toBe('custom_food');
+      expect(result.amount).toBe('300.00');
+      expect(result.cleared).toBe(false);
+      expect(client._calls[0].op).toBe('EditBudget');
     });
 
-    test('updateBudget updates existing budget', async () => {
-      const result = await writeTools.updateBudget({
-        budget_id: 'bud1',
-        amount: 600,
-        name: 'Updated Food Budget',
+    test('set_budget with month dispatches EditBudgetMonthly', async () => {
+      const result = await writeTools.setBudget({
+        category_id: 'custom_food',
+        amount: '150.00',
+        month: '2025-03',
       });
 
       expect(result.success).toBe(true);
-      expect(result.updated_fields).toContain('amount');
-      expect(result.updated_fields).toContain('name');
+      expect(result.month).toBe('2025-03');
+      expect(client._calls[0].op).toBe('EditBudgetMonthly');
     });
 
-    test('deleteBudget removes existing budget', async () => {
-      const result = await writeTools.deleteBudget({ budget_id: 'bud2' });
-
-      expect(result.success).toBe(true);
-      expect(result.budget_id).toBe('bud2');
-      expect(result.deleted_name).toBe('Entertainment Budget');
-    });
-
-    test('setRecurringState changes state', async () => {
+    test('setRecurringState changes state via EditRecurring', async () => {
       const result = await writeTools.setRecurringState({
         recurring_id: 'rec1',
-        state: 'paused',
+        state: 'PAUSED',
       });
 
       expect(result.success).toBe(true);
-      expect(result.old_state).toBe('active');
-      expect(result.new_state).toBe('paused');
-      expect(result.name).toBe('Netflix');
+      expect(result.state).toBe('PAUSED');
+      expect(client._calls[0].op).toBe('EditRecurring');
     });
 
-    test('deleteRecurring removes recurring item', async () => {
+    test('deleteRecurring dispatches DeleteRecurring', async () => {
       const result = await writeTools.deleteRecurring({ recurring_id: 'rec2' });
 
       expect(result.success).toBe(true);
-      expect(result.deleted_name).toBe('Gym Membership');
-    });
-
-    test('updateGoal updates goal fields', async () => {
-      const result = await writeTools.updateGoal({
-        goal_id: 'goal1',
-        name: 'Bigger Emergency Fund',
-        target_amount: 20000,
-      });
-
-      expect(result.success).toBe(true);
-      expect(result.updated_fields).toContain('name');
-      expect(result.updated_fields).toContain('savings');
-    });
-
-    test('deleteGoal removes existing goal', async () => {
-      const result = await writeTools.deleteGoal({ goal_id: 'goal2' });
-
-      expect(result.success).toBe(true);
-      expect(result.deleted_name).toBe('Vacation');
+      expect(result.deleted).toBe(true);
     });
   });
 });

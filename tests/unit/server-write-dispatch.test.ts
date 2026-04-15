@@ -42,33 +42,17 @@ const WRITE_TOOL_SPECS: Record<string, { method: string; args: Record<string, un
     method: 'deleteCategory',
     args: { category_id: 'cat1' },
   },
-  create_budget: {
-    method: 'createBudget',
-    args: { category_id: 'food', amount: 500 },
-  },
-  update_budget: {
-    method: 'updateBudget',
-    args: { budget_id: 'budget1', amount: 600 },
-  },
-  delete_budget: {
-    method: 'deleteBudget',
-    args: { budget_id: 'budget1' },
+  set_budget: {
+    method: 'setBudget',
+    args: { category_id: 'food', amount: '500.00' },
   },
   set_recurring_state: {
     method: 'setRecurringState',
-    args: { recurring_id: 'rec1', state: 'paused' },
+    args: { recurring_id: 'rec1', state: 'PAUSED' },
   },
   delete_recurring: {
     method: 'deleteRecurring',
     args: { recurring_id: 'rec1' },
-  },
-  update_goal: {
-    method: 'updateGoal',
-    args: { goal_id: 'goal1', name: 'Updated Goal' },
-  },
-  delete_goal: {
-    method: 'deleteGoal',
-    args: { goal_id: 'goal1' },
   },
   update_tag: {
     method: 'updateTag',
@@ -76,15 +60,11 @@ const WRITE_TOOL_SPECS: Record<string, { method: string; args: Record<string, un
   },
   create_recurring: {
     method: 'createRecurring',
-    args: { name: 'New Recurring', amount: 100, frequency: 'monthly' },
-  },
-  create_goal: {
-    method: 'createGoal',
-    args: { name: 'New Goal', target_amount: 1000 },
+    args: { transaction_id: 'txn1', frequency: 'MONTHLY' },
   },
   update_recurring: {
     method: 'updateRecurring',
-    args: { recurring_id: 'rec1', name: 'Updated Recurring' },
+    args: { recurring_id: 'rec1', state: 'PAUSED' },
   },
 };
 
