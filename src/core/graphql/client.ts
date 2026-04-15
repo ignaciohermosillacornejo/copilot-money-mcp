@@ -52,6 +52,7 @@ export class GraphQLClient {
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      this.logError(operationName, 'NETWORK', undefined);
       throw new GraphQLError('NETWORK', msg, operationName);
     }
 
@@ -105,6 +106,7 @@ export class GraphQLClient {
     }
 
     if (!body.data) {
+      this.logError(operationName, 'UNKNOWN', response.status);
       throw new GraphQLError(
         'UNKNOWN',
         'Response missing data field',
@@ -116,7 +118,8 @@ export class GraphQLClient {
     return body.data;
   }
 
-  private logError(operationName: string, code: GraphQLErrorCode, httpStatus: number): void {
-    console.error(`[graphql] ${operationName} failed: code=${code} status=${httpStatus}`);
+  private logError(operationName: string, code: GraphQLErrorCode, httpStatus?: number): void {
+    const statusPart = httpStatus !== undefined ? ` status=${httpStatus}` : '';
+    console.error(`[graphql] ${operationName} failed: code=${code}${statusPart}`);
   }
 }
