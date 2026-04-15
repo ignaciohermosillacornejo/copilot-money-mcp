@@ -54,6 +54,8 @@ tests/fixtures/demo_database/
 scripts/*
 !scripts/graphql-capture/
 !scripts/launcher.sh
+# License-check scratch directory (created by CI license gate)
+.license-check/
 # Generated test fixtures
 tests/fixtures/mixed-files-db/
 
