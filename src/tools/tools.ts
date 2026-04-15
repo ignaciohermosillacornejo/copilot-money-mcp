@@ -10,6 +10,21 @@ import { toFirestoreFields } from '../core/format/firestore-rest.js';
 import type { GraphQLClient } from '../core/graphql/client.js';
 import { GraphQLError } from '../core/graphql/client.js';
 import { editTransaction } from '../core/graphql/transactions.js';
+import {
+  createCategory as gqlCreateCategory,
+  editCategory as gqlEditCategory,
+  deleteCategory as gqlDeleteCategory,
+} from '../core/graphql/categories.js';
+import {
+  createTag as gqlCreateTag,
+  editTag as gqlEditTag,
+  deleteTag as gqlDeleteTag,
+} from '../core/graphql/tags.js';
+import {
+  createRecurring as gqlCreateRecurring,
+  editRecurring as gqlEditRecurring,
+  deleteRecurring as gqlDeleteRecurring,
+} from '../core/graphql/recurrings.js';
 import { graphQLErrorToMcpError } from './errors.js';
 import { parsePeriod } from '../utils/date.js';
 import {
@@ -23,7 +38,6 @@ import {
   getTransactionDisplayName,
   getRecurringDisplayName,
   KNOWN_PERIODS,
-  RECURRING_STATES,
 } from '../models/index.js';
 import type { InvestmentPerformance, TwrHolding } from '../models/investment-performance.js';
 import type { Security } from '../models/security.js';
@@ -63,30 +77,6 @@ function validateDocId(id: string, label: string): void {
   if (!SAFE_ID_RE.test(id)) {
     throw new Error(`Invalid ${label} format: ${id}`);
   }
-}
-
-const HEX_COLOR_RE = /^#[0-9A-Fa-f]{6}$/;
-
-/** Validate that a color string is a valid #RRGGBB hex code. */
-function validateHexColor(color: string): void {
-  if (!HEX_COLOR_RE.test(color)) {
-    throw new Error(`Invalid color format: ${color} (expected #RRGGBB)`);
-  }
-}
-
-/**
- * Derive a light background tint from a hex color, matching the Copilot app's
- * `bg_color` convention (e.g. #BC00E3 → #FDF5FE).
- * Blends the color at ~5% opacity over white.
- */
-function hexToBgColor(hex: string): string {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  const t = 0.05; // tint strength
-  const blend = (c: number) => Math.round(255 - t * (255 - c));
-  const toHex = (n: number) => n.toString(16).padStart(2, '0').toUpperCase();
-  return `#${toHex(blend(r))}${toHex(blend(g))}${toHex(blend(b))}`;
 }
 
 /**
@@ -148,12 +138,6 @@ export const MAX_VALID_AMOUNT = 10_000_000;
  * Batching prevents overwhelming Firestore with a large number of simultaneous requests.
  */
 export const REVIEW_BATCH_SIZE = 10;
-
-/**
- * Accepted frequency values for creating recurring items.
- * Subset of KNOWN_FREQUENCIES from the model -- only user-facing values.
- */
-const VALID_RECURRING_FREQUENCIES = ['weekly', 'biweekly', 'monthly', 'yearly'] as const;
 
 // ============================================
 // Validation Helpers
@@ -2280,115 +2264,36 @@ export class CopilotMoneyTools {
    */
   async createCategory(args: {
     name: string;
-    emoji?: string;
-    color?: string;
-    parent_category_id?: string;
-    excluded?: boolean;
-  }): Promise<{
-    success: boolean;
-    category_id: string;
-    name: string;
+    color_name: string;
     emoji: string;
-    color: string;
-    parent_category_id?: string;
-    excluded: boolean;
-  }> {
-    const client = this.getFirestoreClient();
+    is_excluded?: boolean;
+    parent_id?: string;
+  }): Promise<{ success: true; category_id: string; name: string; color_name: string }> {
+    const client = this.getGraphQLClient();
+    if (!args.name?.trim()) throw new Error('Category name must not be empty');
+    if (!args.color_name?.trim()) throw new Error('color_name is required');
+    if (!args.emoji?.trim()) throw new Error('emoji is required');
 
-    const { name, emoji, color, parent_category_id, excluded = false } = args;
-
-    // Validate name is non-empty
-    if (!name.trim()) {
-      throw new Error('Category name must not be empty');
+    try {
+      const result = await gqlCreateCategory(client, {
+        input: {
+          name: args.name.trim(),
+          colorName: args.color_name,
+          emoji: args.emoji,
+          isExcluded: args.is_excluded ?? false,
+          parentId: args.parent_id,
+        },
+      });
+      return {
+        success: true,
+        category_id: result.id,
+        name: result.name,
+        color_name: result.colorName,
+      };
+    } catch (e) {
+      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e));
+      throw e;
     }
-
-    const existingCategories = await this.db.getUserCategories();
-
-    // Validate parent_category_id if provided
-    if (parent_category_id) {
-      validateDocId(parent_category_id, 'parent_category_id');
-      const parent = existingCategories.find((c) => c.category_id === parent_category_id);
-      if (!parent) {
-        throw new Error(`Parent category not found: ${parent_category_id}`);
-      }
-    }
-
-    // Check for duplicate name
-    const duplicate = existingCategories.find(
-      (c) => c.name?.toLowerCase() === name.trim().toLowerCase()
-    );
-    if (duplicate) {
-      throw new Error(
-        `Category with name "${name.trim()}" already exists (id: ${duplicate.category_id})`
-      );
-    }
-
-    // Determine user_id: prefer existing categories, fall back to auth layer
-    const userIdFromCategories = existingCategories.find((c) => c.user_id)?.user_id;
-    const userId = userIdFromCategories ?? (await client.requireUserId());
-
-    // Compute next order value (max existing order + 1)
-    const maxOrder = existingCategories.reduce(
-      (max, c) => Math.max(max, typeof c.order === 'number' ? c.order : -1),
-      -1
-    );
-
-    // Build document fields matching app-created category structure.
-    // The app requires: id, name, emoji, color, bg_color, order, excluded,
-    // is_other, auto_budget_lock, auto_delete_lock, and empty arrays for
-    // plaid_category_ids and partial_name_rules.
-    const trimmedName = name.trim();
-    if (color) validateHexColor(color);
-    const categoryColor = color ?? '#808080';
-    const categoryEmoji = emoji ?? '📁';
-    const docFields: Record<string, unknown> = {
-      name: trimmedName,
-      emoji: categoryEmoji,
-      color: categoryColor,
-      bg_color: hexToBgColor(categoryColor),
-      order: maxOrder + 1,
-      excluded,
-      is_other: false,
-      auto_budget_lock: false,
-      auto_delete_lock: false,
-      plaid_category_ids: [],
-      partial_name_rules: [],
-    };
-    if (parent_category_id) docFields.parent_category_id = parent_category_id;
-
-    // Write to Firestore with auto-generated document ID (matching app behavior)
-    const collectionPath = `users/${userId}/categories`;
-    const firestoreFields = toFirestoreFields(docFields);
-    const categoryId = await client.createDocument(collectionPath, undefined, firestoreFields);
-
-    // Patch the `id` field to match the auto-generated document ID.
-    // App-created categories store `id` equal to the Firestore document ID.
-    const idFields = toFirestoreFields({ id: categoryId });
-    await client.updateDocument(collectionPath, categoryId, idFields, ['id']);
-
-    // Clear cache so the new category is visible on next query
-    this.db.clearCache();
-    this._userCategoryMap = null;
-
-    const result: {
-      success: boolean;
-      category_id: string;
-      name: string;
-      emoji: string;
-      color: string;
-      parent_category_id?: string;
-      excluded: boolean;
-    } = {
-      success: true,
-      category_id: categoryId,
-      name: trimmedName,
-      emoji: categoryEmoji,
-      color: categoryColor,
-      excluded,
-    };
-    if (parent_category_id) result.parent_category_id = parent_category_id;
-
-    return result;
   }
 
   /**
@@ -2610,70 +2515,29 @@ export class CopilotMoneyTools {
    * already exist, writes to Firestore, then clears the cache so the next
    * read picks up the new tag.
    */
-  async createTag(args: { name: string; color_name?: string; hex_color?: string }): Promise<{
-    success: boolean;
-    tag_id: string;
+  async createTag(args: {
     name: string;
     color_name?: string;
     hex_color?: string;
-  }> {
-    const client = this.getFirestoreClient();
+  }): Promise<{ success: true; tag_id: string; name: string; color_name: string }> {
+    const client = this.getGraphQLClient();
+    if (!args.name?.trim()) throw new Error('Tag name must not be empty');
+    const colorName = args.color_name ?? 'PURPLE2'; // default matches captured CreateTag example
 
-    const { name, color_name, hex_color } = args;
-
-    // Validate name is non-empty
-    const trimmedName = name.trim();
-    if (!trimmedName) {
-      throw new Error('Tag name must not be empty');
+    try {
+      const result = await gqlCreateTag(client, {
+        input: { name: args.name.trim(), colorName },
+      });
+      return {
+        success: true,
+        tag_id: result.id,
+        name: result.name,
+        color_name: result.colorName,
+      };
+    } catch (e) {
+      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e));
+      throw e;
     }
-
-    // Generate deterministic tag_id from name (lowercase, spaces to underscores, strip special chars)
-    const tag_id = trimmedName
-      .toLowerCase()
-      .replace(/\s+/g, '_')
-      .replace(/[^a-z0-9_-]/g, '');
-    if (!tag_id) {
-      throw new Error(`Cannot generate a valid tag_id from name: ${trimmedName}`);
-    }
-
-    if (hex_color !== undefined) validateHexColor(hex_color);
-
-    // Check for duplicate tag
-    const existingTags = await this.db.getTags();
-    const duplicate = existingTags.find((t) => t.tag_id === tag_id);
-    if (duplicate) {
-      throw new Error(`Tag "${trimmedName}" already exists (id: ${tag_id})`);
-    }
-
-    // Resolve user_id for the Firestore path users/{user_id}/tags/{tag_id}
-    const userId = await client.requireUserId();
-
-    // Build fields for Firestore
-    const docFields: Record<string, unknown> = { name: trimmedName };
-    if (color_name !== undefined) docFields.color_name = color_name;
-    if (hex_color !== undefined) docFields.hex_color = hex_color;
-
-    const firestoreFields = toFirestoreFields(docFields);
-    const collectionPath = `users/${userId}/tags`;
-    await client.createDocument(collectionPath, tag_id, firestoreFields);
-
-    // Clear the cache so the next read picks up the new tag from LevelDB
-    this.db.clearCache();
-
-    const result: {
-      success: boolean;
-      tag_id: string;
-      name: string;
-      color_name?: string;
-      hex_color?: string;
-    } = {
-      success: true,
-      tag_id,
-      name: trimmedName,
-    };
-    if (color_name !== undefined) result.color_name = color_name;
-    if (hex_color !== undefined) result.hex_color = hex_color;
-    return result;
   }
 
   /**
@@ -2683,38 +2547,18 @@ export class CopilotMoneyTools {
    * then clears the cache.
    */
   async deleteTag(args: { tag_id: string }): Promise<{
-    success: boolean;
+    success: true;
     tag_id: string;
-    deleted_name: string;
+    deleted: true;
   }> {
-    const client = this.getFirestoreClient();
-
-    const { tag_id } = args;
-
-    // Validate tag_id format
-    validateDocId(tag_id, 'tag_id');
-
-    // Validate tag exists
-    const existingTags = await this.db.getTags();
-    const tag = existingTags.find((t) => t.tag_id === tag_id);
-    if (!tag) {
-      throw new Error(`Tag not found: ${tag_id}`);
+    const client = this.getGraphQLClient();
+    try {
+      const result = await gqlDeleteTag(client, { id: args.tag_id });
+      return { success: true, tag_id: result.id, deleted: true };
+    } catch (e) {
+      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e));
+      throw e;
     }
-
-    // Resolve user_id for the Firestore path users/{user_id}/tags/{tag_id}
-    const userId = await client.requireUserId();
-
-    const collectionPath = `users/${userId}/tags`;
-    await client.deleteDocument(collectionPath, tag_id);
-
-    // Clear the cache so the next read reflects the deletion
-    this.db.clearCache();
-
-    return {
-      success: true,
-      tag_id,
-      deleted_name: tag.name ?? tag_id,
-    };
   }
 
   /**
@@ -2726,144 +2570,51 @@ export class CopilotMoneyTools {
   async updateCategory(args: {
     category_id: string;
     name?: string;
+    color_name?: string;
     emoji?: string;
-    color?: string;
-    excluded?: boolean;
-    parent_category_id?: string | null;
-  }): Promise<{
-    success: boolean;
-    category_id: string;
-    updated_fields: string[];
-  }> {
-    const client = this.getFirestoreClient();
-
-    const { category_id, name, emoji, color, excluded, parent_category_id } = args;
-
-    // Validate category_id format
-    validateDocId(category_id, 'category_id');
-
-    // Validate category exists
-    const existingCategories = await this.db.getUserCategories();
-    const category = existingCategories.find((c) => c.category_id === category_id);
-    if (!category) {
-      throw new Error(`Category not found: ${category_id}`);
+    is_excluded?: boolean;
+    parent_id?: string | null;
+  }): Promise<{ success: true; category_id: string; updated: string[] }> {
+    const client = this.getGraphQLClient();
+    const input: Record<string, unknown> = {};
+    if (args.name !== undefined) input.name = args.name;
+    if (args.color_name !== undefined) input.colorName = args.color_name;
+    if (args.emoji !== undefined) input.emoji = args.emoji;
+    if (args.is_excluded !== undefined) input.isExcluded = args.is_excluded;
+    if (args.parent_id !== undefined) input.parentId = args.parent_id;
+    if (Object.keys(input).length === 0) {
+      throw new Error('update_category requires at least one field to update');
     }
 
-    // Build dynamic update fields
-    const fieldsToUpdate: Record<string, unknown> = {};
-    const updateMask: string[] = [];
-
-    if (name !== undefined) {
-      const trimmedName = name.trim();
-      if (!trimmedName) {
-        throw new Error('Category name must not be empty');
-      }
-      // Check for duplicate name among OTHER categories
-      const duplicate = existingCategories.find(
-        (c) => c.category_id !== category_id && c.name?.toLowerCase() === trimmedName.toLowerCase()
-      );
-      if (duplicate) {
-        throw new Error(
-          `Category with name "${trimmedName}" already exists (id: ${duplicate.category_id})`
-        );
-      }
-      fieldsToUpdate.name = trimmedName;
-      updateMask.push('name');
+    try {
+      const result = await gqlEditCategory(client, { id: args.category_id, input });
+      return {
+        success: true,
+        category_id: result.id,
+        updated: Object.keys(result.changed),
+      };
+    } catch (e) {
+      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e));
+      throw e;
     }
-    if (emoji !== undefined) {
-      fieldsToUpdate.emoji = emoji;
-      updateMask.push('emoji');
-    }
-    if (color !== undefined) {
-      validateHexColor(color);
-      fieldsToUpdate.color = color;
-      fieldsToUpdate.bg_color = hexToBgColor(color);
-      updateMask.push('color', 'bg_color');
-    }
-    if (excluded !== undefined) {
-      fieldsToUpdate.excluded = excluded;
-      updateMask.push('excluded');
-    }
-    if (parent_category_id !== undefined) {
-      if (parent_category_id !== null) {
-        validateDocId(parent_category_id, 'parent_category_id');
-        if (parent_category_id === category_id) {
-          throw new Error('A category cannot be its own parent');
-        }
-        const parent = existingCategories.find((c) => c.category_id === parent_category_id);
-        if (!parent) {
-          throw new Error(`Parent category not found: ${parent_category_id}`);
-        }
-      }
-      fieldsToUpdate.parent_category_id = parent_category_id ?? '';
-      updateMask.push('parent_category_id');
-    }
-
-    if (updateMask.length === 0) {
-      throw new Error('No fields to update');
-    }
-
-    // Determine user_id
-    const userIdFromCategories = existingCategories.find((c) => c.user_id)?.user_id;
-    const userId = userIdFromCategories ?? (await client.requireUserId());
-
-    // Write to Firestore
-    const collectionPath = `users/${userId}/categories`;
-    const firestoreFields = toFirestoreFields(fieldsToUpdate);
-    await client.updateDocument(collectionPath, category_id, firestoreFields, updateMask);
-
-    // Clear cache so updates are visible on next query
-    this.db.clearCache();
-    this._userCategoryMap = null;
-
-    return {
-      success: true,
-      category_id,
-      updated_fields: updateMask,
-    };
   }
 
   /**
-   * Delete a user-defined category.
-   *
-   * Validates the category exists, deletes from Firestore, then clears
-   * the cache.
+   * Delete a user-defined category via GraphQL.
    */
   async deleteCategory(args: { category_id: string }): Promise<{
-    success: boolean;
+    success: true;
     category_id: string;
-    deleted_name: string;
+    deleted: true;
   }> {
-    const client = this.getFirestoreClient();
-
-    const { category_id } = args;
-
-    // Validate category_id format
-    validateDocId(category_id, 'category_id');
-
-    // Validate category exists
-    const existingCategories = await this.db.getUserCategories();
-    const category = existingCategories.find((c) => c.category_id === category_id);
-    if (!category) {
-      throw new Error(`Category not found: ${category_id}`);
+    const client = this.getGraphQLClient();
+    try {
+      const result = await gqlDeleteCategory(client, { id: args.category_id });
+      return { success: true, category_id: result.id, deleted: true };
+    } catch (e) {
+      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e));
+      throw e;
     }
-
-    // Resolve user_id for the Firestore path users/{user_id}/categories/{category_id}
-    const userIdFromCategories = existingCategories.find((c) => c.user_id)?.user_id;
-    const userId = userIdFromCategories ?? (await client.requireUserId());
-
-    const collectionPath = `users/${userId}/categories`;
-    await client.deleteDocument(collectionPath, category_id);
-
-    // Clear the cache so the next read reflects the deletion
-    this.db.clearCache();
-    this._userCategoryMap = null;
-
-    return {
-      success: true,
-      category_id,
-      deleted_name: category.name ?? category_id,
-    };
   }
 
   /**
@@ -3099,101 +2850,42 @@ export class CopilotMoneyTools {
    */
   async setRecurringState(args: {
     recurring_id: string;
-    state: 'active' | 'paused' | 'archived';
-  }): Promise<{
-    success: boolean;
-    recurring_id: string;
-    name: string;
-    old_state: string;
-    new_state: string;
-  }> {
-    const client = this.getFirestoreClient();
-
-    const { recurring_id, state } = args;
-
-    // Validate recurring_id format
-    validateDocId(recurring_id, 'recurring_id');
-
-    // Validate state
-    if (!(RECURRING_STATES as readonly string[]).includes(state)) {
-      throw new Error(`Invalid state: ${state}. Must be one of: ${RECURRING_STATES.join(', ')}`);
+    state: string;
+  }): Promise<{ success: true; recurring_id: string; state: string }> {
+    const client = this.getGraphQLClient();
+    const VALID_STATES = ['ACTIVE', 'PAUSED', 'ARCHIVED'];
+    if (!VALID_STATES.includes(args.state)) {
+      throw new Error(`state must be one of: ${VALID_STATES.join(', ')}. Got: ${args.state}`);
     }
 
-    // Validate recurring exists (false = include inactive)
-    const allRecurring = await this.db.getRecurring(false);
-    const recurring = allRecurring.find((r) => r.recurring_id === recurring_id);
-    if (!recurring) {
-      throw new Error(`Recurring item not found: ${recurring_id}`);
+    try {
+      const result = await gqlEditRecurring(client, {
+        id: args.recurring_id,
+        input: { state: args.state },
+      });
+      return { success: true, recurring_id: result.id, state: args.state };
+    } catch (e) {
+      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e));
+      throw e;
     }
-
-    const displayName = getRecurringDisplayName(recurring);
-    const oldState = recurring.state ?? (recurring.is_active ? 'active' : 'paused');
-
-    // Resolve user_id for the Firestore path users/{user_id}/recurring/{recurring_id}
-    const userId = await client.requireUserId();
-
-    // Write both state and derived is_active field
-    const is_active = state === 'active';
-    const firestoreFields = toFirestoreFields({ state, is_active });
-    const collectionPath = `users/${userId}/recurring`;
-    await client.updateDocument(collectionPath, recurring_id, firestoreFields, [
-      'state',
-      'is_active',
-    ]);
-
-    // Clear the cache so the next read reflects the change
-    this.db.clearCache();
-
-    return {
-      success: true,
-      recurring_id,
-      name: displayName,
-      old_state: oldState,
-      new_state: state,
-    };
   }
 
   /**
-   * Delete a recurring item.
-   *
-   * Validates the recurring item exists, deletes from Firestore,
-   * then clears the cache.
+   * Delete a recurring item via GraphQL.
    */
   async deleteRecurring(args: { recurring_id: string }): Promise<{
-    success: boolean;
+    success: true;
     recurring_id: string;
-    deleted_name: string;
+    deleted: true;
   }> {
-    const client = this.getFirestoreClient();
-
-    const { recurring_id } = args;
-
-    // Validate recurring_id format
-    validateDocId(recurring_id, 'recurring_id');
-
-    // Validate recurring exists
-    const allRecurring = await this.db.getRecurring(false);
-    const recurring = allRecurring.find((r) => r.recurring_id === recurring_id);
-    if (!recurring) {
-      throw new Error(`Recurring item not found: ${recurring_id}`);
+    const client = this.getGraphQLClient();
+    try {
+      const result = await gqlDeleteRecurring(client, { id: args.recurring_id });
+      return { success: true, recurring_id: result.id, deleted: true };
+    } catch (e) {
+      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e));
+      throw e;
     }
-
-    const displayName = getRecurringDisplayName(recurring);
-
-    // Resolve user_id for the Firestore path users/{user_id}/recurring/{recurring_id}
-    const userId = await client.requireUserId();
-
-    const collectionPath = `users/${userId}/recurring`;
-    await client.deleteDocument(collectionPath, recurring_id);
-
-    // Clear the cache so the next read reflects the deletion
-    this.db.clearCache();
-
-    return {
-      success: true,
-      recurring_id,
-      deleted_name: displayName,
-    };
   }
 
   /**
@@ -3340,68 +3032,22 @@ export class CopilotMoneyTools {
     tag_id: string;
     name?: string;
     color_name?: string;
-    hex_color?: string;
-  }): Promise<{
-    success: boolean;
-    tag_id: string;
-    updated_fields: string[];
-  }> {
-    const client = this.getFirestoreClient();
-
-    const { tag_id, name, color_name, hex_color } = args;
-
-    // Validate tag_id format
-    validateDocId(tag_id, 'tag_id');
-
-    // Validate tag exists
-    const existingTags = await this.db.getTags();
-    const tag = existingTags.find((t) => t.tag_id === tag_id);
-    if (!tag) {
-      throw new Error(`Tag not found: ${tag_id}`);
+  }): Promise<{ success: true; tag_id: string; updated: string[] }> {
+    const client = this.getGraphQLClient();
+    const input: Record<string, unknown> = {};
+    if (args.name !== undefined) input.name = args.name;
+    if (args.color_name !== undefined) input.colorName = args.color_name;
+    if (Object.keys(input).length === 0) {
+      throw new Error('update_tag requires at least one field to update');
     }
 
-    // Build dynamic update fields
-    const fieldsToUpdate: Record<string, unknown> = {};
-    const updateMask: string[] = [];
-
-    if (name !== undefined) {
-      const trimmedName = name.trim();
-      if (!trimmedName) {
-        throw new Error('Tag name must not be empty');
-      }
-      fieldsToUpdate.name = trimmedName;
-      updateMask.push('name');
+    try {
+      const result = await gqlEditTag(client, { id: args.tag_id, input });
+      return { success: true, tag_id: result.id, updated: Object.keys(result.changed) };
+    } catch (e) {
+      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e));
+      throw e;
     }
-    if (color_name !== undefined) {
-      fieldsToUpdate.color_name = color_name;
-      updateMask.push('color_name');
-    }
-    if (hex_color !== undefined) {
-      validateHexColor(hex_color);
-      fieldsToUpdate.hex_color = hex_color;
-      updateMask.push('hex_color');
-    }
-
-    if (updateMask.length === 0) {
-      throw new Error('No fields to update. Provide at least one of: name, color_name, hex_color');
-    }
-
-    // Resolve user_id
-    const userId = await client.requireUserId();
-
-    // Write to Firestore with dynamic update mask
-    const collectionPath = `users/${userId}/tags`;
-    const firestoreFields = toFirestoreFields(fieldsToUpdate);
-    await client.updateDocument(collectionPath, tag_id, firestoreFields, updateMask);
-
-    // Clear cache so the updated tag is visible on next query
-    this.db.clearCache();
-
-    return {
-      success: true,
-      tag_id,
-      updated_fields: updateMask,
-    };
   }
 
   /**
@@ -3411,86 +3057,54 @@ export class CopilotMoneyTools {
    * so the new recurring item is visible on next query.
    */
   async createRecurring(args: {
-    name: string;
-    amount: number;
+    transaction_id: string;
     frequency: string;
-    category_id?: string;
-    account_id?: string;
-    merchant_name?: string;
-    start_date?: string;
   }): Promise<{
-    success: boolean;
+    success: true;
     recurring_id: string;
     name: string;
-    amount: number;
+    state: string;
     frequency: string;
   }> {
-    const client = this.getFirestoreClient();
-
-    const { name, amount, frequency, category_id, account_id, merchant_name, start_date } = args;
-
-    // Validate name is non-empty
-    const trimmedName = name.trim();
-    if (!trimmedName) {
-      throw new Error('Recurring name must not be empty');
-    }
-
-    // Validate amount is positive
-    if (amount <= 0) {
-      throw new Error('Recurring amount must be greater than 0');
-    }
-
-    // Validate frequency
-    if (!(VALID_RECURRING_FREQUENCIES as readonly string[]).includes(frequency)) {
+    const client = this.getGraphQLClient();
+    const VALID_FREQUENCIES = ['WEEKLY', 'BIWEEKLY', 'MONTHLY', 'YEARLY'];
+    if (!VALID_FREQUENCIES.includes(args.frequency)) {
       throw new Error(
-        `Invalid frequency: ${frequency}. Must be one of: ${VALID_RECURRING_FREQUENCIES.join(', ')}`
+        `frequency must be one of: ${VALID_FREQUENCIES.join(', ')}. Got: ${args.frequency}`
       );
     }
 
-    // Validate optional IDs
-    if (category_id !== undefined) validateDocId(category_id, 'category_id');
-    if (account_id !== undefined) validateDocId(account_id, 'account_id');
+    const all = await this.db.getAllTransactions();
+    const txn = all.find((t) => t.transaction_id === args.transaction_id);
+    if (!txn) throw new Error(`Transaction not found: ${args.transaction_id}`);
+    if (!txn.account_id || !txn.item_id) {
+      throw new Error(
+        `Transaction ${args.transaction_id} missing account_id or item_id in local cache`
+      );
+    }
 
-    // Validate start_date format
-    if (start_date !== undefined) validateDate(start_date, 'start_date');
-
-    // Generate unique recurring_id
-    const recurringId = crypto.randomUUID();
-
-    // Resolve user_id
-    const userId = await client.requireUserId();
-
-    // Build document fields
-    const today = new Date().toISOString().slice(0, 10);
-    const docFields: Record<string, unknown> = {
-      recurring_id: recurringId,
-      name: trimmedName,
-      amount,
-      frequency,
-      is_active: true,
-      state: 'active',
-      latest_date: start_date ?? today,
-    };
-    if (category_id !== undefined) docFields.category_id = category_id;
-    if (account_id !== undefined) docFields.account_id = account_id;
-    if (merchant_name !== undefined) docFields.merchant_name = merchant_name;
-    if (start_date !== undefined) docFields.start_date = start_date;
-
-    // Write to Firestore
-    const collectionPath = `users/${userId}/recurring`;
-    const firestoreFields = toFirestoreFields(docFields);
-    await client.createDocument(collectionPath, recurringId, firestoreFields);
-
-    // Clear cache so the new recurring item is visible on next query
-    this.db.clearCache();
-
-    return {
-      success: true,
-      recurring_id: recurringId,
-      name: trimmedName,
-      amount,
-      frequency,
-    };
+    try {
+      const result = await gqlCreateRecurring(client, {
+        input: {
+          frequency: args.frequency,
+          transaction: {
+            accountId: txn.account_id,
+            itemId: txn.item_id,
+            transactionId: args.transaction_id,
+          },
+        },
+      });
+      return {
+        success: true,
+        recurring_id: result.id,
+        name: result.name,
+        state: result.state,
+        frequency: result.frequency,
+      };
+    } catch (e) {
+      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e));
+      throw e;
+    }
   }
 
   /**
@@ -3581,142 +3195,36 @@ export class CopilotMoneyTools {
    */
   async updateRecurring(args: {
     recurring_id: string;
-    name?: string;
-    amount?: number;
-    frequency?: string;
-    category_id?: string;
-    account_id?: string;
-    merchant_name?: string;
-    emoji?: string;
-    match_string?: string;
-    transaction_ids?: string[];
-    excluded_transaction_ids?: string[];
-    included_transaction_ids?: string[];
-    days_filter?: number;
-  }): Promise<{
-    success: boolean;
-    recurring_id: string;
-    name: string;
-    updated_fields: string[];
-  }> {
-    const client = this.getFirestoreClient();
-
-    const {
-      recurring_id,
-      name,
-      amount,
-      frequency,
-      category_id,
-      account_id,
-      merchant_name,
-      emoji,
-      match_string,
-      transaction_ids,
-      excluded_transaction_ids,
-      included_transaction_ids,
-      days_filter,
-    } = args;
-
-    // Validate recurring_id format
-    validateDocId(recurring_id, 'recurring_id');
-
-    // Verify recurring exists (include inactive)
-    const allRecurring = await this.db.getRecurring(false);
-    const recurring = allRecurring.find((r) => r.recurring_id === recurring_id);
-    if (!recurring) {
-      throw new Error(`Recurring not found: ${recurring_id}`);
-    }
-
-    // Build dynamic update fields
-    const fieldsToUpdate: Record<string, unknown> = {};
-    const updateMask: string[] = [];
-
-    if (name !== undefined) {
-      if (!name.trim()) {
-        throw new Error('Recurring name must not be empty');
-      }
-      fieldsToUpdate.name = name.trim();
-      updateMask.push('name');
-    }
-    if (amount !== undefined) {
-      if (amount <= 0) {
-        throw new Error('amount must be greater than 0');
-      }
-      fieldsToUpdate.amount = amount;
-      updateMask.push('amount');
-    }
-    if (frequency !== undefined) {
-      if (!(VALID_RECURRING_FREQUENCIES as readonly string[]).includes(frequency)) {
-        throw new Error(
-          `Invalid frequency: ${frequency}. Must be one of: ${VALID_RECURRING_FREQUENCIES.join(', ')}`
-        );
-      }
-      fieldsToUpdate.frequency = frequency;
-      updateMask.push('frequency');
-    }
-    if (category_id !== undefined) {
-      validateDocId(category_id, 'category_id');
-      fieldsToUpdate.category_id = category_id;
-      updateMask.push('category_id');
-    }
-    if (account_id !== undefined) {
-      validateDocId(account_id, 'account_id');
-      fieldsToUpdate.account_id = account_id;
-      updateMask.push('account_id');
-    }
-    if (merchant_name !== undefined) {
-      fieldsToUpdate.merchant_name = merchant_name;
-      updateMask.push('merchant_name');
-    }
-    if (emoji !== undefined) {
-      fieldsToUpdate.emoji = emoji;
-      updateMask.push('emoji');
-    }
-    if (match_string !== undefined) {
-      if (!match_string.trim()) {
-        throw new Error('match_string must not be empty');
-      }
-      fieldsToUpdate.match_string = match_string.trim();
-      updateMask.push('match_string');
-    }
-    if (transaction_ids !== undefined) {
-      fieldsToUpdate.transaction_ids = transaction_ids;
-      updateMask.push('transaction_ids');
-    }
-    if (excluded_transaction_ids !== undefined) {
-      fieldsToUpdate.excluded_transaction_ids = excluded_transaction_ids;
-      updateMask.push('excluded_transaction_ids');
-    }
-    if (included_transaction_ids !== undefined) {
-      fieldsToUpdate.included_transaction_ids = included_transaction_ids;
-      updateMask.push('included_transaction_ids');
-    }
-    if (days_filter !== undefined) {
-      fieldsToUpdate.days_filter = days_filter;
-      updateMask.push('days_filter');
-    }
-
-    if (updateMask.length === 0) {
-      throw new Error('No fields to update');
-    }
-
-    // Resolve user_id and write
-    const userId = await client.requireUserId();
-    const collectionPath = `users/${userId}/recurring`;
-    const firestoreFields = toFirestoreFields(fieldsToUpdate);
-    await client.updateDocument(collectionPath, recurring_id, firestoreFields, updateMask);
-
-    // Clear cache
-    this.db.clearCache();
-
-    const displayName = name?.trim() ?? recurring.name ?? recurring.merchant_name ?? recurring_id;
-
-    return {
-      success: true,
-      recurring_id,
-      name: displayName,
-      updated_fields: updateMask,
+    rule?: {
+      name_contains?: string;
+      min_amount?: string;
+      max_amount?: string;
+      days?: number[];
     };
+    state?: string;
+  }): Promise<{ success: true; recurring_id: string; updated: string[] }> {
+    const client = this.getGraphQLClient();
+    const input: Record<string, unknown> = {};
+    if (args.state !== undefined) input.state = args.state;
+    if (args.rule !== undefined) {
+      const rule: Record<string, unknown> = {};
+      if (args.rule.name_contains !== undefined) rule.nameContains = args.rule.name_contains;
+      if (args.rule.min_amount !== undefined) rule.minAmount = args.rule.min_amount;
+      if (args.rule.max_amount !== undefined) rule.maxAmount = args.rule.max_amount;
+      if (args.rule.days !== undefined) rule.days = args.rule.days;
+      input.rule = rule;
+    }
+    if (Object.keys(input).length === 0) {
+      throw new Error('update_recurring requires at least one field to update');
+    }
+
+    try {
+      const result = await gqlEditRecurring(client, { id: args.recurring_id, input });
+      return { success: true, recurring_id: result.id, updated: Object.keys(result.changed) };
+    } catch (e) {
+      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e));
+      throw e;
+    }
   }
 
   /**
@@ -5229,43 +4737,25 @@ export function createWriteToolSchemas(): ToolSchema[] {
     {
       name: 'create_recurring',
       description:
-        'Create a new recurring/subscription item. Requires a name, amount, and frequency. ' +
-        'Optionally set category, account, merchant name, or start date. ' +
-        'Writes directly to Copilot Money via Firestore.',
+        'Create a new recurring/subscription item by seeding it from an existing transaction. ' +
+        'The recurring inherits its merchant name, account, and initial amount from that transaction; ' +
+        'you only supply the cadence (frequency). Writes directly to Copilot Money via GraphQL.',
       inputSchema: {
-        type: 'object',
+        type: 'object' as const,
         properties: {
-          name: {
-            type: 'string',
-            description: 'Name of the recurring item (e.g. "Netflix", "Gym Membership")',
-          },
-          amount: {
-            type: 'number',
-            description: 'Recurring amount (must be greater than 0)',
+          transaction_id: {
+            type: 'string' as const,
+            description:
+              'ID of an existing transaction to seed the recurring from. The recurring inherits its merchant name, account, and initial amount from this transaction.',
           },
           frequency: {
-            type: 'string',
-            enum: ['weekly', 'biweekly', 'monthly', 'yearly'],
-            description: 'How often the charge recurs',
-          },
-          category_id: {
-            type: 'string',
-            description: 'Category ID for this recurring item (from get_categories)',
-          },
-          account_id: {
-            type: 'string',
-            description: 'Account ID for this recurring item (from get_accounts)',
-          },
-          merchant_name: {
-            type: 'string',
-            description: 'Merchant name for the recurring charge',
-          },
-          start_date: {
-            type: 'string',
-            description: 'Start date in ISO format (YYYY-MM-DD). Defaults to today.',
+            type: 'string' as const,
+            enum: ['WEEKLY', 'BIWEEKLY', 'MONTHLY', 'YEARLY'] as const,
+            description: 'How often the recurring payment occurs.',
           },
         },
-        required: ['name', 'amount', 'frequency'],
+        required: ['transaction_id', 'frequency'],
+        additionalProperties: false,
       },
       annotations: {
         readOnlyHint: false,
