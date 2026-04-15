@@ -4,9 +4,9 @@
 
 **Goal:** Add a `license-checker` CI step to the `quality` job in `.github/workflows/test.yml` that fails when any production dependency's license falls outside `MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0`.
 
-**Architecture:** A single ~10-line `run:` step, appended after `Check formatting` in the existing `quality` job. The step creates a scratch directory, runs `npm ci --omit=dev --ignore-scripts` to produce the same production tree that `scripts/pack-mcpb.ts` ships, then invokes `license-checker` via `npx --yes license-checker@latest --onlyAllow ...`. No `package.json` change, no new workflow file, no bundle change. Local repro instructions are added to `CONTRIBUTING.md` so developers can run the same check before pushing.
+**Architecture:** A single ~10-line `run:` step, appended after `Check formatting` in the existing `quality` job. The step creates a scratch directory, runs `npm install --omit=dev --ignore-scripts` against a staged `package.json` (no lockfile) to produce the same production tree that `scripts/pack-mcpb.ts` ships, then invokes `license-checker` via `npx --yes license-checker@latest --onlyAllow ...`. No `package.json` change, no new workflow file, no bundle change. Local repro instructions are added to `CONTRIBUTING.md` so developers can run the same check before pushing.
 
-**Tech Stack:** GitHub Actions (ubuntu-latest), `license-checker` (invoked via npx, no devDep), `npm ci`. Nothing new on the project's core stack.
+**Tech Stack:** GitHub Actions (ubuntu-latest), `license-checker` (invoked via npx, no devDep), `npm install` (mirroring `pack-mcpb.ts`). Nothing new on the project's core stack.
 
 **Reference spec:** `docs/superpowers/specs/2026-04-14-license-hygiene-design.md`
 
@@ -50,8 +50,8 @@ Edit `.github/workflows/test.yml`. Insert after the existing `Check formatting` 
       - name: License check (production deps)
         run: |
           mkdir -p .license-check
-          cp package.json package-lock.json .license-check/
-          (cd .license-check && npm ci --omit=dev --ignore-scripts --no-audit --no-fund)
+          cp package.json .license-check/
+          (cd .license-check && npm install --omit=dev --ignore-scripts --no-audit --no-fund)
           npx --yes license-checker@latest \
             --start .license-check \
             --production \
@@ -77,8 +77,8 @@ Run (from the repo root):
 ```bash
 rm -rf .license-check
 mkdir -p .license-check
-cp package.json package-lock.json .license-check/
-(cd .license-check && npm ci --omit=dev --ignore-scripts --no-audit --no-fund)
+cp package.json .license-check/
+(cd .license-check && npm install --omit=dev --ignore-scripts --no-audit --no-fund)
 npx --yes license-checker@latest \
   --start .license-check \
   --production \
@@ -170,8 +170,8 @@ check locally before pushing:
 
 ```bash
 mkdir -p .license-check
-cp package.json package-lock.json .license-check/
-(cd .license-check && npm ci --omit=dev --ignore-scripts --no-audit --no-fund)
+cp package.json .license-check/
+(cd .license-check && npm install --omit=dev --ignore-scripts --no-audit --no-fund)
 npx --yes license-checker@latest \
   --start .license-check \
   --production \
@@ -269,7 +269,7 @@ gh pr create --title "ci: license-checker gate for production deps" --body "$(ca
 ## Summary
 
 - Adds a `license-checker` step to the `quality` job in `test.yml` that fails CI on any production dep (direct or transitive) outside the allowlist `MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0`.
-- Scans an isolated `npm ci --omit=dev --ignore-scripts` tree so the check mirrors the `.mcpb` bundle's graph exactly.
+- Scans an isolated `npm install --omit=dev --ignore-scripts` tree (package.json only, no lockfile) so the check mirrors the `.mcpb` bundle's graph exactly.
 - Uses `npx --yes license-checker@latest` — no devDep added.
 - Documents local repro in `CONTRIBUTING.md`.
 
