@@ -13,16 +13,18 @@ function createMockClient(response: unknown): GraphQLClient {
 }
 
 describe('setBudget', () => {
-  test('dispatches EditBudget when month absent', async () => {
+  test('dispatches EditBudget when month absent, wire amount is number', async () => {
     const client = createMockClient({ editCategoryBudget: true });
     await setBudget(client, { categoryId: 'cat-1', amount: '250' });
     const call = (client.mutate as ReturnType<typeof mock>).mock.calls[0];
     expect(call[0]).toBe('EditBudget');
     expect(call[1]).toBe(EDIT_BUDGET);
-    expect(call[2]).toEqual({ categoryId: 'cat-1', input: { amount: '250' } });
+    expect(call[2]).toEqual({ categoryId: 'cat-1', input: { amount: 250 } });
+    // Belt-and-suspenders: the amount over the wire must be a Float, not a string.
+    expect(typeof (call[2] as { input: { amount: unknown } }).input.amount).toBe('number');
   });
 
-  test('dispatches EditBudgetMonthly when month present', async () => {
+  test('dispatches EditBudgetMonthly when month present, wire amount is number', async () => {
     const client = createMockClient({ editCategoryBudgetMonthly: true });
     await setBudget(client, { categoryId: 'cat-1', amount: '250', month: '2026-04' });
     const call = (client.mutate as ReturnType<typeof mock>).mock.calls[0];
@@ -30,15 +32,39 @@ describe('setBudget', () => {
     expect(call[1]).toBe(EDIT_BUDGET_MONTHLY);
     expect(call[2]).toEqual({
       categoryId: 'cat-1',
-      input: [{ amount: '250', month: '2026-04' }],
+      input: [{ amount: 250, month: '2026-04' }],
     });
+    expect(typeof (call[2] as { input: Array<{ amount: unknown }> }).input[0].amount).toBe(
+      'number'
+    );
+  });
+
+  test('parses decimal amount strings to Float', async () => {
+    const client = createMockClient({ editCategoryBudget: true });
+    await setBudget(client, { categoryId: 'cat-1', amount: '250.75' });
+    const call = (client.mutate as ReturnType<typeof mock>).mock.calls[0];
+    expect(call[2]).toEqual({ categoryId: 'cat-1', input: { amount: 250.75 } });
   });
 
   test('amount=0 is valid (clears the budget)', async () => {
     const client = createMockClient({ editCategoryBudget: true });
     await setBudget(client, { categoryId: 'cat-1', amount: '0' });
     const call = (client.mutate as ReturnType<typeof mock>).mock.calls[0];
-    expect(call[2]).toEqual({ categoryId: 'cat-1', input: { amount: '0' } });
+    expect(call[2]).toEqual({ categoryId: 'cat-1', input: { amount: 0 } });
+  });
+
+  test('rejects non-numeric amount', async () => {
+    const client = createMockClient({ editCategoryBudget: true });
+    await expect(setBudget(client, { categoryId: 'cat-1', amount: 'abc' })).rejects.toThrow(
+      /invalid amount/
+    );
+  });
+
+  test('rejects negative amount', async () => {
+    const client = createMockClient({ editCategoryBudget: true });
+    await expect(setBudget(client, { categoryId: 'cat-1', amount: '-5' })).rejects.toThrow(
+      /invalid amount/
+    );
   });
 
   test('returns compact { categoryId, amount, month?, cleared }', async () => {

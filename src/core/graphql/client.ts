@@ -67,14 +67,18 @@ export class GraphQLClient {
         401
       );
     }
-    if (response.status === 500) {
+    if (response.status === 400 || response.status === 500) {
+      // Both are schema/wire-shape errors:
+      //  - 400 → GRAPHQL_VALIDATION_FAILED or BAD_USER_INPUT (our request
+      //    doesn't match the server schema — wrong types, orphan fragments).
+      //  - 500 → server couldn't process the request.
       const text = await response.text().catch(() => '');
-      this.logError(operationName, 'SCHEMA_ERROR', 500);
+      this.logError(operationName, 'SCHEMA_ERROR', response.status);
       throw new GraphQLError(
         'SCHEMA_ERROR',
-        `500 Server Error: ${text || 'no body'}`,
+        `${response.status} Schema Error: ${text || 'no body'}`,
         operationName,
-        500
+        response.status
       );
     }
     if (!response.ok) {

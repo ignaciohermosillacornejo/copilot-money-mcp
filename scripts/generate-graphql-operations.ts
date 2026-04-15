@@ -56,7 +56,7 @@ export function addTypenameToSelectionSets(query: string): string {
 
   // Pass 2: inject __typename into every non-root selection set (matches
   // Apollo's documentTransform behavior required by Copilot's GraphQL server).
-  const transformed = visit(ast, {
+  let transformed = visit(ast, {
     SelectionSet(node, _key, parent) {
       // Skip the operation-level selection set (directly under OperationDefinition).
       // __typename is only meaningful on concrete object type selection sets (fields).
@@ -76,6 +76,33 @@ export function addTypenameToSelectionSets(query: string): string {
       };
     },
   });
+
+  // Pass 3: remove orphan fragment definitions. After stripping `@client`
+  // fields, fragments that were only referenced inside those fields become
+  // dangling. The server enforces the spec rule "all defined fragments must be
+  // used" — Apollo's browser transform drops these automatically; we do the
+  // same here. Iterate until stable, since removing one fragment may make
+  // another (that it referenced) unused in turn.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const referenced = new Set<string>();
+    visit(transformed, {
+      FragmentSpread(node) {
+        referenced.add(node.name.value);
+      },
+    });
+    transformed = visit(transformed, {
+      FragmentDefinition(node) {
+        if (!referenced.has(node.name.value)) {
+          changed = true;
+          return null; // drop
+        }
+        return undefined;
+      },
+    });
+  }
+
   return print(transformed);
 }
 

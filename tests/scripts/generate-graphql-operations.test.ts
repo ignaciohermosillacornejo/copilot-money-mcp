@@ -81,6 +81,35 @@ describe('addTypenameToSelectionSets', () => {
     // __typename injected in: editThing's set + nested's set.
     expect((out.match(/__typename/g) ?? []).length).toBe(2);
   });
+
+  test('removes orphan fragment after @client strip', () => {
+    // F1 is still referenced after the strip; F2 only lived under the
+    // stripped @client field and must be removed to satisfy the server's
+    // "all defined fragments must be used" validation rule.
+    const input = `mutation M { x { ...F1 y @client { ...F2 } } } fragment F1 on X { a } fragment F2 on Y { b }`;
+    const out = addTypenameToSelectionSets(input);
+    expect(out).toContain('fragment F1 on X');
+    expect(out).not.toContain('fragment F2 on Y');
+    // And the orphan spread itself is gone with the @client field.
+    expect(out).not.toContain('...F2');
+  });
+
+  test('cascading fragment removal when one fragment only references another orphan', () => {
+    // F1 references F2. The only call site for F1 is inside a @client field,
+    // so F1 becomes unused after pass 1 — and then F2 (only referenced from
+    // F1) becomes unused on the next iteration.
+    const input = `mutation M { x { y @client { ...F1 } } } fragment F1 on X { ...F2 } fragment F2 on Y { b }`;
+    const out = addTypenameToSelectionSets(input);
+    expect(out).not.toContain('fragment F1 on X');
+    expect(out).not.toContain('fragment F2 on Y');
+  });
+
+  test('keeps fragments that are still referenced after the strip', () => {
+    const input = `mutation M { x { ...Keep } } fragment Keep on X { a }`;
+    const out = addTypenameToSelectionSets(input);
+    expect(out).toContain('fragment Keep on X');
+    expect(out).toContain('...Keep');
+  });
 });
 
 describe('extractQueryBlock', () => {

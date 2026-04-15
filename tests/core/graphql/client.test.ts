@@ -81,14 +81,36 @@ describe('GraphQLClient', () => {
     }
   });
 
-  test('classifies HTTP 500 as SCHEMA_ERROR', async () => {
-    mockFetch('Internal server error', 500);
+  test.each([400, 500])('classifies HTTP %i as SCHEMA_ERROR', async (status) => {
+    mockFetch('Schema/validation error body', status);
     const client = new GraphQLClient(createMockAuth());
     try {
       await client.mutate('TestOp', 'mutation TestOp { ok }', {});
       throw new Error('should have thrown');
     } catch (e) {
       expect((e as GraphQLError).code).toBe('SCHEMA_ERROR');
+      expect((e as GraphQLError).httpStatus).toBe(status);
+    }
+  });
+
+  test('400 with GRAPHQL_VALIDATION_FAILED body is SCHEMA_ERROR', async () => {
+    const body = {
+      errors: [
+        {
+          message: 'Fragment "CategoryFields" is never used.',
+          extensions: { code: 'GRAPHQL_VALIDATION_FAILED' },
+        },
+      ],
+    };
+    mockFetch(body, 400);
+    const client = new GraphQLClient(createMockAuth());
+    try {
+      await client.mutate('TestOp', 'mutation TestOp { ok }', {});
+      throw new Error('should have thrown');
+    } catch (e) {
+      expect((e as GraphQLError).code).toBe('SCHEMA_ERROR');
+      expect((e as GraphQLError).httpStatus).toBe(400);
+      expect((e as GraphQLError).message).toContain('CategoryFields');
     }
   });
 
