@@ -1,6 +1,6 @@
 # Copilot Money MCP Server
 
-MCP (Model Context Protocol) server that enables AI-powered queries and management of Copilot Money personal finance data by reading locally cached Firestore data (LevelDB + Protocol Buffers). 35 tools (17 read + 18 write). Read-only by default, write tools opt-in via `--write` flag.
+MCP (Model Context Protocol) server that enables AI-powered queries and management of Copilot Money personal finance data. Reads come from the locally cached Firestore database (LevelDB + Protocol Buffers); writes go through Copilot's GraphQL API at `app.copilot.money/api/graphql`. 30 tools (17 read + 13 write). Read-only by default, write tools opt-in via `--write` flag.
 
 ## Quick Reference
 
@@ -29,9 +29,8 @@ src/
 ├── core/
 │   ├── database.ts          # CopilotDatabase - cached data access layer
 │   ├── decoder.ts           # LevelDB binary decoder for Firestore protobufs
-│   ├── firestore-client.ts  # Firestore REST API client (write operations)
-│   ├── auth/                # Firebase authentication for writes
-│   └── format/              # Firestore field serialization
+│   ├── graphql/             # GraphQL client + per-domain write modules
+│   └── auth/                # Firebase authentication for writes
 ├── models/
 │   ├── transaction.ts  # Transaction Zod schema
 │   ├── account.ts      # Account Zod schema
@@ -40,7 +39,7 @@ src/
 │   ├── category.ts     # Category mappings (Plaid taxonomy)
 │   └── ...             # Other entity schemas (30+ models)
 ├── tools/
-│   └── tools.ts        # All MCP tool implementations (35 tools)
+│   └── tools.ts        # All MCP tool implementations (30 tools)
 ├── utils/
 │   ├── date.ts         # Date period parsing (this_month, last_30_days, etc.)
 │   └── categories.ts   # Category name resolution
@@ -50,7 +49,7 @@ src/
 
 ## Key Files
 
-- **`src/tools/tools.ts`** - All 35 MCP tools (17 read + 18 write) are implemented here as async methods in the `CopilotMoneyTools` class. Read schemas in `createToolSchemas()`, write schemas in `createWriteToolSchemas()`.
+- **`src/tools/tools.ts`** - All 30 MCP tools (17 read + 13 write) are implemented here as async methods in the `CopilotMoneyTools` class. Read schemas in `createToolSchemas()`, write schemas in `createWriteToolSchemas()`.
 - **`src/core/database.ts`** - `CopilotDatabase` class with methods like `getTransactions()`, `getAccounts()`, `getIncome()`, etc.
 - **`src/core/decoder.ts`** - Binary decoder that reads LevelDB files and parses Firestore Protocol Buffers.
 - **`manifest.json`** - MCP bundle metadata for .mcpb packaging.
@@ -80,7 +79,7 @@ Each MCP tool follows this pattern:
 
 ## Important Notes
 
-- **Privacy First**: Reads are 100% local with zero network requests. Opt-in writes (`--write`) send authenticated requests directly to Copilot Money's own Firebase/Firestore backend via `src/core/firestore-client.ts` — no third-party services, no project-operated servers.
+- **Privacy First**: Reads are 100% local with zero network requests. Opt-in writes (`--write`) send authenticated GraphQL requests directly to Copilot Money's own backend at `app.copilot.money/api/graphql` via `src/core/graphql/` — no third-party services, no project-operated servers.
 - **Read-Only by Default**: Write tools require `--write` flag
 - **Database Location**: `~/Library/Containers/com.copilot.production/Data/Library/Application Support/firestore/__FIRAPP_DEFAULT/copilot-production-22904/main`
 

@@ -45,9 +45,9 @@ bun run sync-manifest  # Verify manifest.json matches code
 1. Copilot Money stores data in a local LevelDB/Firestore cache on macOS
 2. `src/core/decoder.ts` reads `.ldb` files and parses Firestore Protocol Buffers
 3. `src/core/database.ts` provides cached, filtered access to all collections
-4. `src/tools/tools.ts` implements 35 MCP tools (17 read + 18 write)
+4. `src/tools/tools.ts` implements 30 MCP tools (17 read + 13 write)
 5. `src/server.ts` handles MCP protocol communication and tool routing
-6. Write tools use `src/core/firestore-client.ts` to modify data via the Firestore REST API
+6. Write tools use `src/core/graphql/` to call Copilot's GraphQL API at `app.copilot.money/api/graphql`
 
 ### Project Structure
 
@@ -56,11 +56,10 @@ src/
 ├── core/
 │   ├── database.ts          # CopilotDatabase — cached data access layer
 │   ├── decoder.ts           # LevelDB binary decoder for Firestore protobufs
-│   ├── firestore-client.ts  # Firestore REST API client (write operations)
 │   ├── leveldb-reader.ts    # Low-level LevelDB iteration
 │   ├── protobuf-parser.ts   # Protocol Buffer wire format parser
-│   ├── auth/                # Firebase authentication for writes
-│   └── format/              # Firestore field serialization
+│   ├── graphql/             # GraphQL client + per-domain write modules
+│   └── auth/                # Firebase authentication for writes
 ├── models/                  # Zod schemas for all Firestore collections
 │   ├── transaction.ts       # Transaction schema
 │   ├── account.ts           # Account schema
@@ -82,7 +81,7 @@ src/
 
 ### Key Files
 
-- **`src/tools/tools.ts`** — All 35 tools as async methods in `CopilotMoneyTools`. Read tool schemas in `createToolSchemas()`, write tool schemas in `createWriteToolSchemas()`.
+- **`src/tools/tools.ts`** — All 30 tools as async methods in `CopilotMoneyTools`. Read tool schemas in `createToolSchemas()`, write tool schemas in `createWriteToolSchemas()`.
 - **`src/core/database.ts`** — `CopilotDatabase` class with 5-minute cache TTL, batch loading via `decodeAllCollectionsIsolated()` (worker thread), and filtered accessors.
 - **`src/core/decoder.ts`** — Binary decoder that reads LevelDB and parses Firestore Protocol Buffers. Decodes 30+ collection paths.
 - **`src/server.ts`** — MCP server with tool routing switch. `WRITE_TOOLS` set gates write operations behind the `--write` flag.
@@ -117,10 +116,10 @@ Same as read tools, plus:
 
 1. Schema goes in `createWriteToolSchemas()` (not `createToolSchemas()`)
 2. Add tool name to the `WRITE_TOOLS` set in `src/server.ts`
-3. Use `this.getFirestoreClient()` then `client.updateDocument()` or `client.createDocument()`
-4. Clear cache after writes: `this.db.clearCache()`
-5. Use validation helpers: `validateDocId()`, `validateDate()`, `validateMonth()`, `validateHexColor()`
-6. Follow the `updateGoal()` pattern for partial updates with dynamic `updateMask`
+3. Add a per-domain function in `src/core/graphql/` (see `setBudget` in `graphql/budgets.ts` or `editTransaction` in `graphql/transactions.ts` for the pattern)
+4. If the mutation isn't in `operations.generated.ts` yet, capture it under `docs/graphql-capture/` and run `bun run generate:graphql`
+5. Wrap GraphQL errors at the tool boundary with `graphQLErrorToMcpError(e)` so user-facing messages stay stable
+6. Use validation helpers: `validateDocId()`, `validateDate()`, `validateMonth()`, `validateHexColor()`
 
 ## Testing
 
@@ -136,7 +135,7 @@ Tests mirror the `src/` structure in `tests/`. Synthetic fixtures in `tests/fixt
 ### Writing Tests
 
 - Use `(db as any)._fieldName = [...]` to inject mock data in `beforeEach`
-- Write tool tests need a mock `FirestoreClient` (see existing write tool tests)
+- Write tool tests need a mock `GraphQLClient` — use `createMockGraphQLClient` from `tests/helpers/mock-graphql.ts`
 - Run `bun run check` before submitting to catch typecheck, lint, and format issues
 
 ### License check
