@@ -6,7 +6,6 @@
 
 import { CopilotDatabase } from '../core/database.js';
 import type { FirestoreClient } from '../core/firestore-client.js';
-import { toFirestoreFields } from '../core/format/firestore-rest.js';
 import type { GraphQLClient } from '../core/graphql/client.js';
 import { GraphQLError } from '../core/graphql/client.js';
 import { editTransaction } from '../core/graphql/transactions.js';
@@ -25,6 +24,7 @@ import {
   editRecurring as gqlEditRecurring,
   deleteRecurring as gqlDeleteRecurring,
 } from '../core/graphql/recurrings.js';
+import { setBudget as gqlSetBudget } from '../core/graphql/budgets.js';
 import { graphQLErrorToMcpError } from './errors.js';
 import { parsePeriod } from '../utils/date.js';
 import {
@@ -34,11 +34,7 @@ import {
   isKnownPlaidCategory,
 } from '../utils/categories.js';
 import type { Transaction, Account, InvestmentPrice, InvestmentSplit } from '../models/index.js';
-import {
-  getTransactionDisplayName,
-  getRecurringDisplayName,
-  KNOWN_PERIODS,
-} from '../models/index.js';
+import { getTransactionDisplayName, getRecurringDisplayName } from '../models/index.js';
 import type { InvestmentPerformance, TwrHolding } from '../models/investment-performance.js';
 import type { Security } from '../models/security.js';
 import type { GoalHistory } from '../models/goal-history.js';
@@ -2618,228 +2614,48 @@ export class CopilotMoneyTools {
   }
 
   /**
-   * Create a new budget in Copilot Money.
+   * Set the monthly budget amount for a category via GraphQL.
    *
-   * Generates a unique budget_id, validates the category exists and has no
-   * existing budget, writes to Firestore, then clears the cache.
+   * Dispatches to EditBudget (all-months default) or EditBudgetMonthly
+   * (per-month override). amount="0" clears the budget.
    */
-  async createBudget(args: {
+  async setBudget(args: {
     category_id: string;
-    amount: number;
-    period?: string;
-    name?: string;
+    amount: string;
+    month?: string;
   }): Promise<{
-    success: boolean;
-    budget_id: string;
+    success: true;
     category_id: string;
-    amount: number;
-    period: string;
-    name?: string;
+    amount: string;
+    month?: string;
+    cleared: boolean;
   }> {
-    const client = this.getFirestoreClient();
-
-    const { category_id, amount, period = 'monthly', name } = args;
-
-    // Validate category_id format
-    validateDocId(category_id, 'category_id');
-
-    // Validate amount is positive
-    if (amount <= 0) {
-      throw new Error('Budget amount must be greater than 0');
+    const client = this.getGraphQLClient();
+    if (!args.category_id?.trim()) throw new Error('category_id is required');
+    if (typeof args.amount !== 'string') {
+      throw new Error('amount must be a string (e.g. "250.00")');
+    }
+    if (args.month !== undefined && !/^\d{4}-\d{2}$/.test(args.month)) {
+      throw new Error('month must be "YYYY-MM"');
     }
 
-    // Validate period
-    if (!(KNOWN_PERIODS as readonly string[]).includes(period)) {
-      throw new Error(`Invalid period: ${period}. Must be one of: ${KNOWN_PERIODS.join(', ')}`);
+    try {
+      const result = await gqlSetBudget(client, {
+        categoryId: args.category_id,
+        amount: args.amount,
+        month: args.month,
+      });
+      return {
+        success: true,
+        category_id: result.categoryId,
+        amount: result.amount,
+        ...(result.month ? { month: result.month } : {}),
+        cleared: result.cleared,
+      };
+    } catch (e) {
+      if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e));
+      throw e;
     }
-
-    // Validate category exists
-    const categories = await this.db.getUserCategories();
-    const category = categories.find((c) => c.category_id === category_id);
-    if (!category) {
-      throw new Error(`Category not found: ${category_id}`);
-    }
-
-    // Check no existing budget targets the same category
-    const existingBudgets = await this.db.getBudgets();
-    const duplicate = existingBudgets.find((b) => b.category_id === category_id);
-    if (duplicate) {
-      throw new Error(
-        `A budget already exists for category "${category_id}" (budget_id: ${duplicate.budget_id})`
-      );
-    }
-
-    // Generate unique budget_id
-    const budgetId = `budget_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
-
-    // Resolve user_id
-    const userId = await client.requireUserId();
-
-    // Build document fields
-    const docFields: Record<string, unknown> = {
-      budget_id: budgetId,
-      category_id,
-      amount,
-      period,
-      is_active: true,
-    };
-    if (name) docFields.name = name;
-
-    // Write to Firestore
-    const collectionPath = `users/${userId}/budgets`;
-    const firestoreFields = toFirestoreFields(docFields);
-    await client.createDocument(collectionPath, budgetId, firestoreFields);
-
-    // Clear cache so the new budget is visible on next query
-    this.db.clearCache();
-
-    const result: {
-      success: boolean;
-      budget_id: string;
-      category_id: string;
-      amount: number;
-      period: string;
-      name?: string;
-    } = {
-      success: true,
-      budget_id: budgetId,
-      category_id,
-      amount,
-      period,
-    };
-    if (name) result.name = name;
-
-    return result;
-  }
-
-  /**
-   * Update an existing budget in Copilot Money.
-   *
-   * Validates the budget exists, builds a dynamic update mask for only the
-   * provided fields, writes to Firestore, then clears the cache.
-   */
-  async updateBudget(args: {
-    budget_id: string;
-    amount?: number;
-    period?: string;
-    name?: string;
-    is_active?: boolean;
-  }): Promise<{
-    success: boolean;
-    budget_id: string;
-    updated_fields: string[];
-  }> {
-    const client = this.getFirestoreClient();
-
-    const { budget_id, amount, period, name, is_active } = args;
-
-    // Validate budget_id format
-    validateDocId(budget_id, 'budget_id');
-
-    // Validate budget exists
-    const existingBudgets = await this.db.getBudgets();
-    const budget = existingBudgets.find((b) => b.budget_id === budget_id);
-    if (!budget) {
-      throw new Error(`Budget not found: ${budget_id}`);
-    }
-
-    // Build update fields — only include fields explicitly provided
-    const updateFields: Record<string, unknown> = {};
-    const updatedFieldNames: string[] = [];
-
-    if (amount !== undefined) {
-      if (amount <= 0) {
-        throw new Error('Budget amount must be greater than 0');
-      }
-      updateFields.amount = amount;
-      updatedFieldNames.push('amount');
-    }
-
-    if (period !== undefined) {
-      if (!(KNOWN_PERIODS as readonly string[]).includes(period)) {
-        throw new Error(`Invalid period: ${period}. Must be one of: ${KNOWN_PERIODS.join(', ')}`);
-      }
-      updateFields.period = period;
-      updatedFieldNames.push('period');
-    }
-
-    if (name !== undefined) {
-      const trimmedName = name.trim();
-      if (!trimmedName) {
-        throw new Error('Budget name must not be empty');
-      }
-      updateFields.name = trimmedName;
-      updatedFieldNames.push('name');
-    }
-
-    if (is_active !== undefined) {
-      updateFields.is_active = is_active;
-      updatedFieldNames.push('is_active');
-    }
-
-    // Ensure at least one field is being updated
-    if (updatedFieldNames.length === 0) {
-      throw new Error(
-        'No fields to update. Provide at least one of: amount, period, name, is_active'
-      );
-    }
-
-    // Resolve user_id
-    const userId = await client.requireUserId();
-
-    // Write to Firestore with dynamic update mask
-    const collectionPath = `users/${userId}/budgets`;
-    const firestoreFields = toFirestoreFields(updateFields);
-    await client.updateDocument(collectionPath, budget_id, firestoreFields, updatedFieldNames);
-
-    // Clear cache so the updated budget is visible on next query
-    this.db.clearCache();
-
-    return {
-      success: true,
-      budget_id,
-      updated_fields: updatedFieldNames,
-    };
-  }
-
-  /**
-   * Delete an existing budget from Copilot Money.
-   *
-   * Validates the budget exists, deletes from Firestore, then clears the cache.
-   */
-  async deleteBudget(args: { budget_id: string }): Promise<{
-    success: boolean;
-    budget_id: string;
-    deleted_name: string;
-  }> {
-    const client = this.getFirestoreClient();
-
-    const { budget_id } = args;
-
-    // Validate budget_id format
-    validateDocId(budget_id, 'budget_id');
-
-    // Validate budget exists
-    const existingBudgets = await this.db.getBudgets();
-    const budget = existingBudgets.find((b) => b.budget_id === budget_id);
-    if (!budget) {
-      throw new Error(`Budget not found: ${budget_id}`);
-    }
-
-    // Resolve user_id
-    const userId = await client.requireUserId();
-
-    const collectionPath = `users/${userId}/budgets`;
-    await client.deleteDocument(collectionPath, budget_id);
-
-    // Clear the cache so the next read reflects the deletion
-    this.db.clearCache();
-
-    return {
-      success: true,
-      budget_id,
-      deleted_name: budget.name ?? budget.category_id ?? budget_id,
-    };
   }
 
   /**
@@ -2886,140 +2702,6 @@ export class CopilotMoneyTools {
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e));
       throw e;
     }
-  }
-
-  /**
-   * Update a financial goal's properties.
-   *
-   * Validates the goal exists, builds a dynamic update mask from the provided
-   * fields, writes to Firestore, then clears the cache.
-   */
-  async updateGoal(args: {
-    goal_id: string;
-    name?: string;
-    emoji?: string;
-    target_amount?: number;
-    monthly_contribution?: number;
-    status?: 'active' | 'paused';
-  }): Promise<{
-    success: boolean;
-    goal_id: string;
-    updated_fields: string[];
-  }> {
-    const client = this.getFirestoreClient();
-
-    const { goal_id, name, emoji, target_amount, monthly_contribution, status } = args;
-
-    // Validate goal_id format
-    validateDocId(goal_id, 'goal_id');
-
-    // Validate goal exists first (include inactive goals)
-    const goals = await this.db.getGoals(false);
-    const goal = goals.find((g) => g.goal_id === goal_id);
-    if (!goal) {
-      throw new Error(`Goal not found: ${goal_id}`);
-    }
-
-    // Build dynamic update fields
-    const fieldsToUpdate: Record<string, unknown> = {};
-    const updateMask: string[] = [];
-
-    if (name !== undefined) {
-      if (!name.trim()) {
-        throw new Error('Goal name must not be empty');
-      }
-      fieldsToUpdate.name = name.trim();
-      updateMask.push('name');
-    }
-    if (emoji !== undefined) {
-      fieldsToUpdate.emoji = emoji;
-      updateMask.push('emoji');
-    }
-
-    // Nested savings fields — use a single 'savings' mask entry so Firestore
-    // merges the sub-object correctly via the REST PATCH API
-    const savingsUpdate: Record<string, unknown> = {};
-    if (target_amount !== undefined) {
-      if (target_amount <= 0) {
-        throw new Error('target_amount must be greater than 0');
-      }
-      savingsUpdate.target_amount = target_amount;
-    }
-    if (monthly_contribution !== undefined) {
-      if (monthly_contribution < 0) {
-        throw new Error('monthly_contribution must be >= 0');
-      }
-      savingsUpdate.tracking_type_monthly_contribution = monthly_contribution;
-    }
-    if (status !== undefined) {
-      savingsUpdate.status = status;
-    }
-    if (Object.keys(savingsUpdate).length > 0) {
-      fieldsToUpdate.savings = savingsUpdate;
-      updateMask.push('savings');
-    }
-
-    if (updateMask.length === 0) {
-      throw new Error('No fields to update');
-    }
-
-    // Resolve user_id
-    const userId = await client.requireUserId();
-
-    // Write to Firestore
-    const collectionPath = `users/${userId}/financial_goals`;
-    const firestoreFields = toFirestoreFields(fieldsToUpdate);
-    await client.updateDocument(collectionPath, goal_id, firestoreFields, updateMask);
-
-    // Clear cache so next read picks up the change
-    this.db.clearCache();
-
-    return {
-      success: true,
-      goal_id,
-      updated_fields: updateMask,
-    };
-  }
-
-  /**
-   * Delete a financial goal.
-   *
-   * Validates the goal exists in the local cache, deletes from Firestore,
-   * then clears the cache.
-   */
-  async deleteGoal(args: { goal_id: string }): Promise<{
-    success: boolean;
-    goal_id: string;
-    deleted_name: string;
-  }> {
-    const client = this.getFirestoreClient();
-
-    const { goal_id } = args;
-
-    // Validate goal_id format
-    validateDocId(goal_id, 'goal_id');
-
-    // Validate goal exists (include inactive goals)
-    const goals = await this.db.getGoals(false);
-    const goal = goals.find((g) => g.goal_id === goal_id);
-    if (!goal) {
-      throw new Error(`Goal not found: ${goal_id}`);
-    }
-
-    // Resolve user_id
-    const userId = await client.requireUserId();
-
-    const collectionPath = `users/${userId}/financial_goals`;
-    await client.deleteDocument(collectionPath, goal_id);
-
-    // Clear the cache so the next read reflects the deletion
-    this.db.clearCache();
-
-    return {
-      success: true,
-      goal_id,
-      deleted_name: goal.name ?? goal_id,
-    };
   }
 
   /**
@@ -3105,86 +2787,6 @@ export class CopilotMoneyTools {
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e));
       throw e;
     }
-  }
-
-  /**
-   * Create a new financial goal.
-   *
-   * Generates a unique goal_id, writes to Firestore with a savings sub-object,
-   * then clears the cache so the new goal is visible on next query.
-   */
-  async createGoal(args: {
-    name: string;
-    target_amount: number;
-    emoji?: string;
-    monthly_contribution?: number;
-    start_date?: string;
-  }): Promise<{
-    success: boolean;
-    goal_id: string;
-    name: string;
-    target_amount: number;
-  }> {
-    const client = this.getFirestoreClient();
-
-    const { name, target_amount, emoji, monthly_contribution, start_date } = args;
-
-    // Validate name is non-empty
-    const trimmedName = name.trim();
-    if (!trimmedName) {
-      throw new Error('Goal name must not be empty');
-    }
-
-    // Validate target_amount is positive
-    if (target_amount <= 0) {
-      throw new Error('target_amount must be greater than 0');
-    }
-
-    // Validate monthly_contribution if provided
-    if (monthly_contribution !== undefined && monthly_contribution < 0) {
-      throw new Error('monthly_contribution must be >= 0');
-    }
-
-    // Validate start_date format
-    if (start_date !== undefined) validateDate(start_date, 'start_date');
-
-    // Generate unique goal_id
-    const goalId = crypto.randomUUID();
-
-    // Resolve user_id
-    const userId = await client.requireUserId();
-
-    // Build document fields
-    const today = new Date().toISOString().slice(0, 10);
-    const docFields: Record<string, unknown> = {
-      goal_id: goalId,
-      name: trimmedName,
-      savings: {
-        type: 'savings',
-        status: 'active',
-        target_amount,
-        tracking_type: monthly_contribution !== undefined ? 'monthly_contribution' : 'manual',
-        tracking_type_monthly_contribution: monthly_contribution ?? 0,
-        start_date: start_date ?? today,
-        is_ongoing: false,
-      },
-    };
-    if (emoji !== undefined) docFields.emoji = emoji;
-
-    // Write to Firestore
-    const collectionPath = `users/${userId}/financial_goals`;
-    const firestoreFields = toFirestoreFields(docFields);
-    await client.createDocument(collectionPath, goalId, firestoreFields);
-
-    // Clear cache so the new goal is visible on next query
-    this.db.clearCache();
-
-    return {
-      success: true,
-      goal_id: goalId,
-      name: trimmedName,
-      target_amount,
-    };
   }
 
   /**
@@ -4494,96 +4096,32 @@ export function createWriteToolSchemas(): ToolSchema[] {
       },
     },
     {
-      name: 'create_budget',
+      name: 'set_budget',
       description:
-        'Create a new budget in Copilot Money. Requires a category_id and amount. ' +
-        'Only one budget per category is allowed. Optionally set a period (default: monthly) ' +
-        'and a display name. Writes directly to Copilot Money via Firestore.',
+        'Set the monthly budget amount for a category. amount="0" clears the budget. Pass month="YYYY-MM" for a single-month override; omit for the all-months default. If this fails with "budgeting is disabled," the caller must enable budgeting in Copilot → Settings → General.',
       inputSchema: {
-        type: 'object',
+        type: 'object' as const,
         properties: {
           category_id: {
-            type: 'string',
-            description: 'Category ID to budget for (from get_categories)',
+            type: 'string' as const,
+            description: 'ID of the category to budget.',
           },
           amount: {
-            type: 'number',
-            description: 'Budget amount (must be greater than 0)',
+            type: 'string' as const,
+            description: 'Decimal amount as a string (e.g. "250.00"). "0" clears the budget.',
           },
-          period: {
-            type: 'string',
-            description: 'Budget period: monthly, yearly, weekly, or daily (default: monthly)',
-            enum: ['monthly', 'yearly', 'weekly', 'daily'],
-          },
-          name: {
-            type: 'string',
-            description: 'Optional display name for the budget',
+          month: {
+            type: 'string' as const,
+            description:
+              'Optional. YYYY-MM for a single-month override. Omit to set the all-months default.',
           },
         },
         required: ['category_id', 'amount'],
+        additionalProperties: false,
       },
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
-        idempotentHint: false,
-      },
-    },
-    {
-      name: 'update_budget',
-      description:
-        'Update an existing budget in Copilot Money. Requires budget_id and at least one ' +
-        'field to update (amount, period, name, or is_active). Only provided fields are changed.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          budget_id: {
-            type: 'string',
-            description: 'Budget ID to update (from get_budgets)',
-          },
-          amount: {
-            type: 'number',
-            description: 'New budget amount (must be greater than 0)',
-          },
-          period: {
-            type: 'string',
-            description: 'New budget period: monthly, yearly, weekly, or daily',
-            enum: ['monthly', 'yearly', 'weekly', 'daily'],
-          },
-          name: {
-            type: 'string',
-            description: 'New display name for the budget',
-          },
-          is_active: {
-            type: 'boolean',
-            description: 'Set to false to deactivate the budget, true to reactivate',
-          },
-        },
-        required: ['budget_id'],
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: true,
-      },
-    },
-    {
-      name: 'delete_budget',
-      description:
-        'Delete a budget from Copilot Money. Requires the budget_id (from get_budgets). ' +
-        'This permanently removes the budget. Writes directly to Copilot Money via Firestore.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          budget_id: {
-            type: 'string',
-            description: 'Budget ID to delete (from get_budgets)',
-          },
-        },
-        required: ['budget_id'],
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: true,
         idempotentHint: true,
       },
     },
@@ -4629,70 +4167,6 @@ export function createWriteToolSchemas(): ToolSchema[] {
           },
         },
         required: ['recurring_id'],
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: true,
-        idempotentHint: true,
-      },
-    },
-    {
-      name: 'update_goal',
-      description:
-        "Update a financial goal's properties. Provide goal_id (required) and any combination " +
-        'of name, emoji, target_amount, monthly_contribution, or status. Only the fields you ' +
-        'provide will be updated. Writes directly to Copilot Money via Firestore.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          goal_id: {
-            type: 'string',
-            description: 'Goal ID to update (from get_goals results)',
-          },
-          name: {
-            type: 'string',
-            description: 'New display name for the goal',
-          },
-          emoji: {
-            type: 'string',
-            description: 'New emoji icon for the goal',
-          },
-          target_amount: {
-            type: 'number',
-            description: 'New target savings amount (must be > 0)',
-          },
-          monthly_contribution: {
-            type: 'number',
-            description: 'New monthly contribution amount (must be >= 0)',
-          },
-          status: {
-            type: 'string',
-            enum: ['active', 'paused'],
-            description: 'Set goal status to active or paused',
-          },
-        },
-        required: ['goal_id'],
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: true,
-      },
-    },
-    {
-      name: 'delete_goal',
-      description:
-        'Delete a financial goal. The goal_id can be obtained from get_goals results. ' +
-        'Writes directly to Copilot Money via Firestore.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          goal_id: {
-            type: 'string',
-            description: 'Goal ID to delete',
-          },
-        },
-        required: ['goal_id'],
       },
       annotations: {
         readOnlyHint: false,
@@ -4756,46 +4230,6 @@ export function createWriteToolSchemas(): ToolSchema[] {
         },
         required: ['transaction_id', 'frequency'],
         additionalProperties: false,
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: false,
-      },
-    },
-    {
-      name: 'create_goal',
-      description:
-        'Create a new financial goal. Requires a name and target amount. ' +
-        'Optionally set an emoji, monthly contribution, or start date. ' +
-        'Writes directly to Copilot Money via Firestore.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          name: {
-            type: 'string',
-            description: 'Name of the financial goal (e.g. "Emergency Fund", "Vacation")',
-          },
-          target_amount: {
-            type: 'number',
-            description: 'Target savings amount (must be greater than 0)',
-          },
-          emoji: {
-            type: 'string',
-            description: 'Emoji icon for the goal (e.g. "🏖️")',
-          },
-          monthly_contribution: {
-            type: 'number',
-            description:
-              'Monthly contribution amount (must be >= 0). ' +
-              'Sets tracking to monthly_contribution mode when provided.',
-          },
-          start_date: {
-            type: 'string',
-            description: 'Start date in ISO format (YYYY-MM-DD). Defaults to today.',
-          },
-        },
-        required: ['name', 'target_amount'],
       },
       annotations: {
         readOnlyHint: false,
