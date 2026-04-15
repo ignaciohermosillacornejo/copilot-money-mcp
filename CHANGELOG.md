@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-04-15
+
+### Fixed
+- **Extension now installs on current Claude Desktop** (#249, upstream [mcpb#229](https://github.com/modelcontextprotocol/mcpb/issues/229)): Claude Desktop 1.2581+ runs Node MCPB extensions inside an Electron UtilityProcess that enforces macOS hardened-runtime library validation, which rejects ad-hoc-signed npm prebuilds (our `classic-level` binding). The process died in `dlopen` before any of our code ran, leaving users with a silent "Server disconnected" status. Routes the launch through `dist/launcher.sh` — an absolute path rather than the literal string `"node"` — so Claude Desktop's router falls through to plain `child_process` spawn where native deps load normally. The launcher tries `command -v node` first, then falls back through `~/.volta/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin` (GUI-launched macOS processes don't inherit shell PATH).
+
+### Changed
+- **Extension declared macOS-only** (`compatibility.platforms: ["darwin"]`): Copilot Money itself only ships for macOS, so the MCP server now tells Claude Desktop / the MCPB catalog to block install on Windows and Linux rather than letting users install something that would have nothing to read.
+
 ## [1.7.0] - 2026-04-14
 
 ### Changed
