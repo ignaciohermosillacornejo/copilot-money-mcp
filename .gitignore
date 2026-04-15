@@ -55,6 +55,7 @@ scripts/*
 !scripts/graphql-capture/
 !scripts/launcher.sh
 !scripts/generate-graphql-operations.ts
+!scripts/smoke-graphql.ts
 # License-check scratch directory (created by CI license gate)
 .license-check/
 # Generated test fixtures
