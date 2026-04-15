@@ -108,8 +108,14 @@
     "type": "node",
     "entry_point": "dist/cli.js",
     "mcp_config": {
-      "command": "node",
-      "args": ["${__dirname}/dist/cli.js"]
+      "command": "${__dirname}/dist/launcher.sh",
+      "args": ["${__dirname}/dist/cli.js"],
+      "platform_overrides": {
+        "win32": {
+          "command": "node",
+          "args": ["${__dirname}/dist/cli.js"]
+        }
+      }
     }
   }
 }
