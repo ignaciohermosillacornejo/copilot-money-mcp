@@ -2243,6 +2243,20 @@ export class CopilotMoneyTools {
     if (!args.color_name?.trim()) throw new Error('color_name is required');
     if (!args.emoji?.trim()) throw new Error('emoji is required');
 
+    // Copilot's GraphQL schema does not accept parentId on CreateCategoryInput
+    // (nor on EditCategoryInput). Parent/child category hierarchies exist in
+    // the local cache and can be read via get_categories(parent_id=...), but
+    // they are not writable through the web app's GraphQL mutations. Reject
+    // with a clear error rather than sending a request the server will refuse.
+    if (args.parent_id !== undefined) {
+      throw new Error(
+        "parent_id is not supported on create_category: Copilot's GraphQL API " +
+          'does not accept parentId on CreateCategoryInput. Create the category ' +
+          'without a parent; the Copilot web app does not currently expose a ' +
+          'mutation to re-parent categories.'
+      );
+    }
+
     try {
       const result = await gqlCreateCategory(client, {
         input: {
@@ -2250,7 +2264,6 @@ export class CopilotMoneyTools {
           colorName: args.color_name,
           emoji: args.emoji,
           isExcluded: args.is_excluded ?? false,
-          parentId: args.parent_id,
         },
       });
       return {
@@ -2508,7 +2521,6 @@ export class CopilotMoneyTools {
     color_name?: string;
     emoji?: string;
     is_excluded?: boolean;
-    parent_id?: string | null;
   }): Promise<{ success: true; category_id: string; updated: string[] }> {
     const client = this.getGraphQLClient();
     const input: Record<string, unknown> = {};
@@ -2516,7 +2528,6 @@ export class CopilotMoneyTools {
     if (args.color_name !== undefined) input.colorName = args.color_name;
     if (args.emoji !== undefined) input.emoji = args.emoji;
     if (args.is_excluded !== undefined) input.isExcluded = args.is_excluded;
-    if (args.parent_id !== undefined) input.parentId = args.parent_id;
     if (Object.keys(input).length === 0) {
       throw new Error('update_category requires at least one field to update');
     }
@@ -3914,10 +3925,11 @@ export function createWriteToolSchemas(): ToolSchema[] {
     {
       name: 'create_category',
       description:
-        'Create a new custom category in Copilot Money. Provide a name (required) ' +
-        'and optionally an emoji, color, parent category, or excluded flag. ' +
-        'Returns the generated category_id. The new category can then be used ' +
-        'with update_transaction.',
+        'Create a new custom category in Copilot Money. Provide name, color_name, ' +
+        'and emoji (all required). Optionally set is_excluded. Returns the generated ' +
+        'category_id. The new category can then be used with update_transaction. ' +
+        "Note: parent/child category hierarchies are not writable through Copilot's " +
+        'GraphQL API — create flat categories only. Writes directly to Copilot Money via GraphQL.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -3925,27 +3937,24 @@ export function createWriteToolSchemas(): ToolSchema[] {
             type: 'string',
             description: 'Display name for the new category (e.g., "Subscriptions")',
           },
+          color_name: {
+            type: 'string',
+            description:
+              'Named color from the Copilot palette (e.g., "RED1", "OLIVE1", "PURPLE2"). ' +
+              'See existing categories via get_categories for valid values.',
+          },
           emoji: {
             type: 'string',
             description: 'Emoji icon for the category (e.g., "🎬")',
           },
-          color: {
-            type: 'string',
-            description: 'Hex color code for the category (e.g., "#FF5733")',
-          },
-          parent_category_id: {
-            type: 'string',
-            description:
-              'Parent category ID to nest under (from get_categories). ' +
-              'Creates a subcategory when provided.',
-          },
-          excluded: {
+          is_excluded: {
             type: 'boolean',
             description: 'Exclude this category from spending totals (default: false)',
             default: false,
           },
         },
-        required: ['name'],
+        required: ['name', 'color_name', 'emoji'],
+        additionalProperties: false,
       },
       annotations: {
         readOnlyHint: false,
@@ -3957,8 +3966,9 @@ export function createWriteToolSchemas(): ToolSchema[] {
       name: 'update_category',
       description:
         'Update an existing user-defined category. Provide category_id (required) and any ' +
-        'fields to change: name, emoji, color, excluded, or parent_category_id (null to ungroup). ' +
-        'Only the specified fields are updated. Writes directly to Copilot Money via GraphQL.',
+        'fields to change: name, emoji, color_name, or is_excluded. Only the specified ' +
+        'fields are updated. Note: parent/child category hierarchies are not writable ' +
+        "through Copilot's GraphQL API. Writes directly to Copilot Money via GraphQL.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -3974,22 +3984,18 @@ export function createWriteToolSchemas(): ToolSchema[] {
             type: 'string',
             description: 'New emoji icon for the category (e.g., "🎬")',
           },
-          color: {
+          color_name: {
             type: 'string',
-            description: 'New hex color code for the category (e.g., "#FF5733")',
+            description:
+              'New named color from the Copilot palette (e.g., "RED1", "OLIVE1", "PURPLE2").',
           },
-          excluded: {
+          is_excluded: {
             type: 'boolean',
             description: 'Exclude this category from spending totals',
           },
-          parent_category_id: {
-            type: ['string', 'null'],
-            description:
-              'Parent category ID to nest under, or null to ungroup. ' +
-              'Use get_categories to find valid parent IDs.',
-          },
         },
         required: ['category_id'],
+        additionalProperties: false,
       },
       annotations: {
         readOnlyHint: false,

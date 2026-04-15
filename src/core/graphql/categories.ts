@@ -6,7 +6,9 @@ export interface CreateCategoryInput {
   colorName: string;
   emoji: string;
   isExcluded: boolean;
-  parentId?: string;
+  // NOTE: parentId is NOT accepted by CreateCategoryInput (server rejects with
+  // BAD_USER_INPUT). Create the category first, then assign parentId via
+  // editCategory. Verified by smoke test against real server.
 }
 
 interface CreateCategoryResponse {
@@ -37,7 +39,9 @@ export interface EditCategoryInput {
   colorName?: string;
   emoji?: string;
   isExcluded?: boolean;
-  parentId?: string | null;
+  // NOTE: parentId is NOT accepted by EditCategoryInput either. The server
+  // rejects with BAD_USER_INPUT. Parent/child category hierarchies are not
+  // writable through Copilot's GraphQL mutations. Verified by smoke test.
 }
 
 interface EditCategoryResponse {
@@ -55,7 +59,6 @@ export interface EditCategoryChanges {
   colorName?: string;
   emoji?: string;
   isExcluded?: boolean;
-  parentId?: string | null;
 }
 
 export async function editCategory(
@@ -81,7 +84,6 @@ export async function editCategory(
   if ('colorName' in args.input) changed.colorName = cat.colorName;
   if ('emoji' in args.input) changed.emoji = args.input.emoji;
   if ('isExcluded' in args.input) changed.isExcluded = args.input.isExcluded;
-  if ('parentId' in args.input) changed.parentId = args.input.parentId;
   return { id: cat.id, changed };
 }
 
