@@ -14,7 +14,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { CopilotDatabase } from './core/database.js';
 import { CopilotMoneyTools, createToolSchemas, createWriteToolSchemas } from './tools/index.js';
-import { FirestoreClient } from './core/firestore-client.js';
+import { GraphQLClient } from './core/graphql/client.js';
 import { FirebaseAuth } from './core/auth/firebase-auth.js';
 import { extractRefreshToken } from './core/auth/browser-token.js';
 
@@ -44,13 +44,13 @@ export class CopilotMoneyServer {
     this.db = new CopilotDatabase(dbPath, decodeTimeoutMs);
     this.writeEnabled = writeEnabled;
 
-    let firestoreClient: FirestoreClient | undefined;
+    let graphqlClient: GraphQLClient | undefined;
     if (writeEnabled) {
       const auth = new FirebaseAuth(() => extractRefreshToken());
-      firestoreClient = new FirestoreClient(auth);
+      graphqlClient = new GraphQLClient(auth);
     }
 
-    this.tools = new CopilotMoneyTools(this.db, firestoreClient);
+    this.tools = new CopilotMoneyTools(this.db, undefined, graphqlClient);
     this.server = new Server(
       {
         name: 'copilot-money-mcp',
@@ -97,21 +97,16 @@ export class CopilotMoneyServer {
     'update_transaction',
     'review_transactions',
     'create_tag',
+    'update_tag',
     'delete_tag',
     'create_category',
     'update_category',
     'delete_category',
-    'create_budget',
-    'update_budget',
-    'delete_budget',
+    'set_budget',
     'set_recurring_state',
-    'delete_recurring',
-    'update_goal',
-    'delete_goal',
-    'update_tag',
     'create_recurring',
-    'create_goal',
     'update_recurring',
+    'delete_recurring',
   ]);
 
   async handleCallTool(name: string, typedArgs?: Record<string, unknown>): Promise<CallToolResult> {
@@ -284,22 +279,8 @@ export class CopilotMoneyServer {
           );
           break;
 
-        case 'create_budget':
-          result = await this.tools.createBudget(
-            typedArgs as Parameters<typeof this.tools.createBudget>[0]
-          );
-          break;
-
-        case 'update_budget':
-          result = await this.tools.updateBudget(
-            typedArgs as Parameters<typeof this.tools.updateBudget>[0]
-          );
-          break;
-
-        case 'delete_budget':
-          result = await this.tools.deleteBudget(
-            typedArgs as Parameters<typeof this.tools.deleteBudget>[0]
-          );
+        case 'set_budget':
+          result = await this.tools.setBudget(typedArgs as any);
           break;
 
         case 'set_recurring_state':
@@ -314,18 +295,6 @@ export class CopilotMoneyServer {
           );
           break;
 
-        case 'update_goal':
-          result = await this.tools.updateGoal(
-            typedArgs as Parameters<typeof this.tools.updateGoal>[0]
-          );
-          break;
-
-        case 'delete_goal':
-          result = await this.tools.deleteGoal(
-            typedArgs as Parameters<typeof this.tools.deleteGoal>[0]
-          );
-          break;
-
         case 'update_tag':
           result = await this.tools.updateTag(
             typedArgs as Parameters<typeof this.tools.updateTag>[0]
@@ -335,12 +304,6 @@ export class CopilotMoneyServer {
         case 'create_recurring':
           result = await this.tools.createRecurring(
             typedArgs as Parameters<typeof this.tools.createRecurring>[0]
-          );
-          break;
-
-        case 'create_goal':
-          result = await this.tools.createGoal(
-            typedArgs as Parameters<typeof this.tools.createGoal>[0]
           );
           break;
 
