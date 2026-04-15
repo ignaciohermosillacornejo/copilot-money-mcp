@@ -149,7 +149,7 @@ check locally before pushing:
 mkdir -p .license-check
 cp package.json .license-check/
 (cd .license-check && npm install --omit=dev --ignore-scripts --no-audit --no-fund)
-npx --yes license-checker@latest \
+npx --yes license-checker@25.0.1 \
   --start .license-check \
   --production \
   --onlyAllow 'MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0' \

@@ -37,11 +37,17 @@ jobs:
         # The nested quotes in --excludePackages are intentional: inside $(...)
         # bash opens a fresh shell-quoting scope, so the inner "..." is its own
         # context and does not conflict with the outer quoting.
+        # license-checker is pinned (not @latest) for supply-chain determinism;
+        # bump deliberately when SPDX database updates are needed.
+        # --onlyAllow matches flat SPDX IDs only. A dep declaring a composite
+        # expression like "(MIT OR Apache-2.0)" will fail the gate even when
+        # compatible; fix by adding it to --excludePackages with a comment, or
+        # switch to license-checker-rseidelsohn which parses expressions.
         run: |
           mkdir -p .license-check
           cp package.json .license-check/
           (cd .license-check && npm install --omit=dev --ignore-scripts --no-audit --no-fund)
-          npx --yes license-checker@latest \
+          npx --yes license-checker@25.0.1 \
             --start .license-check \
             --production \
             --onlyAllow 'MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0' \
