@@ -139,6 +139,30 @@ Tests mirror the `src/` structure in `tests/`. Synthetic fixtures in `tests/fixt
 - Write tool tests need a mock `FirestoreClient` (see existing write tool tests)
 - Run `bun run check` before submitting to catch typecheck, lint, and format issues
 
+### License check
+
+Production-tree licenses are gated in CI against the allowlist
+`MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0`. To run the same
+check locally before pushing:
+
+```bash
+mkdir -p .license-check
+cp package.json .license-check/
+(cd .license-check && npm install --omit=dev --ignore-scripts --no-audit --no-fund)
+npx --yes license-checker@latest \
+  --start .license-check \
+  --production \
+  --onlyAllow 'MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0' \
+  --excludePackages "copilot-money-mcp@$(node -p "require('./package.json').version")" \
+  --summary
+rm -rf .license-check
+```
+
+Expect exit 0. If a disallowed license surfaces, either swap the
+offending dep, pin to an earlier version, or — if the SPDX
+declaration is clearly wrong — add an explicit `--excludePackages`
+entry with a comment.
+
 ## Code Style
 
 - TypeScript strict mode
