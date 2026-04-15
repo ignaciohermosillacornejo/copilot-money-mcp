@@ -112,8 +112,7 @@
       "args": ["${__dirname}/dist/cli.js"],
       "platform_overrides": {
         "win32": {
-          "command": "node",
-          "args": ["${__dirname}/dist/cli.js"]
+          "command": "node"
         }
       }
     }

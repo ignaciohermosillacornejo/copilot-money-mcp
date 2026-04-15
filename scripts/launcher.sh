@@ -11,13 +11,16 @@
 #
 # See https://github.com/modelcontextprotocol/mcpb/issues/229
 
-set -e
+# Intentionally no `set -e`: if `exec` fails on an apparently-executable
+# candidate (wrong arch, corrupted binary), we want to keep trying the rest
+# of the fallback list rather than abort.
 
 # PATH on macOS GUI-launched processes does not inherit the shell's PATH, so
-# Homebrew-ARM (/opt/homebrew/bin) and nvm installs are usually invisible.
-# Fall back through common install locations before giving up.
+# Homebrew-ARM (/opt/homebrew/bin), nvm, and Volta installs are usually
+# invisible. Fall back through common install locations before giving up.
 for candidate in \
     "$(command -v node 2>/dev/null || true)" \
+    "$HOME/.volta/bin/node" \
     /opt/homebrew/bin/node \
     /usr/local/bin/node \
     /usr/bin/node; do

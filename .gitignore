@@ -53,6 +53,7 @@ tests/fixtures/demo_database/
 # Development/debug scripts (except tracked subdirectories)
 scripts/*
 !scripts/graphql-capture/
+!scripts/launcher.sh
 # Generated test fixtures
 tests/fixtures/mixed-files-db/
 
