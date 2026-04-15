@@ -30,6 +30,24 @@ jobs:
       - name: Check formatting
         run: bun run format:check
 
+      - name: License check (production deps)
+        # Stages package.json only (NOT package-lock.json) and runs
+        # npm install --omit=dev to mirror scripts/pack-mcpb.ts exactly, so
+        # the gate measures the same graph that ships in the .mcpb bundle.
+        # The nested quotes in --excludePackages are intentional: inside $(...)
+        # bash opens a fresh shell-quoting scope, so the inner "..." is its own
+        # context and does not conflict with the outer quoting.
+        run: |
+          mkdir -p .license-check
+          cp package.json .license-check/
+          (cd .license-check && npm install --omit=dev --ignore-scripts --no-audit --no-fund)
+          npx --yes license-checker@latest \
+            --start .license-check \
+            --production \
+            --onlyAllow 'MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0' \
+            --excludePackages "copilot-money-mcp@$(node -p "require('./package.json').version")" \
+            --summary
+
   unit-tests:
     name: Unit Tests
     needs: [quality]
