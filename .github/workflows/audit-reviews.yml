@@ -1,90 +1,176 @@
 name: Audit PR Reviews
 
+# Runs after a PR is merged (or via manual dispatch) and asks Claude to identify
+# review suggestions that were NOT applied in the final merged code. Produces
+# at most one follow-up issue per PR, or none if everything was addressed.
+
 on:
-  # Run after every PR merge
   pull_request:
     types: [closed]
-
-  # Run manually from Actions tab
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: 'Dry run (no changes)'
-        required: false
-        default: 'false'
-        type: boolean
       pr_number:
-        description: 'Specific PR number to audit (optional)'
-        required: false
+        description: 'PR number to audit'
+        required: true
         type: string
-
-  # Run weekly on Sundays at midnight (catch-all)
-  schedule:
-    - cron: '0 0 * * 0'
 
 jobs:
   audit:
-    # Skip PRs that were closed without merging
-    if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      issues: write
       pull-requests: write
+      issues: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PR_NUMBER: ${{ github.event.inputs.pr_number || github.event.pull_request.number }}
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@v6
         with:
-          bun-version: latest
+          fetch-depth: 0
 
-      - name: Install dependencies
-        run: bun install
-
-      - name: Create audited label if missing
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Ensure labels exist
         run: |
-          gh label create "audited" \
-            --description "PR has been reviewed in audit" \
-            --color "0E8A16" 2>/dev/null || true
+          gh label create audited          --description "PR has been reviewed in audit" --color 0E8A16 2>/dev/null || true
+          gh label create audit            --description "Issue from PR audit"           --color D93F0B 2>/dev/null || true
+          gh label create review-followup  --description "Follow-up from code review"    --color FBCA04 2>/dev/null || true
 
-      - name: Create audit label if missing
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Skip if already audited
+        id: check
         run: |
-          gh label create "audit" \
-            --description "Issue from PR audit" \
-            --color "D93F0B" 2>/dev/null || true
-
-      - name: Create review-followup label if missing
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh label create "review-followup" \
-            --description "Follow-up from code review" \
-            --color "FBCA04" 2>/dev/null || true
-
-      - name: Run PR Review Audit
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          INPUT_DRY_RUN: ${{ inputs.dry_run }}
-          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
-          EVENT_NAME: ${{ github.event_name }}
-          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          ARGS=""
-          if [ "$INPUT_DRY_RUN" = "true" ]; then
-            ARGS="$ARGS --dry-run"
+          if gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name' | grep -qx audited; then
+            echo "PR #$PR_NUMBER already audited — skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
-          if [ -n "$INPUT_PR_NUMBER" ]; then
-            ARGS="$ARGS --pr $INPUT_PR_NUMBER"
-          elif [ "$EVENT_NAME" = "pull_request" ]; then
-            ARGS="$ARGS --pr $EVENT_PR_NUMBER"
+
+      - name: Load secrets from 1Password
+        if: steps.check.outputs.skip != 'true'
+        uses: 1password/load-secrets-action@v4
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          CLAUDE_CODE_OAUTH_TOKEN: op://Dev/CLAUDE_CODE_OAUTH_TOKEN/credential
+
+      - name: Audit PR reviews with Claude
+        if: steps.check.outputs.skip != 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ env.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          track_progress: false
+          prompt: |
+            You are auditing merged PR #${{ env.PR_NUMBER }} in ${{ github.repository }} for
+            review suggestions that were NOT applied in the final merged code.
+
+            ## Steps
+
+            1. Fetch every Claude review body for this PR:
+               - `gh api repos/${{ github.repository }}/issues/${{ env.PR_NUMBER }}/comments --paginate`
+               - `gh api repos/${{ github.repository }}/pulls/${{ env.PR_NUMBER }}/comments --paginate`
+               - `gh api repos/${{ github.repository }}/pulls/${{ env.PR_NUMBER }}/reviews --paginate`
+               Keep only entries by `github-actions[bot]` whose body contains both "PR Review"
+               or "Claude finished" AND "actions/runs/". Ignore everything else.
+
+            2. Fetch the merged diff:
+               `gh pr diff ${{ env.PR_NUMBER }}`
+
+            3. Extract candidate suggestions from those review bodies. For each candidate,
+               READ the relevant file in the merged tree (current HEAD) and confirm whether
+               the suggested change was applied.
+
+            ## What counts as a suggestion (INCLUDE)
+
+            - Bugs the reviewer identified with a specific fix
+            - Missing error handling / validation the reviewer asked for
+            - Refactors or renames with concrete before/after
+            - Nits that propose a specific edit at a specific location
+
+            ## What does NOT count (EXCLUDE — these are the main false positives)
+
+            - Praise ("nice", "good call", "exactly right", "this is what it should be doing")
+            - Neutral observations, rhetorical questions, or analysis without a request
+            - Items already applied in the merged diff or in a follow-up commit on `main`
+            - Items the PR author explicitly responded to with reasoning (accepted or rejected)
+            - Anything you cannot verify as unaddressed by reading the current code
+
+            ## Verification rule
+
+            Never flag a suggestion without reading the file and confirming the change is
+            absent. If you cannot verify from the code that it's unaddressed, DROP IT.
+            False negatives are strongly preferred over false positives — the goal is signal,
+            not volume. Zero findings is the expected answer for most PRs.
+
+            ## Output
+
+            Write a JSON file at `${{ github.workspace }}/audit-result.json` with exactly
+            this schema (no prose, no markdown):
+
+            {
+              "pr_number": <number>,
+              "unaddressed": [
+                {
+                  "severity": "high" | "medium" | "low",
+                  "file": "<path from repo root>",
+                  "line": <number or null>,
+                  "summary": "<one sentence>",
+                  "quote": "<verbatim from reviewer, ≤200 chars>",
+                  "evidence": "<one sentence: what you read in the code that proves it wasn't applied>"
+                }
+              ]
+            }
+
+            If nothing qualifies, write `{"pr_number": <N>, "unaddressed": []}`.
+
+            Do NOT create issues. Do NOT comment on the PR. Only write the JSON file.
+
+          claude_args: |
+            --model claude-sonnet-4-6
+            --allowedTools "Bash(gh api*),Bash(gh pr view*),Bash(gh pr diff*),Bash(git log*),Bash(git show*),Read,Grep,Glob,Write"
+            --disallowedTools "Bash(gh pr review*),Bash(gh pr merge*),Bash(gh pr close*),Bash(gh issue*),Bash(gh pr comment*)"
+
+      - name: Create follow-up issue if suggestions remain
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          if [ ! -f audit-result.json ]; then
+            echo "::warning::audit-result.json not produced — treating as empty."
+            exit 0
           fi
-          # $ARGS is intentionally unquoted — word-splitting is needed to expand
-          # "--pr 123" into two separate arguments for the script
-          bun run scripts/audit-pr-reviews.ts $ARGS
+
+          if ! jq -e . audit-result.json >/dev/null 2>&1; then
+            echo "::warning::audit-result.json is not valid JSON — skipping issue creation."
+            cat audit-result.json
+            exit 0
+          fi
+
+          COUNT=$(jq '.unaddressed | length' audit-result.json)
+          echo "Unaddressed suggestions: $COUNT"
+          if [ "$COUNT" -eq 0 ]; then
+            exit 0
+          fi
+
+          PR_TITLE=$(gh pr view "$PR_NUMBER" --json title --jq .title)
+
+          {
+            echo "## Unaddressed review suggestions from PR #$PR_NUMBER"
+            echo
+            echo "**PR title:** $PR_TITLE"
+            echo
+            jq -r '.unaddressed[] | "### \(.severity | ascii_upcase): \(.summary)\n\n- **File:** `\(.file)`\(if .line then ":\(.line|tostring)" else "" end)\n- **Reviewer said:** > \(.quote)\n- **Evidence not applied:** \(.evidence)\n"' audit-result.json
+            echo
+            echo "---"
+            echo "_Produced by the PR review audit workflow. Close if not actionable._"
+          } > issue-body.md
+
+          gh issue create \
+            --title "[Audit] Unaddressed suggestions from PR #$PR_NUMBER" \
+            --body-file issue-body.md \
+            --label "audit,review-followup"
+
+      - name: Mark PR as audited
+        if: steps.check.outputs.skip != 'true' && success()
+        run: gh pr edit "$PR_NUMBER" --add-label audited
