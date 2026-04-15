@@ -19,7 +19,7 @@ Tracking: issue #260, item C ("License and supply chain"). This spec implements 
 **In scope:**
 
 - Add a `License check (production deps)` step to the existing `quality` job in `.github/workflows/test.yml`.
-- Use `license-checker` via `npx --yes license-checker@latest` — no devDep added to `package.json`.
+- Use `license-checker` via `npx --yes license-checker@25.0.1` — no devDep added to `package.json`.
 - Run the check against an isolated `npm install --omit=dev --ignore-scripts` tree that mirrors what `scripts/pack-mcpb.ts` ships (package.json only, no lockfile), not against bun's workspace layout.
 - Allowlist: `MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0` (verbatim from issue #260 item C).
 - Document a local repro command for developers who want to run the same check before pushing.
@@ -61,7 +61,7 @@ One new step at the end of the `quality` job in `.github/workflows/test.yml`, af
     mkdir -p .license-check
     cp package.json .license-check/
     (cd .license-check && npm install --omit=dev --ignore-scripts --no-audit --no-fund)
-    npx --yes license-checker@latest \
+    npx --yes license-checker@25.0.1 \
       --start .license-check \
       --production \
       --onlyAllow 'MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0' \
@@ -74,8 +74,8 @@ One new step at the end of the `quality` job in `.github/workflows/test.yml`, af
 **`npm install` in a scratch directory with `package.json` only (no lockfile), not `bun install`'s workspace tree.**
 The `.mcpb` bundle's dep graph is produced by `npm install --omit=dev --ignore-scripts` inside `scripts/pack-mcpb.ts`, which copies `package.json` into the staging directory but NOT `package-lock.json`. Scanning under the same semantics ensures the CI check sees the same set of packages the bundle ships. Copying the lockfile and switching to `npm ci` was considered and rejected: with the lockfile present npm walks the full resolved tree (including devDep entries) during peer-dep validation, and the project's `typescript@^6` conflicts with `typescript-eslint@8`'s `typescript@">=4.8.4 <6.0.0"` peer constraint. Forcing past that with `--legacy-peer-deps` would pass the check but silence a real signal, and — more importantly — would no longer mirror the bundle's actual install path. Bun's `node_modules/` layout can differ subtly (hoisting, peer-dep resolution) — catching a violation against a tree that is NOT what we ship would be a bug.
 
-**`npx license-checker@latest` rather than adding a devDep.**
-`license-checker` pulls ~30 transitive deps that are only relevant to CI. Adding it to `package.json` pollutes the dev graph (lockfile churn, `bun install` time). `npx --yes ... @latest` keeps it ephemeral. `@latest` is acceptable because the tool is low-churn and any breaking-change fallout surfaces as a visible CI failure, not a silent one. If the tool ever ships a regression, we pin a version in the step.
+**`npx license-checker@25.0.1` rather than adding a devDep.**
+`license-checker` pulls ~30 transitive deps that are only relevant to CI. Adding it to `package.json` pollutes the dev graph (lockfile churn, `bun install` time). `npx --yes ... @<version>` keeps it ephemeral. The version is pinned (not `@latest`) for supply-chain determinism — an `@latest` tag could pull a future release with a silent regression or a compromised publish. Bumps are deliberate and visible in git history; when the SPDX database needs to refresh or a bug fix is required, update the pin in one line.
 
 **`--production` + `--onlyAllow`.**
 `--production` restricts to the `dependencies` tree — matching what the bundle ships. `--onlyAllow` causes the tool to exit nonzero if any package's license is outside the list. Exit status is what fails the job.
@@ -104,7 +104,7 @@ No other files are touched.
 mkdir -p .license-check
 cp package.json .license-check/
 (cd .license-check && npm install --omit=dev --ignore-scripts --no-audit --no-fund)
-npx --yes license-checker@latest \
+npx --yes license-checker@25.0.1 \
   --start .license-check \
   --production \
   --onlyAllow 'MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0' \
@@ -134,7 +134,7 @@ The change is a single step in one workflow file. Revert the commit if anything 
 
 - **Adding `THIRD_PARTY_LICENSES` to the bundle.** Individual `LICENSE` files already ride along inside each `node_modules/<pkg>/` directory in the bundle, so MIT/BSD/ISC/Apache-2.0 notice-preservation obligations are already discharged. An aggregated file is auditor-convenience, not legal requirement.
 - **Adding a CycloneDX SBOM.** Deferred as low-ROI at this project's scale. Revisit if a downstream consumer requests one.
-- **Pinning `license-checker` to an exact version via devDeps.** Rejected in favor of `npx @latest` to keep the dev dep graph clean. Trade-off: we trust the tool not to break silently. Revisit if it ever does.
+- **Pinning `license-checker` as a devDep.** Rejected in favor of a version-pinned `npx --yes license-checker@<version>` invocation — gets the supply-chain determinism of a pin without polluting the dev dep graph. Bump the pin deliberately when needed.
 - **Running the gate inside `build-mcpb.yml` or `pack-mcpb.ts`.** Release-path gating is redundant with PR gating (main can only advance through green PRs). Adding the check to the pack script would duplicate work and slow bundle builds for no incremental safety.
 - **Broadening the allowlist to include BlueOak-1.0.0, CC0-1.0, Unlicense, 0BSD.** None currently appear in the tree. Expanding pre-emptively loosens the gate without benefit. Add when a real dep forces the decision.
 - **Blocking on main with `on: push` as well as PRs.** Redundant: `test.yml` already runs on main pushes for the existing jobs, and main only advances through PRs that have already run the gate.

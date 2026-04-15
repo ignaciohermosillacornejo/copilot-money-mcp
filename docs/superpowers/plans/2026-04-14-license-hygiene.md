@@ -4,7 +4,7 @@
 
 **Goal:** Add a `license-checker` CI step to the `quality` job in `.github/workflows/test.yml` that fails when any production dependency's license falls outside `MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0`.
 
-**Architecture:** A single ~10-line `run:` step, appended after `Check formatting` in the existing `quality` job. The step creates a scratch directory, runs `npm install --omit=dev --ignore-scripts` against a staged `package.json` (no lockfile) to produce the same production tree that `scripts/pack-mcpb.ts` ships, then invokes `license-checker` via `npx --yes license-checker@latest --onlyAllow ...`. No `package.json` change, no new workflow file, no bundle change. Local repro instructions are added to `CONTRIBUTING.md` so developers can run the same check before pushing.
+**Architecture:** A single ~10-line `run:` step, appended after `Check formatting` in the existing `quality` job. The step creates a scratch directory, runs `npm install --omit=dev --ignore-scripts` against a staged `package.json` (no lockfile) to produce the same production tree that `scripts/pack-mcpb.ts` ships, then invokes `license-checker` via `npx --yes license-checker@25.0.1 --onlyAllow ...`. No `package.json` change, no new workflow file, no bundle change. Local repro instructions are added to `CONTRIBUTING.md` so developers can run the same check before pushing.
 
 **Tech Stack:** GitHub Actions (ubuntu-latest), `license-checker` (invoked via npx, no devDep), `npm install` (mirroring `pack-mcpb.ts`). Nothing new on the project's core stack.
 
@@ -52,7 +52,7 @@ Edit `.github/workflows/test.yml`. Insert after the existing `Check formatting` 
           mkdir -p .license-check
           cp package.json .license-check/
           (cd .license-check && npm install --omit=dev --ignore-scripts --no-audit --no-fund)
-          npx --yes license-checker@latest \
+          npx --yes license-checker@25.0.1 \
             --start .license-check \
             --production \
             --onlyAllow 'MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0' \
@@ -79,7 +79,7 @@ rm -rf .license-check
 mkdir -p .license-check
 cp package.json .license-check/
 (cd .license-check && npm install --omit=dev --ignore-scripts --no-audit --no-fund)
-npx --yes license-checker@latest \
+npx --yes license-checker@25.0.1 \
   --start .license-check \
   --production \
   --onlyAllow 'MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0' \
@@ -172,7 +172,7 @@ check locally before pushing:
 mkdir -p .license-check
 cp package.json .license-check/
 (cd .license-check && npm install --omit=dev --ignore-scripts --no-audit --no-fund)
-npx --yes license-checker@latest \
+npx --yes license-checker@25.0.1 \
   --start .license-check \
   --production \
   --onlyAllow 'MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0' \
@@ -270,7 +270,7 @@ gh pr create --title "ci: license-checker gate for production deps" --body "$(ca
 
 - Adds a `license-checker` step to the `quality` job in `test.yml` that fails CI on any production dep (direct or transitive) outside the allowlist `MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0`.
 - Scans an isolated `npm install --omit=dev --ignore-scripts` tree (package.json only, no lockfile) so the check mirrors the `.mcpb` bundle's graph exactly.
-- Uses `npx --yes license-checker@latest` — no devDep added.
+- Uses `npx --yes license-checker@25.0.1` — no devDep added.
 - Documents local repro in `CONTRIBUTING.md`.
 
 Implements issue #260 item C (the CI-gate portion only). Aggregated `THIRD_PARTY_LICENSES` and CycloneDX SBOM are explicitly deferred — see the linked spec for the rationale.
