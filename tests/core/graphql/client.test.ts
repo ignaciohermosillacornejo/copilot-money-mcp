@@ -140,4 +140,32 @@ describe('GraphQLClient', () => {
       expect((e as GraphQLError).operationName).toBe('EditTransaction');
     }
   });
+
+  test('logs to stderr when throwing on classified errors', async () => {
+    mockFetch({ errors: [{ message: 'unauthorized' }] }, 401);
+    const originalError = console.error;
+    const logs: string[] = [];
+    console.error = ((...args: unknown[]) => {
+      logs.push(args.map(String).join(' '));
+    }) as typeof console.error;
+    try {
+      const client = new GraphQLClient(createMockAuth());
+      try {
+        await client.mutate('EditTransaction', 'mutation EditTransaction { ok }', {});
+      } catch {
+        /* expected */
+      }
+      expect(
+        logs.some(
+          (l) =>
+            l.includes('[graphql]') &&
+            l.includes('EditTransaction') &&
+            l.includes('AUTH_FAILED') &&
+            l.includes('401')
+        )
+      ).toBe(true);
+    } finally {
+      console.error = originalError;
+    }
+  });
 });
