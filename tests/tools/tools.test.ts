@@ -2650,8 +2650,7 @@ describe('createCategory', () => {
         color_name: 'BLUE',
         emoji: '📁',
         parent_id: 'shopping',
-        // @ts-expect-error — parent_id is intentionally removed from the signature
-      } as any)
+      })
     ).rejects.toThrow(/parent_id is not supported/);
     expect(client._calls).toHaveLength(0);
   });

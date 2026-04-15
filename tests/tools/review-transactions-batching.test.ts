@@ -15,6 +15,7 @@ import { mock } from 'bun:test';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
+import { GraphQLError } from '../../src/core/graphql/client.js';
 import type { GraphQLClient } from '../../src/core/graphql/client.js';
 
 function makeMockDb(txnIds: string[]): CopilotDatabase {
@@ -206,5 +207,37 @@ describe('review_transactions respects 5-parallel concurrency cap', () => {
     // All 3 should be able to run in parallel (since 3 < 5).
     expect(client._maxConcurrent).toBeLessThanOrEqual(5);
     expect(client._maxConcurrent).toBeGreaterThanOrEqual(2);
+  });
+
+  test('partial failure reports non-zero succeeded count under bounded concurrency', async () => {
+    // Mock 8 transactions; fail on 'txn-05'. Concurrent workers mean txns 1-4
+    // and some of 6-8 may complete before the failure surfaces.
+    const txnIds = Array.from({ length: 8 }, (_, i) => `txn-0${i + 1}`);
+    const db = makeMockDb(txnIds);
+
+    const client = {
+      mutate: mock((_op: string, _q: string, vars: any) => {
+        if (vars.id === 'txn-05') {
+          return Promise.reject(new GraphQLError('USER_ACTION_REQUIRED', 'simulated failure'));
+        }
+        return Promise.resolve({
+          editTransaction: {
+            transaction: {
+              id: vars.id,
+              categoryId: 'c1',
+              userNotes: null,
+              isReviewed: true,
+              tags: [],
+            },
+          },
+        });
+      }),
+    } as unknown as GraphQLClient;
+
+    const tools = new CopilotMoneyTools(db, client);
+
+    await expect(
+      tools.reviewTransactions({ transaction_ids: txnIds, reviewed: true })
+    ).rejects.toThrow(/review_transactions failed at id=txn-05 \(\d+\/8 succeeded\)/);
   });
 });

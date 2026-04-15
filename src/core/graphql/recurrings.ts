@@ -74,6 +74,10 @@ interface EditRecurringResponse {
 }
 
 function toFloatOrThrow(value: string, path: string): number {
+  // parseFloat('10abc') returns 10; guard with a regex to require a clean decimal.
+  if (!/^\d+(\.\d+)?$/.test(value)) {
+    throw new Error(`editRecurring: invalid ${path} ${value}`);
+  }
   const n = parseFloat(value);
   if (!Number.isFinite(n) || n < 0) {
     throw new Error(`editRecurring: invalid ${path} ${value}`);

@@ -65,6 +65,45 @@ describe('editRecurring', () => {
     expect(call[1]).toBe(EDIT_RECURRING);
     expect(call[2]).toEqual({ id: 'r1', input: { state: 'PAUSED' } });
   });
+
+  test('converts rule.minAmount/maxAmount string to Float on the wire', async () => {
+    const client = createMockClient({
+      editRecurring: {
+        recurring: {
+          id: 'r1',
+          state: 'ACTIVE',
+          rule: { nameContains: 'x', minAmount: 5, maxAmount: 100, days: [1] },
+        },
+      },
+    });
+    await editRecurring(client, {
+      id: 'r1',
+      input: { rule: { minAmount: '5.00', maxAmount: '100' } },
+    });
+    const call = (client.mutate as ReturnType<typeof mock>).mock.calls[0];
+    // Wire variables use Float, not String.
+    expect(call[2]).toEqual({
+      id: 'r1',
+      input: {
+        rule: {
+          minAmount: 5,
+          maxAmount: 100,
+        },
+      },
+    });
+    expect(typeof call[2].input.rule.minAmount).toBe('number');
+    expect(typeof call[2].input.rule.maxAmount).toBe('number');
+  });
+
+  test('throws for invalid amount string', async () => {
+    const client = createMockClient({});
+    await expect(
+      editRecurring(client, {
+        id: 'r1',
+        input: { rule: { minAmount: '10abc' } },
+      })
+    ).rejects.toThrow(/invalid rule\.minAmount/);
+  });
 });
 
 describe('deleteRecurring', () => {
