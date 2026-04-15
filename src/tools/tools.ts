@@ -5,7 +5,6 @@
  */
 
 import { CopilotDatabase } from '../core/database.js';
-import type { FirestoreClient } from '../core/firestore-client.js';
 import type { GraphQLClient } from '../core/graphql/client.js';
 import { GraphQLError } from '../core/graphql/client.js';
 import { editTransaction } from '../core/graphql/transactions.js';
@@ -130,8 +129,8 @@ export const UNREALISTIC_AMOUNT_THRESHOLD = 1_000_000;
 export const MAX_VALID_AMOUNT = 10_000_000;
 
 /**
- * Maximum number of concurrent Firestore writes when reviewing transactions.
- * Batching prevents overwhelming Firestore with a large number of simultaneous requests.
+ * Maximum number of concurrent write requests when reviewing transactions.
+ * Batching prevents overwhelming the backend with a large number of simultaneous requests.
  */
 export const REVIEW_BATCH_SIZE = 10;
 
@@ -323,7 +322,6 @@ export interface HoldingEntry {
  */
 export class CopilotMoneyTools {
   private db: CopilotDatabase;
-  private firestoreClient: FirestoreClient | null;
   private graphqlClient: GraphQLClient | null;
   private _userCategoryMap: Map<string, string> | null = null;
   private _excludedCategoryIds: Set<string> | null = null;
@@ -332,30 +330,11 @@ export class CopilotMoneyTools {
    * Initialize tools with a database connection.
    *
    * @param database - CopilotDatabase instance
-   * @param firestoreClient - Legacy Firestore client; will be removed once all
-   *   write tools migrate to GraphQL (Task 15).
    * @param graphqlClient - Optional GraphQL client for write operations.
    */
-  constructor(
-    database: CopilotDatabase,
-    firestoreClient?: FirestoreClient,
-    graphqlClient?: GraphQLClient
-  ) {
+  constructor(database: CopilotDatabase, graphqlClient?: GraphQLClient) {
     this.db = database;
-    this.firestoreClient = firestoreClient ?? null;
     this.graphqlClient = graphqlClient ?? null;
-  }
-
-  /**
-   * Return the Firestore client, or throw if write mode is not enabled.
-   */
-  protected getFirestoreClient(): FirestoreClient {
-    if (!this.firestoreClient) {
-      throw new Error(
-        'Write mode is not enabled. Start the server with --write to use write tools.'
-      );
-    }
-    return this.firestoreClient;
   }
 
   /**
