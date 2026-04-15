@@ -136,7 +136,7 @@ describe('set_budget', () => {
     expect(client._calls[0].op).toBe('EditBudget');
     expect(client._calls[0].variables).toEqual({
       categoryId: 'cat1',
-      input: { amount: '250.00' },
+      input: { amount: 250 },
     });
   });
 
@@ -165,7 +165,7 @@ describe('set_budget', () => {
     expect(client._calls[0].op).toBe('EditBudgetMonthly');
     expect(client._calls[0].variables).toEqual({
       categoryId: 'cat1',
-      input: [{ amount: '100.00', month: '2025-03' }],
+      input: [{ amount: 100, month: '2025-03' }],
     });
   });
 
