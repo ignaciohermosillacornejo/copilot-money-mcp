@@ -2,11 +2,13 @@ import { describe, test, expect } from 'bun:test';
 import { createWriteToolSchemas } from '../../src/tools/index.js';
 
 describe('createWriteToolSchemas', () => {
-  test('returns exactly 18 write tool schemas', () => {
+  test('returns exactly 13 write tool schemas', () => {
     // Exact count: if a write tool is added or removed, this assertion
     // forces an explicit update, and the server-protocol.test.ts
     // annotation + rejection tables must be extended in lockstep.
-    expect(createWriteToolSchemas().length).toBe(18);
+    // Post-GraphQL migration: goals and createBudget/updateBudget/deleteBudget
+    // tools were removed; set_budget replaces the three budget tools.
+    expect(createWriteToolSchemas().length).toBe(13);
   });
 
   test('update_transaction has required shape and annotations', () => {

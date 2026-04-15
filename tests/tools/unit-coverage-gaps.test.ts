@@ -1,12 +1,14 @@
 /**
- * Unit tests for coverage gaps in getCacheInfo, refreshDatabase, cross-tool
- * interactions, and write-tool edge cases.
+ * Unit tests for coverage gaps in getCacheInfo, refreshDatabase, and
+ * cross-tool interactions. Write-tool behavior is now covered via
+ * GraphQL-stub tests in write-tools.test.ts and write-tools-phase3.test.ts.
  */
 
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
-import type { Transaction, Account, Category, Tag, Goal, Budget } from '../../src/models/index.js';
+import type { Transaction, Account, Category, Tag, Budget } from '../../src/models/index.js';
+import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -19,7 +21,6 @@ function createMockDb(
     accounts?: Account[];
     userCategories?: Category[];
     tags?: Tag[];
-    goals?: Goal[];
     budgets?: Budget[];
   } = {}
 ): CopilotDatabase {
@@ -31,7 +32,7 @@ function createMockDb(
   a._accounts = overrides.accounts ?? [];
   a._recurring = [];
   a._budgets = overrides.budgets ?? [];
-  a._goals = overrides.goals ?? [];
+  a._goals = [];
   a._goalHistory = [];
   a._investmentPrices = [];
   a._investmentSplits = [];
@@ -47,17 +48,6 @@ function createMockDb(
   a._cacheLoadedAt = Date.now();
 
   return db;
-}
-
-/** A no-op FirestoreClient stub for write tools. */
-function createMockClient() {
-  return {
-    requireUserId: async () => 'test-user-123',
-    getUserId: () => 'test-user-123',
-    createDocument: async (_col: string, docId: string | undefined) => docId ?? 'auto_generated_id',
-    updateDocument: async () => {},
-    deleteDocument: async () => {},
-  } as any;
 }
 
 // ---------------------------------------------------------------------------
@@ -206,13 +196,10 @@ describe('refreshDatabase — expanded', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 3. Cross-tool interaction tests
+// 3. Cross-tool interactions (GraphQL-based)
 // ---------------------------------------------------------------------------
 
 describe('cross-tool interactions', () => {
-  let db: CopilotDatabase;
-  let tools: CopilotMoneyTools;
-
   const baseTxn: Transaction = {
     transaction_id: 'txn_cross',
     amount: 42,
@@ -224,66 +211,63 @@ describe('cross-tool interactions', () => {
   };
 
   const baseCategories: Category[] = [
-    { category_id: 'food_and_drink', name: 'Food & Drink', user_id: 'test-user-123' },
-    { category_id: 'shopping', name: 'Shopping', user_id: 'test-user-123' },
+    { category_id: 'food_and_drink', name: 'Food & Drink' },
+    { category_id: 'shopping', name: 'Shopping' },
   ];
 
-  /** Write tools clear the cache; this restores it so subsequent reads work. */
-  function repopulateCache(
-    extra: {
-      transactions?: Transaction[];
-      categories?: Category[];
-      budgets?: Budget[];
-      tags?: Tag[];
-      goals?: Goal[];
-    } = {}
-  ) {
-    const a = db as any;
-    a._transactions = extra.transactions ?? [{ ...baseTxn }];
-    a._userCategories = extra.categories ?? [...baseCategories];
-    a._budgets = extra.budgets ?? [];
-    a._tags = extra.tags ?? [];
-    a._goals = extra.goals ?? [{ goal_id: 'goal1', name: 'Emergency Fund' }];
-    a._allCollectionsLoaded = true;
-    a._cacheLoadedAt = Date.now();
-  }
-
-  beforeEach(() => {
-    const client = createMockClient();
-    db = createMockDb({
-      transactions: [{ ...baseTxn }],
-      userCategories: [...baseCategories],
-      tags: [],
-      goals: [{ goal_id: 'goal1', name: 'Emergency Fund' }],
-      budgets: [],
+  test('createCategory then set_budget referencing the new category', async () => {
+    const db = createMockDb({ userCategories: baseCategories });
+    const client = createMockGraphQLClient({
+      CreateCategory: {
+        createCategory: { id: 'cat-new', name: 'Streaming', colorName: 'RED' },
+      },
+      EditBudget: { editCategoryBudget: true },
     });
-    tools = new CopilotMoneyTools(db, client);
-  });
+    const tools = new CopilotMoneyTools(db, client);
 
-  test('createCategory then createBudget referencing the new category', async () => {
-    const catResult = await tools.createCategory({ name: 'Streaming' });
+    const catResult = await tools.createCategory({
+      name: 'Streaming',
+      color_name: 'RED',
+      emoji: '🎬',
+    });
     expect(catResult.success).toBe(true);
+    expect(catResult.category_id).toBe('cat-new');
 
-    repopulateCache({
-      categories: [...baseCategories, { category_id: catResult.category_id, name: 'Streaming' }],
-    });
-
-    const budgetResult = await tools.createBudget({
+    const budgetResult = await tools.setBudget({
       category_id: catResult.category_id,
-      amount: 15,
+      amount: '15.00',
     });
     expect(budgetResult.success).toBe(true);
-    expect(budgetResult.category_id).toBe(catResult.category_id);
-    expect(budgetResult.amount).toBe(15);
+    expect(budgetResult.category_id).toBe('cat-new');
+    expect(budgetResult.amount).toBe('15.00');
   });
 
   test('createTag then update_transaction sets the new tag', async () => {
+    const db = createMockDb({
+      transactions: [{ ...baseTxn }],
+      userCategories: baseCategories,
+    });
+    const client = createMockGraphQLClient({
+      CreateTag: { createTag: { id: 'tag-urgent', name: 'urgent', colorName: 'PURPLE2' } },
+      EditTransaction: {
+        editTransaction: {
+          transaction: {
+            id: 'txn_cross',
+            categoryId: 'food_and_drink',
+            userNotes: null,
+            isReviewed: false,
+            tags: [{ id: 'tag-urgent' }],
+          },
+        },
+      },
+    });
+    const tools = new CopilotMoneyTools(db, client);
+
     const tagResult = await tools.createTag({ name: 'urgent' });
     expect(tagResult.success).toBe(true);
 
-    repopulateCache({
-      tags: [{ tag_id: tagResult.tag_id, name: 'urgent' }],
-    });
+    // Repopulate tags for updateTransaction validation
+    (db as any)._tags = [{ tag_id: tagResult.tag_id, name: 'urgent' }];
 
     const updateResult = await tools.updateTransaction({
       transaction_id: 'txn_cross',
@@ -294,12 +278,39 @@ describe('cross-tool interactions', () => {
   });
 
   test('createCategory then update_transaction assigns it', async () => {
-    const catResult = await tools.createCategory({ name: 'Custom Cat' });
+    const db = createMockDb({
+      transactions: [{ ...baseTxn }],
+      userCategories: [...baseCategories],
+    });
+    const client = createMockGraphQLClient({
+      CreateCategory: {
+        createCategory: { id: 'cat-custom', name: 'Custom Cat', colorName: 'BLUE' },
+      },
+      EditTransaction: {
+        editTransaction: {
+          transaction: {
+            id: 'txn_cross',
+            categoryId: 'cat-custom',
+            userNotes: null,
+            isReviewed: false,
+            tags: [],
+          },
+        },
+      },
+    });
+    const tools = new CopilotMoneyTools(db, client);
+
+    const catResult = await tools.createCategory({
+      name: 'Custom Cat',
+      color_name: 'BLUE',
+      emoji: '📁',
+    });
     expect(catResult.success).toBe(true);
 
-    repopulateCache({
-      categories: [...baseCategories, { category_id: catResult.category_id, name: 'Custom Cat' }],
-    });
+    (db as any)._userCategories = [
+      ...baseCategories,
+      { category_id: catResult.category_id, name: 'Custom Cat' },
+    ];
 
     const updateResult = await tools.updateTransaction({
       transaction_id: 'txn_cross',
@@ -319,7 +330,24 @@ describe('cross-tool interactions', () => {
       account_id: 'acct1',
       item_id: 'item1',
     };
-    (db as any)._transactions = [{ ...baseTxn }, txn2];
+    const db = createMockDb({
+      transactions: [{ ...baseTxn }, txn2],
+      userCategories: baseCategories,
+    });
+    const client = createMockGraphQLClient({
+      EditTransaction: (vars: any) => ({
+        editTransaction: {
+          transaction: {
+            id: vars.id,
+            categoryId: 'c',
+            userNotes: null,
+            isReviewed: vars.input.isReviewed,
+            tags: [],
+          },
+        },
+      }),
+    });
+    const tools = new CopilotMoneyTools(db, client);
 
     const reviewResult = await tools.reviewTransactions({
       transaction_ids: ['txn_cross', 'txn_cross2'],
@@ -334,74 +362,5 @@ describe('cross-tool interactions', () => {
     });
     expect(unmarkResult.success).toBe(true);
     expect(unmarkResult.reviewed_count).toBe(2);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 4. Write-tool edge cases
-// ---------------------------------------------------------------------------
-
-describe('write-tool edge cases', () => {
-  let db: CopilotDatabase;
-  let tools: CopilotMoneyTools;
-
-  const writeTxn: Transaction = {
-    transaction_id: 'txn_edge',
-    amount: 77,
-    date: '2024-04-20',
-    name: 'Edge Case Txn',
-    category_id: 'food_and_drink',
-    account_id: 'acct1',
-    item_id: 'item1',
-    user_note: 'old note',
-    tag_ids: ['existing_tag'],
-  };
-
-  beforeEach(() => {
-    const client = createMockClient();
-    db = createMockDb({
-      transactions: [{ ...writeTxn }],
-      userCategories: [
-        { category_id: 'food_and_drink', name: 'Food & Drink', user_id: 'test-user-123' },
-      ],
-      tags: [],
-      goals: [],
-      budgets: [],
-    });
-    tools = new CopilotMoneyTools(db, client);
-  });
-
-  test('createTag with Unicode-only name throws (no valid id chars)', async () => {
-    await expect(tools.createTag({ name: '\u{1F680}\u{1F525}' })).rejects.toThrow(
-      'Cannot generate a valid tag_id'
-    );
-  });
-
-  test('createTag with mixed Unicode and ASCII uses ASCII portion', async () => {
-    const result = await tools.createTag({ name: 'caf\u00e9 latte' });
-    expect(result.success).toBe(true);
-    expect(result.tag_id).toBe('caf_latte');
-    expect(result.name).toBe('caf\u00e9 latte');
-  });
-
-  test('createTag replaces each stripped char with its own underscore (no collapsing)', async () => {
-    // 'café & bar' is transformed in two steps:
-    //   1. spaces → '_': 'café_&_bar'
-    //   2. strip non-[a-z0-9_-]: 'é' and '&' dropped → 'caf__bar'
-    // The two underscores come from the spaces flanking '&' (step 1);
-    // 'é' itself is stripped in step 2, not replaced with an underscore.
-    // The contract is that consecutive underscores are NOT collapsed.
-    const result = await tools.createTag({ name: 'caf\u00e9 & bar' });
-    expect(result.tag_id).toBe('caf__bar');
-  });
-
-  test('createBudget for duplicate category throws', async () => {
-    (db as any)._budgets = [
-      { budget_id: 'b1', category_id: 'food_and_drink', amount: 200, period: 'monthly' },
-    ];
-
-    await expect(
-      tools.createBudget({ category_id: 'food_and_drink', amount: 100 })
-    ).rejects.toThrow('already exists');
   });
 });
