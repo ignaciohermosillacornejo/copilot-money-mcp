@@ -20,7 +20,7 @@ A prior session (see `docs/graphql-capture/`) captured the wire protocol, authen
 ## Non-goals
 
 - Goal CRUD (`create_goal`, `update_goal`, `delete_goal`). Goal write surfaces are mobile-only on the web app. These tools are removed entirely.
-- Budgeting feature toggle (`EditUser` `budgetingConfig.isEnabled`) and rollovers config. If a caller hits a disabled-budget error, our tool surfaces a clear "enable manually in Copilot settings" message. No tool exposes the toggle.
+- Budgeting feature toggle (`EditUser` `budgetingConfig.isEnabled`) and rollovers config. **Verified via E2E smoke (2026-04-15):** these toggles are purely client-side UI settings. The GraphQL server accepts `EditBudget` / `EditBudgetMonthly` mutations regardless of whether budgeting or rollover is enabled in Copilot's Settings → General pane. `set_budget` writes succeed silently; the values just aren't rendered in the UI until the toggles are re-enabled. Documented in the `set_budget` tool description so LLM callers can warn their users. No tool exposes the toggle itself.
 - Request batching. Apollo uses `BatchHttpLink`; we send single-op (object body) requests exclusively. The server accepts both shapes.
 - Local DB cache invalidation after a write. The local LevelDB cache is refreshed by Copilot's own sync; we do not attempt to patch our cached reads.
 - Retries on write failures.
@@ -50,7 +50,9 @@ Total: 13 tools, all rewrites of existing tools. Net MCP surface change from tod
 ### Deliberately not added as tools
 
 - `EditAccount` — the captured mutation supports account rename + hide/unhide. The existing MCP deliberately omits account-write tools (mirroring that decision from the Firestore-backed implementation). We build the `accounts.ts` per-domain function (`editAccount(client, args)`) so the transport and types exist, but do **not** wire it into an MCP tool schema. Future PR can expose it if needed.
-- `EditUser` — supports toggling `budgetingConfig.isEnabled` and related flags. Not exposed. When a caller triggers a server-side "budgeting disabled" or "rollovers disabled" error, the tool surfaces a `USER_ACTION_REQUIRED` message directing them to enable the setting manually in the Copilot web app. Rationale: these are account-level preferences the user should set consciously via the UI, not ambient state changed by the LLM. No `user.ts` per-domain file is created.
+- `EditUser` — supports toggling `budgetingConfig.isEnabled`, `rolloversConfig.isEnabled`, `rolloversConfig.startDate`, and `rolloversConfig.categories`. Not exposed as a tool. Rationale: these are account-level preferences the user should set consciously via the UI, not ambient state changed by the LLM. No `user.ts` per-domain file is created.
+
+  **Correction from original spec (verified via 2026-04-15 smoke):** we originally hypothesized the server would reject budget writes when these flags are off, producing `USER_ACTION_REQUIRED` errors. It does not. Both flags are UI-only; the server accepts all writes. The `set_budget` tool description now warns callers that writes may not be visible in the UI when the flags are off, rather than promising an error. The `USER_ACTION_REQUIRED` code is still valuable — it handles genuine server rejections like `"Tag name must be unique"` and `"Category not found"` — just not the budgeting/rollover case we originally predicted.
 
 ### Removed tools
 
@@ -220,7 +222,7 @@ export class GraphQLError extends Error {
 | HTTP 2xx with non-empty `errors[]` | `USER_ACTION_REQUIRED` |
 | HTTP 2xx with `data` | success (no error thrown) |
 
-`USER_ACTION_REQUIRED` carries the first server error's `message` verbatim. During E2E we will learn the exact shape of budgets-disabled / rollovers-disabled / other business-rule errors and can add a message-rewrite table in the client if any need friendlier wrapping. First pass ships raw server messages.
+`USER_ACTION_REQUIRED` carries the first server error's `message` verbatim. E2E smoke (2026-04-15) surfaced these real examples across the 13 mutations: `"Tag not found"`, `"Tag name must be unique"`, `"Category not found"`, `"Category name already exists"`, `"Recurring not found"`, `"Budget category not found"`, `"Failed to delete tag"`, `"Transaction not found"`, `"Cannot read properties of null (reading 'is_other')"` (the last is a server-side null deref the client can't recover from; surfaces as USER_ACTION_REQUIRED but is really a server bug). **Not confirmed:** budgeting-disabled or rollovers-disabled — those flags are UI-only and don't produce server errors. Raw server messages ship as-is; no message-rewrite table added.
 
 ### Tool-level wrapping
 
