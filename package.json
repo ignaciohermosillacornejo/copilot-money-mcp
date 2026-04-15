@@ -42,7 +42,7 @@
   "scripts": {
     "dev": "bun run src/server.ts",
     "dev:debug": "bun --inspect run src/server.ts",
-    "build": "bun build src/cli.ts src/server.ts --outdir dist --target node --format esm --external classic-level && bun build src/core/decode-worker.ts --outdir dist --target node --format esm --external classic-level && chmod +x dist/cli.js",
+    "build": "bun build src/cli.ts src/server.ts --outdir dist --target node --format esm --external classic-level && bun build src/core/decode-worker.ts --outdir dist --target node --format esm --external classic-level && chmod +x dist/cli.js && cp scripts/launcher.sh dist/launcher.sh && chmod +x dist/launcher.sh",
     "test": "bun test",
     "test:e2e": "bun test tests/e2e/",
     "test:unit": "bun test tests/tools/ tests/core/ tests/models/ tests/utils/",
