@@ -30,7 +30,7 @@ const IN_SCOPE_MUTATIONS = [
 const CAPTURE_DIR = 'docs/graphql-capture/operations/mutations';
 const OUTPUT_PATH = 'src/core/graphql/operations.generated.ts';
 
-function extractQueryBlock(markdown: string, mutationName: string): string {
+export function extractQueryBlock(markdown: string, mutationName: string): string {
   // Find the ```graphql fenced block under the ## Query heading.
   const match = markdown.match(/##\s*Query\s*\n+```graphql\s*\n([\s\S]*?)\n```/);
   if (!match) {
@@ -39,10 +39,15 @@ function extractQueryBlock(markdown: string, mutationName: string): string {
   return match[1];
 }
 
-function addTypenameToSelectionSets(query: string): string {
+export function addTypenameToSelectionSets(query: string): string {
   const ast = parse(query);
   const transformed = visit(ast, {
-    SelectionSet(node) {
+    SelectionSet(node, _key, parent) {
+      // Skip the operation-level selection set (directly under OperationDefinition).
+      // __typename is only meaningful on concrete object type selection sets (fields).
+      if (parent && (parent as { kind?: string }).kind === Kind.OPERATION_DEFINITION) {
+        return undefined; // no change
+      }
       const hasTypename = node.selections.some(
         (sel) => sel.kind === Kind.FIELD && sel.name.value === '__typename'
       );
@@ -86,4 +91,6 @@ function main(): void {
   console.log(`Wrote ${OUTPUT_PATH} with ${IN_SCOPE_MUTATIONS.length} operations`);
 }
 
-main();
+if (import.meta.main) {
+  main();
+}
