@@ -1881,11 +1881,10 @@ export class CopilotMoneyTools {
       return override !== undefined ? override : b.amount;
     };
 
-    // Drop tombstones: Firestore represents deleted docs as empty-field
-    // entries. Our decoder emits those as `{budget_id: docId}` objects with
-    // no category, amount, or amounts. Users see dozens of ghost rows unless
-    // we filter them out here (getCategories does the equivalent filter via
-    // its name guard).
+    // Defense-in-depth: processBudget now drops true empty-field tombstones,
+    // but a doc could still reach here with some fields set and yet no
+    // meaningful budget content (e.g. just a name, or an is_active flag with
+    // nothing else). Strip those so the view only contains actionable rows.
     const nonTombstone = allBudgets.filter(
       (b) => b.category_id !== undefined || b.amount !== undefined || b.amounts !== undefined
     );
