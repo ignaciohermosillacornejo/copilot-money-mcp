@@ -3679,10 +3679,12 @@ export function createToolSchemas(): ToolSchema[] {
     {
       name: 'get_balance_history',
       description:
-        'Get daily balance snapshots for accounts over time. Returns current_balance, ' +
-        'available_balance, and limit per day. Requires a granularity parameter (daily, weekly, ' +
-        'or monthly) to control response size. Weekly and monthly modes downsample by keeping ' +
-        'the last data point per period. Filter by account_id and date range.',
+        'Get daily balance snapshots for accounts over time. Each entry returns current_balance, ' +
+        'available_balance, limit, account_id, and account_name. The response also includes an ' +
+        '`accounts` array listing the distinct account IDs in the paginated page. Requires a ' +
+        'granularity parameter (daily, weekly, or monthly) to control response size. Weekly and ' +
+        'monthly modes downsample by keeping the last data point per period. Filter by ' +
+        'account_id and date range.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -3912,7 +3914,10 @@ export function createWriteToolSchemas(): ToolSchema[] {
       name: 'review_transactions',
       description:
         'Mark one or more transactions as reviewed (or unreviewed). ' +
-        'Accepts an array of transaction_ids. Writes directly to Copilot Money via GraphQL.',
+        'Accepts an array of transaction_ids. Writes are issued via GraphQL in parallel with ' +
+        'a cap of 5 in flight at a time. On the first GraphQL error, new writes stop, in-flight ' +
+        'writes settle, and the error is thrown with a `reviewed_count` reflecting how many ' +
+        'succeeded before the failure (partial success is possible).',
       inputSchema: {
         type: 'object',
         properties: {
@@ -3949,11 +3954,9 @@ export function createWriteToolSchemas(): ToolSchema[] {
           },
           color_name: {
             type: 'string',
-            description: 'Optional color name (e.g. "blue", "red")',
-          },
-          hex_color: {
-            type: 'string',
-            description: 'Optional hex color code (e.g. "#FF5733")',
+            description:
+              'Optional palette token from Copilot (e.g. "PURPLE2", "OLIVE1", "RED1"). ' +
+              'Defaults to "PURPLE2" when omitted. See existing tags for valid values.',
           },
         },
         required: ['name'],
@@ -4176,8 +4179,8 @@ export function createWriteToolSchemas(): ToolSchema[] {
     {
       name: 'update_tag',
       description:
-        'Update an existing tag. Provide tag_id (required) and at least one of name, ' +
-        'color_name, or hex_color. Only the specified fields are updated. ' +
+        'Update an existing tag. Provide tag_id (required) and at least one of name or ' +
+        'color_name. Only the specified fields are updated. ' +
         'Writes directly to Copilot Money via GraphQL.',
       inputSchema: {
         type: 'object',
@@ -4192,11 +4195,9 @@ export function createWriteToolSchemas(): ToolSchema[] {
           },
           color_name: {
             type: 'string',
-            description: 'New color name (e.g. "blue", "red")',
-          },
-          hex_color: {
-            type: 'string',
-            description: 'New hex color code (e.g. "#FF5733")',
+            description:
+              'New palette token from Copilot (e.g. "PURPLE2", "OLIVE1", "RED1"). ' +
+              'See existing tags for valid values.',
           },
         },
         required: ['tag_id'],
