@@ -56,6 +56,31 @@ describe('addTypenameToSelectionSets', () => {
     // __typename injected in: editThing's set, icon's set, and EmojiUnicode inline fragment's set.
     expect((out.match(/__typename/g) ?? []).length).toBe(3);
   });
+
+  test('strips @client directives from selections', () => {
+    const input = `mutation M { editThing(id: "x") { id datetime @client } }`;
+    const out = addTypenameToSelectionSets(input);
+    expect(out).not.toContain('@client');
+    expect(out).not.toContain('datetime');
+  });
+
+  test('strips @client fields with nested selection sets', () => {
+    const input = `mutation M { editThing(id: "x") { id category @client { name } } }`;
+    const out = addTypenameToSelectionSets(input);
+    expect(out).not.toContain('@client');
+    expect(out).not.toContain('category');
+  });
+
+  test('still injects __typename after stripping @client fields', () => {
+    // The @client field removal must not break __typename injection on sibling
+    // object-typed selections. Here `nested` stays and should get __typename.
+    const input = `mutation M { editThing(id: "x") { id datetime @client nested { a } } }`;
+    const out = addTypenameToSelectionSets(input);
+    expect(out).not.toContain('@client');
+    expect(out).not.toContain('datetime');
+    // __typename injected in: editThing's set + nested's set.
+    expect((out.match(/__typename/g) ?? []).length).toBe(2);
+  });
 });
 
 describe('extractQueryBlock', () => {

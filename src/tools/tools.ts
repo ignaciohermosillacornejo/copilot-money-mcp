@@ -128,12 +128,6 @@ export const UNREALISTIC_AMOUNT_THRESHOLD = 1_000_000;
  */
 export const MAX_VALID_AMOUNT = 10_000_000;
 
-/**
- * Maximum number of concurrent write requests when reviewing transactions.
- * Batching prevents overwhelming the backend with a large number of simultaneous requests.
- */
-export const REVIEW_BATCH_SIZE = 10;
-
 // ============================================
 // Validation Helpers
 // ============================================
@@ -2610,6 +2604,11 @@ export class CopilotMoneyTools {
     if (typeof args.amount !== 'string') {
       throw new Error('amount must be a string (e.g. "250.00")');
     }
+    if (!/^\d+(\.\d{1,2})?$/.test(args.amount)) {
+      throw new Error(
+        'amount must be a non-negative decimal like "250.00" or "0" to clear the budget'
+      );
+    }
     if (args.month !== undefined && !/^\d{4}-\d{2}$/.test(args.month)) {
       throw new Error('month must be "YYYY-MM"');
     }
@@ -4101,8 +4100,9 @@ export function createWriteToolSchemas(): ToolSchema[] {
       name: 'set_recurring_state',
       description:
         'Change the state of a recurring item (subscription/charge). ' +
-        'Set to active, paused, or archived. Requires recurring_id (from get_recurring_transactions). ' +
-        'Writes directly to Copilot Money via Firestore.',
+        'Set to ACTIVE, PAUSED, or ARCHIVED (uppercase, matching the GraphQL API). ' +
+        'Requires recurring_id (from get_recurring_transactions). ' +
+        'Writes directly to Copilot Money via GraphQL.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -4112,8 +4112,8 @@ export function createWriteToolSchemas(): ToolSchema[] {
           },
           state: {
             type: 'string',
-            enum: ['active', 'paused', 'archived'],
-            description: 'New state for the recurring item',
+            enum: ['ACTIVE', 'PAUSED', 'ARCHIVED'],
+            description: 'New state for the recurring item (uppercase: ACTIVE, PAUSED, ARCHIVED)',
           },
         },
         required: ['recurring_id', 'state'],
