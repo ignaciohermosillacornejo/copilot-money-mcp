@@ -1,7 +1,7 @@
 # CreateCategory
 
 - **Type:** mutation
-- **Endpoint:** https://app.copilot.money/graphql
+- **Endpoint:** https://app.copilot.money/api/graphql
 - **Fires on:** <fill in from flow docs>
 - **Observations:** 1
 
@@ -95,13 +95,13 @@ fragment BudgetFields on CategoryBudget {
 | Name | Type | Required | Example |
 |------|------|----------|---------|
 | budget | boolean | true | `false` |
-| spend | string | true | `"<amount>"` |
+| spend | boolean | true | `true` |
 | input | object | true | `{"colorName":"OLIVE1","emoji":"🇬🇶","name":"<name>","isExcluded":false,"budget":{"unassignedAmount":"<amount>"}}` |
 
 ## Example request
 
 ```json
-{"operationName":"CreateCategory","query":"mutation CreateCategory($input: CreateCategoryInput!, $spend: Boolean = false, $budget: Boolean = false) {\n  createCategory(input: $input) {\n    ...CategoryFields\n    spend @include(if: $spend) {\n      ...SpendFields\n    }\n    budget @include(if: $budget) {\n      ...BudgetFields\n    }\n    childCategories {\n      ...CategoryFields\n      spend @include(if: $spend) {\n        ...SpendFields\n      }\n      budget @include(if: $budget) {\n        ...BudgetFields\n      }\n    }\n  }\n}\n\nfragment SpendMonthlyFields on CategoryMonthlySpent {\n  unpaidRecurringAmount\n  paidRecurringAmount\n  monthName @client\n  comparisonAmount\n  amount\n  month\n  id\n}\n\nfragment BudgetMonthlyFields on CategoryMonthlyBudget {\n  unassignedRolloverAmount\n  childRolloverAmount\n  unassignedAmount\n  resolvedAmount\n  rolloverAmount\n  childAmount\n  goalAmount\n  amount\n  month\n  id\n}\n\nfragment CategoryFields on Category {\n  isRolloverDisabled\n  canBeDeleted\n  isExcluded\n  templateId\n  colorName\n  icon {\n    ... on EmojiUnicode {\n      unicode\n    }\n    ... on Genmoji {\n      id\n      src\n    }\n  }\n  name\n  id\n}\n\nfragment SpendFields on CategorySpend {\n  current {\n    ...SpendMonthlyFields\n  }\n  histories {\n    ...SpendMonthlyFields\n  }\n}\n\nfragment BudgetFields on CategoryBudget {\n  current {\n    ...BudgetMonthlyFields\n  }\n  histories {\n    ...BudgetMonthlyFields\n  }\n}","variables":{"budget":false,"spend":"<amount>","input":{"colorName":"OLIVE1","emoji":"🇬🇶","name":"<name>","isExcluded":false,"budget":{"unassignedAmount":"<amount>"}}}}
+{"operationName":"CreateCategory","query":"mutation CreateCategory($input: CreateCategoryInput!, $spend: Boolean = false, $budget: Boolean = false) {\n  createCategory(input: $input) {\n    ...CategoryFields\n    spend @include(if: $spend) {\n      ...SpendFields\n    }\n    budget @include(if: $budget) {\n      ...BudgetFields\n    }\n    childCategories {\n      ...CategoryFields\n      spend @include(if: $spend) {\n        ...SpendFields\n      }\n      budget @include(if: $budget) {\n        ...BudgetFields\n      }\n    }\n  }\n}\n\nfragment SpendMonthlyFields on CategoryMonthlySpent {\n  unpaidRecurringAmount\n  paidRecurringAmount\n  monthName @client\n  comparisonAmount\n  amount\n  month\n  id\n}\n\nfragment BudgetMonthlyFields on CategoryMonthlyBudget {\n  unassignedRolloverAmount\n  childRolloverAmount\n  unassignedAmount\n  resolvedAmount\n  rolloverAmount\n  childAmount\n  goalAmount\n  amount\n  month\n  id\n}\n\nfragment CategoryFields on Category {\n  isRolloverDisabled\n  canBeDeleted\n  isExcluded\n  templateId\n  colorName\n  icon {\n    ... on EmojiUnicode {\n      unicode\n    }\n    ... on Genmoji {\n      id\n      src\n    }\n  }\n  name\n  id\n}\n\nfragment SpendFields on CategorySpend {\n  current {\n    ...SpendMonthlyFields\n  }\n  histories {\n    ...SpendMonthlyFields\n  }\n}\n\nfragment BudgetFields on CategoryBudget {\n  current {\n    ...BudgetMonthlyFields\n  }\n  histories {\n    ...BudgetMonthlyFields\n  }\n}","variables":{"budget":false,"spend":true,"input":{"colorName":"OLIVE1","emoji":"🇬🇶","name":"<name>","isExcluded":false,"budget":{"unassignedAmount":"<amount>"}}}}
 ```
 
 ## Example response

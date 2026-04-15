@@ -1,7 +1,7 @@
 # NetworthSettings
 
 - **Type:** query
-- **Endpoint:** https://app.copilot.money/graphql
+- **Endpoint:** https://app.copilot.money/api/graphql
 - **Fires on:** <fill in from flow docs>
 - **Observations:** 2
 
@@ -50,13 +50,13 @@ _(no variables)_
       "id": "<id>",
       "networthConfig": {
         "__typename": "NetworthConfig",
-        "combinesAssetsAndDebt": "<amount>",
+        "combinesAssetsAndDebt": false,
         "excludedAccounts": [],
         "isSingleLine": false
       },
       "investmentConfig": {
         "__typename": "InvestmentConfig",
-        "liveBalance": "<amount>"
+        "liveBalance": true
       }
     }
   }

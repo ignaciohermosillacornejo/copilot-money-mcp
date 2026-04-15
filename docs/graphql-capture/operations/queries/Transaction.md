@@ -1,7 +1,7 @@
 # Transaction
 
 - **Type:** query
-- **Endpoint:** https://app.copilot.money/graphql
+- **Endpoint:** https://app.copilot.money/api/graphql
 - **Fires on:** <fill in from flow docs>
 - **Observations:** 21
 
@@ -175,11 +175,11 @@ fragment TransactionRecurringFields on Recurring {
         "latestBalanceUpdate": "2026-04-14T19:53:10.884Z",
         "identifierId": "<id>",
         "status": "2 hours ago",
-        "hasLiveBalance": "<amount>",
+        "hasLiveBalance": true,
         "institutionId": "<account-id>",
         "isUserHidden": false,
         "isUserClosed": false,
-        "liveBalance": "<amount>",
+        "liveBalance": true,
         "isManual": false,
         "balance": "<amount>",
         "subType": "credit card",
@@ -188,7 +188,7 @@ fragment TransactionRecurringFields on Recurring {
         "color": "#006fcf",
         "name": "<name>",
         "type": "CREDIT",
-        "mask": "1000",
+        "mask": "<account-id>",
         "id": "<id>"
       },
       "category": {
@@ -208,8 +208,8 @@ fragment TransactionRecurringFields on Recurring {
       "recurring": null,
       "identifierId": "<id>",
       "suggestedCategoryIds": [
-        "uVmmgq7OK76xt5HUqHfe",
-        "5Qqr8qs3GHNCj8H6fIKd"
+        "<id>",
+        "<id>"
       ],
       "datetime": "2026-04-14T07:00:00.000Z",
       "recurringId": null,

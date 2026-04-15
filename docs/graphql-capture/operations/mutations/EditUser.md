@@ -1,7 +1,7 @@
 # EditUser
 
 - **Type:** mutation
-- **Endpoint:** https://app.copilot.money/graphql
+- **Endpoint:** https://app.copilot.money/api/graphql
 - **Fires on:** <fill in from flow docs>
 - **Observations:** 11
 
@@ -10,22 +10,22 @@
 ```graphql
 mutation EditUser($input: EditUserInput) {
   editUser(input: $input) {
-  budgetingConfig {
-  isEnabled
-  rolloversConfig {
-  isEnabled
-  startDate
-  categories {
-  id
-}
-}
-}
-  onboarding {
-  ...OnboardingFields
-}
-  termsStatus
-  id
-}
+    budgetingConfig {
+      isEnabled
+      rolloversConfig {
+        isEnabled
+        startDate
+        categories {
+          id
+        }
+      }
+    }
+    onboarding {
+      ...OnboardingFields
+    }
+    termsStatus
+    id
+  }
 }
 
 fragment OnboardingFields on Onboarding {
@@ -43,7 +43,7 @@ fragment OnboardingFields on Onboarding {
 ## Example request
 
 ```json
-{"operationName":"EditUser","query":"mutation EditUser($input: EditUserInput) {\n  editUser(input: $input) {\n  budgetingConfig {\n  isEnabled\n  rolloversConfig {\n  isEnabled\n  startDate\n  categories {\n  id\n}\n}\n}\n  onboarding {\n  ...OnboardingFields\n}\n  termsStatus\n  id\n}\n}\n\nfragment OnboardingFields on Onboarding {\n  lastCompletedStep\n  isCompleted\n}","variables":{"input":{"budgetingConfig":{"isEnabled":true}}}}
+{"operationName":"EditUser","query":"mutation EditUser($input: EditUserInput) {\n  editUser(input: $input) {\n    budgetingConfig {\n      isEnabled\n      rolloversConfig {\n        isEnabled\n        startDate\n        categories {\n          id\n        }\n      }\n    }\n    onboarding {\n      ...OnboardingFields\n    }\n    termsStatus\n    id\n  }\n}\n\nfragment OnboardingFields on Onboarding {\n  lastCompletedStep\n  isCompleted\n}","variables":{"input":{"budgetingConfig":{"isEnabled":true}}}}
 ```
 
 ## Example response

@@ -124,7 +124,7 @@ function toRawEntry(
   return {
     ts: new Date(timestamp).getTime() || Date.now(),
     kind: 'fetch',
-    url: 'https://app.copilot.money/graphql',
+    url: 'https://app.copilot.money/api/graphql',
     method: 'POST',
     headers: {},
     requestBody: JSON.stringify({
@@ -148,7 +148,7 @@ function toRawEntryVerbatim(
   return {
     ts: new Date(timestamp).getTime() || Date.now(),
     kind: 'fetch',
-    url: 'https://app.copilot.money/graphql',
+    url: 'https://app.copilot.money/api/graphql',
     method: 'POST',
     headers: {},
     requestBody: JSON.stringify({ operationName: opName, query, variables }),

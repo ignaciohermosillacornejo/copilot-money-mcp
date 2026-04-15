@@ -220,4 +220,51 @@ describe('scrubEntry - finance-specific numeric fields', () => {
     expect(a.assets).toBe('<amount>');
     expect(a.equity).toBe('<amount>');
   });
+
+  it('does not scrub boolean *Balance fields as amount', () => {
+    const out = scrubEntry(
+      baseEntry({
+        response: {
+          data: {
+            account: {
+              hasLiveBalance: true,
+              hasHistoricalBalance: false,
+            },
+          },
+        },
+      })
+    );
+    const a = (out.response as any).data.account;
+    expect(a.hasLiveBalance).toBe(true);
+    expect(a.hasHistoricalBalance).toBe(false);
+  });
+});
+
+describe('scrubEntry - card/account mask', () => {
+  it('scrubs mask (last-4 digits) as an account-id', () => {
+    const out = scrubEntry(
+      baseEntry({
+        response: { data: { account: { mask: '8100' } } },
+      })
+    );
+    expect((out.response as any).data.account.mask).toBe('<account-id>');
+  });
+});
+
+describe('scrubEntry - plural *Ids suffix', () => {
+  it('scrubs array elements of suggestedCategoryIds', () => {
+    const out = scrubEntry(
+      baseEntry({
+        response: {
+          data: {
+            transaction: {
+              suggestedCategoryIds: ['uVmmgq7OK76xt5HUqHfe', '5Qqr8qs3GHNCj8H6fIKd'],
+            },
+          },
+        },
+      })
+    );
+    const ids = (out.response as any).data.transaction.suggestedCategoryIds;
+    expect(ids).toEqual(['<id>', '<id>']);
+  });
 });
