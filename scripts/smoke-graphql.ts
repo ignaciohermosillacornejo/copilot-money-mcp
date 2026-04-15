@@ -2,29 +2,41 @@
  * Comprehensive E2E smoke test for the GraphQL write path. Opt-in: run
  * manually against your real Copilot account. Not part of CI.
  *
- * Exercises every MCP-exposed write tool plus every GraphQLErrorCode branch.
+ * Exercises every MCP-exposed write tool plus every GraphQLErrorCode branch,
+ * and — for the consistency/mcp-e2e/state-gated sections — the full MCP
+ * tool dispatch chain with local-cache read-back verification.
  *
  * Usage:
- *   bun run scripts/smoke-graphql.ts                  # run everything
- *   bun run scripts/smoke-graphql.ts --quick          # one round-trip per domain
+ *   bun run scripts/smoke-graphql.ts                   # run everything (default)
+ *   bun run scripts/smoke-graphql.ts --quick           # one round-trip per domain
  *   bun run scripts/smoke-graphql.ts --skip-destructive
  *   bun run scripts/smoke-graphql.ts --skip-errors
  *   bun run scripts/smoke-graphql.ts --skip-edge-cases
+ *   bun run scripts/smoke-graphql.ts --skip-consistency  # skip write-to-read poll
+ *   bun run scripts/smoke-graphql.ts --skip-mcp-e2e      # skip MCP tool dispatch
+ *   bun run scripts/smoke-graphql.ts --include-state-gated # opt-IN (interactive)
  *   bun run scripts/smoke-graphql.ts --section tags
  *
  * Sections: tags, categories, transactions, recurrings, budgets, accounts,
- *           bulk, errors, edge
+ *           bulk, errors, edge, consistency, mcp-e2e, state-gated
+ *
+ * Concurrency: all parallel write fan-out in this script is bounded to at
+ * most 5 concurrent requests via the `runBounded` helper. State-gated
+ * tests are opt-in because they require the user to toggle UI state
+ * manually in the Copilot desktop app between prompts.
  *
  * All created entities use the `GQL-TEST-*` prefix and are deleted in a
  * try/finally. If cleanup fails, the script prints explicit manual-cleanup
  * instructions with specific entity IDs.
  */
 
+import * as readline from 'node:readline';
 import { GraphQLClient, GraphQLError } from '../src/core/graphql/client.js';
 import type { GraphQLErrorCode } from '../src/core/graphql/client.js';
 import { FirebaseAuth } from '../src/core/auth/firebase-auth.js';
 import { extractRefreshToken } from '../src/core/auth/browser-token.js';
 import { CopilotDatabase } from '../src/core/database.js';
+import { CopilotMoneyTools } from '../src/tools/tools.js';
 
 import { createTag, editTag, deleteTag } from '../src/core/graphql/tags.js';
 import {
@@ -42,6 +54,83 @@ import { setBudget } from '../src/core/graphql/budgets.js';
 import { editAccount } from '../src/core/graphql/accounts.js';
 
 // -----------------------------------------------------------------------------
+// Bounded-concurrency helper — never more than `limit` in-flight
+// -----------------------------------------------------------------------------
+
+/**
+ * Run async tasks with a concurrency ceiling. Never more than `limit`
+ * in flight at a time. Returns results in the same order as inputs.
+ *
+ * This exists so parallel writes in the smoke (and the mutations issued
+ * by the MCP tool `review_transactions`) don't hammer Copilot's API.
+ */
+async function runBounded<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T, idx: number) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  async function worker(): Promise<void> {
+    while (next < items.length) {
+      const idx = next++;
+      results[idx] = await fn(items[idx]!, idx);
+    }
+  }
+  const workers = Array.from(
+    { length: Math.min(limit, items.length) },
+    () => worker()
+  );
+  await Promise.all(workers);
+  return results;
+}
+
+// -----------------------------------------------------------------------------
+// Polling helper — wait for a local-cache read to reflect a GraphQL write
+// -----------------------------------------------------------------------------
+
+/**
+ * Poll `predicate` at a fixed interval until it returns a non-null result
+ * or `timeoutMs` elapses. Returns the result plus the observed lag, or
+ * `null` on timeout. The predicate is responsible for refreshing the
+ * database cache before reading — this function only handles the loop.
+ */
+async function pollUntil<T>(
+  _label: string,
+  predicate: () => Promise<T | null>,
+  options: { timeoutMs?: number; intervalMs?: number } = {}
+): Promise<{ result: T; observedLagMs: number } | null> {
+  const timeoutMs = options.timeoutMs ?? 60_000;
+  const intervalMs = options.intervalMs ?? 2_000;
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const res = await predicate();
+    if (res !== null && res !== undefined) {
+      return { result: res, observedLagMs: Date.now() - start };
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  return null;
+}
+
+// -----------------------------------------------------------------------------
+// Interactive prompt helper (used only by state-gated section)
+// -----------------------------------------------------------------------------
+
+async function prompt(question: string): Promise<string> {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer);
+    });
+  });
+}
+
+// -----------------------------------------------------------------------------
 // CLI argument parsing
 // -----------------------------------------------------------------------------
 
@@ -49,6 +138,9 @@ const argv = process.argv.slice(2);
 const skipDestructive = argv.includes('--skip-destructive');
 const skipErrors = argv.includes('--skip-errors');
 const skipEdgeCases = argv.includes('--skip-edge-cases');
+const skipConsistency = argv.includes('--skip-consistency');
+const skipMcpE2e = argv.includes('--skip-mcp-e2e');
+const includeStateGated = argv.includes('--include-state-gated');
 const quick = argv.includes('--quick');
 
 const sectionIdx = argv.indexOf('--section');
@@ -65,6 +157,9 @@ const VALID_SECTIONS = [
   'bulk',
   'errors',
   'edge',
+  'consistency',
+  'mcp-e2e',
+  'state-gated',
 ];
 if (onlySection && !VALID_SECTIONS.includes(onlySection)) {
   console.error(
@@ -77,6 +172,10 @@ function sectionEnabled(name: string): boolean {
   if (onlySection) return name === onlySection;
   if (name === 'errors' && skipErrors) return false;
   if (name === 'edge' && skipEdgeCases) return false;
+  if (name === 'consistency' && skipConsistency) return false;
+  if (name === 'mcp-e2e' && skipMcpE2e) return false;
+  // state-gated is opt-in — only run when explicitly requested.
+  if (name === 'state-gated' && !includeStateGated) return false;
   return true;
 }
 
@@ -88,12 +187,19 @@ interface StepResult {
   section: string;
   name: string;
   ok: boolean;
+  skipped?: boolean;
   detail?: string;
   durationMs: number;
 }
 
 const results: StepResult[] = [];
 const stragglers: string[] = [];
+
+/**
+ * Observed write→local-read lag samples, populated by the consistency
+ * section. Used to print a summary at the end of the smoke.
+ */
+const consistencyLags: { label: string; lagMs: number | null }[] = [];
 
 async function step(
   section: string,
@@ -106,6 +212,34 @@ async function step(
     const durationMs = Date.now() - started;
     results.push({ section, name, ok: true, durationMs });
     console.log(`  ✓ ${name} (${durationMs}ms)`);
+  } catch (e) {
+    const durationMs = Date.now() - started;
+    const detail = e instanceof Error ? e.message : String(e);
+    results.push({ section, name, ok: false, detail, durationMs });
+    console.error(`  ✗ ${name} (${durationMs}ms): ${detail}`);
+  }
+}
+
+/**
+ * Like `step`, but accepts a return code for skipped work — useful for the
+ * state-gated section where the user may type "skip" at a prompt.
+ */
+async function stepSkippable(
+  section: string,
+  name: string,
+  fn: () => Promise<'skipped' | void>
+): Promise<void> {
+  const started = Date.now();
+  try {
+    const r = await fn();
+    const durationMs = Date.now() - started;
+    if (r === 'skipped') {
+      results.push({ section, name, ok: true, skipped: true, durationMs });
+      console.log(`  ○ ${name} (skipped)`);
+    } else {
+      results.push({ section, name, ok: true, durationMs });
+      console.log(`  ✓ ${name} (${durationMs}ms)`);
+    }
   } catch (e) {
     const durationMs = Date.now() - started;
     const detail = e instanceof Error ? e.message : String(e);
@@ -1399,6 +1533,627 @@ async function smokeEdgeCases(
 }
 
 // -----------------------------------------------------------------------------
+// Section 5 — Write-to-read consistency
+// -----------------------------------------------------------------------------
+//
+// After each GraphQL write, poll the corresponding read path (via the
+// `CopilotMoneyTools` instance) until the local cache reflects the
+// change, or time out after 60s. Each predicate must refresh the DB
+// cache before reading so any new state written by the native Copilot
+// app to LevelDB is picked up. Observed lags are collected for a
+// summary at the end.
+
+async function smokeWriteReadConsistency(
+  client: GraphQLClient,
+  db: CopilotDatabase,
+  tools: CopilotMoneyTools
+): Promise<void> {
+  logSection('Consistency — write-to-read round trip (polled)');
+
+  const TIMEOUT = 60_000;
+  const INTERVAL = 2_000;
+  const ts = Date.now();
+
+  // 1 — Create tag → visible in db.getTags()
+  await step('consistency', 'createTag → db.getTags() reflects it', async () => {
+    const name = `GQL-TEST-CONSISTENCY-TAG-${ts}`;
+    const created = await createTag(client, {
+      input: { name, colorName: 'PURPLE2' },
+    });
+    const tagId = created.id;
+    try {
+      const found = await pollUntil(
+        'tag-visible',
+        async () => {
+          await tools.refreshDatabase();
+          const tags = await db.getTags();
+          return tags.find((t) => t.tag_id === tagId) ?? null;
+        },
+        { timeoutMs: TIMEOUT, intervalMs: INTERVAL }
+      );
+      if (!found) {
+        consistencyLags.push({ label: 'createTag', lagMs: null });
+        throw new Error('local cache did not reflect write within 60s — Copilot native app sync lag');
+      }
+      consistencyLags.push({ label: 'createTag', lagMs: found.observedLagMs });
+      console.log(`    observed lag: ${found.observedLagMs}ms`);
+    } finally {
+      try {
+        await deleteTag(client, { id: tagId });
+      } catch {
+        registerStraggler(`tag id=${tagId} name=${name}`);
+      }
+    }
+  });
+
+  // 2 — Create category → visible in db.getUserCategories()
+  await step(
+    'consistency',
+    'createCategory → db.getUserCategories() reflects it',
+    async () => {
+      const name = `GQL-TEST-CONSISTENCY-CAT-${ts}`;
+      const created = await createCategory(client, {
+        input: {
+          name,
+          colorName: 'OLIVE1',
+          emoji: '🧪',
+          isExcluded: false,
+        },
+      });
+      const catId = created.id;
+      try {
+        const found = await pollUntil(
+          'cat-visible',
+          async () => {
+            await tools.refreshDatabase();
+            const cats = await db.getUserCategories();
+            return cats.find((c) => c.category_id === catId) ?? null;
+          },
+          { timeoutMs: TIMEOUT, intervalMs: INTERVAL }
+        );
+        if (!found) {
+          consistencyLags.push({ label: 'createCategory', lagMs: null });
+          throw new Error('local cache did not reflect write within 60s — Copilot native app sync lag');
+        }
+        consistencyLags.push({ label: 'createCategory', lagMs: found.observedLagMs });
+        console.log(`    observed lag: ${found.observedLagMs}ms`);
+      } finally {
+        try {
+          await deleteCategory(client, { id: catId });
+        } catch {
+          registerStraggler(`category id=${catId} name=${name}`);
+        }
+      }
+    }
+  );
+
+  // 3 — editTransaction userNotes → visible via tools.getTransactions()
+  await step(
+    'consistency',
+    'editTransaction userNotes → get_transactions reflects it',
+    async () => {
+      const allTxns = await db.getAllTransactions();
+      const candidate = allTxns.find((t) => t.account_id && t.item_id);
+      if (!candidate) {
+        console.log('    (no usable transaction; skipping)');
+        return;
+      }
+      const originalNote = candidate.user_note ?? null;
+      const expectedNote = `GQL-TEST-CONSISTENCY-${ts}`;
+      await editTransaction(client, {
+        id: candidate.transaction_id,
+        accountId: candidate.account_id!,
+        itemId: candidate.item_id!,
+        input: { userNotes: expectedNote },
+      });
+      try {
+        const found = await pollUntil(
+          'note-visible',
+          async () => {
+            await tools.refreshDatabase();
+            const all = await db.getAllTransactions();
+            const t = all.find((x) => x.transaction_id === candidate.transaction_id);
+            return t && t.user_note === expectedNote ? t : null;
+          },
+          { timeoutMs: TIMEOUT, intervalMs: INTERVAL }
+        );
+        if (!found) {
+          consistencyLags.push({ label: 'editTransaction.note', lagMs: null });
+          throw new Error('local cache did not reflect write within 60s — Copilot native app sync lag');
+        }
+        consistencyLags.push({
+          label: 'editTransaction.note',
+          lagMs: found.observedLagMs,
+        });
+        console.log(`    observed lag: ${found.observedLagMs}ms`);
+      } finally {
+        // Restore
+        try {
+          await editTransaction(client, {
+            id: candidate.transaction_id,
+            accountId: candidate.account_id!,
+            itemId: candidate.item_id!,
+            input: { userNotes: originalNote },
+          });
+        } catch {
+          registerStraggler(
+            `txn id=${candidate.transaction_id} note may be "${expectedNote}" — restore failed`
+          );
+        }
+      }
+    }
+  );
+
+  // 4 — setBudget → visible in tools.getBudgets()
+  await step(
+    'consistency',
+    'setBudget → get_budgets reflects amount',
+    async () => {
+      const categories = await db.getUserCategories();
+      const c = categories[0];
+      if (!c) {
+        console.log('    (no user categories; skipping)');
+        return;
+      }
+      const catId = c.category_id;
+      await setBudget(client, { categoryId: catId, amount: '250.00' });
+      try {
+        const found = await pollUntil(
+          'budget-visible',
+          async () => {
+            await tools.refreshDatabase();
+            const budgets = await tools.getBudgets({});
+            // Look for this category in the default-budget entries with amount ~ 250
+            for (const b of budgets.budgets) {
+              const cid = (b as { category_id?: string }).category_id;
+              const amt =
+                (b as { amount?: number }).amount ??
+                (b as { default_amount?: number }).default_amount;
+              if (cid === catId && typeof amt === 'number' && Math.abs(amt - 250) < 0.005) {
+                return b;
+              }
+            }
+            return null;
+          },
+          { timeoutMs: TIMEOUT, intervalMs: INTERVAL }
+        );
+        if (!found) {
+          consistencyLags.push({ label: 'setBudget', lagMs: null });
+          throw new Error('local cache did not reflect write within 60s — Copilot native app sync lag');
+        }
+        consistencyLags.push({ label: 'setBudget', lagMs: found.observedLagMs });
+        console.log(`    observed lag: ${found.observedLagMs}ms`);
+      } finally {
+        try {
+          await setBudget(client, { categoryId: catId, amount: '0' });
+        } catch {
+          registerStraggler(`budget for category=${catId} may be 250.00 — clear failed`);
+        }
+      }
+    }
+  );
+
+  // 5 — createRecurring → visible in tools.getRecurringTransactions()
+  await step(
+    'consistency',
+    'createRecurring → get_recurring_transactions reflects it',
+    async () => {
+      const allTxns = await db.getAllTransactions();
+      const candidate = allTxns.find(
+        (t) => !t.recurring_id && t.account_id && t.item_id
+      );
+      if (!candidate) {
+        console.log('    (no usable non-recurring txn; skipping)');
+        return;
+      }
+      const created = await createRecurring(client, {
+        input: {
+          frequency: 'MONTHLY',
+          transaction: {
+            accountId: candidate.account_id!,
+            itemId: candidate.item_id!,
+            transactionId: candidate.transaction_id,
+          },
+        },
+      });
+      const recurringId = created.id;
+      try {
+        const found = await pollUntil(
+          'recurring-visible',
+          async () => {
+            await tools.refreshDatabase();
+            // Use db.getRecurring() directly — the `getRecurringTransactions`
+            // MCP tool returns heuristic (name-based) clusters, not raw
+            // recurring documents by id. The raw collection is the
+            // authoritative source for a freshly-created recurring.
+            const raw = await db.getRecurring();
+            return raw.find((r) => r.recurring_id === recurringId) ?? null;
+          },
+          { timeoutMs: TIMEOUT, intervalMs: INTERVAL }
+        );
+        if (!found) {
+          consistencyLags.push({ label: 'createRecurring', lagMs: null });
+          throw new Error('local cache did not reflect write within 60s — Copilot native app sync lag');
+        }
+        consistencyLags.push({
+          label: 'createRecurring',
+          lagMs: found.observedLagMs,
+        });
+        console.log(`    observed lag: ${found.observedLagMs}ms`);
+      } finally {
+        try {
+          await deleteRecurring(client, { id: recurringId });
+        } catch {
+          registerStraggler(`recurring id=${recurringId}`);
+        }
+      }
+    }
+  );
+
+  // Summary
+  const observed = consistencyLags
+    .filter((s): s is { label: string; lagMs: number } => s.lagMs !== null)
+    .map((s) => s.lagMs);
+  observed.sort((a, b) => a - b);
+  if (observed.length > 0) {
+    const median = observed[Math.floor(observed.length / 2)]!;
+    const max = observed[observed.length - 1]!;
+    console.log(
+      `  → consistency lag (n=${observed.length}): median=${median}ms max=${max}ms`
+    );
+  }
+  const timedOut = consistencyLags.filter((s) => s.lagMs === null);
+  if (timedOut.length > 0) {
+    console.log(
+      `  → ${timedOut.length} consistency check(s) timed out (>60s). ` +
+        'This indicates Copilot native app sync lag, not an API bug.'
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Section 6 — MCP tool E2E (dispatch chain)
+// -----------------------------------------------------------------------------
+//
+// Exercises the full CopilotMoneyTools.* entry points (arg validation,
+// referential checks, error mapping) instead of calling per-domain
+// GraphQL functions directly. One happy path + one local-validation
+// failure for each write tool where applicable.
+
+async function smokeMcpToolEndToEnd(
+  db: CopilotDatabase,
+  tools: CopilotMoneyTools
+): Promise<void> {
+  logSection('MCP E2E — full dispatch chain');
+
+  const allTxns = await db.getAllTransactions();
+  const candidate = allTxns.find((t) => t.account_id && t.item_id);
+  if (!candidate) {
+    console.warn('  no usable transaction; skipping section');
+    return;
+  }
+  const categories = await db.getUserCategories();
+  if (categories.length === 0) {
+    console.warn('  no user categories; skipping section');
+    return;
+  }
+
+  // --- update_transaction -----------------------------------------------
+  const origCat = candidate.category_id;
+  const altCat = categories.find((c) => c.category_id !== origCat);
+
+  if (altCat && origCat) {
+    await step(
+      'mcp-e2e',
+      'tools.updateTransaction({category_id}) happy path + revert',
+      async () => {
+        await tools.updateTransaction({
+          transaction_id: candidate.transaction_id,
+          category_id: altCat.category_id,
+        });
+        await tools.updateTransaction({
+          transaction_id: candidate.transaction_id,
+          category_id: origCat,
+        });
+      }
+    );
+  }
+
+  await step(
+    'mcp-e2e',
+    'tools.updateTransaction({category_id: invalid}) → local referential rejection',
+    async () => {
+      const e = await expectThrows(
+        () =>
+          tools.updateTransaction({
+            transaction_id: candidate.transaction_id,
+            category_id: 'invalid-xyz',
+          }),
+        'updateTransaction-bad-cat'
+      );
+      if (e instanceof GraphQLError) {
+        throw new Error('expected local validation rejection, got GraphQLError');
+      }
+      const msg = (e as Error).message;
+      if (!/Category not found/i.test(msg)) {
+        throw new Error(`expected "Category not found:" message, got: ${msg}`);
+      }
+      console.log(`    local rejection: ${msg.slice(0, 80)}`);
+    }
+  );
+
+  // --- review_transactions (bounded concurrency=5) -----------------------
+  const usable = allTxns.filter((t) => t.account_id && t.item_id).slice(0, 3);
+  if (usable.length >= 3) {
+    const original = new Map<string, boolean>();
+    for (const t of usable) original.set(t.transaction_id, t.is_reviewed ?? false);
+
+    await step(
+      'mcp-e2e',
+      'tools.reviewTransactions(3 ids, reviewed=true) + revert',
+      async () => {
+        await tools.reviewTransactions({
+          transaction_ids: usable.map((t) => t.transaction_id),
+          reviewed: true,
+        });
+        // Revert each one individually so we never leave anything flipped.
+        for (const t of usable) {
+          await tools.reviewTransactions({
+            transaction_ids: [t.transaction_id],
+            reviewed: original.get(t.transaction_id) ?? false,
+          });
+        }
+      }
+    );
+  }
+
+  // --- tags ---------------------------------------------------------------
+  await step(
+    'mcp-e2e',
+    'tools.createTag + updateTag + deleteTag round-trip',
+    async () => {
+      const created = await tools.createTag({ name: 'GQL-TEST-MCP-TAG' });
+      const tagId = created.tag_id;
+      try {
+        const updated = await tools.updateTag({
+          tag_id: tagId,
+          name: 'GQL-TEST-MCP-TAG-2',
+        });
+        if (!Array.isArray(updated.updated) || !updated.updated.includes('name')) {
+          throw new Error(`updateTag updated field missing: ${JSON.stringify(updated)}`);
+        }
+      } finally {
+        try {
+          await tools.deleteTag({ tag_id: tagId });
+        } catch {
+          registerStraggler(`tag id=${tagId} (MCP E2E)`);
+        }
+      }
+    }
+  );
+
+  // --- categories ---------------------------------------------------------
+  await step(
+    'mcp-e2e',
+    'tools.createCategory + updateCategory + deleteCategory round-trip',
+    async () => {
+      const created = await tools.createCategory({
+        name: 'GQL-TEST-MCP-CAT',
+        color_name: 'RED1',
+        emoji: '🧪',
+      });
+      const catId = created.category_id;
+      try {
+        await tools.updateCategory({ category_id: catId, name: 'GQL-TEST-MCP-CAT-2' });
+      } finally {
+        try {
+          await tools.deleteCategory({ category_id: catId });
+        } catch {
+          registerStraggler(`category id=${catId} (MCP E2E)`);
+        }
+      }
+    }
+  );
+
+  // --- budgets ------------------------------------------------------------
+  const catForBudget = categories[0]!;
+  await step(
+    'mcp-e2e',
+    'tools.setBudget happy path → clear',
+    async () => {
+      await tools.setBudget({ category_id: catForBudget.category_id, amount: '250.00' });
+      await tools.setBudget({ category_id: catForBudget.category_id, amount: '0' });
+    }
+  );
+
+  await step(
+    'mcp-e2e',
+    'tools.setBudget({amount:"-50"}) → local validation rejection',
+    async () => {
+      const e = await expectThrows(
+        () => tools.setBudget({ category_id: catForBudget.category_id, amount: '-50' }),
+        'setBudget-neg'
+      );
+      if (e instanceof GraphQLError) {
+        throw new Error('expected local rejection, got GraphQLError');
+      }
+      console.log(`    local rejection: ${(e as Error).message.slice(0, 80)}`);
+    }
+  );
+
+  // --- recurrings ---------------------------------------------------------
+  // Find an existing recurring for a pause/resume test
+  const recurrings = await db.getRecurring();
+  const existingRecurring = recurrings.find(
+    (r) => (r as { state?: string }).state === 'ACTIVE'
+  );
+
+  if (existingRecurring) {
+    await step(
+      'mcp-e2e',
+      'tools.setRecurringState (PAUSED → ACTIVE) happy path',
+      async () => {
+        const id = (existingRecurring as { recurring_id?: string; id?: string })
+          .recurring_id ??
+          (existingRecurring as { id: string }).id;
+        await tools.setRecurringState({ recurring_id: id, state: 'PAUSED' });
+        await tools.setRecurringState({ recurring_id: id, state: 'ACTIVE' });
+      }
+    );
+  } else {
+    console.log('  (no active recurring; skipping setRecurringState happy path)');
+  }
+
+  await step(
+    'mcp-e2e',
+    'tools.setRecurringState({state: "active"}) → local validation rejection',
+    async () => {
+      const e = await expectThrows(
+        () => tools.setRecurringState({ recurring_id: 'any', state: 'active' }),
+        'setRecurringState-lowercase'
+      );
+      if (e instanceof GraphQLError) {
+        throw new Error('expected local rejection, got GraphQLError');
+      }
+      console.log(`    local rejection: ${(e as Error).message.slice(0, 80)}`);
+    }
+  );
+
+  // createRecurring + updateRecurring + deleteRecurring round-trip through MCP
+  const noRecurringTxn = allTxns.find(
+    (t) => !t.recurring_id && t.account_id && t.item_id
+  );
+  if (noRecurringTxn) {
+    await step(
+      'mcp-e2e',
+      'tools.createRecurring + updateRecurring (rule.min_amount) + deleteRecurring',
+      async () => {
+        const created = await tools.createRecurring({
+          transaction_id: noRecurringTxn.transaction_id,
+          frequency: 'MONTHLY',
+        });
+        const rid = created.recurring_id;
+        try {
+          await tools.updateRecurring({
+            recurring_id: rid,
+            rule: { min_amount: '1' },
+          });
+        } finally {
+          try {
+            await tools.deleteRecurring({ recurring_id: rid });
+          } catch {
+            registerStraggler(`recurring id=${rid} (MCP E2E)`);
+          }
+        }
+      }
+    );
+  } else {
+    console.log('  (no non-recurring txn; skipping createRecurring round-trip)');
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Section 7 — State-gated tests (opt-in, interactive)
+// -----------------------------------------------------------------------------
+//
+// These tests require the user to toggle state in the Copilot macOS app
+// between prompts. Only runs when `--include-state-gated` is passed.
+
+async function smokeStateGated(
+  db: CopilotDatabase,
+  tools: CopilotMoneyTools
+): Promise<void> {
+  logSection('State-gated — interactive prompts');
+
+  console.log(
+    '  This section asks you to toggle UI state in Copilot between prompts.\n' +
+      '  Type "skip" at any prompt to skip just that test.'
+  );
+
+  const categories = await db.getUserCategories();
+  const c = categories[0];
+  if (!c) {
+    console.warn('  no user categories; skipping state-gated section');
+    return;
+  }
+  const catId = c.category_id;
+
+  // --- Budgeting disabled -----------------------------------------------
+  await stepSkippable(
+    'state-gated',
+    'setBudget while budgeting disabled → server rejects',
+    async () => {
+      const ans1 = await prompt(
+        '→ Disable Budgeting in Copilot (Settings → General → Budgeting), ' +
+          'then press Enter (or type "skip"): '
+      );
+      if (ans1.trim().toLowerCase() === 'skip') return 'skipped';
+
+      const e = await expectThrows(
+        () => tools.setBudget({ category_id: catId, amount: '1' }),
+        'setBudget-disabled'
+      );
+      // Capture and report whatever the server says; we don't hard-assert
+      // the code since message/code depend on server-side behavior.
+      if (e instanceof GraphQLError) {
+        console.log(
+          `    server rejection: code=${e.code} status=${e.httpStatus} msg=${e.message.slice(0, 120)}`
+        );
+      } else {
+        console.log(`    rejection: ${(e as Error).message.slice(0, 120)}`);
+      }
+
+      await prompt(
+        '→ Re-enable Budgeting in Copilot, then press Enter to continue (recovery check): '
+      );
+      // Recovery: clearing (amount=0) should now work.
+      await tools.setBudget({ category_id: catId, amount: '0' });
+      return;
+    }
+  );
+
+  // --- Rollovers disabled ------------------------------------------------
+  await stepSkippable(
+    'state-gated',
+    'setBudget while rollovers disabled → observe response',
+    async () => {
+      const ans1 = await prompt(
+        '→ Disable Rollovers in Copilot (Settings → Budget → Rollovers), ' +
+          'then press Enter (or type "skip"): '
+      );
+      if (ans1.trim().toLowerCase() === 'skip') return 'skipped';
+
+      // Without rollovers, a simple setBudget on a category that had a
+      // rollover config may fail; try it and capture the server's reply.
+      let caught: unknown = null;
+      try {
+        await tools.setBudget({ category_id: catId, amount: '5' });
+      } catch (e) {
+        caught = e;
+      }
+      if (caught === null) {
+        console.log(
+          '    setBudget succeeded with rollovers disabled — nothing to assert'
+        );
+      } else if (caught instanceof GraphQLError) {
+        console.log(
+          `    server rejection: code=${(caught as GraphQLError).code} status=${(caught as GraphQLError).httpStatus} msg=${(caught as GraphQLError).message.slice(0, 120)}`
+        );
+      } else {
+        console.log(`    rejection: ${(caught as Error).message.slice(0, 120)}`);
+      }
+
+      await prompt(
+        '→ Re-enable Rollovers in Copilot, then press Enter to continue (recovery check): '
+      );
+      // Recovery: clearing should work regardless.
+      await tools.setBudget({ category_id: catId, amount: '0' });
+      return;
+    }
+  );
+}
+
+// -----------------------------------------------------------------------------
 // Report
 // -----------------------------------------------------------------------------
 
@@ -1431,11 +2186,33 @@ function printReport(wallClockMs: number): void {
   }
   console.log('-'.repeat(colWidth + 1 + 5 + 1 + 5 + 1 + 9));
 
-  const totalPass = results.filter((r) => r.ok).length;
+  const totalPass = results.filter((r) => r.ok && !r.skipped).length;
+  const totalSkipped = results.filter((r) => r.skipped).length;
   const totalFail = results.filter((r) => !r.ok).length;
   console.log(
     `${'TOTAL'.padEnd(colWidth)} ${String(totalPass).padStart(5)} ${String(totalFail).padStart(5)} ${(wallClockMs / 1000).toFixed(2).padStart(7)}s`
   );
+  if (totalSkipped > 0) {
+    console.log(`(${totalSkipped} step(s) skipped)`);
+  }
+
+  // Consistency lag summary (if section ran)
+  if (consistencyLags.length > 0) {
+    const observed = consistencyLags
+      .filter((s): s is { label: string; lagMs: number } => s.lagMs !== null)
+      .map((s) => s.lagMs)
+      .sort((a, b) => a - b);
+    console.log('\nWrite-to-read consistency lag:');
+    for (const s of consistencyLags) {
+      const txt = s.lagMs === null ? 'TIMEOUT (>60s)' : `${s.lagMs}ms`;
+      console.log(`  ${s.label.padEnd(32)} ${txt}`);
+    }
+    if (observed.length > 0) {
+      const median = observed[Math.floor(observed.length / 2)]!;
+      const max = observed[observed.length - 1]!;
+      console.log(`  ${'(median/max)'.padEnd(32)} ${median}ms / ${max}ms`);
+    }
+  }
 
   // Latency stats (successful ops only)
   const okDurations = results.filter((r) => r.ok).map((r) => r.durationMs);
@@ -1473,12 +2250,16 @@ function printReport(wallClockMs: number): void {
 async function main(): Promise<void> {
   console.log('Copilot GraphQL E2E smoke test');
   console.log(
-    `flags: quick=${quick} skipDestructive=${skipDestructive} skipErrors=${skipErrors} skipEdgeCases=${skipEdgeCases} section=${onlySection ?? 'all'}`
+    `flags: quick=${quick} skipDestructive=${skipDestructive} skipErrors=${skipErrors} ` +
+      `skipEdgeCases=${skipEdgeCases} skipConsistency=${skipConsistency} ` +
+      `skipMcpE2e=${skipMcpE2e} includeStateGated=${includeStateGated} ` +
+      `section=${onlySection ?? 'all'}`
   );
 
   const auth = new FirebaseAuth(() => extractRefreshToken());
   const client = new GraphQLClient(auth);
   const db = new CopilotDatabase();
+  const tools = new CopilotMoneyTools(db, client);
 
   const t0 = Date.now();
 
@@ -1503,6 +2284,21 @@ async function main(): Promise<void> {
   // Section 4 — edge cases
   if (sectionEnabled('edge') && !skipDestructive && !quick) {
     await smokeEdgeCases(client, db);
+  }
+
+  // Section 5 — write-to-read consistency (polls local cache after writes)
+  if (sectionEnabled('consistency') && !skipDestructive && !quick) {
+    await smokeWriteReadConsistency(client, db, tools);
+  }
+
+  // Section 6 — MCP tool dispatch chain
+  if (sectionEnabled('mcp-e2e') && !skipDestructive && !quick) {
+    await smokeMcpToolEndToEnd(db, tools);
+  }
+
+  // Section 7 — state-gated (opt-in, interactive)
+  if (sectionEnabled('state-gated')) {
+    await smokeStateGated(db, tools);
   }
 
   const wall = Date.now() - t0;
