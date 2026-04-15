@@ -2,20 +2,20 @@
  * Tests for review_transactions behavior over the GraphQL path.
  *
  * The current implementation issues one EditTransaction mutation per
- * transaction (sequential await loop). This file verifies:
+ * transaction with bounded concurrency (max 5 in flight). This file
+ * verifies:
  *  - one GraphQL call is issued per transaction ID
- *  - calls happen in input order
  *  - each call carries the right accountId/itemId from the local cache
  *  - result shape matches the input
- *
- * (Historically this file tested a concurrent batch cap; the current
- * implementation is sequential, which trivially respects any concurrency cap.)
+ *  - at no point are there more than 5 in-flight GraphQL mutations
  */
 
 import { describe, test, expect } from 'bun:test';
+import { mock } from 'bun:test';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
+import type { GraphQLClient } from '../../src/core/graphql/client.js';
 
 function makeMockDb(txnIds: string[]): CopilotDatabase {
   const db = new CopilotDatabase('/nonexistent');
@@ -67,7 +67,7 @@ describe('review_transactions dispatches one EditTransaction per id', () => {
     });
   });
 
-  test('batch of 25 issues one call per id, preserving order', async () => {
+  test('batch of 25 issues one call per id', async () => {
     const ids = Array.from({ length: 25 }, (_, i) => `txn-${String(i).padStart(2, '0')}`);
     const db = makeMockDb(ids);
     const client = createMockGraphQLClient({
@@ -91,7 +91,11 @@ describe('review_transactions dispatches one EditTransaction per id', () => {
     expect(result.transaction_ids).toEqual(ids);
 
     expect(client._calls).toHaveLength(25);
-    expect(client._calls.map((c) => (c.variables as any).id)).toEqual(ids);
+    // Every id should have been called exactly once (bounded-concurrency
+    // does not guarantee call-ordering across workers, only that the count
+    // and set of ids match).
+    const calledIds = client._calls.map((c) => (c.variables as any).id).sort();
+    expect(calledIds).toEqual([...ids].sort());
   });
 
   test('passes reviewed=false through as isReviewed=false', async () => {
@@ -113,5 +117,94 @@ describe('review_transactions dispatches one EditTransaction per id', () => {
 
     await tools.reviewTransactions({ transaction_ids: ['a', 'b'], reviewed: false });
     expect(client._calls.every((c) => (c.variables as any).input.isReviewed === false)).toBe(true);
+  });
+});
+
+describe('review_transactions respects 5-parallel concurrency cap', () => {
+  /**
+   * Build a GraphQL client that delays every mutate() for `delayMs` and
+   * tracks the max number of concurrent in-flight calls.
+   */
+  function makeConcurrencyTrackingClient(delayMs: number): GraphQLClient & {
+    _maxConcurrent: number;
+    _inflightSamples: number[];
+    _totalCalls: number;
+  } {
+    let inflight = 0;
+    let maxConcurrent = 0;
+    const samples: number[] = [];
+    let totalCalls = 0;
+
+    const client = {
+      mutate: mock(async (op: string, _query: string, vars: unknown) => {
+        inflight++;
+        totalCalls++;
+        maxConcurrent = Math.max(maxConcurrent, inflight);
+        samples.push(inflight);
+        try {
+          await new Promise((r) => setTimeout(r, delayMs));
+          const v = vars as { id: string; input: { isReviewed: boolean } };
+          return {
+            editTransaction: {
+              transaction: {
+                id: v.id,
+                categoryId: 'c',
+                userNotes: null,
+                isReviewed: v.input.isReviewed,
+                tags: [],
+              },
+            },
+          };
+        } finally {
+          inflight--;
+        }
+      }),
+      get _maxConcurrent(): number {
+        return maxConcurrent;
+      },
+      get _inflightSamples(): number[] {
+        return samples;
+      },
+      get _totalCalls(): number {
+        return totalCalls;
+      },
+    };
+    return client as unknown as GraphQLClient & {
+      _maxConcurrent: number;
+      _inflightSamples: number[];
+      _totalCalls: number;
+    };
+  }
+
+  test('batch of 20 never exceeds 5 concurrent calls', async () => {
+    const ids = Array.from({ length: 20 }, (_, i) => `txn-${String(i).padStart(2, '0')}`);
+    const db = makeMockDb(ids);
+    // Use a delay so multiple workers genuinely run concurrently.
+    const client = makeConcurrencyTrackingClient(25);
+    const tools = new CopilotMoneyTools(db, client);
+
+    const result = await tools.reviewTransactions({ transaction_ids: ids });
+    expect(result.success).toBe(true);
+    expect(result.reviewed_count).toBe(20);
+    expect(client._totalCalls).toBe(20);
+
+    // The cap is 5: we should observe concurrency saturated at 5 but
+    // never strictly greater than 5.
+    expect(client._maxConcurrent).toBeLessThanOrEqual(5);
+    // Sanity: we also want to confirm real parallelism — at least one
+    // sample should be > 1 (otherwise we'd be sequential).
+    expect(client._maxConcurrent).toBeGreaterThan(1);
+  });
+
+  test('batch of 3 runs all concurrently (below cap)', async () => {
+    const ids = ['a', 'b', 'c'];
+    const db = makeMockDb(ids);
+    const client = makeConcurrencyTrackingClient(20);
+    const tools = new CopilotMoneyTools(db, client);
+
+    await tools.reviewTransactions({ transaction_ids: ids });
+    // All 3 should be able to run in parallel (since 3 < 5).
+    expect(client._maxConcurrent).toBeLessThanOrEqual(5);
+    expect(client._maxConcurrent).toBeGreaterThanOrEqual(2);
   });
 });

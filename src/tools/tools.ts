@@ -2424,29 +2424,64 @@ export class CopilotMoneyTools {
       throw new Error(`Transactions not found: ${missing.join(', ')}`);
     }
 
-    let reviewed_count = 0;
+    // Pre-flight: confirm every transaction has account/item ids before
+    // issuing any writes. Keeps partial-failure surface small.
     for (const id of transaction_ids) {
       const txn = txnMap.get(id)!;
       if (!txn.account_id || !txn.item_id) {
         throw new Error(`Transaction ${id} missing account_id or item_id in local cache`);
       }
-      try {
-        await editTransaction(client, {
-          id,
-          accountId: txn.account_id,
-          itemId: txn.item_id,
-          input: { isReviewed: reviewed },
-        });
-        reviewed_count++;
-      } catch (e) {
-        if (e instanceof GraphQLError) {
-          throw new Error(
-            `review_transactions failed at id=${id} (${reviewed_count}/${transaction_ids.length} succeeded): ${graphQLErrorToMcpError(e)}`,
-            { cause: e }
-          );
+    }
+
+    // Bounded concurrency: never more than CONCURRENCY in flight at once.
+    // The user explicitly asked to cap parallel writes at 5 to avoid
+    // hammering Copilot's API. We preserve the partial-failure contract:
+    // on the first error we stop starting new writes, wait for in-flight
+    // ones to settle, and surface the error with a success count that
+    // accurately reflects completed writes.
+    const CONCURRENCY = 5;
+    let reviewed_count = 0;
+    let firstError: { id: string; error: unknown } | null = null as {
+      id: string;
+      error: unknown;
+    } | null;
+    let cursor = 0;
+
+    const worker = async (): Promise<void> => {
+      while (true) {
+        if (firstError) return;
+        const idx = cursor++;
+        if (idx >= transaction_ids.length) return;
+        const id = transaction_ids[idx]!;
+        const txn = txnMap.get(id)!;
+        try {
+          await editTransaction(client, {
+            id,
+            accountId: txn.account_id!,
+            itemId: txn.item_id!,
+            input: { isReviewed: reviewed },
+          });
+          reviewed_count++;
+        } catch (e) {
+          // Record the first failure only; other in-flight workers settle.
+          if (!firstError) firstError = { id, error: e };
+          return;
         }
-        throw e;
       }
+    };
+
+    const workerCount = Math.min(CONCURRENCY, transaction_ids.length);
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+    if (firstError) {
+      const { id, error } = firstError;
+      if (error instanceof GraphQLError) {
+        throw new Error(
+          `review_transactions failed at id=${id} (${reviewed_count}/${transaction_ids.length} succeeded): ${graphQLErrorToMcpError(error)}`,
+          { cause: error }
+        );
+      }
+      throw error;
     }
 
     return {
