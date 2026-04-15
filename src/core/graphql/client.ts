@@ -88,10 +88,19 @@ export class GraphQLClient {
       );
     }
 
-    const body = (await response.json()) as {
-      data?: TResponse;
-      errors?: Array<{ message: string }>;
-    };
+    let body: { data?: TResponse; errors?: Array<{ message: string }> };
+    try {
+      body = (await response.json()) as typeof body;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.logError(operationName, 'UNKNOWN', response.status);
+      throw new GraphQLError(
+        'UNKNOWN',
+        `Invalid JSON response: ${msg}`,
+        operationName,
+        response.status
+      );
+    }
 
     if (body.errors && body.errors.length > 0) {
       const firstMessage = body.errors[0]?.message ?? 'GraphQL error (no message)';
