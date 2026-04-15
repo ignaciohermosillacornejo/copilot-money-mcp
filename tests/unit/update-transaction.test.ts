@@ -2,11 +2,13 @@
  * Unit tests for the update_transaction tool (GraphQL-based).
  *
  * Only category_id, note, and tag_ids are supported via GraphQL's
- * EditTransaction mutation. Other fields (excluded, name, internal_transfer,
- * goal_id) throw "fields not supported via GraphQL" per tools.ts.
+ * EditTransaction mutation. Legacy fields (excluded, name, internal_transfer,
+ * goal_id) were removed from the schema when the backend was migrated to
+ * GraphQL; they now hit the defense-in-depth "unknown field" check in
+ * updateTransaction.
  *
  * Covers: per-field mapping, multi-field atomic dispatch, argument
- * validation, referential integrity checks, unsupported-field rejection.
+ * validation, referential integrity checks, unknown-field rejection.
  */
 
 import { describe, test, expect } from 'bun:test';
@@ -165,9 +167,9 @@ describe('updateTransaction — multi-field atomic dispatch', () => {
   });
 });
 
-describe('updateTransaction — unsupported-field rejection', () => {
+describe('updateTransaction — legacy-field rejection', () => {
   test.each(['excluded', 'name', 'internal_transfer', 'goal_id'])(
-    'rejects writes via GraphQL for unsupported field: %s',
+    'rejects legacy (non-GraphQL) field: %s',
     async (field) => {
       const { tools, client } = makeTools();
       const args: Record<string, unknown> = { transaction_id: 'txn1' };
@@ -175,9 +177,7 @@ describe('updateTransaction — unsupported-field rejection', () => {
       if (field === 'name') args.name = 'New Name';
       if (field === 'internal_transfer') args.internal_transfer = true;
       if (field === 'goal_id') args.goal_id = 'goal1';
-      await expect(tools.updateTransaction(args as any)).rejects.toThrow(
-        /not supported via GraphQL/i
-      );
+      await expect(tools.updateTransaction(args as any)).rejects.toThrow(/unknown field/i);
       expect(client._calls).toHaveLength(0);
     }
   );

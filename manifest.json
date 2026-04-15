@@ -100,7 +100,9 @@
   ],
   "tools_generated": false,
   "compatibility": {
-    "platforms": ["darwin"],
+    "platforms": [
+      "darwin"
+    ],
     "runtimes": {
       "node": ">=18.0.0"
     }
@@ -110,7 +112,9 @@
     "entry_point": "dist/cli.js",
     "mcp_config": {
       "command": "${__dirname}/dist/launcher.sh",
-      "args": ["${__dirname}/dist/cli.js"]
+      "args": [
+        "${__dirname}/dist/cli.js"
+      ]
     }
   }
 }

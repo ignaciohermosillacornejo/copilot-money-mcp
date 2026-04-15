@@ -2228,8 +2228,8 @@ export class CopilotMoneyTools {
   /**
    * Create a new user-defined category in Copilot Money.
    *
-   * Generates a unique category_id, writes to Firestore, then clears the cache
-   * so the new category is visible on next query.
+   * Generates a unique category_id, writes via GraphQL; local cache is
+   * refreshed by Copilot's sync process.
    */
   async createCategory(args: {
     name: string;
@@ -2268,20 +2268,17 @@ export class CopilotMoneyTools {
   /**
    * Update one or more fields on a transaction in a single atomic write.
    *
-   * Supported fields: category_id, note, tag_ids, excluded, name,
-   * internal_transfer, goal_id. Omitted fields are preserved. note=""
-   * clears the note. tag_ids=[] clears all tags. goal_id=null unlinks
-   * (Firestore gets "", cache gets undefined).
+   * Supported fields: category_id, note, tag_ids. Omitted fields are preserved.
+   * note="" clears the note. tag_ids=[] clears all tags. Other legacy fields
+   * (name, excluded, internal_transfer, goal_id) are not writable through the
+   * GraphQL EditTransaction mutation and were removed from this tool when the
+   * backend was migrated.
    */
   async updateTransaction(args: {
     transaction_id: string;
     category_id?: string;
     note?: string;
     tag_ids?: string[];
-    excluded?: boolean;
-    name?: string;
-    internal_transfer?: boolean;
-    goal_id?: string | null;
   }): Promise<{
     success: true;
     transaction_id: string;
@@ -2293,16 +2290,7 @@ export class CopilotMoneyTools {
     // Reject unknown fields (equivalent to JSON Schema additionalProperties: false,
     // but re-checked here as a defense in depth in case the method is called directly
     // without going through the MCP dispatch layer).
-    const allowedKeys = new Set([
-      'transaction_id',
-      'category_id',
-      'note',
-      'tag_ids',
-      'excluded',
-      'name',
-      'internal_transfer',
-      'goal_id',
-    ]);
+    const allowedKeys = new Set(['transaction_id', 'category_id', 'note', 'tag_ids']);
     for (const key of Object.keys(args)) {
       if (!allowedKeys.has(key)) {
         throw new Error(`update_transaction: unknown field "${key}"`);
@@ -2348,28 +2336,6 @@ export class CopilotMoneyTools {
         }
       }
     }
-    if ('goal_id' in args && args.goal_id !== null && args.goal_id !== undefined) {
-      validateDocId(args.goal_id, 'goal_id');
-      const goals = await this.db.getGoals();
-      if (!goals.find((g) => g.goal_id === args.goal_id)) {
-        throw new Error(`Goal not found: ${args.goal_id}`);
-      }
-    }
-
-    // Reject fields not supported via the EditTransaction GraphQL mutation.
-    const unsupported: string[] = [];
-    if ('excluded' in args && args.excluded !== undefined) unsupported.push('excluded');
-    if ('name' in args && args.name !== undefined) unsupported.push('name');
-    if ('internal_transfer' in args && args.internal_transfer !== undefined)
-      unsupported.push('internal_transfer');
-    if ('goal_id' in args && args.goal_id !== undefined) unsupported.push('goal_id');
-    if (unsupported.length > 0) {
-      throw new Error(
-        `update_transaction: fields not supported via GraphQL: ${unsupported.join(', ')}. ` +
-          `Only category_id, note, and tag_ids are writable through this tool.`
-      );
-    }
-
     // Map MCP fields → EditTransaction input shape.
     const input: {
       categoryId?: string;
@@ -2417,8 +2383,8 @@ export class CopilotMoneyTools {
   /**
    * Mark one or more transactions as reviewed (or unreviewed).
    *
-   * Validates all transaction IDs, writes user_reviewed to Firestore for each,
-   * then patches the in-memory cache.
+   * Validates all transaction IDs, sets isReviewed via GraphQL for each; local
+   * cache is refreshed by Copilot's sync process.
    */
   async reviewTransactions(args: { transaction_ids: string[]; reviewed?: boolean }): Promise<{
     success: boolean;
@@ -2481,8 +2447,8 @@ export class CopilotMoneyTools {
    * Create a new user-defined tag.
    *
    * Generates a deterministic tag_id from the name, validates it does not
-   * already exist, writes to Firestore, then clears the cache so the next
-   * read picks up the new tag.
+   * already exist, writes via GraphQL; local cache is refreshed by Copilot's
+   * sync process.
    */
   async createTag(args: {
     name: string;
@@ -2512,8 +2478,8 @@ export class CopilotMoneyTools {
   /**
    * Delete an existing user-defined tag.
    *
-   * Validates the tag exists in the local cache, deletes from Firestore,
-   * then clears the cache.
+   * Validates the tag exists in the local cache, deletes via GraphQL; local
+   * cache is refreshed by Copilot's sync process.
    */
   async deleteTag(args: { tag_id: string }): Promise<{
     success: true;
@@ -2534,7 +2500,7 @@ export class CopilotMoneyTools {
    * Update an existing user-defined category.
    *
    * Validates the category exists, applies only the provided fields via
-   * Firestore updateMask, then clears the cache.
+   * GraphQL; local cache is refreshed by Copilot's sync process.
    */
   async updateCategory(args: {
     category_id: string;
@@ -2635,8 +2601,8 @@ export class CopilotMoneyTools {
   /**
    * Change the state of a recurring item (activate, pause, or archive).
    *
-   * Validates the recurring item exists, writes both state and is_active
-   * fields to Firestore, then clears the cache.
+   * Validates the recurring item exists, writes state via GraphQL; local cache
+   * is refreshed by Copilot's sync process.
    */
   async setRecurringState(args: {
     recurring_id: string;
@@ -2681,8 +2647,9 @@ export class CopilotMoneyTools {
   /**
    * Update an existing tag's name and/or color.
    *
-   * Validates the tag exists, builds a dynamic update mask for only the
-   * provided fields, writes to Firestore, then clears the cache.
+   * Validates the tag exists, builds a dynamic patch for only the provided
+   * fields, writes via GraphQL; local cache is refreshed by Copilot's sync
+   * process.
    */
   async updateTag(args: {
     tag_id: string;
@@ -2709,8 +2676,8 @@ export class CopilotMoneyTools {
   /**
    * Create a new recurring/subscription item.
    *
-   * Generates a unique recurring_id, writes to Firestore, then clears the cache
-   * so the new recurring item is visible on next query.
+   * Generates a unique recurring_id, writes via GraphQL; local cache is
+   * refreshed by Copilot's sync process.
    */
   async createRecurring(args: { transaction_id: string; frequency: string }): Promise<{
     success: true;
@@ -2763,8 +2730,9 @@ export class CopilotMoneyTools {
   /**
    * Update an existing recurring/subscription item.
    *
-   * Validates the recurring item exists, builds a dynamic update mask from the
-   * provided fields, writes to Firestore, then clears the cache.
+   * Validates the recurring item exists, builds a dynamic patch from the
+   * provided fields, writes via GraphQL; local cache is refreshed by Copilot's
+   * sync process.
    */
   async updateRecurring(args: {
     recurring_id: string;
@@ -3682,7 +3650,7 @@ export function createToolSchemas(): ToolSchema[] {
       name: 'get_investment_performance',
       description:
         'Get per-security investment performance data. Returns structured performance records ' +
-        'from Firestore, enriched with ticker symbol and name from the securities collection. ' +
+        'from the local LevelDB cache, enriched with ticker symbol and name from the securities collection. ' +
         'Filter by ticker symbol or security ID.',
       inputSchema: {
         type: 'object',
@@ -3820,7 +3788,7 @@ export function createToolSchemas(): ToolSchema[] {
 /**
  * Create MCP tool schemas for write tools.
  *
- * These tools modify Copilot Money data via the Firestore REST API and are
+ * These tools modify Copilot Money data via GraphQL and are
  * only registered when the server is started with the --write flag.
  *
  * @returns List of write tool schema definitions
@@ -3830,12 +3798,12 @@ export function createWriteToolSchemas(): ToolSchema[] {
     {
       name: 'update_transaction',
       description:
-        'Update one or more fields on a transaction in a single atomic write. ' +
-        'Pass transaction_id plus any combination of category_id, note, tag_ids, ' +
-        'excluded, name, internal_transfer, or goal_id. Omitted fields are preserved ' +
-        '(e.g., sending only tag_ids does not erase the note). Pass note="" to clear ' +
-        'the note. Pass tag_ids=[] to clear all tags. Pass goal_id=null to unlink the ' +
-        'goal. At least one mutable field must be provided besides transaction_id.',
+        "Update a single transaction's category, note, or tags. Pass transaction_id plus " +
+        'any combination of category_id, note, or tag_ids — only specified fields are changed. ' +
+        'Pass note="" to clear the note. Pass tag_ids=[] to clear all tags. At least one mutable ' +
+        'field must be provided besides transaction_id. Other fields (name, excluded, ' +
+        'internal_transfer, goal_id) are not writable through the GraphQL API and were removed ' +
+        'from this tool when the backend was migrated.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -3856,22 +3824,6 @@ export function createWriteToolSchemas(): ToolSchema[] {
             type: 'array',
             items: { type: 'string' },
             description: 'Tag IDs to set. Pass empty array to clear all tags.',
-          },
-          excluded: {
-            type: 'boolean',
-            description: 'Whether the transaction is excluded from spending reports.',
-          },
-          name: {
-            type: 'string',
-            description: 'Display name (will be trimmed; must be non-empty if present).',
-          },
-          internal_transfer: {
-            type: 'boolean',
-            description: 'Whether the transaction is an internal transfer.',
-          },
-          goal_id: {
-            type: ['string', 'null'],
-            description: 'Financial goal ID to link to. Pass null to unlink the existing goal.',
           },
         },
         required: ['transaction_id'],
@@ -4212,74 +4164,51 @@ export function createWriteToolSchemas(): ToolSchema[] {
     {
       name: 'update_recurring',
       description:
-        'Update an existing recurring/subscription item. Can modify name, amount, frequency, ' +
-        'category, account, match string, and transaction ID lists. ' +
-        'Useful for fixing recurring detection — update match_string and transaction_ids ' +
-        'to teach Copilot which transactions belong to this recurring charge. ' +
-        'Writes directly to Copilot Money via GraphQL.',
+        'Update an existing recurring transaction. Pass recurring_id plus any combination of ' +
+        'state or rule (name_contains, min_amount, max_amount, days). The recurring cannot be ' +
+        'renamed or re-linked to a different transaction through this tool — those fields must ' +
+        'be changed in the Copilot Money web app. Writes directly to Copilot Money via GraphQL.',
       inputSchema: {
-        type: 'object',
+        type: 'object' as const,
         properties: {
           recurring_id: {
-            type: 'string',
-            description: 'ID of the recurring item to update (from get_recurring_transactions)',
+            type: 'string' as const,
+            description: 'ID of the recurring to update.',
           },
-          name: {
-            type: 'string',
-            description: 'New display name for the recurring charge',
-          },
-          amount: {
-            type: 'number',
-            description: 'Expected recurring amount (must be > 0)',
-          },
-          frequency: {
-            type: 'string',
-            enum: ['weekly', 'biweekly', 'monthly', 'yearly'],
-            description: 'How often this charge recurs',
-          },
-          category_id: {
-            type: 'string',
-            description: 'Category ID to assign (from get_categories)',
-          },
-          account_id: {
-            type: 'string',
-            description: 'Account ID this recurring charge is associated with',
-          },
-          merchant_name: {
-            type: 'string',
-            description: 'Merchant name for the recurring charge',
-          },
-          emoji: {
-            type: 'string',
-            description: 'Emoji icon for the recurring item',
-          },
-          match_string: {
-            type: 'string',
+          state: {
+            type: 'string' as const,
+            enum: ['ACTIVE', 'PAUSED', 'ARCHIVED'] as const,
             description:
-              'Pattern used to auto-match incoming transactions to this recurring item ' +
-              '(e.g., "NETFLIX" matches transactions with "NETFLIX" in the name)',
+              'State of the recurring. Use set_recurring_state instead if you only want to ' +
+              'change state — this tool is for broader edits.',
           },
-          transaction_ids: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'Transaction IDs that belong to this recurring item',
-          },
-          excluded_transaction_ids: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'Transaction IDs explicitly excluded from this recurring item',
-          },
-          included_transaction_ids: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'Transaction IDs explicitly included in this recurring item',
-          },
-          days_filter: {
-            type: 'number',
-            description: 'Expected day-of-month for matching (e.g., 1 for charges on the 1st)',
+          rule: {
+            type: 'object' as const,
+            description: 'Matching rule. Controls how Copilot auto-detects future payments.',
+            properties: {
+              name_contains: {
+                type: 'string' as const,
+                description: 'Substring that must appear in the merchant/payee name.',
+              },
+              min_amount: {
+                type: 'string' as const,
+                description: 'Minimum amount (as a decimal string) for a transaction to match.',
+              },
+              max_amount: {
+                type: 'string' as const,
+                description: 'Maximum amount (as a decimal string) for a transaction to match.',
+              },
+              days: {
+                type: 'array' as const,
+                items: { type: 'number' as const },
+                description: 'Days of the month (1-31) when this recurring is expected.',
+              },
+            },
+            additionalProperties: false,
           },
         },
         required: ['recurring_id'],
+        additionalProperties: false,
       },
       annotations: {
         readOnlyHint: false,

@@ -795,23 +795,24 @@ describe('handleCallTool — write tools', () => {
     expect((result.content[0] as { text: string }).text).toMatch(/at least one field/i);
   });
 
-  test('update_transaction with unsupported field "name" returns error', async () => {
-    // `name` is no longer writable via GraphQL EditTransaction.
+  test('update_transaction with legacy field "name" returns error', async () => {
+    // `name` is no longer writable via GraphQL EditTransaction and was removed
+    // from the MCP schema; the defense-in-depth allowedKeys check catches it.
     const result = await writeServer.handleCallTool('update_transaction', {
       transaction_id: 'txn1',
       name: 'rename attempt',
     });
     expect(result.isError).toBe(true);
-    expect((result.content[0] as { text: string }).text).toMatch(/not supported via GraphQL/i);
+    expect((result.content[0] as { text: string }).text).toMatch(/unknown field/i);
   });
 
-  test('update_transaction with unsupported field goal_id returns error', async () => {
+  test('update_transaction with legacy field goal_id returns error', async () => {
     const result = await writeServer.handleCallTool('update_transaction', {
       transaction_id: 'txn1',
       goal_id: 'goal1',
     });
     expect(result.isError).toBe(true);
-    expect((result.content[0] as { text: string }).text).toMatch(/not supported via GraphQL/i);
+    expect((result.content[0] as { text: string }).text).toMatch(/unknown field/i);
   });
 });
 
