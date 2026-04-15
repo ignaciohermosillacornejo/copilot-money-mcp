@@ -1122,6 +1122,10 @@ function processRecurring(fields: Map<string, FirestoreValue>, docId: string): R
  * Internal helper to process a budget document.
  */
 function processBudget(fields: Map<string, FirestoreValue>, docId: string): Budget | null {
+  // Firestore represents deleted docs as empty-field entries. Drop them
+  // rather than surfacing ghost `{budget_id}` rows (issue #278).
+  if (fields.size === 0) return null;
+
   const budgetId = getString(fields, 'budget_id') ?? docId;
 
   const budgetData: Record<string, unknown> = {

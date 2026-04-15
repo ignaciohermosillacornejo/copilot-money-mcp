@@ -3556,6 +3556,34 @@ describe('decoder coverage', () => {
       expect(budgets[0]?.budget_id).toBe('bud-valid');
     });
 
+    // Bug #278: Firestore represents deleted docs as empty-field entries.
+    // In a real user database 50/86 budget docs were tombstones, which
+    // `processBudget` was surfacing as ghost `{budget_id}` objects. Mirrors
+    // the existing guard on `processCategory` (`if (!name) return null`).
+    test('processBudget skips empty-field tombstone docs', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'budget-tombstone-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'budgets',
+          id: 'bud-tombstone',
+          fields: {}, // no fields at all — Firestore's deleted-doc marker
+        },
+        {
+          collection: 'budgets',
+          id: 'bud-real',
+          fields: {
+            budget_id: 'bud-real',
+            category_id: 'cat-123',
+            amount: 250,
+          },
+        },
+      ]);
+
+      const budgets = await decodeBudgets(dbPath);
+      expect(budgets.length).toBe(1);
+      expect(budgets[0]?.budget_id).toBe('bud-real');
+    });
+
     test('processAccount catch: NaN balance fails schema number validation', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'acc-schema-fail-db');
       await createTestDatabase(dbPath, [
