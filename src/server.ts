@@ -38,7 +38,7 @@ export class CopilotMoneyServer {
    * @param dbPath - Optional path to LevelDB database.
    *                If undefined, uses default Copilot Money location.
    * @param decodeTimeoutMs - Optional timeout for decode operations in milliseconds.
-   * @param writeEnabled - If true, register write tools and enable Firestore writes.
+   * @param writeEnabled - If true, register write tools and enable GraphQL writes.
    */
   constructor(dbPath?: string, decodeTimeoutMs?: number, writeEnabled = false) {
     this.db = new CopilotDatabase(dbPath, decodeTimeoutMs);
@@ -399,7 +399,7 @@ export class CopilotMoneyServer {
  * @param dbPath - Optional path to LevelDB database.
  *                If undefined, uses default Copilot Money location.
  * @param decodeTimeoutMs - Optional timeout for decode operations in milliseconds.
- * @param writeEnabled - If true, register write tools and enable Firestore writes.
+ * @param writeEnabled - If true, register write tools and enable GraphQL writes.
  */
 export async function runServer(
   dbPath?: string,

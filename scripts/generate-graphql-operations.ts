@@ -40,7 +40,22 @@ export function extractQueryBlock(markdown: string, mutationName: string): strin
 }
 
 export function addTypenameToSelectionSets(query: string): string {
-  const ast = parse(query);
+  // Pass 1: strip Field selections carrying the `@client` directive. Apollo's
+  // documentTransform normally removes these client-only fields (local resolvers
+  // for fields that don't exist in the server schema) before the wire send, so
+  // forwarding them unstripped would cause the server to reject the query.
+  let ast = parse(query);
+  ast = visit(ast, {
+    Field(node) {
+      if (node.directives?.some((d) => d.name.value === 'client')) {
+        return null; // removes this field from the AST
+      }
+      return undefined;
+    },
+  });
+
+  // Pass 2: inject __typename into every non-root selection set (matches
+  // Apollo's documentTransform behavior required by Copilot's GraphQL server).
   const transformed = visit(ast, {
     SelectionSet(node, _key, parent) {
       // Skip the operation-level selection set (directly under OperationDefinition).

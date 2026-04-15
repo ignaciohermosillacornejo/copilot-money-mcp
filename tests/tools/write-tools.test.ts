@@ -189,6 +189,35 @@ describe('set_budget', () => {
     expect(client._calls).toHaveLength(0);
   });
 
+  test('accepts integer and zero-decimal amount strings', async () => {
+    // "250" (no decimals) and "250.00" should both validate.
+    const client = createMockGraphQLClient({ EditBudget: { editCategoryBudget: true } });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(tools.setBudget({ category_id: 'cat1', amount: '250' })).resolves.toMatchObject({
+      success: true,
+    });
+    await expect(tools.setBudget({ category_id: 'cat1', amount: '250.00' })).resolves.toMatchObject(
+      { success: true }
+    );
+    await expect(tools.setBudget({ category_id: 'cat1', amount: '0' })).resolves.toMatchObject({
+      success: true,
+      cleared: true,
+    });
+  });
+
+  test('rejects malformed amount strings (non-numeric, empty, negative, >2 decimals)', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    for (const bad of ['abc', '', '-50', '250.123', '1.', '.5', '1,000']) {
+      await expect(tools.setBudget({ category_id: 'cat1', amount: bad })).rejects.toThrow(
+        /amount must be a non-negative decimal/
+      );
+    }
+    expect(client._calls).toHaveLength(0);
+  });
+
   test('rejects empty category_id', async () => {
     const client = createMockGraphQLClient({});
     tools = new CopilotMoneyTools(mockDb, client);
@@ -242,6 +271,27 @@ describe('setRecurringState', () => {
       tools.setRecurringState({ recurring_id: 'rec1', state: 'deleted' as any })
     ).rejects.toThrow('state must be one of: ACTIVE, PAUSED, ARCHIVED');
     expect(client._calls).toHaveLength(0);
+  });
+
+  test('accepts uppercase ACTIVE; rejects lowercase active with clear error', async () => {
+    // Regression: the MCP tool schema previously exposed lowercase enum values,
+    // while the implementation validates uppercase. This test locks in the
+    // uppercase contract so the schema and implementation stay aligned.
+    const activeClient = createMockGraphQLClient({
+      EditRecurring: {
+        editRecurring: { recurring: { id: 'rec1', state: 'ACTIVE' } },
+      },
+    });
+    tools = new CopilotMoneyTools(mockDb, activeClient);
+    const result = await tools.setRecurringState({ recurring_id: 'rec1', state: 'ACTIVE' });
+    expect(result.state).toBe('ACTIVE');
+
+    const badClient = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, badClient);
+    await expect(
+      tools.setRecurringState({ recurring_id: 'rec1', state: 'active' as any })
+    ).rejects.toThrow('state must be one of: ACTIVE, PAUSED, ARCHIVED. Got: active');
+    expect(badClient._calls).toHaveLength(0);
   });
 });
 
