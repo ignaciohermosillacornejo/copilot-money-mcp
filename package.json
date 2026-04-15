@@ -63,6 +63,7 @@
     "fix": "bun run lint:fix && bun run format",
     "clean": "rm -rf dist coverage .bun-build",
     "pack:mcpb": "bun run scripts/pack-mcpb.ts",
+    "pack:mcpb:write": "bun run scripts/sync-manifest.ts -- --write && bun run scripts/pack-mcpb.ts -- --write",
     "prepublishOnly": "bun run clean && bun run build && bun test",
     "prepare": "husky"
   },

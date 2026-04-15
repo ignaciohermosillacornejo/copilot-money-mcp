@@ -23,6 +23,9 @@ bun.lock
 dist/
 *.mcpb
 .mcpb-staging/
+# Writes-enabled manifest variant produced by `bun run pack:mcpb:write`
+# (local-only build; the committed manifest.json describes the read-only bundle).
+manifest.write.json
 
 # Claude Code local state
 .claude/scheduled_tasks.lock
@@ -56,6 +59,7 @@ scripts/*
 !scripts/launcher.sh
 !scripts/generate-graphql-operations.ts
 !scripts/smoke-graphql.ts
+!scripts/build-write-manifest.ts
 # License-check scratch directory (created by CI license gate)
 .license-check/
 # Generated test fixtures

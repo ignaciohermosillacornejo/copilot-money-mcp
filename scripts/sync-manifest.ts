@@ -2,21 +2,26 @@
 /**
  * Sync manifest.json tools with actual tool definitions.
  *
- * Usage: bun run sync-manifest
+ * Usage:
+ *   bun run sync-manifest          # regenerates the read-only manifest.json
+ *   bun run sync-manifest -- --write  # writes manifest.write.json (local-only,
+ *                                       writes-enabled bundle metadata, gitignored)
  *
- * This script reads the tool schemas from createToolSchemas() and
- * createWriteToolSchemas() and updates the manifest.json tools array to
- * match, preserving custom descriptions where they exist but adding any
- * missing tools.
+ * This script reads tool schemas from createToolSchemas() and updates the
+ * read-only `manifest.json` tools array to match, preserving custom
+ * descriptions. With `--write`, it instead generates a writes-enabled variant
+ * at `manifest.write.json` for the local `pack:mcpb:write` build.
  */
 
 import { createToolSchemas } from '../src/tools/tools.js';
+import { buildWriteManifest } from './build-write-manifest.js';
 import { readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const manifestPath = join(__dirname, '../manifest.json');
+const writeManifestPath = join(__dirname, '../manifest.write.json');
 
 interface ManifestTool {
   name: string;
@@ -59,9 +64,18 @@ function truncateDescription(description: string, maxLength: number = 150): stri
 }
 
 function main() {
+  const writeMode = process.argv.includes('--write');
   const manifest: Manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-  // Only read tools ship in the manifest. Write tools are temporarily
-  // disabled in the published CLI while the backend is reworked.
+
+  if (writeMode) {
+    const writeManifest = buildWriteManifest(manifest as never) as unknown as Manifest;
+    writeFileSync(writeManifestPath, JSON.stringify(writeManifest, null, 2) + '\n');
+    console.log(
+      `✓ Wrote manifest.write.json with ${writeManifest.tools.length} tools (writes-enabled, local-only)`
+    );
+    return;
+  }
+
   const schemas = createToolSchemas();
 
   // Build a map of existing manifest tool descriptions (to preserve custom ones)

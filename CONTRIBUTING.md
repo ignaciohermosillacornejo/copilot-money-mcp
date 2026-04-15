@@ -32,11 +32,22 @@ bun run build
 bun install            # Install dependencies
 bun test               # Run tests
 bun run build          # Build for production
-bun run pack:mcpb      # Create .mcpb bundle for Claude Desktop
+bun run pack:mcpb      # Create read-only .mcpb bundle for Claude Desktop
+bun run pack:mcpb:write # Create writes-enabled .mcpb bundle (local self-install only)
 bun run check          # Run typecheck + lint + format:check + test
 bun run fix            # Run lint:fix + format
 bun run sync-manifest  # Verify manifest.json matches code
 ```
+
+#### Writes-enabled bundle (local-only)
+
+`bun run pack:mcpb:write` produces `copilot-money-mcp-write.mcpb`, a variant
+that advertises all 30 tools (17 read + 13 write) and passes `--write` to the
+CLI so write tools are unlocked. It is intended for **self-install only** and
+is **not published to Claude Desktop**; the release workflow continues to ship
+only the read-only bundle. The committed `manifest.json` is never modified —
+the writes-enabled metadata is generated into a gitignored
+`manifest.write.json` and swapped in at pack time.
 
 ## Architecture
 
