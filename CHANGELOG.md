@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-04-15
+
+Write tools are back — rewritten onto Copilot Money's official GraphQL API (`https://app.copilot.money/api/graphql`) after direct Firestore writes were blocked by Copilot's server-side type-check deploy. Opt-in via `--write` (unchanged). 13 write tools (down from 18) across transactions, tags, categories, budgets, and recurrings.
+
+### Breaking Changes
+
+- **Budget write tools consolidated.** `create_budget` / `update_budget` / `delete_budget` → single **`set_budget`**. The Copilot API only exposes `EditBudget(categoryId, {amount})`, so budgets are addressed by category rather than by budget document ID. `amount="0"` clears the budget. Pass `month="YYYY-MM"` for a single-month override (via `EditBudgetMonthly`); omit for the all-months default.
+- **`create_recurring` signature changed.** Now takes `{transaction_id, frequency}` — the API requires seeding a recurring from an existing transaction, so the tool derives `accountId` / `itemId` from the local DB. Previous `{name, amount, category_id, ...}` shape is gone.
+- **Goal write tools removed.** `create_goal` / `update_goal` / `delete_goal` have no web GraphQL equivalent (the app's goal mutations are mobile-only). Goal read tools (`get_goals`, `get_goal_history`) are unchanged.
+- **`update_transaction` field set trimmed.** No longer accepts `excluded`, `name`, `internal_transfer`, or `goal_id` — these are not writable through the public GraphQL mutations. Remaining writable fields: `category_id`, `note`, `tag_ids`.
+- **Error message wording changed.** The old "budgeting disabled" message is gone. When budgeting or rollovers are disabled in Copilot → Settings → General, writes succeed on the server and return a `USER_ACTION_REQUIRED` error with an "enable manually in Copilot settings" hint. The value will not appear in the Copilot UI until those toggles are re-enabled — see the `set_budget` tool description for the full caveat.
+
+### Added
+
+- `src/core/graphql/client.ts` — typed `GraphQLClient` and `GraphQLError` with discriminated `code: 'AUTH_FAILED' | 'SCHEMA_ERROR' | 'USER_ACTION_REQUIRED' | 'NETWORK' | 'UNKNOWN'`. Every thrown error logs operation name + code + HTTP status to stderr; response bodies are never logged (PII).
+- Six per-domain GraphQL modules (`transactions`, `categories`, `tags`, `recurrings`, `budgets`, `accounts`) — thin pure functions over the client, typed args in and compact `{id, changed}` out.
+- `scripts/generate-graphql-operations.ts` — build-time generator that reads captured mutation docs and emits `operations.generated.ts` with `__typename`-transformed query strings matching Apollo's `documentTransform` wire shape.
+- `scripts/smoke-graphql.ts` — opt-in, not in CI, runs against the developer's real account with create-edit-delete round-trips for each domain (`--skip-destructive` for read-only steps).
+
+### Removed
+
+- `src/core/firestore-client.ts`, `src/core/format/`, and their tests. The direct-Firestore write backend is gone. Field-mapping knowledge preserved in `docs/reference/firestore-write-schema.md` so future readers can recover it.
+
+### Known issues
+
+- **`set_budget` sync lag**: Writes succeed on the server but may take minutes to appear via `get_budgets` — budget docs appear to sync through Copilot's native app on a slower cadence than transactions/tags/categories/recurrings (which sync in seconds). Tool descriptions for `set_budget` and `get_budgets` document the caveat. Tracked in [#278](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/278).
+- Per-month overrides written via `set_budget(month=...)` are not surfaced in `get_budgets` — only the all-months default `amount` is shown.
+- **Upstream bugs surfaced during smoke testing** (reported to Copilot; no workaround on our side):
+  - `EditTransaction` silently accepts invalid `categoryId` values — the server returns success but the category isn't actually changed.
+  - Error messages occasionally leak the user's Firebase UID in the composite document ID when a mutation fails.
+
 ## [1.7.1] - 2026-04-15
 
 ### Fixed
