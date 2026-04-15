@@ -141,6 +141,36 @@ describe('GraphQLClient', () => {
     }
   });
 
+  test('classifies malformed JSON on 2xx as UNKNOWN', async () => {
+    // Provide a broken body: 200 OK with body that is not valid JSON.
+    fetchCalls = [];
+    const originalFetch2 = globalThis.fetch;
+    globalThis.fetch = mock((url: string | URL | Request, options?: RequestInit) => {
+      fetchCalls.push({ url: String(url), options: options ?? {} });
+      return Promise.resolve(
+        new Response('not-json-garbage', {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+    }) as typeof fetch;
+
+    try {
+      const client = new GraphQLClient(createMockAuth());
+      try {
+        await client.mutate('TestOp', 'mutation TestOp { ok }', {});
+        throw new Error('should have thrown');
+      } catch (e) {
+        expect(e).toBeInstanceOf(GraphQLError);
+        expect((e as GraphQLError).code).toBe('UNKNOWN');
+        expect((e as GraphQLError).httpStatus).toBe(200);
+        expect((e as GraphQLError).message).toContain('Invalid JSON');
+      }
+    } finally {
+      globalThis.fetch = originalFetch2;
+    }
+  });
+
   test('logs to stderr when throwing on classified errors', async () => {
     mockFetch({ errors: [{ message: 'unauthorized' }] }, 401);
     const originalError = console.error;
