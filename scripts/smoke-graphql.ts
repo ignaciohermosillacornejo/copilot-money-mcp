@@ -20,10 +20,8 @@
  * Sections: tags, categories, transactions, recurrings, budgets, accounts,
  *           bulk, errors, edge, consistency, mcp-e2e, state-gated
  *
- * Concurrency: all parallel write fan-out in this script is bounded to at
- * most 5 concurrent requests via the `runBounded` helper. State-gated
- * tests are opt-in because they require the user to toggle UI state
- * manually in the Copilot desktop app between prompts.
+ * State-gated tests are opt-in because they require the user to toggle UI
+ * state manually in the Copilot desktop app between prompts.
  *
  * All created entities use the `GQL-TEST-*` prefix and are deleted in a
  * try/finally. If cleanup fails, the script prints explicit manual-cleanup
@@ -52,38 +50,6 @@ import {
 } from '../src/core/graphql/recurrings.js';
 import { setBudget } from '../src/core/graphql/budgets.js';
 import { editAccount } from '../src/core/graphql/accounts.js';
-
-// -----------------------------------------------------------------------------
-// Bounded-concurrency helper — never more than `limit` in-flight
-// -----------------------------------------------------------------------------
-
-/**
- * Run async tasks with a concurrency ceiling. Never more than `limit`
- * in flight at a time. Returns results in the same order as inputs.
- *
- * This exists so parallel writes in the smoke (and the mutations issued
- * by the MCP tool `review_transactions`) don't hammer Copilot's API.
- */
-async function runBounded<T, R>(
-  items: readonly T[],
-  limit: number,
-  fn: (item: T, idx: number) => Promise<R>
-): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  let next = 0;
-  async function worker(): Promise<void> {
-    while (next < items.length) {
-      const idx = next++;
-      results[idx] = await fn(items[idx]!, idx);
-    }
-  }
-  const workers = Array.from(
-    { length: Math.min(limit, items.length) },
-    () => worker()
-  );
-  await Promise.all(workers);
-  return results;
-}
 
 // -----------------------------------------------------------------------------
 // Polling helper — wait for a local-cache read to reflect a GraphQL write
