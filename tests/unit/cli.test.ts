@@ -129,10 +129,16 @@ describe('CLI entry point', () => {
       expect(stderr).not.toContain('Invalid');
     });
 
-    test('--write prints a temporarily-unavailable notice', async () => {
+    test('--write does not print a "temporarily unavailable" notice', async () => {
       const { stderr } = await runCli(['--write']);
 
-      expect(stderr).toContain('--write is temporarily unavailable');
+      expect(stderr).not.toContain('temporarily unavailable');
+    });
+
+    test('--write + --verbose logs that write tools are enabled', async () => {
+      const { stderr } = await runCli(['--write', '-v']);
+
+      expect(stderr).toContain('Write tools enabled');
     });
   });
 

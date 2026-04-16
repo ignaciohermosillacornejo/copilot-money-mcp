@@ -52,6 +52,7 @@ Usage:
 Options:
   --db-path <path>    Path to LevelDB database (default: Copilot Money's default location)
   --timeout <ms>      Decode timeout in milliseconds (default: 90000 = 90 seconds)
+  --write             Enable write tools (sends authenticated requests to Copilot Money's GraphQL API)
   --verbose, -v       Enable verbose logging
   --help, -h          Show this help message
 
@@ -95,18 +96,7 @@ function configureLogging(verbose: boolean): void {
 async function main(): Promise<void> {
   const { dbPath, verbose, timeoutMs, writeFlagSeen } = parseArgs();
 
-  // Configure logging first so the --write notice (and any later stderr) picks
-  // up the [ERROR] timestamp prefix in verbose mode.
   configureLogging(verbose);
-
-  if (writeFlagSeen) {
-    console.error(
-      '[copilot-money-mcp] --write is temporarily unavailable: Copilot Money ' +
-        'has restricted direct Firestore writes from third-party clients. ' +
-        'Starting in read-only mode. Status: ' +
-        'https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues'
-    );
-  }
 
   try {
     if (verbose) {
@@ -117,12 +107,13 @@ async function main(): Promise<void> {
       } else {
         console.log('Using default Copilot Money database location');
       }
+      if (writeFlagSeen) {
+        console.log('Write tools enabled (--write)');
+      }
       /* eslint-enable no-console */
     }
 
-    // Run the server in read-only mode. Write tools are temporarily disabled
-    // in the published CLI while the backend is reworked; see --write handling above.
-    await runServer(dbPath, timeoutMs, false);
+    await runServer(dbPath, timeoutMs, writeFlagSeen);
   } catch (error) {
     console.error('Server error:', error);
     process.exit(1);
