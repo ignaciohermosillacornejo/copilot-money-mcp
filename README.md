@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js 18+](https://img.shields.io/badge/node-18+-green.svg)](https://nodejs.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue.svg)](https://www.typescriptlang.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-6.0-blue.svg)](https://www.typescriptlang.org/)
 [![Tests](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/actions/workflows/test.yml)
 [![codecov](https://codecov.io/gh/ignaciohermosillacornejo/copilot-money-mcp/branch/main/graph/badge.svg)](https://codecov.io/gh/ignaciohermosillacornejo/copilot-money-mcp)
 [![Tools](https://img.shields.io/badge/tools-17-blue.svg)](https://github.com/ignaciohermosillacornejo/copilot-money-mcp)
