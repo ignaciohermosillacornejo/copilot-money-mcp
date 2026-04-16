@@ -386,6 +386,126 @@ export class CopilotDatabase {
   }
 
   /**
+   * Patch the in-memory budget for a category after a successful set_budget
+   * write. Mirrors what Copilot's app writes to LevelDB: the value lands in
+   * `amounts[YYYY-MM]` keyed by the current month (or an explicit month when
+   * `month` is provided). See issue #278 for the investigation — the top-level
+   * `amount` field is a frozen legacy artifact the Copilot app stopped
+   * writing to ~2 years ago, so the only way to observe a fresh budget write
+   * is via the amounts map.
+   *
+   * If no budget exists yet for the category, a new entry is pushed so the
+   * setBudget-then-getBudgets round trip still reflects the write.
+   *
+   * @returns true if the cache was populated and the patch applied, false if
+   *   the cache had not been loaded yet (next load picks up real state).
+   */
+  patchCachedBudget(categoryId: string, amount: number, month?: string): boolean {
+    if (!this._budgets) return false;
+    const monthKey =
+      month ??
+      (() => {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      })();
+
+    const existing = this._budgets.find((b) => b.category_id === categoryId);
+    if (existing) {
+      existing.amounts = { ...(existing.amounts ?? {}), [monthKey]: amount };
+    } else {
+      this._budgets.push({
+        budget_id: `patched-${categoryId}`,
+        category_id: categoryId,
+        amounts: { [monthKey]: amount },
+      });
+    }
+    return true;
+  }
+
+  /**
+   * Insert or merge a tag in the in-memory cache. If a tag with the same
+   * `tag_id` exists, incoming fields are merged on top (missing fields are
+   * preserved). Otherwise the tag is appended.
+   *
+   * No-op if the cache has not been loaded yet.
+   */
+  patchCachedTagUpsert(tag: Tag): void {
+    if (!this._tags) return;
+    const idx = this._tags.findIndex((t) => t.tag_id === tag.tag_id);
+    if (idx >= 0) {
+      Object.assign(this._tags[idx]!, tag);
+    } else {
+      this._tags.push(tag);
+    }
+  }
+
+  /**
+   * Remove a tag from the in-memory cache by id. No-op (returns false) if
+   * the cache isn't loaded or the tag isn't found.
+   */
+  patchCachedTagDelete(tagId: string): boolean {
+    if (!this._tags) return false;
+    const before = this._tags.length;
+    this._tags = this._tags.filter((t) => t.tag_id !== tagId);
+    return this._tags.length < before;
+  }
+
+  /**
+   * Insert or merge a category in the in-memory cache. Invalidates the
+   * derived `_categoryNameMap` so the next read rebuilds it. No-op if the
+   * cache has not been loaded yet.
+   */
+  patchCachedCategoryUpsert(category: Category): void {
+    if (!this._userCategories) return;
+    const idx = this._userCategories.findIndex((c) => c.category_id === category.category_id);
+    if (idx >= 0) {
+      Object.assign(this._userCategories[idx]!, category);
+    } else {
+      this._userCategories.push(category);
+    }
+    this._categoryNameMap = null;
+  }
+
+  /**
+   * Remove a category from the in-memory cache. Invalidates the derived
+   * name map. Returns false if the cache isn't loaded or the id isn't found.
+   */
+  patchCachedCategoryDelete(categoryId: string): boolean {
+    if (!this._userCategories) return false;
+    const before = this._userCategories.length;
+    this._userCategories = this._userCategories.filter((c) => c.category_id !== categoryId);
+    if (this._userCategories.length < before) {
+      this._categoryNameMap = null;
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Insert or merge a recurring item. No-op if cache isn't loaded.
+   */
+  patchCachedRecurringUpsert(recurring: Recurring): void {
+    if (!this._recurring) return;
+    const idx = this._recurring.findIndex((r) => r.recurring_id === recurring.recurring_id);
+    if (idx >= 0) {
+      Object.assign(this._recurring[idx]!, recurring);
+    } else {
+      this._recurring.push(recurring);
+    }
+  }
+
+  /**
+   * Remove a recurring item by id. Returns false if cache isn't loaded or
+   * the id isn't found.
+   */
+  patchCachedRecurringDelete(recurringId: string): boolean {
+    if (!this._recurring) return false;
+    const before = this._recurring.length;
+    this._recurring = this._recurring.filter((r) => r.recurring_id !== recurringId);
+    return this._recurring.length < before;
+  }
+
+  /**
    * Get the timestamp when cache was last loaded.
    *
    * @returns Unix timestamp in milliseconds, or null if not loaded
