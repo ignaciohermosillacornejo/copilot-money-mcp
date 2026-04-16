@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-04-16
+
+### Added
+
+- **Optimistic in-memory cache patching after writes.** Every successful GraphQL write now patches the corresponding entity in `CopilotDatabase`'s in-memory cache, so a subsequent read returns the new value without needing `refresh_database` + re-decode from LevelDB. Removes the stale-after-write UX for agents that write-then-read.
+- **Local-only `pack:mcpb:write` build script.** Produces a `copilot-money-mcp-write.mcpb` bundle advertising all 30 tools (17 read + 13 write) with `--write` baked into `mcp_config.args`, for self-installing the writes-enabled CLI in Claude Desktop. The committed `manifest.json` (read-only, 17 tools) is never touched.
+
+### Fixed
+
+- **`get_budgets` now reads the current month's value** ([#278](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/278)): Copilot's macOS app stopped writing to the top-level `amount` field ~2 years ago — fresh values live in `amounts[YYYY-MM]`. Our view was reading the legacy field and showing stale numbers. Also drops tombstoned entries (those without a live current-month value).
+- **`--write` flag now actually enables write tools** ([#282](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/282)): `cli.ts` parsed `--write` but forwarded a hardcoded `false` to `runServer`, so the flag had no effect. Also drops a stale "temporarily unavailable" banner that contradicted the restored-via-GraphQL writes from 2.0.0.
+- **`set_recurring_state` no longer fails on amount-only rules** ([#288](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/288)): `RecurringRule.nameContains` is non-nullable in Copilot's schema but the server returns `null` on recurrings matched by amount-only rules, causing every `setRecurringState` / `editRecurring` response to error. Trimmed the mutation response to only the fields we actually consume.
+- **Tool description drift** on four write/read tools corrected after an audit pass.
+
+### Changed
+
+- `GEMINI.md` now symlinks to `CLAUDE.md` so Gemini CLI users pick up the same project instructions.
+- CI: unit and E2E tests merged into a single job for accurate coverage reporting; README picks up a live CI status badge and Codecov badge.
+
 ## [2.0.0] - 2026-04-15
 
 Write tools are back — rewritten onto Copilot Money's official GraphQL API (`https://app.copilot.money/api/graphql`) after direct Firestore writes were blocked by Copilot's server-side type-check deploy. Opt-in via `--write` (unchanged). 13 write tools (down from 18) across transactions, tags, categories, budgets, and recurrings.
