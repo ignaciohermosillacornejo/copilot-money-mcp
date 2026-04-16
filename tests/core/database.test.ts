@@ -318,6 +318,209 @@ describe('CopilotDatabase', () => {
     });
   });
 
+  describe('patchCachedBudget (issue #278 follow-up)', () => {
+    const currentMonth = (): string => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    };
+
+    test('updates amounts[current_month] on an existing budget matched by category_id', () => {
+      (db as any)._budgets = [
+        { budget_id: 'b1', category_id: 'cat_food', amount: 0, amounts: {} },
+        { budget_id: 'b2', category_id: 'cat_rent', amount: 2000, amounts: {} },
+      ];
+      const month = currentMonth();
+
+      const result = db.patchCachedBudget('cat_food', 250);
+
+      expect(result).toBe(true);
+      const budgets = (db as any)._budgets as Array<{
+        category_id: string;
+        amounts: Record<string, number>;
+      }>;
+      expect(budgets.find((b) => b.category_id === 'cat_food')!.amounts[month]).toBe(250);
+      // Other budgets untouched
+      expect(budgets.find((b) => b.category_id === 'cat_rent')!.amounts).toEqual({});
+    });
+
+    test('uses explicit month when provided', () => {
+      (db as any)._budgets = [
+        { budget_id: 'b1', category_id: 'cat_food', amount: 0, amounts: { '2026-01': 100 } },
+      ];
+
+      db.patchCachedBudget('cat_food', 175, '2026-07');
+
+      const b = ((db as any)._budgets as Array<{ amounts: Record<string, number> }>)[0]!;
+      expect(b.amounts['2026-07']).toBe(175);
+      expect(b.amounts['2026-01']).toBe(100); // untouched
+    });
+
+    test('treats amount=0 as explicit clear (stored as 0, not skipped)', () => {
+      (db as any)._budgets = [
+        { budget_id: 'b1', category_id: 'cat_food', amount: 250, amounts: { '2026-04': 250 } },
+      ];
+
+      db.patchCachedBudget('cat_food', 0, '2026-04');
+
+      const b = ((db as any)._budgets as Array<{ amounts: Record<string, number> }>)[0]!;
+      expect(b.amounts['2026-04']).toBe(0);
+    });
+
+    test('initializes amounts map when the existing budget has no map', () => {
+      (db as any)._budgets = [{ budget_id: 'b1', category_id: 'cat_food', amount: 0 }]; // no amounts key
+      const month = currentMonth();
+
+      db.patchCachedBudget('cat_food', 300);
+
+      const b = ((db as any)._budgets as Array<{ amounts?: Record<string, number> }>)[0]!;
+      expect(b.amounts?.[month]).toBe(300);
+    });
+
+    test('creates a new budget entry when no budget exists for the category', () => {
+      (db as any)._budgets = [
+        { budget_id: 'b1', category_id: 'cat_rent', amount: 2000, amounts: {} },
+      ];
+      const month = currentMonth();
+
+      const result = db.patchCachedBudget('cat_new', 500);
+
+      expect(result).toBe(true);
+      const budgets = (db as any)._budgets as Array<{
+        category_id?: string;
+        amounts?: Record<string, number>;
+      }>;
+      expect(budgets).toHaveLength(2);
+      const created = budgets.find((b) => b.category_id === 'cat_new')!;
+      expect(created.amounts?.[month]).toBe(500);
+    });
+
+    test('returns false when budgets cache is not loaded', () => {
+      (db as any)._budgets = null;
+
+      const result = db.patchCachedBudget('cat_food', 250);
+
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('patchCachedTagUpsert / patchCachedTagDelete', () => {
+    test('upsert adds a new tag when id does not exist', () => {
+      (db as any)._tags = [{ tag_id: 't1', name: 'Existing', color_name: 'RED1' }];
+
+      db.patchCachedTagUpsert({ tag_id: 't2', name: 'New Tag', color_name: 'OLIVE1' });
+
+      const tags = (db as any)._tags as Array<{ tag_id: string; name?: string }>;
+      expect(tags).toHaveLength(2);
+      expect(tags.find((t) => t.tag_id === 't2')?.name).toBe('New Tag');
+    });
+
+    test('upsert merges fields into an existing tag', () => {
+      (db as any)._tags = [{ tag_id: 't1', name: 'Old', color_name: 'RED1' }];
+
+      db.patchCachedTagUpsert({ tag_id: 't1', name: 'Updated' });
+
+      const tag = (
+        (db as any)._tags as Array<{ tag_id: string; name?: string; color_name?: string }>
+      )[0]!;
+      expect(tag.name).toBe('Updated');
+      expect(tag.color_name).toBe('RED1'); // preserved
+    });
+
+    test('delete removes the tag by id', () => {
+      (db as any)._tags = [
+        { tag_id: 't1', name: 'Keep' },
+        { tag_id: 't2', name: 'Remove' },
+      ];
+
+      const result = db.patchCachedTagDelete('t2');
+
+      expect(result).toBe(true);
+      expect((db as any)._tags).toHaveLength(1);
+      expect(((db as any)._tags as Array<{ tag_id: string }>)[0]!.tag_id).toBe('t1');
+    });
+
+    test('patchers are no-ops when cache is not loaded', () => {
+      (db as any)._tags = null;
+      expect(db.patchCachedTagDelete('t1')).toBe(false);
+      // upsert does nothing (no exception); cache stays null so next load is fresh
+      db.patchCachedTagUpsert({ tag_id: 't1', name: 'X' });
+      expect((db as any)._tags).toBeNull();
+    });
+  });
+
+  describe('patchCachedCategoryUpsert / patchCachedCategoryDelete', () => {
+    test('upsert adds a new category and invalidates category name map', () => {
+      (db as any)._userCategories = [{ category_id: 'c1', name: 'Existing' }];
+      (db as any)._categoryNameMap = new Map([['c1', 'Existing']]);
+
+      db.patchCachedCategoryUpsert({ category_id: 'c2', name: 'New Category' });
+
+      expect((db as any)._userCategories).toHaveLength(2);
+      expect((db as any)._categoryNameMap).toBeNull();
+    });
+
+    test('upsert updates an existing category by id', () => {
+      (db as any)._userCategories = [{ category_id: 'c1', name: 'Old', emoji: '🍕' }];
+      (db as any)._categoryNameMap = new Map([['c1', 'Old']]);
+
+      db.patchCachedCategoryUpsert({ category_id: 'c1', name: 'New' });
+
+      const cat = ((db as any)._userCategories as Array<{ name?: string; emoji?: string }>)[0]!;
+      expect(cat.name).toBe('New');
+      expect(cat.emoji).toBe('🍕'); // preserved
+      expect((db as any)._categoryNameMap).toBeNull();
+    });
+
+    test('delete removes the category and invalidates the name map', () => {
+      (db as any)._userCategories = [
+        { category_id: 'c1', name: 'Keep' },
+        { category_id: 'c2', name: 'Remove' },
+      ];
+      (db as any)._categoryNameMap = new Map([
+        ['c1', 'Keep'],
+        ['c2', 'Remove'],
+      ]);
+
+      const result = db.patchCachedCategoryDelete('c2');
+
+      expect(result).toBe(true);
+      expect((db as any)._userCategories).toHaveLength(1);
+      expect((db as any)._categoryNameMap).toBeNull();
+    });
+  });
+
+  describe('patchCachedRecurringUpsert / patchCachedRecurringDelete', () => {
+    test('upsert adds a new recurring', () => {
+      (db as any)._recurring = [{ recurring_id: 'r1', name: 'Spotify' }];
+
+      db.patchCachedRecurringUpsert({ recurring_id: 'r2', name: 'Netflix', state: 'active' });
+
+      expect((db as any)._recurring).toHaveLength(2);
+    });
+
+    test('upsert merges fields into existing recurring', () => {
+      (db as any)._recurring = [{ recurring_id: 'r1', name: 'Spotify', state: 'active' }];
+
+      db.patchCachedRecurringUpsert({ recurring_id: 'r1', state: 'paused' });
+
+      const rec = ((db as any)._recurring as Array<{ name?: string; state?: string }>)[0]!;
+      expect(rec.state).toBe('paused');
+      expect(rec.name).toBe('Spotify'); // preserved
+    });
+
+    test('delete removes the recurring by id', () => {
+      (db as any)._recurring = [
+        { recurring_id: 'r1', name: 'Keep' },
+        { recurring_id: 'r2', name: 'Remove' },
+      ];
+
+      const result = db.patchCachedRecurringDelete('r2');
+
+      expect(result).toBe(true);
+      expect((db as any)._recurring).toHaveLength(1);
+    });
+  });
+
   describe('Cache TTL configuration', () => {
     const originalEnv = process.env.COPILOT_CACHE_TTL_MINUTES;
 

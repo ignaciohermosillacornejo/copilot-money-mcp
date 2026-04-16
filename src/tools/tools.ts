@@ -32,7 +32,14 @@ import {
   isIncomeCategory,
   isKnownPlaidCategory,
 } from '../utils/categories.js';
-import type { Transaction, Account, InvestmentPrice, InvestmentSplit } from '../models/index.js';
+import type {
+  Transaction,
+  Account,
+  InvestmentPrice,
+  InvestmentSplit,
+  Tag,
+  Recurring,
+} from '../models/index.js';
 import { getTransactionDisplayName, getRecurringDisplayName } from '../models/index.js';
 import type { InvestmentPerformance, TwrHolding } from '../models/investment-performance.js';
 import type { Security } from '../models/security.js';
@@ -2291,6 +2298,13 @@ export class CopilotMoneyTools {
           isExcluded: args.is_excluded ?? false,
         },
       });
+      this.db.patchCachedCategoryUpsert({
+        category_id: result.id,
+        name: result.name,
+        color: result.colorName,
+        emoji: args.emoji,
+        excluded: args.is_excluded ?? false,
+      });
       return {
         success: true,
         category_id: result.id,
@@ -2405,6 +2419,16 @@ export class CopilotMoneyTools {
         isReviewed: 'reviewed',
       };
       const updated = Object.keys(result.changed).map((k) => graphqlToApiName[k] ?? k);
+
+      // Optimistic cache patch: writes to the in-memory cache so a subsequent
+      // read returns the new value without needing refresh_database + re-decode.
+      const patch: Partial<Transaction> = {};
+      if ('category_id' in args && args.category_id !== undefined)
+        patch.category_id = args.category_id;
+      if ('note' in args && args.note !== undefined) patch.user_note = args.note;
+      if ('tag_ids' in args && args.tag_ids !== undefined) patch.tag_ids = args.tag_ids;
+      if (Object.keys(patch).length > 0) this.db.patchCachedTransaction(transaction_id, patch);
+
       return {
         success: true,
         transaction_id: result.id,
@@ -2509,6 +2533,13 @@ export class CopilotMoneyTools {
       throw error;
     }
 
+    // Optimistic cache patch — only for ids that successfully completed.
+    // A partial-failure throw above would have bypassed this, so here we
+    // patch every id in the batch.
+    for (const id of transaction_ids) {
+      this.db.patchCachedTransaction(id, { user_reviewed: reviewed });
+    }
+
     return {
       success: true,
       reviewed_count,
@@ -2536,6 +2567,11 @@ export class CopilotMoneyTools {
       const result = await gqlCreateTag(client, {
         input: { name: args.name.trim(), colorName },
       });
+      this.db.patchCachedTagUpsert({
+        tag_id: result.id,
+        name: result.name,
+        color_name: result.colorName,
+      });
       return {
         success: true,
         tag_id: result.id,
@@ -2562,6 +2598,7 @@ export class CopilotMoneyTools {
     const client = this.getGraphQLClient();
     try {
       const result = await gqlDeleteTag(client, { id: args.tag_id });
+      this.db.patchCachedTagDelete(args.tag_id);
       return { success: true, tag_id: result.id, deleted: true };
     } catch (e) {
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
@@ -2594,6 +2631,12 @@ export class CopilotMoneyTools {
 
     try {
       const result = await gqlEditCategory(client, { id: args.category_id, input });
+      const patch: Partial<Category> = { category_id: args.category_id };
+      if (args.name !== undefined) patch.name = args.name;
+      if (args.color_name !== undefined) patch.color = args.color_name;
+      if (args.emoji !== undefined) patch.emoji = args.emoji;
+      if (args.is_excluded !== undefined) patch.excluded = args.is_excluded;
+      this.db.patchCachedCategoryUpsert(patch as Category);
       return {
         success: true,
         category_id: result.id,
@@ -2616,6 +2659,7 @@ export class CopilotMoneyTools {
     const client = this.getGraphQLClient();
     try {
       const result = await gqlDeleteCategory(client, { id: args.category_id });
+      this.db.patchCachedCategoryDelete(args.category_id);
       return { success: true, category_id: result.id, deleted: true };
     } catch (e) {
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
@@ -2656,6 +2700,7 @@ export class CopilotMoneyTools {
         amount: args.amount,
         month: args.month,
       });
+      this.db.patchCachedBudget(args.category_id, parseFloat(args.amount), args.month);
       return {
         success: true,
         category_id: result.categoryId,
@@ -2690,6 +2735,12 @@ export class CopilotMoneyTools {
         id: args.recurring_id,
         input: { state: args.state },
       });
+      // GraphQL returns uppercase state ("ACTIVE"); the LevelDB cache stores
+      // lowercase ("active"). Normalize to the cache's shape on patch.
+      this.db.patchCachedRecurringUpsert({
+        recurring_id: args.recurring_id,
+        state: args.state.toLowerCase() as 'active' | 'paused' | 'archived',
+      });
       return { success: true, recurring_id: result.id, state: args.state };
     } catch (e) {
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
@@ -2708,6 +2759,7 @@ export class CopilotMoneyTools {
     const client = this.getGraphQLClient();
     try {
       const result = await gqlDeleteRecurring(client, { id: args.recurring_id });
+      this.db.patchCachedRecurringDelete(args.recurring_id);
       return { success: true, recurring_id: result.id, deleted: true };
     } catch (e) {
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
@@ -2737,6 +2789,10 @@ export class CopilotMoneyTools {
 
     try {
       const result = await gqlEditTag(client, { id: args.tag_id, input });
+      const patch: Partial<Tag> = { tag_id: args.tag_id };
+      if (args.name !== undefined) patch.name = args.name;
+      if (args.color_name !== undefined) patch.color_name = args.color_name;
+      this.db.patchCachedTagUpsert(patch as Tag);
       return { success: true, tag_id: result.id, updated: Object.keys(result.changed) };
     } catch (e) {
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
@@ -2785,6 +2841,12 @@ export class CopilotMoneyTools {
           },
         },
       });
+      this.db.patchCachedRecurringUpsert({
+        recurring_id: result.id,
+        name: result.name,
+        state: result.state.toLowerCase() as 'active' | 'paused' | 'archived',
+        frequency: result.frequency,
+      });
       return {
         success: true,
         recurring_id: result.id,
@@ -2832,6 +2894,14 @@ export class CopilotMoneyTools {
 
     try {
       const result = await gqlEditRecurring(client, { id: args.recurring_id, input });
+      const patch: Partial<Recurring> = { recurring_id: args.recurring_id };
+      if (args.state !== undefined) {
+        patch.state = args.state.toLowerCase() as 'active' | 'paused' | 'archived';
+      }
+      if (args.rule?.name_contains !== undefined) patch.match_string = args.rule.name_contains;
+      if (args.rule?.min_amount !== undefined) patch.min_amount = parseFloat(args.rule.min_amount);
+      if (args.rule?.max_amount !== undefined) patch.max_amount = parseFloat(args.rule.max_amount);
+      this.db.patchCachedRecurringUpsert(patch as Recurring);
       return { success: true, recurring_id: result.id, updated: Object.keys(result.changed) };
     } catch (e) {
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
