@@ -54,8 +54,8 @@ jobs:
             --excludePackages "copilot-money-mcp@$(node -p "require('./package.json').version")" \
             --summary
 
-  unit-tests:
-    name: Unit Tests
+  tests:
+    name: Tests
     needs: [quality]
     runs-on: ubuntu-latest
     steps:
@@ -69,41 +69,13 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      - name: Run unit tests with coverage
-        run: bun test --coverage --coverage-reporter=lcov tests/unit tests/models tests/core tests/utils
+      - name: Run all tests with coverage
+        run: bun test --coverage --coverage-reporter=lcov
 
-      - name: Upload unit test coverage to Codecov
+      - name: Upload coverage to Codecov
         if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && github.actor != 'dependabot[bot]'
         uses: codecov/codecov-action@v6
         with:
           files: coverage/lcov.info
-          flags: unit
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: true
-
-  e2e-tests:
-    name: E2E Tests
-    needs: [quality]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Run E2E tests with coverage
-        run: bun test --coverage --coverage-reporter=lcov tests/e2e tests/tools tests/integration
-
-      - name: Upload E2E test coverage to Codecov
-        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && github.actor != 'dependabot[bot]'
-        uses: codecov/codecov-action@v6
-        with:
-          files: coverage/lcov.info
-          flags: e2e
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
