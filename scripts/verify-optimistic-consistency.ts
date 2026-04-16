@@ -447,7 +447,9 @@ async function main(): Promise<void> {
     }
     // Capture the actual current state and uppercase it for the GraphQL enum
     // restore. The decoder yields lowercase ('active'), the API expects upper.
-    const originalState = (target.state ?? 'active').toUpperCase();
+    // `target.state` is non-undefined here (the .find above filtered on it),
+    // so no fallback is needed.
+    const originalState = target.state.toUpperCase();
     try {
       await tools.setRecurringState({ recurring_id: target.recurring_id, state: 'PAUSED' });
       console.log(`  paused recurring ${target.recurring_id} "${target.name}"`);
