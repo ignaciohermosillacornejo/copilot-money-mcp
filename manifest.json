@@ -3,7 +3,7 @@
   "name": "copilot-money-mcp",
   "display_name": "Copilot Money MCP Server",
   "description": "Query your personal finances with AI using local Copilot Money data. 17 read-only tools for transactions, investments, budgets, goals, and more.",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "icon": "icon.png",
   "author": {
     "name": "Ignacio Hermosilla",

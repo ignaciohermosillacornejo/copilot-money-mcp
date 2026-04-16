@@ -1,6 +1,6 @@
 {
   "name": "copilot-money-mcp",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "MCP server for Copilot Money — query personal finances locally (17 read tools) and manage them via Copilot's GraphQL API (13 write tools, opt-in with --write)",
   "keywords": [
     "mcp",
