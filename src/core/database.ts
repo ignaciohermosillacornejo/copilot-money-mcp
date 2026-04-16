@@ -5,6 +5,7 @@
  * proper error handling.
  */
 
+import { randomUUID } from 'crypto';
 import { existsSync, readdirSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
@@ -413,8 +414,12 @@ export class CopilotDatabase {
     if (existing) {
       existing.amounts = { ...(existing.amounts ?? {}), [monthKey]: amount };
     } else {
+      // Synthetic placeholder so set_budget → get_budgets reflects the write
+      // before Copilot syncs the real entry. Use a UUID rather than a
+      // deterministic prefix so the surface ID looks like a real Firestore id
+      // instead of advertising "this is fake" to clients.
       this._budgets.push({
-        budget_id: `patched-${categoryId}`,
+        budget_id: randomUUID(),
         category_id: categoryId,
         amounts: { [monthKey]: amount },
       });

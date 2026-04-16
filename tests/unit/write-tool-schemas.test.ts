@@ -39,6 +39,16 @@ describe('createWriteToolSchemas', () => {
     expect(deleteTag!.inputSchema.properties).toHaveProperty('tag_id');
   });
 
+  test('update_tag schema exposes color_name only (no hex_color)', () => {
+    // Symmetric guard with create_tag — updateTag also only reads color_name,
+    // and a schema edit could silently re-add hex_color without this assertion.
+    const updateTag = createWriteToolSchemas().find((s) => s.name === 'update_tag');
+    expect(updateTag).toBeDefined();
+    expect(updateTag!.inputSchema.required).toEqual(['tag_id']);
+    expect(updateTag!.inputSchema.properties).toHaveProperty('color_name');
+    expect(updateTag!.inputSchema.properties).not.toHaveProperty('hex_color');
+  });
+
   test('create_category schema requires name and is non-idempotent', () => {
     const createCat = createWriteToolSchemas().find((s) => s.name === 'create_category');
     expect(createCat).toBeDefined();
