@@ -61,6 +61,7 @@ scripts/*
 !scripts/smoke-graphql.ts
 !scripts/build-write-manifest.ts
 !scripts/manifest-utils.ts
+!scripts/verify-optimistic-consistency.ts
 # License-check scratch directory (created by CI license gate)
 .license-check/
 # Generated test fixtures
