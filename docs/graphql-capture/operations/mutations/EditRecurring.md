@@ -4,6 +4,17 @@
 - **Endpoint:** https://app.copilot.money/api/graphql
 - **Fires on:** <fill in from flow docs>
 - **Observations:** 9
+- **Response fields trimmed vs. captured shape (issue #288):** the
+  original capture selected `rule { ...RecurringRuleFields }`, `payments { ... }`,
+  and `category @client { ... }`. We do not consume those fields in
+  `editRecurring()` and the captured `RecurringRuleFields` fragment
+  includes `nameContains`, which Copilot's server marks non-nullable
+  despite actually returning `null` on any recurring that was matched
+  by amount-only rules. Keeping that selection made `setRecurringState`
+  throw even when the mutation succeeded server-side. Dropping the
+  sub-selection avoids the nullability error without losing any
+  data we consume — `editRecurring()` now echoes the caller's input
+  for the `changed.rule` report.
 
 ## Query
 
@@ -12,15 +23,6 @@ mutation EditRecurring($id: ID!, $input: EditRecurringInput!) {
   editRecurring(id: $id, input: $input) {
     recurring {
       ...RecurringFields
-      rule {
-        ...RecurringRuleFields
-      }
-      payments {
-        ...RecurringPaymentFields
-      }
-      category @client {
-        ...CategoryFields
-      }
     }
   }
 }
@@ -44,38 +46,6 @@ fragment RecurringFields on Recurring {
   name
   id
 }
-
-fragment RecurringRuleFields on RecurringRule {
-  nameContains
-  minAmount
-  maxAmount
-  days
-}
-
-fragment RecurringPaymentFields on RecurringPayment {
-  amount
-  isPaid
-  date
-}
-
-fragment CategoryFields on Category {
-  isRolloverDisabled
-  canBeDeleted
-  isExcluded
-  templateId
-  colorName
-  icon {
-    ... on EmojiUnicode {
-      unicode
-    }
-    ... on Genmoji {
-      id
-      src
-    }
-  }
-  name
-  id
-}
 ```
 
 ## Variables
@@ -88,7 +58,7 @@ fragment CategoryFields on Category {
 ## Example request
 
 ```json
-{"operationName":"EditRecurring","query":"mutation EditRecurring($id: ID!, $input: EditRecurringInput!) {\n  editRecurring(id: $id, input: $input) {\n    recurring {\n      ...RecurringFields\n      rule {\n        ...RecurringRuleFields\n      }\n      payments {\n        ...RecurringPaymentFields\n      }\n      category @client {\n        ...CategoryFields\n      }\n    }\n  }\n}\n\nfragment RecurringFields on Recurring {\n  nextPaymentAmount\n  nextPaymentDate\n  categoryId\n  frequency\n  emoji\n  icon {\n    ... on EmojiUnicode {\n      unicode\n    }\n    ... on Genmoji {\n      id\n      src\n    }\n  }\n  state\n  name\n  id\n}\n\nfragment RecurringRuleFields on RecurringRule {\n  nameContains\n  minAmount\n  maxAmount\n  days\n}\n\nfragment RecurringPaymentFields on RecurringPayment {\n  amount\n  isPaid\n  date\n}\n\nfragment CategoryFields on Category {\n  isRolloverDisabled\n  canBeDeleted\n  isExcluded\n  templateId\n  colorName\n  icon {\n    ... on EmojiUnicode {\n      unicode\n    }\n    ... on Genmoji {\n      id\n      src\n    }\n  }\n  name\n  id\n}","variables":{"input":{"state":"PAUSED"},"id":"<id>"}}
+{"operationName":"EditRecurring","query":"mutation EditRecurring($id: ID!, $input: EditRecurringInput!) {\n  editRecurring(id: $id, input: $input) {\n    recurring {\n      ...RecurringFields\n    }\n  }\n}\n\nfragment RecurringFields on Recurring {\n  nextPaymentAmount\n  nextPaymentDate\n  categoryId\n  frequency\n  emoji\n  icon {\n    ... on EmojiUnicode {\n      unicode\n    }\n    ... on Genmoji {\n      id\n      src\n    }\n  }\n  state\n  name\n  id\n}","variables":{"input":{"state":"PAUSED"},"id":"<id>"}}
 ```
 
 ## Example response
@@ -100,35 +70,6 @@ fragment CategoryFields on Category {
       "__typename": "EditRecurringOutput",
       "recurring": {
         "__typename": "Recurring",
-        "rule": {
-          "__typename": "RecurringRule",
-          "nameContains": "<merchant>",
-          "minAmount": "<amount>",
-          "maxAmount": "<amount>",
-          "days": []
-        },
-        "payments": [
-          {
-            "__typename": "RecurringPayment",
-            "amount": "<amount>",
-            "isPaid": true,
-            "date": "2026-04-05"
-          }
-        ],
-        "category": {
-          "__typename": "Category",
-          "isRolloverDisabled": false,
-          "canBeDeleted": true,
-          "isExcluded": false,
-          "templateId": "Subscriptions",
-          "colorName": "PINK1",
-          "icon": {
-            "__typename": "EmojiUnicode",
-            "unicode": "💳"
-          },
-          "name": "<name>",
-          "id": "<id>"
-        },
         "nextPaymentAmount": "<amount>",
         "nextPaymentDate": "2026-05-05",
         "categoryId": "<id>",

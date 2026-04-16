@@ -64,11 +64,16 @@ interface EditRecurringWireRule {
 
 interface EditRecurringResponse {
   // Captured wire shape: editRecurring wraps a nested `recurring` object.
+  // We deliberately do NOT select `rule { ... }` on the response (issue #288):
+  // `RecurringRule.nameContains` is non-nullable in Copilot's schema but the
+  // server returns null for recurrings matched by amount-only rules, which
+  // made every EditRecurring call throw regardless of what we were updating.
+  // `changed.rule` in the caller-facing result is now populated from the
+  // caller's input rather than read back from the server.
   editRecurring: {
     recurring: {
       id: string;
       state: string;
-      rule?: EditRecurringWireRule;
     };
   };
 }
@@ -113,24 +118,15 @@ export async function editRecurring(
   >('EditRecurring', EDIT_RECURRING, { id: args.id, input: wireInput });
   const recurring = data.editRecurring.recurring;
   // Report back fields the caller named in args.input — keyed by presence,
-  // not by value. Lets callers explicitly "change to undefined" if ever needed;
-  // tools.ts builds args.input via conditional spread so explicit-undefined
-  // shouldn't normally reach us. Server returns Float amounts; convert back
-  // to strings for the changed view to keep the MCP surface consistent.
+  // not by value. The `state` echo uses the server-confirmed value; the
+  // `rule` echo is the caller's input (see EditRecurring wire-shape comment
+  // above — we intentionally don't read the rule back to sidestep the
+  // non-nullable-nameContains server error). In practice tools.ts builds
+  // args.input via conditional spread, so explicit-undefined shouldn't reach us.
   const changed: EditRecurringChanges = {};
   if ('state' in args.input) changed.state = recurring.state;
-  if ('rule' in args.input && recurring.rule) {
-    const serverRule = recurring.rule;
-    const stringRule: EditRecurringInputRule = {};
-    if ('nameContains' in serverRule) stringRule.nameContains = serverRule.nameContains;
-    if ('minAmount' in serverRule && serverRule.minAmount !== undefined) {
-      stringRule.minAmount = String(serverRule.minAmount);
-    }
-    if ('maxAmount' in serverRule && serverRule.maxAmount !== undefined) {
-      stringRule.maxAmount = String(serverRule.maxAmount);
-    }
-    if ('days' in serverRule) stringRule.days = serverRule.days;
-    changed.rule = stringRule;
+  if ('rule' in args.input && args.input.rule) {
+    changed.rule = { ...args.input.rule };
   }
   return { id: recurring.id, changed };
 }
