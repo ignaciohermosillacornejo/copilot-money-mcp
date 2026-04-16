@@ -4,26 +4,9 @@ coverage:
       default:
         target: 95%
         threshold: 1%
-      unit:
-        target: 95%
-        threshold: 1%
-        flags:
-          - unit
-      e2e:
-        target: 70%
-        threshold: 1%
-        flags:
-          - e2e
     patch:
       default:
         target: 80%
 
-flags:
-  unit:
-    paths:
-      - src/
-    carryforward: true
-  e2e:
-    paths:
-      - src/
-    carryforward: true
+ignore:
+  - tests/
