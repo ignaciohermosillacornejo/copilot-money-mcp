@@ -2490,6 +2490,10 @@ export class CopilotMoneyTools {
     // accurately reflects completed writes.
     const CONCURRENCY = 5;
     let reviewed_count = 0;
+    // The `null as {...} | null` cast is load-bearing under TS strict: a bare
+    // `= null` lets control-flow analysis narrow the variable to `null` and
+    // forget the annotated wider type, which then breaks the `if (firstError)`
+    // narrow + the `error instanceof GraphQLError` check below. Don't remove.
     let firstError: { id: string; error: unknown } | null = null as {
       id: string;
       error: unknown;
@@ -2557,7 +2561,6 @@ export class CopilotMoneyTools {
   async createTag(args: {
     name: string;
     color_name?: string;
-    hex_color?: string;
   }): Promise<{ success: true; tag_id: string; name: string; color_name: string }> {
     const client = this.getGraphQLClient();
     if (!args.name?.trim()) throw new Error('Tag name must not be empty');
@@ -3611,8 +3614,7 @@ export function createToolSchemas(): ToolSchema[] {
         '`amounts` map of per-month overrides for history lookups. For parent ' +
         'categories, the returned `amount` is the resolved total (children + ' +
         'rollovers) that Copilot displays in the Budgets view. Totals use the ' +
-        'current-month effective amount. ' +
-        'Refresh note: after `set_budget` writes, `refresh_database` then read.',
+        'current-month effective amount.',
       inputSchema: {
         type: 'object',
         properties: {

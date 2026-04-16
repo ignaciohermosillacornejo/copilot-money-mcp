@@ -27,7 +27,7 @@ jobs:
       PR_NUMBER: ${{ github.event.inputs.pr_number || github.event.pull_request.number }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           fetch-depth: 0
 
@@ -56,7 +56,7 @@ jobs:
 
       - name: Load secrets from 1Password
         if: steps.check.outputs.skip != 'true'
-        uses: 1password/load-secrets-action@v4
+        uses: 1password/load-secrets-action@2bfca7363ef8f96bb66d38dd50981bf948040c7e # v4
         with:
           export-env: true
         env:
@@ -65,7 +65,7 @@ jobs:
 
       - name: Audit PR reviews with Claude
         if: steps.check.outputs.skip != 'true'
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@e30d45253b1abcc29a121ab35b8bf156061582bd # v1
         with:
           claude_code_oauth_token: ${{ env.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -142,7 +142,7 @@ jobs:
 
       - name: Upload audit artifact
         if: always() && steps.check.outputs.skip != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: audit-result-pr-${{ env.PR_NUMBER }}
           path: audit-result.json

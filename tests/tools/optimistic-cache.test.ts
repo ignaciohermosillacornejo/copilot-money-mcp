@@ -163,6 +163,28 @@ describe('optimistic cache patching — categories', () => {
     (db as any)._categoryNameMap = new Map([['cat1', 'Old Name']]);
   });
 
+  test('create_category — new category appears in cache without refresh', async () => {
+    const client = createMockGraphQLClient({
+      CreateCategory: {
+        createCategory: { id: 'cat2', name: 'Travel', colorName: 'BLUE2' },
+      },
+    });
+    tools = new CopilotMoneyTools(db, client);
+
+    await tools.createCategory({
+      name: 'Travel',
+      color_name: 'BLUE2',
+      emoji: '✈️',
+      is_excluded: false,
+    });
+    const cats = await db.getUserCategories();
+
+    expect(cats.find((c) => c.category_id === 'cat2')?.name).toBe('Travel');
+    // Name-map invalidation: new category's name resolves through getCategoryNameMap.
+    const map = await db.getCategoryNameMap();
+    expect(map.get('cat2')).toBe('Travel');
+  });
+
   test('update_category — rename visible without refresh, name map invalidated', async () => {
     const client = createMockGraphQLClient({
       EditCategory: {

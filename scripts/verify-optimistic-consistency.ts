@@ -46,8 +46,27 @@ function argVal(name: string): string | undefined {
   if (i >= 0 && i + 1 < argv.length) return argv[i + 1];
   return undefined;
 }
+const PHASE_NAMES = ['tags', 'categories', 'txn', 'budgets', 'recurrings'] as const;
+type PhaseName = (typeof PHASE_NAMES)[number];
+
 const skip = new Set((argVal('--skip') ?? '').split(',').filter(Boolean));
 const only = argVal('--only');
+
+if (only && !PHASE_NAMES.includes(only as PhaseName)) {
+  console.error(
+    `Unknown --only phase: "${only}". Valid phases: ${PHASE_NAMES.join(', ')}`
+  );
+  process.exit(1);
+}
+for (const s of skip) {
+  if (!PHASE_NAMES.includes(s as PhaseName)) {
+    console.error(
+      `Unknown --skip phase: "${s}". Valid phases: ${PHASE_NAMES.join(', ')}`
+    );
+    process.exit(1);
+  }
+}
+
 function enabled(name: string): boolean {
   if (only) return name === only;
   return !skip.has(name);
@@ -94,7 +113,7 @@ async function pollUntilFreshMatches<T>(
   intervalSec: number
 ): Promise<{ matched: boolean; elapsedSec: number; lastValue: T }> {
   const start = Date.now();
-  let lastValue: T;
+  let lastValue!: T;
   while (true) {
     await freshDecode(db);
     lastValue = await read();
@@ -173,6 +192,7 @@ async function main(): Promise<void> {
 
   // 1) TAGS: create a disposable tag, verify it shows up optimistically, then after fresh decode.
   if (enabled('tags')) {
+    await runPhase('tags.create', async () => {
     heading('tags — create then delete');
     const tagName = `opt-probe-${marker}`;
     let tagId: string | undefined;
@@ -219,10 +239,12 @@ async function main(): Promise<void> {
         }
       }
     }
+    });
   }
 
   // 2) CATEGORIES: create a disposable category, verify and delete.
   if (enabled('categories')) {
+    await runPhase('categories.create', async () => {
     heading('categories — create then delete');
     const catName = `opt-probe-${marker}`;
     let catId: string | undefined;
@@ -272,10 +294,12 @@ async function main(): Promise<void> {
         }
       }
     }
+    });
   }
 
   // 3) TRANSACTIONS: edit a note on a real transaction, then restore.
   if (enabled('txn')) {
+    await runPhase('transactions.update_note', async () => {
     heading('transactions — edit note then restore');
     const all = await db.getAllTransactions();
     const target = all.find((t) => t.account_id && t.item_id && !t.is_pending);
@@ -331,10 +355,12 @@ async function main(): Promise<void> {
         }
       }
     }
+    });
   }
 
   // 4) BUDGETS: set amount on a LEAF category (no children), then restore.
   if (enabled('budgets')) {
+    await runPhase('budgets.set_leaf', async () => {
     heading('budgets — setBudget on a leaf category, then restore');
     const cats = await db.getUserCategories();
     const userCatIds = new Set(cats.map((c) => c.category_id));
@@ -406,6 +432,7 @@ async function main(): Promise<void> {
         }
       }
     }
+    });
   }
 
   // 5) RECURRINGS: toggle state on an existing recurring and restore.
@@ -418,47 +445,47 @@ async function main(): Promise<void> {
       console.log('  (no active recurring found; skipping)');
       return;
     }
-    {
-      const originalState = 'ACTIVE';
+    // Capture the actual current state and uppercase it for the GraphQL enum
+    // restore. The decoder yields lowercase ('active'), the API expects upper.
+    const originalState = (target.state ?? 'active').toUpperCase();
+    try {
+      await tools.setRecurringState({ recurring_id: target.recurring_id, state: 'PAUSED' });
+      console.log(`  paused recurring ${target.recurring_id} "${target.name}"`);
+
+      const optAll = await db.getRecurring();
+      const opt = optAll.find((r) => r.recurring_id === target.recurring_id);
+      console.log(`  optimistic state=${opt?.state}`);
+
+      const synced = await pollUntilFreshMatches(
+        db,
+        () => db.getRecurring(),
+        (recs) =>
+          recs.find((r) => r.recurring_id === target.recurring_id)?.state === 'paused',
+        60,
+        5
+      );
+      const syncedR = synced.lastValue.find((r) => r.recurring_id === target.recurring_id);
+      console.log(
+        `  synced (${synced.elapsedSec.toFixed(1)}s) state=${syncedR?.state} ${synced.matched ? '✓' : '(timed out)'}`
+      );
+      results.push({
+        name: 'recurrings.set_state',
+        optimisticValue: { state: opt?.state },
+        syncedValue: { state: syncedR?.state },
+        matched: opt?.state === syncedR?.state,
+        syncSec: synced.matched ? synced.elapsedSec : null,
+      });
+    } finally {
       try {
-        await tools.setRecurringState({ recurring_id: target.recurring_id, state: 'PAUSED' });
-        console.log(`  paused recurring ${target.recurring_id} "${target.name}"`);
-
-        const optAll = await db.getRecurring();
-        const opt = optAll.find((r) => r.recurring_id === target.recurring_id);
-        console.log(`  optimistic state=${opt?.state}`);
-
-        const synced = await pollUntilFreshMatches(
-          db,
-          () => db.getRecurring(),
-          (recs) =>
-            recs.find((r) => r.recurring_id === target.recurring_id)?.state === 'paused',
-          60,
-          5
-        );
-        const syncedR = synced.lastValue.find((r) => r.recurring_id === target.recurring_id);
-        console.log(
-          `  synced (${synced.elapsedSec.toFixed(1)}s) state=${syncedR?.state} ${synced.matched ? '✓' : '(timed out)'}`
-        );
-        results.push({
-          name: 'recurrings.set_state',
-          optimisticValue: { state: opt?.state },
-          syncedValue: { state: syncedR?.state },
-          matched: opt?.state === syncedR?.state,
-          syncSec: synced.matched ? synced.elapsedSec : null,
+        await tools.setRecurringState({
+          recurring_id: target.recurring_id,
+          state: originalState,
         });
-      } finally {
-        try {
-          await tools.setRecurringState({
-            recurring_id: target.recurring_id,
-            state: originalState,
-          });
-          console.log(`  cleanup: restored state ✓`);
-        } catch (e) {
-          console.log(
-            `  cleanup: restore FAILED — manual: setRecurringState ${target.recurring_id} to ${originalState}: ${e}`
-          );
-        }
+        console.log(`  cleanup: restored state ✓`);
+      } catch (e) {
+        console.log(
+          `  cleanup: restore FAILED — manual: setRecurringState ${target.recurring_id} to ${originalState}: ${e}`
+        );
       }
     }
     });
