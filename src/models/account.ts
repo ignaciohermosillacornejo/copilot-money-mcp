@@ -21,8 +21,8 @@ const AccountHoldingSchema = z
     institution_value: z.number().optional(),
     quantity: z.number().optional(),
     iso_currency_code: z.string().optional(),
-    vested_quantity: z.number().optional(),
-    vested_value: z.number().optional(),
+    vested_quantity: z.number().nullable().optional(),
+    vested_value: z.number().nullable().optional(),
   })
   .passthrough();
 
