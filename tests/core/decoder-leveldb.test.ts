@@ -4,7 +4,7 @@
  * These tests verify that the decoder properly reads from LevelDB databases.
  */
 
-import { describe, test, expect, afterEach, beforeEach } from 'bun:test';
+import { describe, test, expect, afterEach, beforeEach, spyOn } from 'bun:test';
 import {
   decodeTransactions,
   decodeAccounts,
@@ -14,6 +14,7 @@ import {
   decodeGoalHistory,
   decodeCategories,
 } from '../../src/core/decoder.js';
+import { __resetWarnedKeys } from '../../src/core/schema-warn.js';
 import {
   createTransactionDb,
   createAccountDb,
@@ -155,6 +156,43 @@ describe('LevelDB Decoder', () => {
       // Only the complete transaction should be returned
       expect(result.length).toBe(1);
       expect(result[0]?.transaction_id).toBe('txn_003');
+    });
+
+    test('silent schema drop emits a stderr warn (issue #309)', async () => {
+      __resetWarnedKeys();
+      const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const dbPath = path.join(FIXTURES_DIR, 'schema-warn-db');
+        // Malformed date: TransactionSchema requires /^\d{4}-\d{2}-\d{2}$/,
+        // so this doc is dropped by the decoder. Before #309 this was silent;
+        // now it must emit a structured warn to stderr.
+        const transactions: TestTransaction[] = [
+          {
+            transaction_id: 'txn_bad',
+            amount: 10.0,
+            date: 'not-a-date',
+            name: 'Bad Date',
+          },
+          {
+            transaction_id: 'txn_good',
+            amount: 20.0,
+            date: '2024-05-01',
+            name: 'Good',
+          },
+        ];
+
+        await createTransactionDb(dbPath, transactions);
+        const result = await decodeTransactions(dbPath);
+
+        expect(result.length).toBe(1);
+        expect(result[0]?.transaction_id).toBe('txn_good');
+        expect(warnSpy).toHaveBeenCalled();
+        const message = warnSpy.mock.calls[0]?.[0] as string;
+        expect(message).toContain('collection=transactions');
+        expect(message).toContain('path=date');
+      } finally {
+        warnSpy.mockRestore();
+      }
     });
 
     test('skips transactions with zero amount', async () => {

@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { iterateDocuments } from './leveldb-reader.js';
 import { type FirestoreValue, toPlainObject } from './protobuf-parser.js';
+import { validateOrWarn } from './schema-warn.js';
 
 // Re-export for potential use by other modules
 export { toPlainObject } from './protobuf-parser.js';
@@ -856,11 +857,10 @@ function processTransaction(
     txnData.internal_transfer = true;
   }
 
-  try {
-    return TransactionSchema.parse(txnData);
-  } catch {
-    return null;
-  }
+  return validateOrWarn(TransactionSchema, txnData, {
+    collection: 'transactions',
+    docId,
+  });
 }
 
 /**
@@ -1004,11 +1004,10 @@ function processAccount(fields: Map<string, FirestoreValue>, docId: string): Acc
     return null;
   }
 
-  try {
-    return AccountSchema.parse(accData);
-  } catch {
-    return null;
-  }
+  return validateOrWarn(AccountSchema, accData, {
+    collection: 'accounts',
+    docId,
+  });
 }
 
 /**
@@ -1111,11 +1110,10 @@ function processRecurring(fields: Map<string, FirestoreValue>, docId: string): R
   // field name, but our schema exposes last_date for readability. Both kept for consumers.
   if (latestDate) recData.latest_date = latestDate;
 
-  try {
-    return RecurringSchema.parse(recData);
-  } catch {
-    return null;
-  }
+  return validateOrWarn(RecurringSchema, recData, {
+    collection: 'recurring',
+    docId,
+  });
 }
 
 /**
@@ -1170,11 +1168,10 @@ function processBudget(fields: Map<string, FirestoreValue>, docId: string): Budg
   const id = getString(fields, 'id');
   if (id) budgetData.id = id;
 
-  try {
-    return BudgetSchema.parse(budgetData);
-  } catch {
-    return null;
-  }
+  return validateOrWarn(BudgetSchema, budgetData, {
+    collection: 'budgets',
+    docId,
+  });
 }
 
 /**
@@ -1255,11 +1252,10 @@ function processGoal(fields: Map<string, FirestoreValue>, docId: string): Goal |
     }
   }
 
-  try {
-    return GoalSchema.parse(goalData);
-  } catch {
-    return null;
-  }
+  return validateOrWarn(GoalSchema, goalData, {
+    collection: 'goals',
+    docId,
+  });
 }
 
 /**
@@ -1333,11 +1329,10 @@ function processGoalHistory(
     }
   }
 
-  try {
-    return GoalHistorySchema.parse(historyData);
-  } catch {
-    return null;
-  }
+  return validateOrWarn(GoalHistorySchema, historyData, {
+    collection: 'goal_history',
+    docId,
+  });
 }
 
 /**
@@ -1381,8 +1376,10 @@ function processInvestmentPrice(
     if (value) priceData[field] = value;
   }
 
-  const validated = InvestmentPriceSchema.safeParse(priceData);
-  return validated.success ? validated.data : null;
+  return validateOrWarn(InvestmentPriceSchema, priceData, {
+    collection: 'investment_prices',
+    docId,
+  });
 }
 
 /**
@@ -1435,8 +1432,10 @@ function processInvestmentSplit(
     splitData.adjustments = adjustments;
   }
 
-  const validated = InvestmentSplitSchema.safeParse(splitData);
-  return validated.success ? validated.data : null;
+  return validateOrWarn(InvestmentSplitSchema, splitData, {
+    collection: 'investment_splits',
+    docId,
+  });
 }
 
 /**
@@ -1521,8 +1520,10 @@ function processItem(fields: Map<string, FirestoreValue>, docId: string): Item |
   const fetchDataMap = getMap(fields, 'fetch_data');
   if (fetchDataMap) itemData.fetch_data = toPlainObject(fetchDataMap);
 
-  const validated = ItemSchema.safeParse(itemData);
-  return validated.success ? validated.data : null;
+  return validateOrWarn(ItemSchema, itemData, {
+    collection: 'items',
+    docId,
+  });
 }
 
 /**
@@ -1574,8 +1575,10 @@ function processCategory(fields: Map<string, FirestoreValue>, docId: string): Ca
     if (value) categoryData[field] = value;
   }
 
-  const validated = CategorySchema.safeParse(categoryData);
-  return validated.success ? validated.data : null;
+  return validateOrWarn(CategorySchema, categoryData, {
+    collection: 'categories',
+    docId,
+  });
 }
 
 /**
@@ -1642,8 +1645,10 @@ function processInvestmentPerformance(
   const access = getStringArray(fields, 'access');
   if (access) data.access = access;
 
-  const validated = InvestmentPerformanceSchema.safeParse(data);
-  return validated.success ? validated.data : null;
+  return validateOrWarn(InvestmentPerformanceSchema, data, {
+    collection: 'investment_performance',
+    docId,
+  });
 }
 
 /**
@@ -1691,8 +1696,10 @@ function processTwrHolding(
     if (Object.keys(history).length > 0) data.history = history;
   }
 
-  const validated = TwrHoldingSchema.safeParse(data);
-  return validated.success ? validated.data : null;
+  return validateOrWarn(TwrHoldingSchema, data, {
+    collection: 'twr_holdings',
+    docId,
+  });
 }
 
 /**
@@ -1814,8 +1821,10 @@ function processPlaidAccount(
     }
   }
 
-  const validated = PlaidAccountSchema.safeParse(data);
-  return validated.success ? validated.data : null;
+  return validateOrWarn(PlaidAccountSchema, data, {
+    collection: 'plaid_accounts',
+    docId,
+  });
 }
 
 /**
@@ -1833,8 +1842,10 @@ function processTag(fields: Map<string, FirestoreValue>, docId: string): Tag | n
     if (value !== undefined) data[field] = value;
   }
 
-  const validated = TagSchema.safeParse(data);
-  return validated.success ? validated.data : null;
+  return validateOrWarn(TagSchema, data, {
+    collection: 'tags',
+    docId,
+  });
 }
 
 /**
@@ -1887,8 +1898,10 @@ function processBalanceHistory(
   const origin = getString(fields, '_origin');
   if (origin !== undefined) data._origin = origin;
 
-  const validated = BalanceHistorySchema.safeParse(data);
-  return validated.success ? validated.data : null;
+  return validateOrWarn(BalanceHistorySchema, data, {
+    collection: 'balance_history',
+    docId,
+  });
 }
 
 /**
@@ -1924,8 +1937,10 @@ function processHoldingsHistoryMeta(
     }
   }
 
-  const validated = HoldingsHistoryMetaSchema.safeParse(data);
-  return validated.success ? validated.data : null;
+  return validateOrWarn(HoldingsHistoryMetaSchema, data, {
+    collection: 'holdings_history_meta',
+    docId,
+  });
 }
 
 /**
@@ -1990,8 +2005,10 @@ function processHoldingsHistory(
     }
   }
 
-  const validated = HoldingsHistorySchema.safeParse(data);
-  return validated.success ? validated.data : null;
+  return validateOrWarn(HoldingsHistorySchema, data, {
+    collection: 'holdings_history',
+    docId,
+  });
 }
 
 /**
@@ -2005,8 +2022,10 @@ function processChange(fields: Map<string, FirestoreValue>, docId: string): Chan
       if (extracted !== undefined) data[key] = extracted;
     }
   }
-  const validated = ChangeSchema.safeParse(data);
-  return validated.success ? validated.data : null;
+  return validateOrWarn(ChangeSchema, data, {
+    collection: 'changes',
+    docId,
+  });
 }
 
 /**
@@ -2031,8 +2050,12 @@ function processSubChange<T>(
       if (extracted !== undefined) data[key] = extracted;
     }
   }
-  const validated = schema.safeParse(data);
-  return validated.success ? validated.data : null;
+  const logicalCollection = collection.endsWith('/t')
+    ? 'transaction_changes'
+    : collection.endsWith('/a')
+      ? 'account_changes'
+      : 'change_sub';
+  return validateOrWarn(schema, data, { collection: logicalCollection, docId });
 }
 
 /**
@@ -2096,8 +2119,10 @@ function processSecurity(fields: Map<string, FirestoreValue>, docId: string): Se
   const infoMap = getMap(fields, 'info');
   if (infoMap) data.info = toPlainObject(infoMap);
 
-  const validated = SecuritySchema.safeParse(data);
-  return validated.success ? validated.data : null;
+  return validateOrWarn(SecuritySchema, data, {
+    collection: 'securities',
+    docId,
+  });
 }
 
 /**
@@ -2182,8 +2207,10 @@ function processUserProfile(
   const origin = getString(fields, '_origin');
   if (origin !== undefined) data._origin = origin;
 
-  const validated = UserProfileSchema.safeParse(data);
-  return validated.success ? validated.data : null;
+  return validateOrWarn(UserProfileSchema, data, {
+    collection: 'user_profile',
+    docId,
+  });
 }
 
 /**
@@ -2201,8 +2228,10 @@ function processAmazonIntegration(
     if (extracted !== undefined) data[key] = extracted;
   }
 
-  const validated = AmazonIntegrationSchema.safeParse(data);
-  return validated.success ? validated.data : null;
+  return validateOrWarn(AmazonIntegrationSchema, data, {
+    collection: 'amazon_integrations',
+    docId,
+  });
 }
 
 /**
@@ -2250,8 +2279,10 @@ function processAmazonOrder(
   const transactions = getStringArray(fields, 'transactions');
   if (transactions) data.transactions = transactions;
 
-  const validated = AmazonOrderSchema.safeParse(data);
-  return validated.success ? validated.data : null;
+  return validateOrWarn(AmazonOrderSchema, data, {
+    collection: 'amazon_orders',
+    docId,
+  });
 }
 
 /**
@@ -2294,8 +2325,10 @@ function processSubscription(
     }
   }
 
-  const validated = SubscriptionSchema.safeParse(data);
-  return validated.success ? validated.data : null;
+  return validateOrWarn(SubscriptionSchema, data, {
+    collection: 'subscriptions',
+    docId,
+  });
 }
 
 /**
@@ -2324,8 +2357,10 @@ function processInvite(fields: Map<string, FirestoreValue>, docId: string): Invi
     }
   }
 
-  const validated = InviteSchema.safeParse(data);
-  return validated.success ? validated.data : null;
+  return validateOrWarn(InviteSchema, data, {
+    collection: 'invites',
+    docId,
+  });
 }
 
 /**
@@ -2344,8 +2379,10 @@ function processUserItems(fields: Map<string, FirestoreValue>, docId: string): U
     }
   }
 
-  const validated = UserItemsSchema.safeParse(data);
-  return validated.success ? validated.data : null;
+  return validateOrWarn(UserItemsSchema, data, {
+    collection: 'user_items',
+    docId,
+  });
 }
 
 /**
@@ -2367,8 +2404,10 @@ function processFeatureTracking(
     }
   }
 
-  const validated = FeatureTrackingSchema.safeParse(data);
-  return validated.success ? validated.data : null;
+  return validateOrWarn(FeatureTrackingSchema, data, {
+    collection: 'feature_tracking',
+    docId,
+  });
 }
 
 /**
@@ -2387,8 +2426,10 @@ function processSupport(fields: Map<string, FirestoreValue>, docId: string): Sup
     }
   }
 
-  const validated = SupportSchema.safeParse(data);
-  return validated.success ? validated.data : null;
+  return validateOrWarn(SupportSchema, data, {
+    collection: 'support',
+    docId,
+  });
 }
 
 /**
