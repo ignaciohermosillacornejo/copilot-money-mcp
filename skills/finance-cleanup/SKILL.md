@@ -5,18 +5,39 @@ description: "Use when the user wants to clean up transactions, fix categories, 
 
 # Finance Cleanup
 
-Walk the user through a structured cleanup of their Copilot Money transaction data. You have access to MCP tools for reading and writing Copilot Money data. This is a multi-phase process: gather, detect, present, fix, update profile, summarize.
+Walk the user through a structured cleanup of their Copilot Money transaction data. You have access to MCP tools for reading and writing Copilot Money data. This is a multi-phase process: structural audit, gather, detect, present, fix, update profile, summarize.
+
+## Phase 0 — Structural Category Audit
+
+Do this BEFORE any transaction-level work. Transaction cleanup lands in the right buckets only if the taxonomy itself makes sense. Skipping this turns miscategorization fixes into busywork.
+
+1. **Pull categories + spend totals.** Use `get_categories` for the full tree, then `get_transactions` (or grouped aggregates) over the last 6 months to compute per-category spend and per-category transaction count.
+
+2. **Flag structural problems.** Use Python via Bash for the aggregation. Flag any category where:
+   - **Single-merchant dominance:** one merchant is >70% of the category's spend → candidate for a split (e.g. a broad "Shopping" category dominated by one store).
+   - **Semantic breadth:** >3 distinct merchant types lumped together (e.g. transit passes + travel fees + subscriptions all under one transport-adjacent category).
+   - **Dead:** <3 transactions over 6 months → archive candidate.
+   - **Name/content mismatch:** category name doesn't match what's actually inside (e.g. fitness content under a generic "Memberships & Tickets" label).
+   - **Emoji collisions:** duplicate emojis across two unrelated categories, or parent/child emoji mismatches.
+
+3. **Scan for missing buckets.** Look through transactions categorized as "Other" or left uncategorized for recurring patterns that deserve their own category. Common omissions: Fees & Charges (bank fees, FX fees, service fees), Gifts, Software/AI subscriptions.
+
+4. **Present the proposed taxonomy changes to the user** (renames, splits, new categories, archivals) BEFORE touching individual transactions. Use `create_category`, `update_category`, `delete_category` as approved.
+
+5. Only after the taxonomy is clean, move to Phase 1.
 
 ## Phase 1 — Gather Data
 
-1. **Read the user profile.** Open `skills/user-profile.md`. If it doesn't exist, copy `skills/user-profile.template.md` to `skills/user-profile.md` first. Note any existing preferences, especially under "Cleanup Preferences" and "Preferences." These override your judgment — if the profile says "Uber Eats = Dining," never flag Uber Eats as miscategorized.
+1. **Refresh the cache.** Call `refresh_database` as the very first step, before reading anything. The local cache can be stale (the Copilot desktop app re-syncs on focus). Mid-session refreshes cause earlier queries to return incomplete data and force re-pulls later, which wastes time. One refresh up front beats ten mid-session rediscoveries.
 
-2. **Ask about scope.** Before pulling data, ask the user:
+2. **Read the user profile.** Open `skills/user-profile.md`. If it doesn't exist, copy `skills/user-profile.template.md` to `skills/user-profile.md` first. Note any existing preferences, especially under "Cleanup Preferences," "Preferences," and "Recurring Matcher State." These override your judgment — if the profile says "Uber Eats = Dining," never flag Uber Eats as miscategorized.
+
+3. **Ask about scope.** Before pulling data, ask the user:
    - Full cleanup or focused? (e.g., "just recurrings" or "just uncategorized")
    - Any specific date range? Default to last 6 months.
    - Any accounts to skip?
 
-3. **Pull data.** Use these MCP tools:
+4. **Pull data.** Use these MCP tools:
    - `get_transactions` — unreviewed transactions (set `reviewed: false`)
    - `get_transactions` — last 6 months of all transactions (for historical patterns)
    - `get_recurring_transactions` — current recurring charges
@@ -24,6 +45,8 @@ Walk the user through a structured cleanup of their Copilot Money transaction da
    - `get_accounts` — to map account IDs to names
 
    - For any payment app accounts found (Venmo, PayPal, Zelle, CashApp), also pull their transactions separately — these contain the descriptive names and categories that bank-side stubs lack.
+
+   **Default `limit=50`** on broad date-ranged `get_transactions` pulls. Transactions are ~1.6KB each with all the Plaid metadata, so 100 rows reliably exceeds the 100KB MCP response cap and spills to disk — forcing an extra Python-parse detour. At `limit=50` the response stays inline (~80KB). Bump to `limit=100` only when you have already filtered down to a known-small merchant (e.g. `merchant: "AMAZON"` for a user who doesn't shop there constantly).
 
    Run all reads before any analysis. Cache the results mentally — you will cross-reference heavily.
 
@@ -33,11 +56,26 @@ Work through each detection pass. Use Bash with Python for any arithmetic on lar
 
 ### 2.1 Miscategorized Transactions
 
-For each merchant that appears 3+ times in the 6-month history:
+Run two passes. The first catches the highest-signal cases; the second sweeps up the rest.
+
+**Pass A — Cross-category merchants (do this FIRST).**
+
+Group all transactions by `normalized_merchant` over the 6-month history. For each merchant, count the number of distinct `category_name` values used. Flag every merchant with **≥2 distinct categories** as a high-confidence miscategorization candidate — when the same merchant has been filed under multiple buckets, at least one of those categorizations is almost certainly wrong.
+
+Threshold notes:
+- ≥3 distinct categories is almost always a miscategorization somewhere; present these first.
+- Exactly 2 distinct categories is common and often wrong too — but also sometimes legitimate (e.g. a coffee shop that occasionally serves lunch could split Coffee vs Restaurants). Present these with the split visible so the user can call it.
+- Real patterns to expect: payment-processor aliases that resolve to different categories, food-adjacent merchants (coffee/restaurants/delivery), healthcare providers occasionally filed as "Other," travel charges split between Restaurants and Airplane Tickets.
+
+**Pass B — Dominant-category drift.**
+
+For each merchant that appears 3+ times in the 6-month history AND wasn't already surfaced in Pass A:
 - Count how many times each category was used for that merchant.
 - If a transaction's category differs from the merchant's dominant category (used >80% of the time), flag it.
-- **Exception:** If the user profile lists an explicit category preference for that merchant, use the profile's category as ground truth instead of the statistical mode.
-- **Exception:** If a transaction has been manually reviewed and recategorized by the user (reviewed = true with a non-default category), treat it as intentional — do not flag.
+
+**Exceptions (apply to both passes):**
+- If the user profile lists an explicit category preference for that merchant, use the profile's category as ground truth instead of the statistical mode.
+- If a transaction has been manually reviewed and recategorized by the user (reviewed = true with a non-default category), treat it as intentional — do not flag.
 
 ### 2.2 Misclassified Transfers
 
@@ -63,7 +101,22 @@ Scan the 6-month transaction history for merchants appearing 3+ times at regular
 - **Price drift:** Flag if amount varies >5% for charges under $50, or >3% for charges between $50-$200, or >2% for charges over $200.
 - **Missed cycles:** If the most recent occurrence is 7+ days past the expected next date, flag as potentially cancelled or missed.
 
-### 2.4 Quick Wins
+### 2.4 Overdue Recurrings — investigate matcher before archiving
+
+When `get_recurring_transactions` surfaces a sub as "overdue" (expected charge hasn't arrived), **do not recommend archiving it until you've ruled out a stale matcher rule.** In real sessions, ~⅔ of "overdue" subs were actually still charging — the matcher's `name_contains` or `min_amount`/`max_amount` rule had just drifted.
+
+Before flagging archive, for each overdue sub:
+
+1. **Pull the matcher rule.** Use `get_recurring_transactions` (filter by name or id) to read the current `match_string`, `min_amount`, `max_amount`.
+2. **Check the profile.** Read the "Recurring Matcher State" section of `skills/user-profile.md` — if the sub is listed there with known oddities (e.g. "semi-annual, Copilot next_date is buggy for this one"), honor it and skip.
+3. **Look for a near-miss charge.** Run `get_transactions(merchant=<approximate_name>, last_90_days)`. Watch for the two common drift modes:
+   - **Name truncation:** matcher says `name_contains: "Servicename"` but the merchant posts as `SERVICENAM` (payment processor truncated it) — never matches.
+   - **Amount cap drift:** plan price increased (or rent has proration / annual increases) and blew past the old `max_amount`.
+4. **If a near-miss is found**, propose `update_recurring` to fix the rule — widen the amount range, correct the name substring, or both. Only propose `set_recurring_state` to archive if the sub is genuinely silent for >N days with zero near-miss matches.
+
+When a matcher is updated, write the new rule back to the user profile's "Recurring Matcher State" section (see Phase 5) so next session doesn't re-investigate the same sub from scratch.
+
+### 2.5 Quick Wins
 
 - **No category:** Transactions with no category assigned. **Exception:** Income/credit transactions (negative amounts) without a category are intentionally uncategorized — do not flag them.
 - **Old unreviewed:** Unreviewed transactions older than 90 days.
@@ -117,8 +170,12 @@ After all fixes are applied, update `skills/user-profile.md` with any new prefer
 - Any accounts the user said to always skip.
 - Any categories the user said to never touch.
 - Frequency preferences (e.g., "run cleanup monthly").
+- **Recurring Matcher State** — whenever you use `update_recurring` to fix a matcher rule during Phase 2.4, record the final state under "Recurring Matcher State." This is the single most valuable thing the profile can carry between sessions: without it, next cleanup re-investigates the same overdue subs from scratch. For each known-active subscription, record:
+  - Exact merchant substring the payment processor actually posts (not the user-facing brand name).
+  - Current amount range, min–max.
+  - Known oddities — especially semi-annual or annual frequency where Copilot's `next_date` math is buggy and the overdue flag can't be trusted.
 
-**Tell the user exactly what you are saving before writing.** Example: "I'm adding to your profile: 'ENC = Healthcare (psychologist)', 'Skip Coinbase account for cleanup'. OK?"
+**Tell the user exactly what you are saving before writing.** Example: "I'm adding to your profile: 'ENC = Healthcare (psychologist)', 'Skip Coinbase account for cleanup', 'Matcher: Gym Membership — `GYMNAME`, $45–$55, annual price bump expected each January'. OK?"
 
 ## Phase 6 — Summary
 
