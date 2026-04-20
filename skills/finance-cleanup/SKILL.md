@@ -11,7 +11,9 @@ Walk the user through a structured cleanup of their Copilot Money transaction da
 
 Do this BEFORE any transaction-level work. Transaction cleanup lands in the right buckets only if the taxonomy itself makes sense. Skipping this turns miscategorization fixes into busywork.
 
-1. **Pull categories + spend totals.** Use `get_categories` for the full tree, then `get_transactions` (or grouped aggregates) over the last 6 months to compute per-category spend and per-category transaction count.
+0. **Refresh the cache.** Call `refresh_database` at the very start of Phase 0, not Phase 1. Phase 0 already reads categories + 6 months of transactions, so a stale cache would surface structural problems that don't exist (or hide new ones). One refresh covers both phases.
+
+1. **Pull categories + spend totals.** Use `get_categories` for the full tree, then `get_transactions` over the last 6 months to compute per-category spend and per-category transaction count. For this aggregation pass, **paginate through multiple `get_transactions` calls** rather than applying the default `limit=50` — you need the full 6-month set for accurate category totals, not a 50-row sample. Aggregate per-category counts and sums incrementally with Python via Bash as each page comes back.
 
 2. **Flag structural problems.** Use Python via Bash for the aggregation. Flag any category where:
    - **Single-merchant dominance:** one merchant is >70% of the category's spend → candidate for a split (e.g. a broad "Shopping" category dominated by one store).
@@ -28,16 +30,16 @@ Do this BEFORE any transaction-level work. Transaction cleanup lands in the righ
 
 ## Phase 1 — Gather Data
 
-1. **Refresh the cache.** Call `refresh_database` as the very first step, before reading anything. The local cache can be stale (the Copilot desktop app re-syncs on focus). Mid-session refreshes cause earlier queries to return incomplete data and force re-pulls later, which wastes time. One refresh up front beats ten mid-session rediscoveries.
+Cache was refreshed in Phase 0 Step 0 — do not refresh again. Mid-session refreshes cause earlier queries to return incomplete data and force re-pulls later. One refresh up front covers the whole session.
 
-2. **Read the user profile.** Open `skills/user-profile.md`. If it doesn't exist, copy `skills/user-profile.template.md` to `skills/user-profile.md` first. Note any existing preferences, especially under "Cleanup Preferences," "Preferences," and "Recurring Matcher State." These override your judgment — if the profile says "Uber Eats = Dining," never flag Uber Eats as miscategorized.
+1. **Read the user profile.** Open `skills/user-profile.md`. If it doesn't exist, copy `skills/user-profile.template.md` to `skills/user-profile.md` first. Note any existing preferences, especially under "Cleanup Preferences," "Preferences," and "Recurring Matcher State." These override your judgment — if the profile says "Uber Eats = Dining," never flag Uber Eats as miscategorized.
 
-3. **Ask about scope.** Before pulling data, ask the user:
+2. **Ask about scope.** Before pulling data, ask the user:
    - Full cleanup or focused? (e.g., "just recurrings" or "just uncategorized")
    - Any specific date range? Default to last 6 months.
    - Any accounts to skip?
 
-4. **Pull data.** Use these MCP tools:
+3. **Pull data.** Use these MCP tools:
    - `get_transactions` — unreviewed transactions (set `reviewed: false`)
    - `get_transactions` — last 6 months of all transactions (for historical patterns)
    - `get_recurring_transactions` — current recurring charges
@@ -112,7 +114,7 @@ Before flagging archive, for each overdue sub:
 3. **Look for a near-miss charge.** Run `get_transactions(merchant=<approximate_name>, last_90_days)`. Watch for the two common drift modes:
    - **Name truncation:** matcher says `name_contains: "Servicename"` but the merchant posts as `SERVICENAM` (payment processor truncated it) — never matches.
    - **Amount cap drift:** plan price increased (or rent has proration / annual increases) and blew past the old `max_amount`.
-4. **If a near-miss is found**, propose `update_recurring` to fix the rule — widen the amount range, correct the name substring, or both. Only propose `set_recurring_state` to archive if the sub is genuinely silent for >N days with zero near-miss matches.
+4. **If a near-miss is found**, propose `update_recurring` to fix the rule — widen the amount range, correct the name substring, or both. Only propose `set_recurring_state` to archive if the sub is genuinely silent for **30+ days past the expected `next_date`** with zero near-miss matches in the last 90 days. (Phase 2.3 flags missed cycles at 7+ days, which is right for "might be cancelled" — but archiving is a heavier call and should wait for a full extra cycle to rule out delayed posting.)
 
 When a matcher is updated, write the new rule back to the user profile's "Recurring Matcher State" section (see Phase 5) so next session doesn't re-investigate the same sub from scratch.
 
