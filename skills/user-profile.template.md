@@ -28,3 +28,14 @@
 
 ## Cleanup Preferences
 <!-- Auto-populated as you approve/reject cleanup suggestions -->
+
+## Recurring Matcher State
+<!-- Auto-populated by /finance-cleanup whenever it fixes a matcher rule
+     (update_recurring). Read BEFORE investigating any "overdue" recurring
+     so known-active subs aren't re-investigated from scratch each session.
+     Format per sub:
+       - <Display name>
+         - Merchant substring: `<exact text the processor posts>`
+         - Amount range: $min – $max
+         - Oddities: <e.g. "semi-annual; Copilot next_date is buggy"> -->
+
