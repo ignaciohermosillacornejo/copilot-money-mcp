@@ -103,4 +103,60 @@ describe('PlaidAccountSchema', () => {
     });
     expect(result.success).toBe(false);
   });
+
+  /**
+   * Regression: brokerage / IRA / Roth / CMA plaid accounts cache holdings
+   * where `vested_quantity` and `vested_value` come through as literal null
+   * (only stock-plan accounts populate these with numbers). Before the fix,
+   * those nulls tripped Zod validation and the entire plaid account was
+   * silently dropped by `processPlaidAccount` in the decoder.
+   *
+   * Parallel to PR #302, which fixed the same pattern in AccountHoldingSchema.
+   */
+  describe('holdings vested field nullability (parallel to #302)', () => {
+    test('accepts holding with null vested_quantity and vested_value', () => {
+      const result = PlaidAccountSchema.safeParse({
+        plaid_account_id: 'plaid-acc-nullable',
+        holdings: [
+          {
+            security_id: 'sec1',
+            account_id: 'acc1',
+            institution_price: 42.5,
+            institution_value: 425,
+            quantity: 10,
+            cost_basis: null,
+            vested_quantity: null,
+            vested_value: null,
+          },
+        ],
+      });
+
+      expect(result.success).toBe(true);
+    });
+
+    test('accepts holding with numeric vested_quantity and vested_value', () => {
+      const result = PlaidAccountSchema.safeParse({
+        plaid_account_id: 'plaid-acc-numeric',
+        holdings: [
+          {
+            security_id: 'sec1',
+            quantity: 10,
+            vested_quantity: 7,
+            vested_value: 297.5,
+          },
+        ],
+      });
+
+      expect(result.success).toBe(true);
+    });
+
+    test('accepts holding when vested fields are omitted', () => {
+      const result = PlaidAccountSchema.safeParse({
+        plaid_account_id: 'plaid-acc-omitted',
+        holdings: [{ security_id: 'sec1', quantity: 10 }],
+      });
+
+      expect(result.success).toBe(true);
+    });
+  });
 });
