@@ -90,7 +90,7 @@ jobs:
 
       - name: Upload artifact (dry run)
         if: ${{ inputs.dry_run }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: copilot-money-mcp-bundle
           path: copilot-money-mcp.mcpb
