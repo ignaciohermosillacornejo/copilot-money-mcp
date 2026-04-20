@@ -2050,12 +2050,19 @@ function processSubChange<T>(
       if (extracted !== undefined) data[key] = extracted;
     }
   }
-  const logicalCollection = collection.endsWith('/t')
-    ? 'transaction_changes'
-    : collection.endsWith('/a')
-      ? 'account_changes'
-      : 'change_sub';
-  return validateOrWarn(schema, data, { collection: logicalCollection, docId });
+  // Dedupe-friendly stable names for the two known sub-change types. If
+  // Copilot ever adds a new suffix, we fall through to 'change_sub' and
+  // embed the raw collection path in docId so the warn is still diagnosable.
+  if (collection.endsWith('/t')) {
+    return validateOrWarn(schema, data, { collection: 'transaction_changes', docId });
+  }
+  if (collection.endsWith('/a')) {
+    return validateOrWarn(schema, data, { collection: 'account_changes', docId });
+  }
+  return validateOrWarn(schema, data, {
+    collection: 'change_sub',
+    docId: `${docId} (unknown collection: ${collection})`,
+  });
 }
 
 /**
