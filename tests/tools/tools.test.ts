@@ -1583,34 +1583,36 @@ describe('CopilotMoneyTools - Recurring Transactions Detail View', () => {
   });
 
   test('does not count split parents as recurring occurrences', async () => {
-    // A single split across 3 months creates 1 parent + 2 children per month.
-    // Without filtering, pattern detection sees 9 occurrences of "Bilt Rent"
-    // and flags it as recurring even though it's really 3 monthly rents.
+    // Scenario: a monthly recurring charge ("Gym Fees") that the user splits
+    // 50/50 every month. Child amounts are identical so the merchant clears
+    // the recurring detector's 30% amount-variance filter. Each month leaves
+    // 1 parent + 2 children with the same merchant name; without filtering
+    // the detector sees 9 occurrences, with filtering it sees the true 6.
     const split = (suffix: string, month: string): Transaction[] => [
       {
         transaction_id: `parent-${suffix}`,
-        amount: 3000,
+        amount: 100,
         date: month,
-        name: 'Bilt Rent',
+        name: 'Gym Fees',
         account_id: 'acc1',
         children_transaction_ids: [`child-a-${suffix}`, `child-b-${suffix}`],
-        old_category_id: 'rent',
+        old_category_id: 'fitness',
       },
       {
         transaction_id: `child-a-${suffix}`,
-        amount: 2000,
+        amount: 50,
         date: month,
-        name: 'Bilt Rent',
-        category_id: 'rent',
+        name: 'Gym Fees',
+        category_id: 'fitness',
         account_id: 'acc1',
         parent_transaction_id: `parent-${suffix}`,
       },
       {
         transaction_id: `child-b-${suffix}`,
-        amount: 1000,
+        amount: 50,
         date: month,
-        name: 'Bilt Rent',
-        category_id: 'hotels',
+        name: 'Gym Fees',
+        category_id: 'personal_care',
         account_id: 'acc1',
         parent_transaction_id: `parent-${suffix}`,
       },
@@ -1629,10 +1631,9 @@ describe('CopilotMoneyTools - Recurring Transactions Detail View', () => {
 
     // Expect occurrences to reflect real splits (2 children × 3 months = 6),
     // not parents (3 more would bring us to 9).
-    const bilt = result.recurring.find((r) => r.merchant === 'Bilt Rent');
-    if (bilt) {
-      expect(bilt.occurrences).toBe(6);
-    }
+    const gym = result.recurring.find((r) => r.merchant === 'Gym Fees');
+    expect(gym).toBeDefined();
+    expect(gym!.occurrences).toBe(6);
   });
 
   test('returns copilot subscriptions with grouped items by state', async () => {
