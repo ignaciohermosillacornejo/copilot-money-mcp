@@ -98,9 +98,7 @@ export const TransactionSchema = z
     posted_transaction_id: z.string().optional(),
     original_transaction_id: z.string().optional(),
 
-    // Split-transaction linkage. When the user splits a transaction in Copilot,
-    // the original doc gains `children_transaction_ids` and each new child doc
-    // gets `parent_transaction_id`. Both fields are bidirectional pointers.
+    // Present only on split transactions: parent gains children IDs, children gain parent ID.
     parent_transaction_id: z.string().optional(),
     children_transaction_ids: z.array(z.string()).optional(),
 

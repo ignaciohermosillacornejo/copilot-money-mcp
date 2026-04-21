@@ -858,6 +858,50 @@ describe('CopilotMoneyTools', () => {
       }
     });
 
+    test('does not double-count split parents in category totals', async () => {
+      // parent $300 in groceries, two children $100 + $200 also in groceries.
+      // Correct total for groceries = $300, not $600.
+      (db as any)._transactions = [
+        {
+          transaction_id: 'split_parent',
+          amount: 300,
+          date: '2024-03-01',
+          name: 'Costco Split',
+          account_id: 'acc1',
+          children_transaction_ids: ['split_child_a', 'split_child_b'],
+          old_category_id: 'groceries',
+        },
+        {
+          transaction_id: 'split_child_a',
+          amount: 100,
+          date: '2024-03-01',
+          name: 'Costco Split',
+          category_id: 'groceries',
+          account_id: 'acc1',
+          parent_transaction_id: 'split_parent',
+        },
+        {
+          transaction_id: 'split_child_b',
+          amount: 200,
+          date: '2024-03-01',
+          name: 'Costco Split',
+          category_id: 'groceries',
+          account_id: 'acc1',
+          parent_transaction_id: 'split_parent',
+        },
+      ];
+
+      const result = await tools.getCategories({
+        start_date: '2024-03-01',
+        end_date: '2024-03-31',
+      });
+      const groceries = (
+        result.data as { categories: { category_id: string; total_amount: number }[] }
+      ).categories.find((c) => c.category_id === 'groceries');
+
+      expect(groceries?.total_amount).toBe(300);
+    });
+
     test('returns tree view with hierarchy', async () => {
       const result = await tools.getCategories({ view: 'tree' });
 
@@ -1536,6 +1580,59 @@ describe('CopilotMoneyTools - Recurring Transactions Detail View', () => {
     expect(planetFitness?.average_amount).toBe(50);
     expect(planetFitness?.transactions).toBeDefined();
     expect(planetFitness?.transactions?.length).toBeLessThanOrEqual(5);
+  });
+
+  test('does not count split parents as recurring occurrences', async () => {
+    // A single split across 3 months creates 1 parent + 2 children per month.
+    // Without filtering, pattern detection sees 9 occurrences of "Bilt Rent"
+    // and flags it as recurring even though it's really 3 monthly rents.
+    const split = (suffix: string, month: string): Transaction[] => [
+      {
+        transaction_id: `parent-${suffix}`,
+        amount: 3000,
+        date: month,
+        name: 'Bilt Rent',
+        account_id: 'acc1',
+        children_transaction_ids: [`child-a-${suffix}`, `child-b-${suffix}`],
+        old_category_id: 'rent',
+      },
+      {
+        transaction_id: `child-a-${suffix}`,
+        amount: 2000,
+        date: month,
+        name: 'Bilt Rent',
+        category_id: 'rent',
+        account_id: 'acc1',
+        parent_transaction_id: `parent-${suffix}`,
+      },
+      {
+        transaction_id: `child-b-${suffix}`,
+        amount: 1000,
+        date: month,
+        name: 'Bilt Rent',
+        category_id: 'hotels',
+        account_id: 'acc1',
+        parent_transaction_id: `parent-${suffix}`,
+      },
+    ];
+    (db as any)._recurring = [];
+    (db as any)._transactions = [
+      ...split('jan', '2024-01-01'),
+      ...split('feb', '2024-02-01'),
+      ...split('mar', '2024-03-01'),
+    ];
+
+    const result = await tools.getRecurringTransactions({
+      start_date: '2024-01-01',
+      end_date: '2024-04-01',
+    });
+
+    // Expect occurrences to reflect real splits (2 children × 3 months = 6),
+    // not parents (3 more would bring us to 9).
+    const bilt = result.recurring.find((r) => r.merchant === 'Bilt Rent');
+    if (bilt) {
+      expect(bilt.occurrences).toBe(6);
+    }
   });
 
   test('returns copilot subscriptions with grouped items by state', async () => {

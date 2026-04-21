@@ -880,6 +880,10 @@ describe('decoder coverage', () => {
 
       const parent = txns.find((t) => t.transaction_id === 'parent-1')!;
       expect(parent).toBeDefined();
+      // Order is load-bearing: Firestore array fields preserve insertion
+      // order and getStringArray walks them in-order, so the decoder round-
+      // trip must keep children_transaction_ids stable (some callers rely
+      // on display order).
       expect(parent.children_transaction_ids).toEqual(['child-a', 'child-b']);
       expect(parent.parent_transaction_id).toBeUndefined();
 
