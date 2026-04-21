@@ -100,6 +100,36 @@ const mockTransactionsWithFilters: Transaction[] = [
     account_id: 'acc1',
     excluded: true,
   },
+  {
+    // Split parent: has children_transaction_ids, so its amount is already
+    // accounted for by the two child rows below. Double-counting this would
+    // inflate spend totals.
+    transaction_id: 'txn_split_parent',
+    amount: 4346.6,
+    date: '2024-03-01',
+    name: 'Bilt Rent Parent',
+    account_id: 'acc1',
+    children_transaction_ids: ['txn_split_child_a', 'txn_split_child_b'],
+    old_category_id: 'shopping',
+  },
+  {
+    transaction_id: 'txn_split_child_a',
+    amount: 2771.6,
+    date: '2024-03-01',
+    name: 'Bilt Rent Child A',
+    category_id: 'shopping',
+    account_id: 'acc1',
+    parent_transaction_id: 'txn_split_parent',
+  },
+  {
+    transaction_id: 'txn_split_child_b',
+    amount: 1575.0,
+    date: '2024-03-01',
+    name: 'Bilt Rent Child B',
+    category_id: 'shopping',
+    account_id: 'acc1',
+    parent_transaction_id: 'txn_split_parent',
+  },
 ];
 
 const mockAccountsWithHidden: Account[] = [
@@ -680,14 +710,14 @@ describe('CopilotMoneyTools', () => {
       (db as any)._transactions = [...mockTransactionsWithFilters];
     });
 
-    test('excludes transfers, deleted, and excluded transactions by default', async () => {
+    test('excludes transfers, deleted, excluded, and split parents by default', async () => {
       const result = await tools.getTransactions({
         start_date: '2024-03-01',
         end_date: '2024-03-31',
       });
-      // Only normal transaction should be returned
-      expect(result.count).toBe(1);
-      expect(result.transactions[0].transaction_id).toBe('txn_normal');
+      // Normal + two split children (they're real spend); parent is double-count.
+      const ids = result.transactions.map((t) => t.transaction_id).sort();
+      expect(ids).toEqual(['txn_normal', 'txn_split_child_a', 'txn_split_child_b']);
     });
 
     test('includes transfers when exclude_transfers is false', async () => {
@@ -696,8 +726,8 @@ describe('CopilotMoneyTools', () => {
         end_date: '2024-03-31',
         exclude_transfers: false,
       });
-      // Normal + transfer
-      expect(result.count).toBe(2);
+      // Normal + transfer + 2 split children
+      expect(result.count).toBe(4);
     });
 
     test('includes deleted transactions when exclude_deleted is false', async () => {
@@ -706,8 +736,8 @@ describe('CopilotMoneyTools', () => {
         end_date: '2024-03-31',
         exclude_deleted: false,
       });
-      // Normal + deleted
-      expect(result.count).toBe(2);
+      // Normal + deleted + 2 split children
+      expect(result.count).toBe(4);
     });
 
     test('includes excluded transactions when exclude_excluded is false', async () => {
@@ -716,8 +746,24 @@ describe('CopilotMoneyTools', () => {
         end_date: '2024-03-31',
         exclude_excluded: false,
       });
-      // Normal + excluded
-      expect(result.count).toBe(2);
+      // Normal + excluded + 2 split children
+      expect(result.count).toBe(4);
+    });
+
+    test('includes split parents when exclude_split_parents is false', async () => {
+      const result = await tools.getTransactions({
+        start_date: '2024-03-01',
+        end_date: '2024-03-31',
+        exclude_split_parents: false,
+      });
+      // Normal + parent + 2 children = 4
+      const ids = result.transactions.map((t) => t.transaction_id).sort();
+      expect(ids).toEqual([
+        'txn_normal',
+        'txn_split_child_a',
+        'txn_split_child_b',
+        'txn_split_parent',
+      ]);
     });
 
     test('includes all transactions when all filters are disabled', async () => {
@@ -727,9 +773,10 @@ describe('CopilotMoneyTools', () => {
         exclude_transfers: false,
         exclude_deleted: false,
         exclude_excluded: false,
+        exclude_split_parents: false,
       });
-      // All 4 transactions
-      expect(result.count).toBe(4);
+      // All 7 transactions
+      expect(result.count).toBe(7);
     });
   });
 

@@ -455,6 +455,7 @@ export class CopilotMoneyTools {
     exclude_transfers?: boolean;
     exclude_deleted?: boolean;
     exclude_excluded?: boolean;
+    exclude_split_parents?: boolean;
     pending?: boolean;
     region?: string;
     country?: string;
@@ -492,6 +493,7 @@ export class CopilotMoneyTools {
       exclude_transfers = true,
       exclude_deleted = true,
       exclude_excluded = true,
+      exclude_split_parents = true,
       pending,
       region,
       country,
@@ -623,6 +625,16 @@ export class CopilotMoneyTools {
       const excludedCategoryIds = await this.getExcludedCategoryIds();
       transactions = transactions.filter(
         (txn) => !txn.excluded && !(txn.category_id && excludedCategoryIds.has(txn.category_id))
+      );
+    }
+
+    // Filter out split parents. Copilot hides these from its own UI after a
+    // split — the children carry the real categorized amounts. Keeping the
+    // parent would double-count the same spend (parent.amount == sum of
+    // children.amount).
+    if (exclude_split_parents) {
+      transactions = transactions.filter(
+        (txn) => !txn.children_transaction_ids || txn.children_transaction_ids.length === 0
       );
     }
 
@@ -3368,6 +3380,14 @@ export function createToolSchemas(): ToolSchema[] {
           exclude_excluded: {
             type: 'boolean',
             description: 'Exclude user-excluded transactions (default: true)',
+            default: true,
+          },
+          exclude_split_parents: {
+            type: 'boolean',
+            description:
+              'Exclude split-transaction parents (docs with children_transaction_ids). ' +
+              'The children already carry the real categorized amounts — returning the ' +
+              'parent would double-count the spend. Default: true.',
             default: true,
           },
           pending: {
