@@ -319,6 +319,17 @@ export interface HoldingEntry {
 }
 
 /**
+ * Drop split-transaction parents from a list. Each split parent's amount
+ * equals the sum of its children's amounts, so any aggregation (category
+ * totals, merchant grouping, recurring detection) double-counts if parents
+ * are included alongside their children. Copilot hides parents in its own
+ * UI for the same reason.
+ */
+function filterSplitParents<T extends { children_transaction_ids?: string[] }>(txns: T[]): T[] {
+  return txns.filter((t) => !t.children_transaction_ids || t.children_transaction_ids.length === 0);
+}
+
+/**
  * Collection of MCP tools for querying Copilot Money data.
  */
 export class CopilotMoneyTools {
@@ -1219,11 +1230,13 @@ export class CopilotMoneyTools {
       case 'list':
       default: {
         // Get transactions with date filtering if period/dates specified
-        const transactions = await this.db.getTransactions({
-          startDate: start_date,
-          endDate: end_date,
-          limit: 50000, // Get all for aggregation
-        });
+        const transactions = filterSplitParents(
+          await this.db.getTransactions({
+            startDate: start_date,
+            endDate: end_date,
+            limit: 50000, // Get all for aggregation
+          })
+        );
 
         // Count transactions and amounts per category
         const categoryStats = new Map<string, { count: number; totalAmount: number }>();
@@ -1410,12 +1423,16 @@ export class CopilotMoneyTools {
       [start_date, end_date] = parsePeriod(period);
     }
 
-    // Get all transactions in the period
-    const transactions = await this.db.getTransactions({
-      startDate: start_date,
-      endDate: end_date,
-      limit: 50000,
-    });
+    // Get all transactions in the period. Split parents share a merchant
+    // name with their children and would inflate occurrence counts, producing
+    // false-positive recurring matches.
+    const transactions = filterSplitParents(
+      await this.db.getTransactions({
+        startDate: start_date,
+        endDate: end_date,
+        limit: 50000,
+      })
+    );
 
     // Group by merchant name
     const merchantTransactions = new Map<
