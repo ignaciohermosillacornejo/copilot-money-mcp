@@ -829,6 +829,68 @@ describe('decoder coverage', () => {
       expect(investBool).toBeDefined();
       expect(investBool.from_investment).toBe(true);
     });
+
+    test('extracts split-transaction linkage fields', async () => {
+      // When the user splits a transaction in Copilot, the original doc gets
+      // `children_transaction_ids: string[]` and each new child doc gets
+      // `parent_transaction_id: string`. Both fields live on the Firestore
+      // doc but were previously dropped by the decoder allow-list.
+      const dbPath = path.join(FIXTURES_DIR, 'txn-split-linkage-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'transactions',
+          id: 'parent-1',
+          fields: {
+            transaction_id: 'parent-1',
+            amount: 4346.6,
+            date: '2026-04-01',
+            name: 'BILT RENT - AVENUE',
+            children_transaction_ids: ['child-a', 'child-b'],
+            old_category_id: 'rent-cat',
+          },
+        },
+        {
+          collection: 'transactions',
+          id: 'child-a',
+          fields: {
+            transaction_id: 'child-a',
+            amount: 2771.6,
+            date: '2026-04-01',
+            name: 'BILT RENT - AVENUE',
+            category_id: 'rent-cat',
+            parent_transaction_id: 'parent-1',
+          },
+        },
+        {
+          collection: 'transactions',
+          id: 'child-b',
+          fields: {
+            transaction_id: 'child-b',
+            amount: 1575.0,
+            date: '2026-04-01',
+            name: 'BILT RENT - AVENUE',
+            category_id: 'hotels-cat',
+            parent_transaction_id: 'parent-1',
+          },
+        },
+      ]);
+
+      const txns = await decodeTransactions(dbPath);
+      expect(txns.length).toBe(3);
+
+      const parent = txns.find((t) => t.transaction_id === 'parent-1')!;
+      expect(parent).toBeDefined();
+      expect(parent.children_transaction_ids).toEqual(['child-a', 'child-b']);
+      expect(parent.parent_transaction_id).toBeUndefined();
+
+      const childA = txns.find((t) => t.transaction_id === 'child-a')!;
+      expect(childA).toBeDefined();
+      expect(childA.parent_transaction_id).toBe('parent-1');
+      expect(childA.children_transaction_ids).toBeUndefined();
+
+      const childB = txns.find((t) => t.transaction_id === 'child-b')!;
+      expect(childB.parent_transaction_id).toBe('parent-1');
+    });
   });
 
   describe('decodeAllCollections', () => {

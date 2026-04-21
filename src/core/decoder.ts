@@ -789,6 +789,7 @@ function processTransaction(
     'posted_transaction_id',
     'original_transaction_id',
     'old_category_id',
+    'parent_transaction_id',
   ];
 
   for (const field of stringFields) {
@@ -837,6 +838,7 @@ function processTransaction(
     'plaid_category_strings',
     'intelligence_suggested_category_ids',
     'tag_ids',
+    'children_transaction_ids',
   ];
 
   for (const field of stringArrayFields) {
