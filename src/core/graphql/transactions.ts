@@ -4,6 +4,7 @@ import {
   CREATE_TRANSACTION,
   DELETE_TRANSACTION,
   EDIT_TRANSACTION,
+  SPLIT_TRANSACTION,
 } from './operations.generated.js';
 
 /**
@@ -180,6 +181,55 @@ export async function addTransactionToRecurring(
     AddTransactionToRecurringResponse
   >('AddTransactionToRecurring', ADD_TRANSACTION_TO_RECURRING, args);
   return data.addTransactionToRecurring.transaction;
+}
+
+export interface SplitTransactionInput {
+  name: string; // required — no per-split default on the server side
+  date: string; // YYYY-MM-DD; required — server rejects missing date
+  amount: number; // required; children must sum to parent.amount (server-enforced)
+  categoryId: string; // required
+}
+
+export interface SplitTransactionArgs {
+  id: string; // the parent transaction being split
+  accountId: string;
+  itemId: string;
+  input: SplitTransactionInput[]; // one entry per child
+}
+
+export interface SplitTransactionResult {
+  parentTransaction: CreatedTransaction;
+  splitTransactions: CreatedTransaction[];
+}
+
+interface SplitTransactionResponse {
+  splitTransaction: SplitTransactionResult;
+}
+
+/**
+ * Split one parent transaction into N child transactions.
+ *
+ * SplitTransactionOutput has exactly two fields — `parentTransaction` and
+ * `splitTransactions` — both matching the same TransactionFields shape as
+ * createTransaction. The wrapper returns both levels so callers can emit
+ * a combined response (the parent is hidden by Copilot's UI after a split
+ * but not deleted — the children carry `parent_transaction_id` back to it,
+ * and there is no reversal mutation).
+ *
+ * Probed input optionals (`tagIds`, `notes`, `isReviewed`) all rejected by
+ * the server as "not defined by type SplitTransactionInput" — any post-split
+ * metadata edits require per-child `editTransaction` calls.
+ */
+export async function splitTransaction(
+  client: GraphQLClient,
+  args: SplitTransactionArgs
+): Promise<SplitTransactionResult> {
+  const data = await client.mutate<SplitTransactionArgs, SplitTransactionResponse>(
+    'SplitTransaction',
+    SPLIT_TRANSACTION,
+    args
+  );
+  return data.splitTransaction;
 }
 
 export async function editTransaction(

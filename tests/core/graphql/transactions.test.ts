@@ -4,12 +4,14 @@ import {
   createTransaction,
   deleteTransaction,
   addTransactionToRecurring,
+  splitTransaction,
 } from '../../../src/core/graphql/transactions.js';
 import {
   EDIT_TRANSACTION,
   CREATE_TRANSACTION,
   DELETE_TRANSACTION,
   ADD_TRANSACTION_TO_RECURRING,
+  SPLIT_TRANSACTION,
 } from '../../../src/core/graphql/operations.generated.js';
 import type { GraphQLClient } from '../../../src/core/graphql/client.js';
 
@@ -337,6 +339,118 @@ describe('addTransactionToRecurring', () => {
         accountId: 'acc1',
         itemId: 'item1',
         input: { recurringId: 'rec1' },
+      })
+    ).rejects.toThrow('Transaction not found');
+  });
+});
+
+describe('splitTransaction', () => {
+  // Canned server response — the output type is SplitTransactionOutput
+  // with exactly two fields: parentTransaction and splitTransactions.
+  // Both follow the TransactionFields shape (same as CreatedTransaction).
+  const parentTx = {
+    id: 'parent-1',
+    name: 'Hotel + Car + Meals',
+    date: '2026-04-15',
+    amount: 600,
+    categoryId: '', // post-split: Copilot blanks this out on the parent
+    type: 'REGULAR' as const,
+    accountId: 'acc1',
+    itemId: 'item1',
+    isPending: false,
+    isReviewed: false,
+    createdAt: 1777785600000,
+    recurringId: null,
+    userNotes: null,
+    tipAmount: null,
+    suggestedCategoryIds: [],
+    tags: [],
+    goal: null,
+  };
+  const childA = {
+    ...parentTx,
+    id: 'child-a',
+    name: 'Hotel',
+    amount: 400,
+    categoryId: 'cat-lodging',
+  };
+  const childB = {
+    ...parentTx,
+    id: 'child-b',
+    name: 'Car',
+    amount: 200,
+    categoryId: 'cat-car-rental',
+  };
+
+  test('calls mutate with SplitTransaction op name, generated query, and expected variables', async () => {
+    const client = createMockClient({
+      splitTransaction: {
+        parentTransaction: parentTx,
+        splitTransactions: [childA, childB],
+      },
+    });
+
+    await splitTransaction(client, {
+      id: 'parent-1',
+      accountId: 'acc1',
+      itemId: 'item1',
+      input: [
+        { name: 'Hotel', date: '2026-04-15', amount: 400, categoryId: 'cat-lodging' },
+        { name: 'Car', date: '2026-04-15', amount: 200, categoryId: 'cat-car-rental' },
+      ],
+    });
+
+    const calls = (client.mutate as ReturnType<typeof mock>).mock.calls;
+    expect(calls).toHaveLength(1);
+    expect(calls[0][0]).toBe('SplitTransaction');
+    expect(calls[0][1]).toBe(SPLIT_TRANSACTION);
+    expect(calls[0][2]).toEqual({
+      id: 'parent-1',
+      accountId: 'acc1',
+      itemId: 'item1',
+      input: [
+        { name: 'Hotel', date: '2026-04-15', amount: 400, categoryId: 'cat-lodging' },
+        { name: 'Car', date: '2026-04-15', amount: 200, categoryId: 'cat-car-rental' },
+      ],
+    });
+  });
+
+  test('returns unwrapped { parentTransaction, splitTransactions } from the server response', async () => {
+    const client = createMockClient({
+      splitTransaction: {
+        parentTransaction: parentTx,
+        splitTransactions: [childA, childB],
+      },
+    });
+
+    const out = await splitTransaction(client, {
+      id: 'parent-1',
+      accountId: 'acc1',
+      itemId: 'item1',
+      input: [
+        { name: 'Hotel', date: '2026-04-15', amount: 400, categoryId: 'cat-lodging' },
+        { name: 'Car', date: '2026-04-15', amount: 200, categoryId: 'cat-car-rental' },
+      ],
+    });
+
+    expect(out.parentTransaction).toEqual(parentTx);
+    expect(out.splitTransactions).toEqual([childA, childB]);
+  });
+
+  test('propagates errors from the client', async () => {
+    const client = {
+      mutate: mock(() => Promise.reject(new Error('Transaction not found'))),
+    } as unknown as GraphQLClient;
+
+    await expect(
+      splitTransaction(client, {
+        id: 'parent-1',
+        accountId: 'acc1',
+        itemId: 'item1',
+        input: [
+          { name: 'Hotel', date: '2026-04-15', amount: 400, categoryId: 'cat-lodging' },
+          { name: 'Car', date: '2026-04-15', amount: 200, categoryId: 'cat-car-rental' },
+        ],
       })
     ).rejects.toThrow('Transaction not found');
   });
