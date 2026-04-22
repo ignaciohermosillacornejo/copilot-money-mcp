@@ -2729,7 +2729,7 @@ export class CopilotMoneyTools {
 
       return {
         success: true,
-        transaction_id: tx.id,
+        transaction_id,
         transaction,
       };
     } catch (e) {
