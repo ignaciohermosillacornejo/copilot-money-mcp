@@ -1,5 +1,7 @@
 # Operations Index
 
+Operations below are from the web-session capture (`flows/01-web-session.md`). Additional mutations that exist on the server but were **never observed in the web capture** — including `splitTransaction`, `createTransaction`, `deleteTransaction`, and others — are documented in [`../hidden-mutations.md`](../hidden-mutations.md). The recon methodology used to discover them is in [`../introspection-recon.md`](../introspection-recon.md).
+
 - [AccountLiveBalance](operations/queries/AccountLiveBalance.md) — query, 18 observation(s)
 - [Accounts](operations/queries/Accounts.md) — query, 2 observation(s)
 - [Announcement](operations/queries/Announcement.md) — query, 1 observation(s)
