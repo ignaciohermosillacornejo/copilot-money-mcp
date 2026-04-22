@@ -12,6 +12,7 @@ import { resolve, dirname } from 'node:path';
 import { parse, print, visit, Kind } from 'graphql';
 
 const IN_SCOPE_MUTATIONS = [
+  'CreateTransaction',
   'EditTransaction',
   'CreateCategory',
   'EditCategory',
