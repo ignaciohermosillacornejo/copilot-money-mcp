@@ -124,7 +124,7 @@ Install the `graphql` package (used only by the build-time generator) and create
 bun add -d graphql
 ```
 
-Expected: `package.json` shows `"graphql": "^16.x.x"` in `devDependencies`. `bun.lockb` updated.
+Expected: `package.json` shows `"graphql": "^16.x.x"` in `devDependencies`. `bun.lock` updated.
 
 - [ ] **Step 2: Add `generate:graphql` script to package.json**
 
@@ -255,7 +255,7 @@ Expected output: `Wrote src/core/graphql/operations.generated.ts with 13 operati
 - [ ] **Step 5: Commit**
 
 ```bash
-git add package.json bun.lockb scripts/generate-graphql-operations.ts src/core/graphql/operations.generated.ts
+git add package.json bun.lock scripts/generate-graphql-operations.ts src/core/graphql/operations.generated.ts
 git commit -m "feat(graphql): add operations generator + graphql devDependency"
 ```
 

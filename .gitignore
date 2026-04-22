@@ -16,7 +16,6 @@ lerna-debug.log*
 
 # Bun
 .bun-build/
-bun.lockb
 bun.lock
 
 # Build output

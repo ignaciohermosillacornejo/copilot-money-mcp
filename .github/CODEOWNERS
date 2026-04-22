@@ -16,7 +16,6 @@
 # Package configuration - controls dependencies and publishing
 package.json @ignaciohermosillacornejo
 package-lock.json @ignaciohermosillacornejo
-bun.lockb @ignaciohermosillacornejo
 
 # Build and bundle configuration
 manifest.json @ignaciohermosillacornejo
