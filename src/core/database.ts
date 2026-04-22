@@ -387,6 +387,22 @@ export class CopilotDatabase {
   }
 
   /**
+   * Remove a transaction from the in-memory cache by id. Used after a
+   * successful DeleteTransaction GraphQL write so subsequent get_transactions
+   * reads reflect the delete without waiting for the next refresh_database.
+   *
+   * Returns true if the cache contained the id and it was removed, false if
+   * the cache was not loaded or the id was absent. Mirrors the shape of
+   * `patchCachedTagDelete` / `patchCachedCategoryDelete` / `patchCachedRecurringDelete`.
+   */
+  patchCachedTransactionDelete(transactionId: string): boolean {
+    if (!this._transactions) return false;
+    const before = this._transactions.length;
+    this._transactions = this._transactions.filter((t) => t.transaction_id !== transactionId);
+    return this._transactions.length < before;
+  }
+
+  /**
    * Patch the in-memory budget for a category after a successful set_budget
    * write. Mirrors what Copilot's app writes to LevelDB: the value lands in
    * `amounts[YYYY-MM]` keyed by the current month (or an explicit month when

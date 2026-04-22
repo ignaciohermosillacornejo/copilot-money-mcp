@@ -512,3 +512,184 @@ describe('createTransaction', () => {
     expect(client._calls).toHaveLength(0);
   });
 });
+
+describe('deleteTransaction', () => {
+  let tools: CopilotMoneyTools;
+  let mockDb: CopilotDatabase;
+
+  const validArgs = {
+    transaction_id: 'tx1',
+    account_id: 'acc1',
+    item_id: 'item1',
+  };
+
+  beforeEach(() => {
+    mockDb = new CopilotDatabase('/nonexistent');
+    (mockDb as any).dbPath = '/fake';
+    (mockDb as any)._transactions = [
+      {
+        transaction_id: 'tx1',
+        amount: 12.5,
+        date: '2026-04-21',
+        name: 'Coffee',
+        account_id: 'acc1',
+        item_id: 'item1',
+        category_id: 'cat1',
+      },
+      {
+        transaction_id: 'tx2',
+        amount: 20,
+        date: '2026-04-20',
+        name: 'Lunch',
+        account_id: 'acc1',
+        item_id: 'item1',
+        category_id: 'cat1',
+      },
+    ];
+    (mockDb as any)._allCollectionsLoaded = true;
+  });
+
+  test('dispatches DeleteTransaction with all three IDs and returns success', async () => {
+    const client = createMockGraphQLClient({ DeleteTransaction: { deleteTransaction: true } });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    const result = await tools.deleteTransaction(validArgs);
+
+    expect(result.success).toBe(true);
+    expect(result.transaction_id).toBe('tx1');
+    expect(result.deleted).toBe(true);
+
+    expect(client._calls).toHaveLength(1);
+    expect(client._calls[0].op).toBe('DeleteTransaction');
+    expect(client._calls[0].variables).toEqual({
+      id: 'tx1',
+      accountId: 'acc1',
+      itemId: 'item1',
+    });
+  });
+
+  test('mirrors the server Boolean in `deleted` (false stays false)', async () => {
+    // Defensive: Copilot normally returns true on success. If it ever returns
+    // false (no error, no delete), the tool should surface that honestly rather
+    // than coerce to true and hide the drift.
+    const client = createMockGraphQLClient({ DeleteTransaction: { deleteTransaction: false } });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    const result = await tools.deleteTransaction(validArgs);
+    expect(result.deleted).toBe(false);
+    // success still reflects "no error thrown"; deleted reports the server's
+    // actual boolean.
+    expect(result.success).toBe(true);
+  });
+
+  test('evicts the transaction from the in-memory cache on success', async () => {
+    const client = createMockGraphQLClient({ DeleteTransaction: { deleteTransaction: true } });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await tools.deleteTransaction(validArgs);
+
+    const remaining = (mockDb as any)._transactions as Array<{ transaction_id: string }>;
+    expect(remaining.map((t) => t.transaction_id)).toEqual(['tx2']);
+  });
+
+  test('does NOT evict the cache when the server returns false (deleted=false)', async () => {
+    // If the server says "I did not delete", we should not silently remove the
+    // row from the local cache — that would desync from reality.
+    const client = createMockGraphQLClient({ DeleteTransaction: { deleteTransaction: false } });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await tools.deleteTransaction(validArgs);
+
+    const remaining = (mockDb as any)._transactions as Array<{ transaction_id: string }>;
+    expect(remaining.map((t) => t.transaction_id).sort()).toEqual(['tx1', 'tx2']);
+  });
+
+  test('rejects invalid transaction_id format before dispatch', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(
+      tools.deleteTransaction({ ...validArgs, transaction_id: 'bad id!' })
+    ).rejects.toThrow(/Invalid transaction_id/);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('rejects invalid account_id format before dispatch', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(
+      tools.deleteTransaction({ ...validArgs, account_id: 'bad/account' })
+    ).rejects.toThrow(/Invalid account_id/);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('rejects invalid item_id format before dispatch', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(tools.deleteTransaction({ ...validArgs, item_id: 'bad.item' })).rejects.toThrow(
+      /Invalid item_id/
+    );
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('does NOT look up account_id/item_id from the cache via transaction_id', async () => {
+    // The destructive-tool contract requires all three IDs. If we looked up
+    // account_id/item_id from the cached tx1, we'd quietly "fix" a typo in
+    // account_id and delete a different transaction. Assert we forward the
+    // caller's account_id/item_id verbatim even when they would disagree with
+    // the cache.
+    const client = createMockGraphQLClient({ DeleteTransaction: { deleteTransaction: true } });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await tools.deleteTransaction({
+      transaction_id: 'tx1',
+      account_id: 'wrong_account',
+      item_id: 'wrong_item',
+    });
+
+    expect(client._calls[0].variables).toEqual({
+      id: 'tx1',
+      accountId: 'wrong_account',
+      itemId: 'wrong_item',
+    });
+  });
+
+  test('wraps GraphQL errors with graphQLErrorToMcpError', async () => {
+    const { GraphQLError } = await import('../../src/core/graphql/client.js');
+    const client = createMockGraphQLClient({
+      DeleteTransaction: new GraphQLError(
+        'NOT_FOUND',
+        'Transaction not found',
+        'DeleteTransaction',
+        200
+      ),
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(tools.deleteTransaction(validArgs)).rejects.toThrow(/Transaction not found/);
+
+    // On error, the cache is untouched.
+    const remaining = (mockDb as any)._transactions as Array<{ transaction_id: string }>;
+    expect(remaining.map((t) => t.transaction_id).sort()).toEqual(['tx1', 'tx2']);
+  });
+
+  test('eviction is a no-op if the id is absent from the cache (does not throw)', async () => {
+    const client = createMockGraphQLClient({ DeleteTransaction: { deleteTransaction: true } });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    // Caller passes a real server id, but the local cache doesn't have it —
+    // e.g. the cache was loaded before the tx was created elsewhere.
+    const result = await tools.deleteTransaction({
+      transaction_id: 'tx_not_in_cache',
+      account_id: 'acc1',
+      item_id: 'item1',
+    });
+
+    expect(result.deleted).toBe(true);
+    // Existing rows unchanged.
+    const remaining = (mockDb as any)._transactions as Array<{ transaction_id: string }>;
+    expect(remaining.map((t) => t.transaction_id).sort()).toEqual(['tx1', 'tx2']);
+  });
+});

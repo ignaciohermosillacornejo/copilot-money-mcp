@@ -525,6 +525,7 @@ describe('CopilotMoneyServer - write mode', () => {
   // slips through gating.
   const ALL_WRITE_TOOLS = [
     'create_transaction',
+    'delete_transaction',
     'update_transaction',
     'review_transactions',
     'create_tag',
@@ -554,6 +555,7 @@ describe('CopilotMoneyServer - write mode', () => {
   // declare its annotations explicitly here.
   test.each<[string, { readOnlyHint: false; destructiveHint: boolean; idempotentHint: boolean }]>([
     ['create_transaction', { readOnlyHint: false, destructiveHint: false, idempotentHint: false }],
+    ['delete_transaction', { readOnlyHint: false, destructiveHint: true, idempotentHint: true }],
     ['update_transaction', { readOnlyHint: false, destructiveHint: false, idempotentHint: true }],
     ['review_transactions', { readOnlyHint: false, destructiveHint: false, idempotentHint: true }],
     ['create_tag', { readOnlyHint: false, destructiveHint: false, idempotentHint: false }],
@@ -590,6 +592,7 @@ describe('CopilotMoneyServer - write mode', () => {
         type: 'REGULAR',
       },
     ],
+    ['delete_transaction', { transaction_id: 'txn1', account_id: 'acc1', item_id: 'item1' }],
     ['update_transaction', { transaction_id: 'txn1', category_id: 'food' }],
     ['review_transactions', { transaction_ids: ['txn1'], reviewed: true }],
     ['create_tag', { name: 'test' }],

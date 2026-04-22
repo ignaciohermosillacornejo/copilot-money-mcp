@@ -10,6 +10,7 @@ import { GraphQLError } from '../core/graphql/client.js';
 import {
   editTransaction,
   createTransaction as gqlCreateTransaction,
+  deleteTransaction as gqlDeleteTransaction,
   type TransactionType,
 } from '../core/graphql/transactions.js';
 import {
@@ -2581,6 +2582,76 @@ export class CopilotMoneyTools {
   }
 
   /**
+   * Permanently delete a transaction.
+   *
+   * DESTRUCTIVE: there is no soft-delete and no undo. The mutation
+   * requires all three IDs; the tool deliberately does NOT look up
+   * account_id / item_id from transaction_id in the local cache (which
+   * is what update_transaction does). The contract is: require all
+   * three from the caller, and let a wrong one produce the server's
+   * "Transaction not found" error rather than silently deleting a
+   * different transaction that matches on transaction_id alone.
+   *
+   * Cache: on success we evict the row from the in-memory transaction
+   * cache via a small focused helper (patchCachedTransactionDelete) so
+   * subsequent get_transactions reflect the delete without waiting for
+   * refresh_database. On server-returned-false OR thrown error, the
+   * cache is intentionally untouched — the local state must not drift
+   * away from whatever Copilot's server thinks is real.
+   *
+   * Note on Plaid re-sync: Plaid-connected transactions may re-appear
+   * on the source account's next sync, but user-side metadata
+   * (category override, tags, notes, reviewed state, goal link, split
+   * children) will NOT be preserved. This tool makes no attempt to
+   * detect Plaid vs manual — the warning belongs in the tool
+   * description, not in runtime logic.
+   */
+  async deleteTransaction(args: {
+    transaction_id: string;
+    account_id: string;
+    item_id: string;
+  }): Promise<{
+    success: true;
+    transaction_id: string;
+    deleted: boolean;
+  }> {
+    const client = this.getGraphQLClient();
+    const { transaction_id, account_id, item_id } = args;
+
+    // Defense-in-depth — the MCP schema already validates presence and
+    // type, but the method is directly callable from tests and other code.
+    validateDocId(transaction_id, 'transaction_id');
+    validateDocId(account_id, 'account_id');
+    validateDocId(item_id, 'item_id');
+
+    try {
+      const deleted = await gqlDeleteTransaction(client, {
+        id: transaction_id,
+        accountId: account_id,
+        itemId: item_id,
+      });
+
+      // Only evict the cache if the server actually deleted. If it says
+      // false (no error, no delete), leaving the cache intact keeps local
+      // state honest with whatever the server thinks is real.
+      if (deleted) {
+        this.db.patchCachedTransactionDelete(transaction_id);
+      }
+
+      return {
+        success: true,
+        transaction_id,
+        deleted,
+      };
+    } catch (e) {
+      if (e instanceof GraphQLError) {
+        throw new Error(graphQLErrorToMcpError(e), { cause: e });
+      }
+      throw e;
+    }
+  }
+
+  /**
    * Mark one or more transactions as reviewed (or unreviewed).
    *
    * Validates all transaction IDs, sets isReviewed via GraphQL for each; local
@@ -4140,6 +4211,41 @@ export function createWriteToolSchemas(): ToolSchema[] {
         readOnlyHint: false,
         destructiveHint: false,
         idempotentHint: false,
+      },
+    },
+    {
+      name: 'delete_transaction',
+      description:
+        '**DESTRUCTIVE**: Permanently deletes a transaction from Copilot Money. ' +
+        'There is no soft-delete and no undo. All three IDs (transaction_id, ' +
+        'account_id, item_id) are required — no lookups — so a typo in one field ' +
+        "returns 'Transaction not found' rather than silently deleting a different " +
+        'transaction. For Plaid-connected transactions, the source account may re-add ' +
+        'the row on its next sync, but any user-side metadata (category override, ' +
+        'tags, notes, reviewed state, goal link, split children) will not be preserved.',
+      inputSchema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          transaction_id: {
+            type: 'string',
+            description: 'Transaction ID to delete (from get_transactions results)',
+          },
+          account_id: {
+            type: 'string',
+            description: 'Account ID the transaction belongs to (from the transaction row)',
+          },
+          item_id: {
+            type: 'string',
+            description: "Item ID the account belongs to (Copilot's Firestore item_id)",
+          },
+        },
+        required: ['transaction_id', 'account_id', 'item_id'],
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
       },
     },
     {
