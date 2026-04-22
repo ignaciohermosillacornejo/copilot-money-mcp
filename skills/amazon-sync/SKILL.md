@@ -9,9 +9,11 @@ Reconcile Amazon order data with Copilot Money transactions. Fix categories, spl
 
 **Scope:** card refunds only. Amazon store-credit (gift-card balance applied to later orders) is out of scope — those mismatches get flagged, not ledgered.
 
-## Phase 1 — Locate the Export
+## Phase 1 — Read Profile and Locate the Export
 
-The user may supply Amazon data from multiple sources, each with its own CSV shape:
+**Step 1 — Read the user profile first.** Open `skills/user-profile.md`. If it doesn't exist, copy `skills/user-profile.template.md` to `skills/user-profile.md` first. Note any existing `## Amazon Categorization Rules` section — **these rules take precedence over any inference the skill would otherwise do in Phases 5, 6, and 9.** If the profile says `coffee pods → Groceries`, never re-derive that; apply the rule directly. If the profile contradicts a rule you were about to propose, the profile wins. Also note the general `## Preferences` section for category conventions (e.g., "Coffee category is cafés only").
+
+**Step 2 — Locate the export.** The user may supply Amazon data from multiple sources, each with its own CSV shape:
 
 - **Amazon's official "Request My Data" export** — typically a folder like `Your Orders/` with files named `Order History.csv`, `Refund Details.csv`, `Returns Status.csv`, `Replacement Orders.csv`, `Digital Content Orders.csv`.
 - **Third-party tools** (e.g., community scrapers, browser extensions) — column names and file names vary.
@@ -77,7 +79,7 @@ For each Copilot Amazon transaction, attempt to find a matching shipment (or com
 **Match outcomes:**
 - `single` — exactly one shipment matches. Strongest signal.
 - `single-ambig` — multiple shipments match; prefer closest ship-date.
-- `combo` — two or more shipments whose amounts sum to the Copilot amount (same-day bundle). Check combos up to size 5.
+- `combo` — two or more shipments whose amounts sum to the Copilot amount (same-day bundle). Check combos up to size 5, but **pre-filter candidates before the combinatorial search**: only include shipments whose `total_amount` is less than or equal to the Copilot amount and dated within `[copilot_date - 10, copilot_date]` on the same account. Without this pre-filter C(N, 5) explodes on users with many unmatched shipments; with it the search is effectively O(K⁵) where K is usually under ~15.
 - `none` — no match. Most common causes: export is stale (user downloaded it days ago and Copilot has newer charges), or merchant is Amazon Pharmacy / Prime subscription / tips (not in Order History). Leave these alone — do not guess.
 
 **Important:** never extend the date window to chase matches. False matches cause miscategorizations. "No match" is a legitimate outcome.
@@ -86,7 +88,13 @@ For each Copilot Amazon transaction, attempt to find a matching shipment (or com
 
 These classes apply without asking (Approach B rule #1):
 
-1. **Pure-Fresh Copilot transactions** — a Copilot transaction whose matched shipment(s) are **all** Amazon Fresh (every matched shipment's carrier contains `RABBIT`). Set category to **Groceries**. Never split — the user treats every Fresh-only charge as groceries regardless of item mix. Write via `update_transaction` then `review_transactions` to mark reviewed.
+1. **Pure-Fresh Copilot transactions** — a Copilot transaction whose matched shipment(s) are **all** Amazon Fresh (every matched shipment's carrier contains `RABBIT`). Handle per the reviewed-state guard below:
+
+   - `user_reviewed: false`, any current category → set to **Groceries**, then `review_transactions([id])`.
+   - `user_reviewed: true` AND already Groceries → skip (no-op; nothing to change).
+   - `user_reviewed: true` AND **not** Groceries → **do not auto-overwrite.** The user deliberately categorized a Fresh charge as something else (e.g., Healthcare for a Fresh-delivered prescription, Household for a cleaning-supplies Fresh order). Route this transaction to Phase 6 for explicit approval with the item list attached — the user may have meant it or may want to split it per item.
+
+   Never split a pure-Fresh charge — the user treats every Fresh-only shipment as groceries regardless of item mix.
 
    **Bundled charges with Fresh + non-Fresh shipments are NOT pure-Fresh** — they go to Phase 6 for split approval. The bundle's Fresh shipments collapse into a single Groceries child; non-Fresh shipments each contribute a child of their own resolved category.
 
@@ -120,7 +128,7 @@ After the user approves a batch, apply it in Phase 7.
 ## Phase 7 — Write Categorizations and Splits
 
 - **Single category:** `update_transaction(transaction_id, category_id)`, then `review_transactions([id])`.
-- **Split:** `split_transaction(transaction_id, account_id, item_id, splits=[...])`. Child amounts must sum to parent amount. Group items by resolved category first — children are one-per-category, not one-per-item. After split: `update_transaction` on each child to set `reviewed: true` (there's no `reviewed` param on `split_transaction` itself).
+- **Split:** `split_transaction(transaction_id, account_id, item_id, splits=[...])`. All three parent IDs are required — `transaction_id` is the parent transaction, `account_id` is the parent's account ID, `item_id` is Copilot's Firestore `item_id` from the parent transaction row (not the ASIN or any Amazon item identifier). Pull all three from the parent's row in `copilot-amazon-txns.json`. Child amounts must sum to parent amount. Group items by resolved category first — children are one-per-category, not one-per-item. Children inherit the parent's `user_reviewed` state; if the parent was not reviewed, call `review_transactions([child_id_1, child_id_2, ...])` after the split to mark them reviewed (there is no `reviewed` param on `split_transaction`, and `update_transaction` can't set reviewed either — use `review_transactions`).
 
 **Allocation inside a single-shipment split:**
 - Use per-item `unit_price * quantity` as the base allocation.
@@ -140,37 +148,35 @@ After the user approves a batch, apply it in Phase 7.
 
 For each refund in `Refund Details` within the window:
 
-1. Match `order_id` + `refund_amount` to a negative-signed Copilot transaction at the same card account, `refund_date ± 3 days`.
-2. If the original order was split across categories in Phase 7, categorize the refund to match the returned item's category (look up via `Returns Status` if present — that has which item was returned).
-3. If the refund's `disbursement_type` is not a card refund (e.g., Amazon balance), ignore — store credit is out of scope.
-4. If no matching Copilot credit is found, flag but do not guess; the refund may be pending or outside the window.
+1. Find the original order's Copilot charge (Phase 4 result) so you know which `account_id` / `account_mask` the refund should post back to.
+2. Match `order_id` + `refund_amount` to a negative-signed Copilot transaction, `refund_date ± 3 days`. **Account check is required** (same criterion as Phase 4 #3): the Copilot negative-signed transaction's `account_mask` must appear in the original shipment's `payment_method` string. Do not match a refund across accounts — a user with Amazon charges on two cards could get a false match otherwise.
+3. If the original order was split across categories in Phase 7, categorize the refund to match the returned item's category (look up via `Returns Status` if present — that has which item was returned).
+4. If the refund's `disbursement_type` is not a card refund (e.g., Amazon balance), ignore — store credit is out of scope.
+5. If no matching Copilot credit is found, flag but do not guess; the refund may be pending or outside the window.
 
 ## Phase 9 — Update Profile
 
 After writes are applied, update `skills/user-profile.md` with rules discovered during this run. Tell the user exactly what is being saved before writing.
 
-**Amazon-specific profile section** — add if absent:
+**Amazon-specific profile section** — create the section if absent:
 
 ```
 ## Amazon Categorization Rules
 <!-- Auto-populated by /amazon-sync. Patterns match against product name, ASIN, carrier, seller. First match wins. -->
-- Carrier contains "RABBIT" → Groceries (Amazon Fresh)
-- Merchant name contains "AMAZON PHARMACY" → Healthcare
-- Merchant name contains "AMAZON TIPS" → Groceries (Fresh delivery tip)
-- Merchant name contains "AMAZON GROCE" → Groceries
-- Product name contains "coffee pods" / "espresso pods" / "whole beans" / "ground coffee" / "nespresso" → Groceries (NEVER Coffee — Coffee is reserved for coffee shops)
-- Product name contains "protein powder" / "creatine" / "whey" / "supplement" → Groceries (consumable — not fitness equipment)
-- Product name contains "toilet paper" / "paper towel" / "laundry detergent" / "dish soap" / "trash bags" → Household things
-- Product name contains "silicone scar gel" / "eye patch" (medical, not decorative) / "bandage" / "first aid" / "wound care" → Healthcare
-- Product name contains "car flashlight" / "window breaker" / "seatbelt cutter" / "tire" / "motor oil" / "jumper cables" → Car
-- Seller is "Audible" OR product name contains "Kindle edition" OR ASIN starts with "B0" and product name is a book title → Books & Media
 ```
 
-Only add rules the user has confirmed in this session — do not invent defaults. Rules should be phrased as simple substring or seller-name matches so a reader can eyeball and edit them.
+Then append rules the user has confirmed in this session — **only rules the user has confirmed**, no pre-populated defaults. Examples of rule syntax (these are shapes, not rules to inject automatically):
 
-## Phase 10 — Summary
+- `Carrier contains "RABBIT" → Groceries` (merchant/carrier-based)
+- `Merchant name contains "AMAZON PHARMACY" → Healthcare` (Copilot-side merchant match)
+- `Product name contains "coffee pods" → Groceries` (Amazon-side product-name substring)
+- `Seller is "Audible" → Books & Media` (seller-based)
 
-End with:
+Phrase each rule as a simple substring, seller-name, or field match so a reader can eyeball and edit them. Before writing, tell the user exactly what's being saved, e.g., *"Adding to profile: 'Product name contains toilet paper → Household things'. OK?"*
+
+## Phase 10 — Summary and Cleanup
+
+**Summarize** with:
 
 - Shipments in window, matched vs. unmatched.
 - Writes applied, broken down by type (categorization, split, marked reviewed, refund fix).
@@ -178,10 +184,12 @@ End with:
 - Shipments in CSV with no Copilot match — count (usually normal; charges older than export coverage or already-reviewed).
 - Suggestion to re-download the Amazon export if the last Copilot Amazon transaction date is after the last `ship_date` in the CSV (export is stale).
 
+**Then clean up PII side-files.** The intermediate JSON files in `/tmp/amazon-sync/` (`shipments.json`, `refunds.json`, `copilot-amazon-txns.json`, `accounts.json`, `categories.json`, and any match-result files) contain Order IDs, product names, amounts, account masks, and payment details. Delete the directory at end of run: `rm -rf /tmp/amazon-sync/`. If the user ran under an alternate working directory, delete that one instead. Mention the cleanup in the summary so the user knows it happened. Only skip cleanup if the user explicitly asks to keep the files for debugging.
+
 ## Rules
 
 1. **Never write without approval — except the Phase 5 confident classes.** Fresh and clear merchant-pattern categorizations are the only auto-applied writes. Everything else requires dry-run presentation.
-2. **Skip user-reviewed transactions by default.** `user_reviewed: true` means the user made a decision. Flag obvious mismatches for explicit approval; do not overwrite silently. (This applies to Phase 6 flags, not to Phase 5 Fresh auto-apply — Fresh runs regardless of reviewed state because it's never wrong.)
+2. **Respect user-reviewed state.** `user_reviewed: true` means the user made a deliberate decision and auto-apply must not overwrite it. Phase 5 checks reviewed state before writing — a reviewed Fresh charge categorized as Healthcare (e.g., a prescription delivery) is routed to Phase 6 for approval, not silently converted to Groceries. Phase 6 may surface reviewed transactions for correction, but only with explicit user approval — never auto-applied.
 3. **No invented data.** Only reference shipments, Order IDs, products, and Copilot transactions that actually exist. Never fabricate examples.
 4. **Tight match window.** Amount within $0.02; dates in `[ship - 2, ship + 5]`. Looser windows produce false positives. "No match" is a valid outcome.
 5. **Exact payment-method match.** A shipment's `payment_method` must contain the Copilot `account_mask`. Do not match across accounts.
@@ -190,6 +198,6 @@ End with:
 8. **Use Python for any aggregation over ~10 rows.** Match scoring, amount comparisons, combo-sum search, allocation math — all via the `Bash` tool with Python.
 9. **Preserve full merchant names.** Show the Copilot `original_name` or `name`, not `normalized_merchant`. Users need the full suffix after `AMAZON MKTPL*` to recall which order a charge corresponds to.
 10. **Report staleness explicitly.** If the export's latest `ship_date` is more than 3 days before the Copilot data's latest Amazon transaction, tell the user the export is stale and suggest a fresh download before acting on recent unmatched transactions.
-11. **Digital subscriptions are out of scope.** Prime Video, Audible subscriptions, Kindle Unlimited renewals — skip. Copilot's recurring detection owns them.
+11. **Digital subscriptions are out of scope; one-off digital purchases are.** Prime Video, Audible subscriptions, Kindle Unlimited renewals — skip. Copilot's recurring detection owns them. A row is a subscription when `subscription_order_type` is non-empty and not `Not Applicable`. One-off digital purchases (Kindle books bought individually, single-song MP3s, non-renewing digital rentals) flow through the normal Phase 4/6 pipeline: match on amount + date + account like retail, then categorize per profile rules (e.g., Kindle book → Books & Media; Prime Video rental → Entertainment & Experiences).
 12. **Store credit is out of scope.** If a shipment's Copilot charge is less than the CSV's `shipment_total` (gift-card applied), flag and leave alone. Do not try to reconstruct an Amazon balance ledger.
 13. **`exclude_transfers: true` is fine** — Amazon charges are not internal transfers. No special handling needed here.
