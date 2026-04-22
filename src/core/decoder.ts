@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { iterateDocuments } from './leveldb-reader.js';
 import { type FirestoreValue, toPlainObject } from './protobuf-parser.js';
-import { validateOrWarn } from './schema-warn.js';
+import { validateOrWarn, warnUnreadFields } from './schema-warn.js';
 
 // Re-export for potential use by other modules
 export { toPlainObject } from './protobuf-parser.js';
@@ -858,6 +858,36 @@ function processTransaction(
   if (copilotType === 'internal_transfer') {
     txnData.internal_transfer = true;
   }
+
+  warnUnreadFields(
+    fields,
+    {
+      consumed: [
+        // scalar fields handled at the top
+        'transaction_id',
+        'amount',
+        'date',
+        'type',
+        ...stringFields,
+        ...booleanFields,
+        ...numericFields,
+        'created_timestamp',
+        ...stringArrayFields,
+        ...mapFields,
+      ],
+      ignored: [
+        // Nested objects. We read the flat equivalents separately (city,
+        // region, lat, lon, payment_method, ppd_id, etc.), so the nested
+        // parent is deliberately skipped rather than round-tripped.
+        'location',
+        'payment_meta',
+        // Numeric array of ML confidence scores paired with
+        // intelligence_suggested_category_ids. No downstream consumer.
+        'intelligence_category_scores',
+      ],
+    },
+    { collection: 'transactions', docId }
+  );
 
   return validateOrWarn(TransactionSchema, txnData, {
     collection: 'transactions',
