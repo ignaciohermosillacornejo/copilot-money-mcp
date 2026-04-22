@@ -1,7 +1,7 @@
 /**
  * Tests for the writes-enabled manifest transform used by the local-only
  * pack:mcpb:write build. The committed manifest.json describes the read-only
- * bundle published to Claude Desktop; this transform layers the 13 write
+ * bundle published to Claude Desktop; this transform layers the 14 write
  * tools, adds --write to mcp_config.args, and renames the bundle so it can
  * be installed alongside the read-only one without colliding.
  */
@@ -44,7 +44,7 @@ function readOnlyFixture(): ManifestForTest {
 }
 
 describe('buildWriteManifest', () => {
-  test('produces a manifest with all 30 tools (read + write)', () => {
+  test('produces a manifest with all 31 tools (read + write)', () => {
     const result = buildWriteManifest(readOnlyFixture());
     expect(result.tools.length).toBe(createToolSchemas().length + createWriteToolSchemas().length);
   });

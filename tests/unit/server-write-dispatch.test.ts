@@ -39,6 +39,18 @@ const WRITE_TOOL_SPECS: Record<string, { method: string; args: Record<string, un
       recurring_id: 'rec1',
     },
   },
+  split_transaction: {
+    method: 'splitTransaction',
+    args: {
+      transaction_id: 'txn1',
+      account_id: 'acc1',
+      item_id: 'item1',
+      splits: [
+        { amount: 50, category_id: 'cat1' },
+        { amount: 50, category_id: 'cat2' },
+      ],
+    },
+  },
   update_transaction: {
     method: 'updateTransaction',
     args: { transaction_id: 'txn1', category_id: 'food' },

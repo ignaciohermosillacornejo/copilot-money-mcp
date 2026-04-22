@@ -12,6 +12,7 @@ import {
   createTransaction as gqlCreateTransaction,
   deleteTransaction as gqlDeleteTransaction,
   addTransactionToRecurring as gqlAddTransactionToRecurring,
+  splitTransaction as gqlSplitTransaction,
   type TransactionType,
 } from '../core/graphql/transactions.js';
 import {
@@ -2741,6 +2742,192 @@ export class CopilotMoneyTools {
   }
 
   /**
+   * Split one parent transaction into N child transactions.
+   *
+   * Wraps the GraphQL `splitTransaction` mutation. Each split entry requires
+   * `amount` + `category_id`; `name` and `date` default to the parent's
+   * values if omitted by the caller. The sum of all children's `amount`
+   * fields must equal the parent's `amount` (server-enforced; we also
+   * validate client-side up to a small floating-point epsilon so callers
+   * get a clear local error before a round-trip).
+   *
+   * Contract: all three parent IDs (transaction_id, account_id, item_id)
+   * are required and forwarded verbatim. Same defensive stance as
+   * delete_transaction / add_transaction_to_recurring — we do NOT re-resolve
+   * account_id / item_id from the cache via transaction_id. A typo in any
+   * field surfaces as a server-side "Transaction not found" rather than
+   * silently splitting a different transaction.
+   *
+   * Cache: on success we evict the parent row from the in-memory
+   * transaction cache. Copilot's UI hides the parent after a split (the
+   * server sets categoryId to "" and adds children_transaction_ids to the
+   * parent doc), so cached reads should stop surfacing it. We deliberately
+   * do NOT attempt to insert the new children into the cache — there's no
+   * insert helper, the ids are brand-new server-assigned, and the next
+   * refresh_database will pick them up. Callers that need the children
+   * immediately can read them from the returned `children` array.
+   *
+   * Reversal: there is no `unsplitTransaction` / `revertSplit` / `undoSplit`
+   * on the server (all three probed and don't exist). To "undo" a split,
+   * callers must delete each child via delete_transaction and edit the
+   * parent's category back via update_transaction.
+   *
+   * Per-split metadata (tags, notes, reviewed state) is not accepted by
+   * the server's SplitTransactionInput — follow-up edits require per-child
+   * update_transaction calls.
+   */
+  async splitTransaction(args: {
+    transaction_id: string;
+    account_id: string;
+    item_id: string;
+    splits: Array<{
+      name?: string;
+      date?: string;
+      amount: number;
+      category_id: string;
+    }>;
+  }): Promise<{
+    success: true;
+    parent_transaction_id: string;
+    child_transaction_ids: string[];
+    parent: Transaction;
+    children: Transaction[];
+  }> {
+    const client = this.getGraphQLClient();
+    const { transaction_id, account_id, item_id, splits } = args;
+
+    // Defense-in-depth — the MCP schema already validates presence/type,
+    // but the method is directly callable from tests and other code.
+    validateDocId(transaction_id, 'transaction_id');
+    validateDocId(account_id, 'account_id');
+    validateDocId(item_id, 'item_id');
+
+    if (!Array.isArray(splits) || splits.length < 2) {
+      throw new Error('splits must have at least 2 entries — a split-into-one is a no-op');
+    }
+
+    // Per-entry validation — runs BEFORE cache lookup/sum check so invalid
+    // input fails fast and uniformly.
+    for (const [i, s] of splits.entries()) {
+      validateDocId(s.category_id, 'category_id');
+
+      if (typeof s.amount !== 'number' || !Number.isFinite(s.amount)) {
+        throw new Error(`splits[${i}].amount must be a finite number`);
+      }
+      // Match the local Transaction Zod schema's invariant — mirrors create_transaction.
+      if (Math.abs(s.amount) > MAX_VALID_AMOUNT) {
+        throw new Error(
+          `splits[${i}].amount exceeds maximum valid value (${MAX_VALID_AMOUNT}): ${s.amount}`
+        );
+      }
+
+      if (s.date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(s.date)) {
+        throw new Error(`splits[${i}].date: Expected YYYY-MM-DD, got: ${s.date}`);
+      }
+
+      if (s.name !== undefined) {
+        const trimmed = s.name.trim();
+        if (!trimmed) {
+          throw new Error(`splits[${i}].name must be a non-empty string`);
+        }
+      }
+    }
+
+    // Resolve parent from the cache — needed for default name/date and the
+    // client-side sum check. Reject if missing, matching update_transaction's
+    // "Transaction not found" contract.
+    const allTxns = await this.db.getAllTransactions();
+    const parentTxn = allTxns.find((t) => t.transaction_id === transaction_id);
+    if (!parentTxn) {
+      throw new Error(`Transaction not found: ${transaction_id}`);
+    }
+
+    // Client-side sum check. Server also enforces this, but a local error
+    // saves a round-trip and gives the caller more actionable numbers.
+    // 1e-6 epsilon tolerates IEEE-754 drift (0.1 + 0.2 = 0.30000000000000004)
+    // without letting real mismatches through at 2-decimal financial precision.
+    const sum = splits.reduce((acc, s) => acc + s.amount, 0);
+    const parentAmount = parentTxn.amount;
+    const diff = sum - parentAmount;
+    if (Math.abs(diff) > 1e-6) {
+      throw new Error(
+        `Split amounts must sum to parent amount. ` +
+          `Parent=${parentAmount}, sum=${sum}, diff=${diff}`
+      );
+    }
+
+    // Resolve the default name from the parent — `name` is optional on the
+    // local Transaction model (some older Plaid rows only have
+    // `original_name`), so fall through to that before giving up. A split
+    // without a usable default can't succeed since the server requires
+    // `name: String!` on every SplitTransactionInput — surface that as a
+    // local error rather than sending an empty string.
+    const parentDefaultName = parentTxn.name ?? parentTxn.original_name;
+    if (splits.some((s) => s.name === undefined) && !parentDefaultName) {
+      throw new Error(
+        `Cannot default split name from parent ${transaction_id}: parent has no name or original_name. Pass an explicit name on each split.`
+      );
+    }
+
+    // Apply name/date defaults from the parent AFTER validation + sum check.
+    const inputs = splits.map((s) => ({
+      name: s.name !== undefined ? s.name.trim() : parentDefaultName!,
+      date: s.date !== undefined ? s.date : parentTxn.date,
+      amount: s.amount,
+      categoryId: s.category_id,
+    }));
+
+    try {
+      const result = await gqlSplitTransaction(client, {
+        id: transaction_id,
+        accountId: account_id,
+        itemId: item_id,
+        input: inputs,
+      });
+
+      // Map each server-side TransactionFields shape to the local snake_case
+      // Transaction model. Same field set as create_transaction / add_to_recurring.
+      const toLocal = (tx: (typeof result.splitTransactions)[number]): Transaction => ({
+        transaction_id: tx.id,
+        amount: tx.amount,
+        date: tx.date,
+        name: tx.name,
+        account_id: tx.accountId,
+        item_id: tx.itemId,
+        category_id: tx.categoryId,
+        pending: tx.isPending,
+        user_reviewed: tx.isReviewed,
+        user_note: tx.userNotes ?? undefined,
+        recurring_id: tx.recurringId ?? undefined,
+        tag_ids: tx.tags.map((t) => t.id),
+        internal_transfer: tx.type === 'INTERNAL_TRANSFER',
+      });
+
+      const parent = toLocal(result.parentTransaction);
+      const children = result.splitTransactions.map(toLocal);
+
+      // Evict the parent from the in-memory cache so subsequent
+      // get_transactions reads stop surfacing the now-hidden row. No-op
+      // if the cache is unloaded or the id is absent — same eviction-is-a-
+      // no-op contract as delete_transaction.
+      this.db.patchCachedTransactionDelete(transaction_id);
+
+      return {
+        success: true,
+        parent_transaction_id: parent.transaction_id,
+        child_transaction_ids: children.map((c) => c.transaction_id),
+        parent,
+        children,
+      };
+    } catch (e) {
+      if (e instanceof GraphQLError) {
+        throw new Error(graphQLErrorToMcpError(e), { cause: e });
+      }
+      throw e;
+    }
+  }
+
+  /**
    * Mark one or more transactions as reviewed (or unreviewed).
    *
    * Validates all transaction IDs, sets isReviewed via GraphQL for each; local
@@ -4373,6 +4560,75 @@ export function createWriteToolSchemas(): ToolSchema[] {
         readOnlyHint: false,
         destructiveHint: false,
         idempotentHint: true,
+      },
+    },
+    {
+      name: 'split_transaction',
+      description:
+        'Split one parent transaction into multiple child transactions (e.g., split a single ' +
+        "'Hotel + Car + Meals' charge into three category-specific children). All three parent " +
+        'IDs are required (transaction_id, account_id, item_id) plus a `splits` array with at ' +
+        'least 2 entries. Each split entry requires `amount` and `category_id`; `name` and ' +
+        "`date` default to the parent's values if omitted. The sum of all children's `amount` " +
+        "fields must equal the parent's `amount` (server-enforced; this tool also validates " +
+        'client-side before dispatching). After success the parent transaction is hidden but ' +
+        'not deleted (children reference it via parent_transaction_id) — there is no reversal ' +
+        "mutation; to undo a split delete each child and edit the parent's category back. No " +
+        'optional per-split fields exist — tags, notes, and reviewed state must be set via ' +
+        'update_transaction on each child after split.',
+      inputSchema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          transaction_id: {
+            type: 'string',
+            description: 'Parent transaction ID to split (from get_transactions results)',
+          },
+          account_id: {
+            type: 'string',
+            description: 'Account ID the parent transaction belongs to (from the transaction row)',
+          },
+          item_id: {
+            type: 'string',
+            description: "Item ID the account belongs to (Copilot's Firestore item_id)",
+          },
+          splits: {
+            type: 'array',
+            minItems: 2,
+            description:
+              'Children to create. Must have at least 2 entries; child amounts must sum to the parent amount.',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                name: {
+                  type: 'string',
+                  description: "Child name. Defaults to the parent's name if omitted.",
+                },
+                date: {
+                  type: 'string',
+                  description: "YYYY-MM-DD; defaults to the parent's date if omitted.",
+                },
+                amount: {
+                  type: 'number',
+                  description:
+                    'Child amount. Positive = expense, negative = income (Copilot sign convention). All child amounts must sum to the parent amount.',
+                },
+                category_id: {
+                  type: 'string',
+                  description: 'Category ID for the child (from get_categories results)',
+                },
+              },
+              required: ['amount', 'category_id'],
+            },
+          },
+        },
+        required: ['transaction_id', 'account_id', 'item_id', 'splits'],
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
       },
     },
     {

@@ -901,3 +901,476 @@ describe('addTransactionToRecurring', () => {
     expect(result.transaction.internal_transfer).toBe(true);
   });
 });
+
+describe('splitTransaction', () => {
+  let tools: CopilotMoneyTools;
+  let mockDb: CopilotDatabase;
+
+  // Parent: $600 "Hotel + Car + Meals" charge on 2026-04-15.
+  // Mirrors what the local cache would hold after decoder read.
+  const parentCacheRow = {
+    transaction_id: 'parent-1',
+    amount: 600,
+    date: '2026-04-15',
+    name: 'Hotel + Car + Meals',
+    account_id: 'acc1',
+    item_id: 'item1',
+    category_id: 'cat-travel',
+  };
+
+  // Server response rows (TransactionFields shape, same as createTransaction).
+  const parentServer = {
+    id: 'parent-1',
+    name: 'Hotel + Car + Meals',
+    date: '2026-04-15',
+    amount: 600,
+    categoryId: '', // blanked by server after split
+    type: 'REGULAR' as const,
+    accountId: 'acc1',
+    itemId: 'item1',
+    isPending: false,
+    isReviewed: false,
+    createdAt: 1777785600000,
+    recurringId: null,
+    userNotes: null,
+    tipAmount: null,
+    suggestedCategoryIds: [],
+    tags: [],
+    goal: null,
+  };
+  const childHotel = {
+    ...parentServer,
+    id: 'child-hotel',
+    name: 'Hotel',
+    amount: 400,
+    categoryId: 'cat-lodging',
+  };
+  const childCar = {
+    ...parentServer,
+    id: 'child-car',
+    name: 'Car',
+    amount: 200,
+    categoryId: 'cat-car-rental',
+  };
+
+  const validArgs = {
+    transaction_id: 'parent-1',
+    account_id: 'acc1',
+    item_id: 'item1',
+    splits: [
+      { name: 'Hotel', date: '2026-04-15', amount: 400, category_id: 'cat-lodging' },
+      { name: 'Car', date: '2026-04-15', amount: 200, category_id: 'cat-car-rental' },
+    ],
+  };
+
+  beforeEach(() => {
+    mockDb = new CopilotDatabase('/nonexistent');
+    (mockDb as any).dbPath = '/fake';
+    (mockDb as any)._transactions = [
+      { ...parentCacheRow },
+      {
+        transaction_id: 'tx-other',
+        amount: 10,
+        date: '2026-04-16',
+        name: 'Coffee',
+        account_id: 'acc1',
+        item_id: 'item1',
+        category_id: 'cat-food',
+      },
+    ];
+    (mockDb as any)._allCollectionsLoaded = true;
+  });
+
+  test('dispatches SplitTransaction with mapped input array and returns parent + children', async () => {
+    const client = createMockGraphQLClient({
+      SplitTransaction: {
+        splitTransaction: {
+          parentTransaction: parentServer,
+          splitTransactions: [childHotel, childCar],
+        },
+      },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    const result = await tools.splitTransaction(validArgs);
+
+    expect(result.success).toBe(true);
+    expect(result.parent_transaction_id).toBe('parent-1');
+    expect(result.child_transaction_ids).toEqual(['child-hotel', 'child-car']);
+    expect(result.parent.transaction_id).toBe('parent-1');
+    expect(result.parent.category_id).toBe(''); // mirrors server's post-split blank
+    expect(result.children).toHaveLength(2);
+    expect(result.children[0].transaction_id).toBe('child-hotel');
+    expect(result.children[0].amount).toBe(400);
+    expect(result.children[0].category_id).toBe('cat-lodging');
+    expect(result.children[1].transaction_id).toBe('child-car');
+    expect(result.children[1].amount).toBe(200);
+    expect(result.children[1].category_id).toBe('cat-car-rental');
+
+    expect(client._calls).toHaveLength(1);
+    expect(client._calls[0].op).toBe('SplitTransaction');
+    expect(client._calls[0].variables).toEqual({
+      id: 'parent-1',
+      accountId: 'acc1',
+      itemId: 'item1',
+      input: [
+        { name: 'Hotel', date: '2026-04-15', amount: 400, categoryId: 'cat-lodging' },
+        { name: 'Car', date: '2026-04-15', amount: 200, categoryId: 'cat-car-rental' },
+      ],
+    });
+  });
+
+  test('evicts the parent transaction from the in-memory cache on success', async () => {
+    // The parent is hidden from Copilot's UI after a split — cached reads
+    // should stop surfacing it. (Children are NOT inserted here; the next
+    // refresh_database picks them up.)
+    const client = createMockGraphQLClient({
+      SplitTransaction: {
+        splitTransaction: {
+          parentTransaction: parentServer,
+          splitTransactions: [childHotel, childCar],
+        },
+      },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await tools.splitTransaction(validArgs);
+
+    const remaining = (mockDb as any)._transactions as Array<{ transaction_id: string }>;
+    expect(remaining.map((t) => t.transaction_id)).toEqual(['tx-other']);
+  });
+
+  test('defaults missing name/date on a split entry to the parent values', async () => {
+    const client = createMockGraphQLClient({
+      SplitTransaction: {
+        splitTransaction: {
+          parentTransaction: parentServer,
+          splitTransactions: [childHotel, childCar],
+        },
+      },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await tools.splitTransaction({
+      transaction_id: 'parent-1',
+      account_id: 'acc1',
+      item_id: 'item1',
+      splits: [
+        // name omitted → parent name. date omitted → parent date.
+        { amount: 400, category_id: 'cat-lodging' },
+        // explicit name/date — not overridden.
+        { name: 'Car', date: '2026-04-16', amount: 200, category_id: 'cat-car-rental' },
+      ],
+    });
+
+    const sentInput = (client._calls[0].variables as { input: SplitTransactionInputShape[] }).input;
+    expect(sentInput[0]).toEqual({
+      name: 'Hotel + Car + Meals',
+      date: '2026-04-15',
+      amount: 400,
+      categoryId: 'cat-lodging',
+    });
+    expect(sentInput[1]).toEqual({
+      name: 'Car',
+      date: '2026-04-16',
+      amount: 200,
+      categoryId: 'cat-car-rental',
+    });
+  });
+
+  test('supports a 3-way split happy path', async () => {
+    const childMeals = {
+      ...parentServer,
+      id: 'child-meals',
+      name: 'Meals',
+      amount: 100,
+      categoryId: 'cat-food',
+    };
+    const childHotel2 = { ...childHotel, amount: 300 };
+    const childCar2 = { ...childCar, amount: 200 };
+    const client = createMockGraphQLClient({
+      SplitTransaction: {
+        splitTransaction: {
+          parentTransaction: parentServer,
+          splitTransactions: [childHotel2, childCar2, childMeals],
+        },
+      },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    const result = await tools.splitTransaction({
+      transaction_id: 'parent-1',
+      account_id: 'acc1',
+      item_id: 'item1',
+      splits: [
+        { name: 'Hotel', date: '2026-04-15', amount: 300, category_id: 'cat-lodging' },
+        { name: 'Car', date: '2026-04-15', amount: 200, category_id: 'cat-car-rental' },
+        { name: 'Meals', date: '2026-04-15', amount: 100, category_id: 'cat-food' },
+      ],
+    });
+
+    expect(result.children).toHaveLength(3);
+    expect(result.child_transaction_ids).toEqual(['child-hotel', 'child-car', 'child-meals']);
+    expect(
+      (client._calls[0].variables as { input: SplitTransactionInputShape[] }).input
+    ).toHaveLength(3);
+  });
+
+  test('rejects splits.length < 2 (zero or one)', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(tools.splitTransaction({ ...validArgs, splits: [] })).rejects.toThrow(
+      /at least 2|minimum.*2|splits.*2/i
+    );
+    await expect(
+      tools.splitTransaction({
+        ...validArgs,
+        splits: [{ name: 'Hotel', date: '2026-04-15', amount: 600, category_id: 'cat-lodging' }],
+      })
+    ).rejects.toThrow(/at least 2|minimum.*2|splits.*2/i);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('rejects sum mismatch with parent amount and names parent amount, sum, and diff', async () => {
+    // Parent is 600; splits sum to 500 → diff 100. Must surface those numbers.
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(
+      tools.splitTransaction({
+        ...validArgs,
+        splits: [
+          { name: 'Hotel', date: '2026-04-15', amount: 300, category_id: 'cat-lodging' },
+          { name: 'Car', date: '2026-04-15', amount: 200, category_id: 'cat-car-rental' },
+        ],
+      })
+    ).rejects.toThrow(/600.*500.*100|parent.*600/);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('accepts sum within a tiny floating-point epsilon', async () => {
+    // 0.1 + 0.2 = 0.30000000000000004 in IEEE 754; this should NOT trip the sum check.
+    (mockDb as any)._transactions[0].amount = 0.3;
+    const client = createMockGraphQLClient({
+      SplitTransaction: {
+        splitTransaction: {
+          parentTransaction: { ...parentServer, amount: 0.3 },
+          splitTransactions: [
+            { ...childHotel, amount: 0.1 },
+            { ...childCar, amount: 0.2 },
+          ],
+        },
+      },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(
+      tools.splitTransaction({
+        ...validArgs,
+        splits: [
+          { name: 'Hotel', date: '2026-04-15', amount: 0.1, category_id: 'cat-lodging' },
+          { name: 'Car', date: '2026-04-15', amount: 0.2, category_id: 'cat-car-rental' },
+        ],
+      })
+    ).resolves.toMatchObject({ success: true });
+  });
+
+  test('rejects when parent transaction is not in the local cache', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(
+      tools.splitTransaction({ ...validArgs, transaction_id: 'nonexistent-tx' })
+    ).rejects.toThrow(/Transaction not found/);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('rejects invalid transaction_id format before any cache lookup', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(
+      tools.splitTransaction({ ...validArgs, transaction_id: 'bad id!' })
+    ).rejects.toThrow(/Invalid transaction_id/);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('rejects invalid account_id format', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(
+      tools.splitTransaction({ ...validArgs, account_id: 'bad/account' })
+    ).rejects.toThrow(/Invalid account_id/);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('rejects invalid item_id format', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(tools.splitTransaction({ ...validArgs, item_id: 'bad.item' })).rejects.toThrow(
+      /Invalid item_id/
+    );
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('rejects invalid category_id on a split entry', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(
+      tools.splitTransaction({
+        ...validArgs,
+        splits: [
+          { name: 'Hotel', date: '2026-04-15', amount: 400, category_id: 'bad id!' },
+          { name: 'Car', date: '2026-04-15', amount: 200, category_id: 'cat-car-rental' },
+        ],
+      })
+    ).rejects.toThrow(/Invalid category_id/);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('rejects non-finite amount on a split entry (NaN, Infinity)', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(
+      tools.splitTransaction({
+        ...validArgs,
+        splits: [
+          { name: 'Hotel', date: '2026-04-15', amount: Number.NaN, category_id: 'cat-lodging' },
+          { name: 'Car', date: '2026-04-15', amount: 200, category_id: 'cat-car-rental' },
+        ],
+      })
+    ).rejects.toThrow(/amount.*finite/i);
+
+    await expect(
+      tools.splitTransaction({
+        ...validArgs,
+        splits: [
+          {
+            name: 'Hotel',
+            date: '2026-04-15',
+            amount: Number.POSITIVE_INFINITY,
+            category_id: 'cat-lodging',
+          },
+          { name: 'Car', date: '2026-04-15', amount: 200, category_id: 'cat-car-rental' },
+        ],
+      })
+    ).rejects.toThrow(/amount.*finite/i);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('rejects amount exceeding MAX_VALID_AMOUNT (both signs)', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(
+      tools.splitTransaction({
+        ...validArgs,
+        splits: [
+          { name: 'Hotel', date: '2026-04-15', amount: 10_000_001, category_id: 'cat-lodging' },
+          { name: 'Car', date: '2026-04-15', amount: 1, category_id: 'cat-car-rental' },
+        ],
+      })
+    ).rejects.toThrow(/amount exceeds maximum/i);
+
+    await expect(
+      tools.splitTransaction({
+        ...validArgs,
+        splits: [
+          { name: 'Hotel', date: '2026-04-15', amount: -10_000_001, category_id: 'cat-lodging' },
+          { name: 'Car', date: '2026-04-15', amount: 1, category_id: 'cat-car-rental' },
+        ],
+      })
+    ).rejects.toThrow(/amount exceeds maximum/i);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('rejects malformed date on a split entry', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(
+      tools.splitTransaction({
+        ...validArgs,
+        splits: [
+          { name: 'Hotel', date: '2026-4-15', amount: 400, category_id: 'cat-lodging' },
+          { name: 'Car', date: '2026-04-15', amount: 200, category_id: 'cat-car-rental' },
+        ],
+      })
+    ).rejects.toThrow(/date.*YYYY-MM-DD/i);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('rejects empty name on a split entry after trim', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(
+      tools.splitTransaction({
+        ...validArgs,
+        splits: [
+          { name: '   ', date: '2026-04-15', amount: 400, category_id: 'cat-lodging' },
+          { name: 'Car', date: '2026-04-15', amount: 200, category_id: 'cat-car-rental' },
+        ],
+      })
+    ).rejects.toThrow(/name.*empty/i);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('wraps GraphQL errors and does NOT evict the cache on error', async () => {
+    const { GraphQLError } = await import('../../src/core/graphql/client.js');
+    const client = createMockGraphQLClient({
+      SplitTransaction: new GraphQLError(
+        'USER_ACTION_REQUIRED',
+        'Split amounts do not match parent',
+        'SplitTransaction',
+        200
+      ),
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(tools.splitTransaction(validArgs)).rejects.toThrow(/Split amounts/);
+
+    // Parent still in cache — local state tracks whatever the server thinks is real.
+    const remaining = (mockDb as any)._transactions as Array<{ transaction_id: string }>;
+    expect(remaining.map((t) => t.transaction_id).sort()).toEqual(['parent-1', 'tx-other']);
+  });
+
+  test('does NOT look up account_id/item_id from the cache via transaction_id', async () => {
+    // Same destructive-safe contract as delete_transaction / add_transaction_to_recurring —
+    // a typo in account_id/item_id must not be silently fixed from the cache.
+    const client = createMockGraphQLClient({
+      SplitTransaction: {
+        splitTransaction: {
+          parentTransaction: parentServer,
+          splitTransactions: [childHotel, childCar],
+        },
+      },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await tools.splitTransaction({
+      ...validArgs,
+      account_id: 'wrong_account',
+      item_id: 'wrong_item',
+    });
+
+    expect(client._calls[0].variables).toMatchObject({
+      id: 'parent-1',
+      accountId: 'wrong_account',
+      itemId: 'wrong_item',
+    });
+  });
+});
+
+// Local narrow shape to help tests assert the outbound variables structure.
+interface SplitTransactionInputShape {
+  name: string;
+  date: string;
+  amount: number;
+  categoryId: string;
+}
