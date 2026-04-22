@@ -11,6 +11,7 @@ import {
   editTransaction,
   createTransaction as gqlCreateTransaction,
   deleteTransaction as gqlDeleteTransaction,
+  addTransactionToRecurring as gqlAddTransactionToRecurring,
   type TransactionType,
 } from '../core/graphql/transactions.js';
 import {
@@ -2652,6 +2653,94 @@ export class CopilotMoneyTools {
   }
 
   /**
+   * Manually link an existing transaction to an existing recurring series.
+   *
+   * Use case: Copilot's auto-detection occasionally misses a rent /
+   * subscription / etc. charge that should be grouped with a recurring.
+   * This tool wraps the GraphQL AddTransactionToRecurring mutation with
+   * its single `recurringId` input and returns the just-linked transaction
+   * (now with its `recurring_id` populated).
+   *
+   * Contract: all four IDs are required and forwarded verbatim — the tool
+   * does NOT re-resolve account_id / item_id from the cache via
+   * transaction_id. A typo in any one field surfaces as a server-side
+   * "Transaction not found" rather than silently attaching the wrong
+   * transaction. Same defensive choice as delete_transaction.
+   *
+   * Cache: unlike create_transaction (where there is nothing to patch) and
+   * unlike delete_transaction (which evicts the row), here the transaction
+   * already exists in the cache — we patch `recurring_id` on the cached
+   * row via `patchCachedTransaction` so subsequent get_transactions reads
+   * reflect the link without waiting for a refresh_database cycle.
+   */
+  async addTransactionToRecurring(args: {
+    transaction_id: string;
+    account_id: string;
+    item_id: string;
+    recurring_id: string;
+  }): Promise<{
+    success: true;
+    transaction_id: string;
+    transaction: Transaction;
+  }> {
+    const client = this.getGraphQLClient();
+    const { transaction_id, account_id, item_id, recurring_id } = args;
+
+    // Defense-in-depth — the MCP schema already validates presence and
+    // type, but the method is directly callable from tests and other code.
+    validateDocId(transaction_id, 'transaction_id');
+    validateDocId(account_id, 'account_id');
+    validateDocId(item_id, 'item_id');
+    validateDocId(recurring_id, 'recurring_id');
+
+    try {
+      const tx = await gqlAddTransactionToRecurring(client, {
+        id: transaction_id,
+        accountId: account_id,
+        itemId: item_id,
+        input: { recurringId: recurring_id },
+      });
+
+      // Map the GraphQL camelCase Transaction fields back to the project's
+      // local snake_case Transaction shape. Mirrors createTransaction's
+      // mapping — the input type is identical (TransactionFields).
+      const transaction: Transaction = {
+        transaction_id: tx.id,
+        amount: tx.amount,
+        date: tx.date,
+        name: tx.name,
+        account_id: tx.accountId,
+        item_id: tx.itemId,
+        category_id: tx.categoryId,
+        pending: tx.isPending,
+        user_reviewed: tx.isReviewed,
+        user_note: tx.userNotes ?? undefined,
+        recurring_id: tx.recurringId ?? undefined,
+        tag_ids: tx.tags.map((t) => t.id),
+        internal_transfer: tx.type === 'INTERNAL_TRANSFER',
+      };
+
+      // Optimistic cache patch: the transaction already exists in the
+      // cache, so just update its recurring_id to match what the server
+      // now says. No-op (returns false) if the cache is unloaded or the
+      // id is absent — both acceptable, same as delete_transaction's
+      // eviction-is-a-no-op contract.
+      this.db.patchCachedTransaction(transaction_id, { recurring_id });
+
+      return {
+        success: true,
+        transaction_id: tx.id,
+        transaction,
+      };
+    } catch (e) {
+      if (e instanceof GraphQLError) {
+        throw new Error(graphQLErrorToMcpError(e), { cause: e });
+      }
+      throw e;
+    }
+  }
+
+  /**
    * Mark one or more transactions as reviewed (or unreviewed).
    *
    * Validates all transaction IDs, sets isReviewed via GraphQL for each; local
@@ -4245,6 +4334,44 @@ export function createWriteToolSchemas(): ToolSchema[] {
       annotations: {
         readOnlyHint: false,
         destructiveHint: true,
+        idempotentHint: true,
+      },
+    },
+    {
+      name: 'add_transaction_to_recurring',
+      description:
+        'Manually link an existing transaction to an existing recurring series. Use this when ' +
+        "Copilot's auto-detection missed a rent/subscription/etc. charge that should be grouped " +
+        'with a recurring. All four IDs are required (transaction_id, account_id, item_id, ' +
+        'recurring_id). The transaction must already exist — create_transaction followed by ' +
+        'add_transaction_to_recurring is the manual flow. Returns the updated transaction with ' +
+        'its recurring_id now populated.',
+      inputSchema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          transaction_id: {
+            type: 'string',
+            description: 'Transaction ID to attach (from get_transactions results)',
+          },
+          account_id: {
+            type: 'string',
+            description: 'Account ID the transaction belongs to (from the transaction row)',
+          },
+          item_id: {
+            type: 'string',
+            description: "Item ID the account belongs to (Copilot's Firestore item_id)",
+          },
+          recurring_id: {
+            type: 'string',
+            description: 'Recurring series ID to link to (from get_recurring_transactions results)',
+          },
+        },
+        required: ['transaction_id', 'account_id', 'item_id', 'recurring_id'],
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
         idempotentHint: true,
       },
     },
