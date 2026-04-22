@@ -1,5 +1,9 @@
 import type { GraphQLClient } from './client.js';
-import { CREATE_TRANSACTION, EDIT_TRANSACTION } from './operations.generated.js';
+import {
+  CREATE_TRANSACTION,
+  DELETE_TRANSACTION,
+  EDIT_TRANSACTION,
+} from './operations.generated.js';
 
 /**
  * TransactionType enum values accepted by Copilot's GraphQL schema.
@@ -101,6 +105,39 @@ export interface EditTransactionChanges {
   userNotes?: string | null;
   isReviewed?: boolean;
   tagIds?: string[];
+}
+
+export interface DeleteTransactionArgs {
+  id: string;
+  accountId: string;
+  itemId: string;
+}
+
+interface DeleteTransactionResponse {
+  deleteTransaction: boolean;
+}
+
+/**
+ * Permanently delete a transaction. Requires all three IDs — the server
+ * has no "look up the other two from id" fallback, and the tool layer
+ * deliberately does not supply one so a typo in any single field fails
+ * with "Transaction not found" rather than silently hitting a different
+ * transaction.
+ *
+ * Returns the raw Boolean from the server unchanged. Copilot returns
+ * `true` on success; any other value surfaces through untouched so
+ * callers can observe drift from the documented contract.
+ */
+export async function deleteTransaction(
+  client: GraphQLClient,
+  args: DeleteTransactionArgs
+): Promise<boolean> {
+  const data = await client.mutate<DeleteTransactionArgs, DeleteTransactionResponse>(
+    'DeleteTransaction',
+    DELETE_TRANSACTION,
+    args
+  );
+  return data.deleteTransaction;
 }
 
 export async function editTransaction(
