@@ -187,9 +187,14 @@ describe('LevelDB Decoder', () => {
         expect(result.length).toBe(1);
         expect(result[0]?.transaction_id).toBe('txn_good');
         expect(warnSpy).toHaveBeenCalled();
-        const message = warnSpy.mock.calls[0]?.[0] as string;
-        expect(message).toContain('collection=transactions');
-        expect(message).toContain('path=date');
+        // The same fixture may also trigger unread-field warns (helper fields
+        // like is_transfer/note/tags are not part of the Copilot schema), so
+        // find the schema-drop entry rather than indexing calls[0].
+        const messages = warnSpy.mock.calls.map((c) => c[0] as string);
+        const schemaDrop = messages.find((m) => m.includes('schema drop'));
+        expect(schemaDrop).toBeDefined();
+        expect(schemaDrop).toContain('collection=transactions');
+        expect(schemaDrop).toContain('path=date');
       } finally {
         warnSpy.mockRestore();
       }
