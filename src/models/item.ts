@@ -72,6 +72,9 @@ export const ItemSchema = z
     error_code: z.string().optional(), // Plaid error code
     error_message: z.string().optional(), // Human-readable error message
     error_type: z.string().optional(), // Error type (e.g., "ITEM_ERROR")
+    // Full Plaid error payload — richer than the flat error_* fields.
+    // Contains { error_code, error_message, error_type, display_message, ... }.
+    error: z.record(z.string(), z.unknown()).optional(),
     needs_update: z.boolean().optional(), // Flag indicating re-authentication needed
 
     // Account linkage
@@ -102,6 +105,9 @@ export const ItemSchema = z
     disconnect_attempted: z.string().optional(),
     disconnect_attempted_error: z.string().optional(),
     fetch_data: z.record(z.string(), z.unknown()).optional(),
+    // OAuth flow metadata — present for institutions that use OAuth rather
+    // than direct-credential auth. Shape varies by provider.
+    oauth: z.record(z.string(), z.unknown()).optional(),
     id: z.string().optional(),
     latest_investments_refresh: z.string().optional(),
     status_last_webhook_code_sent: z.string().optional(),
@@ -110,6 +116,27 @@ export const ItemSchema = z
   .passthrough(); // Allow additional fields we haven't discovered yet
 
 export type Item = z.infer<typeof ItemSchema>;
+
+/**
+ * Fields Copilot stores on item docs that we deliberately drop at the decoder
+ * boundary. Keeping this list next to the schema documents *why* each field is
+ * withheld — especially the sensitive ones — and feeds the `ignored` option of
+ * `warnUnreadFields` so unseen-field warnings stay off for them.
+ *
+ * Treat access tokens as sensitive even when we're reading them off a local
+ * file: they're bearer credentials for the user's bank connection.
+ */
+export const IGNORED_ITEM_FIELDS = [
+  // Plaid bearer credentials — never surface to tool output.
+  'access_token',
+  'deleted_access_token',
+  // Non-Plaid aggregator (Akoya) metadata; no downstream consumer.
+  'akoya',
+  // Plaid product feature flags — useful to Copilot internally, not to the MCP's tools.
+  'available_products',
+  'billed_products',
+  'optional_products',
+] as const;
 
 /**
  * Get the display name for an item (institution name or fallback).

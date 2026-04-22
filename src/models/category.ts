@@ -37,6 +37,8 @@ export const CategorySchema = z
     is_other: z.boolean().optional(),
     auto_budget_lock: z.boolean().optional(),
     auto_delete_lock: z.boolean().optional(),
+    // Whether unused budget for this category carries forward to next month.
+    rollover_disabled: z.boolean().optional(),
 
     // Plaid mapping - links custom categories to standard Plaid categories
     plaid_category_ids: z.array(z.string()).optional(),

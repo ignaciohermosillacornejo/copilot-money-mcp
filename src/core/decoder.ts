@@ -23,7 +23,7 @@ import { Goal, GoalSchema } from '../models/goal.js';
 import { GoalHistory, GoalHistorySchema, DailySnapshot } from '../models/goal-history.js';
 import { InvestmentPrice, InvestmentPriceSchema } from '../models/investment-price.js';
 import { InvestmentSplit, InvestmentSplitSchema } from '../models/investment-split.js';
-import { Item, ItemSchema } from '../models/item.js';
+import { Item, ItemSchema, IGNORED_ITEM_FIELDS } from '../models/item.js';
 import { Category, CategorySchema } from '../models/category.js';
 import {
   InvestmentPerformance,
@@ -815,6 +815,9 @@ function processTransaction(
     'skip_balance_adjust',
     'user_deleted',
     'intelligence_powered',
+    // Some docs store internal_transfer directly as a boolean in addition to
+    // (or instead of) the string `type === "internal_transfer"` pattern.
+    'internal_transfer',
   ];
 
   for (const field of booleanFields) {
@@ -839,6 +842,8 @@ function processTransaction(
     'intelligence_suggested_category_ids',
     'tag_ids',
     'children_transaction_ids',
+    // Legacy/alternative name for intelligence_suggested_category_ids.
+    'suggestion_ids',
   ];
 
   for (const field of stringArrayFields) {
@@ -927,6 +932,9 @@ function processAccount(fields: Map<string, FirestoreValue>, docId: string): Acc
     '_origin',
     'nickname',
     'group_id',
+    'user_id',
+    // Stable account ID that survives provider re-auth; safer join key than item/id.
+    'persistent_account_id',
   ];
 
   for (const field of stringFields) {
@@ -963,6 +971,16 @@ function processAccount(fields: Map<string, FirestoreValue>, docId: string): Acc
   if (availableBalance !== undefined) {
     accData.available_balance = Math.round(availableBalance * 100) / 100;
   }
+
+  // Last auto-sync balance snapshot — used when live fetches aren't available.
+  const lastAutoBalance = getNumber(fields, 'last_auto_current_balance');
+  if (lastAutoBalance !== undefined) {
+    accData.last_auto_current_balance = Math.round(lastAutoBalance * 100) / 100;
+  }
+
+  // IDs of financial_goals this account funds (emergency fund, vacation, etc.).
+  const financialGoalIds = getStringArray(fields, 'financial_goal_ids');
+  if (financialGoalIds) accData.financial_goal_ids = financialGoalIds;
 
   // Check for null limit (credit cards) vs numeric limit
   const limitField = fields.get('limit');
@@ -1056,6 +1074,8 @@ function processAccount(fields: Map<string, FirestoreValue>, docId: string): Acc
         'holdings',
         'metadata',
         'merged',
+        'last_auto_current_balance',
+        'financial_goal_ids',
         ...stringFields,
         ...booleanFields,
       ],
@@ -1505,6 +1525,11 @@ function processInvestmentPrice(
     if (value) priceData[field] = value;
   }
 
+  // The actual price payload — keyed by day-of-month on daily docs and by
+  // intraday timestamp on hf docs. Values carry numeric prices plus metadata.
+  const pricesMap = getMap(fields, 'prices');
+  if (pricesMap) priceData.prices = toPlainObject(pricesMap);
+
   warnUnreadFields(
     fields,
     {
@@ -1513,6 +1538,7 @@ function processInvestmentPrice(
         'ticker_symbol',
         'date',
         'month',
+        'prices',
         ...priceFields,
         ...ohlcvFields,
         ...metaFields,
@@ -1675,6 +1701,14 @@ function processItem(fields: Map<string, FirestoreValue>, docId: string): Item |
   const fetchDataMap = getMap(fields, 'fetch_data');
   if (fetchDataMap) itemData.fetch_data = toPlainObject(fetchDataMap);
 
+  // Plaid error payload — richer than the flat error_code/error_message fields.
+  const errorMap = getMap(fields, 'error');
+  if (errorMap) itemData.error = toPlainObject(errorMap);
+
+  // OAuth flow metadata for institutions that use OAuth auth.
+  const oauthMap = getMap(fields, 'oauth');
+  if (oauthMap) itemData.oauth = toPlainObject(oauthMap);
+
   warnUnreadFields(
     fields,
     {
@@ -1682,11 +1716,13 @@ function processItem(fields: Map<string, FirestoreValue>, docId: string): Item |
         'item_id',
         'products',
         'fetch_data',
+        'error',
+        'oauth',
         ...stringFields,
         ...timestampFields,
         ...boolFields,
       ],
-      ignored: [],
+      ignored: IGNORED_ITEM_FIELDS,
     },
     { collection: 'items', docId }
   );
@@ -1721,7 +1757,14 @@ function processCategory(fields: Map<string, FirestoreValue>, docId: string): Ca
   const order = getNumber(fields, 'order');
   if (order !== undefined) categoryData.order = order;
 
-  const booleanFields = ['excluded', 'is_other', 'auto_budget_lock', 'auto_delete_lock'];
+  const booleanFields = [
+    'excluded',
+    'is_other',
+    'auto_budget_lock',
+    'auto_delete_lock',
+    // Per-category budget rollover toggle.
+    'rollover_disabled',
+  ];
   for (const field of booleanFields) {
     const value = getBoolean(fields, field);
     if (value !== undefined) categoryData[field] = value;
@@ -2599,8 +2642,9 @@ function processAmazonOrder(
     data.amazon_user_id = parts[amazonIdx + 1];
   }
 
-  // String fields
-  for (const field of ['date', 'account_id', 'match_state']) {
+  // String fields. `id` parallels order_id (Copilot stores both); copilot_tx is
+  // set once Copilot matches this order to a posted transaction.
+  for (const field of ['date', 'account_id', 'match_state', 'id', 'copilot_tx']) {
     const value = getString(fields, field) ?? getDateString(fields, field);
     if (value !== undefined) data[field] = value;
   }
@@ -2634,6 +2678,8 @@ function processAmazonOrder(
         'date',
         'account_id',
         'match_state',
+        'id',
+        'copilot_tx',
         'items',
         'details',
         'payment',

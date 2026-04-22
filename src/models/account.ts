@@ -76,6 +76,16 @@ export const AccountSchema = z
     // Visibility - accounts marked as deleted by user or merged into other accounts
     user_deleted: z.boolean().optional(),
 
+    // Ownership & linkage
+    user_id: z.string().optional(),
+    // Stable account identifier that survives re-linking (the provider-side ID
+    // doesn't persist across reconnects; persistent_account_id does).
+    persistent_account_id: z.string().optional(),
+    // Last automated balance snapshot — used when a live fetch isn't available.
+    last_auto_current_balance: z.number().optional(),
+    // IDs of financial_goals linked to this account (funds toward emergency fund, etc.).
+    financial_goal_ids: z.array(z.string()).optional(),
+
     // Investment fields
     holdings: z.array(AccountHoldingSchema).optional(),
     holdings_initialized: z.boolean().optional(),

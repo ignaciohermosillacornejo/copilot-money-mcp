@@ -89,6 +89,8 @@ export const TransactionSchema = z
     intelligence_suggested_category_ids: z.array(z.string()).optional(),
     intelligence_chosen_category_id: z.string().optional(),
     intelligence_powered: z.boolean().optional(),
+    // Alternative/legacy name some docs carry alongside intelligence_suggested_category_ids
+    suggestion_ids: z.array(z.string()).optional(),
 
     // Recurring references
     recurring_id: z.string().optional(),

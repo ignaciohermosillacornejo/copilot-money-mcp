@@ -29,6 +29,12 @@ const AmazonOrderItemSchema = z
 export const AmazonOrderSchema = z
   .object({
     order_id: z.string(),
+    // Copilot also stores the same ID under `id` on the order doc — preserved
+    // verbatim so downstream consumers that dereference the raw doc still work.
+    id: z.string().optional(),
+    // Copilot's linked transaction ID. Set once Copilot matches this Amazon
+    // order to a posted transaction; used to join item-level receipts to spend.
+    copilot_tx: z.string().optional(),
     amazon_user_id: z.string().optional(),
     date: z.string().optional(),
     account_id: z.string().optional(),
