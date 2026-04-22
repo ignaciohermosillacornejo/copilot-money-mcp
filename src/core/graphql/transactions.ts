@@ -1,5 +1,75 @@
 import type { GraphQLClient } from './client.js';
-import { EDIT_TRANSACTION } from './operations.generated.js';
+import { CREATE_TRANSACTION, EDIT_TRANSACTION } from './operations.generated.js';
+
+/**
+ * TransactionType enum values accepted by Copilot's GraphQL schema.
+ *
+ * Verified exhaustively against the live endpoint on 2026-04-21:
+ *   - Typo probes (REGULR, INCOM, INTERNA_TRANSFER, etc.) surface "Did you
+ *     mean REGULAR / INCOME / INTERNAL_TRANSFER" — no other enum values
+ *     appeared across broad sweeps.
+ *   - Accepted values pass the enum layer and fail downstream on ID
+ *     validation, confirming the enum match.
+ */
+export type TransactionType = 'REGULAR' | 'INCOME' | 'INTERNAL_TRANSFER';
+
+export interface CreateTransactionInput {
+  name: string;
+  date: string; // YYYY-MM-DD
+  amount: number;
+  categoryId: string;
+  type: TransactionType;
+}
+
+export interface CreateTransactionArgs {
+  accountId: string;
+  itemId: string;
+  input: CreateTransactionInput;
+}
+
+/**
+ * GraphQL response shape for CreateTransaction. Mirrors the Transaction
+ * type selected by the generated query (TransactionFields fragment). Kept
+ * as `unknown`-tolerant for optional/client-computed fields that the
+ * server may or may not populate; only `id` is strictly required by
+ * downstream callers.
+ */
+export interface CreatedTransaction {
+  id: string;
+  name: string;
+  date: string;
+  amount: number;
+  categoryId: string;
+  type: TransactionType;
+  accountId: string;
+  itemId: string;
+  isPending: boolean;
+  isReviewed: boolean;
+  createdAt: number;
+  recurringId: string | null;
+  userNotes: string | null;
+  tipAmount: number | null;
+  suggestedCategoryIds: string[];
+  tags: Array<{ id: string; name: string; colorName: string }>;
+  goal: { id: string; name: string } | null;
+}
+
+interface CreateTransactionResponse {
+  createTransaction: CreatedTransaction;
+}
+
+export async function createTransaction(
+  client: GraphQLClient,
+  args: CreateTransactionArgs
+): Promise<{ id: string; transaction: CreatedTransaction }> {
+  const data = await client.mutate<CreateTransactionArgs, CreateTransactionResponse>(
+    'CreateTransaction',
+    CREATE_TRANSACTION,
+    args
+  );
+  const tx = data.createTransaction;
+  return { id: tx.id, transaction: tx };
+}
 
 export interface EditTransactionInput {
   categoryId?: string;
