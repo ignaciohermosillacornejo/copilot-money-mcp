@@ -19,7 +19,9 @@ describe('createWriteToolSchemas', () => {
     const split = createWriteToolSchemas().find((s) => s.name === 'split_transaction');
     expect(split).toBeDefined();
     expect(split!.annotations?.readOnlyHint).toBe(false);
-    expect(split!.annotations?.destructiveHint).toBe(false);
+    // Destructive: the parent is permanently hidden post-split and there is
+    // no reversal mutation. "Undo" requires per-child delete + parent edit.
+    expect(split!.annotations?.destructiveHint).toBe(true);
     // Not idempotent: replaying a split would fail (the parent is already
     // hidden and its children already exist) but the intent-semantics of
     // a retry differ from, say, setting a flag.
