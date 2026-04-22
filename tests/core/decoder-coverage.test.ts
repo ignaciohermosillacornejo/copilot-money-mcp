@@ -964,9 +964,24 @@ describe('decoder coverage', () => {
             oauth: { state: 'connected', last_refresh: '2026-04-20' },
           },
         },
+        // investment_prices: the `prices` payload map
+        {
+          collection: 'investment_prices',
+          id: 'inv-cov',
+          fields: {
+            investment_id: 'inv-cov',
+            ticker_symbol: 'COV',
+            date: '2026-04-20',
+            currency: 'USD',
+            prices: {
+              '2026-04-20': { price: 150.5, source: 'plaid' },
+              '2026-04-19': { price: 149.0, source: 'plaid' },
+            },
+          },
+        },
       ]);
 
-      const { transactions, accounts, categories, items, amazonOrders } =
+      const { transactions, accounts, categories, items, amazonOrders, investmentPrices } =
         await decodeAllCollections(dbPath);
 
       const txn = transactions.find((t) => t.transaction_id === 'txn-cov')!;
@@ -992,6 +1007,13 @@ describe('decoder coverage', () => {
         display_message: 'Please re-authenticate',
       });
       expect(item.oauth).toEqual({ state: 'connected', last_refresh: '2026-04-20' });
+
+      const price = investmentPrices.find((p) => p.investment_id === 'inv-cov')!;
+      expect(price).toBeDefined();
+      expect(price.prices).toEqual({
+        '2026-04-20': { price: 150.5, source: 'plaid' },
+        '2026-04-19': { price: 149.0, source: 'plaid' },
+      });
     });
 
     test('IGNORED_ITEM_FIELDS suppresses warns for sensitive + Plaid metadata fields', async () => {
