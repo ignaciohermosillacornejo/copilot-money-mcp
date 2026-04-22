@@ -16,9 +16,11 @@
  *   bun run scripts/smoke-graphql.ts --skip-mcp-e2e      # skip MCP tool dispatch
  *   bun run scripts/smoke-graphql.ts --include-state-gated # opt-IN (interactive)
  *   bun run scripts/smoke-graphql.ts --section tags
+ *   bun run scripts/smoke-graphql.ts --section transactions-write
  *
- * Sections: tags, categories, transactions, recurrings, budgets, accounts,
- *           bulk, errors, edge, consistency, mcp-e2e, state-gated
+ * Sections: tags, categories, transactions, transactions-write, recurrings,
+ *           budgets, accounts, bulk, errors, edge, consistency, mcp-e2e,
+ *           state-gated
  *
  * State-gated tests are opt-in because they require the user to toggle UI
  * state manually in the Copilot desktop app between prompts.
@@ -42,7 +44,13 @@ import {
   editCategory,
   deleteCategory,
 } from '../src/core/graphql/categories.js';
-import { editTransaction } from '../src/core/graphql/transactions.js';
+import {
+  addTransactionToRecurring,
+  createTransaction,
+  deleteTransaction,
+  editTransaction,
+  splitTransaction,
+} from '../src/core/graphql/transactions.js';
 import {
   createRecurring,
   editRecurring,
@@ -117,6 +125,7 @@ const VALID_SECTIONS = [
   'tags',
   'categories',
   'transactions',
+  'transactions-write',
   'recurrings',
   'budgets',
   'accounts',
@@ -771,6 +780,496 @@ async function smokeTransactionsHappyPath(
         }
       }
     );
+  }
+}
+
+/**
+ * Exercise the four transaction-write tools shipped in PRs #320–#323:
+ * `create_transaction`, `split_transaction`, `add_transaction_to_recurring`,
+ * and `delete_transaction`. Each test creates GQL-TEST-* rows, asserts the
+ * server response, and cleans up in a try/finally via `deleteTransaction`.
+ *
+ * All test transactions use the `GQL-TEST-*` name prefix and run against the
+ * first open manual account. Plaid accounts are unsafe targets because
+ * Copilot re-syncs provider data and may overwrite or re-create our test
+ * rows; manual accounts have no such upstream feed.
+ *
+ * Verifies server-side state only. Does NOT assert deleted transactions
+ * disappear from `db.getAllTransactions()` — see issue #326 (the decoder
+ * does not handle Firestore NoDocument tombstones, so deleted docs persist
+ * in the decoded LevelDB cache until the next full pull). Once #326 is
+ * fixed, this section can be extended to assert cache eviction after
+ * `refresh_database`.
+ */
+async function smokeTransactionsWrites(
+  client: GraphQLClient,
+  db: CopilotDatabase,
+  tools: CopilotMoneyTools
+): Promise<void> {
+  logSection('Transactions — writes (create/split/add-to-recurring/delete)');
+
+  // --- Prerequisite discovery --------------------------------------------
+
+  const accounts = await db.getAccounts();
+  const manualAccount = accounts.find(
+    (a) => a.is_manual && !a.user_hidden && !a.user_deleted
+  );
+  if (!manualAccount || !manualAccount.account_id || !manualAccount.item_id) {
+    console.warn(
+      '  no open manual account found (need is_manual && !user_hidden && !user_deleted with account_id+item_id); skipping section'
+    );
+    return;
+  }
+  const accountId = manualAccount.account_id;
+  const itemId = manualAccount.item_id;
+  console.log(
+    `  using manual account id=${accountId} name=${manualAccount.name ?? '(unnamed)'}`
+  );
+
+  const categories = await db.getUserCategories();
+  const usableCategories = categories.filter(
+    (c) => c.category_id && c.name && c.name.length > 0
+  );
+  if (usableCategories.length < 2) {
+    console.warn(
+      `  need at least 2 user-defined categories with non-empty id+name (found ${usableCategories.length}); skipping section`
+    );
+    return;
+  }
+  const cat1 = usableCategories[0]!;
+  const cat2 = usableCategories[1]!;
+  console.log(
+    `  using categories id=${cat1.category_id} name=${cat1.name} | id=${cat2.category_id} name=${cat2.name}`
+  );
+
+  // Active recurring is optional — if absent, only the add-to-recurring step
+  // skips. Everything else still runs.
+  const activeRecurrings = await db.getRecurring(true);
+  const activeRecurring = activeRecurrings[0] ?? null;
+  if (activeRecurring) {
+    console.log(
+      `  using active recurring id=${activeRecurring.recurring_id} (for add-to-recurring step)`
+    );
+  } else {
+    console.log('  no active recurring; add-to-recurring step will skip');
+  }
+
+  // --- Cleanup registry ---------------------------------------------------
+  // Every created row pushes an entry here immediately so partial failures
+  // still get cleaned up in the outer finally block.
+  interface CleanupEntry {
+    id: string;
+    accountId: string;
+    itemId: string;
+    label: string;
+  }
+  const cleanup: CleanupEntry[] = [];
+
+  /**
+   * Poll until a just-created transaction is visible in the decoded local
+   * cache. tools.splitTransaction resolves parent name/date + sum-checks
+   * against that cache, so any split test needs the parent to have
+   * propagated through Copilot's sync pipeline first.
+   */
+  async function waitForTxnVisible(transactionId: string): Promise<void> {
+    const found = await pollUntil(
+      `txn-${transactionId}-visible`,
+      async () => {
+        await tools.refreshDatabase();
+        const txns = await db.getAllTransactions();
+        return txns.find((t) => t.transaction_id === transactionId) ?? null;
+      },
+      { timeoutMs: 60_000, intervalMs: 2_000 }
+    );
+    if (!found) {
+      throw new Error(
+        `parent txn ${transactionId} did not appear in local cache within 60s — ` +
+          `Copilot desktop app sync lag; rerun or wait for sync`
+      );
+    }
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  try {
+    // --- Test 1 — create_transaction happy path + cleanup ----------------
+    await step('transactions-write', 'create_transaction REGULAR + delete', async () => {
+      const created = await createTransaction(client, {
+        accountId,
+        itemId,
+        input: {
+          name: 'GQL-TEST-smoke-create',
+          date: today,
+          amount: 1.23,
+          categoryId: cat1.category_id,
+          type: 'REGULAR',
+        },
+      });
+      cleanup.push({
+        id: created.id,
+        accountId,
+        itemId,
+        label: 'GQL-TEST-smoke-create',
+      });
+      if (!created.id) throw new Error('createTransaction returned empty id');
+      if (Math.abs(created.amount - 1.23) > 1e-6) {
+        throw new Error(`expected amount=1.23, got ${created.amount}`);
+      }
+      if (created.name !== 'GQL-TEST-smoke-create') {
+        throw new Error(`expected name=GQL-TEST-smoke-create, got ${created.name}`);
+      }
+      const ok = await deleteTransaction(client, { id: created.id, accountId, itemId });
+      if (ok !== true) {
+        throw new Error(`deleteTransaction returned ${ok}, expected true`);
+      }
+      // Delete succeeded — drop from cleanup registry.
+      cleanup.splice(
+        cleanup.findIndex((c) => c.id === created.id),
+        1
+      );
+    });
+
+    // --- Test 2 — INCOME and INTERNAL_TRANSFER enum coverage -------------
+    for (const type of ['INCOME', 'INTERNAL_TRANSFER'] as const) {
+      await step(
+        'transactions-write',
+        `create_transaction ${type} + delete`,
+        async () => {
+          const label = `GQL-TEST-smoke-create-${type}`;
+          const created = await createTransaction(client, {
+            accountId,
+            itemId,
+            input: {
+              name: label,
+              date: today,
+              amount: 1.0,
+              categoryId: cat1.category_id,
+              type,
+            },
+          });
+          cleanup.push({ id: created.id, accountId, itemId, label });
+          if (!created.id) throw new Error('createTransaction returned empty id');
+          const ok = await deleteTransaction(client, {
+            id: created.id,
+            accountId,
+            itemId,
+          });
+          if (ok !== true) {
+            throw new Error(`deleteTransaction returned ${ok}, expected true`);
+          }
+          cleanup.splice(
+            cleanup.findIndex((c) => c.id === created.id),
+            1
+          );
+        }
+      );
+    }
+
+    // --- Test 3 — 2-way split with name/date defaulting from parent -------
+    await step(
+      'transactions-write',
+      'split_transaction 2-way with name/date defaulting',
+      async () => {
+        const parent = await createTransaction(client, {
+          accountId,
+          itemId,
+          input: {
+            name: 'GQL-TEST-smoke-split-parent',
+            date: today,
+            amount: 10.0,
+            categoryId: cat1.category_id,
+            type: 'REGULAR',
+          },
+        });
+        cleanup.push({
+          id: parent.id,
+          accountId,
+          itemId,
+          label: 'GQL-TEST-smoke-split-parent',
+        });
+
+        // tools.splitTransaction reads the parent from the decoded LevelDB
+        // cache for name/date defaulting + the client-side sum check. We
+        // just created the parent via GraphQL; the local cache won't see
+        // it until Copilot's desktop app syncs down (usually <30s). Poll
+        // until it's visible or give up with a useful error.
+        await waitForTxnVisible(parent.id);
+
+        const result = await tools.splitTransaction({
+          transaction_id: parent.id,
+          account_id: accountId,
+          item_id: itemId,
+          splits: [
+            { amount: 7.0, category_id: cat1.category_id },
+            {
+              amount: 3.0,
+              category_id: cat2.category_id,
+              name: 'GQL-TEST-smoke-split-child-B',
+            },
+          ],
+        });
+
+        // Register children for cleanup BEFORE any assertions — even if an
+        // assertion throws, the outer finally will sweep the rows.
+        for (const child of result.children) {
+          cleanup.push({
+            id: child.transaction_id,
+            accountId,
+            itemId,
+            label: `GQL-TEST-smoke-split-child ${child.name ?? ''}`.trim(),
+          });
+        }
+
+        if (result.children.length !== 2) {
+          throw new Error(`expected 2 children, got ${result.children.length}`);
+        }
+        if (result.parent_transaction_id !== parent.id) {
+          throw new Error(
+            `parent id drift: sent ${parent.id}, got ${result.parent_transaction_id}`
+          );
+        }
+        const sum = result.children.reduce((acc, c) => acc + c.amount, 0);
+        if (Math.abs(sum - 10.0) > 1e-6) {
+          throw new Error(`expected child sum=10.0, got ${sum}`);
+        }
+
+        const childA = result.children.find((c) => c.amount === 7.0);
+        const childB = result.children.find((c) => c.amount === 3.0);
+        if (!childA || !childB) {
+          throw new Error(
+            `couldn't find child A(7) / B(3) in amounts=[${result.children
+              .map((c) => c.amount)
+              .join(',')}]`
+          );
+        }
+        if (childA.name !== 'GQL-TEST-smoke-split-parent') {
+          throw new Error(
+            `child A name should default to parent's; expected GQL-TEST-smoke-split-parent, got ${childA.name}`
+          );
+        }
+        if (childA.date !== today) {
+          throw new Error(
+            `child A date should default to parent's (${today}), got ${childA.date}`
+          );
+        }
+        if (childB.name !== 'GQL-TEST-smoke-split-child-B') {
+          throw new Error(
+            `child B name should be explicit 'GQL-TEST-smoke-split-child-B', got ${childB.name}`
+          );
+        }
+
+        // Cleanup: delete both children + the hidden parent. Assert each
+        // returns true — this is the main delete-verification of the test.
+        const toDelete = [childA.transaction_id, childB.transaction_id, parent.id];
+        for (const id of toDelete) {
+          const ok = await deleteTransaction(client, { id, accountId, itemId });
+          if (ok !== true) {
+            throw new Error(`deleteTransaction(${id}) returned ${ok}, expected true`);
+          }
+          cleanup.splice(
+            cleanup.findIndex((c) => c.id === id),
+            1
+          );
+        }
+      }
+    );
+
+    // --- Test 4 — 3-way even split ---------------------------------------
+    await step('transactions-write', 'split_transaction 3-way even split', async () => {
+      const parent = await createTransaction(client, {
+        accountId,
+        itemId,
+        input: {
+          name: 'GQL-TEST-smoke-split3-parent',
+          date: today,
+          amount: 30.0,
+          categoryId: cat1.category_id,
+          type: 'REGULAR',
+        },
+      });
+      cleanup.push({
+        id: parent.id,
+        accountId,
+        itemId,
+        label: 'GQL-TEST-smoke-split3-parent',
+      });
+
+      await waitForTxnVisible(parent.id);
+
+      const result = await tools.splitTransaction({
+        transaction_id: parent.id,
+        account_id: accountId,
+        item_id: itemId,
+        splits: [
+          { amount: 10.0, category_id: cat1.category_id },
+          { amount: 10.0, category_id: cat2.category_id },
+          { amount: 10.0, category_id: cat1.category_id },
+        ],
+      });
+
+      for (const child of result.children) {
+        cleanup.push({
+          id: child.transaction_id,
+          accountId,
+          itemId,
+          label: `GQL-TEST-smoke-split3-child ${child.name ?? ''}`.trim(),
+        });
+      }
+
+      if (result.children.length !== 3) {
+        throw new Error(`expected 3 children, got ${result.children.length}`);
+      }
+      const sum = result.children.reduce((acc, c) => acc + c.amount, 0);
+      if (Math.abs(sum - 30.0) > 1e-6) {
+        throw new Error(`expected child sum=30.0, got ${sum}`);
+      }
+
+      const toDelete = [
+        ...result.children.map((c) => c.transaction_id),
+        parent.id,
+      ];
+      for (const id of toDelete) {
+        const ok = await deleteTransaction(client, { id, accountId, itemId });
+        if (ok !== true) {
+          throw new Error(`deleteTransaction(${id}) returned ${ok}, expected true`);
+        }
+        cleanup.splice(
+          cleanup.findIndex((c) => c.id === id),
+          1
+        );
+      }
+    });
+
+    // --- Test 5 — client-side sum mismatch is rejected before wire -------
+    await step(
+      'transactions-write',
+      'split_transaction client-side sum mismatch rejected',
+      async () => {
+        const parent = await createTransaction(client, {
+          accountId,
+          itemId,
+          input: {
+            name: 'GQL-TEST-smoke-split-bad-sum',
+            date: today,
+            amount: 10.0,
+            categoryId: cat1.category_id,
+            type: 'REGULAR',
+          },
+        });
+        cleanup.push({
+          id: parent.id,
+          accountId,
+          itemId,
+          label: 'GQL-TEST-smoke-split-bad-sum',
+        });
+
+        await waitForTxnVisible(parent.id);
+
+        const thrown = await expectThrows(
+          () =>
+            tools.splitTransaction({
+              transaction_id: parent.id,
+              account_id: accountId,
+              item_id: itemId,
+              splits: [
+                { amount: 5.0, category_id: cat1.category_id },
+                { amount: 3.0, category_id: cat2.category_id },
+              ],
+            }),
+          'splitTransaction with sum-mismatch'
+        );
+        const msg = thrown instanceof Error ? thrown.message : String(thrown);
+        const lower = msg.toLowerCase();
+        if (!lower.includes('parent') || !lower.includes('sum')) {
+          throw new Error(
+            `expected error to mention 'parent' and 'sum', got: ${msg}`
+          );
+        }
+
+        // Parent remains alive since the split was rejected locally — clean
+        // up directly.
+        const ok = await deleteTransaction(client, {
+          id: parent.id,
+          accountId,
+          itemId,
+        });
+        if (ok !== true) {
+          throw new Error(`deleteTransaction returned ${ok}, expected true`);
+        }
+        cleanup.splice(
+          cleanup.findIndex((c) => c.id === parent.id),
+          1
+        );
+      }
+    );
+
+    // --- Test 6 — add_transaction_to_recurring (skippable) ----------------
+    await stepSkippable(
+      'transactions-write',
+      'add_transaction_to_recurring links a new txn to an active recurring',
+      async () => {
+        if (!activeRecurring) return 'skipped';
+        const created = await createTransaction(client, {
+          accountId,
+          itemId,
+          input: {
+            name: 'GQL-TEST-smoke-atr',
+            date: today,
+            amount: 2.5,
+            categoryId: cat1.category_id,
+            type: 'REGULAR',
+          },
+        });
+        cleanup.push({
+          id: created.id,
+          accountId,
+          itemId,
+          label: 'GQL-TEST-smoke-atr',
+        });
+
+        const linked = await addTransactionToRecurring(client, {
+          id: created.id,
+          accountId,
+          itemId,
+          input: { recurringId: activeRecurring.recurring_id },
+        });
+        if (linked.recurringId !== activeRecurring.recurring_id) {
+          throw new Error(
+            `expected recurringId=${activeRecurring.recurring_id}, got ${linked.recurringId}`
+          );
+        }
+
+        const ok = await deleteTransaction(client, {
+          id: created.id,
+          accountId,
+          itemId,
+        });
+        if (ok !== true) {
+          throw new Error(`deleteTransaction returned ${ok}, expected true`);
+        }
+        cleanup.splice(
+          cleanup.findIndex((c) => c.id === created.id),
+          1
+        );
+      }
+    );
+  } finally {
+    // Sweep any surviving cleanup entries. Each test removes its own IDs
+    // after a successful delete — anything left here is from a partial
+    // failure above.
+    for (const entry of cleanup) {
+      try {
+        await deleteTransaction(client, {
+          id: entry.id,
+          accountId: entry.accountId,
+          itemId: entry.itemId,
+        });
+      } catch {
+        registerStraggler(
+          `transaction id=${entry.id}. Manual cleanup: find "${entry.label}" in Copilot and delete it.`
+        );
+      }
+    }
   }
 }
 
@@ -2236,6 +2735,9 @@ async function main(): Promise<void> {
     if (sectionEnabled('recurrings')) await smokeRecurringsHappyPath(client, db);
   }
   if (sectionEnabled('transactions')) await smokeTransactionsHappyPath(client, db);
+  if (sectionEnabled('transactions-write') && !skipDestructive) {
+    await smokeTransactionsWrites(client, db, tools);
+  }
   if (sectionEnabled('budgets')) await smokeBudgetsHappyPath(client, db);
   if (sectionEnabled('accounts')) await smokeAccountsHappyPath(client, db);
 
