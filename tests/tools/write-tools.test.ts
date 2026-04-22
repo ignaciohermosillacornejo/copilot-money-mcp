@@ -430,9 +430,9 @@ describe('createTransaction', () => {
     const client = createMockGraphQLClient({});
     tools = new CopilotMoneyTools(mockDb, client);
 
-    await expect(
-      tools.createTransaction({ ...validArgs, type: 'EXPENSE' as any })
-    ).rejects.toThrow(/type.*REGULAR.*INCOME.*INTERNAL_TRANSFER/);
+    await expect(tools.createTransaction({ ...validArgs, type: 'EXPENSE' as any })).rejects.toThrow(
+      /type.*REGULAR.*INCOME.*INTERNAL_TRANSFER/
+    );
     expect(client._calls).toHaveLength(0);
   });
 
@@ -440,15 +440,15 @@ describe('createTransaction', () => {
     const client = createMockGraphQLClient({});
     tools = new CopilotMoneyTools(mockDb, client);
 
-    await expect(
-      tools.createTransaction({ ...validArgs, account_id: 'bad id!' })
-    ).rejects.toThrow(/Invalid account_id/);
+    await expect(tools.createTransaction({ ...validArgs, account_id: 'bad id!' })).rejects.toThrow(
+      /Invalid account_id/
+    );
     await expect(tools.createTransaction({ ...validArgs, item_id: 'bad/item' })).rejects.toThrow(
       /Invalid item_id/
     );
-    await expect(
-      tools.createTransaction({ ...validArgs, category_id: 'bad.id' })
-    ).rejects.toThrow(/Invalid category_id/);
+    await expect(tools.createTransaction({ ...validArgs, category_id: 'bad.id' })).rejects.toThrow(
+      /Invalid category_id/
+    );
     expect(client._calls).toHaveLength(0);
   });
 

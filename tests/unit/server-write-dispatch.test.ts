@@ -14,6 +14,18 @@ import { CopilotMoneyTools } from '../../src/tools/tools.js';
  * Map of write tool name -> { method to stub, minimal args for dispatch }.
  */
 const WRITE_TOOL_SPECS: Record<string, { method: string; args: Record<string, unknown> }> = {
+  create_transaction: {
+    method: 'createTransaction',
+    args: {
+      account_id: 'acc1',
+      item_id: 'item1',
+      name: 'Coffee',
+      date: '2026-04-21',
+      amount: 5.25,
+      category_id: 'cat1',
+      type: 'REGULAR',
+    },
+  },
   update_transaction: {
     method: 'updateTransaction',
     args: { transaction_id: 'txn1', category_id: 'food' },
