@@ -94,6 +94,7 @@ export class CopilotMoneyServer {
    * @param typedArgs - Tool arguments
    */
   private static readonly WRITE_TOOLS = new Set([
+    'create_transaction',
     'update_transaction',
     'review_transactions',
     'create_tag',
@@ -238,6 +239,11 @@ export class CopilotMoneyServer {
           );
           break;
 
+        case 'create_transaction':
+          result = await this.tools.createTransaction(
+            typedArgs as Parameters<typeof this.tools.createTransaction>[0]
+          );
+          break;
         case 'update_transaction':
           result = await this.tools.updateTransaction(
             typedArgs as Parameters<typeof this.tools.updateTransaction>[0]
