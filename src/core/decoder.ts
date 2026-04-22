@@ -1036,6 +1036,34 @@ function processAccount(fields: Map<string, FirestoreValue>, docId: string): Acc
     return null;
   }
 
+  warnUnreadFields(
+    fields,
+    {
+      consumed: [
+        'account_id',
+        'id',
+        'current_balance',
+        'original_current_balance',
+        'available_balance',
+        'limit',
+        'type',
+        'account_type',
+        'subtype',
+        'original_type',
+        'original_subtype',
+        'verification_status',
+        'latest_balance_update',
+        'holdings',
+        'metadata',
+        'merged',
+        ...stringFields,
+        ...booleanFields,
+      ],
+      ignored: [],
+    },
+    { collection: 'accounts', docId }
+  );
+
   return validateOrWarn(AccountSchema, accData, {
     collection: 'accounts',
     docId,
@@ -1142,6 +1170,34 @@ function processRecurring(fields: Map<string, FirestoreValue>, docId: string): R
   // field name, but our schema exposes last_date for readability. Both kept for consumers.
   if (latestDate) recData.latest_date = latestDate;
 
+  warnUnreadFields(
+    fields,
+    {
+      consumed: [
+        'recurring_id',
+        'id',
+        'state',
+        'is_active',
+        'amount',
+        'min_amount',
+        'max_amount',
+        'days_filter',
+        'latest_date',
+        'next_date',
+        'last_date',
+        'transaction_ids',
+        'excluded_transaction_ids',
+        'included_transaction_ids',
+        'skip_filter_update',
+        'identification_method',
+        '_origin',
+        ...stringFields,
+      ],
+      ignored: [],
+    },
+    { collection: 'recurring', docId }
+  );
+
   return validateOrWarn(RecurringSchema, recData, {
     collection: 'recurring',
     docId,
@@ -1199,6 +1255,15 @@ function processBudget(fields: Map<string, FirestoreValue>, docId: string): Budg
   // ID field
   const id = getString(fields, 'id');
   if (id) budgetData.id = id;
+
+  warnUnreadFields(
+    fields,
+    {
+      consumed: ['budget_id', 'amount', 'is_active', 'amounts', 'id', ...stringFields],
+      ignored: [],
+    },
+    { collection: 'budgets', docId }
+  );
 
   return validateOrWarn(BudgetSchema, budgetData, {
     collection: 'budgets',
@@ -1284,6 +1349,22 @@ function processGoal(fields: Map<string, FirestoreValue>, docId: string): Goal |
     }
   }
 
+  warnUnreadFields(
+    fields,
+    {
+      consumed: [
+        'goal_id',
+        'emoji',
+        'associated_accounts',
+        'savings',
+        ...stringFields,
+        ...boolFields,
+      ],
+      ignored: [],
+    },
+    { collection: 'goals', docId }
+  );
+
   return validateOrWarn(GoalSchema, goalData, {
     collection: 'goals',
     docId,
@@ -1360,6 +1441,22 @@ function processGoalHistory(
       historyData.current_amount = latestBalance;
     }
   }
+
+  warnUnreadFields(
+    fields,
+    {
+      consumed: [
+        'goal_id',
+        'current_amount',
+        'target_amount',
+        'total_contribution',
+        'daily_data',
+        ...stringFields,
+      ],
+      ignored: [],
+    },
+    { collection: 'goal_history', docId }
+  );
 
   return validateOrWarn(GoalHistorySchema, historyData, {
     collection: 'goal_history',
