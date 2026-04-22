@@ -2523,6 +2523,11 @@ export class CopilotMoneyTools {
     if (typeof amount !== 'number' || !Number.isFinite(amount)) {
       throw new Error('amount must be a finite number');
     }
+    // Match the local Transaction Zod schema's invariant (models/transaction.ts)
+    // so a server-accepted amount will also round-trip through the cache.
+    if (Math.abs(amount) > MAX_VALID_AMOUNT) {
+      throw new Error(`amount exceeds maximum valid value (${MAX_VALID_AMOUNT}): ${amount}`);
+    }
 
     const VALID_TYPES: TransactionType[] = ['REGULAR', 'INCOME', 'INTERNAL_TRANSFER'];
     if (!VALID_TYPES.includes(type)) {
@@ -2530,7 +2535,7 @@ export class CopilotMoneyTools {
     }
 
     try {
-      const result = await gqlCreateTransaction(client, {
+      const tx = await gqlCreateTransaction(client, {
         accountId: account_id,
         itemId: item_id,
         input: {
@@ -2541,8 +2546,6 @@ export class CopilotMoneyTools {
           type,
         },
       });
-
-      const tx = result.transaction;
       // Map the GraphQL camelCase Transaction fields back to the project's
       // local snake_case Transaction shape. Only fields Copilot actually
       // populates on create are included; the rest arrive on the next
@@ -2560,6 +2563,7 @@ export class CopilotMoneyTools {
         user_note: tx.userNotes ?? undefined,
         recurring_id: tx.recurringId ?? undefined,
         tag_ids: tx.tags.map((t) => t.id),
+        internal_transfer: tx.type === 'INTERNAL_TRANSFER',
         is_manual: true,
       };
 
