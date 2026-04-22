@@ -2528,6 +2528,24 @@ function processUserProfile(
   const origin = getString(fields, '_origin');
   if (origin !== undefined) data._origin = origin;
 
+  warnUnreadFields(
+    fields,
+    {
+      consumed: [
+        'fcm_tokens',
+        'latest_spending_trigger',
+        'rollovers_starte_date',
+        '_origin',
+        ...stringFields,
+        ...numericFields,
+        ...booleanFields,
+        ...mapFields,
+      ],
+      ignored: [],
+    },
+    { collection: 'user_profile', docId }
+  );
+
   return validateOrWarn(UserProfileSchema, data, {
     collection: 'user_profile',
     docId,
@@ -2548,6 +2566,13 @@ function processAmazonIntegration(
     const extracted = extractValue(value);
     if (extracted !== undefined) data[key] = extracted;
   }
+
+  warnUnreadFields(
+    fields,
+    // Generic pass-through reads every raw key.
+    { consumed: Array.from(fields.keys()), ignored: [] },
+    { collection: 'amazon_integrations', docId }
+  );
 
   return validateOrWarn(AmazonIntegrationSchema, data, {
     collection: 'amazon_integrations',
@@ -2600,6 +2625,23 @@ function processAmazonOrder(
   const transactions = getStringArray(fields, 'transactions');
   if (transactions) data.transactions = transactions;
 
+  warnUnreadFields(
+    fields,
+    {
+      consumed: [
+        'date',
+        'account_id',
+        'match_state',
+        'items',
+        'details',
+        'payment',
+        'transactions',
+      ],
+      ignored: [],
+    },
+    { collection: 'amazon_orders', docId }
+  );
+
   return validateOrWarn(AmazonOrderSchema, data, {
     collection: 'amazon_orders',
     docId,
@@ -2646,6 +2688,13 @@ function processSubscription(
     }
   }
 
+  warnUnreadFields(
+    fields,
+    // Explicit fields + generic pass-through below — every raw key is consumed.
+    { consumed: Array.from(fields.keys()), ignored: [] },
+    { collection: 'subscriptions', docId }
+  );
+
   return validateOrWarn(SubscriptionSchema, data, {
     collection: 'subscriptions',
     docId,
@@ -2678,6 +2727,13 @@ function processInvite(fields: Map<string, FirestoreValue>, docId: string): Invi
     }
   }
 
+  warnUnreadFields(
+    fields,
+    // Explicit fields + generic pass-through below — every raw key is consumed.
+    { consumed: Array.from(fields.keys()), ignored: [] },
+    { collection: 'invites', docId }
+  );
+
   return validateOrWarn(InviteSchema, data, {
     collection: 'invites',
     docId,
@@ -2699,6 +2755,12 @@ function processUserItems(fields: Map<string, FirestoreValue>, docId: string): U
       if (extracted !== undefined) data[key] = extracted;
     }
   }
+
+  warnUnreadFields(
+    fields,
+    { consumed: Array.from(fields.keys()), ignored: [] },
+    { collection: 'user_items', docId }
+  );
 
   return validateOrWarn(UserItemsSchema, data, {
     collection: 'user_items',
@@ -2725,6 +2787,12 @@ function processFeatureTracking(
     }
   }
 
+  warnUnreadFields(
+    fields,
+    { consumed: Array.from(fields.keys()), ignored: [] },
+    { collection: 'feature_tracking', docId }
+  );
+
   return validateOrWarn(FeatureTrackingSchema, data, {
     collection: 'feature_tracking',
     docId,
@@ -2746,6 +2814,12 @@ function processSupport(fields: Map<string, FirestoreValue>, docId: string): Sup
       if (extracted !== undefined) data[key] = extracted;
     }
   }
+
+  warnUnreadFields(
+    fields,
+    { consumed: Array.from(fields.keys()), ignored: [] },
+    { collection: 'support', docId }
+  );
 
   return validateOrWarn(SupportSchema, data, {
     collection: 'support',
