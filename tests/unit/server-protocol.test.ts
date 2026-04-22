@@ -524,6 +524,7 @@ describe('CopilotMoneyServer - write mode', () => {
   // below all derive their coverage from this set so nothing silently
   // slips through gating.
   const ALL_WRITE_TOOLS = [
+    'create_transaction',
     'update_transaction',
     'review_transactions',
     'create_tag',
@@ -552,6 +553,7 @@ describe('CopilotMoneyServer - write mode', () => {
   // client UX without any runtime failure, so every write tool must
   // declare its annotations explicitly here.
   test.each<[string, { readOnlyHint: false; destructiveHint: boolean; idempotentHint: boolean }]>([
+    ['create_transaction', { readOnlyHint: false, destructiveHint: false, idempotentHint: false }],
     ['update_transaction', { readOnlyHint: false, destructiveHint: false, idempotentHint: true }],
     ['review_transactions', { readOnlyHint: false, destructiveHint: false, idempotentHint: true }],
     ['create_tag', { readOnlyHint: false, destructiveHint: false, idempotentHint: false }],
@@ -576,6 +578,18 @@ describe('CopilotMoneyServer - write mode', () => {
   // without the --write flag. The argument shapes here don't matter —
   // the rejection happens before validation.
   test.each<[string, Record<string, unknown>]>([
+    [
+      'create_transaction',
+      {
+        account_id: 'acc1',
+        item_id: 'item1',
+        name: 'Coffee',
+        date: '2026-04-21',
+        amount: 5.25,
+        category_id: 'cat1',
+        type: 'REGULAR',
+      },
+    ],
     ['update_transaction', { transaction_id: 'txn1', category_id: 'food' }],
     ['review_transactions', { transaction_ids: ['txn1'], reviewed: true }],
     ['create_tag', { name: 'test' }],

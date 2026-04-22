@@ -4130,15 +4130,7 @@ export function createWriteToolSchemas(): ToolSchema[] {
               'Transaction type. REGULAR for typical expenses, INCOME for inflows, INTERNAL_TRANSFER for between-account moves.',
           },
         },
-        required: [
-          'account_id',
-          'item_id',
-          'name',
-          'date',
-          'amount',
-          'category_id',
-          'type',
-        ],
+        required: ['account_id', 'item_id', 'name', 'date', 'amount', 'category_id', 'type'],
       },
       annotations: {
         readOnlyHint: false,
