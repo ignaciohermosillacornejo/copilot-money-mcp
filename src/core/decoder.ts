@@ -1505,6 +1505,23 @@ function processInvestmentPrice(
     if (value) priceData[field] = value;
   }
 
+  warnUnreadFields(
+    fields,
+    {
+      consumed: [
+        'investment_id',
+        'ticker_symbol',
+        'date',
+        'month',
+        ...priceFields,
+        ...ohlcvFields,
+        ...metaFields,
+      ],
+      ignored: [],
+    },
+    { collection: 'investment_prices', docId }
+  );
+
   return validateOrWarn(InvestmentPriceSchema, priceData, {
     collection: 'investment_prices',
     docId,
@@ -1560,6 +1577,15 @@ function processInvestmentSplit(
   if (Object.keys(adjustments).length > 0) {
     splitData.adjustments = adjustments;
   }
+
+  warnUnreadFields(
+    fields,
+    {
+      consumed: ['split_id', ...stringFields, ...numericFields, ...Object.keys(adjustments)],
+      ignored: [],
+    },
+    { collection: 'investment_splits', docId }
+  );
 
   return validateOrWarn(InvestmentSplitSchema, splitData, {
     collection: 'investment_splits',
@@ -1649,6 +1675,22 @@ function processItem(fields: Map<string, FirestoreValue>, docId: string): Item |
   const fetchDataMap = getMap(fields, 'fetch_data');
   if (fetchDataMap) itemData.fetch_data = toPlainObject(fetchDataMap);
 
+  warnUnreadFields(
+    fields,
+    {
+      consumed: [
+        'item_id',
+        'products',
+        'fetch_data',
+        ...stringFields,
+        ...timestampFields,
+        ...boolFields,
+      ],
+      ignored: [],
+    },
+    { collection: 'items', docId }
+  );
+
   return validateOrWarn(ItemSchema, itemData, {
     collection: 'items',
     docId,
@@ -1704,6 +1746,23 @@ function processCategory(fields: Map<string, FirestoreValue>, docId: string): Ca
     if (value) categoryData[field] = value;
   }
 
+  warnUnreadFields(
+    fields,
+    {
+      consumed: [
+        'category_id',
+        'name',
+        'order',
+        ...stringFields,
+        ...booleanFields,
+        ...arrayFields,
+        ...additionalStringFields,
+      ],
+      ignored: [],
+    },
+    { collection: 'categories', docId }
+  );
+
   return validateOrWarn(CategorySchema, categoryData, {
     collection: 'categories',
     docId,
@@ -1738,6 +1797,15 @@ function processUserAccount(
 
   const order = getNumber(fields, 'order');
   if (order !== undefined) userAccountData.order = order;
+
+  warnUnreadFields(
+    fields,
+    {
+      consumed: ['account_id', 'name', 'hidden', 'order'],
+      ignored: [],
+    },
+    { collection: 'user_accounts', docId }
+  );
 
   return userAccountData;
 }
