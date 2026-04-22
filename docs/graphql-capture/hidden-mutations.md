@@ -131,15 +131,20 @@ mutation AddTransactionToRecurring(
   $input:     AddTransactionToRecurringInput!
 ) {
   addTransactionToRecurring(itemId: $itemId, accountId: $accountId, id: $id, input: $input) {
-    # AddTransactionToRecurringOutput fields unknown
+    transaction {                          # the ONLY field on the output type
+      ...TransactionFields                 # same shape as createTransaction's output
+    }
   }
 }
 
 input AddTransactionToRecurringInput {
-  recurringId: ID!      # required
-  # Optional fields unknown
+  recurringId: ID!      # required — the only field
 }
 ```
+
+**Return shape:** `AddTransactionToRecurringOutput!` has exactly one field: `transaction: Transaction!`. Probed output candidates `recurring`, `updated`, `id`, `success`, `errors`, `node`, `data`, `recurringTransaction` all failed with "Cannot query field X" — the server even suggested "Did you mean 'transaction'" when probing `recurringTransaction`, confirming `transaction` is the canonical (and only) field.
+
+**Input shape:** `AddTransactionToRecurringInput` has exactly one field: `recurringId: ID!`. Optional-field probes for `date`, `isReviewed`, `notes`, and `tagIds` were all rejected as "not defined by type AddTransactionToRecurringInput" — downstream edits (category/notes/tags) require a follow-up `editTransaction` call.
 
 **Use case:** manually link a one-off transaction to an existing recurring series that Copilot's auto-detection missed (e.g., a rent transaction that didn't match the existing rent recurring).
 
