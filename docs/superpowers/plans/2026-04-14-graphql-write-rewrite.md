@@ -255,7 +255,7 @@ Expected output: `Wrote src/core/graphql/operations.generated.ts with 13 operati
 - [ ] **Step 5: Commit**
 
 ```bash
-git add package.json bun.lock scripts/generate-graphql-operations.ts src/core/graphql/operations.generated.ts
+git add package.json scripts/generate-graphql-operations.ts src/core/graphql/operations.generated.ts
 git commit -m "feat(graphql): add operations generator + graphql devDependency"
 ```
 
