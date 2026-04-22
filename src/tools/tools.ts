@@ -13,6 +13,7 @@ import {
   deleteTransaction as gqlDeleteTransaction,
   addTransactionToRecurring as gqlAddTransactionToRecurring,
   splitTransaction as gqlSplitTransaction,
+  type CreatedTransaction,
   type TransactionType,
 } from '../core/graphql/transactions.js';
 import {
@@ -2870,6 +2871,10 @@ export class CopilotMoneyTools {
     }
 
     // Apply name/date defaults from the parent AFTER validation + sum check.
+    // `parentDefaultName!` is safe here because the guard a few lines above
+    // throws when any split omits `name` and `parentDefaultName` is falsy —
+    // so reaching this line with `s.name === undefined` implies parentDefaultName
+    // is non-empty. TypeScript can't narrow across the `.some` call.
     const inputs = splits.map((s) => ({
       name: s.name !== undefined ? s.name.trim() : parentDefaultName!,
       date: s.date !== undefined ? s.date : parentTxn.date,
@@ -2887,7 +2892,7 @@ export class CopilotMoneyTools {
 
       // Map each server-side TransactionFields shape to the local snake_case
       // Transaction model. Same field set as create_transaction / add_to_recurring.
-      const toLocal = (tx: (typeof result.splitTransactions)[number]): Transaction => ({
+      const toLocal = (tx: CreatedTransaction): Transaction => ({
         transaction_id: tx.id,
         amount: tx.amount,
         date: tx.date,
@@ -4627,7 +4632,13 @@ export function createWriteToolSchemas(): ToolSchema[] {
       },
       annotations: {
         readOnlyHint: false,
-        destructiveHint: false,
+        // Destructive: the parent transaction is permanently hidden post-split
+        // (categoryId blanked, children_transaction_ids populated) and there
+        // is no reversal mutation. "Undo" requires per-child delete + parent
+        // edit. Idempotent is also false — re-running creates duplicate
+        // children on the parent. Both hints reflect the "no safe retry"
+        // nature of the operation.
+        destructiveHint: true,
         idempotentHint: false,
       },
     },

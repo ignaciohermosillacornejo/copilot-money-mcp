@@ -562,7 +562,7 @@ describe('CopilotMoneyServer - write mode', () => {
       'add_transaction_to_recurring',
       { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
     ],
-    ['split_transaction', { readOnlyHint: false, destructiveHint: false, idempotentHint: false }],
+    ['split_transaction', { readOnlyHint: false, destructiveHint: true, idempotentHint: false }],
     ['update_transaction', { readOnlyHint: false, destructiveHint: false, idempotentHint: true }],
     ['review_transactions', { readOnlyHint: false, destructiveHint: false, idempotentHint: true }],
     ['create_tag', { readOnlyHint: false, destructiveHint: false, idempotentHint: false }],
