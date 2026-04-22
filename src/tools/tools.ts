@@ -7,7 +7,11 @@
 import { CopilotDatabase } from '../core/database.js';
 import type { GraphQLClient } from '../core/graphql/client.js';
 import { GraphQLError } from '../core/graphql/client.js';
-import { editTransaction } from '../core/graphql/transactions.js';
+import {
+  editTransaction,
+  createTransaction as gqlCreateTransaction,
+  type TransactionType,
+} from '../core/graphql/transactions.js';
 import {
   createCategory as gqlCreateCategory,
   editCategory as gqlEditCategory,
@@ -2472,6 +2476,107 @@ export class CopilotMoneyTools {
   }
 
   /**
+   * Create a brand-new manual transaction on an existing account.
+   *
+   * Seven required inputs, no optionals — scope is intentionally tight for
+   * the first pass. The server assigns the ID; on success we return the
+   * full newly-created Transaction in the local snake_case shape so callers
+   * can immediately read it without a refresh_database round-trip.
+   *
+   * Cache note: unlike updateTransaction which patches an existing cached
+   * row, there is no existing row to patch here. A deliberate choice to
+   * NOT invent a new "add to cache" code path — the next refresh_database
+   * will pick the new transaction up from Copilot's sync. Callers that
+   * need it immediately can use the returned `transaction` object.
+   */
+  async createTransaction(args: {
+    account_id: string;
+    item_id: string;
+    name: string;
+    date: string;
+    amount: number;
+    category_id: string;
+    type: TransactionType;
+  }): Promise<{
+    success: true;
+    transaction_id: string;
+    transaction: Transaction;
+  }> {
+    const client = this.getGraphQLClient();
+    const { account_id, item_id, name, date, amount, category_id, type } = args;
+
+    // Defense-in-depth validation (the MCP dispatch layer already schema-checks,
+    // but methods are callable directly from tests/code).
+    validateDocId(account_id, 'account_id');
+    validateDocId(item_id, 'item_id');
+    validateDocId(category_id, 'category_id');
+
+    const trimmedName = typeof name === 'string' ? name.trim() : '';
+    if (!trimmedName) {
+      throw new Error('name must be a non-empty string');
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      throw new Error(`Invalid date format. Expected YYYY-MM-DD, got: ${date}`);
+    }
+
+    if (typeof amount !== 'number' || !Number.isFinite(amount)) {
+      throw new Error('amount must be a finite number');
+    }
+
+    const VALID_TYPES: TransactionType[] = ['REGULAR', 'INCOME', 'INTERNAL_TRANSFER'];
+    if (!VALID_TYPES.includes(type)) {
+      throw new Error(`type must be one of: REGULAR, INCOME, INTERNAL_TRANSFER. Got: ${type}`);
+    }
+
+    try {
+      const result = await gqlCreateTransaction(client, {
+        accountId: account_id,
+        itemId: item_id,
+        input: {
+          name: trimmedName,
+          date,
+          amount,
+          categoryId: category_id,
+          type,
+        },
+      });
+
+      const tx = result.transaction;
+      // Map the GraphQL camelCase Transaction fields back to the project's
+      // local snake_case Transaction shape. Only fields Copilot actually
+      // populates on create are included; the rest arrive on the next
+      // refresh_database cycle.
+      const transaction: Transaction = {
+        transaction_id: tx.id,
+        amount: tx.amount,
+        date: tx.date,
+        name: tx.name,
+        account_id: tx.accountId,
+        item_id: tx.itemId,
+        category_id: tx.categoryId,
+        pending: tx.isPending,
+        user_reviewed: tx.isReviewed,
+        user_note: tx.userNotes ?? undefined,
+        recurring_id: tx.recurringId ?? undefined,
+        tag_ids: tx.tags.map((t) => t.id),
+        is_manual: true,
+      };
+
+      return {
+        success: true,
+        transaction_id: tx.id,
+        transaction,
+      };
+    } catch (e) {
+      if (e instanceof GraphQLError) {
+        throw new Error(graphQLErrorToMcpError(e), { cause: e });
+      }
+      throw e;
+    }
+  }
+
+  /**
    * Mark one or more transactions as reviewed (or unreviewed).
    *
    * Validates all transaction IDs, sets isReviewed via GraphQL for each; local
@@ -3980,6 +4085,67 @@ export function createToolSchemas(): ToolSchema[] {
  */
 export function createWriteToolSchemas(): ToolSchema[] {
   return [
+    {
+      name: 'create_transaction',
+      description:
+        'Create a brand-new manual transaction on an existing account. All seven ' +
+        'fields are required: account_id, item_id (from get_accounts), name, date ' +
+        '(YYYY-MM-DD), amount (positive = expense, negative = income; Copilot sign ' +
+        'convention), category_id (from get_categories), and type. type is one of ' +
+        'REGULAR, INCOME, or INTERNAL_TRANSFER. Returns the newly-created transaction.',
+      inputSchema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          account_id: {
+            type: 'string',
+            description: 'Account ID to attach the transaction to (from get_accounts)',
+          },
+          item_id: {
+            type: 'string',
+            description:
+              "Item ID the account belongs to (from get_accounts; Copilot's Firestore item_id, not the user's)",
+          },
+          name: {
+            type: 'string',
+            description: 'Transaction name / merchant label (non-empty)',
+          },
+          date: {
+            type: 'string',
+            description: 'Transaction date in YYYY-MM-DD format',
+          },
+          amount: {
+            type: 'number',
+            description:
+              'Transaction amount. Positive = expense, negative = income (Copilot sign convention).',
+          },
+          category_id: {
+            type: 'string',
+            description: 'Category ID to assign (from get_categories)',
+          },
+          type: {
+            type: 'string',
+            enum: ['REGULAR', 'INCOME', 'INTERNAL_TRANSFER'],
+            description:
+              'Transaction type. REGULAR for typical expenses, INCOME for inflows, INTERNAL_TRANSFER for between-account moves.',
+          },
+        },
+        required: [
+          'account_id',
+          'item_id',
+          'name',
+          'date',
+          'amount',
+          'category_id',
+          'type',
+        ],
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    },
     {
       name: 'update_transaction',
       description:

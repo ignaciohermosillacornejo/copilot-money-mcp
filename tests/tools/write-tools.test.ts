@@ -311,3 +311,174 @@ describe('deleteRecurring', () => {
     expect(client._calls[0].variables).toEqual({ deleteRecurringId: 'rec1' });
   });
 });
+
+describe('createTransaction', () => {
+  let tools: CopilotMoneyTools;
+  let mockDb: CopilotDatabase;
+
+  // Canned server response used across several happy-path tests.
+  const createdTx = {
+    id: 'new-tx-1',
+    name: 'Coffee',
+    date: '2026-04-21',
+    amount: 5.25,
+    categoryId: 'cat1',
+    type: 'REGULAR',
+    accountId: 'acc1',
+    itemId: 'item1',
+    isPending: false,
+    isReviewed: false,
+    createdAt: 1777785600000,
+    recurringId: null,
+    userNotes: null,
+    tipAmount: null,
+    suggestedCategoryIds: [],
+    tags: [],
+    goal: null,
+  };
+
+  beforeEach(() => {
+    mockDb = new CopilotDatabase('/nonexistent');
+    (mockDb as any).dbPath = '/fake';
+    (mockDb as any)._allCollectionsLoaded = true;
+  });
+
+  const validArgs = {
+    account_id: 'acc1',
+    item_id: 'item1',
+    name: 'Coffee',
+    date: '2026-04-21',
+    amount: 5.25,
+    category_id: 'cat1',
+    type: 'REGULAR' as const,
+  };
+
+  test('dispatches CreateTransaction with mapped input', async () => {
+    const client = createMockGraphQLClient({ CreateTransaction: { createTransaction: createdTx } });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    const result = await tools.createTransaction(validArgs);
+
+    expect(result.success).toBe(true);
+    expect(result.transaction_id).toBe('new-tx-1');
+    expect(result.transaction.transaction_id).toBe('new-tx-1');
+    expect(result.transaction.name).toBe('Coffee');
+    expect(result.transaction.date).toBe('2026-04-21');
+    expect(result.transaction.amount).toBe(5.25);
+    expect(result.transaction.category_id).toBe('cat1');
+    expect(result.transaction.account_id).toBe('acc1');
+    expect(result.transaction.item_id).toBe('item1');
+
+    expect(client._calls).toHaveLength(1);
+    expect(client._calls[0].op).toBe('CreateTransaction');
+    expect(client._calls[0].variables).toEqual({
+      accountId: 'acc1',
+      itemId: 'item1',
+      input: {
+        name: 'Coffee',
+        date: '2026-04-21',
+        amount: 5.25,
+        categoryId: 'cat1',
+        type: 'REGULAR',
+      },
+    });
+  });
+
+  test('trims whitespace on name before sending', async () => {
+    const client = createMockGraphQLClient({ CreateTransaction: { createTransaction: createdTx } });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await tools.createTransaction({ ...validArgs, name: '  Coffee  ' });
+
+    expect((client._calls[0].variables as any).input.name).toBe('Coffee');
+  });
+
+  test('rejects empty name after trim', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(tools.createTransaction({ ...validArgs, name: '   ' })).rejects.toThrow(
+      /name.*empty/i
+    );
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('rejects malformed date', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(tools.createTransaction({ ...validArgs, date: '2026-4-21' })).rejects.toThrow(
+      /date.*YYYY-MM-DD/i
+    );
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('rejects non-finite amount (NaN / Infinity)', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(tools.createTransaction({ ...validArgs, amount: Number.NaN })).rejects.toThrow(
+      /amount.*finite/i
+    );
+    await expect(
+      tools.createTransaction({ ...validArgs, amount: Number.POSITIVE_INFINITY })
+    ).rejects.toThrow(/amount.*finite/i);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('rejects invalid type enum', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(
+      tools.createTransaction({ ...validArgs, type: 'EXPENSE' as any })
+    ).rejects.toThrow(/type.*REGULAR.*INCOME.*INTERNAL_TRANSFER/);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('rejects invalid document ids', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(
+      tools.createTransaction({ ...validArgs, account_id: 'bad id!' })
+    ).rejects.toThrow(/Invalid account_id/);
+    await expect(tools.createTransaction({ ...validArgs, item_id: 'bad/item' })).rejects.toThrow(
+      /Invalid item_id/
+    );
+    await expect(
+      tools.createTransaction({ ...validArgs, category_id: 'bad.id' })
+    ).rejects.toThrow(/Invalid category_id/);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('wraps GraphQL errors with graphQLErrorToMcpError', async () => {
+    const { GraphQLError } = await import('../../src/core/graphql/client.js');
+    const client = createMockGraphQLClient({
+      CreateTransaction: new GraphQLError(
+        'USER_ACTION_REQUIRED',
+        "Resource id 'bad' is invalid",
+        'CreateTransaction',
+        200
+      ),
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(tools.createTransaction(validArgs)).rejects.toThrow(/Resource id/);
+  });
+
+  test('accepts INCOME and INTERNAL_TRANSFER as valid types', async () => {
+    const client = createMockGraphQLClient({ CreateTransaction: { createTransaction: createdTx } });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(
+      tools.createTransaction({ ...validArgs, type: 'INCOME', amount: -1000 })
+    ).resolves.toMatchObject({ success: true });
+    await expect(
+      tools.createTransaction({ ...validArgs, type: 'INTERNAL_TRANSFER' })
+    ).resolves.toMatchObject({ success: true });
+
+    expect((client._calls[0].variables as any).input.type).toBe('INCOME');
+    expect((client._calls[1].variables as any).input.type).toBe('INTERNAL_TRANSFER');
+  });
+});
