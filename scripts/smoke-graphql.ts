@@ -801,6 +801,13 @@ async function smokeTransactionsHappyPath(
  * fixed, this section can be extended to assert cache eviction after
  * `refresh_database`.
  */
+interface CleanupEntry {
+  id: string;
+  accountId: string;
+  itemId: string;
+  label: string;
+}
+
 async function smokeTransactionsWrites(
   client: GraphQLClient,
   db: CopilotDatabase,
@@ -857,13 +864,13 @@ async function smokeTransactionsWrites(
   // --- Cleanup registry ---------------------------------------------------
   // Every created row pushes an entry here immediately so partial failures
   // still get cleaned up in the outer finally block.
-  interface CleanupEntry {
-    id: string;
-    accountId: string;
-    itemId: string;
-    label: string;
-  }
   const cleanup: CleanupEntry[] = [];
+
+  /** Remove an entry from `cleanup` by transaction id. No-op if not found. */
+  function unregisterCleanup(id: string): void {
+    const idx = cleanup.findIndex((c) => c.id === id);
+    if (idx !== -1) cleanup.splice(idx, 1);
+  }
 
   /**
    * Poll until a just-created transaction is visible in the decoded local
@@ -887,6 +894,7 @@ async function smokeTransactionsWrites(
           `Copilot desktop app sync lag; rerun or wait for sync`
       );
     }
+    console.log(`  ↻ txn ${transactionId} visible after ${found.observedLagMs}ms`);
   }
 
   const today = new Date().toISOString().slice(0, 10);
@@ -923,10 +931,7 @@ async function smokeTransactionsWrites(
         throw new Error(`deleteTransaction returned ${ok}, expected true`);
       }
       // Delete succeeded — drop from cleanup registry.
-      cleanup.splice(
-        cleanup.findIndex((c) => c.id === created.id),
-        1
-      );
+      unregisterCleanup(created.id);
     });
 
     // --- Test 2 — INCOME and INTERNAL_TRANSFER enum coverage -------------
@@ -957,10 +962,7 @@ async function smokeTransactionsWrites(
           if (ok !== true) {
             throw new Error(`deleteTransaction returned ${ok}, expected true`);
           }
-          cleanup.splice(
-            cleanup.findIndex((c) => c.id === created.id),
-            1
-          );
+          unregisterCleanup(created.id);
         }
       );
     }
@@ -1066,10 +1068,7 @@ async function smokeTransactionsWrites(
           if (ok !== true) {
             throw new Error(`deleteTransaction(${id}) returned ${ok}, expected true`);
           }
-          cleanup.splice(
-            cleanup.findIndex((c) => c.id === id),
-            1
-          );
+          unregisterCleanup(id);
         }
       }
     );
@@ -1133,10 +1132,7 @@ async function smokeTransactionsWrites(
         if (ok !== true) {
           throw new Error(`deleteTransaction(${id}) returned ${ok}, expected true`);
         }
-        cleanup.splice(
-          cleanup.findIndex((c) => c.id === id),
-          1
-        );
+        unregisterCleanup(id);
       }
     });
 
@@ -1196,10 +1192,7 @@ async function smokeTransactionsWrites(
         if (ok !== true) {
           throw new Error(`deleteTransaction returned ${ok}, expected true`);
         }
-        cleanup.splice(
-          cleanup.findIndex((c) => c.id === parent.id),
-          1
-        );
+        unregisterCleanup(parent.id);
       }
     );
 
@@ -1247,10 +1240,7 @@ async function smokeTransactionsWrites(
         if (ok !== true) {
           throw new Error(`deleteTransaction returned ${ok}, expected true`);
         }
-        cleanup.splice(
-          cleanup.findIndex((c) => c.id === created.id),
-          1
-        );
+        unregisterCleanup(created.id);
       }
     );
   } finally {
