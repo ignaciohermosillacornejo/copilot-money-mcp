@@ -14,6 +14,7 @@ import { parse, print, visit, Kind } from 'graphql';
 const IN_SCOPE_MUTATIONS = [
   'CreateTransaction',
   'EditTransaction',
+  'DeleteTransaction',
   'CreateCategory',
   'EditCategory',
   'DeleteCategory',
