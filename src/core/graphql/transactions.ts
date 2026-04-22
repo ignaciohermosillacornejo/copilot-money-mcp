@@ -61,14 +61,13 @@ interface CreateTransactionResponse {
 export async function createTransaction(
   client: GraphQLClient,
   args: CreateTransactionArgs
-): Promise<{ id: string; transaction: CreatedTransaction }> {
+): Promise<CreatedTransaction> {
   const data = await client.mutate<CreateTransactionArgs, CreateTransactionResponse>(
     'CreateTransaction',
     CREATE_TRANSACTION,
     args
   );
-  const tx = data.createTransaction;
-  return { id: tx.id, transaction: tx };
+  return data.createTransaction;
 }
 
 export interface EditTransactionInput {

@@ -179,8 +179,7 @@ describe('createTransaction', () => {
       },
     });
 
-    expect(out.id).toBe('new-tx-2');
-    expect(out.transaction).toEqual(created);
+    expect(out).toEqual(created);
   });
 
   test('propagates errors from the client', async () => {

@@ -244,6 +244,7 @@ export class CopilotMoneyServer {
             typedArgs as Parameters<typeof this.tools.createTransaction>[0]
           );
           break;
+
         case 'update_transaction':
           result = await this.tools.updateTransaction(
             typedArgs as Parameters<typeof this.tools.updateTransaction>[0]

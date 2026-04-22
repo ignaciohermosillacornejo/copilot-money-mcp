@@ -481,4 +481,34 @@ describe('createTransaction', () => {
     expect((client._calls[0].variables as any).input.type).toBe('INCOME');
     expect((client._calls[1].variables as any).input.type).toBe('INTERNAL_TRANSFER');
   });
+
+  test('sets internal_transfer=true on returned transaction when type is INTERNAL_TRANSFER', async () => {
+    const serverTx = { ...createdTx, type: 'INTERNAL_TRANSFER' };
+    const client = createMockGraphQLClient({ CreateTransaction: { createTransaction: serverTx } });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    const result = await tools.createTransaction({ ...validArgs, type: 'INTERNAL_TRANSFER' });
+    expect(result.transaction.internal_transfer).toBe(true);
+  });
+
+  test('sets internal_transfer=false for REGULAR transactions', async () => {
+    const client = createMockGraphQLClient({ CreateTransaction: { createTransaction: createdTx } });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    const result = await tools.createTransaction(validArgs);
+    expect(result.transaction.internal_transfer).toBe(false);
+  });
+
+  test('rejects amount exceeding MAX_VALID_AMOUNT', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(tools.createTransaction({ ...validArgs, amount: 10_000_001 })).rejects.toThrow(
+      /amount exceeds maximum/i
+    );
+    await expect(tools.createTransaction({ ...validArgs, amount: -10_000_001 })).rejects.toThrow(
+      /amount exceeds maximum/i
+    );
+    expect(client._calls).toHaveLength(0);
+  });
 });
