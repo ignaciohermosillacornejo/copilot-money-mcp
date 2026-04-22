@@ -18,7 +18,7 @@ Signatures below reflect only what the server confirmed via validation errors. O
 | [`deleteAccount`](#deleteaccount) | ❌ | high (cascades to all txns) | Remove a manual account |
 | [`deleteUser`](#deleteuser) | ❌ | **existential** | Delete the entire user account |
 
-No other hidden mutations surfaced across the ~460-candidate sweep (see `scripts/recon/probe-mutations-wide.ts`).
+No other hidden mutations surfaced across a brute-force sweep of ~460 verb × entity combinations. The probe script was a throwaway in `/tmp/` during investigation; see [`introspection-recon.md`](./introspection-recon.md) for the methodology to reconstruct it.
 
 ## Budget mutations — finding
 
@@ -26,7 +26,17 @@ No other hidden mutations surfaced across the ~460-candidate sweep (see `scripts
 
 ## Goal mutations — finding
 
-**No goal mutations exist on the GraphQL endpoint.** Probes for `createGoal`, `editGoal`, `deleteGoal`, `archiveGoal`, `contributeToGoal`, `transferToGoal` all returned "Cannot query field". Goals are read-only via this API — any changes go through a different channel (likely direct Firestore writes from the iOS app).
+**No goal mutations exist on the GraphQL endpoint.** A focused sweep of 277 candidate names returned zero hits. The sweep covered:
+
+- all verb × entity combinations for `Goal`, `Goals`, `FinancialGoal`, `FinancialGoals`, `SavingsGoal`, `SavingsGoals`, and `Savings` — across 33 verbs (`create`/`edit`/`delete`/`archive`/`pause`/`complete`/`contribute`/`fund`/`allocate`/`transfer`/…);
+- transaction-goal linking candidates: `setTransactionGoal`, `linkTransactionToGoal`, `attachTransactionToGoal`, `moveTransactionToGoal`, `assignGoalToTransaction`, etc.;
+- account-goal linking candidates: `linkAccountToGoal`, `setGoalAccount`, `setSavingsAccount`, `enableSavings`, etc.;
+- goal-category linking candidates: `linkCategoryToGoal`, `setGoalCategories`, etc.;
+- progress/contribution ops: `editGoalProgress`, `incrementGoal`, `contributeToGoal`, etc.
+
+Additionally, `editTransaction`'s `EditTransactionInput` does **not** accept any of `goal`, `goalId`, `financial_goal_id`, `financialGoalId`, `savingsGoalId` — all probed keys were rejected with "not defined by type EditTransactionInput". The `goal_id` field we decode from Firestore (see `src/models/transaction.ts`) is a Firestore-side attribute only; it has no GraphQL read or write path.
+
+**Conclusion:** goals are entirely client-side in Copilot. The iOS and desktop apps write goal changes directly to Firestore (bypassing the GraphQL layer that Copilot's own backend enforces for other entities). To support goal writes from the MCP, we'd need Firestore write access — a larger architectural change than adding another GraphQL tool.
 
 ---
 
@@ -107,7 +117,7 @@ mutation DeleteTransaction($itemId: ID!, $accountId: ID!, $id: ID!) {
 
 Returns `Boolean!`. **Destructive — no soft-delete.** Firestore picks up the removal and Copilot's clients stop rendering it.
 
-**Caveat:** probably idempotent-safe on Plaid transactions (Plaid re-syncs and the transaction comes back on next refresh) but this hasn't been confirmed.
+⚠ **Unverified behavior.** Plaid-connected transactions *may* re-appear on the next sync (Plaid is the source of truth), making delete appear idempotent — but this hasn't been tested. Even if the transaction reappears, any user-side metadata (category override, tags, notes, reviewed state, goal link, split children) is likely *not* preserved across the delete/re-sync round-trip. Treat `deleteTransaction` on Plaid transactions as destructive until verified otherwise.
 
 ---
 
@@ -157,13 +167,13 @@ mutation BulkEditTransactions($input: BulkEditTransactionInput!) {
 
 ```graphql
 mutation BulkDeleteTransactions(/* args unknown */) {
-  bulkDeleteTransactions {
+  bulkDeleteTransactions(/* required args not yet probed */) {
     # BulkDeleteTransactionsOutput fields unknown
   }
 }
 ```
 
-Confirmed to exist (returns `BulkDeleteTransactionsOutput!`) but neither argument shape nor output fields are known. Given the risk profile, we didn't probe further.
+Confirmed to exist (returns `BulkDeleteTransactionsOutput!`) but neither argument shape nor output fields are known. **Do not call without args** — it almost certainly requires a list of transaction IDs, but reading the error-enumeration path further could risk the same validation-bypass behavior as `bulkEditTransactions`. Given the risk profile, we didn't probe further.
 
 ---
 

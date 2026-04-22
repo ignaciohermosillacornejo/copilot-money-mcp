@@ -81,14 +81,16 @@ The agents only probe — they never execute a real mutation. Every call uses a 
      createTransaction(
        itemId: "__does_not_exist__"
        accountId: "__does_not_exist__"
-       input: { name: "x", date: "2026-01-01", amount: 1.0, categoryId: "x", type: __BAD__ }
+       input: { name: "x", date: "2026-01-01", amount: 1.0, categoryId: "x", type: INVALID_PROBE_VALUE }
      ) { id }
    }
    ```
 
-2. Expected: Apollo returns "Value 'BAD' does not exist in 'TransactionType' enum. Did you mean X, Y, Z?" or "Expected type 'TransactionType'. Did you mean 'expense', 'income', 'transfer'?".
+   (Don't use a name starting with `__` — GraphQL reserves double-underscore for introspection types, and Apollo will reject the name itself before enum validation runs.)
 
-3. Report every enum value the error surfaces.
+2. Expected: a response whose error message names the real `TransactionType` enum values. Exact phrasing is not guaranteed — could be "Value 'INVALID_PROBE_VALUE' does not exist in 'TransactionType' enum", "Expected type 'TransactionType'", or similar, possibly with a "Did you mean …" suggesting valid values. If the error contains a quoted list of candidates, those are the real enum members.
+
+3. Report every enum value the error surfaces. Do **not** assume the values are `expense`/`income`/`transfer` or any other specific set — only trust what the server actually returns.
 
 4. For each value, send a follow-up probe using that value as `type` and `__does_not_exist__` for all IDs. Expected: "Account not found" or similar data-layer error (confirming the type was accepted). Report which values the server accepts.
 
@@ -103,6 +105,8 @@ The agents only probe — they never execute a real mutation. Every call uses a 
 **Scope:** read-only.
 
 **Task:**
+
+All probes in this agent run under the user's own Firebase token. Even if an admin/debug query exists, the server will enforce row-level authorization — the probe reveals the *shape* of the API surface, not privileged data. "Admin" names in the candidate list below are there because they're common GraphQL conventions, not because we expect them to return anything the user isn't already authorized to see.
 
 1. Run a 50-candidate brute force against `query Probe { <candidate> }` for names like `adminStats`, `healthCheck`, `debugUser`, `internalQueue`, `transactionCount`, `userActivity`, `auditLog`, etc. Harvest any that return "required argument" or "subfield selection" errors (meaning exists). Ignore ones with "Cannot query field" (don't exist).
 
