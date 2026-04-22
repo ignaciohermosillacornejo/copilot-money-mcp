@@ -1071,7 +1071,7 @@ export class CopilotMoneyTools {
         institution_name: getItemDisplayName(item),
         institution_id: item.institution_id,
         status,
-        products: item.billed_products ?? [],
+        products: item.products ?? [],
         last_transactions_update: item.status_transactions_last_successful_update ?? null,
         last_transactions_failed: item.status_transactions_last_failed_update ?? null,
         last_investments_update: item.status_investments_last_successful_update ?? null,

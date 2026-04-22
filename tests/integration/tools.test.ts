@@ -572,7 +572,10 @@ describe('CopilotMoneyTools Integration', () => {
             item_id: 'item1',
             institution_name: 'Chase',
             institution_id: 'ins_56',
-            billed_products: ['transactions'],
+            // getConnectionStatus now reads item.products (which the decoder
+            // actually populates) instead of item.billed_products (which was
+            // always undefined, so the field used to always return []).
+            products: ['transactions'],
             status_transactions_last_successful_update: '2026-03-08T06:14:29.057Z',
             latest_fetch: '2026-03-08T06:14:34.117Z',
             login_required: false,

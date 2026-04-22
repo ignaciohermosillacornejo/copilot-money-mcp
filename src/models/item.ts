@@ -81,9 +81,9 @@ export const ItemSchema = z
     accounts: z.array(z.string()).optional(), // Array of account IDs linked to this item
     account_count: z.number().optional(), // Number of accounts
 
-    // Metadata
-    available_products: z.array(z.string()).optional(), // Available Plaid products
-    billed_products: z.array(z.string()).optional(), // Products billed for this item
+    // Metadata. Note: available_products / billed_products / optional_products
+    // are declared in IGNORED_ITEM_FIELDS and never populated by the decoder,
+    // so they intentionally don't appear here.
     created_at: z.string().optional(), // When item was created
     updated_at: z.string().optional(), // Last update timestamp
     webhook: z.string().optional(), // Webhook URL for updates
