@@ -34,7 +34,7 @@ Each "Did you mean" list contains up to 5 real mutation names that are edit-dist
 | `addTransactionChild` | `addTransactionToRecurring` |
 | `createChildTransaction` | `createTransaction`, `deleteTransaction`, `editTransaction` |
 
-See `scripts/recon/probe-mutations-wide.ts` for the full sweep that brute-forces verb × entity combinations.
+The actual probe script lived in `/tmp/` during investigation and wasn't committed — see the "How to re-run the recon" section below for a minimal reproducer.
 
 ## Technique 2 — required-arg enumeration
 
