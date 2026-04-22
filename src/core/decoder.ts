@@ -1842,6 +1842,25 @@ function processInvestmentPerformance(
   const access = getStringArray(fields, 'access');
   if (access) data.access = access;
 
+  warnUnreadFields(
+    fields,
+    {
+      consumed: [
+        'security_id',
+        'securityId',
+        'type',
+        'user_id',
+        'userId',
+        'last_update',
+        'lastUpdate',
+        'position',
+        'access',
+      ],
+      ignored: [],
+    },
+    { collection: 'investment_performance', docId }
+  );
+
   return validateOrWarn(InvestmentPerformanceSchema, data, {
     collection: 'investment_performance',
     docId,
@@ -1892,6 +1911,15 @@ function processTwrHolding(
     }
     if (Object.keys(history).length > 0) data.history = history;
   }
+
+  warnUnreadFields(
+    fields,
+    {
+      consumed: ['security_id', 'securityId', 'history'],
+      ignored: [],
+    },
+    { collection: 'twr_holdings', docId }
+  );
 
   return validateOrWarn(TwrHoldingSchema, data, {
     collection: 'twr_holdings',
@@ -2018,6 +2046,24 @@ function processPlaidAccount(
     }
   }
 
+  warnUnreadFields(
+    fields,
+    {
+      consumed: [
+        'verification_status',
+        'latest_balance_update',
+        'holdings',
+        ...stringFields,
+        ...numberFields,
+        'limit',
+        ...booleanFields,
+        ...mapFieldNames,
+      ],
+      ignored: [],
+    },
+    { collection: 'plaid_accounts', docId }
+  );
+
   return validateOrWarn(PlaidAccountSchema, data, {
     collection: 'plaid_accounts',
     docId,
@@ -2038,6 +2084,15 @@ function processTag(fields: Map<string, FirestoreValue>, docId: string): Tag | n
     const value = getString(fields, field);
     if (value !== undefined) data[field] = value;
   }
+
+  warnUnreadFields(
+    fields,
+    {
+      consumed: [...stringFields],
+      ignored: [],
+    },
+    { collection: 'tags', docId }
+  );
 
   return validateOrWarn(TagSchema, data, {
     collection: 'tags',
@@ -2094,6 +2149,15 @@ function processBalanceHistory(
 
   const origin = getString(fields, '_origin');
   if (origin !== undefined) data._origin = origin;
+
+  warnUnreadFields(
+    fields,
+    {
+      consumed: [...numericFields, '_origin'],
+      ignored: [],
+    },
+    { collection: 'balance_history', docId }
+  );
 
   return validateOrWarn(BalanceHistorySchema, data, {
     collection: 'balance_history',
