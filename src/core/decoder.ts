@@ -2198,6 +2198,14 @@ function processHoldingsHistoryMeta(
     }
   }
 
+  warnUnreadFields(
+    fields,
+    // All raw fields are passed through by the generic loop above, so every
+    // key is consumed by design.
+    { consumed: Array.from(fields.keys()), ignored: [] },
+    { collection: 'holdings_history_meta', docId }
+  );
+
   return validateOrWarn(HoldingsHistoryMetaSchema, data, {
     collection: 'holdings_history_meta',
     docId,
@@ -2266,6 +2274,14 @@ function processHoldingsHistory(
     }
   }
 
+  warnUnreadFields(
+    fields,
+    // 'history' is explicitly handled above; everything else is passed through
+    // by the generic loop — so every raw field is consumed by design.
+    { consumed: Array.from(fields.keys()), ignored: [] },
+    { collection: 'holdings_history', docId }
+  );
+
   return validateOrWarn(HoldingsHistorySchema, data, {
     collection: 'holdings_history',
     docId,
@@ -2283,6 +2299,12 @@ function processChange(fields: Map<string, FirestoreValue>, docId: string): Chan
       if (extracted !== undefined) data[key] = extracted;
     }
   }
+  warnUnreadFields(
+    fields,
+    // Generic pass-through reads every raw key.
+    { consumed: Array.from(fields.keys()), ignored: [] },
+    { collection: 'changes', docId }
+  );
   return validateOrWarn(ChangeSchema, data, {
     collection: 'changes',
     docId,
@@ -2315,11 +2337,26 @@ function processSubChange<T>(
   // Copilot ever adds a new suffix, we fall through to 'change_sub' and
   // embed the raw collection path in docId so the warn is still diagnosable.
   if (collection.endsWith('/t')) {
+    warnUnreadFields(
+      fields,
+      { consumed: Array.from(fields.keys()), ignored: [] },
+      { collection: 'transaction_changes', docId }
+    );
     return validateOrWarn(schema, data, { collection: 'transaction_changes', docId });
   }
   if (collection.endsWith('/a')) {
+    warnUnreadFields(
+      fields,
+      { consumed: Array.from(fields.keys()), ignored: [] },
+      { collection: 'account_changes', docId }
+    );
     return validateOrWarn(schema, data, { collection: 'account_changes', docId });
   }
+  warnUnreadFields(
+    fields,
+    { consumed: Array.from(fields.keys()), ignored: [] },
+    { collection: 'change_sub', docId: `${docId} (unknown collection: ${collection})` }
+  );
   return validateOrWarn(schema, data, {
     collection: 'change_sub',
     docId: `${docId} (unknown collection: ${collection})`,
@@ -2386,6 +2423,22 @@ function processSecurity(fields: Map<string, FirestoreValue>, docId: string): Se
   // info map
   const infoMap = getMap(fields, 'info');
   if (infoMap) data.info = toPlainObject(infoMap);
+
+  warnUnreadFields(
+    fields,
+    {
+      consumed: [
+        'security_id',
+        'option_contract',
+        'info',
+        ...stringFields,
+        ...numericFields,
+        ...booleanFields,
+      ],
+      ignored: [],
+    },
+    { collection: 'securities', docId }
+  );
 
   return validateOrWarn(SecuritySchema, data, {
     collection: 'securities',
