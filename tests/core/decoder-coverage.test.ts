@@ -2,7 +2,8 @@
  * Additional tests for decoder.ts to achieve 100% code coverage.
  */
 
-import { describe, test, expect, afterEach, beforeEach } from 'bun:test';
+import { describe, test, expect, afterEach, beforeEach, spyOn } from 'bun:test';
+import { __resetWarnedKeys } from '../../src/core/schema-warn.js';
 import {
   extractValue,
   decodeInvestmentPrices,
@@ -894,6 +895,138 @@ describe('decoder coverage', () => {
 
       const childB = txns.find((t) => t.transaction_id === 'child-b')!;
       expect(childB.parent_transaction_id).toBe('parent-1');
+    });
+
+    test('round-trips real-DB coverage fields (transactions/accounts/categories/items/investment_prices/amazon_orders)', async () => {
+      // Locks in the 12 fields added in the "close all real-DB coverage gaps"
+      // PR. Each block asserts the decoder surfaces the new field; collectively
+      // they guard against regressions that would make these fields silently
+      // drop again (the exact class of bug that motivated the whole coverage-
+      // warn effort).
+      const dbPath = path.join(FIXTURES_DIR, 'coverage-fields-db');
+      await createTestDatabase(dbPath, [
+        // transactions: internal_transfer (boolean direct) + suggestion_ids
+        {
+          collection: 'transactions',
+          id: 'txn-cov',
+          fields: {
+            transaction_id: 'txn-cov',
+            amount: 25,
+            date: '2026-04-20',
+            name: 'Test',
+            internal_transfer: true,
+            suggestion_ids: ['sug-a', 'sug-b'],
+          },
+        },
+        // accounts: financial_goal_ids + last_auto_current_balance + persistent_account_id + user_id
+        {
+          collection: 'accounts',
+          id: 'acc-cov',
+          fields: {
+            account_id: 'acc-cov',
+            name: 'Coverage Checking',
+            current_balance: 1000,
+            account_type: 'depository',
+            user_id: 'user-123',
+            persistent_account_id: 'persist-xyz',
+            last_auto_current_balance: 999.5,
+            financial_goal_ids: ['goal-a', 'goal-b'],
+          },
+        },
+        // categories: rollover_disabled
+        {
+          collection: 'categories',
+          id: 'cat-cov',
+          fields: {
+            category_id: 'cat-cov',
+            name: 'Test Category',
+            rollover_disabled: true,
+          },
+        },
+        // amazon_orders: copilot_tx + id
+        {
+          collection: 'amazon/u1/orders',
+          id: 'order-cov',
+          fields: {
+            date: '2026-04-20',
+            id: 'dup-order-id',
+            copilot_tx: 'linked-tx-123',
+          },
+        },
+        // items: error + oauth
+        {
+          collection: 'items',
+          id: 'item-cov',
+          fields: {
+            item_id: 'item-cov',
+            institution_name: 'Test Bank',
+            error: { error_code: 'ITEM_LOGIN_REQUIRED', display_message: 'Please re-authenticate' },
+            oauth: { state: 'connected', last_refresh: '2026-04-20' },
+          },
+        },
+      ]);
+
+      const { transactions, accounts, categories, items, amazonOrders } =
+        await decodeAllCollections(dbPath);
+
+      const txn = transactions.find((t) => t.transaction_id === 'txn-cov')!;
+      expect(txn.internal_transfer).toBe(true);
+      expect(txn.suggestion_ids).toEqual(['sug-a', 'sug-b']);
+
+      const acc = accounts.find((a) => a.account_id === 'acc-cov')!;
+      expect(acc.user_id).toBe('user-123');
+      expect(acc.persistent_account_id).toBe('persist-xyz');
+      expect(acc.last_auto_current_balance).toBe(999.5);
+      expect(acc.financial_goal_ids).toEqual(['goal-a', 'goal-b']);
+
+      const cat = categories.find((c) => c.category_id === 'cat-cov')!;
+      expect(cat.rollover_disabled).toBe(true);
+
+      const order = amazonOrders.find((o) => o.order_id === 'order-cov')!;
+      expect(order.id).toBe('dup-order-id');
+      expect(order.copilot_tx).toBe('linked-tx-123');
+
+      const item = items.find((i) => i.item_id === 'item-cov')!;
+      expect(item.error).toEqual({
+        error_code: 'ITEM_LOGIN_REQUIRED',
+        display_message: 'Please re-authenticate',
+      });
+      expect(item.oauth).toEqual({ state: 'connected', last_refresh: '2026-04-20' });
+    });
+
+    test('IGNORED_ITEM_FIELDS suppresses warns for sensitive + Plaid metadata fields', async () => {
+      // If the decoder ever stops passing IGNORED_ITEM_FIELDS to warnUnreadFields,
+      // this test's warn-spy assertion will flip to expect.toHaveBeenCalled() and
+      // fail — catching the regression at the source.
+      const dbPath = path.join(FIXTURES_DIR, 'ignored-item-fields-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'items',
+          id: 'item-ignored',
+          fields: {
+            item_id: 'item-ignored',
+            institution_name: 'Sensitive Bank',
+            access_token: 'access-sandbox-SENSITIVE',
+            deleted_access_token: 'access-sandbox-OLD',
+            akoya: 'akoya-metadata',
+            available_products: ['transactions', 'auth'],
+            billed_products: ['transactions'],
+            optional_products: ['investments'],
+          },
+        },
+      ]);
+
+      const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        __resetWarnedKeys();
+        await decodeItems(dbPath);
+        const unreadItemWarns = warnSpy.mock.calls
+          .map((call) => String(call[0] ?? ''))
+          .filter((msg) => msg.includes('collection=items') && msg.includes('unread field'));
+        expect(unreadItemWarns).toEqual([]);
+      } finally {
+        warnSpy.mockRestore();
+      }
     });
   });
 
