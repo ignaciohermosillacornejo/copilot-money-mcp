@@ -1,8 +1,13 @@
 import { describe, test, expect, mock } from 'bun:test';
-import { editTransaction, createTransaction } from '../../../src/core/graphql/transactions.js';
+import {
+  editTransaction,
+  createTransaction,
+  deleteTransaction,
+} from '../../../src/core/graphql/transactions.js';
 import {
   EDIT_TRANSACTION,
   CREATE_TRANSACTION,
+  DELETE_TRANSACTION,
 } from '../../../src/core/graphql/operations.generated.js';
 import type { GraphQLClient } from '../../../src/core/graphql/client.js';
 
@@ -200,5 +205,56 @@ describe('createTransaction', () => {
         },
       })
     ).rejects.toThrow('boom');
+  });
+});
+
+describe('deleteTransaction', () => {
+  test('calls mutate with DeleteTransaction op name, generated query, and expected variables', async () => {
+    const client = createMockClient({ deleteTransaction: true });
+
+    await deleteTransaction(client, {
+      id: 'tx1',
+      accountId: 'acc1',
+      itemId: 'item1',
+    });
+
+    const calls = (client.mutate as ReturnType<typeof mock>).mock.calls;
+    expect(calls).toHaveLength(1);
+    expect(calls[0][0]).toBe('DeleteTransaction');
+    expect(calls[0][1]).toBe(DELETE_TRANSACTION);
+    expect(calls[0][2]).toEqual({ id: 'tx1', accountId: 'acc1', itemId: 'item1' });
+  });
+
+  test('returns the boolean response unchanged (true)', async () => {
+    const client = createMockClient({ deleteTransaction: true });
+    const out = await deleteTransaction(client, {
+      id: 'tx1',
+      accountId: 'acc1',
+      itemId: 'item1',
+    });
+    expect(out).toBe(true);
+  });
+
+  test('returns the boolean response unchanged (false)', async () => {
+    // Defensive: the server return type is Boolean!, so a `false` would be
+    // unusual but the wrapper must not coerce to true. Surfaces any future
+    // server-side change where delete can "not-fail-but-not-delete".
+    const client = createMockClient({ deleteTransaction: false });
+    const out = await deleteTransaction(client, {
+      id: 'tx1',
+      accountId: 'acc1',
+      itemId: 'item1',
+    });
+    expect(out).toBe(false);
+  });
+
+  test('propagates errors from the client', async () => {
+    const client = {
+      mutate: mock(() => Promise.reject(new Error('Transaction not found'))),
+    } as unknown as GraphQLClient;
+
+    await expect(
+      deleteTransaction(client, { id: 'tx1', accountId: 'acc1', itemId: 'item1' })
+    ).rejects.toThrow('Transaction not found');
   });
 });
