@@ -8,17 +8,27 @@ Signatures below reflect only what the server confirmed via validation errors. O
 
 | Mutation | MCP tool yet? | Risk | Primary use |
 |---|---|---|---|
-| [`splitTransaction`](#splittransaction) | ❌ | medium (reversal via edit/delete) | Split one transaction into N children |
-| [`createTransaction`](#createtransaction) | ❌ | medium | Manual-account transactions |
-| [`deleteTransaction`](#deletetransaction) | ❌ | high (destructive) | Remove a transaction |
-| [`addTransactionToRecurring`](#addtransactiontorecurring) | ❌ | low | Attach one-off to existing recurring |
+| [`splitTransaction`](#splittransaction) | ✅ PR #323 | medium (reversal via edit/delete) | Split one transaction into N children |
+| [`createTransaction`](#createtransaction) | ✅ PR #320 | medium | Manual-account transactions |
+| [`deleteTransaction`](#deletetransaction) | ✅ PR #321 | high (destructive) | Remove a transaction |
+| [`addTransactionToRecurring`](#addtransactiontorecurring) | ✅ PR #322 | low | Attach one-off to existing recurring |
 | [`bulkEditTransactions`](#bulkedittransactions) | ❌ | **DO NOT PROBE** blindly | Edit many transactions at once |
 | [`bulkDeleteTransactions`](#bulkdeletetransactions) | ❌ | **high (destructive)** | Delete many transactions |
 | [`createAccount`](#createaccount) | ❌ | medium | Manual account creation |
 | [`deleteAccount`](#deleteaccount) | ❌ | high (cascades to all txns) | Remove a manual account |
 | [`deleteUser`](#deleteuser) | ❌ | **existential** | Delete the entire user account |
+| [`acceptTerms`](#accepttermsdismissannouncement-editinvestmentconfig) | ❌ | low | Record that the user accepted updated ToS |
+| [`dismissAnnouncement`](#accepttermsdismissannouncement-editinvestmentconfig) | ❌ | low | Dismiss an in-app announcement |
+| [`editInvestmentConfig`](#accepttermsdismissannouncement-editinvestmentconfig) | ❌ | low | User-level investment config (odd — no required args) |
+| [`confirmConnection`](#connection-lifecycle) | ❌ | low-medium | Confirm a Plaid-link connection after institution challenge |
+| [`deleteConnection`](#connection-lifecycle) | ❌ | **high (cascades)** | Remove a Plaid connection |
+| [`startSubscription`](#subscription-lifecycle) | ❌ | **do not expose** | Start a Copilot paid plan |
+| [`changeSubscription`](#subscription-lifecycle) | ❌ | **do not expose** | Switch between Copilot plans |
+| [`cancelSubscription`](#subscription-lifecycle) | ❌ | **do not expose** | Cancel the Copilot subscription |
+| [`claimPromotion`](#subscription-lifecycle) | ❌ | low | Redeem a promo code |
+| [`deletePaymentMethod`](#subscription-lifecycle) | ❌ | medium | Remove a saved payment method |
 
-No other hidden mutations surfaced across a brute-force sweep of ~460 verb × entity combinations. The probe script was a throwaway in `/tmp/` during investigation; see [`introspection-recon.md`](./introspection-recon.md) for the methodology to reconstruct it.
+**Sweep coverage (2026-04-22, after PRs #320-#323 shipped):** a second broad sweep across ~170 additional candidates covered Amazon, Plaid, Account, Holdings/Investments, Rules, Notifications, User preferences, Subscription/billing, Attachments, Sharing, AI/assistant, Reports, Search, and miscellaneous (password/PIN/2FA/device). The nine new mutations above came out of that sweep; everything else in those categories returned "Cannot query field" on all tested candidates. Tested-and-absent candidates are catalogued in the "Tested-and-absent surface" section below so future authors don't re-probe the same names.
 
 ## Budget mutations — finding
 
@@ -219,6 +229,83 @@ mutation DeleteUser($confirm: Boolean!) {
 ```
 
 **⚠⚠ Existential — deletes the user's entire Copilot account.** Surfaced by the brute-force sweep; listed here for completeness and as a warning. The `confirm: Boolean!` guard is the only protection — do not expose this via any MCP tool without a multi-step confirmation gate.
+
+---
+
+## acceptTerms, dismissAnnouncement, editInvestmentConfig
+
+Surfaced by the 2026-04-22 sweep. All three return a user-scoped object with no cross-user effects.
+
+```graphql
+mutation Probe { acceptTerms { id } }                              # User!; no args
+mutation Probe { dismissAnnouncement(id: $id) { id } }             # Announcement!
+mutation Probe { editInvestmentConfig { id } }                     # User!; no required args
+```
+
+`editInvestmentConfig` having no required args is unusual — likely accepts an optional input object whose fields Apollo doesn't leak (same suppression problem as elsewhere). Not worth probing without an iOS capture.
+
+---
+
+## Connection lifecycle
+
+Plaid-style institution connections have two hidden mutations — a `create` / `refresh` /`edit` / `reconnect` family was probed and does **not** exist. The UI-driven "connect an account" flow is presumably `createAccount` → `confirmConnection` after the institution challenge.
+
+```graphql
+mutation Probe {
+  confirmConnection(institutionId: ID!, input: ConfirmConnectionInput!) { id }   # Connection!
+}
+
+mutation Probe { deleteConnection(id: ID!) }                                     # no output subfields
+```
+
+**Unknowns:** `ConfirmConnectionInput` fields. Probing with empty input (or any input) requires a real `institutionId`, which would hit the data layer — refused without an isolated test account. Input probably carries a Plaid `public_token` or equivalent OAuth grant.
+
+**Destructive:** `deleteConnection` almost certainly cascades to every account + transaction tied to that institution. Same risk class as `deleteAccount` — do not expose without confirmation gates.
+
+---
+
+## Subscription lifecycle
+
+Copilot's in-app paid-plan management. Five mutations, all billing-sensitive.
+
+```graphql
+mutation Probe { startSubscription(input: StartSubscriptionInput!) { id } }    # StartSubscriptionResult!
+mutation Probe { changeSubscription(input: ChangeSubscriptionInput!) { id } }  # ChangeSubscriptionResult!
+mutation Probe { cancelSubscription(subscriptionId: ID!) { id } }              # CopilotSubscription
+mutation Probe { claimPromotion(promotionCode: String!) { id } }               # ClaimPromotionResult!
+mutation Probe { deletePaymentMethod(id: ID!) }
+```
+
+Confirmed input shapes:
+- `StartSubscriptionInput`: `planId: ID!, paymentMethodId: ID!` (both required; other fields unknown).
+- `ChangeSubscriptionInput`: has `planId: ID!` (confirmed via "Did you mean planId" error on a `plan` probe); other fields unknown.
+
+**Do not expose any of these via MCP tools.** Billing operations — cancelling, changing plans, or claiming promotions — should always be user-driven through Copilot's own UI. The right safety-posture is to explicitly refuse these even if asked; leave them documented here only so the recon surface is complete.
+
+---
+
+## Tested-and-absent surface (saves re-probing)
+
+The 2026-04-22 sweep returned "Cannot query field on type Mutation" for every candidate in these categories. Suggestions surfacing in "Did you mean" errors were followed up and are all captured above.
+
+- **Amazon** (20 probed): `linkAmazonOrder`, `unlinkAmazonOrder`, `matchAmazonOrder`, `unmatchAmazonOrder`, `setAmazonOrder`, `editAmazonOrder`, `createAmazonIntegration`, `editAmazonIntegration`, `deleteAmazonIntegration`, `refreshAmazonOrders`, `syncAmazonOrders`, `importAmazonOrders`, `setAmazonOrderId`, `editTransactionAmazonOrder`, `attachAmazonOrder`, `detachAmazonOrder`, `setTransactionAmazonOrder`, `createAmazonOrder`, `deleteAmazonOrder`, `amazonOrderMatch`. **Amazon order-to-transaction linkage is set server-side only** — the Firestore `amazon/{id}/orders/{order_id}.copilot_tx` field is populated by Copilot's backend matcher, not by any user-accessible mutation. Downstream: to expose Amazon data via MCP we'd need read-only tools on the decoded cache (we have `AmazonOrderSchema` in `src/models/amazon.ts`, just no `get_amazon_orders` tool).
+- **Plaid item lifecycle** (16 probed): `createLinkToken`, `exchangePublicToken`, `refreshItem`, `syncItem`, `reconnectItem`, `editItem`, `deleteItem`, `createItem`, `retriggerItem`, `forceItemSync`, `updateItemCredentials`, `resolveItemError`, `removeItem`, `disconnectItem`, `linkPlaid`, `updatePlaidItem`. None exist — connection lifecycle goes through `createAccount` + `confirmConnection` + `deleteConnection` only.
+- **Account variants** (12 probed): `createManualAccount`, `deleteManualAccount`, `editManualAccountBalance`, `setAccountBalance`, `addAccount`, `removeAccount`, `hideAccount`, `unhideAccount`, `archiveAccount`, `unarchiveAccount`, `closeAccount`, `reopenAccount`. Account hiding is an `editAccount` field (`isUserHidden`), not a separate mutation.
+- **Holdings / Investments** (12 probed): `editHolding`, `createHolding`, `deleteHolding`, `setCostBasis`, `updateCostBasis`, `editCostBasis`, `markInvestmentTransfer`, `editInvestmentTransaction`, `setHoldingQuantity`, `refreshHoldings`, `createInvestmentTransaction`, `deleteInvestmentTransaction`. Investments are fully read-only via GraphQL — no write path exists for holdings, cost basis, or per-holding transactions. (Investment-transaction amounts are `editTransaction`-able via the regular transaction path.)
+- **Rules** (12 probed): `createRule`, `editRule`, `deleteRule`, `applyRule`, `createTransactionRule`, `editTransactionRule`, `deleteTransactionRule`, `createCategoryRule`, `editCategoryRule`, `deleteCategoryRule`, `setTransactionRule`, `runRules`. **No user-facing rules API exists on GraphQL** — Copilot's categorization rules (the `rule` field on `EditRecurringInput`) are scoped to recurring detection only.
+- **Notifications** (11 probed): `createNotification`, `markNotificationRead`, `deleteNotification`, `editNotificationPreferences`, `setNotificationPreferences`, `markAllNotificationsRead`, `subscribeToNotifications`, `unsubscribeFromNotifications`, `registerDevice`, `unregisterDevice`, `setPushToken`. Device / push registration presumably happens via a non-GraphQL endpoint.
+- **User preferences / settings / onboarding** (16 probed): `editUserPreferences`, `setUserPreference`, `updateUserPreferences`, `setCurrency`, `setLocale`, `setTimezone`, `completeOnboarding`, `markOnboardingStep`, `completeOnboardingStep`, `setOnboardingState`, `acceptTerms`*, `dismissAnnouncement`*, `setFeatureFlag`, `trackEvent`, `logEvent`, `submitFeedback`. (*acceptTerms and dismissAnnouncement exist — see above.) Most user-level settings live on `editUser`; separate settings mutations don't exist.
+- **Attachments / receipts** (8 probed): `uploadReceipt`, `setReceipt`, `deleteReceipt`, `attachReceipt`, `createAttachment`, `deleteAttachment`, `addTransactionAttachment`, `removeTransactionAttachment`. No receipt/attachment API — if Copilot has receipt storage it's either Firestore-direct or a separate HTTP endpoint.
+- **Sharing / household** (10 probed): `inviteUser`, `acceptInvitation`, `removeSharedUser`, `shareAccount`, `unshareAccount`, `createHousehold`, `leaveHousehold`, `inviteToHousehold`, `addPartner`, `removePartner`. No sharing mutations — Copilot currently has no household/partner feature (and if they add one, the surface will shift).
+- **AI / assistant** (8 probed): `sendAssistantMessage`, `createInsight`, `dismissInsight`, `requestInsight`, `createChat`, `sendMessage`, `editInsight`, `generateInsight`. No assistant-surface mutations. If Copilot ships an AI feature it isn't exposed on this endpoint.
+- **Reports / exports** (6 probed): `generateReport`, `requestExport`, `createReport`, `downloadReport`, `exportTransactions`, `scheduleReport`. No report generation via GraphQL.
+- **Views / search** (5 probed): `saveSearch`, `saveFilter`, `createView`, `editView`, `deleteView`. No saved-view mutations.
+- **Auth / security / device** (8 probed): `refreshCache`, `resetPassword`, `changePassword`, `setPin`, `clearPin`, `enableTwoFactor`, `disableTwoFactor`, `requestMagicLink`. Auth is fully handled by Firebase on a separate endpoint — no auth mutations on the Copilot GraphQL server.
+- **Misc transaction operations** (5 probed): `archiveTransaction`, `hideTransaction`, `flagTransaction`, `markTransactionReviewed`, `confirmTransaction`. Only the already-known `editTransaction.isReviewed` path exists.
+- **Recurring detection** (4 probed): `detectRecurring`, `acceptRecurring`, `rejectRecurring`, `suggestCategory`. Recurring-detection UI appears to be server-automated — no user-triggered mutations.
+- **Category suggestions** (2 probed): `acceptSuggestion`, `dismissSuggestion`. Suggestions live on `Transaction.suggestedCategoryIds` (read-only).
+
+**Total sweep (including prior): ~460 + 170 = ~630 candidate names across all known surfaces.** The discovered write surface is ~25 mutations. See the "Remaining recon work" section of `introspection-recon.md` for directions still uncovered (queries, subscriptions, optional-input-field enumeration).
 
 ---
 
