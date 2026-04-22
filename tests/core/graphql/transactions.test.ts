@@ -3,11 +3,13 @@ import {
   editTransaction,
   createTransaction,
   deleteTransaction,
+  addTransactionToRecurring,
 } from '../../../src/core/graphql/transactions.js';
 import {
   EDIT_TRANSACTION,
   CREATE_TRANSACTION,
   DELETE_TRANSACTION,
+  ADD_TRANSACTION_TO_RECURRING,
 } from '../../../src/core/graphql/operations.generated.js';
 import type { GraphQLClient } from '../../../src/core/graphql/client.js';
 
@@ -255,6 +257,87 @@ describe('deleteTransaction', () => {
 
     await expect(
       deleteTransaction(client, { id: 'tx1', accountId: 'acc1', itemId: 'item1' })
+    ).rejects.toThrow('Transaction not found');
+  });
+});
+
+describe('addTransactionToRecurring', () => {
+  // Canned server response — the output is `{ transaction: Transaction }`
+  // and the Transaction shape matches TransactionFields (same as
+  // createTransaction's output).
+  const linkedTx = {
+    id: 'tx1',
+    name: 'Rent',
+    date: '2026-04-01',
+    amount: 2500,
+    categoryId: 'cat-rent',
+    type: 'REGULAR' as const,
+    accountId: 'acc1',
+    itemId: 'item1',
+    isPending: false,
+    isReviewed: false,
+    createdAt: 1777785600000,
+    recurringId: 'rec1',
+    userNotes: null,
+    tipAmount: null,
+    suggestedCategoryIds: [],
+    tags: [],
+    goal: null,
+  };
+
+  test('calls mutate with AddTransactionToRecurring op name, generated query, and expected variables', async () => {
+    const client = createMockClient({
+      addTransactionToRecurring: { transaction: linkedTx },
+    });
+
+    await addTransactionToRecurring(client, {
+      id: 'tx1',
+      accountId: 'acc1',
+      itemId: 'item1',
+      input: { recurringId: 'rec1' },
+    });
+
+    const calls = (client.mutate as ReturnType<typeof mock>).mock.calls;
+    expect(calls).toHaveLength(1);
+    expect(calls[0][0]).toBe('AddTransactionToRecurring');
+    expect(calls[0][1]).toBe(ADD_TRANSACTION_TO_RECURRING);
+    expect(calls[0][2]).toEqual({
+      id: 'tx1',
+      accountId: 'acc1',
+      itemId: 'item1',
+      input: { recurringId: 'rec1' },
+    });
+  });
+
+  test('returns the linked transaction fields from the nested response', async () => {
+    const client = createMockClient({
+      addTransactionToRecurring: { transaction: linkedTx },
+    });
+
+    const out = await addTransactionToRecurring(client, {
+      id: 'tx1',
+      accountId: 'acc1',
+      itemId: 'item1',
+      input: { recurringId: 'rec1' },
+    });
+
+    // Wrapper unwraps the `transaction` level so callers get the same
+    // CreatedTransaction shape they get from createTransaction().
+    expect(out).toEqual(linkedTx);
+  });
+
+  test('propagates errors from the client', async () => {
+    const client = {
+      mutate: mock(() => Promise.reject(new Error('Transaction not found'))),
+    } as unknown as GraphQLClient;
+
+    await expect(
+      addTransactionToRecurring(client, {
+        id: 'tx1',
+        accountId: 'acc1',
+        itemId: 'item1',
+        input: { recurringId: 'rec1' },
+      })
     ).rejects.toThrow('Transaction not found');
   });
 });

@@ -1,5 +1,6 @@
 import type { GraphQLClient } from './client.js';
 import {
+  ADD_TRANSACTION_TO_RECURRING,
   CREATE_TRANSACTION,
   DELETE_TRANSACTION,
   EDIT_TRANSACTION,
@@ -138,6 +139,47 @@ export async function deleteTransaction(
     args
   );
   return data.deleteTransaction;
+}
+
+export interface AddTransactionToRecurringInput {
+  recurringId: string; // the only field accepted by the server
+}
+
+export interface AddTransactionToRecurringArgs {
+  id: string; // transaction to attach
+  accountId: string;
+  itemId: string;
+  input: AddTransactionToRecurringInput;
+}
+
+interface AddTransactionToRecurringResponse {
+  addTransactionToRecurring: {
+    transaction: CreatedTransaction;
+  };
+}
+
+/**
+ * Manually link an existing transaction to an existing recurring series.
+ *
+ * The mutation's output type has exactly one field (`transaction`), and
+ * the transaction it returns matches the same TransactionFields shape as
+ * createTransaction. We unwrap the `transaction` level here so callers get
+ * the same CreatedTransaction shape in both cases.
+ *
+ * The input type accepts only `recurringId: ID!` — probes for `date`,
+ * `isReviewed`, `notes`, and `tagIds` all returned "not defined" (see
+ * hidden-mutations.md). Downstream metadata edits require a follow-up
+ * `editTransaction` call.
+ */
+export async function addTransactionToRecurring(
+  client: GraphQLClient,
+  args: AddTransactionToRecurringArgs
+): Promise<CreatedTransaction> {
+  const data = await client.mutate<
+    AddTransactionToRecurringArgs,
+    AddTransactionToRecurringResponse
+  >('AddTransactionToRecurring', ADD_TRANSACTION_TO_RECURRING, args);
+  return data.addTransactionToRecurring.transaction;
 }
 
 export async function editTransaction(
