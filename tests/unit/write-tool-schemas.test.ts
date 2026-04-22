@@ -2,7 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import { createWriteToolSchemas } from '../../src/tools/index.js';
 
 describe('createWriteToolSchemas', () => {
-  test('returns exactly 16 write tool schemas', () => {
+  test('returns exactly 17 write tool schemas', () => {
     // Exact count: if a write tool is added or removed, this assertion
     // forces an explicit update, and the server-protocol.test.ts
     // annotation + rejection tables must be extended in lockstep.
@@ -11,7 +11,49 @@ describe('createWriteToolSchemas', () => {
     // 2026-04: create_transaction added (14 total).
     // 2026-04: delete_transaction added (15 total).
     // 2026-04: add_transaction_to_recurring added (16 total).
-    expect(createWriteToolSchemas().length).toBe(16);
+    // 2026-04: split_transaction added (17 total).
+    expect(createWriteToolSchemas().length).toBe(17);
+  });
+
+  test('split_transaction has required shape and annotations', () => {
+    const split = createWriteToolSchemas().find((s) => s.name === 'split_transaction');
+    expect(split).toBeDefined();
+    expect(split!.annotations?.readOnlyHint).toBe(false);
+    expect(split!.annotations?.destructiveHint).toBe(false);
+    // Not idempotent: replaying a split would fail (the parent is already
+    // hidden and its children already exist) but the intent-semantics of
+    // a retry differ from, say, setting a flag.
+    expect(split!.annotations?.idempotentHint).toBe(false);
+    expect(split!.inputSchema.additionalProperties).toBe(false);
+    expect(split!.inputSchema.required).toEqual([
+      'transaction_id',
+      'account_id',
+      'item_id',
+      'splits',
+    ]);
+    expect(split!.inputSchema.properties.splits.type).toBe('array');
+    // minItems:2 — a split-into-one is meaningless; caller should use update_transaction.
+    expect(split!.inputSchema.properties.splits.minItems).toBe(2);
+    const itemSchema = split!.inputSchema.properties.splits.items as {
+      type: string;
+      required: string[];
+      additionalProperties: boolean;
+      properties: Record<string, unknown>;
+    };
+    expect(itemSchema.type).toBe('object');
+    expect(itemSchema.additionalProperties).toBe(false);
+    // Only amount + category_id are required per-entry — name/date default
+    // to parent values when omitted.
+    expect(itemSchema.required).toEqual(['amount', 'category_id']);
+    expect(itemSchema.properties).toHaveProperty('name');
+    expect(itemSchema.properties).toHaveProperty('date');
+    expect(itemSchema.properties).toHaveProperty('amount');
+    expect(itemSchema.properties).toHaveProperty('category_id');
+    // Must not advertise tags/notes/reviewed — the server's
+    // SplitTransactionInput rejects all three ("not defined by type").
+    expect(itemSchema.properties).not.toHaveProperty('tag_ids');
+    expect(itemSchema.properties).not.toHaveProperty('note');
+    expect(itemSchema.properties).not.toHaveProperty('is_reviewed');
   });
 
   test('create_transaction has required shape and annotations', () => {
