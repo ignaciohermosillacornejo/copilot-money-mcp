@@ -2,14 +2,15 @@ import { describe, test, expect } from 'bun:test';
 import { createWriteToolSchemas } from '../../src/tools/index.js';
 
 describe('createWriteToolSchemas', () => {
-  test('returns exactly 14 write tool schemas', () => {
+  test('returns exactly 15 write tool schemas', () => {
     // Exact count: if a write tool is added or removed, this assertion
     // forces an explicit update, and the server-protocol.test.ts
     // annotation + rejection tables must be extended in lockstep.
     // Post-GraphQL migration: goals and createBudget/updateBudget/deleteBudget
     // tools were removed; set_budget replaces the three budget tools.
     // 2026-04: create_transaction added (14 total).
-    expect(createWriteToolSchemas().length).toBe(14);
+    // 2026-04: delete_transaction added (15 total).
+    expect(createWriteToolSchemas().length).toBe(15);
   });
 
   test('create_transaction has required shape and annotations', () => {
@@ -33,6 +34,25 @@ describe('createWriteToolSchemas', () => {
       'INCOME',
       'INTERNAL_TRANSFER',
     ]);
+  });
+
+  test('delete_transaction has required shape and annotations', () => {
+    const deleteTxn = createWriteToolSchemas().find((s) => s.name === 'delete_transaction');
+    expect(deleteTxn).toBeDefined();
+    expect(deleteTxn!.annotations?.readOnlyHint).toBe(false);
+    expect(deleteTxn!.annotations?.destructiveHint).toBe(true);
+    expect(deleteTxn!.annotations?.idempotentHint).toBe(true);
+    expect(deleteTxn!.inputSchema.additionalProperties).toBe(false);
+    // All three IDs required — no lookup fallback, so the caller must be
+    // explicit and a typo can only match "Transaction not found" at the
+    // server rather than silently resolving to a different tx.
+    expect(deleteTxn!.inputSchema.required).toEqual(['transaction_id', 'account_id', 'item_id']);
+    expect(deleteTxn!.inputSchema.properties).toHaveProperty('transaction_id');
+    expect(deleteTxn!.inputSchema.properties).toHaveProperty('account_id');
+    expect(deleteTxn!.inputSchema.properties).toHaveProperty('item_id');
+    // Description must warn about destructive + Plaid re-sync metadata loss.
+    expect(deleteTxn!.description).toMatch(/DESTRUCTIVE/);
+    expect(deleteTxn!.description).toMatch(/no.*undo|no.*soft-delete/i);
   });
 
   test('update_transaction has required shape and annotations', () => {

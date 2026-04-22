@@ -26,6 +26,10 @@ const WRITE_TOOL_SPECS: Record<string, { method: string; args: Record<string, un
       type: 'REGULAR',
     },
   },
+  delete_transaction: {
+    method: 'deleteTransaction',
+    args: { transaction_id: 'txn1', account_id: 'acc1', item_id: 'item1' },
+  },
   update_transaction: {
     method: 'updateTransaction',
     args: { transaction_id: 'txn1', category_id: 'food' },
