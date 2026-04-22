@@ -16,6 +16,7 @@ const IN_SCOPE_MUTATIONS = [
   'EditTransaction',
   'DeleteTransaction',
   'AddTransactionToRecurring',
+  'SplitTransaction',
   'CreateCategory',
   'EditCategory',
   'DeleteCategory',
