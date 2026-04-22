@@ -30,6 +30,15 @@ const WRITE_TOOL_SPECS: Record<string, { method: string; args: Record<string, un
     method: 'deleteTransaction',
     args: { transaction_id: 'txn1', account_id: 'acc1', item_id: 'item1' },
   },
+  add_transaction_to_recurring: {
+    method: 'addTransactionToRecurring',
+    args: {
+      transaction_id: 'txn1',
+      account_id: 'acc1',
+      item_id: 'item1',
+      recurring_id: 'rec1',
+    },
+  },
   update_transaction: {
     method: 'updateTransaction',
     args: { transaction_id: 'txn1', category_id: 'food' },

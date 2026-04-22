@@ -2,7 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import { createWriteToolSchemas } from '../../src/tools/index.js';
 
 describe('createWriteToolSchemas', () => {
-  test('returns exactly 15 write tool schemas', () => {
+  test('returns exactly 16 write tool schemas', () => {
     // Exact count: if a write tool is added or removed, this assertion
     // forces an explicit update, and the server-protocol.test.ts
     // annotation + rejection tables must be extended in lockstep.
@@ -10,7 +10,8 @@ describe('createWriteToolSchemas', () => {
     // tools were removed; set_budget replaces the three budget tools.
     // 2026-04: create_transaction added (14 total).
     // 2026-04: delete_transaction added (15 total).
-    expect(createWriteToolSchemas().length).toBe(15);
+    // 2026-04: add_transaction_to_recurring added (16 total).
+    expect(createWriteToolSchemas().length).toBe(16);
   });
 
   test('create_transaction has required shape and annotations', () => {
@@ -53,6 +54,28 @@ describe('createWriteToolSchemas', () => {
     // Description must warn about destructive + Plaid re-sync metadata loss.
     expect(deleteTxn!.description).toMatch(/DESTRUCTIVE/);
     expect(deleteTxn!.description).toMatch(/no.*undo|no.*soft-delete/i);
+  });
+
+  test('add_transaction_to_recurring has required shape and annotations', () => {
+    const atr = createWriteToolSchemas().find((s) => s.name === 'add_transaction_to_recurring');
+    expect(atr).toBeDefined();
+    expect(atr!.annotations?.readOnlyHint).toBe(false);
+    expect(atr!.annotations?.destructiveHint).toBe(false);
+    expect(atr!.annotations?.idempotentHint).toBe(true);
+    expect(atr!.inputSchema.additionalProperties).toBe(false);
+    // All four IDs required — same defensive "no cache lookup" contract as
+    // delete_transaction; a typo must fail at the server boundary rather
+    // than silently attach a different transaction.
+    expect(atr!.inputSchema.required).toEqual([
+      'transaction_id',
+      'account_id',
+      'item_id',
+      'recurring_id',
+    ]);
+    expect(atr!.inputSchema.properties).toHaveProperty('transaction_id');
+    expect(atr!.inputSchema.properties).toHaveProperty('account_id');
+    expect(atr!.inputSchema.properties).toHaveProperty('item_id');
+    expect(atr!.inputSchema.properties).toHaveProperty('recurring_id');
   });
 
   test('update_transaction has required shape and annotations', () => {

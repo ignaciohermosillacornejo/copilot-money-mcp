@@ -96,6 +96,7 @@ export class CopilotMoneyServer {
   private static readonly WRITE_TOOLS = new Set([
     'create_transaction',
     'delete_transaction',
+    'add_transaction_to_recurring',
     'update_transaction',
     'review_transactions',
     'create_tag',
@@ -249,6 +250,12 @@ export class CopilotMoneyServer {
         case 'delete_transaction':
           result = await this.tools.deleteTransaction(
             typedArgs as Parameters<typeof this.tools.deleteTransaction>[0]
+          );
+          break;
+
+        case 'add_transaction_to_recurring':
+          result = await this.tools.addTransactionToRecurring(
+            typedArgs as Parameters<typeof this.tools.addTransactionToRecurring>[0]
           );
           break;
 

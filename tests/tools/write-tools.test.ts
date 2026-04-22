@@ -693,3 +693,211 @@ describe('deleteTransaction', () => {
     expect(remaining.map((t) => t.transaction_id).sort()).toEqual(['tx1', 'tx2']);
   });
 });
+
+describe('addTransactionToRecurring', () => {
+  let tools: CopilotMoneyTools;
+  let mockDb: CopilotDatabase;
+
+  // Server response shape: { addTransactionToRecurring: { transaction: {...} } }.
+  // recurringId is populated because linking the tx succeeded.
+  const linkedTx = {
+    id: 'tx1',
+    name: 'Rent',
+    date: '2026-04-01',
+    amount: 2500,
+    categoryId: 'cat-rent',
+    type: 'REGULAR',
+    accountId: 'acc1',
+    itemId: 'item1',
+    isPending: false,
+    isReviewed: false,
+    createdAt: 1777785600000,
+    recurringId: 'rec1',
+    userNotes: null,
+    tipAmount: null,
+    suggestedCategoryIds: [],
+    tags: [],
+    goal: null,
+  };
+
+  const validArgs = {
+    transaction_id: 'tx1',
+    account_id: 'acc1',
+    item_id: 'item1',
+    recurring_id: 'rec1',
+  };
+
+  beforeEach(() => {
+    mockDb = new CopilotDatabase('/nonexistent');
+    (mockDb as any).dbPath = '/fake';
+    (mockDb as any)._transactions = [
+      {
+        transaction_id: 'tx1',
+        amount: 2500,
+        date: '2026-04-01',
+        name: 'Rent',
+        account_id: 'acc1',
+        item_id: 'item1',
+        category_id: 'cat-rent',
+        recurring_id: undefined,
+      },
+      {
+        transaction_id: 'tx2',
+        amount: 10,
+        date: '2026-04-02',
+        name: 'Coffee',
+        account_id: 'acc1',
+        item_id: 'item1',
+        category_id: 'cat-food',
+      },
+    ];
+    (mockDb as any)._allCollectionsLoaded = true;
+  });
+
+  test('dispatches AddTransactionToRecurring with mapped input and returns the linked transaction', async () => {
+    const client = createMockGraphQLClient({
+      AddTransactionToRecurring: { addTransactionToRecurring: { transaction: linkedTx } },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    const result = await tools.addTransactionToRecurring(validArgs);
+
+    expect(result.success).toBe(true);
+    expect(result.transaction_id).toBe('tx1');
+    expect(result.transaction.transaction_id).toBe('tx1');
+    expect(result.transaction.recurring_id).toBe('rec1');
+    expect(result.transaction.name).toBe('Rent');
+    expect(result.transaction.internal_transfer).toBe(false);
+
+    expect(client._calls).toHaveLength(1);
+    expect(client._calls[0].op).toBe('AddTransactionToRecurring');
+    expect(client._calls[0].variables).toEqual({
+      id: 'tx1',
+      accountId: 'acc1',
+      itemId: 'item1',
+      input: { recurringId: 'rec1' },
+    });
+  });
+
+  test('patches recurring_id on the cached transaction row on success', async () => {
+    const client = createMockGraphQLClient({
+      AddTransactionToRecurring: { addTransactionToRecurring: { transaction: linkedTx } },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await tools.addTransactionToRecurring(validArgs);
+
+    const cached = (
+      (mockDb as any)._transactions as Array<{
+        transaction_id: string;
+        recurring_id?: string;
+      }>
+    ).find((t) => t.transaction_id === 'tx1');
+    expect(cached?.recurring_id).toBe('rec1');
+  });
+
+  test('does NOT look up account_id/item_id from the cache via transaction_id', async () => {
+    // Same defensive contract as delete_transaction — a typo in account_id
+    // or item_id must not be silently "fixed" from the cache; forward
+    // verbatim so the server rejects the wrong-tuple rather than linking
+    // a different transaction.
+    const client = createMockGraphQLClient({
+      AddTransactionToRecurring: { addTransactionToRecurring: { transaction: linkedTx } },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await tools.addTransactionToRecurring({
+      transaction_id: 'tx1',
+      account_id: 'wrong_account',
+      item_id: 'wrong_item',
+      recurring_id: 'rec1',
+    });
+
+    expect(client._calls[0].variables).toEqual({
+      id: 'tx1',
+      accountId: 'wrong_account',
+      itemId: 'wrong_item',
+      input: { recurringId: 'rec1' },
+    });
+  });
+
+  test('rejects invalid transaction_id format before dispatch', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(
+      tools.addTransactionToRecurring({ ...validArgs, transaction_id: 'bad id!' })
+    ).rejects.toThrow(/Invalid transaction_id/);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('rejects invalid account_id format before dispatch', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(
+      tools.addTransactionToRecurring({ ...validArgs, account_id: 'bad/account' })
+    ).rejects.toThrow(/Invalid account_id/);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('rejects invalid item_id format before dispatch', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(
+      tools.addTransactionToRecurring({ ...validArgs, item_id: 'bad.item' })
+    ).rejects.toThrow(/Invalid item_id/);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('rejects invalid recurring_id format before dispatch', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(
+      tools.addTransactionToRecurring({ ...validArgs, recurring_id: 'bad.recurring' })
+    ).rejects.toThrow(/Invalid recurring_id/);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('wraps GraphQL errors with graphQLErrorToMcpError and does not patch the cache', async () => {
+    const { GraphQLError } = await import('../../src/core/graphql/client.js');
+    const client = createMockGraphQLClient({
+      AddTransactionToRecurring: new GraphQLError(
+        'NOT_FOUND',
+        'Transaction not found',
+        'AddTransactionToRecurring',
+        200
+      ),
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(tools.addTransactionToRecurring(validArgs)).rejects.toThrow(
+      /Transaction not found/
+    );
+
+    // On error, the cache row is untouched.
+    const cached = (
+      (mockDb as any)._transactions as Array<{
+        transaction_id: string;
+        recurring_id?: string;
+      }>
+    ).find((t) => t.transaction_id === 'tx1');
+    expect(cached?.recurring_id).toBeUndefined();
+  });
+
+  test('flips internal_transfer to true if the linked transaction is an INTERNAL_TRANSFER', async () => {
+    // Mirrors the createTransaction load-bearing mapping — the response's
+    // `type` field drives local `internal_transfer`, independent of what
+    // the cache had before.
+    const serverTx = { ...linkedTx, type: 'INTERNAL_TRANSFER' };
+    const client = createMockGraphQLClient({
+      AddTransactionToRecurring: { addTransactionToRecurring: { transaction: serverTx } },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    const result = await tools.addTransactionToRecurring(validArgs);
+    expect(result.transaction.internal_transfer).toBe(true);
+  });
+});
