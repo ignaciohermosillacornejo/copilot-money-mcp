@@ -2299,12 +2299,14 @@ function processChange(fields: Map<string, FirestoreValue>, docId: string): Chan
       if (extracted !== undefined) data[key] = extracted;
     }
   }
+
   warnUnreadFields(
     fields,
     // Generic pass-through reads every raw key.
     { consumed: Array.from(fields.keys()), ignored: [] },
     { collection: 'changes', docId }
   );
+
   return validateOrWarn(ChangeSchema, data, {
     collection: 'changes',
     docId,
@@ -2690,7 +2692,7 @@ function processSubscription(
 
   warnUnreadFields(
     fields,
-    // Explicit fields + generic pass-through below — every raw key is consumed.
+    // Explicit fields + generic pass-through above — every raw key is consumed.
     { consumed: Array.from(fields.keys()), ignored: [] },
     { collection: 'subscriptions', docId }
   );
@@ -2729,7 +2731,7 @@ function processInvite(fields: Map<string, FirestoreValue>, docId: string): Invi
 
   warnUnreadFields(
     fields,
-    // Explicit fields + generic pass-through below — every raw key is consumed.
+    // Explicit fields + generic pass-through above — every raw key is consumed.
     { consumed: Array.from(fields.keys()), ignored: [] },
     { collection: 'invites', docId }
   );
