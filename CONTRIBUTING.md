@@ -42,7 +42,7 @@ bun run sync-manifest  # Verify manifest.json matches code
 #### Writes-enabled bundle (local-only)
 
 `bun run pack:mcpb:write` produces `copilot-money-mcp-write.mcpb`, a variant
-that advertises all 31 tools (17 read + 14 write) and passes `--write` to the
+that advertises all 34 tools (17 read + 17 write) and passes `--write` to the
 CLI so write tools are unlocked. It is intended for **self-install only** and
 is **not published to Claude Desktop**; the release workflow continues to ship
 only the read-only bundle. The committed `manifest.json` is never modified —
@@ -56,7 +56,7 @@ the writes-enabled metadata is generated into a gitignored
 1. Copilot Money stores data in a local LevelDB/Firestore cache on macOS
 2. `src/core/decoder.ts` reads `.ldb` files and parses Firestore Protocol Buffers
 3. `src/core/database.ts` provides cached, filtered access to all collections
-4. `src/tools/tools.ts` implements 31 MCP tools (17 read + 14 write)
+4. `src/tools/tools.ts` implements 34 MCP tools (17 read + 17 write)
 5. `src/server.ts` handles MCP protocol communication and tool routing
 6. Write tools use `src/core/graphql/` to call Copilot's GraphQL API at `app.copilot.money/api/graphql`
 
@@ -92,7 +92,7 @@ src/
 
 ### Key Files
 
-- **`src/tools/tools.ts`** — All 31 tools as async methods in `CopilotMoneyTools`. Read tool schemas in `createToolSchemas()`, write tool schemas in `createWriteToolSchemas()`.
+- **`src/tools/tools.ts`** — All 34 tools as async methods in `CopilotMoneyTools`. Read tool schemas in `createToolSchemas()`, write tool schemas in `createWriteToolSchemas()`.
 - **`src/core/database.ts`** — `CopilotDatabase` class with 5-minute cache TTL, batch loading via `decodeAllCollectionsIsolated()` (worker thread), and filtered accessors.
 - **`src/core/decoder.ts`** — Binary decoder that reads LevelDB and parses Firestore Protocol Buffers. Decodes 30+ collection paths.
 - **`src/server.ts`** — MCP server with tool routing switch. `WRITE_TOOLS` set gates write operations behind the `--write` flag.

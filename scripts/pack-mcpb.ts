@@ -80,7 +80,7 @@ try {
 
   if (writeMode) {
     // Replace the read-only manifest.json with the writes-enabled one so the
-    // bundled metadata advertises all 30 tools and passes --write to the CLI.
+    // bundled metadata advertises all 34 tools and passes --write to the CLI.
     copyFileSync(writeManifestPath, join(stagingDir, 'manifest.json'));
   }
 

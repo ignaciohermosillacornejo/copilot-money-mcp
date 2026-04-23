@@ -1,6 +1,6 @@
 # Copilot Money MCP Server
 
-MCP (Model Context Protocol) server that enables AI-powered queries and management of Copilot Money personal finance data. Reads come from the locally cached Firestore database (LevelDB + Protocol Buffers); writes go through Copilot's GraphQL API at `app.copilot.money/api/graphql`. 31 tools (17 read + 14 write). Read-only by default, write tools opt-in via `--write` flag.
+MCP (Model Context Protocol) server that enables AI-powered queries and management of Copilot Money personal finance data. Reads come from the locally cached Firestore database (LevelDB + Protocol Buffers); writes go through Copilot's GraphQL API at `app.copilot.money/api/graphql`. 34 tools (17 read + 17 write). Read-only by default, write tools opt-in via `--write` flag.
 
 ## Quick Reference
 
@@ -39,7 +39,7 @@ src/
 │   ├── category.ts     # Category mappings (Plaid taxonomy)
 │   └── ...             # Other entity schemas (30+ models)
 ├── tools/
-│   └── tools.ts        # All MCP tool implementations (31 tools)
+│   └── tools.ts        # All MCP tool implementations (34 tools)
 ├── utils/
 │   ├── date.ts         # Date period parsing (this_month, last_30_days, etc.)
 │   └── categories.ts   # Category name resolution
@@ -49,7 +49,7 @@ src/
 
 ## Key Files
 
-- **`src/tools/tools.ts`** - All 31 MCP tools (17 read + 14 write) are implemented here as async methods in the `CopilotMoneyTools` class. Read schemas in `createToolSchemas()`, write schemas in `createWriteToolSchemas()`.
+- **`src/tools/tools.ts`** - All 34 MCP tools (17 read + 17 write) are implemented here as async methods in the `CopilotMoneyTools` class. Read schemas in `createToolSchemas()`, write schemas in `createWriteToolSchemas()`.
 - **`src/core/database.ts`** - `CopilotDatabase` class with methods like `getTransactions()`, `getAccounts()`, `getIncome()`, etc.
 - **`src/core/decoder.ts`** - Binary decoder that reads LevelDB files and parses Firestore Protocol Buffers.
 - **`manifest.json`** - MCP bundle metadata for .mcpb packaging.
