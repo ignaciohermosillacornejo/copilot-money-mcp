@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-04-23
+
+### Added
+
+- **Four new transaction write tools** bringing the write surface to 17 (total: 17 read + 17 write = 34 tools). All mirror the shapes Copilot's own web app uses via GraphQL:
+  - **`create_transaction`** ([#320](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/320)) — add a manual transaction to a non-Plaid account. Supports `internal_transfer` flag, amount bounds, and is wired to patch the in-memory cache so a subsequent `get_transactions` returns the new row without `refresh_database`.
+  - **`delete_transaction`** ([#321](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/321)) — delete a manual transaction. Marked `destructiveHint: true`.
+  - **`add_transaction_to_recurring`** ([#322](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/322)) — link an existing transaction to an existing recurring rule (the counterpart to `create_recurring`, which seeds a fresh rule).
+  - **`split_transaction`** ([#323](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/323)) — split one transaction into N children with per-child amount, category, note, and tags. Marked `destructiveHint: true` because the parent transaction's original fields become shared state across the children.
+- **Split-transaction awareness in `get_transactions`** ([#315](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/315)) — transactions now surface `split_children` / `split_parent_id` so agents can reason about splits, and the spending aggregators stop double-counting a parent plus its children.
+- **Decoder schema-drop instrumentation** — `validateOrWarn` helper ([#309](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/309), [#311](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/311)) and `warnUnreadFields` wired into all 29 collection processors ([#316](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/316)). New or renamed Copilot fields that we were silently dropping now log a one-line warning to stderr instead of disappearing. Combined with [#317](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/317), which closed every real-DB field coverage gap visible via the decode-coverage script.
+- **GraphQL reconnaissance catalog** — `docs/graphql/` gained a full sweep of hidden mutations plus a tested-absent catalog documenting which app operations have no web-GraphQL equivalent ([#319](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/319), [#324](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/324)).
+- **`/finance-cleanup` structural audit** ([#312](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/312)) — cross-category spending pattern detection and matcher-state persistence so repeated runs don't re-examine the same merchants.
+- **Smoke test coverage for transaction writes** ([#327](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/327)) — `scripts/smoke-graphql.ts` gained a transactions-write section exercising the four new tools end-to-end against a real account.
+
+### Fixed
+
+- **`get_holdings` no longer crashes on newly nullable fields** ([#302](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/302), [#310](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/310)) — Copilot's recent schema change made `vested_quantity` / `vested_value` nullable on holdings; the Zod schemas were updated to allow `null` so RSU-bearing accounts stopped failing validation.
+
+### Changed
+
+- CI: `actions/upload-artifact` 4.6.2 → 7.0.1 ([#313](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/313)); dev-dependencies group bump ([#314](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/314)).
+- `CLAUDE.md` gained a lockfile troubleshooting note; stale `bun.lockb` references purged ([#328](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/328)).
+- README: Glama MCP server score badge added ([#299](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/299)).
+
 ## [2.0.1] - 2026-04-16
 
 ### Added
