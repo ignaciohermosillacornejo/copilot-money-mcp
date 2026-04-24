@@ -1373,3 +1373,39 @@ fragment TransactionPaginationFields on TransactionPagination {
   }
 }
 ```
+
+## TransactionFilter shape (captured 2026-04-23 via Chrome DevTools)
+
+Captured from live web-UI network traffic. Supersedes earlier
+"captured variables" section.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `dates` | `[DateRangeInput!]` | Array of `{ from, to }` where both are `YYYY-MM-DD`. Multiple ranges permitted. |
+| `accountIds` | `[AccountRefInput!]` | Array of `{ accountId, itemId }` — compound IDs. Not a flat string array. |
+| `categoryIds` | `[ID!]` | Flat array of opaque string IDs. |
+| `recurringIds` | `[ID!]` | Flat array of opaque string IDs. |
+| `tagIds` | `[ID!]` | Flat array of opaque string IDs. |
+| `types` | `[TransactionType!]` | Enum: `REGULAR \| INCOME \| INTERNAL_TRANSFER \| RECURRING`. Note: `RECURRING` is not in the write-side `TransactionType` enum. |
+| `isReviewed` | `Boolean` | `true` = reviewed, `false` = not reviewed. |
+| `matchString` | `String` | Full-text match against merchant name. Used internally by the "similar transactions" panel; not exposed in UI filters. |
+
+## TransactionSort shape
+
+```graphql
+input TransactionSort {
+  field: TransactionSortField!   # DATE | AMOUNT
+  direction: SortDirection!      # ASC | DESC
+}
+```
+
+Passed as `sort: [TransactionSort!]`. The web UI default is
+`[{field: DATE, direction: DESC}]`.
+
+## Related operation — transactionsFeed
+
+The web UI uses `transactionsFeed(...)` (aliased as `feed:`) with an
+extra `$month: Boolean = false` variable that groups results by month
+in the response. `transactions` returns the plainer
+`TransactionPagination` shape and is the query the MCP live-reads
+path uses. Both accept the same `TransactionFilter`.
