@@ -44,7 +44,7 @@ src/
 │   ├── date.ts         # Date period parsing (this_month, last_30_days, etc.)
 │   └── categories.ts   # Category name resolution
 ├── server.ts           # MCP server (CopilotMoneyServer class)
-└── cli.ts              # CLI entry point with --db-path and --write options
+└── cli.ts              # CLI entry point with --db-path, --write, --live-reads options
 ```
 
 ## Key Files
@@ -81,6 +81,7 @@ Each MCP tool follows this pattern:
 
 - **Privacy First**: Reads are 100% local with zero network requests. Opt-in writes (`--write`) send authenticated GraphQL requests directly to Copilot Money's own backend at `app.copilot.money/api/graphql` via `src/core/graphql/` — no third-party services, no project-operated servers.
 - **Read-Only by Default**: Write tools require `--write` flag
+- **Live Reads (Opt-in)**: `--live-reads` swaps cache-backed `get_transactions` for GraphQL-backed `get_transactions_live`. See `docs/graphql-live-reads.md`. Requires browser session auth.
 - **Database Location**: `~/Library/Containers/com.copilot.production/Data/Library/Application Support/firestore/__FIRAPP_DEFAULT/copilot-production-22904/main`
 
 ## Common Tasks
