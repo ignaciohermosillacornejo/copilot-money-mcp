@@ -292,6 +292,11 @@ export class LiveTransactionsTools {
           `transaction_id lookup in live mode requires account_id and item_id. All three are returned together by a prior get_transactions_live call.`
         );
       }
+      if (!opts.start_date && !opts.end_date && !opts.period) {
+        throw new Error(
+          `transaction_id lookup in live mode also requires a date range (start_date, end_date, or period) to bound the search. Pass the date from the prior get_transactions_live result — the server has no single-transaction-by-id filter, so unbounded lookups paginate the whole account history.`
+        );
+      }
     }
   }
 }
@@ -301,7 +306,7 @@ export function createLiveToolSchemas(): ToolSchema[] {
     {
       name: 'get_transactions_live',
       description:
-        "Reads transactions live from Copilot's GraphQL API (requires --live-reads flag and network connectivity). Use this when the user asks about historical date ranges that may not be in the local cache, or when fresh data is required. Unlike get_transactions, the following filters are NOT supported and must not be included: city, lat, lon, radius_km, region, country, transaction_type=foreign, transaction_type=duplicates, and exclude_split_parents=false — any of these returns an error telling you to retry without the parameter. Single-transaction lookup requires all three of transaction_id, account_id, item_id. If the backend is unreachable, this tool returns an isError result; it does NOT fall back to the local cache.",
+        "Reads transactions live from Copilot's GraphQL API (requires --live-reads flag and network connectivity). Use this when the user asks about historical date ranges that may not be in the local cache, or when fresh data is required. Unlike get_transactions, the following filters are NOT supported and must not be included: city, lat, lon, radius_km, region, country, transaction_type=foreign, transaction_type=duplicates, and exclude_split_parents=false — any of these returns an error telling you to retry without the parameter. Single-transaction lookup requires transaction_id + account_id + item_id AND a date range (start_date, end_date, or period) — pass the transaction's date from the prior list result; the server has no single-row-by-id filter so unbounded lookups paginate the whole account. If the backend is unreachable, this tool returns an isError result; it does NOT fall back to the local cache.",
       inputSchema: {
         type: 'object',
         properties: {
