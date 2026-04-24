@@ -45,6 +45,8 @@ fragment TransactionFields on Transaction {
   suggestedCategoryIds
   datetime @client
   recurringId
+  parentId
+  isoCurrencyCode
   categoryId
   isReviewed
   accountId
