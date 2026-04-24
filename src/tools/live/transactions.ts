@@ -10,7 +10,13 @@
  */
 
 import type { LiveCopilotDatabase } from '../../core/live-database.js';
-import type { ReadTransactionType } from '../../core/graphql/queries/transactions.js';
+import type {
+  AccountRef,
+  ReadTransactionType,
+  TransactionNode,
+} from '../../core/graphql/queries/transactions.js';
+import { normalizeMerchantName } from '../tools.js';
+import { parsePeriod } from '../../utils/date.js';
 
 export type LiveTransactionType = 'refunds' | 'credits' | 'hsa_eligible' | 'tagged';
 
@@ -73,24 +79,182 @@ const UNSUPPORTED_KEYS = ['city', 'lat', 'lon', 'radius_km', 'region', 'country'
 export class LiveTransactionsTools {
   constructor(private readonly live: LiveCopilotDatabase) {}
 
-  getTransactions(opts: GetTransactionsLiveOptions): Promise<GetTransactionsLiveResult> {
-    try {
-      this.validate(opts);
-    } catch (err) {
-      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
-      return Promise.reject(err);
+  async getTransactions(opts: GetTransactionsLiveOptions): Promise<GetTransactionsLiveResult> {
+    this.validate(opts);
+
+    if (opts.transaction_id) {
+      return this.singleTransactionLookup(opts);
     }
-    // Filter translation + fetch + post-filter + enrichment lands in Task 8.
-    // Phase-1 placeholder: empty result so validation tests can pass.
-    // TODO(Task 8): Use this.live to fetch from GraphQL.
-    void this.live;
-    return Promise.resolve({
-      count: 0,
-      total_count: 0,
+
+    const [start_date, end_date] = opts.period
+      ? parsePeriod(opts.period)
+      : [opts.start_date, opts.end_date];
+
+    const accountRefs = opts.account_id
+      ? [await this.resolveAccountRef(opts.account_id)]
+      : undefined;
+
+    const categoryIds = opts.category ? [opts.category] : undefined;
+
+    const tagIds = opts.tag ? await this.resolveTagIds(opts.tag) : undefined;
+
+    const matchString = opts.query ?? opts.merchant;
+
+    const types: ReadTransactionType[] | undefined =
+      opts.exclude_transfers !== false ? ['REGULAR', 'INCOME', 'RECURRING'] : undefined;
+
+    const nodes = await this.live.getTransactions({
+      startDate: start_date,
+      endDate: end_date,
+      accountRefs,
+      categoryIds,
+      tagIds,
+      types,
+      matchString,
+    });
+
+    const filtered = await this.postFilter(nodes, opts);
+    return this.paginateAndEnrich(filtered, opts);
+  }
+
+  private async singleTransactionLookup(
+    opts: GetTransactionsLiveOptions
+  ): Promise<GetTransactionsLiveResult> {
+    const ref = await this.resolveAccountRef(opts.account_id!);
+    const nodes = await this.live.getTransactions({
+      accountRefs: [ref],
+      startDate: opts.start_date,
+      endDate: opts.end_date,
+    });
+    const match = nodes.find((n) => n.id === opts.transaction_id);
+    if (!match) {
+      return { count: 0, total_count: 0, offset: 0, has_more: false, transactions: [] };
+    }
+    const enriched = await this.enrich([match]);
+    return {
+      count: 1,
+      total_count: 1,
       offset: 0,
       has_more: false,
-      transactions: [],
-    });
+      transactions: enriched,
+    };
+  }
+
+  private async resolveAccountRef(accountId: string): Promise<AccountRef> {
+    const accounts = await this.live.getCache().getAccounts();
+    const match = accounts.find((a) => a.account_id === accountId);
+    if (!match || !match.item_id) {
+      throw new Error(
+        `Account '${accountId}' not found in local cache. Refresh the cache (open the Copilot app) or pass a valid account_id.`
+      );
+    }
+    return { accountId: match.account_id, itemId: match.item_id };
+  }
+
+  private async resolveTagIds(tagName: string): Promise<string[]> {
+    const stripped = tagName.startsWith('#') ? tagName.slice(1) : tagName;
+    const tags = await this.live.getCache().getTags();
+    const lowered = stripped.toLowerCase();
+    const match = tags.find((t) => t.name?.toLowerCase() === lowered);
+    if (!match) {
+      throw new Error(
+        `Tag '${tagName}' not found. Create the tag first or pass an existing tag name.`
+      );
+    }
+    return [match.tag_id];
+  }
+
+  private async postFilter(
+    nodes: TransactionNode[],
+    opts: GetTransactionsLiveOptions
+  ): Promise<TransactionNode[]> {
+    let result = nodes;
+
+    if (opts.exclude_transfers !== false) {
+      result = result.filter((n) => n.type !== 'INTERNAL_TRANSFER');
+    }
+
+    if (opts.exclude_excluded !== false) {
+      const cats = await this.live.getCache().getUserCategories();
+      const excludedCatIds = new Set(
+        cats.filter((c) => c.excluded === true).map((c) => c.category_id)
+      );
+      result = result.filter((n) => !n.categoryId || !excludedCatIds.has(n.categoryId));
+    }
+
+    if (opts.min_amount !== undefined) {
+      const min = opts.min_amount;
+      result = result.filter((n) => Math.abs(n.amount) >= min);
+    }
+    if (opts.max_amount !== undefined) {
+      const max = opts.max_amount;
+      result = result.filter((n) => Math.abs(n.amount) <= max);
+    }
+
+    if (opts.pending !== undefined) {
+      result = result.filter((n) => n.isPending === opts.pending);
+    }
+
+    if (opts.transaction_type === 'tagged') {
+      result = result.filter((n) => n.tags.length > 0);
+    } else if (opts.transaction_type === 'refunds') {
+      result = result.filter((n) => n.amount < 0);
+    } else if (opts.transaction_type === 'credits') {
+      result = result.filter((n) => n.amount < 0 && n.type === 'INCOME');
+    } else if (opts.transaction_type === 'hsa_eligible') {
+      const map = await this.live.getCache().getCategoryNameMap();
+      result = result.filter((n) => {
+        if (!n.categoryId) return false;
+        const name = (map.get(n.categoryId) ?? '').toLowerCase();
+        return name.includes('health') || name.includes('medical');
+      });
+    }
+
+    return result;
+  }
+
+  private async paginateAndEnrich(
+    rows: TransactionNode[],
+    opts: GetTransactionsLiveOptions
+  ): Promise<GetTransactionsLiveResult> {
+    const limit = opts.limit ?? 100;
+    const offset = opts.offset ?? 0;
+    const total = rows.length;
+    const sliced = rows.slice(offset, offset + limit);
+    const enriched = await this.enrich(sliced);
+    return {
+      count: enriched.length,
+      total_count: total,
+      offset,
+      has_more: offset + limit < total,
+      transactions: enriched,
+    };
+  }
+
+  private async enrich(rows: TransactionNode[]): Promise<EnrichedTransaction[]> {
+    const catMap = await this.live.getCache().getCategoryNameMap();
+    return rows.map((n) => ({
+      transaction_id: n.id,
+      account_id: n.accountId,
+      item_id: n.itemId,
+      category_id: n.categoryId,
+      category_name: n.categoryId ? catMap.get(n.categoryId) : undefined,
+      recurring_id: n.recurringId,
+      parent_transaction_id: n.parentId,
+      amount: n.amount,
+      date: n.date,
+      name: n.name,
+      normalized_merchant: normalizeMerchantName(n.name),
+      type: n.type,
+      user_reviewed: n.isReviewed,
+      pending: n.isPending,
+      user_notes: n.userNotes,
+      tip_amount: n.tipAmount,
+      suggested_category_ids: n.suggestedCategoryIds,
+      iso_currency_code: n.isoCurrencyCode,
+      tag_ids: n.tags.map((t) => t.id),
+      created_timestamp: n.createdAt,
+    }));
   }
 
   private validate(opts: GetTransactionsLiveOptions): void {
