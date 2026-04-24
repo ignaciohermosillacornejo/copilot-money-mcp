@@ -130,3 +130,19 @@ export class LiveCopilotDatabase {
     });
   }
 }
+
+/**
+ * Validate that the live-reads auth path works end-to-end before
+ * registering any live tools. Sends one cheap GraphQL query that
+ * exercises token extraction → Firebase exchange → endpoint →
+ * schema validity → permission. Any failure is fatal; callers
+ * should log and exit non-zero, not register a dead tool.
+ */
+export async function preflightLiveAuth(client: GraphQLClient): Promise<void> {
+  await fetchTransactionsPage(client, {
+    first: 1,
+    after: null,
+    filter: null,
+    sort: buildTransactionSort(),
+  });
+}
