@@ -15,6 +15,7 @@ import type {
   ReadTransactionType,
   TransactionNode,
 } from '../../core/graphql/queries/transactions.js';
+import type { ToolSchema } from '../tools.js';
 import { normalizeMerchantName } from '../tools.js';
 import { parsePeriod } from '../../utils/date.js';
 
@@ -293,4 +294,112 @@ export class LiveTransactionsTools {
       }
     }
   }
+}
+
+export function createLiveToolSchemas(): ToolSchema[] {
+  return [
+    {
+      name: 'get_transactions_live',
+      description:
+        "Reads transactions live from Copilot's GraphQL API (requires --live-reads flag and network connectivity). Use this when the user asks about historical date ranges that may not be in the local cache, or when fresh data is required. Unlike get_transactions, the following filters are NOT supported and must not be included: city, lat, lon, radius_km, region, country, transaction_type=foreign, transaction_type=duplicates, and exclude_split_parents=false — any of these returns an error telling you to retry without the parameter. Single-transaction lookup requires all three of transaction_id, account_id, item_id. If the backend is unreachable, this tool returns an isError result; it does NOT fall back to the local cache.",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          period: {
+            type: 'string',
+            description:
+              'Period shorthand: this_month, last_month, last_7_days, last_30_days, last_90_days, ytd, this_year, last_year',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Start date (YYYY-MM-DD)',
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+          },
+          end_date: {
+            type: 'string',
+            description: 'End date (YYYY-MM-DD)',
+            pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+          },
+          category: { type: 'string', description: 'Filter by category ID' },
+          merchant: {
+            type: 'string',
+            description: 'Filter by merchant name (server-side matchString, substring match)',
+          },
+          account_id: { type: 'string', description: 'Filter by account ID' },
+          item_id: {
+            type: 'string',
+            description:
+              'Item ID paired with account_id. Required only when using transaction_id to fetch a single transaction.',
+          },
+          min_amount: {
+            type: 'number',
+            description: 'Minimum transaction amount (absolute value)',
+          },
+          max_amount: {
+            type: 'number',
+            description: 'Maximum transaction amount (absolute value)',
+          },
+          limit: {
+            type: 'integer',
+            description: 'Maximum results per page (default 100)',
+            default: 100,
+          },
+          offset: {
+            type: 'integer',
+            description: 'Offset for pagination (default 0)',
+            default: 0,
+          },
+          exclude_transfers: {
+            type: 'boolean',
+            description:
+              'Exclude internal transfers between accounts (default: true). When true, filter types=[REGULAR, INCOME, RECURRING].',
+            default: true,
+          },
+          exclude_deleted: {
+            type: 'boolean',
+            description:
+              'Exclude deleted transactions (default: true). No-op in live mode — the server already excludes deleted rows.',
+            default: true,
+          },
+          exclude_excluded: {
+            type: 'boolean',
+            description:
+              'Exclude transactions in user-excluded categories (default: true). Cross-referenced against Category.isExcluded from the local cache.',
+            default: true,
+          },
+          exclude_split_parents: {
+            type: 'boolean',
+            description:
+              'Must be true or omitted — the server omits split parents from the transactions query. Passing false returns an error.',
+            default: true,
+          },
+          pending: {
+            type: 'boolean',
+            description: 'Filter by pending status (true=pending only, false=settled only)',
+          },
+          transaction_id: {
+            type: 'string',
+            description:
+              'Get one transaction by ID — REQUIRES account_id and item_id alongside (all three come from a previous get_transactions_live result).',
+          },
+          query: {
+            type: 'string',
+            description:
+              'Free-text merchant search (server-side matchString). Equivalent to passing merchant.',
+          },
+          transaction_type: {
+            type: 'string',
+            enum: ['refunds', 'credits', 'hsa_eligible', 'tagged'],
+            description:
+              'Filter by special type. Note: foreign and duplicates are NOT supported in live mode.',
+          },
+          tag: {
+            type: 'string',
+            description: 'Filter by tag name (resolved to tagId via local cache)',
+          },
+        },
+      },
+      annotations: { readOnlyHint: true },
+    },
+  ];
 }

@@ -1,5 +1,8 @@
 import { describe, test, expect, mock } from 'bun:test';
-import { LiveTransactionsTools } from '../../../src/tools/live/transactions.js';
+import {
+  LiveTransactionsTools,
+  createLiveToolSchemas,
+} from '../../../src/tools/live/transactions.js';
 import { LiveCopilotDatabase } from '../../../src/core/live-database.js';
 import type { GraphQLClient } from '../../../src/core/graphql/client.js';
 import type { CopilotDatabase } from '../../../src/core/database.js';
@@ -226,5 +229,43 @@ describe('LiveTransactionsTools — account resolution', () => {
     await expect(tools.getTransactions({ account_id: 'nope' })).rejects.toThrow(
       /account.*not found/i
     );
+  });
+});
+
+describe('createLiveToolSchemas', () => {
+  test('registers exactly one tool named get_transactions_live', () => {
+    const schemas = createLiveToolSchemas();
+    expect(schemas).toHaveLength(1);
+    expect(schemas[0]!.name).toBe('get_transactions_live');
+  });
+
+  test('description enumerates unsupported filters and 3-ID rule', () => {
+    const { description } = createLiveToolSchemas()[0]!;
+    expect(description).toMatch(/city|lat|lon|region|country/);
+    expect(description).toMatch(/foreign|duplicates/);
+    expect(description).toMatch(/account_id.*item_id/);
+  });
+
+  test('input schema omits unsupported filters', () => {
+    const { inputSchema } = createLiveToolSchemas()[0]!;
+    const props = (inputSchema as { properties: Record<string, unknown> }).properties;
+    expect(props.city).toBeUndefined();
+    expect(props.lat).toBeUndefined();
+    expect(props.lon).toBeUndefined();
+    expect(props.radius_km).toBeUndefined();
+    expect(props.region).toBeUndefined();
+    expect(props.country).toBeUndefined();
+  });
+
+  test('transaction_type enum excludes foreign and duplicates', () => {
+    const { inputSchema } = createLiveToolSchemas()[0]!;
+    const ttype = (inputSchema as { properties: { transaction_type?: { enum?: string[] } } })
+      .properties.transaction_type;
+    expect(ttype?.enum).toEqual(['refunds', 'credits', 'hsa_eligible', 'tagged']);
+  });
+
+  test('readOnlyHint is true', () => {
+    const { annotations } = createLiveToolSchemas()[0]!;
+    expect(annotations?.readOnlyHint).toBe(true);
   });
 });
