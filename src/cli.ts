@@ -13,12 +13,14 @@ function parseArgs(): {
   verbose: boolean;
   timeoutMs?: number;
   writeFlagSeen: boolean;
+  liveReadsEnabled: boolean;
 } {
   const args = process.argv.slice(2);
   let dbPath: string | undefined;
   let verbose = false;
   let timeoutMs: number | undefined;
   let writeFlagSeen = false;
+  let liveReadsEnabled = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -42,6 +44,8 @@ function parseArgs(): {
       verbose = true;
     } else if (arg === '--write') {
       writeFlagSeen = true;
+    } else if (arg === '--live-reads') {
+      liveReadsEnabled = true;
     } else if (arg === '--help' || arg === '-h') {
       console.error(`
 Copilot Money MCP Server - Expose financial data through MCP
@@ -53,6 +57,7 @@ Options:
   --db-path <path>    Path to LevelDB database (default: Copilot Money's default location)
   --timeout <ms>      Decode timeout in milliseconds (default: 90000 = 90 seconds)
   --write             Enable write tools (sends authenticated requests to Copilot Money's GraphQL API)
+  --live-reads        Enable GraphQL-backed get_transactions_live (replaces cache-backed get_transactions). Requires authenticated browser session at app.copilot.money.
   --verbose, -v       Enable verbose logging
   --help, -h          Show this help message
 
@@ -65,7 +70,7 @@ Environment:
     }
   }
 
-  return { dbPath, verbose, timeoutMs, writeFlagSeen };
+  return { dbPath, verbose, timeoutMs, writeFlagSeen, liveReadsEnabled };
 }
 
 /**
@@ -94,7 +99,7 @@ function configureLogging(verbose: boolean): void {
  * Main entry point.
  */
 async function main(): Promise<void> {
-  const { dbPath, verbose, timeoutMs, writeFlagSeen } = parseArgs();
+  const { dbPath, verbose, timeoutMs, writeFlagSeen, liveReadsEnabled } = parseArgs();
 
   configureLogging(verbose);
 
@@ -110,10 +115,13 @@ async function main(): Promise<void> {
       if (writeFlagSeen) {
         console.log('Write tools enabled (--write)');
       }
+      if (liveReadsEnabled) {
+        console.log('Live reads enabled (--live-reads)');
+      }
       /* eslint-enable no-console */
     }
 
-    await runServer(dbPath, timeoutMs, writeFlagSeen);
+    await runServer(dbPath, timeoutMs, writeFlagSeen, liveReadsEnabled);
   } catch (error) {
     console.error('Server error:', error);
     process.exit(1);
