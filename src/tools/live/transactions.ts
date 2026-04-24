@@ -122,10 +122,16 @@ export class LiveTransactionsTools {
     opts: GetTransactionsLiveOptions
   ): Promise<GetTransactionsLiveResult> {
     const ref = await this.resolveAccountRef(opts.account_id!);
+    // Resolve period → [start, end] exactly like the main path, so a caller
+    // passing only `period` still produces a bounded fetch. validate() already
+    // guarantees at least one of (start_date, end_date, period) is present.
+    const [start_date, end_date] = opts.period
+      ? parsePeriod(opts.period)
+      : [opts.start_date, opts.end_date];
     const nodes = await this.live.getTransactions({
       accountRefs: [ref],
-      startDate: opts.start_date,
-      endDate: opts.end_date,
+      startDate: start_date,
+      endDate: end_date,
     });
     const match = nodes.find((n) => n.id === opts.transaction_id);
     if (!match) {
