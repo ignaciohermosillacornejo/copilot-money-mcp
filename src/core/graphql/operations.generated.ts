@@ -35,3 +35,42 @@ export const EDIT_BUDGET = "mutation EditBudget($categoryId: ID!, $input: EditCa
 export const EDIT_BUDGET_MONTHLY = "mutation EditBudgetMonthly($categoryId: ID!, $input: [EditCategoryBudgetMonthlyInput!]!) {\n  editCategoryBudgetMonthly(categoryId: $categoryId, input: $input)\n}";
 
 export const EDIT_ACCOUNT = "mutation EditAccount($itemId: ID!, $id: ID!, $input: EditAccountInput!) {\n  editAccount(itemId: $itemId, id: $id, input: $input) {\n    __typename\n    account {\n      __typename\n      ...AccountFields\n    }\n  }\n}\n\nfragment AccountFields on Account {\n  __typename\n  hasHistoricalUpdates\n  latestBalanceUpdate\n  hasLiveBalance\n  institutionId\n  isUserHidden\n  isUserClosed\n  liveBalance\n  isManual\n  balance\n  subType\n  itemId\n  limit\n  color\n  name\n  type\n  mask\n  id\n}";
+
+// READ-ONLY QUERIES (manually appended — read-side generator does not exist yet)
+
+export const TRANSACTIONS = `query Transactions($first: Int, $after: String, $filter: TransactionFilter, $sort: [TransactionSort!]) {
+  transactions(first: $first, after: $after, filter: $filter, sort: $sort) {
+    __typename
+    edges {
+      __typename
+      cursor
+      node {
+        __typename
+        id
+        accountId
+        itemId
+        categoryId
+        recurringId
+        parentId
+        isReviewed
+        isPending
+        amount
+        date
+        name
+        type
+        userNotes
+        tipAmount
+        suggestedCategoryIds
+        isoCurrencyCode
+        createdAt
+        tags { __typename id name colorName }
+        goal { __typename id name }
+      }
+    }
+    pageInfo {
+      __typename
+      endCursor
+      hasNextPage
+    }
+  }
+}`;
