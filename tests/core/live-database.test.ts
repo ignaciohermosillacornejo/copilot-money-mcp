@@ -1,5 +1,5 @@
 import { describe, test, expect, mock } from 'bun:test';
-import { LiveCopilotDatabase } from '../../src/core/live-database.js';
+import { LiveCopilotDatabase, preflightLiveAuth } from '../../src/core/live-database.js';
 import { GraphQLError } from '../../src/core/graphql/client.js';
 import type { GraphQLClient } from '../../src/core/graphql/client.js';
 import type { CopilotDatabase } from '../../src/core/database.js';
@@ -178,5 +178,37 @@ describe('LiveCopilotDatabase.getTransactions', () => {
     const rows = await live.getTransactions({});
     expect(rows).toHaveLength(0);
     expect(calls).toBe(2);
+  });
+});
+
+describe('preflightLiveAuth', () => {
+  test('resolves when probe returns a page', async () => {
+    const client = {
+      mutate: mock(),
+      query: mock(() =>
+        Promise.resolve({
+          transactions: { edges: [], pageInfo: { endCursor: null, hasNextPage: false } },
+        })
+      ),
+    } as unknown as GraphQLClient;
+    await expect(preflightLiveAuth(client)).resolves.toBeUndefined();
+  });
+
+  test('rejects with NETWORK code preserved', async () => {
+    const client = {
+      mutate: mock(),
+      query: mock(() => Promise.reject(new GraphQLError('NETWORK', 'down', 'Transactions'))),
+    } as unknown as GraphQLClient;
+    await expect(preflightLiveAuth(client)).rejects.toMatchObject({ code: 'NETWORK' });
+  });
+
+  test('rejects with AUTH_FAILED when token rejected', async () => {
+    const client = {
+      mutate: mock(),
+      query: mock(() => Promise.reject(new GraphQLError('AUTH_FAILED', '401', 'Transactions'))),
+    } as unknown as GraphQLClient;
+    await expect(preflightLiveAuth(client)).rejects.toMatchObject({
+      code: 'AUTH_FAILED',
+    });
   });
 });
