@@ -44,7 +44,7 @@ These translate into Copilot's `TransactionFilter` and run on the server:
 - `category` (as ID) → `filter.categoryIds: [id]`
 - `tag` (by name) → resolved via local tag cache → `filter.tagIds: [id]`
 - `merchant` or `query` → `filter.matchString` (substring match against name)
-- `exclude_transfers: true` → `filter.types: [REGULAR, INCOME, RECURRING]`
+- `exclude_transfers: true` → `filter.types: [REGULAR, INCOME]` (the enum is only `REGULAR | INCOME | INTERNAL_TRANSFER` — the UI's "Recurring" filter is `recurringIds`, not a type)
 
 ### Client-side post-filters (applied after pagination)
 

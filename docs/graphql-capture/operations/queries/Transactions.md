@@ -1386,7 +1386,7 @@ Captured from live web-UI network traffic. Supersedes earlier
 | `categoryIds` | `[ID!]` | Flat array of opaque string IDs. |
 | `recurringIds` | `[ID!]` | Flat array of opaque string IDs. |
 | `tagIds` | `[ID!]` | Flat array of opaque string IDs. |
-| `types` | `[TransactionType!]` | Enum: `REGULAR \| INCOME \| INTERNAL_TRANSFER \| RECURRING`. Note: `RECURRING` is not in the write-side `TransactionType` enum. |
+| `types` | `[TransactionType!]` | Enum: `REGULAR \| INCOME \| INTERNAL_TRANSFER`. Verified against the live endpoint 2026-04-24 — passing `RECURRING` returns `BAD_USER_INPUT`. The UI's "Recurring" filter maps to `recurringIds` (series linkage), not a fourth enum value. |
 | `isReviewed` | `Boolean` | `true` = reviewed, `false` = not reviewed. |
 | `matchString` | `String` | Full-text match against merchant name. Used internally by the "similar transactions" panel; not exposed in UI filters. |
 
