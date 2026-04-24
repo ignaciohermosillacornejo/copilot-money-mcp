@@ -9,7 +9,16 @@
 import type { GraphQLClient } from '../client.js';
 import { TRANSACTIONS } from '../operations.generated.js';
 
-export type ReadTransactionType = 'REGULAR' | 'INCOME' | 'INTERNAL_TRANSFER' | 'RECURRING';
+/**
+ * TransactionType enum accepted by the read-side TransactionFilter.
+ *
+ * Verified against the live endpoint on 2026-04-24: the enum is exactly
+ * `REGULAR | INCOME | INTERNAL_TRANSFER`. The web UI shows "Recurring"
+ * as a filter option, but it maps to `recurringIds` (series linkage),
+ * not a fourth enum value — passing `RECURRING` returns
+ * BAD_USER_INPUT from the server.
+ */
+export type ReadTransactionType = 'REGULAR' | 'INCOME' | 'INTERNAL_TRANSFER';
 
 export interface DateRange {
   from: string; // YYYY-MM-DD

@@ -102,7 +102,7 @@ export class LiveTransactionsTools {
     const matchString = opts.query ?? opts.merchant;
 
     const types: ReadTransactionType[] | undefined =
-      opts.exclude_transfers !== false ? ['REGULAR', 'INCOME', 'RECURRING'] : undefined;
+      opts.exclude_transfers !== false ? ['REGULAR', 'INCOME'] : undefined;
 
     const nodes = await this.live.getTransactions({
       startDate: start_date,
@@ -363,7 +363,7 @@ export function createLiveToolSchemas(): ToolSchema[] {
           exclude_transfers: {
             type: 'boolean',
             description:
-              'Exclude internal transfers between accounts (default: true). When true, filter types=[REGULAR, INCOME, RECURRING].',
+              'Exclude internal transfers between accounts (default: true). When true, filter types=[REGULAR, INCOME].',
             default: true,
           },
           exclude_deleted: {
