@@ -31,7 +31,12 @@ const IN_SCOPE_MUTATIONS = [
   'EditAccount',
 ] as const;
 
+const IN_SCOPE_QUERIES = [
+  'Transactions',
+] as const;
+
 const CAPTURE_DIR = 'docs/graphql-capture/operations/mutations';
+const CAPTURE_DIR_QUERIES = 'docs/graphql-capture/operations/queries';
 const OUTPUT_PATH = 'src/core/graphql/operations.generated.ts';
 
 export function extractQueryBlock(markdown: string, mutationName: string): string {
@@ -132,9 +137,24 @@ function main(): void {
     lines.push('');
   }
 
+  if (IN_SCOPE_QUERIES.length > 0) {
+    lines.push('// ─── Queries ───');
+    lines.push('');
+    for (const name of IN_SCOPE_QUERIES) {
+      const path = resolve(CAPTURE_DIR_QUERIES, `${name}.md`);
+      const md = readFileSync(path, 'utf8');
+      const rawQuery = extractQueryBlock(md, name);
+      const transformed = addTypenameToSelectionSets(rawQuery);
+      lines.push(`export const ${constName(name)} = ${JSON.stringify(transformed)};`);
+      lines.push('');
+    }
+  }
+
   mkdirSync(dirname(OUTPUT_PATH), { recursive: true });
   writeFileSync(OUTPUT_PATH, lines.join('\n'));
-  console.log(`Wrote ${OUTPUT_PATH} with ${IN_SCOPE_MUTATIONS.length} operations`);
+  console.log(
+    `Wrote ${OUTPUT_PATH} with ${IN_SCOPE_MUTATIONS.length} mutations and ${IN_SCOPE_QUERIES.length} queries`
+  );
 }
 
 if (import.meta.main) {
