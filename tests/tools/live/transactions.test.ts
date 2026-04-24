@@ -241,6 +241,29 @@ describe('LiveTransactionsTools — account resolution', () => {
       /account.*not found/i
     );
   });
+
+  test('singleTransactionLookup resolves period → bounded startDate/endDate', async () => {
+    const live = mkLiveReturning([]);
+    const accounts: Account[] = [{ account_id: 'a1', item_id: 'i1' } as Account];
+    (live.getCache().getAccounts as ReturnType<typeof mock>).mockImplementation(() =>
+      Promise.resolve(accounts)
+    );
+    const spy = mock((_opts: unknown) => Promise.resolve([] as TransactionNode[]));
+    (live as unknown as { getTransactions: typeof spy }).getTransactions = spy;
+
+    const tools = new LiveTransactionsTools(live);
+    await tools.getTransactions({
+      transaction_id: 't1',
+      account_id: 'a1',
+      item_id: 'i1',
+      period: 'this_year',
+    });
+
+    const args = spy.mock.calls[0]![0] as { startDate?: string; endDate?: string };
+    // parsePeriod('this_year') returns concrete YYYY-MM-DD bounds; assert both are set.
+    expect(args.startDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(args.endDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
 });
 
 describe('createLiveToolSchemas', () => {
