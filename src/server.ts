@@ -149,6 +149,20 @@ export class CopilotMoneyServer {
       };
     }
 
+    // Block live-read tools when --live-reads is off (before db check — this is a
+    // configuration issue independent of cache availability).
+    if (name === 'get_transactions_live' && !this.liveTools) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'get_transactions_live is only available when the server runs with --live-reads.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
     // Check if database is available
     if (!this.db.isAvailable()) {
       return {
@@ -175,19 +189,10 @@ export class CopilotMoneyServer {
           break;
 
         case 'get_transactions_live':
-          if (!this.liveTools) {
-            return {
-              content: [
-                {
-                  type: 'text' as const,
-                  text: 'get_transactions_live is only available when the server runs with --live-reads.',
-                },
-              ],
-              isError: true,
-            };
-          }
-          result = await this.liveTools.getTransactions(
-            (typedArgs as Parameters<typeof this.liveTools.getTransactions>[0]) || {}
+          // liveTools non-null invariant enforced by the early guard above.
+          result = await this.liveTools!.getTransactions(
+            (typedArgs as Parameters<NonNullable<typeof this.liveTools>['getTransactions']>[0]) ||
+              {}
           );
           break;
 
