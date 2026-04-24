@@ -6,6 +6,9 @@
  * captured from Copilot's web UI on 2026-04-23.
  */
 
+import type { GraphQLClient } from '../client.js';
+import { TRANSACTIONS } from '../operations.generated.js';
+
 export type ReadTransactionType = 'REGULAR' | 'INCOME' | 'INTERNAL_TRANSFER' | 'RECURRING';
 
 export interface DateRange {
@@ -82,4 +85,136 @@ export function buildTransactionFilter(opts: BuildFilterOptions): TransactionFil
   }
 
   return hasAny ? filter : null;
+}
+
+export type TransactionSortField = 'DATE' | 'AMOUNT';
+export type SortDirection = 'ASC' | 'DESC';
+
+export interface TransactionSortInput {
+  field: TransactionSortField;
+  direction: SortDirection;
+}
+
+export function buildTransactionSort(
+  overrides?: Partial<TransactionSortInput>
+): TransactionSortInput[] {
+  return [
+    {
+      field: overrides?.field ?? 'DATE',
+      direction: overrides?.direction ?? 'DESC',
+    },
+  ];
+}
+
+export interface TransactionTag {
+  id: string;
+  name: string;
+  colorName: string;
+}
+
+export interface TransactionGoalRef {
+  id: string;
+  name: string;
+}
+
+export interface TransactionNode {
+  id: string;
+  accountId: string;
+  itemId: string;
+  categoryId: string | null;
+  recurringId: string | null;
+  parentId: string | null;
+  isReviewed: boolean;
+  isPending: boolean;
+  amount: number;
+  date: string;
+  name: string;
+  type: ReadTransactionType;
+  userNotes: string | null;
+  tipAmount: number | null;
+  suggestedCategoryIds: string[];
+  isoCurrencyCode: string | null;
+  createdAt: number;
+  tags: TransactionTag[];
+  goal: TransactionGoalRef | null;
+}
+
+export interface TransactionEdge {
+  cursor: string;
+  node: TransactionNode;
+}
+
+export interface TransactionsPage {
+  edges: TransactionEdge[];
+  pageInfo: { endCursor: string | null; hasNextPage: boolean };
+}
+
+export interface PaginateOptions {
+  startDate?: string;
+}
+
+export type TransactionsFetcher = (after: string | null) => Promise<TransactionsPage>;
+
+/**
+ * Paginate a Transactions query until no more pages are needed.
+ *
+ * Pure pagination driver — the fetcher callback owns the actual
+ * network call. Early-exits when the trailing edge of a page precedes
+ * opts.startDate (requires DATE DESC sort to be meaningful). Otherwise
+ * follows pageInfo.endCursor until pageInfo.hasNextPage === false.
+ */
+export async function paginateTransactions(
+  fetcher: TransactionsFetcher,
+  opts: PaginateOptions
+): Promise<TransactionNode[]> {
+  const collected: TransactionNode[] = [];
+  let cursor: string | null = null;
+
+  while (true) {
+    const page = await fetcher(cursor);
+    for (const edge of page.edges) {
+      collected.push(edge.node);
+    }
+
+    if (!page.pageInfo.hasNextPage) break;
+
+    if (opts.startDate && page.edges.length > 0) {
+      const tail = page.edges[page.edges.length - 1]!.node.date;
+      if (tail < opts.startDate) break;
+    }
+
+    cursor = page.pageInfo.endCursor;
+    if (cursor === null) break;
+  }
+
+  return collected;
+}
+
+export interface FetchTransactionsArgs {
+  first: number;
+  after: string | null;
+  filter: TransactionFilterInput | null;
+  sort: TransactionSortInput[];
+}
+
+interface TransactionsResponse {
+  transactions: TransactionsPage;
+}
+
+/**
+ * Single GraphQL round-trip fetching one page of transactions.
+ *
+ * Delegates transport and auth to the GraphQLClient. Returns the raw
+ * page for paginateTransactions to drive.
+ */
+export async function fetchTransactionsPage(
+  client: GraphQLClient,
+  args: FetchTransactionsArgs
+): Promise<TransactionsPage> {
+  const data = await client.query<FetchTransactionsArgs, TransactionsResponse>(
+    'Transactions',
+    TRANSACTIONS,
+    args
+  );
+  return data.transactions;
 }

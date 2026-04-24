@@ -131,6 +131,19 @@ export class GraphQLClient {
     return body.data;
   }
 
+  /**
+   * Send a GraphQL query. Same transport, auth, and error classification
+   * as mutate(). Semantic alias kept separate so call sites and logs
+   * distinguish reads from writes.
+   */
+  async query<TVariables, TResponse>(
+    operationName: string,
+    query: string,
+    variables: TVariables
+  ): Promise<TResponse> {
+    return this.mutate<TVariables, TResponse>(operationName, query, variables);
+  }
+
   private logError(operationName: string, code: GraphQLErrorCode, httpStatus?: number): void {
     const statusPart = httpStatus !== undefined ? ` status=${httpStatus}` : '';
     console.error(`[graphql] ${operationName} failed: code=${code}${statusPart}`);
