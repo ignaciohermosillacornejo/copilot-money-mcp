@@ -17,6 +17,8 @@ import { CopilotMoneyTools, createToolSchemas, createWriteToolSchemas } from './
 import { GraphQLClient } from './core/graphql/client.js';
 import { FirebaseAuth } from './core/auth/firebase-auth.js';
 import { extractRefreshToken } from './core/auth/browser-token.js';
+import { LiveCopilotDatabase, preflightLiveAuth } from './core/live-database.js';
+import { LiveTransactionsTools, createLiveToolSchemas } from './tools/live/transactions.js';
 
 // Read version from package.json
 import { createRequire } from 'module';
@@ -31,6 +33,8 @@ export class CopilotMoneyServer {
   private tools: CopilotMoneyTools;
   private server: Server;
   private writeEnabled: boolean;
+  private liveReadsEnabled: boolean;
+  private liveTools?: LiveTransactionsTools;
 
   /**
    * Initialize the MCP server.
@@ -40,17 +44,29 @@ export class CopilotMoneyServer {
    * @param decodeTimeoutMs - Optional timeout for decode operations in milliseconds.
    * @param writeEnabled - If true, register write tools and enable GraphQL writes.
    */
-  constructor(dbPath?: string, decodeTimeoutMs?: number, writeEnabled = false) {
+  constructor(
+    dbPath?: string,
+    decodeTimeoutMs?: number,
+    writeEnabled = false,
+    liveReadsEnabled = false,
+    injectedGraphqlClient?: GraphQLClient
+  ) {
     this.db = new CopilotDatabase(dbPath, decodeTimeoutMs);
     this.writeEnabled = writeEnabled;
+    this.liveReadsEnabled = liveReadsEnabled;
 
-    let graphqlClient: GraphQLClient | undefined;
-    if (writeEnabled) {
+    let graphqlClient = injectedGraphqlClient;
+    if ((writeEnabled || liveReadsEnabled) && !graphqlClient) {
       const auth = new FirebaseAuth(() => extractRefreshToken());
       graphqlClient = new GraphQLClient(auth);
     }
 
     this.tools = new CopilotMoneyTools(this.db, graphqlClient);
+
+    if (liveReadsEnabled && graphqlClient) {
+      const liveDb = new LiveCopilotDatabase(graphqlClient, this.db);
+      this.liveTools = new LiveTransactionsTools(liveDb);
+    }
     this.server = new Server(
       {
         name: 'copilot-money-mcp',
@@ -72,9 +88,15 @@ export class CopilotMoneyServer {
    */
   handleListTools(): { tools: Tool[] } {
     const readSchemas = createToolSchemas();
-    const allSchemas = this.writeEnabled
-      ? [...readSchemas, ...createWriteToolSchemas()]
+    const filteredReads = this.liveReadsEnabled
+      ? readSchemas.filter((s) => s.name !== 'get_transactions')
       : readSchemas;
+    const liveSchemas = this.liveReadsEnabled ? createLiveToolSchemas() : [];
+    const allSchemas = [
+      ...filteredReads,
+      ...liveSchemas,
+      ...(this.writeEnabled ? createWriteToolSchemas() : []),
+    ];
 
     const tools: Tool[] = allSchemas.map((schema) => ({
       name: schema.name,
@@ -149,6 +171,23 @@ export class CopilotMoneyServer {
         case 'get_transactions':
           result = await this.tools.getTransactions(
             (typedArgs as Parameters<typeof this.tools.getTransactions>[0]) || {}
+          );
+          break;
+
+        case 'get_transactions_live':
+          if (!this.liveTools) {
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: 'get_transactions_live is only available when the server runs with --live-reads.',
+                },
+              ],
+              isError: true,
+            };
+          }
+          result = await this.liveTools.getTransactions(
+            (typedArgs as Parameters<typeof this.liveTools.getTransactions>[0]) || {}
           );
           break;
 
@@ -432,8 +471,34 @@ export class CopilotMoneyServer {
 export async function runServer(
   dbPath?: string,
   decodeTimeoutMs?: number,
-  writeEnabled = false
+  writeEnabled = false,
+  liveReadsEnabled = false
 ): Promise<void> {
-  const server = new CopilotMoneyServer(dbPath, decodeTimeoutMs, writeEnabled);
+  let graphqlClient: GraphQLClient | undefined;
+  if (writeEnabled || liveReadsEnabled) {
+    const auth = new FirebaseAuth(() => extractRefreshToken());
+    graphqlClient = new GraphQLClient(auth);
+  }
+
+  if (liveReadsEnabled && graphqlClient) {
+    try {
+      await preflightLiveAuth(graphqlClient);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[live-reads] preflight failed: ${msg}`);
+      console.error(
+        '[live-reads] ensure you are logged into app.copilot.money in your default browser, then restart.'
+      );
+      process.exit(1);
+    }
+  }
+
+  const server = new CopilotMoneyServer(
+    dbPath,
+    decodeTimeoutMs,
+    writeEnabled,
+    liveReadsEnabled,
+    graphqlClient
+  );
   await server.run();
 }
