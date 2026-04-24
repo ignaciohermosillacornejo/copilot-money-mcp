@@ -16,6 +16,15 @@
 
 import { GraphQLError, type GraphQLClient } from './graphql/client.js';
 import type { CopilotDatabase } from './database.js';
+import {
+  buildTransactionFilter,
+  buildTransactionSort,
+  fetchTransactionsPage,
+  paginateTransactions,
+  type BuildFilterOptions,
+  type TransactionNode,
+  type TransactionSortInput,
+} from './graphql/queries/transactions.js';
 
 interface MemoEntry<T> {
   result: T;
@@ -86,5 +95,38 @@ export class LiveCopilotDatabase {
   logReadCall(opName: string, pages: number, latencyMs: number, rows: number): void {
     if (!this.verbose) return;
     console.error(`[graphql-read] op=${opName} pages=${pages} latency=${latencyMs}ms rows=${rows}`);
+  }
+
+  /**
+   * Fetch transactions from Copilot's GraphQL API, paginating with
+   * DATE DESC sort and early-exiting when the trailing row precedes
+   * the requested start date.
+   *
+   * Pure data access — client-side post-filtering (amount range,
+   * pending, excluded-category join, special transaction_type
+   * variants) lives in the tool layer, not here.
+   */
+  async getTransactions(
+    opts: BuildFilterOptions & { sort?: TransactionSortInput; pageSize?: number }
+  ): Promise<TransactionNode[]> {
+    const filter = buildTransactionFilter(opts);
+    const sort = buildTransactionSort(opts.sort);
+    const first = opts.pageSize ?? 100;
+
+    const memoKey = JSON.stringify({ filter, sort, first });
+    return this.memoize(memoKey, async () => {
+      let pages = 0;
+      const startedAt = Date.now();
+      const rows = await paginateTransactions(
+        (after) =>
+          this.withRetry(async () => {
+            pages += 1;
+            return fetchTransactionsPage(this.graphql, { first, after, filter, sort });
+          }),
+        { startDate: opts.startDate }
+      );
+      this.logReadCall('Transactions', pages, Date.now() - startedAt, rows.length);
+      return rows;
+    });
   }
 }

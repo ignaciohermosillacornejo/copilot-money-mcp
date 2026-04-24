@@ -3,6 +3,7 @@ import { LiveCopilotDatabase } from '../../src/core/live-database.js';
 import { GraphQLError } from '../../src/core/graphql/client.js';
 import type { GraphQLClient } from '../../src/core/graphql/client.js';
 import type { CopilotDatabase } from '../../src/core/database.js';
+import type { TransactionsPage } from '../../src/core/graphql/queries/transactions.js';
 
 function mkClient(): GraphQLClient {
   return { mutate: mock(), query: mock() } as unknown as GraphQLClient;
@@ -93,5 +94,89 @@ describe('LiveCopilotDatabase — memo', () => {
     await live.memoize('a', async () => 1);
     const b = await live.memoize('b', async () => 2);
     expect(b).toBe(2);
+  });
+});
+
+function mkClientReturning(pages: TransactionsPage[]): GraphQLClient {
+  let i = 0;
+  return {
+    mutate: mock(),
+    query: mock(() => Promise.resolve({ transactions: pages[i++] })),
+  } as unknown as GraphQLClient;
+}
+
+describe('LiveCopilotDatabase.getTransactions', () => {
+  test('paginates through one page and returns rows', async () => {
+    const client = mkClientReturning([
+      {
+        edges: [
+          {
+            cursor: 'c1',
+            node: {
+              id: 't1',
+              accountId: 'a1',
+              itemId: 'i1',
+              categoryId: 'c',
+              recurringId: null,
+              parentId: null,
+              isReviewed: false,
+              isPending: false,
+              amount: 10,
+              date: '2025-06-01',
+              name: 'Amazon',
+              type: 'REGULAR',
+              userNotes: null,
+              tipAmount: null,
+              suggestedCategoryIds: [],
+              isoCurrencyCode: 'USD',
+              createdAt: 0,
+              tags: [],
+              goal: null,
+            },
+          },
+        ],
+        pageInfo: { endCursor: 'c1', hasNextPage: false },
+      },
+    ]);
+    const live = new LiveCopilotDatabase(client, mkCache());
+    const rows = await live.getTransactions({});
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.id).toBe('t1');
+  });
+
+  test('memoizes identical calls within TTL', async () => {
+    const page: TransactionsPage = {
+      edges: [],
+      pageInfo: { endCursor: null, hasNextPage: false },
+    };
+    const client = mkClientReturning([page]);
+    const live = new LiveCopilotDatabase(client, mkCache());
+
+    await live.getTransactions({ startDate: '2025-01-01' });
+    await live.getTransactions({ startDate: '2025-01-01' });
+
+    const qCalls = (client.query as ReturnType<typeof mock>).mock.calls;
+    expect(qCalls).toHaveLength(1);
+  });
+
+  test('retries once on NETWORK error per page', async () => {
+    let calls = 0;
+    const page: TransactionsPage = {
+      edges: [],
+      pageInfo: { endCursor: null, hasNextPage: false },
+    };
+    const client = {
+      mutate: mock(),
+      query: mock(() => {
+        calls += 1;
+        if (calls === 1) throw new GraphQLError('NETWORK', 'blip', 'Transactions');
+        return Promise.resolve({ transactions: page });
+      }),
+    } as unknown as GraphQLClient;
+    const live = new LiveCopilotDatabase(client, mkCache());
+
+    const rows = await live.getTransactions({});
+    expect(rows).toHaveLength(0);
+    expect(calls).toBe(2);
   });
 });
