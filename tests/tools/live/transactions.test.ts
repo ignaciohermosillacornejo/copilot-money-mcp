@@ -69,6 +69,17 @@ describe('LiveTransactionsTools — input validation', () => {
       /account_id.*item_id/i
     );
   });
+
+  test('rejects transaction_id lookup without a date range (unbounded fetch guard)', async () => {
+    const tools = new LiveTransactionsTools(mkLive());
+    await expect(
+      tools.getTransactions({
+        transaction_id: 't1',
+        account_id: 'a1',
+        item_id: 'i1',
+      } as never)
+    ).rejects.toThrow(/date range|start_date.*end_date.*period/i);
+  });
 });
 
 import type {
