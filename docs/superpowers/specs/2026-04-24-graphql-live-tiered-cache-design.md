@@ -57,9 +57,10 @@ This spec sits **across the phases 2..N band**: it defines the cache architectur
 
 The transactions tiered-cache work deliberately does not ship in Phase 2 because:
 
-1. Accounts prove the flat-snapshot path and write-through plumbing on the simplest possible entity (~10 rows, one GraphQL round-trip, one mutation: `editAccount`).
+1. Accounts prove the flat-snapshot read path on the simplest possible entity (~10 rows, one GraphQL round-trip).
 2. The Phase-1 memo keeps working for transactions during Phase 2 — no regression.
-3. Transactions are the most complex cache shape (month-keyed window map, eviction, tiered TTLs). Separating them lets us review the snapshot-cache + write-through pattern independently of the windowing logic.
+3. Transactions are the most complex cache shape (month-keyed window map, eviction, tiered TTLs). Separating them lets us review the snapshot-cache pattern independently of the windowing logic.
+4. Write-through plumbing is exercised by the existing `patchCached*` call sites for transactions/categories/tags/budgets/recurring (10-method catalog) — accounts have no MCP write tool by design and therefore no live-cache write-through to validate.
 
 ## Scope
 
@@ -69,10 +70,10 @@ The transactions tiered-cache work deliberately does not ship in Phase 2 because
   - `SnapshotCache<T>` — flat `{ rows, fetched_at }` per entity, configurable TTL, write-through patches.
   - `TransactionWindowCache` — `Map<YearMonth, { rows, fetched_at, complete }>`, tiered TTL by month age, month-scoped invalidation, write-through patches.
   - `InFlightRegistry` — `Map<string, Promise<T>>` single-flight guard.
-- `patchLive*` catalog: 11 methods on `LiveCopilotDatabase` mirroring the existing `patchCached*` methods on `CopilotDatabase`.
+- `patchLive*` catalog: 10 methods on `LiveCopilotDatabase` mirroring the existing `patchCached*` methods on `CopilotDatabase`. (No account write-through: by design, the MCP server does not expose an `edit_account` write tool — account-edit blast-radius is judged too high to surface.)
 - Freshness envelope: `_cache_oldest_fetched_at` (ISO, worst-case staleness), `_cache_newest_fetched_at` (ISO, best-case staleness), and `_cache_hit` (boolean) added to every live-tool response.
 - New `refresh_cache` MCP tool (registered only when `--live-reads` is on), with `scope?` and `months?` args.
-- Concrete Phase 2 implementation: `get_accounts_live` tool using `SnapshotCache` + `patchLiveAccount` write-through from `edit_account`.
+- Concrete Phase 2 implementation: `get_accounts_live` tool using `SnapshotCache`. Read-path only — accounts are read-only via MCP (no `edit_account` write tool exists or is added).
 - Extend verbose instrumentation to log `staleness_ms` on cache refills (supports N+1 measurement).
 - Tests covering the cache primitives, write-through at each call site, and the `get_accounts_live` migration.
 
@@ -263,7 +264,7 @@ Staleness is documented in `docs/graphql-live-reads.md` so operators know what t
 
 ### Write-through catalog
 
-11 `patchLive*` methods on `LiveCopilotDatabase`, 1:1 with the existing `patchCached*` methods on `CopilotDatabase`:
+10 `patchLive*` methods on `LiveCopilotDatabase`, 1:1 with the existing `patchCached*` methods on `CopilotDatabase`:
 
 | Method | Existing LevelDB analog | Call sites (in `src/tools/tools.ts`) |
 |---|---|---|
@@ -276,7 +277,8 @@ Staleness is documented in `docs/graphql-live-reads.md` so operators know what t
 | `patchLiveCategoryDelete(id)` | `patchCachedCategoryDelete` | 1 |
 | `patchLiveRecurringUpsert(rec)` | `patchCachedRecurringUpsert` | 3 |
 | `patchLiveRecurringDelete(id)` | `patchCachedRecurringDelete` | 1 |
-| `patchLiveAccount(id, fields)` | **new** — `patchCachedAccount` added in Phase 2 alongside the live analog | 1 (`edit_account`) |
+
+No `patchLiveAccount` and no `patchCachedAccount` — the MCP server intentionally does not expose an account-edit write tool. Account-edit blast-radius (renaming accounts, toggling hidden/closed flags) is judged too high for AI-driven invocation, so the write surface is unavailable by design. Accounts read via `get_accounts_live`; mutations happen in Copilot's own apps.
 
 Call-site pattern — two explicit calls at each site where a mutation succeeds:
 
@@ -388,11 +390,7 @@ The ceiling is defensive. If real usage shows thrashing, tuning options include:
 4. **Stale / miss branch**: `InFlightRegistry` either reuses an in-flight promise or calls `fetchAccounts()` (single GraphQL round-trip). Loader closure populates the cache before resolving (per the InFlightRegistry contract). `_cache_hit: false`, both `oldest` and `newest` = `<now>`.
 5. **Envelope assembly.** Existing account enrichment + the new envelope fields.
 
-Write-through from `edit_account`:
-
-1. `edit_account` invokes the `EditAccount` GraphQL mutation.
-2. Success → `this.db.patchCachedAccount(id, patch)` (new — mirrors existing entity patterns) + `this.liveDb?.patchLiveAccount(id, patch)`.
-3. Next `get_accounts_live` call returns the patched row immediately (if cache was loaded) or refetches (if not).
+No write-through demo for accounts — the MCP server doesn't expose `edit_account` (intentional safety boundary). Account read-cache freshness relies on TTL invalidation + the explicit `refresh_cache({ scope: "accounts" })` escape hatch.
 
 ### Walkthrough 2 — `get_transactions_live` under the tiered cache (Phase 3 preview, informs the Phase 2 design)
 
@@ -471,8 +469,8 @@ Cache primitives surface errors from their loaders transparently — no swallowi
   - First call: cache miss, fetches via mock GraphQL, returns rows with `_cache_hit: false`.
   - Second call within 1h: cache hit, no GraphQL call, `_cache_hit: true`.
   - After `refresh_cache({ scope: "accounts" })`: next call has `_cache_hit: false`.
-  - Write-through: `edit_account` updates both caches; subsequent `get_accounts_live` shows the patched row without a refetch.
   - Envelope timestamps populated correctly across single-fetch and cache-hit cases.
+  - `account_type` filter and `include_hidden` flag preserve the parity with the cache-backed `get_accounts` tool's behavior.
 
 - `tests/tools/refresh-cache.test.ts`:
   - Each scope clears the right slice.
@@ -481,7 +479,7 @@ Cache primitives surface errors from their loaders transparently — no swallowi
 
 ### Integration / E2E
 
-- Manual acceptance: `bun run dev --live-reads --verbose` with the accounts migration. Exercise `get_accounts_live` twice back-to-back, observe second call logs `pages=0 latency=<1ms rows=<n>` (or equivalent cache-hit log line). Then `edit_account` on one account, immediately `get_accounts_live`, verify the edited fields appear.
+- Manual acceptance: `bun run dev --live-reads --verbose` with the accounts migration. Exercise `get_accounts_live` twice back-to-back, observe the second call logs a cache-hit line (or equivalent `cache_hit=true`). Then call `refresh_cache({ scope: "accounts" })` and verify the next `get_accounts_live` call refetches.
 - No CI integration tests (they'd require a real endpoint or a complex GraphQL fixture server).
 
 ### Staleness-measurement instrumentation
@@ -505,7 +503,7 @@ These resolve during Phase 2 implementation:
 1. **TTL tier constants live in `LiveCopilotDatabase` config** (`LiveDatabaseOptions`) with sensible defaults matching the table in §"TTL tiers". No env-var override — tuning is a code change so the default is what ships.
 2. **`SnapshotCache<T>` generics** — TypeScript generics keep type safety for each entity. Test with `Account` first; spec trusts the pattern transfers to the other four entities.
 3. **Envelope aggregation** — `_cache_hit: false` if any contributor required network (logical AND across contributors); `_cache_oldest_fetched_at` = `min` over contributors; `_cache_newest_fetched_at` = `max`. Test the mixed-tier case explicitly.
-4. **`patchLiveAccount` requires a `patchCachedAccount` counterpart** — account edits don't currently touch the LevelDB cache (the one call site at `edit_account` flushes via `refresh_database`). Phase 2 adds both sides: a new `patchCachedAccount` on `CopilotDatabase` and a `patchLiveAccount` on `LiveCopilotDatabase`, wiring both into `edit_account`. Net win beyond the live-cache goal: `edit_account` no longer needs a full LevelDB reload to show its result.
+4. **No `patchLiveAccount` / `patchCachedAccount`** — the MCP server does not expose an `edit_account` write tool by design (account-edit blast-radius is judged too high for AI-driven invocation). The write-through catalog therefore stops at 10 methods. Operators wanting to refresh account state after an out-of-band edit (e.g., renaming an account in Copilot's own app) use `refresh_cache({ scope: "accounts" })`.
 5. **Month-boundary arithmetic** — uses existing date utilities (`src/utils/date.ts`). Add helpers `monthsCovered(range)` and `monthAge(yearMonth, now)` alongside the existing period parsers.
 6. **`refresh_cache` tool schema** — registered via the same `createLiveToolSchemas()` mechanism as `get_transactions_live`; just another entry.
 7. **No changes to `operations.generated.ts`** — `Accounts` query is added via the existing `scripts/generate-graphql-operations.ts` queries pipeline.
@@ -525,7 +523,7 @@ The spec is approvable when a human can answer these without guessing.
 
 1. **When is a cache entry stale?** When `fetched_at + tier_ttl ≤ now` (where `tier_ttl` comes from the TTL table — 1h / 6h / 24h / 1w depending on entity; for transactions, resolved per month by age from today). Write-through supersedes TTL for rows we mutate ourselves.
 2. **What happens when Plaid-sync writes behind our back?** Nothing until the affected tier's TTL expires. Worst-case staleness is 1h for 8–21d transactions / accounts / budgets; 6h for recurring; 1w for >21d transactions (under the assumption it barely drifts); 24h for categories and tags. Current calendar month transactions never cache. Staleness is bounded, named, and measurable.
-3. **How do writes propagate to the cache?** Via 11 `patchLive*` methods invoked from the `src/tools/tools.ts` write call sites, alongside the existing `patchCached*` calls. Both caches are patched in lock-step after every successful GraphQL mutation. Live patches are best-effort (no-op if cache not loaded).
+3. **How do writes propagate to the cache?** Via 10 `patchLive*` methods invoked from the `src/tools/tools.ts` write call sites, alongside the existing `patchCached*` calls. Both caches are patched in lock-step after every successful GraphQL mutation. Live patches are best-effort (no-op if cache not loaded). Accounts are read-only via MCP — no account write-through (intentional safety boundary).
 4. **Which entities are cached and at what TTL?** See the TTL table in §"TTL tiers". Six cached entities: transactions (tiered by month age), accounts (1h), budgets (1h), recurring (6h), categories (24h), tags (24h).
 5. **What does the LLM see about freshness?** Three fields: `_cache_oldest_fetched_at` (worst-case staleness floor), `_cache_newest_fetched_at` (best-case staleness — typically "now" when any live-tier slice is in the response), and `_cache_hit` (boolean — `true` iff nothing required network this turn). Together they let the LLM bracket data freshness across mixed-tier responses without misinterpreting an old-floor timestamp as "everything is stale." Documented in `docs/graphql-live-reads.md`.
 6. **How does the LLM force a refresh?** `refresh_cache({ scope, months? })`. Registered only in `--live-reads` mode. `refresh_database` is untouched and continues to reload LevelDB.
