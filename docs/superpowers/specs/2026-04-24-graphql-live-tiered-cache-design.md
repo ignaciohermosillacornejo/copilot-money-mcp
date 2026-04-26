@@ -26,7 +26,7 @@ Phase 2's goal is to put a cache architecture in place that supports per-entity 
 2. **Per-entity TTL for small entities.** Accounts (1h), Budgets (1h), Recurring (6h), Categories (24h), Tags (24h). Whole-entity snapshot per call.
 3. **Write-through consistency.** Every successful MCP write mutation updates the live cache at the same call site where it updates the LevelDB cache. User always sees their own writes without refresh.
 4. **Explicit LLM-invokable refresh.** A new `refresh_cache` tool (registered only when `--live-reads` is on) flushes the live cache by scope, without touching LevelDB.
-5. **Freshness signaling.** Live-tool response envelopes carry `_cache_fetched_at` and `_cache_hit` so the LLM can judge staleness.
+5. **Freshness signaling.** Live-tool response envelopes carry `_cache_oldest_fetched_at`, `_cache_newest_fetched_at`, and `_cache_hit` so the LLM can bracket staleness across mixed-tier responses.
 6. **Concurrent-call safety.** Simultaneous misses share a single in-flight promise — no duplicate network fetches.
 7. **Preserve Phase 1 operator surface.** Flag name (`--live-reads`), tool name (`get_transactions_live`), error taxonomy, and auth preflight all stay identical. Only the cache layer behind them changes.
 
@@ -70,7 +70,7 @@ The transactions tiered-cache work deliberately does not ship in Phase 2 because
   - `TransactionWindowCache` — `Map<YearMonth, { rows, fetched_at, complete }>`, tiered TTL by month age, month-scoped invalidation, write-through patches.
   - `InFlightRegistry` — `Map<string, Promise<T>>` single-flight guard.
 - `patchLive*` catalog: 11 methods on `LiveCopilotDatabase` mirroring the existing `patchCached*` methods on `CopilotDatabase`.
-- Freshness envelope: `_cache_fetched_at` (ISO) and `_cache_hit` (boolean) added to every live-tool response.
+- Freshness envelope: `_cache_oldest_fetched_at` (ISO, worst-case staleness), `_cache_newest_fetched_at` (ISO, best-case staleness), and `_cache_hit` (boolean) added to every live-tool response.
 - New `refresh_cache` MCP tool (registered only when `--live-reads` is on), with `scope?` and `months?` args.
 - Concrete Phase 2 implementation: `get_accounts_live` tool using `SnapshotCache` + `patchLiveAccount` write-through from `edit_account`.
 - Extend verbose instrumentation to log `staleness_ms` on cache refills (supports N+1 measurement).
@@ -174,7 +174,20 @@ The current calendar month is always `"live"` (`min_age = 0`). The previous mont
 3. Emit `cachedRows` from resolved months, sliced to `[start_date, end_date]`.
 4. Caller fetches `toFetch` months (serially for now; parallel is a future optimization), calls `ingestMonth` per result, then merges with `cachedRows`, applies client-side post-filters, and returns.
 
-`evictLRU` runs after every `ingestMonth`: if total rows across all windows exceed a configured cap (default 20,000), drop the oldest-accessed month until under the cap. Small entities are never evicted (they're bounded).
+`evictLRU` runs after every `ingestMonth` and **iteratively** drops the oldest-accessed month one at a time until the total falls under the cap. The loop semantics matter: a single ingest can be a high-volume month (5k rows) that pushes the total well past the cap, and dropping a small old month (e.g., 50 rows) doesn't bring the total under by itself. Pseudocode:
+
+```ts
+evictLRU(maxTotalRows: number): void {
+  while (this.totalRows() > maxTotalRows) {
+    const oldest = this.oldestAccessedMonth();
+    if (!oldest) return; // nothing left to evict — caller is responsible for capacity
+    this.windows.delete(oldest);
+    this.lastAccessed.delete(oldest);
+  }
+}
+```
+
+Default cap 20,000 rows. Small entities are never evicted (they're bounded).
 
 #### 3. `InFlightRegistry` — concurrent-call safety
 
@@ -193,6 +206,27 @@ class InFlightRegistry {
 ```
 
 Shared by both `SnapshotCache` (keyed on entity name) and `TransactionWindowCache` (keyed on `YYYY-MM`). Guarantees any set of simultaneous cache-miss callers share one GraphQL round-trip per key.
+
+**Critical contract — the loader must populate the cache before its promise resolves.** Otherwise the following microtask race occurs:
+
+1. Loader resolves with rows.
+2. `.finally()` callback fires (microtask N) → registry entry deleted.
+3. Caller's `await` continuation fires (microtask N+1) → cache populated.
+
+Between (2) and (3), any new caller checking the registry sees it empty AND the cache still empty, triggering a duplicate fetch.
+
+The fix is structural: callers wrap the cache write **inside** the closure passed to `run()`, so cache-population runs before `.finally()`:
+
+```ts
+// SnapshotCache.read() — cache-write inside the closure
+const result = await this.inflight.run(this.entityKey, async () => {
+  const rows = await loader();
+  this.entry = { rows, fetched_at: Date.now() }; // happens-before promise resolves
+  return rows;
+});
+```
+
+`TransactionWindowCache.ingestMonth()` follows the same pattern — the per-month closure ingests into the window map before resolving. Tested explicitly via the in-flight registry test suite.
 
 ### TTL tiers — table
 
@@ -258,22 +292,31 @@ The `?` is load-bearing: when `--live-reads` is off, `liveDb` is undefined and t
 
 ### Freshness envelope
 
-Live-tool response envelopes gain two fields:
+Live-tool response envelopes gain three fields:
 
 ```jsonc
 {
   "count": 25,
   "total_count": 312,
   "transactions": [ ... ],
-  "_cache_fetched_at": "2026-04-24T14:32:17.421Z", // ISO
+  "_cache_oldest_fetched_at": "2026-04-24T08:01:00.000Z", // worst-case staleness
+  "_cache_newest_fetched_at": "2026-04-25T14:32:17.421Z", // best-case staleness
   "_cache_hit": false
 }
 ```
 
-- **`_cache_fetched_at`** — for snapshot caches, the snapshot's `fetched_at`. For transaction queries, the **oldest** `fetched_at` across all months that contributed rows (worst-case staleness).
-- **`_cache_hit`** — `true` iff every month/entity contributing to this response came from cache (no network call this turn). `false` if **any** part required a fetch — whether first-time miss, TTL-expired refetch, or live-tier policy fetch. Rationale: the LLM's real question is "did this touch the network?" Granular per-month breakdown adds surface area without meaningfully improving LLM decisions.
+- **`_cache_oldest_fetched_at`** — the **oldest** `fetched_at` across all entries that contributed to this response. For snapshot caches with a single entry, oldest == newest. For transaction queries spanning multiple months, this is the staleness floor.
+- **`_cache_newest_fetched_at`** — the **newest** `fetched_at`. For mixed-tier transaction queries, this is typically "just now" because the current calendar month is on the live tier and always refetched. Gives the LLM positive evidence that the recent slice is fresh, even when older slices are cached.
+- **`_cache_hit`** — `true` iff every month/entity contributing to this response came from cache without a network call this turn. `false` if any part required a fetch (first-time miss, TTL-expired refetch, or live-tier policy fetch).
 
-Documented in `docs/graphql-live-reads.md` with LLM guidance: "If `_cache_hit: true` and `_cache_fetched_at` is older than an hour and the user is asking about recent activity, consider `refresh_cache({ scope: 'transactions', months: ['YYYY-MM'] })`."
+**Why three fields, not one.** A naive single-timestamp envelope creates a misinterpretation hazard: a query mixing live-tier April (just fetched) with cold-tier January (fetched yesterday) would surface "yesterday" as the freshness signal. An LLM seeing that single old timestamp may aggressively call `refresh_cache` on the assumption the entire dataset is stale, even though the user-visible *recent* portion is actually live-fresh. The oldest+newest pair lets the LLM read both bounds: "the freshest contributor is from this turn; the staleness floor is yesterday — only refresh if the user is asking about historical periods that fall in the older slice."
+
+**LLM guidance documented in `docs/graphql-live-reads.md`:**
+
+> Interpreting freshness fields:
+> - **`_cache_newest_fetched_at` close to "now"** — at least one slice (typically the current calendar month and last 7 days for transactions) was just fetched. Trust the recent portion of the response without invoking refresh.
+> - **`_cache_oldest_fetched_at` significantly older** — older slices are from cache. For transactions, by design >21d-old months can be up to 1 week stale. Don't trigger `refresh_cache` based on this alone unless the user is specifically asking about that older window.
+> - **`_cache_hit: true`** — no network this turn. If the user explicitly asked for fresh data ("sync", "what's new", "refresh"), and the user-relevant slice is older than its tier TTL, call `refresh_cache` with the narrowest scope that covers the slice (`{scope: 'transactions', months: [...]}` for a specific month).
 
 Cache-backed tools (`--live-reads` off) do **not** gain these fields — they're live-cache specific. This keeps Phase N+2's default-flip a pure rename rather than a schema change.
 
@@ -341,8 +384,8 @@ The ceiling is defensive. If real usage shows thrashing, tuning options include:
 
 1. **MCP dispatch.** `server.ts` routes `get_accounts_live` to `LiveAccountsTools.getAccounts(args)`.
 2. **Cache read.** `this.live.getAccountsCache().read(() => fetchAccounts(this.live.getClient()))`.
-3. **Fresh-enough branch** (`fetched_at + 1h > now`): return cached rows immediately. `_cache_hit: true`, `_cache_fetched_at: <cached_at>`.
-4. **Stale / miss branch**: `InFlightRegistry` either reuses an in-flight promise or calls `fetchAccounts()` (single GraphQL round-trip). Result cached with fresh `fetched_at`. `_cache_hit: false`, `_cache_fetched_at: <now>`.
+3. **Fresh-enough branch** (`fetched_at + 1h > now`): return cached rows immediately. `_cache_hit: true`, both `oldest` and `newest` = `<cached_at>`.
+4. **Stale / miss branch**: `InFlightRegistry` either reuses an in-flight promise or calls `fetchAccounts()` (single GraphQL round-trip). Loader closure populates the cache before resolving (per the InFlightRegistry contract). `_cache_hit: false`, both `oldest` and `newest` = `<now>`.
 5. **Envelope assembly.** Existing account enrichment + the new envelope fields.
 
 Write-through from `edit_account`:
@@ -365,7 +408,7 @@ Hypothetical `today = 2026-04-15` so all three tiers appear in one example.
 5. Ingest the fetched month into the window map. Merge with cached `2026-02` + `2026-03` rows.
 6. Apply client-side post-filters (amount range, pending, etc.) on the merged set.
 7. Slice to the requested `[start_date, end_date]` range.
-8. Envelope: `_cache_hit: false` (April required a live-tier fetch) + `_cache_fetched_at: min(april_fetched_at, march_fetched_at, feb_fetched_at)`.
+8. Envelope: `_cache_hit: false` (April required a live-tier fetch) + `_cache_oldest_fetched_at: min(april_fetched_at, march_fetched_at, feb_fetched_at)` (≈ Feb's `2026-04-10`) + `_cache_newest_fetched_at: max(...)` (≈ April's "now"). The two-bound shape lets the LLM see that the recent slice is fresh even though the historical slice is older.
 
 Key property: subsequent broad queries over similar ranges pay only the April refetch cost (~3s) instead of the full-year 33s. The Feb and March months are paid for once until their TTLs expire.
 
@@ -410,12 +453,14 @@ Cache primitives surface errors from their loaders transparently — no swallowi
   - Cached + fresh month pulled, stale month flagged for fetch, miss month flagged for fetch.
   - Month-straddling row mutation (upsert with a date change) moves the row across windows.
   - `evictLRU` drops oldest-accessed month when cap exceeded.
+  - **Eviction loop:** ingesting a high-volume month (e.g., 5,000 rows) onto a cache already near the cap triggers iterative eviction until total falls under the cap, not a single drop.
   - `invalidate('all')` clears everything; `invalidate(['2026-04'])` clears only named.
 
 - `tests/core/cache/in-flight-registry.test.ts`:
   - Simultaneous callers share one promise.
   - Failure clears the entry.
   - Post-success, next call starts fresh.
+  - **Race-window contract:** a third caller invoking `read()` **between** the loader resolving and the registry being cleared must see the populated cache, not a fresh fetch. Test by interleaving microtasks: loader returns a row; assert the cache is populated before the registry-cleanup `.finally()` observable fires.
 
 - `tests/core/live-database.test.ts` — extended:
   - `patchLive*` methods (11 of them) each verified against the target cache primitive.
@@ -427,6 +472,7 @@ Cache primitives surface errors from their loaders transparently — no swallowi
   - Second call within 1h: cache hit, no GraphQL call, `_cache_hit: true`.
   - After `refresh_cache({ scope: "accounts" })`: next call has `_cache_hit: false`.
   - Write-through: `edit_account` updates both caches; subsequent `get_accounts_live` shows the patched row without a refetch.
+  - Envelope timestamps populated correctly across single-fetch and cache-hit cases.
 
 - `tests/tools/refresh-cache.test.ts`:
   - Each scope clears the right slice.
@@ -458,7 +504,7 @@ These resolve during Phase 2 implementation:
 
 1. **TTL tier constants live in `LiveCopilotDatabase` config** (`LiveDatabaseOptions`) with sensible defaults matching the table in §"TTL tiers". No env-var override — tuning is a code change so the default is what ships.
 2. **`SnapshotCache<T>` generics** — TypeScript generics keep type safety for each entity. Test with `Account` first; spec trusts the pattern transfers to the other four entities.
-3. **`_cache_hit` aggregation** — a mixed response sets `_cache_hit: false` if any contributing month/entity required network. Simple AND across contributors; test it explicitly.
+3. **Envelope aggregation** — `_cache_hit: false` if any contributor required network (logical AND across contributors); `_cache_oldest_fetched_at` = `min` over contributors; `_cache_newest_fetched_at` = `max`. Test the mixed-tier case explicitly.
 4. **`patchLiveAccount` requires a `patchCachedAccount` counterpart** — account edits don't currently touch the LevelDB cache (the one call site at `edit_account` flushes via `refresh_database`). Phase 2 adds both sides: a new `patchCachedAccount` on `CopilotDatabase` and a `patchLiveAccount` on `LiveCopilotDatabase`, wiring both into `edit_account`. Net win beyond the live-cache goal: `edit_account` no longer needs a full LevelDB reload to show its result.
 5. **Month-boundary arithmetic** — uses existing date utilities (`src/utils/date.ts`). Add helpers `monthsCovered(range)` and `monthAge(yearMonth, now)` alongside the existing period parsers.
 6. **`refresh_cache` tool schema** — registered via the same `createLiveToolSchemas()` mechanism as `get_transactions_live`; just another entry.
@@ -481,7 +527,7 @@ The spec is approvable when a human can answer these without guessing.
 2. **What happens when Plaid-sync writes behind our back?** Nothing until the affected tier's TTL expires. Worst-case staleness is 1h for 8–21d transactions / accounts / budgets; 6h for recurring; 1w for >21d transactions (under the assumption it barely drifts); 24h for categories and tags. Current calendar month transactions never cache. Staleness is bounded, named, and measurable.
 3. **How do writes propagate to the cache?** Via 11 `patchLive*` methods invoked from the `src/tools/tools.ts` write call sites, alongside the existing `patchCached*` calls. Both caches are patched in lock-step after every successful GraphQL mutation. Live patches are best-effort (no-op if cache not loaded).
 4. **Which entities are cached and at what TTL?** See the TTL table in §"TTL tiers". Six cached entities: transactions (tiered by month age), accounts (1h), budgets (1h), recurring (6h), categories (24h), tags (24h).
-5. **What does the LLM see about freshness?** `_cache_fetched_at` (ISO timestamp, worst-case across contributing entries) and `_cache_hit` (boolean — `true` iff nothing in the response required network this turn). Documented in `docs/graphql-live-reads.md` with LLM-facing guidance for interpreting the values.
+5. **What does the LLM see about freshness?** Three fields: `_cache_oldest_fetched_at` (worst-case staleness floor), `_cache_newest_fetched_at` (best-case staleness — typically "now" when any live-tier slice is in the response), and `_cache_hit` (boolean — `true` iff nothing required network this turn). Together they let the LLM bracket data freshness across mixed-tier responses without misinterpreting an old-floor timestamp as "everything is stale." Documented in `docs/graphql-live-reads.md`.
 6. **How does the LLM force a refresh?** `refresh_cache({ scope, months? })`. Registered only in `--live-reads` mode. `refresh_database` is untouched and continues to reload LevelDB.
 
 ## Appendix B — rejected alternatives
