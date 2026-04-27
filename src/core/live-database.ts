@@ -143,14 +143,18 @@ export class LiveCopilotDatabase {
     }
   }
 
-  async memoize<T>(key: string, loader: () => Promise<T>): Promise<T> {
+  async memoize<T>(
+    key: string,
+    loader: () => Promise<T>
+  ): Promise<{ result: T; fetched_at: number; hit: boolean }> {
     const existing = this.memoStore.get(key);
     if (existing && Date.now() - existing.at < this.memoTtlMs) {
-      return existing.result as T;
+      return { result: existing.result as T, fetched_at: existing.at, hit: true };
     }
     const result = await loader();
-    this.memoStore.set(key, { result, at: Date.now() });
-    return result;
+    const at = Date.now();
+    this.memoStore.set(key, { result, at });
+    return { result, fetched_at: at, hit: false };
   }
 
   logReadCall(opName: string, pages: number, latencyMs: number, rows: number): void {
@@ -169,13 +173,13 @@ export class LiveCopilotDatabase {
    */
   async getTransactions(
     opts: BuildFilterOptions & { sort?: TransactionSortInput; pageSize?: number }
-  ): Promise<TransactionNode[]> {
+  ): Promise<{ rows: TransactionNode[]; fetched_at: number; hit: boolean }> {
     const filter = buildTransactionFilter(opts);
     const sort = buildTransactionSort(opts.sort);
     const first = opts.pageSize ?? 100;
 
     const memoKey = JSON.stringify({ filter, sort, first });
-    return this.memoize(memoKey, async () => {
+    const memoResult = await this.memoize(memoKey, async () => {
       let pages = 0;
       const startedAt = Date.now();
       const rows = await paginateTransactions(
@@ -189,6 +193,11 @@ export class LiveCopilotDatabase {
       this.logReadCall('Transactions', pages, Date.now() - startedAt, rows.length);
       return rows;
     });
+    return {
+      rows: memoResult.result,
+      fetched_at: memoResult.fetched_at,
+      hit: memoResult.hit,
+    };
   }
 
   // ── Phase 2: cache accessors ──────────────────────────────────────────────
