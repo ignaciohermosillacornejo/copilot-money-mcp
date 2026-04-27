@@ -35,6 +35,7 @@ import {
 import { setBudget as gqlSetBudget } from '../core/graphql/budgets.js';
 import { graphQLErrorToMcpError } from './errors.js';
 import { parsePeriod } from '../utils/date.js';
+import { roundAmount } from '../utils/round.js';
 import {
   getCategoryName,
   isTransferCategory,
@@ -212,20 +213,6 @@ function validateOffset(offset: number | undefined): number {
  * Default category ID for uncategorized transactions.
  */
 const DEFAULT_CATEGORY_ID = 'uncategorized';
-
-/**
- * Rounds a number to 2 decimal places for currency display.
- *
- * @param value - The number to round
- * @returns Number rounded to 2 decimal places
- *
- * @example
- * roundAmount(10.126) // returns 10.13
- * roundAmount(10.1)   // returns 10.1
- */
-function roundAmount(value: number): number {
-  return Math.round(value * 100) / 100;
-}
 
 /**
  * Gets the category ID or returns the default 'uncategorized'.
