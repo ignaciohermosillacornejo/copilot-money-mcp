@@ -76,6 +76,18 @@ describe('TransactionWindowCache.plan', () => {
     expect(result.toFetch).toEqual(['2026-02']);
   });
 
+  test('live-tier month never surfaces cached rows even if ingested', () => {
+    // Spec contract: live tier = always refetch, never surface cache.
+    // Caller is responsible for ingesting fresh results; old cache state
+    // for a live month is not optimistically returned.
+    const cache = makeCache();
+    cache.ingestMonth('2026-04', [mkTx('a', '2026-04-10')], Date.now());
+
+    const result = cache.plan({ from: '2026-04-01', to: '2026-04-30' }, today);
+    expect(result.toFetch).toEqual(['2026-04']);
+    expect(result.cachedRows).toEqual([]);
+  });
+
   test('cachedRows are sliced to the requested range', () => {
     const cache = makeCache();
     cache.ingestMonth('2026-03', [mkTx('a', '2026-03-05'), mkTx('b', '2026-03-25')], Date.now());
@@ -112,10 +124,11 @@ describe('TransactionWindowCache write-through', () => {
 
     cache.upsert({ ...mkTx('a', '2026-04-05'), name: 'moved' });
 
-    const r3 = cache.plan({ from: '2026-03-01', to: '2026-03-31' }, new Date('2026-04-15'));
-    const r4 = cache.plan({ from: '2026-04-01', to: '2026-04-30' }, new Date('2026-04-15'));
-    expect(r3.cachedRows).toEqual([]);
-    expect(r4.cachedRows.map((r) => r.id)).toEqual(['a']);
+    // Inspect window state directly — `plan()` would filter the April
+    // entry via the live-tier rule, which is unrelated to the move.
+    expect(cache.entriesForMonth('2026-03')).toEqual([]);
+    expect(cache.entriesForMonth('2026-04').map((r) => r.id)).toEqual(['a']);
+    expect(cache.entriesForMonth('2026-04')[0]?.name).toBe('moved');
   });
 
   test('delete removes the row from its window', () => {

@@ -50,11 +50,16 @@ export class TransactionWindowCache<T extends CachedTransaction = CachedTransact
   private readonly windows = new Map<YearMonth, WindowEntry<T>>();
   private readonly lastAccessed = new Map<YearMonth, number>();
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   constructor(
     private readonly opts: TransactionWindowCacheOptions,
-    _inflight: InFlightRegistry
-  ) {}
+    // Stored for Phase 3 forward-compat — when transaction reads migrate
+    // onto this cache, the registry will gate concurrent month fetches.
+    // Phase 2 ingestMonth is externally driven so the field is unused yet.
+    private readonly inflight: InFlightRegistry
+  ) {
+    // Suppress unused-private-field warning while inflight is forward-compat only.
+    void this.inflight;
+  }
 
   tierFor(month: YearMonth, now: Date): Tier {
     const age = monthAge(month, now);
@@ -81,22 +86,14 @@ export class TransactionWindowCache<T extends CachedTransaction = CachedTransact
 
     for (const month of months) {
       const tier = this.tierFor(month, now);
-      const entry = this.windows.get(month);
-
       if (tier === 'live') {
-        // Live months always go to toFetch for a fresh read.
-        // If the month has been ingested (e.g. after a write-through upsert),
-        // also serve its current rows so callers see an optimistic value.
+        // Live tier: always refetch, never surface cache. Per the spec
+        // (§Query resolution), the caller fetches authoritative data and
+        // any prior write-through state will be overwritten by ingestMonth.
         toFetch.push(month);
-        if (entry) {
-          this.lastAccessed.set(month, Date.now());
-          for (const row of entry.rows) {
-            if (row.date >= range.from && row.date <= range.to) cachedRows.push(row);
-          }
-        }
         continue;
       }
-
+      const entry = this.windows.get(month);
       const ttl = this.ttlFor(tier);
       if (entry && Date.now() - entry.fetched_at < ttl) {
         this.lastAccessed.set(month, Date.now());
