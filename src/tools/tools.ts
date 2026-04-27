@@ -5,6 +5,7 @@
  */
 
 import { CopilotDatabase } from '../core/database.js';
+import type { LiveCopilotDatabase } from '../core/live-database.js';
 import type { GraphQLClient } from '../core/graphql/client.js';
 import { GraphQLError } from '../core/graphql/client.js';
 import {
@@ -343,6 +344,7 @@ function filterSplitParents<T extends { children_transaction_ids?: string[] }>(t
 export class CopilotMoneyTools {
   private db: CopilotDatabase;
   private graphqlClient: GraphQLClient | null;
+  private liveDb: LiveCopilotDatabase | undefined;
   private _userCategoryMap: Map<string, string> | null = null;
   private _excludedCategoryIds: Set<string> | null = null;
 
@@ -351,10 +353,16 @@ export class CopilotMoneyTools {
    *
    * @param database - CopilotDatabase instance
    * @param graphqlClient - Optional GraphQL client for write operations.
+   * @param liveDb - Optional LiveCopilotDatabase for write-through to live cache.
    */
-  constructor(database: CopilotDatabase, graphqlClient?: GraphQLClient) {
+  constructor(
+    database: CopilotDatabase,
+    graphqlClient?: GraphQLClient,
+    liveDb?: LiveCopilotDatabase
+  ) {
     this.db = database;
     this.graphqlClient = graphqlClient ?? null;
+    this.liveDb = liveDb;
   }
 
   /**
@@ -2342,6 +2350,13 @@ export class CopilotMoneyTools {
         emoji: args.emoji,
         excluded: args.is_excluded ?? false,
       });
+      this.liveDb?.patchLiveCategoryUpsert({
+        category_id: result.id,
+        name: result.name,
+        color: result.colorName,
+        emoji: args.emoji,
+        excluded: args.is_excluded ?? false,
+      });
       return {
         success: true,
         category_id: result.id,
@@ -2464,7 +2479,10 @@ export class CopilotMoneyTools {
         patch.category_id = args.category_id;
       if ('note' in args && args.note !== undefined) patch.user_note = args.note;
       if ('tag_ids' in args && args.tag_ids !== undefined) patch.tag_ids = args.tag_ids;
-      if (Object.keys(patch).length > 0) this.db.patchCachedTransaction(transaction_id, patch);
+      if (Object.keys(patch).length > 0) {
+        this.db.patchCachedTransaction(transaction_id, patch);
+        this.liveDb?.patchLiveTransaction(transaction_id, patch);
+      }
 
       return {
         success: true,
@@ -2639,6 +2657,7 @@ export class CopilotMoneyTools {
       // state honest with whatever the server thinks is real.
       if (deleted) {
         this.db.patchCachedTransactionDelete(transaction_id);
+        this.liveDb?.patchLiveTransactionDelete(transaction_id);
       }
 
       return {
@@ -2728,6 +2747,7 @@ export class CopilotMoneyTools {
       // id is absent — both acceptable, same as delete_transaction's
       // eviction-is-a-no-op contract.
       this.db.patchCachedTransaction(transaction_id, { recurring_id });
+      this.liveDb?.patchLiveTransaction(transaction_id, { recurring_id });
 
       return {
         success: true,
@@ -2916,6 +2936,7 @@ export class CopilotMoneyTools {
       // if the cache is unloaded or the id is absent — same eviction-is-a-
       // no-op contract as delete_transaction.
       this.db.patchCachedTransactionDelete(transaction_id);
+      this.liveDb?.patchLiveTransactionDelete(transaction_id);
 
       return {
         success: true,
@@ -3032,6 +3053,7 @@ export class CopilotMoneyTools {
     // patch every id in the batch.
     for (const id of transaction_ids) {
       this.db.patchCachedTransaction(id, { user_reviewed: reviewed });
+      this.liveDb?.patchLiveTransaction(id, { user_reviewed: reviewed });
     }
 
     return {
@@ -3060,11 +3082,13 @@ export class CopilotMoneyTools {
       const result = await gqlCreateTag(client, {
         input: { name: args.name.trim(), colorName },
       });
-      this.db.patchCachedTagUpsert({
+      const tag = {
         tag_id: result.id,
         name: result.name,
         color_name: result.colorName,
-      });
+      };
+      this.db.patchCachedTagUpsert(tag);
+      this.liveDb?.patchLiveTagUpsert(tag);
       return {
         success: true,
         tag_id: result.id,
@@ -3092,6 +3116,7 @@ export class CopilotMoneyTools {
     try {
       const result = await gqlDeleteTag(client, { id: args.tag_id });
       this.db.patchCachedTagDelete(args.tag_id);
+      this.liveDb?.patchLiveTagDelete(args.tag_id);
       return { success: true, tag_id: result.id, deleted: true };
     } catch (e) {
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
@@ -3130,6 +3155,7 @@ export class CopilotMoneyTools {
       if (args.emoji !== undefined) patch.emoji = args.emoji;
       if (args.is_excluded !== undefined) patch.excluded = args.is_excluded;
       this.db.patchCachedCategoryUpsert(patch as Category);
+      this.liveDb?.patchLiveCategoryUpsert(patch as Category);
       return {
         success: true,
         category_id: result.id,
@@ -3153,6 +3179,7 @@ export class CopilotMoneyTools {
     try {
       const result = await gqlDeleteCategory(client, { id: args.category_id });
       this.db.patchCachedCategoryDelete(args.category_id);
+      this.liveDb?.patchLiveCategoryDelete(args.category_id);
       return { success: true, category_id: result.id, deleted: true };
     } catch (e) {
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
@@ -3194,6 +3221,7 @@ export class CopilotMoneyTools {
         month: args.month,
       });
       this.db.patchCachedBudget(args.category_id, parseFloat(args.amount), args.month);
+      this.liveDb?.patchLiveBudget(args.category_id, parseFloat(args.amount), args.month);
       return {
         success: true,
         category_id: result.categoryId,
@@ -3230,10 +3258,12 @@ export class CopilotMoneyTools {
       });
       // GraphQL returns uppercase state ("ACTIVE"); the LevelDB cache stores
       // lowercase ("active"). Normalize to the cache's shape on patch.
-      this.db.patchCachedRecurringUpsert({
+      const recurringPatch = {
         recurring_id: args.recurring_id,
         state: args.state.toLowerCase() as 'active' | 'paused' | 'archived',
-      });
+      };
+      this.db.patchCachedRecurringUpsert(recurringPatch);
+      this.liveDb?.patchLiveRecurringUpsert(recurringPatch);
       return { success: true, recurring_id: result.id, state: args.state };
     } catch (e) {
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
@@ -3253,6 +3283,7 @@ export class CopilotMoneyTools {
     try {
       const result = await gqlDeleteRecurring(client, { id: args.recurring_id });
       this.db.patchCachedRecurringDelete(args.recurring_id);
+      this.liveDb?.patchLiveRecurringDelete(args.recurring_id);
       return { success: true, recurring_id: result.id, deleted: true };
     } catch (e) {
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
@@ -3286,6 +3317,7 @@ export class CopilotMoneyTools {
       if (args.name !== undefined) patch.name = args.name;
       if (args.color_name !== undefined) patch.color_name = args.color_name;
       this.db.patchCachedTagUpsert(patch as Tag);
+      this.liveDb?.patchLiveTagUpsert(patch as Tag);
       return { success: true, tag_id: result.id, updated: Object.keys(result.changed) };
     } catch (e) {
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
@@ -3334,12 +3366,14 @@ export class CopilotMoneyTools {
           },
         },
       });
-      this.db.patchCachedRecurringUpsert({
+      const recurringRow = {
         recurring_id: result.id,
         name: result.name,
         state: result.state.toLowerCase() as 'active' | 'paused' | 'archived',
         frequency: result.frequency,
-      });
+      };
+      this.db.patchCachedRecurringUpsert(recurringRow);
+      this.liveDb?.patchLiveRecurringUpsert(recurringRow);
       return {
         success: true,
         recurring_id: result.id,
@@ -3395,6 +3429,7 @@ export class CopilotMoneyTools {
       if (args.rule?.min_amount !== undefined) patch.min_amount = parseFloat(args.rule.min_amount);
       if (args.rule?.max_amount !== undefined) patch.max_amount = parseFloat(args.rule.max_amount);
       this.db.patchCachedRecurringUpsert(patch as Recurring);
+      this.liveDb?.patchLiveRecurringUpsert(patch as Recurring);
       return { success: true, recurring_id: result.id, updated: Object.keys(result.changed) };
     } catch (e) {
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
