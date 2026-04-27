@@ -36,11 +36,20 @@ export class LiveAccountsTools {
     const { account_type, include_hidden = false } = args;
 
     const cache = this.live.getAccountsCache();
+    const startedAt = Date.now();
     const {
       rows: cached,
       fetched_at,
       hit,
     } = await cache.read(() => fetchAccounts(this.live.getClient()));
+    this.live.logReadCall({
+      op: 'Accounts',
+      pages: hit ? 0 : 1,
+      latencyMs: Date.now() - startedAt,
+      rows: cached.length,
+      ttl_tier: 'warm',
+      cache_hit: hit,
+    });
 
     let rows = cached;
 

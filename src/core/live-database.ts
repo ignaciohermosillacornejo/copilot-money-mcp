@@ -162,9 +162,29 @@ export class LiveCopilotDatabase {
     return { result, fetched_at: at, hit: false };
   }
 
-  logReadCall(opName: string, pages: number, latencyMs: number, rows: number): void {
+  logReadCall(log: {
+    op: string;
+    pages: number;
+    latencyMs: number;
+    rows: number;
+    ttl_tier?: 'live' | 'warm' | 'cold';
+    cache_hit?: boolean;
+    staleness_ms?: number | null;
+    month?: string;
+  }): void {
     if (!this.verbose) return;
-    console.error(`[graphql-read] op=${opName} pages=${pages} latency=${latencyMs}ms rows=${rows}`);
+    const parts = [
+      `[graphql-read]`,
+      `op=${log.op}`,
+      log.ttl_tier !== undefined ? `ttl_tier=${log.ttl_tier}` : null,
+      log.cache_hit !== undefined ? `cache_hit=${log.cache_hit}` : null,
+      `pages=${log.pages}`,
+      `latency=${log.latencyMs}ms`,
+      `rows=${log.rows}`,
+      log.month ? `month=${log.month}` : null,
+      log.staleness_ms !== undefined ? `staleness_ms=${log.staleness_ms ?? 'null'}` : null,
+    ].filter(Boolean);
+    console.error(parts.join(' '));
   }
 
   /**
@@ -195,7 +215,13 @@ export class LiveCopilotDatabase {
           }),
         { startDate: opts.startDate }
       );
-      this.logReadCall('Transactions', pages, Date.now() - startedAt, rows.length);
+      this.logReadCall({
+        op: 'Transactions',
+        pages,
+        latencyMs: Date.now() - startedAt,
+        rows: rows.length,
+        cache_hit: false, // pure miss path; cache hits short-circuit before this loader runs
+      });
       return rows;
     });
     return {
