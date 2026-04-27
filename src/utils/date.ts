@@ -100,3 +100,54 @@ export function parsePeriod(period: string): [string, string] {
       throw new Error(`Unknown period: ${period}`);
   }
 }
+
+/**
+ * A YYYY-MM string used as a window-cache key.
+ */
+export type YearMonth = string;
+
+export interface DateRangeArg {
+  from: string; // YYYY-MM-DD
+  to: string; // YYYY-MM-DD
+}
+
+/**
+ * Enumerate every calendar month overlapped by the inclusive
+ * [from, to] range, in chronological order. Inputs are YYYY-MM-DD.
+ */
+export function monthsCovered(range: DateRangeArg): YearMonth[] {
+  const startYear = Number(range.from.slice(0, 4));
+  const startMonth = Number(range.from.slice(5, 7));
+  const endYear = Number(range.to.slice(0, 4));
+  const endMonth = Number(range.to.slice(5, 7));
+
+  const months: YearMonth[] = [];
+  let y = startYear;
+  let m = startMonth;
+  while (y < endYear || (y === endYear && m <= endMonth)) {
+    months.push(`${y.toString().padStart(4, '0')}-${m.toString().padStart(2, '0')}`);
+    m += 1;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+  }
+  return months;
+}
+
+/**
+ * Age in whole days of the most recent day of the given YYYY-MM month
+ * relative to `now`. Clamped at 0 — current and future months return 0.
+ *
+ * Used by TransactionWindowCache to resolve a month into one of the
+ * tier classes (live ≤7d / warm 8-21d / cold >21d).
+ */
+export function monthAge(month: YearMonth, now: Date): number {
+  const year = Number(month.slice(0, 4));
+  const monthNum = Number(month.slice(5, 7));
+  // Last day of the month: day 0 of next month.
+  const lastDay = new Date(year, monthNum, 0);
+  const ageMs = now.getTime() - lastDay.getTime();
+  if (ageMs <= 0) return 0;
+  return Math.floor(ageMs / (24 * 60 * 60 * 1000));
+}
