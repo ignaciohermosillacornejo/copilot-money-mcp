@@ -204,4 +204,32 @@ describe('monthAge', () => {
   test('future month → 0 days (clamped)', () => {
     expect(monthAge('2026-05', new Date('2026-04-15'))).toBe(0);
   });
+
+  test('year-boundary previous month', () => {
+    // 2025-12-31 is 5 days before 2026-01-05
+    expect(monthAge('2025-12', new Date('2026-01-05'))).toBe(5);
+  });
+
+  test('multi-year staleness math handles intervening leap years', () => {
+    // 2024 is a leap year (Feb 29); 2024-01-31 → 2026-04-15 = 805 days.
+    expect(monthAge('2024-01', new Date('2026-04-15'))).toBe(805);
+  });
+
+  test('age is timezone-invariant when now is parsed from YYYY-MM-DD', () => {
+    // `new Date('2026-04-15')` is parsed as UTC midnight; the helper must
+    // not let the host TZ shift the day count. Run-time TZ stash + restore.
+    const originalTZ = process.env.TZ;
+    try {
+      process.env.TZ = 'America/Vancouver'; // UTC-7/8
+      expect(monthAge('2026-03', new Date('2026-04-15'))).toBe(15);
+      expect(monthAge('2026-02', new Date('2026-04-15'))).toBe(46);
+
+      process.env.TZ = 'Pacific/Auckland'; // UTC+12/13
+      expect(monthAge('2026-03', new Date('2026-04-15'))).toBe(15);
+      expect(monthAge('2026-02', new Date('2026-04-15'))).toBe(46);
+    } finally {
+      if (originalTZ === undefined) delete process.env.TZ;
+      else process.env.TZ = originalTZ;
+    }
+  });
 });
