@@ -1,10 +1,10 @@
 /**
  * Live-mode get_accounts_live tool.
  *
- * Fetches accounts via GraphQL through LiveCopilotDatabase's
- * memoize() layer (5 min TTL by default). Output envelope matches the
- * cache-backed get_accounts shape (count, totals, accounts) plus the
- * three live-cache freshness fields.
+ * Fetches accounts via GraphQL through the SnapshotCache<AccountNode>
+ * exposed by LiveCopilotDatabase (1h TTL by default). Output envelope
+ * matches the cache-backed get_accounts shape (count, totals, accounts)
+ * plus the three live-cache freshness fields.
  */
 
 import type { LiveCopilotDatabase } from '../../core/live-database.js';
@@ -29,20 +29,20 @@ export interface GetAccountsLiveResult {
 
 const LIABILITY_TYPES = new Set(['credit', 'loan']);
 
-const ACCOUNTS_MEMO_KEY = 'live:accounts';
-
 export class LiveAccountsTools {
   constructor(private readonly live: LiveCopilotDatabase) {}
 
   async getAccounts(args: GetAccountsLiveArgs): Promise<GetAccountsLiveResult> {
     const { account_type, include_hidden = false } = args;
 
-    const { result, fetched_at, hit } = await this.live.memoize<AccountNode[]>(
-      ACCOUNTS_MEMO_KEY,
-      () => fetchAccounts(this.live.getClient())
-    );
+    const cache = this.live.getAccountsCache();
+    const {
+      rows: cached,
+      fetched_at,
+      hit,
+    } = await cache.read(() => fetchAccounts(this.live.getClient()));
 
-    let rows = result;
+    let rows = cached;
 
     if (!include_hidden) {
       rows = rows.filter((a) => !a.isUserHidden && !a.isUserClosed);
