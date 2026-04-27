@@ -42,14 +42,6 @@ export class LiveAccountsTools {
       fetched_at,
       hit,
     } = await cache.read(() => fetchAccounts(this.live.getClient()));
-    this.live.logReadCall({
-      op: 'Accounts',
-      pages: hit ? 0 : 1,
-      latencyMs: Date.now() - startedAt,
-      rows: cached.length,
-      ttl_tier: 'warm',
-      cache_hit: hit,
-    });
 
     let rows = cached;
 
@@ -59,6 +51,19 @@ export class LiveAccountsTools {
     if (account_type) {
       rows = rows.filter((a) => a.type === account_type);
     }
+
+    // Log after filtering so `rows` reflects what's actually returned to
+    // the caller, not the raw cached count. ttl_tier is omitted because
+    // the live/warm/cold labels are tied to TransactionWindowCache's
+    // age-based classification — they don't map cleanly to a snapshot
+    // cache with a fixed 1h TTL.
+    this.live.logReadCall({
+      op: 'Accounts',
+      pages: hit ? 0 : 1,
+      latencyMs: Date.now() - startedAt,
+      rows: rows.length,
+      cache_hit: hit,
+    });
 
     let totalAssets = 0;
     let totalLiabilities = 0;

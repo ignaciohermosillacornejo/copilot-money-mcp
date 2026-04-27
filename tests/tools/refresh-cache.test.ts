@@ -126,4 +126,31 @@ describe('RefreshCacheTool', () => {
     const c = await live.getCategoriesCache().read(async () => [] as never);
     expect(c.hit).toBe(false);
   });
+
+  test('rejects malformed month strings with a clear error', async () => {
+    const live = mkLive();
+    const tool = new RefreshCacheTool(live);
+
+    await expect(tool.refresh({ scope: 'transactions', months: ['bogus'] })).rejects.toThrow(
+      /Invalid month format/
+    );
+
+    await expect(tool.refresh({ scope: 'transactions', months: ['2026-13'] })).rejects.toThrow(
+      /Invalid month format/
+    );
+
+    await expect(
+      tool.refresh({ scope: 'transactions', months: ['2026-04', '2026-00'] })
+    ).rejects.toThrow(/Invalid month format/);
+  });
+
+  test('accepts well-formed YYYY-MM month strings', async () => {
+    const live = mkLive();
+    live.getTransactionsWindowCache().ingestMonth('2026-04', [], Date.now());
+    const tool = new RefreshCacheTool(live);
+
+    await expect(
+      tool.refresh({ scope: 'transactions', months: ['2026-04', '2025-12', '2024-01'] })
+    ).resolves.toBeDefined();
+  });
 });
