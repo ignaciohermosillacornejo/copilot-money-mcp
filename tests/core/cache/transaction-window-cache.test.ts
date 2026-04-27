@@ -184,6 +184,48 @@ describe('TransactionWindowCache.evictLRU', () => {
   });
 });
 
+describe('TransactionWindowCache.totalRows running counter', () => {
+  test('matches actual row count across ingest, upsert, delete, invalidate', () => {
+    const cache = makeCache();
+    expect(cache.totalRows()).toBe(0);
+
+    cache.ingestMonth('2026-03', [mkTx('a', '2026-03-10'), mkTx('b', '2026-03-15')], Date.now());
+    expect(cache.totalRows()).toBe(2);
+
+    // Re-ingesting overwrites; counter reflects new size, not sum.
+    cache.ingestMonth('2026-03', [mkTx('a', '2026-03-10')], Date.now());
+    expect(cache.totalRows()).toBe(1);
+
+    cache.ingestMonth('2026-04', [mkTx('c', '2026-04-05')], Date.now());
+    expect(cache.totalRows()).toBe(2);
+
+    // Upsert into existing row replaces in place — count unchanged.
+    cache.upsert({ ...mkTx('a', '2026-03-10'), name: 'updated' });
+    expect(cache.totalRows()).toBe(2);
+
+    // Upsert with date change moves across windows — count still unchanged.
+    cache.upsert({ ...mkTx('a', '2026-04-08'), name: 'moved' });
+    expect(cache.totalRows()).toBe(2);
+
+    // Upsert of a new id into a cached month — count goes up.
+    cache.upsert(mkTx('d', '2026-04-20'));
+    expect(cache.totalRows()).toBe(3);
+
+    // Delete decrements.
+    cache.delete('d');
+    expect(cache.totalRows()).toBe(2);
+
+    // Selective invalidate decrements by removed window's row count.
+    cache.invalidate(['2026-04']);
+    expect(cache.totalRows()).toBe(0);
+
+    // Invalidate-all zeroes the counter.
+    cache.ingestMonth('2026-05', [mkTx('e', '2026-05-01')], Date.now());
+    cache.invalidate('all');
+    expect(cache.totalRows()).toBe(0);
+  });
+});
+
 describe('TransactionWindowCache.invalidate', () => {
   test('all clears every window', () => {
     const cache = makeCache();

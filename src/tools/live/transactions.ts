@@ -138,7 +138,11 @@ export class LiveTransactionsTools {
   private async singleTransactionLookup(
     opts: GetTransactionsLiveOptions
   ): Promise<GetTransactionsLiveResult> {
-    const ref = await this.resolveAccountRef(opts.account_id!);
+    // validate() guarantees both account_id and item_id are present for the
+    // single-transaction path. Use the caller-supplied item_id directly so the
+    // documented contract ("all three come from a prior list result") is
+    // actually enforced — not silently bypassed via a cache lookup.
+    const ref: AccountRef = { accountId: opts.account_id!, itemId: opts.item_id! };
     // Resolve period → [start, end] exactly like the main path, so a caller
     // passing only `period` still produces a bounded fetch. validate() already
     // guarantees at least one of (start_date, end_date, period) is present.
