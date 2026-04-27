@@ -112,28 +112,28 @@ describe('SnapshotCache', () => {
 
   test('cache populated before in-flight registry clears (race contract)', async () => {
     const reg = new InFlightRegistry();
-    const cache = new SnapshotCache<Row>(
-      { key: 'rows', ttlMs: 1000, keyFn: (r) => r.id },
-      reg
-    );
+    const cache = new SnapshotCache<Row>({ key: 'rows', ttlMs: 1000, keyFn: (r) => r.id }, reg);
 
     let loaderResolves!: (rows: Row[]) => void;
     const loaderPromise = new Promise<Row[]>((resolve) => {
       loaderResolves = resolve;
     });
 
+    // A starts the in-flight load. B joins the same key and MUST share
+    // A's loader. If the cache write happens INSIDE the inflight closure,
+    // B's await resumes after the cache is populated. If it happens AFTER
+    // `await this.inflight.run(...)` returns, B can race past the
+    // registry cleanup, see the cache empty, and return stale/empty rows.
     const readA = cache.read(() => loaderPromise);
-    loaderResolves([{ id: '1', name: 'one' }]);
-    await readA;
-
-    // After A resolves, both registry-cleanup and cache-write must have
-    // happened. A subsequent read must be a hit, not a fresh fetch.
-    let loads = 0;
-    const result = await cache.read(async () => {
-      loads += 1;
-      return [];
+    const readB = cache.read(async () => {
+      throw new Error('B should never invoke its own loader');
     });
-    expect(result.hit).toBe(true);
-    expect(loads).toBe(0);
+
+    loaderResolves([{ id: '1', name: 'one' }]);
+    const [a, b] = await Promise.all([readA, readB]);
+
+    expect(a.hit).toBe(false);
+    expect(a.rows).toEqual([{ id: '1', name: 'one' }]);
+    expect(b.rows).toEqual([{ id: '1', name: 'one' }]);
   });
 });
