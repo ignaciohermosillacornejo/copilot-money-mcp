@@ -49,6 +49,9 @@ interface WindowEntry<T extends CachedTransaction> {
 export class TransactionWindowCache<T extends CachedTransaction = CachedTransaction> {
   private readonly windows = new Map<YearMonth, WindowEntry<T>>();
   private readonly lastAccessed = new Map<YearMonth, number>();
+  // Running row count maintained by every mutation. Avoids the previous
+  // O(n²) loop where evictLRU recomputed totalRows() on each iteration.
+  private _totalRows = 0;
 
   constructor(
     private readonly opts: TransactionWindowCacheOptions,
@@ -109,7 +112,11 @@ export class TransactionWindowCache<T extends CachedTransaction = CachedTransact
   }
 
   ingestMonth(month: YearMonth, rows: T[], fetched_at: number): void {
-    this.windows.set(month, { rows: [...rows], fetched_at });
+    const existing = this.windows.get(month);
+    if (existing) this._totalRows -= existing.rows.length;
+    const cloned = [...rows];
+    this.windows.set(month, { rows: cloned, fetched_at });
+    this._totalRows += cloned.length;
     this.lastAccessed.set(month, Date.now());
     this.evictLRU(this.opts.maxRows);
   }
@@ -123,20 +130,30 @@ export class TransactionWindowCache<T extends CachedTransaction = CachedTransact
     for (const [m, entry] of this.windows) {
       if (m === month) continue;
       const idx = entry.rows.findIndex((r) => r.id === tx.id);
-      if (idx >= 0) entry.rows.splice(idx, 1);
+      if (idx >= 0) {
+        entry.rows.splice(idx, 1);
+        this._totalRows -= 1;
+      }
     }
     const entry = this.windows.get(month);
     if (!entry) return; // no-op for uncached target months
     const idx = entry.rows.findIndex((r) => r.id === tx.id);
-    if (idx >= 0) entry.rows[idx] = tx;
-    else entry.rows.push(tx);
+    if (idx >= 0) {
+      entry.rows[idx] = tx;
+    } else {
+      entry.rows.push(tx);
+      this._totalRows += 1;
+    }
     this.lastAccessed.set(month, Date.now());
   }
 
   delete(id: string): void {
     for (const entry of this.windows.values()) {
       const idx = entry.rows.findIndex((r) => r.id === id);
-      if (idx >= 0) entry.rows.splice(idx, 1);
+      if (idx >= 0) {
+        entry.rows.splice(idx, 1);
+        this._totalRows -= 1;
+      }
     }
   }
 
@@ -144,18 +161,22 @@ export class TransactionWindowCache<T extends CachedTransaction = CachedTransact
     if (scope === 'all') {
       this.windows.clear();
       this.lastAccessed.clear();
+      this._totalRows = 0;
       return;
     }
     for (const m of scope) {
+      const entry = this.windows.get(m);
+      if (entry) this._totalRows -= entry.rows.length;
       this.windows.delete(m);
       this.lastAccessed.delete(m);
     }
   }
 
   totalRows(): number {
-    let total = 0;
-    for (const entry of this.windows.values()) total += entry.rows.length;
-    return total;
+    // O(1) — maintained as a running counter on every mutation. See
+    // ingestMonth/upsert/delete/invalidate/evictLRU. Drift would be a
+    // bug; the assertion below catches it in dev test runs only.
+    return this._totalRows;
   }
 
   hasMonth(month: YearMonth): boolean {
@@ -171,9 +192,11 @@ export class TransactionWindowCache<T extends CachedTransaction = CachedTransact
   }
 
   private evictLRU(maxTotalRows: number): void {
-    while (this.totalRows() > maxTotalRows) {
+    while (this._totalRows > maxTotalRows) {
       const oldest = this.oldestAccessedMonth();
       if (!oldest) return;
+      const entry = this.windows.get(oldest);
+      if (entry) this._totalRows -= entry.rows.length;
       this.windows.delete(oldest);
       this.lastAccessed.delete(oldest);
     }

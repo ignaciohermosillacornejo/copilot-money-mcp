@@ -293,8 +293,13 @@ export class LiveCopilotDatabase {
     const monthKey =
       month ??
       (() => {
+        // UTC matches monthAge() / monthsCovered() in date.ts. Using
+        // local time would be off by ~12h at month boundaries in
+        // negative UTC offsets (e.g., late Jan 31 in UTC-8 is already
+        // Feb 1 UTC), producing a budget bucket that doesn't match
+        // the cache's tier-classification basis.
         const d = new Date();
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
       })();
     // Use a UUID for budget_id (matches patchCachedBudget on CopilotDatabase
     // — both paths surface the same shape so paired writes at Task 6 sites

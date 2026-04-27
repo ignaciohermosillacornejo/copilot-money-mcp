@@ -22,7 +22,18 @@ export interface SnapshotCacheOptions<T> {
 export interface SnapshotReadResult<T> {
   rows: T[];
   fetched_at: number;
-  /** true iff served from cache without a network call this turn. */
+  /**
+   * true iff this caller's `read()` returned synchronously from the
+   * fresh-cache branch (TTL not expired). false in three cases:
+   *   - first-time miss: caller triggered the loader and the fetch
+   *   - TTL-expired refetch: caller triggered the loader for fresh data
+   *   - in-flight coalescer: caller joined another caller's pending
+   *     loader via InFlightRegistry. The coalescer does NOT issue a
+   *     network call itself — but we still mark `hit: false` because
+   *     the response data was network-derived this turn (just not by
+   *     this caller). The semantic is "data was network-fresh this
+   *     turn", not "this specific caller paid network cost".
+   */
   hit: boolean;
 }
 
