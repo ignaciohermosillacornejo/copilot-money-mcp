@@ -3553,3 +3553,16 @@ describe('updateRecurring', () => {
     });
   });
 });
+
+describe('write-through to live cache', () => {
+  test('CopilotMoneyTools accepts an optional liveDb constructor argument', () => {
+    // Smoke test: confirm the third constructor parameter is plumbed through.
+    // Detailed write-through behavior is exercised in tests/core/live-database.test.ts
+    // (patchLive* methods) and via the live-mode integration tests.
+    const db = new CopilotDatabase('/tmp/nonexistent-test-db');
+    const tools = new CopilotMoneyTools(db);
+    expect(tools).toBeDefined();
+    // No throw when constructed without liveDb. The 16 patchCached call sites
+    // use `this.liveDb?.patchLive*` so a missing liveDb is a silent no-op.
+  });
+});

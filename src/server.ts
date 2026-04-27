@@ -61,12 +61,13 @@ export class CopilotMoneyServer {
       graphqlClient = new GraphQLClient(auth);
     }
 
-    this.tools = new CopilotMoneyTools(this.db, graphqlClient);
-
+    let liveDb: LiveCopilotDatabase | undefined;
     if (liveReadsEnabled && graphqlClient) {
-      const liveDb = new LiveCopilotDatabase(graphqlClient, this.db);
+      liveDb = new LiveCopilotDatabase(graphqlClient, this.db);
       this.liveTools = new LiveTransactionsTools(liveDb);
     }
+
+    this.tools = new CopilotMoneyTools(this.db, graphqlClient, liveDb);
     this.server = new Server(
       {
         name: 'copilot-money-mcp',
