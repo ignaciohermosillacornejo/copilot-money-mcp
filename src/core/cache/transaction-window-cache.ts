@@ -116,14 +116,17 @@ export class TransactionWindowCache<T extends CachedTransaction = CachedTransact
 
   upsert(tx: T): void {
     const month = tx.date.slice(0, 7);
-    // Delete from any other window that holds this id (date-change case).
+    // Cross-window removal happens unconditionally — if the row moved
+    // from a cached month into an uncached month, the old entry is
+    // still removed even though the new window won't be created
+    // (insert below is a no-op when target month isn't cached).
     for (const [m, entry] of this.windows) {
       if (m === month) continue;
       const idx = entry.rows.findIndex((r) => r.id === tx.id);
       if (idx >= 0) entry.rows.splice(idx, 1);
     }
     const entry = this.windows.get(month);
-    if (!entry) return; // no-op for uncached months
+    if (!entry) return; // no-op for uncached target months
     const idx = entry.rows.findIndex((r) => r.id === tx.id);
     if (idx >= 0) entry.rows[idx] = tx;
     else entry.rows.push(tx);
