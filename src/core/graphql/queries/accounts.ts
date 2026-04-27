@@ -18,7 +18,11 @@ export interface AccountNode {
   itemId: string;
   name: string;
   balance: number;
-  liveBalance: number | null;
+  // Boolean flag in the real response (verified against Chrome capture
+  // 2026-04-15) — indicates whether the account currently has a live
+  // balance feed. Distinct from `hasLiveBalance` (capability flag, set
+  // when Plaid offers live balance for the institution).
+  liveBalance: boolean;
   type: string;
   subType: string | null;
   mask: string | null;
