@@ -44,15 +44,18 @@ export class SnapshotCache<T> {
       return { rows: this.entry.rows, fetched_at: this.entry.fetched_at, hit: true };
     }
 
-    await this.inflight.run(this.opts.key, async () => {
+    const result = await this.inflight.run(this.opts.key, async () => {
       const rows = await loader();
       // Cache write happens-before the loader's returned promise resolves,
       // ensuring it precedes the InFlightRegistry's .finally() cleanup.
-      this.entry = { rows, fetched_at: Date.now() };
-      return rows;
+      // This also guards against a concurrent invalidate() racing between
+      // awaits — the local `entry` is captured before any external code runs.
+      const entry: Entry<T> = { rows, fetched_at: Date.now() };
+      this.entry = entry;
+      return entry;
     });
 
-    return { rows: this.entry!.rows, fetched_at: this.entry!.fetched_at, hit: false };
+    return { rows: result.rows, fetched_at: result.fetched_at, hit: false };
   }
 
   upsert(row: T): void {
