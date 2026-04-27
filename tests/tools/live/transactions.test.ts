@@ -113,11 +113,15 @@ function mkNode(partial: Partial<TransactionNode>): TransactionNode {
   };
 }
 
-function mkLiveReturning(nodes: TransactionNode[]): LiveCopilotDatabase {
+function mkLiveReturning(nodes: TransactionNode[], fetchedAt = Date.now()): LiveCopilotDatabase {
   const live = mkLive();
   (
-    live as unknown as { getTransactions: (opts: unknown) => Promise<TransactionNode[]> }
-  ).getTransactions = async () => nodes;
+    live as unknown as {
+      getTransactions: (
+        opts: unknown
+      ) => Promise<{ rows: TransactionNode[]; fetched_at: number; hit: boolean }>;
+    }
+  ).getTransactions = async () => ({ rows: nodes, fetched_at: fetchedAt, hit: false });
   return live;
 }
 
@@ -221,7 +225,9 @@ describe('LiveTransactionsTools — account resolution', () => {
     (live.getCache().getAccounts as ReturnType<typeof mock>).mockImplementation(() =>
       Promise.resolve(accounts)
     );
-    const spy = mock((_opts: unknown) => Promise.resolve([] as TransactionNode[]));
+    const spy = mock((_opts: unknown) =>
+      Promise.resolve({ rows: [] as TransactionNode[], fetched_at: Date.now(), hit: false })
+    );
     (live as unknown as { getTransactions: typeof spy }).getTransactions = spy;
 
     const tools = new LiveTransactionsTools(live);
@@ -248,7 +254,9 @@ describe('LiveTransactionsTools — account resolution', () => {
     (live.getCache().getAccounts as ReturnType<typeof mock>).mockImplementation(() =>
       Promise.resolve(accounts)
     );
-    const spy = mock((_opts: unknown) => Promise.resolve([] as TransactionNode[]));
+    const spy = mock((_opts: unknown) =>
+      Promise.resolve({ rows: [] as TransactionNode[], fetched_at: Date.now(), hit: false })
+    );
     (live as unknown as { getTransactions: typeof spy }).getTransactions = spy;
 
     const tools = new LiveTransactionsTools(live);
@@ -263,6 +271,73 @@ describe('LiveTransactionsTools — account resolution', () => {
     // parsePeriod('this_year') returns concrete YYYY-MM-DD bounds; assert both are set.
     expect(args.startDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(args.endDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe('LiveTransactionsTools — freshness envelope', () => {
+  test('response includes _cache_oldest_fetched_at, _cache_newest_fetched_at, and _cache_hit', async () => {
+    const live = mkLiveReturning([mkNode({ id: 't1' })]);
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({
+      start_date: '2026-04-01',
+      end_date: '2026-04-30',
+    });
+    expect(typeof result._cache_oldest_fetched_at).toBe('string');
+    expect(typeof result._cache_newest_fetched_at).toBe('string');
+    expect(typeof result._cache_hit).toBe('boolean');
+    expect(result._cache_hit).toBe(false);
+  });
+
+  test('oldest and newest are equal (single memo bucket in Phase 2)', async () => {
+    const live = mkLiveReturning([]);
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({
+      start_date: '2026-04-01',
+      end_date: '2026-04-30',
+    });
+    expect(result._cache_oldest_fetched_at).toBe(result._cache_newest_fetched_at);
+  });
+
+  test('_cache_oldest_fetched_at is a valid ISO string', async () => {
+    const live = mkLiveReturning([]);
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({
+      start_date: '2026-04-01',
+      end_date: '2026-04-30',
+    });
+    expect(new Date(result._cache_oldest_fetched_at).toISOString()).toBe(
+      result._cache_oldest_fetched_at
+    );
+  });
+
+  test('second identical call has _cache_hit: true and same timestamps', async () => {
+    // Use the real LiveCopilotDatabase memoize by constructing a live instance
+    // whose underlying GraphQL call returns a fixed page.
+    const { LiveCopilotDatabase: LiveDB } = await import('../../../src/core/live-database.js');
+    const client = {
+      mutate: mock(),
+      query: mock(() =>
+        Promise.resolve({
+          transactions: { edges: [], pageInfo: { endCursor: null, hasNextPage: false } },
+        })
+      ),
+    } as unknown as import('../../../src/core/graphql/client.js').GraphQLClient;
+    const cache = {
+      getAccounts: mock(() => Promise.resolve([])),
+      getTags: mock(() => Promise.resolve([])),
+      getUserCategories: mock(() => Promise.resolve([])),
+      getCategoryNameMap: mock(() => Promise.resolve(new Map<string, string>())),
+    } as unknown as import('../../../src/core/database.js').CopilotDatabase;
+    const liveDb = new LiveDB(client, cache, { memoTtlMs: 60_000 });
+    const tools = new LiveTransactionsTools(liveDb);
+
+    const a = await tools.getTransactions({ start_date: '2026-04-01', end_date: '2026-04-30' });
+    const b = await tools.getTransactions({ start_date: '2026-04-01', end_date: '2026-04-30' });
+
+    expect(a._cache_hit).toBe(false);
+    expect(b._cache_hit).toBe(true);
+    expect(b._cache_oldest_fetched_at).toBe(a._cache_oldest_fetched_at);
+    expect(b._cache_newest_fetched_at).toBe(a._cache_newest_fetched_at);
   });
 });
 

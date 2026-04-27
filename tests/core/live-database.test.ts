@@ -73,9 +73,26 @@ describe('LiveCopilotDatabase — memo', () => {
     };
     const a = await live.memoize('key-1', loader);
     const b = await live.memoize('key-1', loader);
-    expect(a).toEqual({ value: 1 });
-    expect(b).toEqual({ value: 1 });
+    expect(a.result).toEqual({ value: 1 });
+    expect(b.result).toEqual({ value: 1 });
     expect(calls).toBe(1);
+  });
+
+  test('hit=false on first call, hit=true on second call within TTL', async () => {
+    const live = new LiveCopilotDatabase(mkClient(), mkCache(), { memoTtlMs: 60_000 });
+    const loader = async () => 42;
+    const a = await live.memoize('key-hit', loader);
+    const b = await live.memoize('key-hit', loader);
+    expect(a.hit).toBe(false);
+    expect(b.hit).toBe(true);
+  });
+
+  test('fetched_at is stable across cache hits', async () => {
+    const live = new LiveCopilotDatabase(mkClient(), mkCache(), { memoTtlMs: 60_000 });
+    const loader = async () => 'x';
+    const a = await live.memoize('key-ts', loader);
+    const b = await live.memoize('key-ts', loader);
+    expect(b.fetched_at).toBe(a.fetched_at);
   });
 
   test('re-loads after TTL expires', async () => {
@@ -95,7 +112,7 @@ describe('LiveCopilotDatabase — memo', () => {
     const live = new LiveCopilotDatabase(mkClient(), mkCache());
     await live.memoize('a', async () => 1);
     const b = await live.memoize('b', async () => 2);
-    expect(b).toBe(2);
+    expect(b.result).toBe(2);
   });
 });
 
@@ -141,7 +158,7 @@ describe('LiveCopilotDatabase.getTransactions', () => {
       },
     ]);
     const live = new LiveCopilotDatabase(client, mkCache());
-    const rows = await live.getTransactions({});
+    const { rows } = await live.getTransactions({});
     expect(rows).toHaveLength(1);
     expect(rows[0]!.id).toBe('t1');
   });
@@ -177,7 +194,7 @@ describe('LiveCopilotDatabase.getTransactions', () => {
     } as unknown as GraphQLClient;
     const live = new LiveCopilotDatabase(client, mkCache());
 
-    const rows = await live.getTransactions({});
+    const { rows } = await live.getTransactions({});
     expect(rows).toHaveLength(0);
     expect(calls).toBe(2);
   });

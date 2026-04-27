@@ -67,12 +67,18 @@ export interface EnrichedTransaction {
   created_timestamp: number;
 }
 
-export interface GetTransactionsLiveResult {
+interface PageResult {
   count: number;
   total_count: number;
   offset: number;
   has_more: boolean;
   transactions: EnrichedTransaction[];
+}
+
+export interface GetTransactionsLiveResult extends PageResult {
+  _cache_oldest_fetched_at: string;
+  _cache_newest_fetched_at: string;
+  _cache_hit: boolean;
 }
 
 const UNSUPPORTED_KEYS = ['city', 'lat', 'lon', 'radius_km', 'region', 'country'] as const;
@@ -104,7 +110,11 @@ export class LiveTransactionsTools {
     const types: ReadTransactionType[] | undefined =
       opts.exclude_transfers !== false ? ['REGULAR', 'INCOME'] : undefined;
 
-    const nodes = await this.live.getTransactions({
+    const {
+      rows: nodes,
+      fetched_at,
+      hit,
+    } = await this.live.getTransactions({
       startDate: start_date,
       endDate: end_date,
       accountRefs,
@@ -115,7 +125,14 @@ export class LiveTransactionsTools {
     });
 
     const filtered = await this.postFilter(nodes, opts);
-    return this.paginateAndEnrich(filtered, opts);
+    const page = await this.paginateAndEnrich(filtered, opts);
+    const fetchedAtIso = new Date(fetched_at).toISOString();
+    return {
+      ...page,
+      _cache_oldest_fetched_at: fetchedAtIso,
+      _cache_newest_fetched_at: fetchedAtIso,
+      _cache_hit: hit,
+    };
   }
 
   private async singleTransactionLookup(
@@ -128,14 +145,28 @@ export class LiveTransactionsTools {
     const [start_date, end_date] = opts.period
       ? parsePeriod(opts.period)
       : [opts.start_date, opts.end_date];
-    const nodes = await this.live.getTransactions({
+    const {
+      rows: nodes,
+      fetched_at,
+      hit,
+    } = await this.live.getTransactions({
       accountRefs: [ref],
       startDate: start_date,
       endDate: end_date,
     });
+    const fetchedAtIso = new Date(fetched_at).toISOString();
     const match = nodes.find((n) => n.id === opts.transaction_id);
     if (!match) {
-      return { count: 0, total_count: 0, offset: 0, has_more: false, transactions: [] };
+      return {
+        count: 0,
+        total_count: 0,
+        offset: 0,
+        has_more: false,
+        transactions: [],
+        _cache_oldest_fetched_at: fetchedAtIso,
+        _cache_newest_fetched_at: fetchedAtIso,
+        _cache_hit: hit,
+      };
     }
     const enriched = await this.enrich([match]);
     return {
@@ -144,6 +175,9 @@ export class LiveTransactionsTools {
       offset: 0,
       has_more: false,
       transactions: enriched,
+      _cache_oldest_fetched_at: fetchedAtIso,
+      _cache_newest_fetched_at: fetchedAtIso,
+      _cache_hit: hit,
     };
   }
 
@@ -223,7 +257,7 @@ export class LiveTransactionsTools {
   private async paginateAndEnrich(
     rows: TransactionNode[],
     opts: GetTransactionsLiveOptions
-  ): Promise<GetTransactionsLiveResult> {
+  ): Promise<PageResult> {
     const limit = opts.limit ?? 100;
     const offset = opts.offset ?? 0;
     const total = rows.length;
