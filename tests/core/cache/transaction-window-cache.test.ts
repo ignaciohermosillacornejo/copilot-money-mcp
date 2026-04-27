@@ -45,6 +45,24 @@ describe('TransactionWindowCache.tierFor', () => {
     const cache = makeCache();
     expect(cache.tierFor('2026-05', today)).toBe('live');
   });
+
+  test('boundary at exactly 7 days → live', () => {
+    // Last day of '2026-03' is 2026-03-31. 7d after = 2026-04-07.
+    const cache = makeCache();
+    expect(cache.tierFor('2026-03', new Date('2026-04-07'))).toBe('live');
+  });
+
+  test('boundary at exactly 21 days → warm', () => {
+    // Last day of '2026-03' is 2026-03-31. 21d after = 2026-04-21.
+    const cache = makeCache();
+    expect(cache.tierFor('2026-03', new Date('2026-04-21'))).toBe('warm');
+  });
+
+  test('boundary at 22 days → cold', () => {
+    // First cold day is 22d. 22d after 2026-03-31 = 2026-04-22.
+    const cache = makeCache();
+    expect(cache.tierFor('2026-03', new Date('2026-04-22'))).toBe('cold');
+  });
 });
 
 describe('TransactionWindowCache.plan', () => {
