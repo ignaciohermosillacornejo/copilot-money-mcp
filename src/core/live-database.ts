@@ -20,6 +20,7 @@
  * See docs/superpowers/plans/2026-04-25-graphql-live-tiered-cache.md.
  */
 
+import { randomUUID } from 'crypto';
 import { GraphQLError, type GraphQLClient } from './graphql/client.js';
 import type { CopilotDatabase } from './database.js';
 import {
@@ -255,8 +256,11 @@ export class LiveCopilotDatabase {
         const d = new Date();
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
       })();
+    // Use a UUID for budget_id (matches patchCachedBudget on CopilotDatabase
+    // — both paths surface the same shape so paired writes at Task 6 sites
+    // don't produce divergent results across the LevelDB and live caches).
     const synthetic: Budget = {
-      budget_id: '',
+      budget_id: randomUUID(),
       category_id: categoryId,
       amounts: { [monthKey]: amount },
     };
