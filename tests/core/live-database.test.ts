@@ -476,3 +476,81 @@ describe('LiveCopilotDatabase — recurring cache patches', () => {
     expect(result.rows.map((r) => r.recurring_id)).toEqual(['r2']);
   });
 });
+
+// ── logReadCall structured fields ──────────────────────────────────────────
+
+describe('LiveCopilotDatabase — logReadCall', () => {
+  test('logReadCall with structured fields emits ttl_tier and cache_hit', () => {
+    const lines: string[] = [];
+    const origError = console.error;
+    console.error = (...args: unknown[]) => {
+      lines.push(args.map(String).join(' '));
+    };
+    try {
+      const live = new LiveCopilotDatabase({} as GraphQLClient, {} as CopilotDatabase, {
+        verbose: true,
+      });
+      live.logReadCall({
+        op: 'Accounts',
+        pages: 1,
+        latencyMs: 320,
+        rows: 12,
+        ttl_tier: 'warm',
+        cache_hit: false,
+      });
+      expect(lines.length).toBe(1);
+      expect(lines[0]).toContain('op=Accounts');
+      expect(lines[0]).toContain('ttl_tier=warm');
+      expect(lines[0]).toContain('cache_hit=false');
+      expect(lines[0]).toContain('pages=1');
+      expect(lines[0]).toContain('latency=320ms');
+      expect(lines[0]).toContain('rows=12');
+    } finally {
+      console.error = origError;
+    }
+  });
+
+  test('logReadCall is silent when verbose is off', () => {
+    const lines: string[] = [];
+    const origError = console.error;
+    console.error = (...args: unknown[]) => {
+      lines.push(args.map(String).join(' '));
+    };
+    try {
+      const live = new LiveCopilotDatabase({} as GraphQLClient, {} as CopilotDatabase, {
+        verbose: false,
+      });
+      live.logReadCall({ op: 'Transactions', pages: 1, latencyMs: 100, rows: 0, cache_hit: true });
+      expect(lines.length).toBe(0);
+    } finally {
+      console.error = origError;
+    }
+  });
+
+  test('logReadCall optional fields (month, staleness_ms) appear when set', () => {
+    const lines: string[] = [];
+    const origError = console.error;
+    console.error = (...args: unknown[]) => {
+      lines.push(args.map(String).join(' '));
+    };
+    try {
+      const live = new LiveCopilotDatabase({} as GraphQLClient, {} as CopilotDatabase, {
+        verbose: true,
+      });
+      live.logReadCall({
+        op: 'Transactions',
+        pages: 8,
+        latencyMs: 2810,
+        rows: 210,
+        ttl_tier: 'cold',
+        cache_hit: false,
+        month: '2026-03',
+        staleness_ms: null,
+      });
+      expect(lines[0]).toContain('month=2026-03');
+      expect(lines[0]).toContain('staleness_ms=null');
+    } finally {
+      console.error = origError;
+    }
+  });
+});
