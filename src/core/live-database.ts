@@ -38,7 +38,8 @@ import {
   TransactionWindowCache,
   type CachedTransaction,
 } from './cache/index.js';
-import type { Account, Category, Tag, Budget, Recurring, Transaction } from '../models/index.js';
+import type { AccountNode } from './graphql/queries/accounts.js';
+import type { Category, Tag, Budget, Recurring, Transaction } from '../models/index.js';
 
 interface MemoEntry<T> {
   result: T;
@@ -67,7 +68,11 @@ export class LiveCopilotDatabase {
 
   // Phase 2: tiered-cache primitives
   private readonly inflight: InFlightRegistry;
-  private readonly accountsCache: SnapshotCache<Account>;
+  // Typed on AccountNode (GraphQL response shape) rather than the
+  // LevelDB Account model. The live cache stores what the live read
+  // path produces; tools that consume both shapes can map between
+  // them at the call site if needed.
+  private readonly accountsCache: SnapshotCache<AccountNode>;
   private readonly categoriesCache: SnapshotCache<Category>;
   private readonly tagsCache: SnapshotCache<Tag>;
   private readonly budgetsCache: SnapshotCache<Budget>;
@@ -83,8 +88,8 @@ export class LiveCopilotDatabase {
     this.verbose = opts.verbose ?? false;
 
     this.inflight = new InFlightRegistry();
-    this.accountsCache = new SnapshotCache<Account>(
-      { key: 'accounts', ttlMs: ONE_HOUR_MS, keyFn: (a) => a.account_id },
+    this.accountsCache = new SnapshotCache<AccountNode>(
+      { key: 'accounts', ttlMs: ONE_HOUR_MS, keyFn: (a) => a.id },
       this.inflight
     );
     this.categoriesCache = new SnapshotCache<Category>(
@@ -202,7 +207,7 @@ export class LiveCopilotDatabase {
 
   // ── Phase 2: cache accessors ──────────────────────────────────────────────
 
-  getAccountsCache(): SnapshotCache<Account> {
+  getAccountsCache(): SnapshotCache<AccountNode> {
     return this.accountsCache;
   }
 
