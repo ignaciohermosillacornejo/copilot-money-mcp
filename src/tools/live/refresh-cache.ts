@@ -20,6 +20,8 @@ const VALID_SCOPES = [
   'recurring',
 ] as const;
 
+const YEAR_MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+
 type Scope = (typeof VALID_SCOPES)[number];
 
 export interface RefreshCacheArgs {
@@ -47,6 +49,15 @@ export class RefreshCacheTool {
       return Promise.reject(
         new Error(`Unknown scope '${scope}'. Valid scopes: ${VALID_SCOPES.join(', ')}.`)
       );
+    }
+
+    if (args.months) {
+      const bad = args.months.find((m) => !YEAR_MONTH_RE.test(m));
+      if (bad !== undefined) {
+        return Promise.reject(
+          new Error(`Invalid month format '${bad}'. Expected YYYY-MM (e.g., '2026-04').`)
+        );
+      }
     }
 
     const flushed: RefreshCacheResult['flushed'] = {};
