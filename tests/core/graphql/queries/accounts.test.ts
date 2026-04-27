@@ -1,6 +1,7 @@
 import { describe, expect, test, mock } from 'bun:test';
 import { fetchAccounts, type AccountNode } from '../../../../src/core/graphql/queries/accounts.js';
 import type { GraphQLClient } from '../../../../src/core/graphql/client.js';
+import { ACCOUNTS } from '../../../../src/core/graphql/operations.generated.js';
 
 describe('fetchAccounts', () => {
   test('returns the accounts array from a successful query', async () => {
@@ -12,7 +13,7 @@ describe('fetchAccounts', () => {
             itemId: 'item1',
             name: 'Checking',
             balance: 1000,
-            liveBalance: 1000,
+            liveBalance: true,
             type: 'depository',
             subType: 'checking',
             mask: '0001',
@@ -54,6 +55,6 @@ describe('fetchAccounts', () => {
     expect(queryFn.mock.calls.length).toBe(1);
     const [opName, opString] = queryFn.mock.calls[0] as unknown as [string, string];
     expect(opName).toBe('Accounts');
-    expect(opString).toContain('query Accounts(');
+    expect(opString).toBe(ACCOUNTS);
   });
 });
