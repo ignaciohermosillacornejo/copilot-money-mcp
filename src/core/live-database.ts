@@ -11,7 +11,13 @@
  *   - one retry on NETWORK errors (other GraphQL codes surface)
  *   - optional verbose logging to stderr for latency measurement
  *
+ * Phase 2 adds tiered-cache primitives (SnapshotCache per entity type +
+ * TransactionWindowCache for month-keyed transaction windows) and
+ * 10 write-through patchLive* methods so mutations can update the cache
+ * without requiring a full refresh.
+ *
  * See docs/superpowers/specs/2026-04-23-graphql-live-reads-design.md.
+ * See docs/superpowers/plans/2026-04-25-graphql-live-tiered-cache.md.
  */
 
 import { GraphQLError, type GraphQLClient } from './graphql/client.js';
@@ -25,6 +31,13 @@ import {
   type TransactionNode,
   type TransactionSortInput,
 } from './graphql/queries/transactions.js';
+import {
+  InFlightRegistry,
+  SnapshotCache,
+  TransactionWindowCache,
+  type CachedTransaction,
+} from './cache/index.js';
+import type { Account, Category, Tag, Budget, Recurring, Transaction } from '../models/index.js';
 
 interface MemoEntry<T> {
   result: T;
@@ -39,10 +52,26 @@ export interface LiveDatabaseOptions {
 const DEFAULT_MEMO_TTL_MS = 5 * 60 * 1000;
 const RETRY_BACKOFF_MS = 500;
 
+const ONE_HOUR_MS = 60 * 60 * 1000;
+const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const ONE_WEEK_MS = 7 * ONE_DAY_MS;
+const DEFAULT_MAX_TX_ROWS = 20_000;
+
 export class LiveCopilotDatabase {
+  // existing fields
   private readonly memoTtlMs: number;
   private readonly verbose: boolean;
   private readonly memoStore: Map<string, MemoEntry<unknown>> = new Map();
+
+  // Phase 2: tiered-cache primitives
+  private readonly inflight: InFlightRegistry;
+  private readonly accountsCache: SnapshotCache<Account>;
+  private readonly categoriesCache: SnapshotCache<Category>;
+  private readonly tagsCache: SnapshotCache<Tag>;
+  private readonly budgetsCache: SnapshotCache<Budget>;
+  private readonly recurringCache: SnapshotCache<Recurring>;
+  private readonly transactionsWindowCache: TransactionWindowCache<CachedTransaction>;
 
   constructor(
     private readonly graphql: GraphQLClient,
@@ -51,6 +80,37 @@ export class LiveCopilotDatabase {
   ) {
     this.memoTtlMs = opts.memoTtlMs ?? DEFAULT_MEMO_TTL_MS;
     this.verbose = opts.verbose ?? false;
+
+    this.inflight = new InFlightRegistry();
+    this.accountsCache = new SnapshotCache<Account>(
+      { key: 'accounts', ttlMs: ONE_HOUR_MS, keyFn: (a) => a.account_id },
+      this.inflight
+    );
+    this.categoriesCache = new SnapshotCache<Category>(
+      { key: 'categories', ttlMs: ONE_DAY_MS, keyFn: (c) => c.category_id },
+      this.inflight
+    );
+    this.tagsCache = new SnapshotCache<Tag>(
+      { key: 'tags', ttlMs: ONE_DAY_MS, keyFn: (t) => t.tag_id },
+      this.inflight
+    );
+    this.budgetsCache = new SnapshotCache<Budget>(
+      { key: 'budgets', ttlMs: ONE_HOUR_MS, keyFn: (b) => b.category_id ?? b.budget_id },
+      this.inflight
+    );
+    this.recurringCache = new SnapshotCache<Recurring>(
+      { key: 'recurring', ttlMs: SIX_HOURS_MS, keyFn: (r) => r.recurring_id },
+      this.inflight
+    );
+    this.transactionsWindowCache = new TransactionWindowCache<CachedTransaction>(
+      {
+        liveTtlMs: 0,
+        warmTtlMs: ONE_HOUR_MS,
+        coldTtlMs: ONE_WEEK_MS,
+        maxRows: DEFAULT_MAX_TX_ROWS,
+      },
+      this.inflight
+    );
   }
 
   /**
@@ -128,6 +188,103 @@ export class LiveCopilotDatabase {
       this.logReadCall('Transactions', pages, Date.now() - startedAt, rows.length);
       return rows;
     });
+  }
+
+  // ── Phase 2: cache accessors ──────────────────────────────────────────────
+
+  getAccountsCache(): SnapshotCache<Account> {
+    return this.accountsCache;
+  }
+
+  getCategoriesCache(): SnapshotCache<Category> {
+    return this.categoriesCache;
+  }
+
+  getTagsCache(): SnapshotCache<Tag> {
+    return this.tagsCache;
+  }
+
+  getBudgetsCache(): SnapshotCache<Budget> {
+    return this.budgetsCache;
+  }
+
+  getRecurringCache(): SnapshotCache<Recurring> {
+    return this.recurringCache;
+  }
+
+  getTransactionsWindowCache(): TransactionWindowCache<CachedTransaction> {
+    return this.transactionsWindowCache;
+  }
+
+  // ── Phase 2: write-through patch methods ─────────────────────────────────
+
+  /**
+   * Patch a cached transaction by id. Locates the row across all cached
+   * months, merges the provided fields, and upserts the result. No-op if
+   * the row is not currently cached.
+   */
+  patchLiveTransaction(id: string, fields: Partial<Transaction>): void {
+    let existing: CachedTransaction | undefined;
+    for (const month of this.transactionsWindowCache.cachedMonths()) {
+      const row = this.transactionsWindowCache.entriesForMonth(month).find((r) => r.id === id);
+      if (row) {
+        existing = row;
+        break;
+      }
+    }
+    if (!existing) return;
+    const merged = { ...existing, ...fields, id } as CachedTransaction;
+    this.transactionsWindowCache.upsert(merged);
+  }
+
+  /** Remove a cached transaction by id. No-op if not found. */
+  patchLiveTransactionDelete(id: string): void {
+    this.transactionsWindowCache.delete(id);
+  }
+
+  /**
+   * Upsert a synthetic Budget into the budgets snapshot cache.
+   * Keyed by category_id. The next real cache refill will overwrite.
+   *
+   * @param month - YYYY-MM key for the amounts map; defaults to current month.
+   */
+  patchLiveBudget(categoryId: string, amount: number, month?: string): void {
+    const monthKey =
+      month ??
+      (() => {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      })();
+    const synthetic: Budget = {
+      budget_id: '',
+      category_id: categoryId,
+      amounts: { [monthKey]: amount },
+    };
+    this.budgetsCache.upsert(synthetic);
+  }
+
+  patchLiveTagUpsert(tag: Tag): void {
+    this.tagsCache.upsert(tag);
+  }
+
+  patchLiveTagDelete(id: string): void {
+    this.tagsCache.delete(id);
+  }
+
+  patchLiveCategoryUpsert(category: Category): void {
+    this.categoriesCache.upsert(category);
+  }
+
+  patchLiveCategoryDelete(id: string): void {
+    this.categoriesCache.delete(id);
+  }
+
+  patchLiveRecurringUpsert(recurring: Recurring): void {
+    this.recurringCache.upsert(recurring);
+  }
+
+  patchLiveRecurringDelete(id: string): void {
+    this.recurringCache.delete(id);
   }
 }
 

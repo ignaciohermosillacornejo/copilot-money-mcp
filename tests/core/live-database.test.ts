@@ -4,6 +4,8 @@ import { GraphQLError } from '../../src/core/graphql/client.js';
 import type { GraphQLClient } from '../../src/core/graphql/client.js';
 import type { CopilotDatabase } from '../../src/core/database.js';
 import type { TransactionsPage } from '../../src/core/graphql/queries/transactions.js';
+import { SnapshotCache, TransactionWindowCache } from '../../src/core/cache/index.js';
+import type { Tag, Category, Budget, Recurring } from '../../src/models/index.js';
 
 function mkClient(): GraphQLClient {
   return { mutate: mock(), query: mock() } as unknown as GraphQLClient;
@@ -210,5 +212,250 @@ describe('preflightLiveAuth', () => {
     await expect(preflightLiveAuth(client)).rejects.toMatchObject({
       code: 'AUTH_FAILED',
     });
+  });
+});
+
+// ── Cache accessor smoke tests ──────────────────────────────────────────────
+
+describe('LiveCopilotDatabase — cache accessors', () => {
+  function mkLive() {
+    return new LiveCopilotDatabase(mkClient(), mkCache());
+  }
+
+  test('getAccountsCache returns a SnapshotCache instance', () => {
+    expect(mkLive().getAccountsCache()).toBeInstanceOf(SnapshotCache);
+  });
+
+  test('getCategoriesCache returns a SnapshotCache instance', () => {
+    expect(mkLive().getCategoriesCache()).toBeInstanceOf(SnapshotCache);
+  });
+
+  test('getTagsCache returns a SnapshotCache instance', () => {
+    expect(mkLive().getTagsCache()).toBeInstanceOf(SnapshotCache);
+  });
+
+  test('getBudgetsCache returns a SnapshotCache instance', () => {
+    expect(mkLive().getBudgetsCache()).toBeInstanceOf(SnapshotCache);
+  });
+
+  test('getRecurringCache returns a SnapshotCache instance', () => {
+    expect(mkLive().getRecurringCache()).toBeInstanceOf(SnapshotCache);
+  });
+
+  test('getTransactionsWindowCache returns a TransactionWindowCache instance', () => {
+    expect(mkLive().getTransactionsWindowCache()).toBeInstanceOf(TransactionWindowCache);
+  });
+
+  test('each call returns the same instance (not a new one)', () => {
+    const live = mkLive();
+    expect(live.getTagsCache()).toBe(live.getTagsCache());
+    expect(live.getTransactionsWindowCache()).toBe(live.getTransactionsWindowCache());
+  });
+});
+
+// ── patchLiveTransaction ────────────────────────────────────────────────────
+
+describe('LiveCopilotDatabase.patchLiveTransaction', () => {
+  function mkLive() {
+    return new LiveCopilotDatabase(mkClient(), mkCache());
+  }
+
+  test('updates matching row in cached month', () => {
+    const live = mkLive();
+    const wc = live.getTransactionsWindowCache();
+    // Seed a warm/cold month (2024-01) with one row.
+    wc.ingestMonth('2024-01', [{ id: 'tx1', date: '2024-01-15', name: 'Old' }], Date.now());
+
+    live.patchLiveTransaction('tx1', { name: 'New' } as Record<string, unknown>);
+
+    const rows = wc.entriesForMonth('2024-01');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.name).toBe('New');
+    expect(rows[0]!.id).toBe('tx1');
+  });
+
+  test('no-op when transaction id is not cached', () => {
+    const live = mkLive();
+    const wc = live.getTransactionsWindowCache();
+    wc.ingestMonth('2024-01', [{ id: 'tx1', date: '2024-01-15' }], Date.now());
+
+    // Should not throw; cache unchanged
+    live.patchLiveTransaction('missing', { name: 'Ghost' } as Record<string, unknown>);
+
+    expect(wc.entriesForMonth('2024-01')).toHaveLength(1);
+  });
+
+  test('no-op when cache is empty', () => {
+    const live = mkLive();
+    // No error thrown
+    live.patchLiveTransaction('tx99', { name: 'X' } as Record<string, unknown>);
+  });
+
+  test('id field is preserved from the patch argument', () => {
+    const live = mkLive();
+    const wc = live.getTransactionsWindowCache();
+    wc.ingestMonth('2024-01', [{ id: 'tx1', date: '2024-01-10' }], Date.now());
+
+    live.patchLiveTransaction('tx1', { id: 'should-be-ignored', name: 'Z' } as Record<
+      string,
+      unknown
+    >);
+
+    expect(wc.entriesForMonth('2024-01')[0]!.id).toBe('tx1');
+  });
+});
+
+// ── patchLiveTransactionDelete ──────────────────────────────────────────────
+
+describe('LiveCopilotDatabase.patchLiveTransactionDelete', () => {
+  test('removes matching row from cached month', () => {
+    const live = new LiveCopilotDatabase(mkClient(), mkCache());
+    const wc = live.getTransactionsWindowCache();
+    wc.ingestMonth('2024-02', [{ id: 'tx2', date: '2024-02-01' }], Date.now());
+
+    live.patchLiveTransactionDelete('tx2');
+
+    expect(wc.entriesForMonth('2024-02')).toHaveLength(0);
+  });
+
+  test('no-op when id not found', () => {
+    const live = new LiveCopilotDatabase(mkClient(), mkCache());
+    const wc = live.getTransactionsWindowCache();
+    wc.ingestMonth('2024-02', [{ id: 'tx2', date: '2024-02-01' }], Date.now());
+
+    live.patchLiveTransactionDelete('unknown');
+
+    expect(wc.entriesForMonth('2024-02')).toHaveLength(1);
+  });
+});
+
+// ── patchLiveBudget ─────────────────────────────────────────────────────────
+
+describe('LiveCopilotDatabase.patchLiveBudget', () => {
+  async function seedAndRead(live: LiveCopilotDatabase): Promise<Budget[]> {
+    // Seed cache so upsert has somewhere to write.
+    return (await live.getBudgetsCache().read(async () => [])).rows;
+  }
+
+  test('upserts synthetic budget into cache by category_id', async () => {
+    const live = new LiveCopilotDatabase(mkClient(), mkCache());
+    await seedAndRead(live);
+
+    live.patchLiveBudget('cat-42', 500, '2025-03');
+
+    const result = await live.getBudgetsCache().read(async () => []);
+    expect(result.rows).toHaveLength(1);
+    const b = result.rows[0]!;
+    expect(b.category_id).toBe('cat-42');
+    expect(b.amounts?.['2025-03']).toBe(500);
+  });
+
+  test('defaults month to current YYYY-MM', async () => {
+    const live = new LiveCopilotDatabase(mkClient(), mkCache());
+    await seedAndRead(live);
+
+    live.patchLiveBudget('cat-1', 100);
+
+    const result = await live.getBudgetsCache().read(async () => []);
+    const b = result.rows[0]!;
+    const now = new Date();
+    const expectedMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    expect(Object.keys(b.amounts ?? {})[0]).toBe(expectedMonth);
+  });
+
+  test('updates existing budget by category_id', async () => {
+    const live = new LiveCopilotDatabase(mkClient(), mkCache());
+    // Seed with an existing budget for the same category.
+    await live
+      .getBudgetsCache()
+      .read(async () => [{ budget_id: 'b1', category_id: 'cat-5', amounts: { '2025-01': 200 } }]);
+
+    live.patchLiveBudget('cat-5', 999, '2025-02');
+
+    const result = await live.getBudgetsCache().read(async () => []);
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]!.amounts?.['2025-02']).toBe(999);
+  });
+});
+
+// ── patchLiveTagUpsert / patchLiveTagDelete ─────────────────────────────────
+
+describe('LiveCopilotDatabase — tag cache patches', () => {
+  async function mkSeeded() {
+    const live = new LiveCopilotDatabase(mkClient(), mkCache());
+    await live.getTagsCache().read(async () => []);
+    return live;
+  }
+
+  test('patchLiveTagUpsert inserts a new tag', async () => {
+    const live = await mkSeeded();
+    const tag: Tag = { tag_id: 't1', name: 'Vacation' };
+    live.patchLiveTagUpsert(tag);
+    const result = await live.getTagsCache().read(async () => []);
+    expect(result.rows.find((t) => t.tag_id === 't1')?.name).toBe('Vacation');
+  });
+
+  test('patchLiveTagUpsert updates existing tag', async () => {
+    const live = new LiveCopilotDatabase(mkClient(), mkCache());
+    await live.getTagsCache().read(async () => [{ tag_id: 't1', name: 'Old' }]);
+    live.patchLiveTagUpsert({ tag_id: 't1', name: 'Updated' });
+    const result = await live.getTagsCache().read(async () => []);
+    expect(result.rows.find((t) => t.tag_id === 't1')?.name).toBe('Updated');
+  });
+
+  test('patchLiveTagDelete removes tag by id', async () => {
+    const live = new LiveCopilotDatabase(mkClient(), mkCache());
+    await live.getTagsCache().read(async () => [{ tag_id: 't1' }, { tag_id: 't2' }]);
+    live.patchLiveTagDelete('t1');
+    const result = await live.getTagsCache().read(async () => []);
+    expect(result.rows.map((t) => t.tag_id)).toEqual(['t2']);
+  });
+});
+
+// ── patchLiveCategoryUpsert / patchLiveCategoryDelete ──────────────────────
+
+describe('LiveCopilotDatabase — category cache patches', () => {
+  test('patchLiveCategoryUpsert inserts a new category', async () => {
+    const live = new LiveCopilotDatabase(mkClient(), mkCache());
+    await live.getCategoriesCache().read(async () => []);
+    const cat: Category = { category_id: 'c1', name: 'Dining' };
+    live.patchLiveCategoryUpsert(cat);
+    const result = await live.getCategoriesCache().read(async () => []);
+    expect(result.rows.find((c) => c.category_id === 'c1')?.name).toBe('Dining');
+  });
+
+  test('patchLiveCategoryDelete removes category by id', async () => {
+    const live = new LiveCopilotDatabase(mkClient(), mkCache());
+    await live.getCategoriesCache().read(async () => [
+      { category_id: 'c1', name: 'Dining' },
+      { category_id: 'c2', name: 'Travel' },
+    ]);
+    live.patchLiveCategoryDelete('c1');
+    const result = await live.getCategoriesCache().read(async () => []);
+    expect(result.rows.map((c) => c.category_id)).toEqual(['c2']);
+  });
+});
+
+// ── patchLiveRecurringUpsert / patchLiveRecurringDelete ────────────────────
+
+describe('LiveCopilotDatabase — recurring cache patches', () => {
+  test('patchLiveRecurringUpsert inserts a new recurring item', async () => {
+    const live = new LiveCopilotDatabase(mkClient(), mkCache());
+    await live.getRecurringCache().read(async () => []);
+    const rec: Recurring = { recurring_id: 'r1', name: 'Netflix' };
+    live.patchLiveRecurringUpsert(rec);
+    const result = await live.getRecurringCache().read(async () => []);
+    expect(result.rows.find((r) => r.recurring_id === 'r1')?.name).toBe('Netflix');
+  });
+
+  test('patchLiveRecurringDelete removes recurring item by id', async () => {
+    const live = new LiveCopilotDatabase(mkClient(), mkCache());
+    await live.getRecurringCache().read(async () => [
+      { recurring_id: 'r1', name: 'Netflix' },
+      { recurring_id: 'r2', name: 'Spotify' },
+    ]);
+    live.patchLiveRecurringDelete('r1');
+    const result = await live.getRecurringCache().read(async () => []);
+    expect(result.rows.map((r) => r.recurring_id)).toEqual(['r2']);
   });
 });
