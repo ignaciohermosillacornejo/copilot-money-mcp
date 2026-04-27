@@ -77,6 +77,54 @@ All errors surface as `isError: true` tool results.
 
 Current phase: **1** — only `get_transactions_live`. Phases 2..N will add `_live` variants for accounts, categories, budgets, recurring transactions, and tags.
 
+## Cache architecture (Phase 2+)
+
+When `--live-reads` is on, reads are served through an in-memory tiered cache:
+
+| Entity | Cache shape | TTL | Notes |
+|---|---|---|---|
+| Accounts | flat snapshot | 1h | One GraphQL round-trip per refill. |
+| Categories | flat snapshot | 24h | Rarely change; write-through covers user edits. |
+| Tags | flat snapshot | 24h | Same. |
+| Budgets | flat snapshot | 1h | User-edited. |
+| Recurring | flat snapshot | 6h | User-edited + Copilot auto-detects. |
+| Transactions | month-keyed window map | tiered | Current month: live (no cache); 8–21d months: 1h; >21d months: 1w. |
+
+Writes via MCP tools update both LevelDB cache and the live cache so subsequent reads reflect the change without a refresh. The MCP server intentionally does not expose `edit_account`; account-cache freshness relies on TTL invalidation + `refresh_cache`.
+
+## Freshness fields
+
+Live-tool responses carry three envelope fields:
+
+- `_cache_oldest_fetched_at` — worst-case staleness (oldest contributor).
+- `_cache_newest_fetched_at` — best-case staleness (newest contributor).
+- `_cache_hit` — `true` iff every contributor came from cache without a network call.
+
+For transactions, `_cache_newest_fetched_at` is typically "now" because the current calendar month is on the live tier and always refetched. `_cache_oldest_fetched_at` may be older when the response includes cached historical months.
+
+**LLM guidance for interpreting the fields:**
+
+- If `_cache_newest_fetched_at` is close to "now": at least one slice (current month, or a tier-warm/cold refill that just happened) is fresh. Trust the recent portion of the response without invoking refresh.
+- If `_cache_oldest_fetched_at` is significantly older: older slices are from cache. By design, >21d-old months can be up to a week stale — don't trigger `refresh_cache` based on this alone unless the user is specifically asking about that older window.
+- If `_cache_hit: true` and the user explicitly asked for fresh data ("sync", "what's new", "refresh"): call `refresh_cache` with the narrowest scope that covers what the user is asking about (e.g., `{scope: 'transactions', months: ['2026-04']}`).
+
+## refresh_cache
+
+Live-mode tool that flushes the in-memory live cache by scope. Does **not** touch LevelDB — `refresh_database` remains the LevelDB equivalent.
+
+```
+refresh_cache({
+  scope?: "all" | "transactions" | "accounts" | "categories" | "tags" | "budgets" | "recurring",
+  months?: string[] // YYYY-MM, only meaningful when scope is "all" or "transactions"
+})
+```
+
+Examples:
+
+- `refresh_cache({})` — flushes everything.
+- `refresh_cache({scope: "accounts"})` — flushes only the accounts snapshot.
+- `refresh_cache({scope: "transactions", months: ["2026-04"]})` — flushes one transaction month.
+
 ## Performance note
 
 GraphQL reads paginate server-side (page size 100 by default). Narrow queries (e.g. one month of one account) typically run in <1s. Broad queries (full year, no account filter) paginate multiple pages — the server has limits on single-response size. When `--verbose` is set, the server logs per-call latency and pagination counts to stderr as `[graphql-read] op=Transactions pages=N latency=Xms rows=Y`. This data informs whether future phases need a richer caching strategy.
