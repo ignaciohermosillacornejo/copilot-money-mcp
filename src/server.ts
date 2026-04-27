@@ -19,6 +19,7 @@ import { FirebaseAuth } from './core/auth/firebase-auth.js';
 import { extractRefreshToken } from './core/auth/browser-token.js';
 import { LiveCopilotDatabase, preflightLiveAuth } from './core/live-database.js';
 import { LiveTransactionsTools, createLiveToolSchemas } from './tools/live/transactions.js';
+import { LiveAccountsTools, createLiveAccountsToolSchema } from './tools/live/accounts.js';
 
 // Read version from package.json
 import { createRequire } from 'module';
@@ -35,6 +36,7 @@ export class CopilotMoneyServer {
   private writeEnabled: boolean;
   private liveReadsEnabled: boolean;
   private liveTools?: LiveTransactionsTools;
+  private liveAccountsTools?: LiveAccountsTools;
 
   /**
    * Initialize the MCP server.
@@ -65,6 +67,7 @@ export class CopilotMoneyServer {
     if (liveReadsEnabled && graphqlClient) {
       liveDb = new LiveCopilotDatabase(graphqlClient, this.db);
       this.liveTools = new LiveTransactionsTools(liveDb);
+      this.liveAccountsTools = new LiveAccountsTools(liveDb);
     }
 
     this.tools = new CopilotMoneyTools(this.db, graphqlClient, liveDb);
@@ -90,9 +93,11 @@ export class CopilotMoneyServer {
   handleListTools(): { tools: Tool[] } {
     const readSchemas = createToolSchemas();
     const filteredReads = this.liveReadsEnabled
-      ? readSchemas.filter((s) => s.name !== 'get_transactions')
+      ? readSchemas.filter((s) => s.name !== 'get_transactions' && s.name !== 'get_accounts')
       : readSchemas;
-    const liveSchemas = this.liveReadsEnabled ? createLiveToolSchemas() : [];
+    const liveSchemas = this.liveReadsEnabled
+      ? [...createLiveToolSchemas(), createLiveAccountsToolSchema()]
+      : [];
     const allSchemas = [
       ...filteredReads,
       ...liveSchemas,
@@ -164,6 +169,18 @@ export class CopilotMoneyServer {
       };
     }
 
+    if (name === 'get_accounts_live' && !this.liveAccountsTools) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'get_accounts_live is only available when the server runs with --live-reads.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
     // Check if database is available
     if (!this.db.isAvailable()) {
       return {
@@ -194,6 +211,15 @@ export class CopilotMoneyServer {
           result = await this.liveTools!.getTransactions(
             (typedArgs as Parameters<NonNullable<typeof this.liveTools>['getTransactions']>[0]) ||
               {}
+          );
+          break;
+
+        case 'get_accounts_live':
+          // liveAccountsTools non-null invariant enforced by the early guard above.
+          result = await this.liveAccountsTools!.getAccounts(
+            (typedArgs as Parameters<
+              NonNullable<typeof this.liveAccountsTools>['getAccounts']
+            >[0]) ?? {}
           );
           break;
 

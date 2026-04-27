@@ -2215,3 +2215,66 @@ describe('balance history downsampling edge cases', () => {
     expect(result.count).toBe(3);
   });
 });
+
+// ============================================
+// --live-reads accounts wiring tests
+// ============================================
+
+describe('--live-reads accounts wiring', () => {
+  test('handleListTools when --live-reads is off includes get_accounts and excludes get_accounts_live', () => {
+    const server = new CopilotMoneyServer(FAKE_DB_DIR);
+    const { tools } = server.handleListTools();
+    const names = tools.map((t) => t.name);
+    expect(names).toContain('get_accounts');
+    expect(names).not.toContain('get_accounts_live');
+  });
+
+  test('handleListTools when --live-reads is on includes get_accounts_live and excludes get_accounts', () => {
+    // Pass a mock GraphQL client so the constructor can wire liveAccountsTools
+    // without attempting real auth. The fourth positional arg is liveReadsEnabled.
+    const mockClient = createMockGraphQLClient({});
+    const server = new CopilotMoneyServer(FAKE_DB_DIR, undefined, false, true, mockClient);
+    const { tools } = server.handleListTools();
+    const names = tools.map((t) => t.name);
+    expect(names).toContain('get_accounts_live');
+    expect(names).not.toContain('get_accounts');
+  });
+
+  test('get_accounts_live without --live-reads returns isError with --live-reads hint', async () => {
+    const server = new CopilotMoneyServer(FAKE_DB_DIR);
+    const db = createMockDb();
+    server._injectForTesting(db, new CopilotMoneyTools(db));
+
+    const result = await server.handleCallTool('get_accounts_live', {});
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('--live-reads');
+  });
+
+  test('get_accounts_live with --live-reads dispatches to LiveAccountsTools', async () => {
+    const mockClient = createMockGraphQLClient({});
+    const server = new CopilotMoneyServer(FAKE_DB_DIR, undefined, false, true, mockClient);
+    const db = createMockDb();
+    server._injectForTesting(db, new CopilotMoneyTools(db));
+
+    // Inject a stub LiveAccountsTools via private field access
+    const stubResult = {
+      count: 1,
+      total_balance: 100,
+      total_assets: 100,
+      total_liabilities: 0,
+      accounts: [],
+      _cache_oldest_fetched_at: '2025-01-01T00:00:00.000Z',
+      _cache_newest_fetched_at: '2025-01-01T00:00:00.000Z',
+      _cache_hit: false,
+    };
+    (server as any).liveAccountsTools = {
+      getAccounts: async (_args: unknown) => stubResult,
+    };
+
+    const result = await server.handleCallTool('get_accounts_live', {});
+    expect(result.isError).toBeUndefined();
+    const data = JSON.parse(result.content[0].text) as typeof stubResult;
+    expect(data.count).toBe(1);
+    expect(data._cache_hit).toBe(false);
+  });
+});
