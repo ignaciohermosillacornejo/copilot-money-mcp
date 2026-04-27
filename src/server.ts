@@ -20,6 +20,7 @@ import { extractRefreshToken } from './core/auth/browser-token.js';
 import { LiveCopilotDatabase, preflightLiveAuth } from './core/live-database.js';
 import { LiveTransactionsTools, createLiveToolSchemas } from './tools/live/transactions.js';
 import { LiveAccountsTools, createLiveAccountsToolSchema } from './tools/live/accounts.js';
+import { RefreshCacheTool, createRefreshCacheToolSchema } from './tools/live/refresh-cache.js';
 
 // Read version from package.json
 import { createRequire } from 'module';
@@ -37,6 +38,7 @@ export class CopilotMoneyServer {
   private liveReadsEnabled: boolean;
   private liveTools?: LiveTransactionsTools;
   private liveAccountsTools?: LiveAccountsTools;
+  private refreshCacheTool?: RefreshCacheTool;
 
   /**
    * Initialize the MCP server.
@@ -68,6 +70,7 @@ export class CopilotMoneyServer {
       liveDb = new LiveCopilotDatabase(graphqlClient, this.db);
       this.liveTools = new LiveTransactionsTools(liveDb);
       this.liveAccountsTools = new LiveAccountsTools(liveDb);
+      this.refreshCacheTool = new RefreshCacheTool(liveDb);
     }
 
     this.tools = new CopilotMoneyTools(this.db, graphqlClient, liveDb);
@@ -96,7 +99,7 @@ export class CopilotMoneyServer {
       ? readSchemas.filter((s) => s.name !== 'get_transactions' && s.name !== 'get_accounts')
       : readSchemas;
     const liveSchemas = this.liveReadsEnabled
-      ? [...createLiveToolSchemas(), createLiveAccountsToolSchema()]
+      ? [...createLiveToolSchemas(), createLiveAccountsToolSchema(), createRefreshCacheToolSchema()]
       : [];
     const allSchemas = [
       ...filteredReads,
@@ -181,6 +184,18 @@ export class CopilotMoneyServer {
       };
     }
 
+    if (name === 'refresh_cache' && !this.refreshCacheTool) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'refresh_cache is only available when the server runs with --live-reads.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
     // Check if database is available
     if (!this.db.isAvailable()) {
       return {
@@ -221,6 +236,21 @@ export class CopilotMoneyServer {
               NonNullable<typeof this.liveAccountsTools>['getAccounts']
             >[0]) ?? {}
           );
+          break;
+
+        case 'refresh_cache':
+          // refreshCacheTool non-null invariant enforced by the early guard above.
+          try {
+            result = await this.refreshCacheTool!.refresh(
+              (typedArgs as Parameters<NonNullable<typeof this.refreshCacheTool>['refresh']>[0]) ??
+                {}
+            );
+          } catch (err) {
+            return {
+              content: [{ type: 'text' as const, text: (err as Error).message }],
+              isError: true,
+            };
+          }
           break;
 
         case 'get_cache_info':
