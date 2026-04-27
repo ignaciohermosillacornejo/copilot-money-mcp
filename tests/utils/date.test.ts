@@ -3,7 +3,7 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { parsePeriod, getMonthRange } from '../../src/utils/date.js';
+import { parsePeriod, getMonthRange, monthsCovered, monthAge } from '../../src/utils/date.js';
 
 // Mock Date for testing time-dependent functions
 let originalDate: typeof Date;
@@ -156,5 +156,52 @@ describe('getMonthRange', () => {
 
   test('throws error for invalid month (0)', () => {
     expect(() => getMonthRange(2025, 0)).toThrow();
+  });
+});
+
+describe('monthsCovered', () => {
+  test('single-month range returns one entry', () => {
+    expect(monthsCovered({ from: '2026-04-05', to: '2026-04-20' })).toEqual(['2026-04']);
+  });
+
+  test('multi-month range enumerates all covered months', () => {
+    expect(monthsCovered({ from: '2026-02-15', to: '2026-04-15' })).toEqual([
+      '2026-02',
+      '2026-03',
+      '2026-04',
+    ]);
+  });
+
+  test('range across a year boundary', () => {
+    expect(monthsCovered({ from: '2025-11-15', to: '2026-02-10' })).toEqual([
+      '2025-11',
+      '2025-12',
+      '2026-01',
+      '2026-02',
+    ]);
+  });
+
+  test('start === end is single month', () => {
+    expect(monthsCovered({ from: '2026-04-15', to: '2026-04-15' })).toEqual(['2026-04']);
+  });
+});
+
+describe('monthAge', () => {
+  test('current month → 0 days', () => {
+    expect(monthAge('2026-04', new Date('2026-04-15'))).toBe(0);
+  });
+
+  test('previous month → days from end of that month', () => {
+    // 2026-03-31 is 15 days before 2026-04-15
+    expect(monthAge('2026-03', new Date('2026-04-15'))).toBe(15);
+  });
+
+  test('two months ago → ~46 days', () => {
+    // 2026-02-28 is 46 days before 2026-04-15 (non-leap year 2026)
+    expect(monthAge('2026-02', new Date('2026-04-15'))).toBe(46);
+  });
+
+  test('future month → 0 days (clamped)', () => {
+    expect(monthAge('2026-05', new Date('2026-04-15'))).toBe(0);
   });
 });
