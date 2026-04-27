@@ -140,14 +140,19 @@ export function monthsCovered(range: DateRangeArg): YearMonth[] {
  * relative to `now`. Clamped at 0 — current and future months return 0.
  *
  * Used by TransactionWindowCache to resolve a month into one of the
- * tier classes (live ≤7d / warm 8-21d / cold >21d).
+ * tier classes (live ≤7d / warm 8-21d / cold >21d). Computed in UTC so
+ * the tier classification is timezone-invariant: a month with `now -
+ * last_day` of exactly 7.0 days produces the same tier in every TZ.
  */
 export function monthAge(month: YearMonth, now: Date): number {
   const year = Number(month.slice(0, 4));
   const monthNum = Number(month.slice(5, 7));
-  // Last day of the month: day 0 of next month.
-  const lastDay = new Date(year, monthNum, 0);
-  const ageMs = now.getTime() - lastDay.getTime();
+  // Last day of the month at UTC midnight: day 0 of next month in UTC.
+  const lastDayUtcMs = Date.UTC(year, monthNum, 0);
+  // `now` projected to UTC midnight on its calendar date — strips intra-day
+  // hours so age is measured in whole calendar days, regardless of host TZ.
+  const nowUtcMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const ageMs = nowUtcMs - lastDayUtcMs;
   if (ageMs <= 0) return 0;
   return Math.floor(ageMs / (24 * 60 * 60 * 1000));
 }
