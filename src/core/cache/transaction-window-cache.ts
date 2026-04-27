@@ -174,8 +174,7 @@ export class TransactionWindowCache<T extends CachedTransaction = CachedTransact
 
   totalRows(): number {
     // O(1) — maintained as a running counter on every mutation. See
-    // ingestMonth/upsert/delete/invalidate/evictLRU. Drift would be a
-    // bug; the assertion below catches it in dev test runs only.
+    // ingestMonth/upsert/delete/invalidate/evictLRU.
     return this._totalRows;
   }
 
