@@ -88,4 +88,14 @@ export class SnapshotCache<T> {
   invalidate(): void {
     this.entry = null;
   }
+
+  /**
+   * Synchronous read of currently-cached rows. Returns undefined if the cache
+   * is empty (never populated or invalidated). Does NOT trigger a fetch and
+   * does NOT check TTL — used by write-through patches that need to merge
+   * against the current cached value.
+   */
+  peek(): T[] | undefined {
+    return this.entry?.rows;
+  }
 }
