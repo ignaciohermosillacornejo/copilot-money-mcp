@@ -10,10 +10,7 @@
  */
 
 import type { LiveCopilotDatabase } from '../../core/live-database.js';
-import {
-  fetchCategories,
-  type CategoryNode,
-} from '../../core/graphql/queries/categories.js';
+import { fetchCategories, type CategoryNode } from '../../core/graphql/queries/categories.js';
 
 export interface GetCategoriesLiveArgs {
   excluded_only?: boolean;
@@ -33,9 +30,11 @@ export class LiveCategoriesTools {
   async getCategories(args: GetCategoriesLiveArgs): Promise<GetCategoriesLiveResult> {
     const cache = this.live.getCategoriesCache();
     const startedAt = Date.now();
-    const { rows: cached, fetched_at, hit } = await cache.read(() =>
-      fetchCategories(this.live.getClient())
-    );
+    const {
+      rows: cached,
+      fetched_at,
+      hit,
+    } = await cache.read(() => fetchCategories(this.live.getClient()));
 
     let rows = cached;
     if (args.excluded_only === true) {

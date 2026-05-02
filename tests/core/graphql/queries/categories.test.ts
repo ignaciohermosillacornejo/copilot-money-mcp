@@ -103,10 +103,10 @@ describe('fetchCategories', () => {
     const { fetchCategories } = await import('../../../../src/core/graphql/queries/categories.js');
     await fetchCategories(client);
 
-    expect(client.query).toHaveBeenCalledWith(
-      'Categories',
-      expect.any(String),
-      { spend: false, budget: true, rollovers: false }
-    );
+    expect(client.query).toHaveBeenCalledWith('Categories', expect.any(String), {
+      spend: false,
+      budget: true,
+      rollovers: false,
+    });
   });
 });

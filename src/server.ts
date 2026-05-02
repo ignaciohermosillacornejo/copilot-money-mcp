@@ -20,6 +20,7 @@ import { extractRefreshToken } from './core/auth/browser-token.js';
 import { LiveCopilotDatabase, preflightLiveAuth } from './core/live-database.js';
 import { LiveTransactionsTools, createLiveToolSchemas } from './tools/live/transactions.js';
 import { LiveAccountsTools, createLiveAccountsToolSchema } from './tools/live/accounts.js';
+import { LiveCategoriesTools, createLiveCategoriesToolSchema } from './tools/live/categories.js';
 import { RefreshCacheTool, createRefreshCacheToolSchema } from './tools/live/refresh-cache.js';
 
 // Read version from package.json
@@ -38,6 +39,7 @@ export class CopilotMoneyServer {
   private liveReadsEnabled: boolean;
   private liveTools?: LiveTransactionsTools;
   private liveAccountsTools?: LiveAccountsTools;
+  private liveCategoriesTools?: LiveCategoriesTools;
   private refreshCacheTool?: RefreshCacheTool;
 
   /**
@@ -70,6 +72,7 @@ export class CopilotMoneyServer {
       liveDb = new LiveCopilotDatabase(graphqlClient, this.db);
       this.liveTools = new LiveTransactionsTools(liveDb);
       this.liveAccountsTools = new LiveAccountsTools(liveDb);
+      this.liveCategoriesTools = new LiveCategoriesTools(liveDb);
       this.refreshCacheTool = new RefreshCacheTool(liveDb);
     }
 
@@ -99,7 +102,12 @@ export class CopilotMoneyServer {
       ? readSchemas.filter((s) => s.name !== 'get_transactions' && s.name !== 'get_accounts')
       : readSchemas;
     const liveSchemas = this.liveReadsEnabled
-      ? [...createLiveToolSchemas(), createLiveAccountsToolSchema(), createRefreshCacheToolSchema()]
+      ? [
+          ...createLiveToolSchemas(),
+          createLiveAccountsToolSchema(),
+          createLiveCategoriesToolSchema(),
+          createRefreshCacheToolSchema(),
+        ]
       : [];
     const allSchemas = [
       ...filteredReads,
@@ -184,6 +192,18 @@ export class CopilotMoneyServer {
       };
     }
 
+    if (name === 'get_categories_live' && !this.liveCategoriesTools) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'get_categories_live is only available when the server runs with --live-reads.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
     if (name === 'refresh_cache' && !this.refreshCacheTool) {
       return {
         content: [
@@ -234,6 +254,14 @@ export class CopilotMoneyServer {
           result = await this.liveAccountsTools!.getAccounts(
             (typedArgs as Parameters<
               NonNullable<typeof this.liveAccountsTools>['getAccounts']
+            >[0]) ?? {}
+          );
+          break;
+
+        case 'get_categories_live':
+          result = await this.liveCategoriesTools!.getCategories(
+            (typedArgs as Parameters<
+              NonNullable<typeof this.liveCategoriesTools>['getCategories']
             >[0]) ?? {}
           );
           break;

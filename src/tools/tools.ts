@@ -2349,9 +2349,7 @@ export class CopilotMoneyTools {
         name: result.name,
         templateId: null,
         colorName: result.colorName,
-        icon: args.emoji
-          ? { __typename: 'EmojiUnicode', unicode: args.emoji }
-          : null,
+        icon: args.emoji ? { __typename: 'EmojiUnicode', unicode: args.emoji } : null,
         isExcluded: args.is_excluded ?? false,
         isRolloverDisabled: false,
         canBeDeleted: true,
