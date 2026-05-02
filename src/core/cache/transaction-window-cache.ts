@@ -2,9 +2,12 @@
  * Month-keyed window cache for transaction reads.
  *
  * Transactions are tiered by the age of the month's most recent day:
- *   - min_age ≤ 7d → live (no cache; always refetch)
- *   - 7d < min_age ≤ 21d → warm (1h TTL)
- *   - min_age > 21d → cold (1w TTL)
+ *   - min_age ≤ 14d → live (no cache; always refetch)
+ *   - min_age > 14d → cold (1w TTL)
+ *
+ * The 14-day boundary captures the meaningful Plaid-sync drift window
+ * (recent merchants are still posting late charges) without the
+ * complexity of a separate warm tier.
  *
  * `plan()` decomposes a date range into months and returns
  * (cachedRows, toFetch). The caller fetches missing months and
@@ -14,7 +17,7 @@
  * Eviction runs iteratively after each ingest; a single high-volume
  * ingest can push the total well past the cap.
  *
- * See docs/superpowers/specs/2026-04-24-graphql-live-tiered-cache-design.md.
+ * See docs/superpowers/specs/2026-05-01-graphql-live-tx-windowed-cache-design.md.
  */
 
 import { monthsCovered, monthAge, type YearMonth } from '../../utils/date.js';
@@ -27,11 +30,10 @@ export interface CachedTransaction {
   [key: string]: unknown;
 }
 
-export type Tier = 'live' | 'warm' | 'cold';
+export type Tier = 'live' | 'cold';
 
 export interface TransactionWindowCacheOptions {
   liveTtlMs: number; // typically 0 — never cache live tier
-  warmTtlMs: number; // e.g. 1h
   coldTtlMs: number; // e.g. 1w
   maxRows: number; // total-row cap before eviction
 }
@@ -66,8 +68,7 @@ export class TransactionWindowCache<T extends CachedTransaction = CachedTransact
 
   tierFor(month: YearMonth, now: Date): Tier {
     const age = monthAge(month, now);
-    if (age <= 7) return 'live';
-    if (age <= 21) return 'warm';
+    if (age <= 14) return 'live';
     return 'cold';
   }
 
@@ -75,8 +76,6 @@ export class TransactionWindowCache<T extends CachedTransaction = CachedTransact
     switch (tier) {
       case 'live':
         return this.opts.liveTtlMs;
-      case 'warm':
-        return this.opts.warmTtlMs;
       case 'cold':
         return this.opts.coldTtlMs;
     }
@@ -188,6 +187,10 @@ export class TransactionWindowCache<T extends CachedTransaction = CachedTransact
 
   entriesForMonth(month: YearMonth): T[] {
     return this.windows.get(month)?.rows ?? [];
+  }
+
+  getFetchedAt(month: YearMonth): number | undefined {
+    return this.windows.get(month)?.fetched_at;
   }
 
   private evictLRU(maxTotalRows: number): void {

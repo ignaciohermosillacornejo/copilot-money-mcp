@@ -140,9 +140,9 @@ export function monthsCovered(range: DateRangeArg): YearMonth[] {
  * relative to `now`. Clamped at 0 — current and future months return 0.
  *
  * Used by TransactionWindowCache to resolve a month into one of the
- * tier classes (live ≤7d / warm 8-21d / cold >21d). Computed in UTC so
- * the tier classification is timezone-invariant: a month with `now -
- * last_day` of exactly 7.0 days produces the same tier in every TZ.
+ * tier classes (live ≤14d / cold >14d). Computed in UTC so the tier
+ * classification is timezone-invariant: a month with `now - last_day`
+ * of exactly 14.0 days produces the same tier in every TZ.
  */
 export function monthAge(month: YearMonth, now: Date): number {
   const year = Number(month.slice(0, 4));

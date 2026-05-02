@@ -16,7 +16,6 @@ const makeCache = () =>
   new TransactionWindowCache(
     {
       liveTtlMs: 0, // never cache live tier
-      warmTtlMs: 60 * 60 * 1000, // 1h
       coldTtlMs: 7 * 24 * 60 * 60 * 1000, // 1w
       maxRows: 1000,
     },
@@ -24,69 +23,61 @@ const makeCache = () =>
   );
 
 describe('TransactionWindowCache.tierFor', () => {
-  const today = new Date('2026-04-15');
-
   test('current month → live', () => {
     const cache = makeCache();
-    expect(cache.tierFor('2026-04', today)).toBe('live');
+    expect(cache.tierFor('2026-05', new Date('2026-05-15'))).toBe('live');
   });
 
-  test('previous month with min_age in (7, 21] → warm', () => {
+  test('previous month with min_age ≤ 14 → live', () => {
     const cache = makeCache();
-    expect(cache.tierFor('2026-03', today)).toBe('warm'); // 15d
+    expect(cache.tierFor('2026-04', new Date('2026-05-10'))).toBe('live');
   });
 
   test('two months ago → cold', () => {
     const cache = makeCache();
-    expect(cache.tierFor('2026-02', today)).toBe('cold'); // 46d
+    expect(cache.tierFor('2026-03', new Date('2026-05-15'))).toBe('cold');
   });
 
   test('future month → live (clamped)', () => {
     const cache = makeCache();
-    expect(cache.tierFor('2026-05', today)).toBe('live');
+    expect(cache.tierFor('2026-06', new Date('2026-05-15'))).toBe('live');
   });
 
-  test('boundary at exactly 7 days → live', () => {
-    // Last day of '2026-03' is 2026-03-31. 7d after = 2026-04-07.
+  test('boundary at exactly 14 days → live', () => {
     const cache = makeCache();
-    expect(cache.tierFor('2026-03', new Date('2026-04-07'))).toBe('live');
+    expect(cache.tierFor('2026-04', new Date('2026-05-14'))).toBe('live');
   });
 
-  test('boundary at exactly 21 days → warm', () => {
-    // Last day of '2026-03' is 2026-03-31. 21d after = 2026-04-21.
+  test('boundary at 15 days → cold', () => {
     const cache = makeCache();
-    expect(cache.tierFor('2026-03', new Date('2026-04-21'))).toBe('warm');
-  });
-
-  test('boundary at 22 days → cold', () => {
-    // First cold day is 22d. 22d after 2026-03-31 = 2026-04-22.
-    const cache = makeCache();
-    expect(cache.tierFor('2026-03', new Date('2026-04-22'))).toBe('cold');
+    expect(cache.tierFor('2026-04', new Date('2026-05-15'))).toBe('cold');
   });
 });
 
 describe('TransactionWindowCache.plan', () => {
-  const today = new Date('2026-04-15');
+  const today = new Date('2026-05-15');
 
   test('all months absent from cache → all in toFetch', () => {
     const cache = makeCache();
-    const result = cache.plan({ from: '2026-02-01', to: '2026-04-15' }, today);
-    expect(result.toFetch).toEqual(['2026-02', '2026-03', '2026-04']);
+    const result = cache.plan({ from: '2026-03-01', to: '2026-05-15' }, today);
+    expect(result.toFetch).toEqual(['2026-03', '2026-04', '2026-05']);
     expect(result.cachedRows).toEqual([]);
   });
 
-  test('cached fresh months are pulled; live month is always in toFetch', () => {
+  test('cached fresh cold months are pulled; live month is always in toFetch', () => {
     const cache = makeCache();
     cache.ingestMonth('2026-02', [mkTx('a', '2026-02-10')], Date.now());
     cache.ingestMonth('2026-03', [mkTx('b', '2026-03-20')], Date.now());
+    cache.ingestMonth('2026-04', [mkTx('c', '2026-04-15')], Date.now());
 
-    const result = cache.plan({ from: '2026-02-01', to: '2026-04-15' }, today);
-    expect(result.toFetch).toEqual(['2026-04']);
-    expect(result.cachedRows.map((r) => r.id).sort()).toEqual(['a', 'b']);
+    const result = cache.plan({ from: '2026-02-01', to: '2026-05-15' }, today);
+    expect(result.toFetch).toEqual(['2026-05']);
+    expect(result.cachedRows.map((r) => r.id).sort()).toEqual(['a', 'b', 'c']);
   });
 
   test('stale cold-tier month is in toFetch', () => {
     const cache = makeCache();
+    // Cold TTL is 1w; ingest a month with fetched_at 8 days ago → stale.
     const eightDaysAgo = Date.now() - 8 * 24 * 60 * 60 * 1000;
     cache.ingestMonth('2026-02', [mkTx('a', '2026-02-10')], eightDaysAgo);
 
@@ -99,10 +90,10 @@ describe('TransactionWindowCache.plan', () => {
     // Caller is responsible for ingesting fresh results; old cache state
     // for a live month is not optimistically returned.
     const cache = makeCache();
-    cache.ingestMonth('2026-04', [mkTx('a', '2026-04-10')], Date.now());
+    cache.ingestMonth('2026-05', [mkTx('a', '2026-05-10')], Date.now());
 
-    const result = cache.plan({ from: '2026-04-01', to: '2026-04-30' }, today);
-    expect(result.toFetch).toEqual(['2026-04']);
+    const result = cache.plan({ from: '2026-05-01', to: '2026-05-31' }, today);
+    expect(result.toFetch).toEqual(['2026-05']);
     expect(result.cachedRows).toEqual([]);
   });
 
@@ -165,7 +156,6 @@ describe('TransactionWindowCache.evictLRU', () => {
     const cache = new TransactionWindowCache(
       {
         liveTtlMs: 0,
-        warmTtlMs: 60 * 60 * 1000,
         coldTtlMs: 7 * 24 * 60 * 60 * 1000,
         maxRows: 100,
       },
@@ -274,5 +264,26 @@ describe('TransactionWindowCache accessors', () => {
   test('entriesForMonth returns empty array for uncached month', () => {
     const cache = makeCache();
     expect(cache.entriesForMonth('2026-03')).toEqual([]);
+  });
+});
+
+describe('TransactionWindowCache.getFetchedAt', () => {
+  test('returns fetched_at for cached month', () => {
+    const cache = makeCache();
+    const ts = 1_700_000_000_000;
+    cache.ingestMonth('2026-03', [mkTx('a', '2026-03-10')], ts);
+    expect(cache.getFetchedAt('2026-03')).toBe(ts);
+  });
+
+  test('returns undefined for uncached month', () => {
+    const cache = makeCache();
+    expect(cache.getFetchedAt('2026-03')).toBeUndefined();
+  });
+
+  test('reflects re-ingest timestamp', () => {
+    const cache = makeCache();
+    cache.ingestMonth('2026-03', [], 1);
+    cache.ingestMonth('2026-03', [], 2);
+    expect(cache.getFetchedAt('2026-03')).toBe(2);
   });
 });
