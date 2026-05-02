@@ -258,6 +258,60 @@ describe('LiveCopilotDatabase.getTransactions (windowed)', () => {
     expect(wc.cachedMonths().length).toBe(1);
   });
 
+  test('cross-month leakage is filtered before ingest (no cache pollution)', async () => {
+    // Page returns Feb rows AND a January row (paginate's tail).
+    const client = mkClientReturning([
+      mkPage([
+        { id: 'feb1', date: '2025-02-15' },
+        { id: 'jan-leak', date: '2025-01-30' }, // outside Feb's range
+      ]),
+    ]);
+    const live = new LiveCopilotDatabase(client, mkCache());
+    await live.getTransactions({ from: '2025-02-01', to: '2025-02-28' });
+
+    // The leaked January row must NOT have polluted Feb's cache bucket.
+    const wc = live.getTransactionsWindowCache();
+    const febRows = wc.entriesForMonth('2025-02');
+    expect(febRows.map((r) => r.id)).toEqual(['feb1']);
+    expect(wc.entriesForMonth('2025-01')).toEqual([]);
+  });
+
+  test('shared concurrency cap across concurrent calls', async () => {
+    // 8 distinct months across 2 callers; only 4 should be in-flight at once.
+    let active = 0;
+    let peak = 0;
+    let resolveAll!: () => void;
+    const gate = new Promise<void>((r) => {
+      resolveAll = r;
+    });
+    let queryNum = 0;
+    const client = {
+      mutate: mock(),
+      query: mock(async () => {
+        active += 1;
+        peak = Math.max(peak, active);
+        queryNum += 1;
+        const num = queryNum;
+        await gate;
+        active -= 1;
+        return { transactions: mkPage([{ id: `t${num}`, date: '2025-01-15' }]) };
+      }),
+    } as unknown as GraphQLClient;
+    const live = new LiveCopilotDatabase(client, mkCache());
+
+    // Caller A wants 4 distinct months, caller B wants 4 different distinct months.
+    const a = live.getTransactions({ from: '2025-01-01', to: '2025-04-30' });
+    const b = live.getTransactions({ from: '2025-05-01', to: '2025-08-31' });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(peak).toBeLessThanOrEqual(4);
+    resolveAll();
+    await Promise.all([a, b]);
+    expect(peak).toBeLessThanOrEqual(4);
+  });
+
   test('concurrent calls coalesce per-month via InFlightRegistry', async () => {
     let queryCalls = 0;
     let resolveAll!: () => void;

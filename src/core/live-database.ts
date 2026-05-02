@@ -69,6 +69,7 @@ export class LiveCopilotDatabase {
 
   // Phase 2: tiered-cache primitives
   private readonly inflight: InFlightRegistry;
+  private readonly fetchLimit: ReturnType<typeof pLimit>;
   // Typed on AccountNode (GraphQL response shape) rather than the
   // LevelDB Account model. The live cache stores what the live read
   // path produces; tools that consume both shapes can map between
@@ -89,6 +90,7 @@ export class LiveCopilotDatabase {
     this.verbose = opts.verbose ?? false;
 
     this.inflight = new InFlightRegistry();
+    this.fetchLimit = pLimit(4);
     this.accountsCache = new SnapshotCache<AccountNode>(
       { key: 'accounts', ttlMs: ONE_HOUR_MS, keyFn: (a) => a.id },
       this.inflight
@@ -164,7 +166,7 @@ export class LiveCopilotDatabase {
     const filter = buildTransactionFilter({ startDate: monthStart, endDate: monthEnd });
     const fetched_at = Date.now();
     let pages = 0;
-    const rows = await paginateTransactions(
+    const rawRows = await paginateTransactions(
       (after) =>
         this.withRetry(async () => {
           pages += 1;
@@ -172,6 +174,12 @@ export class LiveCopilotDatabase {
         }),
       { startDate: monthStart }
     );
+    // Trim leaked tail-page rows that fall outside this month's window.
+    // `paginateTransactions` early-exits AFTER appending a page, so the
+    // trailing edge of the last page can dip into the previous month.
+    // Without this trim, those rows pollute the wrong cache bucket and
+    // get double-counted on subsequent full-range queries.
+    const rows = rawRows.filter((r) => r.date >= monthStart && r.date <= monthEnd);
     this.transactionsWindowCache.ingestMonth(month, rows as unknown as CachedTransaction[], fetched_at);
     return { rows, fetched_at, pages };
   }
@@ -255,12 +263,11 @@ export class LiveCopilotDatabase {
     const { cachedRows, toFetch } = this.transactionsWindowCache.plan(range, now);
 
     const startedAt = Date.now();
-    const limit = pLimit(4);
     let totalPages = 0;
 
     const settled = await Promise.allSettled(
       toFetch.map((month) =>
-        limit(() =>
+        this.fetchLimit(() =>
           this.inflight.run(`tx:${month}`, async () => {
             const result = await this.fetchMonth(month, sortArr, pageSize);
             totalPages += result.pages;
