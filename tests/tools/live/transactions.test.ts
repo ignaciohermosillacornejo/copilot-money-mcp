@@ -141,8 +141,22 @@ async function mkLiveReturning(
 describe('LiveTransactionsTools — happy path', () => {
   test('returns envelope with enriched fields', async () => {
     const live = await mkLiveReturning([mkNode({ id: 't1', name: 'AMAZON.COM*XYZ' })]);
-    (live.getCache().getCategoryNameMap as ReturnType<typeof mock>).mockImplementation(() =>
-      Promise.resolve(new Map([['c1', 'Shopping']]))
+    // Seed categoriesCache so getCategoryNameMap() resolves c1 → 'Shopping'.
+    live.getCategoriesCache().invalidate();
+    await live.getCategoriesCache().read(() =>
+      Promise.resolve([
+        {
+          id: 'c1',
+          name: 'Shopping',
+          templateId: 'Shopping',
+          colorName: null,
+          icon: null,
+          isExcluded: false,
+          isRolloverDisabled: false,
+          canBeDeleted: true,
+          budget: null,
+        },
+      ])
     );
     const tools = new LiveTransactionsTools(live);
 
@@ -652,6 +666,109 @@ describe('LiveTransactionsTools — exclude_excluded filter', () => {
     });
     // No categories are excluded, so all transactions should be returned.
     expect(result.transactions.map((t) => t.transaction_id).sort()).toEqual(['t1', 't2', 't3']);
+  });
+});
+
+describe('LiveTransactionsTools — hsa_eligible filter', () => {
+  test('transaction_type=hsa_eligible retains transactions in health/medical categories', async () => {
+    const nodes = [
+      mkNode({ id: 't1', categoryId: 'cat-health' }),
+      mkNode({ id: 't2', categoryId: 'cat-food' }),
+      mkNode({ id: 't3', categoryId: null }),
+    ];
+    const live = await mkLiveReturning(nodes);
+    // Seed categoriesCache so getCategoryNameMap() resolves category names.
+    live.getCategoriesCache().invalidate();
+    await live.getCategoriesCache().read(() =>
+      Promise.resolve([
+        {
+          id: 'cat-health',
+          name: 'Health & Medical',
+          templateId: 'Health',
+          colorName: null,
+          icon: null,
+          isExcluded: false,
+          isRolloverDisabled: false,
+          canBeDeleted: true,
+          budget: null,
+        },
+        {
+          id: 'cat-food',
+          name: 'Food',
+          templateId: 'Food',
+          colorName: null,
+          icon: null,
+          isExcluded: false,
+          isRolloverDisabled: false,
+          canBeDeleted: true,
+          budget: null,
+        },
+      ])
+    );
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({
+      transaction_type: 'hsa_eligible',
+      start_date: '2025-01-01',
+      end_date: '2025-12-31',
+    });
+    // Only t1 (Health & Medical) should match; t2 (Food) and t3 (no category) should be filtered out.
+    expect(result.transactions.map((t) => t.transaction_id)).toEqual(['t1']);
+  });
+
+  test('transaction_type=hsa_eligible matches "medical" in category name', async () => {
+    const nodes = [
+      mkNode({ id: 't1', categoryId: 'cat-medical' }),
+      mkNode({ id: 't2', categoryId: 'cat-shopping' }),
+    ];
+    const live = await mkLiveReturning(nodes);
+    live.getCategoriesCache().invalidate();
+    await live.getCategoriesCache().read(() =>
+      Promise.resolve([
+        {
+          id: 'cat-medical',
+          name: 'Medical Expenses',
+          templateId: null,
+          colorName: null,
+          icon: null,
+          isExcluded: false,
+          isRolloverDisabled: false,
+          canBeDeleted: true,
+          budget: null,
+        },
+        {
+          id: 'cat-shopping',
+          name: 'Shopping',
+          templateId: 'Shopping',
+          colorName: null,
+          icon: null,
+          isExcluded: false,
+          isRolloverDisabled: false,
+          canBeDeleted: true,
+          budget: null,
+        },
+      ])
+    );
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({
+      transaction_type: 'hsa_eligible',
+      start_date: '2025-01-01',
+      end_date: '2025-12-31',
+    });
+    expect(result.transactions.map((t) => t.transaction_id)).toEqual(['t1']);
+  });
+
+  test('transaction_type=hsa_eligible returns empty when categoriesCache is empty', async () => {
+    const nodes = [mkNode({ id: 't1', categoryId: 'cat-health' })];
+    // mkLiveReturning pre-warms categoriesCache with [] — no category name resolution possible.
+    const live = await mkLiveReturning(nodes);
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({
+      transaction_type: 'hsa_eligible',
+      start_date: '2025-01-01',
+      end_date: '2025-12-31',
+    });
+    // With no categories in the cache, the name map is empty → no matches.
+    expect(result.transactions).toEqual([]);
   });
 });
 
