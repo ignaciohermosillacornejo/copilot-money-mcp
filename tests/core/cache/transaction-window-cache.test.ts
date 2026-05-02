@@ -66,9 +66,11 @@ describe('TransactionWindowCache.plan', () => {
 
   test('cached fresh cold months are pulled; live month is always in toFetch', () => {
     const cache = makeCache();
-    cache.ingestMonth('2026-02', [mkTx('a', '2026-02-10')], Date.now());
-    cache.ingestMonth('2026-03', [mkTx('b', '2026-03-20')], Date.now());
-    cache.ingestMonth('2026-04', [mkTx('c', '2026-04-15')], Date.now());
+    // Fixed timestamp 1 day before today (2026-05-15) to avoid boundary races.
+    const freshAt = new Date('2026-05-14').getTime();
+    cache.ingestMonth('2026-02', [mkTx('a', '2026-02-10')], freshAt);
+    cache.ingestMonth('2026-03', [mkTx('b', '2026-03-20')], freshAt);
+    cache.ingestMonth('2026-04', [mkTx('c', '2026-04-15')], freshAt);
 
     const result = cache.plan({ from: '2026-02-01', to: '2026-05-15' }, today);
     expect(result.toFetch).toEqual(['2026-05']);
