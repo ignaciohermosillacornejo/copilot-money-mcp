@@ -14,10 +14,10 @@ import type {
   ReadTransactionType,
   TransactionNode,
 } from '../../core/graphql/queries/transactions.js';
+import { fetchCategories } from '../../core/graphql/queries/categories.js';
 import type { ToolSchema } from '../tools.js';
 import { normalizeMerchantName } from '../tools.js';
 import { parsePeriod } from '../../utils/date.js';
-import { fetchCategories } from '../../core/graphql/queries/categories.js';
 
 export type LiveTransactionType = 'refunds' | 'credits' | 'hsa_eligible' | 'tagged';
 
@@ -238,9 +238,7 @@ export class LiveTransactionsTools {
       const { rows: cats } = await this.live
         .getCategoriesCache()
         .read(() => fetchCategories(this.live.getClient()));
-      const excludedCatIds = new Set(
-        cats.filter((c) => c.isExcluded === true).map((c) => c.id)
-      );
+      const excludedCatIds = new Set(cats.filter((c) => c.isExcluded === true).map((c) => c.id));
       result = result.filter((n) => !n.categoryId || !excludedCatIds.has(n.categoryId));
     }
 

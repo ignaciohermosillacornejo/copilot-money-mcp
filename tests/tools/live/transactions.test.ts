@@ -10,7 +10,7 @@ import type { CopilotDatabase } from '../../../src/core/database.js';
 function mkLive(): LiveCopilotDatabase {
   const client = {
     mutate: mock(),
-    query: mock(() => Promise.resolve({ categories: [] })),
+    query: mock(),
   } as unknown as GraphQLClient;
   const cache = {
     getAccounts: mock(() => Promise.resolve([])),
@@ -112,7 +112,10 @@ function mkNode(partial: Partial<TransactionNode>): TransactionNode {
   };
 }
 
-function mkLiveReturning(nodes: TransactionNode[], fetchedAt = Date.now()): LiveCopilotDatabase {
+async function mkLiveReturning(
+  nodes: TransactionNode[],
+  fetchedAt = Date.now()
+): Promise<LiveCopilotDatabase> {
   const live = mkLive();
   (
     live as unknown as {
@@ -129,12 +132,15 @@ function mkLiveReturning(nodes: TransactionNode[], fetchedAt = Date.now()): Live
     newest_fetched_at: fetchedAt,
     hit: false,
   });
+  // Pre-warm categoriesCache with empty so tests that don't exercise
+  // category-dependent paths never call fetchCategories on the mock client.
+  await live.getCategoriesCache().read(() => Promise.resolve([]));
   return live;
 }
 
 describe('LiveTransactionsTools — happy path', () => {
   test('returns envelope with enriched fields', async () => {
-    const live = mkLiveReturning([mkNode({ id: 't1', name: 'AMAZON.COM*XYZ' })]);
+    const live = await mkLiveReturning([mkNode({ id: 't1', name: 'AMAZON.COM*XYZ' })]);
     (live.getCache().getCategoryNameMap as ReturnType<typeof mock>).mockImplementation(() =>
       Promise.resolve(new Map([['c1', 'Shopping']]))
     );
@@ -156,7 +162,7 @@ describe('LiveTransactionsTools — happy path', () => {
 
   test('applies limit and offset client-side', async () => {
     const nodes = [1, 2, 3, 4, 5].map((i) => mkNode({ id: `t${i}` }));
-    const live = mkLiveReturning(nodes);
+    const live = await mkLiveReturning(nodes);
     const tools = new LiveTransactionsTools(live);
 
     const result = await tools.getTransactions({
@@ -181,7 +187,7 @@ describe('LiveTransactionsTools — post-filters', () => {
       mkNode({ id: 't2', amount: 50 }),
       mkNode({ id: 't3', amount: 150 }),
     ];
-    const live = mkLiveReturning(nodes);
+    const live = await mkLiveReturning(nodes);
     const tools = new LiveTransactionsTools(live);
     const result = await tools.getTransactions({
       min_amount: 10,
@@ -194,7 +200,7 @@ describe('LiveTransactionsTools — post-filters', () => {
 
   test('filters by pending flag', async () => {
     const nodes = [mkNode({ id: 't1', isPending: true }), mkNode({ id: 't2', isPending: false })];
-    const live = mkLiveReturning(nodes);
+    const live = await mkLiveReturning(nodes);
     const tools = new LiveTransactionsTools(live);
     const resultP = await tools.getTransactions({
       pending: true,
@@ -218,7 +224,7 @@ describe('LiveTransactionsTools — post-filters', () => {
       }),
       mkNode({ id: 't2', tags: [] }),
     ];
-    const live = mkLiveReturning(nodes);
+    const live = await mkLiveReturning(nodes);
     const tools = new LiveTransactionsTools(live);
     const result = await tools.getTransactions({
       transaction_type: 'tagged',
@@ -230,7 +236,7 @@ describe('LiveTransactionsTools — post-filters', () => {
 
   test('transaction_type=refunds filters to negative amounts', async () => {
     const nodes = [mkNode({ id: 't1', amount: -25 }), mkNode({ id: 't2', amount: 15 })];
-    const live = mkLiveReturning(nodes);
+    const live = await mkLiveReturning(nodes);
     const tools = new LiveTransactionsTools(live);
     const result = await tools.getTransactions({
       transaction_type: 'refunds',
@@ -245,7 +251,7 @@ describe('LiveTransactionsTools — post-filters', () => {
       mkNode({ id: 't1', type: 'REGULAR' }),
       mkNode({ id: 't2', type: 'INTERNAL_TRANSFER' }),
     ];
-    const live = mkLiveReturning(nodes);
+    const live = await mkLiveReturning(nodes);
     const tools = new LiveTransactionsTools(live);
     const result = await tools.getTransactions({
       exclude_transfers: true,
@@ -259,7 +265,7 @@ describe('LiveTransactionsTools — post-filters', () => {
 describe('LiveTransactionsTools — account resolution', () => {
   test('account_id filter narrows to rows from that account (post-filter)', async () => {
     const nodes = [mkNode({ id: 't1', accountId: 'a1' }), mkNode({ id: 't2', accountId: 'a2' })];
-    const live = mkLiveReturning(nodes);
+    const live = await mkLiveReturning(nodes);
     const tools = new LiveTransactionsTools(live);
     const result = await tools.getTransactions({
       account_id: 'a2',
@@ -276,7 +282,7 @@ describe('LiveTransactionsTools — account resolution', () => {
       mkNode({ id: 'tOTHER', accountId: 'a1', itemId: 'i1' }),
       mkNode({ id: 't1', accountId: 'a1', itemId: 'i1', name: 'matched' }),
     ];
-    const live = mkLiveReturning(nodes);
+    const live = await mkLiveReturning(nodes);
     const tools = new LiveTransactionsTools(live);
 
     const result = await tools.getTransactions({
@@ -294,7 +300,7 @@ describe('LiveTransactionsTools — account resolution', () => {
   });
 
   test('singleTransactionLookup returns empty when no match in range', async () => {
-    const live = mkLiveReturning([mkNode({ id: 'other', accountId: 'a1', itemId: 'i1' })]);
+    const live = await mkLiveReturning([mkNode({ id: 'other', accountId: 'a1', itemId: 'i1' })]);
     const tools = new LiveTransactionsTools(live);
     const result = await tools.getTransactions({
       transaction_id: 'missing',
@@ -310,7 +316,7 @@ describe('LiveTransactionsTools — account resolution', () => {
 
 describe('LiveTransactionsTools — freshness envelope', () => {
   test('response includes _cache_oldest_fetched_at, _cache_newest_fetched_at, and _cache_hit', async () => {
-    const live = mkLiveReturning([mkNode({ id: 't1' })]);
+    const live = await mkLiveReturning([mkNode({ id: 't1' })]);
     const tools = new LiveTransactionsTools(live);
     const result = await tools.getTransactions({
       start_date: '2026-04-01',
@@ -323,7 +329,7 @@ describe('LiveTransactionsTools — freshness envelope', () => {
   });
 
   test('oldest and newest are equal when fixture provides a single timestamp', async () => {
-    const live = mkLiveReturning([]);
+    const live = await mkLiveReturning([]);
     const tools = new LiveTransactionsTools(live);
     const result = await tools.getTransactions({
       start_date: '2026-04-01',
@@ -333,7 +339,7 @@ describe('LiveTransactionsTools — freshness envelope', () => {
   });
 
   test('_cache_oldest_fetched_at is a valid ISO string', async () => {
-    const live = mkLiveReturning([]);
+    const live = await mkLiveReturning([]);
     const tools = new LiveTransactionsTools(live);
     const result = await tools.getTransactions({
       start_date: '2026-04-01',
@@ -419,7 +425,7 @@ describe('createLiveToolSchemas', () => {
 describe('LiveTransactionsTools — migrated filters', () => {
   test('category filter matches by categoryId', async () => {
     const nodes = [mkNode({ id: 't1', categoryId: 'c1' }), mkNode({ id: 't2', categoryId: 'c2' })];
-    const live = mkLiveReturning(nodes);
+    const live = await mkLiveReturning(nodes);
     const tools = new LiveTransactionsTools(live);
     const result = await tools.getTransactions({
       category: 'c1',
@@ -437,7 +443,7 @@ describe('LiveTransactionsTools — migrated filters', () => {
       }),
       mkNode({ id: 't2', tags: [] }),
     ];
-    const live = mkLiveReturning(nodes);
+    const live = await mkLiveReturning(nodes);
     (live.getCache().getTags as ReturnType<typeof mock>).mockImplementation(() =>
       Promise.resolve([{ tag_id: 'tg1', name: 'Vacation' }])
     );
@@ -455,7 +461,7 @@ describe('LiveTransactionsTools — migrated filters', () => {
       mkNode({ id: 't1', type: 'REGULAR' }),
       mkNode({ id: 't2', type: 'INTERNAL_TRANSFER' }),
     ];
-    const live = mkLiveReturning(nodes);
+    const live = await mkLiveReturning(nodes);
     const tools = new LiveTransactionsTools(live);
     const result = await tools.getTransactions({
       exclude_transfers: false,
@@ -471,7 +477,7 @@ describe('LiveTransactionsTools — migrated filters', () => {
       mkNode({ id: 't2', name: 'AMAZON.com' }),
       mkNode({ id: 't3', name: 'Whole Foods' }),
     ];
-    const live = mkLiveReturning(nodes);
+    const live = await mkLiveReturning(nodes);
     const tools = new LiveTransactionsTools(live);
     const result = await tools.getTransactions({
       query: 'amazon',
@@ -486,7 +492,7 @@ describe('LiveTransactionsTools — migrated filters', () => {
       mkNode({ id: 't1', name: 'Starbucks #123' }),
       mkNode({ id: 't2', name: 'Coffee Bean' }),
     ];
-    const live = mkLiveReturning(nodes);
+    const live = await mkLiveReturning(nodes);
     const tools = new LiveTransactionsTools(live);
     const result = await tools.getTransactions({
       merchant: 'starbucks',
@@ -502,7 +508,7 @@ describe('LiveTransactionsTools — migrated filters', () => {
       mkNode({ id: 't2', name: 'bar only' }),
       mkNode({ id: 't3', name: 'foo and bar' }),
     ];
-    const live = mkLiveReturning(nodes);
+    const live = await mkLiveReturning(nodes);
     const tools = new LiveTransactionsTools(live);
     const result = await tools.getTransactions({
       query: 'foo',
@@ -522,7 +528,9 @@ describe('LiveTransactionsTools — exclude_excluded filter', () => {
       mkNode({ id: 't2', categoryId: 'cat-normal' }),
       mkNode({ id: 't3', categoryId: null }),
     ];
-    const live = mkLiveReturning(nodes);
+    const live = await mkLiveReturning(nodes);
+    // Invalidate the empty pre-warm so we can seed real category data.
+    live.getCategoriesCache().invalidate();
     await live.getCategoriesCache().read(() =>
       Promise.resolve([
         {
@@ -563,7 +571,9 @@ describe('LiveTransactionsTools — exclude_excluded filter', () => {
       mkNode({ id: 't1', categoryId: 'cat-excluded' }),
       mkNode({ id: 't2', categoryId: 'cat-normal' }),
     ];
-    const live = mkLiveReturning(nodes);
+    const live = await mkLiveReturning(nodes);
+    // Invalidate the empty pre-warm so we can seed real category data.
+    live.getCategoriesCache().invalidate();
     await live.getCategoriesCache().read(() =>
       Promise.resolve([
         {
@@ -599,6 +609,50 @@ describe('LiveTransactionsTools — exclude_excluded filter', () => {
     // Both should be returned when exclude_excluded=false
     expect(result.transactions.map((t) => t.transaction_id).sort()).toEqual(['t1', 't2']);
   });
+
+  test('exclude_excluded=true returns all transactions when no categories are excluded', async () => {
+    const nodes = [
+      mkNode({ id: 't1', categoryId: 'cat-normal' }),
+      mkNode({ id: 't2', categoryId: 'cat-other' }),
+      mkNode({ id: 't3', categoryId: null }),
+    ];
+    const live = await mkLiveReturning(nodes);
+    // Invalidate the empty pre-warm and seed only non-excluded categories.
+    live.getCategoriesCache().invalidate();
+    await live.getCategoriesCache().read(() =>
+      Promise.resolve([
+        {
+          id: 'cat-normal',
+          name: 'Food',
+          templateId: 'Food',
+          colorName: 'ORANGE2',
+          icon: null,
+          isExcluded: false,
+          isRolloverDisabled: false,
+          canBeDeleted: true,
+          budget: null,
+        },
+        {
+          id: 'cat-other',
+          name: 'Shopping',
+          templateId: 'Shopping',
+          colorName: 'BLUE1',
+          icon: null,
+          isExcluded: false,
+          isRolloverDisabled: false,
+          canBeDeleted: true,
+          budget: null,
+        },
+      ])
+    );
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({
+      start_date: '2025-01-01',
+      end_date: '2025-12-31',
+    });
+    // No categories are excluded, so all transactions should be returned.
+    expect(result.transactions.map((t) => t.transaction_id).sort()).toEqual(['t1', 't2', 't3']);
+  });
 });
 
 describe('LiveTransactionsTools — date-less query rejection', () => {
@@ -617,7 +671,7 @@ describe('LiveTransactionsTools — date-less query rejection', () => {
   });
 
   test('does NOT throw when query is set with period', async () => {
-    const live = mkLiveReturning([]);
+    const live = await mkLiveReturning([]);
     const tools = new LiveTransactionsTools(live);
     await expect(
       tools.getTransactions({ query: 'amazon', period: 'this_month' })
@@ -625,7 +679,7 @@ describe('LiveTransactionsTools — date-less query rejection', () => {
   });
 
   test('does NOT throw when query is set with explicit dates', async () => {
-    const live = mkLiveReturning([]);
+    const live = await mkLiveReturning([]);
     const tools = new LiveTransactionsTools(live);
     await expect(
       tools.getTransactions({
@@ -637,7 +691,7 @@ describe('LiveTransactionsTools — date-less query rejection', () => {
   });
 
   test('validate: transaction_id path bypasses query-without-date guard', async () => {
-    const live = mkLiveReturning([mkNode({ id: 't1', accountId: 'a1', itemId: 'i1' })]);
+    const live = await mkLiveReturning([mkNode({ id: 't1', accountId: 'a1', itemId: 'i1' })]);
     const tools = new LiveTransactionsTools(live);
     // query is set but should NOT cause a date-range error because transaction_id
     // lookup has its own date-range enforcement (transaction_id requires period
