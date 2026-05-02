@@ -63,7 +63,6 @@ describe('LiveCopilotDatabase — withRetry', () => {
   });
 });
 
-
 describe('LiveCopilotDatabase.getTransactions (windowed)', () => {
   function mkClientReturning(pages: TransactionsPage[]): GraphQLClient {
     let i = 0;
@@ -199,9 +198,9 @@ describe('LiveCopilotDatabase.getTransactions (windowed)', () => {
       }),
     } as unknown as GraphQLClient;
     const live = new LiveCopilotDatabase(client, mkCache());
-    await expect(
-      live.getTransactions({ from: '2025-01-01', to: '2025-02-28' })
-    ).rejects.toThrow(/Failed to fetch/);
+    await expect(live.getTransactions({ from: '2025-01-01', to: '2025-02-28' })).rejects.toThrow(
+      /Failed to fetch/
+    );
     const wc = live.getTransactionsWindowCache();
     expect(wc.cachedMonths().length).toBe(1);
   });
@@ -608,6 +607,33 @@ describe('LiveCopilotDatabase — logReadCall', () => {
       });
       live.logReadCall({ op: 'Transactions', pages: 1, latencyMs: 100, rows: 0, cache_hit: true });
       expect(lines.length).toBe(0);
+    } finally {
+      console.error = origError;
+    }
+  });
+
+  test('logReadCall emits from_to_months and fetched_months when set', () => {
+    const lines: string[] = [];
+    const origError = console.error;
+    console.error = (...args: unknown[]) => {
+      lines.push(args.map(String).join(' '));
+    };
+    try {
+      const live = new LiveCopilotDatabase({} as GraphQLClient, {} as CopilotDatabase, {
+        verbose: true,
+      });
+      live.logReadCall({
+        op: 'Transactions',
+        pages: 8,
+        latencyMs: 2843,
+        rows: 2412,
+        cache_hit: false,
+        from_to_months: 12,
+        fetched_months: 2,
+      });
+      expect(lines.length).toBe(1);
+      expect(lines[0]).toContain('from_to_months=12');
+      expect(lines[0]).toContain('fetched_months=2');
     } finally {
       console.error = origError;
     }
