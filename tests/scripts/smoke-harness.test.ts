@@ -4,7 +4,11 @@ import type { GraphQLClient } from '../../src/core/graphql/client.js';
 describe('setupLiveSmoke', () => {
   test('assembles auth + client + live db and runs preflight', async () => {
     const fakeClient = {
-      query: mock(() => Promise.resolve({ transactions: { edges: [], pageInfo: { hasNextPage: false, endCursor: null } } })),
+      query: mock(() =>
+        Promise.resolve({
+          transactions: { edges: [], pageInfo: { hasNextPage: false, endCursor: null } },
+        })
+      ),
     } as unknown as GraphQLClient;
 
     const { setupLiveSmoke } = await import('../../scripts/smoke/_harness.js');
@@ -22,8 +26,8 @@ describe('setupLiveSmoke', () => {
     } as unknown as GraphQLClient;
 
     const { setupLiveSmoke } = await import('../../scripts/smoke/_harness.js');
-    await expect(
-      setupLiveSmoke({ verbose: false, injectedClient: failingClient })
-    ).rejects.toThrow('UNAUTHENTICATED');
+    await expect(setupLiveSmoke({ verbose: false, injectedClient: failingClient })).rejects.toThrow(
+      'UNAUTHENTICATED'
+    );
   });
 });

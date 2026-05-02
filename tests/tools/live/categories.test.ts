@@ -91,7 +91,8 @@ describe('LiveCategoriesTools.getCategories', () => {
 
 describe('createLiveCategoriesToolSchema', () => {
   test('returns a schema with readOnlyHint=true', async () => {
-    const { createLiveCategoriesToolSchema } = await import('../../../src/tools/live/categories.js');
+    const { createLiveCategoriesToolSchema } =
+      await import('../../../src/tools/live/categories.js');
     const schema = createLiveCategoriesToolSchema();
     expect(schema.name).toBe('get_categories_live');
     expect(schema.annotations?.readOnlyHint).toBe(true);
