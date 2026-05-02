@@ -34,6 +34,7 @@ const IN_SCOPE_MUTATIONS = [
 const IN_SCOPE_QUERIES = [
   'Transactions',
   'Accounts',
+  'Categories',
 ] as const;
 
 const CAPTURE_DIR = 'docs/graphql-capture/operations/mutations';
