@@ -63,58 +63,6 @@ describe('LiveCopilotDatabase — withRetry', () => {
   });
 });
 
-describe('LiveCopilotDatabase — memo', () => {
-  test('returns cached value within TTL', async () => {
-    const live = new LiveCopilotDatabase(mkClient(), mkCache(), { memoTtlMs: 60_000 });
-    let calls = 0;
-    const loader = async () => {
-      calls += 1;
-      return { value: calls };
-    };
-    const a = await live.memoize('key-1', loader);
-    const b = await live.memoize('key-1', loader);
-    expect(a.result).toEqual({ value: 1 });
-    expect(b.result).toEqual({ value: 1 });
-    expect(calls).toBe(1);
-  });
-
-  test('hit=false on first call, hit=true on second call within TTL', async () => {
-    const live = new LiveCopilotDatabase(mkClient(), mkCache(), { memoTtlMs: 60_000 });
-    const loader = async () => 42;
-    const a = await live.memoize('key-hit', loader);
-    const b = await live.memoize('key-hit', loader);
-    expect(a.hit).toBe(false);
-    expect(b.hit).toBe(true);
-  });
-
-  test('fetched_at is stable across cache hits', async () => {
-    const live = new LiveCopilotDatabase(mkClient(), mkCache(), { memoTtlMs: 60_000 });
-    const loader = async () => 'x';
-    const a = await live.memoize('key-ts', loader);
-    const b = await live.memoize('key-ts', loader);
-    expect(b.fetched_at).toBe(a.fetched_at);
-  });
-
-  test('re-loads after TTL expires', async () => {
-    const live = new LiveCopilotDatabase(mkClient(), mkCache(), { memoTtlMs: 1 });
-    let calls = 0;
-    const loader = async () => {
-      calls += 1;
-      return calls;
-    };
-    await live.memoize('k', loader);
-    await new Promise((r) => setTimeout(r, 5));
-    await live.memoize('k', loader);
-    expect(calls).toBe(2);
-  });
-
-  test('distinguishes different keys', async () => {
-    const live = new LiveCopilotDatabase(mkClient(), mkCache());
-    await live.memoize('a', async () => 1);
-    const b = await live.memoize('b', async () => 2);
-    expect(b.result).toBe(2);
-  });
-});
 
 describe('LiveCopilotDatabase.getTransactions (windowed)', () => {
   function mkClientReturning(pages: TransactionsPage[]): GraphQLClient {

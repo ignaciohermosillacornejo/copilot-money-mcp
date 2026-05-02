@@ -7,7 +7,6 @@
  * categories, budgets, recurring, and tags.
  *
  * The class owns cross-cutting concerns shared by every method:
- *   - short-lived result memoization (default 5 min TTL)
  *   - one retry on NETWORK errors (other GraphQL codes surface)
  *   - optional verbose logging to stderr for latency measurement
  *
@@ -42,17 +41,10 @@ import {
 import type { AccountNode } from './graphql/queries/accounts.js';
 import type { Category, Tag, Budget, Recurring, Transaction } from '../models/index.js';
 
-interface MemoEntry<T> {
-  result: T;
-  at: number;
-}
-
 export interface LiveDatabaseOptions {
-  memoTtlMs?: number;
   verbose?: boolean;
 }
 
-const DEFAULT_MEMO_TTL_MS = 5 * 60 * 1000;
 const RETRY_BACKOFF_MS = 500;
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
@@ -62,10 +54,7 @@ const ONE_WEEK_MS = 7 * ONE_DAY_MS;
 const DEFAULT_MAX_TX_ROWS = 20_000;
 
 export class LiveCopilotDatabase {
-  // existing fields
-  private readonly memoTtlMs: number;
   private readonly verbose: boolean;
-  private readonly memoStore: Map<string, MemoEntry<unknown>> = new Map();
 
   // Phase 2: tiered-cache primitives
   private readonly inflight: InFlightRegistry;
@@ -86,7 +75,6 @@ export class LiveCopilotDatabase {
     private readonly cache: CopilotDatabase,
     opts: LiveDatabaseOptions = {}
   ) {
-    this.memoTtlMs = opts.memoTtlMs ?? DEFAULT_MEMO_TTL_MS;
     this.verbose = opts.verbose ?? false;
 
     this.inflight = new InFlightRegistry();
@@ -182,20 +170,6 @@ export class LiveCopilotDatabase {
     const rows = rawRows.filter((r) => r.date >= monthStart && r.date <= monthEnd);
     this.transactionsWindowCache.ingestMonth(month, rows as unknown as CachedTransaction[], fetched_at);
     return { rows, fetched_at, pages };
-  }
-
-  async memoize<T>(
-    key: string,
-    loader: () => Promise<T>
-  ): Promise<{ result: T; fetched_at: number; hit: boolean }> {
-    const existing = this.memoStore.get(key);
-    if (existing && Date.now() - existing.at < this.memoTtlMs) {
-      return { result: existing.result as T, fetched_at: existing.at, hit: true };
-    }
-    const result = await loader();
-    const at = Date.now();
-    this.memoStore.set(key, { result, at });
-    return { result, fetched_at: at, hit: false };
   }
 
   logReadCall(log: {
