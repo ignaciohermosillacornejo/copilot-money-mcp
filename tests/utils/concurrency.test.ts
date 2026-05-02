@@ -75,4 +75,26 @@ describe('pLimit', () => {
     await Promise.all([t1, t2, t3]);
     expect(order).toEqual(['a', 'b', 'c']);
   });
+
+  test('throws RangeError when concurrency is zero, negative, or non-integer', () => {
+    expect(() => pLimit(0)).toThrow(RangeError);
+    expect(() => pLimit(-1)).toThrow(RangeError);
+    expect(() => pLimit(2.5)).toThrow(RangeError);
+    expect(() => pLimit(NaN)).toThrow(RangeError);
+  });
+
+  test('preserves non-Error rejection values verbatim (string, object)', async () => {
+    const limit = pLimit(2);
+    await expect(
+      limit(async () => {
+        throw 'string-error';
+      })
+    ).rejects.toBe('string-error');
+    const obj = { code: 42 };
+    await expect(
+      limit(async () => {
+        throw obj;
+      })
+    ).rejects.toBe(obj);
+  });
 });

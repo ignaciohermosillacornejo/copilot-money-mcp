@@ -7,6 +7,9 @@
  * regardless of settlement outcome.
  */
 export function pLimit(concurrency: number) {
+  if (!Number.isInteger(concurrency) || concurrency < 1) {
+    throw new RangeError(`pLimit: concurrency must be a positive integer (got ${concurrency})`);
+  }
   let active = 0;
   const queue: Array<() => void> = [];
   const next = () => {
@@ -23,7 +26,8 @@ export function pLimit(concurrency: number) {
             next();
           },
           (err: unknown) => {
-            reject(err instanceof Error ? err : new Error(String(err)));
+            // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- pLimit is a transparent wrapper; preserve caller's rejection value verbatim.
+            reject(err);
             next();
           }
         );
