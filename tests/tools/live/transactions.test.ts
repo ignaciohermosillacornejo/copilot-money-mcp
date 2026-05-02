@@ -8,7 +8,10 @@ import type { GraphQLClient } from '../../../src/core/graphql/client.js';
 import type { CopilotDatabase } from '../../../src/core/database.js';
 
 function mkLive(): LiveCopilotDatabase {
-  const client = { mutate: mock(), query: mock() } as unknown as GraphQLClient;
+  const client = {
+    mutate: mock(),
+    query: mock(() => Promise.resolve({ categories: [] })),
+  } as unknown as GraphQLClient;
   const cache = {
     getAccounts: mock(() => Promise.resolve([])),
     getTags: mock(() => Promise.resolve([])),
@@ -358,6 +361,9 @@ describe('LiveTransactionsTools — freshness envelope', () => {
       getCategoryNameMap: mock(() => Promise.resolve(new Map<string, string>())),
     } as unknown as import('../../../src/core/database.js').CopilotDatabase;
     const liveDb = new LiveDB(client, cache);
+    // Pre-warm categoriesCache so exclude_excluded doesn't call fetchCategories
+    // on this client (which stubs only the transactions query shape).
+    await liveDb.getCategoriesCache().read(() => Promise.resolve([]));
     const tools = new LiveTransactionsTools(liveDb);
 
     // Pick a date range entirely in the cold tier (>14d old) so the second
@@ -506,6 +512,92 @@ describe('LiveTransactionsTools — migrated filters', () => {
     });
     // Only `foo` filter runs; `bar` is ignored.
     expect(result.transactions.map((t) => t.transaction_id).sort()).toEqual(['t1', 't3']);
+  });
+});
+
+describe('LiveTransactionsTools — exclude_excluded filter', () => {
+  test('exclude_excluded=true (default) filters out transactions in excluded categories', async () => {
+    const nodes = [
+      mkNode({ id: 't1', categoryId: 'cat-excluded' }),
+      mkNode({ id: 't2', categoryId: 'cat-normal' }),
+      mkNode({ id: 't3', categoryId: null }),
+    ];
+    const live = mkLiveReturning(nodes);
+    await live.getCategoriesCache().read(() =>
+      Promise.resolve([
+        {
+          id: 'cat-excluded',
+          name: 'Transfer',
+          templateId: null,
+          colorName: null,
+          icon: null,
+          isExcluded: true,
+          isRolloverDisabled: false,
+          canBeDeleted: true,
+          budget: null,
+        },
+        {
+          id: 'cat-normal',
+          name: 'Food',
+          templateId: 'Food',
+          colorName: 'ORANGE2',
+          icon: null,
+          isExcluded: false,
+          isRolloverDisabled: false,
+          canBeDeleted: true,
+          budget: null,
+        },
+      ])
+    );
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({
+      start_date: '2025-01-01',
+      end_date: '2025-12-31',
+    });
+    // t1 (cat-excluded) should be filtered out; t2 (cat-normal) and t3 (no category) should remain
+    expect(result.transactions.map((t) => t.transaction_id).sort()).toEqual(['t2', 't3']);
+  });
+
+  test('exclude_excluded=false retains transactions in excluded categories', async () => {
+    const nodes = [
+      mkNode({ id: 't1', categoryId: 'cat-excluded' }),
+      mkNode({ id: 't2', categoryId: 'cat-normal' }),
+    ];
+    const live = mkLiveReturning(nodes);
+    await live.getCategoriesCache().read(() =>
+      Promise.resolve([
+        {
+          id: 'cat-excluded',
+          name: 'Transfer',
+          templateId: null,
+          colorName: null,
+          icon: null,
+          isExcluded: true,
+          isRolloverDisabled: false,
+          canBeDeleted: true,
+          budget: null,
+        },
+        {
+          id: 'cat-normal',
+          name: 'Food',
+          templateId: 'Food',
+          colorName: 'ORANGE2',
+          icon: null,
+          isExcluded: false,
+          isRolloverDisabled: false,
+          canBeDeleted: true,
+          budget: null,
+        },
+      ])
+    );
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({
+      exclude_excluded: false,
+      start_date: '2025-01-01',
+      end_date: '2025-12-31',
+    });
+    // Both should be returned when exclude_excluded=false
+    expect(result.transactions.map((t) => t.transaction_id).sort()).toEqual(['t1', 't2']);
   });
 });
 
