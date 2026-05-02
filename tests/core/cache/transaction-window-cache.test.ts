@@ -101,7 +101,13 @@ describe('TransactionWindowCache.plan', () => {
 
   test('cachedRows are sliced to the requested range', () => {
     const cache = makeCache();
-    cache.ingestMonth('2026-03', [mkTx('a', '2026-03-05'), mkTx('b', '2026-03-25')], Date.now());
+    // Ingest with today's clock so the cold-tier TTL check (now-consistent
+    // since the recent clock-alignment fix) sees the entry as fresh.
+    cache.ingestMonth(
+      '2026-03',
+      [mkTx('a', '2026-03-05'), mkTx('b', '2026-03-25')],
+      today.getTime()
+    );
 
     const result = cache.plan({ from: '2026-03-10', to: '2026-03-31' }, today);
     expect(result.cachedRows.map((r) => r.id)).toEqual(['b']);
