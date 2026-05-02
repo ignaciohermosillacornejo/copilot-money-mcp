@@ -244,7 +244,10 @@ export class LiveTransactionsTools {
       result = result.filter((n) => n.tags.some((t) => resolvedTagIds.has(t.id)));
     }
 
-    // 8. exclude_excluded
+    // 8. exclude_excluded — reads categoriesCache directly rather than going
+    // through getCategoryNameMap() because we need the `isExcluded` boolean,
+    // not a name lookup. The cache hit shared with getCategoryNameMap() (when
+    // both are called in the same request) keeps the cost minimal.
     if (opts.exclude_excluded !== false) {
       const { rows: cats } = await this.live
         .getCategoriesCache()
