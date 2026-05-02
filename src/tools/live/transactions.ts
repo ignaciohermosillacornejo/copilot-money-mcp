@@ -332,17 +332,6 @@ export class LiveTransactionsTools {
       );
     }
 
-    if (
-      (opts.query !== undefined || opts.merchant !== undefined) &&
-      !opts.start_date &&
-      !opts.end_date &&
-      !opts.period
-    ) {
-      throw new Error(
-        `Query/merchant searches in live mode require a date range. Pass period (e.g. period: 'this_year') or start_date + end_date.`
-      );
-    }
-
     if (opts.transaction_id !== undefined) {
       if (!opts.account_id || !opts.item_id) {
         throw new Error(
@@ -354,6 +343,17 @@ export class LiveTransactionsTools {
           `transaction_id lookup in live mode also requires a date range (start_date, end_date, or period) to bound the search. Pass the date from the prior get_transactions_live result — the server has no single-transaction-by-id filter, so unbounded lookups paginate the whole account history.`
         );
       }
+    }
+
+    if (
+      (opts.query !== undefined || opts.merchant !== undefined) &&
+      !opts.start_date &&
+      !opts.end_date &&
+      !opts.period
+    ) {
+      throw new Error(
+        `Query/merchant searches in live mode require a date range. Pass period (e.g. period: 'this_year') or start_date + end_date.`
+      );
     }
   }
 }

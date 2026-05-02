@@ -543,4 +543,21 @@ describe('LiveTransactionsTools — date-less query rejection', () => {
       })
     ).resolves.toBeDefined();
   });
+
+  test('validate: transaction_id path bypasses query-without-date guard', async () => {
+    const live = mkLiveReturning([mkNode({ id: 't1', accountId: 'a1', itemId: 'i1' })]);
+    const tools = new LiveTransactionsTools(live);
+    // query is set but should NOT cause a date-range error because transaction_id
+    // lookup has its own date-range enforcement (transaction_id requires period
+    // or start_date/end_date — supplied here via period).
+    await expect(
+      tools.getTransactions({
+        transaction_id: 't1',
+        account_id: 'a1',
+        item_id: 'i1',
+        query: 'foo',
+        period: 'this_year',
+      })
+    ).resolves.toBeDefined();
+  });
 });
