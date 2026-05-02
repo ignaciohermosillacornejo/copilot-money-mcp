@@ -6,6 +6,7 @@ import type { CopilotDatabase } from '../../src/core/database.js';
 import type { TransactionsPage } from '../../src/core/graphql/queries/transactions.js';
 import { SnapshotCache, TransactionWindowCache } from '../../src/core/cache/index.js';
 import type { Tag, Category, Budget, Recurring } from '../../src/models/index.js';
+import type { CategoryNode } from '../../src/core/graphql/queries/categories.js';
 
 function mkClient(): GraphQLClient {
   return { mutate: mock(), query: mock() } as unknown as GraphQLClient;
@@ -525,25 +526,72 @@ describe('LiveCopilotDatabase — tag cache patches', () => {
 
 // ── patchLiveCategoryUpsert / patchLiveCategoryDelete ──────────────────────
 
-describe('LiveCopilotDatabase — category cache patches', () => {
-  test('patchLiveCategoryUpsert inserts a new category', async () => {
+describe('LiveCopilotDatabase.patchLiveCategoryUpsert (CategoryNode shape)', () => {
+  test('upserts a CategoryNode into categoriesCache', async () => {
     const live = new LiveCopilotDatabase(mkClient(), mkCache());
-    await live.getCategoriesCache().read(async () => []);
-    const cat: Category = { category_id: 'c1', name: 'Dining' };
-    live.patchLiveCategoryUpsert(cat);
-    const result = await live.getCategoriesCache().read(async () => []);
-    expect(result.rows.find((c) => c.category_id === 'c1')?.name).toBe('Dining');
+
+    // Warm cache via a fake fetch
+    const cache = live.getCategoriesCache();
+    await cache.read(() =>
+      Promise.resolve([
+        {
+          id: 'cat-1',
+          name: 'Old Name',
+          templateId: 'Food',
+          colorName: 'ORANGE2',
+          icon: null,
+          isExcluded: false,
+          isRolloverDisabled: false,
+          canBeDeleted: true,
+          budget: null,
+        },
+      ])
+    );
+
+    live.patchLiveCategoryUpsert({
+      id: 'cat-1',
+      name: 'New Name',
+      templateId: 'Food',
+      colorName: 'ORANGE2',
+      icon: null,
+      isExcluded: false,
+      isRolloverDisabled: false,
+      canBeDeleted: true,
+      budget: null,
+    });
+
+    const after = await cache.read(() => Promise.resolve([]));
+    expect(after.rows.find((c) => c.id === 'cat-1')?.name).toBe('New Name');
   });
 
   test('patchLiveCategoryDelete removes category by id', async () => {
     const live = new LiveCopilotDatabase(mkClient(), mkCache());
-    await live.getCategoriesCache().read(async () => [
-      { category_id: 'c1', name: 'Dining' },
-      { category_id: 'c2', name: 'Travel' },
-    ]);
-    live.patchLiveCategoryDelete('c1');
-    const result = await live.getCategoriesCache().read(async () => []);
-    expect(result.rows.map((c) => c.category_id)).toEqual(['c2']);
+    const catNode1: CategoryNode = {
+      id: 'cat-1',
+      name: 'Dining',
+      templateId: 'Food',
+      colorName: 'ORANGE2',
+      icon: null,
+      isExcluded: false,
+      isRolloverDisabled: false,
+      canBeDeleted: true,
+      budget: null,
+    };
+    const catNode2: CategoryNode = {
+      id: 'cat-2',
+      name: 'Travel',
+      templateId: 'Travel',
+      colorName: 'BLUE1',
+      icon: null,
+      isExcluded: false,
+      isRolloverDisabled: false,
+      canBeDeleted: true,
+      budget: null,
+    };
+    await live.getCategoriesCache().read(() => Promise.resolve([catNode1, catNode2]));
+    live.patchLiveCategoryDelete('cat-1');
+    const result = await live.getCategoriesCache().read(() => Promise.resolve([]));
+    expect(result.rows.map((c) => c.id)).toEqual(['cat-2']);
   });
 });
 
