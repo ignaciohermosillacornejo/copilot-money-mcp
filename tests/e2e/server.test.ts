@@ -2278,3 +2278,75 @@ describe('--live-reads accounts wiring', () => {
     expect(data._cache_hit).toBe(false);
   });
 });
+
+// ============================================
+// --live-reads categories wiring tests
+// ============================================
+
+describe('--live-reads categories wiring', () => {
+  test('handleListTools when --live-reads is off includes get_categories and excludes get_categories_live', () => {
+    const server = new CopilotMoneyServer(FAKE_DB_DIR);
+    const { tools } = server.handleListTools();
+    const names = tools.map((t) => t.name);
+    expect(names).toContain('get_categories');
+    expect(names).not.toContain('get_categories_live');
+  });
+
+  test('handleListTools when --live-reads is on includes get_categories_live and excludes get_categories', () => {
+    // Pass a mock GraphQL client so the constructor can wire liveCategoriesTools
+    // without attempting real auth. The fourth positional arg is liveReadsEnabled.
+    const mockClient = createMockGraphQLClient({});
+    const server = new CopilotMoneyServer(FAKE_DB_DIR, undefined, false, true, mockClient);
+    const { tools } = server.handleListTools();
+    const names = tools.map((t) => t.name);
+    expect(names).toContain('get_categories_live');
+    expect(names).not.toContain('get_categories');
+  });
+
+  test('get_categories_live without --live-reads returns isError with --live-reads hint', async () => {
+    const server = new CopilotMoneyServer(FAKE_DB_DIR);
+    const db = createMockDb();
+    server._injectForTesting(db, new CopilotMoneyTools(db));
+
+    const result = await server.handleCallTool('get_categories_live', {});
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('--live-reads');
+  });
+
+  test('get_categories_live with --live-reads dispatches to LiveCategoriesTools', async () => {
+    const mockClient = createMockGraphQLClient({});
+    const server = new CopilotMoneyServer(FAKE_DB_DIR, undefined, false, true, mockClient);
+    const db = createMockDb();
+    server._injectForTesting(db, new CopilotMoneyTools(db));
+
+    // Inject a stub LiveCategoriesTools via private field access
+    const stubResult = {
+      count: 1,
+      categories: [
+        {
+          id: 'cat-1',
+          name: 'Food',
+          templateId: 'Food',
+          colorName: 'ORANGE2',
+          isExcluded: false,
+          isRolloverDisabled: false,
+          canBeDeleted: true,
+          icon: { __typename: 'EmojiUnicode', unicode: '🍱' },
+          budget: null,
+        },
+      ],
+      _cache_oldest_fetched_at: '2025-01-01T00:00:00.000Z',
+      _cache_newest_fetched_at: '2025-01-01T00:00:00.000Z',
+      _cache_hit: false,
+    };
+    (server as any).liveCategoriesTools = {
+      getCategories: async (_args: unknown) => stubResult,
+    };
+
+    const result = await server.handleCallTool('get_categories_live', {});
+    expect(result.isError).toBeUndefined();
+    const data = JSON.parse(result.content[0].text) as typeof stubResult;
+    expect(data.count).toBe(1);
+    expect(data._cache_hit).toBe(false);
+  });
+});
