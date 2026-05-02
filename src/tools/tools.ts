@@ -2338,6 +2338,12 @@ export class CopilotMoneyTools {
         emoji: args.emoji,
         excluded: args.is_excluded ?? false,
       });
+      // The CreateCategory mutation doesn't return `icon` on its response,
+      // so we synthesize it as EmojiUnicode here. If the user-supplied emoji
+      // string ends up being stored as a Genmoji on the server, the synthesized
+      // shape would be wrong — but the next categoriesCache read overwrites
+      // this synthetic entry with the correct server shape, so the divergence
+      // is bounded to the window before the next read.
       this.liveDb?.patchLiveCategoryUpsert({
         id: result.id,
         name: result.name,

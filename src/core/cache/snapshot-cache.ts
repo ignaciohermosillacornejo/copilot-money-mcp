@@ -94,6 +94,9 @@ export class SnapshotCache<T> {
    * is empty (never populated or invalidated). Does NOT trigger a fetch and
    * does NOT check TTL — used by write-through patches that need to merge
    * against the current cached value.
+   *
+   * The returned array is the live internal reference — callers MUST NOT
+   * mutate it or its elements. Treat as read-only.
    */
   peek(): T[] | undefined {
     return this.entry?.rows;
