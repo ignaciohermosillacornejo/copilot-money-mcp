@@ -262,9 +262,7 @@ export class CopilotMoneyServer {
           break;
 
         case 'get_accounts':
-          result = await this.tools.getAccounts(
-            typedArgs as Parameters<typeof this.tools.getAccounts>[0]
-          );
+          result = await this.tools.getAccounts(typedArgs);
           break;
 
         case 'get_connection_status':
@@ -272,45 +270,31 @@ export class CopilotMoneyServer {
           break;
 
         case 'get_categories':
-          result = await this.tools.getCategories(
-            (typedArgs as Parameters<typeof this.tools.getCategories>[0]) || {}
-          );
+          result = await this.tools.getCategories(typedArgs || {});
           break;
 
         case 'get_recurring_transactions':
-          result = await this.tools.getRecurringTransactions(
-            (typedArgs as Parameters<typeof this.tools.getRecurringTransactions>[0]) || {}
-          );
+          result = await this.tools.getRecurringTransactions(typedArgs || {});
           break;
 
         case 'get_budgets':
-          result = await this.tools.getBudgets(
-            (typedArgs as Parameters<typeof this.tools.getBudgets>[0]) || {}
-          );
+          result = await this.tools.getBudgets(typedArgs || {});
           break;
 
         case 'get_goals':
-          result = await this.tools.getGoals(
-            (typedArgs as Parameters<typeof this.tools.getGoals>[0]) || {}
-          );
+          result = await this.tools.getGoals(typedArgs || {});
           break;
 
         case 'get_investment_prices':
-          result = await this.tools.getInvestmentPrices(
-            (typedArgs as Parameters<typeof this.tools.getInvestmentPrices>[0]) || {}
-          );
+          result = await this.tools.getInvestmentPrices(typedArgs || {});
           break;
 
         case 'get_investment_splits':
-          result = await this.tools.getInvestmentSplits(
-            (typedArgs as Parameters<typeof this.tools.getInvestmentSplits>[0]) || {}
-          );
+          result = await this.tools.getInvestmentSplits(typedArgs || {});
           break;
 
         case 'get_holdings':
-          result = await this.tools.getHoldings(
-            (typedArgs as Parameters<typeof this.tools.getHoldings>[0]) || {}
-          );
+          result = await this.tools.getHoldings(typedArgs || {});
           break;
 
         case 'get_balance_history':
@@ -320,27 +304,19 @@ export class CopilotMoneyServer {
           break;
 
         case 'get_investment_performance':
-          result = await this.tools.getInvestmentPerformance(
-            (typedArgs as Parameters<typeof this.tools.getInvestmentPerformance>[0]) || {}
-          );
+          result = await this.tools.getInvestmentPerformance(typedArgs || {});
           break;
 
         case 'get_twr_returns':
-          result = await this.tools.getTwrReturns(
-            (typedArgs as Parameters<typeof this.tools.getTwrReturns>[0]) || {}
-          );
+          result = await this.tools.getTwrReturns(typedArgs || {});
           break;
 
         case 'get_securities':
-          result = await this.tools.getSecurities(
-            (typedArgs as Parameters<typeof this.tools.getSecurities>[0]) || {}
-          );
+          result = await this.tools.getSecurities(typedArgs || {});
           break;
 
         case 'get_goal_history':
-          result = await this.tools.getGoalHistory(
-            (typedArgs as Parameters<typeof this.tools.getGoalHistory>[0]) || {}
-          );
+          result = await this.tools.getGoalHistory(typedArgs || {});
           break;
 
         case 'create_transaction':

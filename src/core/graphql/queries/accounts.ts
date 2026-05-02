@@ -52,7 +52,7 @@ export async function fetchAccounts(client: GraphQLClient): Promise<AccountNode[
   const data = await client.query<Record<string, never>, AccountsResponse>(
     'Accounts',
     ACCOUNTS,
-    {} as Record<string, never>
+    {}
   );
   return data.accounts;
 }
