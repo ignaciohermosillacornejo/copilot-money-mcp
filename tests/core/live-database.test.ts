@@ -495,12 +495,12 @@ describe('LiveCopilotDatabase — logReadCall', () => {
         pages: 1,
         latencyMs: 320,
         rows: 12,
-        ttl_tier: 'warm',
+        ttl_tier: 'cold',
         cache_hit: false,
       });
       expect(lines.length).toBe(1);
       expect(lines[0]).toContain('op=Accounts');
-      expect(lines[0]).toContain('ttl_tier=warm');
+      expect(lines[0]).toContain('ttl_tier=cold');
       expect(lines[0]).toContain('cache_hit=false');
       expect(lines[0]).toContain('pages=1');
       expect(lines[0]).toContain('latency=320ms');
