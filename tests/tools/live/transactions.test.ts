@@ -15,8 +15,6 @@ function mkLive(): LiveCopilotDatabase {
   const cache = {
     getAccounts: mock(() => Promise.resolve([])),
     getTags: mock(() => Promise.resolve([])),
-    getUserCategories: mock(() => Promise.resolve([])),
-    getCategoryNameMap: mock(() => Promise.resolve(new Map<string, string>())),
   } as unknown as CopilotDatabase;
   return new LiveCopilotDatabase(client, cache);
 }
@@ -141,7 +139,8 @@ async function mkLiveReturning(
 describe('LiveTransactionsTools — happy path', () => {
   test('returns envelope with enriched fields', async () => {
     const live = await mkLiveReturning([mkNode({ id: 't1', name: 'AMAZON.COM*XYZ' })]);
-    // Seed categoriesCache so getCategoryNameMap() resolves c1 → 'Shopping'.
+    // mkLiveReturning pre-warms categoriesCache with []; invalidate() to allow
+    // the next read() to seed real test data instead of returning the stale [].
     live.getCategoriesCache().invalidate();
     await live.getCategoriesCache().read(() =>
       Promise.resolve([
@@ -377,8 +376,6 @@ describe('LiveTransactionsTools — freshness envelope', () => {
     const cache = {
       getAccounts: mock(() => Promise.resolve([])),
       getTags: mock(() => Promise.resolve([])),
-      getUserCategories: mock(() => Promise.resolve([])),
-      getCategoryNameMap: mock(() => Promise.resolve(new Map<string, string>())),
     } as unknown as import('../../../src/core/database.js').CopilotDatabase;
     const liveDb = new LiveDB(client, cache);
     // Pre-warm categoriesCache so exclude_excluded doesn't call fetchCategories
