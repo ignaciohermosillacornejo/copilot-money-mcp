@@ -173,7 +173,7 @@ export function encodeVarint(value: number): Buffer {
 export function parseTag(tag: number): { fieldNumber: number; wireType: WireType } {
   return {
     fieldNumber: tag >>> 3,
-    wireType: (tag & 0x07) as WireType,
+    wireType: tag & 0x07,
   };
 }
 
