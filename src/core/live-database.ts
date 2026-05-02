@@ -34,7 +34,8 @@ import { getMonthRange, monthsCovered } from '../utils/date.js';
 import { pLimit } from '../utils/concurrency.js';
 import { InFlightRegistry, SnapshotCache, TransactionWindowCache } from './cache/index.js';
 import type { AccountNode } from './graphql/queries/accounts.js';
-import type { Category, Tag, Budget, Recurring, Transaction } from '../models/index.js';
+import type { CategoryNode } from './graphql/queries/categories.js';
+import type { Tag, Budget, Recurring, Transaction } from '../models/index.js';
 
 export interface LiveDatabaseOptions {
   verbose?: boolean;
@@ -59,7 +60,7 @@ export class LiveCopilotDatabase {
   // path produces; tools that consume both shapes can map between
   // them at the call site if needed.
   private readonly accountsCache: SnapshotCache<AccountNode>;
-  private readonly categoriesCache: SnapshotCache<Category>;
+  private readonly categoriesCache: SnapshotCache<CategoryNode>;
   private readonly tagsCache: SnapshotCache<Tag>;
   private readonly budgetsCache: SnapshotCache<Budget>;
   private readonly recurringCache: SnapshotCache<Recurring>;
@@ -78,8 +79,8 @@ export class LiveCopilotDatabase {
       { key: 'accounts', ttlMs: ONE_HOUR_MS, keyFn: (a) => a.id },
       this.inflight
     );
-    this.categoriesCache = new SnapshotCache<Category>(
-      { key: 'categories', ttlMs: ONE_DAY_MS, keyFn: (c) => c.category_id },
+    this.categoriesCache = new SnapshotCache<CategoryNode>(
+      { key: 'categories', ttlMs: ONE_DAY_MS, keyFn: (c) => c.id },
       this.inflight
     );
     this.tagsCache = new SnapshotCache<Tag>(
@@ -306,7 +307,7 @@ export class LiveCopilotDatabase {
     return this.accountsCache;
   }
 
-  getCategoriesCache(): SnapshotCache<Category> {
+  getCategoriesCache(): SnapshotCache<CategoryNode> {
     return this.categoriesCache;
   }
 
@@ -389,7 +390,7 @@ export class LiveCopilotDatabase {
     this.tagsCache.delete(id);
   }
 
-  patchLiveCategoryUpsert(category: Category): void {
+  patchLiveCategoryUpsert(category: CategoryNode): void {
     this.categoriesCache.upsert(category);
   }
 
