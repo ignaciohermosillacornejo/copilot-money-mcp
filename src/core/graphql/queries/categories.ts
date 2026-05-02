@@ -6,9 +6,10 @@
  * PR #3 (Budgets) projects budgets from the same cache — querying without
  * `budget: true` would warm the cache with the wrong shape.
  *
- * Returns a flat list — childCategories are recursively flattened so the
- * SnapshotCache can key on `id` without duplicating rows. Each child loses
- * its own (empty) childCategories field after flattening.
+ * Returns a flat list — childCategories are flattened one level deep (the
+ * GraphQL query does not request grandchildren) so the SnapshotCache can
+ * key on `id` without duplicating rows. Each parent loses its
+ * childCategories field after flattening.
  */
 
 import type { GraphQLClient } from '../client.js';

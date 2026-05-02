@@ -44,6 +44,57 @@ describe('fetchCategories', () => {
     expect(rows.find((r) => r.id === 'child-1')?.childCategories).toBeUndefined();
   });
 
+  test('handles multiple parents with mixed children/empty children, preserving order', async () => {
+    const client = {
+      query: mock(() =>
+        Promise.resolve({
+          categories: [
+            {
+              id: 'parent-1',
+              name: 'Food',
+              templateId: 'Food',
+              colorName: null,
+              isExcluded: false,
+              isRolloverDisabled: false,
+              canBeDeleted: true,
+              icon: null,
+              childCategories: [
+                {
+                  id: 'child-1',
+                  name: 'Coffee',
+                  templateId: null,
+                  colorName: null,
+                  isExcluded: false,
+                  isRolloverDisabled: false,
+                  canBeDeleted: true,
+                  icon: null,
+                },
+              ],
+              budget: null,
+            },
+            {
+              id: 'parent-2',
+              name: 'Rent',
+              templateId: 'Rent',
+              colorName: null,
+              isExcluded: false,
+              isRolloverDisabled: false,
+              canBeDeleted: true,
+              icon: null,
+              childCategories: [],
+              budget: null,
+            },
+          ],
+        })
+      ),
+    } as unknown as GraphQLClient;
+
+    const { fetchCategories } = await import('../../../../src/core/graphql/queries/categories.js');
+    const rows = await fetchCategories(client);
+
+    expect(rows.map((r) => r.id)).toEqual(['parent-1', 'child-1', 'parent-2']);
+  });
+
   test('passes {spend:false, budget:true, rollovers:false} variables', async () => {
     const client = {
       query: mock(() => Promise.resolve({ categories: [] })),
