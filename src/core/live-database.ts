@@ -55,10 +55,12 @@ export class LiveCopilotDatabase {
   // Phase 2: tiered-cache primitives
   private readonly inflight: InFlightRegistry;
   private readonly fetchLimit: ReturnType<typeof pLimit>;
-  // Typed on AccountNode (GraphQL response shape) rather than the
-  // LevelDB Account model. The live cache stores what the live read
-  // path produces; tools that consume both shapes can map between
-  // them at the call site if needed.
+  // GraphQL-typed caches (accountsCache, categoriesCache) are typed on the
+  // GraphQL response shape (AccountNode, CategoryNode), NOT the LevelDB
+  // models (Account, Category). The live cache stores what the live read
+  // path produces; tools that consume both shapes can map between them at
+  // the call site if needed. Future GraphQL-backed caches added below
+  // should follow the same convention.
   private readonly accountsCache: SnapshotCache<AccountNode>;
   private readonly categoriesCache: SnapshotCache<CategoryNode>;
   private readonly tagsCache: SnapshotCache<Tag>;
