@@ -5,7 +5,7 @@ import type { GraphQLClient } from '../../src/core/graphql/client.js';
 import type { CopilotDatabase } from '../../src/core/database.js';
 import type { TransactionsPage } from '../../src/core/graphql/queries/transactions.js';
 import { SnapshotCache, TransactionWindowCache } from '../../src/core/cache/index.js';
-import type { Tag, Category, Budget, Recurring } from '../../src/models/index.js';
+import type { Tag, Budget, Recurring } from '../../src/models/index.js';
 import type { CategoryNode } from '../../src/core/graphql/queries/categories.js';
 
 function mkClient(): GraphQLClient {
