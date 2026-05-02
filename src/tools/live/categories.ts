@@ -42,11 +42,18 @@ export class LiveCategoriesTools {
       rows = rows.filter((c) => c.isExcluded === true);
     }
 
+    // Sort by templateId then name. Categories with null templateId
+    // (user-created, no system template) are pushed to the end via the
+    // `￿` sentinel — system-template categories (Food, Rent, etc.) are
+    // the primary grouping axis, with user-created categories as the long
+    // tail. Empty arrays sort identically; this is intentional.
     rows = [...rows].sort((a, b) => {
-      const t = (a.templateId ?? '').localeCompare(b.templateId ?? '');
+      const t = (a.templateId ?? '￿').localeCompare(b.templateId ?? '￿');
       return t !== 0 ? t : a.name.localeCompare(b.name);
     });
 
+    // Log after filter+sort so `rows` reflects what's returned to the caller,
+    // not the raw cached count. Mirrors the LiveAccountsTools convention.
     this.live.logReadCall({
       op: 'Categories',
       pages: hit ? 0 : 1,
