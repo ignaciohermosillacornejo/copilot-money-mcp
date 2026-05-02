@@ -99,7 +99,12 @@ export class CopilotMoneyServer {
   handleListTools(): { tools: Tool[] } {
     const readSchemas = createToolSchemas();
     const filteredReads = this.liveReadsEnabled
-      ? readSchemas.filter((s) => s.name !== 'get_transactions' && s.name !== 'get_accounts')
+      ? readSchemas.filter(
+          (s) =>
+            s.name !== 'get_transactions' &&
+            s.name !== 'get_accounts' &&
+            s.name !== 'get_categories'
+        )
       : readSchemas;
     const liveSchemas = this.liveReadsEnabled
       ? [
