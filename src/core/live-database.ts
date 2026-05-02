@@ -111,7 +111,6 @@ export class LiveCopilotDatabase {
     this.transactionsWindowCache = new TransactionWindowCache<CachedTransaction>(
       {
         liveTtlMs: 0,
-        warmTtlMs: ONE_HOUR_MS,
         coldTtlMs: ONE_WEEK_MS,
         maxRows: DEFAULT_MAX_TX_ROWS,
       },
@@ -167,7 +166,7 @@ export class LiveCopilotDatabase {
     pages: number;
     latencyMs: number;
     rows: number;
-    ttl_tier?: 'live' | 'warm' | 'cold';
+    ttl_tier?: 'live' | 'cold';
     cache_hit?: boolean;
     staleness_ms?: number | null;
     month?: string;
