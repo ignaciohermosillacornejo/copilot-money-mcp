@@ -54,7 +54,7 @@ export class LiveAccountsTools {
 
     // Log after filtering so `rows` reflects what's actually returned to
     // the caller, not the raw cached count. ttl_tier is omitted because
-    // the live/warm/cold labels are tied to TransactionWindowCache's
+    // the live/cold labels are tied to TransactionWindowCache's
     // age-based classification — they don't map cleanly to a snapshot
     // cache with a fixed 1h TTL.
     this.live.logReadCall({
