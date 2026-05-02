@@ -22,6 +22,7 @@ import {
   editCategory as gqlEditCategory,
   deleteCategory as gqlDeleteCategory,
 } from '../core/graphql/categories.js';
+import type { CategoryNode } from '../core/graphql/queries/categories.js';
 import {
   createTag as gqlCreateTag,
   editTag as gqlEditTag,
@@ -2338,11 +2339,17 @@ export class CopilotMoneyTools {
         excluded: args.is_excluded ?? false,
       });
       this.liveDb?.patchLiveCategoryUpsert({
-        category_id: result.id,
+        id: result.id,
         name: result.name,
-        color: result.colorName,
-        emoji: args.emoji,
-        excluded: args.is_excluded ?? false,
+        templateId: null,
+        colorName: result.colorName,
+        icon: args.emoji
+          ? { __typename: 'EmojiUnicode', unicode: args.emoji }
+          : null,
+        isExcluded: args.is_excluded ?? false,
+        isRolloverDisabled: false,
+        canBeDeleted: true,
+        budget: null,
       });
       return {
         success: true,
@@ -3142,7 +3149,24 @@ export class CopilotMoneyTools {
       if (args.emoji !== undefined) patch.emoji = args.emoji;
       if (args.is_excluded !== undefined) patch.excluded = args.is_excluded;
       this.db.patchCachedCategoryUpsert(patch as Category);
-      this.liveDb?.patchLiveCategoryUpsert(patch as Category);
+      if (this.liveDb) {
+        const cached = this.liveDb
+          .getCategoriesCache()
+          .peek()
+          ?.find((c) => c.id === args.category_id);
+        if (cached) {
+          const merged: CategoryNode = {
+            ...cached,
+            ...(args.name !== undefined ? { name: args.name } : {}),
+            ...(args.color_name !== undefined ? { colorName: args.color_name } : {}),
+            ...(args.emoji !== undefined
+              ? { icon: { __typename: 'EmojiUnicode', unicode: args.emoji } }
+              : {}),
+            ...(args.is_excluded !== undefined ? { isExcluded: args.is_excluded } : {}),
+          };
+          this.liveDb.patchLiveCategoryUpsert(merged);
+        }
+      }
       return {
         success: true,
         category_id: result.id,

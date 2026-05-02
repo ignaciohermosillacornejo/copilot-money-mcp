@@ -137,3 +137,32 @@ describe('SnapshotCache', () => {
     expect(b.rows).toEqual([{ id: '1', name: 'one' }]);
   });
 });
+
+describe('SnapshotCache.peek', () => {
+  test('returns undefined when never populated', () => {
+    const cache = new SnapshotCache<{ id: string }>(
+      { key: 'k', ttlMs: 1000, keyFn: (r) => r.id },
+      new InFlightRegistry()
+    );
+    expect(cache.peek()).toBeUndefined();
+  });
+
+  test('returns rows after read populates', async () => {
+    const cache = new SnapshotCache<{ id: string }>(
+      { key: 'k', ttlMs: 1000, keyFn: (r) => r.id },
+      new InFlightRegistry()
+    );
+    await cache.read(() => Promise.resolve([{ id: 'x' }]));
+    expect(cache.peek()).toEqual([{ id: 'x' }]);
+  });
+
+  test('returns undefined after invalidate', async () => {
+    const cache = new SnapshotCache<{ id: string }>(
+      { key: 'k', ttlMs: 1000, keyFn: (r) => r.id },
+      new InFlightRegistry()
+    );
+    await cache.read(() => Promise.resolve([{ id: 'x' }]));
+    cache.invalidate();
+    expect(cache.peek()).toBeUndefined();
+  });
+});
