@@ -28,10 +28,11 @@ import {
   buildTransactionSort,
   fetchTransactionsPage,
   paginateTransactions,
-  type BuildFilterOptions,
   type TransactionNode,
   type TransactionSortInput,
 } from './graphql/queries/transactions.js';
+import { getMonthRange, monthsCovered } from '../utils/date.js';
+import { pLimit } from '../utils/concurrency.js';
 import {
   InFlightRegistry,
   SnapshotCache,
@@ -147,6 +148,34 @@ export class LiveCopilotDatabase {
     }
   }
 
+  /**
+   * Fetch + paginate one month of transactions; ingest into the
+   * window cache; return the rows along with the timestamp the
+   * fetch was initiated and the page count.
+   */
+  private async fetchMonth(
+    month: string,
+    sort: TransactionSortInput[],
+    pageSize: number
+  ): Promise<{ rows: TransactionNode[]; fetched_at: number; pages: number }> {
+    const year = Number(month.slice(0, 4));
+    const m = Number(month.slice(5, 7));
+    const [monthStart, monthEnd] = getMonthRange(year, m);
+    const filter = buildTransactionFilter({ startDate: monthStart, endDate: monthEnd });
+    const fetched_at = Date.now();
+    let pages = 0;
+    const rows = await paginateTransactions(
+      (after) =>
+        this.withRetry(async () => {
+          pages += 1;
+          return fetchTransactionsPage(this.graphql, { first: pageSize, after, filter, sort });
+        }),
+      { startDate: monthStart }
+    );
+    this.transactionsWindowCache.ingestMonth(month, rows as unknown as CachedTransaction[], fetched_at);
+    return { rows, fetched_at, pages };
+  }
+
   async memoize<T>(
     key: string,
     loader: () => Promise<T>
@@ -170,6 +199,8 @@ export class LiveCopilotDatabase {
     cache_hit?: boolean;
     staleness_ms?: number | null;
     month?: string;
+    from_to_months?: number;
+    fetched_months?: number;
   }): void {
     if (!this.verbose) return;
     const parts = [
@@ -181,53 +212,116 @@ export class LiveCopilotDatabase {
       `latency=${log.latencyMs}ms`,
       `rows=${log.rows}`,
       log.month ? `month=${log.month}` : null,
+      log.from_to_months !== undefined ? `from_to_months=${log.from_to_months}` : null,
+      log.fetched_months !== undefined ? `fetched_months=${log.fetched_months}` : null,
       log.staleness_ms !== undefined ? `staleness_ms=${log.staleness_ms ?? 'null'}` : null,
     ].filter(Boolean);
     console.error(parts.join(' '));
   }
 
   /**
-   * Fetch transactions from Copilot's GraphQL API, paginating with
-   * DATE DESC sort and early-exiting when the trailing row precedes
-   * the requested start date.
+   * Fetch transactions for a date range, backed by the month-keyed
+   * window cache. Live-tier months (≤14d age) refetch unconditionally;
+   * older months come from cache or trigger a per-month fetch.
    *
-   * Pure data access — client-side post-filtering (amount range,
-   * pending, excluded-category join, special transaction_type
-   * variants) lives in the tool layer, not here.
+   * Concurrent month fetches are capped at 4 in flight (`pLimit(4)`)
+   * and coalesced across callers via `InFlightRegistry` keyed on
+   * `tx:<YYYY-MM>`.
+   *
+   * Returns rows sorted (date DESC, createdAt DESC, id DESC) with a
+   * freshness envelope reflecting the per-month `fetched_at` distribution.
    */
   async getTransactions(
-    opts: BuildFilterOptions & { sort?: TransactionSortInput; pageSize?: number }
-  ): Promise<{ rows: TransactionNode[]; fetched_at: number; hit: boolean }> {
-    const filter = buildTransactionFilter(opts);
-    const sort = buildTransactionSort(opts.sort);
-    const first = opts.pageSize ?? 100;
+    range: { from: string; to: string },
+    sort?: TransactionSortInput,
+    opts?: { pageSize?: number }
+  ): Promise<{
+    rows: TransactionNode[];
+    oldest_fetched_at: number;
+    newest_fetched_at: number;
+    hit: boolean;
+  }> {
+    if (!range.from || !range.to) {
+      throw new Error(`getTransactions requires both from and to (got from='${range.from}', to='${range.to}')`);
+    }
+    if (range.from > range.to) {
+      throw new Error(`getTransactions: from (${range.from}) must be <= to (${range.to})`);
+    }
 
-    const memoKey = JSON.stringify({ filter, sort, first });
-    const memoResult = await this.memoize(memoKey, async () => {
-      let pages = 0;
-      const startedAt = Date.now();
-      const rows = await paginateTransactions(
-        (after) =>
-          this.withRetry(async () => {
-            pages += 1;
-            return fetchTransactionsPage(this.graphql, { first, after, filter, sort });
-          }),
-        { startDate: opts.startDate }
-      );
-      this.logReadCall({
-        op: 'Transactions',
-        pages,
-        latencyMs: Date.now() - startedAt,
-        rows: rows.length,
-        cache_hit: false, // pure miss path; cache hits short-circuit before this loader runs
-      });
-      return rows;
+    const sortArr = buildTransactionSort(sort);
+    const pageSize = opts?.pageSize ?? 100;
+    const now = new Date();
+
+    const { cachedRows, toFetch } = this.transactionsWindowCache.plan(range, now);
+
+    const startedAt = Date.now();
+    const limit = pLimit(4);
+    let totalPages = 0;
+
+    const settled = await Promise.allSettled(
+      toFetch.map((month) =>
+        limit(() =>
+          this.inflight.run(`tx:${month}`, async () => {
+            const result = await this.fetchMonth(month, sortArr, pageSize);
+            totalPages += result.pages;
+            return { month, ...result };
+          })
+        )
+      )
+    );
+
+    const failures: Array<{ month: string; reason: unknown }> = [];
+    const successes: Array<{ month: string; rows: TransactionNode[]; fetched_at: number }> = [];
+    for (let i = 0; i < settled.length; i += 1) {
+      const s = settled[i]!;
+      if (s.status === 'fulfilled') {
+        successes.push(s.value);
+      } else {
+        failures.push({ month: toFetch[i]!, reason: s.reason });
+      }
+    }
+    if (failures.length > 0) {
+      const summary = failures
+        .map((f) => `${f.month}: ${(f.reason as Error)?.message ?? String(f.reason)}`)
+        .join('; ');
+      throw new Error(`Failed to fetch months: ${summary}`);
+    }
+
+    const freshRows = successes.flatMap((s) => s.rows);
+    const merged = [...(cachedRows as unknown as TransactionNode[]), ...freshRows].filter(
+      (r) => r.date >= range.from && r.date <= range.to
+    );
+    merged.sort(
+      (a, b) =>
+        b.date.localeCompare(a.date) ||
+        b.createdAt - a.createdAt ||
+        b.id.localeCompare(a.id)
+    );
+
+    // Freshness envelope: walk every month in the requested range and
+    // collect its current fetched_at. (After ingest, all months are
+    // present; live-tier and just-fetched months reflect "now".)
+    const allMonths = monthsCovered(range);
+    const fetchedAts: number[] = [];
+    for (const m of allMonths) {
+      const ts = this.transactionsWindowCache.getFetchedAt(m);
+      if (ts !== undefined) fetchedAts.push(ts);
+    }
+    const oldest = fetchedAts.length ? Math.min(...fetchedAts) : Date.now();
+    const newest = fetchedAts.length ? Math.max(...fetchedAts) : Date.now();
+    const hit = toFetch.length === 0;
+
+    this.logReadCall({
+      op: 'Transactions',
+      pages: totalPages,
+      latencyMs: Date.now() - startedAt,
+      rows: merged.length,
+      cache_hit: hit,
+      from_to_months: allMonths.length,
+      fetched_months: toFetch.length,
     });
-    return {
-      rows: memoResult.result,
-      fetched_at: memoResult.fetched_at,
-      hit: memoResult.hit,
-    };
+
+    return { rows: merged, oldest_fetched_at: oldest, newest_fetched_at: newest, hit };
   }
 
   // ── Phase 2: cache accessors ──────────────────────────────────────────────
