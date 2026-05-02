@@ -82,11 +82,7 @@ describe('LiveTransactionsTools — input validation', () => {
   });
 });
 
-import type {
-  TransactionNode,
-  AccountRef,
-} from '../../../src/core/graphql/queries/transactions.js';
-import type { Account } from '../../../src/models/index.js';
+import type { TransactionNode } from '../../../src/core/graphql/queries/transactions.js';
 
 function mkNode(partial: Partial<TransactionNode>): TransactionNode {
   return {
@@ -117,11 +113,19 @@ function mkLiveReturning(nodes: TransactionNode[], fetchedAt = Date.now()): Live
   const live = mkLive();
   (
     live as unknown as {
-      getTransactions: (
-        opts: unknown
-      ) => Promise<{ rows: TransactionNode[]; fetched_at: number; hit: boolean }>;
+      getTransactions: (range: { from: string; to: string }) => Promise<{
+        rows: TransactionNode[];
+        oldest_fetched_at: number;
+        newest_fetched_at: number;
+        hit: boolean;
+      }>;
     }
-  ).getTransactions = async () => ({ rows: nodes, fetched_at: fetchedAt, hit: false });
+  ).getTransactions = async () => ({
+    rows: nodes,
+    oldest_fetched_at: fetchedAt,
+    newest_fetched_at: fetchedAt,
+    hit: false,
+  });
   return live;
 }
 
@@ -133,7 +137,11 @@ describe('LiveTransactionsTools — happy path', () => {
     );
     const tools = new LiveTransactionsTools(live);
 
-    const result = await tools.getTransactions({ query: 'amazon' });
+    const result = await tools.getTransactions({
+      query: 'amazon',
+      start_date: '2025-01-01',
+      end_date: '2025-12-31',
+    });
 
     expect(result.count).toBe(1);
     expect(result.transactions[0]).toMatchObject({
@@ -148,7 +156,12 @@ describe('LiveTransactionsTools — happy path', () => {
     const live = mkLiveReturning(nodes);
     const tools = new LiveTransactionsTools(live);
 
-    const result = await tools.getTransactions({ limit: 2, offset: 1 });
+    const result = await tools.getTransactions({
+      limit: 2,
+      offset: 1,
+      start_date: '2025-01-01',
+      end_date: '2025-12-31',
+    });
 
     expect(result.count).toBe(2);
     expect(result.total_count).toBe(5);
@@ -167,7 +180,12 @@ describe('LiveTransactionsTools — post-filters', () => {
     ];
     const live = mkLiveReturning(nodes);
     const tools = new LiveTransactionsTools(live);
-    const result = await tools.getTransactions({ min_amount: 10, max_amount: 100 });
+    const result = await tools.getTransactions({
+      min_amount: 10,
+      max_amount: 100,
+      start_date: '2025-01-01',
+      end_date: '2025-12-31',
+    });
     expect(result.transactions.map((t) => t.transaction_id)).toEqual(['t2']);
   });
 
@@ -175,9 +193,17 @@ describe('LiveTransactionsTools — post-filters', () => {
     const nodes = [mkNode({ id: 't1', isPending: true }), mkNode({ id: 't2', isPending: false })];
     const live = mkLiveReturning(nodes);
     const tools = new LiveTransactionsTools(live);
-    const resultP = await tools.getTransactions({ pending: true });
+    const resultP = await tools.getTransactions({
+      pending: true,
+      start_date: '2025-01-01',
+      end_date: '2025-12-31',
+    });
     expect(resultP.transactions.map((t) => t.transaction_id)).toEqual(['t1']);
-    const resultS = await tools.getTransactions({ pending: false });
+    const resultS = await tools.getTransactions({
+      pending: false,
+      start_date: '2025-01-01',
+      end_date: '2025-12-31',
+    });
     expect(resultS.transactions.map((t) => t.transaction_id)).toEqual(['t2']);
   });
 
@@ -191,7 +217,11 @@ describe('LiveTransactionsTools — post-filters', () => {
     ];
     const live = mkLiveReturning(nodes);
     const tools = new LiveTransactionsTools(live);
-    const result = await tools.getTransactions({ transaction_type: 'tagged' });
+    const result = await tools.getTransactions({
+      transaction_type: 'tagged',
+      start_date: '2025-01-01',
+      end_date: '2025-12-31',
+    });
     expect(result.transactions.map((t) => t.transaction_id)).toEqual(['t1']);
   });
 
@@ -199,7 +229,11 @@ describe('LiveTransactionsTools — post-filters', () => {
     const nodes = [mkNode({ id: 't1', amount: -25 }), mkNode({ id: 't2', amount: 15 })];
     const live = mkLiveReturning(nodes);
     const tools = new LiveTransactionsTools(live);
-    const result = await tools.getTransactions({ transaction_type: 'refunds' });
+    const result = await tools.getTransactions({
+      transaction_type: 'refunds',
+      start_date: '2025-01-01',
+      end_date: '2025-12-31',
+    });
     expect(result.transactions.map((t) => t.transaction_id)).toEqual(['t1']);
   });
 
@@ -210,67 +244,64 @@ describe('LiveTransactionsTools — post-filters', () => {
     ];
     const live = mkLiveReturning(nodes);
     const tools = new LiveTransactionsTools(live);
-    const result = await tools.getTransactions({ exclude_transfers: true });
+    const result = await tools.getTransactions({
+      exclude_transfers: true,
+      start_date: '2025-01-01',
+      end_date: '2025-12-31',
+    });
     expect(result.transactions.map((t) => t.transaction_id)).toEqual(['t1']);
   });
 });
 
 describe('LiveTransactionsTools — account resolution', () => {
-  test('resolves account_id to AccountRef via cache', async () => {
-    const live = mkLiveReturning([]);
-    const accounts: Account[] = [
-      { account_id: 'a1', item_id: 'i-1' } as Account,
-      { account_id: 'a2', item_id: 'i-2' } as Account,
+  test('account_id filter narrows to rows from that account (post-filter)', async () => {
+    const nodes = [mkNode({ id: 't1', accountId: 'a1' }), mkNode({ id: 't2', accountId: 'a2' })];
+    const live = mkLiveReturning(nodes);
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({
+      account_id: 'a2',
+      start_date: '2025-01-01',
+      end_date: '2025-12-31',
+    });
+    expect(result.transactions.map((t) => t.transaction_id)).toEqual(['t2']);
+  });
+
+  test('singleTransactionLookup post-filters by (id, accountId, itemId)', async () => {
+    const nodes = [
+      mkNode({ id: 't1', accountId: 'aOTHER', itemId: 'i1' }),
+      mkNode({ id: 't1', accountId: 'a1', itemId: 'iOTHER' }),
+      mkNode({ id: 'tOTHER', accountId: 'a1', itemId: 'i1' }),
+      mkNode({ id: 't1', accountId: 'a1', itemId: 'i1', name: 'matched' }),
     ];
-    (live.getCache().getAccounts as ReturnType<typeof mock>).mockImplementation(() =>
-      Promise.resolve(accounts)
-    );
-    const spy = mock((_opts: unknown) =>
-      Promise.resolve({ rows: [] as TransactionNode[], fetched_at: Date.now(), hit: false })
-    );
-    (live as unknown as { getTransactions: typeof spy }).getTransactions = spy;
-
+    const live = mkLiveReturning(nodes);
     const tools = new LiveTransactionsTools(live);
-    await tools.getTransactions({ account_id: 'a2' });
 
-    const args = spy.mock.calls[0]![0] as { accountRefs?: AccountRef[] };
-    expect(args.accountRefs).toEqual([{ accountId: 'a2', itemId: 'i-2' }]);
-  });
-
-  test('surfaces error when account_id is not in cache', async () => {
-    const live = mkLiveReturning([]);
-    (live.getCache().getAccounts as ReturnType<typeof mock>).mockImplementation(() =>
-      Promise.resolve([])
-    );
-    const tools = new LiveTransactionsTools(live);
-    await expect(tools.getTransactions({ account_id: 'nope' })).rejects.toThrow(
-      /account.*not found/i
-    );
-  });
-
-  test('singleTransactionLookup resolves period → bounded startDate/endDate', async () => {
-    const live = mkLiveReturning([]);
-    const accounts: Account[] = [{ account_id: 'a1', item_id: 'i1' } as Account];
-    (live.getCache().getAccounts as ReturnType<typeof mock>).mockImplementation(() =>
-      Promise.resolve(accounts)
-    );
-    const spy = mock((_opts: unknown) =>
-      Promise.resolve({ rows: [] as TransactionNode[], fetched_at: Date.now(), hit: false })
-    );
-    (live as unknown as { getTransactions: typeof spy }).getTransactions = spy;
-
-    const tools = new LiveTransactionsTools(live);
-    await tools.getTransactions({
+    const result = await tools.getTransactions({
       transaction_id: 't1',
       account_id: 'a1',
       item_id: 'i1',
       period: 'this_year',
     });
 
-    const args = spy.mock.calls[0]![0] as { startDate?: string; endDate?: string };
-    // parsePeriod('this_year') returns concrete YYYY-MM-DD bounds; assert both are set.
-    expect(args.startDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(args.endDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(result.count).toBe(1);
+    expect(result.transactions[0]!.transaction_id).toBe('t1');
+    expect(result.transactions[0]!.account_id).toBe('a1');
+    expect(result.transactions[0]!.item_id).toBe('i1');
+    expect(result.transactions[0]!.name).toBe('matched');
+  });
+
+  test('singleTransactionLookup returns empty when no match in range', async () => {
+    const live = mkLiveReturning([mkNode({ id: 'other', accountId: 'a1', itemId: 'i1' })]);
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({
+      transaction_id: 'missing',
+      account_id: 'a1',
+      item_id: 'i1',
+      period: 'this_year',
+    });
+    expect(result.count).toBe(0);
+    expect(result.total_count).toBe(0);
+    expect(result.transactions).toEqual([]);
   });
 });
 
@@ -288,7 +319,7 @@ describe('LiveTransactionsTools — freshness envelope', () => {
     expect(result._cache_hit).toBe(false);
   });
 
-  test('oldest and newest are equal (single memo bucket in Phase 2)', async () => {
+  test('oldest and newest are equal when fixture provides a single timestamp', async () => {
     const live = mkLiveReturning([]);
     const tools = new LiveTransactionsTools(live);
     const result = await tools.getTransactions({
@@ -310,9 +341,7 @@ describe('LiveTransactionsTools — freshness envelope', () => {
     );
   });
 
-  test('second identical call has _cache_hit: true and same timestamps', async () => {
-    // Use the real LiveCopilotDatabase memoize by constructing a live instance
-    // whose underlying GraphQL call returns a fixed page.
+  test('second identical call hits the window cache and reports _cache_hit: true', async () => {
     const { LiveCopilotDatabase: LiveDB } = await import('../../../src/core/live-database.js');
     const client = {
       mutate: mock(),
@@ -328,11 +357,13 @@ describe('LiveTransactionsTools — freshness envelope', () => {
       getUserCategories: mock(() => Promise.resolve([])),
       getCategoryNameMap: mock(() => Promise.resolve(new Map<string, string>())),
     } as unknown as import('../../../src/core/database.js').CopilotDatabase;
-    const liveDb = new LiveDB(client, cache, { memoTtlMs: 60_000 });
+    const liveDb = new LiveDB(client, cache);
     const tools = new LiveTransactionsTools(liveDb);
 
-    const a = await tools.getTransactions({ start_date: '2026-04-01', end_date: '2026-04-30' });
-    const b = await tools.getTransactions({ start_date: '2026-04-01', end_date: '2026-04-30' });
+    // Pick a date range entirely in the cold tier (>14d old) so the second
+    // call hits cache. 2024 is well outside the live tier on 2026-05-01.
+    const a = await tools.getTransactions({ start_date: '2024-06-01', end_date: '2024-06-30' });
+    const b = await tools.getTransactions({ start_date: '2024-06-01', end_date: '2024-06-30' });
 
     expect(a._cache_hit).toBe(false);
     expect(b._cache_hit).toBe(true);
@@ -376,5 +407,140 @@ describe('createLiveToolSchemas', () => {
   test('readOnlyHint is true', () => {
     const { annotations } = createLiveToolSchemas()[0]!;
     expect(annotations?.readOnlyHint).toBe(true);
+  });
+});
+
+describe('LiveTransactionsTools — migrated filters', () => {
+  test('category filter matches by categoryId', async () => {
+    const nodes = [mkNode({ id: 't1', categoryId: 'c1' }), mkNode({ id: 't2', categoryId: 'c2' })];
+    const live = mkLiveReturning(nodes);
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({
+      category: 'c1',
+      start_date: '2025-01-01',
+      end_date: '2025-12-31',
+    });
+    expect(result.transactions.map((t) => t.transaction_id)).toEqual(['t1']);
+  });
+
+  test('tag filter resolves name → id and matches via n.tags[]', async () => {
+    const nodes = [
+      mkNode({
+        id: 't1',
+        tags: [{ id: 'tg1', name: 'vacation', colorName: 'BLUE1' }],
+      }),
+      mkNode({ id: 't2', tags: [] }),
+    ];
+    const live = mkLiveReturning(nodes);
+    (live.getCache().getTags as ReturnType<typeof mock>).mockImplementation(() =>
+      Promise.resolve([{ tag_id: 'tg1', name: 'Vacation' }])
+    );
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({
+      tag: 'Vacation',
+      start_date: '2025-01-01',
+      end_date: '2025-12-31',
+    });
+    expect(result.transactions.map((t) => t.transaction_id)).toEqual(['t1']);
+  });
+
+  test('exclude_transfers=false retains INTERNAL_TRANSFER rows', async () => {
+    const nodes = [
+      mkNode({ id: 't1', type: 'REGULAR' }),
+      mkNode({ id: 't2', type: 'INTERNAL_TRANSFER' }),
+    ];
+    const live = mkLiveReturning(nodes);
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({
+      exclude_transfers: false,
+      start_date: '2025-01-01',
+      end_date: '2025-12-31',
+    });
+    expect(result.transactions.map((t) => t.transaction_id).sort()).toEqual(['t1', 't2']);
+  });
+
+  test('matchString filters case-insensitive substring on name (via query)', async () => {
+    const nodes = [
+      mkNode({ id: 't1', name: 'Amazon Fresh' }),
+      mkNode({ id: 't2', name: 'AMAZON.com' }),
+      mkNode({ id: 't3', name: 'Whole Foods' }),
+    ];
+    const live = mkLiveReturning(nodes);
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({
+      query: 'amazon',
+      start_date: '2025-01-01',
+      end_date: '2025-12-31',
+    });
+    expect(result.transactions.map((t) => t.transaction_id).sort()).toEqual(['t1', 't2']);
+  });
+
+  test('matchString filters case-insensitive via merchant when query is unset', async () => {
+    const nodes = [
+      mkNode({ id: 't1', name: 'Starbucks #123' }),
+      mkNode({ id: 't2', name: 'Coffee Bean' }),
+    ];
+    const live = mkLiveReturning(nodes);
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({
+      merchant: 'starbucks',
+      start_date: '2025-01-01',
+      end_date: '2025-12-31',
+    });
+    expect(result.transactions.map((t) => t.transaction_id)).toEqual(['t1']);
+  });
+
+  test('query takes precedence over merchant when both are set', async () => {
+    const nodes = [
+      mkNode({ id: 't1', name: 'foo only' }),
+      mkNode({ id: 't2', name: 'bar only' }),
+      mkNode({ id: 't3', name: 'foo and bar' }),
+    ];
+    const live = mkLiveReturning(nodes);
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({
+      query: 'foo',
+      merchant: 'bar',
+      start_date: '2025-01-01',
+      end_date: '2025-12-31',
+    });
+    // Only `foo` filter runs; `bar` is ignored.
+    expect(result.transactions.map((t) => t.transaction_id).sort()).toEqual(['t1', 't3']);
+  });
+});
+
+describe('LiveTransactionsTools — date-less query rejection', () => {
+  test('throws when query is set without dates or period', async () => {
+    const tools = new LiveTransactionsTools(mkLive());
+    await expect(tools.getTransactions({ query: 'amazon' })).rejects.toThrow(
+      /require a date range|period|start_date/
+    );
+  });
+
+  test('throws when merchant is set without dates or period', async () => {
+    const tools = new LiveTransactionsTools(mkLive());
+    await expect(tools.getTransactions({ merchant: 'amazon' })).rejects.toThrow(
+      /require a date range|period|start_date/
+    );
+  });
+
+  test('does NOT throw when query is set with period', async () => {
+    const live = mkLiveReturning([]);
+    const tools = new LiveTransactionsTools(live);
+    await expect(
+      tools.getTransactions({ query: 'amazon', period: 'this_month' })
+    ).resolves.toBeDefined();
+  });
+
+  test('does NOT throw when query is set with explicit dates', async () => {
+    const live = mkLiveReturning([]);
+    const tools = new LiveTransactionsTools(live);
+    await expect(
+      tools.getTransactions({
+        query: 'amazon',
+        start_date: '2025-01-01',
+        end_date: '2025-12-31',
+      })
+    ).resolves.toBeDefined();
   });
 });

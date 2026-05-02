@@ -11,7 +11,6 @@
 
 import type { LiveCopilotDatabase } from '../../core/live-database.js';
 import type {
-  AccountRef,
   ReadTransactionType,
   TransactionNode,
 } from '../../core/graphql/queries/transactions.js';
@@ -97,40 +96,23 @@ export class LiveTransactionsTools {
       ? parsePeriod(opts.period)
       : [opts.start_date, opts.end_date];
 
-    const accountRefs = opts.account_id
-      ? [await this.resolveAccountRef(opts.account_id)]
-      : undefined;
-
-    const categoryIds = opts.category ? [opts.category] : undefined;
-
-    const tagIds = opts.tag ? await this.resolveTagIds(opts.tag) : undefined;
-
-    const matchString = opts.query ?? opts.merchant;
-
-    const types: ReadTransactionType[] | undefined =
-      opts.exclude_transfers !== false ? ['REGULAR', 'INCOME'] : undefined;
+    if (!start_date || !end_date) {
+      throw new Error(`Date range required: pass period, start_date, or end_date.`);
+    }
 
     const {
       rows: nodes,
-      fetched_at,
+      oldest_fetched_at,
+      newest_fetched_at,
       hit,
-    } = await this.live.getTransactions({
-      startDate: start_date,
-      endDate: end_date,
-      accountRefs,
-      categoryIds,
-      tagIds,
-      types,
-      matchString,
-    });
+    } = await this.live.getTransactions({ from: start_date, to: end_date });
 
     const filtered = await this.postFilter(nodes, opts);
     const page = await this.paginateAndEnrich(filtered, opts);
-    const fetchedAtIso = new Date(fetched_at).toISOString();
     return {
       ...page,
-      _cache_oldest_fetched_at: fetchedAtIso,
-      _cache_newest_fetched_at: fetchedAtIso,
+      _cache_oldest_fetched_at: new Date(oldest_fetched_at).toISOString(),
+      _cache_newest_fetched_at: new Date(newest_fetched_at).toISOString(),
       _cache_hit: hit,
     };
   }
@@ -138,28 +120,26 @@ export class LiveTransactionsTools {
   private async singleTransactionLookup(
     opts: GetTransactionsLiveOptions
   ): Promise<GetTransactionsLiveResult> {
-    // validate() guarantees both account_id and item_id are present for the
-    // single-transaction path. Use the caller-supplied item_id directly so the
-    // documented contract ("all three come from a prior list result") is
-    // actually enforced — not silently bypassed via a cache lookup.
-    const ref: AccountRef = { accountId: opts.account_id!, itemId: opts.item_id! };
-    // Resolve period → [start, end] exactly like the main path, so a caller
-    // passing only `period` still produces a bounded fetch. validate() already
-    // guarantees at least one of (start_date, end_date, period) is present.
     const [start_date, end_date] = opts.period
       ? parsePeriod(opts.period)
       : [opts.start_date, opts.end_date];
+    if (!start_date || !end_date) {
+      throw new Error(
+        `transaction_id lookup requires a date range. Pass period, start_date, or end_date.`
+      );
+    }
     const {
       rows: nodes,
-      fetched_at,
+      oldest_fetched_at,
+      newest_fetched_at,
       hit,
-    } = await this.live.getTransactions({
-      accountRefs: [ref],
-      startDate: start_date,
-      endDate: end_date,
-    });
-    const fetchedAtIso = new Date(fetched_at).toISOString();
-    const match = nodes.find((n) => n.id === opts.transaction_id);
+    } = await this.live.getTransactions({ from: start_date, to: end_date });
+    const fetchedAtIso = new Date(oldest_fetched_at).toISOString();
+    const newestIso = new Date(newest_fetched_at).toISOString();
+    const match = nodes.find(
+      (n) =>
+        n.id === opts.transaction_id && n.accountId === opts.account_id && n.itemId === opts.item_id
+    );
     if (!match) {
       return {
         count: 0,
@@ -168,7 +148,7 @@ export class LiveTransactionsTools {
         has_more: false,
         transactions: [],
         _cache_oldest_fetched_at: fetchedAtIso,
-        _cache_newest_fetched_at: fetchedAtIso,
+        _cache_newest_fetched_at: newestIso,
         _cache_hit: hit,
       };
     }
@@ -180,20 +160,9 @@ export class LiveTransactionsTools {
       has_more: false,
       transactions: enriched,
       _cache_oldest_fetched_at: fetchedAtIso,
-      _cache_newest_fetched_at: fetchedAtIso,
+      _cache_newest_fetched_at: newestIso,
       _cache_hit: hit,
     };
-  }
-
-  private async resolveAccountRef(accountId: string): Promise<AccountRef> {
-    const accounts = await this.live.getCache().getAccounts();
-    const match = accounts.find((a) => a.account_id === accountId);
-    if (!match || !match.item_id) {
-      throw new Error(
-        `Account '${accountId}' not found in local cache. Refresh the cache (open the Copilot app) or pass a valid account_id.`
-      );
-    }
-    return { accountId: match.account_id, itemId: match.item_id };
   }
 
   private async resolveTagIds(tagName: string): Promise<string[]> {
@@ -215,18 +184,24 @@ export class LiveTransactionsTools {
   ): Promise<TransactionNode[]> {
     let result = nodes;
 
+    // 1. types (exclude_transfers default true)
     if (opts.exclude_transfers !== false) {
       result = result.filter((n) => n.type !== 'INTERNAL_TRANSFER');
     }
 
-    if (opts.exclude_excluded !== false) {
-      const cats = await this.live.getCache().getUserCategories();
-      const excludedCatIds = new Set(
-        cats.filter((c) => c.excluded === true).map((c) => c.category_id)
-      );
-      result = result.filter((n) => !n.categoryId || !excludedCatIds.has(n.categoryId));
+    // 2. accountId
+    if (opts.account_id !== undefined) {
+      const id = opts.account_id;
+      result = result.filter((n) => n.accountId === id);
     }
 
+    // 3. categoryId
+    if (opts.category !== undefined) {
+      const cid = opts.category;
+      result = result.filter((n) => n.categoryId === cid);
+    }
+
+    // 4. amount range
     if (opts.min_amount !== undefined) {
       const min = opts.min_amount;
       result = result.filter((n) => Math.abs(n.amount) >= min);
@@ -236,10 +211,34 @@ export class LiveTransactionsTools {
       result = result.filter((n) => Math.abs(n.amount) <= max);
     }
 
+    // 5. pending
     if (opts.pending !== undefined) {
       result = result.filter((n) => n.isPending === opts.pending);
     }
 
+    // 6. matchString (query precedence over merchant; case-insensitive substring)
+    const needleRaw = opts.query ?? opts.merchant;
+    if (needleRaw !== undefined && needleRaw !== '') {
+      const needle = needleRaw.toLowerCase();
+      result = result.filter((n) => n.name.toLowerCase().includes(needle));
+    }
+
+    // 7. tag (resolved name → id, then membership in n.tags[])
+    if (opts.tag !== undefined) {
+      const resolvedTagIds = new Set(await this.resolveTagIds(opts.tag));
+      result = result.filter((n) => n.tags.some((t) => resolvedTagIds.has(t.id)));
+    }
+
+    // 8. exclude_excluded
+    if (opts.exclude_excluded !== false) {
+      const cats = await this.live.getCache().getUserCategories();
+      const excludedCatIds = new Set(
+        cats.filter((c) => c.excluded === true).map((c) => c.category_id)
+      );
+      result = result.filter((n) => !n.categoryId || !excludedCatIds.has(n.categoryId));
+    }
+
+    // 9. transaction_type variants
     if (opts.transaction_type === 'tagged') {
       result = result.filter((n) => n.tags.length > 0);
     } else if (opts.transaction_type === 'refunds') {
@@ -327,6 +326,17 @@ export class LiveTransactionsTools {
     if (opts.exclude_split_parents === false) {
       throw new Error(
         `Parameter 'exclude_split_parents=false' is not supported in live mode — the GraphQL server omits split parents. Retry without 'exclude_split_parents' or set it to true.`
+      );
+    }
+
+    if (
+      (opts.query !== undefined || opts.merchant !== undefined) &&
+      !opts.start_date &&
+      !opts.end_date &&
+      !opts.period
+    ) {
+      throw new Error(
+        `Query/merchant searches in live mode require a date range. Pass period (e.g. period: 'this_year') or start_date + end_date.`
       );
     }
 
