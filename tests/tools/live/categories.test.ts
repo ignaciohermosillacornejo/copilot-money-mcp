@@ -73,17 +73,19 @@ describe('LiveCategoriesTools.getCategories', () => {
     expect(result.categories).toEqual([]);
   });
 
-  test('output sorted by templateId then name', async () => {
+  test('output sorted by templateId then name; null templateId sorts last', async () => {
     const client = makeClient([
       { ...sampleRow, id: 'a', name: 'Zebra', templateId: 'Food' },
       { ...sampleRow, id: 'b', name: 'Apple', templateId: 'Food' },
       { ...sampleRow, id: 'c', name: 'Cake', templateId: 'Drink' },
+      { ...sampleRow, id: 'd', name: 'Custom', templateId: null },
     ]);
     const tools = new LiveCategoriesTools(makeLive(client));
 
     const result = await tools.getCategories({});
 
-    expect(result.categories.map((c) => c.id)).toEqual(['c', 'b', 'a']);
+    // Drink < Food < null-sentinel; within Food, Apple < Zebra
+    expect(result.categories.map((c) => c.id)).toEqual(['c', 'b', 'a', 'd']);
   });
 });
 
