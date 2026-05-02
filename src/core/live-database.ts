@@ -32,12 +32,7 @@ import {
 } from './graphql/queries/transactions.js';
 import { getMonthRange, monthsCovered } from '../utils/date.js';
 import { pLimit } from '../utils/concurrency.js';
-import {
-  InFlightRegistry,
-  SnapshotCache,
-  TransactionWindowCache,
-  type CachedTransaction,
-} from './cache/index.js';
+import { InFlightRegistry, SnapshotCache, TransactionWindowCache } from './cache/index.js';
 import type { AccountNode } from './graphql/queries/accounts.js';
 import type { Category, Tag, Budget, Recurring, Transaction } from '../models/index.js';
 
@@ -68,7 +63,7 @@ export class LiveCopilotDatabase {
   private readonly tagsCache: SnapshotCache<Tag>;
   private readonly budgetsCache: SnapshotCache<Budget>;
   private readonly recurringCache: SnapshotCache<Recurring>;
-  private readonly transactionsWindowCache: TransactionWindowCache<CachedTransaction>;
+  private readonly transactionsWindowCache: TransactionWindowCache<TransactionNode>;
 
   constructor(
     private readonly graphql: GraphQLClient,
@@ -99,7 +94,7 @@ export class LiveCopilotDatabase {
       { key: 'recurring', ttlMs: SIX_HOURS_MS, keyFn: (r) => r.recurring_id },
       this.inflight
     );
-    this.transactionsWindowCache = new TransactionWindowCache<CachedTransaction>(
+    this.transactionsWindowCache = new TransactionWindowCache<TransactionNode>(
       {
         liveTtlMs: 0,
         coldTtlMs: ONE_WEEK_MS,
@@ -168,11 +163,7 @@ export class LiveCopilotDatabase {
     // Without this trim, those rows pollute the wrong cache bucket and
     // get double-counted on subsequent full-range queries.
     const rows = rawRows.filter((r) => r.date >= monthStart && r.date <= monthEnd);
-    this.transactionsWindowCache.ingestMonth(
-      month,
-      rows as unknown as CachedTransaction[],
-      fetched_at
-    );
+    this.transactionsWindowCache.ingestMonth(month, rows, fetched_at);
     return { rows, fetched_at, pages };
   }
 
@@ -275,7 +266,7 @@ export class LiveCopilotDatabase {
     }
 
     const freshRows = successes.flatMap((s) => s.rows);
-    const merged = [...(cachedRows as unknown as TransactionNode[]), ...freshRows].filter(
+    const merged = [...cachedRows, ...freshRows].filter(
       (r) => r.date >= range.from && r.date <= range.to
     );
     merged.sort(
@@ -331,7 +322,7 @@ export class LiveCopilotDatabase {
     return this.recurringCache;
   }
 
-  getTransactionsWindowCache(): TransactionWindowCache<CachedTransaction> {
+  getTransactionsWindowCache(): TransactionWindowCache<TransactionNode> {
     return this.transactionsWindowCache;
   }
 
@@ -343,7 +334,7 @@ export class LiveCopilotDatabase {
    * the row is not currently cached.
    */
   patchLiveTransaction(id: string, fields: Partial<Transaction>): void {
-    let existing: CachedTransaction | undefined;
+    let existing: TransactionNode | undefined;
     for (const month of this.transactionsWindowCache.cachedMonths()) {
       const row = this.transactionsWindowCache.entriesForMonth(month).find((r) => r.id === id);
       if (row) {
@@ -352,7 +343,7 @@ export class LiveCopilotDatabase {
       }
     }
     if (!existing) return;
-    const merged = { ...existing, ...fields, id } as CachedTransaction;
+    const merged: TransactionNode = { ...existing, ...fields, id };
     this.transactionsWindowCache.upsert(merged);
   }
 

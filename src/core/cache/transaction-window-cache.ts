@@ -27,7 +27,6 @@ import type { InFlightRegistry } from './in-flight-registry.js';
 export interface CachedTransaction {
   id: string;
   date: string; // YYYY-MM-DD
-  [key: string]: unknown;
 }
 
 export type Tier = 'live' | 'cold';
@@ -57,9 +56,11 @@ export class TransactionWindowCache<T extends CachedTransaction = CachedTransact
 
   constructor(
     private readonly opts: TransactionWindowCacheOptions,
-    // Stored for Phase 3 forward-compat — when transaction reads migrate
-    // onto this cache, the registry will gate concurrent month fetches.
-    // Phase 2 ingestMonth is externally driven so the field is unused yet.
+    // Held for compatibility with the constructor signature and to express
+    // the intent that this cache is part of an InFlightRegistry-coordinated
+    // system. Coalescing actually happens at the call site in
+    // LiveCopilotDatabase.getTransactions; the cache itself is externally
+    // driven via ingestMonth, so the field is unused INSIDE this class.
     private readonly inflight: InFlightRegistry
   ) {
     // Suppress unused-private-field warning while inflight is forward-compat only.
@@ -97,8 +98,8 @@ export class TransactionWindowCache<T extends CachedTransaction = CachedTransact
       }
       const entry = this.windows.get(month);
       const ttl = this.ttlFor(tier);
-      if (entry && Date.now() - entry.fetched_at < ttl) {
-        this.lastAccessed.set(month, Date.now());
+      if (entry && now.getTime() - entry.fetched_at < ttl) {
+        this.lastAccessed.set(month, now.getTime());
         for (const row of entry.rows) {
           if (row.date >= range.from && row.date <= range.to) cachedRows.push(row);
         }
@@ -132,6 +133,7 @@ export class TransactionWindowCache<T extends CachedTransaction = CachedTransact
       if (idx >= 0) {
         entry.rows.splice(idx, 1);
         this._totalRows -= 1;
+        break; // ids are unique across windows; first match is the only match
       }
     }
     const entry = this.windows.get(month);
@@ -152,6 +154,7 @@ export class TransactionWindowCache<T extends CachedTransaction = CachedTransact
       if (idx >= 0) {
         entry.rows.splice(idx, 1);
         this._totalRows -= 1;
+        break; // ids are unique across windows
       }
     }
   }

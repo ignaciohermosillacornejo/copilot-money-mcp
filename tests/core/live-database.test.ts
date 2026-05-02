@@ -283,6 +283,15 @@ describe('LiveCopilotDatabase.getTransactions (windowed)', () => {
     await Promise.all([a, b]);
     expect(queryCalls).toBe(1);
   });
+
+  test('single-day range works (from === to)', async () => {
+    const client = mkClientReturning([mkPage([{ id: 't1', date: '2025-01-15' }])]);
+    const live = new LiveCopilotDatabase(client, mkCache());
+    const result = await live.getTransactions({ from: '2025-01-15', to: '2025-01-15' });
+    expect(result.rows.map((r) => r.id)).toEqual(['t1']);
+    expect(result.hit).toBe(false);
+    expect(result.oldest_fetched_at).toBe(result.newest_fetched_at);
+  });
 });
 
 describe('preflightLiveAuth', () => {
