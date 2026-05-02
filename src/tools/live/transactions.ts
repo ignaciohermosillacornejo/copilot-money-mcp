@@ -136,6 +136,8 @@ export class LiveTransactionsTools {
     } = await this.live.getTransactions({ from: start_date, to: end_date });
     const fetchedAtIso = new Date(oldest_fetched_at).toISOString();
     const newestIso = new Date(newest_fetched_at).toISOString();
+    // GraphQL guarantees the (id, accountId, itemId) triple is unique per transaction,
+    // so find() returns at most one match. No tie-breaking needed.
     const match = nodes.find(
       (n) =>
         n.id === opts.transaction_id && n.accountId === opts.account_id && n.itemId === opts.item_id
@@ -216,7 +218,8 @@ export class LiveTransactionsTools {
       result = result.filter((n) => n.isPending === opts.pending);
     }
 
-    // 6. matchString (query precedence over merchant; case-insensitive substring)
+    // 6. matchString (query precedence over merchant via ??; the !== '' guard
+    // below also skips filtering when the value is an empty string).
     const needleRaw = opts.query ?? opts.merchant;
     if (needleRaw !== undefined && needleRaw !== '') {
       const needle = needleRaw.toLowerCase();
