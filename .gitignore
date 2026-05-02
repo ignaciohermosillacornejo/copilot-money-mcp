@@ -58,6 +58,7 @@ scripts/*
 !scripts/launcher.sh
 !scripts/generate-graphql-operations.ts
 !scripts/smoke-graphql.ts
+!scripts/smoke/
 !scripts/build-write-manifest.ts
 !scripts/manifest-utils.ts
 !scripts/verify-optimistic-consistency.ts
