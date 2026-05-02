@@ -86,6 +86,17 @@ const UNSUPPORTED_KEYS = ['city', 'lat', 'lon', 'radius_km', 'region', 'country'
 export class LiveTransactionsTools {
   constructor(private readonly live: LiveCopilotDatabase) {}
 
+  private async getCategoryNameMap(): Promise<Map<string, string>> {
+    const { rows } = await this.live
+      .getCategoriesCache()
+      .read(() => fetchCategories(this.live.getClient()));
+    const map = new Map<string, string>();
+    for (const c of rows) {
+      if (c.name) map.set(c.id, c.name);
+    }
+    return map;
+  }
+
   async getTransactions(opts: GetTransactionsLiveOptions): Promise<GetTransactionsLiveResult> {
     this.validate(opts);
 
@@ -250,7 +261,7 @@ export class LiveTransactionsTools {
     } else if (opts.transaction_type === 'credits') {
       result = result.filter((n) => n.amount < 0 && n.type === 'INCOME');
     } else if (opts.transaction_type === 'hsa_eligible') {
-      const map = await this.live.getCache().getCategoryNameMap();
+      const map = await this.getCategoryNameMap();
       result = result.filter((n) => {
         if (!n.categoryId) return false;
         const name = (map.get(n.categoryId) ?? '').toLowerCase();
@@ -280,7 +291,7 @@ export class LiveTransactionsTools {
   }
 
   private async enrich(rows: TransactionNode[]): Promise<EnrichedTransaction[]> {
-    const catMap = await this.live.getCache().getCategoryNameMap();
+    const catMap = await this.getCategoryNameMap();
     return rows.map((n) => ({
       transaction_id: n.id,
       account_id: n.accountId,
