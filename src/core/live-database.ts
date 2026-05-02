@@ -168,7 +168,11 @@ export class LiveCopilotDatabase {
     // Without this trim, those rows pollute the wrong cache bucket and
     // get double-counted on subsequent full-range queries.
     const rows = rawRows.filter((r) => r.date >= monthStart && r.date <= monthEnd);
-    this.transactionsWindowCache.ingestMonth(month, rows as unknown as CachedTransaction[], fetched_at);
+    this.transactionsWindowCache.ingestMonth(
+      month,
+      rows as unknown as CachedTransaction[],
+      fetched_at
+    );
     return { rows, fetched_at, pages };
   }
 
@@ -224,7 +228,9 @@ export class LiveCopilotDatabase {
     hit: boolean;
   }> {
     if (!range.from || !range.to) {
-      throw new Error(`getTransactions requires both from and to (got from='${range.from}', to='${range.to}')`);
+      throw new Error(
+        `getTransactions requires both from and to (got from='${range.from}', to='${range.to}')`
+      );
     }
     if (range.from > range.to) {
       throw new Error(`getTransactions: from (${range.from}) must be <= to (${range.to})`);
@@ -274,9 +280,7 @@ export class LiveCopilotDatabase {
     );
     merged.sort(
       (a, b) =>
-        b.date.localeCompare(a.date) ||
-        b.createdAt - a.createdAt ||
-        b.id.localeCompare(a.id)
+        b.date.localeCompare(a.date) || b.createdAt - a.createdAt || b.id.localeCompare(a.id)
     );
 
     // Freshness envelope: walk every month in the requested range and
