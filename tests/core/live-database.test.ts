@@ -116,87 +116,171 @@ describe('LiveCopilotDatabase — memo', () => {
   });
 });
 
-function mkClientReturning(pages: TransactionsPage[]): GraphQLClient {
-  let i = 0;
-  return {
-    mutate: mock(),
-    query: mock(() => Promise.resolve({ transactions: pages[i++] })),
-  } as unknown as GraphQLClient;
-}
+describe('LiveCopilotDatabase.getTransactions (windowed)', () => {
+  function mkClientReturning(pages: TransactionsPage[]): GraphQLClient {
+    let i = 0;
+    return {
+      mutate: mock(),
+      query: mock(() => Promise.resolve({ transactions: pages[i++] })),
+    } as unknown as GraphQLClient;
+  }
 
-describe('LiveCopilotDatabase.getTransactions', () => {
-  test('paginates through one page and returns rows', async () => {
+  function mkPage(rows: Array<{ id: string; date: string; createdAt?: number }>): TransactionsPage {
+    return {
+      edges: rows.map((r) => ({
+        cursor: `c-${r.id}`,
+        node: {
+          id: r.id,
+          accountId: 'a1',
+          itemId: 'i1',
+          categoryId: 'c1',
+          recurringId: null,
+          parentId: null,
+          isReviewed: false,
+          isPending: false,
+          amount: 10,
+          date: r.date,
+          name: `tx-${r.id}`,
+          type: 'REGULAR',
+          userNotes: null,
+          tipAmount: null,
+          suggestedCategoryIds: [],
+          isoCurrencyCode: 'USD',
+          createdAt: r.createdAt ?? 0,
+          tags: [],
+          goal: null,
+        },
+      })),
+      pageInfo: { endCursor: null, hasNextPage: false },
+    };
+  }
+
+  test('throws on missing or inverted range', async () => {
+    const live = new LiveCopilotDatabase(mkClient(), mkCache());
+    await expect(live.getTransactions({ from: '', to: '2025-12-31' })).rejects.toThrow();
+    await expect(live.getTransactions({ from: '2025-01-01', to: '' })).rejects.toThrow();
+    await expect(live.getTransactions({ from: '2025-12-31', to: '2025-01-01' })).rejects.toThrow();
+  });
+
+  test('pure cache miss fetches every month and ingests', async () => {
     const client = mkClientReturning([
-      {
-        edges: [
-          {
-            cursor: 'c1',
-            node: {
-              id: 't1',
-              accountId: 'a1',
-              itemId: 'i1',
-              categoryId: 'c',
-              recurringId: null,
-              parentId: null,
-              isReviewed: false,
-              isPending: false,
-              amount: 10,
-              date: '2025-06-01',
-              name: 'Amazon',
-              type: 'REGULAR',
-              userNotes: null,
-              tipAmount: null,
-              suggestedCategoryIds: [],
-              isoCurrencyCode: 'USD',
-              createdAt: 0,
-              tags: [],
-              goal: null,
-            },
-          },
-        ],
-        pageInfo: { endCursor: 'c1', hasNextPage: false },
-      },
+      mkPage([{ id: 't1', date: '2025-01-15' }]),
+      mkPage([{ id: 't2', date: '2025-02-15' }]),
     ]);
     const live = new LiveCopilotDatabase(client, mkCache());
-    const { rows } = await live.getTransactions({});
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.id).toBe('t1');
+    const result = await live.getTransactions({ from: '2025-01-01', to: '2025-02-28' });
+    expect(result.rows.map((r) => r.id).sort()).toEqual(['t1', 't2']);
+    expect(result.hit).toBe(false);
+    const wc = live.getTransactionsWindowCache();
+    expect(wc.hasMonth('2025-01')).toBe(true);
+    expect(wc.hasMonth('2025-02')).toBe(true);
   });
 
-  test('memoizes identical calls within TTL', async () => {
-    const page: TransactionsPage = {
-      edges: [],
-      pageInfo: { endCursor: null, hasNextPage: false },
-    };
-    const client = mkClientReturning([page]);
+  test('pure cache hit returns cached rows with no network', async () => {
+    const live = new LiveCopilotDatabase(mkClient(), mkCache());
+    const wc = live.getTransactionsWindowCache();
+    const ts = Date.now();
+    wc.ingestMonth(
+      '2024-06',
+      [
+        {
+          id: 't1',
+          date: '2024-06-10',
+          accountId: 'a1',
+          itemId: 'i1',
+          categoryId: null,
+          recurringId: null,
+          parentId: null,
+          isReviewed: false,
+          isPending: false,
+          amount: 10,
+          name: 'cached',
+          type: 'REGULAR',
+          userNotes: null,
+          tipAmount: null,
+          suggestedCategoryIds: [],
+          isoCurrencyCode: 'USD',
+          createdAt: 0,
+          tags: [],
+          goal: null,
+        },
+      ],
+      ts
+    );
+
+    const result = await live.getTransactions({ from: '2024-06-01', to: '2024-06-30' });
+    expect(result.rows.map((r) => r.id)).toEqual(['t1']);
+    expect(result.hit).toBe(true);
+    expect(result.oldest_fetched_at).toBe(ts);
+    expect(result.newest_fetched_at).toBe(ts);
+  });
+
+  test('returns rows sorted DESC by (date, createdAt, id)', async () => {
+    const client = mkClientReturning([
+      mkPage([
+        { id: 'a', date: '2025-01-15', createdAt: 100 },
+        { id: 'b', date: '2025-01-15', createdAt: 200 },
+        { id: 'c', date: '2025-01-20', createdAt: 50 },
+      ]),
+    ]);
     const live = new LiveCopilotDatabase(client, mkCache());
-
-    await live.getTransactions({ startDate: '2025-01-01' });
-    await live.getTransactions({ startDate: '2025-01-01' });
-
-    const qCalls = (client.query as ReturnType<typeof mock>).mock.calls;
-    expect(qCalls).toHaveLength(1);
+    const result = await live.getTransactions({ from: '2025-01-01', to: '2025-01-31' });
+    expect(result.rows.map((r) => r.id)).toEqual(['c', 'b', 'a']);
   });
 
-  test('retries once on NETWORK error per page', async () => {
-    let calls = 0;
-    const page: TransactionsPage = {
-      edges: [],
-      pageInfo: { endCursor: null, hasNextPage: false },
-    };
+  test('rows outside the requested range are trimmed after merge', async () => {
+    const client = mkClientReturning([
+      mkPage([
+        { id: 'in', date: '2025-01-15' },
+        { id: 'out', date: '2024-12-31' },
+      ]),
+    ]);
+    const live = new LiveCopilotDatabase(client, mkCache());
+    const result = await live.getTransactions({ from: '2025-01-01', to: '2025-01-31' });
+    expect(result.rows.map((r) => r.id)).toEqual(['in']);
+  });
+
+  test('one failing month rejects the entire call but ingests successes', async () => {
+    let i = 0;
     const client = {
       mutate: mock(),
       query: mock(() => {
-        calls += 1;
-        if (calls === 1) throw new GraphQLError('NETWORK', 'blip', 'Transactions');
-        return Promise.resolve({ transactions: page });
+        i += 1;
+        if (i === 2) throw new GraphQLError('AUTH_FAILED', '401', 'Transactions');
+        return Promise.resolve({ transactions: mkPage([{ id: `t${i}`, date: '2025-01-15' }]) });
+      }),
+    } as unknown as GraphQLClient;
+    const live = new LiveCopilotDatabase(client, mkCache());
+    await expect(
+      live.getTransactions({ from: '2025-01-01', to: '2025-02-28' })
+    ).rejects.toThrow(/Failed to fetch/);
+    const wc = live.getTransactionsWindowCache();
+    expect(wc.cachedMonths().length).toBe(1);
+  });
+
+  test('concurrent calls coalesce per-month via InFlightRegistry', async () => {
+    let queryCalls = 0;
+    let resolveAll!: () => void;
+    const gate = new Promise<void>((r) => {
+      resolveAll = r;
+    });
+    const client = {
+      mutate: mock(),
+      query: mock(async () => {
+        queryCalls += 1;
+        await gate;
+        return { transactions: mkPage([{ id: `t${queryCalls}`, date: '2025-01-15' }]) };
       }),
     } as unknown as GraphQLClient;
     const live = new LiveCopilotDatabase(client, mkCache());
 
-    const { rows } = await live.getTransactions({});
-    expect(rows).toHaveLength(0);
-    expect(calls).toBe(2);
+    const a = live.getTransactions({ from: '2025-01-01', to: '2025-01-31' });
+    const b = live.getTransactions({ from: '2025-01-01', to: '2025-01-31' });
+    await Promise.resolve();
+    await Promise.resolve();
+    resolveAll();
+    await Promise.all([a, b]);
+    expect(queryCalls).toBe(1);
   });
 });
 
