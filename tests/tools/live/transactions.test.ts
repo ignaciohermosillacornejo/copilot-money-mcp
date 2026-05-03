@@ -133,6 +133,7 @@ async function mkLiveReturning(
   // Pre-warm categoriesCache with empty so tests that don't exercise
   // category-dependent paths never call fetchCategories on the mock client.
   await live.getCategoriesCache().read(() => Promise.resolve([]));
+  await live.getTagsCache().read(() => Promise.resolve([]));
   return live;
 }
 
@@ -455,9 +456,10 @@ describe('LiveTransactionsTools — migrated filters', () => {
       mkNode({ id: 't2', tags: [] }),
     ];
     const live = await mkLiveReturning(nodes);
-    (live.getCache().getTags as ReturnType<typeof mock>).mockImplementation(() =>
-      Promise.resolve([{ tag_id: 'tg1', name: 'Vacation' }])
-    );
+    live.getTagsCache().invalidate();
+    await live
+      .getTagsCache()
+      .read(() => Promise.resolve([{ id: 'tg1', name: 'vacation', colorName: 'BLUE1' }]));
     const tools = new LiveTransactionsTools(live);
     const result = await tools.getTransactions({
       tag: 'Vacation',
