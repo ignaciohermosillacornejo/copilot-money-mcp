@@ -23,6 +23,7 @@ import {
   deleteCategory as gqlDeleteCategory,
 } from '../core/graphql/categories.js';
 import type { CategoryNode } from '../core/graphql/queries/categories.js';
+import type { TagNode } from '../core/graphql/queries/tags.js';
 import {
   createTag as gqlCreateTag,
   editTag as gqlEditTag,
@@ -3086,7 +3087,11 @@ export class CopilotMoneyTools {
         color_name: result.colorName,
       };
       this.db.patchCachedTagUpsert(tag);
-      this.liveDb?.patchLiveTagUpsert(tag);
+      this.liveDb?.patchLiveTagUpsert({
+        id: result.id,
+        name: result.name,
+        colorName: result.colorName,
+      });
       return {
         success: true,
         tag_id: result.id,
@@ -3338,7 +3343,20 @@ export class CopilotMoneyTools {
       if (args.name !== undefined) patch.name = args.name;
       if (args.color_name !== undefined) patch.color_name = args.color_name;
       this.db.patchCachedTagUpsert(patch as Tag);
-      this.liveDb?.patchLiveTagUpsert(patch as Tag);
+      if (this.liveDb) {
+        const cached = this.liveDb
+          .getTagsCache()
+          .peek()
+          ?.find((t) => t.id === args.tag_id);
+        if (cached) {
+          const merged: TagNode = {
+            ...cached,
+            ...(args.name !== undefined ? { name: args.name } : {}),
+            ...(args.color_name !== undefined ? { colorName: args.color_name } : {}),
+          };
+          this.liveDb.patchLiveTagUpsert(merged);
+        }
+      }
       return { success: true, tag_id: result.id, updated: Object.keys(result.changed) };
     } catch (e) {
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
