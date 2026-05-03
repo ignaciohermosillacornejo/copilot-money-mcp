@@ -13,15 +13,11 @@
  */
 
 import type { LiveCopilotDatabase } from '../../core/live-database.js';
-import {
-  fetchCategories,
-  type CategoryNode,
-} from '../../core/graphql/queries/categories.js';
+import { fetchCategories, type CategoryNode } from '../../core/graphql/queries/categories.js';
 import { roundAmount } from '../../utils/round.js';
 
-export interface GetBudgetsLiveArgs {
-  // Reserved for future filters (e.g., active_only).
-}
+// Reserved for future filters (e.g., active_only).
+export type GetBudgetsLiveArgs = Record<string, never>;
 
 export interface GetBudgetsLiveBudget {
   budget_id: string;
@@ -79,9 +75,11 @@ export class LiveBudgetsTools {
   async getBudgets(_args: GetBudgetsLiveArgs): Promise<GetBudgetsLiveResult> {
     const cache = this.live.getCategoriesCache();
     const startedAt = Date.now();
-    const { rows: cats, fetched_at, hit } = await cache.read(() =>
-      fetchCategories(this.live.getClient())
-    );
+    const {
+      rows: cats,
+      fetched_at,
+      hit,
+    } = await cache.read(() => fetchCategories(this.live.getClient()));
 
     const projected: GetBudgetsLiveBudget[] = [];
     let totalBudgeted = 0;
