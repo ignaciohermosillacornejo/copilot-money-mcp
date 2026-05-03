@@ -35,7 +35,8 @@ import { pLimit } from '../utils/concurrency.js';
 import { InFlightRegistry, SnapshotCache, TransactionWindowCache } from './cache/index.js';
 import type { AccountNode } from './graphql/queries/accounts.js';
 import type { CategoryNode } from './graphql/queries/categories.js';
-import type { Tag, Budget, Recurring, Transaction } from '../models/index.js';
+import type { TagNode } from './graphql/queries/tags.js';
+import type { Budget, Recurring, Transaction } from '../models/index.js';
 
 export interface LiveDatabaseOptions {
   verbose?: boolean;
@@ -55,15 +56,15 @@ export class LiveCopilotDatabase {
   // Phase 2: tiered-cache primitives
   private readonly inflight: InFlightRegistry;
   private readonly fetchLimit: ReturnType<typeof pLimit>;
-  // GraphQL-typed caches (accountsCache, categoriesCache) are typed on the
-  // GraphQL response shape (AccountNode, CategoryNode), NOT the LevelDB
-  // models (Account, Category). The live cache stores what the live read
-  // path produces; tools that consume both shapes can map between them at
-  // the call site if needed. Future GraphQL-backed caches added below
+  // GraphQL-typed caches (accountsCache, categoriesCache, tagsCache) are typed
+  // on the GraphQL response shape (AccountNode, CategoryNode, TagNode), NOT the
+  // LevelDB models (Account, Category, Tag). The live cache stores what the
+  // live read path produces; tools that consume both shapes can map between
+  // them at the call site if needed. Future GraphQL-backed caches added below
   // should follow the same convention.
   private readonly accountsCache: SnapshotCache<AccountNode>;
   private readonly categoriesCache: SnapshotCache<CategoryNode>;
-  private readonly tagsCache: SnapshotCache<Tag>;
+  private readonly tagsCache: SnapshotCache<TagNode>;
   private readonly budgetsCache: SnapshotCache<Budget>;
   private readonly recurringCache: SnapshotCache<Recurring>;
   private readonly transactionsWindowCache: TransactionWindowCache<TransactionNode>;
@@ -85,8 +86,8 @@ export class LiveCopilotDatabase {
       { key: 'categories', ttlMs: ONE_DAY_MS, keyFn: (c) => c.id },
       this.inflight
     );
-    this.tagsCache = new SnapshotCache<Tag>(
-      { key: 'tags', ttlMs: ONE_DAY_MS, keyFn: (t) => t.tag_id },
+    this.tagsCache = new SnapshotCache<TagNode>(
+      { key: 'tags', ttlMs: ONE_DAY_MS, keyFn: (t) => t.id },
       this.inflight
     );
     this.budgetsCache = new SnapshotCache<Budget>(
@@ -313,7 +314,7 @@ export class LiveCopilotDatabase {
     return this.categoriesCache;
   }
 
-  getTagsCache(): SnapshotCache<Tag> {
+  getTagsCache(): SnapshotCache<TagNode> {
     return this.tagsCache;
   }
 
@@ -384,7 +385,7 @@ export class LiveCopilotDatabase {
     this.budgetsCache.upsert(synthetic);
   }
 
-  patchLiveTagUpsert(tag: Tag): void {
+  patchLiveTagUpsert(tag: TagNode): void {
     this.tagsCache.upsert(tag);
   }
 

@@ -492,35 +492,38 @@ describe('LiveCopilotDatabase.patchLiveBudget', () => {
 
 // ── patchLiveTagUpsert / patchLiveTagDelete ─────────────────────────────────
 
-describe('LiveCopilotDatabase — tag cache patches', () => {
-  async function mkSeeded() {
+describe('LiveCopilotDatabase.patchLiveTagUpsert (TagNode shape)', () => {
+  test('upserts a TagNode into tagsCache', async () => {
     const live = new LiveCopilotDatabase(mkClient(), mkCache());
-    await live.getTagsCache().read(async () => []);
-    return live;
-  }
 
-  test('patchLiveTagUpsert inserts a new tag', async () => {
-    const live = await mkSeeded();
-    const tag: Tag = { tag_id: 't1', name: 'Vacation' };
-    live.patchLiveTagUpsert(tag);
-    const result = await live.getTagsCache().read(async () => []);
-    expect(result.rows.find((t) => t.tag_id === 't1')?.name).toBe('Vacation');
+    const cache = live.getTagsCache();
+    await cache.read(() =>
+      Promise.resolve([{ id: 'tag-1', name: 'travel', colorName: 'BLUE1' }])
+    );
+
+    live.patchLiveTagUpsert({ id: 'tag-1', name: 'travel-2026', colorName: 'BLUE1' });
+
+    const after = await cache.read(() => Promise.resolve([]));
+    expect(after.rows.find((t) => t.id === 'tag-1')?.name).toBe('travel-2026');
   });
+});
 
-  test('patchLiveTagUpsert updates existing tag', async () => {
+describe('LiveCopilotDatabase.patchLiveTagDelete (TagNode shape)', () => {
+  test('removes a TagNode from tagsCache by id', async () => {
     const live = new LiveCopilotDatabase(mkClient(), mkCache());
-    await live.getTagsCache().read(async () => [{ tag_id: 't1', name: 'Old' }]);
-    live.patchLiveTagUpsert({ tag_id: 't1', name: 'Updated' });
-    const result = await live.getTagsCache().read(async () => []);
-    expect(result.rows.find((t) => t.tag_id === 't1')?.name).toBe('Updated');
-  });
 
-  test('patchLiveTagDelete removes tag by id', async () => {
-    const live = new LiveCopilotDatabase(mkClient(), mkCache());
-    await live.getTagsCache().read(async () => [{ tag_id: 't1' }, { tag_id: 't2' }]);
-    live.patchLiveTagDelete('t1');
-    const result = await live.getTagsCache().read(async () => []);
-    expect(result.rows.map((t) => t.tag_id)).toEqual(['t2']);
+    const cache = live.getTagsCache();
+    await cache.read(() =>
+      Promise.resolve([
+        { id: 'tag-1', name: 'travel', colorName: 'BLUE1' },
+        { id: 'tag-2', name: 'work', colorName: 'PINK1' },
+      ])
+    );
+
+    live.patchLiveTagDelete('tag-1');
+
+    const after = await cache.read(() => Promise.resolve([]));
+    expect(after.rows.map((t) => t.id)).toEqual(['tag-2']);
   });
 });
 
