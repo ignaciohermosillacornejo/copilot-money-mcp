@@ -206,13 +206,24 @@ describe('LevelDB Decoder', () => {
       // Document and leaving everything else intact. The decoder must
       // filter these out, the same way `tools.getAccounts` filters
       // accounts with user_deleted=true.
+      //
+      // The filter must use `=== true`: rows with the field absent (most
+      // transactions) and rows with explicit `user_deleted: false` should
+      // both pass through.
       const dbPath = path.join(FIXTURES_DIR, 'soft-deleted-txn-db');
       const transactions: TestTransaction[] = [
         {
-          transaction_id: 'txn_active',
+          transaction_id: 'txn_no_field',
           amount: 50.0,
           date: '2024-01-15',
-          name: 'Active Transaction',
+          name: 'Active (field absent)',
+        },
+        {
+          transaction_id: 'txn_explicit_false',
+          amount: 25.0,
+          date: '2024-01-15',
+          name: 'Active (user_deleted=false)',
+          user_deleted: false,
         },
         {
           transaction_id: 'txn_soft_deleted',
@@ -226,8 +237,8 @@ describe('LevelDB Decoder', () => {
       await createTransactionDb(dbPath, transactions);
       const result = await decodeTransactions(dbPath);
 
-      expect(result.length).toBe(1);
-      expect(result[0]?.transaction_id).toBe('txn_active');
+      const ids = result.map((t) => t.transaction_id).sort();
+      expect(ids).toEqual(['txn_explicit_false', 'txn_no_field']);
     });
 
     test('skips transactions with zero amount', async () => {
