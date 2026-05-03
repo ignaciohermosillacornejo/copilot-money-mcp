@@ -3153,6 +3153,12 @@ export class CopilotMoneyTools {
       if (args.emoji !== undefined) patch.emoji = args.emoji;
       if (args.is_excluded !== undefined) patch.excluded = args.is_excluded;
       this.db.patchCachedCategoryUpsert(patch as Category);
+      // Like createCategory above: the EditCategory mutation doesn't return
+      // `icon` on its response, so we synthesize it as EmojiUnicode here. If
+      // the category was previously a Genmoji, this write-through will
+      // incorrectly mark it as EmojiUnicode until the next categoriesCache
+      // read overwrites it with the correct server shape — bounded divergence,
+      // same trade-off as createCategory.
       if (this.liveDb) {
         const cached = this.liveDb
           .getCategoriesCache()
