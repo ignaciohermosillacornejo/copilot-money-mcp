@@ -23,6 +23,7 @@ import { LiveAccountsTools, createLiveAccountsToolSchema } from './tools/live/ac
 import { LiveCategoriesTools, createLiveCategoriesToolSchema } from './tools/live/categories.js';
 import { LiveTagsTools, createLiveTagsToolSchema } from './tools/live/tags.js';
 import { LiveBudgetsTools, createLiveBudgetsToolSchema } from './tools/live/budgets.js';
+import { LiveRecurringTools, createLiveRecurringToolSchema } from './tools/live/recurring.js';
 import { RefreshCacheTool, createRefreshCacheToolSchema } from './tools/live/refresh-cache.js';
 
 // Read version from package.json
@@ -44,6 +45,7 @@ export class CopilotMoneyServer {
   private liveCategoriesTools?: LiveCategoriesTools;
   private liveTagsTools?: LiveTagsTools;
   private liveBudgetsTools?: LiveBudgetsTools;
+  private liveRecurringTools?: LiveRecurringTools;
   private refreshCacheTool?: RefreshCacheTool;
 
   /**
@@ -79,6 +81,7 @@ export class CopilotMoneyServer {
       this.liveCategoriesTools = new LiveCategoriesTools(liveDb);
       this.liveTagsTools = new LiveTagsTools(liveDb);
       this.liveBudgetsTools = new LiveBudgetsTools(liveDb);
+      this.liveRecurringTools = new LiveRecurringTools(liveDb);
       this.refreshCacheTool = new RefreshCacheTool(liveDb);
     }
 
@@ -110,7 +113,8 @@ export class CopilotMoneyServer {
             s.name !== 'get_transactions' &&
             s.name !== 'get_accounts' &&
             s.name !== 'get_categories' &&
-            s.name !== 'get_budgets'
+            s.name !== 'get_budgets' &&
+            s.name !== 'get_recurring_transactions'
         )
       : readSchemas;
     const liveSchemas = this.liveReadsEnabled
@@ -120,6 +124,7 @@ export class CopilotMoneyServer {
           createLiveCategoriesToolSchema(),
           createLiveTagsToolSchema(),
           createLiveBudgetsToolSchema(),
+          createLiveRecurringToolSchema(),
           createRefreshCacheToolSchema(),
         ]
       : [];
@@ -242,6 +247,18 @@ export class CopilotMoneyServer {
       };
     }
 
+    if (name === 'get_recurring_live' && !this.liveRecurringTools) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'get_recurring_live is only available when the server runs with --live-reads.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
     if (name === 'refresh_cache' && !this.refreshCacheTool) {
       return {
         content: [
@@ -314,6 +331,14 @@ export class CopilotMoneyServer {
           result = await this.liveBudgetsTools!.getBudgets(
             (typedArgs as Parameters<NonNullable<typeof this.liveBudgetsTools>['getBudgets']>[0]) ??
               {}
+          );
+          break;
+
+        case 'get_recurring_live':
+          result = await this.liveRecurringTools!.getRecurring(
+            (typedArgs as Parameters<
+              NonNullable<typeof this.liveRecurringTools>['getRecurring']
+            >[0]) ?? {}
           );
           break;
 
