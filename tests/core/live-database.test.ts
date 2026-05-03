@@ -596,6 +596,125 @@ describe('LiveCopilotDatabase.patchLiveCategoryUpsert (CategoryNode shape)', () 
   });
 });
 
+// ── patchLiveCategoryBudget ────────────────────────────────────────────────
+
+describe('LiveCopilotDatabase.patchLiveCategoryBudget', () => {
+  test('updates budget.current.amount on a cached category for the current month', async () => {
+    const live = new LiveCopilotDatabase(mkClient(), mkCache());
+    const cache = live.getCategoriesCache();
+
+    // Seed a category with no budget
+    await cache.read(() =>
+      Promise.resolve([
+        {
+          id: 'cat-1',
+          name: 'Food',
+          templateId: 'Food',
+          colorName: null,
+          icon: null,
+          isExcluded: false,
+          isRolloverDisabled: false,
+          canBeDeleted: true,
+          budget: null,
+        },
+      ])
+    );
+
+    const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM (UTC)
+    live.patchLiveCategoryBudget('cat-1', 250, currentMonth);
+
+    const after = await cache.read(() => Promise.resolve([]));
+    const cat = after.rows.find((c) => c.id === 'cat-1');
+    expect(cat?.budget?.current?.amount).toBe('250');
+    expect(cat?.budget?.current?.month).toBe(currentMonth);
+  });
+
+  test('updates a historical month via budget.histories', async () => {
+    const live = new LiveCopilotDatabase(mkClient(), mkCache());
+    const cache = live.getCategoriesCache();
+
+    await cache.read(() =>
+      Promise.resolve([
+        {
+          id: 'cat-1',
+          name: 'Food',
+          templateId: 'Food',
+          colorName: null,
+          icon: null,
+          isExcluded: false,
+          isRolloverDisabled: false,
+          canBeDeleted: true,
+          budget: {
+            current: null,
+            histories: [
+              {
+                unassignedRolloverAmount: '0',
+                childRolloverAmount: '0',
+                unassignedAmount: '0',
+                resolvedAmount: '100',
+                rolloverAmount: '0',
+                childAmount: null,
+                goalAmount: '100',
+                amount: '100',
+                month: '2026-04',
+                id: 'b-existing',
+              },
+            ],
+          },
+        },
+      ])
+    );
+
+    live.patchLiveCategoryBudget('cat-1', 175, '2026-04');
+
+    const after = await cache.read(() => Promise.resolve([]));
+    const hist = after.rows.find((c) => c.id === 'cat-1')?.budget?.histories ?? [];
+    expect(hist).toHaveLength(1);
+    expect(hist[0]?.amount).toBe('175');
+  });
+
+  test('inserts a new history entry when month not present', async () => {
+    const live = new LiveCopilotDatabase(mkClient(), mkCache());
+    const cache = live.getCategoriesCache();
+
+    await cache.read(() =>
+      Promise.resolve([
+        {
+          id: 'cat-1',
+          name: 'Food',
+          templateId: 'Food',
+          colorName: null,
+          icon: null,
+          isExcluded: false,
+          isRolloverDisabled: false,
+          canBeDeleted: true,
+          budget: { current: null, histories: [] },
+        },
+      ])
+    );
+
+    live.patchLiveCategoryBudget('cat-1', 75, '2025-12');
+
+    const after = await cache.read(() => Promise.resolve([]));
+    const hist = after.rows.find((c) => c.id === 'cat-1')?.budget?.histories ?? [];
+    expect(hist).toHaveLength(1);
+    expect(hist[0]?.month).toBe('2025-12');
+    expect(hist[0]?.amount).toBe('75');
+  });
+
+  test('no-op when category not in cache', async () => {
+    const live = new LiveCopilotDatabase(mkClient(), mkCache());
+    const cache = live.getCategoriesCache();
+    await cache.read(() => Promise.resolve([])); // empty cache
+
+    // Does not throw
+    expect(() => live.patchLiveCategoryBudget('cat-missing', 100)).not.toThrow();
+
+    const after = await cache.read(() => Promise.resolve([]));
+    expect(after.rows.find((c) => c.id === 'cat-missing')).toBeUndefined();
+  });
+});
+
 // ── patchLiveRecurringUpsert / patchLiveRecurringDelete ────────────────────
 
 describe('LiveCopilotDatabase — recurring cache patches', () => {

@@ -401,6 +401,92 @@ export class LiveCopilotDatabase {
     this.categoriesCache.delete(id);
   }
 
+  /**
+   * Update the cached category's budget slot. Peeks the cached category, mutates
+   * either `budget.current` (when month matches current month or is omitted) or
+   * `budget.histories[month]` (replace existing or insert new), then upserts.
+   * No-op if the category is not currently cached — the next get_budgets_live or
+   * get_categories_live call will refetch with the fresh value from the EditBudget
+   * mutation that already succeeded.
+   */
+  patchLiveCategoryBudget(categoryId: string, amount: number, month?: string): void {
+    const cached = this.categoriesCache.peek()?.find((c) => c.id === categoryId);
+    if (!cached) return;
+
+    const monthKey =
+      month ??
+      (() => {
+        // UTC matches monthAge() / monthsCovered() in date.ts. Using local time
+        // would be off by ~12h at month boundaries in negative UTC offsets.
+        const d = new Date();
+        return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+      })();
+    const amountStr = String(amount);
+
+    const existingBudget = cached.budget ?? { current: null, histories: [] };
+
+    // If patch targets the current month, update budget.current
+    const updatesCurrent = existingBudget.current?.month === monthKey;
+    let newCurrent = existingBudget.current;
+    let newHistories = existingBudget.histories;
+
+    if (updatesCurrent && newCurrent) {
+      newCurrent = { ...newCurrent, amount: amountStr };
+    } else {
+      // Update or insert in histories
+      const idx = newHistories.findIndex((h) => h.month === monthKey);
+      if (idx >= 0) {
+        newHistories = [...newHistories];
+        newHistories[idx] = { ...newHistories[idx]!, amount: amountStr };
+      } else {
+        // Insert minimal new history entry. Other monthly fields default to null/0.
+        newHistories = [
+          ...newHistories,
+          {
+            unassignedRolloverAmount: null,
+            childRolloverAmount: null,
+            unassignedAmount: null,
+            resolvedAmount: amountStr,
+            rolloverAmount: null,
+            childAmount: null,
+            goalAmount: amountStr,
+            amount: amountStr,
+            month: monthKey,
+            id: `${categoryId}-${monthKey}-synthetic`,
+          },
+        ];
+      }
+    }
+
+    // If no current existed but the patch was for the current month, synthesize current.
+    if (!updatesCurrent) {
+      const todayMonth = (() => {
+        const d = new Date();
+        return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+      })();
+      if (monthKey === todayMonth && !newCurrent) {
+        newCurrent = {
+          unassignedRolloverAmount: null,
+          childRolloverAmount: null,
+          unassignedAmount: null,
+          resolvedAmount: amountStr,
+          rolloverAmount: null,
+          childAmount: null,
+          goalAmount: amountStr,
+          amount: amountStr,
+          month: monthKey,
+          id: `${categoryId}-${monthKey}-current-synthetic`,
+        };
+      }
+    }
+
+    const merged: CategoryNode = {
+      ...cached,
+      budget: { current: newCurrent, histories: newHistories },
+    };
+    this.categoriesCache.upsert(merged);
+  }
+
   patchLiveRecurringUpsert(recurring: Recurring): void {
     this.recurringCache.upsert(recurring);
   }
