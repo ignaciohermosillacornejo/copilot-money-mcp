@@ -3247,7 +3247,7 @@ export class CopilotMoneyTools {
         month: args.month,
       });
       this.db.patchCachedBudget(args.category_id, parseFloat(args.amount), args.month);
-      this.liveDb?.patchLiveBudget(args.category_id, parseFloat(args.amount), args.month);
+      this.liveDb?.patchLiveCategoryBudget(args.category_id, parseFloat(args.amount), args.month);
       return {
         success: true,
         category_id: result.categoryId,
