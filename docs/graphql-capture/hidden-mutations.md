@@ -21,14 +21,16 @@ Signatures below reflect only what the server confirmed via validation errors. O
 | [`dismissAnnouncement`](#accepttermsdismissannouncement-editinvestmentconfig) | ❌ | low | Dismiss an in-app announcement |
 | [`editInvestmentConfig`](#accepttermsdismissannouncement-editinvestmentconfig) | ❌ | low | User-level investment config (odd — no required args) |
 | [`confirmConnection`](#connection-lifecycle) | ❌ | low-medium | Confirm a Plaid-link connection after institution challenge |
-| [`deleteConnection`](#connection-lifecycle) | ❌ | **high (cascades)** | Remove a Plaid connection |
+| [`deleteConnection`](#connection-lifecycle) | ❌ | **high (assumed cascade)** | Remove a Plaid connection |
 | [`startSubscription`](#subscription-lifecycle) | ❌ | **do not expose** | Start a Copilot paid plan |
 | [`changeSubscription`](#subscription-lifecycle) | ❌ | **do not expose** | Switch between Copilot plans |
 | [`cancelSubscription`](#subscription-lifecycle) | ❌ | **do not expose** | Cancel the Copilot subscription |
 | [`claimPromotion`](#subscription-lifecycle) | ❌ | low | Redeem a promo code |
 | [`deletePaymentMethod`](#subscription-lifecycle) | ❌ | medium | Remove a saved payment method |
 
-**Sweep coverage (2026-04-22, after PRs #320-#323 shipped):** a second broad sweep across ~170 additional candidates covered Amazon, Plaid, Account, Holdings/Investments, Rules, Notifications, User preferences, Subscription/billing, Attachments, Sharing, AI/assistant, Reports, Search, and miscellaneous (password/PIN/2FA/device). The nine new mutations above came out of that sweep; everything else in those categories returned "Cannot query field" on all tested candidates. Tested-and-absent candidates are catalogued in the "Tested-and-absent surface" section below so future authors don't re-probe the same names.
+### Sweep coverage — 2026-04-22
+
+A second broad sweep across ~170 additional candidates covered Amazon, Plaid, Account, Holdings/Investments, Rules, Notifications, User preferences, Subscription/billing, Attachments, Sharing, AI/assistant, Reports, Search, and miscellaneous (password/PIN/2FA/device). The nine new mutations above came out of that sweep; everything else in those categories returned "Cannot query field" on all tested candidates. Tested-and-absent candidates are catalogued in the "Tested-and-absent surface" section below so future authors don't re-probe the same names.
 
 ## Budget mutations — finding
 
@@ -266,7 +268,7 @@ mutation Probe { deleteConnection(id: ID!) }                                    
 
 ## Subscription lifecycle
 
-Copilot's in-app paid-plan management. Five mutations, all billing-sensitive.
+Copilot's in-app paid-plan management. Four billing-sensitive mutations plus one lower-risk payment-method mutation.
 
 ```graphql
 mutation Probe { startSubscription(input: StartSubscriptionInput!) { id } }    # StartSubscriptionResult!
@@ -281,6 +283,8 @@ Confirmed input shapes:
 - `ChangeSubscriptionInput`: has `planId: ID!` (confirmed via "Did you mean planId" error on a `plan` probe); other fields unknown.
 
 **Do not expose any of these via MCP tools.** Billing operations — cancelling, changing plans, or claiming promotions — should always be user-driven through Copilot's own UI. The right safety-posture is to explicitly refuse these even if asked; leave them documented here only so the recon surface is complete.
+
+**`deletePaymentMethod` is lower-risk than the other four** — it removes a saved card from the user's wallet without changing the active plan or charging anything. Still left out of MCP scope: payment-method management is account-administration UX that belongs in Copilot's own settings screen, and a stale removal can break the next renewal. Same "user-driven only" posture, but for ergonomic reasons rather than billing-impact reasons.
 
 ---
 

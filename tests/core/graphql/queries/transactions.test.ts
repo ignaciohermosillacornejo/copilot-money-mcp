@@ -205,6 +205,22 @@ describe('paginateTransactions', () => {
     expect(rows).toHaveLength(2);
   });
 
+  test('throws after max-page cap when fetcher returns empty edges + hasNextPage=true + stable cursor', async () => {
+    let calls = 0;
+    const fetcher = async (): Promise<TransactionsPage> => {
+      calls += 1;
+      return {
+        edges: [],
+        pageInfo: { endCursor: 'stuck-cursor', hasNextPage: true },
+      };
+    };
+    await expect(paginateTransactions(fetcher, {})).rejects.toThrow(
+      /max page|page (count|cap|limit)|too many pages/i
+    );
+    // Sanity: bounded — well under 10k calls even if the cap is high.
+    expect(calls).toBeLessThan(10_000);
+  });
+
   test('passes previous endCursor to fetcher', async () => {
     const received: (string | null)[] = [];
     const pages: TransactionsPage[] = [
