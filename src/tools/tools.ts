@@ -3343,6 +3343,10 @@ export class CopilotMoneyTools {
       if (args.name !== undefined) patch.name = args.name;
       if (args.color_name !== undefined) patch.color_name = args.color_name;
       this.db.patchCachedTagUpsert(patch as Tag);
+      // If tagsCache hasn't been warmed yet, peek() returns undefined and we
+      // skip the live-cache update silently. The next get_tags_live call will
+      // hydrate fresh data from GraphQL (the EditTag mutation already succeeded).
+      // Mirrors the same semantic in updateCategory's write-through.
       if (this.liveDb) {
         const cached = this.liveDb
           .getTagsCache()
