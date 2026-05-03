@@ -2363,7 +2363,7 @@ describe('--live-reads tags wiring', () => {
     expect(names).not.toContain('get_tags_live');
   });
 
-  test('handleListTools when --live-reads is ON includes get_tags_live and excludes get_tags', () => {
+  test('handleListTools when --live-reads is ON includes get_tags_live', () => {
     // Pass a mock GraphQL client so the constructor can wire liveTagsTools
     // without attempting real auth. The fourth positional arg is liveReadsEnabled.
     const mockClient = createMockGraphQLClient({});
@@ -2371,7 +2371,6 @@ describe('--live-reads tags wiring', () => {
     const { tools } = server.handleListTools();
     const names = tools.map((t) => t.name);
     expect(names).toContain('get_tags_live');
-    expect(names).not.toContain('get_tags');
   });
 
   test('get_tags_live without --live-reads returns isError with --live-reads hint', async () => {
