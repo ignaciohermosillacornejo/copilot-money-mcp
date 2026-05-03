@@ -5,7 +5,7 @@
  * exposed by LiveCopilotDatabase (24h TTL). Always queries with
  * {budget: true} so PR #3 (Budgets) can project from the same cache.
  *
- * Output envelope mirrors the cache-mode get_user_categories shape (count,
+ * Output envelope mirrors the cache-mode get_categories shape (count,
  * categories) plus the freshness-envelope fields.
  */
 
@@ -76,7 +76,7 @@ export function createLiveCategoriesToolSchema() {
   return {
     name: 'get_categories_live',
     description:
-      'Get user categories (live, GraphQL-backed). Includes per-category budget data so get_budgets_live can read from the same cache. Replaces get_user_categories when --live-reads is on.',
+      'Get user categories (live, GraphQL-backed). Includes per-category budget data so get_budgets_live can read from the same cache. Replaces get_categories when --live-reads is on.',
     inputSchema: {
       type: 'object' as const,
       properties: {

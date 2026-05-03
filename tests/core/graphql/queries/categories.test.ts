@@ -95,6 +95,64 @@ describe('fetchCategories', () => {
     expect(rows.map((r) => r.id)).toEqual(['parent-1', 'child-1', 'parent-2']);
   });
 
+  test('budget field on parent and children survives flatten', async () => {
+    const sampleBudget = {
+      current: {
+        unassignedRolloverAmount: '0',
+        childRolloverAmount: '0',
+        unassignedAmount: '50',
+        resolvedAmount: '450',
+        rolloverAmount: '0',
+        childAmount: null,
+        goalAmount: '500',
+        amount: '500',
+        month: '2026-05',
+        id: 'budget-current',
+      },
+      histories: [],
+    };
+
+    const client = {
+      query: mock(() =>
+        Promise.resolve({
+          categories: [
+            {
+              id: 'parent-1',
+              name: 'Food',
+              templateId: 'Food',
+              colorName: 'ORANGE2',
+              isExcluded: false,
+              isRolloverDisabled: false,
+              canBeDeleted: true,
+              icon: null,
+              budget: sampleBudget,
+              childCategories: [
+                {
+                  id: 'child-1',
+                  name: 'Coffee',
+                  templateId: null,
+                  colorName: null,
+                  isExcluded: false,
+                  isRolloverDisabled: false,
+                  canBeDeleted: true,
+                  icon: null,
+                  budget: sampleBudget,
+                },
+              ],
+            },
+          ],
+        })
+      ),
+    } as unknown as GraphQLClient;
+
+    const { fetchCategories } = await import('../../../../src/core/graphql/queries/categories.js');
+    const rows = await fetchCategories(client);
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.budget?.current?.amount).toBe('500');
+    expect(rows[1]?.budget?.current?.amount).toBe('500');
+  });
+
   test('passes {spend:false, budget:true, rollovers:false} variables', async () => {
     const client = {
       query: mock(() => Promise.resolve({ categories: [] })),
