@@ -64,6 +64,13 @@ describe('LiveTransactionsTools — input validation', () => {
     );
   });
 
+  test('rejects exclude_deleted=false (server-side filter cannot be disabled)', async () => {
+    const tools = new LiveTransactionsTools(mkLive());
+    await expect(tools.getTransactions({ exclude_deleted: false } as never)).rejects.toThrow(
+      /exclude_deleted.*not supported/i
+    );
+  });
+
   test('rejects transaction_id lookup without account_id+item_id', async () => {
     const tools = new LiveTransactionsTools(mkLive());
     await expect(tools.getTransactions({ transaction_id: 't1' } as never)).rejects.toThrow(

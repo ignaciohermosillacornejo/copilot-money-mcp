@@ -164,13 +164,21 @@ export interface PaginateOptions {
 
 export type TransactionsFetcher = (after: string | null) => Promise<TransactionsPage>;
 
+// Server caps page size at 25, so 1000 pages = 25k transactions — far above any
+// realistic personal-finance window. The cap exists to escape pathological
+// server responses (empty edges + hasNextPage=true + stable cursor) that
+// would otherwise spin forever, since the startDate early-exit only fires
+// when edges is non-empty.
+const MAX_PAGES = 1000;
+
 /**
  * Paginate a Transactions query until no more pages are needed.
  *
  * Pure pagination driver — the fetcher callback owns the actual
  * network call. Early-exits when the trailing edge of a page precedes
  * opts.startDate (requires DATE DESC sort to be meaningful). Otherwise
- * follows pageInfo.endCursor until pageInfo.hasNextPage === false.
+ * follows pageInfo.endCursor until pageInfo.hasNextPage === false, with
+ * a hard MAX_PAGES safety cap.
  */
 export async function paginateTransactions(
   fetcher: TransactionsFetcher,
@@ -179,24 +187,26 @@ export async function paginateTransactions(
   const collected: TransactionNode[] = [];
   let cursor: string | null = null;
 
-  while (true) {
+  for (let page_count = 0; page_count < MAX_PAGES; page_count++) {
     const page = await fetcher(cursor);
     for (const edge of page.edges) {
       collected.push(edge.node);
     }
 
-    if (!page.pageInfo.hasNextPage) break;
+    if (!page.pageInfo.hasNextPage) return collected;
 
     if (opts.startDate && page.edges.length > 0) {
       const tail = page.edges[page.edges.length - 1]!.node.date;
-      if (tail < opts.startDate) break;
+      if (tail < opts.startDate) return collected;
     }
 
     cursor = page.pageInfo.endCursor;
-    if (cursor === null) break;
+    if (cursor === null) return collected;
   }
 
-  return collected;
+  throw new Error(
+    `paginateTransactions exceeded max page count (${MAX_PAGES}) — server kept returning hasNextPage=true. Likely a server-side pagination bug; narrow the date range or report upstream.`
+  );
 }
 
 export interface FetchTransactionsArgs {

@@ -347,6 +347,12 @@ export class LiveTransactionsTools {
       );
     }
 
+    if (opts.exclude_deleted === false) {
+      throw new Error(
+        `Parameter 'exclude_deleted=false' is not supported in live mode — the GraphQL server omits deleted transactions. Retry without 'exclude_deleted' or set it to true.`
+      );
+    }
+
     if (opts.transaction_id !== undefined) {
       if (!opts.account_id || !opts.item_id) {
         throw new Error(
@@ -378,7 +384,7 @@ export function createLiveToolSchemas(): ToolSchema[] {
     {
       name: 'get_transactions_live',
       description:
-        "Reads transactions live from Copilot's GraphQL API (requires --live-reads flag and network connectivity). Use this when the user asks about historical date ranges that may not be in the local cache, or when fresh data is required. Unlike get_transactions, the following filters are NOT supported and must not be included: city, lat, lon, radius_km, region, country, transaction_type=foreign, transaction_type=duplicates, and exclude_split_parents=false — any of these returns an error telling you to retry without the parameter. Single-transaction lookup requires transaction_id + account_id + item_id AND a date range (start_date, end_date, or period) — pass the transaction's date from the prior list result; the server has no single-row-by-id filter so unbounded lookups paginate the whole account. If the backend is unreachable, this tool returns an isError result; it does NOT fall back to the local cache.",
+        "Reads transactions live from Copilot's GraphQL API (requires --live-reads flag and network connectivity). Use this when the user asks about historical date ranges that may not be in the local cache, or when fresh data is required. Unlike get_transactions, the following filters are NOT supported and must not be included: city, lat, lon, radius_km, region, country, transaction_type=foreign, transaction_type=duplicates, exclude_split_parents=false, and exclude_deleted=false — any of these returns an error telling you to retry without the parameter. Single-transaction lookup requires transaction_id + account_id + item_id AND a date range (start_date, end_date, or period) — pass the transaction's date from the prior list result; the server has no single-row-by-id filter so unbounded lookups paginate the whole account. If the backend is unreachable, this tool returns an isError result; it does NOT fall back to the local cache.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -435,7 +441,7 @@ export function createLiveToolSchemas(): ToolSchema[] {
           exclude_deleted: {
             type: 'boolean',
             description:
-              'Exclude deleted transactions (default: true). No-op in live mode — the server already excludes deleted rows.',
+              'Must be true or omitted — the GraphQL server already excludes deleted transactions. Passing false returns an error.',
             default: true,
           },
           exclude_excluded: {
