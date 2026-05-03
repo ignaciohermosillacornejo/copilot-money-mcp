@@ -69,7 +69,8 @@ export class RefreshCacheTool {
       flushed.categories = true;
       this.live.getTagsCache().invalidate();
       flushed.tags = true;
-      this.live.getBudgetsCache().invalidate();
+      // budgets piggyback on categoriesCache; flushing categories above already
+      // invalidates them. Set the flag for output parity with the original API.
       flushed.budgets = true;
       this.live.getRecurringCache().invalidate();
       flushed.recurring = true;
@@ -102,7 +103,9 @@ export class RefreshCacheTool {
         flushed.tags = true;
         break;
       case 'budgets':
-        this.live.getBudgetsCache().invalidate();
+        // Alias: budgets data lives inside categoriesCache (per-category projection).
+        // Invalidating categoriesCache also flushes the budgets projection.
+        this.live.getCategoriesCache().invalidate();
         flushed.budgets = true;
         break;
       case 'recurring':
@@ -126,7 +129,8 @@ export function createRefreshCacheToolSchema() {
         scope: {
           type: 'string',
           enum: VALID_SCOPES,
-          description: 'Which slice of the live cache to flush. Default: all.',
+          description:
+            'Which slice of the live cache to flush. Default: all. Note: "budgets" is an alias for "categories" — budget data is a projection of the categories cache.',
           default: 'all',
         },
         months: {
