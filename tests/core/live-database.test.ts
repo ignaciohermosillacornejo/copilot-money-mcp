@@ -5,8 +5,9 @@ import type { GraphQLClient } from '../../src/core/graphql/client.js';
 import type { CopilotDatabase } from '../../src/core/database.js';
 import type { TransactionsPage } from '../../src/core/graphql/queries/transactions.js';
 import { SnapshotCache, TransactionWindowCache } from '../../src/core/cache/index.js';
-import type { Tag, Recurring } from '../../src/models/index.js';
+import type { Tag } from '../../src/models/index.js';
 import type { CategoryNode } from '../../src/core/graphql/queries/categories.js';
+import type { RecurringNode } from '../../src/core/graphql/queries/recurrings.js';
 
 function mkClient(): GraphQLClient {
   return { mutate: mock(), query: mock() } as unknown as GraphQLClient;
@@ -703,24 +704,47 @@ describe('LiveCopilotDatabase.patchLiveCategoryBudget', () => {
 // ── patchLiveRecurringUpsert / patchLiveRecurringDelete ────────────────────
 
 describe('LiveCopilotDatabase — recurring cache patches', () => {
-  test('patchLiveRecurringUpsert inserts a new recurring item', async () => {
+  test('patchLiveRecurringUpsert inserts a new recurring item (RecurringNode shape)', async () => {
     const live = new LiveCopilotDatabase(mkClient(), mkCache());
     await live.getRecurringCache().read(async () => []);
-    const rec: Recurring = { recurring_id: 'r1', name: 'Netflix' };
+    const rec: RecurringNode = {
+      id: 'r1',
+      name: 'Netflix',
+      state: 'ACTIVE',
+      frequency: 'MONTHLY',
+      nextPaymentAmount: 15.99,
+      nextPaymentDate: '2026-06-01',
+      categoryId: 'cat-streaming',
+      emoji: '🎬',
+      icon: { __typename: 'EmojiUnicode', unicode: '🎬' },
+      rule: null,
+      payments: [],
+    };
     live.patchLiveRecurringUpsert(rec);
     const result = await live.getRecurringCache().read(async () => []);
-    expect(result.rows.find((r) => r.recurring_id === 'r1')?.name).toBe('Netflix');
+    expect(result.rows.find((r) => r.id === 'r1')?.name).toBe('Netflix');
   });
 
   test('patchLiveRecurringDelete removes recurring item by id', async () => {
     const live = new LiveCopilotDatabase(mkClient(), mkCache());
-    await live.getRecurringCache().read(async () => [
-      { recurring_id: 'r1', name: 'Netflix' },
-      { recurring_id: 'r2', name: 'Spotify' },
-    ]);
+    const r1: RecurringNode = {
+      id: 'r1',
+      name: 'Netflix',
+      state: 'ACTIVE',
+      frequency: 'MONTHLY',
+      nextPaymentAmount: null,
+      nextPaymentDate: null,
+      categoryId: null,
+      emoji: null,
+      icon: null,
+      rule: null,
+      payments: [],
+    };
+    const r2: RecurringNode = { ...r1, id: 'r2', name: 'Spotify' };
+    await live.getRecurringCache().read(async () => [r1, r2]);
     live.patchLiveRecurringDelete('r1');
     const result = await live.getRecurringCache().read(async () => []);
-    expect(result.rows.map((r) => r.recurring_id)).toEqual(['r2']);
+    expect(result.rows.map((r) => r.id)).toEqual(['r2']);
   });
 });
 
