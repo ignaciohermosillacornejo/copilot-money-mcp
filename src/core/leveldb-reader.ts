@@ -26,7 +26,7 @@ import {
 
 /**
  * Cache for temporary database copies.
- * Maps source path to { tempPath, refCount, lastAccess, sourceMtime }.
+ * Maps source path to { tempPath, refCount, lastAccess, sourceFingerprint }.
  */
 interface TempDbCacheEntry {
   tempPath: string;
@@ -37,7 +37,7 @@ interface TempDbCacheEntry {
    * directory and every relevant file inside). Used to detect whether the
    * source has changed since this entry was populated.
    */
-  sourceMtime: number;
+  sourceFingerprint: number;
 }
 
 const tempDbCache = new Map<string, TempDbCacheEntry>();
@@ -97,8 +97,8 @@ function sourceFingerprint(srcPath: string): number {
 function copyDatabaseToTemp(srcPath: string): string {
   const cached = tempDbCache.get(srcPath);
   if (cached && fs.existsSync(cached.tempPath)) {
-    const currentMtime = sourceFingerprint(srcPath);
-    if (currentMtime <= cached.sourceMtime) {
+    const currentFingerprint = sourceFingerprint(srcPath);
+    if (currentFingerprint <= cached.sourceFingerprint) {
       cached.refCount++;
       cached.lastAccess = Date.now();
       return cached.tempPath;
@@ -125,8 +125,10 @@ function copyDatabaseToTemp(srcPath: string): string {
   // copy itself will then be observed as `current > stored` on the next
   // call and trigger a re-copy — preferring an extra copy over a stale
   // snapshot. (Storing the post-copy fingerprint would risk missing
-  // mid-copy writes.)
-  const sourceMtime = sourceFingerprint(srcPath);
+  // mid-copy writes.) Recomputed here rather than reusing the
+  // staleness-check value above, so this snapshot is captured as close
+  // to the copy start as possible.
+  const fingerprint = sourceFingerprint(srcPath);
 
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'copilot-leveldb-'));
   const files = fs.readdirSync(srcPath);
@@ -140,7 +142,7 @@ function copyDatabaseToTemp(srcPath: string): string {
     tempPath: tempDir,
     refCount: 1,
     lastAccess: Date.now(),
-    sourceMtime,
+    sourceFingerprint: fingerprint,
   });
 
   return tempDir;
