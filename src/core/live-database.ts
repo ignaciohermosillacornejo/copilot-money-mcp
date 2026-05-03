@@ -374,33 +374,52 @@ export class LiveCopilotDatabase {
     const cached = this.categoriesCache.peek()?.find((c) => c.id === categoryId);
     if (!cached) return;
 
-    const monthKey =
-      month ??
-      (() => {
-        // UTC matches monthAge() / monthsCovered() in date.ts. Using local time
-        // would be off by ~12h at month boundaries in negative UTC offsets.
-        const d = new Date();
-        return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
-      })();
+    // Compute current UTC month once (shared by both monthKey defaulting and
+    // current-synthesis logic). UTC matches monthAge() / monthsCovered() in
+    // date.ts. Local time would be off by ~12h at month boundaries in negative
+    // UTC offsets.
+    const todayMonth = (() => {
+      const d = new Date();
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+    })();
+    const monthKey = month ?? todayMonth;
     const amountStr = String(amount);
 
     const existingBudget = cached.budget ?? { current: null, histories: [] };
 
-    // If patch targets the current month, update budget.current
-    const updatesCurrent = existingBudget.current?.month === monthKey;
+    // Decide where the patch lands:
+    // - If a `current` entry exists for the patched month → update its amount
+    // - Else if the patched month IS the current month → synthesize a fresh `current`
+    //   (do NOT also write histories — that would create a semantically inconsistent
+    //   state where both current and a same-month history entry exist)
+    // - Else → upsert in `histories[]` (replace existing entry by month, or push new)
     let newCurrent = existingBudget.current;
     let newHistories = existingBudget.histories;
 
-    if (updatesCurrent && newCurrent) {
-      newCurrent = { ...newCurrent, amount: amountStr };
+    if (existingBudget.current?.month === monthKey) {
+      newCurrent = { ...existingBudget.current, amount: amountStr };
+    } else if (monthKey === todayMonth) {
+      // Patch targets current month but no `current` existed — synthesize one.
+      newCurrent = {
+        unassignedRolloverAmount: null,
+        childRolloverAmount: null,
+        unassignedAmount: null,
+        resolvedAmount: amountStr,
+        rolloverAmount: null,
+        childAmount: null,
+        goalAmount: amountStr,
+        amount: amountStr,
+        month: monthKey,
+        id: `${categoryId}-${monthKey}-current-synthetic`,
+      };
     } else {
-      // Update or insert in histories
+      // Patch targets a non-current month → write to histories.
       const idx = newHistories.findIndex((h) => h.month === monthKey);
       if (idx >= 0) {
         newHistories = [...newHistories];
         newHistories[idx] = { ...newHistories[idx]!, amount: amountStr };
       } else {
-        // Insert minimal new history entry. Other monthly fields default to null/0.
+        // Insert minimal new history entry. Other monthly fields default to null.
         newHistories = [
           ...newHistories,
           {
@@ -416,28 +435,6 @@ export class LiveCopilotDatabase {
             id: `${categoryId}-${monthKey}-synthetic`,
           },
         ];
-      }
-    }
-
-    // If no current existed but the patch was for the current month, synthesize current.
-    if (!updatesCurrent) {
-      const todayMonth = (() => {
-        const d = new Date();
-        return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
-      })();
-      if (monthKey === todayMonth && !newCurrent) {
-        newCurrent = {
-          unassignedRolloverAmount: null,
-          childRolloverAmount: null,
-          unassignedAmount: null,
-          resolvedAmount: amountStr,
-          rolloverAmount: null,
-          childAmount: null,
-          goalAmount: amountStr,
-          amount: amountStr,
-          month: monthKey,
-          id: `${categoryId}-${monthKey}-current-synthetic`,
-        };
       }
     }
 

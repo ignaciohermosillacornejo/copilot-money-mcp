@@ -121,6 +121,43 @@ describe('LiveBudgetsTools.getBudgets', () => {
     expect(result.budgets[0]?.amount).toBeUndefined(); // no current
     expect(result.budgets[0]?.amounts).toEqual({ '2026-04': 400 });
   });
+
+  test('handles category with budget.current present but current.amount=null', async () => {
+    const cat = {
+      id: 'cat-misc',
+      name: 'Misc',
+      templateId: null,
+      colorName: null,
+      icon: null,
+      isExcluded: false,
+      isRolloverDisabled: false,
+      canBeDeleted: true,
+      budget: {
+        current: {
+          unassignedRolloverAmount: null,
+          childRolloverAmount: null,
+          unassignedAmount: null,
+          resolvedAmount: null,
+          rolloverAmount: null,
+          childAmount: null,
+          goalAmount: null,
+          amount: null,
+          month: '2026-05',
+          id: 'budget-misc-null',
+        },
+        histories: [],
+      },
+    };
+    const client = makeClient([cat]);
+    const tools = new LiveBudgetsTools(makeLive(client));
+
+    const result = await tools.getBudgets({});
+
+    // current.amount=null → parseAmount returns undefined → neither `amount` nor
+    // an `amounts` entry is produced for the current month; histories is empty too.
+    // projectCategory drops the row entirely (no current amount AND no history amounts).
+    expect(result.count).toBe(0);
+  });
 });
 
 describe('createLiveBudgetsToolSchema', () => {
