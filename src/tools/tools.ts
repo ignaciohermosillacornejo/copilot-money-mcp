@@ -3478,6 +3478,12 @@ export class CopilotMoneyTools {
     state?: string;
   }): Promise<{ success: true; recurring_id: string; updated: string[] }> {
     const client = this.getGraphQLClient();
+    if (args.state !== undefined) {
+      const VALID_STATES = ['ACTIVE', 'PAUSED', 'ARCHIVED'];
+      if (!VALID_STATES.includes(args.state)) {
+        throw new Error(`state must be one of: ${VALID_STATES.join(', ')}. Got: ${args.state}`);
+      }
+    }
     const input: Record<string, unknown> = {};
     if (args.state !== undefined) input.state = args.state;
     if (args.rule !== undefined) {

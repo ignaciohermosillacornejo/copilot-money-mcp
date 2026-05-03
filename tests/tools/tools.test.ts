@@ -3460,6 +3460,15 @@ describe('updateRecurring', () => {
     expect(client._calls).toHaveLength(0);
   });
 
+  test('rejects lowercase state with VALID_STATES error (matches setRecurringState)', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+    await expect(tools.updateRecurring({ recurring_id: 'rec-1', state: 'paused' })).rejects.toThrow(
+      'state must be one of: ACTIVE, PAUSED, ARCHIVED. Got: paused'
+    );
+    expect(client._calls).toHaveLength(0);
+  });
+
   test('dispatches EditRecurring with state', async () => {
     const client = createMockGraphQLClient({
       EditRecurring: {
