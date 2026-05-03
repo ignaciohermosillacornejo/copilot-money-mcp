@@ -106,8 +106,7 @@ export class CopilotMoneyServer {
           (s) =>
             s.name !== 'get_transactions' &&
             s.name !== 'get_accounts' &&
-            s.name !== 'get_categories' &&
-            s.name !== 'get_tags'
+            s.name !== 'get_categories'
         )
       : readSchemas;
     const liveSchemas = this.liveReadsEnabled
