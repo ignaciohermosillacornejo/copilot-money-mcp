@@ -200,6 +200,36 @@ describe('LevelDB Decoder', () => {
       }
     });
 
+    test('skips soft-deleted transactions (user_deleted=true) — issue #326', async () => {
+      // Copilot's app does not write Firestore tombstones for transaction
+      // deletes. It soft-deletes by flipping `user_deleted: true` on the
+      // Document and leaving everything else intact. The decoder must
+      // filter these out, the same way `tools.getAccounts` filters
+      // accounts with user_deleted=true.
+      const dbPath = path.join(FIXTURES_DIR, 'soft-deleted-txn-db');
+      const transactions: TestTransaction[] = [
+        {
+          transaction_id: 'txn_active',
+          amount: 50.0,
+          date: '2024-01-15',
+          name: 'Active Transaction',
+        },
+        {
+          transaction_id: 'txn_soft_deleted',
+          amount: 99.99,
+          date: '2024-01-16',
+          name: 'GQL-TEST-deleted',
+          user_deleted: true,
+        },
+      ];
+
+      await createTransactionDb(dbPath, transactions);
+      const result = await decodeTransactions(dbPath);
+
+      expect(result.length).toBe(1);
+      expect(result[0]?.transaction_id).toBe('txn_active');
+    });
+
     test('skips transactions with zero amount', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'zero-amount-db');
       const transactions: TestTransaction[] = [

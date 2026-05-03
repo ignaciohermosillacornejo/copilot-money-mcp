@@ -747,6 +747,13 @@ function processTransaction(
     return null;
   }
 
+  // Soft delete: Copilot does not write Firestore tombstones for transaction
+  // deletes — it flips `user_deleted: true` on the Document and leaves the
+  // rest in place. Drop these the same way `getAccounts` does (#326).
+  if (getBoolean(fields, 'user_deleted') === true) {
+    return null;
+  }
+
   const txnData: Record<string, unknown> = {
     transaction_id: transactionId,
     amount,

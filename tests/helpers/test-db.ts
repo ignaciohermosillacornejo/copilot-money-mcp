@@ -27,6 +27,7 @@ export interface TestTransaction {
   is_transfer?: boolean;
   note?: string;
   tags?: string[];
+  user_deleted?: boolean;
 }
 
 export interface TestAccount {
@@ -198,6 +199,7 @@ export async function createTransactionDb(
       is_transfer: t.is_transfer,
       note: t.note,
       tags: t.tags,
+      user_deleted: t.user_deleted,
     },
   }));
 
