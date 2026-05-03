@@ -795,11 +795,15 @@ async function smokeTransactionsHappyPath(
  * rows; manual accounts have no such upstream feed.
  *
  * Verifies server-side state only. Does NOT assert deleted transactions
- * disappear from `db.getAllTransactions()` — see issue #326 (the decoder
- * does not handle Firestore NoDocument tombstones, so deleted docs persist
- * in the decoded LevelDB cache until the next full pull). Once #326 is
- * fixed, this section can be extended to assert cache eviction after
- * `refresh_database`.
+ * disappear from `db.getAllTransactions()` after `refresh_database`.
+ * Cache eviction is covered by unit tests in
+ * `tests/core/decoder-leveldb.test.ts` (the `user_deleted=true` filter
+ * fixed in #326 / PR #344). Adding a live end-to-end assertion here was
+ * considered and declined — see issue #346: it would require polling on
+ * Copilot's desktop-app sync window (deletes only land in LevelDB once
+ * the app flushes them locally), and the marginal value over the unit
+ * tests didn't justify the extra smoke runtime on a script that's
+ * already manual-only.
  */
 interface CleanupEntry {
   id: string;
