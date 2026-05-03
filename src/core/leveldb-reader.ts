@@ -26,12 +26,18 @@ import {
 
 /**
  * Cache for temporary database copies.
- * Maps source path to { tempPath, refCount, lastAccess }.
+ * Maps source path to { tempPath, refCount, lastAccess, sourceMtime }.
  */
 interface TempDbCacheEntry {
   tempPath: string;
   refCount: number;
   lastAccess: number;
+  /**
+   * Fingerprint of the source LevelDB at copy time (max mtime across the
+   * directory and every relevant file inside). Used to detect whether the
+   * source has changed since this entry was populated.
+   */
+  sourceMtime: number;
 }
 
 const tempDbCache = new Map<string, TempDbCacheEntry>();
@@ -40,51 +46,101 @@ const tempDbCache = new Map<string, TempDbCacheEntry>();
 const TEMP_DB_CACHE_TTL = 5 * 60 * 1000;
 
 /**
+ * Predicate for files that make up a LevelDB database state. Matches the set
+ * `copyDatabaseToTemp` actually copies (LOCK is intentionally excluded — we
+ * never want to copy or fingerprint it).
+ */
+function isLevelDBFile(file: string): boolean {
+  return (
+    file.endsWith('.ldb') ||
+    file.endsWith('.log') ||
+    file.startsWith('MANIFEST-') ||
+    file === 'CURRENT' ||
+    file === 'LOG' ||
+    file === 'LOG.old'
+  );
+}
+
+/**
+ * Compute a fingerprint of the source LevelDB's current state.
+ *
+ * Returns max(directory mtime, file mtime for every relevant file). The
+ * directory mtime catches structural changes (new/removed/renamed files,
+ * e.g. compaction producing a new .ldb or rolling MANIFEST); per-file
+ * mtimes catch in-place appends (e.g. writes to the active .log file,
+ * which don't bump the directory mtime). Combined, no LevelDB write can
+ * leave the fingerprint unchanged.
+ */
+function sourceFingerprint(srcPath: string): number {
+  let max = fs.statSync(srcPath).mtimeMs;
+  for (const file of fs.readdirSync(srcPath)) {
+    if (!isLevelDBFile(file)) continue;
+    const m = fs.statSync(path.join(srcPath, file)).mtimeMs;
+    if (m > max) max = m;
+  }
+  return max;
+}
+
+/**
  * Copy a LevelDB database to a temporary directory.
  * This allows reading while another process has the database locked.
  *
- * Uses a cache to avoid copying the same database multiple times.
- * The cache entry is reference-counted and cleaned up when no longer in use.
+ * Uses a cache to avoid copying the same database multiple times. The
+ * cache entry is reference-counted and cleaned up when no longer in use.
+ * On a cache hit, the source's current fingerprint is compared against the
+ * one captured at copy time; if the source has changed, the stale temp
+ * copy is discarded and a fresh one is made.
  *
  * @param srcPath - Source database directory
  * @returns Path to the temporary copy
  */
 function copyDatabaseToTemp(srcPath: string): string {
-  // Check cache first
   const cached = tempDbCache.get(srcPath);
   if (cached && fs.existsSync(cached.tempPath)) {
-    cached.refCount++;
-    cached.lastAccess = Date.now();
-    return cached.tempPath;
-  }
-
-  // Create a unique temp directory
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'copilot-leveldb-'));
-
-  // Copy all LevelDB files
-  // LevelDB database consists of: .ldb (SST files), MANIFEST-*, CURRENT, LOG, LOCK
-  const files = fs.readdirSync(srcPath);
-  for (const file of files) {
-    // Copy all relevant LevelDB files (skip LOCK file - we don't need it for read-only)
-    if (
-      file.endsWith('.ldb') ||
-      file.endsWith('.log') ||
-      file.startsWith('MANIFEST-') ||
-      file === 'CURRENT' ||
-      file === 'LOG' ||
-      file === 'LOG.old'
-    ) {
-      const srcFile = path.join(srcPath, file);
-      const destFile = path.join(tempDir, file);
-      fs.copyFileSync(srcFile, destFile);
+    const currentMtime = sourceFingerprint(srcPath);
+    if (currentMtime <= cached.sourceMtime) {
+      cached.refCount++;
+      cached.lastAccess = Date.now();
+      return cached.tempPath;
+    }
+    // Source has changed since the cached copy was made. If nothing is
+    // currently iterating it, drop the stale copy and fall through to
+    // copy fresh. If a concurrent iteration is still using it, return
+    // the stale path (the iterator can't safely have its temp dir
+    // deleted out from under it). This concurrent case is unreachable
+    // in production (worker isolates each have their own cache) and not
+    // exercised by current callers; preserving it as a fallback keeps
+    // correctness when refCount drops back to 0.
+    if (cached.refCount === 0) {
+      cleanupTempDatabase(cached.tempPath);
+      tempDbCache.delete(srcPath);
+    } else {
+      cached.refCount++;
+      cached.lastAccess = Date.now();
+      return cached.tempPath;
     }
   }
 
-  // Add to cache
+  // Snapshot the fingerprint BEFORE copying. Any source change during the
+  // copy itself will then be observed as `current > stored` on the next
+  // call and trigger a re-copy — preferring an extra copy over a stale
+  // snapshot. (Storing the post-copy fingerprint would risk missing
+  // mid-copy writes.)
+  const sourceMtime = sourceFingerprint(srcPath);
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'copilot-leveldb-'));
+  const files = fs.readdirSync(srcPath);
+  for (const file of files) {
+    if (isLevelDBFile(file)) {
+      fs.copyFileSync(path.join(srcPath, file), path.join(tempDir, file));
+    }
+  }
+
   tempDbCache.set(srcPath, {
     tempPath: tempDir,
     refCount: 1,
     lastAccess: Date.now(),
+    sourceMtime,
   });
 
   return tempDir;
