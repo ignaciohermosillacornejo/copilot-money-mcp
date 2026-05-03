@@ -60,7 +60,7 @@ export class LiveTagsTools {
 export function createLiveTagsToolSchema() {
   return {
     name: 'get_tags_live',
-    description: 'Get user tags (live, GraphQL-backed). Replaces get_tags when --live-reads is on.',
+    description: 'Get user tags (live, GraphQL-backed). Available when --live-reads is on.',
     inputSchema: {
       type: 'object' as const,
       properties: {},
