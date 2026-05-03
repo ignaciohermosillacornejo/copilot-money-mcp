@@ -497,9 +497,7 @@ describe('LiveCopilotDatabase.patchLiveTagUpsert (TagNode shape)', () => {
     const live = new LiveCopilotDatabase(mkClient(), mkCache());
 
     const cache = live.getTagsCache();
-    await cache.read(() =>
-      Promise.resolve([{ id: 'tag-1', name: 'travel', colorName: 'BLUE1' }])
-    );
+    await cache.read(() => Promise.resolve([{ id: 'tag-1', name: 'travel', colorName: 'BLUE1' }]));
 
     live.patchLiveTagUpsert({ id: 'tag-1', name: 'travel-2026', colorName: 'BLUE1' });
 
