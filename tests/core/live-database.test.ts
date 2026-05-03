@@ -574,6 +574,44 @@ describe('LiveCopilotDatabase.patchLiveCategoryBudget', () => {
     const cat = after.rows.find((c) => c.id === 'cat-1');
     expect(cat?.budget?.current?.amount).toBe('250');
     expect(cat?.budget?.current?.month).toBe(currentMonth);
+    // The patch went to `current`, not `histories` — histories must stay empty.
+    expect(cat?.budget?.histories).toEqual([]);
+  });
+
+  test('patching current month with no existing current synthesizes ONLY current (not both current+history)', async () => {
+    const live = new LiveCopilotDatabase(mkClient(), mkCache());
+    const cache = live.getCategoriesCache();
+
+    // Seed a category with budget.current=null and empty histories
+    await cache.read(() =>
+      Promise.resolve([
+        {
+          id: 'cat-1',
+          name: 'Food',
+          templateId: 'Food',
+          colorName: null,
+          icon: null,
+          isExcluded: false,
+          isRolloverDisabled: false,
+          canBeDeleted: true,
+          budget: { current: null, histories: [] },
+        },
+      ])
+    );
+
+    // Patch the current UTC month
+    const todayMonth = (() => {
+      const d = new Date();
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+    })();
+    live.patchLiveCategoryBudget('cat-1', 250, todayMonth);
+
+    const after = await cache.read(() => Promise.resolve([]));
+    const cat = after.rows.find((c) => c.id === 'cat-1');
+    expect(cat?.budget?.current?.amount).toBe('250');
+    expect(cat?.budget?.current?.month).toBe(todayMonth);
+    // Critical: histories should remain empty — current month went to `current`, not `histories`
+    expect(cat?.budget?.histories).toEqual([]);
   });
 
   test('updates a historical month via budget.histories', async () => {
