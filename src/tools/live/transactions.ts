@@ -15,6 +15,7 @@ import type {
   TransactionNode,
 } from '../../core/graphql/queries/transactions.js';
 import { fetchCategories } from '../../core/graphql/queries/categories.js';
+import { fetchTags } from '../../core/graphql/queries/tags.js';
 import type { ToolSchema } from '../tools.js';
 import { normalizeMerchantName } from '../tools.js';
 import { parsePeriod } from '../../utils/date.js';
@@ -181,15 +182,17 @@ export class LiveTransactionsTools {
 
   private async resolveTagIds(tagName: string): Promise<string[]> {
     const stripped = tagName.startsWith('#') ? tagName.slice(1) : tagName;
-    const tags = await this.live.getCache().getTags();
+    const { rows: tags } = await this.live
+      .getTagsCache()
+      .read(() => fetchTags(this.live.getClient()));
     const lowered = stripped.toLowerCase();
-    const match = tags.find((t) => t.name?.toLowerCase() === lowered);
+    const match = tags.find((t) => t.name.toLowerCase() === lowered);
     if (!match) {
       throw new Error(
         `Tag '${tagName}' not found. Create the tag first or pass an existing tag name.`
       );
     }
-    return [match.tag_id];
+    return [match.id];
   }
 
   private async postFilter(
