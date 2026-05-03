@@ -35,7 +35,8 @@ import { InFlightRegistry, SnapshotCache, TransactionWindowCache } from './cache
 import type { AccountNode } from './graphql/queries/accounts.js';
 import type { CategoryNode } from './graphql/queries/categories.js';
 import type { TagNode } from './graphql/queries/tags.js';
-import type { Recurring, Transaction } from '../models/index.js';
+import type { RecurringNode } from './graphql/queries/recurrings.js';
+import type { Transaction } from '../models/index.js';
 
 export interface LiveDatabaseOptions {
   verbose?: boolean;
@@ -64,7 +65,7 @@ export class LiveCopilotDatabase {
   private readonly accountsCache: SnapshotCache<AccountNode>;
   private readonly categoriesCache: SnapshotCache<CategoryNode>;
   private readonly tagsCache: SnapshotCache<TagNode>;
-  private readonly recurringCache: SnapshotCache<Recurring>;
+  private readonly recurringCache: SnapshotCache<RecurringNode>;
   private readonly transactionsWindowCache: TransactionWindowCache<TransactionNode>;
 
   constructor(
@@ -88,8 +89,8 @@ export class LiveCopilotDatabase {
       { key: 'tags', ttlMs: ONE_DAY_MS, keyFn: (t) => t.id },
       this.inflight
     );
-    this.recurringCache = new SnapshotCache<Recurring>(
-      { key: 'recurring', ttlMs: SIX_HOURS_MS, keyFn: (r) => r.recurring_id },
+    this.recurringCache = new SnapshotCache<RecurringNode>(
+      { key: 'recurring', ttlMs: SIX_HOURS_MS, keyFn: (r) => r.id },
       this.inflight
     );
     this.transactionsWindowCache = new TransactionWindowCache<TransactionNode>(
@@ -312,7 +313,7 @@ export class LiveCopilotDatabase {
     return this.tagsCache;
   }
 
-  getRecurringCache(): SnapshotCache<Recurring> {
+  getRecurringCache(): SnapshotCache<RecurringNode> {
     return this.recurringCache;
   }
 
@@ -445,7 +446,7 @@ export class LiveCopilotDatabase {
     this.categoriesCache.upsert(merged);
   }
 
-  patchLiveRecurringUpsert(recurring: Recurring): void {
+  patchLiveRecurringUpsert(recurring: RecurringNode): void {
     this.recurringCache.upsert(recurring);
   }
 
