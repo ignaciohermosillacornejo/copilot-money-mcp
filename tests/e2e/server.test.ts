@@ -2408,3 +2408,72 @@ describe('--live-reads tags wiring', () => {
     expect(data._cache_hit).toBe(false);
   });
 });
+
+// ============================================
+// --live-reads budgets wiring tests
+// ============================================
+
+describe('--live-reads budgets wiring', () => {
+  test('handleListTools when --live-reads is OFF excludes get_budgets_live', () => {
+    const server = new CopilotMoneyServer(FAKE_DB_DIR);
+    const { tools } = server.handleListTools();
+    const names = tools.map((t) => t.name);
+    expect(names).not.toContain('get_budgets_live');
+  });
+
+  test('handleListTools when --live-reads is ON includes get_budgets_live and excludes get_budgets', () => {
+    // Pass a mock GraphQL client so the constructor can wire liveBudgetsTools
+    // without attempting real auth. The fourth positional arg is liveReadsEnabled.
+    const mockClient = createMockGraphQLClient({});
+    const server = new CopilotMoneyServer(FAKE_DB_DIR, undefined, false, true, mockClient);
+    const { tools } = server.handleListTools();
+    const names = tools.map((t) => t.name);
+    expect(names).toContain('get_budgets_live');
+    expect(names).not.toContain('get_budgets');
+  });
+
+  test('get_budgets_live without --live-reads returns isError with --live-reads hint', async () => {
+    const server = new CopilotMoneyServer(FAKE_DB_DIR);
+    const db = createMockDb();
+    server._injectForTesting(db, new CopilotMoneyTools(db));
+
+    const result = await server.handleCallTool('get_budgets_live', {});
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('--live-reads');
+  });
+
+  test('get_budgets_live with --live-reads dispatches to liveBudgetsTools.getBudgets', async () => {
+    const mockClient = createMockGraphQLClient({});
+    const server = new CopilotMoneyServer(FAKE_DB_DIR, undefined, false, true, mockClient);
+    const db = createMockDb();
+    server._injectForTesting(db, new CopilotMoneyTools(db));
+
+    // Inject a stub LiveBudgetsTools via private field access
+    const stubResult = {
+      count: 1,
+      total_budgeted: 500,
+      budgets: [
+        {
+          budget_id: 'cat-food',
+          category_id: 'cat-food',
+          category_name: 'Food',
+          amount: 500,
+          amounts: { '2026-05': 500 },
+        },
+      ],
+      _cache_oldest_fetched_at: '2025-01-01T00:00:00.000Z',
+      _cache_newest_fetched_at: '2025-01-01T00:00:00.000Z',
+      _cache_hit: false,
+    };
+    (server as any).liveBudgetsTools = {
+      getBudgets: async (_args: unknown) => stubResult,
+    };
+
+    const result = await server.handleCallTool('get_budgets_live', {});
+    expect(result.isError).toBeUndefined();
+    const data = JSON.parse(result.content[0].text) as typeof stubResult;
+    expect(data.count).toBe(1);
+    expect(data.total_budgeted).toBe(500);
+    expect(data._cache_hit).toBe(false);
+  });
+});
