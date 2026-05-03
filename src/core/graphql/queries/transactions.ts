@@ -187,7 +187,7 @@ export async function paginateTransactions(
   const collected: TransactionNode[] = [];
   let cursor: string | null = null;
 
-  for (let page_count = 0; page_count < MAX_PAGES; page_count++) {
+  for (let pageCount = 0; pageCount < MAX_PAGES; pageCount++) {
     const page = await fetcher(cursor);
     for (const edge of page.edges) {
       collected.push(edge.node);
