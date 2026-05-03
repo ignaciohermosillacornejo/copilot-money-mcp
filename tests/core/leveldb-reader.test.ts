@@ -499,5 +499,28 @@ describe('leveldb-reader', () => {
       expect(count1).toBe(1);
       expect(count2).toBe(1);
     });
+
+    test('invalidates cache when source database changes', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'cache-invalidate-db');
+      await createTestDatabase(dbPath, [
+        { collection: 'transactions', id: 'txn-1', fields: { amount: 1.11 } },
+      ]);
+
+      // First iteration populates the temp cache.
+      let count1 = 0;
+      for await (const _doc of iterateDocuments(dbPath)) count1++;
+      expect(count1).toBe(1);
+
+      // Mutate the source: delete the only document.
+      const reader = new LevelDBReader(dbPath);
+      await reader.open();
+      await reader.deleteDocument('transactions', 'txn-1');
+      await reader.close();
+
+      // Second iteration must reflect the deletion, not return the stale snapshot.
+      let count2 = 0;
+      for await (const _doc of iterateDocuments(dbPath)) count2++;
+      expect(count2).toBe(0);
+    });
   });
 });
