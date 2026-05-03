@@ -94,18 +94,6 @@ describe('RefreshCacheTool — scope: budgets', () => {
     expect(result.flushed.budgets).toBe(true);
   });
 
-  test('does NOT call getBudgetsCache (it will be deleted in Task 6)', async () => {
-    const { live } = makeMockLive();
-    // Attach a spy to getBudgetsCache; it should never be called
-    const getBudgetsCacheSpy = mock(() => ({ invalidate: mock(() => {}) }));
-    (live as Record<string, unknown>)['getBudgetsCache'] = getBudgetsCacheSpy;
-
-    const tool = new RefreshCacheTool(live);
-    await tool.refresh({ scope: 'budgets' });
-
-    expect(getBudgetsCacheSpy).not.toHaveBeenCalled();
-  });
-
   test('does NOT flush accounts, tags, recurring, or transactions', async () => {
     const { live, mocks } = makeMockLive();
     const tool = new RefreshCacheTool(live);

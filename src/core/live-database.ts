@@ -19,7 +19,6 @@
  * See docs/superpowers/plans/2026-04-25-graphql-live-tiered-cache.md.
  */
 
-import { randomUUID } from 'crypto';
 import { GraphQLError, type GraphQLClient } from './graphql/client.js';
 import type { CopilotDatabase } from './database.js';
 import {
@@ -36,7 +35,7 @@ import { InFlightRegistry, SnapshotCache, TransactionWindowCache } from './cache
 import type { AccountNode } from './graphql/queries/accounts.js';
 import type { CategoryNode } from './graphql/queries/categories.js';
 import type { TagNode } from './graphql/queries/tags.js';
-import type { Budget, Recurring, Transaction } from '../models/index.js';
+import type { Recurring, Transaction } from '../models/index.js';
 
 export interface LiveDatabaseOptions {
   verbose?: boolean;
@@ -65,7 +64,6 @@ export class LiveCopilotDatabase {
   private readonly accountsCache: SnapshotCache<AccountNode>;
   private readonly categoriesCache: SnapshotCache<CategoryNode>;
   private readonly tagsCache: SnapshotCache<TagNode>;
-  private readonly budgetsCache: SnapshotCache<Budget>;
   private readonly recurringCache: SnapshotCache<Recurring>;
   private readonly transactionsWindowCache: TransactionWindowCache<TransactionNode>;
 
@@ -88,10 +86,6 @@ export class LiveCopilotDatabase {
     );
     this.tagsCache = new SnapshotCache<TagNode>(
       { key: 'tags', ttlMs: ONE_DAY_MS, keyFn: (t) => t.id },
-      this.inflight
-    );
-    this.budgetsCache = new SnapshotCache<Budget>(
-      { key: 'budgets', ttlMs: ONE_HOUR_MS, keyFn: (b) => b.category_id ?? b.budget_id },
       this.inflight
     );
     this.recurringCache = new SnapshotCache<Recurring>(
@@ -318,10 +312,6 @@ export class LiveCopilotDatabase {
     return this.tagsCache;
   }
 
-  getBudgetsCache(): SnapshotCache<Budget> {
-    return this.budgetsCache;
-  }
-
   getRecurringCache(): SnapshotCache<Recurring> {
     return this.recurringCache;
   }
@@ -354,35 +344,6 @@ export class LiveCopilotDatabase {
   /** Remove a cached transaction by id. No-op if not found. */
   patchLiveTransactionDelete(id: string): void {
     this.transactionsWindowCache.delete(id);
-  }
-
-  /**
-   * Upsert a synthetic Budget into the budgets snapshot cache.
-   * Keyed by category_id. The next real cache refill will overwrite.
-   *
-   * @param month - YYYY-MM key for the amounts map; defaults to current month.
-   */
-  patchLiveBudget(categoryId: string, amount: number, month?: string): void {
-    const monthKey =
-      month ??
-      (() => {
-        // UTC matches monthAge() / monthsCovered() in date.ts. Using
-        // local time would be off by ~12h at month boundaries in
-        // negative UTC offsets (e.g., late Jan 31 in UTC-8 is already
-        // Feb 1 UTC), producing a budget bucket that doesn't match
-        // the cache's tier-classification basis.
-        const d = new Date();
-        return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
-      })();
-    // Use a UUID for budget_id (matches patchCachedBudget on CopilotDatabase
-    // — both paths surface the same shape so paired writes at Task 6 sites
-    // don't produce divergent results across the LevelDB and live caches).
-    const synthetic: Budget = {
-      budget_id: randomUUID(),
-      category_id: categoryId,
-      amounts: { [monthKey]: amount },
-    };
-    this.budgetsCache.upsert(synthetic);
   }
 
   patchLiveTagUpsert(tag: TagNode): void {
