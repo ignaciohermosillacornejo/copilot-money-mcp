@@ -36,6 +36,7 @@ const IN_SCOPE_QUERIES = [
   'Accounts',
   'Categories',
   'Tags',
+  'Recurrings',
 ] as const;
 
 const CAPTURE_DIR = 'docs/graphql-capture/operations/mutations';
