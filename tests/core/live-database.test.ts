@@ -5,7 +5,7 @@ import type { GraphQLClient } from '../../src/core/graphql/client.js';
 import type { CopilotDatabase } from '../../src/core/database.js';
 import type { TransactionsPage } from '../../src/core/graphql/queries/transactions.js';
 import { SnapshotCache, TransactionWindowCache } from '../../src/core/cache/index.js';
-import type { Tag, Budget, Recurring } from '../../src/models/index.js';
+import type { Tag, Recurring } from '../../src/models/index.js';
 import type { CategoryNode } from '../../src/core/graphql/queries/categories.js';
 
 function mkClient(): GraphQLClient {
@@ -346,10 +346,6 @@ describe('LiveCopilotDatabase — cache accessors', () => {
     expect(mkLive().getTagsCache()).toBeInstanceOf(SnapshotCache);
   });
 
-  test('getBudgetsCache returns a SnapshotCache instance', () => {
-    expect(mkLive().getBudgetsCache()).toBeInstanceOf(SnapshotCache);
-  });
-
   test('getRecurringCache returns a SnapshotCache instance', () => {
     expect(mkLive().getRecurringCache()).toBeInstanceOf(SnapshotCache);
   });
@@ -438,55 +434,6 @@ describe('LiveCopilotDatabase.patchLiveTransactionDelete', () => {
     live.patchLiveTransactionDelete('unknown');
 
     expect(wc.entriesForMonth('2024-02')).toHaveLength(1);
-  });
-});
-
-// ── patchLiveBudget ─────────────────────────────────────────────────────────
-
-describe('LiveCopilotDatabase.patchLiveBudget', () => {
-  async function seedAndRead(live: LiveCopilotDatabase): Promise<Budget[]> {
-    // Seed cache so upsert has somewhere to write.
-    return (await live.getBudgetsCache().read(async () => [])).rows;
-  }
-
-  test('upserts synthetic budget into cache by category_id', async () => {
-    const live = new LiveCopilotDatabase(mkClient(), mkCache());
-    await seedAndRead(live);
-
-    live.patchLiveBudget('cat-42', 500, '2025-03');
-
-    const result = await live.getBudgetsCache().read(async () => []);
-    expect(result.rows).toHaveLength(1);
-    const b = result.rows[0]!;
-    expect(b.category_id).toBe('cat-42');
-    expect(b.amounts?.['2025-03']).toBe(500);
-  });
-
-  test('defaults month to current YYYY-MM', async () => {
-    const live = new LiveCopilotDatabase(mkClient(), mkCache());
-    await seedAndRead(live);
-
-    live.patchLiveBudget('cat-1', 100);
-
-    const result = await live.getBudgetsCache().read(async () => []);
-    const b = result.rows[0]!;
-    const now = new Date();
-    const expectedMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    expect(Object.keys(b.amounts ?? {})[0]).toBe(expectedMonth);
-  });
-
-  test('updates existing budget by category_id', async () => {
-    const live = new LiveCopilotDatabase(mkClient(), mkCache());
-    // Seed with an existing budget for the same category.
-    await live
-      .getBudgetsCache()
-      .read(async () => [{ budget_id: 'b1', category_id: 'cat-5', amounts: { '2025-01': 200 } }]);
-
-    live.patchLiveBudget('cat-5', 999, '2025-02');
-
-    const result = await live.getBudgetsCache().read(async () => []);
-    expect(result.rows).toHaveLength(1);
-    expect(result.rows[0]!.amounts?.['2025-02']).toBe(999);
   });
 });
 
