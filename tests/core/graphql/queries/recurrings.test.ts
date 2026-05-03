@@ -38,9 +38,7 @@ describe('fetchRecurrings', () => {
       ),
     } as unknown as GraphQLClient;
 
-    const { fetchRecurrings } = await import(
-      '../../../../src/core/graphql/queries/recurrings.js'
-    );
+    const { fetchRecurrings } = await import('../../../../src/core/graphql/queries/recurrings.js');
     const rows = await fetchRecurrings(client);
 
     expect(rows).toHaveLength(2);
@@ -55,9 +53,7 @@ describe('fetchRecurrings', () => {
       query: mock(() => Promise.resolve({ recurrings: [] })),
     } as unknown as GraphQLClient;
 
-    const { fetchRecurrings } = await import(
-      '../../../../src/core/graphql/queries/recurrings.js'
-    );
+    const { fetchRecurrings } = await import('../../../../src/core/graphql/queries/recurrings.js');
     await fetchRecurrings(client);
 
     expect(client.query).toHaveBeenCalledWith('Recurrings', expect.any(String), {
@@ -70,9 +66,7 @@ describe('fetchRecurrings', () => {
       query: mock(() => Promise.resolve({ recurrings: [] })),
     } as unknown as GraphQLClient;
 
-    const { fetchRecurrings } = await import(
-      '../../../../src/core/graphql/queries/recurrings.js'
-    );
+    const { fetchRecurrings } = await import('../../../../src/core/graphql/queries/recurrings.js');
     const rows = await fetchRecurrings(client);
     expect(rows).toEqual([]);
   });
