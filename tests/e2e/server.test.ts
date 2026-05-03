@@ -2477,3 +2477,79 @@ describe('--live-reads budgets wiring', () => {
     expect(data._cache_hit).toBe(false);
   });
 });
+
+// ============================================
+// --live-reads recurring wiring tests
+// ============================================
+
+describe('--live-reads recurring wiring', () => {
+  test('handleListTools when --live-reads is OFF excludes get_recurring_live', () => {
+    const server = new CopilotMoneyServer(FAKE_DB_DIR);
+    const { tools } = server.handleListTools();
+    const names = tools.map((t) => t.name);
+    expect(names).not.toContain('get_recurring_live');
+    // Cache-mode tool stays present
+    expect(names).toContain('get_recurring_transactions');
+  });
+
+  test('handleListTools when --live-reads is ON includes get_recurring_live and excludes get_recurring_transactions', () => {
+    // Pass a mock GraphQL client so the constructor can wire liveRecurringTools
+    // without attempting real auth. The fourth positional arg is liveReadsEnabled.
+    const mockClient = createMockGraphQLClient({});
+    const server = new CopilotMoneyServer(FAKE_DB_DIR, undefined, false, true, mockClient);
+    const { tools } = server.handleListTools();
+    const names = tools.map((t) => t.name);
+    expect(names).toContain('get_recurring_live');
+    expect(names).not.toContain('get_recurring_transactions');
+  });
+
+  test('get_recurring_live without --live-reads returns isError with --live-reads hint', async () => {
+    const server = new CopilotMoneyServer(FAKE_DB_DIR);
+    const db = createMockDb();
+    server._injectForTesting(db, new CopilotMoneyTools(db));
+
+    const result = await server.handleCallTool('get_recurring_live', {});
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('--live-reads');
+  });
+
+  test('get_recurring_live with --live-reads dispatches to liveRecurringTools.getRecurring', async () => {
+    const mockClient = createMockGraphQLClient({});
+    const server = new CopilotMoneyServer(FAKE_DB_DIR, undefined, false, true, mockClient);
+    const db = createMockDb();
+    server._injectForTesting(db, new CopilotMoneyTools(db));
+
+    // Inject a stub LiveRecurringTools via private field access
+    const stubResult = {
+      count: 1,
+      recurring: [
+        {
+          id: 'r1',
+          name: 'Netflix',
+          state: 'ACTIVE',
+          frequency: 'MONTHLY',
+          nextPaymentAmount: 15.99,
+          nextPaymentDate: '2026-06-01',
+          categoryId: 'cat-streaming',
+          emoji: '🎬',
+          icon: { __typename: 'EmojiUnicode', unicode: '🎬' },
+          rule: null,
+          payments: [],
+        },
+      ],
+      _cache_oldest_fetched_at: '2025-01-01T00:00:00.000Z',
+      _cache_newest_fetched_at: '2025-01-01T00:00:00.000Z',
+      _cache_hit: false,
+    };
+    (server as any).liveRecurringTools = {
+      getRecurring: async (_args: unknown) => stubResult,
+    };
+
+    const result = await server.handleCallTool('get_recurring_live', {});
+    expect(result.isError).toBeUndefined();
+    const data = JSON.parse(result.content[0].text) as typeof stubResult;
+    expect(data.count).toBe(1);
+    expect(data.recurring[0]?.name).toBe('Netflix');
+    expect(data._cache_hit).toBe(false);
+  });
+});
