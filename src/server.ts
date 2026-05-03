@@ -22,6 +22,7 @@ import { LiveTransactionsTools, createLiveToolSchemas } from './tools/live/trans
 import { LiveAccountsTools, createLiveAccountsToolSchema } from './tools/live/accounts.js';
 import { LiveCategoriesTools, createLiveCategoriesToolSchema } from './tools/live/categories.js';
 import { LiveTagsTools, createLiveTagsToolSchema } from './tools/live/tags.js';
+import { LiveBudgetsTools, createLiveBudgetsToolSchema } from './tools/live/budgets.js';
 import { RefreshCacheTool, createRefreshCacheToolSchema } from './tools/live/refresh-cache.js';
 
 // Read version from package.json
@@ -42,6 +43,7 @@ export class CopilotMoneyServer {
   private liveAccountsTools?: LiveAccountsTools;
   private liveCategoriesTools?: LiveCategoriesTools;
   private liveTagsTools?: LiveTagsTools;
+  private liveBudgetsTools?: LiveBudgetsTools;
   private refreshCacheTool?: RefreshCacheTool;
 
   /**
@@ -76,6 +78,7 @@ export class CopilotMoneyServer {
       this.liveAccountsTools = new LiveAccountsTools(liveDb);
       this.liveCategoriesTools = new LiveCategoriesTools(liveDb);
       this.liveTagsTools = new LiveTagsTools(liveDb);
+      this.liveBudgetsTools = new LiveBudgetsTools(liveDb);
       this.refreshCacheTool = new RefreshCacheTool(liveDb);
     }
 
@@ -106,7 +109,8 @@ export class CopilotMoneyServer {
           (s) =>
             s.name !== 'get_transactions' &&
             s.name !== 'get_accounts' &&
-            s.name !== 'get_categories'
+            s.name !== 'get_categories' &&
+            s.name !== 'get_budgets'
         )
       : readSchemas;
     const liveSchemas = this.liveReadsEnabled
@@ -115,6 +119,7 @@ export class CopilotMoneyServer {
           createLiveAccountsToolSchema(),
           createLiveCategoriesToolSchema(),
           createLiveTagsToolSchema(),
+          createLiveBudgetsToolSchema(),
           createRefreshCacheToolSchema(),
         ]
       : [];
@@ -225,6 +230,18 @@ export class CopilotMoneyServer {
       };
     }
 
+    if (name === 'get_budgets_live' && !this.liveBudgetsTools) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'get_budgets_live is only available when the server runs with --live-reads.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
     if (name === 'refresh_cache' && !this.refreshCacheTool) {
       return {
         content: [
@@ -290,6 +307,13 @@ export class CopilotMoneyServer {
         case 'get_tags_live':
           result = await this.liveTagsTools!.getTags(
             (typedArgs as Parameters<NonNullable<typeof this.liveTagsTools>['getTags']>[0]) ?? {}
+          );
+          break;
+
+        case 'get_budgets_live':
+          result = await this.liveBudgetsTools!.getBudgets(
+            (typedArgs as Parameters<NonNullable<typeof this.liveBudgetsTools>['getBudgets']>[0]) ??
+              {}
           );
           break;
 
