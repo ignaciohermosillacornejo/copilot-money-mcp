@@ -24,6 +24,7 @@ import {
 } from '../core/graphql/categories.js';
 import type { CategoryNode } from '../core/graphql/queries/categories.js';
 import type { TagNode } from '../core/graphql/queries/tags.js';
+import type { RecurringNode } from '../core/graphql/queries/recurrings.js';
 import {
   createTag as gqlCreateTag,
   editTag as gqlEditTag,
@@ -3289,7 +3290,20 @@ export class CopilotMoneyTools {
         state: args.state.toLowerCase() as 'active' | 'paused' | 'archived',
       };
       this.db.patchCachedRecurringUpsert(recurringPatch);
-      this.liveDb?.patchLiveRecurringUpsert(recurringPatch);
+      // If recurringCache hasn't been warmed yet, peek() returns undefined and we
+      // skip the live-cache update silently. The next get_recurring_live call will
+      // hydrate fresh data from GraphQL (the EditRecurring mutation already
+      // succeeded). Mirrors the same semantic in updateTag/updateCategory.
+      if (this.liveDb) {
+        const cached = this.liveDb
+          .getRecurringCache()
+          .peek()
+          ?.find((r) => r.id === args.recurring_id);
+        if (cached) {
+          const merged: RecurringNode = { ...cached, state: args.state };
+          this.liveDb.patchLiveRecurringUpsert(merged);
+        }
+      }
       return { success: true, recurring_id: result.id, state: args.state };
     } catch (e) {
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
@@ -3416,7 +3430,23 @@ export class CopilotMoneyTools {
         frequency: result.frequency,
       };
       this.db.patchCachedRecurringUpsert(recurringRow);
-      this.liveDb?.patchLiveRecurringUpsert(recurringRow);
+      // CreateRecurring returns only id/name/state/frequency. We synthesize a
+      // RecurringNode with safe defaults for the missing fields; the next
+      // get_recurring_live call will overwrite them with the server-canonical
+      // shape. Same trade-off as createCategory/createTag.
+      this.liveDb?.patchLiveRecurringUpsert({
+        id: result.id,
+        name: result.name,
+        state: result.state,
+        frequency: result.frequency,
+        nextPaymentAmount: null,
+        nextPaymentDate: null,
+        categoryId: null,
+        emoji: null,
+        icon: null,
+        rule: null,
+        payments: [],
+      });
       return {
         success: true,
         recurring_id: result.id,
@@ -3472,7 +3502,40 @@ export class CopilotMoneyTools {
       if (args.rule?.min_amount !== undefined) patch.min_amount = parseFloat(args.rule.min_amount);
       if (args.rule?.max_amount !== undefined) patch.max_amount = parseFloat(args.rule.max_amount);
       this.db.patchCachedRecurringUpsert(patch as Recurring);
-      this.liveDb?.patchLiveRecurringUpsert(patch as Recurring);
+      // Peek-merge against the GraphQL RecurringNode shape. Skip silently if
+      // cache cold; same convention as updateTag/updateCategory.
+      if (this.liveDb) {
+        const cached = this.liveDb
+          .getRecurringCache()
+          .peek()
+          ?.find((r) => r.id === args.recurring_id);
+        if (cached) {
+          const mergedRule: RecurringNode['rule'] =
+            args.rule !== undefined
+              ? {
+                  nameContains:
+                    args.rule.name_contains !== undefined
+                      ? args.rule.name_contains
+                      : (cached.rule?.nameContains ?? null),
+                  minAmount:
+                    args.rule.min_amount !== undefined
+                      ? parseFloat(args.rule.min_amount)
+                      : (cached.rule?.minAmount ?? null),
+                  maxAmount:
+                    args.rule.max_amount !== undefined
+                      ? parseFloat(args.rule.max_amount)
+                      : (cached.rule?.maxAmount ?? null),
+                  days: args.rule.days !== undefined ? args.rule.days : (cached.rule?.days ?? null),
+                }
+              : cached.rule;
+          const merged: RecurringNode = {
+            ...cached,
+            ...(args.state !== undefined ? { state: args.state } : {}),
+            rule: mergedRule,
+          };
+          this.liveDb.patchLiveRecurringUpsert(merged);
+        }
+      }
       return { success: true, recurring_id: result.id, updated: Object.keys(result.changed) };
     } catch (e) {
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
