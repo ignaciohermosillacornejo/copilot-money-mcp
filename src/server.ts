@@ -21,6 +21,7 @@ import { LiveCopilotDatabase, preflightLiveAuth } from './core/live-database.js'
 import { LiveTransactionsTools, createLiveToolSchemas } from './tools/live/transactions.js';
 import { LiveAccountsTools, createLiveAccountsToolSchema } from './tools/live/accounts.js';
 import { LiveCategoriesTools, createLiveCategoriesToolSchema } from './tools/live/categories.js';
+import { LiveTagsTools, createLiveTagsToolSchema } from './tools/live/tags.js';
 import { RefreshCacheTool, createRefreshCacheToolSchema } from './tools/live/refresh-cache.js';
 
 // Read version from package.json
@@ -40,6 +41,7 @@ export class CopilotMoneyServer {
   private liveTools?: LiveTransactionsTools;
   private liveAccountsTools?: LiveAccountsTools;
   private liveCategoriesTools?: LiveCategoriesTools;
+  private liveTagsTools?: LiveTagsTools;
   private refreshCacheTool?: RefreshCacheTool;
 
   /**
@@ -73,6 +75,7 @@ export class CopilotMoneyServer {
       this.liveTools = new LiveTransactionsTools(liveDb);
       this.liveAccountsTools = new LiveAccountsTools(liveDb);
       this.liveCategoriesTools = new LiveCategoriesTools(liveDb);
+      this.liveTagsTools = new LiveTagsTools(liveDb);
       this.refreshCacheTool = new RefreshCacheTool(liveDb);
     }
 
@@ -103,7 +106,8 @@ export class CopilotMoneyServer {
           (s) =>
             s.name !== 'get_transactions' &&
             s.name !== 'get_accounts' &&
-            s.name !== 'get_categories'
+            s.name !== 'get_categories' &&
+            s.name !== 'get_tags'
         )
       : readSchemas;
     const liveSchemas = this.liveReadsEnabled
@@ -111,6 +115,7 @@ export class CopilotMoneyServer {
           ...createLiveToolSchemas(),
           createLiveAccountsToolSchema(),
           createLiveCategoriesToolSchema(),
+          createLiveTagsToolSchema(),
           createRefreshCacheToolSchema(),
         ]
       : [];
@@ -209,6 +214,18 @@ export class CopilotMoneyServer {
       };
     }
 
+    if (name === 'get_tags_live' && !this.liveTagsTools) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'get_tags_live is only available when the server runs with --live-reads.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
     if (name === 'refresh_cache' && !this.refreshCacheTool) {
       return {
         content: [
@@ -268,6 +285,12 @@ export class CopilotMoneyServer {
             (typedArgs as Parameters<
               NonNullable<typeof this.liveCategoriesTools>['getCategories']
             >[0]) ?? {}
+          );
+          break;
+
+        case 'get_tags_live':
+          result = await this.liveTagsTools!.getTags(
+            (typedArgs as Parameters<NonNullable<typeof this.liveTagsTools>['getTags']>[0]) ?? {}
           );
           break;
 

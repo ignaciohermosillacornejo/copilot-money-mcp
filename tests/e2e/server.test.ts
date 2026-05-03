@@ -2350,3 +2350,62 @@ describe('--live-reads categories wiring', () => {
     expect(data._cache_hit).toBe(false);
   });
 });
+
+// ============================================
+// --live-reads tags wiring tests
+// ============================================
+
+describe('--live-reads tags wiring', () => {
+  test('handleListTools when --live-reads is OFF excludes get_tags_live', () => {
+    const server = new CopilotMoneyServer(FAKE_DB_DIR);
+    const { tools } = server.handleListTools();
+    const names = tools.map((t) => t.name);
+    expect(names).not.toContain('get_tags_live');
+  });
+
+  test('handleListTools when --live-reads is ON includes get_tags_live and excludes get_tags', () => {
+    // Pass a mock GraphQL client so the constructor can wire liveTagsTools
+    // without attempting real auth. The fourth positional arg is liveReadsEnabled.
+    const mockClient = createMockGraphQLClient({});
+    const server = new CopilotMoneyServer(FAKE_DB_DIR, undefined, false, true, mockClient);
+    const { tools } = server.handleListTools();
+    const names = tools.map((t) => t.name);
+    expect(names).toContain('get_tags_live');
+    expect(names).not.toContain('get_tags');
+  });
+
+  test('get_tags_live without --live-reads returns isError with --live-reads hint', async () => {
+    const server = new CopilotMoneyServer(FAKE_DB_DIR);
+    const db = createMockDb();
+    server._injectForTesting(db, new CopilotMoneyTools(db));
+
+    const result = await server.handleCallTool('get_tags_live', {});
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('--live-reads');
+  });
+
+  test('get_tags_live with --live-reads dispatches to liveTagsTools.getTags', async () => {
+    const mockClient = createMockGraphQLClient({});
+    const server = new CopilotMoneyServer(FAKE_DB_DIR, undefined, false, true, mockClient);
+    const db = createMockDb();
+    server._injectForTesting(db, new CopilotMoneyTools(db));
+
+    // Inject a stub LiveTagsTools via private field access
+    const stubResult = {
+      count: 1,
+      tags: [{ id: 'tag-1', name: 'travel', colorName: 'BLUE1' }],
+      _cache_oldest_fetched_at: '2025-01-01T00:00:00.000Z',
+      _cache_newest_fetched_at: '2025-01-01T00:00:00.000Z',
+      _cache_hit: false,
+    };
+    (server as any).liveTagsTools = {
+      getTags: async (_args: unknown) => stubResult,
+    };
+
+    const result = await server.handleCallTool('get_tags_live', {});
+    expect(result.isError).toBeUndefined();
+    const data = JSON.parse(result.content[0].text) as typeof stubResult;
+    expect(data.count).toBe(1);
+    expect(data._cache_hit).toBe(false);
+  });
+});

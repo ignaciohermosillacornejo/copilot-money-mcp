@@ -9,6 +9,7 @@
 import type { LiveCopilotDatabase } from '../../core/live-database.js';
 import { fetchTags, type TagNode } from '../../core/graphql/queries/tags.js';
 
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface GetTagsLiveArgs {
   // No filters yet; reserved for future args (e.g., color_filter).
 }
@@ -27,9 +28,11 @@ export class LiveTagsTools {
   async getTags(_args: GetTagsLiveArgs): Promise<GetTagsLiveResult> {
     const cache = this.live.getTagsCache();
     const startedAt = Date.now();
-    const { rows: cached, fetched_at, hit } = await cache.read(() =>
-      fetchTags(this.live.getClient())
-    );
+    const {
+      rows: cached,
+      fetched_at,
+      hit,
+    } = await cache.read(() => fetchTags(this.live.getClient()));
 
     const rows = [...cached].sort((a, b) => a.name.localeCompare(b.name));
 
@@ -57,8 +60,7 @@ export class LiveTagsTools {
 export function createLiveTagsToolSchema() {
   return {
     name: 'get_tags_live',
-    description:
-      'Get user tags (live, GraphQL-backed). Replaces get_tags when --live-reads is on.',
+    description: 'Get user tags (live, GraphQL-backed). Replaces get_tags when --live-reads is on.',
     inputSchema: {
       type: 'object' as const,
       properties: {},
