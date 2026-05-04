@@ -3,6 +3,7 @@ import { LiveCopilotDatabase } from '../../../src/core/live-database.js';
 import type { GraphQLClient } from '../../../src/core/graphql/client.js';
 import type { CopilotDatabase } from '../../../src/core/database.js';
 import type { RecurringNode } from '../../../src/core/graphql/queries/recurrings.js';
+import type { CategoryNode } from '../../../src/core/graphql/queries/categories.js';
 
 const FAKE_DB = {} as CopilotDatabase;
 
@@ -17,6 +18,19 @@ function mkRec(partial: Partial<RecurringNode> & { id: string; name: string }): 
     icon: null,
     rule: null,
     payments: [],
+    ...partial,
+  };
+}
+
+function mkCat(partial: Partial<CategoryNode> & { id: string; name: string }): CategoryNode {
+  return {
+    templateId: null,
+    colorName: null,
+    icon: null,
+    isExcluded: false,
+    isRolloverDisabled: false,
+    canBeDeleted: true,
+    budget: null,
     ...partial,
   };
 }
@@ -83,27 +97,16 @@ describe('LiveRecurringTools.getRecurring', () => {
     ]);
 
     // Pre-warm categoriesCache with the matching category.
-    await live.getCategoriesCache().read(async () => [
-      {
-        id: 'cat-utils',
-        parentId: null,
-        name: 'Utilities',
-        templateId: 'Utilities',
-        colorName: 'YELLOW1',
-        icon: { __typename: 'EmojiUnicode', unicode: '🧹' },
-        isExcluded: false,
-        isRolloverDisabled: false,
-        canBeDeleted: true,
-        budget: null,
-      },
-    ]);
+    await live
+      .getCategoriesCache()
+      .read(async () => [mkCat({ id: 'cat-utils', name: 'Utilities' })]);
 
     const { LiveRecurringTools } = await import('../../../src/tools/live/recurring.js');
     const tools = new LiveRecurringTools(live);
     const result = await tools.getRecurring({});
 
     const item = result.recurring.find((r) => r.id === 'r1');
-    expect((item as { category_name?: string | null })?.category_name).toBe('Utilities');
+    expect(item?.category_name).toBe('Utilities');
   });
 
   test('regression R1: category_name is null when categoriesCache is cold', async () => {
@@ -123,7 +126,7 @@ describe('LiveRecurringTools.getRecurring', () => {
     const result = await tools.getRecurring({});
 
     const item = result.recurring.find((r) => r.id === 'r1');
-    expect((item as { category_name?: string | null })?.category_name).toBeNull();
+    expect(item?.category_name).toBeNull();
   });
 
   test('regression R1: category_name is null when categoryId does not match any category', async () => {
@@ -137,26 +140,13 @@ describe('LiveRecurringTools.getRecurring', () => {
       }),
     ]);
     // Warm with a category that does NOT match.
-    await live.getCategoriesCache().read(async () => [
-      {
-        id: 'cat-other',
-        parentId: null,
-        name: 'Other',
-        templateId: null,
-        colorName: 'GRAY1',
-        icon: null,
-        isExcluded: false,
-        isRolloverDisabled: false,
-        canBeDeleted: true,
-        budget: null,
-      },
-    ]);
+    await live.getCategoriesCache().read(async () => [mkCat({ id: 'cat-other', name: 'Other' })]);
 
     const { LiveRecurringTools } = await import('../../../src/tools/live/recurring.js');
     const tools = new LiveRecurringTools(live);
     const result = await tools.getRecurring({});
 
     const item = result.recurring.find((r) => r.id === 'r1');
-    expect((item as { category_name?: string | null })?.category_name).toBeNull();
+    expect(item?.category_name).toBeNull();
   });
 });
