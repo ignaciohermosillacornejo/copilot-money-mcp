@@ -76,7 +76,10 @@ export function createLiveCategoriesToolSchema() {
   return {
     name: 'get_categories_live',
     description:
-      'Get user categories (live, GraphQL-backed). Includes per-category budget data so get_budgets_live can read from the same cache. Replaces get_categories when --live-reads is on.',
+      'Get user categories (live, GraphQL-backed). Includes per-category budget data so get_budgets_live can read from the same cache. ' +
+      'Each row carries a `parentId` field: `null` for top-level categories (parents AND standalones), or the parent category id for children. ' +
+      'To detect a parent specifically: build a Set of parent ids from the rows where `parentId !== null`. ' +
+      'Replaces get_categories when --live-reads is on.',
     inputSchema: {
       type: 'object' as const,
       properties: {
