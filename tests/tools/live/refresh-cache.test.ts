@@ -17,6 +17,7 @@ function makeMockLive(): {
     tags: ReturnType<typeof makeInvalidateCache>;
     recurring: ReturnType<typeof makeInvalidateCache>;
     user: ReturnType<typeof makeInvalidateCache>;
+    networth: ReturnType<typeof makeInvalidateCache>;
     transactions: { invalidate: ReturnType<typeof mock> };
   };
 } {
@@ -25,6 +26,7 @@ function makeMockLive(): {
   const tags = makeInvalidateCache();
   const recurring = makeInvalidateCache();
   const user = makeInvalidateCache();
+  const networth = makeInvalidateCache();
   const transactions = { invalidate: mock((_arg: string[] | 'all') => {}) };
 
   const live = {
@@ -33,10 +35,14 @@ function makeMockLive(): {
     getTagsCache: mock(() => tags),
     getRecurringCache: mock(() => recurring),
     getUserCache: mock(() => user),
+    getNetworthCache: mock(() => networth),
     getTransactionsWindowCache: mock(() => transactions),
   } as unknown as LiveCopilotDatabase;
 
-  return { live, mocks: { accounts, categories, tags, recurring, user, transactions } };
+  return {
+    live,
+    mocks: { accounts, categories, tags, recurring, user, networth, transactions },
+  };
 }
 
 describe('RefreshCacheTool — scope: all', () => {
@@ -51,6 +57,7 @@ describe('RefreshCacheTool — scope: all', () => {
     expect(mocks.tags.invalidate).toHaveBeenCalledTimes(1);
     expect(mocks.recurring.invalidate).toHaveBeenCalledTimes(1);
     expect(mocks.user.invalidate).toHaveBeenCalledTimes(1);
+    expect(mocks.networth.invalidate).toHaveBeenCalledTimes(1);
     expect(mocks.transactions.invalidate).toHaveBeenCalledTimes(1);
     expect(result.flushed.accounts).toBe(true);
     expect(result.flushed.categories).toBe(true);
@@ -58,6 +65,7 @@ describe('RefreshCacheTool — scope: all', () => {
     expect(result.flushed.budgets).toBe(true);
     expect(result.flushed.recurring).toBe(true);
     expect(result.flushed.user).toBe(true);
+    expect(result.flushed.networth).toBe(true);
     expect(result.flushed.transactions_months).toBe('all');
   });
 
@@ -139,6 +147,20 @@ describe('RefreshCacheTool — scope: tags', () => {
     expect(mocks.tags.invalidate).toHaveBeenCalledTimes(1);
     expect(mocks.categories.invalidate).not.toHaveBeenCalled();
     expect(result.flushed.tags).toBe(true);
+  });
+});
+
+describe('RefreshCacheTool — scope: networth', () => {
+  test('invalidates only networthCache', async () => {
+    const { live, mocks } = makeMockLive();
+    const tool = new RefreshCacheTool(live);
+
+    const result = await tool.refresh({ scope: 'networth' });
+
+    expect(mocks.networth.invalidate).toHaveBeenCalledTimes(1);
+    expect(mocks.categories.invalidate).not.toHaveBeenCalled();
+    expect(mocks.accounts.invalidate).not.toHaveBeenCalled();
+    expect(result.flushed.networth).toBe(true);
   });
 });
 
