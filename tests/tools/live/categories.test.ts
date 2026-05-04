@@ -3,6 +3,7 @@ import type { GraphQLClient } from '../../../src/core/graphql/client.js';
 import { CopilotDatabase } from '../../../src/core/database.js';
 import { LiveCopilotDatabase } from '../../../src/core/live-database.js';
 import { LiveCategoriesTools } from '../../../src/tools/live/categories.js';
+import type { CategoryNode } from '../../../src/core/graphql/queries/categories.js';
 
 function makeClient(rows: unknown[]): GraphQLClient {
   return {
@@ -86,6 +87,75 @@ describe('LiveCategoriesTools.getCategories', () => {
 
     // Drink < Food < null-sentinel; within Food, Apple < Zebra
     expect(result.categories.map((c) => c.id)).toEqual(['c', 'b', 'a', 'd']);
+  });
+
+  test('regression C1: default include_history=false strips budget.histories', async () => {
+    const fixture: CategoryNode = {
+      id: 'cat-1',
+      parentId: null,
+      name: 'Restaurants',
+      templateId: 'Restaurants',
+      colorName: 'PURPLE2',
+      icon: { __typename: 'EmojiUnicode', unicode: '🍔' },
+      isExcluded: false,
+      isRolloverDisabled: false,
+      canBeDeleted: true,
+      budget: {
+        current: {
+          unassignedRolloverAmount: null,
+          childRolloverAmount: null,
+          unassignedAmount: null,
+          resolvedAmount: '500',
+          rolloverAmount: '0',
+          childAmount: null,
+          goalAmount: '0',
+          amount: '500',
+          month: '2026-05',
+          id: 'budget-current-id',
+        },
+        histories: [
+          {
+            unassignedRolloverAmount: null,
+            childRolloverAmount: null,
+            unassignedAmount: null,
+            resolvedAmount: '500',
+            rolloverAmount: '0',
+            childAmount: null,
+            goalAmount: '0',
+            amount: '500',
+            month: '2026-04',
+            id: 'budget-history-1',
+          },
+          {
+            unassignedRolloverAmount: null,
+            childRolloverAmount: null,
+            unassignedAmount: null,
+            resolvedAmount: '500',
+            rolloverAmount: '0',
+            childAmount: null,
+            goalAmount: '0',
+            amount: '500',
+            month: '2026-03',
+            id: 'budget-history-2',
+          },
+        ],
+      },
+    };
+    const live = makeLive(makeClient([fixture]));
+    const tools = new LiveCategoriesTools(live);
+
+    const result = await tools.getCategories({});
+
+    expect(result.count).toBe(1);
+    // Default behavior: histories must be stripped to keep response small.
+    expect(result.categories[0]?.budget?.histories).toEqual([]);
+    // Current month is preserved.
+    expect(result.categories[0]?.budget?.current?.amount).toBe('500');
+
+    // Cache must NOT be mutated — second read should still see histories
+    // (verifies the projection clones rather than mutates).
+    const cached = live.getCategoriesCache().peek();
+    expect(cached?.[0]?.budget?.histories).toHaveLength(2);
   });
 });
 
