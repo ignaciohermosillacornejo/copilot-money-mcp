@@ -156,21 +156,26 @@ describe('RefreshCacheTool — scope: recurring', () => {
 });
 
 describe('RefreshCacheTool — scope: user (audit C6)', () => {
-  test('invalidates only userCache', async () => {
+  test('cascades to categoriesCache so rollover changes surface immediately', async () => {
+    // The user setting (rolloversConfig.isEnabled) is read inside
+    // categoriesCache.read() — so flushing user alone wouldn't surface new
+    // rollover data until categoriesCache also expires (up to 24h). The
+    // 'user' scope cascades to categoriesCache to make the documented
+    // "use after toggling rollover" advice actually work.
     const { live, mocks } = makeMockLive();
     const tool = new RefreshCacheTool(live);
 
     const result = await tool.refresh({ scope: 'user' });
 
     expect(mocks.user.invalidate).toHaveBeenCalledTimes(1);
+    expect(mocks.categories.invalidate).toHaveBeenCalledTimes(1);
     expect(mocks.accounts.invalidate).not.toHaveBeenCalled();
-    expect(mocks.categories.invalidate).not.toHaveBeenCalled();
     expect(mocks.tags.invalidate).not.toHaveBeenCalled();
     expect(mocks.recurring.invalidate).not.toHaveBeenCalled();
     expect(mocks.transactions.invalidate).not.toHaveBeenCalled();
     expect(result.flushed.user).toBe(true);
+    expect(result.flushed.categories).toBe(true);
     expect(result.flushed.accounts).toBeUndefined();
-    expect(result.flushed.categories).toBeUndefined();
   });
 });
 
