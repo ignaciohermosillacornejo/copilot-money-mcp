@@ -95,6 +95,9 @@ export class LiveMonthlySpendTools {
     });
 
     const fetchedAtIso = new Date(fetched_at).toISOString();
+    // Both `_cache_oldest_fetched_at` and `_cache_newest_fetched_at` reflect
+    // the same single-snapshot fetch time — unlike the windowed transaction
+    // cache where they can differ across month windows.
     return {
       count: rows.length,
       daily_spending: rows,
