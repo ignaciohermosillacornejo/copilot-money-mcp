@@ -16,6 +16,7 @@ function makeMockLive(): {
     categories: ReturnType<typeof makeInvalidateCache>;
     tags: ReturnType<typeof makeInvalidateCache>;
     recurring: ReturnType<typeof makeInvalidateCache>;
+    user: ReturnType<typeof makeInvalidateCache>;
     transactions: { invalidate: ReturnType<typeof mock> };
   };
 } {
@@ -23,6 +24,7 @@ function makeMockLive(): {
   const categories = makeInvalidateCache();
   const tags = makeInvalidateCache();
   const recurring = makeInvalidateCache();
+  const user = makeInvalidateCache();
   const transactions = { invalidate: mock((_arg: string[] | 'all') => {}) };
 
   const live = {
@@ -30,10 +32,11 @@ function makeMockLive(): {
     getCategoriesCache: mock(() => categories),
     getTagsCache: mock(() => tags),
     getRecurringCache: mock(() => recurring),
+    getUserCache: mock(() => user),
     getTransactionsWindowCache: mock(() => transactions),
   } as unknown as LiveCopilotDatabase;
 
-  return { live, mocks: { accounts, categories, tags, recurring, transactions } };
+  return { live, mocks: { accounts, categories, tags, recurring, user, transactions } };
 }
 
 describe('RefreshCacheTool — scope: all', () => {
@@ -47,12 +50,14 @@ describe('RefreshCacheTool — scope: all', () => {
     expect(mocks.categories.invalidate).toHaveBeenCalledTimes(1);
     expect(mocks.tags.invalidate).toHaveBeenCalledTimes(1);
     expect(mocks.recurring.invalidate).toHaveBeenCalledTimes(1);
+    expect(mocks.user.invalidate).toHaveBeenCalledTimes(1);
     expect(mocks.transactions.invalidate).toHaveBeenCalledTimes(1);
     expect(result.flushed.accounts).toBe(true);
     expect(result.flushed.categories).toBe(true);
     expect(result.flushed.tags).toBe(true);
     expect(result.flushed.budgets).toBe(true);
     expect(result.flushed.recurring).toBe(true);
+    expect(result.flushed.user).toBe(true);
     expect(result.flushed.transactions_months).toBe('all');
   });
 
@@ -150,6 +155,25 @@ describe('RefreshCacheTool — scope: recurring', () => {
   });
 });
 
+describe('RefreshCacheTool — scope: user (audit C6)', () => {
+  test('invalidates only userCache', async () => {
+    const { live, mocks } = makeMockLive();
+    const tool = new RefreshCacheTool(live);
+
+    const result = await tool.refresh({ scope: 'user' });
+
+    expect(mocks.user.invalidate).toHaveBeenCalledTimes(1);
+    expect(mocks.accounts.invalidate).not.toHaveBeenCalled();
+    expect(mocks.categories.invalidate).not.toHaveBeenCalled();
+    expect(mocks.tags.invalidate).not.toHaveBeenCalled();
+    expect(mocks.recurring.invalidate).not.toHaveBeenCalled();
+    expect(mocks.transactions.invalidate).not.toHaveBeenCalled();
+    expect(result.flushed.user).toBe(true);
+    expect(result.flushed.accounts).toBeUndefined();
+    expect(result.flushed.categories).toBeUndefined();
+  });
+});
+
 describe('RefreshCacheTool — scope: transactions', () => {
   test('flushes all transaction months by default', async () => {
     const { live, mocks } = makeMockLive();
@@ -212,6 +236,12 @@ describe('createRefreshCacheToolSchema', () => {
     const schema = createRefreshCacheToolSchema();
     const scopeProp = schema.inputSchema.properties.scope as { enum: string[] };
     expect(scopeProp.enum).toContain('budgets');
+  });
+
+  test('user scope is listed in enum (audit C6)', () => {
+    const schema = createRefreshCacheToolSchema();
+    const scopeProp = schema.inputSchema.properties.scope as { enum: string[] };
+    expect(scopeProp.enum).toContain('user');
   });
 
   test('schema description mentions budgets piggyback on categories', () => {
