@@ -153,6 +153,83 @@ describe('fetchCategories', () => {
     expect(rows[1]?.budget?.current?.amount).toBe('500');
   });
 
+  test('regression C3: parentId set to null for parents, parent.id for children', async () => {
+    const client = {
+      query: mock(() =>
+        Promise.resolve({
+          categories: [
+            {
+              id: 'home-id',
+              name: '🏠 Home',
+              templateId: 'Household',
+              colorName: 'ORANGE2',
+              icon: { __typename: 'EmojiUnicode', unicode: '🏠' },
+              isExcluded: false,
+              isRolloverDisabled: false,
+              canBeDeleted: false,
+              budget: null,
+              childCategories: [
+                {
+                  id: 'rent-id',
+                  name: 'Rent',
+                  templateId: 'Rent',
+                  colorName: 'ORANGE2',
+                  icon: { __typename: 'EmojiUnicode', unicode: '🔑' },
+                  isExcluded: false,
+                  isRolloverDisabled: false,
+                  canBeDeleted: true,
+                  budget: null,
+                },
+                {
+                  id: 'utilities-id',
+                  name: 'Utilities',
+                  templateId: 'Utilities',
+                  colorName: 'ORANGE2',
+                  icon: { __typename: 'EmojiUnicode', unicode: '🧹' },
+                  isExcluded: false,
+                  isRolloverDisabled: false,
+                  canBeDeleted: true,
+                  budget: null,
+                },
+              ],
+            },
+            {
+              id: 'standalone-id',
+              name: 'Insurance',
+              templateId: 'Insurance',
+              colorName: 'YELLOW1',
+              icon: { __typename: 'EmojiUnicode', unicode: '☂️' },
+              isExcluded: false,
+              isRolloverDisabled: false,
+              canBeDeleted: true,
+              budget: null,
+              childCategories: [],
+            },
+          ],
+        })
+      ),
+    } as unknown as GraphQLClient;
+
+    const { fetchCategories } = await import('../../../../src/core/graphql/queries/categories.js');
+    const flat = await fetchCategories(client);
+
+    const home = flat.find((c) => c.id === 'home-id');
+    const rent = flat.find((c) => c.id === 'rent-id');
+    const utilities = flat.find((c) => c.id === 'utilities-id');
+    const insurance = flat.find((c) => c.id === 'standalone-id');
+
+    // Parents and standalone categories: parentId is null.
+    expect(home?.parentId).toBeNull();
+    expect(insurance?.parentId).toBeNull();
+
+    // Children: parentId points at their parent's id.
+    expect(rent?.parentId).toBe('home-id');
+    expect(utilities?.parentId).toBe('home-id');
+
+    // No childCategories field on flattened output.
+    expect((home as Record<string, unknown>)?.childCategories).toBeUndefined();
+  });
+
   test('passes {spend:false, budget:true, rollovers:false} variables', async () => {
     const client = {
       query: mock(() => Promise.resolve({ categories: [] })),
