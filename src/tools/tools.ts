@@ -2348,6 +2348,10 @@ export class CopilotMoneyTools {
       // is bounded to the window before the next read.
       this.liveDb?.patchLiveCategoryUpsert({
         id: result.id,
+        // Copilot's GraphQL mutation doesn't accept parentId on
+        // CreateCategoryInput, so newly-created categories are always
+        // top-level. See the early-throw above on args.parent_id.
+        parentId: null,
         name: result.name,
         templateId: null,
         colorName: result.colorName,
