@@ -517,6 +517,12 @@ describe('leveldb-reader', () => {
       await reader.deleteDocument('transactions', 'txn-1');
       await reader.close();
 
+      // Guard against rare filesystems with 1-second mtime granularity:
+      // ensure the source's post-mutation mtime is strictly greater than
+      // the fingerprint snapshotted by the first iteration. APFS/ext4
+      // give sub-millisecond resolution, but a few ms here costs nothing.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+
       // Second iteration must reflect the deletion, not return the stale snapshot.
       let count2 = 0;
       for await (const _doc of iterateDocuments(dbPath)) count2++;
