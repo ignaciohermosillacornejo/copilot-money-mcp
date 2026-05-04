@@ -38,6 +38,10 @@ const IN_SCOPE_QUERIES = [
   'Tags',
   'Recurrings',
   'User',
+  // Phase-2 live tools (added 2026-05-04):
+  'Networth',
+  'UpcomingRecurrings',
+  'MonthlySpend',
 ] as const;
 
 const CAPTURE_DIR = 'docs/graphql-capture/operations/mutations';
