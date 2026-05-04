@@ -70,4 +70,93 @@ describe('LiveRecurringTools.getRecurring', () => {
     expect(result.recurring).toEqual([]);
     expect(result._cache_hit).toBe(false);
   });
+
+  test('regression R1: category_name populated when categoriesCache is warm', async () => {
+    const { live } = mkLiveReturning([
+      mkRec({
+        id: 'r1',
+        name: 'Cellphone Plan',
+        nextPaymentAmount: 52.37,
+        nextPaymentDate: '2026-05-10',
+        categoryId: 'cat-utils',
+      }),
+    ]);
+
+    // Pre-warm categoriesCache with the matching category.
+    await live.getCategoriesCache().read(async () => [
+      {
+        id: 'cat-utils',
+        parentId: null,
+        name: 'Utilities',
+        templateId: 'Utilities',
+        colorName: 'YELLOW1',
+        icon: { __typename: 'EmojiUnicode', unicode: '🧹' },
+        isExcluded: false,
+        isRolloverDisabled: false,
+        canBeDeleted: true,
+        budget: null,
+      },
+    ]);
+
+    const { LiveRecurringTools } = await import('../../../src/tools/live/recurring.js');
+    const tools = new LiveRecurringTools(live);
+    const result = await tools.getRecurring({});
+
+    const item = result.recurring.find((r) => r.id === 'r1');
+    expect((item as { category_name?: string | null })?.category_name).toBe('Utilities');
+  });
+
+  test('regression R1: category_name is null when categoriesCache is cold', async () => {
+    const { live } = mkLiveReturning([
+      mkRec({
+        id: 'r1',
+        name: 'Mystery Sub',
+        nextPaymentAmount: 5,
+        nextPaymentDate: '2026-05-10',
+        categoryId: 'cat-unknown',
+      }),
+    ]);
+    // Do NOT pre-warm categoriesCache — verify the cold-cache fallback.
+
+    const { LiveRecurringTools } = await import('../../../src/tools/live/recurring.js');
+    const tools = new LiveRecurringTools(live);
+    const result = await tools.getRecurring({});
+
+    const item = result.recurring.find((r) => r.id === 'r1');
+    expect((item as { category_name?: string | null })?.category_name).toBeNull();
+  });
+
+  test('regression R1: category_name is null when categoryId does not match any category', async () => {
+    const { live } = mkLiveReturning([
+      mkRec({
+        id: 'r1',
+        name: 'Stale link',
+        nextPaymentAmount: 9,
+        nextPaymentDate: '2026-05-10',
+        categoryId: 'cat-deleted',
+      }),
+    ]);
+    // Warm with a category that does NOT match.
+    await live.getCategoriesCache().read(async () => [
+      {
+        id: 'cat-other',
+        parentId: null,
+        name: 'Other',
+        templateId: null,
+        colorName: 'GRAY1',
+        icon: null,
+        isExcluded: false,
+        isRolloverDisabled: false,
+        canBeDeleted: true,
+        budget: null,
+      },
+    ]);
+
+    const { LiveRecurringTools } = await import('../../../src/tools/live/recurring.js');
+    const tools = new LiveRecurringTools(live);
+    const result = await tools.getRecurring({});
+
+    const item = result.recurring.find((r) => r.id === 'r1');
+    expect((item as { category_name?: string | null })?.category_name).toBeNull();
+  });
 });
