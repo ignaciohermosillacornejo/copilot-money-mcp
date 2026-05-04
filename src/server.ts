@@ -24,6 +24,7 @@ import { LiveCategoriesTools, createLiveCategoriesToolSchema } from './tools/liv
 import { LiveTagsTools, createLiveTagsToolSchema } from './tools/live/tags.js';
 import { LiveBudgetsTools, createLiveBudgetsToolSchema } from './tools/live/budgets.js';
 import { LiveRecurringTools, createLiveRecurringToolSchema } from './tools/live/recurring.js';
+import { LiveNetworthTools, createLiveNetworthToolSchema } from './tools/live/networth.js';
 import { RefreshCacheTool, createRefreshCacheToolSchema } from './tools/live/refresh-cache.js';
 
 // Read version from package.json
@@ -46,6 +47,7 @@ export class CopilotMoneyServer {
   private liveTagsTools?: LiveTagsTools;
   private liveBudgetsTools?: LiveBudgetsTools;
   private liveRecurringTools?: LiveRecurringTools;
+  private liveNetworthTools?: LiveNetworthTools;
   private refreshCacheTool?: RefreshCacheTool;
 
   /**
@@ -82,6 +84,7 @@ export class CopilotMoneyServer {
       this.liveTagsTools = new LiveTagsTools(liveDb);
       this.liveBudgetsTools = new LiveBudgetsTools(liveDb);
       this.liveRecurringTools = new LiveRecurringTools(liveDb);
+      this.liveNetworthTools = new LiveNetworthTools(liveDb);
       this.refreshCacheTool = new RefreshCacheTool(liveDb);
     }
 
@@ -125,6 +128,7 @@ export class CopilotMoneyServer {
           createLiveTagsToolSchema(),
           createLiveBudgetsToolSchema(),
           createLiveRecurringToolSchema(),
+          createLiveNetworthToolSchema(),
           createRefreshCacheToolSchema(),
         ]
       : [];
@@ -259,6 +263,18 @@ export class CopilotMoneyServer {
       };
     }
 
+    if (name === 'get_networth_live' && !this.liveNetworthTools) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'get_networth_live is only available when the server runs with --live-reads.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
     if (name === 'refresh_cache' && !this.refreshCacheTool) {
       return {
         content: [
@@ -338,6 +354,15 @@ export class CopilotMoneyServer {
           result = await this.liveRecurringTools!.getRecurring(
             (typedArgs as Parameters<
               NonNullable<typeof this.liveRecurringTools>['getRecurring']
+            >[0]) ?? {}
+          );
+          break;
+
+        case 'get_networth_live':
+          // liveNetworthTools non-null invariant enforced by the early guard above.
+          result = await this.liveNetworthTools!.getNetworth(
+            (typedArgs as Parameters<
+              NonNullable<typeof this.liveNetworthTools>['getNetworth']
             >[0]) ?? {}
           );
           break;
