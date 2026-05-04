@@ -485,6 +485,7 @@ describe('LiveCopilotDatabase.patchLiveCategoryUpsert (CategoryNode shape)', () 
       Promise.resolve([
         {
           id: 'cat-1',
+          parentId: null,
           name: 'Old Name',
           templateId: 'Food',
           colorName: 'ORANGE2',
@@ -499,6 +500,7 @@ describe('LiveCopilotDatabase.patchLiveCategoryUpsert (CategoryNode shape)', () 
 
     live.patchLiveCategoryUpsert({
       id: 'cat-1',
+      parentId: null,
       name: 'New Name',
       templateId: 'Food',
       colorName: 'ORANGE2',
@@ -517,6 +519,7 @@ describe('LiveCopilotDatabase.patchLiveCategoryUpsert (CategoryNode shape)', () 
     const live = new LiveCopilotDatabase(mkClient(), mkCache());
     const catNode1: CategoryNode = {
       id: 'cat-1',
+      parentId: null,
       name: 'Dining',
       templateId: 'Food',
       colorName: 'ORANGE2',
@@ -528,6 +531,7 @@ describe('LiveCopilotDatabase.patchLiveCategoryUpsert (CategoryNode shape)', () 
     };
     const catNode2: CategoryNode = {
       id: 'cat-2',
+      parentId: null,
       name: 'Travel',
       templateId: 'Travel',
       colorName: 'BLUE1',
@@ -556,6 +560,7 @@ describe('LiveCopilotDatabase.patchLiveCategoryBudget', () => {
       Promise.resolve([
         {
           id: 'cat-1',
+          parentId: null,
           name: 'Food',
           templateId: 'Food',
           colorName: null,
@@ -588,6 +593,7 @@ describe('LiveCopilotDatabase.patchLiveCategoryBudget', () => {
       Promise.resolve([
         {
           id: 'cat-1',
+          parentId: null,
           name: 'Food',
           templateId: 'Food',
           colorName: null,
@@ -623,6 +629,7 @@ describe('LiveCopilotDatabase.patchLiveCategoryBudget', () => {
       Promise.resolve([
         {
           id: 'cat-1',
+          parentId: null,
           name: 'Food',
           templateId: 'Food',
           colorName: null,
@@ -667,6 +674,7 @@ describe('LiveCopilotDatabase.patchLiveCategoryBudget', () => {
       Promise.resolve([
         {
           id: 'cat-1',
+          parentId: null,
           name: 'Food',
           templateId: 'Food',
           colorName: null,
