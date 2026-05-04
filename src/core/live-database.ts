@@ -36,7 +36,7 @@ import type { AccountNode } from './graphql/queries/accounts.js';
 import type { CategoryNode } from './graphql/queries/categories.js';
 import type { TagNode } from './graphql/queries/tags.js';
 import type { RecurringNode } from './graphql/queries/recurrings.js';
-import type { UserNode } from './graphql/queries/user.js';
+import { fetchUser, type UserNode } from './graphql/queries/user.js';
 import type { Transaction } from '../models/index.js';
 
 export interface LiveDatabaseOptions {
@@ -329,6 +329,35 @@ export class LiveCopilotDatabase {
 
   getUserCache(): SnapshotCache<UserNode> {
     return this.userCache;
+  }
+
+  /**
+   * Resolve the user's effective rollovers flag for the Categories query.
+   *
+   * Reads the user record (cached for 24h via userCache) and projects
+   * `budgetingConfig.rolloversConfig.isEnabled` down to a boolean. Mirrors
+   * the web app's per-user behavior — the web reads the same field and
+   * forwards it to the same Categories query (audit finding C6).
+   *
+   * Defensive fallback: if `budgetingConfig.isEnabled === false` (budgeting
+   * fully off) or any layer of the config tree is null, returns `false` —
+   * passing `rollovers: true` when budgeting is off would warm the cache
+   * with rollover effects the user can't see anywhere in the product.
+   *
+   * Used by every consumer of categoriesCache (LiveCategoriesTools,
+   * LiveBudgetsTools, LiveTransactionsTools.getCategoryNameMap) so the
+   * cached payload is consistent regardless of which tool warms the cache
+   * first.
+   */
+  async resolveRolloversFlag(): Promise<boolean> {
+    const { rows } = await this.userCache.read(() =>
+      fetchUser(this.graphql).then((user) => [user])
+    );
+    const user = rows[0];
+    return (
+      user?.budgetingConfig?.isEnabled === true &&
+      user.budgetingConfig.rolloversConfig?.isEnabled === true
+    );
   }
 
   getTransactionsWindowCache(): TransactionWindowCache<TransactionNode> {

@@ -14,6 +14,23 @@ function makeLive(client: GraphQLClient): LiveCopilotDatabase {
   return new LiveCopilotDatabase(client, new CopilotDatabase('/tmp/no-such-db'));
 }
 
+// Pre-warms userCache with rollovers OFF so tests that don't exercise the
+// user-config path can still read categories without hitting the User query.
+// Audit C6: the historical hardcoded `rollovers: false` matches this default.
+async function prewarmUserCacheRolloversOff(live: LiveCopilotDatabase): Promise<void> {
+  await live.getUserCache().read(() =>
+    Promise.resolve([
+      {
+        id: 'test-user',
+        budgetingConfig: {
+          isEnabled: true,
+          rolloversConfig: { isEnabled: false, startDate: null },
+        },
+      },
+    ])
+  );
+}
+
 const sampleCategoryWithBudget = {
   id: 'cat-food',
   name: 'Food',
@@ -105,7 +122,9 @@ function makeRestaurantsCategory(monthCount: number) {
 describe('LiveBudgetsTools.getBudgets', () => {
   test('cold call: projects per-category budgets from categoriesCache', async () => {
     const client = makeClient([sampleCategoryWithBudget, sampleCategoryWithoutBudget]);
-    const tools = new LiveBudgetsTools(makeLive(client));
+    const live = makeLive(client);
+    await prewarmUserCacheRolloversOff(live);
+    const tools = new LiveBudgetsTools(live);
 
     const result = await tools.getBudgets({});
 
@@ -121,7 +140,9 @@ describe('LiveBudgetsTools.getBudgets', () => {
 
   test('warm call: cache hit, no second fetch', async () => {
     const client = makeClient([sampleCategoryWithBudget]);
-    const tools = new LiveBudgetsTools(makeLive(client));
+    const live = makeLive(client);
+    await prewarmUserCacheRolloversOff(live);
+    const tools = new LiveBudgetsTools(live);
 
     await tools.getBudgets({});
     const second = await tools.getBudgets({});
@@ -132,7 +153,9 @@ describe('LiveBudgetsTools.getBudgets', () => {
 
   test('empty categoriesCache returns count 0, no throw', async () => {
     const client = makeClient([]);
-    const tools = new LiveBudgetsTools(makeLive(client));
+    const live = makeLive(client);
+    await prewarmUserCacheRolloversOff(live);
+    const tools = new LiveBudgetsTools(live);
 
     const result = await tools.getBudgets({});
 
@@ -150,7 +173,9 @@ describe('LiveBudgetsTools.getBudgets', () => {
       },
     };
     const client = makeClient([cat]);
-    const tools = new LiveBudgetsTools(makeLive(client));
+    const live = makeLive(client);
+    await prewarmUserCacheRolloversOff(live);
+    const tools = new LiveBudgetsTools(live);
 
     const result = await tools.getBudgets({});
 
@@ -162,7 +187,9 @@ describe('LiveBudgetsTools.getBudgets', () => {
   test('regression C4: default months_window=12 trims amounts to exactly 12 entries', async () => {
     // 24-month fixture; default trim should return exactly the trailing 12.
     const client = makeClient([makeRestaurantsCategory(24)]);
-    const tools = new LiveBudgetsTools(makeLive(client));
+    const live = makeLive(client);
+    await prewarmUserCacheRolloversOff(live);
+    const tools = new LiveBudgetsTools(live);
 
     const result = await tools.getBudgets({});
 
@@ -174,7 +201,9 @@ describe('LiveBudgetsTools.getBudgets', () => {
   test('regression C4: months_window=0 returns all amounts', async () => {
     // 24-month fixture; opt-out should return all 24.
     const client = makeClient([makeRestaurantsCategory(24)]);
-    const tools = new LiveBudgetsTools(makeLive(client));
+    const live = makeLive(client);
+    await prewarmUserCacheRolloversOff(live);
+    const tools = new LiveBudgetsTools(live);
 
     const result = await tools.getBudgets({ months_window: 0 });
 
@@ -186,7 +215,9 @@ describe('LiveBudgetsTools.getBudgets', () => {
     // 24-month fixture, custom window of 3 — covers a non-boundary value
     // (neither the default 12 nor the opt-out sentinel 0).
     const client = makeClient([makeRestaurantsCategory(24)]);
-    const tools = new LiveBudgetsTools(makeLive(client));
+    const live = makeLive(client);
+    await prewarmUserCacheRolloversOff(live);
+    const tools = new LiveBudgetsTools(live);
 
     const result = await tools.getBudgets({ months_window: 3 });
 
@@ -224,7 +255,9 @@ describe('LiveBudgetsTools.getBudgets', () => {
       },
     };
     const client = makeClient([cat]);
-    const tools = new LiveBudgetsTools(makeLive(client));
+    const live = makeLive(client);
+    await prewarmUserCacheRolloversOff(live);
+    const tools = new LiveBudgetsTools(live);
 
     const result = await tools.getBudgets({});
 

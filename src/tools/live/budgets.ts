@@ -105,7 +105,12 @@ export class LiveBudgetsTools {
       rows: cats,
       fetched_at,
       hit,
-    } = await cache.read(() => fetchCategories(this.live.getClient()));
+    } = await cache.read(async () => {
+      // Same closure as LiveCategoriesTools — see resolveRolloversFlag()
+      // and audit finding C6.
+      const rollovers = await this.live.resolveRolloversFlag();
+      return fetchCategories(this.live.getClient(), { rollovers });
+    });
 
     const monthsWindow = args.months_window ?? 12;
 

@@ -5,6 +5,11 @@ import { LiveCopilotDatabase } from '../../../src/core/live-database.js';
 import { LiveCategoriesTools } from '../../../src/tools/live/categories.js';
 
 function makeClient(rows: unknown[]): GraphQLClient {
+  // Single-shape mock: every query (User, Categories, ...) returns the same
+  // `{categories: rows}` payload. The `categories` key is ignored by the User
+  // query; the User query's `data.user` field is undefined here, which is fine
+  // for tests that pre-warm userCache directly (most tests below). For tests
+  // that exercise the user-config path, use makeMultiOpClient.
   return {
     query: mock(() => Promise.resolve({ categories: rows })),
   } as unknown as GraphQLClient;
@@ -12,6 +17,23 @@ function makeClient(rows: unknown[]): GraphQLClient {
 
 function makeLive(client: GraphQLClient): LiveCopilotDatabase {
   return new LiveCopilotDatabase(client, new CopilotDatabase('/tmp/no-such-db'));
+}
+
+// Pre-warms userCache with rollovers OFF so tests that don't exercise the
+// user-config path can still read categories without hitting the User query.
+// The historical hardcoded `rollovers: false` matches this default.
+async function prewarmUserCacheRolloversOff(live: LiveCopilotDatabase): Promise<void> {
+  await live.getUserCache().read(() =>
+    Promise.resolve([
+      {
+        id: 'test-user',
+        budgetingConfig: {
+          isEnabled: true,
+          rolloversConfig: { isEnabled: false, startDate: null },
+        },
+      },
+    ])
+  );
 }
 
 const sampleRow = {
@@ -29,7 +51,9 @@ const sampleRow = {
 describe('LiveCategoriesTools.getCategories', () => {
   test('cold call: fetches and returns rows with cache_hit=false', async () => {
     const client = makeClient([sampleRow]);
-    const tools = new LiveCategoriesTools(makeLive(client));
+    const live = makeLive(client);
+    await prewarmUserCacheRolloversOff(live);
+    const tools = new LiveCategoriesTools(live);
 
     const result = await tools.getCategories({});
 
@@ -41,12 +65,15 @@ describe('LiveCategoriesTools.getCategories', () => {
 
   test('warm call: cache hit, no second fetch', async () => {
     const client = makeClient([sampleRow]);
-    const tools = new LiveCategoriesTools(makeLive(client));
+    const live = makeLive(client);
+    await prewarmUserCacheRolloversOff(live);
+    const tools = new LiveCategoriesTools(live);
 
     await tools.getCategories({});
     const second = await tools.getCategories({});
 
     expect(second._cache_hit).toBe(true);
+    // userCache pre-warmed (so no User query); only the Categories query fires.
     expect(client.query).toHaveBeenCalledTimes(1);
   });
 
@@ -55,7 +82,9 @@ describe('LiveCategoriesTools.getCategories', () => {
       sampleRow,
       { ...sampleRow, id: 'cat-2', name: 'Excluded', isExcluded: true },
     ]);
-    const tools = new LiveCategoriesTools(makeLive(client));
+    const live = makeLive(client);
+    await prewarmUserCacheRolloversOff(live);
+    const tools = new LiveCategoriesTools(live);
 
     const result = await tools.getCategories({ excluded_only: true });
 
@@ -65,7 +94,9 @@ describe('LiveCategoriesTools.getCategories', () => {
 
   test('empty result returns count 0, no throw', async () => {
     const client = makeClient([]);
-    const tools = new LiveCategoriesTools(makeLive(client));
+    const live = makeLive(client);
+    await prewarmUserCacheRolloversOff(live);
+    const tools = new LiveCategoriesTools(live);
 
     const result = await tools.getCategories({});
 
@@ -80,12 +111,132 @@ describe('LiveCategoriesTools.getCategories', () => {
       { ...sampleRow, id: 'c', name: 'Cake', templateId: 'Drink' },
       { ...sampleRow, id: 'd', name: 'Custom', templateId: null },
     ]);
-    const tools = new LiveCategoriesTools(makeLive(client));
+    const live = makeLive(client);
+    await prewarmUserCacheRolloversOff(live);
+    const tools = new LiveCategoriesTools(live);
 
     const result = await tools.getCategories({});
 
     // Drink < Food < null-sentinel; within Food, Apple < Zebra
     expect(result.categories.map((c) => c.id)).toEqual(['c', 'b', 'a', 'd']);
+  });
+});
+
+describe('LiveCategoriesTools.getCategories — audit C6 regression', () => {
+  // Multi-op mock client: discriminates by op name so we can capture the
+  // Categories variables while also returning a User payload.
+  function makeMultiOpClient(opts: {
+    user: {
+      id: string;
+      budgetingConfig: {
+        isEnabled: boolean;
+        rolloversConfig: { isEnabled: boolean; startDate: string | null } | null;
+      } | null;
+    };
+    categories?: unknown[];
+  }): { client: GraphQLClient; calls: Array<{ op: string; vars: Record<string, unknown> }> } {
+    const calls: Array<{ op: string; vars: Record<string, unknown> }> = [];
+    const client = {
+      query: mock((op: string, _q: string, vars: Record<string, unknown>) => {
+        calls.push({ op, vars });
+        if (op === 'User') return Promise.resolve({ user: opts.user });
+        if (op === 'Categories') return Promise.resolve({ categories: opts.categories ?? [] });
+        return Promise.resolve({});
+      }),
+    } as unknown as GraphQLClient;
+    return { client, calls };
+  }
+
+  test('rollovers flag mirrors user.budgetingConfig.rolloversConfig.isEnabled (true)', async () => {
+    const { client, calls } = makeMultiOpClient({
+      user: {
+        id: 'u-1',
+        budgetingConfig: {
+          isEnabled: true,
+          rolloversConfig: { isEnabled: true, startDate: '2026-01' },
+        },
+      },
+    });
+    const tools = new LiveCategoriesTools(makeLive(client));
+
+    await tools.getCategories({});
+
+    const categoriesCall = calls.find((c) => c.op === 'Categories');
+    expect(categoriesCall?.vars.rollovers).toBe(true);
+    // Sanity: User query also fired.
+    expect(calls.some((c) => c.op === 'User')).toBe(true);
+  });
+
+  test('rollovers flag is false when rolloversConfig.isEnabled is false', async () => {
+    const { client, calls } = makeMultiOpClient({
+      user: {
+        id: 'u-2',
+        budgetingConfig: {
+          isEnabled: true,
+          rolloversConfig: { isEnabled: false, startDate: null },
+        },
+      },
+    });
+    const tools = new LiveCategoriesTools(makeLive(client));
+
+    await tools.getCategories({});
+
+    const categoriesCall = calls.find((c) => c.op === 'Categories');
+    expect(categoriesCall?.vars.rollovers).toBe(false);
+  });
+
+  test('rollovers flag is false when budgetingConfig.isEnabled is false (defensive)', async () => {
+    const { client, calls } = makeMultiOpClient({
+      user: {
+        id: 'u-3',
+        budgetingConfig: {
+          isEnabled: false,
+          rolloversConfig: { isEnabled: true, startDate: '2026-01' },
+        },
+      },
+    });
+    const tools = new LiveCategoriesTools(makeLive(client));
+
+    await tools.getCategories({});
+
+    const categoriesCall = calls.find((c) => c.op === 'Categories');
+    expect(categoriesCall?.vars.rollovers).toBe(false);
+  });
+
+  test('rollovers flag is false when budgetingConfig is null', async () => {
+    const { client, calls } = makeMultiOpClient({
+      user: { id: 'u-4', budgetingConfig: null },
+    });
+    const tools = new LiveCategoriesTools(makeLive(client));
+
+    await tools.getCategories({});
+
+    const categoriesCall = calls.find((c) => c.op === 'Categories');
+    expect(categoriesCall?.vars.rollovers).toBe(false);
+  });
+
+  test('userCache shields callers: a second getCategories call does not refetch User', async () => {
+    const { client, calls } = makeMultiOpClient({
+      user: {
+        id: 'u-1',
+        budgetingConfig: {
+          isEnabled: true,
+          rolloversConfig: { isEnabled: true, startDate: '2026-01' },
+        },
+      },
+    });
+    const live = makeLive(client);
+    const tools = new LiveCategoriesTools(live);
+
+    await tools.getCategories({});
+    // Force a second cold Categories fetch by invalidating only categoriesCache.
+    live.getCategoriesCache().invalidate();
+    await tools.getCategories({});
+
+    const userCalls = calls.filter((c) => c.op === 'User');
+    const categoryCalls = calls.filter((c) => c.op === 'Categories');
+    expect(userCalls).toHaveLength(1);
+    expect(categoryCalls).toHaveLength(2);
   });
 });
 
