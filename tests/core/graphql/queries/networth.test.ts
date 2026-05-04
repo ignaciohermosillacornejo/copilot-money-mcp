@@ -14,9 +14,8 @@ describe('fetchNetworthHistory', () => {
       ),
     } as unknown as GraphQLClient;
 
-    const { fetchNetworthHistory } = await import(
-      '../../../../src/core/graphql/queries/networth.js'
-    );
+    const { fetchNetworthHistory } =
+      await import('../../../../src/core/graphql/queries/networth.js');
     const rows = await fetchNetworthHistory(client, { timeFrame: 'ALL' });
 
     expect(rows).toHaveLength(2);
@@ -30,9 +29,8 @@ describe('fetchNetworthHistory', () => {
       query: mock(() => Promise.resolve({ networthHistory: [] })),
     } as unknown as GraphQLClient;
 
-    const { fetchNetworthHistory } = await import(
-      '../../../../src/core/graphql/queries/networth.js'
-    );
+    const { fetchNetworthHistory } =
+      await import('../../../../src/core/graphql/queries/networth.js');
     await fetchNetworthHistory(client, { timeFrame: 'YEAR' });
 
     expect(client.query).toHaveBeenCalledWith('Networth', expect.any(String), {
@@ -45,9 +43,8 @@ describe('fetchNetworthHistory', () => {
       query: mock(() => Promise.resolve({ networthHistory: [] })),
     } as unknown as GraphQLClient;
 
-    const { fetchNetworthHistory } = await import(
-      '../../../../src/core/graphql/queries/networth.js'
-    );
+    const { fetchNetworthHistory } =
+      await import('../../../../src/core/graphql/queries/networth.js');
     const rows = await fetchNetworthHistory(client, { timeFrame: 'ALL' });
     expect(rows).toEqual([]);
   });
@@ -61,9 +58,8 @@ describe('fetchNetworthHistory', () => {
       ),
     } as unknown as GraphQLClient;
 
-    const { fetchNetworthHistory } = await import(
-      '../../../../src/core/graphql/queries/networth.js'
-    );
+    const { fetchNetworthHistory } =
+      await import('../../../../src/core/graphql/queries/networth.js');
     const rows = await fetchNetworthHistory(client, { timeFrame: 'ALL' });
 
     expect(rows[0]?.assets).toBeNull();
