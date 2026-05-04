@@ -152,6 +152,22 @@ describe('LiveUpcomingRecurringsTools.getUpcomingRecurrings', () => {
     expect(item?.category_name).toBeNull();
   });
 
+  test('category_name is null when the row has no categoryId (null categoryId)', async () => {
+    const { live } = mkLiveReturning([
+      mkUpcoming({ id: 'r1', name: 'Uncategorized', categoryId: null }),
+    ]);
+    // Warm categoriesCache so this isn't conflated with the cold-cache case.
+    await live.getCategoriesCache().read(async () => [mkCat({ id: 'cat-x', name: 'X' })]);
+
+    const { LiveUpcomingRecurringsTools } =
+      await import('../../../src/tools/live/upcoming-recurrings.js');
+    const tools = new LiveUpcomingRecurringsTools(live);
+    const result = await tools.getUpcomingRecurrings({});
+
+    const item = result.upcoming.find((r) => r.id === 'r1');
+    expect(item?.category_name).toBeNull();
+  });
+
   test('category_name is null when categoryId does not match any category', async () => {
     const { live } = mkLiveReturning([
       mkUpcoming({
