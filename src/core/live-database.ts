@@ -36,7 +36,11 @@ import type { AccountNode } from './graphql/queries/accounts.js';
 import type { CategoryNode } from './graphql/queries/categories.js';
 import type { TagNode } from './graphql/queries/tags.js';
 import type { RecurringNode } from './graphql/queries/recurrings.js';
+<<<<<<< HEAD
 import type { NetworthHistoryNode } from './graphql/queries/networth.js';
+=======
+import type { UpcomingRecurringNode } from './graphql/queries/upcoming-recurrings.js';
+>>>>>>> f59958b (feat(live-db): add upcomingRecurringsCache (1h TTL))
 import { fetchUser, type UserNode } from './graphql/queries/user.js';
 import type { Transaction } from '../models/index.js';
 
@@ -68,6 +72,11 @@ export class LiveCopilotDatabase {
   private readonly categoriesCache: SnapshotCache<CategoryNode>;
   private readonly tagsCache: SnapshotCache<TagNode>;
   private readonly recurringCache: SnapshotCache<RecurringNode>;
+  // upcomingRecurringsCache holds the "about-to-bill" view (next-due
+  // unpaid items). Distinct from recurringCache (configured/historical
+  // view). Short 1h TTL because items move out of this view as bills get
+  // paid throughout the day.
+  private readonly upcomingRecurringsCache: SnapshotCache<UpcomingRecurringNode>;
   // userCache always holds at most one row — the current user — but we use the
   // SnapshotCache primitive uniformly with the rest of the entities so the
   // refresh-cache and TTL machinery works without a special case. `keyFn` keys
@@ -103,6 +112,10 @@ export class LiveCopilotDatabase {
     );
     this.recurringCache = new SnapshotCache<RecurringNode>(
       { key: 'recurring', ttlMs: SIX_HOURS_MS, keyFn: (r) => r.id },
+      this.inflight
+    );
+    this.upcomingRecurringsCache = new SnapshotCache<UpcomingRecurringNode>(
+      { key: 'upcoming_recurrings', ttlMs: ONE_HOUR_MS, keyFn: (r) => r.id },
       this.inflight
     );
     this.userCache = new SnapshotCache<UserNode>(
@@ -341,6 +354,10 @@ export class LiveCopilotDatabase {
 
   getRecurringCache(): SnapshotCache<RecurringNode> {
     return this.recurringCache;
+  }
+
+  getUpcomingRecurringsCache(): SnapshotCache<UpcomingRecurringNode> {
+    return this.upcomingRecurringsCache;
   }
 
   getUserCache(): SnapshotCache<UserNode> {
