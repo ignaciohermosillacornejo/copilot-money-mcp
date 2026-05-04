@@ -79,9 +79,7 @@ function sourceFingerprint(srcPath: string): number {
       const m = fs.statSync(path.join(srcPath, file)).mtimeMs;
       if (m > max) max = m;
     } catch (err) {
-      // TOCTOU: a LevelDB compaction can delete an .ldb between readdir
-      // and stat. The vanished file is no longer part of the source's
-      // current state, so skipping it is correct. Other errors propagate.
+      // TOCTOU: compaction may delete .ldb between readdir and stat; vanished file is safe to skip (dir mtime bumps), others propagate.
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
     }
   }
@@ -144,9 +142,7 @@ function copyDatabaseToTemp(srcPath: string): string {
     try {
       fs.copyFileSync(path.join(srcPath, file), path.join(tempDir, file));
     } catch (err) {
-      // TOCTOU: a LevelDB compaction can delete an .ldb between readdir
-      // and copyFile. LevelDB's MANIFEST has already removed the file,
-      // so the resulting copy correctly omits it. Other errors propagate.
+      // TOCTOU: compaction may delete .ldb between readdir and copyFile; MANIFEST already dropped it, so omitting is correct, others propagate.
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
     }
   }
