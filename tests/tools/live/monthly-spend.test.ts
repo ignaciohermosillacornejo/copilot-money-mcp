@@ -132,18 +132,16 @@ describe('LiveMonthlySpendTools.getMonthlySpend', () => {
 
 describe('createLiveMonthlySpendToolSchema', () => {
   test('returns a schema with readOnlyHint=true', async () => {
-    const { createLiveMonthlySpendToolSchema } = await import(
-      '../../../src/tools/live/monthly-spend.js'
-    );
+    const { createLiveMonthlySpendToolSchema } =
+      await import('../../../src/tools/live/monthly-spend.js');
     const schema = createLiveMonthlySpendToolSchema();
     expect(schema.name).toBe('get_monthly_spend_live');
     expect(schema.annotations?.readOnlyHint).toBe(true);
   });
 
   test('declares an optional include_future boolean property', async () => {
-    const { createLiveMonthlySpendToolSchema } = await import(
-      '../../../src/tools/live/monthly-spend.js'
-    );
+    const { createLiveMonthlySpendToolSchema } =
+      await import('../../../src/tools/live/monthly-spend.js');
     const schema = createLiveMonthlySpendToolSchema();
     const props = schema.inputSchema.properties as Record<string, { type: string }>;
     expect(props.include_future?.type).toBe('boolean');

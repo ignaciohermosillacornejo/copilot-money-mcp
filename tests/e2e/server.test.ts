@@ -2724,9 +2724,7 @@ describe('--live-reads monthly-spend wiring', () => {
     // Inject a stub LiveMonthlySpendTools via private field access
     const stubResult = {
       count: 1,
-      daily_spending: [
-        { id: 'd1', date: '2026-04-01', total_amount: 100, comparison_amount: 90 },
-      ],
+      daily_spending: [{ id: 'd1', date: '2026-04-01', total_amount: 100, comparison_amount: 90 }],
       _cache_oldest_fetched_at: '2025-01-01T00:00:00.000Z',
       _cache_newest_fetched_at: '2025-01-01T00:00:00.000Z',
       _cache_hit: false,
