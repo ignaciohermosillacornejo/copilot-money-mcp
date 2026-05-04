@@ -8,6 +8,7 @@ import { SnapshotCache, TransactionWindowCache } from '../../src/core/cache/inde
 import type { Tag } from '../../src/models/index.js';
 import type { CategoryNode } from '../../src/core/graphql/queries/categories.js';
 import type { RecurringNode } from '../../src/core/graphql/queries/recurrings.js';
+import type { UserNode } from '../../src/core/graphql/queries/user.js';
 
 function mkClient(): GraphQLClient {
   return { mutate: mock(), query: mock() } as unknown as GraphQLClient;
@@ -355,10 +356,44 @@ describe('LiveCopilotDatabase — cache accessors', () => {
     expect(mkLive().getTransactionsWindowCache()).toBeInstanceOf(TransactionWindowCache);
   });
 
+  test('getUserCache returns a SnapshotCache instance', () => {
+    expect(mkLive().getUserCache()).toBeInstanceOf(SnapshotCache);
+  });
+
   test('each call returns the same instance (not a new one)', () => {
     const live = mkLive();
     expect(live.getTagsCache()).toBe(live.getTagsCache());
     expect(live.getTransactionsWindowCache()).toBe(live.getTransactionsWindowCache());
+    expect(live.getUserCache()).toBe(live.getUserCache());
+  });
+});
+
+describe('LiveCopilotDatabase — userCache', () => {
+  function mkLive() {
+    return new LiveCopilotDatabase(mkClient(), mkCache());
+  }
+
+  test('userCache stores UserNode shape and serves cached reads', async () => {
+    const live = mkLive();
+    const fixture: UserNode = {
+      id: 'u-1',
+      budgetingConfig: {
+        isEnabled: true,
+        rolloversConfig: { isEnabled: true, startDate: '2026-01' },
+      },
+    };
+    const cache = live.getUserCache();
+    const fetcher = mock(() => Promise.resolve([fixture]));
+
+    const first = await cache.read(fetcher);
+    const second = await cache.read(fetcher);
+
+    expect(first.rows[0]).toEqual(fixture);
+    expect(first.hit).toBe(false);
+    expect(second.rows[0]).toEqual(fixture);
+    expect(second.hit).toBe(true);
+    // Loader runs only on cold; second call hits cache.
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 });
 

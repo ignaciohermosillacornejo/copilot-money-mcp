@@ -36,6 +36,7 @@ import type { AccountNode } from './graphql/queries/accounts.js';
 import type { CategoryNode } from './graphql/queries/categories.js';
 import type { TagNode } from './graphql/queries/tags.js';
 import type { RecurringNode } from './graphql/queries/recurrings.js';
+import type { UserNode } from './graphql/queries/user.js';
 import type { Transaction } from '../models/index.js';
 
 export interface LiveDatabaseOptions {
@@ -66,6 +67,11 @@ export class LiveCopilotDatabase {
   private readonly categoriesCache: SnapshotCache<CategoryNode>;
   private readonly tagsCache: SnapshotCache<TagNode>;
   private readonly recurringCache: SnapshotCache<RecurringNode>;
+  // userCache always holds at most one row — the current user — but we use the
+  // SnapshotCache primitive uniformly with the rest of the entities so the
+  // refresh-cache and TTL machinery works without a special case. `keyFn` keys
+  // on the user id.
+  private readonly userCache: SnapshotCache<UserNode>;
   private readonly transactionsWindowCache: TransactionWindowCache<TransactionNode>;
 
   constructor(
@@ -91,6 +97,10 @@ export class LiveCopilotDatabase {
     );
     this.recurringCache = new SnapshotCache<RecurringNode>(
       { key: 'recurring', ttlMs: SIX_HOURS_MS, keyFn: (r) => r.id },
+      this.inflight
+    );
+    this.userCache = new SnapshotCache<UserNode>(
+      { key: 'user', ttlMs: ONE_DAY_MS, keyFn: (u) => u.id },
       this.inflight
     );
     this.transactionsWindowCache = new TransactionWindowCache<TransactionNode>(
@@ -315,6 +325,10 @@ export class LiveCopilotDatabase {
 
   getRecurringCache(): SnapshotCache<RecurringNode> {
     return this.recurringCache;
+  }
+
+  getUserCache(): SnapshotCache<UserNode> {
+    return this.userCache;
   }
 
   getTransactionsWindowCache(): TransactionWindowCache<TransactionNode> {
