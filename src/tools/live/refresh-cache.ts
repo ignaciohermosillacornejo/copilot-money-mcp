@@ -117,11 +117,15 @@ export class RefreshCacheTool {
         flushed.recurring = true;
         break;
       case 'user':
-        // Refresh the cached user record (read by resolveRolloversFlag for the
-        // Categories query). Use after toggling rollover or budgeting in the
-        // web app — see audit finding C6.
+        // Cascade: user settings only affect category queries (resolveRolloversFlag
+        // runs inside categoriesCache.read()). Flushing userCache alone wouldn't
+        // surface new rollover data until categoriesCache expires (up to 24h),
+        // making the documented "use after toggling rollover" advice ineffective.
+        // Invalidate both so the next get_categories_live re-derives the flag.
         this.live.getUserCache().invalidate();
+        this.live.getCategoriesCache().invalidate();
         flushed.user = true;
+        flushed.categories = true;
         break;
     }
 
@@ -141,7 +145,7 @@ export function createRefreshCacheToolSchema() {
           type: 'string',
           enum: VALID_SCOPES,
           description:
-            'Which slice of the live cache to flush. Default: all. Note: "budgets" is an alias for "categories" — budget data is a projection of the categories cache. "user" refreshes the cached user record (read by the Categories query to honor the user\'s rollover setting); use after toggling rollover or budgeting in the web app.',
+            'Which slice of the live cache to flush. Default: all. Note: "budgets" is an alias for "categories" — budget data is a projection of the categories cache. "user" refreshes the cached user record AND cascades to categories (the rollover flag is read inside the categories fetch closure, so flushing user alone wouldn\'t surface new rollover data until categories also expires); use after toggling rollover or budgeting in the web app.',
           default: 'all',
         },
         months: {
