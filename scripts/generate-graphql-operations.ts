@@ -38,7 +38,7 @@ const IN_SCOPE_QUERIES = [
   'Tags',
   'Recurrings',
   'User',
-  // Phase-2 live tools (added 2026-05-04):
+  // Phase-2 live tools:
   'Networth',
   'UpcomingRecurrings',
   'MonthlySpend',
