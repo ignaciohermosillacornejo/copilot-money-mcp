@@ -266,6 +266,167 @@ describe('LiveBudgetsTools.getBudgets', () => {
     // projectCategory drops the row entirely (no current amount AND no history amounts).
     expect(result.count).toBe(0);
   });
+
+  test('regression C2: total_budgeted sums only top-level categories (parents + standalones), not children', async () => {
+    // Parent with amount 200 and one child with amount 100. Pre-fix the
+    // headline summed 300, double-counting because the parent's amount
+    // already includes the child's base via the GraphQL `childAmount` field.
+    // Post-fix: only the parent (200) contributes; the child is skipped.
+    // Fixture mirrors the GraphQL tree shape so fetchCategories synthesizes
+    // child.parentId = parent.id during flatten.
+    const childRow = {
+      id: 'child-rent',
+      name: 'Rent',
+      templateId: 'Rent',
+      colorName: 'ORANGE2',
+      isExcluded: false,
+      isRolloverDisabled: false,
+      canBeDeleted: true,
+      icon: { __typename: 'EmojiUnicode', unicode: '🔑' },
+      budget: {
+        current: {
+          unassignedRolloverAmount: null,
+          childRolloverAmount: null,
+          unassignedAmount: null,
+          resolvedAmount: '100',
+          rolloverAmount: '0',
+          childAmount: null,
+          goalAmount: '0',
+          amount: '100',
+          month: '2026-05',
+          id: 'b-child-current',
+        },
+        histories: [],
+      },
+    };
+    const parentRow = {
+      id: 'parent-home',
+      name: 'Home',
+      templateId: null,
+      colorName: 'ORANGE2',
+      isExcluded: false,
+      isRolloverDisabled: false,
+      canBeDeleted: true,
+      icon: null,
+      budget: {
+        current: {
+          unassignedRolloverAmount: '50',
+          childRolloverAmount: '0',
+          unassignedAmount: '100',
+          resolvedAmount: '200',
+          rolloverAmount: '50',
+          childAmount: '100',
+          goalAmount: '0',
+          amount: '200',
+          month: '2026-05',
+          id: 'b-parent-current',
+        },
+        histories: [],
+      },
+      childCategories: [childRow],
+    };
+
+    const client = makeClient([parentRow]);
+    const live = makeLive(client);
+    await prewarmUserCacheRolloversOff(live);
+    const tools = new LiveBudgetsTools(live);
+
+    const result = await tools.getBudgets({});
+
+    expect(result.count).toBe(2);
+    expect(result.total_budgeted).toBe(200);
+  });
+
+  test('regression C2: standalones are still counted in total_budgeted', async () => {
+    // Standalone (no children) + parent (with one child). Headline = standalone + parent.
+    const standalone = {
+      id: 'standalone-sub',
+      name: 'Subscriptions',
+      templateId: 'Subscriptions',
+      colorName: 'PINK1',
+      isExcluded: false,
+      isRolloverDisabled: false,
+      canBeDeleted: true,
+      icon: { __typename: 'EmojiUnicode', unicode: '💳' },
+      budget: {
+        current: {
+          unassignedRolloverAmount: null,
+          childRolloverAmount: null,
+          unassignedAmount: null,
+          resolvedAmount: '50',
+          rolloverAmount: '0',
+          childAmount: null,
+          goalAmount: '0',
+          amount: '50',
+          month: '2026-05',
+          id: 'b-standalone-current',
+        },
+        histories: [],
+      },
+    };
+    const parentWithChild = {
+      id: 'parent-home',
+      name: 'Home',
+      templateId: null,
+      colorName: 'ORANGE2',
+      isExcluded: false,
+      isRolloverDisabled: false,
+      canBeDeleted: true,
+      icon: null,
+      budget: {
+        current: {
+          unassignedRolloverAmount: '50',
+          childRolloverAmount: '0',
+          unassignedAmount: '100',
+          resolvedAmount: '200',
+          rolloverAmount: '50',
+          childAmount: '100',
+          goalAmount: '0',
+          amount: '200',
+          month: '2026-05',
+          id: 'b-parent-current2',
+        },
+        histories: [],
+      },
+      childCategories: [
+        {
+          id: 'child-rent',
+          name: 'Rent',
+          templateId: 'Rent',
+          colorName: 'ORANGE2',
+          isExcluded: false,
+          isRolloverDisabled: false,
+          canBeDeleted: true,
+          icon: { __typename: 'EmojiUnicode', unicode: '🔑' },
+          budget: {
+            current: {
+              unassignedRolloverAmount: null,
+              childRolloverAmount: null,
+              unassignedAmount: null,
+              resolvedAmount: '100',
+              rolloverAmount: '0',
+              childAmount: null,
+              goalAmount: '0',
+              amount: '100',
+              month: '2026-05',
+              id: 'b-child-current2',
+            },
+            histories: [],
+          },
+        },
+      ],
+    };
+
+    const client = makeClient([standalone, parentWithChild]);
+    const live = makeLive(client);
+    await prewarmUserCacheRolloversOff(live);
+    const tools = new LiveBudgetsTools(live);
+
+    const result = await tools.getBudgets({});
+
+    expect(result.count).toBe(3);
+    expect(result.total_budgeted).toBe(250); // 50 standalone + 200 parent
+  });
 });
 
 describe('createLiveBudgetsToolSchema', () => {

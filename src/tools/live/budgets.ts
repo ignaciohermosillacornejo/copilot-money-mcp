@@ -124,7 +124,11 @@ export class LiveBudgetsTools {
           ? { ...row, amounts: trimAmountsToWindow(row.amounts, monthsWindow) }
           : row;
       projected.push(trimmed);
-      if (trimmed.amount !== undefined) totalBudgeted += trimmed.amount;
+      // parent.amount already includes children's base via the GraphQL
+      // childAmount field, so summing children separately double-counts.
+      if (trimmed.amount !== undefined && cat.parentId === null) {
+        totalBudgeted += trimmed.amount;
+      }
     }
 
     // Sort by category_name for stable output (mirrors LiveCategoriesTools convention).
