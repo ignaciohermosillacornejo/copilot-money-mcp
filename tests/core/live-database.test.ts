@@ -352,6 +352,46 @@ describe('LiveCopilotDatabase — cache accessors', () => {
     expect(mkLive().getRecurringCache()).toBeInstanceOf(SnapshotCache);
   });
 
+  test('getUpcomingRecurringsCache returns a SnapshotCache instance', () => {
+    expect(mkLive().getUpcomingRecurringsCache()).toBeInstanceOf(SnapshotCache);
+  });
+
+  test('getUpcomingRecurringsCache returns the same instance across calls', () => {
+    const live = mkLive();
+    expect(live.getUpcomingRecurringsCache()).toBe(live.getUpcomingRecurringsCache());
+  });
+
+  test('upcomingRecurringsCache stores UpcomingRecurringNode shape and serves cached reads', async () => {
+    const live = mkLive();
+    const cache = live.getUpcomingRecurringsCache();
+    const fetcher = mock(() =>
+      Promise.resolve([
+        {
+          id: 'r1',
+          name: 'Subscription A',
+          state: 'ACTIVE',
+          frequency: 'MONTHLY',
+          nextPaymentAmount: 100,
+          nextPaymentDate: '2026-05-10',
+          categoryId: 'cat-1',
+          emoji: 'A',
+          icon: { __typename: 'EmojiUnicode' as const, unicode: 'A' },
+          rule: null,
+          payments: [{ amount: 100, isPaid: false, date: '2026-05-10' }],
+        },
+      ])
+    );
+
+    const first = await cache.read(fetcher);
+    const second = await cache.read(fetcher);
+
+    expect(first.rows[0]?.id).toBe('r1');
+    expect(first.hit).toBe(false);
+    expect(second.hit).toBe(true);
+    // Loader runs only on cold; second call hits cache (1h TTL).
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   test('getTransactionsWindowCache returns a TransactionWindowCache instance', () => {
     expect(mkLive().getTransactionsWindowCache()).toBeInstanceOf(TransactionWindowCache);
   });
