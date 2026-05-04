@@ -49,10 +49,12 @@ function parseAmount(value: string | null | undefined): number | undefined {
 }
 
 /**
- * Return a trimmed amounts map containing only the trailing N months from
- * "now" (current calendar month inclusive). Months are sorted lexicographically;
- * the most recent N keys are kept. If the input has fewer than N months,
- * returns the input unchanged.
+ * Return a trimmed amounts map containing only the most recent N months
+ * by lexicographic key order. `YYYY-MM` keys sort chronologically, so this
+ * is equivalent to "trailing N months" for normal data. The function does
+ * NOT consult the current date; if the input contains future-dated keys
+ * (e.g., projected budgets), they win the trailing-N selection. If the
+ * input has fewer than N months, returns the input unchanged.
  */
 function trimAmountsToWindow(
   amounts: Record<string, number>,
