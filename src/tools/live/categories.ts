@@ -14,6 +14,14 @@ import { fetchCategories, type CategoryNode } from '../../core/graphql/queries/c
 
 export interface GetCategoriesLiveArgs {
   excluded_only?: boolean;
+  /**
+   * Whether to include the per-category `budget.histories[]` array in the
+   * response. Default: `false` — histories are stripped to keep the response
+   * within the LLM tool-result token budget. The cache still stores the full
+   * history; this only affects the serialized output. Set to `true` for
+   * historical analysis or budget-trend charting.
+   */
+  include_history?: boolean;
 }
 
 export interface GetCategoriesLiveResult {
@@ -61,10 +69,19 @@ export class LiveCategoriesTools {
       cache_hit: hit,
     });
 
+    const includeHistory = args.include_history === true;
+    // Default-strip budget.histories to keep response under the LLM token
+    // budget (~25 KB). The cache still holds the full history — this is a
+    // read-side projection only. Critical: shallow clone each row's budget
+    // so we never mutate the cached references.
+    const projected = includeHistory
+      ? rows
+      : rows.map((c) => (c.budget ? { ...c, budget: { ...c.budget, histories: [] } } : c));
+
     const fetchedAtIso = new Date(fetched_at).toISOString();
     return {
-      count: rows.length,
-      categories: rows,
+      count: projected.length,
+      categories: projected,
       _cache_oldest_fetched_at: fetchedAtIso,
       _cache_newest_fetched_at: fetchedAtIso,
       _cache_hit: hit,
@@ -79,6 +96,7 @@ export function createLiveCategoriesToolSchema() {
       'Get user categories (live, GraphQL-backed). Includes per-category budget data so get_budgets_live can read from the same cache. ' +
       'Each row carries a `parentId` field: `null` for top-level categories (parents AND standalones), or the parent category id for children. ' +
       'To detect a parent specifically: build a Set of parent ids from the rows where `parentId !== null`. ' +
+      'By default, `budget.histories[]` is stripped to keep the response small — pass `include_history: true` to receive the full multi-year history. ' +
       'Replaces get_categories when --live-reads is on.',
     inputSchema: {
       type: 'object' as const,
@@ -86,6 +104,14 @@ export function createLiveCategoriesToolSchema() {
         excluded_only: {
           type: 'boolean',
           description: 'Return only categories marked as excluded. Default: false.',
+          default: false,
+        },
+        include_history: {
+          type: 'boolean',
+          description:
+            'Include per-category budget.histories array (multi-year monthly data). ' +
+            'Default: false — stripped to keep response under the LLM tool-result ' +
+            'token budget. Set to true for trend analysis or budget-history queries.',
           default: false,
         },
       },
