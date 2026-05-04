@@ -88,9 +88,12 @@ export class LiveTransactionsTools {
   constructor(private readonly live: LiveCopilotDatabase) {}
 
   private async getCategoryNameMap(): Promise<Map<string, string>> {
-    const { rows } = await this.live
-      .getCategoriesCache()
-      .read(() => fetchCategories(this.live.getClient()));
+    const { rows } = await this.live.getCategoriesCache().read(async () => {
+      // Same closure as LiveCategoriesTools — see resolveRolloversFlag()
+      // and audit finding C6.
+      const rollovers = await this.live.resolveRolloversFlag();
+      return fetchCategories(this.live.getClient(), { rollovers });
+    });
     const map = new Map<string, string>();
     for (const c of rows) {
       if (c.name) map.set(c.id, c.name);
@@ -252,9 +255,12 @@ export class LiveTransactionsTools {
     // not a name lookup. The cache hit shared with getCategoryNameMap() (when
     // both are called in the same request) keeps the cost minimal.
     if (opts.exclude_excluded !== false) {
-      const { rows: cats } = await this.live
-        .getCategoriesCache()
-        .read(() => fetchCategories(this.live.getClient()));
+      const { rows: cats } = await this.live.getCategoriesCache().read(async () => {
+        // Same closure as LiveCategoriesTools — see resolveRolloversFlag()
+        // and audit finding C6.
+        const rollovers = await this.live.resolveRolloversFlag();
+        return fetchCategories(this.live.getClient(), { rollovers });
+      });
       const excludedCatIds = new Set(cats.filter((c) => c.isExcluded === true).map((c) => c.id));
       result = result.filter((n) => !n.categoryId || !excludedCatIds.has(n.categoryId));
     }

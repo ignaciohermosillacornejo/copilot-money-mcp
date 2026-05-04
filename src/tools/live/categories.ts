@@ -42,7 +42,14 @@ export class LiveCategoriesTools {
       rows: cached,
       fetched_at,
       hit,
-    } = await cache.read(() => fetchCategories(this.live.getClient()));
+    } = await cache.read(async () => {
+      // Mirror the web app's per-user rollover-handling behavior: read the
+      // user's actual `budgetingConfig.rolloversConfig.isEnabled` (cached
+      // 24h on userCache) and forward it to the Categories query. See
+      // audit finding C6.
+      const rollovers = await this.live.resolveRolloversFlag();
+      return fetchCategories(this.live.getClient(), { rollovers });
+    });
 
     let rows = cached;
     if (args.excluded_only === true) {
