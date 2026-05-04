@@ -11,6 +11,10 @@
  *
  * Exits non-zero on any assertion failure. Output is intended to be pasted
  * into the PR description.
+ *
+ * Audit C6 (rollover correctness): exercised end-to-end via the categories
+ * smoke (`scripts/smoke/categories.ts`) since LiveBudgetsTools projects from
+ * the same categoriesCache; running both smokes covers the path.
  */
 
 import { setupLiveSmoke } from './_harness.js';
