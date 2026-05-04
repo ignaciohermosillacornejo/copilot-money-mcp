@@ -93,7 +93,9 @@ export function createLiveRecurringToolSchema() {
       "NOTE: pattern-based detection from transactions is NOT included — only Copilot's " +
       'native subscription tracking. Run without --live-reads if you need pattern detection. ' +
       'Each row carries a `category_name` field joined from the categories cache; ' +
-      '`null` if the cache is cold or the category was deleted upstream.',
+      '`null` if the cache is cold or the category was deleted upstream. ' +
+      'To guarantee `category_name` is populated, call `get_categories_live` first ' +
+      'in the same session to warm the cache.',
     inputSchema: {
       type: 'object' as const,
       properties: {},
