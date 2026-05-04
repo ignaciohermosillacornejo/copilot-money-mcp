@@ -18,6 +18,7 @@ const VALID_SCOPES = [
   'tags',
   'budgets',
   'recurring',
+  'upcoming_recurrings',
   'user',
   'networth',
 ] as const;
@@ -38,6 +39,7 @@ export interface RefreshCacheResult {
     tags?: boolean;
     budgets?: boolean;
     recurring?: boolean;
+    upcoming_recurrings?: boolean;
     user?: boolean;
     networth?: boolean;
     transactions_months?: string[] | 'all';
@@ -78,6 +80,8 @@ export class RefreshCacheTool {
       flushed.budgets = true;
       this.live.getRecurringCache().invalidate();
       flushed.recurring = true;
+      this.live.getUpcomingRecurringsCache().invalidate();
+      flushed.upcoming_recurrings = true;
       this.live.getUserCache().invalidate();
       flushed.user = true;
       this.live.getNetworthCache().invalidate();
@@ -119,6 +123,10 @@ export class RefreshCacheTool {
       case 'recurring':
         this.live.getRecurringCache().invalidate();
         flushed.recurring = true;
+        break;
+      case 'upcoming_recurrings':
+        this.live.getUpcomingRecurringsCache().invalidate();
+        flushed.upcoming_recurrings = true;
         break;
       case 'user':
         // Cascade: user settings only affect category queries (resolveRolloversFlag
