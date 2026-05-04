@@ -72,7 +72,8 @@ export class LiveAccountsTools {
     let totalAssets = 0;
     let totalLiabilities = 0;
     for (const a of rows) {
-      if (LIABILITY_TYPES.has(a.type.toUpperCase())) totalLiabilities += a.balance;
+      const typeUpper = a.type.toUpperCase();
+      if (LIABILITY_TYPES.has(typeUpper)) totalLiabilities += a.balance;
       else totalAssets += a.balance;
     }
 
