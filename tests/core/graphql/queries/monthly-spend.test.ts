@@ -14,9 +14,8 @@ describe('fetchMonthlySpend', () => {
       ),
     } as unknown as GraphQLClient;
 
-    const { fetchMonthlySpend } = await import(
-      '../../../../src/core/graphql/queries/monthly-spend.js'
-    );
+    const { fetchMonthlySpend } =
+      await import('../../../../src/core/graphql/queries/monthly-spend.js');
     const rows = await fetchMonthlySpend(client);
 
     expect(rows).toHaveLength(2);
@@ -31,9 +30,8 @@ describe('fetchMonthlySpend', () => {
       query: mock(() => Promise.resolve({ monthlySpending: [] })),
     } as unknown as GraphQLClient;
 
-    const { fetchMonthlySpend } = await import(
-      '../../../../src/core/graphql/queries/monthly-spend.js'
-    );
+    const { fetchMonthlySpend } =
+      await import('../../../../src/core/graphql/queries/monthly-spend.js');
     await fetchMonthlySpend(client);
 
     expect(client.query).toHaveBeenCalledWith('MonthlySpend', expect.any(String), {});
@@ -44,9 +42,8 @@ describe('fetchMonthlySpend', () => {
       query: mock(() => Promise.resolve({ monthlySpending: [] })),
     } as unknown as GraphQLClient;
 
-    const { fetchMonthlySpend } = await import(
-      '../../../../src/core/graphql/queries/monthly-spend.js'
-    );
+    const { fetchMonthlySpend } =
+      await import('../../../../src/core/graphql/queries/monthly-spend.js');
     const rows = await fetchMonthlySpend(client);
     expect(rows).toEqual([]);
   });
@@ -63,9 +60,8 @@ describe('fetchMonthlySpend', () => {
       ),
     } as unknown as GraphQLClient;
 
-    const { fetchMonthlySpend } = await import(
-      '../../../../src/core/graphql/queries/monthly-spend.js'
-    );
+    const { fetchMonthlySpend } =
+      await import('../../../../src/core/graphql/queries/monthly-spend.js');
     const rows = await fetchMonthlySpend(client);
 
     expect(rows[1]?.totalAmount).toBeNull();

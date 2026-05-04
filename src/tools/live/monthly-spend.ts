@@ -110,7 +110,7 @@ export function createLiveMonthlySpendToolSchema() {
     name: 'get_monthly_spend_live',
     description:
       "Get the current month's daily spending series (live, GraphQL-backed). " +
-      'Each row carries `total_amount` (this period\'s spend on `date`) and ' +
+      "Each row carries `total_amount` (this period's spend on `date`) and " +
       '`comparison_amount` (same-day-of-prior-period spend, used by the web app ' +
       'for "vs last month" deltas). Future-dated placeholder rows (where both ' +
       'amounts are null) are filtered out by default; pass `include_future: true` ' +
