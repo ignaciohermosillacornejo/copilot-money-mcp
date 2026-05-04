@@ -116,9 +116,7 @@ describe('LiveNetworthTools.getNetworth', () => {
 
 describe('createLiveNetworthToolSchema', () => {
   test('returns a schema with readOnlyHint=true and time_frame arg', async () => {
-    const { createLiveNetworthToolSchema } = await import(
-      '../../../src/tools/live/networth.js'
-    );
+    const { createLiveNetworthToolSchema } = await import('../../../src/tools/live/networth.js');
     const schema = createLiveNetworthToolSchema();
     expect(schema.name).toBe('get_networth_live');
     expect(schema.annotations?.readOnlyHint).toBe(true);

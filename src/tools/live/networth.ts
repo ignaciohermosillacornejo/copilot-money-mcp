@@ -91,7 +91,7 @@ export function createLiveNetworthToolSchema() {
       'Get net-worth-over-time history (live, GraphQL-backed). Returns daily snapshots ' +
       'sorted oldest→newest by date; for each row, `assets - debt` gives the net worth ' +
       'at that point in time. Both `assets` and `debt` are nullable strings — early dates ' +
-      'in the user\'s history may have `assets: null` until backfilled. Available when ' +
+      "in the user's history may have `assets: null` until backfilled. Available when " +
       '--live-reads is on. Optional `time_frame` arg (default "ALL"; other server-supported ' +
       'values include "YEAR", "MONTH"). The cache holds the most-recently-requested ' +
       'time_frame; requesting a different value triggers a fresh fetch.',

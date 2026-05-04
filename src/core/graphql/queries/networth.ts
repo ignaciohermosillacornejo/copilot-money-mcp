@@ -37,10 +37,8 @@ export async function fetchNetworthHistory(
   client: GraphQLClient,
   opts: FetchNetworthHistoryOpts
 ): Promise<NetworthHistoryNode[]> {
-  const data = await client.query<{ timeFrame: string }, NetworthResponse>(
-    'Networth',
-    NETWORTH,
-    { timeFrame: opts.timeFrame }
-  );
+  const data = await client.query<{ timeFrame: string }, NetworthResponse>('Networth', NETWORTH, {
+    timeFrame: opts.timeFrame,
+  });
   return data.networthHistory;
 }
