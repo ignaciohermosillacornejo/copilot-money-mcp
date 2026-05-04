@@ -65,6 +65,43 @@ const sampleCategoryWithoutBudget = {
   budget: null,
 };
 
+// Builds a Restaurants category with `monthCount` consecutive months of
+// history ending at 2026-05 (inclusive). Used by the C4 regression tests
+// to exercise the months_window trim with various input sizes.
+function makeRestaurantsCategory(monthCount: number) {
+  const months = Array.from({ length: monthCount }, (_, i) => {
+    // Date.UTC months are 0-indexed (May = 4). Anchor the last entry at
+    // 2026-05; first entry is 2026-05 minus (monthCount - 1) months.
+    const d = new Date(Date.UTC(2026, 4 - (monthCount - 1) + i, 1));
+    return d.toISOString().slice(0, 7);
+  });
+  return {
+    id: 'cat-restaurants',
+    name: 'Restaurants',
+    templateId: 'Restaurants',
+    colorName: 'PURPLE2',
+    icon: { __typename: 'EmojiUnicode', unicode: '🍔' },
+    isExcluded: false,
+    isRolloverDisabled: false,
+    canBeDeleted: true,
+    budget: {
+      current: null,
+      histories: months.map((m, i) => ({
+        unassignedRolloverAmount: null,
+        childRolloverAmount: null,
+        unassignedAmount: null,
+        resolvedAmount: '500',
+        rolloverAmount: '0',
+        childAmount: null,
+        goalAmount: '0',
+        amount: '500',
+        month: m,
+        id: `b-${i}`,
+      })),
+    },
+  };
+}
+
 describe('LiveBudgetsTools.getBudgets', () => {
   test('cold call: projects per-category budgets from categoriesCache', async () => {
     const client = makeClient([sampleCategoryWithBudget, sampleCategoryWithoutBudget]);
@@ -122,86 +159,42 @@ describe('LiveBudgetsTools.getBudgets', () => {
     expect(result.budgets[0]?.amounts).toEqual({ '2026-04': 400 });
   });
 
-  test('regression C4: default months_window=12 trims amounts to 12 entries', async () => {
-    // Build a category with budget history spanning 24 months ending on
-    // 2026-05. Default behavior should return only the trailing 12.
-    const months = Array.from({ length: 24 }, (_, i) => {
-      const d = new Date(Date.UTC(2024, 5 + i, 1)); // 2024-06 through 2026-05
-      return d.toISOString().slice(0, 7);
-    });
-    const fixtureCategory = {
-      id: 'cat-restaurants',
-      name: 'Restaurants',
-      templateId: 'Restaurants',
-      colorName: 'PURPLE2',
-      icon: { __typename: 'EmojiUnicode', unicode: '🍔' },
-      isExcluded: false,
-      isRolloverDisabled: false,
-      canBeDeleted: true,
-      budget: {
-        current: null,
-        histories: months.map((m, i) => ({
-          unassignedRolloverAmount: null,
-          childRolloverAmount: null,
-          unassignedAmount: null,
-          resolvedAmount: '500',
-          rolloverAmount: '0',
-          childAmount: null,
-          goalAmount: '0',
-          amount: '500',
-          month: m,
-          id: `b-${i}`,
-        })),
-      },
-    };
-    const client = makeClient([fixtureCategory]);
+  test('regression C4: default months_window=12 trims amounts to exactly 12 entries', async () => {
+    // 24-month fixture; default trim should return exactly the trailing 12.
+    const client = makeClient([makeRestaurantsCategory(24)]);
     const tools = new LiveBudgetsTools(makeLive(client));
 
     const result = await tools.getBudgets({});
 
     const restaurants = result.budgets.find((b) => b.category_id === 'cat-restaurants');
     expect(restaurants?.amounts).toBeDefined();
-    expect(Object.keys(restaurants?.amounts ?? {}).length).toBeLessThanOrEqual(12);
+    expect(Object.keys(restaurants?.amounts ?? {}).length).toBe(12);
   });
 
   test('regression C4: months_window=0 returns all amounts', async () => {
-    // 24 months in fixture; opt-out should return all 24.
-    const months = Array.from({ length: 24 }, (_, i) => {
-      const d = new Date(Date.UTC(2024, 5 + i, 1));
-      return d.toISOString().slice(0, 7);
-    });
-    const fixtureCategory = {
-      id: 'cat-restaurants',
-      name: 'Restaurants',
-      templateId: 'Restaurants',
-      colorName: 'PURPLE2',
-      icon: { __typename: 'EmojiUnicode', unicode: '🍔' },
-      isExcluded: false,
-      isRolloverDisabled: false,
-      canBeDeleted: true,
-      budget: {
-        current: null,
-        histories: months.map((m, i) => ({
-          unassignedRolloverAmount: null,
-          childRolloverAmount: null,
-          unassignedAmount: null,
-          resolvedAmount: '500',
-          rolloverAmount: '0',
-          childAmount: null,
-          goalAmount: '0',
-          amount: '500',
-          month: m,
-          id: `b-${i}`,
-        })),
-      },
-    };
-    const client = makeClient([fixtureCategory]);
+    // 24-month fixture; opt-out should return all 24.
+    const client = makeClient([makeRestaurantsCategory(24)]);
     const tools = new LiveBudgetsTools(makeLive(client));
 
     const result = await tools.getBudgets({ months_window: 0 });
 
     const restaurants = result.budgets.find((b) => b.category_id === 'cat-restaurants');
     expect(Object.keys(restaurants?.amounts ?? {}).length).toBe(24);
+  });
+
+  test('regression C4: explicit months_window trims to that exact count', async () => {
+    // 24-month fixture, custom window of 3 — covers a non-boundary value
+    // (neither the default 12 nor the opt-out sentinel 0).
+    const client = makeClient([makeRestaurantsCategory(24)]);
+    const tools = new LiveBudgetsTools(makeLive(client));
+
+    const result = await tools.getBudgets({ months_window: 3 });
+
+    const restaurants = result.budgets.find((b) => b.category_id === 'cat-restaurants');
+    const keys = Object.keys(restaurants?.amounts ?? {}).sort();
+    expect(keys.length).toBe(3);
+    // The trailing 3 months ending at 2026-05 are 2026-03, 2026-04, 2026-05.
+    expect(keys).toEqual(['2026-03', '2026-04', '2026-05']);
   });
 
   test('handles category with budget.current present but current.amount=null', async () => {
