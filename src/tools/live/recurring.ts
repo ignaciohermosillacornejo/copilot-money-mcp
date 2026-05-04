@@ -20,9 +20,19 @@ export interface GetRecurringLiveArgs {
   // No filters yet; reserved for future args (e.g., state filter).
 }
 
+export interface GetRecurringLiveRow extends RecurringNode {
+  /**
+   * Joined from `categoriesCache.peek()` by `categoryId`. `null` if the
+   * categories cache is cold (no fetch is triggered to populate it) or
+   * if the category for this recurring's `categoryId` was not found
+   * (e.g., deleted upstream). Mirrors `get_transactions_live`'s same join.
+   */
+  category_name: string | null;
+}
+
 export interface GetRecurringLiveResult {
   count: number;
-  recurring: RecurringNode[];
+  recurring: GetRecurringLiveRow[];
   _cache_oldest_fetched_at: string;
   _cache_newest_fetched_at: string;
   _cache_hit: boolean;
@@ -40,7 +50,20 @@ export class LiveRecurringTools {
       hit,
     } = await cache.read(() => fetchRecurrings(this.live.getClient()));
 
-    const rows = [...cached].sort((a, b) => a.name.localeCompare(b.name));
+    const cachedCategories = this.live.getCategoriesCache().peek();
+    const categoryNameById = new Map<string, string>();
+    if (cachedCategories) {
+      for (const cat of cachedCategories) {
+        categoryNameById.set(cat.id, cat.name);
+      }
+    }
+
+    const rows: GetRecurringLiveRow[] = cached
+      .map((r) => ({
+        ...r,
+        category_name: r.categoryId ? (categoryNameById.get(r.categoryId) ?? null) : null,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
 
     this.live.logReadCall({
       op: 'Recurrings',
@@ -68,7 +91,9 @@ export function createLiveRecurringToolSchema() {
       'Get user-confirmed recurring/subscription items (live, GraphQL-backed). ' +
       'Replaces get_recurring_transactions when --live-reads is on. ' +
       "NOTE: pattern-based detection from transactions is NOT included — only Copilot's " +
-      'native subscription tracking. Run without --live-reads if you need pattern detection.',
+      'native subscription tracking. Run without --live-reads if you need pattern detection. ' +
+      'Each row carries a `category_name` field joined from the categories cache; ' +
+      '`null` if the cache is cold or the category was deleted upstream.',
     inputSchema: {
       type: 'object' as const,
       properties: {},
