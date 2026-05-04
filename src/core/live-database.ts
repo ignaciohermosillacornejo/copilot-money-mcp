@@ -36,6 +36,7 @@ import type { AccountNode } from './graphql/queries/accounts.js';
 import type { CategoryNode } from './graphql/queries/categories.js';
 import type { TagNode } from './graphql/queries/tags.js';
 import type { RecurringNode } from './graphql/queries/recurrings.js';
+import type { NetworthHistoryNode } from './graphql/queries/networth.js';
 import { fetchUser, type UserNode } from './graphql/queries/user.js';
 import type { Transaction } from '../models/index.js';
 
@@ -72,6 +73,11 @@ export class LiveCopilotDatabase {
   // refresh-cache and TTL machinery works without a special case. `keyFn` keys
   // on the user id.
   private readonly userCache: SnapshotCache<UserNode>;
+  // networthCache holds the most-recently-requested timeFrame's history.
+  // Requests for a different timeFrame trigger a fresh fetch (the cache is
+  // not partitioned by timeFrame to keep the SnapshotCache primitive simple);
+  // the 1h TTL still applies to the most-recently-requested timeFrame.
+  private readonly networthCache: SnapshotCache<NetworthHistoryNode>;
   private readonly transactionsWindowCache: TransactionWindowCache<TransactionNode>;
 
   constructor(
@@ -101,6 +107,10 @@ export class LiveCopilotDatabase {
     );
     this.userCache = new SnapshotCache<UserNode>(
       { key: 'user', ttlMs: ONE_DAY_MS, keyFn: (u) => u.id },
+      this.inflight
+    );
+    this.networthCache = new SnapshotCache<NetworthHistoryNode>(
+      { key: 'networth', ttlMs: ONE_HOUR_MS, keyFn: (n) => n.date },
       this.inflight
     );
     this.transactionsWindowCache = new TransactionWindowCache<TransactionNode>(
@@ -329,6 +339,10 @@ export class LiveCopilotDatabase {
 
   getUserCache(): SnapshotCache<UserNode> {
     return this.userCache;
+  }
+
+  getNetworthCache(): SnapshotCache<NetworthHistoryNode> {
+    return this.networthCache;
   }
 
   /**
