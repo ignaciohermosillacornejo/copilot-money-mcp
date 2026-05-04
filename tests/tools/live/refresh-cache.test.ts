@@ -44,7 +44,16 @@ function makeMockLive(): {
 
   return {
     live,
-    mocks: { accounts, categories, tags, recurring, upcomingRecurrings, user, networth, transactions },
+    mocks: {
+      accounts,
+      categories,
+      tags,
+      recurring,
+      upcomingRecurrings,
+      user,
+      networth,
+      transactions,
+    },
   };
 }
 
