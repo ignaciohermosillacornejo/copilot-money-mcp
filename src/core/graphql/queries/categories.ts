@@ -42,6 +42,20 @@ export interface CategoryBudget {
 
 export interface CategoryNode {
   id: string;
+  /**
+   * The id of this category's parent, or `null` if this is a top-level
+   * category (parent OR standalone).
+   *
+   * Note: `parentId === null` does NOT distinguish parents-with-children
+   * from standalone categories. To detect parents specifically, build a
+   * Set of parent ids: `new Set(categories.filter(c => c.parentId !== null).map(c => c.parentId))`.
+   *
+   * Populated by `fetchCategories` during flatten — Copilot's GraphQL
+   * `Categories` query returns a tree (`categories[].childCategories[]`)
+   * which we collapse to a single keyed list, recording the relationship
+   * here so consumers can rebuild the hierarchy.
+   */
+  parentId: string | null;
   name: string;
   templateId: string | null;
   colorName: string | null;
@@ -53,8 +67,12 @@ export interface CategoryNode {
   budget?: CategoryBudget | null;
 }
 
-interface CategoryResponseNode extends CategoryNode {
-  childCategories?: CategoryNode[];
+// Raw GraphQL response shape — does NOT include parentId. The flatten step
+// synthesizes parentId for both parent rows (null) and child rows (parent.id).
+type CategoryRawFields = Omit<CategoryNode, 'parentId'>;
+
+interface CategoryResponseNode extends CategoryRawFields {
+  childCategories?: CategoryRawFields[];
 }
 
 interface CategoriesResponse {
@@ -67,11 +85,11 @@ export async function fetchCategories(client: GraphQLClient): Promise<CategoryNo
   const data = await client.query<typeof VARS, CategoriesResponse>('Categories', CATEGORIES, VARS);
   const flat: CategoryNode[] = [];
   for (const cat of data.categories) {
-    const { childCategories, ...parent } = cat;
-    flat.push(parent);
+    const { childCategories, ...rawParent } = cat;
+    flat.push({ ...rawParent, parentId: null });
     if (childCategories) {
       for (const child of childCategories) {
-        flat.push(child);
+        flat.push({ ...child, parentId: rawParent.id });
       }
     }
   }
