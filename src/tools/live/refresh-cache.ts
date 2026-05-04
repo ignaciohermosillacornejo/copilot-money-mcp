@@ -19,6 +19,7 @@ const VALID_SCOPES = [
   'budgets',
   'recurring',
   'user',
+  'networth',
 ] as const;
 
 const YEAR_MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -38,6 +39,7 @@ export interface RefreshCacheResult {
     budgets?: boolean;
     recurring?: boolean;
     user?: boolean;
+    networth?: boolean;
     transactions_months?: string[] | 'all';
   };
 }
@@ -78,6 +80,8 @@ export class RefreshCacheTool {
       flushed.recurring = true;
       this.live.getUserCache().invalidate();
       flushed.user = true;
+      this.live.getNetworthCache().invalidate();
+      flushed.networth = true;
     };
 
     const flushTransactions = () => {
@@ -126,6 +130,10 @@ export class RefreshCacheTool {
         this.live.getCategoriesCache().invalidate();
         flushed.user = true;
         flushed.categories = true;
+        break;
+      case 'networth':
+        this.live.getNetworthCache().invalidate();
+        flushed.networth = true;
         break;
     }
 
