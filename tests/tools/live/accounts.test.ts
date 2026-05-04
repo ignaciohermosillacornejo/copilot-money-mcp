@@ -14,7 +14,7 @@ const A = (id: string, opts: Partial<AccountNode> = {}): AccountNode => ({
   name: `Account ${id}`,
   balance: 100,
   liveBalance: true,
-  type: 'depository',
+  type: 'DEPOSITORY',
   subType: 'checking',
   mask: '0001',
   isUserHidden: false,
@@ -80,7 +80,7 @@ describe('LiveAccountsTools.getAccounts', () => {
   });
 
   test('account_type filter applied', async () => {
-    const live = mkLive([A('a', { type: 'depository' }), A('b', { type: 'credit' })]);
+    const live = mkLive([A('a', { type: 'DEPOSITORY' }), A('b', { type: 'CREDIT' })]);
     const tools = new LiveAccountsTools(live);
 
     const result = await tools.getAccounts({ account_type: 'credit' });
@@ -90,9 +90,9 @@ describe('LiveAccountsTools.getAccounts', () => {
 
   test('totals calculated correctly: assets minus liabilities', async () => {
     const live = mkLive([
-      A('a', { type: 'depository', balance: 1000 }),
-      A('b', { type: 'credit', balance: 200 }),
-      A('c', { type: 'loan', balance: 500 }),
+      A('a', { type: 'DEPOSITORY', balance: 1000 }),
+      A('b', { type: 'CREDIT', balance: 200 }),
+      A('c', { type: 'LOAN', balance: 500 }),
     ]);
     const tools = new LiveAccountsTools(live);
 
@@ -123,10 +123,7 @@ describe('LiveAccountsTools.getAccounts', () => {
   test('regression A1: account_type filter is case-insensitive', async () => {
     // Real server returns uppercase. Tool description documents lowercase examples
     // ("depository, credit, loan, investment, etc."). Both must work.
-    const live = mkLive([
-      A('a', { type: 'DEPOSITORY' }),
-      A('b', { type: 'CREDIT' }),
-    ]);
+    const live = mkLive([A('a', { type: 'DEPOSITORY' }), A('b', { type: 'CREDIT' })]);
     const tools = new LiveAccountsTools(live);
 
     const lower = await tools.getAccounts({ account_type: 'credit' });
