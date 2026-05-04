@@ -81,7 +81,8 @@ Each MCP tool follows this pattern:
 
 - **Privacy First**: Reads are 100% local with zero network requests. Opt-in writes (`--write`) send authenticated GraphQL requests directly to Copilot Money's own backend at `app.copilot.money/api/graphql` via `src/core/graphql/` — no third-party services, no project-operated servers.
 - **Read-Only by Default**: Write tools require `--write` flag
-- **Live Reads (Opt-in)**: `--live-reads` swaps cache-backed `get_transactions` for GraphQL-backed `get_transactions_live`. See `docs/graphql-live-reads.md`. Requires browser session auth.
+- **Live Reads (Opt-in)**: `--live-reads` swaps cache-backed reads (`get_transactions`, `get_accounts`, `get_categories`, `get_budgets`, `get_recurring_transactions`) for GraphQL-backed `_live` variants and adds `get_tags_live`. See `docs/graphql-live-reads.md`. Requires browser session auth.
+- **Verify `--live-reads` is on (when needed)**: before any work that depends on live mode (parity audits, smoke tests, anything that must reflect current server state), confirm the running MCP host has `--live-reads` enabled. **Cheap check:** call `mcp__copilot-money__get_accounts` (or any read tool that has a `_live` variant) — if the tool list contains `get_accounts_live` and excludes `get_accounts`, `--live-reads` is on. If you see the cache-mode names, the flag is missing — add `--live-reads` to the `args` array of the `copilot-money` entry in `~/.claude.json` (or `~/Library/Application Support/Claude/claude_desktop_config.json` for Claude Desktop), then ask the user to restart the MCP host (Claude Code: `/mcp` reload, or quit + relaunch). Do NOT proceed with live-mode work assuming the flag is on without verifying.
 - **Database Location**: `~/Library/Containers/com.copilot.production/Data/Library/Application Support/firestore/__FIRAPP_DEFAULT/copilot-production-22904/main`
 
 ## Common Tasks
