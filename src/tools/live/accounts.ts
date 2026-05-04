@@ -77,13 +77,18 @@ export class LiveAccountsTools {
       else totalAssets += a.balance;
     }
 
+    // A2: charge cards (e.g., AmEx Platinum) have no preset spending limit;
+    // the server returns limit:0 which would cause /0 in utilization
+    // calculations. Project null so consumers get a clean signal.
+    const projectedAccounts = rows.map((a) => (a.limit === 0 ? { ...a, limit: null } : a));
+
     const fetchedAtIso = new Date(fetched_at).toISOString();
     return {
       count: rows.length,
       total_balance: roundAmount(totalAssets - totalLiabilities),
       total_assets: roundAmount(totalAssets),
       total_liabilities: roundAmount(totalLiabilities),
-      accounts: rows,
+      accounts: projectedAccounts,
       _cache_oldest_fetched_at: fetchedAtIso,
       _cache_newest_fetched_at: fetchedAtIso,
       _cache_hit: hit,
