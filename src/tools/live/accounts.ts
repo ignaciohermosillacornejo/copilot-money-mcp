@@ -27,7 +27,10 @@ export interface GetAccountsLiveResult {
   _cache_hit: boolean;
 }
 
-const LIABILITY_TYPES = new Set(['credit', 'loan']);
+// GraphQL Account.type returns uppercase enum values ('CREDIT', 'DEPOSITORY',
+// 'LOAN', 'INVESTMENT', 'OTHER'). The set holds the canonical uppercase form;
+// callers normalize via .toUpperCase() at the comparison site.
+const LIABILITY_TYPES = new Set(['CREDIT', 'LOAN']);
 
 export class LiveAccountsTools {
   constructor(private readonly live: LiveCopilotDatabase) {}
@@ -49,7 +52,8 @@ export class LiveAccountsTools {
       rows = rows.filter((a) => !a.isUserHidden && !a.isUserClosed);
     }
     if (account_type) {
-      rows = rows.filter((a) => a.type === account_type);
+      const normalized = account_type.toUpperCase();
+      rows = rows.filter((a) => a.type.toUpperCase() === normalized);
     }
 
     // Log after filtering so `rows` reflects what's actually returned to
@@ -68,7 +72,7 @@ export class LiveAccountsTools {
     let totalAssets = 0;
     let totalLiabilities = 0;
     for (const a of rows) {
-      if (LIABILITY_TYPES.has(a.type)) totalLiabilities += a.balance;
+      if (LIABILITY_TYPES.has(a.type.toUpperCase())) totalLiabilities += a.balance;
       else totalAssets += a.balance;
     }
 
@@ -96,7 +100,8 @@ export function createLiveAccountsToolSchema() {
       properties: {
         account_type: {
           type: 'string',
-          description: 'Filter by account type (depository, credit, loan, investment, etc.)',
+          description:
+            'Filter by account type (case-insensitive — depository, credit, loan, investment, etc.).',
         },
         include_hidden: {
           type: 'boolean',
