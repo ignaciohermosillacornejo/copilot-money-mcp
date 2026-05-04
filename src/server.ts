@@ -29,6 +29,10 @@ import {
   LiveUpcomingRecurringsTools,
   createLiveUpcomingRecurringsToolSchema,
 } from './tools/live/upcoming-recurrings.js';
+import {
+  LiveMonthlySpendTools,
+  createLiveMonthlySpendToolSchema,
+} from './tools/live/monthly-spend.js';
 import { RefreshCacheTool, createRefreshCacheToolSchema } from './tools/live/refresh-cache.js';
 
 // Read version from package.json
@@ -53,6 +57,7 @@ export class CopilotMoneyServer {
   private liveRecurringTools?: LiveRecurringTools;
   private liveNetworthTools?: LiveNetworthTools;
   private liveUpcomingRecurringsTools?: LiveUpcomingRecurringsTools;
+  private liveMonthlySpendTools?: LiveMonthlySpendTools;
   private refreshCacheTool?: RefreshCacheTool;
 
   /**
@@ -91,6 +96,7 @@ export class CopilotMoneyServer {
       this.liveRecurringTools = new LiveRecurringTools(liveDb);
       this.liveNetworthTools = new LiveNetworthTools(liveDb);
       this.liveUpcomingRecurringsTools = new LiveUpcomingRecurringsTools(liveDb);
+      this.liveMonthlySpendTools = new LiveMonthlySpendTools(liveDb);
       this.refreshCacheTool = new RefreshCacheTool(liveDb);
     }
 
@@ -136,6 +142,7 @@ export class CopilotMoneyServer {
           createLiveRecurringToolSchema(),
           createLiveNetworthToolSchema(),
           createLiveUpcomingRecurringsToolSchema(),
+          createLiveMonthlySpendToolSchema(),
           createRefreshCacheToolSchema(),
         ]
       : [];
@@ -294,6 +301,18 @@ export class CopilotMoneyServer {
       };
     }
 
+    if (name === 'get_monthly_spend_live' && !this.liveMonthlySpendTools) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'get_monthly_spend_live is only available when the server runs with --live-reads.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
     if (name === 'refresh_cache' && !this.refreshCacheTool) {
       return {
         content: [
@@ -391,6 +410,15 @@ export class CopilotMoneyServer {
           result = await this.liveUpcomingRecurringsTools!.getUpcomingRecurrings(
             (typedArgs as Parameters<
               NonNullable<typeof this.liveUpcomingRecurringsTools>['getUpcomingRecurrings']
+            >[0]) ?? {}
+          );
+          break;
+
+        case 'get_monthly_spend_live':
+          // liveMonthlySpendTools non-null invariant enforced by the early guard above.
+          result = await this.liveMonthlySpendTools!.getMonthlySpend(
+            (typedArgs as Parameters<
+              NonNullable<typeof this.liveMonthlySpendTools>['getMonthlySpend']
             >[0]) ?? {}
           );
           break;

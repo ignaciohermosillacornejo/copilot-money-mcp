@@ -2682,3 +2682,64 @@ describe('--live-reads upcoming-recurrings wiring', () => {
     expect(data._cache_hit).toBe(false);
   });
 });
+
+// ============================================
+// --live-reads monthly-spend wiring tests
+// ============================================
+
+describe('--live-reads monthly-spend wiring', () => {
+  test('handleListTools when --live-reads is OFF excludes get_monthly_spend_live', () => {
+    const server = new CopilotMoneyServer(FAKE_DB_DIR);
+    const { tools } = server.handleListTools();
+    const names = tools.map((t) => t.name);
+    expect(names).not.toContain('get_monthly_spend_live');
+  });
+
+  test('handleListTools when --live-reads is ON includes get_monthly_spend_live', () => {
+    // Pass a mock GraphQL client so the constructor can wire liveMonthlySpendTools
+    // without attempting real auth. The fourth positional arg is liveReadsEnabled.
+    const mockClient = createMockGraphQLClient({});
+    const server = new CopilotMoneyServer(FAKE_DB_DIR, undefined, false, true, mockClient);
+    const { tools } = server.handleListTools();
+    const names = tools.map((t) => t.name);
+    expect(names).toContain('get_monthly_spend_live');
+  });
+
+  test('get_monthly_spend_live without --live-reads returns isError with --live-reads hint', async () => {
+    const server = new CopilotMoneyServer(FAKE_DB_DIR);
+    const db = createMockDb();
+    server._injectForTesting(db, new CopilotMoneyTools(db));
+
+    const result = await server.handleCallTool('get_monthly_spend_live', {});
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('--live-reads');
+  });
+
+  test('get_monthly_spend_live with --live-reads dispatches to liveMonthlySpendTools.getMonthlySpend', async () => {
+    const mockClient = createMockGraphQLClient({});
+    const server = new CopilotMoneyServer(FAKE_DB_DIR, undefined, false, true, mockClient);
+    const db = createMockDb();
+    server._injectForTesting(db, new CopilotMoneyTools(db));
+
+    // Inject a stub LiveMonthlySpendTools via private field access
+    const stubResult = {
+      count: 1,
+      daily_spending: [
+        { id: 'd1', date: '2026-04-01', total_amount: 100, comparison_amount: 90 },
+      ],
+      _cache_oldest_fetched_at: '2025-01-01T00:00:00.000Z',
+      _cache_newest_fetched_at: '2025-01-01T00:00:00.000Z',
+      _cache_hit: false,
+    };
+    (server as any).liveMonthlySpendTools = {
+      getMonthlySpend: async (_args: unknown) => stubResult,
+    };
+
+    const result = await server.handleCallTool('get_monthly_spend_live', {});
+    expect(result.isError).toBeUndefined();
+    const data = JSON.parse(result.content[0].text) as typeof stubResult;
+    expect(data.count).toBe(1);
+    expect(data.daily_spending[0]?.id).toBe('d1');
+    expect(data._cache_hit).toBe(false);
+  });
+});
