@@ -404,12 +404,17 @@ describe('LiveCopilotDatabase — cache accessors', () => {
     expect(mkLive().getNetworthCache()).toBeInstanceOf(SnapshotCache);
   });
 
+  test('getMonthlySpendCache returns a SnapshotCache instance', () => {
+    expect(mkLive().getMonthlySpendCache()).toBeInstanceOf(SnapshotCache);
+  });
+
   test('each call returns the same instance (not a new one)', () => {
     const live = mkLive();
     expect(live.getTagsCache()).toBe(live.getTagsCache());
     expect(live.getTransactionsWindowCache()).toBe(live.getTransactionsWindowCache());
     expect(live.getUserCache()).toBe(live.getUserCache());
     expect(live.getNetworthCache()).toBe(live.getNetworthCache());
+    expect(live.getMonthlySpendCache()).toBe(live.getMonthlySpendCache());
   });
 });
 
