@@ -48,7 +48,10 @@ export interface CategoryNode {
    *
    * Note: `parentId === null` does NOT distinguish parents-with-children
    * from standalone categories. To detect parents specifically, build a
-   * Set of parent ids: `new Set(categories.filter(c => c.parentId !== null).map(c => c.parentId))`.
+   * Set of parent ids:
+   * `new Set(categories.filter((c): c is CategoryNode & { parentId: string } => c.parentId !== null).map(c => c.parentId))`.
+   * The type predicate narrows the result to `Set<string>` (without it
+   * TypeScript infers `Set<string | null>`).
    *
    * Populated by `fetchCategories` during flatten — Copilot's GraphQL
    * `Categories` query returns a tree (`categories[].childCategories[]`)

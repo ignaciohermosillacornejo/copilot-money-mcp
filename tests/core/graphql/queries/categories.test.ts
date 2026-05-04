@@ -230,6 +230,41 @@ describe('fetchCategories', () => {
     expect((home as Record<string, unknown>)?.childCategories).toBeUndefined();
   });
 
+  test('regression C3: parentId is null when childCategories key is absent (vs empty array)', async () => {
+    // CategoryResponseNode.childCategories is optional — the server may omit
+    // the key entirely on top-level categories with no children. The
+    // `if (childCategories)` guard handles both undefined and []. This test
+    // pins the absent-key path explicitly (the existing standalone test
+    // covers the empty-array path).
+    const client = {
+      query: mock(() =>
+        Promise.resolve({
+          categories: [
+            {
+              id: 'no-children-key',
+              name: 'Bare Standalone',
+              templateId: 'Misc',
+              colorName: 'GRAY1',
+              icon: null,
+              isExcluded: false,
+              isRolloverDisabled: false,
+              canBeDeleted: true,
+              budget: null,
+              // childCategories key intentionally omitted (not undefined, not [])
+            },
+          ],
+        })
+      ),
+    } as unknown as GraphQLClient;
+
+    const { fetchCategories } = await import('../../../../src/core/graphql/queries/categories.js');
+    const flat = await fetchCategories(client);
+
+    expect(flat).toHaveLength(1);
+    expect(flat[0]?.id).toBe('no-children-key');
+    expect(flat[0]?.parentId).toBeNull();
+  });
+
   test('passes {spend:false, budget:true, rollovers:false} variables', async () => {
     const client = {
       query: mock(() => Promise.resolve({ categories: [] })),
