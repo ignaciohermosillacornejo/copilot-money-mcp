@@ -135,6 +135,29 @@ describe('LiveAccountsTools.getAccounts', () => {
     expect(upper.accounts[0]?.id).toBe('b');
   });
 
+  test('regression A2: limit:0 mapped to null for charge cards', async () => {
+    // AmEx Platinum is a charge card with no preset spending limit.
+    // Server returns limit:0; consumers computing utilization (balance/limit)
+    // would divide by zero. Project null instead.
+    const live = mkLive([
+      A('chk', { type: 'DEPOSITORY', balance: 5000, limit: null }),
+      A('cc-with-limit', { type: 'CREDIT', balance: 100, limit: 5000 }),
+      A('charge', { type: 'CREDIT', balance: 1500, limit: 0 }),
+    ]);
+    const tools = new LiveAccountsTools(live);
+    const result = await tools.getAccounts({});
+
+    const charge = result.accounts.find((a) => a.id === 'charge');
+    const ccLimit = result.accounts.find((a) => a.id === 'cc-with-limit');
+    const chk = result.accounts.find((a) => a.id === 'chk');
+
+    expect(charge?.limit).toBeNull();
+    // Sanity: a real-limit credit card retains its limit.
+    expect(ccLimit?.limit).toBe(5000);
+    // Sanity: depository accounts (already null in fixture) stay null.
+    expect(chk?.limit).toBeNull();
+  });
+
   test('schema definition exposes filter args', () => {
     const schema = createLiveAccountsToolSchema();
     expect(schema.name).toBe('get_accounts_live');
