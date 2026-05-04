@@ -529,4 +529,127 @@ describe('leveldb-reader', () => {
       expect(count2).toBe(0);
     });
   });
+
+  describe('compaction TOCTOU resilience', () => {
+    // Simulate a LevelDB compaction deleting an .ldb between readdir and the
+    // per-file stat/copyFile call by stubbing readdirSync to inject a phantom
+    // filename that doesn't exist on disk. Real readdir/stat/copyFile are used
+    // for everything else, so the genuine race is reproduced exactly: the
+    // listing contains a name, the per-file syscall hits ENOENT.
+
+    function injectPhantom(targetDir: string, phantom: string): () => void {
+      const original = fs.readdirSync;
+      (fs as { readdirSync: typeof fs.readdirSync }).readdirSync = ((
+        p: fs.PathLike,
+        opts?: Parameters<typeof fs.readdirSync>[1]
+      ) => {
+        const real = (original as (p: fs.PathLike, opts?: unknown) => unknown)(p, opts);
+        if (typeof p === 'string' && path.resolve(p) === path.resolve(targetDir)) {
+          return [...(real as string[]), phantom];
+        }
+        return real;
+      }) as typeof fs.readdirSync;
+      return () => {
+        (fs as { readdirSync: typeof fs.readdirSync }).readdirSync = original;
+      };
+    }
+
+    test('copy loop skips files that vanish between readdir and copyFile', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'copy-toctou-db');
+      await createTestDatabase(dbPath, [{ collection: 'test', id: 'doc1', fields: { x: 1 } }]);
+
+      // First call exercises the copy loop. Phantom must be ignored.
+      const restore = injectPhantom(dbPath, 'vanished-9999.ldb');
+      try {
+        const docs = [];
+        for await (const doc of iterateDocuments(dbPath)) docs.push(doc);
+        expect(docs.length).toBe(1);
+      } finally {
+        restore();
+      }
+    });
+
+    test('sourceFingerprint skips files that vanish between readdir and stat', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'fingerprint-toctou-db');
+      await createTestDatabase(dbPath, [{ collection: 'test', id: 'doc1', fields: { x: 1 } }]);
+
+      // Prime the temp cache so the next call goes through the fingerprint
+      // (cache-hit) path rather than the copy loop.
+      for await (const _doc of iterateDocuments(dbPath)) {
+        // drain
+      }
+
+      const restore = injectPhantom(dbPath, 'vanished-9999.ldb');
+      try {
+        const docs = [];
+        for await (const doc of iterateDocuments(dbPath)) docs.push(doc);
+        expect(docs.length).toBe(1);
+      } finally {
+        restore();
+      }
+    });
+
+    test('sourceFingerprint propagates non-ENOENT stat errors', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'fingerprint-eacces-db');
+      await createTestDatabase(dbPath, [{ collection: 'test', id: 'doc1', fields: { x: 1 } }]);
+
+      // Prime cache so the next call goes through sourceFingerprint.
+      for await (const _doc of iterateDocuments(dbPath)) {
+        // drain
+      }
+
+      const originalStat = fs.statSync;
+      (fs as { statSync: typeof fs.statSync }).statSync = ((
+        p: fs.PathLike,
+        opts?: Parameters<typeof fs.statSync>[1]
+      ) => {
+        // Throw on any per-file stat inside the source DB directory; allow
+        // the directory-itself stat through so we hit the per-file branch.
+        if (typeof p === 'string' && p.startsWith(dbPath + path.sep)) {
+          const err: NodeJS.ErrnoException = new Error('permission denied');
+          err.code = 'EACCES';
+          throw err;
+        }
+        return (originalStat as (p: fs.PathLike, opts?: unknown) => fs.Stats)(p, opts);
+      }) as typeof fs.statSync;
+
+      try {
+        const gen = iterateDocuments(dbPath);
+        await expect(gen.next()).rejects.toThrow('permission denied');
+      } finally {
+        (fs as { statSync: typeof fs.statSync }).statSync = originalStat;
+      }
+    });
+
+    test('copy loop propagates non-ENOENT copy errors', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'copy-eacces-db');
+      await createTestDatabase(dbPath, [{ collection: 'test', id: 'doc1', fields: { x: 1 } }]);
+
+      const originalCopy = fs.copyFileSync;
+      (fs as { copyFileSync: typeof fs.copyFileSync }).copyFileSync = ((
+        src: fs.PathLike,
+        dest: fs.PathLike,
+        mode?: number
+      ) => {
+        // Throw on any copy out of the source DB directory.
+        if (typeof src === 'string' && src.startsWith(dbPath + path.sep)) {
+          const err: NodeJS.ErrnoException = new Error('permission denied');
+          err.code = 'EACCES';
+          throw err;
+        }
+        return (originalCopy as (s: fs.PathLike, d: fs.PathLike, m?: number) => void)(
+          src,
+          dest,
+          mode
+        );
+      }) as typeof fs.copyFileSync;
+
+      try {
+        const gen = iterateDocuments(dbPath);
+        await expect(gen.next()).rejects.toThrow('permission denied');
+      } finally {
+        (fs as { copyFileSync: typeof fs.copyFileSync }).copyFileSync = originalCopy;
+      }
+    });
+  });
 });
