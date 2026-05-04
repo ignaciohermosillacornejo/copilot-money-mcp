@@ -16,8 +16,14 @@ import type { LiveCopilotDatabase } from '../../core/live-database.js';
 import { fetchCategories, type CategoryNode } from '../../core/graphql/queries/categories.js';
 import { roundAmount } from '../../utils/round.js';
 
-// Reserved for future filters (e.g., active_only).
-export type GetBudgetsLiveArgs = Record<string, never>;
+export interface GetBudgetsLiveArgs {
+  /**
+   * Trailing-N-months window for the per-budget `amounts` map. Default 12.
+   * Set to 0 to return the full multi-year history (matches the historical
+   * pre-fix behavior). Months are relative to the current month inclusive.
+   */
+  months_window?: number;
+}
 
 export interface GetBudgetsLiveBudget {
   budget_id: string;
@@ -40,6 +46,24 @@ function parseAmount(value: string | null | undefined): number | undefined {
   if (value === null || value === undefined) return undefined;
   const n = Number(value);
   return Number.isFinite(n) ? n : undefined;
+}
+
+/**
+ * Return a trimmed amounts map containing only the trailing N months from
+ * "now" (current calendar month inclusive). Months are sorted lexicographically;
+ * the most recent N keys are kept. If the input has fewer than N months,
+ * returns the input unchanged.
+ */
+function trimAmountsToWindow(
+  amounts: Record<string, number>,
+  windowMonths: number
+): Record<string, number> {
+  const keys = Object.keys(amounts).sort();
+  if (keys.length <= windowMonths) return amounts;
+  const kept = keys.slice(-windowMonths);
+  const trimmed: Record<string, number> = {};
+  for (const k of kept) trimmed[k] = amounts[k]!;
+  return trimmed;
 }
 
 function projectCategory(cat: CategoryNode): GetBudgetsLiveBudget | null {
@@ -72,7 +96,7 @@ function projectCategory(cat: CategoryNode): GetBudgetsLiveBudget | null {
 export class LiveBudgetsTools {
   constructor(private readonly live: LiveCopilotDatabase) {}
 
-  async getBudgets(_args: GetBudgetsLiveArgs): Promise<GetBudgetsLiveResult> {
+  async getBudgets(args: GetBudgetsLiveArgs): Promise<GetBudgetsLiveResult> {
     const cache = this.live.getCategoriesCache();
     const startedAt = Date.now();
     const {
@@ -81,13 +105,19 @@ export class LiveBudgetsTools {
       hit,
     } = await cache.read(() => fetchCategories(this.live.getClient()));
 
+    const monthsWindow = args.months_window ?? 12;
+
     const projected: GetBudgetsLiveBudget[] = [];
     let totalBudgeted = 0;
     for (const cat of cats) {
       const row = projectCategory(cat);
       if (!row) continue;
-      projected.push(row);
-      if (row.amount !== undefined) totalBudgeted += row.amount;
+      const trimmed =
+        monthsWindow > 0 && row.amounts
+          ? { ...row, amounts: trimAmountsToWindow(row.amounts, monthsWindow) }
+          : row;
+      projected.push(trimmed);
+      if (trimmed.amount !== undefined) totalBudgeted += trimmed.amount;
     }
 
     // Sort by category_name for stable output (mirrors LiveCategoriesTools convention).
@@ -123,7 +153,16 @@ export function createLiveBudgetsToolSchema() {
       'powers get_categories_live populates this. Replaces get_budgets when --live-reads is on.',
     inputSchema: {
       type: 'object' as const,
-      properties: {},
+      properties: {
+        months_window: {
+          type: 'integer',
+          minimum: 0,
+          description:
+            "Number of trailing months to include in each budget's `amounts` map. " +
+            'Default: 12. Set to 0 to return the full multi-year history (large response).',
+          default: 12,
+        },
+      },
     },
     annotations: {
       readOnlyHint: true,
