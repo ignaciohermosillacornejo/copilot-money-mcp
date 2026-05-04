@@ -1,10 +1,13 @@
 /**
  * GraphQL query wrapper for Categories.
  *
- * Always queries with {spend: false, budget: true, rollovers: false} so the
- * cached payload carries category.budget.current and category.budget.histories.
- * PR #3 (Budgets) projects budgets from the same cache — querying without
- * `budget: true` would warm the cache with the wrong shape.
+ * Always queries with {spend: false, budget: true}; the caller passes
+ * `rollovers` explicitly so the value mirrors the user's actual
+ * `budgetingConfig.rolloversConfig.isEnabled` setting (see audit C6).
+ * The cached payload carries category.budget.current and
+ * category.budget.histories — PR #3 (Budgets) projects budgets from the
+ * same cache, so querying without `budget: true` would warm the cache
+ * with the wrong shape.
  *
  * Returns a flat list — childCategories are flattened one level deep (the
  * GraphQL query does not request grandchildren) so the SnapshotCache can
@@ -82,10 +85,31 @@ interface CategoriesResponse {
   categories: CategoryResponseNode[];
 }
 
-const VARS = { spend: false, budget: true, rollovers: false } as const;
+export interface FetchCategoriesOpts {
+  /** Whether to include rollover effects in the budget computation. */
+  rollovers: boolean;
+}
 
-export async function fetchCategories(client: GraphQLClient): Promise<CategoryNode[]> {
-  const data = await client.query<typeof VARS, CategoriesResponse>('Categories', CATEGORIES, VARS);
+interface CategoriesVariables {
+  spend: false;
+  budget: true;
+  rollovers: boolean;
+}
+
+export async function fetchCategories(
+  client: GraphQLClient,
+  opts: FetchCategoriesOpts
+): Promise<CategoryNode[]> {
+  const variables: CategoriesVariables = {
+    spend: false,
+    budget: true,
+    rollovers: opts.rollovers,
+  };
+  const data = await client.query<CategoriesVariables, CategoriesResponse>(
+    'Categories',
+    CATEGORIES,
+    variables
+  );
   const flat: CategoryNode[] = [];
   for (const cat of data.categories) {
     const { childCategories, ...rawParent } = cat;
