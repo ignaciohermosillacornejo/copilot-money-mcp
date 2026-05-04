@@ -157,6 +157,44 @@ describe('LiveCategoriesTools.getCategories', () => {
     const cached = live.getCategoriesCache().peek();
     expect(cached?.[0]?.budget?.histories).toHaveLength(2);
   });
+
+  test('regression C1: include_history=true preserves budget.histories', async () => {
+    const fixture: CategoryNode = {
+      id: 'cat-1',
+      parentId: null,
+      name: 'Restaurants',
+      templateId: 'Restaurants',
+      colorName: 'PURPLE2',
+      icon: { __typename: 'EmojiUnicode', unicode: '🍔' },
+      isExcluded: false,
+      isRolloverDisabled: false,
+      canBeDeleted: true,
+      budget: {
+        current: null,
+        histories: [
+          {
+            unassignedRolloverAmount: null,
+            childRolloverAmount: null,
+            unassignedAmount: null,
+            resolvedAmount: '500',
+            rolloverAmount: '0',
+            childAmount: null,
+            goalAmount: '0',
+            amount: '500',
+            month: '2026-04',
+            id: 'budget-history-1',
+          },
+        ],
+      },
+    };
+    const live = makeLive(makeClient([fixture]));
+    const tools = new LiveCategoriesTools(live);
+
+    const result = await tools.getCategories({ include_history: true });
+
+    expect(result.categories[0]?.budget?.histories).toHaveLength(1);
+    expect(result.categories[0]?.budget?.histories[0]?.month).toBe('2026-04');
+  });
 });
 
 describe('createLiveCategoriesToolSchema', () => {
