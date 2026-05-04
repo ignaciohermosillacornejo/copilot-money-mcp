@@ -35,6 +35,12 @@ manifest.write.json
 # is tracked; raw/ stays local.
 docs/graphql-capture/raw/
 
+# Superpowers session scratch — audit measurements, design specs, plan
+# templates, and handoff notes routinely contain real financial figures
+# captured during parity work (account balances, category totals, account
+# names). Keep the whole tree local so `git add -A` can't surface it.
+docs/superpowers/
+
 # TypeScript
 *.tsbuildinfo
 
