@@ -77,9 +77,7 @@ export class LiveAccountsTools {
       else totalAssets += a.balance;
     }
 
-    // A2: charge cards (e.g., AmEx Platinum) have no preset spending limit;
-    // the server returns limit:0 which would cause /0 in utilization
-    // calculations. Project null so consumers get a clean signal.
+    // A2: server returns limit:0 for charge cards (no preset limit); project null to prevent /0 in utilization.
     const projectedAccounts = rows.map((a) => (a.limit === 0 ? { ...a, limit: null } : a));
 
     const fetchedAtIso = new Date(fetched_at).toISOString();

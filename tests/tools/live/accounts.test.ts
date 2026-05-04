@@ -136,9 +136,7 @@ describe('LiveAccountsTools.getAccounts', () => {
   });
 
   test('regression A2: limit:0 mapped to null for charge cards', async () => {
-    // AmEx Platinum is a charge card with no preset spending limit.
-    // Server returns limit:0; consumers computing utilization (balance/limit)
-    // would divide by zero. Project null instead.
+    // Charge cards (e.g., AmEx Platinum) have no preset limit; server returns 0, project null to prevent /0.
     const live = mkLive([
       A('chk', { type: 'DEPOSITORY', balance: 5000, limit: null }),
       A('cc-with-limit', { type: 'CREDIT', balance: 100, limit: 5000 }),
