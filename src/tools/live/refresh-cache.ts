@@ -18,6 +18,7 @@ const VALID_SCOPES = [
   'tags',
   'budgets',
   'recurring',
+  'user',
 ] as const;
 
 const YEAR_MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -36,6 +37,7 @@ export interface RefreshCacheResult {
     tags?: boolean;
     budgets?: boolean;
     recurring?: boolean;
+    user?: boolean;
     transactions_months?: string[] | 'all';
   };
 }
@@ -74,6 +76,8 @@ export class RefreshCacheTool {
       flushed.budgets = true;
       this.live.getRecurringCache().invalidate();
       flushed.recurring = true;
+      this.live.getUserCache().invalidate();
+      flushed.user = true;
     };
 
     const flushTransactions = () => {
@@ -112,6 +116,13 @@ export class RefreshCacheTool {
         this.live.getRecurringCache().invalidate();
         flushed.recurring = true;
         break;
+      case 'user':
+        // Refresh the cached user record (read by resolveRolloversFlag for the
+        // Categories query). Use after toggling rollover or budgeting in the
+        // web app — see audit finding C6.
+        this.live.getUserCache().invalidate();
+        flushed.user = true;
+        break;
     }
 
     return Promise.resolve({ flushed });
@@ -130,7 +141,7 @@ export function createRefreshCacheToolSchema() {
           type: 'string',
           enum: VALID_SCOPES,
           description:
-            'Which slice of the live cache to flush. Default: all. Note: "budgets" is an alias for "categories" — budget data is a projection of the categories cache.',
+            'Which slice of the live cache to flush. Default: all. Note: "budgets" is an alias for "categories" — budget data is a projection of the categories cache. "user" refreshes the cached user record (read by the Categories query to honor the user\'s rollover setting); use after toggling rollover or budgeting in the web app.',
           default: 'all',
         },
         months: {
