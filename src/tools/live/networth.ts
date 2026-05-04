@@ -39,6 +39,12 @@ export interface GetNetworthLiveResult {
 }
 
 export class LiveNetworthTools {
+  // Tracks the timeFrame of the currently-cached snapshot. Assumes serial
+  // callers — MCP tool calls are processed one-at-a-time by the server's
+  // request loop, so concurrent getNetworth calls with different time_frame
+  // values can't race on the assignment below. If that assumption ever
+  // changes (e.g., a worker pool is added), move this into SnapshotCache
+  // metadata so it's guarded by the same lock as the cache itself.
   private lastTimeFrame: string | null = null;
 
   constructor(private readonly live: LiveCopilotDatabase) {}
@@ -49,7 +55,8 @@ export class LiveNetworthTools {
 
     // If the requested timeFrame differs from the last one cached, invalidate
     // so the next read fetches fresh rows for the new timeFrame instead of
-    // returning stale rows from the previous timeFrame.
+    // returning stale rows from the previous timeFrame. (See lastTimeFrame
+    // comment above for the serial-callers assumption.)
     if (this.lastTimeFrame !== null && this.lastTimeFrame !== timeFrame) {
       cache.invalidate();
     }
@@ -74,6 +81,9 @@ export class LiveNetworthTools {
     });
 
     const fetchedAtIso = new Date(fetched_at).toISOString();
+    // Both `_cache_oldest_fetched_at` and `_cache_newest_fetched_at` reflect
+    // the same single-snapshot fetch time — unlike the windowed transaction
+    // cache where they can differ across month windows.
     return {
       count: rows.length,
       networth_history: rows,
@@ -100,9 +110,11 @@ export function createLiveNetworthToolSchema() {
       properties: {
         time_frame: {
           type: 'string',
+          enum: ['ALL', 'YEAR', 'MONTH'],
           description:
             'TimeFrame enum passed through to the Networth query. Default "ALL". ' +
-            'Validation is left to the server.',
+            'Other values are passed through unchanged; the server is the source of truth ' +
+            'on which TimeFrame values it accepts.',
           default: DEFAULT_TIME_FRAME,
         },
       },

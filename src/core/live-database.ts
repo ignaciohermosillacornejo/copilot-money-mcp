@@ -109,6 +109,12 @@ export class LiveCopilotDatabase {
       { key: 'user', ttlMs: ONE_DAY_MS, keyFn: (u) => u.id },
       this.inflight
     );
+    // keyFn assumes the upstream Networth query returns at most one row per
+    // date (true today — daily snapshots). If a future schema change ever
+    // returns multiple rows per date (e.g., intraday), upsert() would
+    // silently overwrite the first match. No write-through patches exist
+    // for networth today, so this is latent — but worth pinning the
+    // assumption here for future maintainers.
     this.networthCache = new SnapshotCache<NetworthHistoryNode>(
       { key: 'networth', ttlMs: ONE_HOUR_MS, keyFn: (n) => n.date },
       this.inflight
