@@ -55,9 +55,8 @@ describe('LiveUpcomingRecurringsTools.getUpcomingRecurrings', () => {
       mkUpcoming({ id: 'r2', name: 'Item Early', nextPaymentDate: '2026-05-05' }),
       mkUpcoming({ id: 'r3', name: 'Item Mid', nextPaymentDate: '2026-05-10' }),
     ]);
-    const { LiveUpcomingRecurringsTools } = await import(
-      '../../../src/tools/live/upcoming-recurrings.js'
-    );
+    const { LiveUpcomingRecurringsTools } =
+      await import('../../../src/tools/live/upcoming-recurrings.js');
     const tools = new LiveUpcomingRecurringsTools(live);
 
     const result = await tools.getUpcomingRecurrings({});
@@ -71,9 +70,8 @@ describe('LiveUpcomingRecurringsTools.getUpcomingRecurrings', () => {
     const { live, client } = mkLiveReturning([
       mkUpcoming({ id: 'r1', name: 'Item', nextPaymentDate: '2026-05-10' }),
     ]);
-    const { LiveUpcomingRecurringsTools } = await import(
-      '../../../src/tools/live/upcoming-recurrings.js'
-    );
+    const { LiveUpcomingRecurringsTools } =
+      await import('../../../src/tools/live/upcoming-recurrings.js');
     const tools = new LiveUpcomingRecurringsTools(live);
 
     await tools.getUpcomingRecurrings({});
@@ -85,9 +83,8 @@ describe('LiveUpcomingRecurringsTools.getUpcomingRecurrings', () => {
 
   test('returns empty list and count=0 when nothing is upcoming', async () => {
     const { live } = mkLiveReturning([]);
-    const { LiveUpcomingRecurringsTools } = await import(
-      '../../../src/tools/live/upcoming-recurrings.js'
-    );
+    const { LiveUpcomingRecurringsTools } =
+      await import('../../../src/tools/live/upcoming-recurrings.js');
     const tools = new LiveUpcomingRecurringsTools(live);
 
     const result = await tools.getUpcomingRecurrings({});
@@ -102,9 +99,8 @@ describe('LiveUpcomingRecurringsTools.getUpcomingRecurrings', () => {
       mkUpcoming({ id: 'r2', name: 'No date', nextPaymentDate: null }),
       mkUpcoming({ id: 'r3', name: 'Earliest', nextPaymentDate: '2026-05-01' }),
     ]);
-    const { LiveUpcomingRecurringsTools } = await import(
-      '../../../src/tools/live/upcoming-recurrings.js'
-    );
+    const { LiveUpcomingRecurringsTools } =
+      await import('../../../src/tools/live/upcoming-recurrings.js');
     const tools = new LiveUpcomingRecurringsTools(live);
 
     const result = await tools.getUpcomingRecurrings({});
@@ -126,9 +122,8 @@ describe('LiveUpcomingRecurringsTools.getUpcomingRecurrings', () => {
       .getCategoriesCache()
       .read(async () => [mkCat({ id: 'cat-utils', name: 'Utilities' })]);
 
-    const { LiveUpcomingRecurringsTools } = await import(
-      '../../../src/tools/live/upcoming-recurrings.js'
-    );
+    const { LiveUpcomingRecurringsTools } =
+      await import('../../../src/tools/live/upcoming-recurrings.js');
     const tools = new LiveUpcomingRecurringsTools(live);
     const result = await tools.getUpcomingRecurrings({});
 
@@ -148,9 +143,8 @@ describe('LiveUpcomingRecurringsTools.getUpcomingRecurrings', () => {
     ]);
     // Do NOT pre-warm categoriesCache.
 
-    const { LiveUpcomingRecurringsTools } = await import(
-      '../../../src/tools/live/upcoming-recurrings.js'
-    );
+    const { LiveUpcomingRecurringsTools } =
+      await import('../../../src/tools/live/upcoming-recurrings.js');
     const tools = new LiveUpcomingRecurringsTools(live);
     const result = await tools.getUpcomingRecurrings({});
 
@@ -170,9 +164,8 @@ describe('LiveUpcomingRecurringsTools.getUpcomingRecurrings', () => {
     ]);
     await live.getCategoriesCache().read(async () => [mkCat({ id: 'cat-other', name: 'Other' })]);
 
-    const { LiveUpcomingRecurringsTools } = await import(
-      '../../../src/tools/live/upcoming-recurrings.js'
-    );
+    const { LiveUpcomingRecurringsTools } =
+      await import('../../../src/tools/live/upcoming-recurrings.js');
     const tools = new LiveUpcomingRecurringsTools(live);
     const result = await tools.getUpcomingRecurrings({});
 
@@ -184,9 +177,8 @@ describe('LiveUpcomingRecurringsTools.getUpcomingRecurrings', () => {
     const { live } = mkLiveReturning([
       mkUpcoming({ id: 'r1', name: 'Item', nextPaymentDate: '2026-05-10' }),
     ]);
-    const { LiveUpcomingRecurringsTools } = await import(
-      '../../../src/tools/live/upcoming-recurrings.js'
-    );
+    const { LiveUpcomingRecurringsTools } =
+      await import('../../../src/tools/live/upcoming-recurrings.js');
     const tools = new LiveUpcomingRecurringsTools(live);
 
     const result = await tools.getUpcomingRecurrings({});
@@ -197,25 +189,22 @@ describe('LiveUpcomingRecurringsTools.getUpcomingRecurrings', () => {
 
 describe('createLiveUpcomingRecurringsToolSchema', () => {
   test('schema name is get_upcoming_recurrings_live', async () => {
-    const { createLiveUpcomingRecurringsToolSchema } = await import(
-      '../../../src/tools/live/upcoming-recurrings.js'
-    );
+    const { createLiveUpcomingRecurringsToolSchema } =
+      await import('../../../src/tools/live/upcoming-recurrings.js');
     const schema = createLiveUpcomingRecurringsToolSchema();
     expect(schema.name).toBe('get_upcoming_recurrings_live');
   });
 
   test('schema is read-only', async () => {
-    const { createLiveUpcomingRecurringsToolSchema } = await import(
-      '../../../src/tools/live/upcoming-recurrings.js'
-    );
+    const { createLiveUpcomingRecurringsToolSchema } =
+      await import('../../../src/tools/live/upcoming-recurrings.js');
     const schema = createLiveUpcomingRecurringsToolSchema();
     expect(schema.annotations.readOnlyHint).toBe(true);
   });
 
   test('description distinguishes about-to-bill vs configured/historical view', async () => {
-    const { createLiveUpcomingRecurringsToolSchema } = await import(
-      '../../../src/tools/live/upcoming-recurrings.js'
-    );
+    const { createLiveUpcomingRecurringsToolSchema } =
+      await import('../../../src/tools/live/upcoming-recurrings.js');
     const schema = createLiveUpcomingRecurringsToolSchema();
     expect(schema.description).toMatch(/get_recurring_live/);
     expect(schema.description.toLowerCase()).toMatch(/about.to.bill|upcoming|next.due/);
