@@ -2609,3 +2609,76 @@ describe('--live-reads networth wiring', () => {
     expect(data._cache_hit).toBe(false);
   });
 });
+
+// ============================================
+// --live-reads upcoming-recurrings wiring tests
+// ============================================
+
+describe('--live-reads upcoming-recurrings wiring', () => {
+  test('handleListTools when --live-reads is OFF excludes get_upcoming_recurrings_live', () => {
+    const server = new CopilotMoneyServer(FAKE_DB_DIR);
+    const { tools } = server.handleListTools();
+    const names = tools.map((t) => t.name);
+    expect(names).not.toContain('get_upcoming_recurrings_live');
+  });
+
+  test('handleListTools when --live-reads is ON includes get_upcoming_recurrings_live', () => {
+    const mockClient = createMockGraphQLClient({});
+    const server = new CopilotMoneyServer(FAKE_DB_DIR, undefined, false, true, mockClient);
+    const { tools } = server.handleListTools();
+    const names = tools.map((t) => t.name);
+    expect(names).toContain('get_upcoming_recurrings_live');
+    // Sibling tool stays present (this is a net-new tool, not a swap)
+    expect(names).toContain('get_recurring_live');
+  });
+
+  test('get_upcoming_recurrings_live without --live-reads returns isError with --live-reads hint', async () => {
+    const server = new CopilotMoneyServer(FAKE_DB_DIR);
+    const db = createMockDb();
+    server._injectForTesting(db, new CopilotMoneyTools(db));
+
+    const result = await server.handleCallTool('get_upcoming_recurrings_live', {});
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('--live-reads');
+  });
+
+  test('get_upcoming_recurrings_live with --live-reads dispatches to liveUpcomingRecurringsTools.getUpcomingRecurrings', async () => {
+    const mockClient = createMockGraphQLClient({});
+    const server = new CopilotMoneyServer(FAKE_DB_DIR, undefined, false, true, mockClient);
+    const db = createMockDb();
+    server._injectForTesting(db, new CopilotMoneyTools(db));
+
+    const stubResult = {
+      count: 1,
+      upcoming: [
+        {
+          id: 'r1',
+          name: 'Subscription A',
+          state: 'ACTIVE',
+          frequency: 'MONTHLY',
+          nextPaymentAmount: 100,
+          nextPaymentDate: '2026-05-10',
+          categoryId: 'cat-1',
+          emoji: 'A',
+          icon: { __typename: 'EmojiUnicode', unicode: 'A' },
+          rule: null,
+          payments: [{ amount: 100, isPaid: false, date: '2026-05-10' }],
+          category_name: null,
+        },
+      ],
+      _cache_oldest_fetched_at: '2025-01-01T00:00:00.000Z',
+      _cache_newest_fetched_at: '2025-01-01T00:00:00.000Z',
+      _cache_hit: false,
+    };
+    (server as any).liveUpcomingRecurringsTools = {
+      getUpcomingRecurrings: async (_args: unknown) => stubResult,
+    };
+
+    const result = await server.handleCallTool('get_upcoming_recurrings_live', {});
+    expect(result.isError).toBeUndefined();
+    const data = JSON.parse(result.content[0].text) as typeof stubResult;
+    expect(data.count).toBe(1);
+    expect(data.upcoming[0]?.name).toBe('Subscription A');
+    expect(data._cache_hit).toBe(false);
+  });
+});

@@ -36,11 +36,8 @@ import type { AccountNode } from './graphql/queries/accounts.js';
 import type { CategoryNode } from './graphql/queries/categories.js';
 import type { TagNode } from './graphql/queries/tags.js';
 import type { RecurringNode } from './graphql/queries/recurrings.js';
-<<<<<<< HEAD
 import type { NetworthHistoryNode } from './graphql/queries/networth.js';
-=======
 import type { UpcomingRecurringNode } from './graphql/queries/upcoming-recurrings.js';
->>>>>>> f59958b (feat(live-db): add upcomingRecurringsCache (1h TTL))
 import { fetchUser, type UserNode } from './graphql/queries/user.js';
 import type { Transaction } from '../models/index.js';
 

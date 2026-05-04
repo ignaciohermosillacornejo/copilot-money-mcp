@@ -38,9 +38,8 @@ describe('fetchUpcomingRecurrings', () => {
       ),
     } as unknown as GraphQLClient;
 
-    const { fetchUpcomingRecurrings } = await import(
-      '../../../../src/core/graphql/queries/upcoming-recurrings.js'
-    );
+    const { fetchUpcomingRecurrings } =
+      await import('../../../../src/core/graphql/queries/upcoming-recurrings.js');
     const rows = await fetchUpcomingRecurrings(client);
 
     expect(rows).toHaveLength(2);
@@ -55,9 +54,8 @@ describe('fetchUpcomingRecurrings', () => {
       query: mock(() => Promise.resolve({ unpaidUpcomingRecurrings: [] })),
     } as unknown as GraphQLClient;
 
-    const { fetchUpcomingRecurrings } = await import(
-      '../../../../src/core/graphql/queries/upcoming-recurrings.js'
-    );
+    const { fetchUpcomingRecurrings } =
+      await import('../../../../src/core/graphql/queries/upcoming-recurrings.js');
     await fetchUpcomingRecurrings(client);
 
     expect(client.query).toHaveBeenCalledWith('UpcomingRecurrings', expect.any(String), {});
@@ -68,9 +66,8 @@ describe('fetchUpcomingRecurrings', () => {
       query: mock(() => Promise.resolve({ unpaidUpcomingRecurrings: [] })),
     } as unknown as GraphQLClient;
 
-    const { fetchUpcomingRecurrings } = await import(
-      '../../../../src/core/graphql/queries/upcoming-recurrings.js'
-    );
+    const { fetchUpcomingRecurrings } =
+      await import('../../../../src/core/graphql/queries/upcoming-recurrings.js');
     const rows = await fetchUpcomingRecurrings(client);
     expect(rows).toEqual([]);
   });

@@ -25,6 +25,10 @@ import { LiveTagsTools, createLiveTagsToolSchema } from './tools/live/tags.js';
 import { LiveBudgetsTools, createLiveBudgetsToolSchema } from './tools/live/budgets.js';
 import { LiveRecurringTools, createLiveRecurringToolSchema } from './tools/live/recurring.js';
 import { LiveNetworthTools, createLiveNetworthToolSchema } from './tools/live/networth.js';
+import {
+  LiveUpcomingRecurringsTools,
+  createLiveUpcomingRecurringsToolSchema,
+} from './tools/live/upcoming-recurrings.js';
 import { RefreshCacheTool, createRefreshCacheToolSchema } from './tools/live/refresh-cache.js';
 
 // Read version from package.json
@@ -48,6 +52,7 @@ export class CopilotMoneyServer {
   private liveBudgetsTools?: LiveBudgetsTools;
   private liveRecurringTools?: LiveRecurringTools;
   private liveNetworthTools?: LiveNetworthTools;
+  private liveUpcomingRecurringsTools?: LiveUpcomingRecurringsTools;
   private refreshCacheTool?: RefreshCacheTool;
 
   /**
@@ -85,6 +90,7 @@ export class CopilotMoneyServer {
       this.liveBudgetsTools = new LiveBudgetsTools(liveDb);
       this.liveRecurringTools = new LiveRecurringTools(liveDb);
       this.liveNetworthTools = new LiveNetworthTools(liveDb);
+      this.liveUpcomingRecurringsTools = new LiveUpcomingRecurringsTools(liveDb);
       this.refreshCacheTool = new RefreshCacheTool(liveDb);
     }
 
@@ -129,6 +135,7 @@ export class CopilotMoneyServer {
           createLiveBudgetsToolSchema(),
           createLiveRecurringToolSchema(),
           createLiveNetworthToolSchema(),
+          createLiveUpcomingRecurringsToolSchema(),
           createRefreshCacheToolSchema(),
         ]
       : [];
@@ -275,6 +282,18 @@ export class CopilotMoneyServer {
       };
     }
 
+    if (name === 'get_upcoming_recurrings_live' && !this.liveUpcomingRecurringsTools) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'get_upcoming_recurrings_live is only available when the server runs with --live-reads.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
     if (name === 'refresh_cache' && !this.refreshCacheTool) {
       return {
         content: [
@@ -363,6 +382,15 @@ export class CopilotMoneyServer {
           result = await this.liveNetworthTools!.getNetworth(
             (typedArgs as Parameters<
               NonNullable<typeof this.liveNetworthTools>['getNetworth']
+            >[0]) ?? {}
+          );
+          break;
+
+        case 'get_upcoming_recurrings_live':
+          // liveUpcomingRecurringsTools non-null invariant enforced by the early guard above.
+          result = await this.liveUpcomingRecurringsTools!.getUpcomingRecurrings(
+            (typedArgs as Parameters<
+              NonNullable<typeof this.liveUpcomingRecurringsTools>['getUpcomingRecurrings']
             >[0]) ?? {}
           );
           break;
