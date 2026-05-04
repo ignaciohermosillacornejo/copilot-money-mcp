@@ -102,6 +102,42 @@ describe('LiveAccountsTools.getAccounts', () => {
     expect(result.total_balance).toBe(300); // 1000 - 700
   });
 
+  test('regression A1: real-shape uppercase types are bucketed correctly', async () => {
+    // GraphQL returns Account.type as uppercase enum values ('CREDIT', 'DEPOSITORY',
+    // 'LOAN'). Pre-fix code held lowercase in LIABILITY_TYPES, so production saw
+    // every credit-card balance summed into total_assets and total_liabilities=0.
+    // See docs/superpowers/audits/2026-05-03-live-mode-parity-audit.md § Issue A1.
+    const live = mkLive([
+      A('chk', { type: 'DEPOSITORY', balance: 5000 }),
+      A('cc', { type: 'CREDIT', balance: 1500 }),
+      A('ln', { type: 'LOAN', balance: 800 }),
+    ]);
+    const tools = new LiveAccountsTools(live);
+
+    const result = await tools.getAccounts({});
+    expect(result.total_assets).toBe(5000);
+    expect(result.total_liabilities).toBe(2300);
+    expect(result.total_balance).toBe(2700);
+  });
+
+  test('regression A1: account_type filter is case-insensitive', async () => {
+    // Real server returns uppercase. Tool description documents lowercase examples
+    // ("depository, credit, loan, investment, etc."). Both must work.
+    const live = mkLive([
+      A('a', { type: 'DEPOSITORY' }),
+      A('b', { type: 'CREDIT' }),
+    ]);
+    const tools = new LiveAccountsTools(live);
+
+    const lower = await tools.getAccounts({ account_type: 'credit' });
+    expect(lower.count).toBe(1);
+    expect(lower.accounts[0]?.id).toBe('b');
+
+    const upper = await tools.getAccounts({ account_type: 'CREDIT' });
+    expect(upper.count).toBe(1);
+    expect(upper.accounts[0]?.id).toBe('b');
+  });
+
   test('schema definition exposes filter args', () => {
     const schema = createLiveAccountsToolSchema();
     expect(schema.name).toBe('get_accounts_live');
