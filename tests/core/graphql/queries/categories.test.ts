@@ -36,7 +36,7 @@ describe('fetchCategories', () => {
     } as unknown as GraphQLClient;
 
     const { fetchCategories } = await import('../../../../src/core/graphql/queries/categories.js');
-    const rows = await fetchCategories(client);
+    const rows = await fetchCategories(client, { rollovers: false });
 
     expect(rows).toHaveLength(2);
     expect(rows.map((r) => r.id)).toEqual(['parent-1', 'child-1']);
@@ -90,7 +90,7 @@ describe('fetchCategories', () => {
     } as unknown as GraphQLClient;
 
     const { fetchCategories } = await import('../../../../src/core/graphql/queries/categories.js');
-    const rows = await fetchCategories(client);
+    const rows = await fetchCategories(client, { rollovers: false });
 
     expect(rows.map((r) => r.id)).toEqual(['parent-1', 'child-1', 'parent-2']);
   });
@@ -146,7 +146,7 @@ describe('fetchCategories', () => {
     } as unknown as GraphQLClient;
 
     const { fetchCategories } = await import('../../../../src/core/graphql/queries/categories.js');
-    const rows = await fetchCategories(client);
+    const rows = await fetchCategories(client, { rollovers: false });
 
     expect(rows).toHaveLength(2);
     expect(rows[0]?.budget?.current?.amount).toBe('500');
@@ -211,7 +211,7 @@ describe('fetchCategories', () => {
     } as unknown as GraphQLClient;
 
     const { fetchCategories } = await import('../../../../src/core/graphql/queries/categories.js');
-    const flat = await fetchCategories(client);
+    const flat = await fetchCategories(client, { rollovers: false });
 
     const home = flat.find((c) => c.id === 'home-id');
     const rent = flat.find((c) => c.id === 'rent-id');
@@ -258,22 +258,44 @@ describe('fetchCategories', () => {
     } as unknown as GraphQLClient;
 
     const { fetchCategories } = await import('../../../../src/core/graphql/queries/categories.js');
-    const flat = await fetchCategories(client);
+    const flat = await fetchCategories(client, { rollovers: false });
 
     expect(flat).toHaveLength(1);
     expect(flat[0]?.id).toBe('no-children-key');
     expect(flat[0]?.parentId).toBeNull();
   });
 
-  test('passes {spend:false, budget:true, rollovers:false} variables', async () => {
+  test('passes {spend:false, budget:true} variables and the caller-supplied rollovers flag', async () => {
     const client = {
       query: mock(() => Promise.resolve({ categories: [] })),
     } as unknown as GraphQLClient;
 
     const { fetchCategories } = await import('../../../../src/core/graphql/queries/categories.js');
-    await fetchCategories(client);
+    await fetchCategories(client, { rollovers: false });
 
     expect(client.query).toHaveBeenCalledWith('Categories', expect.any(String), {
+      spend: false,
+      budget: true,
+      rollovers: false,
+    });
+  });
+
+  test('regression C6: forwards rollovers flag to GraphQL variables', async () => {
+    const client = {
+      query: mock(() => Promise.resolve({ categories: [] })),
+    } as unknown as GraphQLClient;
+
+    const { fetchCategories } = await import('../../../../src/core/graphql/queries/categories.js');
+
+    await fetchCategories(client, { rollovers: true });
+    expect(client.query).toHaveBeenLastCalledWith('Categories', expect.any(String), {
+      spend: false,
+      budget: true,
+      rollovers: true,
+    });
+
+    await fetchCategories(client, { rollovers: false });
+    expect(client.query).toHaveBeenLastCalledWith('Categories', expect.any(String), {
       spend: false,
       budget: true,
       rollovers: false,
