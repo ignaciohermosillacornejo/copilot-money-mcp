@@ -42,6 +42,17 @@ const IN_SCOPE_QUERIES = [
   'Networth',
   'UpcomingRecurrings',
   'MonthlySpend',
+  // Phase 3 investments:
+  'Holdings',
+  'TopMovers',
+  'AggregatedHoldings',
+  'SecurityPrices',
+  'SecurityPricesHighFrequency',
+  'InvestmentBalance',
+  'InvestmentLiveBalance',
+  'InvestmentAllocation',
+  'Account',
+  'BalanceHistory',
 ] as const;
 
 const CAPTURE_DIR = 'docs/graphql-capture/operations/mutations';
