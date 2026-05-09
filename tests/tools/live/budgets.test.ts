@@ -436,4 +436,12 @@ describe('createLiveBudgetsToolSchema', () => {
     expect(schema.name).toBe('get_budgets_live');
     expect(schema.annotations?.readOnlyHint).toBe(true);
   });
+
+  test('declares months_window with minimum: 0', async () => {
+    const { createLiveBudgetsToolSchema } = await import('../../../src/tools/live/budgets.js');
+    const schema = createLiveBudgetsToolSchema();
+    const props = schema.inputSchema.properties as Record<string, { minimum?: number }>;
+    expect(props.months_window).toBeDefined();
+    expect(props.months_window?.minimum).toBe(0);
+  });
 });
