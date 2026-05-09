@@ -442,6 +442,6 @@ describe('createLiveBudgetsToolSchema', () => {
     const schema = createLiveBudgetsToolSchema();
     const props = schema.inputSchema.properties as Record<string, { minimum?: number }>;
     expect(props.months_window).toBeDefined();
-    expect(props.months_window?.minimum).toBe(0);
+    expect(props.months_window.minimum).toBe(0);
   });
 });
