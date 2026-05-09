@@ -600,11 +600,49 @@ describe('LiveCopilotDatabase.patchLiveCategoryUpsert (CategoryNode shape)', () 
     expect(after.rows.find((c) => c.id === 'cat-1')?.name).toBe('New Name');
   });
 
-  test('preserves non-null parentId on upsert', async () => {
+  test('preserves non-null parentId on upsert (insert path)', async () => {
     const live = new LiveCopilotDatabase(mkClient(), mkCache());
 
     const cache = live.getCategoriesCache();
     await cache.read(() => Promise.resolve([]));
+
+    live.patchLiveCategoryUpsert({
+      id: 'child-1',
+      parentId: 'parent-1',
+      name: 'Coffee',
+      templateId: 'Food',
+      colorName: 'ORANGE2',
+      icon: null,
+      isExcluded: false,
+      isRolloverDisabled: false,
+      canBeDeleted: true,
+      budget: null,
+    });
+
+    const after = await cache.read(() => Promise.resolve([]));
+    expect(after.rows.find((c) => c.id === 'child-1')?.parentId).toBe('parent-1');
+  });
+
+  test('overwrites parentId on upsert when row already exists (update path)', async () => {
+    const live = new LiveCopilotDatabase(mkClient(), mkCache());
+
+    const cache = live.getCategoriesCache();
+    await cache.read(() =>
+      Promise.resolve([
+        {
+          id: 'child-1',
+          parentId: null,
+          name: 'Coffee',
+          templateId: 'Food',
+          colorName: 'ORANGE2',
+          icon: null,
+          isExcluded: false,
+          isRolloverDisabled: false,
+          canBeDeleted: true,
+          budget: null,
+        },
+      ])
+    );
 
     live.patchLiveCategoryUpsert({
       id: 'child-1',
