@@ -55,3 +55,23 @@ export const NETWORTH = "query Networth($timeFrame: TimeFrame) {\n  networthHist
 export const UPCOMING_RECURRINGS = "query UpcomingRecurrings {\n  unpaidUpcomingRecurrings {\n    ...RecurringFields\n    rule {\n      ...RecurringRuleFields\n      __typename\n    }\n    payments @connection(key: \"upcoming\") {\n      ...RecurringPaymentFields\n      __typename\n    }\n    __typename\n  }\n}\n\nfragment RecurringFields on Recurring {\n  nextPaymentAmount\n  nextPaymentDate\n  categoryId\n  frequency\n  emoji\n  icon {\n    ... on EmojiUnicode {\n      unicode\n      __typename\n    }\n    ... on Genmoji {\n      id\n      src\n      __typename\n    }\n    __typename\n  }\n  state\n  name\n  id\n  __typename\n}\n\nfragment RecurringRuleFields on RecurringRule {\n  nameContains\n  minAmount\n  maxAmount\n  days\n  __typename\n}\n\nfragment RecurringPaymentFields on RecurringPayment {\n  amount\n  isPaid\n  date\n  __typename\n}";
 
 export const MONTHLY_SPEND = "query MonthlySpend {\n  monthlySpending {\n    comparisonAmount\n    totalAmount\n    date\n    id\n    __typename\n  }\n}";
+
+export const HOLDINGS = "query Holdings {\n  holdings {\n    security {\n      ...SecurityFields\n      __typename\n    }\n    metrics {\n      averageCost\n      totalReturn\n      costBasis\n      __typename\n    }\n    accountId\n    quantity\n    itemId\n    id\n    __typename\n  }\n}\n\nfragment SecurityFields on Security {\n  marketInfo {\n    closeTime\n    openTime\n    __typename\n  }\n  currentPrice\n  lastUpdate\n  symbol\n  name\n  type\n  id\n  __typename\n}";
+
+export const TOP_MOVERS = "query TopMovers($filter: TopMoversFilter) {\n  topMovers(filter: $filter) {\n    security {\n      ...SecurityFields\n      __typename\n    }\n    values {\n      timestamp\n      price\n      id\n      __typename\n    }\n    change\n    __typename\n  }\n}\n\nfragment SecurityFields on Security {\n  marketInfo {\n    closeTime\n    openTime\n    __typename\n  }\n  currentPrice\n  lastUpdate\n  symbol\n  name\n  type\n  id\n  __typename\n}";
+
+export const AGGREGATED_HOLDINGS = "query AggregatedHoldings($timeFrame: TimeFrame, $filter: AggregatedHoldingsFilter, $accountId: ID, $itemId: ID) {\n  aggregatedHoldings(\n    timeFrame: $timeFrame\n    filter: $filter\n    accountId: $accountId\n    itemId: $itemId\n  ) {\n    security {\n      marketInfo {\n        closeTime\n        openTime\n        __typename\n      }\n      lastUpdate\n      symbol\n      name\n      type\n      id\n      __typename\n    }\n    change\n    value\n    __typename\n  }\n}";
+
+export const SECURITY_PRICES = "query SecurityPrices($id: ID!, $timeFrame: TimeFrame) {\n  securityPrices(securityId: $id, timeFrame: $timeFrame) {\n    price\n    date\n    id\n    __typename\n  }\n}";
+
+export const SECURITY_PRICES_HIGH_FREQUENCY = "query SecurityPricesHighFrequency($id: ID!, $timeFrame: TimeFrame) {\n  securityPricesHighFrequency(securityId: $id, timeFrame: $timeFrame) {\n    timestamp\n    price\n    id\n    __typename\n  }\n}";
+
+export const INVESTMENT_BALANCE = "query InvestmentBalance($timeFrame: TimeFrame) {\n  investmentBalance(timeFrame: $timeFrame) {\n    id\n    date\n    balance\n    __typename\n  }\n}";
+
+export const INVESTMENT_LIVE_BALANCE = "query InvestmentLiveBalance {\n  investmentLiveBalance {\n    id\n    date\n    balance\n    __typename\n  }\n}";
+
+export const INVESTMENT_ALLOCATION = "query InvestmentAllocation($filter: AllocationFilter) {\n  investmentAllocation(filter: $filter) {\n    ...AllocationFields\n    __typename\n  }\n}\n\nfragment AllocationFields on Allocation {\n  percentage\n  amount\n  type\n  id\n  __typename\n}";
+
+export const ACCOUNT = "query Account($itemId: ID!, $id: ID!, $accountLink: Boolean = false) {\n  account(itemId: $itemId, id: $id) {\n    ...AccountFields\n    accountLink @include(if: $accountLink) {\n      type\n      account {\n        ...AccountFields\n        __typename\n      }\n      __typename\n    }\n    __typename\n  }\n}\n\nfragment AccountFields on Account {\n  hasHistoricalUpdates\n  latestBalanceUpdate\n  hasLiveBalance\n  institutionId\n  isUserHidden\n  isUserClosed\n  liveBalance\n  isManual\n  balance\n  subType\n  itemId\n  limit\n  color\n  name\n  type\n  mask\n  id\n  __typename\n}";
+
+export const BALANCE_HISTORY = "query BalanceHistory($itemId: ID!, $accountId: ID!, $timeFrame: TimeFrame) {\n  accountBalanceHistory(\n    itemId: $itemId\n    accountId: $accountId\n    timeFrame: $timeFrame\n  ) {\n    ...BalanceFields\n    __typename\n  }\n}\n\nfragment BalanceFields on AccountBalanceHistory {\n  balance\n  date\n  __typename\n}";
