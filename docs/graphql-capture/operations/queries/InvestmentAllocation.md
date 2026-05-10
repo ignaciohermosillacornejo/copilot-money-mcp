@@ -47,16 +47,16 @@ fragment AllocationFields on Allocation {
       {
         "__typename": "Allocation",
         "id": "<id>",
-        "type": "<placeholder>",
+        "type": "<allocation-type>",
         "amount": "<amount>",
-        "percentage": "<placeholder>"
+        "percentage": "<amount>"
       },
       {
         "__typename": "Allocation",
         "id": "<id>",
-        "type": "<placeholder>",
+        "type": "<allocation-type>",
         "amount": "<amount>",
-        "percentage": "<placeholder>"
+        "percentage": "<amount>"
       }
     ]
   }
