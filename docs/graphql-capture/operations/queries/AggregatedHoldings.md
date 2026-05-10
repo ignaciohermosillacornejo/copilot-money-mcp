@@ -44,6 +44,8 @@ query AggregatedHoldings($timeFrame: TimeFrame, $filter: AggregatedHoldingsFilte
 
 `AggregatedHoldingsFilter` is an array; concrete enum members are not yet enumerated from captures.
 
+The inline security selection here omits `currentPrice` (which the `SecurityFields` fragment in `Holdings.md` / `TopMovers.md` does include). This matches the captured web traffic — the aggregated view renders `change` + `value` only and does not need the spot price. Future implementors should match the web app's selection here rather than reaching for `SecurityFields`.
+
 ## Example request
 
 ```json

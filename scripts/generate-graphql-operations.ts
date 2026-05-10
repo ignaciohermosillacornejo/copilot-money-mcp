@@ -1,8 +1,8 @@
 /**
  * Generate src/core/graphql/operations.generated.ts from the captured
- * mutation docs in docs/graphql-capture/operations/mutations/.
+ * operation docs in docs/graphql-capture/operations/{mutations,queries}/.
  *
- * Parses each in-scope mutation's query string, injects __typename into
+ * Parses each in-scope mutation and query string, injects __typename into
  * every selection set (matching Apollo's documentTransform behavior
  * required by Copilot's GraphQL server), and emits typed string constants.
  */
