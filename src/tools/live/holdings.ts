@@ -191,12 +191,11 @@ export function createLiveHoldingsToolSchema() {
       properties: {
         account_id: {
           type: 'string',
-          description: 'Filter — exact match on the holding\'s accountId.',
+          description: "Filter — exact match on the holding's accountId.",
         },
         ticker_symbol: {
           type: 'string',
-          description:
-            'Filter — case-insensitive match on the security\'s ticker symbol.',
+          description: "Filter — case-insensitive match on the security's ticker symbol.",
         },
         limit: {
           type: 'number',
