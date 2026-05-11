@@ -81,6 +81,7 @@ import {
 } from '../../core/graphql/queries/security-prices-high-frequency.js';
 import type { TimeFrame } from '../../core/graphql/queries/_shared.js';
 import { GraphQLError } from '../../core/graphql/client.js';
+import { paginate, DEFAULT_MAX_ROWS } from '../../utils/pagination.js';
 
 const TIME_FRAMES: TimeFrame[] = [
   'ONE_DAY',
@@ -98,9 +99,6 @@ const FIVE_MIN_MS = 5 * 60 * 1000;
 const ONE_HOUR_MS = 60 * 60 * 1000;
 
 const DEFAULT_TIME_FRAME: TimeFrame = 'ONE_MONTH';
-const DEFAULT_MAX_ROWS = 500;
-const MIN_MAX_ROWS = 1;
-const MAX_MAX_ROWS = 5000;
 
 /**
  * Sentinel key segment for "no timeFrame passed" so an explicit `'ALL'`
@@ -121,7 +119,16 @@ export type PriceGranularity = 'daily' | 'intraday';
 export interface GetInvestmentPricesLiveArgs {
   security_id: string;
   time_frame?: TimeFrame;
+  /**
+   * Cap on the number of rows returned. Clamped to [1, 5000]; default 500.
+   * Slices the most-recent rows of the ascending series.
+   */
   max_rows?: number;
+  /**
+   * Number of rows to skip from the most-recent end. Clamped to >= 0;
+   * default 0. Set to `max_rows` to fetch the next-most-recent batch.
+   */
+  offset?: number;
 }
 
 export interface GetInvestmentPricesLiveEntry {
@@ -161,12 +168,6 @@ function makeKey(securityId: string, timeFrame?: TimeFrame): string {
 
 function isIntraday(timeFrame: TimeFrame): boolean {
   return INTRADAY_TIME_FRAMES.has(timeFrame);
-}
-
-function clampMaxRows(n: number | undefined): number {
-  if (n === undefined) return DEFAULT_MAX_ROWS;
-  if (!Number.isFinite(n)) return DEFAULT_MAX_ROWS;
-  return Math.max(MIN_MAX_ROWS, Math.min(MAX_MAX_ROWS, Math.floor(n)));
 }
 
 /**
@@ -255,7 +256,6 @@ export class LiveInvestmentPricesTools {
     }
 
     const timeFrame: TimeFrame = args.time_frame ?? DEFAULT_TIME_FRAME;
-    const maxRows = clampMaxRows(args.max_rows);
     const intraday = isIntraday(timeFrame);
     const key = makeKey(args.security_id, args.time_frame);
     const startedAt = Date.now();
@@ -263,6 +263,7 @@ export class LiveInvestmentPricesTools {
     let granularity: PriceGranularity;
     let projected: GetInvestmentPricesLiveEntry[];
     let totalRows: number;
+    let truncated: boolean;
     let fetchedAt: number;
     let hit = false;
 
@@ -280,9 +281,10 @@ export class LiveInvestmentPricesTools {
         this.intradayCache.set(key, entry);
       }
       const sorted = entry.rows.slice().sort((a, b) => a.timestamp - b.timestamp);
-      totalRows = sorted.length;
-      const sliced = sorted.length > maxRows ? sorted.slice(sorted.length - maxRows) : sorted;
-      projected = sliced.map((r) => ({ price: r.price, timestamp: r.timestamp }));
+      const page = paginate(sorted, { max_rows: args.max_rows, offset: args.offset });
+      totalRows = page.total_rows;
+      truncated = page.truncated;
+      projected = page.rows.map((r) => ({ price: r.price, timestamp: r.timestamp }));
       fetchedAt = entry.fetched_at;
     } else {
       granularity = 'daily';
@@ -295,13 +297,12 @@ export class LiveInvestmentPricesTools {
         this.dailyCache.set(key, entry);
       }
       const sorted = entry.rows.slice().sort((a, b) => a.date.localeCompare(b.date));
-      totalRows = sorted.length;
-      const sliced = sorted.length > maxRows ? sorted.slice(sorted.length - maxRows) : sorted;
-      projected = sliced.map((r) => ({ price: r.price, date: r.date }));
+      const page = paginate(sorted, { max_rows: args.max_rows, offset: args.offset });
+      totalRows = page.total_rows;
+      truncated = page.truncated;
+      projected = page.rows.map((r) => ({ price: r.price, date: r.date }));
       fetchedAt = entry.fetched_at;
     }
-
-    const truncated = totalRows > projected.length;
 
     this.live.logReadCall({
       op: intraday ? 'SecurityPricesHighFrequency' : 'SecurityPrices',
@@ -365,6 +366,13 @@ export function createLiveInvestmentPricesToolSchema() {
             'MCP single-tool-result token limit on long-range queries. If hit, response ' +
             'includes `truncated: true`.',
           default: DEFAULT_MAX_ROWS,
+        },
+        offset: {
+          type: 'integer',
+          description:
+            'Number of rows to skip from the most-recent end. Default 0. Set to `max_rows` to ' +
+            'fetch the next-most-recent batch (counts backwards through history).',
+          default: 0,
         },
       },
       required: ['security_id'],

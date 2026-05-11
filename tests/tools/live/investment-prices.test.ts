@@ -415,6 +415,46 @@ describe('LiveInvestmentPricesTools — max_rows truncation', () => {
     expect(result.total_rows).toBe(5);
     expect(result.truncated).toBe(false);
   });
+
+  test('offset=max_rows returns the next-most-recent batch', async () => {
+    const bigDaily = Array.from({ length: 1500 }, (_, i) => ({
+      id: SECURITY_ID,
+      price: 100 + i,
+      date: `2025-${String(Math.floor(i / 30) + 1).padStart(2, '0')}-${String((i % 30) + 1).padStart(2, '0')}`,
+    }));
+    const client = makeClient({ daily: bigDaily });
+    const tools = new LiveInvestmentPricesTools(makeLive(client));
+
+    const result = await tools.getInvestmentPrices({
+      security_id: SECURITY_ID,
+      time_frame: 'ONE_YEAR',
+      max_rows: 500,
+      offset: 500,
+    });
+
+    expect(result.count).toBe(500);
+    expect(result.total_rows).toBe(1500);
+    expect(result.truncated).toBe(true);
+    expect(result.prices[0]!.price).toBe(100 + 500);
+    expect(result.prices[499]!.price).toBe(100 + 999);
+  });
+
+  test('offset beyond total returns empty rows without throwing', async () => {
+    const client = makeClient({ daily: dailyRows });
+    const tools = new LiveInvestmentPricesTools(makeLive(client));
+
+    const result = await tools.getInvestmentPrices({
+      security_id: SECURITY_ID,
+      time_frame: 'ONE_MONTH',
+      max_rows: 100,
+      offset: 5000,
+    });
+
+    expect(result.count).toBe(0);
+    expect(result.total_rows).toBe(5);
+    expect(result.prices).toEqual([]);
+    expect(result.truncated).toBe(false);
+  });
 });
 
 describe('LiveInvestmentPricesTools — sorting', () => {
@@ -550,6 +590,16 @@ describe('createLiveInvestmentPricesToolSchema', () => {
     expect(props.max_rows?.type).toBe('integer');
     expect(props.max_rows?.default).toBe(500);
     expect((schema.inputSchema as { required?: string[] }).required ?? []).toEqual(['security_id']);
+  });
+
+  test('exposes offset pagination arg matching the shared shape', () => {
+    const schema = createLiveInvestmentPricesToolSchema();
+    const props = schema.inputSchema.properties as Record<
+      string,
+      { type: string; default?: number }
+    >;
+    expect(props.offset?.type).toBe('integer');
+    expect(props.offset?.default).toBe(0);
   });
 
   test('description mentions the ownership gate', () => {
