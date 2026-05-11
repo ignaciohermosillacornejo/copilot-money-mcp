@@ -10,6 +10,7 @@
 
 import type { LiveCopilotDatabase } from '../../core/live-database.js';
 import type { LiveBalanceHistoryTools } from './balance-history.js';
+import type { LiveInvestmentPricesTools } from './investment-prices.js';
 
 const VALID_SCOPES = [
   'all',
@@ -25,6 +26,7 @@ const VALID_SCOPES = [
   'monthly_spend',
   'holdings',
   'balance_history',
+  'investment_prices',
 ] as const;
 
 const YEAR_MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -49,6 +51,7 @@ export interface RefreshCacheResult {
     monthly_spend?: boolean;
     holdings?: boolean;
     balance_history?: boolean;
+    investment_prices?: boolean;
     transactions_months?: string[] | 'all';
   };
 }
@@ -63,7 +66,8 @@ export class RefreshCacheTool {
    */
   constructor(
     private readonly live: LiveCopilotDatabase,
-    private readonly balanceHistory?: LiveBalanceHistoryTools
+    private readonly balanceHistory?: LiveBalanceHistoryTools,
+    private readonly investmentPrices?: LiveInvestmentPricesTools
   ) {}
 
   refresh(args: RefreshCacheArgs): Promise<RefreshCacheResult> {
@@ -110,6 +114,10 @@ export class RefreshCacheTool {
       if (this.balanceHistory) {
         this.balanceHistory.clearCache();
         flushed.balance_history = true;
+      }
+      if (this.investmentPrices) {
+        this.investmentPrices.clearCache();
+        flushed.investment_prices = true;
       }
     };
 
@@ -185,6 +193,18 @@ export class RefreshCacheTool {
         if (this.balanceHistory) {
           this.balanceHistory.clearCache();
           flushed.balance_history = true;
+        }
+        break;
+      case 'investment_prices':
+        // The cache lives on LiveInvestmentPricesTools (two Maps — intraday
+        // + daily), not on LiveCopilotDatabase, for the same reason as
+        // balance_history. clearCache() drops every cached entry across
+        // both maps. Only flag flushed.investment_prices when the tool was
+        // actually wired (no-op semantics: "was flushed" not "operation
+        // acknowledged").
+        if (this.investmentPrices) {
+          this.investmentPrices.clearCache();
+          flushed.investment_prices = true;
         }
         break;
     }

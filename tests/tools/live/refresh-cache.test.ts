@@ -5,6 +5,7 @@ import {
 } from '../../../src/tools/live/refresh-cache.js';
 import type { LiveCopilotDatabase } from '../../../src/core/live-database.js';
 import type { LiveBalanceHistoryTools } from '../../../src/tools/live/balance-history.js';
+import type { LiveInvestmentPricesTools } from '../../../src/tools/live/investment-prices.js';
 
 function makeInvalidateCache() {
   return { invalidate: mock(() => {}) };
@@ -16,6 +17,15 @@ function makeBalanceHistoryMock(): {
 } {
   const clearCache = mock(() => {});
   const tool = { clearCache } as unknown as LiveBalanceHistoryTools;
+  return { tool, clearCache };
+}
+
+function makeInvestmentPricesMock(): {
+  tool: LiveInvestmentPricesTools;
+  clearCache: ReturnType<typeof mock>;
+} {
+  const clearCache = mock(() => {});
+  const tool = { clearCache } as unknown as LiveInvestmentPricesTools;
   return { tool, clearCache };
 }
 
@@ -79,7 +89,8 @@ describe('RefreshCacheTool — scope: all', () => {
   test('flushes all snapshot caches and transactions', async () => {
     const { live, mocks } = makeMockLive();
     const bh = makeBalanceHistoryMock();
-    const tool = new RefreshCacheTool(live, bh.tool);
+    const ip = makeInvestmentPricesMock();
+    const tool = new RefreshCacheTool(live, bh.tool, ip.tool);
 
     const result = await tool.refresh({ scope: 'all' });
 
@@ -94,6 +105,7 @@ describe('RefreshCacheTool — scope: all', () => {
     expect(mocks.holdings.invalidate).toHaveBeenCalledTimes(1);
     expect(mocks.transactions.invalidate).toHaveBeenCalledTimes(1);
     expect(bh.clearCache).toHaveBeenCalledTimes(1);
+    expect(ip.clearCache).toHaveBeenCalledTimes(1);
     expect(result.flushed.accounts).toBe(true);
     expect(result.flushed.categories).toBe(true);
     expect(result.flushed.tags).toBe(true);
@@ -105,6 +117,7 @@ describe('RefreshCacheTool — scope: all', () => {
     expect(result.flushed.monthly_spend).toBe(true);
     expect(result.flushed.holdings).toBe(true);
     expect(result.flushed.balance_history).toBe(true);
+    expect(result.flushed.investment_prices).toBe(true);
     expect(result.flushed.transactions_months).toBe('all');
   });
 
@@ -320,6 +333,35 @@ describe('RefreshCacheTool — scope: balance_history', () => {
   });
 });
 
+describe('RefreshCacheTool — scope: investment_prices', () => {
+  test('clears the investment-prices tool cache and nothing else', async () => {
+    const { live, mocks } = makeMockLive();
+    const ip = makeInvestmentPricesMock();
+    const tool = new RefreshCacheTool(live, undefined, ip.tool);
+
+    const result = await tool.refresh({ scope: 'investment_prices' });
+
+    expect(ip.clearCache).toHaveBeenCalledTimes(1);
+    expect(mocks.accounts.invalidate).not.toHaveBeenCalled();
+    expect(mocks.categories.invalidate).not.toHaveBeenCalled();
+    expect(mocks.holdings.invalidate).not.toHaveBeenCalled();
+    expect(mocks.transactions.invalidate).not.toHaveBeenCalled();
+    expect(result.flushed.investment_prices).toBe(true);
+    expect(result.flushed.holdings).toBeUndefined();
+    expect(result.flushed.accounts).toBeUndefined();
+  });
+
+  test('no-op when investmentPrices tool is not wired — omits investment_prices from flushed', async () => {
+    const { live } = makeMockLive();
+    const tool = new RefreshCacheTool(live); // no investment-prices tool passed
+
+    const result = await tool.refresh({ scope: 'investment_prices' });
+
+    // Flag only appears when a real flush happened.
+    expect(result.flushed.investment_prices).toBeUndefined();
+  });
+});
+
 describe('RefreshCacheTool — scope: transactions', () => {
   test('flushes all transaction months by default', async () => {
     const { live, mocks } = makeMockLive();
@@ -412,6 +454,12 @@ describe('createRefreshCacheToolSchema', () => {
     const schema = createRefreshCacheToolSchema();
     const scopeProp = schema.inputSchema.properties.scope as { enum: string[] };
     expect(scopeProp.enum).toContain('balance_history');
+  });
+
+  test('investment_prices scope is listed in enum', () => {
+    const schema = createRefreshCacheToolSchema();
+    const scopeProp = schema.inputSchema.properties.scope as { enum: string[] };
+    expect(scopeProp.enum).toContain('investment_prices');
   });
 
   test('schema description mentions budgets piggyback on categories', () => {
