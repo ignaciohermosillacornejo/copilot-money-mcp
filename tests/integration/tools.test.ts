@@ -16,7 +16,6 @@ import type {
   Goal,
   GoalHistory,
   InvestmentPrice,
-  InvestmentSplit,
   Category,
   Tag,
 } from '../../src/models/index.js';
@@ -210,25 +209,6 @@ const mockInvestmentPrices: InvestmentPrice[] = [
   },
 ];
 
-const mockInvestmentSplits: InvestmentSplit[] = [
-  {
-    split_id: 'split1',
-    ticker_symbol: 'AAPL',
-    split_date: '2020-08-28',
-    split_ratio: '4:1',
-    from_factor: 1,
-    to_factor: 4,
-  },
-  {
-    split_id: 'split2',
-    ticker_symbol: 'TSLA',
-    split_date: '2022-08-25',
-    split_ratio: '3:1',
-    from_factor: 1,
-    to_factor: 3,
-  },
-];
-
 const mockAccountsWithHoldings: Account[] = [
   ...mockAccounts,
   {
@@ -308,7 +288,6 @@ function createMockDatabase(overrides?: {
   goals?: Goal[];
   goalHistory?: GoalHistory[];
   investmentPrices?: InvestmentPrice[];
-  investmentSplits?: InvestmentSplit[];
   userCategories?: Category[];
   tags?: Tag[];
   securities?: any[];
@@ -323,7 +302,6 @@ function createMockDatabase(overrides?: {
   (db as any)._goals = overrides?.goals ?? [];
   (db as any)._goalHistory = overrides?.goalHistory ?? [];
   (db as any)._investmentPrices = overrides?.investmentPrices ?? [];
-  (db as any)._investmentSplits = overrides?.investmentSplits ?? [];
   (db as any)._items = overrides?.items ?? [];
   const defaultUserCategories: Category[] = [
     { category_id: 'food_dining', name: 'Food & Dining', emoji: '🍔', order: 0 },
@@ -473,7 +451,7 @@ describe('CopilotMoneyTools Integration', () => {
   describe('tool schemas', () => {
     test('returns correct number of tool schemas', async () => {
       const schemas = createToolSchemas();
-      expect(schemas.length).toBe(17);
+      expect(schemas.length).toBe(13);
     });
 
     test('all tools have readOnlyHint annotation', async () => {
@@ -511,17 +489,13 @@ describe('CopilotMoneyTools Integration', () => {
       expect(names).toContain('get_budgets');
       expect(names).toContain('get_goals');
       expect(names).toContain('get_investment_prices');
-      expect(names).toContain('get_investment_splits');
       expect(names).toContain('get_holdings');
       // New tools
       expect(names).toContain('get_balance_history');
-      expect(names).toContain('get_investment_performance');
-      expect(names).toContain('get_twr_returns');
-      expect(names).toContain('get_securities');
       expect(names).toContain('get_goal_history');
 
-      // Should have exactly 17 tools
-      expect(names.length).toBe(17);
+      // Should have exactly 13 read tools
+      expect(names.length).toBe(13);
     });
   });
 
@@ -891,31 +865,6 @@ describe('CopilotMoneyTools Integration', () => {
       for (const p of result.prices) {
         expect(p.ticker_symbol).toBe('AAPL');
       }
-    });
-  });
-
-  describe('getInvestmentSplits', () => {
-    let splitTools: CopilotMoneyTools;
-
-    beforeEach(() => {
-      const db = createMockDatabase({
-        investmentSplits: [...mockInvestmentSplits],
-      });
-      splitTools = new CopilotMoneyTools(db);
-    });
-
-    test('returns all splits', async () => {
-      const result = await splitTools.getInvestmentSplits();
-
-      expect(result.total_count).toBe(2);
-      expect(result.splits.length).toBe(2);
-    });
-
-    test('filters by ticker_symbol', async () => {
-      const result = await splitTools.getInvestmentSplits({ ticker_symbol: 'TSLA' });
-
-      expect(result.total_count).toBe(1);
-      expect(result.splits[0]!.split_ratio).toBe('3:1');
     });
   });
 

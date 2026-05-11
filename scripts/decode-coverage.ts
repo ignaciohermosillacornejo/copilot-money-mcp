@@ -102,13 +102,6 @@ function isDecoded(rawCollection: string): boolean {
     rawCollection.includes('investment_prices/')
   )
     return true;
-  if (rawCollection.endsWith('/twr_holding')) return true;
-  if (
-    collectionMatches(rawCollection, 'investment_performance') ||
-    rawCollection.includes('investment_performance/')
-  )
-    return true;
-  if (collectionMatches(rawCollection, 'investment_splits')) return true;
   if (collectionMatches(rawCollection, 'items') || /^items\/[^/]+$/.test(rawCollection))
     return true;
   if (collectionMatches(rawCollection, 'tags')) return true;

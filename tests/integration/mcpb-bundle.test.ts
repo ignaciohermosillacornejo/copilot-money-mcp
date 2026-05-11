@@ -175,7 +175,7 @@ describe('mcpb bundle', () => {
       const tools = (response.result as { tools: unknown[] }).tools;
       expect(Array.isArray(tools)).toBe(true);
       // Bundled CLI runs read-only; write tools are excluded.
-      expect(tools.length).toBe(17);
+      expect(tools.length).toBe(13);
     } finally {
       proc.kill('SIGTERM');
     }

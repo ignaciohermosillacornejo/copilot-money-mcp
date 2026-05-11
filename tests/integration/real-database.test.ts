@@ -35,7 +35,6 @@ import {
   GoalSchema,
   GoalHistorySchema,
   InvestmentPriceSchema,
-  InvestmentSplitSchema,
   ItemSchema,
   CategorySchema,
 } from '../../src/models/index.js';
@@ -47,7 +46,6 @@ import type {
   Goal,
   GoalHistory,
   InvestmentPrice,
-  InvestmentSplit,
   Item,
   Category,
 } from '../../src/models/index.js';
@@ -181,7 +179,6 @@ interface LoadedData {
   goals: Goal[];
   goalHistory: GoalHistory[];
   investmentPrices: InvestmentPrice[];
-  investmentSplits: InvestmentSplit[];
   items: Item[];
   userCategories: Category[];
   userAccounts: UserAccountCustomization[];
@@ -214,7 +211,6 @@ describeWithRealDb('Real Copilot Money Database Integration', () => {
       const goals = await db.getGoals();
       const goalHistory = await db.getGoalHistory();
       const investmentPrices = await db.getInvestmentPrices();
-      const investmentSplits = await db.getInvestmentSplits();
       const items = await db.getItems();
       const userCategories = await db.getUserCategories();
       const userAccounts = await db.getUserAccounts();
@@ -229,7 +225,6 @@ describeWithRealDb('Real Copilot Money Database Integration', () => {
         goals,
         goalHistory,
         investmentPrices,
-        investmentSplits,
         items,
         userCategories,
         userAccounts,
@@ -249,7 +244,6 @@ describeWithRealDb('Real Copilot Money Database Integration', () => {
       console.log(`   Goals: ${goals.length}`);
       console.log(`   Goal History: ${goalHistory.length}`);
       console.log(`   Investment Prices: ${investmentPrices.length.toLocaleString()}`);
-      console.log(`   Investment Splits: ${investmentSplits.length}`);
       console.log(`   Items: ${items.length}`);
       console.log(`   User Categories: ${userCategories.length}`);
       console.log(`   User Accounts: ${userAccounts.length}`);
@@ -468,28 +462,6 @@ describeWithRealDb('Real Copilot Money Database Integration', () => {
 
       if (stats.invalidCount > 0) {
         console.log(`\n⚠️  Investment price validation errors (${stats.invalidCount}):`);
-        stats.errors.forEach((e) => console.log(`   ${e}`));
-      }
-
-      expect(stats.invalidCount).toBe(0);
-    });
-  });
-
-  describe('Investment Splits', () => {
-    test('investment splits pass schema validation (if any exist)', () => {
-      if (data.investmentSplits.length === 0) {
-        console.log('   (No investment splits found - this is OK)');
-        return;
-      }
-
-      const stats = validateWithSchema(
-        data.investmentSplits,
-        InvestmentSplitSchema,
-        (s) => `InvestmentSplit ${s.split_id}`
-      );
-
-      if (stats.invalidCount > 0) {
-        console.log(`\n⚠️  Investment split validation errors (${stats.invalidCount}):`);
         stats.errors.forEach((e) => console.log(`   ${e}`));
       }
 

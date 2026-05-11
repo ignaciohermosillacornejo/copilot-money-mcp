@@ -119,19 +119,6 @@ export interface TestInvestmentPrice {
   price_type?: string;
 }
 
-export interface TestInvestmentSplit {
-  split_id: string;
-  ticker_symbol?: string;
-  split_date?: string;
-  split_ratio?: string;
-  from_factor?: number;
-  to_factor?: number;
-  announcement_date?: string;
-  record_date?: string;
-  ex_date?: string;
-  description?: string;
-}
-
 export interface TestItem {
   item_id: string;
   institution_name?: string;
@@ -356,33 +343,6 @@ export async function createInvestmentPriceDb(
 }
 
 /**
- * Create a test database with investment splits.
- */
-export async function createInvestmentSplitDb(
-  dbPath: string,
-  splits: TestInvestmentSplit[]
-): Promise<void> {
-  const documents = splits.map((s) => ({
-    collection: 'investment_splits',
-    id: s.split_id,
-    fields: {
-      split_id: s.split_id,
-      ticker_symbol: s.ticker_symbol,
-      split_date: s.split_date,
-      split_ratio: s.split_ratio,
-      from_factor: s.from_factor,
-      to_factor: s.to_factor,
-      announcement_date: s.announcement_date,
-      record_date: s.record_date,
-      ex_date: s.ex_date,
-      description: s.description,
-    },
-  }));
-
-  await createTestDb(dbPath, documents);
-}
-
-/**
  * Create a test database with items.
  */
 export async function createItemDb(dbPath: string, items: TestItem[]): Promise<void> {
@@ -445,7 +405,6 @@ export async function createCombinedDb(
     goals?: TestGoal[];
     goalHistory?: TestGoalHistory[];
     investmentPrices?: TestInvestmentPrice[];
-    investmentSplits?: TestInvestmentSplit[];
     items?: TestItem[];
     categories?: TestCategory[];
   }
@@ -596,27 +555,6 @@ export async function createCombinedDb(
           open: p.open,
           volume: p.volume,
           price_type: p.price_type,
-        },
-      });
-    }
-  }
-
-  if (data.investmentSplits) {
-    for (const s of data.investmentSplits) {
-      documents.push({
-        collection: 'investment_splits',
-        id: s.split_id,
-        fields: {
-          split_id: s.split_id,
-          ticker_symbol: s.ticker_symbol,
-          split_date: s.split_date,
-          split_ratio: s.split_ratio,
-          from_factor: s.from_factor,
-          to_factor: s.to_factor,
-          announcement_date: s.announcement_date,
-          record_date: s.record_date,
-          ex_date: s.ex_date,
-          description: s.description,
         },
       });
     }

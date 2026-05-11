@@ -22,15 +22,8 @@ import { Budget, BudgetSchema } from '../models/budget.js';
 import { Goal, GoalSchema } from '../models/goal.js';
 import { GoalHistory, GoalHistorySchema, DailySnapshot } from '../models/goal-history.js';
 import { InvestmentPrice, InvestmentPriceSchema } from '../models/investment-price.js';
-import { InvestmentSplit, InvestmentSplitSchema } from '../models/investment-split.js';
 import { Item, ItemSchema, IGNORED_ITEM_FIELDS } from '../models/item.js';
 import { Category, CategorySchema } from '../models/category.js';
-import {
-  InvestmentPerformance,
-  InvestmentPerformanceSchema,
-  TwrHolding,
-  TwrHoldingSchema,
-} from '../models/investment-performance.js';
 import { PlaidAccount, PlaidAccountSchema } from '../models/plaid-account.js';
 import { BalanceHistory, BalanceHistorySchema } from '../models/balance-history.js';
 import {
@@ -508,66 +501,6 @@ export async function decodeInvestmentPrices(
 }
 
 /**
- * Decode investment splits from LevelDB database.
- */
-export async function decodeInvestmentSplits(
-  dbPath: string,
-  options: {
-    tickerSymbol?: string;
-    startDate?: string;
-    endDate?: string;
-  } = {}
-): Promise<InvestmentSplit[]> {
-  const { tickerSymbol, startDate, endDate } = options;
-  const splits: InvestmentSplit[] = [];
-
-  for await (const doc of iterateDocuments(dbPath, { collection: 'investment_splits' })) {
-    // Pre-filter by ticker
-    if (tickerSymbol) {
-      const ticker = getString(doc.fields, 'ticker_symbol');
-      if (ticker !== tickerSymbol) continue;
-    }
-
-    // Pre-filter by date range
-    if (startDate || endDate) {
-      const splitDate = getString(doc.fields, 'split_date');
-      if (splitDate) {
-        if (startDate && splitDate < startDate) continue;
-        if (endDate && splitDate > endDate) continue;
-      }
-    }
-
-    const split = processInvestmentSplit(doc.fields, doc.documentId);
-    if (split) splits.push(split);
-  }
-
-  // Deduplicate by split_id
-  const seen = new Set<string>();
-  const unique: InvestmentSplit[] = [];
-
-  for (const split of splits) {
-    if (!seen.has(split.split_id)) {
-      seen.add(split.split_id);
-      unique.push(split);
-    }
-  }
-
-  // Sort by ticker_symbol, then by split_date (newest first)
-  unique.sort((a, b) => {
-    const tickerA = a.ticker_symbol || '';
-    const tickerB = b.ticker_symbol || '';
-    if (tickerA !== tickerB) {
-      return tickerA.localeCompare(tickerB);
-    }
-    const dateA = a.split_date || '';
-    const dateB = b.split_date || '';
-    return dateB.localeCompare(dateA);
-  });
-
-  return unique;
-}
-
-/**
  * Decode Plaid items (institution connections) from LevelDB database.
  */
 export async function decodeItems(
@@ -707,12 +640,9 @@ export interface AllCollectionsResult {
   goals: Goal[];
   goalHistory: GoalHistory[];
   investmentPrices: InvestmentPrice[];
-  investmentSplits: InvestmentSplit[];
   items: Item[];
   categories: Category[];
   userAccounts: UserAccountCustomization[];
-  investmentPerformance: InvestmentPerformance[];
-  twrHoldings: TwrHolding[];
   plaidAccounts: PlaidAccount[];
   balanceHistory: BalanceHistory[];
   holdingsHistoryMeta: HoldingsHistoryMeta[];
@@ -1562,71 +1492,6 @@ function processInvestmentPrice(
 }
 
 /**
- * Internal helper to process an investment split document.
- */
-function processInvestmentSplit(
-  fields: Map<string, FirestoreValue>,
-  docId: string
-): InvestmentSplit | null {
-  const splitId = getString(fields, 'split_id') ?? docId;
-
-  const splitData: Record<string, unknown> = {
-    split_id: splitId,
-  };
-
-  const stringFields = [
-    'ticker_symbol',
-    'investment_id',
-    'split_date',
-    'split_ratio',
-    'announcement_date',
-    'record_date',
-    'ex_date',
-    'description',
-    'source',
-  ];
-
-  for (const field of stringFields) {
-    const value = getString(fields, field);
-    if (value) splitData[field] = value;
-  }
-
-  const numericFields = ['from_factor', 'to_factor', 'multiplier'];
-  for (const field of numericFields) {
-    const value = getNumber(fields, field);
-    if (value !== undefined) splitData[field] = value;
-  }
-
-  // Collect date-keyed adjustment factors (e.g., "2022-03-11": 0.5)
-  const knownFields = new Set(['split_id', ...stringFields, ...numericFields]);
-  const dateKeyRegex = /^\d{4}-\d{2}-\d{2}$/;
-  const adjustments: Record<string, number> = {};
-  for (const [key, value] of fields.entries()) {
-    if (knownFields.has(key)) continue;
-    if (dateKeyRegex.test(key) && (value.type === 'double' || value.type === 'integer')) {
-      adjustments[key] = value.value;
-    }
-  }
-  if (Object.keys(adjustments).length > 0) {
-    splitData.adjustments = adjustments;
-  }
-
-  warnUnreadFields(
-    fields,
-    {
-      consumed: ['split_id', ...stringFields, ...numericFields, ...Object.keys(adjustments)],
-      ignored: [],
-    },
-    { collection: 'investment_splits', docId }
-  );
-
-  return validateOrWarn(InvestmentSplitSchema, splitData, {
-    collection: 'investment_splits',
-    docId,
-  });
-}
-
-/**
  * Internal helper to process an item document.
  */
 function processItem(fields: Map<string, FirestoreValue>, docId: string): Item | null {
@@ -1858,123 +1723,6 @@ function processUserAccount(
   );
 
   return userAccountData;
-}
-
-/**
- * Internal helper to process an investment performance document.
- */
-function processInvestmentPerformance(
-  fields: Map<string, FirestoreValue>,
-  docId: string
-): InvestmentPerformance | null {
-  const data: Record<string, unknown> = {
-    performance_id: docId,
-  };
-
-  // String fields — check both snake_case and camelCase variants
-  const securityId = getString(fields, 'security_id') ?? getString(fields, 'securityId');
-  if (securityId) data.security_id = securityId;
-
-  const type = getString(fields, 'type');
-  if (type) data.type = type;
-
-  const userId = getString(fields, 'user_id') ?? getString(fields, 'userId');
-  if (userId) data.user_id = userId;
-
-  const lastUpdate = getString(fields, 'last_update') ?? getString(fields, 'lastUpdate');
-  if (lastUpdate) data.last_update = lastUpdate;
-
-  // Number fields
-  const position = getNumber(fields, 'position');
-  if (position !== undefined) data.position = position;
-
-  // String array fields
-  const access = getStringArray(fields, 'access');
-  if (access) data.access = access;
-
-  warnUnreadFields(
-    fields,
-    {
-      consumed: [
-        'security_id',
-        'securityId',
-        'type',
-        'user_id',
-        'userId',
-        'last_update',
-        'lastUpdate',
-        'position',
-        'access',
-      ],
-      ignored: [],
-    },
-    { collection: 'investment_performance', docId }
-  );
-
-  return validateOrWarn(InvestmentPerformanceSchema, data, {
-    collection: 'investment_performance',
-    docId,
-  });
-}
-
-/**
- * Internal helper to process a TWR holding document.
- */
-function processTwrHolding(
-  fields: Map<string, FirestoreValue>,
-  docId: string,
-  key: string
-): TwrHolding | null {
-  // Extract security hash from the key path: investment_performance/{hash}/twr_holding
-  let securityHash = 'unknown';
-  const segments = key.split('/');
-  for (let i = 0; i < segments.length; i++) {
-    if (segments[i] === 'investment_performance' && i + 1 < segments.length) {
-      securityHash = segments[i + 1]!;
-      break;
-    }
-  }
-
-  const data: Record<string, unknown> = {
-    twr_id: `${securityHash}:${docId}`,
-  };
-
-  const securityId = getString(fields, 'security_id') ?? getString(fields, 'securityId');
-  if (securityId) data.security_id = securityId;
-
-  // The document ID is the month (YYYY-MM format)
-  if (/^\d{4}-\d{2}$/.test(docId)) {
-    data.month = docId;
-  }
-
-  // Extract history map: epoch-ms keys → { value: number }
-  const historyMap = getMap(fields, 'history');
-  if (historyMap) {
-    const history: Record<string, { value: number }> = {};
-    for (const [epochKey, val] of historyMap) {
-      if (val.type === 'map') {
-        const valueField = val.value.get('value');
-        if (valueField && (valueField.type === 'double' || valueField.type === 'integer')) {
-          history[epochKey] = { value: valueField.value };
-        }
-      }
-    }
-    if (Object.keys(history).length > 0) data.history = history;
-  }
-
-  warnUnreadFields(
-    fields,
-    {
-      consumed: ['security_id', 'securityId', 'history'],
-      ignored: [],
-    },
-    { collection: 'twr_holdings', docId }
-  );
-
-  return validateOrWarn(TwrHoldingSchema, data, {
-    collection: 'twr_holdings',
-    docId,
-  });
 }
 
 /**
@@ -2907,12 +2655,9 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
   const rawGoals: Goal[] = [];
   const rawGoalHistory: GoalHistory[] = [];
   const rawInvestmentPrices: InvestmentPrice[] = [];
-  const rawInvestmentSplits: InvestmentSplit[] = [];
   const rawItems: Item[] = [];
   const rawCategories: Category[] = [];
   const rawUserAccounts: UserAccountCustomization[] = [];
-  const rawInvestmentPerformance: InvestmentPerformance[] = [];
-  const rawTwrHoldings: TwrHolding[] = [];
   const rawPlaidAccounts: PlaidAccount[] = [];
   const rawBalanceHistory: BalanceHistory[] = [];
   const rawHoldingsHistoryMeta: HoldingsHistoryMeta[] = [];
@@ -2986,18 +2731,6 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     ) {
       const price = processInvestmentPrice(fields, documentId, key);
       if (price) rawInvestmentPrices.push(price);
-    } else if (collection.endsWith('/twr_holding')) {
-      const twr = processTwrHolding(fields, documentId, key);
-      if (twr) rawTwrHoldings.push(twr);
-    } else if (
-      collectionMatches(collection, 'investment_performance') ||
-      collection.includes('investment_performance/')
-    ) {
-      const perf = processInvestmentPerformance(fields, documentId);
-      if (perf) rawInvestmentPerformance.push(perf);
-    } else if (collectionMatches(collection, 'investment_splits')) {
-      const split = processInvestmentSplit(fields, documentId);
-      if (split) rawInvestmentSplits.push(split);
     } else if (collectionMatches(collection, 'items') || /^items\/[^/]+$/.test(collection)) {
       // Match both top-level items and items/{item_id} parent-pointer docs.
       // Parent-pointer docs (items/{item_id}) have empty fields and processItem returns null.
@@ -3141,26 +2874,6 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     return dateB.localeCompare(dateA);
   });
 
-  // Investment splits: dedupe by split_id
-  const splitSeen = new Set<string>();
-  const investmentSplits: InvestmentSplit[] = [];
-  for (const split of rawInvestmentSplits) {
-    if (!splitSeen.has(split.split_id)) {
-      splitSeen.add(split.split_id);
-      investmentSplits.push(split);
-    }
-  }
-  investmentSplits.sort((a, b) => {
-    const tickerA = a.ticker_symbol || '';
-    const tickerB = b.ticker_symbol || '';
-    if (tickerA !== tickerB) {
-      return tickerA.localeCompare(tickerB);
-    }
-    const dateA = a.split_date || '';
-    const dateB = b.split_date || '';
-    return dateB.localeCompare(dateA);
-  });
-
   // Items: dedupe by item_id
   const itemSeen = new Set<string>();
   const items: Item[] = [];
@@ -3206,26 +2919,6 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     if (!userAccSeen.has(userAccount.account_id)) {
       userAccSeen.add(userAccount.account_id);
       userAccounts.push(userAccount);
-    }
-  }
-
-  // Investment performance: dedupe by performance_id
-  const perfSeen = new Set<string>();
-  const investmentPerformance: InvestmentPerformance[] = [];
-  for (const perf of rawInvestmentPerformance) {
-    if (!perfSeen.has(perf.performance_id)) {
-      perfSeen.add(perf.performance_id);
-      investmentPerformance.push(perf);
-    }
-  }
-
-  // TWR holdings: dedupe by twr_id
-  const twrSeen = new Set<string>();
-  const twrHoldings: TwrHolding[] = [];
-  for (const twr of rawTwrHoldings) {
-    if (!twrSeen.has(twr.twr_id)) {
-      twrSeen.add(twr.twr_id);
-      twrHoldings.push(twr);
     }
   }
 
@@ -3420,12 +3113,9 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     goals,
     goalHistory,
     investmentPrices,
-    investmentSplits,
     items,
     categories,
     userAccounts,
-    investmentPerformance,
-    twrHoldings,
     plaidAccounts,
     balanceHistory,
     holdingsHistoryMeta,

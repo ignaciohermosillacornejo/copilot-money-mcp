@@ -17,7 +17,6 @@ import {
   decodeGoals,
   decodeGoalHistory,
   decodeInvestmentPrices,
-  decodeInvestmentSplits,
   decodeItems,
   decodeCategories,
   decodeUserAccounts,
@@ -34,13 +33,11 @@ import {
   Goal,
   GoalHistory,
   InvestmentPrice,
-  InvestmentSplit,
   Item,
   getTransactionDisplayName,
 } from '../models/index.js';
 import type { Security, HoldingsHistory, Tag } from '../models/index.js';
 import type { BalanceHistory } from '../models/balance-history.js';
-import type { InvestmentPerformance, TwrHolding } from '../models/investment-performance.js';
 import { getCategoryName } from '../utils/categories.js';
 
 /**
@@ -153,7 +150,6 @@ export class CopilotDatabase {
   private _goals: Goal[] | null = null;
   private _goalHistory: GoalHistory[] | null = null;
   private _investmentPrices: InvestmentPrice[] | null = null;
-  private _investmentSplits: InvestmentSplit[] | null = null;
   private _items: Item[] | null = null;
   private _userCategories: Category[] | null = null;
   private _categoryNameMap: Map<string, string> | null = null;
@@ -163,8 +159,6 @@ export class CopilotDatabase {
   private _tags: Tag[] | null = null;
   private _holdingsHistory: HoldingsHistory[] | null = null;
   private _balanceHistory: BalanceHistory[] | null = null;
-  private _investmentPerformance: InvestmentPerformance[] | null = null;
-  private _twrHoldings: TwrHolding[] | null = null;
 
   // Promises for in-flight loads to prevent duplicate loading
   private _loadingTransactions: Promise<Transaction[]> | null = null;
@@ -174,7 +168,6 @@ export class CopilotDatabase {
   private _loadingGoals: Promise<Goal[]> | null = null;
   private _loadingGoalHistory: Promise<GoalHistory[]> | null = null;
   private _loadingInvestmentPrices: Promise<InvestmentPrice[]> | null = null;
-  private _loadingInvestmentSplits: Promise<InvestmentSplit[]> | null = null;
   private _loadingItems: Promise<Item[]> | null = null;
   private _loadingUserCategories: Promise<Category[]> | null = null;
   private _loadingUserAccounts: Promise<UserAccountCustomization[]> | null = null;
@@ -274,7 +267,6 @@ export class CopilotDatabase {
     this._goals = null;
     this._goalHistory = null;
     this._investmentPrices = null;
-    this._investmentSplits = null;
     this._items = null;
     this._userCategories = null;
     this._categoryNameMap = null;
@@ -284,8 +276,6 @@ export class CopilotDatabase {
     this._holdingsHistory = null;
     this._tags = null;
     this._balanceHistory = null;
-    this._investmentPerformance = null;
-    this._twrHoldings = null;
 
     // Clear in-flight loading promises
     this._loadingTransactions = null;
@@ -295,7 +285,6 @@ export class CopilotDatabase {
     this._loadingGoals = null;
     this._loadingGoalHistory = null;
     this._loadingInvestmentPrices = null;
-    this._loadingInvestmentSplits = null;
     this._loadingItems = null;
     this._loadingUserCategories = null;
     this._loadingUserAccounts = null;
@@ -331,7 +320,6 @@ export class CopilotDatabase {
     goals?: Goal[];
     goalHistory?: GoalHistory[];
     investmentPrices?: InvestmentPrice[];
-    investmentSplits?: InvestmentSplit[];
     items?: Item[];
     userCategories?: Category[];
     userAccounts?: UserAccountCustomization[];
@@ -339,8 +327,6 @@ export class CopilotDatabase {
     tags?: Tag[];
     holdingsHistory?: HoldingsHistory[];
     balanceHistory?: BalanceHistory[];
-    investmentPerformance?: InvestmentPerformance[];
-    twrHoldings?: TwrHolding[];
     categoryNameMap?: Map<string, string>;
     accountNameMap?: Map<string, string>;
   }): void {
@@ -351,7 +337,6 @@ export class CopilotDatabase {
     if (data.goals !== undefined) this._goals = data.goals;
     if (data.goalHistory !== undefined) this._goalHistory = data.goalHistory;
     if (data.investmentPrices !== undefined) this._investmentPrices = data.investmentPrices;
-    if (data.investmentSplits !== undefined) this._investmentSplits = data.investmentSplits;
     if (data.items !== undefined) this._items = data.items;
     if (data.userCategories !== undefined) this._userCategories = data.userCategories;
     if (data.userAccounts !== undefined) this._userAccounts = data.userAccounts;
@@ -359,9 +344,6 @@ export class CopilotDatabase {
     if (data.tags !== undefined) this._tags = data.tags;
     if (data.holdingsHistory !== undefined) this._holdingsHistory = data.holdingsHistory;
     if (data.balanceHistory !== undefined) this._balanceHistory = data.balanceHistory;
-    if (data.investmentPerformance !== undefined)
-      this._investmentPerformance = data.investmentPerformance;
-    if (data.twrHoldings !== undefined) this._twrHoldings = data.twrHoldings;
     if (data.categoryNameMap !== undefined) this._categoryNameMap = data.categoryNameMap;
     if (data.accountNameMap !== undefined) this._accountNameMap = data.accountNameMap;
     this._allCollectionsLoaded = true;
@@ -577,7 +559,6 @@ export class CopilotDatabase {
       this._goals = result.goals;
       this._goalHistory = result.goalHistory;
       this._investmentPrices = result.investmentPrices;
-      this._investmentSplits = result.investmentSplits;
       this._items = result.items;
       this._userCategories = result.categories;
       this._userAccounts = result.userAccounts;
@@ -585,8 +566,6 @@ export class CopilotDatabase {
       this._holdingsHistory = result.holdingsHistory;
       this._tags = result.tags;
       this._balanceHistory = result.balanceHistory;
-      this._investmentPerformance = result.investmentPerformance;
-      this._twrHoldings = result.twrHoldings;
 
       this._allCollectionsLoaded = true;
       this._cacheLoadedAt = Date.now();
@@ -788,33 +767,6 @@ export class CopilotDatabase {
   }
 
   /**
-   * Load investment splits with caching.
-   * Uses batch loading for optimal performance on first access.
-   */
-  private async loadInvestmentSplits(): Promise<InvestmentSplit[]> {
-    if (this._investmentSplits !== null) {
-      return this._investmentSplits;
-    }
-
-    if (!this._allCollectionsLoaded) {
-      await this.loadAllCollections();
-      return this._investmentSplits ?? [];
-    }
-
-    if (this._loadingInvestmentSplits !== null) {
-      return this._loadingInvestmentSplits;
-    }
-
-    this._loadingInvestmentSplits = decodeInvestmentSplits(this.requireDbPath());
-    try {
-      this._investmentSplits = await this._loadingInvestmentSplits;
-      return this._investmentSplits;
-    } finally {
-      this._loadingInvestmentSplits = null;
-    }
-  }
-
-  /**
    * Load items with caching.
    * Uses batch loading for optimal performance on first access.
    */
@@ -938,36 +890,6 @@ export class CopilotDatabase {
       return this._balanceHistory ?? [];
     }
     return this._balanceHistory ?? [];
-  }
-
-  /**
-   * Load investment performance with caching.
-   * Uses batch loading for optimal performance on first access.
-   */
-  private async loadInvestmentPerformance(): Promise<InvestmentPerformance[]> {
-    if (this._investmentPerformance !== null) {
-      return this._investmentPerformance;
-    }
-    if (!this._allCollectionsLoaded) {
-      await this.loadAllCollections();
-      return this._investmentPerformance ?? [];
-    }
-    return this._investmentPerformance ?? [];
-  }
-
-  /**
-   * Load TWR holdings with caching.
-   * Uses batch loading for optimal performance on first access.
-   */
-  private async loadTwrHoldings(): Promise<TwrHolding[]> {
-    if (this._twrHoldings !== null) {
-      return this._twrHoldings;
-    }
-    if (!this._allCollectionsLoaded) {
-      await this.loadAllCollections();
-      return this._twrHoldings ?? [];
-    }
-    return this._twrHoldings ?? [];
   }
 
   /**
@@ -1444,75 +1366,6 @@ export class CopilotDatabase {
   }
 
   /**
-   * Get investment splits from the database.
-   *
-   * Investment splits are stored in:
-   * /investment_splits/{split_id}
-   *
-   * Each document contains split information including ticker symbol,
-   * split date, split ratio (e.g., "4:1"), and calculated multipliers.
-   *
-   * @param options - Filter options
-   * @param options.tickerSymbol - Filter by ticker symbol (e.g., "AAPL", "TSLA")
-   * @param options.startDate - Filter by split date >= this (YYYY-MM-DD)
-   * @param options.endDate - Filter by split date <= this (YYYY-MM-DD)
-   * @returns Array of InvestmentSplit objects, sorted by ticker and date (newest first)
-   */
-  async getInvestmentSplits(
-    options: {
-      tickerSymbol?: string;
-      startDate?: string;
-      endDate?: string;
-    } = {}
-  ): Promise<InvestmentSplit[]> {
-    const { tickerSymbol, startDate, endDate } = options;
-
-    // Load investment splits with caching
-    const allSplits = await this.loadInvestmentSplits();
-    let result = [...allSplits];
-
-    // Apply ticker symbol filter (case-insensitive)
-    if (tickerSymbol) {
-      const lower = tickerSymbol.toLowerCase();
-      result = result.filter((s) => s.ticker_symbol?.toLowerCase() === lower);
-    }
-
-    // Apply date range filters
-    if (startDate) {
-      result = result.filter((s) => s.split_date && s.split_date >= startDate);
-    }
-    if (endDate) {
-      result = result.filter((s) => s.split_date && s.split_date <= endDate);
-    }
-
-    return result;
-  }
-
-  /**
-   * Get all securities from the database.
-   *
-   * Securities represent stocks, ETFs, mutual funds, cash equivalents, etc.
-   *
-   * @param options - Filter options
-   * @param options.tickerSymbol - Filter by ticker symbol (case-insensitive exact match)
-   * @param options.type - Filter by security type (e.g., "equity", "etf", "mutual fund")
-   * @returns Array of Security objects
-   */
-  async getSecurities(options: { tickerSymbol?: string; type?: string } = {}): Promise<Security[]> {
-    const { tickerSymbol, type } = options;
-    const all = await this.loadSecurities();
-    let result = [...all];
-    if (tickerSymbol) {
-      const lower = tickerSymbol.toLowerCase();
-      result = result.filter((s) => s.ticker_symbol?.toLowerCase() === lower);
-    }
-    if (type) {
-      result = result.filter((s) => s.type === type);
-    }
-    return result;
-  }
-
-  /**
    * Get a map of securities keyed by security_id for fast lookups.
    *
    * @returns Map<security_id, Security>
@@ -1668,52 +1521,6 @@ export class CopilotDatabase {
       return b.date.localeCompare(a.date); // date desc
     });
 
-    return result;
-  }
-
-  /**
-   * Get investment performance data with optional filters.
-   *
-   * @param options - Filter options
-   * @param options.securityId - Filter by security_id
-   * @returns Array of InvestmentPerformance objects
-   */
-  async getInvestmentPerformance(
-    options: { securityId?: string } = {}
-  ): Promise<InvestmentPerformance[]> {
-    const { securityId } = options;
-    const all = await this.loadInvestmentPerformance();
-    let result = [...all];
-    if (securityId) {
-      result = result.filter((p) => p.security_id === securityId);
-    }
-    return result;
-  }
-
-  /**
-   * Get TWR (Time-Weighted Return) holdings with optional filters.
-   *
-   * @param options - Filter options
-   * @param options.securityId - Filter by security_id
-   * @param options.startMonth - Filter by month >= this (YYYY-MM)
-   * @param options.endMonth - Filter by month <= this (YYYY-MM)
-   * @returns Array of TwrHolding objects
-   */
-  async getTwrHoldings(
-    options: { securityId?: string; startMonth?: string; endMonth?: string } = {}
-  ): Promise<TwrHolding[]> {
-    const { securityId, startMonth, endMonth } = options;
-    const all = await this.loadTwrHoldings();
-    let result = [...all];
-    if (securityId) {
-      result = result.filter((t) => t.security_id === securityId);
-    }
-    if (startMonth) {
-      result = result.filter((t) => t.month && t.month >= startMonth);
-    }
-    if (endMonth) {
-      result = result.filter((t) => t.month && t.month <= endMonth);
-    }
     return result;
   }
 

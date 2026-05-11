@@ -23,10 +23,7 @@ import type {
   Tag,
   BalanceHistory,
   Security,
-  InvestmentPerformance,
-  TwrHolding,
   InvestmentPrice,
-  InvestmentSplit,
   HoldingsHistory,
 } from '../../src/models/index.js';
 import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
@@ -277,38 +274,6 @@ const mockSecurities: Security[] = [
   },
 ];
 
-const mockInvestmentPerformance: InvestmentPerformance[] = [
-  {
-    performance_id: 'perf1',
-    security_id: 'sec1',
-    type: 'security',
-  },
-  {
-    performance_id: 'perf2',
-    security_id: 'sec2',
-    type: 'security',
-  },
-];
-
-const mockTwrHoldings: TwrHolding[] = [
-  {
-    twr_id: 'twr1',
-    security_id: 'sec1',
-    month: '2025-01',
-    history: {
-      '1736899200000': { value: 0.05 },
-    },
-  },
-  {
-    twr_id: 'twr2',
-    security_id: 'sec2',
-    month: '2025-01',
-    history: {
-      '1736899200000': { value: 0.03 },
-    },
-  },
-];
-
 const mockInvestmentPrices: InvestmentPrice[] = [
   {
     investment_id: 'price1',
@@ -326,17 +291,6 @@ const mockInvestmentPrices: InvestmentPrice[] = [
   },
 ];
 
-const mockInvestmentSplits: InvestmentSplit[] = [
-  {
-    split_id: 'split1',
-    ticker_symbol: 'AAPL',
-    split_date: '2020-08-28',
-    split_ratio: '4:1',
-    to_factor: 4,
-    from_factor: 1,
-  },
-];
-
 describe('CopilotMoneyServer E2E', () => {
   let server: CopilotMoneyServer;
   let tools: CopilotMoneyTools;
@@ -351,7 +305,6 @@ describe('CopilotMoneyServer E2E', () => {
       goals: [],
       goalHistory: [],
       investmentPrices: [],
-      investmentSplits: [],
       items: [],
       userCategories: [],
       userAccounts: [],
@@ -532,7 +485,6 @@ function createMockDb(): CopilotDatabase {
     goals: [...mockGoals],
     goalHistory: [...mockGoalHistory],
     investmentPrices: [...mockInvestmentPrices],
-    investmentSplits: [...mockInvestmentSplits],
     items: [...mockItems],
     userCategories: [...mockUserCategories],
     userAccounts: [],
@@ -542,8 +494,6 @@ function createMockDb(): CopilotDatabase {
     holdingsHistory: [],
     securities: [...mockSecurities],
     balanceHistory: [...mockBalanceHistory],
-    investmentPerformance: [...mockInvestmentPerformance],
-    twrHoldings: [...mockTwrHoldings],
   });
   return db;
 }
@@ -943,116 +893,6 @@ describe('handleCallTool — read tools (extended)', () => {
     expect(data.offset).toBe(0);
   });
 
-  test('get_securities returns security master data', async () => {
-    const result = await server.handleCallTool('get_securities', {});
-    expect(result.isError).toBeUndefined();
-    const data = parseToolResult(result) as any;
-    expect(data.count).toBe(mockSecurities.length);
-    expect(data.securities).toBeArray();
-    expect(data.securities[0].security_id).toBeString();
-    expect(data.securities[0].ticker_symbol).toBeString();
-  });
-
-  test('get_securities filters by ticker_symbol', async () => {
-    const result = await server.handleCallTool('get_securities', {
-      ticker_symbol: 'AAPL',
-    });
-    expect(result.isError).toBeUndefined();
-    const data = parseToolResult(result) as any;
-    expect(data.count).toBe(1);
-    expect(data.securities[0].ticker_symbol).toBe('AAPL');
-    expect(data.securities[0].name).toBe('Apple Inc.');
-  });
-
-  test('get_securities filters by type', async () => {
-    const result = await server.handleCallTool('get_securities', {
-      type: 'etf',
-    });
-    expect(result.isError).toBeUndefined();
-    const data = parseToolResult(result) as any;
-    expect(data.count).toBe(1);
-    expect(data.securities[0].ticker_symbol).toBe('VTI');
-  });
-
-  test('get_securities returns pagination fields', async () => {
-    const result = await server.handleCallTool('get_securities', {
-      limit: 1,
-    });
-    expect(result.isError).toBeUndefined();
-    const data = parseToolResult(result) as any;
-    expect(data.count).toBe(1);
-    expect(data.total_count).toBe(mockSecurities.length);
-    expect(data.has_more).toBe(true);
-  });
-
-  test('get_investment_performance returns enriched performance data', async () => {
-    const result = await server.handleCallTool('get_investment_performance', {});
-    expect(result.isError).toBeUndefined();
-    const data = parseToolResult(result) as any;
-    expect(data.count).toBe(mockInvestmentPerformance.length);
-    expect(data.performance).toBeArray();
-    // Should be enriched with security data
-    const applePerf = data.performance.find((p: any) => p.security_id === 'sec1');
-    expect(applePerf).toBeDefined();
-    expect(applePerf.ticker_symbol).toBe('AAPL');
-    expect(applePerf.name).toBe('Apple Inc.');
-  });
-
-  test('get_investment_performance filters by ticker_symbol', async () => {
-    const result = await server.handleCallTool('get_investment_performance', {
-      ticker_symbol: 'VTI',
-    });
-    expect(result.isError).toBeUndefined();
-    const data = parseToolResult(result) as any;
-    expect(data.count).toBe(1);
-    expect(data.performance[0].ticker_symbol).toBe('VTI');
-  });
-
-  test('get_investment_performance filters by security_id', async () => {
-    const result = await server.handleCallTool('get_investment_performance', {
-      security_id: 'sec1',
-    });
-    expect(result.isError).toBeUndefined();
-    const data = parseToolResult(result) as any;
-    expect(data.count).toBe(1);
-    expect(data.performance[0].security_id).toBe('sec1');
-  });
-
-  test('get_twr_returns returns enriched TWR data', async () => {
-    const result = await server.handleCallTool('get_twr_returns', {});
-    expect(result.isError).toBeUndefined();
-    const data = parseToolResult(result) as any;
-    expect(data.count).toBe(mockTwrHoldings.length);
-    expect(data.twr_returns).toBeArray();
-    // Should be enriched with security data
-    const appleTwr = data.twr_returns.find((t: any) => t.security_id === 'sec1');
-    expect(appleTwr).toBeDefined();
-    expect(appleTwr.ticker_symbol).toBe('AAPL');
-    expect(appleTwr.month).toBe('2025-01');
-  });
-
-  test('get_twr_returns filters by ticker_symbol', async () => {
-    const result = await server.handleCallTool('get_twr_returns', {
-      ticker_symbol: 'AAPL',
-    });
-    expect(result.isError).toBeUndefined();
-    const data = parseToolResult(result) as any;
-    expect(data.count).toBe(1);
-    expect(data.twr_returns[0].security_id).toBe('sec1');
-  });
-
-  test('get_twr_returns filters by month range', async () => {
-    const result = await server.handleCallTool('get_twr_returns', {
-      start_month: '2025-01',
-      end_month: '2025-01',
-    });
-    expect(result.isError).toBeUndefined();
-    const data = parseToolResult(result) as any;
-    for (const entry of data.twr_returns) {
-      expect(entry.month).toBe('2025-01');
-    }
-  });
-
   test('get_goal_history returns enriched goal history', async () => {
     const result = await server.handleCallTool('get_goal_history', {});
     expect(result.isError).toBeUndefined();
@@ -1137,27 +977,6 @@ describe('handleCallTool — read tools (extended)', () => {
     expect(data.count).toBe(1);
     expect(data.prices[0].ticker_symbol).toBe('AAPL');
     expect(data.prices[0].close_price).toBe(185.5);
-  });
-
-  test('get_investment_splits returns split data', async () => {
-    const result = await server.handleCallTool('get_investment_splits', {});
-    expect(result.isError).toBeUndefined();
-    const data = parseToolResult(result) as any;
-    expect(data.count).toBe(mockInvestmentSplits.length);
-    expect(data.splits).toBeArray();
-    expect(data.splits[0].ticker_symbol).toBe('AAPL');
-    expect(data.splits[0].split_ratio).toBe('4:1');
-    expect(data.splits[0].split_date).toBe('2020-08-28');
-  });
-
-  test('get_investment_splits filters by ticker_symbol', async () => {
-    const result = await server.handleCallTool('get_investment_splits', {
-      ticker_symbol: 'AAPL',
-    });
-    expect(result.isError).toBeUndefined();
-    const data = parseToolResult(result) as any;
-    expect(data.count).toBe(1);
-    expect(data.splits[0].ticker_symbol).toBe('AAPL');
   });
 
   test('get_balance_history with offset skips entries', async () => {
@@ -1518,7 +1337,6 @@ describe('transaction pagination edge cases', () => {
       goals: [],
       goalHistory: [],
       investmentPrices: [],
-      investmentSplits: [],
       items: [],
       userCategories: [],
       userAccounts: [],
@@ -1660,7 +1478,6 @@ describe('holdings cost basis edge cases', () => {
       goals: [],
       goalHistory: [],
       investmentPrices: [],
-      investmentSplits: [],
       items: [],
       userCategories: [],
       userAccounts: [],
@@ -1886,7 +1703,6 @@ describe('balance history downsampling edge cases', () => {
       goals: [],
       goalHistory: [],
       investmentPrices: [],
-      investmentSplits: [],
       items: [],
       userCategories: [],
       userAccounts: [],
