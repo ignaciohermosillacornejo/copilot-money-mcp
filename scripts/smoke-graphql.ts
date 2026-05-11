@@ -19,8 +19,8 @@
  *   bun run scripts/smoke-graphql.ts --section transactions-write
  *
  * Sections: tags, categories, transactions, transactions-write, recurrings,
- *           budgets, accounts, bulk, errors, edge, consistency, mcp-e2e,
- *           state-gated
+ *           budgets, accounts, holdings, bulk, errors, edge, consistency,
+ *           mcp-e2e, state-gated
  *
  * State-gated tests are opt-in because they require the user to toggle UI
  * state manually in the Copilot desktop app between prompts.
