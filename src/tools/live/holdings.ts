@@ -118,15 +118,15 @@ function projectHolding(h: HoldingNode): GetHoldingsLiveEntry {
     // should report a negative percentage, not flip to positive via
     // negative ÷ negative cancellation.
     //
-    // Rounding: `Math.floor(... * 100) / 100` floors at the 2-decimal-place
-    // position of the percent (toward negative infinity). This mirrors
-    // Copilot's web UI display convention, verified by direct comparison
-    // of two holdings against the UI's "Total return" field. Note this
-    // differs from the `roundAmount` (round-half-up) used for the other
-    // three derived fields above.
+    // Rounding: `Math.floor(percent * 100) / 100` floors at the
+    // 2-decimal-place position of the percent (toward negative infinity).
+    // This mirrors Copilot's web UI display convention, verified by direct
+    // comparison of two holdings against the UI's "Total return" field.
+    // Note this differs from the `roundAmount` (round-half-up) used for the
+    // other three derived fields above.
     if (h.metrics.costBasis !== 0) {
-      entry.total_return_percent =
-        Math.floor((h.metrics.totalReturn / Math.abs(h.metrics.costBasis)) * 10000) / 100;
+      const percent = (h.metrics.totalReturn / Math.abs(h.metrics.costBasis)) * 100;
+      entry.total_return_percent = Math.floor(percent * 100) / 100;
     }
   }
 
