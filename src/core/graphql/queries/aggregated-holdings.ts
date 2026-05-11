@@ -9,7 +9,7 @@
  * The captured query at docs/graphql-capture/operations/queries/AggregatedHoldings.md
  * accepts an optional `timeFrame`, an opaque `filter` input object (the
  * server schema is `AggregatedHoldingsFilter`; structure not captured —
- * accept as `unknown[]` for now), plus optional `accountId` / `itemId`
+ * accept as `Record<string, unknown>[]` for now), plus optional `accountId` / `itemId`
  * scope filters.
  *
  * NOTE: the embedded `security` block in this query intentionally omits
