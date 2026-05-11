@@ -312,6 +312,12 @@ export class LiveInvestmentPricesTools {
     });
 
     const fetchedAtIso = new Date(fetchedAt).toISOString();
+    // Single-fetch shape — each cache key maps to exactly one fetched-at
+    // timestamp, so `_cache_oldest_fetched_at` and `_cache_newest_fetched_at`
+    // are always identical here. The dual field mirrors the envelope shared
+    // with other live tools (notably the windowed transactions cache, where
+    // the two can differ across month windows). Keep both for cross-tool
+    // consistency.
     return {
       granularity,
       count: projected.length,

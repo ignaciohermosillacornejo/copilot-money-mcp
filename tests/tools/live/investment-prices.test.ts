@@ -381,6 +381,26 @@ describe('LiveInvestmentPricesTools — max_rows truncation', () => {
     expect(result.truncated).toBe(false);
   });
 
+  test('max_rows below MIN floor (0) is clamped up to 1', async () => {
+    // 5 daily rows on the server; max_rows=0 must clamp to MIN_MAX_ROWS (=1)
+    // rather than producing an empty/error response. The most-recent row
+    // (tail of ascending series) should be returned.
+    const client = makeClient({ daily: dailyRows });
+    const tools = new LiveInvestmentPricesTools(makeLive(client));
+
+    const result = await tools.getInvestmentPrices({
+      security_id: SECURITY_ID,
+      time_frame: 'ONE_MONTH',
+      max_rows: 0,
+    });
+
+    expect(result.count).toBe(1);
+    expect(result.total_rows).toBe(5);
+    expect(result.truncated).toBe(true);
+    // Tail of ascending series — most recent.
+    expect(result.prices[0]!.date).toBe('2026-01-05');
+  });
+
   test('no truncation when total_rows <= max_rows', async () => {
     const client = makeClient({ daily: dailyRows });
     const tools = new LiveInvestmentPricesTools(makeLive(client));
