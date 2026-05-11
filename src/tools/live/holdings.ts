@@ -110,6 +110,12 @@ function projectHolding(h: HoldingNode): GetHoldingsLiveEntry {
     // Divide-by-zero guard: costBasis === 0 would yield Infinity (positive
     // return) or NaN (zero/zero) — neither is meaningful as a percentage.
     // Omit the field instead so callers can detect "unavailable" cleanly.
+    //
+    // Denominator is `Math.abs(costBasis)` so a negative basis (short
+    // positions, margin accounts) preserves the sign of `totalReturn`:
+    // a short that goes against you (totalReturn < 0 with costBasis < 0)
+    // should report a negative percentage, not flip to positive via
+    // negative ÷ negative cancellation.
     if (h.metrics.costBasis !== 0) {
       entry.total_return_percent = roundAmount(
         (h.metrics.totalReturn / Math.abs(h.metrics.costBasis)) * 100
