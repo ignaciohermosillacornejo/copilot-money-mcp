@@ -17,7 +17,7 @@
 
 An [MCP](https://modelcontextprotocol.io/) server that gives AI assistants access to your Copilot Money personal finance data. It reads from the locally cached Firestore database (LevelDB + Protocol Buffers) on your Mac. **Reads are 100% local with zero network requests.**
 
-**13 cache-mode or 13 live-mode read tools (depending on flags), plus up to 17 write tools** — query and modify transactions, accounts, holdings, balances, categories, recurring charges, budgets, goals, and investment performance. See [Tools by Mode](#tools-by-mode) below.
+**13 cache-mode read tools (or 20 in `--live-reads` mode: 7 surviving cache + 13 live), plus up to 17 write tools** — query and modify transactions, accounts, holdings, balances, categories, recurring charges, budgets, goals, and investment performance. See [Tools by Mode](#tools-by-mode) below.
 
 ## Privacy First
 
