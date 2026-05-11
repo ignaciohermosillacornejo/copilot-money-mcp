@@ -58,6 +58,7 @@ import {
 } from '../src/core/graphql/recurrings.js';
 import { setBudget } from '../src/core/graphql/budgets.js';
 import { editAccount } from '../src/core/graphql/accounts.js';
+import { fetchHoldings } from '../src/core/graphql/queries/holdings.js';
 
 // -----------------------------------------------------------------------------
 // Polling helper — wait for a local-cache read to reflect a GraphQL write
@@ -129,6 +130,7 @@ const VALID_SECTIONS = [
   'recurrings',
   'budgets',
   'accounts',
+  'holdings',
   'bulk',
   'errors',
   'edge',
@@ -1520,6 +1522,49 @@ async function smokeAccountsHappyPath(
   });
 }
 
+/**
+ * Holdings — read-only smoke. No setup or cleanup. Verifies the query
+ * round-trips, returns a well-shaped payload, and (when at least one
+ * holding has metrics) the metric fields are numeric. Counts are printed
+ * but individual holdings are not (PII).
+ */
+async function smokeHoldingsHappyPath(client: GraphQLClient): Promise<void> {
+  logSection('Holdings — happy path');
+
+  await step('holdings', 'fetchHoldings returns well-shaped payload', async () => {
+    const rows = await fetchHoldings(client);
+    console.log(`  Holdings count: ${rows.length}`);
+    if (rows.length === 0) return;
+
+    const first = rows[0];
+    if (!first || typeof first.id !== 'string' || first.id.length === 0) {
+      throw new Error('holdings[0].id missing or empty');
+    }
+    if (typeof first.accountId !== 'string' || first.accountId.length === 0) {
+      throw new Error('holdings[0].accountId missing or empty');
+    }
+    if (typeof first.quantity !== 'number') {
+      throw new Error(`holdings[0].quantity expected number, got ${typeof first.quantity}`);
+    }
+    if (!first.security || typeof first.security.id !== 'string') {
+      throw new Error('holdings[0].security missing or malformed');
+    }
+
+    if (first.metrics) {
+      const { averageCost, costBasis, totalReturn } = first.metrics;
+      if (
+        typeof averageCost !== 'number' ||
+        typeof costBasis !== 'number' ||
+        typeof totalReturn !== 'number'
+      ) {
+        throw new Error(
+          `holdings[0].metrics fields not all numeric (averageCost=${typeof averageCost}, costBasis=${typeof costBasis}, totalReturn=${typeof totalReturn})`
+        );
+      }
+    }
+  });
+}
+
 // -----------------------------------------------------------------------------
 // Section 2 — Bulk operations
 // -----------------------------------------------------------------------------
@@ -2734,6 +2779,7 @@ async function main(): Promise<void> {
   }
   if (sectionEnabled('budgets')) await smokeBudgetsHappyPath(client, db);
   if (sectionEnabled('accounts')) await smokeAccountsHappyPath(client, db);
+  if (sectionEnabled('holdings')) await smokeHoldingsHappyPath(client);
 
   // Section 2 — bulk
   if (sectionEnabled('bulk')) await smokeBulkReviewTransactions(client, db);
