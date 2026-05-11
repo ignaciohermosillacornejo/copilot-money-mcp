@@ -9,6 +9,7 @@
  */
 
 import type { LiveCopilotDatabase } from '../../core/live-database.js';
+import type { LiveBalanceHistoryTools } from './balance-history.js';
 
 const VALID_SCOPES = [
   'all',
@@ -23,6 +24,7 @@ const VALID_SCOPES = [
   'networth',
   'monthly_spend',
   'holdings',
+  'balance_history',
 ] as const;
 
 const YEAR_MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -46,12 +48,22 @@ export interface RefreshCacheResult {
     networth?: boolean;
     monthly_spend?: boolean;
     holdings?: boolean;
+    balance_history?: boolean;
     transactions_months?: string[] | 'all';
   };
 }
 
 export class RefreshCacheTool {
-  constructor(private readonly live: LiveCopilotDatabase) {}
+  /**
+   * `balanceHistory` is optional so existing call sites and tests don't
+   * have to wire the tool instance — when omitted, the `balance_history`
+   * scope is a no-op (but still surfaces `flushed.balance_history: true`
+   * for output parity). The live server path passes a real tool.
+   */
+  constructor(
+    private readonly live: LiveCopilotDatabase,
+    private readonly balanceHistory?: LiveBalanceHistoryTools
+  ) {}
 
   refresh(args: RefreshCacheArgs): Promise<RefreshCacheResult> {
     const scope: Scope = args.scope ?? 'all';
@@ -94,6 +106,8 @@ export class RefreshCacheTool {
       flushed.monthly_spend = true;
       this.live.getHoldingsCache().invalidate();
       flushed.holdings = true;
+      this.balanceHistory?.clearCache();
+      flushed.balance_history = true;
     };
 
     const flushTransactions = () => {
@@ -158,6 +172,13 @@ export class RefreshCacheTool {
       case 'holdings':
         this.live.getHoldingsCache().invalidate();
         flushed.holdings = true;
+        break;
+      case 'balance_history':
+        // The cache lives on LiveBalanceHistoryTools (Map<tuple, snapshot>),
+        // not on LiveCopilotDatabase — the keying is tightly coupled to the
+        // tool's call shape. clearCache() drops every cached tuple at once.
+        this.balanceHistory?.clearCache();
+        flushed.balance_history = true;
         break;
     }
 
