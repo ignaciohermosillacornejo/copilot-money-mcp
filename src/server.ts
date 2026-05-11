@@ -34,6 +34,10 @@ import {
   createLiveMonthlySpendToolSchema,
 } from './tools/live/monthly-spend.js';
 import { LiveHoldingsTools, createLiveHoldingsToolSchema } from './tools/live/holdings.js';
+import {
+  LiveBalanceHistoryTools,
+  createLiveBalanceHistoryToolSchema,
+} from './tools/live/balance-history.js';
 import { RefreshCacheTool, createRefreshCacheToolSchema } from './tools/live/refresh-cache.js';
 
 // Read version from package.json
@@ -60,6 +64,7 @@ export class CopilotMoneyServer {
   private liveUpcomingRecurringsTools?: LiveUpcomingRecurringsTools;
   private liveMonthlySpendTools?: LiveMonthlySpendTools;
   private liveHoldingsTools?: LiveHoldingsTools;
+  private liveBalanceHistoryTools?: LiveBalanceHistoryTools;
   private refreshCacheTool?: RefreshCacheTool;
 
   /**
@@ -100,7 +105,8 @@ export class CopilotMoneyServer {
       this.liveUpcomingRecurringsTools = new LiveUpcomingRecurringsTools(liveDb);
       this.liveMonthlySpendTools = new LiveMonthlySpendTools(liveDb);
       this.liveHoldingsTools = new LiveHoldingsTools(liveDb);
-      this.refreshCacheTool = new RefreshCacheTool(liveDb);
+      this.liveBalanceHistoryTools = new LiveBalanceHistoryTools(liveDb);
+      this.refreshCacheTool = new RefreshCacheTool(liveDb, this.liveBalanceHistoryTools);
     }
 
     this.tools = new CopilotMoneyTools(this.db, graphqlClient, liveDb);
@@ -130,6 +136,11 @@ export class CopilotMoneyServer {
     // liveSchemas array — for every name removed here there must be a live
     // schema added below (and vice versa) so users see exactly one tool per
     // semantic read.
+    // Note: `get_balance_history` is deliberately NOT swapped out for
+    // `get_balance_history_live`. The live tool's GraphQL backing is
+    // strictly narrower than cache mode — single-account, timeFrame-enum
+    // only, no weekly/monthly downsampling, no name/limit enrichment. Both
+    // tools coexist so callers can pick the right shape per use case.
     const filteredReads = this.liveReadsEnabled
       ? readSchemas.filter(
           (s) =>
@@ -153,6 +164,7 @@ export class CopilotMoneyServer {
           createLiveUpcomingRecurringsToolSchema(),
           createLiveMonthlySpendToolSchema(),
           createLiveHoldingsToolSchema(),
+          createLiveBalanceHistoryToolSchema(),
           createRefreshCacheToolSchema(),
         ]
       : [];
@@ -335,6 +347,18 @@ export class CopilotMoneyServer {
       };
     }
 
+    if (name === 'get_balance_history_live' && !this.liveBalanceHistoryTools) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'get_balance_history_live is only available when the server runs with --live-reads.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
     if (name === 'refresh_cache' && !this.refreshCacheTool) {
       return {
         content: [
@@ -451,6 +475,18 @@ export class CopilotMoneyServer {
             (typedArgs as Parameters<
               NonNullable<typeof this.liveHoldingsTools>['getHoldings']
             >[0]) ?? {}
+          );
+          break;
+
+        case 'get_balance_history_live':
+          // liveBalanceHistoryTools non-null invariant enforced by the early guard above.
+          // item_id and account_id are required by the schema; the runtime
+          // validation (in getBalanceHistory) surfaces a clean error if a
+          // caller bypasses the schema.
+          result = await this.liveBalanceHistoryTools!.getBalanceHistory(
+            (typedArgs ?? {}) as unknown as Parameters<
+              NonNullable<typeof this.liveBalanceHistoryTools>['getBalanceHistory']
+            >[0]
           );
           break;
 
