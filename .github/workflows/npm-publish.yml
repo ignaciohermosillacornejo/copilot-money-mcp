@@ -124,6 +124,7 @@ jobs:
 
       - name: Authenticate to MCP Registry (GitHub OIDC)
         if: inputs.dry_run != true && github.event.inputs.dry_run != 'true'
+        continue-on-error: true
         run: ./mcp-publisher login github-oidc
 
       - name: Publish to MCP Registry
