@@ -57,8 +57,9 @@ export class RefreshCacheTool {
   /**
    * `balanceHistory` is optional so existing call sites and tests don't
    * have to wire the tool instance — when omitted, the `balance_history`
-   * scope is a no-op (but still surfaces `flushed.balance_history: true`
-   * for output parity). The live server path passes a real tool.
+   * scope is a no-op AND `flushed.balance_history` is omitted from the
+   * response (the flag only appears when a real flush happened). The
+   * live server path always passes a real tool.
    */
   constructor(
     private readonly live: LiveCopilotDatabase,
@@ -106,8 +107,10 @@ export class RefreshCacheTool {
       flushed.monthly_spend = true;
       this.live.getHoldingsCache().invalidate();
       flushed.holdings = true;
-      this.balanceHistory?.clearCache();
-      flushed.balance_history = true;
+      if (this.balanceHistory) {
+        this.balanceHistory.clearCache();
+        flushed.balance_history = true;
+      }
     };
 
     const flushTransactions = () => {
@@ -177,8 +180,12 @@ export class RefreshCacheTool {
         // The cache lives on LiveBalanceHistoryTools (Map<tuple, snapshot>),
         // not on LiveCopilotDatabase — the keying is tightly coupled to the
         // tool's call shape. clearCache() drops every cached tuple at once.
-        this.balanceHistory?.clearCache();
-        flushed.balance_history = true;
+        // Only set flushed.balance_history when the tool was actually wired
+        // (no-op semantics: "was flushed" not "operation acknowledged").
+        if (this.balanceHistory) {
+          this.balanceHistory.clearCache();
+          flushed.balance_history = true;
+        }
         break;
     }
 
