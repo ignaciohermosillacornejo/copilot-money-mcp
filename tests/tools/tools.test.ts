@@ -2383,7 +2383,9 @@ describe('getHoldings', () => {
     expect(aapl!.cost_basis).toBe(15000);
     expect(aapl!.average_cost).toBe(150);
     expect(aapl!.total_return).toBe(4000);
-    expect(aapl!.total_return_percent).toBeCloseTo(26.67, 1);
+    // (4000 / 15000) * 100 = 26.6666...
+    //   Math.floor → 26.66 (mirrors Copilot web UI display convention)
+    expect(aapl!.total_return_percent).toBe(26.66);
   });
 
   test('omits average_cost and total_return when cost_basis is null', async () => {
@@ -2468,6 +2470,55 @@ describe('getHoldings', () => {
     for (const h of result.holdings) {
       expect(h.ticker_symbol).toBe('SCHX');
     }
+  });
+
+  test('total_return_percent floors at the 2-decimal-place position (positive + negative)', async () => {
+    // Verifies the floor-toward-negative-infinity rounding convention that
+    // mirrors Copilot's web UI display of "Total return" percent.
+    //   Positive: (100 / 1191) * 100 = 8.3963... → floor = 8.39 (round → 8.40)
+    //   Negative: (-100 / 437) * 100 = -22.8833... → floor = -22.89 (round → -22.88)
+    (db as any)._accounts = [
+      {
+        account_id: 'inv_floor_pos',
+        current_balance: 1291,
+        name: 'Floor Positive',
+        account_type: 'investment',
+        holdings: [
+          {
+            security_id: 'sec_aapl',
+            account_id: 'inv_floor_pos',
+            cost_basis: 1191,
+            institution_price: 12.91,
+            institution_value: 1291,
+            quantity: 100,
+            iso_currency_code: 'USD',
+          },
+        ],
+      },
+      {
+        account_id: 'inv_floor_neg',
+        current_balance: 337,
+        name: 'Floor Negative',
+        account_type: 'investment',
+        holdings: [
+          {
+            security_id: 'sec_schx',
+            account_id: 'inv_floor_neg',
+            cost_basis: 437,
+            institution_price: 3.37,
+            institution_value: 337,
+            quantity: 100,
+            iso_currency_code: 'USD',
+          },
+        ],
+      },
+    ];
+
+    const result = await tools.getHoldings({});
+    const pos = result.holdings.find((h) => h.account_id === 'inv_floor_pos');
+    const neg = result.holdings.find((h) => h.account_id === 'inv_floor_neg');
+    expect(pos?.total_return_percent).toBe(8.39);
+    expect(neg?.total_return_percent).toBe(-22.89);
   });
 });
 
