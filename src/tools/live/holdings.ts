@@ -15,9 +15,10 @@
  *     CASH sleeves inside investment accounts), all four are omitted from
  *     the output rather than emitted as `null` — `is_cash_equivalent` on
  *     the same row tells the caller why.
- *   - `total_return_percent = (totalReturn / costBasis) * 100`. Guards
- *     against `costBasis === 0` (would produce Infinity/NaN) by omitting
- *     the field in that case.
+ *   - `total_return_percent = (totalReturn / costBasis) * 100`, floored at
+ *     the 2-decimal-place position to mirror Copilot's web UI display
+ *     convention. Guards against `costBasis === 0` (would produce
+ *     Infinity/NaN) by omitting the field in that case.
  *   - `is_cash_equivalent` is derived from `security.type === 'CASH'`,
  *     NOT from the absence of metrics. Non-cash positions may also lack
  *     metrics (rare, but possible for newly-imported securities).
@@ -116,10 +117,16 @@ function projectHolding(h: HoldingNode): GetHoldingsLiveEntry {
     // a short that goes against you (totalReturn < 0 with costBasis < 0)
     // should report a negative percentage, not flip to positive via
     // negative ÷ negative cancellation.
+    //
+    // Rounding: `Math.floor(... * 100) / 100` floors at the 2-decimal-place
+    // position of the percent (toward negative infinity). This mirrors
+    // Copilot's web UI display convention, verified by direct comparison
+    // of two holdings against the UI's "Total return" field. Note this
+    // differs from the `roundAmount` (round-half-up) used for the other
+    // three derived fields above.
     if (h.metrics.costBasis !== 0) {
-      entry.total_return_percent = roundAmount(
-        (h.metrics.totalReturn / Math.abs(h.metrics.costBasis)) * 100
-      );
+      entry.total_return_percent =
+        Math.floor((h.metrics.totalReturn / Math.abs(h.metrics.costBasis)) * 10000) / 100;
     }
   }
 

@@ -191,6 +191,42 @@ describe('LiveHoldingsTools.getHoldings', () => {
     expect(result._cache_oldest_fetched_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
+  test('total_return_percent floors at the 2-decimal-place position (positive case)', async () => {
+    // 100 / 1191 * 100 = 8.3963...
+    //   Math.floor → 8.39 (locked in by this test)
+    //   Math.round → 8.40 (would fail under the previous round-half-up rule)
+    // This mirrors Copilot's web UI rounding convention.
+    const flooredPositive = {
+      ...equityHolding,
+      id: 'h-floor-pos',
+      metrics: { averageCost: 119.1, costBasis: 1191, totalReturn: 100 },
+    };
+    const client = makeClient([flooredPositive]);
+    const tools = new LiveHoldingsTools(makeLive(client));
+
+    const result = await tools.getHoldings({});
+
+    expect(result.holdings[0]?.total_return_percent).toBe(8.39);
+  });
+
+  test('total_return_percent floors toward negative infinity (negative case)', async () => {
+    // -100 / 437 * 100 = -22.8833...
+    //   Math.floor → -22.89 (further from zero, locked in by this test)
+    //   Math.round → -22.88 (would fail under round-half-up)
+    // Confirms floor toward negative infinity, not toward zero.
+    const flooredNegative = {
+      ...equityHolding,
+      id: 'h-floor-neg',
+      metrics: { averageCost: 43.7, costBasis: 437, totalReturn: -100 },
+    };
+    const client = makeClient([flooredNegative]);
+    const tools = new LiveHoldingsTools(makeLive(client));
+
+    const result = await tools.getHoldings({});
+
+    expect(result.holdings[0]?.total_return_percent).toBe(-22.89);
+  });
+
   test('degenerate cost_basis=0 does not produce Infinity/NaN total_return_percent', async () => {
     const zeroBasis = {
       ...equityHolding,
