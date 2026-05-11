@@ -99,7 +99,11 @@ interface CacheEntry {
 }
 
 function makeKey(itemId: string, accountId: string, timeFrame?: TimeFrame): string {
-  return `${itemId}:${accountId}:${timeFrame ?? DEFAULT_TIME_FRAME_KEY}`;
+  // Use \0 (null byte) as the separator — Plaid IDs today are alphanumeric +
+  // hyphen, but the colon variant of this function would have aliased
+  // (itemId="foo:bar", accountId="baz") with (itemId="foo", accountId="bar:baz").
+  // \0 cannot appear in either field so the join is injectively reversible.
+  return `${itemId}\0${accountId}\0${timeFrame ?? DEFAULT_TIME_FRAME_KEY}`;
 }
 
 export class LiveBalanceHistoryTools {
@@ -133,11 +137,10 @@ export class LiveBalanceHistoryTools {
 
     const startedAt = Date.now();
     const key = makeKey(args.item_id, args.account_id, args.time_frame);
-    const now = Date.now();
 
     let entry = this.cache.get(key);
     let hit = false;
-    if (entry !== undefined && now - entry.fetched_at < this.ttlMs) {
+    if (entry !== undefined && startedAt - entry.fetched_at < this.ttlMs) {
       hit = true;
     } else {
       const rows = await this.live.withRetry(() =>

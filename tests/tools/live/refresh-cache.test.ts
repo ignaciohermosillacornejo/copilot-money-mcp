@@ -308,13 +308,15 @@ describe('RefreshCacheTool — scope: balance_history', () => {
     expect(result.flushed.accounts).toBeUndefined();
   });
 
-  test('no-op (but still reports flushed) when balanceHistory tool is not wired', async () => {
+  test('no-op when balanceHistory tool is not wired — omits balance_history from flushed', async () => {
     const { live } = makeMockLive();
     const tool = new RefreshCacheTool(live); // no balance-history tool passed
 
     const result = await tool.refresh({ scope: 'balance_history' });
 
-    expect(result.flushed.balance_history).toBe(true);
+    // Flag only appears when a real flush happened; unwired path returns
+    // an empty flushed map.
+    expect(result.flushed.balance_history).toBeUndefined();
   });
 });
 
