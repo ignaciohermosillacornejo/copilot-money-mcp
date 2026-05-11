@@ -190,6 +190,32 @@ entry with a comment.
 4. Run `bun run check` to verify
 5. Push and open a Pull Request
 
+## Publishing to the MCP Registry
+
+The server is listed in the official [MCP Registry](https://registry.modelcontextprotocol.io) as `io.github.ignaciohermosillacornejo/copilot-money-mcp`. The registry stores metadata only — the actual artifact lives on npm.
+
+Publishing is currently manual. Run it after each npm release that needs to be reflected in the registry (no need to re-publish for every patch — only when `server.json` metadata or the published `version` changes meaningfully).
+
+### Prerequisites
+- The target version must already be published to npm with the `mcpName` field present in `package.json` (the registry validates against the published tarball).
+- `mcp-publisher` CLI installed locally (`brew install mcp-publisher`).
+
+### Steps
+1. Bump `version` in both `package.json` and `server.json` so they match (the package `version` inside `server.json` must equal the npm version that contains `mcpName`).
+2. Cut the npm release through the normal release flow (the `npm-publish.yml` workflow runs on GitHub release).
+3. Confirm the new version is live: `npm view copilot-money-mcp version`.
+4. Authenticate and publish:
+   ```bash
+   mcp-publisher login github
+   mcp-publisher publish
+   ```
+5. Verify:
+   ```bash
+   curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.ignaciohermosillacornejo/copilot-money-mcp"
+   ```
+
+GitHub auth requires the server name to start with `io.github.<your-username>/`, which is why only `ignaciohermosillacornejo` can publish updates. Future: wire this into a `mcp-registry-publish.yml` workflow triggered after `npm-publish.yml`.
+
 ## Reporting Issues
 
 When reporting bugs, include: OS version, Node.js version, Copilot Money version, error messages, and steps to reproduce.
