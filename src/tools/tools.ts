@@ -4050,7 +4050,10 @@ export function createToolSchemas(): ToolSchema[] {
         "Get financial goals from Copilot's native goal tracking. " +
         'Retrieves user-defined savings goals, debt payoff targets, and investment goals. ' +
         'Returns goal details including target amounts, monthly contributions, status (active/paused), ' +
-        'start dates, and tracking configuration. Calculates total target amount across all goals.',
+        'start dates, and tracking configuration. Calculates total target amount across all goals. ' +
+        "Cache-only: no live-mode (`--live-reads`) counterpart exists because Copilot's GraphQL endpoint " +
+        'does not expose goal data, so this tool always returns cached LevelDB data regardless of the ' +
+        '`--live-reads` flag.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -4186,7 +4189,10 @@ export function createToolSchemas(): ToolSchema[] {
       description:
         'Get monthly progress snapshots for financial goals. Returns current_amount, ' +
         'target_amount, daily data points, and contribution records per month. ' +
-        'Filter by goal_id or month range (YYYY-MM).',
+        'Filter by goal_id or month range (YYYY-MM). ' +
+        "Cache-only: no live-mode (`--live-reads`) counterpart exists because Copilot's GraphQL endpoint " +
+        'does not expose goal data, so this tool always returns cached LevelDB data regardless of the ' +
+        '`--live-reads` flag.',
       inputSchema: {
         type: 'object',
         properties: {
