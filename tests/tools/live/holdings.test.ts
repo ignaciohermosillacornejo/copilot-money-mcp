@@ -237,18 +237,14 @@ describe('LiveHoldingsTools.getHoldings', () => {
 
 describe('createLiveHoldingsToolSchema', () => {
   test('returns a schema with readOnlyHint=true and the expected tool name', async () => {
-    const { createLiveHoldingsToolSchema } = await import(
-      '../../../src/tools/live/holdings.js'
-    );
+    const { createLiveHoldingsToolSchema } = await import('../../../src/tools/live/holdings.js');
     const schema = createLiveHoldingsToolSchema();
     expect(schema.name).toBe('get_holdings_live');
     expect(schema.annotations?.readOnlyHint).toBe(true);
   });
 
   test('declares optional account_id, ticker_symbol, limit, offset (no required)', async () => {
-    const { createLiveHoldingsToolSchema } = await import(
-      '../../../src/tools/live/holdings.js'
-    );
+    const { createLiveHoldingsToolSchema } = await import('../../../src/tools/live/holdings.js');
     const schema = createLiveHoldingsToolSchema();
     const props = schema.inputSchema.properties as Record<string, { type: string }>;
     expect(props.account_id?.type).toBe('string');
