@@ -17,7 +17,7 @@
 
 An [MCP](https://modelcontextprotocol.io/) server that gives AI assistants access to your Copilot Money personal finance data. It reads from the locally cached Firestore database (LevelDB + Protocol Buffers) on your Mac. **Reads are 100% local with zero network requests.**
 
-**17 read tools** across spending, investments, budgets, goals, and more — query transactions, accounts, holdings, balances, categories, recurring charges, budgets, goals, and investment performance.
+**13 cache-mode read tools + 13 live-mode tools + 17 write tools** — query and modify transactions, accounts, holdings, balances, categories, recurring charges, budgets, goals, and investment performance.
 
 ## Privacy First
 
@@ -31,6 +31,76 @@ We never collect, store, or transmit your data to any server operated by this pr
 > **Heads up about AI providers.** While this server itself runs locally and never sends your data to any server operated by this project, **the AI assistant you connect it to (Claude, ChatGPT, Gemini, etc.) will see your Copilot Money data** as part of answering your questions. That means your financial data will be transmitted to and processed by the provider of whichever model you choose — **Anthropic, OpenAI, Google, or another third party** — subject to that provider's own privacy policy and data retention terms.
 >
 > **By using this MCP server with a hosted AI model, you are knowingly sharing your financial data with that AI provider.** Only use this tool if you are comfortable with that trade-off. If you are not, consider waiting for an official Copilot Money integration or using a fully local model.
+
+## Tools by Mode
+
+This server exposes different tools depending on which CLI flags you enable.
+
+### 🟢 Default mode (`copilot-money-mcp`) — reads from local cache, no auth
+
+| Tool | Status | Notes |
+|---|---|---|
+| `get_transactions` | ✅ | Query transactions with filters (date range, category, merchant, amount, account, text search, etc.) |
+| `get_accounts` | ✅ | List accounts with balances; filter by type |
+| `get_categories` | ✅ | Category hierarchy with spending totals |
+| `get_budgets` | ✅ | Budgets vs. spending |
+| `get_recurring_transactions` | ✅ | Detected subscriptions + recurring charges |
+| `get_holdings` | ✅ | Investment positions with cost basis (cached) |
+| `get_balance_history` | ✅ | Daily balance history; supports cross-account + daily/weekly/monthly granularity |
+| `get_investment_prices` | ✅ | Historical price data |
+| `get_goals` | ⚠️ | Cache-only — Copilot's GraphQL endpoint doesn't expose goals data, so no `--live-reads` counterpart exists |
+| `get_goal_history` | ⚠️ | Same — cache-only forever |
+| `get_cache_info` | ✅ | Local cache metadata (utility) |
+| `get_connection_status` | ✅ | Bank sync health (utility) |
+| `refresh_database` | ✅ | Reload from disk (utility) |
+
+### 🌐 `--live-reads` mode — real-time data via Copilot's GraphQL API (requires browser auth 🔒)
+
+When enabled, 6 cache-mode read tools are replaced with GraphQL-backed equivalents, and 7 new live-only tools are added.
+
+| Tool | Replaces? | Status | Notes |
+|---|---|---|---|
+| `get_transactions_live` | `get_transactions` | ✅ | Windowed cache; paginates per month |
+| `get_accounts_live` | `get_accounts` | ✅ | 1h cache |
+| `get_categories_live` | `get_categories` | ✅ | 24h cache; reflects rollovers per user setting |
+| `get_budgets_live` | `get_budgets` | ✅ | Projection over `categories_live` data |
+| `get_recurring_live` | `get_recurring_transactions` | ✅ | ⚠️ Pattern-based detection from transactions is NOT in live mode — use cache mode if you need that |
+| `get_holdings_live` | `get_holdings` | ✅ | Includes cost basis via `metrics`; `metrics: null` for CASH and some 401(k) mutual fund positions (Copilot doesn't compute basis for those) |
+| `get_tags_live` | _(additive)_ | ✅ | No cache-mode counterpart |
+| `get_networth_live` | _(additive)_ | ✅ | Net worth over time |
+| `get_upcoming_recurrings_live` | _(additive)_ | ✅ | Next-due unpaid recurrings (distinct from `get_recurring_live`'s historical view) |
+| `get_monthly_spend_live` | _(additive)_ | ✅ | Daily-series spending for the current month with prior-period comparison |
+| `get_balance_history_live` | _(additive)_ | ✅ | ⚠️ Single-account only (server constraint — requires `item_id` + `account_id`); use cache-mode `get_balance_history` for cross-account or weekly/monthly granularity |
+| `get_investment_prices_live` | _(additive)_ | ✅ | ⚠️ Server-side ownership-gated: only works for securities currently in your linked accounts |
+| `refresh_cache` | _(utility)_ | ✅ | Invalidate live-mode caches by scope |
+
+### ✍️ `--write` mode — mutations via Copilot's GraphQL API (requires browser auth 🔒)
+
+| Tool | Status | Notes |
+|---|---|---|
+| `create_transaction` | ✅ | |
+| `update_transaction` | ✅ | |
+| `delete_transaction` | ✅ | |
+| `split_transaction` | ✅ | |
+| `add_transaction_to_recurring` | ✅ | Link an existing transaction to a recurring series |
+| `review_transactions` | ✅ | Bulk-mark as reviewed/unreviewed |
+| `create_category` / `update_category` / `delete_category` | ✅ | |
+| `create_tag` / `update_tag` / `delete_tag` | ✅ | |
+| `create_recurring` / `update_recurring` / `delete_recurring` | ✅ | |
+| `set_recurring_state` | ✅ | Pause / resume |
+| `set_budget` | ✅ | Setting amount to 0 effectively deletes |
+
+### ⚠️ Known caveats
+
+| Topic | Status |
+|---|---|
+| Goals (`get_goals`, `get_goal_history`) | ⚠️ Cache-only. Copilot's GraphQL endpoint doesn't expose goals. There is no live counterpart, and there are no goal write tools (goals are desktop-only in Copilot). |
+| Goal write tools (`create_goal` / `update_goal` / `delete_goal`) | ❌ Not implemented. Copilot doesn't expose goal mutations via GraphQL. |
+| Stock-split data | ⚠️ Copilot's local cache contains only empty placeholder records (no split dates / ratios), and there is no GraphQL endpoint for splits. The previous `get_investment_splits` cache-mode tool returned no useful data and was removed. |
+| Long time-series responses | ⚠️ The MCP single-tool-result token cap means very long histories (e.g., multi-year daily prices or balances) are capped at 500 rows by default. Use `max_rows` / `offset` parameters, or narrow `time_frame` to fetch more. |
+| 🔒 Browser authentication | Both `--live-reads` and `--write` require a logged-in browser session against `app.copilot.money` (the server uses the same Firebase refresh-token flow as the web app). Reads in default mode require nothing. |
+
+---
 
 ## Quick Start
 
@@ -113,9 +183,9 @@ Uses `get_accounts`, `get_balance_history`, `get_connection_status`.
 
 > "Show me AAPL price history for the past year"
 
-> "What's my time-weighted return this quarter?"
+> "What's my current cost basis on META?"
 
-Uses `get_holdings`, `get_investment_prices`, `get_securities`, `get_investment_performance`, `get_twr_returns`.
+Uses `get_holdings` (or `get_holdings_live` for live cost basis), `get_investment_prices` (or `get_investment_prices_live` for live per-security price history).
 
 ### Budgets & Goals
 
@@ -134,30 +204,6 @@ Uses `get_budgets`, `get_goals`, `get_goal_history`.
 > "How much do I spend on recurring charges per month?"
 
 Uses `get_recurring_transactions`.
-
-## Available Tools
-
-### Read Tools (17)
-
-| Tool | Description |
-|------|-------------|
-| `get_transactions` | Query transactions with filters — date range, category, merchant, amount, account, location, text search, and special types (foreign, refunds, duplicates, HSA-eligible). |
-| `get_accounts` | List all accounts with balances, filter by type (checking, savings, credit, investment). Includes net worth calculation. |
-| `get_categories` | List categories with transaction counts and spending totals. Supports list, tree, and search views. |
-| `get_recurring_transactions` | Identify subscriptions and recurring charges with frequency, cost, and next expected date. |
-| `get_budgets` | Get budgets with spending vs. limit comparisons. |
-| `get_goals` | Get financial goals with target amounts, progress, and monthly contributions. |
-| `get_goal_history` | Monthly progress snapshots for goals with daily data and contribution records. |
-| `get_balance_history` | Daily balance snapshots for accounts over time. Supports daily, weekly, or monthly granularity. |
-| `get_holdings` | Current investment holdings with ticker, quantity, price, cost basis, and total return. |
-| `get_investment_prices` | Historical price data (daily + high-frequency) for stocks, ETFs, mutual funds, and crypto. |
-| `get_investment_splits` | Stock split history with ratios, dates, and multipliers. |
-| `get_investment_performance` | Per-security investment performance data. |
-| `get_twr_returns` | Time-weighted return (TWR) monthly data for investment holdings. |
-| `get_securities` | Security master data — ticker, name, type, price, and identifiers (ISIN/CUSIP). |
-| `get_connection_status` | Bank sync health for linked institutions, including last sync timestamps and errors. |
-| `get_cache_info` | Local cache metadata — date range, transaction count, cache age. |
-| `refresh_database` | Reload data from disk. Cache auto-refreshes every 5 minutes. |
 
 ## Configuration
 
