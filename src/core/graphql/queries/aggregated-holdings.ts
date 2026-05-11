@@ -49,7 +49,7 @@ export interface AggregatedHoldingNode {
 
 export interface FetchAggregatedHoldingsOpts {
   timeFrame?: TimeFrame;
-  filter?: unknown[];
+  filter?: Record<string, unknown>[];
   accountId?: string;
   itemId?: string;
 }
@@ -65,7 +65,7 @@ export async function fetchAggregatedHoldings(
   const data = await client.query<
     {
       timeFrame?: TimeFrame;
-      filter?: unknown[];
+      filter?: Record<string, unknown>[];
       accountId?: string;
       itemId?: string;
     },

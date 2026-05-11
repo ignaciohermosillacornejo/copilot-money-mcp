@@ -41,7 +41,7 @@ describe('fetchSecurityPricesHighFrequency', () => {
     });
   });
 
-  test('handles empty intraday response', async () => {
+  test('omits timeFrame when not provided', async () => {
     const client = {
       query: mock(() => Promise.resolve({ securityPricesHighFrequency: [] })),
     } as unknown as GraphQLClient;
@@ -51,5 +51,9 @@ describe('fetchSecurityPricesHighFrequency', () => {
     const rows = await fetchSecurityPricesHighFrequency(client, { id: 's1' });
 
     expect(rows).toEqual([]);
+    expect(client.query).toHaveBeenCalledWith('SecurityPricesHighFrequency', expect.any(String), {
+      id: 's1',
+      timeFrame: undefined,
+    });
   });
 });
