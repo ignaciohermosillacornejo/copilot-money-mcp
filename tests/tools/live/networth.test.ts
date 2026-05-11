@@ -24,6 +24,8 @@ describe('LiveNetworthTools.getNetworth', () => {
     const result = await tools.getNetworth({});
 
     expect(result.count).toBe(1);
+    expect(result.total_rows).toBe(1);
+    expect(result.truncated).toBe(false);
     expect(result.networth_history[0]?.date).toBe('2026-01-01');
     expect(result.networth_history[0]?.assets).toBe('100000');
     expect(result.networth_history[0]?.debt).toBe('5000');
@@ -70,11 +72,25 @@ describe('LiveNetworthTools.getNetworth', () => {
     ]);
   });
 
-  test('default timeFrame is "ALL" when not provided', async () => {
+  test('default timeFrame is "YTD" when not provided', async () => {
+    // Tightened on 2026-05 from ALL → YTD so the default response stays
+    // under the MCP single-tool-result token cap (issue #380). Callers
+    // wanting full history must pass time_frame: 'ALL' explicitly.
     const client = makeClient([]);
     const tools = new LiveNetworthTools(makeLive(client));
 
     await tools.getNetworth({});
+
+    expect(client.query).toHaveBeenCalledWith('Networth', expect.any(String), {
+      timeFrame: 'YTD',
+    });
+  });
+
+  test('explicit time_frame=ALL still works (opt-in to full history)', async () => {
+    const client = makeClient([]);
+    const tools = new LiveNetworthTools(makeLive(client));
+
+    await tools.getNetworth({ time_frame: 'ALL' });
 
     expect(client.query).toHaveBeenCalledWith('Networth', expect.any(String), {
       timeFrame: 'ALL',
@@ -103,6 +119,57 @@ describe('LiveNetworthTools.getNetworth', () => {
     expect(second._cache_hit).toBe(false);
   });
 
+  test('caps at default max_rows=500 and reports truncated=true', async () => {
+    const bigRows = Array.from({ length: 1500 }, (_, i) => ({
+      date: `2025-${String(Math.floor(i / 30) + 1).padStart(2, '0')}-${String((i % 30) + 1).padStart(2, '0')}`,
+      assets: String(100 + i),
+      debt: String(10 + i),
+    }));
+    const client = makeClient(bigRows);
+    const tools = new LiveNetworthTools(makeLive(client));
+
+    const result = await tools.getNetworth({ time_frame: 'ALL' });
+
+    expect(result.total_rows).toBe(1500);
+    expect(result.count).toBe(500);
+    expect(result.truncated).toBe(true);
+    // Sliced to MOST RECENT (tail of ascending series).
+    expect(result.networth_history[0]?.assets).toBe(String(100 + 1000));
+    expect(result.networth_history[499]?.assets).toBe(String(100 + 1499));
+  });
+
+  test('offset=500 returns the next-most-recent batch', async () => {
+    const bigRows = Array.from({ length: 1500 }, (_, i) => ({
+      date: `2025-${String(Math.floor(i / 30) + 1).padStart(2, '0')}-${String((i % 30) + 1).padStart(2, '0')}`,
+      assets: String(100 + i),
+      debt: String(10 + i),
+    }));
+    const client = makeClient(bigRows);
+    const tools = new LiveNetworthTools(makeLive(client));
+
+    const result = await tools.getNetworth({
+      time_frame: 'ALL',
+      max_rows: 500,
+      offset: 500,
+    });
+
+    expect(result.count).toBe(500);
+    expect(result.total_rows).toBe(1500);
+    expect(result.truncated).toBe(true);
+    expect(result.networth_history[0]?.assets).toBe(String(100 + 500));
+  });
+
+  test('offset beyond total returns empty rows without throwing', async () => {
+    const client = makeClient([sampleRow]);
+    const tools = new LiveNetworthTools(makeLive(client));
+
+    const result = await tools.getNetworth({ max_rows: 100, offset: 5000 });
+
+    expect(result.count).toBe(0);
+    expect(result.networth_history).toEqual([]);
+    expect(result.total_rows).toBe(1);
+  });
+
   test('preserves null assets/debt in passthrough (early dates)', async () => {
     const client = makeClient([{ date: '2022-09-13', assets: null, debt: '500' }]);
     const tools = new LiveNetworthTools(makeLive(client));
@@ -121,5 +188,30 @@ describe('createLiveNetworthToolSchema', () => {
     expect(schema.name).toBe('get_networth_live');
     expect(schema.annotations?.readOnlyHint).toBe(true);
     expect(schema.inputSchema.properties).toHaveProperty('time_frame');
+  });
+
+  test('time_frame default is "YTD" (tightened from ALL on 2026-05)', async () => {
+    const { createLiveNetworthToolSchema } = await import('../../../src/tools/live/networth.js');
+    const schema = createLiveNetworthToolSchema();
+    const props = schema.inputSchema.properties as Record<
+      string,
+      { type: string; default?: string | number; enum?: string[] }
+    >;
+    expect(props.time_frame?.default).toBe('YTD');
+    // Description should explain the change so callers can find context.
+    expect(schema.description).toMatch(/YTD/);
+  });
+
+  test('exposes max_rows and offset pagination args', async () => {
+    const { createLiveNetworthToolSchema } = await import('../../../src/tools/live/networth.js');
+    const schema = createLiveNetworthToolSchema();
+    const props = schema.inputSchema.properties as Record<
+      string,
+      { type: string; default?: number }
+    >;
+    expect(props.max_rows?.type).toBe('integer');
+    expect(props.max_rows?.default).toBe(500);
+    expect(props.offset?.type).toBe('integer');
+    expect(props.offset?.default).toBe(0);
   });
 });

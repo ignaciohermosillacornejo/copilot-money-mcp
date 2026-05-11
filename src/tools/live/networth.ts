@@ -4,12 +4,17 @@
  * Fetches net-worth-over-time history via GraphQL through the
  * SnapshotCache<NetworthHistoryNode> exposed by LiveCopilotDatabase
  * (1h TTL). Output envelope mirrors the other live read tools (count,
- * networth_history) plus the freshness-envelope fields.
+ * networth_history) plus the freshness-envelope fields, plus the uniform
+ * pagination shape (total_rows, truncated; max_rows/offset args).
  *
  * The `total` field from the upstream NetworthHistory type is a client-side
  * (`@client`) projection stripped by the operations generator and is not
  * present on the wire. Consumers that want net worth at each point should
  * compute `assets - debt` per row.
+ *
+ * Default time_frame is `YTD` (tightened from `ALL` on 2026-05) so the
+ * default call stays well below the MCP single-tool-result token cap.
+ * Callers wanting the full history pass `time_frame: 'ALL'` explicitly.
  *
  * timeFrame caching: a single SnapshotCache holds the most-recently-requested
  * timeFrame's rows. Requests for a different timeFrame invalidate the cache
@@ -23,15 +28,31 @@ import {
   fetchNetworthHistory,
   type NetworthHistoryNode,
 } from '../../core/graphql/queries/networth.js';
+import { paginate, DEFAULT_MAX_ROWS } from '../../utils/pagination.js';
 
-const DEFAULT_TIME_FRAME = 'ALL';
+const DEFAULT_TIME_FRAME = 'YTD';
 
 export interface GetNetworthLiveArgs {
   time_frame?: string;
+  /**
+   * Cap on the number of rows returned. Clamped to [1, 5000]; default 500.
+   * Slices the most-recent rows of the ascending-by-date series.
+   */
+  max_rows?: number;
+  /**
+   * Number of rows to skip from the most-recent end (counts from the tail).
+   * Clamped to >= 0; default 0.
+   */
+  offset?: number;
 }
 
 export interface GetNetworthLiveResult {
+  /** Number of rows in this page (= networth_history.length). */
   count: number;
+  /** Pre-pagination row count of the full series the server returned. */
+  total_rows: number;
+  /** True iff older rows beyond this page remain. */
+  truncated: boolean;
   networth_history: NetworthHistoryNode[];
   _cache_oldest_fetched_at: string;
   _cache_newest_fetched_at: string;
@@ -69,14 +90,17 @@ export class LiveNetworthTools {
       hit,
     } = await cache.read(() => fetchNetworthHistory(this.live.getClient(), { timeFrame }));
 
-    const rows = [...cached].sort((a, b) => a.date.localeCompare(b.date));
+    const sorted = [...cached].sort((a, b) => a.date.localeCompare(b.date));
 
-    // Log after sort so `rows` reflects what's returned to the caller.
+    // Apply uniform pagination AFTER sort so the "newest N" semantics hold.
+    const page = paginate(sorted, { max_rows: args.max_rows, offset: args.offset });
+
+    // Log after pagination so `rows` reflects what's returned to the caller.
     this.live.logReadCall({
       op: 'Networth',
       pages: hit ? 0 : 1,
       latencyMs: Date.now() - startedAt,
-      rows: rows.length,
+      rows: page.rows.length,
       cache_hit: hit,
     });
 
@@ -85,8 +109,10 @@ export class LiveNetworthTools {
     // the same single-snapshot fetch time — unlike the windowed transaction
     // cache where they can differ across month windows.
     return {
-      count: rows.length,
-      networth_history: rows,
+      count: page.rows.length,
+      total_rows: page.total_rows,
+      truncated: page.truncated,
+      networth_history: page.rows,
       _cache_oldest_fetched_at: fetchedAtIso,
       _cache_newest_fetched_at: fetchedAtIso,
       _cache_hit: hit,
@@ -102,20 +128,38 @@ export function createLiveNetworthToolSchema() {
       'sorted oldest→newest by date; for each row, `assets - debt` gives the net worth ' +
       'at that point in time. Both `assets` and `debt` are nullable strings — early dates ' +
       "in the user's history may have `assets: null` until backfilled. Available when " +
-      '--live-reads is on. Optional `time_frame` arg (default "ALL"; other server-supported ' +
-      'values include "YEAR", "MONTH"). The cache holds the most-recently-requested ' +
-      'time_frame; requesting a different value triggers a fresh fetch.',
+      '--live-reads is on. Optional `time_frame` arg (default "YTD"; other server-supported ' +
+      'values include "ALL", "YEAR", "MONTH"). The cache holds the most-recently-requested ' +
+      'time_frame; requesting a different value triggers a fresh fetch. ' +
+      'Long-range responses are paginated via `max_rows` (default 500, max 5000) and ' +
+      '`offset`; `total_rows` and `truncated` indicate whether older rows remain.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         time_frame: {
           type: 'string',
-          enum: ['ALL', 'YEAR', 'MONTH'],
+          enum: ['ALL', 'YEAR', 'MONTH', 'YTD'],
           description:
-            'TimeFrame enum passed through to the Networth query. Default "ALL". ' +
-            'Other values are passed through unchanged; the server is the source of truth ' +
-            'on which TimeFrame values it accepts.',
+            'TimeFrame enum passed through to the Networth query. Default "YTD" ' +
+            '(tightened on 2026-05 to fit the default response under the MCP token cap). ' +
+            'Pass "ALL" for full history. Other values are passed through unchanged; ' +
+            'the server is the source of truth on which TimeFrame values it accepts.',
           default: DEFAULT_TIME_FRAME,
+        },
+        max_rows: {
+          type: 'integer',
+          description:
+            'Cap response to the most recent N rows (default 500, max 5000). Helps avoid the ' +
+            'MCP single-tool-result token limit on long-range queries. If hit, response ' +
+            'includes `truncated: true`.',
+          default: DEFAULT_MAX_ROWS,
+        },
+        offset: {
+          type: 'integer',
+          description:
+            'Number of rows to skip from the most-recent end. Default 0. Set to `max_rows` to ' +
+            'fetch the next-most-recent batch.',
+          default: 0,
         },
       },
     },
