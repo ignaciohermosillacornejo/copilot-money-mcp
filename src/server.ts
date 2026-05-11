@@ -33,6 +33,7 @@ import {
   LiveMonthlySpendTools,
   createLiveMonthlySpendToolSchema,
 } from './tools/live/monthly-spend.js';
+import { LiveHoldingsTools, createLiveHoldingsToolSchema } from './tools/live/holdings.js';
 import { RefreshCacheTool, createRefreshCacheToolSchema } from './tools/live/refresh-cache.js';
 
 // Read version from package.json
@@ -58,6 +59,7 @@ export class CopilotMoneyServer {
   private liveNetworthTools?: LiveNetworthTools;
   private liveUpcomingRecurringsTools?: LiveUpcomingRecurringsTools;
   private liveMonthlySpendTools?: LiveMonthlySpendTools;
+  private liveHoldingsTools?: LiveHoldingsTools;
   private refreshCacheTool?: RefreshCacheTool;
 
   /**
@@ -97,6 +99,7 @@ export class CopilotMoneyServer {
       this.liveNetworthTools = new LiveNetworthTools(liveDb);
       this.liveUpcomingRecurringsTools = new LiveUpcomingRecurringsTools(liveDb);
       this.liveMonthlySpendTools = new LiveMonthlySpendTools(liveDb);
+      this.liveHoldingsTools = new LiveHoldingsTools(liveDb);
       this.refreshCacheTool = new RefreshCacheTool(liveDb);
     }
 
@@ -122,6 +125,11 @@ export class CopilotMoneyServer {
    */
   handleListTools(): { tools: Tool[] } {
     const readSchemas = createToolSchemas();
+    // When --live-reads is on, the cache-mode reads in this list are swapped
+    // out for their _live counterparts below. Keep this in sync with the
+    // liveSchemas array — for every name removed here there must be a live
+    // schema added below (and vice versa) so users see exactly one tool per
+    // semantic read.
     const filteredReads = this.liveReadsEnabled
       ? readSchemas.filter(
           (s) =>
@@ -129,7 +137,8 @@ export class CopilotMoneyServer {
             s.name !== 'get_accounts' &&
             s.name !== 'get_categories' &&
             s.name !== 'get_budgets' &&
-            s.name !== 'get_recurring_transactions'
+            s.name !== 'get_recurring_transactions' &&
+            s.name !== 'get_holdings'
         )
       : readSchemas;
     const liveSchemas = this.liveReadsEnabled
@@ -143,6 +152,7 @@ export class CopilotMoneyServer {
           createLiveNetworthToolSchema(),
           createLiveUpcomingRecurringsToolSchema(),
           createLiveMonthlySpendToolSchema(),
+          createLiveHoldingsToolSchema(),
           createRefreshCacheToolSchema(),
         ]
       : [];
@@ -313,6 +323,18 @@ export class CopilotMoneyServer {
       };
     }
 
+    if (name === 'get_holdings_live' && !this.liveHoldingsTools) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'get_holdings_live is only available when the server runs with --live-reads.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
     if (name === 'refresh_cache' && !this.refreshCacheTool) {
       return {
         content: [
@@ -419,6 +441,15 @@ export class CopilotMoneyServer {
           result = await this.liveMonthlySpendTools!.getMonthlySpend(
             (typedArgs as Parameters<
               NonNullable<typeof this.liveMonthlySpendTools>['getMonthlySpend']
+            >[0]) ?? {}
+          );
+          break;
+
+        case 'get_holdings_live':
+          // liveHoldingsTools non-null invariant enforced by the early guard above.
+          result = await this.liveHoldingsTools!.getHoldings(
+            (typedArgs as Parameters<
+              NonNullable<typeof this.liveHoldingsTools>['getHoldings']
             >[0]) ?? {}
           );
           break;
