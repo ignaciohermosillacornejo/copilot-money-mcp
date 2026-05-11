@@ -42,14 +42,14 @@ describe('fetchAggregatedHoldings', () => {
       await import('../../../../src/core/graphql/queries/aggregated-holdings.js');
     await fetchAggregatedHoldings(client, {
       timeFrame: 'YTD',
-      filter: [],
+      filter: [{ kind: 'assetClass', value: 'equity' }],
       accountId: 'a1',
       itemId: 'i1',
     });
 
     expect(client.query).toHaveBeenCalledWith('AggregatedHoldings', expect.any(String), {
       timeFrame: 'YTD',
-      filter: [],
+      filter: [{ kind: 'assetClass', value: 'equity' }],
       accountId: 'a1',
       itemId: 'i1',
     });
