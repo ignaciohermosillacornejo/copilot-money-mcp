@@ -2192,18 +2192,18 @@ export class CopilotMoneyTools {
         };
 
         // Compute cost basis derived fields.
-        // `total_return_percent` uses `Math.floor(... * 100) / 100` to floor
-        // at the 2-decimal-place position of the percent (toward negative
-        // infinity). This mirrors Copilot's web UI display convention,
-        // verified by direct comparison against the UI's "Total return"
-        // field. The other three fields use `roundAmount` (round-half-up).
+        // `total_return_percent` uses `Math.floor(percent * 100) / 100` to
+        // floor at the 2-decimal-place position of the percent (toward
+        // negative infinity). This mirrors Copilot's web UI display
+        // convention, verified by direct comparison against the UI's
+        // "Total return" field. The other three fields use `roundAmount`
+        // (round-half-up).
         if (h.cost_basis != null && h.cost_basis !== 0 && h.quantity !== 0) {
           entry.cost_basis = roundAmount(h.cost_basis);
           entry.average_cost = roundAmount(h.cost_basis / h.quantity);
           entry.total_return = roundAmount(h.institution_value - h.cost_basis);
-          entry.total_return_percent =
-            Math.floor(((h.institution_value - h.cost_basis) / Math.abs(h.cost_basis)) * 10000) /
-            100;
+          const percent = ((h.institution_value - h.cost_basis) / Math.abs(h.cost_basis)) * 100;
+          entry.total_return_percent = Math.floor(percent * 100) / 100;
         }
 
         holdings.push(entry);
