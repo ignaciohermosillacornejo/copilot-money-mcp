@@ -2741,3 +2741,80 @@ describe('--live-reads monthly-spend wiring', () => {
     expect(data._cache_hit).toBe(false);
   });
 });
+
+// ============================================
+// --live-reads holdings wiring tests
+// ============================================
+
+describe('--live-reads holdings wiring', () => {
+  test('handleListTools when --live-reads is OFF includes get_holdings and excludes get_holdings_live', () => {
+    const server = new CopilotMoneyServer(FAKE_DB_DIR);
+    const { tools } = server.handleListTools();
+    const names = tools.map((t) => t.name);
+    expect(names).toContain('get_holdings');
+    expect(names).not.toContain('get_holdings_live');
+  });
+
+  test('handleListTools when --live-reads is ON includes get_holdings_live and excludes get_holdings', () => {
+    // Pass a mock GraphQL client so the constructor can wire liveHoldingsTools
+    // without attempting real auth. The fourth positional arg is liveReadsEnabled.
+    const mockClient = createMockGraphQLClient({});
+    const server = new CopilotMoneyServer(FAKE_DB_DIR, undefined, false, true, mockClient);
+    const { tools } = server.handleListTools();
+    const names = tools.map((t) => t.name);
+    expect(names).toContain('get_holdings_live');
+    expect(names).not.toContain('get_holdings');
+  });
+
+  test('get_holdings_live without --live-reads returns isError with --live-reads hint', async () => {
+    const server = new CopilotMoneyServer(FAKE_DB_DIR);
+    const db = createMockDb();
+    server._injectForTesting(db, new CopilotMoneyTools(db));
+
+    const result = await server.handleCallTool('get_holdings_live', {});
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('--live-reads');
+  });
+
+  test('get_holdings_live with --live-reads dispatches to liveHoldingsTools.getHoldings', async () => {
+    const mockClient = createMockGraphQLClient({});
+    const server = new CopilotMoneyServer(FAKE_DB_DIR, undefined, false, true, mockClient);
+    const db = createMockDb();
+    server._injectForTesting(db, new CopilotMoneyTools(db));
+
+    // Inject a stub LiveHoldingsTools via private field access
+    const stubResult = {
+      count: 1,
+      total_count: 1,
+      offset: 0,
+      has_more: false,
+      holdings: [
+        {
+          security_id: 'sec-1',
+          ticker_symbol: 'ACME',
+          name: 'Acme',
+          type: 'EQUITY',
+          account_id: 'acct-1',
+          item_id: 'item-1',
+          quantity: 10,
+          institution_price: 100,
+          institution_value: 1000,
+          is_cash_equivalent: false,
+        },
+      ],
+      _cache_oldest_fetched_at: '2025-01-01T00:00:00.000Z',
+      _cache_newest_fetched_at: '2025-01-01T00:00:00.000Z',
+      _cache_hit: false,
+    };
+    (server as any).liveHoldingsTools = {
+      getHoldings: async (_args: unknown) => stubResult,
+    };
+
+    const result = await server.handleCallTool('get_holdings_live', {});
+    expect(result.isError).toBeUndefined();
+    const data = JSON.parse(result.content[0].text) as typeof stubResult;
+    expect(data.count).toBe(1);
+    expect(data.holdings[0]?.security_id).toBe('sec-1');
+    expect(data._cache_hit).toBe(false);
+  });
+});
