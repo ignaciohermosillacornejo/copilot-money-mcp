@@ -38,6 +38,10 @@ import {
   LiveBalanceHistoryTools,
   createLiveBalanceHistoryToolSchema,
 } from './tools/live/balance-history.js';
+import {
+  LiveInvestmentPricesTools,
+  createLiveInvestmentPricesToolSchema,
+} from './tools/live/investment-prices.js';
 import { RefreshCacheTool, createRefreshCacheToolSchema } from './tools/live/refresh-cache.js';
 
 // Read version from package.json
@@ -65,6 +69,7 @@ export class CopilotMoneyServer {
   private liveMonthlySpendTools?: LiveMonthlySpendTools;
   private liveHoldingsTools?: LiveHoldingsTools;
   private liveBalanceHistoryTools?: LiveBalanceHistoryTools;
+  private liveInvestmentPricesTools?: LiveInvestmentPricesTools;
   private refreshCacheTool?: RefreshCacheTool;
 
   /**
@@ -106,7 +111,12 @@ export class CopilotMoneyServer {
       this.liveMonthlySpendTools = new LiveMonthlySpendTools(liveDb);
       this.liveHoldingsTools = new LiveHoldingsTools(liveDb);
       this.liveBalanceHistoryTools = new LiveBalanceHistoryTools(liveDb);
-      this.refreshCacheTool = new RefreshCacheTool(liveDb, this.liveBalanceHistoryTools);
+      this.liveInvestmentPricesTools = new LiveInvestmentPricesTools(liveDb);
+      this.refreshCacheTool = new RefreshCacheTool(
+        liveDb,
+        this.liveBalanceHistoryTools,
+        this.liveInvestmentPricesTools
+      );
     }
 
     this.tools = new CopilotMoneyTools(this.db, graphqlClient, liveDb);
@@ -165,6 +175,7 @@ export class CopilotMoneyServer {
           createLiveMonthlySpendToolSchema(),
           createLiveHoldingsToolSchema(),
           createLiveBalanceHistoryToolSchema(),
+          createLiveInvestmentPricesToolSchema(),
           createRefreshCacheToolSchema(),
         ]
       : [];
@@ -359,6 +370,18 @@ export class CopilotMoneyServer {
       };
     }
 
+    if (name === 'get_investment_prices_live' && !this.liveInvestmentPricesTools) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'get_investment_prices_live is only available when the server runs with --live-reads.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
     if (name === 'refresh_cache' && !this.refreshCacheTool) {
       return {
         content: [
@@ -486,6 +509,18 @@ export class CopilotMoneyServer {
           result = await this.liveBalanceHistoryTools!.getBalanceHistory(
             (typedArgs ?? {}) as unknown as Parameters<
               NonNullable<typeof this.liveBalanceHistoryTools>['getBalanceHistory']
+            >[0]
+          );
+          break;
+
+        case 'get_investment_prices_live':
+          // liveInvestmentPricesTools non-null invariant enforced by the early guard above.
+          // security_id is required by the schema; the runtime validation
+          // (in getInvestmentPrices) surfaces a clean error if a caller
+          // bypasses the schema.
+          result = await this.liveInvestmentPricesTools!.getInvestmentPrices(
+            (typedArgs ?? {}) as unknown as Parameters<
+              NonNullable<typeof this.liveInvestmentPricesTools>['getInvestmentPrices']
             >[0]
           );
           break;
