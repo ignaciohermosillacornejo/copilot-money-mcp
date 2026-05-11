@@ -308,7 +308,7 @@ describe('LiveInvestmentPricesTools — cache behavior', () => {
     expect(client.query).toHaveBeenCalledTimes(4);
   });
 
-  test('omitted vs explicit ONE_MONTH share a key but distinct from DEFAULT', async () => {
+  test('omitted time_frame uses DEFAULT sentinel key, distinct from explicit ONE_MONTH', async () => {
     // Both default to ONE_MONTH semantics, but they use different cache keys:
     // explicit ONE_MONTH uses the enum value; omitted uses the DEFAULT sentinel.
     const client = makeClient({ daily: dailyRows });

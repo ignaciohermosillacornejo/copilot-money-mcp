@@ -49,7 +49,7 @@ import {
   type BalanceHistoryPointNode,
 } from '../../core/graphql/queries/balance-history.js';
 import type { TimeFrame } from '../../core/graphql/queries/_shared.js';
-import { paginate, DEFAULT_MAX_ROWS, HARD_MAX_ROWS } from '../../utils/pagination.js';
+import { paginate, DEFAULT_MAX_ROWS } from '../../utils/pagination.js';
 
 const TIME_FRAMES: TimeFrame[] = [
   'ONE_DAY',
@@ -257,7 +257,3 @@ export function createLiveBalanceHistoryToolSchema() {
     },
   };
 }
-
-// Re-export pagination constants so callers/tests can pull the bounds from
-// one place if needed.
-export { DEFAULT_MAX_ROWS, HARD_MAX_ROWS };
