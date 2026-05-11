@@ -19,8 +19,8 @@
  *   bun run scripts/smoke-graphql.ts --section transactions-write
  *
  * Sections: tags, categories, transactions, transactions-write, recurrings,
- *           budgets, accounts, holdings, balance-history, bulk, errors, edge,
- *           consistency, mcp-e2e, state-gated
+ *           budgets, accounts, holdings, balance-history, investment-prices,
+ *           bulk, errors, edge, consistency, mcp-e2e, state-gated
  *
  * State-gated tests are opt-in because they require the user to toggle UI
  * state manually in the Copilot desktop app between prompts.
@@ -60,6 +60,8 @@ import { setBudget } from '../src/core/graphql/budgets.js';
 import { editAccount } from '../src/core/graphql/accounts.js';
 import { fetchHoldings } from '../src/core/graphql/queries/holdings.js';
 import { fetchAccountBalanceHistory } from '../src/core/graphql/queries/balance-history.js';
+import { fetchSecurityPrices } from '../src/core/graphql/queries/security-prices.js';
+import { fetchSecurityPricesHighFrequency } from '../src/core/graphql/queries/security-prices-high-frequency.js';
 
 // -----------------------------------------------------------------------------
 // Polling helper — wait for a local-cache read to reflect a GraphQL write
@@ -133,6 +135,7 @@ const VALID_SECTIONS = [
   'accounts',
   'holdings',
   'balance-history',
+  'investment-prices',
   'bulk',
   'errors',
   'edge',
@@ -1626,6 +1629,94 @@ async function smokeBalanceHistoryHappyPath(
   );
 }
 
+/**
+ * Investment prices — read-only smoke. Picks a security_id from the user's
+ * current Holdings (the server is ownership-gated), then exercises both the
+ * daily (SecurityPrices) and intraday (SecurityPricesHighFrequency) wrappers.
+ * Verifies row shape and ascending sort. No prices or dates are printed.
+ */
+async function smokeInvestmentPricesHappyPath(client: GraphQLClient): Promise<void> {
+  logSection('Investment prices — happy path');
+
+  const holdings = await fetchHoldings(client);
+  const usable = holdings.find(
+    (h) => h.security?.id && h.security.type !== 'CASH' && h.quantity > 0
+  );
+  if (!usable) {
+    console.warn('  no usable holding (non-cash, qty > 0); skipping');
+    return;
+  }
+  const securityId = usable.security.id;
+  console.log(`  Security type: ${usable.security.type}`);
+
+  await step(
+    'investment-prices',
+    'fetchSecurityPrices (daily, ONE_MONTH) returns well-shaped, date-sorted rows',
+    async () => {
+      const rows = await fetchSecurityPrices(client, { id: securityId, timeFrame: 'ONE_MONTH' });
+      console.log(`  Daily prices: ${rows.length}`);
+      if (!Array.isArray(rows)) {
+        throw new Error(`expected array, got ${typeof rows}`);
+      }
+      if (rows.length === 0) return;
+
+      for (const r of rows) {
+        if (typeof r.price !== 'number') {
+          throw new Error(`daily row.price not numeric: ${typeof r.price}`);
+        }
+        if (typeof r.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(r.date)) {
+          throw new Error(`daily row.date not YYYY-MM-DD: ${String(r.date)}`);
+        }
+      }
+
+      if (rows.length > 1) {
+        for (let i = 1; i < rows.length; i += 1) {
+          if (rows[i]!.date < rows[i - 1]!.date) {
+            throw new Error(
+              `daily rows not sorted ascending at index ${i} (${rows[i - 1]!.date} → ${rows[i]!.date})`
+            );
+          }
+        }
+      }
+    }
+  );
+
+  await step(
+    'investment-prices',
+    'fetchSecurityPricesHighFrequency (intraday, ONE_DAY) returns well-shaped, timestamp-sorted rows',
+    async () => {
+      const rows = await fetchSecurityPricesHighFrequency(client, {
+        id: securityId,
+        timeFrame: 'ONE_DAY',
+      });
+      console.log(`  Intraday prices: ${rows.length}`);
+      if (!Array.isArray(rows)) {
+        throw new Error(`expected array, got ${typeof rows}`);
+      }
+      if (rows.length === 0) return;
+
+      for (const r of rows) {
+        if (typeof r.price !== 'number') {
+          throw new Error(`intraday row.price not numeric: ${typeof r.price}`);
+        }
+        if (typeof r.timestamp !== 'number') {
+          throw new Error(`intraday row.timestamp not numeric: ${typeof r.timestamp}`);
+        }
+      }
+
+      if (rows.length > 1) {
+        for (let i = 1; i < rows.length; i += 1) {
+          if (rows[i]!.timestamp < rows[i - 1]!.timestamp) {
+            throw new Error(
+              `intraday rows not sorted ascending at index ${i} (timestamps ${rows[i - 1]!.timestamp} → ${rows[i]!.timestamp})`
+            );
+          }
+        }
+      }
+    }
+  );
+}
+
 // -----------------------------------------------------------------------------
 // Section 2 — Bulk operations
 // -----------------------------------------------------------------------------
@@ -2842,6 +2933,7 @@ async function main(): Promise<void> {
   if (sectionEnabled('accounts')) await smokeAccountsHappyPath(client, db);
   if (sectionEnabled('holdings')) await smokeHoldingsHappyPath(client);
   if (sectionEnabled('balance-history')) await smokeBalanceHistoryHappyPath(client, db);
+  if (sectionEnabled('investment-prices')) await smokeInvestmentPricesHappyPath(client);
 
   // Section 2 — bulk
   if (sectionEnabled('bulk')) await smokeBulkReviewTransactions(client, db);
