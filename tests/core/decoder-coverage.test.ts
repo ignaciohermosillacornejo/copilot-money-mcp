@@ -9,7 +9,6 @@ import {
   decodeInvestmentPrices,
   decodeUserAccounts,
   decodeItems,
-  decodeInvestmentSplits,
   decodeAllCollections,
   decodeGoalHistory,
   decodeTransactions,
@@ -524,97 +523,6 @@ describe('decoder coverage', () => {
       expect(items.length).toBe(1);
       expect(items[0]?.login_required).toBe(true);
       expect(items[0]?.disconnected).toBe(false);
-    });
-  });
-
-  describe('decodeInvestmentSplits', () => {
-    test('decodes investment splits', async () => {
-      const dbPath = path.join(FIXTURES_DIR, 'splits-db');
-      await createTestDatabase(dbPath, [
-        {
-          collection: 'investment_splits',
-          id: 'split1',
-          fields: {
-            split_id: 'split1',
-            ticker_symbol: 'AAPL',
-            split_date: '2024-01-15',
-            split_ratio: '4:1',
-            from_factor: 1,
-            to_factor: 4,
-            announcement_date: '2024-01-01',
-            record_date: '2024-01-14',
-            ex_date: '2024-01-15',
-            description: '4-for-1 stock split',
-          },
-        },
-      ]);
-
-      const splits = await decodeInvestmentSplits(dbPath);
-
-      expect(splits.length).toBe(1);
-      expect(splits[0]?.ticker_symbol).toBe('AAPL');
-      expect(splits[0]?.split_ratio).toBe('4:1');
-    });
-
-    test('filters splits by ticker symbol', async () => {
-      const dbPath = path.join(FIXTURES_DIR, 'splits-filter-db');
-      await createTestDatabase(dbPath, [
-        {
-          collection: 'investment_splits',
-          id: 'split1',
-          fields: {
-            split_id: 'split1',
-            ticker_symbol: 'AAPL',
-            split_date: '2024-01-15',
-          },
-        },
-        {
-          collection: 'investment_splits',
-          id: 'split2',
-          fields: {
-            split_id: 'split2',
-            ticker_symbol: 'GOOGL',
-            split_date: '2024-01-15',
-          },
-        },
-      ]);
-
-      const splits = await decodeInvestmentSplits(dbPath, { tickerSymbol: 'AAPL' });
-
-      expect(splits.length).toBe(1);
-      expect(splits[0]?.ticker_symbol).toBe('AAPL');
-    });
-
-    test('filters splits by date range', async () => {
-      const dbPath = path.join(FIXTURES_DIR, 'splits-date-db');
-      await createTestDatabase(dbPath, [
-        {
-          collection: 'investment_splits',
-          id: 'split1',
-          fields: {
-            split_id: 'split1',
-            ticker_symbol: 'AAPL',
-            split_date: '2024-01-10',
-          },
-        },
-        {
-          collection: 'investment_splits',
-          id: 'split2',
-          fields: {
-            split_id: 'split2',
-            ticker_symbol: 'AAPL',
-            split_date: '2024-01-20',
-          },
-        },
-      ]);
-
-      const splits = await decodeInvestmentSplits(dbPath, {
-        startDate: '2024-01-15',
-        endDate: '2024-01-25',
-      });
-
-      expect(splits.length).toBe(1);
-      expect(splits[0]?.split_date).toBe('2024-01-20');
     });
   });
 
@@ -1139,16 +1047,6 @@ describe('decoder coverage', () => {
             date: '2024-01-15',
           },
         },
-        // Investment split
-        {
-          collection: 'investment_splits',
-          id: 'split1',
-          fields: {
-            split_id: 'split1',
-            ticker_symbol: 'AAPL',
-            split_ratio: '4:1',
-          },
-        },
         // Goal history
         {
           collection: 'financial_goals/goal1/financial_goal_history',
@@ -1190,9 +1088,6 @@ describe('decoder coverage', () => {
 
       expect(result.investmentPrices.length).toBe(1);
       expect(result.investmentPrices[0]?.ticker_symbol).toBe('AAPL');
-
-      expect(result.investmentSplits.length).toBe(1);
-      expect(result.investmentSplits[0]?.split_ratio).toBe('4:1');
     });
 
     test('deduplicates transactions by transaction_id, not by name/amount/date', async () => {
@@ -1331,7 +1226,6 @@ describe('decoder coverage', () => {
       expect(result.goals).toEqual([]);
       expect(result.goalHistory).toEqual([]);
       expect(result.investmentPrices).toEqual([]);
-      expect(result.investmentSplits).toEqual([]);
       expect(result.items).toEqual([]);
       expect(result.categories).toEqual([]);
       expect(result.userAccounts).toEqual([]);
@@ -1816,104 +1710,6 @@ describe('decoder coverage', () => {
       expect(result.investmentPrices[1]?.date).toBe('2024-01-10');
       // Then second investment
       expect(result.investmentPrices[2]?.investment_id).toBe('inv2');
-    });
-
-    test('handles investment splits with sorting', async () => {
-      const dbPath = path.join(FIXTURES_DIR, 'investment-splits-sort-db');
-      await createTestDatabase(dbPath, [
-        {
-          collection: 'investment_splits',
-          id: 'split1',
-          fields: {
-            split_id: 'split1',
-            ticker_symbol: 'AAPL',
-            split_date: '2024-01-10',
-          },
-        },
-        {
-          collection: 'investment_splits',
-          id: 'split2',
-          fields: {
-            split_id: 'split2',
-            ticker_symbol: 'AAPL',
-            split_date: '2024-01-20',
-          },
-        },
-        {
-          collection: 'investment_splits',
-          id: 'split3',
-          fields: {
-            split_id: 'split3',
-            ticker_symbol: 'GOOGL',
-            split_date: '2024-01-15',
-          },
-        },
-      ]);
-
-      const result = await decodeAllCollections(dbPath);
-
-      // Should be sorted by ticker_symbol, then by split_date (newest first)
-      expect(result.investmentSplits.length).toBe(3);
-      // AAPL first (alphabetically), newest date first
-      expect(result.investmentSplits[0]?.ticker_symbol).toBe('AAPL');
-      expect(result.investmentSplits[0]?.split_date).toBe('2024-01-20');
-      expect(result.investmentSplits[1]?.ticker_symbol).toBe('AAPL');
-      expect(result.investmentSplits[1]?.split_date).toBe('2024-01-10');
-      // Then GOOGL
-      expect(result.investmentSplits[2]?.ticker_symbol).toBe('GOOGL');
-    });
-
-    test('decodes investment performance via decodeAllCollections', async () => {
-      const dbPath = path.join(FIXTURES_DIR, 'inv-perf-db');
-      await createTestDatabase(dbPath, [
-        {
-          collection: 'investment_performance',
-          id: 'perf1',
-          fields: {
-            security_id: 'sec123',
-            type: 'stock',
-            user_id: 'user1',
-            last_update: '2024-01-15',
-            position: 5,
-            access: ['read', 'write'],
-          },
-        },
-      ]);
-
-      const result = await decodeAllCollections(dbPath);
-
-      expect(result.investmentPerformance.length).toBe(1);
-      expect(result.investmentPerformance[0]?.performance_id).toBe('perf1');
-      expect(result.investmentPerformance[0]?.security_id).toBe('sec123');
-      expect(result.investmentPerformance[0]?.type).toBe('stock');
-      expect(result.investmentPerformance[0]?.user_id).toBe('user1');
-      expect(result.investmentPerformance[0]?.last_update).toBe('2024-01-15');
-      expect(result.investmentPerformance[0]?.position).toBe(5);
-      expect(result.investmentPerformance[0]?.access).toEqual(['read', 'write']);
-    });
-
-    test('decodes TWR holdings via decodeAllCollections', async () => {
-      const dbPath = path.join(FIXTURES_DIR, 'twr-holding-db');
-      await createTestDatabase(dbPath, [
-        {
-          collection: 'investment_performance/hash123/twr_holding',
-          id: '2024-01',
-          fields: {
-            security_id: 'sec456',
-            history: {
-              '1705276800000': { value: 1.05 },
-              '1705363200000': { value: 1.08 },
-            },
-          },
-        },
-      ]);
-
-      const result = await decodeAllCollections(dbPath);
-
-      expect(result.twrHoldings.length).toBe(1);
-      expect(result.twrHoldings[0]?.security_id).toBe('sec456');
-      expect(result.twrHoldings[0]?.month).toBe('2024-01');
-      expect(result.twrHoldings[0]?.history).toBeDefined();
     });
 
     test('decodes plaid accounts via decodeAllCollections', async () => {
@@ -2843,33 +2639,6 @@ describe('decoder coverage', () => {
     });
   });
 
-  describe('camelCase fallback fields', () => {
-    test('investment performance with camelCase field names', async () => {
-      const dbPath = path.join(FIXTURES_DIR, 'camelcase-perf-db');
-      await createTestDatabase(dbPath, [
-        {
-          collection: 'investment_performance',
-          id: 'perf1',
-          fields: {
-            // Use camelCase variants that the decoder falls back to
-            securityId: 'sec123',
-            userId: 'user456',
-            lastUpdate: '2024-01-15',
-            type: 'twr',
-            position: 1,
-          },
-        },
-      ]);
-
-      const result = await decodeAllCollections(dbPath);
-
-      expect(result.investmentPerformance.length).toBe(1);
-      expect(result.investmentPerformance[0]?.security_id).toBe('sec123');
-      expect(result.investmentPerformance[0]?.user_id).toBe('user456');
-      expect(result.investmentPerformance[0]?.last_update).toBe('2024-01-15');
-    });
-  });
-
   describe('original_* fallback fields', () => {
     test('account with original_current_balance fallback', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'original-balance-db');
@@ -3240,37 +3009,6 @@ describe('decoder coverage', () => {
       expect(prices.length).toBe(2);
       expect(prices[0]?.date).toBe('2024-01-20'); // newest first
       expect(prices[1]?.date).toBe('2024-01-10');
-    });
-
-    test('investment splits sort by ticker then date', async () => {
-      const dbPath = path.join(FIXTURES_DIR, 'sort-splits-db');
-      await createTestDatabase(dbPath, [
-        {
-          collection: 'investment_splits',
-          id: 's1',
-          fields: { split_id: 's1', ticker_symbol: 'GOOGL', split_date: '2024-01-10' },
-        },
-        {
-          collection: 'investment_splits',
-          id: 's2',
-          fields: { split_id: 's2', ticker_symbol: 'AAPL', split_date: '2024-01-20' },
-        },
-        {
-          collection: 'investment_splits',
-          id: 's3',
-          fields: { split_id: 's3', ticker_symbol: 'AAPL', split_date: '2024-01-10' },
-        },
-      ]);
-
-      const splits = await decodeInvestmentSplits(dbPath);
-
-      expect(splits.length).toBe(3);
-      // AAPL first (alphabetical), newest date first
-      expect(splits[0]?.ticker_symbol).toBe('AAPL');
-      expect(splits[0]?.split_date).toBe('2024-01-20');
-      expect(splits[1]?.ticker_symbol).toBe('AAPL');
-      expect(splits[1]?.split_date).toBe('2024-01-10');
-      expect(splits[2]?.ticker_symbol).toBe('GOOGL');
     });
 
     test('extracts all new category fields', async () => {
@@ -3647,45 +3385,6 @@ describe('decoder coverage', () => {
       expect(result.balanceHistory.length).toBe(1);
       expect(result.balanceHistory[0]!._origin).toBe('plaid');
       expect(result.balanceHistory[0]!.current_balance).toBe(7500);
-    });
-  });
-
-  describe('investment split adjustments', () => {
-    test('captures date-keyed adjustment factors', async () => {
-      const dbPath = path.join(FIXTURES_DIR, 'split-adjustments-db');
-      await createTestDatabase(dbPath, [
-        {
-          collection: 'investment_splits',
-          id: 'split-adj1',
-          fields: {
-            '2022-03-11': 0.5,
-            '2024-10-11': 0.333,
-          },
-        },
-      ]);
-
-      const splits = await decodeInvestmentSplits(dbPath);
-      expect(splits.length).toBe(1);
-      expect(splits[0]!.adjustments).toEqual({
-        '2022-03-11': 0.5,
-        '2024-10-11': 0.333,
-      });
-    });
-
-    test('handles empty investment split document (zero fields)', async () => {
-      const dbPath = path.join(FIXTURES_DIR, 'split-empty-db');
-      await createTestDatabase(dbPath, [
-        {
-          collection: 'investment_splits',
-          id: 'split-empty1',
-          fields: {},
-        },
-      ]);
-
-      const splits = await decodeInvestmentSplits(dbPath);
-      expect(splits.length).toBe(1);
-      expect(splits[0]!.split_id).toBe('split-empty1');
-      expect(splits[0]!.adjustments).toBeUndefined();
     });
   });
 

@@ -541,10 +541,6 @@ export class CopilotMoneyServer {
           result = await this.tools.getInvestmentPrices(typedArgs || {});
           break;
 
-        case 'get_investment_splits':
-          result = await this.tools.getInvestmentSplits(typedArgs || {});
-          break;
-
         case 'get_holdings':
           result = await this.tools.getHoldings(typedArgs || {});
           break;
@@ -553,18 +549,6 @@ export class CopilotMoneyServer {
           result = await this.tools.getBalanceHistory(
             (typedArgs as Parameters<typeof this.tools.getBalanceHistory>[0]) || {}
           );
-          break;
-
-        case 'get_investment_performance':
-          result = await this.tools.getInvestmentPerformance(typedArgs || {});
-          break;
-
-        case 'get_twr_returns':
-          result = await this.tools.getTwrReturns(typedArgs || {});
-          break;
-
-        case 'get_securities':
-          result = await this.tools.getSecurities(typedArgs || {});
           break;
 
         case 'get_goal_history':

@@ -69,20 +69,6 @@ export {
 } from './investment-price.js';
 
 export {
-  InvestmentSplitSchema,
-  type InvestmentSplit,
-  type ParsedSplitRatio,
-  parseSplitRatio,
-  getSplitMultiplier,
-  getSplitDisplayString,
-  getSplitDisplayName,
-  isReverseSplit,
-  adjustPriceForSplit,
-  adjustSharesForSplit,
-  formatSplitDate,
-} from './investment-split.js';
-
-export {
   ItemSchema,
   type Item,
   type ConnectionStatus,
@@ -97,13 +83,6 @@ export {
   formatLastUpdate,
   isConsentExpiringSoon,
 } from './item.js';
-
-export {
-  InvestmentPerformanceSchema,
-  type InvestmentPerformance,
-  TwrHoldingSchema,
-  type TwrHolding,
-} from './investment-performance.js';
 
 export { PlaidAccountSchema, type PlaidAccount, type Holding } from './plaid-account.js';
 

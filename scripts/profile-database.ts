@@ -82,7 +82,6 @@ async function profile() {
     { name: 'goals', loader: () => db.getGoals() },
     { name: 'goalHistory', loader: () => db.getGoalHistory() },
     { name: 'investmentPrices', loader: () => db.getInvestmentPrices() },
-    { name: 'investmentSplits', loader: () => db.getInvestmentSplits() },
     { name: 'items', loader: () => db.getItems() },
     { name: 'userCategories', loader: () => db.getUserCategories() },
     { name: 'userAccounts', loader: () => db.getUserAccounts() },

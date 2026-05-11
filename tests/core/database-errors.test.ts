@@ -33,7 +33,6 @@ const dbPathErrorCases: Array<{
   { method: 'getGoals', cacheFieldsToClear: ['_goals'] },
   { method: 'getGoalHistory', cacheFieldsToClear: ['_goalHistory'] },
   { method: 'getInvestmentPrices', cacheFieldsToClear: ['_investmentPrices'] },
-  { method: 'getInvestmentSplits', cacheFieldsToClear: ['_investmentSplits'] },
   { method: 'getItems', cacheFieldsToClear: ['_items'] },
   { method: 'getUserCategories', cacheFieldsToClear: ['_userCategories'] },
   { method: 'getUserAccounts', cacheFieldsToClear: ['_userAccounts'] },

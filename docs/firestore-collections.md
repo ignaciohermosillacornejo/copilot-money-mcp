@@ -4,7 +4,7 @@ Complete documentation of all Firestore collections cached locally by Copilot Mo
 
 **Last verified:** 2026-04-05 | **App version:** macOS (App Store) | **Total documents:** ~55,953 across ~35 unique collection patterns
 
-**Decode coverage:** 100% — all 35 collection paths fully decoded (document counts vary per user database)
+**Decode coverage:** 32 of 35 collection paths decoded — `investment_splits`, `investment_performance`, and `investment_performance/{hash}/twr_holding` were dropped after the underlying cache data proved either empty or non-analytical (see changelog for rationale)
 
 ## Database Location
 
