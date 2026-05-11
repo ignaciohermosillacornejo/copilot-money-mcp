@@ -49,6 +49,7 @@ import {
   type BalanceHistoryPointNode,
 } from '../../core/graphql/queries/balance-history.js';
 import type { TimeFrame } from '../../core/graphql/queries/_shared.js';
+import { paginate, DEFAULT_MAX_ROWS, HARD_MAX_ROWS } from '../../utils/pagination.js';
 
 const TIME_FRAMES: TimeFrame[] = [
   'ONE_DAY',
@@ -78,6 +79,17 @@ export interface GetBalanceHistoryLiveArgs {
   account_id: string;
   /** Optional timeFrame. Omit to use the server's default range. */
   time_frame?: TimeFrame;
+  /**
+   * Cap on the number of rows returned. Clamped to [1, 5000]; default 500.
+   * Slices the most-recent rows of the ascending-by-date series.
+   */
+  max_rows?: number;
+  /**
+   * Number of rows to skip from the most-recent end (counts from the tail).
+   * Clamped to >= 0; default 0. `offset=max_rows` returns the
+   * next-most-recent batch.
+   */
+  offset?: number;
 }
 
 export interface GetBalanceHistoryLiveEntry {
@@ -86,7 +98,12 @@ export interface GetBalanceHistoryLiveEntry {
 }
 
 export interface GetBalanceHistoryLiveResult {
+  /** Number of rows in this page (= balance_history.length). */
   count: number;
+  /** Pre-pagination row count of the full series the server returned. */
+  total_rows: number;
+  /** True iff older rows beyond this page remain (caller can paginate further). */
+  truncated: boolean;
   balance_history: GetBalanceHistoryLiveEntry[];
   _cache_oldest_fetched_at: string;
   _cache_newest_fetched_at: string;
@@ -158,7 +175,10 @@ export class LiveBalanceHistoryTools {
     // safety net here makes the contract explicit. `.slice()` first so we
     // never mutate the cached array.
     const sorted = entry.rows.slice().sort((a, b) => a.date.localeCompare(b.date));
-    const projected: GetBalanceHistoryLiveEntry[] = sorted.map((r) => ({
+
+    // Apply uniform pagination AFTER sort so the "newest N" semantics hold.
+    const page = paginate(sorted, { max_rows: args.max_rows, offset: args.offset });
+    const projected: GetBalanceHistoryLiveEntry[] = page.rows.map((r) => ({
       date: r.date,
       balance: r.balance,
     }));
@@ -175,6 +195,8 @@ export class LiveBalanceHistoryTools {
     // Single-fetch shape — oldest and newest are identical.
     return {
       count: projected.length,
+      total_rows: page.total_rows,
+      truncated: page.truncated,
       balance_history: projected,
       _cache_oldest_fetched_at: fetchedAtIso,
       _cache_newest_fetched_at: fetchedAtIso,
@@ -192,7 +214,10 @@ export function createLiveBalanceHistoryToolSchema() {
       'Date range is selected by the time_frame enum; the server returns daily granularity ' +
       'and no name/limit enrichment. For cross-account history or weekly/monthly downsampling, ' +
       'use cache-mode `get_balance_history`. Use `get_accounts_live` to enumerate ' +
-      '(item_id, account_id) pairs. Available when --live-reads is on.',
+      '(item_id, account_id) pairs. ' +
+      'Long-range responses are paginated via `max_rows` (default 500, max 5000) and `offset` ' +
+      '(counts from the most-recent end); `total_rows` and `truncated` indicate whether ' +
+      'older rows remain. Available when --live-reads is on.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -209,6 +234,21 @@ export function createLiveBalanceHistoryToolSchema() {
           enum: TIME_FRAMES,
           description: "Date range preset. Optional — omit to use the server's default range.",
         },
+        max_rows: {
+          type: 'integer',
+          description:
+            'Cap response to the most recent N rows (default 500, max 5000). Helps avoid the ' +
+            'MCP single-tool-result token limit on long-range queries. If hit, response ' +
+            'includes `truncated: true`.',
+          default: DEFAULT_MAX_ROWS,
+        },
+        offset: {
+          type: 'integer',
+          description:
+            'Number of rows to skip from the most-recent end. Default 0. Set to `max_rows` to ' +
+            'fetch the next-most-recent batch (counts backwards through history).',
+          default: 0,
+        },
       },
       required: ['item_id', 'account_id'],
     },
@@ -217,3 +257,7 @@ export function createLiveBalanceHistoryToolSchema() {
     },
   };
 }
+
+// Re-export pagination constants so callers/tests can pull the bounds from
+// one place if needed.
+export { DEFAULT_MAX_ROWS, HARD_MAX_ROWS };

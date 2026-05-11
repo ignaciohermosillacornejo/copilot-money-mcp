@@ -40,6 +40,8 @@ describe('LiveBalanceHistoryTools.getBalanceHistory — happy path', () => {
     });
 
     expect(result.count).toBe(3);
+    expect(result.total_rows).toBe(3);
+    expect(result.truncated).toBe(false);
     expect(result.balance_history).toEqual([
       { date: '2026-01-01', balance: 1000 },
       { date: '2026-01-02', balance: 1050 },
@@ -63,6 +65,8 @@ describe('LiveBalanceHistoryTools.getBalanceHistory — happy path', () => {
     });
 
     expect(result.count).toBe(0);
+    expect(result.total_rows).toBe(0);
+    expect(result.truncated).toBe(false);
     expect(result.balance_history).toEqual([]);
     expect(result._cache_hit).toBe(false);
     expect(typeof result._cache_oldest_fetched_at).toBe('string');
@@ -246,6 +250,67 @@ describe('LiveBalanceHistoryTools — GraphQL wiring', () => {
   });
 });
 
+describe('LiveBalanceHistoryTools — pagination', () => {
+  // 1500-row synthetic series — well above the default 500-row cap so we can
+  // exercise truncation and offset pagination. Dates are synthetic
+  // (year-2025-padded month/day), values are 1000 + index.
+  const bigRows = Array.from({ length: 1500 }, (_, i) => ({
+    date: `2025-${String(Math.floor(i / 30) + 1).padStart(2, '0')}-${String((i % 30) + 1).padStart(2, '0')}`,
+    balance: 1000 + i,
+  }));
+
+  test('caps at default max_rows=500 and reports truncated=true', async () => {
+    const client = makeClient(bigRows);
+    const tools = new LiveBalanceHistoryTools(makeLive(client));
+
+    const result = await tools.getBalanceHistory({
+      item_id: ITEM_ID,
+      account_id: ACCOUNT_ID,
+    });
+
+    expect(result.total_rows).toBe(1500);
+    expect(result.count).toBe(500);
+    expect(result.truncated).toBe(true);
+    // Sliced to MOST RECENT (tail of ascending series).
+    expect(result.balance_history[0]!.balance).toBe(1000 + 1000);
+    expect(result.balance_history[499]!.balance).toBe(1000 + 1499);
+  });
+
+  test('offset=500 returns the next-most-recent batch', async () => {
+    const client = makeClient(bigRows);
+    const tools = new LiveBalanceHistoryTools(makeLive(client));
+
+    const result = await tools.getBalanceHistory({
+      item_id: ITEM_ID,
+      account_id: ACCOUNT_ID,
+      max_rows: 500,
+      offset: 500,
+    });
+
+    expect(result.count).toBe(500);
+    expect(result.total_rows).toBe(1500);
+    expect(result.truncated).toBe(true); // 500 older rows still remain
+    expect(result.balance_history[0]!.balance).toBe(1000 + 500);
+    expect(result.balance_history[499]!.balance).toBe(1000 + 999);
+  });
+
+  test('offset beyond total returns empty rows without throwing', async () => {
+    const client = makeClient(bigRows);
+    const tools = new LiveBalanceHistoryTools(makeLive(client));
+
+    const result = await tools.getBalanceHistory({
+      item_id: ITEM_ID,
+      account_id: ACCOUNT_ID,
+      max_rows: 100,
+      offset: 5000,
+    });
+
+    expect(result.count).toBe(0);
+    expect(result.total_rows).toBe(1500);
+    expect(result.balance_history).toEqual([]);
+  });
+});
+
 describe('createLiveBalanceHistoryToolSchema', () => {
   test('name is get_balance_history_live, readOnlyHint=true', () => {
     const schema = createLiveBalanceHistoryToolSchema();
@@ -257,7 +322,7 @@ describe('createLiveBalanceHistoryToolSchema', () => {
     const schema = createLiveBalanceHistoryToolSchema();
     const props = schema.inputSchema.properties as Record<
       string,
-      { type: string; enum?: string[] }
+      { type: string; enum?: string[]; default?: number }
     >;
     expect(props.item_id?.type).toBe('string');
     expect(props.account_id?.type).toBe('string');
@@ -275,5 +340,17 @@ describe('createLiveBalanceHistoryToolSchema', () => {
       'item_id',
       'account_id',
     ]);
+  });
+
+  test('exposes max_rows and offset pagination args', () => {
+    const schema = createLiveBalanceHistoryToolSchema();
+    const props = schema.inputSchema.properties as Record<
+      string,
+      { type: string; default?: number }
+    >;
+    expect(props.max_rows?.type).toBe('integer');
+    expect(props.max_rows?.default).toBe(500);
+    expect(props.offset?.type).toBe('integer');
+    expect(props.offset?.default).toBe(0);
   });
 });
