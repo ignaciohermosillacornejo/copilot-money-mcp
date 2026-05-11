@@ -39,6 +39,7 @@ import type { RecurringNode } from './graphql/queries/recurrings.js';
 import type { NetworthHistoryNode } from './graphql/queries/networth.js';
 import type { UpcomingRecurringNode } from './graphql/queries/upcoming-recurrings.js';
 import type { DailySpendNode } from './graphql/queries/monthly-spend.js';
+import type { HoldingNode } from './graphql/queries/holdings.js';
 import { fetchUser, type UserNode } from './graphql/queries/user.js';
 import type { Transaction } from '../models/index.js';
 
@@ -86,6 +87,13 @@ export class LiveCopilotDatabase {
   // the 1h TTL still applies to the most-recently-requested timeFrame.
   private readonly networthCache: SnapshotCache<NetworthHistoryNode>;
   private readonly monthlySpendCache: SnapshotCache<DailySpendNode>;
+  // holdingsCache stores investment positions (one row per (account, security)).
+  // 6h TTL: positions change slowly (no daily buy/sell for most users); intraday
+  // price drift inside `security.currentPrice` and `metrics.totalReturn` does
+  // not need second-by-second freshness for agent queries — matches the
+  // `recurringCache` TTL precedent for similarly slow-moving entities. Callers
+  // who need a fresh snapshot can use refresh_cache with scope='holdings'.
+  private readonly holdingsCache: SnapshotCache<HoldingNode>;
   private readonly transactionsWindowCache: TransactionWindowCache<TransactionNode>;
 
   constructor(
@@ -133,6 +141,10 @@ export class LiveCopilotDatabase {
     );
     this.monthlySpendCache = new SnapshotCache<DailySpendNode>(
       { key: 'monthly_spend', ttlMs: ONE_HOUR_MS, keyFn: (d) => d.id },
+      this.inflight
+    );
+    this.holdingsCache = new SnapshotCache<HoldingNode>(
+      { key: 'holdings', ttlMs: SIX_HOURS_MS, keyFn: (h) => h.id },
       this.inflight
     );
     this.transactionsWindowCache = new TransactionWindowCache<TransactionNode>(
@@ -373,6 +385,10 @@ export class LiveCopilotDatabase {
 
   getMonthlySpendCache(): SnapshotCache<DailySpendNode> {
     return this.monthlySpendCache;
+  }
+
+  getHoldingsCache(): SnapshotCache<HoldingNode> {
+    return this.holdingsCache;
   }
 
   /**
