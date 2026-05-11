@@ -187,7 +187,7 @@ function translateNotFound(err: unknown, securityId: string): never {
       `Price history for security ${securityId} is not available — the security is not currently in your linked accounts.`
     );
   }
-  throw err as Error;
+  throw err;
 }
 
 export class LiveInvestmentPricesTools {
@@ -344,7 +344,10 @@ export function createLiveInvestmentPricesToolSchema() {
       'IMPORTANT — server-side ownership gate: this query is restricted to securities you ' +
       'currently hold. For any security_id not in your linked-account positions, the tool ' +
       'returns a clean error ("not currently in your linked accounts"). Use `get_holdings_live` ' +
-      'to enumerate valid security_ids. Available when --live-reads is on.',
+      'to enumerate valid security_ids. Long-range responses are paginated via `max_rows` ' +
+      '(default 500, max 5000) and `offset` (counts from the most-recent row); the response ' +
+      'reports `total_rows` and `truncated` so callers can detect when older data was elided. ' +
+      'Available when --live-reads is on.',
     inputSchema: {
       type: 'object' as const,
       properties: {
