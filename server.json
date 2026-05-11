@@ -1,0 +1,44 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.ignaciohermosillacornejo/copilot-money-mcp",
+  "title": "Copilot Money",
+  "description": "Query Copilot Money personal finance data locally (reads) and manage it via Copilot's GraphQL API (opt-in writes). 34 tools across transactions, accounts, budgets, goals, categories, and recurring charges.",
+  "repository": {
+    "url": "https://github.com/ignaciohermosillacornejo/copilot-money-mcp",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/ignaciohermosillacornejo/copilot-money-mcp#readme",
+  "version": "2.1.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "copilot-money-mcp",
+      "version": "2.1.0",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "named",
+          "name": "--db-path",
+          "description": "Path to the Copilot Money LevelDB database. Defaults to Copilot Money's standard macOS location.",
+          "isRequired": false
+        },
+        {
+          "type": "named",
+          "name": "--write",
+          "description": "Enable write tools (sends authenticated requests to Copilot Money's GraphQL API). Off by default.",
+          "isRequired": false
+        },
+        {
+          "type": "named",
+          "name": "--live-reads",
+          "description": "Use GraphQL-backed live reads instead of the local LevelDB cache. Requires an authenticated browser session at app.copilot.money.",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}
