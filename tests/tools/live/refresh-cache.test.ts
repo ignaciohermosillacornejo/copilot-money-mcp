@@ -4,9 +4,19 @@ import {
   createRefreshCacheToolSchema,
 } from '../../../src/tools/live/refresh-cache.js';
 import type { LiveCopilotDatabase } from '../../../src/core/live-database.js';
+import type { LiveBalanceHistoryTools } from '../../../src/tools/live/balance-history.js';
 
 function makeInvalidateCache() {
   return { invalidate: mock(() => {}) };
+}
+
+function makeBalanceHistoryMock(): {
+  tool: LiveBalanceHistoryTools;
+  clearCache: ReturnType<typeof mock>;
+} {
+  const clearCache = mock(() => {});
+  const tool = { clearCache } as unknown as LiveBalanceHistoryTools;
+  return { tool, clearCache };
 }
 
 function makeMockLive(): {
@@ -68,7 +78,8 @@ function makeMockLive(): {
 describe('RefreshCacheTool — scope: all', () => {
   test('flushes all snapshot caches and transactions', async () => {
     const { live, mocks } = makeMockLive();
-    const tool = new RefreshCacheTool(live);
+    const bh = makeBalanceHistoryMock();
+    const tool = new RefreshCacheTool(live, bh.tool);
 
     const result = await tool.refresh({ scope: 'all' });
 
@@ -82,6 +93,7 @@ describe('RefreshCacheTool — scope: all', () => {
     expect(mocks.monthlySpend.invalidate).toHaveBeenCalledTimes(1);
     expect(mocks.holdings.invalidate).toHaveBeenCalledTimes(1);
     expect(mocks.transactions.invalidate).toHaveBeenCalledTimes(1);
+    expect(bh.clearCache).toHaveBeenCalledTimes(1);
     expect(result.flushed.accounts).toBe(true);
     expect(result.flushed.categories).toBe(true);
     expect(result.flushed.tags).toBe(true);
@@ -92,6 +104,7 @@ describe('RefreshCacheTool — scope: all', () => {
     expect(result.flushed.networth).toBe(true);
     expect(result.flushed.monthly_spend).toBe(true);
     expect(result.flushed.holdings).toBe(true);
+    expect(result.flushed.balance_history).toBe(true);
     expect(result.flushed.transactions_months).toBe('all');
   });
 
@@ -277,6 +290,34 @@ describe('RefreshCacheTool — scope: holdings', () => {
   });
 });
 
+describe('RefreshCacheTool — scope: balance_history', () => {
+  test('clears the balance-history tool cache and nothing else', async () => {
+    const { live, mocks } = makeMockLive();
+    const bh = makeBalanceHistoryMock();
+    const tool = new RefreshCacheTool(live, bh.tool);
+
+    const result = await tool.refresh({ scope: 'balance_history' });
+
+    expect(bh.clearCache).toHaveBeenCalledTimes(1);
+    expect(mocks.accounts.invalidate).not.toHaveBeenCalled();
+    expect(mocks.categories.invalidate).not.toHaveBeenCalled();
+    expect(mocks.holdings.invalidate).not.toHaveBeenCalled();
+    expect(mocks.transactions.invalidate).not.toHaveBeenCalled();
+    expect(result.flushed.balance_history).toBe(true);
+    expect(result.flushed.holdings).toBeUndefined();
+    expect(result.flushed.accounts).toBeUndefined();
+  });
+
+  test('no-op (but still reports flushed) when balanceHistory tool is not wired', async () => {
+    const { live } = makeMockLive();
+    const tool = new RefreshCacheTool(live); // no balance-history tool passed
+
+    const result = await tool.refresh({ scope: 'balance_history' });
+
+    expect(result.flushed.balance_history).toBe(true);
+  });
+});
+
 describe('RefreshCacheTool — scope: transactions', () => {
   test('flushes all transaction months by default', async () => {
     const { live, mocks } = makeMockLive();
@@ -363,6 +404,12 @@ describe('createRefreshCacheToolSchema', () => {
     const schema = createRefreshCacheToolSchema();
     const scopeProp = schema.inputSchema.properties.scope as { enum: string[] };
     expect(scopeProp.enum).toContain('holdings');
+  });
+
+  test('balance_history scope is listed in enum', () => {
+    const schema = createRefreshCacheToolSchema();
+    const scopeProp = schema.inputSchema.properties.scope as { enum: string[] };
+    expect(scopeProp.enum).toContain('balance_history');
   });
 
   test('schema description mentions budgets piggyback on categories', () => {
