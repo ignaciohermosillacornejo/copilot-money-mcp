@@ -117,6 +117,7 @@ jobs:
 
       - name: Install mcp-publisher
         if: inputs.dry_run != true && github.event.inputs.dry_run != 'true'
+        continue-on-error: true
         env:
           MCP_PUBLISHER_VERSION: v1.7.8
         run: |
