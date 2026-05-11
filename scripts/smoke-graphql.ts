@@ -19,8 +19,8 @@
  *   bun run scripts/smoke-graphql.ts --section transactions-write
  *
  * Sections: tags, categories, transactions, transactions-write, recurrings,
- *           budgets, accounts, holdings, bulk, errors, edge, consistency,
- *           mcp-e2e, state-gated
+ *           budgets, accounts, holdings, balance-history, bulk, errors, edge,
+ *           consistency, mcp-e2e, state-gated
  *
  * State-gated tests are opt-in because they require the user to toggle UI
  * state manually in the Copilot desktop app between prompts.
@@ -59,6 +59,7 @@ import {
 import { setBudget } from '../src/core/graphql/budgets.js';
 import { editAccount } from '../src/core/graphql/accounts.js';
 import { fetchHoldings } from '../src/core/graphql/queries/holdings.js';
+import { fetchAccountBalanceHistory } from '../src/core/graphql/queries/balance-history.js';
 
 // -----------------------------------------------------------------------------
 // Polling helper — wait for a local-cache read to reflect a GraphQL write
@@ -131,6 +132,7 @@ const VALID_SECTIONS = [
   'budgets',
   'accounts',
   'holdings',
+  'balance-history',
   'bulk',
   'errors',
   'edge',
@@ -1565,6 +1567,65 @@ async function smokeHoldingsHappyPath(client: GraphQLClient): Promise<void> {
   });
 }
 
+/**
+ * Balance history — read-only smoke. Picks the first usable account
+ * (account_id + item_id present), fetches ONE_MONTH of daily balance
+ * history, and verifies the payload shape. Row count is printed; account
+ * sub-type is printed but balances/IDs are not (PII).
+ */
+async function smokeBalanceHistoryHappyPath(
+  client: GraphQLClient,
+  db: CopilotDatabase
+): Promise<void> {
+  logSection('Balance history — happy path');
+
+  const accounts = await db.getAccounts();
+  const a = accounts.find((x) => x.account_id && x.item_id);
+  if (!a || !a.item_id) {
+    console.warn('  no usable account; skipping');
+    return;
+  }
+  const accountId = a.account_id;
+  const itemId = a.item_id;
+  console.log(`  Account: ${a.subtype ?? a.account_type ?? 'unknown'}`);
+
+  await step(
+    'balance-history',
+    'fetchAccountBalanceHistory returns well-shaped, date-sorted rows',
+    async () => {
+      const rows = await fetchAccountBalanceHistory(client, {
+        itemId,
+        accountId,
+        timeFrame: 'ONE_MONTH',
+      });
+      console.log(`  Balance history rows: ${rows.length}`);
+      if (!Array.isArray(rows)) {
+        throw new Error(`expected array, got ${typeof rows}`);
+      }
+      if (rows.length === 0) return;
+
+      for (const r of rows) {
+        if (typeof r.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(r.date)) {
+          throw new Error(`row.date not YYYY-MM-DD: ${String(r.date)}`);
+        }
+        if (typeof r.balance !== 'number') {
+          throw new Error(`row.balance not numeric: ${typeof r.balance}`);
+        }
+      }
+
+      if (rows.length > 1) {
+        for (let i = 1; i < rows.length; i += 1) {
+          if (rows[i]!.date < rows[i - 1]!.date) {
+            throw new Error(
+              `rows not sorted ascending at index ${i} (${rows[i - 1]!.date} → ${rows[i]!.date})`
+            );
+          }
+        }
+      }
+    }
+  );
+}
+
 // -----------------------------------------------------------------------------
 // Section 2 — Bulk operations
 // -----------------------------------------------------------------------------
@@ -2780,6 +2841,7 @@ async function main(): Promise<void> {
   if (sectionEnabled('budgets')) await smokeBudgetsHappyPath(client, db);
   if (sectionEnabled('accounts')) await smokeAccountsHappyPath(client, db);
   if (sectionEnabled('holdings')) await smokeHoldingsHappyPath(client);
+  if (sectionEnabled('balance-history')) await smokeBalanceHistoryHappyPath(client, db);
 
   // Section 2 — bulk
   if (sectionEnabled('bulk')) await smokeBulkReviewTransactions(client, db);
