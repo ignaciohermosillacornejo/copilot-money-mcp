@@ -585,6 +585,13 @@ describe('CopilotMoneyTools', () => {
       expect(result.count).toBe(0);
     });
 
+    test('filters by tag excludes transactions without tag_ids', async () => {
+      (db as any)._tags = [{ tag_id: '9qyEMnfMXknwvx9OnYhk', name: 'Tahiti' }];
+      // mockTransactions have no tag_ids — none should match the filter.
+      const result = await tools.getTransactions({ tag: 'Tahiti' });
+      expect(result.count).toBe(0);
+    });
+
     test('filters by tag name resolves to any tag id that shares the name', async () => {
       // If two tag docs share the same name, a transaction tagged with either
       // ID should match when filtering by that name.

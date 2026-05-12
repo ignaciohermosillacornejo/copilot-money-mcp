@@ -606,10 +606,7 @@ export class CopilotMoneyTools {
     // ============================================
     if (tag) {
       const normalizedTag = (tag.startsWith('#') ? tag.substring(1) : tag).toLowerCase();
-      // Resolve the input tag name to one or more tag IDs (case-insensitive match
-      // against Tag.name). The transaction's tag_ids array holds opaque Firestore
-      // IDs, so we have to look up the IDs that correspond to the user's input
-      // name before filtering.
+      // tag_ids holds opaque Firestore IDs; resolve name → IDs before filtering.
       const tags = await this.db.getTags();
       const matchingTagIds = new Set(
         tags
