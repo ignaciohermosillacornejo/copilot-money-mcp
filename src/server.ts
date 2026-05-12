@@ -576,6 +576,10 @@ export class CopilotMoneyServer {
           result = await this.tools.getInvestmentPrices(typedArgs || {});
           break;
 
+        case 'get_investment_splits':
+          result = await this.tools.getInvestmentSplits(typedArgs || {});
+          break;
+
         case 'get_holdings':
           result = await this.tools.getHoldings(typedArgs || {});
           break;

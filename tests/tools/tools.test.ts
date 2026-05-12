@@ -1761,9 +1761,9 @@ describe('refreshDatabase', () => {
 });
 
 describe('createToolSchemas', () => {
-  test('returns 13 tool schemas', async () => {
+  test('returns 14 tool schemas', async () => {
     const schemas = createToolSchemas();
-    expect(schemas).toHaveLength(13);
+    expect(schemas).toHaveLength(14);
   });
 
   test('all tools have readOnlyHint: true', async () => {
@@ -1801,13 +1801,14 @@ describe('createToolSchemas', () => {
     expect(names).toContain('get_budgets');
     expect(names).toContain('get_goals');
     expect(names).toContain('get_investment_prices');
+    expect(names).toContain('get_investment_splits');
     expect(names).toContain('get_holdings');
     // New tools
     expect(names).toContain('get_balance_history');
     expect(names).toContain('get_goal_history');
 
-    // Should have exactly 13 tools
-    expect(names.length).toBe(13);
+    // Should have exactly 14 tools
+    expect(names.length).toBe(14);
   });
 });
 
@@ -2519,6 +2520,155 @@ describe('getHoldings', () => {
     const neg = result.holdings.find((h) => h.account_id === 'inv_floor_neg');
     expect(pos?.total_return_percent).toBe(8.39);
     expect(neg?.total_return_percent).toBe(-22.89);
+  });
+});
+
+describe('getInvestmentSplits', () => {
+  // Synthetic security IDs only — no real Plaid SHA256 hashes, no real
+  // tickers. Reviewer asked for obviously-fake fixtures so nothing leaks.
+  const synthSecurities: Security[] = [
+    {
+      security_id: 'sec-A',
+      ticker_symbol: 'TEST-A',
+      name: 'Test Security A',
+      type: 'equity',
+      current_price: 100.0,
+      is_cash_equivalent: false,
+      iso_currency_code: 'USD',
+    },
+    {
+      security_id: 'sec-B',
+      ticker_symbol: 'TEST-B',
+      name: 'Test Security B',
+      type: 'equity',
+      current_price: 50.0,
+      is_cash_equivalent: false,
+      iso_currency_code: 'USD',
+    },
+  ];
+
+  let db: CopilotDatabase;
+  let tools: CopilotMoneyTools;
+
+  beforeEach(() => {
+    db = new CopilotDatabase('/fake/path');
+    (db as any)._allCollectionsLoaded = true;
+    (db as any)._transactions = [];
+    (db as any)._accounts = [];
+    (db as any)._recurring = [];
+    (db as any)._budgets = [];
+    (db as any)._goals = [];
+    (db as any)._goalHistory = [];
+    (db as any)._investmentPrices = [];
+    (db as any)._items = [];
+    (db as any)._userCategories = [];
+    (db as any)._userAccounts = [];
+    (db as any)._securities = [...synthSecurities];
+    (db as any)._investmentSplits = [
+      {
+        security_id: 'sec-A',
+        adjustments: {
+          '2021-07-20': 0.25, // 4-for-1
+          '2024-06-10': 0.1, // 10-for-1
+        },
+      },
+    ];
+    tools = new CopilotMoneyTools(db);
+  });
+
+  test('happy path: projects each adjustment into its own row with ticker/name', async () => {
+    const result = await tools.getInvestmentSplits({});
+    expect(result.count).toBe(2);
+    expect(result.total_count).toBe(2);
+    expect(result.has_more).toBe(false);
+
+    // Sorted by date descending — newest first.
+    expect(result.splits[0]).toEqual({
+      security_id: 'sec-A',
+      ticker_symbol: 'TEST-A',
+      name: 'Test Security A',
+      effective_date: '2024-06-10',
+      multiplier: 0.1,
+      ratio_description: '10-for-1',
+    });
+    expect(result.splits[1]).toEqual({
+      security_id: 'sec-A',
+      ticker_symbol: 'TEST-A',
+      name: 'Test Security A',
+      effective_date: '2021-07-20',
+      multiplier: 0.25,
+      ratio_description: '4-for-1',
+    });
+  });
+
+  test('ratio formatting covers forward, reverse, and unknown', async () => {
+    (db as any)._investmentSplits = [
+      {
+        security_id: 'sec-A',
+        adjustments: {
+          '2020-01-01': 0.1, // 10-for-1
+          '2020-02-01': 0.25, // 4-for-1
+          '2020-03-01': 2.0, // 1-for-2 reverse
+          '2020-04-01': 0.123, // not a clean ratio
+        },
+      },
+    ];
+    const result = await tools.getInvestmentSplits({});
+    const byDate = Object.fromEntries(
+      result.splits.map((s) => [s.effective_date, s.ratio_description])
+    );
+    expect(byDate['2020-01-01']).toBe('10-for-1');
+    expect(byDate['2020-02-01']).toBe('4-for-1');
+    expect(byDate['2020-03-01']).toBe('1-for-2 reverse split');
+    expect(byDate['2020-04-01']).toBe('unknown ratio');
+  });
+
+  test('start_date filter excludes earlier rows', async () => {
+    const result = await tools.getInvestmentSplits({ start_date: '2024-01-01' });
+    expect(result.count).toBe(1);
+    expect(result.splits[0].effective_date).toBe('2024-06-10');
+  });
+
+  test('end_date filter excludes later rows', async () => {
+    const result = await tools.getInvestmentSplits({ end_date: '2023-12-31' });
+    expect(result.count).toBe(1);
+    expect(result.splits[0].effective_date).toBe('2021-07-20');
+  });
+
+  test('ticker filter returns zero rows when ticker has no splits', async () => {
+    const result = await tools.getInvestmentSplits({ ticker_symbol: 'TEST-B' });
+    expect(result.count).toBe(0);
+    expect(result.total_count).toBe(0);
+  });
+
+  test('ticker filter is case-insensitive', async () => {
+    const result = await tools.getInvestmentSplits({ ticker_symbol: 'test-a' });
+    expect(result.count).toBe(2);
+    for (const r of result.splits) {
+      expect(r.ticker_symbol).toBe('TEST-A');
+    }
+  });
+
+  test('pagination: limit + offset + has_more', async () => {
+    const result = await tools.getInvestmentSplits({ limit: 1, offset: 0 });
+    expect(result.count).toBe(1);
+    expect(result.total_count).toBe(2);
+    expect(result.offset).toBe(0);
+    expect(result.has_more).toBe(true);
+
+    const page2 = await tools.getInvestmentSplits({ limit: 1, offset: 1 });
+    expect(page2.count).toBe(1);
+    expect(page2.has_more).toBe(false);
+    expect(page2.splits[0].effective_date).toBe('2021-07-20');
+  });
+
+  test('returns count 0 when cache has no splits', async () => {
+    (db as any)._investmentSplits = [];
+    const result = await tools.getInvestmentSplits({});
+    expect(result.count).toBe(0);
+    expect(result.total_count).toBe(0);
+    expect(result.has_more).toBe(false);
+    expect(result.splits).toEqual([]);
   });
 });
 

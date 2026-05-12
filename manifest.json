@@ -70,6 +70,10 @@
       "description": "Get investment price history for portfolio tracking. Returns daily and high-frequency price data for stocks, ETFs, mutual funds, and crypto."
     },
     {
+      "name": "get_investment_splits",
+      "description": "Get stock split events from the local Firestore cache."
+    },
+    {
       "name": "get_holdings",
       "description": "Get current investment holdings with position-level detail including ticker, quantity, price, average cost, and total return per holding."
     },
