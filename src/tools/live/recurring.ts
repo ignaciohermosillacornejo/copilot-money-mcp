@@ -50,13 +50,7 @@ export class LiveRecurringTools {
       hit,
     } = await cache.read(() => fetchRecurrings(this.live.getClient()));
 
-    const cachedCategories = this.live.getCategoriesCache().peek();
-    const categoryNameById = new Map<string, string>();
-    if (cachedCategories) {
-      for (const cat of cachedCategories) {
-        categoryNameById.set(cat.id, cat.name);
-      }
-    }
+    const categoryNameById = this.live.peekCategoryNameMap();
 
     const rows: GetRecurringLiveRow[] = cached
       .map((r) => ({

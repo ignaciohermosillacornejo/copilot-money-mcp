@@ -417,6 +417,22 @@ export class LiveCopilotDatabase {
     );
   }
 
+  /**
+   * Cold-safe category-id → name lookup map. Returns an empty Map when
+   * the categories cache is cold (no fetch is triggered). Used by tools
+   * that want to enrich rows with category names but don't need to force
+   * a category fetch for that enrichment.
+   */
+  peekCategoryNameMap(): Map<string, string> {
+    const rows = this.categoriesCache.peek();
+    if (rows === undefined) return new Map();
+    const map = new Map<string, string>();
+    for (const cat of rows) {
+      if (cat.id) map.set(cat.id, cat.name);
+    }
+    return map;
+  }
+
   getTransactionsWindowCache(): TransactionWindowCache<TransactionNode> {
     return this.transactionsWindowCache;
   }
