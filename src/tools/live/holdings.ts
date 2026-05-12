@@ -34,6 +34,7 @@
 import type { LiveCopilotDatabase } from '../../core/live-database.js';
 import { fetchHoldings, type HoldingNode } from '../../core/graphql/queries/holdings.js';
 import { computeTotalReturnPercent, roundAmount } from '../../utils/round.js';
+import { clampMaxRows, clampOffset } from '../../utils/pagination.js';
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 10_000;
@@ -78,16 +79,6 @@ export interface GetHoldingsLiveResult {
   _cache_hit: boolean;
 }
 
-function clampLimit(limit: number | undefined): number {
-  if (limit === undefined) return DEFAULT_LIMIT;
-  return Math.max(MIN_LIMIT, Math.min(MAX_LIMIT, Math.floor(limit)));
-}
-
-function clampOffset(offset: number | undefined): number {
-  if (offset === undefined) return 0;
-  return Math.max(0, Math.floor(offset));
-}
-
 function projectHolding(h: HoldingNode): GetHoldingsLiveEntry {
   const institutionValue = roundAmount(h.quantity * h.security.currentPrice);
   const entry: GetHoldingsLiveEntry = {
@@ -126,7 +117,7 @@ export class LiveHoldingsTools {
       hit,
     } = await cache.read(() => fetchHoldings(this.live.getClient()));
 
-    const limit = clampLimit(args.limit);
+    const limit = clampMaxRows(args.limit, { hardMax: MAX_LIMIT, defaultValue: DEFAULT_LIMIT });
     const offset = clampOffset(args.offset);
     const tickerLower = args.ticker_symbol?.toLowerCase();
 
