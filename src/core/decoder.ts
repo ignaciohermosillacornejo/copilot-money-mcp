@@ -22,7 +22,11 @@ import { Budget, BudgetSchema } from '../models/budget.js';
 import { Goal, GoalSchema } from '../models/goal.js';
 import { GoalHistory, GoalHistorySchema, DailySnapshot } from '../models/goal-history.js';
 import { InvestmentPrice, InvestmentPriceSchema } from '../models/investment-price.js';
-import { InvestmentSplit, InvestmentSplitSchema } from '../models/investment-split.js';
+import {
+  InvestmentSplit,
+  InvestmentSplitSchema,
+  DATE_KEY_REGEX,
+} from '../models/investment-split.js';
 import { Item, ItemSchema, IGNORED_ITEM_FIELDS } from '../models/item.js';
 import { Category, CategorySchema } from '../models/category.js';
 import { PlaidAccount, PlaidAccountSchema } from '../models/plaid-account.js';
@@ -2261,9 +2265,8 @@ function processInvestmentSplit(
   docId: string
 ): InvestmentSplit | null {
   const adjustments: Record<string, number> = {};
-  const dateKey = /^\d{4}-\d{2}-\d{2}$/;
   for (const [key, value] of fields.entries()) {
-    if (!dateKey.test(key)) continue;
+    if (!DATE_KEY_REGEX.test(key)) continue;
     if (value.type !== 'double' && value.type !== 'integer') continue;
     adjustments[key] = value.value;
   }
