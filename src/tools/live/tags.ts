@@ -62,7 +62,7 @@ export function createLiveTagsToolSchema() {
     name: 'get_tags_live',
     description:
       'Get all user tags (live, GraphQL-backed). Each row carries `id`, `name`, and `color`. ' +
-      'No cache-mode counterpart exists — tags are additive in live mode. ' +
+      'No cache-mode counterpart exists — this tool is the only way to enumerate tags. ' +
       'Use this to enumerate tag IDs before calling `get_transactions_live` with a tag filter, ' +
       'or to enrich transaction-tag references with human-readable names. ' +
       'Available when --live-reads is on.',
