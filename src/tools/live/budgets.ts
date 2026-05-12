@@ -14,7 +14,7 @@
 
 import type { LiveCopilotDatabase } from '../../core/live-database.js';
 import { fetchCategories, type CategoryNode } from '../../core/graphql/queries/categories.js';
-import { roundAmount } from '../../utils/round.js';
+import { parseAmount, roundAmount } from '../../utils/round.js';
 
 export interface GetBudgetsLiveArgs {
   /**
@@ -40,12 +40,6 @@ export interface GetBudgetsLiveResult {
   _cache_oldest_fetched_at: string;
   _cache_newest_fetched_at: string;
   _cache_hit: boolean;
-}
-
-function parseAmount(value: string | null | undefined): number | undefined {
-  if (value === null || value === undefined) return undefined;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : undefined;
 }
 
 /**
@@ -76,21 +70,21 @@ function projectCategory(cat: CategoryNode): GetBudgetsLiveBudget | null {
   const amounts: Record<string, number> = {};
   if (budget.current?.month) {
     const a = parseAmount(budget.current.amount);
-    if (a !== undefined) amounts[budget.current.month] = a;
+    if (a !== null) amounts[budget.current.month] = a;
   }
   for (const h of budget.histories) {
     const a = parseAmount(h.amount);
-    if (a !== undefined) amounts[h.month] = a;
+    if (a !== null) amounts[h.month] = a;
   }
 
   // Skip rows with neither current nor history amounts (entirely empty)
-  if (amount === undefined && Object.keys(amounts).length === 0) return null;
+  if (amount === null && Object.keys(amounts).length === 0) return null;
 
   return {
     budget_id: cat.id, // GraphQL has no per-budget id; use category id as the stable key
     category_id: cat.id,
     category_name: cat.name,
-    ...(amount !== undefined ? { amount } : {}),
+    ...(amount !== null ? { amount } : {}),
     ...(Object.keys(amounts).length > 0 ? { amounts } : {}),
   };
 }
