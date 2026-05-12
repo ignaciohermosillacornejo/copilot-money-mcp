@@ -27,8 +27,13 @@ export type TimeFrame =
 /**
  * All TimeFrame values, in display order. Use for MCP tool schema
  * `enum:` constraints so the option list cannot drift from the union above.
+ *
+ * `satisfies TimeFrame[]` (instead of an annotation) forces TypeScript to
+ * verify every literal is a member of the union — and `as const` preserves
+ * the literal types so missing-element drift in the union is also caught
+ * at compile time.
  */
-export const ALL_TIME_FRAMES: TimeFrame[] = [
+export const ALL_TIME_FRAMES = [
   'ONE_DAY',
   'ONE_WEEK',
   'ONE_MONTH',
@@ -36,7 +41,7 @@ export const ALL_TIME_FRAMES: TimeFrame[] = [
   'YTD',
   'ONE_YEAR',
   'ALL',
-];
+] as const satisfies readonly TimeFrame[];
 
 /**
  * Market hours metadata attached to each Security.
