@@ -46,7 +46,11 @@ import {
   isKnownPlaidCategory,
 } from '../utils/categories.js';
 import type { Transaction, Account, InvestmentPrice, Tag, Recurring } from '../models/index.js';
-import { getTransactionDisplayName, getRecurringDisplayName } from '../models/index.js';
+import {
+  getTransactionDisplayName,
+  getRecurringDisplayName,
+  formatSplitRatio,
+} from '../models/index.js';
 import type { GoalHistory } from '../models/goal-history.js';
 import { isItemHealthy, itemNeedsAttention, getItemDisplayName } from '../models/item.js';
 import { type Category, getCategoryDisplayName } from '../models/category.js';
@@ -2112,9 +2116,88 @@ export class CopilotMoneyTools {
   /**
    * Get stock split history with optional filters.
    *
-   * @param options - Filter options
-   * @returns Object with split data and pagination info
+   * One output row per (security, effective_date) tuple. Securities that
+   * have never had a split are omitted entirely. The returned `multiplier`
+   * is what to multiply a pre-split price/quantity by to convert to the
+   * post-split equivalent (e.g. 0.1 for a 10-for-1 split).
+   *
+   * IMPORTANT: prices returned by `get_investment_prices` (and its live
+   * counterpart) are ALREADY split-adjusted by Copilot. This tool is for
+   * surfacing the split events themselves — narrative or historical
+   * analysis — NOT for back-correcting prices.
    */
+  async getInvestmentSplits(
+    options: {
+      ticker_symbol?: string;
+      start_date?: string;
+      end_date?: string;
+      limit?: number;
+      offset?: number;
+    } = {}
+  ): Promise<{
+    count: number;
+    total_count: number;
+    offset: number;
+    has_more: boolean;
+    splits: Array<{
+      security_id: string;
+      ticker_symbol?: string;
+      name?: string;
+      effective_date: string;
+      multiplier: number;
+      ratio_description: string;
+    }>;
+  }> {
+    const { ticker_symbol, start_date, end_date } = options;
+    const validatedLimit = validateLimit(options.limit, DEFAULT_QUERY_LIMIT);
+    const validatedOffset = validateOffset(options.offset);
+
+    if (start_date) validateDate(start_date, 'start_date');
+    if (end_date) validateDate(end_date, 'end_date');
+
+    // Load splits (applies ticker filter at the doc level).
+    const docs = await this.db.getInvestmentSplits({ tickerSymbol: ticker_symbol });
+    const securityMap = await this.db.getSecurityMap();
+
+    // Project each (security, date) tuple into its own output row.
+    const allRows: Array<{
+      security_id: string;
+      ticker_symbol?: string;
+      name?: string;
+      effective_date: string;
+      multiplier: number;
+      ratio_description: string;
+    }> = [];
+    for (const doc of docs) {
+      const sec = securityMap.get(doc.security_id);
+      for (const [date, multiplier] of Object.entries(doc.adjustments)) {
+        if (start_date && date < start_date) continue;
+        if (end_date && date > end_date) continue;
+        allRows.push({
+          security_id: doc.security_id,
+          ticker_symbol: sec?.ticker_symbol,
+          name: sec?.name,
+          effective_date: date,
+          multiplier,
+          ratio_description: formatSplitRatio(multiplier),
+        });
+      }
+    }
+
+    // Sort by date descending (most-recent first) — natural agent UX.
+    allRows.sort((a, b) => b.effective_date.localeCompare(a.effective_date));
+
+    const total = allRows.length;
+    const sliced = allRows.slice(validatedOffset, validatedOffset + validatedLimit);
+    return {
+      count: sliced.length,
+      total_count: total,
+      offset: validatedOffset,
+      has_more: validatedOffset + sliced.length < total,
+      splits: sliced,
+    };
+  }
+
   /**
    * Get current investment holdings with cost basis and returns.
    *
@@ -4097,6 +4180,51 @@ export function createToolSchemas(): ToolSchema[] {
           offset: {
             type: 'integer',
             description: 'Number of results to skip for pagination (default: 0)',
+            default: 0,
+          },
+        },
+      },
+      annotations: { readOnlyHint: true },
+    },
+    {
+      name: 'get_investment_splits',
+      description:
+        'Get stock split events from the local Firestore cache. Returns one row ' +
+        'per (security, effective_date) with the adjustment multiplier (e.g. 0.1 ' +
+        'for a 10-for-1 split — multiply pre-split prices/quantities by this value ' +
+        'to convert to the post-split equivalent). Joined with the securities ' +
+        'collection so each row includes ticker and name. ' +
+        'IMPORTANT: prices returned by `get_investment_prices` and ' +
+        '`get_investment_prices_live` are ALREADY split-adjusted by Copilot. ' +
+        'Use this tool only when you need the split events themselves (e.g., for ' +
+        'narrative or historical-analysis purposes) — you do NOT need to apply ' +
+        'these multipliers to the prices yourself. Securities that have never ' +
+        'split are not included in the output. Coverage is limited to securities ' +
+        'Copilot currently syncs in your local cache (typically currently-held ' +
+        'or recently-held).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          ticker_symbol: {
+            type: 'string',
+            description: 'Optional. Case-insensitive ticker filter (e.g. "NVDA").',
+          },
+          start_date: {
+            type: 'string',
+            description: 'Optional. Inclusive lower bound on effective_date (YYYY-MM-DD).',
+          },
+          end_date: {
+            type: 'string',
+            description: 'Optional. Inclusive upper bound on effective_date (YYYY-MM-DD).',
+          },
+          limit: {
+            type: 'integer',
+            description: 'Maximum number of rows. Default 100, max 10000.',
+            default: 100,
+          },
+          offset: {
+            type: 'integer',
+            description: 'Pagination offset, default 0.',
             default: 0,
           },
         },

@@ -69,6 +69,12 @@ export {
 } from './investment-price.js';
 
 export {
+  InvestmentSplitSchema,
+  type InvestmentSplit,
+  formatRatio as formatSplitRatio,
+} from './investment-split.js';
+
+export {
   ItemSchema,
   type Item,
   type ConnectionStatus,

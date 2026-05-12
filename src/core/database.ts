@@ -36,7 +36,7 @@ import {
   Item,
   getTransactionDisplayName,
 } from '../models/index.js';
-import type { Security, HoldingsHistory, Tag } from '../models/index.js';
+import type { Security, HoldingsHistory, Tag, InvestmentSplit } from '../models/index.js';
 import type { BalanceHistory } from '../models/balance-history.js';
 import { getCategoryName } from '../utils/categories.js';
 
@@ -150,6 +150,7 @@ export class CopilotDatabase {
   private _goals: Goal[] | null = null;
   private _goalHistory: GoalHistory[] | null = null;
   private _investmentPrices: InvestmentPrice[] | null = null;
+  private _investmentSplits: InvestmentSplit[] | null = null;
   private _items: Item[] | null = null;
   private _userCategories: Category[] | null = null;
   private _categoryNameMap: Map<string, string> | null = null;
@@ -267,6 +268,7 @@ export class CopilotDatabase {
     this._goals = null;
     this._goalHistory = null;
     this._investmentPrices = null;
+    this._investmentSplits = null;
     this._items = null;
     this._userCategories = null;
     this._categoryNameMap = null;
@@ -320,6 +322,7 @@ export class CopilotDatabase {
     goals?: Goal[];
     goalHistory?: GoalHistory[];
     investmentPrices?: InvestmentPrice[];
+    investmentSplits?: InvestmentSplit[];
     items?: Item[];
     userCategories?: Category[];
     userAccounts?: UserAccountCustomization[];
@@ -337,6 +340,7 @@ export class CopilotDatabase {
     if (data.goals !== undefined) this._goals = data.goals;
     if (data.goalHistory !== undefined) this._goalHistory = data.goalHistory;
     if (data.investmentPrices !== undefined) this._investmentPrices = data.investmentPrices;
+    if (data.investmentSplits !== undefined) this._investmentSplits = data.investmentSplits;
     if (data.items !== undefined) this._items = data.items;
     if (data.userCategories !== undefined) this._userCategories = data.userCategories;
     if (data.userAccounts !== undefined) this._userAccounts = data.userAccounts;
@@ -559,6 +563,7 @@ export class CopilotDatabase {
       this._goals = result.goals;
       this._goalHistory = result.goalHistory;
       this._investmentPrices = result.investmentPrices;
+      this._investmentSplits = result.investmentSplits;
       this._items = result.items;
       this._userCategories = result.categories;
       this._userAccounts = result.userAccounts;
@@ -860,6 +865,26 @@ export class CopilotDatabase {
       return this._securities ?? [];
     }
     return this._securities ?? [];
+  }
+
+  /**
+   * Load investment splits with caching.
+   * Uses batch loading for optimal performance on first access.
+   *
+   * Cache shape: one InvestmentSplit per security (keyed by `security_id`)
+   * with a sparse `adjustments` map of YYYY-MM-DD → multiplier. Securities
+   * that have never split are omitted at decode time (placeholder docs are
+   * skipped) — so the returned array only contains entries with ≥1 split.
+   */
+  private async loadInvestmentSplits(): Promise<InvestmentSplit[]> {
+    if (this._investmentSplits !== null) {
+      return this._investmentSplits;
+    }
+    if (!this._allCollectionsLoaded) {
+      await this.loadAllCollections();
+      return this._investmentSplits ?? [];
+    }
+    return this._investmentSplits ?? [];
   }
 
   /**
@@ -1377,6 +1402,56 @@ export class CopilotDatabase {
       map.set(s.security_id, s);
     }
     return map;
+  }
+
+  /**
+   * Get investment splits (one entry per security that has had ≥1 split).
+   *
+   * Each entry has a sparse `adjustments` map of YYYY-MM-DD → multiplier.
+   * Securities with no splits are omitted entirely at decode time.
+   *
+   * Filters operate at the document level:
+   * - `tickerSymbol`: case-insensitive match via the securityMap join.
+   * - `startDate` / `endDate`: a doc is included if ≥1 of its `adjustments`
+   *   keys falls within the [startDate, endDate] window (inclusive). The
+   *   per-(date, multiplier) row-level filter happens at the tool/projection
+   *   layer — that's where each tuple is emitted as its own output row.
+   *
+   * @returns Array of InvestmentSplit objects
+   */
+  async getInvestmentSplits(
+    options: {
+      tickerSymbol?: string;
+      startDate?: string;
+      endDate?: string;
+    } = {}
+  ): Promise<InvestmentSplit[]> {
+    const { tickerSymbol, startDate, endDate } = options;
+    const allSplits = await this.loadInvestmentSplits();
+    let result = [...allSplits];
+
+    if (tickerSymbol) {
+      const securityMap = await this.getSecurityMap();
+      const lower = tickerSymbol.toLowerCase();
+      const matchingIds = new Set<string>();
+      for (const [id, sec] of securityMap) {
+        if (sec.ticker_symbol?.toLowerCase() === lower) matchingIds.add(id);
+      }
+      result = result.filter((s) => matchingIds.has(s.security_id));
+    }
+
+    if (startDate || endDate) {
+      result = result.filter((s) => {
+        for (const date of Object.keys(s.adjustments)) {
+          if (startDate && date < startDate) continue;
+          if (endDate && date > endDate) continue;
+          return true;
+        }
+        return false;
+      });
+    }
+
+    return result;
   }
 
   /**

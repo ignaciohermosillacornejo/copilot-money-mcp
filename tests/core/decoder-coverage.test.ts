@@ -1226,6 +1226,7 @@ describe('decoder coverage', () => {
       expect(result.goals).toEqual([]);
       expect(result.goalHistory).toEqual([]);
       expect(result.investmentPrices).toEqual([]);
+      expect(result.investmentSplits).toEqual([]);
       expect(result.items).toEqual([]);
       expect(result.categories).toEqual([]);
       expect(result.userAccounts).toEqual([]);
@@ -1710,6 +1711,38 @@ describe('decoder coverage', () => {
       expect(result.investmentPrices[1]?.date).toBe('2024-01-10');
       // Then second investment
       expect(result.investmentPrices[2]?.investment_id).toBe('inv2');
+    });
+
+    test('decodes investment_splits docs with date-keyed adjustment factors', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'investment-splits-db');
+      await createTestDatabase(dbPath, [
+        // Doc with two real split events for a synthetic security
+        {
+          collection: 'investment_splits',
+          id: 'sec-A',
+          fields: {
+            '2021-07-20': 0.25,
+            '2024-06-10': 0.1,
+          },
+        },
+        // Placeholder doc with zero fields — must be skipped, not surfaced as
+        // a zero-row entry.
+        {
+          collection: 'investment_splits',
+          id: 'sec-empty',
+          fields: {},
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.investmentSplits.length).toBe(1);
+      const doc = result.investmentSplits[0]!;
+      expect(doc.security_id).toBe('sec-A');
+      expect(doc.adjustments).toEqual({
+        '2021-07-20': 0.25,
+        '2024-06-10': 0.1,
+      });
     });
 
     test('decodes plaid accounts via decodeAllCollections', async () => {

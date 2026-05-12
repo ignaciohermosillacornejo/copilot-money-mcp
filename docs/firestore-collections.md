@@ -4,7 +4,7 @@ Complete documentation of all Firestore collections cached locally by Copilot Mo
 
 **Last verified:** 2026-04-05 | **App version:** macOS (App Store) | **Total documents:** ~55,953 across ~35 unique collection patterns
 
-**Decode coverage:** 32 of 35 collection paths decoded — `investment_splits`, `investment_performance`, and `investment_performance/{hash}/twr_holding` were dropped after the underlying cache data proved either empty or non-analytical (see changelog for rationale)
+**Decode coverage:** 33 of 35 collection paths decoded — `investment_performance` and `investment_performance/{hash}/twr_holding` remain undecoded (cache data is non-analytical). `investment_splits` was restored 2026-05-11 after re-inspection revealed real date-keyed adjustment multipliers in docs for securities that have actually split (the original drop in 2026-05-10 was a false negative — none of the then-held securities had splits in their history).
 
 ## Database Location
 

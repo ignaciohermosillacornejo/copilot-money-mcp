@@ -22,6 +22,7 @@ import { Budget, BudgetSchema } from '../models/budget.js';
 import { Goal, GoalSchema } from '../models/goal.js';
 import { GoalHistory, GoalHistorySchema, DailySnapshot } from '../models/goal-history.js';
 import { InvestmentPrice, InvestmentPriceSchema } from '../models/investment-price.js';
+import { InvestmentSplit, InvestmentSplitSchema } from '../models/investment-split.js';
 import { Item, ItemSchema, IGNORED_ITEM_FIELDS } from '../models/item.js';
 import { Category, CategorySchema } from '../models/category.js';
 import { PlaidAccount, PlaidAccountSchema } from '../models/plaid-account.js';
@@ -640,6 +641,7 @@ export interface AllCollectionsResult {
   goals: Goal[];
   goalHistory: GoalHistory[];
   investmentPrices: InvestmentPrice[];
+  investmentSplits: InvestmentSplit[];
   items: Item[];
   categories: Category[];
   userAccounts: UserAccountCustomization[];
@@ -2247,6 +2249,47 @@ function processSecurity(fields: Map<string, FirestoreValue>, docId: string): Se
 }
 
 /**
+ * Internal helper to process an investment split document.
+ *
+ * Each doc lives at `investment_splits/{security_id}` and contains a
+ * sparse set of date-keyed double fields (YYYY-MM-DD → multiplier).
+ * Securities that have never split get an empty placeholder doc; we
+ * skip those by returning null rather than emitting a zero-row entry.
+ */
+function processInvestmentSplit(
+  fields: Map<string, FirestoreValue>,
+  docId: string
+): InvestmentSplit | null {
+  const adjustments: Record<string, number> = {};
+  const dateKey = /^\d{4}-\d{2}-\d{2}$/;
+  for (const [key, value] of fields.entries()) {
+    if (!dateKey.test(key)) continue;
+    if (value.type !== 'double' && value.type !== 'integer') continue;
+    adjustments[key] = value.value;
+  }
+
+  // Per warnUnreadFields convention: explicitly mark date-keyed
+  // adjustment fields as consumed so they don't trigger the unread-field
+  // warning. The `consumed` list grows dynamically based on which dates
+  // appeared in this particular doc.
+  warnUnreadFields(
+    fields,
+    { consumed: Object.keys(adjustments), ignored: [] },
+    { collection: 'investment_splits', docId }
+  );
+
+  // Skip the placeholder/empty docs — surfacing zero-split rows for
+  // every never-split security is just noise.
+  if (Object.keys(adjustments).length === 0) return null;
+
+  return validateOrWarn(
+    InvestmentSplitSchema,
+    { security_id: docId, adjustments },
+    { collection: 'investment_splits', docId }
+  );
+}
+
+/**
  * Internal helper to process a user profile document.
  */
 function processUserProfile(
@@ -2655,6 +2698,7 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
   const rawGoals: Goal[] = [];
   const rawGoalHistory: GoalHistory[] = [];
   const rawInvestmentPrices: InvestmentPrice[] = [];
+  const rawInvestmentSplits: InvestmentSplit[] = [];
   const rawItems: Item[] = [];
   const rawCategories: Category[] = [];
   const rawUserAccounts: UserAccountCustomization[] = [];
@@ -2731,6 +2775,9 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     ) {
       const price = processInvestmentPrice(fields, documentId, key);
       if (price) rawInvestmentPrices.push(price);
+    } else if (collectionMatches(collection, 'investment_splits')) {
+      const split = processInvestmentSplit(fields, documentId);
+      if (split) rawInvestmentSplits.push(split);
     } else if (collectionMatches(collection, 'items') || /^items\/[^/]+$/.test(collection)) {
       // Match both top-level items and items/{item_id} parent-pointer docs.
       // Parent-pointer docs (items/{item_id}) have empty fields and processItem returns null.
@@ -2873,6 +2920,17 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     const dateB = b.date || b.month || '';
     return dateB.localeCompare(dateA);
   });
+
+  // Investment splits: dedupe by security_id (one doc per security)
+  const splitSeen = new Set<string>();
+  const investmentSplits: InvestmentSplit[] = [];
+  for (const split of rawInvestmentSplits) {
+    if (!splitSeen.has(split.security_id)) {
+      splitSeen.add(split.security_id);
+      investmentSplits.push(split);
+    }
+  }
+  investmentSplits.sort((a, b) => a.security_id.localeCompare(b.security_id));
 
   // Items: dedupe by item_id
   const itemSeen = new Set<string>();
@@ -3113,6 +3171,7 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     goals,
     goalHistory,
     investmentPrices,
+    investmentSplits,
     items,
     categories,
     userAccounts,
