@@ -2601,7 +2601,7 @@ describe('getInvestmentSplits', () => {
     });
   });
 
-  test('ratio formatting covers forward, reverse, and unknown', async () => {
+  test('ratio formatting covers forward, reverse, no-op, and unknown', async () => {
     (db as any)._investmentSplits = [
       {
         security_id: 'sec-A',
@@ -2610,6 +2610,9 @@ describe('getInvestmentSplits', () => {
           '2020-02-01': 0.25, // 4-for-1
           '2020-03-01': 2.0, // 1-for-2 reverse
           '2020-04-01': 0.123, // not a clean ratio
+          // multiplier === 1.0 is a no-op (shouldn't exist in real data, but
+          // guard against the misleading "1-for-1 reverse split" label).
+          '2020-05-01': 1.0,
         },
       },
     ];
@@ -2621,6 +2624,7 @@ describe('getInvestmentSplits', () => {
     expect(byDate['2020-02-01']).toBe('4-for-1');
     expect(byDate['2020-03-01']).toBe('1-for-2 reverse split');
     expect(byDate['2020-04-01']).toBe('unknown ratio');
+    expect(byDate['2020-05-01']).toBe('unknown ratio');
   });
 
   test('start_date filter excludes earlier rows', async () => {

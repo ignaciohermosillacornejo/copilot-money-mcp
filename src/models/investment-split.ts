@@ -18,13 +18,17 @@
 
 import { z } from 'zod';
 
-const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/;
+/**
+ * Exported so the decoder can reuse the same regex when scanning raw
+ * Firestore docs for date-keyed adjustment fields.
+ */
+export const DATE_KEY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
 export const InvestmentSplitSchema = z
   .object({
     security_id: z.string(),
     // Map of YYYY-MM-DD → adjustment multiplier (e.g. "2024-06-10": 0.1)
-    adjustments: z.record(z.string().regex(DATE_KEY), z.number()).default({}),
+    adjustments: z.record(z.string().regex(DATE_KEY_REGEX), z.number()).default({}),
   })
   .passthrough();
 
@@ -37,7 +41,11 @@ export type InvestmentSplit = z.infer<typeof InvestmentSplitSchema>;
  */
 export function formatRatio(multiplier: number): string {
   if (!Number.isFinite(multiplier) || multiplier <= 0) return 'unknown ratio';
-  if (multiplier >= 1) {
+  // multiplier === 1 is a no-op (no split). Copilot almost certainly never
+  // writes one, but guard against the misleading "1-for-1 reverse split"
+  // label if it ever does.
+  if (multiplier === 1) return 'unknown ratio';
+  if (multiplier > 1) {
     // Reverse split: 1/M shares become 1. e.g. multiplier 2 → 1-for-2 reverse.
     const denom = Math.round(multiplier);
     if (Math.abs(multiplier - denom) < 0.01) return `1-for-${denom} reverse split`;
