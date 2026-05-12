@@ -261,8 +261,10 @@ describe('LiveBudgetsTools.getBudgets', () => {
 
     const result = await tools.getBudgets({});
 
-    // current.amount=null → parseAmount returns undefined → neither `amount` nor
-    // an `amounts` entry is produced for the current month; histories is empty too.
+    // current.amount=null → parseAmount returns null → neither `amount` nor
+    // an `amounts` entry is produced for the current month (the conditional
+    // spread `...(amount !== null ? { amount } : {})` omits the key, so the
+    // field is `undefined` on the output object); histories is empty too.
     // projectCategory drops the row entirely (no current amount AND no history amounts).
     expect(result.count).toBe(0);
   });

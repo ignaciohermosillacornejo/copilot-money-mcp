@@ -148,6 +148,36 @@ describe('paginate — offset semantics (counts from the end)', () => {
   });
 });
 
+describe('clampMaxRows — override paths', () => {
+  test('defaultValue override is used when input is undefined', () => {
+    expect(clampMaxRows(undefined, { defaultValue: 100 })).toBe(100);
+  });
+
+  test('defaultValue override is used when input is non-finite', () => {
+    expect(clampMaxRows(Number.NaN, { defaultValue: 50 })).toBe(50);
+    expect(clampMaxRows(Number.POSITIVE_INFINITY, { defaultValue: 50 })).toBe(50);
+  });
+
+  test('hardMax override caps inputs above its value', () => {
+    expect(clampMaxRows(20_000, { hardMax: 10_000 })).toBe(10_000);
+  });
+
+  test('hardMax override accepts values at and below its value', () => {
+    expect(clampMaxRows(10_000, { hardMax: 10_000 })).toBe(10_000);
+    expect(clampMaxRows(7_500, { hardMax: 10_000 })).toBe(7_500);
+  });
+
+  test('MIN_MAX_ROWS floor still applies under override', () => {
+    expect(clampMaxRows(0, { hardMax: 10_000, defaultValue: 100 })).toBe(MIN_MAX_ROWS);
+    expect(clampMaxRows(-5, { hardMax: 10_000, defaultValue: 100 })).toBe(MIN_MAX_ROWS);
+  });
+
+  test('default hardMax / defaultValue still applies when not overridden', () => {
+    expect(clampMaxRows(undefined)).toBe(DEFAULT_MAX_ROWS);
+    expect(clampMaxRows(100_000)).toBe(HARD_MAX_ROWS);
+  });
+});
+
 describe('paginate — slicing math', () => {
   test('big series, max=500, offset=0 → tail (indices 1000..1499)', () => {
     const r = paginate(big, { max_rows: 500, offset: 0 });
