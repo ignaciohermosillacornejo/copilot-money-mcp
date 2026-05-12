@@ -42,6 +42,7 @@ import type { DailySpendNode } from './graphql/queries/monthly-spend.js';
 import type { HoldingNode } from './graphql/queries/holdings.js';
 import { fetchUser, type UserNode } from './graphql/queries/user.js';
 import type { Transaction } from '../models/index.js';
+import { ONE_HOUR_MS, SIX_HOURS_MS, ONE_DAY_MS, ONE_WEEK_MS } from '../utils/durations.js';
 
 export interface LiveDatabaseOptions {
   verbose?: boolean;
@@ -49,10 +50,6 @@ export interface LiveDatabaseOptions {
 
 const RETRY_BACKOFF_MS = 500;
 
-const ONE_HOUR_MS = 60 * 60 * 1000;
-const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
-const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-const ONE_WEEK_MS = 7 * ONE_DAY_MS;
 const DEFAULT_MAX_TX_ROWS = 20_000;
 
 export class LiveCopilotDatabase {

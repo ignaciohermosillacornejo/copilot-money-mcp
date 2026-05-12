@@ -82,6 +82,7 @@ import {
 import type { TimeFrame } from '../../core/graphql/queries/_shared.js';
 import { GraphQLError } from '../../core/graphql/client.js';
 import { paginate, DEFAULT_MAX_ROWS } from '../../utils/pagination.js';
+import { FIVE_MIN_MS, ONE_HOUR_MS } from '../../utils/durations.js';
 
 const TIME_FRAMES: TimeFrame[] = [
   'ONE_DAY',
@@ -92,11 +93,6 @@ const TIME_FRAMES: TimeFrame[] = [
   'ONE_YEAR',
   'ALL',
 ];
-
-/** Intraday TTL — 5 minutes. Prices change throughout the trading day. */
-const FIVE_MIN_MS = 5 * 60 * 1000;
-/** Daily TTL — 1 hour. Daily closes only update at end-of-day. */
-const ONE_HOUR_MS = 60 * 60 * 1000;
 
 const DEFAULT_TIME_FRAME: TimeFrame = 'ONE_MONTH';
 
