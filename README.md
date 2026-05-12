@@ -204,7 +204,7 @@ The `period` parameter supports these shortcuts:
 
 ## Authentication & Optional Modes
 
-Both `--live-reads` and `--write` make authenticated calls to Copilot Money's GraphQL API at `app.copilot.money/api/graphql`. They require a **logged-in browser session** against `app.copilot.money` — the server reads the same Firebase refresh token the web app stores in your browser (Chrome/Safari/Firefox).
+Both `--live-reads` and `--write` make authenticated calls to Copilot Money's GraphQL API at `app.copilot.money/api/graphql`. They require a **logged-in browser session** against `app.copilot.money` — the server reads the same Firebase refresh token the web app stores in your browser (Chrome, Arc, Safari, or Firefox).
 
 Default mode requires no authentication and makes zero network requests — reads come from the local LevelDB cache.
 
@@ -217,7 +217,7 @@ copilot-money-mcp --live-reads
 Replaces 6 cache-mode read tools (`get_transactions`, `get_accounts`, `get_categories`, `get_budgets`, `get_recurring_transactions`, `get_holdings`) with live GraphQL-backed equivalents, and adds 7 net-new ones (`get_tags_live`, `get_networth_live`, `get_upcoming_recurrings_live`, `get_monthly_spend_live`, `get_balance_history_live`, `get_investment_prices_live`, `refresh_cache`).
 
 Use this when:
-- You need transactions outside the macOS app's local-cache window (most caches hold ~30 days).
+- You need transactions the macOS app hasn't pre-fetched yet (the auto-fetch window is typically ~30 days; past that, open the app and scroll back to force the cache to populate, or use `--live-reads` to query the server directly).
 - You want fresh per-security cost basis or balance-over-time data.
 - The macOS app hasn't synced recently.
 
@@ -270,7 +270,7 @@ This server reads from Copilot Money's **local Firestore cache**, not the cloud.
 
 `get_investment_splits` returns split events (date + adjustment multiplier) for securities you currently hold. Securities you no longer hold eventually fall out of the cache. There's no GraphQL endpoint for splits, so this is the only path.
 
-Also: `get_investment_prices` / `_live` already return split- and dividend-adjusted prices (Copilot applies Plaid's adjustment factors server-side). You generally don't need raw split events to back-correct prices.
+Also: `get_investment_prices` and `get_investment_prices_live` already return split- and dividend-adjusted prices (Copilot applies Plaid's adjustment factors server-side). You generally don't need raw split events to back-correct prices.
 
 ### Live investment prices are ownership-gated
 
