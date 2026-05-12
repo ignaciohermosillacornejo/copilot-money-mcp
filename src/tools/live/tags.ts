@@ -60,7 +60,12 @@ export class LiveTagsTools {
 export function createLiveTagsToolSchema() {
   return {
     name: 'get_tags_live',
-    description: 'Get user tags (live, GraphQL-backed). Available when --live-reads is on.',
+    description:
+      'Get all user tags (live, GraphQL-backed). Each row carries `id`, `name`, and `color`. ' +
+      'No cache-mode counterpart exists — tags are additive in live mode. ' +
+      'Use this to enumerate tag IDs before calling `get_transactions_live` with a tag filter, ' +
+      'or to enrich transaction-tag references with human-readable names. ' +
+      'Available when --live-reads is on.',
     inputSchema: {
       type: 'object' as const,
       properties: {},

@@ -211,12 +211,12 @@ export function createLiveHoldingsToolSchema() {
           description: "Filter — case-insensitive match on the security's ticker symbol.",
         },
         limit: {
-          type: 'number',
+          type: 'integer',
           description: `Max rows to return. Default ${DEFAULT_LIMIT}, clamped to [${MIN_LIMIT}, ${MAX_LIMIT}].`,
           default: DEFAULT_LIMIT,
         },
         offset: {
-          type: 'number',
+          type: 'integer',
           description: 'Pagination offset (>= 0). Default 0.',
           default: 0,
         },

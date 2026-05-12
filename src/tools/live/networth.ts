@@ -140,10 +140,10 @@ export function createLiveNetworthToolSchema() {
           type: 'string',
           enum: ['ALL', 'YEAR', 'MONTH', 'YTD'],
           description:
-            'TimeFrame enum passed through to the Networth query. Default "YTD" ' +
-            '(tightened on 2026-05 to fit the default response under the MCP token cap). ' +
-            'Pass "ALL" for full history. Other values are passed through unchanged; ' +
-            'the server is the source of truth on which TimeFrame values it accepts.',
+            "TimeFrame enum passed through to the Networth query. Default 'YTD' " +
+            "(tightened from 'ALL' on 2026-05). Note: this enum is smaller than the canonical " +
+            'TimeFrame used by other live time-series tools (no ONE_DAY/ONE_WEEK/ONE_MONTH/' +
+            'THREE_MONTHS/ONE_YEAR). The Networth GraphQL endpoint accepts only these four values.',
           default: DEFAULT_TIME_FRAME,
         },
         max_rows: {

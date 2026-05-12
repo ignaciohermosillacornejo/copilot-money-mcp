@@ -236,7 +236,8 @@ export function createRefreshCacheToolSchema() {
       },
     },
     annotations: {
-      readOnlyHint: false,
+      // Like refresh_database, this only flushes in-memory state — no user data is mutated.
+      readOnlyHint: true,
     },
   };
 }

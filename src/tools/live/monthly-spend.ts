@@ -117,7 +117,10 @@ export function createLiveMonthlySpendToolSchema() {
       '`comparison_amount` (same-day-of-prior-period spend, used by the web app ' +
       'for "vs last month" deltas). Future-dated placeholder rows (where both ' +
       'amounts are null) are filtered out by default; pass `include_future: true` ' +
-      'to opt in to the full padded series. Available when --live-reads is on.',
+      'to opt in to the full padded series. Available when --live-reads is on. ' +
+      'No pagination — the response is always ≤31 daily rows (one month). ' +
+      'The other time-series live tools expose `max_rows`/`offset`/`total_rows`/`truncated` ' +
+      "for capping long histories; this tool doesn't need them at this scale.",
     inputSchema: {
       type: 'object' as const,
       properties: {

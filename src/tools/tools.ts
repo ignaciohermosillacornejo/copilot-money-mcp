@@ -3782,6 +3782,8 @@ export function createToolSchemas(): ToolSchema[] {
     {
       name: 'get_transactions',
       description:
+        "Reads from the local LevelDB cache, which may lag behind Copilot's server if the macOS app hasn't synced recently. " +
+        'For real-time data use --live-reads with `get_transactions_live`. ' +
         'Unified transaction retrieval tool. Supports multiple modes: ' +
         '(1) Filter-based: Use period, date range, category, merchant, amount filters. ' +
         '(2) Single lookup: Provide transaction_id to get one transaction. ' +

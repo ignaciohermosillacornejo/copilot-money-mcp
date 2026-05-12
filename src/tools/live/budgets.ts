@@ -161,7 +161,10 @@ export function createLiveBudgetsToolSchema() {
     description:
       "Get budgets from Copilot's native budget tracking (live, GraphQL-backed). " +
       'Projects per-category budgets from the categories cache — the same fetch that ' +
-      'powers get_categories_live populates this. Replaces get_budgets when --live-reads is on.',
+      'powers get_categories_live populates this. Replaces get_budgets when --live-reads is on. ' +
+      'Note: live mode does not include `name`, `period`, `start_date`, `end_date`, `is_active`, ' +
+      "or `iso_currency_code` per budget — those fields aren't exposed on Copilot's GraphQL endpoint. " +
+      'Use cache-mode `get_budgets` if you need them.',
     inputSchema: {
       type: 'object' as const,
       properties: {

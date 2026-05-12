@@ -285,8 +285,8 @@ describe('createLiveHoldingsToolSchema', () => {
     const props = schema.inputSchema.properties as Record<string, { type: string }>;
     expect(props.account_id?.type).toBe('string');
     expect(props.ticker_symbol?.type).toBe('string');
-    expect(props.limit?.type).toBe('number');
-    expect(props.offset?.type).toBe('number');
+    expect(props.limit?.type).toBe('integer');
+    expect(props.offset?.type).toBe('integer');
     // All filters are opt-in.
     expect((schema.inputSchema as { required?: string[] }).required ?? []).toEqual([]);
   });
