@@ -56,14 +56,25 @@ export interface PaginationResult<T> {
   truncated: boolean;
 }
 
+export interface ClampMaxRowsOpts {
+  /** Override the upper bound (default HARD_MAX_ROWS = 5000). */
+  hardMax?: number;
+  /** Override the fallback used when the input is undefined/non-finite (default DEFAULT_MAX_ROWS = 500). */
+  defaultValue?: number;
+}
+
 /**
- * Clamp `max_rows` to [MIN_MAX_ROWS, HARD_MAX_ROWS]. Non-finite or omitted
- * values resolve to DEFAULT_MAX_ROWS. Fractional inputs are floored.
+ * Clamp `max_rows` to [MIN_MAX_ROWS, hardMax]. Non-finite or omitted values
+ * resolve to `defaultValue`. Fractional inputs are floored. Defaults preserve
+ * the original behavior (hardMax=5000, defaultValue=500); pass overrides for
+ * tools with a different limit shape (e.g. holdings caps at 10000).
  */
-export function clampMaxRows(n: number | undefined): number {
-  if (n === undefined) return DEFAULT_MAX_ROWS;
-  if (!Number.isFinite(n)) return DEFAULT_MAX_ROWS;
-  return Math.max(MIN_MAX_ROWS, Math.min(HARD_MAX_ROWS, Math.floor(n)));
+export function clampMaxRows(n: number | undefined, opts: ClampMaxRowsOpts = {}): number {
+  const hardMax = opts.hardMax ?? HARD_MAX_ROWS;
+  const def = opts.defaultValue ?? DEFAULT_MAX_ROWS;
+  if (n === undefined) return def;
+  if (!Number.isFinite(n)) return def;
+  return Math.max(MIN_MAX_ROWS, Math.min(hardMax, Math.floor(n)));
 }
 
 /**
