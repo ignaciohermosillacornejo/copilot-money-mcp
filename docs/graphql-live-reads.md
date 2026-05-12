@@ -77,7 +77,7 @@ All errors surface as `isError: true` tool results.
 
 All migration phases are complete — every cache-mode read that has a GraphQL counterpart now ships a `_live` variant. Future work focuses on measurement (latency, cache-hit rates) ahead of any decision to flip `--live-reads` on by default. See [`docs/tools-by-mode.md`](./tools-by-mode.md) for the current inventory.
 
-## Cache architecture (Phase 2+)
+## Cache architecture (live-reads mode)
 
 When `--live-reads` is on, reads are served through an in-memory tiered cache:
 

@@ -2153,12 +2153,11 @@ export class CopilotMoneyTools {
       ratio_description: string;
     }>;
   }> {
-    const { ticker_symbol, start_date, end_date } = options;
+    const { ticker_symbol } = options;
     const validatedLimit = validateLimit(options.limit, DEFAULT_QUERY_LIMIT);
     const validatedOffset = validateOffset(options.offset);
-
-    if (start_date) validateDate(start_date, 'start_date');
-    if (end_date) validateDate(end_date, 'end_date');
+    const start_date = validateDate(options.start_date, 'start_date');
+    const end_date = validateDate(options.end_date, 'end_date');
 
     // Load splits (applies ticker filter at the doc level).
     const docs = await this.db.getInvestmentSplits({ tickerSymbol: ticker_symbol });
