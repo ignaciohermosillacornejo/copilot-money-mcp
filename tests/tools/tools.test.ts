@@ -593,8 +593,7 @@ describe('CopilotMoneyTools', () => {
     });
 
     test('filters by tag name resolves to any tag id that shares the name', async () => {
-      // If two tag docs share the same name, a transaction tagged with either
-      // ID should match when filtering by that name.
+      // Two tag docs sharing a name: a transaction tagged with either ID should match.
       const taggedTxn: Transaction = {
         transaction_id: 'txn_tagged_dup',
         amount: 80.0,
