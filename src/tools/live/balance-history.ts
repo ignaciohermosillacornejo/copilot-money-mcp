@@ -51,6 +51,7 @@ import {
 import type { TimeFrame } from '../../core/graphql/queries/_shared.js';
 import { paginate, DEFAULT_MAX_ROWS } from '../../utils/pagination.js';
 import { ONE_HOUR_MS } from '../../utils/durations.js';
+import { makeTupleKey } from '../../utils/cache-key.js';
 
 const TIME_FRAMES: TimeFrame[] = [
   'ONE_DAY',
@@ -61,14 +62,6 @@ const TIME_FRAMES: TimeFrame[] = [
   'ONE_YEAR',
   'ALL',
 ];
-
-/**
- * Sentinel key segment for "no timeFrame passed" so an explicit `'ALL'`
- * never collides with an omitted argument. The two are semantically
- * different (server default vs explicit ALL) — keep their cache entries
- * separate to honor that distinction.
- */
-const DEFAULT_TIME_FRAME_KEY = 'DEFAULT';
 
 export interface GetBalanceHistoryLiveArgs {
   /** Plaid item ID. Required by the server. */
@@ -113,14 +106,6 @@ interface CacheEntry {
   fetched_at: number;
 }
 
-function makeKey(itemId: string, accountId: string, timeFrame?: TimeFrame): string {
-  // Use \0 (null byte) as the separator — Plaid IDs today are alphanumeric +
-  // hyphen, but the colon variant of this function would have aliased
-  // (itemId="foo:bar", accountId="baz") with (itemId="foo", accountId="bar:baz").
-  // \0 cannot appear in either field so the join is injectively reversible.
-  return `${itemId}\0${accountId}\0${timeFrame ?? DEFAULT_TIME_FRAME_KEY}`;
-}
-
 export class LiveBalanceHistoryTools {
   /**
    * Per-(itemId, accountId, timeFrame) cache. Bounded by the small product
@@ -151,7 +136,7 @@ export class LiveBalanceHistoryTools {
     }
 
     const startedAt = Date.now();
-    const key = makeKey(args.item_id, args.account_id, args.time_frame);
+    const key = makeTupleKey(args.item_id, args.account_id, args.time_frame);
 
     let entry = this.cache.get(key);
     let hit = false;

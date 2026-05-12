@@ -44,10 +44,9 @@
  *     close is the user's responsibility (refresh_cache --scope
  *     investment_prices).
  *
- * Cache key for both maps: `${security_id}\0${time_frame ?? 'DEFAULT'}`.
- * The null-byte separator avoids the colon-aliasing pitfall noted in the
- * balance-history cache (see its JSDoc). A `'DEFAULT'` sentinel keeps the
- * "omitted time_frame" entry distinct from any explicit enum value.
+ * Cache key for both maps is composed via `makeTupleKey(security_id,
+ * time_frame)` — see `src/utils/cache-key.ts` for the null-byte
+ * separator + omitted-arg sentinel rationale.
  *
  * The cache lives on this class (not `LiveCopilotDatabase`) because the
  * keying is per-request and tightly coupled to the tool's call shape, the
@@ -83,6 +82,7 @@ import type { TimeFrame } from '../../core/graphql/queries/_shared.js';
 import { GraphQLError } from '../../core/graphql/client.js';
 import { paginate, DEFAULT_MAX_ROWS } from '../../utils/pagination.js';
 import { FIVE_MIN_MS, ONE_HOUR_MS } from '../../utils/durations.js';
+import { makeTupleKey } from '../../utils/cache-key.js';
 
 const TIME_FRAMES: TimeFrame[] = [
   'ONE_DAY',
@@ -95,14 +95,6 @@ const TIME_FRAMES: TimeFrame[] = [
 ];
 
 const DEFAULT_TIME_FRAME: TimeFrame = 'ONE_MONTH';
-
-/**
- * Sentinel key segment for "no timeFrame passed" so an explicit `'ALL'`
- * never collides with an omitted argument. The two are semantically
- * different (server default vs explicit ALL) — keep their cache entries
- * separate to honor that distinction.
- */
-const DEFAULT_TIME_FRAME_KEY = 'DEFAULT';
 
 /**
  * Time frames that route to the high-frequency (intraday) query. Anything
@@ -154,12 +146,6 @@ interface DailyCacheEntry {
 interface IntradayCacheEntry {
   rows: HighFrequencyPricePointNode[];
   fetched_at: number;
-}
-
-function makeKey(securityId: string, timeFrame?: TimeFrame): string {
-  // \0 (null byte) cannot appear in either field, so the join is injectively
-  // reversible. See balance-history.ts for the colon-aliasing rationale.
-  return `${securityId}\0${timeFrame ?? DEFAULT_TIME_FRAME_KEY}`;
 }
 
 function isIntraday(timeFrame: TimeFrame): boolean {
@@ -253,7 +239,7 @@ export class LiveInvestmentPricesTools {
 
     const timeFrame: TimeFrame = args.time_frame ?? DEFAULT_TIME_FRAME;
     const intraday = isIntraday(timeFrame);
-    const key = makeKey(args.security_id, args.time_frame);
+    const key = makeTupleKey(args.security_id, args.time_frame);
     const startedAt = Date.now();
 
     let granularity: PriceGranularity;
