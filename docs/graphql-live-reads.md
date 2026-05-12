@@ -1,8 +1,8 @@
 # GraphQL Live Reads
 
-The `--live-reads` CLI flag swaps the cache-backed `get_transactions` MCP tool for a GraphQL-backed `get_transactions_live` that reads directly from Copilot's web API. Use it when the local LevelDB cache is missing data for the window you need — most commonly for historical reconciliation like `/amazon-sync` on older years.
+The `--live-reads` CLI flag swaps cache-backed read tools for GraphQL-backed `_live` equivalents that read directly from Copilot's web API. Use it when the local LevelDB cache is missing data for the window you need — most commonly for historical reconciliation like `/amazon-sync` on older years — or whenever you want freshness guarantees the local cache can't give.
 
-This is Phase 1 of a progressive migration off LevelDB. See `docs/superpowers/specs/2026-04-23-graphql-live-reads-design.md` for the full roadmap.
+The progressive migration off LevelDB is now complete for every entity that has a usable GraphQL endpoint: 13 `_live` tools ship today, covering transactions, accounts, categories, budgets, recurring transactions, holdings, tags, net worth, upcoming recurrings, monthly spend, balance history, investment prices, plus a `refresh_cache` utility. See [`docs/tools-by-mode.md`](./tools-by-mode.md) for the full per-tool inventory and which cache-mode tools `--live-reads` swaps vs. adds alongside.
 
 ## Starting with live reads
 
@@ -75,7 +75,7 @@ All errors surface as `isError: true` tool results.
 
 `_live` suffix is transitional. When every cache-backed read tool has a GraphQL-backed equivalent and measurement shows live reads are fast enough, a future release will flip `--live-reads` on by default and rename `get_<entity>_live` → `get_<entity>`, retiring the flag.
 
-Current phase: **1** — only `get_transactions_live`. Phases 2..N will add `_live` variants for accounts, categories, budgets, recurring transactions, and tags.
+All migration phases are complete — every cache-mode read that has a GraphQL counterpart now ships a `_live` variant. Future work focuses on measurement (latency, cache-hit rates) ahead of any decision to flip `--live-reads` on by default. See [`docs/tools-by-mode.md`](./tools-by-mode.md) for the current inventory.
 
 ## Cache architecture (Phase 2+)
 

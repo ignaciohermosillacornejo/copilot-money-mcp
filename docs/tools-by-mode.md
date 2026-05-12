@@ -14,6 +14,7 @@ This server exposes different tools depending on which CLI flags you enable. The
 | `get_holdings` | ✅ | Investment positions with cost basis (cached) |
 | `get_balance_history` | ✅ | Daily balance history; supports cross-account + daily/weekly/monthly granularity |
 | `get_investment_prices` | ✅ | Historical price data |
+| `get_investment_splits` | ⚠️ | Cache-only — returns stock-split events (date + multiplier) for held securities that have split. Empty for securities that never split. Note that prices from `get_investment_prices` are already split-adjusted; use this tool only for narrative/historical analysis. |
 | `get_goals` | ⚠️ | Cache-only — Copilot's GraphQL endpoint doesn't expose goals data, so no `--live-reads` counterpart exists |
 | `get_goal_history` | ⚠️ | Same — cache-only forever |
 | `get_cache_info` | ✅ | Local cache metadata (utility) |
@@ -62,6 +63,6 @@ When enabled, 6 cache-mode read tools are replaced with GraphQL-backed equivalen
 |---|---|
 | Goals (`get_goals`, `get_goal_history`) | ⚠️ Cache-only. Copilot's GraphQL endpoint doesn't expose goals. There is no live counterpart, and there are no goal write tools (goals are desktop-only in Copilot). |
 | Goal write tools (`create_goal` / `update_goal` / `delete_goal`) | ❌ Not implemented. Copilot doesn't expose goal mutations via GraphQL. |
-| Stock-split data | ⚠️ Copilot's local cache contains only empty placeholder records (no split dates / ratios), and there is no GraphQL endpoint for splits. The previous `get_investment_splits` cache-mode tool returned no useful data and was removed. |
+| Stock-split data | ⚠️ Available via `get_investment_splits` for currently-held securities that have split (one row per `(security_id, effective_date)` with adjustment multiplier). Empty for securities that never split. Securities a user no longer holds eventually fall out of the cache. There is no GraphQL endpoint for splits — this is the only way to get them, and only for held securities. |
 | Long time-series responses | ⚠️ The MCP single-tool-result token cap means very long histories (e.g., multi-year daily prices or balances) are capped at 500 rows by default. Use `max_rows` / `offset` parameters, or narrow `time_frame` to fetch more. |
 | 🔒 Browser authentication | Both `--live-reads` and `--write` require a logged-in browser session against `app.copilot.money` (the server uses the same Firebase refresh-token flow as the web app). Reads in default mode require nothing. |
