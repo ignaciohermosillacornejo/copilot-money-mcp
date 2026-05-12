@@ -111,7 +111,7 @@ Then add to your Claude Desktop configuration (`~/Library/Application Support/Cl
 
 > "What are my top 5 spending categories this year?"
 
-Uses `get_transactions`, `get_categories` with date ranges, text search, and category filters.
+Uses `get_transactions` (or `get_transactions_live` for fresh data via `--live-reads`) and `get_categories` (or `get_categories_live`), with date ranges, text search, and category filters.
 
 ### Account Overview
 
@@ -121,13 +121,13 @@ Uses `get_transactions`, `get_categories` with date ranges, text search, and cat
 
 > "Which bank connections need attention?"
 
-Uses `get_accounts`, `get_balance_history`, `get_connection_status`.
+Uses `get_accounts` (or `get_accounts_live` for fresh balances via `--live-reads`), `get_balance_history` (with optional `get_balance_history_live` per-account live variant), `get_connection_status`, and `get_networth_live` for net-worth-over-time charts.
 
 ### Investment Portfolio
 
 > "What are my current holdings and total returns?"
 
-> "Show me AAPL price history for the past year"
+> "Show me the price history for my largest equity holding over the past year"
 
 > "What's my current cost basis on META?"
 
@@ -141,7 +141,7 @@ Uses `get_holdings` (or `get_holdings_live` for live cost basis), `get_investmen
 
 > "Show me my goal history over the past 6 months"
 
-Uses `get_budgets`, `get_goals`, `get_goal_history`.
+Uses `get_budgets` (or `get_budgets_live` via `--live-reads`), and `get_goals` / `get_goal_history` (cache-only — Copilot's GraphQL endpoint doesn't expose goal data).
 
 ### Subscriptions & Recurring
 
@@ -149,7 +149,7 @@ Uses `get_budgets`, `get_goals`, `get_goal_history`.
 
 > "How much do I spend on recurring charges per month?"
 
-Uses `get_recurring_transactions`.
+Uses `get_recurring_transactions` (or `get_recurring_live` via `--live-reads`) and `get_upcoming_recurrings_live` for next-due unpaid items.
 
 ## Configuration
 
@@ -202,6 +202,58 @@ The `period` parameter supports these shortcuts:
 
 `this_month` `last_month` `last_7_days` `last_30_days` `last_90_days` `ytd` `this_year` `last_year`
 
+## Authentication & Optional Modes
+
+Both `--live-reads` and `--write` make authenticated calls to Copilot Money's GraphQL API at `app.copilot.money/api/graphql`. They require a **logged-in browser session** against `app.copilot.money` — the server reads the same Firebase refresh token the web app stores in your browser (Chrome/Safari/Firefox).
+
+Default mode requires no authentication and makes zero network requests — reads come from the local LevelDB cache.
+
+### `--live-reads`: real-time reads via GraphQL
+
+```bash
+copilot-money-mcp --live-reads
+```
+
+Replaces 6 cache-mode read tools (`get_transactions`, `get_accounts`, `get_categories`, `get_budgets`, `get_recurring_transactions`, `get_holdings`) with live GraphQL-backed equivalents, and adds 7 net-new ones (`get_tags_live`, `get_networth_live`, `get_upcoming_recurrings_live`, `get_monthly_spend_live`, `get_balance_history_live`, `get_investment_prices_live`, `refresh_cache`).
+
+Use this when:
+- You need transactions outside the macOS app's local-cache window (most caches hold ~30 days).
+- You want fresh per-security cost basis or balance-over-time data.
+- The macOS app hasn't synced recently.
+
+### `--write`: mutations via GraphQL
+
+```bash
+copilot-money-mcp --write
+```
+
+Adds 17 mutation tools for transactions, tags, categories, recurrings, budgets, and split-transactions. Off by default — the server is read-only unless you opt in.
+
+### Combining both
+
+```bash
+copilot-money-mcp --live-reads --write
+```
+
+Live reads + write tools together — the most common power-user setup.
+
+### Configuring via Claude Desktop / Cursor
+
+Add the flags to the `args` array in your MCP config:
+
+```json
+{
+  "mcpServers": {
+    "copilot-money": {
+      "command": "copilot-money-mcp",
+      "args": ["--live-reads", "--write"]
+    }
+  }
+}
+```
+
+Restart Claude Desktop / Cursor after editing.
+
 ## Known Limitations
 
 ### Local Cache Dependency
@@ -209,6 +261,24 @@ The `period` parameter supports these shortcuts:
 This server reads from Copilot Money's **local Firestore cache**, not the cloud. Firestore's offline persistence caches every document the app has ever fetched, so the local database generally contains all transactions, accounts, budgets, goals, and other data you've viewed in the app. The default Firestore cache size is 100 MB (enough for tens of thousands of transactions), and older documents are only evicted via LRU garbage collection if that limit is exceeded.
 
 **To maximize cached data:** Open the Copilot Money app and browse through your data (transaction history, accounts, budgets) to ensure it has been fetched and cached locally.
+
+### Goals are read-only
+
+`get_goals` and `get_goal_history` work (cache-only), but there are no goal write tools — Copilot's GraphQL endpoint doesn't expose goal mutations. Goal creation, editing, and contributions are mobile-only in Copilot itself, and live in a path our project can't reach without iOS / desktop traffic capture.
+
+### Investment splits are limited to currently-held securities
+
+`get_investment_splits` returns split events (date + adjustment multiplier) for securities you currently hold. Securities you no longer hold eventually fall out of the cache. There's no GraphQL endpoint for splits, so this is the only path.
+
+Also: `get_investment_prices` / `_live` already return split- and dividend-adjusted prices (Copilot applies Plaid's adjustment factors server-side). You generally don't need raw split events to back-correct prices.
+
+### Live investment prices are ownership-gated
+
+`get_investment_prices_live` only works for securities currently in your linked accounts. Asking for a price series on a ticker you don't own returns an explicit "not in your linked accounts" error.
+
+### Long time-series responses are capped
+
+Time-series live tools (`get_balance_history_live`, `get_networth_live`, `get_investment_prices_live`) cap responses at 500 rows by default to fit the MCP single-tool-result token limit. Pass `max_rows` / `offset` to paginate, or narrow `time_frame` for fewer rows.
 
 ## Troubleshooting
 
