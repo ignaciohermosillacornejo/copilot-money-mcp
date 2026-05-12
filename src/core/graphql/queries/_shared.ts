@@ -25,6 +25,20 @@ export type TimeFrame =
   | 'ALL';
 
 /**
+ * All TimeFrame values, in display order. Use for MCP tool schema
+ * `enum:` constraints so the option list cannot drift from the union above.
+ */
+export const ALL_TIME_FRAMES: TimeFrame[] = [
+  'ONE_DAY',
+  'ONE_WEEK',
+  'ONE_MONTH',
+  'THREE_MONTHS',
+  'YTD',
+  'ONE_YEAR',
+  'ALL',
+];
+
+/**
  * Market hours metadata attached to each Security.
  *
  * Both fields are epoch milliseconds and may be `null` (e.g. for CASH

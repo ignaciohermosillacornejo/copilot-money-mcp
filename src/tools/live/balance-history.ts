@@ -48,20 +48,10 @@ import {
   fetchAccountBalanceHistory,
   type BalanceHistoryPointNode,
 } from '../../core/graphql/queries/balance-history.js';
-import type { TimeFrame } from '../../core/graphql/queries/_shared.js';
+import { ALL_TIME_FRAMES, type TimeFrame } from '../../core/graphql/queries/_shared.js';
 import { paginate, DEFAULT_MAX_ROWS } from '../../utils/pagination.js';
 import { ONE_HOUR_MS } from '../../utils/durations.js';
 import { makeTupleKey } from '../../utils/cache-key.js';
-
-const TIME_FRAMES: TimeFrame[] = [
-  'ONE_DAY',
-  'ONE_WEEK',
-  'ONE_MONTH',
-  'THREE_MONTHS',
-  'YTD',
-  'ONE_YEAR',
-  'ALL',
-];
 
 export interface GetBalanceHistoryLiveArgs {
   /** Plaid item ID. Required by the server. */
@@ -214,7 +204,7 @@ export function createLiveBalanceHistoryToolSchema() {
         },
         time_frame: {
           type: 'string',
-          enum: TIME_FRAMES,
+          enum: ALL_TIME_FRAMES,
           description: "Date range preset. Optional — omit to use the server's default range.",
         },
         max_rows: {

@@ -78,21 +78,11 @@ import {
   fetchSecurityPricesHighFrequency,
   type HighFrequencyPricePointNode,
 } from '../../core/graphql/queries/security-prices-high-frequency.js';
-import type { TimeFrame } from '../../core/graphql/queries/_shared.js';
+import { ALL_TIME_FRAMES, type TimeFrame } from '../../core/graphql/queries/_shared.js';
 import { GraphQLError } from '../../core/graphql/client.js';
 import { paginate, DEFAULT_MAX_ROWS } from '../../utils/pagination.js';
 import { FIVE_MIN_MS, ONE_HOUR_MS } from '../../utils/durations.js';
 import { makeTupleKey } from '../../utils/cache-key.js';
-
-const TIME_FRAMES: TimeFrame[] = [
-  'ONE_DAY',
-  'ONE_WEEK',
-  'ONE_MONTH',
-  'THREE_MONTHS',
-  'YTD',
-  'ONE_YEAR',
-  'ALL',
-];
 
 const DEFAULT_TIME_FRAME: TimeFrame = 'ONE_MONTH';
 
@@ -339,7 +329,7 @@ export function createLiveInvestmentPricesToolSchema() {
         },
         time_frame: {
           type: 'string',
-          enum: TIME_FRAMES,
+          enum: ALL_TIME_FRAMES,
           description:
             'Date range. Default: ONE_MONTH. ONE_DAY and ONE_WEEK return intraday timestamps; ' +
             'larger ranges return daily closes.',
