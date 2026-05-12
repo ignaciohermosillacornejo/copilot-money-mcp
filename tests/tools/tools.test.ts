@@ -342,6 +342,9 @@ describe('CopilotMoneyTools', () => {
         current_balance: 5000,
       },
     ];
+    (db as any)._tags = [];
+    (db as any)._allCollectionsLoaded = true;
+    (db as any)._cacheLoadedAt = Date.now();
 
     tools = new CopilotMoneyTools(db);
   });
@@ -509,69 +512,122 @@ describe('CopilotMoneyTools', () => {
       expect(result.transactions[0].name).toBe('Grocery Store');
     });
 
-    test('filters by tag', async () => {
+    test('filters by tag name and matches transaction with corresponding opaque tag id', async () => {
+      // Transactions store opaque Firestore-generated tag IDs in tag_ids,
+      // not the human-readable name. The filter must resolve name -> id.
       const taggedTxn: Transaction = {
         transaction_id: 'txn_tagged',
         amount: 55.0,
         date: '2024-01-30',
-        name: 'Business Lunch',
+        name: 'Lunch Out',
         category_id: 'food_dining',
         account_id: 'acc1',
-        tag_ids: ['work', 'expense'],
+        tag_ids: ['9qyEMnfMXknwvx9OnYhk'],
       };
       (db as any)._transactions = [...mockTransactions, taggedTxn];
+      (db as any)._tags = [{ tag_id: '9qyEMnfMXknwvx9OnYhk', name: 'Tahiti' }];
 
-      const result = await tools.getTransactions({ tag: 'work' });
+      const result = await tools.getTransactions({ tag: 'Tahiti' });
       expect(result.count).toBe(1);
-      expect(result.transactions[0].tag_ids).toContain('work');
+      expect(result.transactions[0].transaction_id).toBe('txn_tagged');
+    });
+
+    test('filters by tag is case-insensitive on name', async () => {
+      const taggedTxn: Transaction = {
+        transaction_id: 'txn_tagged_case',
+        amount: 200.0,
+        date: '2024-01-30',
+        name: 'Hotel Stay',
+        category_id: 'travel',
+        account_id: 'acc1',
+        tag_ids: ['9qyEMnfMXknwvx9OnYhk'],
+      };
+      (db as any)._transactions = [...mockTransactions, taggedTxn];
+      (db as any)._tags = [{ tag_id: '9qyEMnfMXknwvx9OnYhk', name: 'Tahiti' }];
+
+      const result = await tools.getTransactions({ tag: 'TAHITI' });
+      expect(result.count).toBe(1);
+      expect(result.transactions[0].transaction_id).toBe('txn_tagged_case');
     });
 
     test('filters by tag with # prefix strips the #', async () => {
       const taggedTxn: Transaction = {
-        transaction_id: 'txn_tagged2',
+        transaction_id: 'txn_tagged_hash',
         amount: 65.0,
         date: '2024-01-30',
-        name: 'Office Supplies',
+        name: 'Souvenirs',
         category_id: 'shopping',
         account_id: 'acc1',
-        tag_ids: ['business'],
+        tag_ids: ['9qyEMnfMXknwvx9OnYhk'],
       };
       (db as any)._transactions = [...mockTransactions, taggedTxn];
+      (db as any)._tags = [{ tag_id: '9qyEMnfMXknwvx9OnYhk', name: 'Tahiti' }];
 
-      const result = await tools.getTransactions({ tag: '#business' });
+      const result = await tools.getTransactions({ tag: '#Tahiti' });
       expect(result.count).toBe(1);
-      expect(result.transactions[0].tag_ids).toContain('business');
+      expect(result.transactions[0].transaction_id).toBe('txn_tagged_hash');
     });
 
-    test('filters by tag is case-insensitive', async () => {
+    test('filters by unknown tag name returns no rows', async () => {
       const taggedTxn: Transaction = {
-        transaction_id: 'txn_tag_case',
-        amount: 200.0,
-        date: '2024-01-30',
-        name: 'Hotel Bora Bora',
-        category_id: 'travel',
-        account_id: 'acc1',
-        tag_ids: ['FrenchPolynesia'],
-      };
-      (db as any)._transactions = [...mockTransactions, taggedTxn];
-
-      const result = await tools.getTransactions({ tag: 'frenchpolynesia' });
-      expect(result.count).toBe(1);
-    });
-
-    test('filters by tag excludes transactions without tag_ids', async () => {
-      const untaggedTxn: Transaction = {
-        transaction_id: 'txn_no_tags',
+        transaction_id: 'txn_tagged_other',
         amount: 50.0,
         date: '2024-01-30',
         name: 'Dinner',
         category_id: 'food_dining',
         account_id: 'acc1',
+        tag_ids: ['9qyEMnfMXknwvx9OnYhk'],
       };
-      (db as any)._transactions = [...mockTransactions, untaggedTxn];
+      (db as any)._transactions = [...mockTransactions, taggedTxn];
+      (db as any)._tags = [{ tag_id: '9qyEMnfMXknwvx9OnYhk', name: 'Tahiti' }];
 
-      const result = await tools.getTransactions({ tag: 'vacation' });
+      const result = await tools.getTransactions({ tag: 'no-such-tag' });
       expect(result.count).toBe(0);
+    });
+
+    test('filters by tag name resolves to any tag id that shares the name', async () => {
+      // If two tag docs share the same name, a transaction tagged with either
+      // ID should match when filtering by that name.
+      const taggedTxn: Transaction = {
+        transaction_id: 'txn_tagged_dup',
+        amount: 80.0,
+        date: '2024-01-30',
+        name: 'Excursion',
+        category_id: 'travel',
+        account_id: 'acc1',
+        tag_ids: ['B'],
+      };
+      (db as any)._transactions = [...mockTransactions, taggedTxn];
+      (db as any)._tags = [
+        { tag_id: 'A', name: 'Tahiti' },
+        { tag_id: 'B', name: 'Tahiti' },
+      ];
+
+      const result = await tools.getTransactions({ tag: 'Tahiti' });
+      expect(result.count).toBe(1);
+      expect(result.transactions[0].transaction_id).toBe('txn_tagged_dup');
+    });
+
+    test('filters by tag still matches legacy id-equals-name tags', async () => {
+      // Older tags can have an ID that happens to equal their name. The filter
+      // must still resolve the input name to that ID so transactions referencing
+      // the legacy ID continue to match. This pins the behavior that masked the
+      // original bug.
+      const taggedTxn: Transaction = {
+        transaction_id: 'txn_legacy_tag',
+        amount: 75.0,
+        date: '2024-01-30',
+        name: 'Legacy Tagged',
+        category_id: 'travel',
+        account_id: 'acc1',
+        tag_ids: ['frenchpolynesia'],
+      };
+      (db as any)._transactions = [...mockTransactions, taggedTxn];
+      (db as any)._tags = [{ tag_id: 'frenchpolynesia', name: 'frenchpolynesia' }];
+
+      const result = await tools.getTransactions({ tag: 'frenchpolynesia' });
+      expect(result.count).toBe(1);
+      expect(result.transactions[0].transaction_id).toBe('txn_legacy_tag');
     });
 
     test('filters by transaction_type hsa_eligible', async () => {
