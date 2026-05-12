@@ -22,6 +22,7 @@ import {
   fetchMonthlySpend,
   type DailySpendNode,
 } from '../../core/graphql/queries/monthly-spend.js';
+import { parseAmount } from '../../utils/round.js';
 
 export interface GetMonthlySpendLiveArgs {
   /**
@@ -45,12 +46,6 @@ export interface GetMonthlySpendLiveResult {
   _cache_oldest_fetched_at: string;
   _cache_newest_fetched_at: string;
   _cache_hit: boolean;
-}
-
-function parseAmount(value: string | null | undefined): number | null {
-  if (value === null || value === undefined) return null;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
 }
 
 function projectRow(row: DailySpendNode): GetMonthlySpendLiveDay {

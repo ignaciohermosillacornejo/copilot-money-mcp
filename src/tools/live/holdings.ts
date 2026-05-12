@@ -15,10 +15,9 @@
  *     CASH sleeves inside investment accounts), all four are omitted from
  *     the output rather than emitted as `null` — `is_cash_equivalent` on
  *     the same row tells the caller why.
- *   - `total_return_percent = (totalReturn / costBasis) * 100`, floored at
- *     the 2-decimal-place position to mirror Copilot's web UI display
- *     convention. Guards against `costBasis === 0` (would produce
- *     Infinity/NaN) by omitting the field in that case.
+ *   - `total_return_percent` is computed by `computeTotalReturnPercent`
+ *     (see `src/utils/round.ts`) — floored to 2dp matching Copilot's web
+ *     UI display convention; omitted when `costBasis === 0`.
  *   - `is_cash_equivalent` is derived from `security.type === 'CASH'`,
  *     NOT from the absence of metrics. Non-cash positions may also lack
  *     metrics (rare, but possible for newly-imported securities).
@@ -34,7 +33,7 @@
 
 import type { LiveCopilotDatabase } from '../../core/live-database.js';
 import { fetchHoldings, type HoldingNode } from '../../core/graphql/queries/holdings.js';
-import { roundAmount } from '../../utils/round.js';
+import { computeTotalReturnPercent, roundAmount } from '../../utils/round.js';
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 10_000;
@@ -108,26 +107,8 @@ function projectHolding(h: HoldingNode): GetHoldingsLiveEntry {
     entry.cost_basis = roundAmount(h.metrics.costBasis);
     entry.average_cost = roundAmount(h.metrics.averageCost);
     entry.total_return = roundAmount(h.metrics.totalReturn);
-    // Divide-by-zero guard: costBasis === 0 would yield Infinity (positive
-    // return) or NaN (zero/zero) — neither is meaningful as a percentage.
-    // Omit the field instead so callers can detect "unavailable" cleanly.
-    //
-    // Denominator is `Math.abs(costBasis)` so a negative basis (short
-    // positions, margin accounts) preserves the sign of `totalReturn`:
-    // a short that goes against you (totalReturn < 0 with costBasis < 0)
-    // should report a negative percentage, not flip to positive via
-    // negative ÷ negative cancellation.
-    //
-    // Rounding: `Math.floor(percent * 100) / 100` floors at the
-    // 2-decimal-place position of the percent (toward negative infinity).
-    // This mirrors Copilot's web UI display convention, verified by direct
-    // comparison of two holdings against the UI's "Total return" field.
-    // Note this differs from the `roundAmount` (round-half-up) used for the
-    // other three derived fields above.
-    if (h.metrics.costBasis !== 0) {
-      const percent = (h.metrics.totalReturn / Math.abs(h.metrics.costBasis)) * 100;
-      entry.total_return_percent = Math.floor(percent * 100) / 100;
-    }
+    const pct = computeTotalReturnPercent(h.metrics.totalReturn, h.metrics.costBasis);
+    if (pct !== undefined) entry.total_return_percent = pct;
   }
 
   return entry;
