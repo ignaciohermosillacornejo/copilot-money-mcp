@@ -50,6 +50,7 @@ import {
 } from '../../core/graphql/queries/balance-history.js';
 import type { TimeFrame } from '../../core/graphql/queries/_shared.js';
 import { paginate, DEFAULT_MAX_ROWS } from '../../utils/pagination.js';
+import { ONE_HOUR_MS } from '../../utils/durations.js';
 
 const TIME_FRAMES: TimeFrame[] = [
   'ONE_DAY',
@@ -60,9 +61,6 @@ const TIME_FRAMES: TimeFrame[] = [
   'ONE_YEAR',
   'ALL',
 ];
-
-/** 1 hour. Balance history is daily-granular and rarely updates intraday. */
-const ONE_HOUR_MS = 60 * 60 * 1000;
 
 /**
  * Sentinel key segment for "no timeFrame passed" so an explicit `'ALL'`
