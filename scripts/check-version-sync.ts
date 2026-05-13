@@ -46,7 +46,9 @@ if (manifestVersion !== pkgVersion) {
 if (mismatches.length > 0) {
   console.error('Version sync check failed:');
   for (const m of mismatches) console.error(`  - ${m}`);
-  console.error('\nBump all four to the same value before publishing.');
+  console.error(
+    '\nBump all four version fields (package.json, server.json#version, server.json#packages[npm].version, manifest.json) to the same value before publishing.',
+  );
   process.exit(1);
 }
 
