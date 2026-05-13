@@ -8,7 +8,7 @@
 [![Tests](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/actions/workflows/test.yml)
 [![codecov](https://codecov.io/gh/ignaciohermosillacornejo/copilot-money-mcp/branch/main/graph/badge.svg)](https://codecov.io/gh/ignaciohermosillacornejo/copilot-money-mcp)
 [![copilot-money-mcp MCP server](https://glama.ai/mcp/servers/ignaciohermosillacornejo/copilot-money-mcp/badges/score.svg)](https://glama.ai/mcp/servers/ignaciohermosillacornejo/copilot-money-mcp)
-[![MCP Registry](https://img.shields.io/badge/MCP_Registry-copilot--money-blue)](https://registry.modelcontextprotocol.io/?q=copilot-money-mcp)
+[![MCP Registry](https://img.shields.io/badge/MCP_Registry-copilot--money--mcp-blue)](https://registry.modelcontextprotocol.io/?q=copilot-money-mcp)
 
 ## Disclaimer
 
