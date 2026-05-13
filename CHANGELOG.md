@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-05-12
+
+This release closes Phases 1–3 of the `--live-reads` migration (GraphQL-backed reads layered over the local LevelDB cache, gated by `--live-reads` and a browser session). The live surface now covers transactions, accounts, categories, budgets, recurring charges, holdings, balances, investment prices, tags, net worth, monthly spend, and upcoming recurrings — 13 live read/utility tools that swap in for 6 cache-mode equivalents and add 7 new ones. Default mode (no flags) stays fully local and offline.
+
+### Added
+
+- **Live-reads mode (`--live-reads` flag)** — opt-in GraphQL-backed reads served through a tiered in-memory cache. Mirrors Copilot's web app traffic against `app.copilot.money/api/graphql` and falls back gracefully when auth is missing. Off by default. See [`docs/graphql-live-reads.md`](docs/graphql-live-reads.md).
+- **`get_transactions_live`** ([#334](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/334)) — windowed cache backed by `TransactionWindowCache` (tiered TTLs by month-age, LRU eviction). Trims cross-month leakage and shares a bounded-concurrency `pLimit` primitive across callers.
+- **`get_accounts_live`** ([#352](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/352)) — 1h snapshot cache; `live_balance` becomes a real boolean from the server.
+- **`get_categories_live`** ([#360](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/360)) — 24h cache; reads `user.budgetingConfig.rolloversConfig.isEnabled` so categories reflect rollover state per the user setting. Default-strips `budget.histories` (audit C1); opt back in via `include_history`.
+- **`get_budgets_live`** ([#363](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/363)) — projection over `categoriesCache`; `set_budget` write-throughs target `patchLiveCategoryBudget`. Per-month overrides supported.
+- **`get_recurring_live`** ([#347](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/347)) — joins `category_name` from the categories cache (audit R1); `set_recurring_state` validates new state before mutating.
+- **`get_holdings_live`** ([#373](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/373)) — includes cost basis via `metrics`; tolerates `metrics: null` for CASH and 401(k) mutual funds.
+- **`get_balance_history_live`** ([#376](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/376)) — single-account, paginated; cache-mode `get_balance_history` remains the path for cross-account / weekly / monthly granularity.
+- **`get_investment_prices_live`** ([#382](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/382)) — server-side ownership-gated to securities in linked accounts.
+- **`get_tags_live`** ([#341](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/341)) — no cache-mode counterpart; the only way to enumerate tags.
+- **`get_networth_live`** ([#368](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/368)) — net worth over time, retrofitted with pagination + tighter YTD default.
+- **`get_upcoming_recurrings_live`** ([#369](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/369)) — next-due unpaid recurrings, distinct from the recurring rule history.
+- **`get_monthly_spend_live`** ([#370](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/370)) — daily-series spending for the current month with prior-period comparison.
+- **`refresh_cache` utility** ([#334](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/334)) — flush live-mode caches by scope (`transactions`, `accounts`, `categories`, `budgets`, `recurrings`, `tags`, `holdings`, `balance_history`, `investment_prices`, `networth`, `monthly_spend`, `upcoming_recurrings`, `user`).
+- **Live-reads infrastructure** — `LiveCopilotDatabase`, `SnapshotCache` / `TransactionWindowCache`, `InFlightRegistry` single-flight primitive, structured `logReadCall` with `ttl_tier` + `cache_hit`, optimistic write-through patches at 16 call sites in `tools.ts`.
+- **`get_investment_splits` restored** ([#387](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/387)) — now models adjustment factors accurately (one row per `(security_id, effective_date)` with multiplier); cache-only.
+- **MCP registry publishing** ([#374](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/374)) — `server.json` + `mcpName` shipped; `scripts/check-version-sync.ts` guards `package.json` / `server.json` / `manifest.json` from drifting, wired into the Quality Checks CI job. CI workflow publishes to the MCP registry after npm publish.
+- **`amazon-sync` skill** ([#329](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/329)) — reconcile Amazon order history with Copilot transactions, split multi-category orders, match card refunds.
+
+### Fixed
+
+- **Cache-mode `get_transactions` tag filter** ([#394](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/394)) — previously compared the input tag name against opaque tag IDs and returned an empty result; now resolves name → id first.
+- **Soft-deleted transactions** ([#344](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/344)) — decoder now filters `user_deleted=true` rows so deleted transactions stop showing up in cache reads.
+- **`get_budgets` top-level aggregation** ([#365](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/365)) — sums `total_budgeted` from top-level categories only; child categories no longer double-count.
+- **Account-type bucketing** ([#354](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/354)) — liabilities now bucketed by uppercase server enum; previously case-sensitive comparison missed some accounts.
+- **Charge-card limit handling** ([#355](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/355)) — `limit:0` on charge cards now maps to `null` (no preset limit), not zero.
+- **Category `parentId` preservation** ([#357](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/357)) — write-through `createCategory` sets `parentId=null` explicitly; `flatten` no longer drops the field.
+- **`leveldb-reader` cache invalidation** ([#349](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/349), [#352](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/352)) — temp-copy cache now invalidates when source changes and tolerates compaction TOCTOU during copy + fingerprint.
+- **Holdings percent rounding** ([#378](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/378)) — `total_return_percent` now matches the Copilot UI's rounding convention.
+
+### Changed
+
+- **README rewrite** ([#386](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/386), [#395](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/395)) — compact 3-mode comparison; per-tool inventory moved to [`docs/tools-by-mode.md`](docs/tools-by-mode.md). Documents `--write` / `--live-reads`, expands known limitations, clarifies live-mode tool counts (21 read tools: 8 cache + 13 live).
+- **Tool descriptions** ([#390](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/390)) — review-pass over read-tool descriptions + read-only hints.
+- **Documentation** — `docs/graphql-live-reads.md` covers cache architecture and freshness envelope; `tools-by-mode.md` is now the canonical per-tool inventory; `CLAUDE.md` documents `--live-reads` preflight + PII-scrub guardrails.
+- **Refactor** — extracted shared `paginate` helper for time-series tools, `computeTotalReturnPercent` / `parseAmount` utils, cache-key tuple helper, duration constants; centralized `ALL_TIME_FRAMES` in `_shared`; aligned holdings rounding with Copilot UI; dropped dead `excluded` filter logic and stale `set_recurring_state` audit comments.
+- **Dependencies** — production-group bumps (zod, others); dev-group bumps (`@types/node`, `@types/bun`, `eslint`); ESLint 8.59 unnecessary-type-assertion cleanup.
+
+### Removed
+
+- **Four dead cache-mode investment tools** ([#383](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/383)) — `get_investment_performance`, `get_twr_returns`, `get_securities`, and the original placeholder `get_investment_splits` are gone. Plaid never populates the backing collections, or the data is internal-only / unused by the Copilot web app. `get_investment_splits` returns immediately with the new adjustment-factor model in [#387](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/387).
+
 ## [2.1.0] - 2026-04-23
 
 ### Added
