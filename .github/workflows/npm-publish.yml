@@ -10,10 +10,20 @@ on:
         required: false
         type: boolean
         default: false
+      skip_npm:
+        description: 'Skip npm publish (e.g. re-running only the MCP registry publish after a registry-side failure)'
+        required: false
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       dry_run:
         description: 'Perform a dry run (do not actually publish)'
+        required: false
+        type: boolean
+        default: false
+      skip_npm:
+        description: 'Skip npm publish (used by recovery workflow_dispatch runs; auto-release passes false)'
         required: false
         type: boolean
         default: false
@@ -97,6 +107,7 @@ jobs:
           fi
 
       - name: Check if version already exists on npm
+        if: inputs.skip_npm != true
         run: |
           PACKAGE_NAME=$(node -p "require('./package.json').name")
           PACKAGE_VERSION=$(node -p "require('./package.json').version")
@@ -108,11 +119,11 @@ jobs:
           echo "Version $PACKAGE_VERSION is available for publishing"
 
       - name: Publish to npm (dry run)
-        if: inputs.dry_run == true || github.event.inputs.dry_run == 'true'
+        if: (inputs.dry_run == true || github.event.inputs.dry_run == 'true') && inputs.skip_npm != true
         run: npm publish --dry-run --verbose
 
       - name: Publish to npm
-        if: inputs.dry_run != true && github.event.inputs.dry_run != 'true'
+        if: inputs.dry_run != true && github.event.inputs.dry_run != 'true' && inputs.skip_npm != true
         run: npm publish --provenance --access public --verbose
 
       - name: Install mcp-publisher

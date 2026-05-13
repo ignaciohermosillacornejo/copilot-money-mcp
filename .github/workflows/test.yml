@@ -33,6 +33,9 @@ jobs:
       - name: Version sync check
         run: bun run check:version-sync
 
+      - name: MCP registry constraints check (server.json)
+        run: bun run check:server-json
+
       - name: License check (production deps)
         # Stages package.json only (NOT package-lock.json) and runs
         # npm install --omit=dev to mirror scripts/pack-mcpb.ts exactly, so
