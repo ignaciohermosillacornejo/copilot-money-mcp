@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.ignaciohermosillacornejo/copilot-money-mcp",
   "title": "Copilot Money",
-  "description": "Query Copilot Money personal finance data locally (14 cache-mode read tools), opt into GraphQL-backed live reads with --live-reads (21 read tools: 8 cache + 13 live), and manage data via Copilot's GraphQL API (17 write tools, opt-in with --write). Tools span transactions, accounts, budgets, goals, categories, recurring charges, and investments.",
+  "description": "Query and manage Copilot Money personal finances — local reads, opt-in GraphQL writes.",
   "repository": {
     "url": "https://github.com/ignaciohermosillacornejo/copilot-money-mcp",
     "source": "github"
