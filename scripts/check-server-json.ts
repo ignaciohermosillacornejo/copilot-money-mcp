@@ -37,5 +37,7 @@ if (issues.length > 0) {
   process.exit(1);
 }
 
-const len = typeof description === 'string' ? description.length : 0;
-console.log(`server.json passes MCP registry constraints (description: ${len}/${DESCRIPTION_MAX} chars)`);
+// Past the early-exit above, `description` is guaranteed to be a string.
+console.log(
+  `server.json passes MCP registry constraints (description: ${(description as string).length}/${DESCRIPTION_MAX} chars)`,
+);
