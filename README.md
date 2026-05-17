@@ -15,7 +15,7 @@
 **This is an independent, community-driven project and is not affiliated with, endorsed by, or associated with Copilot Money or its parent company in any way.** This tool was created by an independent developer to enable AI-powered queries of locally cached data. "Copilot Money" is a trademark of its respective owner.
 
 > [!NOTE]
-> **Copilot Money has announced an official MCP server (currently in waitlist, read-only).** If a first-party, read-only integration suits your needs, you should strongly consider using it instead of this community project. Learn more and join the waitlist at [agent.copilot.money](https://agent.copilot.money/?utm_source=reddit&utm_medium=social&utm_campaign=reddit_mcp-launch_051426#mcp).
+> **Copilot Money has announced an official MCP server (currently in waitlist, read-only).** If a first-party, read-only integration suits your needs, you should strongly consider using it instead of this community project. Learn more and join the waitlist at [agent.copilot.money](https://agent.copilot.money/#mcp).
 >
 > This project remains useful if you need write tools (categorize transactions, manage budgets, edit recurrings, etc.), fully offline cache-mode reads with zero network requests, or simply want access today without waiting for the official rollout.
 
