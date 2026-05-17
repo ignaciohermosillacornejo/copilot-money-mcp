@@ -80,7 +80,7 @@ describe('TransactionWindowCache.plan', () => {
   test('stale cold-tier month is in toFetch', () => {
     const cache = makeCache();
     // Cold TTL is 1w; ingest a month with fetched_at 8 days ago → stale.
-    const eightDaysAgo = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    const eightDaysAgo = today.getTime() - 8 * 24 * 60 * 60 * 1000;
     cache.ingestMonth('2026-02', [mkTx('a', '2026-02-10')], eightDaysAgo);
 
     const result = cache.plan({ from: '2026-02-01', to: '2026-02-28' }, today);
