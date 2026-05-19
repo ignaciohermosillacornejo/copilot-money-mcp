@@ -5,6 +5,17 @@ description: "Use when the user asks how they're doing financially, wants a spen
 
 # Finance Pulse
 
+## When to use
+
+- The user asks how they're doing financially or wants a check-in
+- The user asks about "free money" or discretionary budget
+- The user says "pulse" or asks for a spending summary
+
+## Do NOT use if
+
+- The user wants a specific affordability decision → use `/finance`
+- The user wants to fix categories or clean transactions → use `/finance-cleanup`
+
 Give the user a 30-second financial check-in. One number, a few flags, prospective framing. Read-only — this skill never writes.
 
 ## Phase 1 — Gather Data

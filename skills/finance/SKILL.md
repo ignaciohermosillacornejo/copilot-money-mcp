@@ -5,6 +5,19 @@ description: "Use for open-ended financial questions: 'can I afford X?', 'should
 
 # Finance — Financial Advisor
 
+## When to use
+
+- Open-ended financial questions: "can I afford X?", "should I buy X?", "how much can I spend on Y?"
+- Affordability checks for any purchase amount, from coffee to a car
+- Any financial reasoning question that doesn't fit a more specific skill
+
+## Do NOT use if
+
+- The user wants a status check or check-in → use `/finance-pulse`
+- The user wants to categorize, fix, or clean transactions → use `/finance-cleanup`
+- The user wants to track a trip's expenses → use `/finance-trip`
+- The user wants to reconcile Amazon orders against transactions → use `/amazon-sync`
+
 Answer open-ended financial questions using transaction data, account balances, and the user's financial profile. This is the thinking skill — it reasons about affordability, tradeoffs, and financial decisions.
 
 ## Phase 1 — Understand the Question
