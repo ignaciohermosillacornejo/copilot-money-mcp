@@ -1,8 +1,10 @@
 """Single source of truth for the Free Money formula.
 
-Imported by per-skill scripts. The same formula appears as prose in
-finance/SKILL.md and finance-pulse/SKILL.md so a reader doesn't have to
-chase the file; this script is authoritative.
+Reference implementation — the same formula is reproduced as prose in
+finance/SKILL.md and finance-pulse/SKILL.md, which is what runs at
+invocation time. This file is the canonical version for maintainers:
+when the formula changes, update here first and then sync the SKILL.md
+prose to match.
 """
 
 
