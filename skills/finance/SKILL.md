@@ -9,7 +9,7 @@ Answer open-ended financial questions using transaction data, account balances, 
 
 ## Phase 1 — Understand the Question
 
-1. **Read the user profile.** Open `skills/user-profile.md`. If it doesn't exist, copy `skills/user-profile.template.md` to `skills/user-profile.md` first. You need:
+1. **Read the user profile** at `~/.claude/copilot-money/user-profile.md`. If the file doesn't exist: run `mkdir -p ~/.claude/copilot-money`, then copy `skills/user-profile.template.md` (relative to the copilot-money-mcp repo root) to the profile path. First-time bootstrap may require CWD = repo root for the template read. You need:
    - Income & Obligations (for Free Money calculation)
    - Savings & Goals
    - Irregular Expenses
@@ -81,7 +81,7 @@ Proactively flag relevant context:
 
 ## Phase 3 — Present
 
-**Tone:** Match `skills/user-profile.md` Communication Style. Default: blunt, dollar amounts.
+**Tone:** Match `~/.claude/copilot-money/user-profile.md` Communication Style. Default: blunt, dollar amounts.
 
 **Never give binary yes/no.** Always present:
 

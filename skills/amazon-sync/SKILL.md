@@ -11,7 +11,7 @@ Reconcile Amazon order data with Copilot Money transactions. Fix categories, spl
 
 ## Phase 1 — Read Profile and Locate the Export
 
-**Step 1 — Read the user profile first.** Open `skills/user-profile.md`. If it doesn't exist, copy `skills/user-profile.template.md` to `skills/user-profile.md` first. Note any existing `## Amazon Categorization Rules` section — **these rules take precedence over any inference the skill would otherwise do in Phases 5, 6, and 9.** If the profile says `coffee pods → Groceries`, never re-derive that; apply the rule directly. If the profile contradicts a rule you were about to propose, the profile wins. Also note the general `## Preferences` section for category conventions (e.g., "Coffee category is cafés only").
+**Step 1 — Read the user profile first.** Open the user profile at `~/.claude/copilot-money/user-profile.md`. If the file doesn't exist: run `mkdir -p ~/.claude/copilot-money`, then copy `skills/user-profile.template.md` (relative to the copilot-money-mcp repo root) to the profile path. First-time bootstrap may require CWD = repo root for the template read. Note any existing `## Amazon Categorization Rules` section — **these rules take precedence over any inference the skill would otherwise do in Phases 5, 6, and 9.** If the profile says `coffee pods → Groceries`, never re-derive that; apply the rule directly. If the profile contradicts a rule you were about to propose, the profile wins. Also note the general `## Preferences` section for category conventions (e.g., "Coffee category is cafés only").
 
 **Step 2 — Locate the export.** The user may supply Amazon data from multiple sources, each with its own CSV shape:
 
@@ -156,7 +156,7 @@ For each refund in `Refund Details` within the window:
 
 ## Phase 9 — Update Profile
 
-After writes are applied, update `skills/user-profile.md` with rules discovered during this run. Tell the user exactly what is being saved before writing.
+After writes are applied, update `~/.claude/copilot-money/user-profile.md` with rules discovered during this run. Tell the user exactly what is being saved before writing.
 
 **Amazon-specific profile section** — create the section if absent:
 

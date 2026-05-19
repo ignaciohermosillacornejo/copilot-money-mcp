@@ -32,7 +32,7 @@ Do this BEFORE any transaction-level work. Transaction cleanup lands in the righ
 
 Cache was refreshed in Phase 0 Step 0 — do not refresh again. Mid-session refreshes cause earlier queries to return incomplete data and force re-pulls later. One refresh up front covers the whole session.
 
-1. **Read the user profile.** Open `skills/user-profile.md`. If it doesn't exist, copy `skills/user-profile.template.md` to `skills/user-profile.md` first. Note any existing preferences, especially under "Cleanup Preferences," "Preferences," and "Recurring Matcher State." These override your judgment — if the profile says "Uber Eats = Dining," never flag Uber Eats as miscategorized.
+1. **Read the user profile** at `~/.claude/copilot-money/user-profile.md`. If the file doesn't exist: run `mkdir -p ~/.claude/copilot-money`, then copy `skills/user-profile.template.md` (relative to the copilot-money-mcp repo root) to the profile path. First-time bootstrap may require CWD = repo root for the template read. Note any existing preferences, especially under "Cleanup Preferences," "Preferences," and "Recurring Matcher State." These override your judgment — if the profile says "Uber Eats = Dining," never flag Uber Eats as miscategorized.
 
 2. **Ask about scope.** Before pulling data, ask the user:
    - Full cleanup or focused? (e.g., "just recurrings" or "just uncategorized")
@@ -110,7 +110,7 @@ When `get_recurring_transactions` surfaces a sub as "overdue" (expected charge h
 Before flagging archive, for each overdue sub:
 
 1. **Pull the matcher rule.** Use `get_recurring_transactions` (filter by name or id) to read the current `match_string`, `min_amount`, `max_amount`.
-2. **Check the profile.** Read the "Recurring Matcher State" section of `skills/user-profile.md` — if the sub is listed there with known oddities (e.g. "semi-annual, Copilot next_date is buggy for this one"), honor it and skip.
+2. **Check the profile.** Read the "Recurring Matcher State" section of `~/.claude/copilot-money/user-profile.md` — if the sub is listed there with known oddities (e.g. "semi-annual, Copilot next_date is buggy for this one"), honor it and skip.
 3. **Look for a near-miss charge.** Run `get_transactions(merchant=<approximate_name>, last_90_days)`. Watch for the two common drift modes:
    - **Name truncation:** matcher says `name_contains: "Servicename"` but the merchant posts as `SERVICENAM` (payment processor truncated it) — never matches.
    - **Amount cap drift:** plan price increased (or rent has proration / annual increases) and blew past the old `max_amount`.
@@ -166,7 +166,7 @@ After each batch of writes:
 
 ## Phase 5 — Update Profile
 
-After all fixes are applied, update `skills/user-profile.md` with any new preferences learned during this session:
+After all fixes are applied, update `~/.claude/copilot-money/user-profile.md` with any new preferences learned during this session:
 
 - New merchant-to-category mappings the user confirmed — **only for recurring merchants/professionals** (e.g., a psychologist, English teacher, ISP). Do not save one-off purchases or single-visit merchants (a restaurant visited once, a parking lot, a taxi). The profile should contain preferences that will be useful in future cleanup sessions.
 - Any accounts the user said to always skip.
@@ -190,7 +190,7 @@ End with a brief summary:
 
 1. **Never write without asking — except confident batch fixes.** Every write operation must be explicitly approved by the user first. The one exception: when Phase 3 identifies high-confidence fixes (merchant's dominant category is >80%, or user profile has an explicit mapping), you may apply them directly and report what you changed afterward. This avoids dialog fatigue on obvious fixes while still requiring approval for anything uncertain.
 2. **Dry-run first.** Always present findings (Phase 3) before applying any fixes (Phase 4). No exceptions.
-3. **Respect the profile.** `skills/user-profile.md` preferences override statistical analysis. If the profile says a merchant is categorized a certain way, do not flag it.
+3. **Respect the profile.** `~/.claude/copilot-money/user-profile.md` preferences override statistical analysis. If the profile says a merchant is categorized a certain way, do not flag it.
 4. **Be honest about uncertainty.** If you cannot confidently identify a merchant or determine the right category, say so. Let the user decide.
 5. **Use Bash with Python for math.** For aggregations, frequency calculations, or any arithmetic involving more than ~10 values, use Python via the Bash tool. Do not do mental math on large sets.
 6. **Batch size.** Present 3-5 findings at a time. Never dump everything at once.

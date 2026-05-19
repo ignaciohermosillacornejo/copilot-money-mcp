@@ -9,7 +9,7 @@ Give the user a 30-second financial check-in. One number, a few flags, prospecti
 
 ## Phase 1 — Gather Data
 
-1. **Read the user profile.** Open `skills/user-profile.md`. If it doesn't exist, copy `skills/user-profile.template.md` to `skills/user-profile.md` first. Note:
+1. **Read the user profile** at `~/.claude/copilot-money/user-profile.md`. If the file doesn't exist: run `mkdir -p ~/.claude/copilot-money`, then copy `skills/user-profile.template.md` (relative to the copilot-money-mcp repo root) to the profile path. First-time bootstrap may require CWD = repo root for the template read. Note:
    - Income & Obligations (if populated): monthly income, rent, fixed costs
    - Savings & Goals: targets and active goals
    - Irregular Expenses: amortized monthly reserve
@@ -39,7 +39,7 @@ Give the user a 30-second financial check-in. One number, a few flags, prospecti
 
 ### 2.1 Bootstrap (first run only)
 
-If `skills/user-profile.md` has empty Income & Obligations section, bootstrap it:
+If `~/.claude/copilot-money/user-profile.md` has empty Income & Obligations section, bootstrap it:
 
 1. **Detect income.** Use Python to scan the 90-day transaction data for recurring credits (negative amounts) from the same source. Look for:
    - Payroll deposits: same source, similar amounts, biweekly or monthly cadence
@@ -65,7 +65,7 @@ If `skills/user-profile.md` has empty Income & Obligations section, bootstrap it
    - Amortize detected amounts to monthly: annual ÷ 12, semi-annual ÷ 6
    - Present: "I found these irregular expenses: [list]. Monthly reserve: ~$X"
 
-5. **Save to profile.** After user confirms, update the relevant sections of `skills/user-profile.md`. On subsequent runs, skip bootstrapping and read the profile directly.
+5. **Save to profile.** After user confirms, update the relevant sections of `~/.claude/copilot-money/user-profile.md`. On subsequent runs, skip bootstrapping and read the profile directly.
 
 ### 2.2 Compute Free Money
 
@@ -129,7 +129,7 @@ Prioritize using 3-tier system:
 
 ## Phase 3 — Present
 
-**Tone:** Match `skills/user-profile.md` Communication Style. Default: blunt, simple, dollar amounts.
+**Tone:** Match `~/.claude/copilot-money/user-profile.md` Communication Style. Default: blunt, simple, dollar amounts.
 
 **Structure — always this order:**
 
