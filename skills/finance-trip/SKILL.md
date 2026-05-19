@@ -9,7 +9,7 @@ Track trip expenses by finding transactions in a date range, using location and 
 
 ## Phase 1 — Scope the Trip
 
-1. **Read the user profile.** Open `skills/user-profile.md`. If it doesn't exist, copy `skills/user-profile.template.md` to `skills/user-profile.md` first. Check Trip Tracking preferences and any existing trips.
+1. **Read the user profile** at `~/.claude/copilot-money/user-profile.md`. If the file doesn't exist: run `mkdir -p ~/.claude/copilot-money`, then copy `skills/user-profile.template.md` (relative to the copilot-money-mcp repo root) to the profile path. First-time bootstrap may require CWD = repo root for the template read. Check Trip Tracking preferences and any existing trips.
 
 2. **Get trip parameters.** Ask the user or infer from context:
    - **Trip name:** e.g., "French Polynesia", "Whistler Weekend"
@@ -53,7 +53,7 @@ Track trip expenses by finding transactions in a date range, using location and 
 
 ## Phase 3 — Present & Confirm
 
-**Tone:** Match `skills/user-profile.md` Communication Style. Default: blunt, simple, dollar amounts.
+**Tone:** Match `~/.claude/copilot-money/user-profile.md` Communication Style. Default: blunt, simple, dollar amounts.
 
 1. **Show the trip summary first** (before asking about individual transactions):
 
