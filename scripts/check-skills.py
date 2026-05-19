@@ -29,7 +29,6 @@ TOOLS_DIR = REPO_ROOT / "src" / "tools"
 TOOL_PREFIXES = (
     "get_",
     "set_",
-    "categorize_",
     "split_",
     "create_",
     "review_",

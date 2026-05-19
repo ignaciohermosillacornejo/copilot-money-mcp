@@ -18,6 +18,11 @@ description: "Use when the user wants to track trip expenses, tag travel transac
 
 Track trip expenses by finding transactions in a date range, using location and merchant data to suggest which ones belong to the trip, and tagging confirmed ones. Can re-run to catch stragglers.
 
+## Guardrails
+
+1. **Stage writes as a draft.** Before any `create_tag` or `update_transaction` call (including tag adds via `tag_ids`), show the user the proposed change (new tag name, or which transactions get which tags) and wait for explicit confirmation. The "Definitely trip" batch-approval flow (Phase 3) is the carve-out — the batch must still be presented first, but per-item confirmation isn't required after the batch is approved in the same turn.
+2. **Confirmation is per-turn.** A previous "go ahead" does not authorize subsequent batches. Each new batch of writes requires its own confirmation in the same turn.
+
 ## Phase 1 — Scope the Trip
 
 1. **Read the user profile** at `~/.claude/copilot-money/user-profile.md`. If the file doesn't exist: run `mkdir -p ~/.claude/copilot-money`, then copy `skills/user-profile.template.md` (relative to the copilot-money-mcp repo root) to the profile path. First-time bootstrap may require CWD = repo root for the template read. Check Trip Tracking preferences and any existing trips.
