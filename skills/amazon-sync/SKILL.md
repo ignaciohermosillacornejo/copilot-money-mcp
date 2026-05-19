@@ -5,6 +5,17 @@ description: "Use when the user wants to reconcile Amazon order history with Cop
 
 # Amazon Sync
 
+## When to use
+
+- The user has an Amazon order CSV (official "Request My Data" export or equivalent) and wants to reconcile it with Copilot transactions
+- The user wants to split multi-category Amazon shipments
+- The user wants to match Amazon card refunds
+
+## Do NOT use if
+
+- The user wants general transaction cleanup → use `/finance-cleanup`
+- The user has no Amazon CSV — this skill requires the export
+
 Reconcile Amazon order data with Copilot Money transactions. Fix categories, split multi-category shipments, and match card refunds. Read-only by default during analysis; writes only after user approval (with Amazon Fresh and other high-confidence fixes as the one exception — see Phase 5).
 
 **Scope:** card refunds only. Amazon store-credit (gift-card balance applied to later orders) is out of scope — those mismatches get flagged, not ledgered.

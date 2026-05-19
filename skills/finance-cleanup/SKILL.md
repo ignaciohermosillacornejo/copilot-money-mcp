@@ -5,6 +5,18 @@ description: "Use when the user wants to clean up transactions, fix categories, 
 
 # Finance Cleanup
 
+## When to use
+
+- The user wants to fix transaction categories
+- The user wants to find missing recurring charges
+- The user wants general transaction hygiene: mark reviewed, fix transfers, archive subscriptions
+
+## Do NOT use if
+
+- The user wants a financial status check → use `/finance-pulse`
+- The user is asking an affordability question → use `/finance`
+- The user has an Amazon CSV to reconcile → use `/amazon-sync`
+
 Walk the user through a structured cleanup of their Copilot Money transaction data. You have access to MCP tools for reading and writing Copilot Money data. This is a multi-phase process: structural audit, gather, detect, present, fix, update profile, summarize.
 
 ## Phase 0 — Structural Category Audit

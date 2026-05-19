@@ -5,6 +5,17 @@ description: "Use when the user wants to track trip expenses, tag travel transac
 
 # Finance Trip
 
+## When to use
+
+- The user wants to tag travel transactions for a trip
+- The user asks "how much did I spend in [place]?"
+- The user wants to find late-posting charges from a recent trip
+
+## Do NOT use if
+
+- The "trip" isn't a discrete date range (it's general spending in a category) → use `/finance-pulse`
+- The user wants Amazon-specific reconciliation → use `/amazon-sync`
+
 Track trip expenses by finding transactions in a date range, using location and merchant data to suggest which ones belong to the trip, and tagging confirmed ones. Can re-run to catch stragglers.
 
 ## Phase 1 — Scope the Trip
