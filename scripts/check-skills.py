@@ -124,7 +124,7 @@ def check_profile_path(skill_dir: Path) -> list[str]:
         # Extract every contiguous non-whitespace token that mentions user-profile
         for token in re.findall(r"\S*user-profile[^\s`]*", line):
             # Strip surrounding markdown punctuation (backticks, quotes, parens, commas)
-            stripped = token.strip("`'\"(),.")
+            stripped = token.strip("`'\"(),.[]")
             if stripped in ALLOWED_PROFILE_PATHS:
                 continue
             errors.append(
