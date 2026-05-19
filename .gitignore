@@ -70,6 +70,7 @@ scripts/*
 !scripts/verify-optimistic-consistency.ts
 !scripts/check-version-sync.ts
 !scripts/check-server-json.ts
+!scripts/check-skills.py
 # License-check scratch directory (created by CI license gate)
 .license-check/
 # Generated test fixtures
