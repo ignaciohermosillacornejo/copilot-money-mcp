@@ -63,6 +63,7 @@
     "sync-manifest": "bun run scripts/sync-manifest.ts",
     "check:version-sync": "bun run scripts/check-version-sync.ts",
     "check:server-json": "bun run scripts/check-server-json.ts",
+    "check:skills": "python3 scripts/check-skills.py",
     "fix": "bun run lint:fix && bun run format",
     "clean": "rm -rf dist coverage .bun-build",
     "pack:mcpb": "bun run scripts/pack-mcpb.ts",
