@@ -74,7 +74,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.2.0",
     "classic-level": "^3.0.0",
-    "protobufjs": "^8.0.0",
+    "protobufjs": "^8.3.0",
     "zod": "^4.3.5"
   },
   "devDependencies": {
@@ -89,6 +89,6 @@
     "husky": "^9.1.7",
     "prettier": "^3.2.5",
     "typescript": "^6.0.2",
-    "typescript-eslint": "^8.0.0"
+    "typescript-eslint": "^8.59.3"
   }
 }
