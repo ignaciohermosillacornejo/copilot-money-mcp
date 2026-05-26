@@ -55,7 +55,7 @@ Run this BETWEEN Phase 1's read and Phase 2's compute. It catches the common cas
    - `## Irregular Expenses (Sinking Funds)`
    - `## Accounts`
 
-   `## Savings & Goals` is intentionally NOT in this list — the savings target comes live from `get_goals` each session, so there's no stale-profile concern. The `last_verified` stamp on that section in the template is still there as a marker, but Phase 1.5 doesn't act on it.
+   `## Savings & Goals` is intentionally NOT in this list — the savings target comes live from `get_goals` each session, so there's no stale-profile concern. The template doesn't carry a `last_verified` stamp for that section.
 
    Each section has a comment of the form `<!-- last_verified: YYYY-MM-DD -->` or `<!-- last_verified: never -->`. Extract the date.
 
