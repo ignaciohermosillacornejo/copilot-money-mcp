@@ -46,6 +46,31 @@ Give the user a 30-second financial check-in. One number, a few flags, prospecti
    - Save transaction data to temp files and process with Python scripts
    - Only bring summary statistics back into your context for presentation
 
+## Phase 1.5 — Profile Freshness Check
+
+Run this BETWEEN Phase 1's read and Phase 2's compute. It catches the common case where the profile was bootstrapped months ago and the underlying numbers (income, fixed obligations, account roles) have drifted.
+
+1. **Parse `last_verified` from each major profile section's HTML comment.** Sections to check:
+   - `## Income & Obligations`
+   - `## Savings & Goals`
+   - `## Irregular Expenses (Sinking Funds)`
+   - `## Accounts`
+
+   Each section has a comment of the form `<!-- last_verified: YYYY-MM-DD -->` or `<!-- last_verified: never -->`. Extract the date.
+
+2. **Read `staleness_threshold_days` from `## Preferences`.** It's stored as a comment: `<!-- staleness_threshold_days: 90 -->`. Default to `90` if the comment or value is absent.
+
+3. **For each section older than the threshold (or with `last_verified: never`):**
+
+   - **Interactive mode (default):** Prompt the user once, listing every stale section at once: "Your profile sections are stale: [Income & Obligations] last verified [N] days ago; [Savings & Goals] last verified [M] days ago. Re-bootstrap? [y/skip]". A single y/skip applies to all stale sections.
+   - **Scheduled mode (per Rule "Scheduled runs are silent"):** Skip the prompt; tag each stale section for the Phase 3 warning prefix and proceed.
+
+4. **If the user picks `y`:** run only the bootstrap subflow for each stale section (the corresponding step from Phase 2.1: step 1 for Income, step 2 for Obligations, step 3 for Accounts, step 4 for Irregular Expenses). Skip the bootstrap steps for non-stale sections. After each section's bootstrap saves to profile, also update its `<!-- last_verified: -->` comment to today's date in YYYY-MM-DD form.
+
+5. **If the user picks `skip`:** proceed with stale data. Pass the list of stale section names + their `last_verified` dates to Phase 3 for warning output.
+
+6. **If no sections are stale:** skip Phase 1.5 silently — no output.
+
 ## Phase 2 — Compute Financial State
 
 ### 2.1 Bootstrap (first run only)
@@ -76,7 +101,7 @@ If `~/.claude/copilot-money/user-profile.md` has empty Income & Obligations sect
    - Amortize detected amounts to monthly: annual ÷ 12, semi-annual ÷ 6
    - Present: "I found these irregular expenses: [list]. Monthly reserve: ~$X"
 
-5. **Save to profile.** After user confirms, update the relevant sections of `~/.claude/copilot-money/user-profile.md`. On subsequent runs, skip bootstrapping and read the profile directly.
+5. **Save to profile.** After user confirms, update the relevant sections of `~/.claude/copilot-money/user-profile.md`. For each section saved, also update its `<!-- last_verified: -->` HTML comment to today's date in YYYY-MM-DD form (this is what Phase 1.5 reads to decide if the section is stale). On subsequent runs, skip bootstrapping and read the profile directly.
 
 ### 2.2 Compute Free Money
 
@@ -141,6 +166,16 @@ Prioritize using 3-tier system:
 ## Phase 3 — Present
 
 **Tone:** Match `~/.claude/copilot-money/user-profile.md` Communication Style. Default: blunt, simple, dollar amounts.
+
+**Stale-data warning prefix (if Phase 1.5 flagged any stale sections that the user chose to skip).** Prepend the output with a warning block, then continue with The Number / Flags / Quick Stats as normal:
+
+> ⚠️ Using stale profile data:
+> - Income & Obligations: last verified [date] ([N] days ago)
+> - Accounts: last verified [date] ([N] days ago)
+>
+> Re-run with `re-bootstrap` if these numbers feel off.
+
+Only include sections that were actually skipped — don't list every section unconditionally.
 
 **Structure — always this order:**
 
