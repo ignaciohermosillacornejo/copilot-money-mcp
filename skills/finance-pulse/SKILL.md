@@ -41,8 +41,8 @@ Give the user a 30-second financial check-in. One number, a few flags, prospecti
 
    Paginate `get_transactions` if needed (100 per page). Use `limit` and `offset`.
 
-3. **Handle large datasets.** Transaction data will be large. Do NOT try to hold all transactions in your context. Instead:
-   - Use Python via Bash for all aggregations, grouping, and arithmetic
+3. **Handle large datasets and do all math via Python.** Transaction data will be large. Do NOT try to hold all transactions in your context, and do NOT do mental math on more than ~10 numbers. Instead:
+   - Use Python via Bash for ALL aggregations, averages, projections, grouping, and arithmetic
    - Save transaction data to temp files and process with Python scripts
    - Only bring summary statistics back into your context for presentation
 
@@ -117,7 +117,7 @@ Free Money = Net Monthly Income
 
 Steps:
 1. Sum fixed obligations from profile (or detected in bootstrap)
-2. Sum savings targets from `get_goals` or profile
+2. Sum savings targets from `get_goals` or profile. If `get_goals` returns 0 AND the profile has no savings target, set this term to 0 and note it for Phase 3 output: "No savings target set — Free Money doesn't reserve anything for savings."
 3. Sum amortized irregular expenses from profile
 4. Sum this month's discretionary spending: total spending minus transactions that match fixed obligation merchants (by name/category). Do NOT subtract the profile's fixed amount — subtract the actual charges from those merchants. This ensures over-charges (e.g., rent higher than usual) are correctly captured rather than silently inflating Free Money.
 5. Free Money = Net Income − Fixed − Savings − Irregular − Already Spent
@@ -232,14 +232,10 @@ After presenting, silently check if any profile sections should be updated:
 
 1. **Read-only.** This skill never writes to Copilot Money. No `set_*`, no `create_*`, no `review_*` calls.
 2. **3-5 flags max.** Never dump 15 findings. Pick the most important ones. Alert fatigue kills usefulness.
-3. **Prospective framing.** Always "you have $X left" not "you spent $X". Restore the pain of paying.
-4. **Use Python for math.** All aggregations, averages, projections via Bash with Python. No mental math on >10 numbers.
-5. **One screen.** The entire output should fit on one screen. If it doesn't, cut the least important parts.
-6. **Respect profile.** Don't flag spending the user said to ignore. Don't flag categories they don't care about.
-7. **Show full merchant names.** When referencing a transaction, use the full `name` or `original_name`, not the truncated `normalized_merchant`.
-8. **First run is special.** If profile is mostly empty, spend time bootstrapping — ask the user to confirm detected income, obligations, and account roles before computing Free Money. This is a one-time cost for accuracy.
-9. **Scheduled runs are silent.** When triggered by a schedule (not interactive), output the pulse as a report without asking questions. Use whatever profile data is available. Note any profile gaps as "could not compute X — profile missing Y."
-10. **Income is intentionally uncategorized.** Income transactions (negative amounts) have no category on purpose. Never flag them as uncategorized or missing a category.
-11. **Large datasets go to disk.** MCP tool responses >100KB are saved to temp files instead of returned inline. Use Python via Bash to process these files. This happens routinely with `get_transactions`, `get_accounts`, and `get_recurring_transactions`.
-12. **Reference existing budgets.** The user has budgets set up in Copilot Money (`get_budgets`). Use these to inform spending flags — if a category has a budget, flag when spending exceeds or approaches the budget amount, not just when it exceeds the 90-day average.
-13. **No savings goals set.** If `get_goals` returns 0, note this in the pulse output: "No savings target set — Free Money doesn't reserve anything for savings." Suggest setting one if this persists across runs.
+3. **One screen.** The entire output should fit on one screen. If it doesn't, cut the least important parts.
+4. **Respect profile.** Don't flag spending the user said to ignore. Don't flag categories they don't care about.
+5. **First run is special.** If profile is mostly empty, spend time bootstrapping — ask the user to confirm detected income, obligations, and account roles before computing Free Money. This is a one-time cost for accuracy.
+6. **Scheduled runs are silent.** When triggered by a schedule (not interactive), output the pulse as a report without asking questions. Use whatever profile data is available. Note any profile gaps as "could not compute X — profile missing Y."
+7. **Income is intentionally uncategorized.** Income transactions (negative amounts) have no category on purpose. Never flag them as uncategorized or missing a category.
+8. **Large datasets go to disk.** MCP tool responses >100KB are saved to temp files instead of returned inline. Use Python via Bash to process these files. This happens routinely with `get_transactions`, `get_accounts`, and `get_recurring_transactions`.
+9. **Reference existing budgets.** The user has budgets set up in Copilot Money (`get_budgets`). Use these to inform spending flags — if a category has a budget, flag when spending exceeds or approaches the budget amount, not just when it exceeds the 90-day average.
