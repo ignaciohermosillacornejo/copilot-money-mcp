@@ -182,7 +182,12 @@ Phase 2 built an in-memory list of all findings. Phase 3 presents a batch from t
    - Transfer fixes: `update_transaction` to change category to/from Internal Transfer.
    - Matcher rule fixes: `update_recurring` per Phase 2.4.
 
-2. **Update profile sections relevant to this batch** (incremental updates per the C3 design — Task 5 of this plan adds the detailed handling).
+2. **Update profile sections relevant to this batch** (incremental, per-batch — do NOT defer to Phase 5):
+   - `update_recurring` succeeded → append the new rule to the "Recurring Matcher State" section of `~/.claude/copilot-money/user-profile.md`.
+   - `update_transaction` recategorized a **recurring merchant** (appears 3+ times in the 6-month transaction history) → append a merchant→category mapping to the "Cleanup Preferences" section.
+   - `delete_category` / `update_category` (archive or rename) → note it under "Cleanup Preferences" so the next session knows.
+   - One-off merchants (single visit, restaurant, parking, taxi) → do NOT save. The profile is for state worth re-using next session, not a transcript.
+   - Always tell the user what's being saved before writing: "Adding to profile: 'ENC = Healthcare (psychologist)'. OK?" — but only if the entry isn't a near-duplicate of something already in the profile (avoid double-confirming the same fact).
 
 3. **Prune the in-memory findings list.** Remove every item that was just written. The findings list is now smaller; what remains is what's still to fix.
 
@@ -192,20 +197,41 @@ Phase 2 built an in-memory list of all findings. Phase 3 presents a batch from t
 
 **Why a mutable list, not a re-pull:** writes go through GraphQL directly to Copilot's servers, but the local LevelDB cache is fed by the desktop app's sync (a few minutes' lag). Re-pulling between batches would surface stale reads that don't yet reflect what was just written. The Phase 2 snapshot is the freshest view we have; pruning items as they're fixed keeps it accurate within the session.
 
-## Phase 5 — Update Profile
+## Phase 5 — Final Sweep + Profile Summary
 
-After all fixes are applied, update `~/.claude/copilot-money/user-profile.md` with any new preferences learned during this session:
+The bulk of profile updates happen incrementally in Phase 4 (per the C3 rule). Phase 5 is the catch-all for things that don't tie to a specific Phase-4 batch.
 
-- New merchant-to-category mappings the user confirmed — **only for recurring merchants/professionals** (e.g., a psychologist, English teacher, ISP). Do not save one-off purchases or single-visit merchants (a restaurant visited once, a parking lot, a taxi). The profile should contain preferences that will be useful in future cleanup sessions.
-- Any accounts the user said to always skip.
-- Any categories the user said to never touch.
-- Frequency preferences (e.g., "run cleanup monthly").
-- **Recurring Matcher State** — whenever you use `update_recurring` to fix a matcher rule during Phase 2.4, record the final state under "Recurring Matcher State." This is the single most valuable thing the profile can carry between sessions: without it, next cleanup re-investigates the same overdue subs from scratch. For each known-active subscription, record:
-  - Exact merchant substring the payment processor actually posts (not the user-facing brand name).
-  - Current amount range, min–max.
-  - Known oddities — especially semi-annual or annual frequency where Copilot's `next_date` math is buggy and the overdue flag can't be trusted.
+1. **Sweep for session-level preferences** that emerged in conversation but weren't tied to a specific write:
+   - "Always skip the Coinbase account" → save under "Cleanup Preferences"
+   - "Never touch the Business expenses category" → save under "Cleanup Preferences"
+   - Frequency preference: "run cleanup monthly" → save under "Cleanup Preferences"
 
-**Tell the user exactly what you are saving before writing.** Example: "I'm adding to your profile: 'ENC = Healthcare (psychologist)', 'Skip Coinbase account for cleanup', 'Matcher: Gym Membership — `GYMNAME`, $45–$55, annual price bump expected each January'. OK?"
+2. **Summarize all profile updates from this session.** Count what was saved across Phase 4 batches + this final sweep:
+
+   > "Profile updates this session: [N] matcher rules, [M] merchant mappings, [K] skip preferences."
+
+   The user should see, in one line, what their profile gained — so they know the work compounds across sessions.
+
+3. **Tell the user exactly what you're saving before writing** any final-sweep entry. Example: "Adding to profile: 'Skip Coinbase account for cleanup'. OK?"
+
+**Reference — what gets saved where** (handled inline in Phase 4, repeated here for the reader):
+
+| Trigger | Profile section |
+|---|---|
+| `update_recurring` succeeds | Recurring Matcher State |
+| `update_transaction` on a recurring merchant | Cleanup Preferences (merchant→category) |
+| `delete_category` / `update_category` | Cleanup Preferences (note) |
+| Account-skip preference stated | Cleanup Preferences |
+| Category-never-touch preference stated | Cleanup Preferences |
+
+**Recurring Matcher State format** (per entry):
+
+```
+- <Display name>
+  - Merchant substring: `<exact text the processor posts>`
+  - Amount range: $min – $max
+  - Oddities: <e.g. "semi-annual; Copilot next_date is buggy">
+```
 
 ## Phase 6 — Summary
 
@@ -236,3 +262,4 @@ This pre-empts the common confusion when a user re-opens /finance-cleanup right 
 12. **Income is intentionally uncategorized.** Income transactions (negative amounts) have no category on purpose. Never flag them as uncategorized or try to assign a category.
 13. **`exclude_transfers` defaults to true.** `get_transactions` hides internal transfers by default. To analyze transfers (misclassified transfer detection), pass `exclude_transfers: false`.
 14. **Findings list is the session source of truth.** Within a session, the in-memory findings list from Phase 2 is what Phase 3 presents and Phase 4 prunes. Do NOT re-pull from cache after writes — the local cache is stale until the Copilot Money app syncs (a few minutes after each write). Surface only what remains in the pruned list.
+15. **Profile updates are per-batch, not end-of-session.** The user may walk away mid-cleanup; preserve learned state immediately so the next session benefits. Phase 5 is a final-sweep catch-all, not the primary write point.
