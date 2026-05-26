@@ -4,18 +4,23 @@
 
 ## Income & Obligations
 <!-- Auto-populated when skills learn about your income and fixed expenses -->
+<!-- last_verified: never -->
 
 ## Savings & Goals
 <!-- Auto-populated from Copilot goals and user conversations -->
+<!-- last_verified: never -->
 
 ## Irregular Expenses (Sinking Funds)
 <!-- Auto-populated: annual/semi-annual payments detected from transaction history -->
+<!-- last_verified: never -->
 
 ## Preferences
 <!-- Auto-populated as you use skills and express preferences -->
+<!-- staleness_threshold_days: 90 (used by /finance-pulse to decide when a section needs re-bootstrapping; lower means more frequent prompts) -->
 
 ## Accounts
 <!-- Auto-populated: which accounts serve which purpose -->
+<!-- last_verified: never -->
 
 ## Trip Tracking
 <!-- Only active/recent trips (within 3 weeks of end date). Concluded trips are tracked via tags in Copilot Money, not here. -->
