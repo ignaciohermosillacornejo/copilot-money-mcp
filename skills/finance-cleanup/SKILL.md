@@ -169,18 +169,28 @@ Examples of good phrasing:
 
 **Never auto-approve. Never skip the presentation phase.**
 
-## Phase 4 — Apply Fixes
+## Phase 4 — Apply Fixes (loop)
 
-Only after the user approves a batch:
+Phase 2 built an in-memory list of all findings. Phase 3 presents a batch from that list and waits for user approval. Phase 4 then runs the loop below for each approved batch — and loops back to Phase 3 with the remaining findings until the list is empty or the user stops.
 
-- **Recategorize:** Use `update_transaction` for each transaction that needs a category change. Set the correct `categoryId`.
-- **New recurrings:** Use `create_recurring` for merchants the user confirms as recurring.
-- **Mark reviewed:** Use `review_transactions` to mark cleaned-up transactions as reviewed.
-- **Transfer fixes:** Use `update_transaction` to change category to/from Internal Transfer.
+**Per-batch loop:**
 
-After each batch of writes:
-- Confirm what was changed: "Done — recategorized 3 Uber Eats transactions to Dining, marked 5 old transactions as reviewed."
-- If any write fails, report the error and move on. Do not retry silently.
+1. **Apply MCP writes.**
+   - Recategorize: `update_transaction` per transaction (set `categoryId` to the user-created category).
+   - New recurrings: `create_recurring` for merchants the user confirms as recurring.
+   - Mark reviewed: `review_transactions` for cleaned-up transactions.
+   - Transfer fixes: `update_transaction` to change category to/from Internal Transfer.
+   - Matcher rule fixes: `update_recurring` per Phase 2.4.
+
+2. **Update profile sections relevant to this batch** (incremental updates per the C3 design — Task 5 of this plan adds the detailed handling).
+
+3. **Prune the in-memory findings list.** Remove every item that was just written. The findings list is now smaller; what remains is what's still to fix.
+
+4. **Confirm to user.** Brief, factual: "Done — recategorized 3 Uber Eats transactions to Dining, marked 5 old transactions as reviewed." If a write failed, report the specific error and continue with the rest of the batch — do not retry silently.
+
+5. **Loop back to Phase 3** with the pruned findings list. Present the next batch. Repeat until the list is empty or the user signals they're done.
+
+**Why a mutable list, not a re-pull:** writes go through GraphQL directly to Copilot's servers, but the local LevelDB cache is fed by the desktop app's sync (a few minutes' lag). Re-pulling between batches would surface stale reads that don't yet reflect what was just written. The Phase 2 snapshot is the freshest view we have; pruning items as they're fixed keeps it accurate within the session.
 
 ## Phase 5 — Update Profile
 
@@ -204,6 +214,12 @@ End with a brief summary:
 - Any items the user deferred or rejected — note them so they can revisit.
 - Suggested next cleanup date based on transaction volume (e.g., "You get ~120 transactions/month — I'd run this again in 2-3 weeks").
 
+**Sync-lag note:** Always close with:
+
+> "Your fixes are live in Copilot Money. The local cache will catch up on next sync — usually a few minutes. If you re-run /finance-cleanup right away and your fixes seem missing, that's sync lag; wait a couple minutes or check the app directly."
+
+This pre-empts the common confusion when a user re-opens /finance-cleanup right after writing and sees the just-fixed items still flagged.
+
 ## Rules
 
 1. **Never write without asking — except confident batch fixes.** Every write operation must be explicitly approved by the user first. The one exception: when Phase 3 identifies high-confidence fixes (merchant's dominant category is >80%, or user profile has an explicit mapping), you may apply them directly and report what you changed afterward. This avoids dialog fatigue on obvious fixes while still requiring approval for anything uncertain.
@@ -219,3 +235,4 @@ End with a brief summary:
 11. **Large datasets go to disk.** MCP tool responses >100KB are saved to temp files instead of returned inline. Use Python via Bash to process these files — do not try to read them into context. This happens routinely with `get_transactions` (100 txns ~160KB), `get_accounts` (~77KB), and `get_recurring_transactions` (~70KB).
 12. **Income is intentionally uncategorized.** Income transactions (negative amounts) have no category on purpose. Never flag them as uncategorized or try to assign a category.
 13. **`exclude_transfers` defaults to true.** `get_transactions` hides internal transfers by default. To analyze transfers (misclassified transfer detection), pass `exclude_transfers: false`.
+14. **Findings list is the session source of truth.** Within a session, the in-memory findings list from Phase 2 is what Phase 3 presents and Phase 4 prunes. Do NOT re-pull from cache after writes — the local cache is stale until the Copilot Money app syncs (a few minutes after each write). Surface only what remains in the pruned list.
