@@ -50,19 +50,24 @@ Give the user a 30-second financial check-in. One number, a few flags, prospecti
 
 Run this BETWEEN Phase 1's read and Phase 2's compute. It catches the common case where the profile was bootstrapped months ago and the underlying numbers (income, fixed obligations, account roles) have drifted.
 
-1. **Parse `last_verified` from each major profile section's HTML comment.** Sections to check:
+1. **Parse `last_verified` from each profile section's HTML comment.** Sections to check:
    - `## Income & Obligations`
-   - `## Savings & Goals`
    - `## Irregular Expenses (Sinking Funds)`
    - `## Accounts`
 
+   `## Savings & Goals` is intentionally NOT in this list — the savings target comes live from `get_goals` each session, so there's no stale-profile concern. The `last_verified` stamp on that section in the template is still there as a marker, but Phase 1.5 doesn't act on it.
+
    Each section has a comment of the form `<!-- last_verified: YYYY-MM-DD -->` or `<!-- last_verified: never -->`. Extract the date.
 
-2. **Read `staleness_threshold_days` from `## Preferences`.** It's stored as a comment: `<!-- staleness_threshold_days: 90 -->`. Default to `90` if the comment or value is absent.
+2. **Read `staleness_threshold_days` from `## Preferences`.** It's stored as a comment of the form `<!-- staleness_threshold_days: <N> ... -->` — extract the first integer after the colon (any trailing text is human-readable documentation only). Default to `90` if the comment is absent or the value can't be parsed.
 
 3. **For each section older than the threshold (or with `last_verified: never`):**
 
-   - **Interactive mode (default):** Prompt the user once, listing every stale section at once: "Your profile sections are stale: [Income & Obligations] last verified [N] days ago; [Savings & Goals] last verified [M] days ago. Re-bootstrap? [y/skip]". A single y/skip applies to all stale sections.
+   - **Interactive mode (default):** Prompt the user once, listing every stale section at once. For each section, format the freshness clause based on the stamp:
+     - `last_verified: never` → "never verified"
+     - valid date → "last verified [N] days ago" (where N is today minus the stamp date)
+
+     Example prompt: "Your profile sections are stale: [Income & Obligations] last verified 142 days ago; [Accounts] never verified. Re-bootstrap? [y/skip]". A single y/skip applies to all stale sections.
    - **Scheduled mode (per Rule "Scheduled runs are silent"):** Skip the prompt; tag each stale section for the Phase 3 warning prefix and proceed.
 
 4. **If the user picks `y`:** run only the bootstrap subflow for each stale section (the corresponding step from Phase 2.1: step 1 for Income, step 2 for Obligations, step 3 for Accounts, step 4 for Irregular Expenses). Skip the bootstrap steps for non-stale sections. After each section's bootstrap saves to profile, also update its `<!-- last_verified: -->` comment to today's date in YYYY-MM-DD form.
@@ -171,9 +176,11 @@ Prioritize using 3-tier system:
 
 > ⚠️ Using stale profile data:
 > - Income & Obligations: last verified [date] ([N] days ago)
-> - Accounts: last verified [date] ([N] days ago)
+> - Accounts: never verified
 >
 > Re-run with `re-bootstrap` if these numbers feel off.
+
+Format each line based on the stamp value: a real date shows "[date] ([N] days ago)"; `never` shows "never verified".
 
 Only include sections that were actually skipped — don't list every section unconditionally.
 

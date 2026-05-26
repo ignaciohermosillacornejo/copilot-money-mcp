@@ -8,7 +8,6 @@
 
 ## Savings & Goals
 <!-- Auto-populated from Copilot goals and user conversations -->
-<!-- last_verified: never -->
 
 ## Irregular Expenses (Sinking Funds)
 <!-- Auto-populated: annual/semi-annual payments detected from transaction history -->

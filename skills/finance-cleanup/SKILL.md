@@ -134,7 +134,7 @@ Before flagging archive, for each overdue sub:
    - **Amount cap drift:** plan price increased (or rent has proration / annual increases) and blew past the old `max_amount`.
 4. **If a near-miss is found**, propose `update_recurring` to fix the rule — widen the amount range, correct the name substring, or both. Only propose `set_recurring_state` to archive if the sub is genuinely silent for **30+ days past the expected `next_date`** with zero near-miss matches in the last 90 days. (Phase 2.3 flags missed cycles at 7+ days, which is right for "might be cancelled" — but archiving is a heavier call and should wait for a full extra cycle to rule out delayed posting.)
 
-When a matcher is updated, write the new rule back to the user profile's "Recurring Matcher State" section (see Phase 5) so next session doesn't re-investigate the same sub from scratch.
+When a matcher is updated, write the new rule back to the user profile's "Recurring Matcher State" section (see Phase 4 step 2) so next session doesn't re-investigate the same sub from scratch.
 
 ### 2.5 Quick Wins
 
