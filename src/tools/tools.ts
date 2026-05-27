@@ -23,6 +23,7 @@ import {
   deleteCategory as gqlDeleteCategory,
 } from '../core/graphql/categories.js';
 import type { CategoryNode } from '../core/graphql/queries/categories.js';
+import type { TransactionNode } from '../core/graphql/queries/transactions.js';
 import type { TagNode } from '../core/graphql/queries/tags.js';
 import type { RecurringNode } from '../core/graphql/queries/recurrings.js';
 import {
@@ -37,7 +38,7 @@ import {
 } from '../core/graphql/recurrings.js';
 import { setBudget as gqlSetBudget } from '../core/graphql/budgets.js';
 import { graphQLErrorToMcpError } from './errors.js';
-import { parsePeriod } from '../utils/date.js';
+import { parsePeriod, getMonthRange } from '../utils/date.js';
 import { computeTotalReturnPercent, roundAmount } from '../utils/round.js';
 import {
   getCategoryName,
@@ -338,7 +339,7 @@ export class CopilotMoneyTools {
    *
    * @param database - CopilotDatabase instance
    * @param graphqlClient - Optional GraphQL client for write operations.
-   * @param liveDb - Optional LiveCopilotDatabase for write-through to live cache.
+   * @param liveDb - Optional LiveCopilotDatabase for read-fallback and write-through cache patching when --live-reads is active.
    */
   constructor(
     database: CopilotDatabase,
@@ -358,6 +359,104 @@ export class CopilotMoneyTools {
       throw new Error('Write tools require --write flag to be set');
     }
     return this.graphqlClient;
+  }
+
+  private transactionNodeToLocal(node: TransactionNode): Transaction {
+    return {
+      transaction_id: node.id,
+      account_id: node.accountId,
+      item_id: node.itemId,
+      amount: node.amount,
+      date: node.date,
+      name: node.name,
+      category_id: node.categoryId ?? undefined,
+      pending: node.isPending,
+      user_reviewed: node.isReviewed,
+      user_note: node.userNotes ?? undefined,
+      recurring_id: node.recurringId ?? undefined,
+      parent_transaction_id: node.parentId ?? undefined,
+      tag_ids: node.tags.map((t) => t.id),
+      internal_transfer: node.type === 'INTERNAL_TRANSFER',
+      iso_currency_code: node.isoCurrencyCode ?? undefined,
+    };
+  }
+
+  /** Resolve a transaction by ID: local cache → live window cache → GraphQL fetch. */
+  private async resolveTransaction(id: string, dateHint?: string): Promise<Transaction> {
+    // Local LevelDB cache (fast, always available)
+    const allTxns = await this.db.getAllTransactions();
+    const local = allTxns.find((t) => t.transaction_id === id);
+    if (local) return local;
+
+    if (!this.liveDb) {
+      throw new Error(`Transaction not found: ${id}`);
+    }
+
+    // Live window cache scan
+    const windowCache = this.liveDb.getTransactionsWindowCache();
+    for (const month of windowCache.cachedMonths()) {
+      const row = windowCache.entriesForMonth(month).find((r) => r.id === id);
+      if (row) return this.transactionNodeToLocal(row);
+    }
+
+    // GraphQL fetch scoped to the transaction's month
+    if (dateHint) {
+      const year = Number(dateHint.slice(0, 4));
+      const month = Number(dateHint.slice(5, 7));
+      const [from, to] = getMonthRange(year, month);
+      try {
+        const { rows } = await this.liveDb.getTransactions({ from, to });
+        const match = rows.find((r) => r.id === id);
+        if (match) return this.transactionNodeToLocal(match);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        throw new Error(`Transaction not found: ${id} (live lookup failed: ${msg})`, { cause: e });
+      }
+    }
+
+    throw new Error(`Transaction not found: ${id}`);
+  }
+
+  /** Batch-resolve transactions by ID with one local scan and one live pass. */
+  private async resolveTransactions(ids: string[]): Promise<Map<string, Transaction>> {
+    const result = new Map<string, Transaction>();
+    const allTxns = await this.db.getAllTransactions();
+    const localMap = new Map(allTxns.map((t) => [t.transaction_id, t]));
+
+    const remaining: string[] = [];
+    for (const id of ids) {
+      const local = localMap.get(id);
+      if (local) {
+        result.set(id, local);
+      } else {
+        remaining.push(id);
+      }
+    }
+
+    if (remaining.length === 0) return result;
+
+    if (!this.liveDb) {
+      throw new Error(`Transactions not found: ${remaining.join(', ')}`);
+    }
+
+    const windowCache = this.liveDb.getTransactionsWindowCache();
+    const remainingSet = new Set(remaining);
+
+    for (const month of windowCache.cachedMonths()) {
+      for (const row of windowCache.entriesForMonth(month)) {
+        if (remainingSet.has(row.id)) {
+          result.set(row.id, this.transactionNodeToLocal(row));
+          remainingSet.delete(row.id);
+        }
+      }
+      if (remainingSet.size === 0) break;
+    }
+
+    if (remainingSet.size > 0) {
+      throw new Error(`Transactions not found: ${Array.from(remainingSet).join(', ')}`);
+    }
+
+    return result;
   }
 
   /**
@@ -2453,13 +2552,7 @@ export class CopilotMoneyTools {
 
     validateDocId(transaction_id, 'transaction_id');
 
-    // Resolve the transaction from the local cache so we can supply accountId /
-    // itemId to the GraphQL mutation.
-    const allTxns = await this.db.getAllTransactions();
-    const txn = allTxns.find((t) => t.transaction_id === transaction_id);
-    if (!txn) {
-      throw new Error(`Transaction not found: ${transaction_id}`);
-    }
+    const txn = await this.resolveTransaction(transaction_id);
 
     // Per-field validation (runs BEFORE any write for atomicity).
     if ('category_id' in args && args.category_id !== undefined) {
@@ -2495,7 +2588,7 @@ export class CopilotMoneyTools {
     if ('tag_ids' in args && args.tag_ids !== undefined) input.tagIds = args.tag_ids;
 
     if (!txn.account_id || !txn.item_id) {
-      throw new Error(`Transaction ${transaction_id} missing account_id or item_id in local cache`);
+      throw new Error(`Transaction ${transaction_id} missing account_id or item_id`);
     }
 
     try {
@@ -2896,14 +2989,8 @@ export class CopilotMoneyTools {
       }
     }
 
-    // Resolve parent from the cache — needed for default name/date and the
-    // client-side sum check. Reject if missing, matching update_transaction's
-    // "Transaction not found" contract.
-    const allTxns = await this.db.getAllTransactions();
-    const parentTxn = allTxns.find((t) => t.transaction_id === transaction_id);
-    if (!parentTxn) {
-      throw new Error(`Transaction not found: ${transaction_id}`);
-    }
+    // Resolve parent — needed for default name/date and the client-side sum check.
+    const parentTxn = await this.resolveTransaction(transaction_id);
 
     // Client-side sum check. Server also enforces this, but a local error
     // saves a round-trip and gives the caller more actionable numbers.
@@ -3018,20 +3105,14 @@ export class CopilotMoneyTools {
       validateDocId(id, 'transaction_id');
     }
 
-    const allTransactions = await this.db.getAllTransactions();
-    const txnMap = new Map(allTransactions.map((t) => [t.transaction_id, t]));
-
-    const missing = transaction_ids.filter((id) => !txnMap.has(id));
-    if (missing.length > 0) {
-      throw new Error(`Transactions not found: ${missing.join(', ')}`);
-    }
+    const txnMap = await this.resolveTransactions(transaction_ids);
 
     // Pre-flight: confirm every transaction has account/item ids before
     // issuing any writes. Keeps partial-failure surface small.
     for (const id of transaction_ids) {
       const txn = txnMap.get(id)!;
       if (!txn.account_id || !txn.item_id) {
-        throw new Error(`Transaction ${id} missing account_id or item_id in local cache`);
+        throw new Error(`Transaction ${id} missing account_id or item_id`);
       }
     }
 
@@ -3445,13 +3526,9 @@ export class CopilotMoneyTools {
       );
     }
 
-    const all = await this.db.getAllTransactions();
-    const txn = all.find((t) => t.transaction_id === args.transaction_id);
-    if (!txn) throw new Error(`Transaction not found: ${args.transaction_id}`);
+    const txn = await this.resolveTransaction(args.transaction_id);
     if (!txn.account_id || !txn.item_id) {
-      throw new Error(
-        `Transaction ${args.transaction_id} missing account_id or item_id in local cache`
-      );
+      throw new Error(`Transaction ${args.transaction_id} missing account_id or item_id`);
     }
 
     try {
