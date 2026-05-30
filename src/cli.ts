@@ -56,7 +56,7 @@ Usage:
 Options:
   --db-path <path>    Path to LevelDB database (default: Copilot Money's default location)
   --timeout <ms>      Decode timeout in milliseconds (default: 90000 = 90 seconds)
-  --write             Enable write tools (sends authenticated requests to Copilot Money's GraphQL API)
+  --write             Enable write tools (implies --live-reads)
   --live-reads        Enable GraphQL-backed get_transactions_live (replaces cache-backed get_transactions). Requires authenticated browser session at app.copilot.money.
   --verbose, -v       Enable verbose logging
   --help, -h          Show this help message
@@ -68,6 +68,10 @@ Environment:
 `);
       process.exit(0);
     }
+  }
+
+  if (writeFlagSeen) {
+    liveReadsEnabled = true;
   }
 
   return { dbPath, verbose, timeoutMs, writeFlagSeen, liveReadsEnabled };
