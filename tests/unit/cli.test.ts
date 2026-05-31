@@ -140,6 +140,19 @@ describe('CLI entry point', () => {
 
       expect(stderr).toContain('Write tools enabled');
     });
+
+    test('--write implies --live-reads', async () => {
+      const { stderr } = await runCli(['--write', '-v']);
+
+      expect(stderr).toContain('Write tools enabled');
+      expect(stderr).toContain('Live reads enabled');
+    });
+
+    test('--write without --live-reads still enables live reads', async () => {
+      const { stderr } = await runCli(['--write', '-v']);
+
+      expect(stderr).toContain('Live reads enabled');
+    });
   });
 
   describe('no arguments', () => {
