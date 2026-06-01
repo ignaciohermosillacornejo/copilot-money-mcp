@@ -135,22 +135,24 @@ describe('CLI entry point', () => {
       expect(stderr).not.toContain('temporarily unavailable');
     });
 
-    test('--write + --verbose logs that write tools are enabled', async () => {
-      const { stderr } = await runCli(['--write', '-v']);
-
-      expect(stderr).toContain('Write tools enabled');
-    });
-
-    test('--write implies --live-reads', async () => {
+    test('--write -v logs that both write tools and live reads are enabled', async () => {
       const { stderr } = await runCli(['--write', '-v']);
 
       expect(stderr).toContain('Write tools enabled');
       expect(stderr).toContain('Live reads enabled');
     });
 
-    test('--write without --live-reads still enables live reads', async () => {
-      const { stderr } = await runCli(['--write', '-v']);
+    test('--live-reads alone does NOT enable write tools', async () => {
+      const { stderr } = await runCli(['--live-reads', '-v']);
 
+      expect(stderr).toContain('Live reads enabled');
+      expect(stderr).not.toContain('Write tools enabled');
+    });
+
+    test('explicit --write --live-reads behaves the same as --write alone', async () => {
+      const { stderr } = await runCli(['--write', '--live-reads', '-v']);
+
+      expect(stderr).toContain('Write tools enabled');
       expect(stderr).toContain('Live reads enabled');
     });
   });

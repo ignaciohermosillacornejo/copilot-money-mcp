@@ -41,7 +41,9 @@ When enabled, 6 cache-mode read tools are replaced with GraphQL-backed equivalen
 | `get_investment_prices_live` | _(additive)_ | ✅ | ⚠️ Server-side ownership-gated: only works for securities currently in your linked accounts |
 | `refresh_cache` | _(utility)_ | ✅ | Invalidate live-mode caches by scope |
 
-## ✍️ `--write` mode — mutations via Copilot's GraphQL API (requires browser auth 🔒)
+## ✍️ `--write` mode — mutations via Copilot's GraphQL API (requires browser auth 🔒, implies `--live-reads`)
+
+Enabling `--write` automatically turns on `--live-reads`, so the tools below are exposed **on top of** the live read surface in the previous section, not on top of cache-mode reads. Write tools resolve transaction account/item IDs against the live GraphQL surface, which avoids the ~30-day local cache cliff that would otherwise make older transactions un-editable.
 
 | Tool | Status | Notes |
 |---|---|---|
