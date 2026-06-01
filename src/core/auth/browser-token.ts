@@ -24,21 +24,51 @@ export interface TokenResult {
 
 /** Firebase refresh token regex: AMf- followed by 100+ URL-safe base64 chars. */
 const REFRESH_TOKEN_REGEX = /AMf-[A-Za-z0-9_-]{100,}/g;
+const COPILOT_INDEXEDDB_DIR = 'IndexedDB/https_app.copilot.money_0.indexeddb.leveldb';
+const LOCAL_STORAGE_DIR = 'Local Storage/leveldb';
+
+/**
+ * Build token search paths for Chromium profile directories.
+ *
+ * Chrome profile directory names are not guaranteed to be `Default`; once users
+ * create/delete profiles, the sole active profile can be `Profile 1`,
+ * `Profile 3`, etc. Firebase Web SDK v9+ stores Copilot auth in per-profile
+ * IndexedDB, so scan all normal Chrome profile directories and prefer
+ * IndexedDB before the older Local Storage fallback.
+ */
+export function getChromiumProfileStoragePaths(userDataDir: string): string[] {
+  const profileDirs = new Set<string>(['Default']);
+  if (existsSync(userDataDir)) {
+    try {
+      for (const entry of readdirSync(userDataDir, { withFileTypes: true })) {
+        if (entry.isDirectory() && /^Profile \d+$/.test(entry.name)) {
+          profileDirs.add(entry.name);
+        }
+      }
+    } catch {
+      /* Fall back to Default below */
+    }
+  }
+
+  const sortedProfiles = Array.from(profileDirs).sort((a, b) => {
+    if (a === 'Default') return -1;
+    if (b === 'Default') return 1;
+    return Number(a.slice('Profile '.length)) - Number(b.slice('Profile '.length));
+  });
+
+  return sortedProfiles.flatMap((profile) => [
+    join(userDataDir, profile, COPILOT_INDEXEDDB_DIR),
+    join(userDataDir, profile, LOCAL_STORAGE_DIR),
+  ]);
+}
 
 /** Default browser configurations for macOS. */
 export const BROWSER_CONFIGS: BrowserConfig[] = [
   {
     name: 'Chrome',
-    paths: [
-      // Firebase Web SDK v9+ stores auth tokens in IndexedDB, not Local Storage.
-      // Search the Copilot Money IndexedDB first (most reliable source).
-      join(
-        homedir(),
-        'Library/Application Support/Google/Chrome/Default/IndexedDB/https_app.copilot.money_0.indexeddb.leveldb'
-      ),
-      join(homedir(), 'Library/Application Support/Google/Chrome/Default/Local Storage/leveldb'),
-      join(homedir(), 'Library/Application Support/Google/Chrome/Profile 1/Local Storage/leveldb'),
-    ],
+    paths: getChromiumProfileStoragePaths(
+      join(homedir(), 'Library/Application Support/Google/Chrome')
+    ),
     type: 'chromium',
   },
   {
