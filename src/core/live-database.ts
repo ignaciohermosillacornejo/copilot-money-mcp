@@ -454,8 +454,46 @@ export class LiveCopilotDatabase {
       }
     }
     if (!existing) return;
-    const merged: TransactionNode = { ...existing, ...fields, id };
+    const merged: TransactionNode = {
+      ...existing,
+      ...this.toTransactionNodePatch(fields, existing),
+      id,
+    };
     this.transactionsWindowCache.upsert(merged);
+  }
+
+  private toTransactionNodePatch(
+    fields: Partial<Transaction>,
+    existing: TransactionNode
+  ): Partial<TransactionNode> {
+    const patch: Partial<TransactionNode> = {};
+
+    if (fields.name !== undefined) patch.name = fields.name;
+    if (fields.amount !== undefined) patch.amount = fields.amount;
+    if (fields.date !== undefined) patch.date = fields.date;
+    if (fields.account_id !== undefined) patch.accountId = fields.account_id;
+    if (fields.item_id !== undefined) patch.itemId = fields.item_id;
+    if (fields.category_id !== undefined) patch.categoryId = fields.category_id;
+    if (fields.recurring_id !== undefined) patch.recurringId = fields.recurring_id;
+    if (fields.parent_transaction_id !== undefined) patch.parentId = fields.parent_transaction_id;
+    if (fields.pending !== undefined) patch.isPending = fields.pending;
+    if (fields.user_reviewed !== undefined) patch.isReviewed = fields.user_reviewed;
+    if (fields.user_note !== undefined) patch.userNotes = fields.user_note;
+    if (typeof fields.tip_amount === 'number') patch.tipAmount = fields.tip_amount;
+    if (fields.tip_amount === null) patch.tipAmount = null;
+    if (fields.iso_currency_code !== undefined) patch.isoCurrencyCode = fields.iso_currency_code;
+    if (fields.created_timestamp !== undefined) {
+      const createdAt = Number(fields.created_timestamp);
+      if (Number.isFinite(createdAt)) patch.createdAt = createdAt;
+    }
+    if (fields.tag_ids !== undefined) {
+      const existingTags = new Map(existing.tags.map((t) => [t.id, t]));
+      patch.tags = fields.tag_ids.map((tagId) => {
+        return existingTags.get(tagId) ?? { id: tagId, name: '', colorName: '' };
+      });
+    }
+
+    return patch;
   }
 
   /** Remove a cached transaction by id. No-op if not found. */
