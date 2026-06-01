@@ -1,8 +1,9 @@
 /**
  * Browser token extractor for Firebase refresh tokens.
  *
- * Searches Chrome, Arc, Safari, and Firefox LevelDB/IndexedDB storage
- * for Copilot Money Firebase refresh tokens (prefixed with "AMf-").
+ * Searches Chromium browsers (Chrome, Arc, Edge, Brave, Vivaldi, Chromium,
+ * Opera), Safari, and Firefox LevelDB/IndexedDB storage for Copilot Money
+ * Firebase refresh tokens (prefixed with "AMf-").
  */
 
 import { readdirSync, readFileSync, existsSync, statSync } from 'fs';
@@ -62,26 +63,51 @@ export function getChromiumProfileStoragePaths(userDataDir: string): string[] {
   ]);
 }
 
+/**
+ * Chromium-based browsers that use the standard Chrome user-data layout
+ * (`Default` / `Profile N` subdirectories), keyed to their macOS user-data
+ * directory relative to the home folder. They all store Copilot's Firebase
+ * Web SDK session under per-profile IndexedDB/Local Storage, so they share
+ * getChromiumProfileStoragePaths for multi-profile discovery.
+ */
+const CHROMIUM_USER_DATA_DIRS: ReadonlyArray<{ name: string; userDataDir: string }> = [
+  { name: 'Chrome', userDataDir: 'Library/Application Support/Google/Chrome' },
+  { name: 'Arc', userDataDir: 'Library/Application Support/Arc/User Data' },
+  { name: 'Microsoft Edge', userDataDir: 'Library/Application Support/Microsoft Edge' },
+  { name: 'Brave', userDataDir: 'Library/Application Support/BraveSoftware/Brave-Browser' },
+  { name: 'Vivaldi', userDataDir: 'Library/Application Support/Vivaldi' },
+  { name: 'Chromium', userDataDir: 'Library/Application Support/Chromium' },
+];
+
+/**
+ * Opera-family browsers keep their single profile at the user-data root (no
+ * `Default` subdirectory), unlike the browsers above. Multi-profile discovery
+ * does not apply, so their storage dirs sit directly under the user-data dir.
+ */
+const OPERA_USER_DATA_DIRS: ReadonlyArray<{ name: string; userDataDir: string }> = [
+  { name: 'Opera', userDataDir: 'Library/Application Support/com.operasoftware.Opera' },
+  { name: 'Opera GX', userDataDir: 'Library/Application Support/com.operasoftware.OperaGX' },
+];
+
 /** Default browser configurations for macOS. */
 export const BROWSER_CONFIGS: BrowserConfig[] = [
-  {
-    name: 'Chrome',
-    paths: getChromiumProfileStoragePaths(
-      join(homedir(), 'Library/Application Support/Google/Chrome')
-    ),
-    type: 'chromium',
-  },
-  {
-    name: 'Arc',
-    paths: [
-      join(
-        homedir(),
-        'Library/Application Support/Arc/User Data/Default/IndexedDB/https_app.copilot.money_0.indexeddb.leveldb'
-      ),
-      join(homedir(), 'Library/Application Support/Arc/User Data/Default/Local Storage/leveldb'),
-    ],
-    type: 'chromium',
-  },
+  ...CHROMIUM_USER_DATA_DIRS.map(
+    ({ name, userDataDir }): BrowserConfig => ({
+      name,
+      paths: getChromiumProfileStoragePaths(join(homedir(), userDataDir)),
+      type: 'chromium',
+    })
+  ),
+  ...OPERA_USER_DATA_DIRS.map(
+    ({ name, userDataDir }): BrowserConfig => ({
+      name,
+      paths: [
+        join(homedir(), userDataDir, COPILOT_INDEXEDDB_DIR),
+        join(homedir(), userDataDir, LOCAL_STORAGE_DIR),
+      ],
+      type: 'chromium',
+    })
+  ),
   {
     name: 'Safari',
     paths: [
@@ -200,7 +226,8 @@ function searchSafariDatabases(dbDir: string): string | undefined {
 
 /**
  * Extract a Firebase refresh token from browser local storage.
- * Searches browsers in order: Chrome, Arc, Safari, Firefox.
+ * Searches browsers in order: the Chromium family (Chrome, Arc, Edge, Brave,
+ * Vivaldi, Chromium, Opera), then Safari, then Firefox.
  * @param browserOverrides - Override browser configs for testing
  * @throws Error if no token is found in any browser
  */
