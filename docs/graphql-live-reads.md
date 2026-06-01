@@ -8,8 +8,9 @@ The progressive migration off LevelDB is now complete for every entity that has 
 
 ```bash
 copilot-money-mcp --live-reads
-# or alongside writes
-copilot-money-mcp --write --live-reads
+# `--write` implies `--live-reads`, so the line below is equivalent to either
+# `copilot-money-mcp --write` or `copilot-money-mcp --write --live-reads`.
+copilot-money-mcp --write
 ```
 
 Prerequisites:

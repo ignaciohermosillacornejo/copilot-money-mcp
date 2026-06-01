@@ -46,9 +46,9 @@ This server exposes different tools depending on which CLI flags you enable.
 |---|---|---|---|---|---|
 | 🟢 Default | _(none)_ | Reads from your local LevelDB cache | ❌ None | 🔌 Zero (offline) | 14 cache-mode read + utility tools |
 | 🌐 Live reads | `--live-reads` | Real-time reads via Copilot's GraphQL API; swaps out 6 cache tools and adds 7 live-only ones | 🔒 Browser session | 🌐 HTTPS per request | 21 read tools (8 cache + 13 live) |
-| ✍️ Writes | `--write` | Adds mutation tools (transactions, tags, categories, budgets, recurrings, splits) | 🔒 Browser session | 🌐 HTTPS per request | +17 write tools (additive to either read mode) |
+| ✍️ Writes | `--write` | Adds mutation tools (transactions, tags, categories, budgets, recurrings, splits) **and turns on `--live-reads` automatically** — writes need server-fresh transaction metadata, so live reads are coupled to write mode | 🔒 Browser session | 🌐 HTTPS per request | +17 write tools, on top of the 21 live read tools |
 
-`--live-reads` and `--write` can be combined.
+Passing `--write` implies `--live-reads`; you can still pass `--live-reads` on its own for read-only live access.
 
 📖 **See [docs/tools-by-mode.md](docs/tools-by-mode.md)** for the full per-tool inventory with status, caveats, and known limitations (goals, stock splits, response-size caps).
 
@@ -227,7 +227,7 @@ Use this when:
 - You want fresh per-security cost basis or balance-over-time data.
 - The macOS app hasn't synced recently.
 
-### `--write`: mutations via GraphQL
+### `--write`: mutations via GraphQL (implies `--live-reads`)
 
 ```bash
 copilot-money-mcp --write
@@ -235,13 +235,11 @@ copilot-money-mcp --write
 
 Adds 17 mutation tools for transactions, tags, categories, recurrings, budgets, and split-transactions. Off by default — the server is read-only unless you opt in.
 
-### Combining both
+`--write` automatically enables `--live-reads` as well. Write tools resolve transaction metadata (account/item IDs) against the live GraphQL surface so they can edit any transaction the API exposes, not just the ~30 days the local LevelDB cache happens to hold. Once you've consented to the authenticated network calls writes require, there's no privacy or perf reason to keep reads pinned to the stale cache.
 
 ```bash
-copilot-money-mcp --live-reads --write
+copilot-money-mcp --write --live-reads   # equivalent to `--write` alone; --live-reads is redundant
 ```
-
-Live reads + write tools together — the most common power-user setup.
 
 ### Configuring via Claude Desktop / Cursor
 
@@ -252,7 +250,7 @@ Add the flags to the `args` array in your MCP config:
   "mcpServers": {
     "copilot-money": {
       "command": "copilot-money-mcp",
-      "args": ["--live-reads", "--write"]
+      "args": ["--write"]
     }
   }
 }
