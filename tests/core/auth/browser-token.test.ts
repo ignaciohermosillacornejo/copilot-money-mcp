@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import {
   extractRefreshToken,
   BROWSER_CONFIGS,
+  getChromiumProfileStoragePaths,
   type BrowserConfig,
 } from '../../../src/core/auth/browser-token.js';
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync, symlinkSync, chmodSync } from 'fs';
@@ -28,6 +29,32 @@ describe('extractRefreshToken', () => {
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test('discovers IndexedDB and Local Storage paths for all Chrome profile directories', () => {
+    const chromeDir = join(tempDir, 'Chrome');
+    mkdirSync(join(chromeDir, 'Default'), { recursive: true });
+    mkdirSync(join(chromeDir, 'Profile 3'), { recursive: true });
+    mkdirSync(join(chromeDir, 'Profile 1'), { recursive: true });
+    mkdirSync(join(chromeDir, 'System Profile'), { recursive: true });
+
+    expect(getChromiumProfileStoragePaths(chromeDir)).toEqual([
+      join(chromeDir, 'Default/IndexedDB/https_app.copilot.money_0.indexeddb.leveldb'),
+      join(chromeDir, 'Default/Local Storage/leveldb'),
+      join(chromeDir, 'Profile 1/IndexedDB/https_app.copilot.money_0.indexeddb.leveldb'),
+      join(chromeDir, 'Profile 1/Local Storage/leveldb'),
+      join(chromeDir, 'Profile 3/IndexedDB/https_app.copilot.money_0.indexeddb.leveldb'),
+      join(chromeDir, 'Profile 3/Local Storage/leveldb'),
+    ]);
+  });
+
+  test('uses Default profile paths when Chromium user data dir is missing', () => {
+    const chromeDir = join(tempDir, 'missing-chrome');
+
+    expect(getChromiumProfileStoragePaths(chromeDir)).toEqual([
+      join(chromeDir, 'Default/IndexedDB/https_app.copilot.money_0.indexeddb.leveldb'),
+      join(chromeDir, 'Default/Local Storage/leveldb'),
+    ]);
   });
 
   test('extracts token from .ldb file containing refresh token', async () => {
