@@ -141,6 +141,28 @@ describe('updateTransaction — single-field mapping to EditTransaction', () => 
       input: { tagIds: [] },
     });
   });
+
+  test('throws when GraphQL returns an unchanged categoryId', async () => {
+    const { tools } = makeTools({
+      responses: {
+        EditTransaction: {
+          editTransaction: {
+            transaction: {
+              id: 'txn1',
+              categoryId: 'food',
+              userNotes: null,
+              isReviewed: false,
+              tags: [],
+            },
+          },
+        },
+      },
+    });
+
+    await expect(
+      tools.updateTransaction({ transaction_id: 'txn1', category_id: 'groceries' })
+    ).rejects.toThrow(/did not apply categoryId/);
+  });
 });
 
 describe('updateTransaction — multi-field atomic dispatch', () => {

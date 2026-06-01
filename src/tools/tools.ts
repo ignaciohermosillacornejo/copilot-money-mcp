@@ -15,6 +15,8 @@ import {
   addTransactionToRecurring as gqlAddTransactionToRecurring,
   splitTransaction as gqlSplitTransaction,
   type CreatedTransaction,
+  type EditTransactionChanges,
+  type EditTransactionInput,
   type TransactionType,
 } from '../core/graphql/transactions.js';
 import {
@@ -376,6 +378,44 @@ export class CopilotMoneyTools {
       throw new Error('Write tools require --write flag to be set');
     }
     return this.graphqlClient;
+  }
+
+  private assertEditTransactionApplied(
+    transactionId: string,
+    requested: EditTransactionInput,
+    changed: EditTransactionChanges
+  ): void {
+    if ('categoryId' in requested && changed.categoryId !== requested.categoryId) {
+      throw new Error(
+        `EditTransaction did not apply categoryId for ${transactionId}: requested ${requested.categoryId}, got ${changed.categoryId ?? 'null'}`
+      );
+    }
+    if ('userNotes' in requested) {
+      const requestedNotes = requested.userNotes;
+      const changedNotes = changed.userNotes;
+      const cleared = requestedNotes === '' && changedNotes === null;
+      if (!cleared && changedNotes !== requestedNotes) {
+        throw new Error(
+          `EditTransaction did not apply userNotes for ${transactionId}: requested ${JSON.stringify(requestedNotes)}, got ${JSON.stringify(changedNotes)}`
+        );
+      }
+    }
+    if ('isReviewed' in requested && changed.isReviewed !== requested.isReviewed) {
+      throw new Error(
+        `EditTransaction did not apply isReviewed for ${transactionId}: requested ${requested.isReviewed}, got ${changed.isReviewed}`
+      );
+    }
+    if ('tagIds' in requested) {
+      const requestedTags = requested.tagIds ?? [];
+      const changedTags = changed.tagIds ?? [];
+      const sameLength = requestedTags.length === changedTags.length;
+      const sameValues = requestedTags.every((id, index) => changedTags[index] === id);
+      if (!sameLength || !sameValues) {
+        throw new Error(
+          `EditTransaction did not apply tagIds for ${transactionId}: requested ${JSON.stringify(requestedTags)}, got ${JSON.stringify(changedTags)}`
+        );
+      }
+    }
   }
 
   private validateTransactionWriteRef(ref: TransactionWriteRef): void {
@@ -2569,6 +2609,7 @@ export class CopilotMoneyTools {
         itemId: txnRef.item_id,
         input,
       });
+      this.assertEditTransactionApplied(transaction_id, input, result.changed);
       // Map GraphQL field names back to MCP API names in the response.
       const graphqlToApiName: Record<string, string> = {
         categoryId: 'category_id',
@@ -3145,12 +3186,17 @@ export class CopilotMoneyTools {
         if (idx >= writeRefs.length) return;
         const txn = writeRefs[idx]!;
         try {
-          await editTransaction(client, {
+          const result = await editTransaction(client, {
             id: txn.transaction_id,
             accountId: txn.account_id,
             itemId: txn.item_id,
             input: { isReviewed: reviewed },
           });
+          this.assertEditTransactionApplied(
+            txn.transaction_id,
+            { isReviewed: reviewed },
+            result.changed
+          );
           reviewed_count++;
         } catch (e) {
           // Record the first failure only; other in-flight workers settle.
