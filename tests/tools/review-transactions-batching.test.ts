@@ -119,6 +119,28 @@ describe('review_transactions dispatches one EditTransaction per id', () => {
     await tools.reviewTransactions({ transaction_ids: ['a', 'b'], reviewed: false });
     expect(client._calls.every((c) => (c.variables as any).input.isReviewed === false)).toBe(true);
   });
+
+  test('throws when GraphQL returns an unchanged isReviewed value', async () => {
+    const db = makeMockDb(['txn-1']);
+    const client = createMockGraphQLClient({
+      EditTransaction: {
+        editTransaction: {
+          transaction: {
+            id: 'txn-1',
+            categoryId: 'c',
+            userNotes: null,
+            isReviewed: false,
+            tags: [],
+          },
+        },
+      },
+    });
+    const tools = new CopilotMoneyTools(db, client);
+
+    await expect(tools.reviewTransactions({ transaction_ids: ['txn-1'] })).rejects.toThrow(
+      /did not apply isReviewed/
+    );
+  });
 });
 
 describe('review_transactions respects 5-parallel concurrency cap', () => {

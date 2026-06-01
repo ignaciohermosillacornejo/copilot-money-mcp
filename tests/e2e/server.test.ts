@@ -737,6 +737,48 @@ describe('handleCallTool — write tools', () => {
     expect(data.updated.sort()).toEqual(['category_id', 'note', 'tag_ids']);
   });
 
+  test('update_transaction accepts explicit refs for transactions outside local cache', async () => {
+    const calls: any[] = [];
+    const writeTools = new CopilotMoneyTools(
+      db,
+      createMockGraphQLClient({
+        EditTransaction: (vars: any) => {
+          calls.push(vars);
+          return {
+            editTransaction: {
+              transaction: {
+                id: vars.id,
+                categoryId: vars.input?.categoryId ?? 'c',
+                userNotes: vars.input?.userNotes ?? null,
+                isReviewed: vars.input?.isReviewed ?? false,
+                tags: (vars.input?.tagIds ?? []).map((id: string) => ({ id })),
+              },
+            },
+          };
+        },
+      })
+    );
+    writeServer._injectForTesting(db, writeTools);
+
+    const result = await writeServer.handleCallTool('update_transaction', {
+      transaction_id: 'live_only_txn',
+      account_id: 'live_acc',
+      item_id: 'live_item',
+      category_id: 'custom_cat_1',
+    });
+
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.transaction_id).toBe('live_only_txn');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      id: 'live_only_txn',
+      accountId: 'live_acc',
+      itemId: 'live_item',
+    });
+  });
+
   test('update_transaction rejects empty patch', async () => {
     const result = await writeServer.handleCallTool('update_transaction', {
       transaction_id: 'txn1',
@@ -1041,6 +1083,71 @@ describe('handleCallTool — write tools (extended)', () => {
     const data = parseToolResult(result) as any;
     expect(data.success).toBe(true);
     expect(data.reviewed_count).toBe(1);
+  });
+
+  test('review_transactions accepts explicit refs for transactions outside local cache', async () => {
+    const calls: any[] = [];
+    const writeTools = new CopilotMoneyTools(
+      db,
+      createMockGraphQLClient({
+        EditTransaction: (vars: any) => {
+          calls.push(vars);
+          return {
+            editTransaction: {
+              transaction: {
+                id: vars.id,
+                categoryId: vars.input?.categoryId ?? 'c',
+                userNotes: vars.input?.userNotes ?? null,
+                isReviewed: vars.input?.isReviewed ?? false,
+                tags: (vars.input?.tagIds ?? []).map((id: string) => ({ id })),
+              },
+            },
+          };
+        },
+      })
+    );
+    writeServer._injectForTesting(db, writeTools);
+
+    const result = await writeServer.handleCallTool('review_transactions', {
+      transactions: [
+        {
+          transaction_id: 'live_review_txn',
+          account_id: 'live_acc',
+          item_id: 'live_item',
+        },
+      ],
+    });
+
+    expect(result.isError).toBeUndefined();
+    const data = parseToolResult(result) as any;
+    expect(data.success).toBe(true);
+    expect(data.reviewed_count).toBe(1);
+    expect(data.transaction_ids).toEqual(['live_review_txn']);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      id: 'live_review_txn',
+      accountId: 'live_acc',
+      itemId: 'live_item',
+      input: { isReviewed: true },
+    });
+  });
+
+  test('review_transactions rejects mixed legacy IDs and explicit refs', async () => {
+    const result = await writeServer.handleCallTool('review_transactions', {
+      transaction_ids: ['txn1'],
+      transactions: [
+        {
+          transaction_id: 'live_review_txn',
+          account_id: 'live_acc',
+          item_id: 'live_item',
+        },
+      ],
+    });
+
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { text: string }).text).toMatch(
+      /either transaction_ids or transactions/i
+    );
   });
 
   // -- Tag write tools --

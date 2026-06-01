@@ -468,6 +468,43 @@ describe('LiveCopilotDatabase.patchLiveTransaction', () => {
     expect(rows[0]!.id).toBe('tx1');
   });
 
+  test('maps local transaction field names onto GraphQL cache rows', () => {
+    const live = mkLive();
+    const wc = live.getTransactionsWindowCache();
+    wc.ingestMonth(
+      '2024-01',
+      [
+        {
+          id: 'tx1',
+          date: '2024-01-15',
+          categoryId: 'old-cat',
+          isReviewed: false,
+          userNotes: null,
+          tags: [{ id: 'tag-old', name: 'Old Tag', colorName: 'RED1' }],
+        },
+      ],
+      Date.now()
+    );
+
+    live.patchLiveTransaction('tx1', {
+      category_id: 'new-cat',
+      user_reviewed: true,
+      user_note: 'Checked',
+      tag_ids: ['tag-old', 'tag-new'],
+    } as Record<string, unknown>);
+
+    const row = wc.entriesForMonth('2024-01')[0]!;
+    expect(row.categoryId).toBe('new-cat');
+    expect(row.isReviewed).toBe(true);
+    expect(row.userNotes).toBe('Checked');
+    expect(row.tags).toEqual([
+      { id: 'tag-old', name: 'Old Tag', colorName: 'RED1' },
+      { id: 'tag-new', name: '', colorName: '' },
+    ]);
+    expect((row as Record<string, unknown>).category_id).toBeUndefined();
+    expect((row as Record<string, unknown>).user_reviewed).toBeUndefined();
+  });
+
   test('no-op when transaction id is not cached', () => {
     const live = mkLive();
     const wc = live.getTransactionsWindowCache();
