@@ -28,27 +28,38 @@ describe('BROWSER_CONFIGS', () => {
   test('standard Chromium browsers search per-profile IndexedDB then Local Storage', () => {
     for (const name of ['Chrome', 'Arc', 'Microsoft Edge', 'Brave', 'Vivaldi', 'Chromium']) {
       const config = BROWSER_CONFIGS.find((b) => b.name === name);
-      expect(config?.type).toBe('chromium');
+      expect(config).toBeDefined();
+      expect(config!.type).toBe('chromium');
       // At minimum, the Default profile's IndexedDB and Local Storage are searched.
       expect(
-        config?.paths.some((p) =>
+        config!.paths.some((p) =>
           p.endsWith('Default/IndexedDB/https_app.copilot.money_0.indexeddb.leveldb')
         )
       ).toBe(true);
-      expect(config?.paths.some((p) => p.endsWith('Default/Local Storage/leveldb'))).toBe(true);
+      expect(config!.paths.some((p) => p.endsWith('Default/Local Storage/leveldb'))).toBe(true);
     }
   });
 
-  test('Opera-family browsers search storage dirs at the user-data root (no Default profile)', () => {
+  test('Opera-family browsers search both the root layout and the Default profile layout', () => {
     for (const name of ['Opera', 'Opera GX']) {
       const config = BROWSER_CONFIGS.find((b) => b.name === name);
-      expect(config?.type).toBe('chromium');
-      expect(config?.paths).toEqual([
-        expect.stringMatching(/IndexedDB\/https_app\.copilot\.money_0\.indexeddb\.leveldb$/),
-        expect.stringMatching(/Local Storage\/leveldb$/),
-      ]);
-      // Root layout: no Default/Profile N segment in the path.
-      expect(config?.paths.every((p) => !/\/(Default|Profile \d+)\//.test(p))).toBe(true);
+      expect(config).toBeDefined();
+      expect(config!.type).toBe('chromium');
+      // Root layout (older builds): the first two paths sit directly under the
+      // user-data dir with no Default/Profile N segment.
+      expect(config!.paths[0]).toMatch(
+        /IndexedDB\/https_app\.copilot\.money_0\.indexeddb\.leveldb$/
+      );
+      expect(config!.paths[1]).toMatch(/Local Storage\/leveldb$/);
+      expect(config!.paths.slice(0, 2).every((p) => !/\/(Default|Profile \d+)\//.test(p))).toBe(
+        true
+      );
+      // Default layout (recent builds) is also covered.
+      expect(
+        config!.paths.some((p) =>
+          p.endsWith('Default/IndexedDB/https_app.copilot.money_0.indexeddb.leveldb')
+        )
+      ).toBe(true);
     }
   });
 });
