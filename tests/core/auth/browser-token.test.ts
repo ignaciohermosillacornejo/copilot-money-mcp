@@ -10,13 +10,46 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 
 describe('BROWSER_CONFIGS', () => {
-  test('defines configs for Chrome, Arc, Safari, and Firefox', () => {
+  test('defines configs for all supported Chromium browsers plus Safari and Firefox', () => {
     const names = BROWSER_CONFIGS.map((b) => b.name);
     expect(names).toContain('Chrome');
     expect(names).toContain('Arc');
+    expect(names).toContain('Microsoft Edge');
+    expect(names).toContain('Brave');
+    expect(names).toContain('Vivaldi');
+    expect(names).toContain('Chromium');
+    expect(names).toContain('Opera');
+    expect(names).toContain('Opera GX');
     expect(names).toContain('Safari');
     expect(names).toContain('Firefox');
-    expect(names).toHaveLength(4);
+    expect(names).toHaveLength(10);
+  });
+
+  test('standard Chromium browsers search per-profile IndexedDB then Local Storage', () => {
+    for (const name of ['Chrome', 'Arc', 'Microsoft Edge', 'Brave', 'Vivaldi', 'Chromium']) {
+      const config = BROWSER_CONFIGS.find((b) => b.name === name);
+      expect(config?.type).toBe('chromium');
+      // At minimum, the Default profile's IndexedDB and Local Storage are searched.
+      expect(
+        config?.paths.some((p) =>
+          p.endsWith('Default/IndexedDB/https_app.copilot.money_0.indexeddb.leveldb')
+        )
+      ).toBe(true);
+      expect(config?.paths.some((p) => p.endsWith('Default/Local Storage/leveldb'))).toBe(true);
+    }
+  });
+
+  test('Opera-family browsers search storage dirs at the user-data root (no Default profile)', () => {
+    for (const name of ['Opera', 'Opera GX']) {
+      const config = BROWSER_CONFIGS.find((b) => b.name === name);
+      expect(config?.type).toBe('chromium');
+      expect(config?.paths).toEqual([
+        expect.stringMatching(/IndexedDB\/https_app\.copilot\.money_0\.indexeddb\.leveldb$/),
+        expect.stringMatching(/Local Storage\/leveldb$/),
+      ]);
+      // Root layout: no Default/Profile N segment in the path.
+      expect(config?.paths.every((p) => !/\/(Default|Profile \d+)\//.test(p))).toBe(true);
+    }
   });
 });
 
