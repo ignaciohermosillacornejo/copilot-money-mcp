@@ -2,8 +2,8 @@
  * Browser token extractor for Firebase refresh tokens.
  *
  * Searches Chromium browsers (Chrome, Arc, Edge, Brave, Vivaldi, Chromium,
- * Opera), Safari, and Firefox LevelDB/IndexedDB storage for Copilot Money
- * Firebase refresh tokens (prefixed with "AMf-").
+ * Opera, Opera GX), Safari, and Firefox LevelDB/IndexedDB storage for Copilot
+ * Money Firebase refresh tokens (prefixed with "AMf-").
  */
 
 import { readdirSync, readFileSync, existsSync, statSync } from 'fs';
@@ -80,9 +80,12 @@ const CHROMIUM_USER_DATA_DIRS: ReadonlyArray<{ name: string; userDataDir: string
 ];
 
 /**
- * Opera-family browsers keep their single profile at the user-data root (no
- * `Default` subdirectory), unlike the browsers above. Multi-profile discovery
- * does not apply, so their storage dirs sit directly under the user-data dir.
+ * Opera-family browsers historically kept their single profile at the
+ * user-data root (no `Default` subdirectory), but recent Chromium-based Opera
+ * builds may use Chrome's `Default` / `Profile N` layout. We can't know which
+ * a given install uses, so we search both: the storage dirs directly under the
+ * user-data root plus the standard per-profile paths. Non-existent paths are
+ * skipped cheaply at search time.
  */
 const OPERA_USER_DATA_DIRS: ReadonlyArray<{ name: string; userDataDir: string }> = [
   { name: 'Opera', userDataDir: 'Library/Application Support/com.operasoftware.Opera' },
@@ -98,16 +101,20 @@ export const BROWSER_CONFIGS: BrowserConfig[] = [
       type: 'chromium',
     })
   ),
-  ...OPERA_USER_DATA_DIRS.map(
-    ({ name, userDataDir }): BrowserConfig => ({
+  ...OPERA_USER_DATA_DIRS.map(({ name, userDataDir }): BrowserConfig => {
+    const root = join(homedir(), userDataDir);
+    return {
       name,
+      // Root layout (older builds) first, then the Chrome-style Default/Profile
+      // N layout (recent builds) via the shared multi-profile discovery.
       paths: [
-        join(homedir(), userDataDir, COPILOT_INDEXEDDB_DIR),
-        join(homedir(), userDataDir, LOCAL_STORAGE_DIR),
+        join(root, COPILOT_INDEXEDDB_DIR),
+        join(root, LOCAL_STORAGE_DIR),
+        ...getChromiumProfileStoragePaths(root),
       ],
       type: 'chromium',
-    })
-  ),
+    };
+  }),
   {
     name: 'Safari',
     paths: [
@@ -227,7 +234,7 @@ function searchSafariDatabases(dbDir: string): string | undefined {
 /**
  * Extract a Firebase refresh token from browser local storage.
  * Searches browsers in order: the Chromium family (Chrome, Arc, Edge, Brave,
- * Vivaldi, Chromium, Opera), then Safari, then Firefox.
+ * Vivaldi, Chromium, Opera, Opera GX), then Safari, then Firefox.
  * @param browserOverrides - Override browser configs for testing
  * @throws Error if no token is found in any browser
  */
