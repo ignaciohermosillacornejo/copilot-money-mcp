@@ -89,6 +89,24 @@ function validateDocId(id: string, label: string): void {
   }
 }
 
+type TransactionWriteRef = {
+  transaction_id: string;
+  account_id: string;
+  item_id: string;
+};
+
+type OptionalTransactionWriteRef = {
+  transaction_id: string;
+  account_id?: string;
+  item_id?: string;
+};
+
+function hasExplicitTransactionWriteRef(
+  ref: OptionalTransactionWriteRef
+): ref is TransactionWriteRef {
+  return ref.account_id !== undefined && ref.item_id !== undefined;
+}
+
 /**
  * Plaid category ID for foreign transaction fees (snake_case format).
  * @see https://plaid.com/docs/api/products/transactions/#categoriesget
@@ -358,6 +376,52 @@ export class CopilotMoneyTools {
       throw new Error('Write tools require --write flag to be set');
     }
     return this.graphqlClient;
+  }
+
+  private validateTransactionWriteRef(ref: TransactionWriteRef): void {
+    validateDocId(ref.transaction_id, 'transaction_id');
+    validateDocId(ref.account_id, 'account_id');
+    validateDocId(ref.item_id, 'item_id');
+  }
+
+  private async resolveTransactionWriteRef(
+    ref: OptionalTransactionWriteRef,
+    transactionMap?: Map<string, Transaction>
+  ): Promise<TransactionWriteRef> {
+    validateDocId(ref.transaction_id, 'transaction_id');
+
+    if (ref.account_id !== undefined || ref.item_id !== undefined) {
+      if (!hasExplicitTransactionWriteRef(ref)) {
+        throw new Error(
+          `Transaction ${ref.transaction_id} requires both account_id and item_id when either is provided`
+        );
+      }
+      this.validateTransactionWriteRef(ref);
+      return ref;
+    }
+
+    const localTransactionMap =
+      transactionMap ??
+      new Map((await this.db.getAllTransactions()).map((txn) => [txn.transaction_id, txn]));
+    const txn = localTransactionMap.get(ref.transaction_id);
+    if (!txn) {
+      throw new Error(
+        `Transaction not found in local cache: ${ref.transaction_id}. ` +
+          'Pass account_id and item_id from get_transactions_live for live-read transactions.'
+      );
+    }
+    if (!txn.account_id || !txn.item_id) {
+      throw new Error(
+        `Transaction ${ref.transaction_id} missing account_id or item_id in local cache. ` +
+          'Pass account_id and item_id from get_transactions_live.'
+      );
+    }
+
+    return {
+      transaction_id: ref.transaction_id,
+      account_id: txn.account_id,
+      item_id: txn.item_id,
+    };
   }
 
   /**
@@ -2422,6 +2486,8 @@ export class CopilotMoneyTools {
    */
   async updateTransaction(args: {
     transaction_id: string;
+    account_id?: string;
+    item_id?: string;
     category_id?: string;
     note?: string;
     tag_ids?: string[];
@@ -2436,7 +2502,14 @@ export class CopilotMoneyTools {
     // Reject unknown fields (equivalent to JSON Schema additionalProperties: false,
     // but re-checked here as a defense in depth in case the method is called directly
     // without going through the MCP dispatch layer).
-    const allowedKeys = new Set(['transaction_id', 'category_id', 'note', 'tag_ids']);
+    const allowedKeys = new Set([
+      'transaction_id',
+      'account_id',
+      'item_id',
+      'category_id',
+      'note',
+      'tag_ids',
+    ]);
     for (const key of Object.keys(args)) {
       if (!allowedKeys.has(key)) {
         throw new Error(`update_transaction: unknown field "${key}"`);
@@ -2445,21 +2518,16 @@ export class CopilotMoneyTools {
 
     // Require at least one mutable field besides transaction_id.
     const mutableKeys = Object.keys(args).filter(
-      (k) => k !== 'transaction_id' && (args as Record<string, unknown>)[k] !== undefined
+      (k) =>
+        !['transaction_id', 'account_id', 'item_id'].includes(k) &&
+        (args as Record<string, unknown>)[k] !== undefined
     );
     if (mutableKeys.length === 0) {
       throw new Error('update_transaction requires at least one field to update');
     }
 
     validateDocId(transaction_id, 'transaction_id');
-
-    // Resolve the transaction from the local cache so we can supply accountId /
-    // itemId to the GraphQL mutation.
-    const allTxns = await this.db.getAllTransactions();
-    const txn = allTxns.find((t) => t.transaction_id === transaction_id);
-    if (!txn) {
-      throw new Error(`Transaction not found: ${transaction_id}`);
-    }
+    const txnRef = await this.resolveTransactionWriteRef(args);
 
     // Per-field validation (runs BEFORE any write for atomicity).
     if ('category_id' in args && args.category_id !== undefined) {
@@ -2494,15 +2562,11 @@ export class CopilotMoneyTools {
     if ('note' in args && args.note !== undefined) input.userNotes = args.note;
     if ('tag_ids' in args && args.tag_ids !== undefined) input.tagIds = args.tag_ids;
 
-    if (!txn.account_id || !txn.item_id) {
-      throw new Error(`Transaction ${transaction_id} missing account_id or item_id in local cache`);
-    }
-
     try {
       const result = await editTransaction(client, {
         id: transaction_id,
-        accountId: txn.account_id,
-        itemId: txn.item_id,
+        accountId: txnRef.account_id,
+        itemId: txnRef.item_id,
         input,
       });
       // Map GraphQL field names back to MCP API names in the response.
@@ -3001,39 +3065,60 @@ export class CopilotMoneyTools {
    * Validates all transaction IDs, sets isReviewed via GraphQL for each; local
    * cache is refreshed by Copilot's sync process.
    */
-  async reviewTransactions(args: { transaction_ids: string[]; reviewed?: boolean }): Promise<{
+  async reviewTransactions(args: {
+    transaction_ids?: string[];
+    transactions?: OptionalTransactionWriteRef[];
+    reviewed?: boolean;
+  }): Promise<{
     success: boolean;
     reviewed_count: number;
     transaction_ids: string[];
   }> {
     const client = this.getGraphQLClient();
 
-    const { transaction_ids, reviewed = true } = args;
+    const { transaction_ids, transactions, reviewed = true } = args;
+    const hasTransactionIds = transaction_ids !== undefined;
+    const hasTransactions = transactions !== undefined;
 
-    if (!Array.isArray(transaction_ids) || transaction_ids.length === 0) {
-      throw new Error('transaction_ids must be a non-empty array');
+    if (hasTransactionIds && hasTransactions) {
+      throw new Error('Pass either transaction_ids or transactions, not both');
+    }
+    if (!hasTransactionIds && !hasTransactions) {
+      throw new Error('review_transactions requires transaction_ids or transactions');
     }
 
-    for (const id of transaction_ids) {
-      validateDocId(id, 'transaction_id');
-    }
+    let writeRefs: TransactionWriteRef[];
 
-    const allTransactions = await this.db.getAllTransactions();
-    const txnMap = new Map(allTransactions.map((t) => [t.transaction_id, t]));
-
-    const missing = transaction_ids.filter((id) => !txnMap.has(id));
-    if (missing.length > 0) {
-      throw new Error(`Transactions not found: ${missing.join(', ')}`);
-    }
-
-    // Pre-flight: confirm every transaction has account/item ids before
-    // issuing any writes. Keeps partial-failure surface small.
-    for (const id of transaction_ids) {
-      const txn = txnMap.get(id)!;
-      if (!txn.account_id || !txn.item_id) {
-        throw new Error(`Transaction ${id} missing account_id or item_id in local cache`);
+    if (hasTransactions) {
+      if (!Array.isArray(transactions) || transactions.length === 0) {
+        throw new Error('transactions must be a non-empty array');
       }
+
+      writeRefs = transactions.map((ref) => {
+        if (!hasExplicitTransactionWriteRef(ref)) {
+          throw new Error(
+            `Transaction ${ref.transaction_id} requires transaction_id, account_id, and item_id`
+          );
+        }
+        this.validateTransactionWriteRef(ref);
+        return ref;
+      });
+    } else {
+      if (!Array.isArray(transaction_ids) || transaction_ids.length === 0) {
+        throw new Error('transaction_ids must be a non-empty array');
+      }
+      for (const id of transaction_ids) {
+        validateDocId(id, 'transaction_id');
+      }
+
+      const allTransactions = await this.db.getAllTransactions();
+      const txnMap = new Map(allTransactions.map((t) => [t.transaction_id, t]));
+      writeRefs = await Promise.all(
+        transaction_ids.map((id) => this.resolveTransactionWriteRef({ transaction_id: id }, txnMap))
+      );
     }
+
+    const resolvedTransactionIds = writeRefs.map((ref) => ref.transaction_id);
 
     // Bounded concurrency: never more than CONCURRENCY in flight at once.
     // The user explicitly asked to cap parallel writes at 5 to avoid
@@ -3057,33 +3142,32 @@ export class CopilotMoneyTools {
       while (true) {
         if (firstError) return;
         const idx = cursor++;
-        if (idx >= transaction_ids.length) return;
-        const id = transaction_ids[idx]!;
-        const txn = txnMap.get(id)!;
+        if (idx >= writeRefs.length) return;
+        const txn = writeRefs[idx]!;
         try {
           await editTransaction(client, {
-            id,
-            accountId: txn.account_id!,
-            itemId: txn.item_id!,
+            id: txn.transaction_id,
+            accountId: txn.account_id,
+            itemId: txn.item_id,
             input: { isReviewed: reviewed },
           });
           reviewed_count++;
         } catch (e) {
           // Record the first failure only; other in-flight workers settle.
-          if (!firstError) firstError = { id, error: e };
+          if (!firstError) firstError = { id: txn.transaction_id, error: e };
           return;
         }
       }
     };
 
-    const workerCount = Math.min(CONCURRENCY, transaction_ids.length);
+    const workerCount = Math.min(CONCURRENCY, writeRefs.length);
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
     if (firstError) {
       const { id, error } = firstError;
       if (error instanceof GraphQLError) {
         throw new Error(
-          `review_transactions failed at id=${id} (${reviewed_count}/${transaction_ids.length} succeeded): ${graphQLErrorToMcpError(error)}`,
+          `review_transactions failed at id=${id} (${reviewed_count}/${writeRefs.length} succeeded): ${graphQLErrorToMcpError(error)}`,
           { cause: error }
         );
       }
@@ -3093,7 +3177,7 @@ export class CopilotMoneyTools {
     // Optimistic cache patch — only for ids that successfully completed.
     // A partial-failure throw above would have bypassed this, so here we
     // patch every id in the batch.
-    for (const id of transaction_ids) {
+    for (const id of resolvedTransactionIds) {
       this.db.patchCachedTransaction(id, { user_reviewed: reviewed });
       this.liveDb?.patchLiveTransaction(id, { user_reviewed: reviewed });
     }
@@ -3101,7 +3185,7 @@ export class CopilotMoneyTools {
     return {
       success: true,
       reviewed_count,
-      transaction_ids,
+      transaction_ids: resolvedTransactionIds,
     };
   }
 
@@ -4573,6 +4657,8 @@ export function createWriteToolSchemas(): ToolSchema[] {
       description:
         "Update a single transaction's category, note, or tags. Pass transaction_id plus " +
         'any combination of category_id, note, or tag_ids — only specified fields are changed. ' +
+        'When updating a row returned by get_transactions_live that may not exist in the local ' +
+        'cache, also pass account_id and item_id. ' +
         'Pass note="" to clear the note. Pass tag_ids=[] to clear all tags. At least one mutable ' +
         'field must be provided besides transaction_id. Other fields (name, excluded, ' +
         'internal_transfer, goal_id) are not writable through the GraphQL API and were removed ' +
@@ -4584,6 +4670,16 @@ export function createWriteToolSchemas(): ToolSchema[] {
           transaction_id: {
             type: 'string',
             description: 'Transaction ID to update (from get_transactions results)',
+          },
+          account_id: {
+            type: 'string',
+            description:
+              'Account ID for this transaction. Optional for local-cache transactions; required with item_id for live-read transactions from get_transactions_live.',
+          },
+          item_id: {
+            type: 'string',
+            description:
+              'Item ID for this transaction. Optional for local-cache transactions; required with account_id for live-read transactions from get_transactions_live.',
           },
           category_id: {
             type: 'string',
@@ -4611,24 +4707,51 @@ export function createWriteToolSchemas(): ToolSchema[] {
       name: 'review_transactions',
       description:
         'Mark one or more transactions as reviewed (or unreviewed). ' +
-        'Accepts an array of transaction_ids. Writes are issued via GraphQL in parallel with ' +
+        'Accepts either legacy transaction_ids, resolved through the local cache, or a ' +
+        'transactions array with transaction_id, account_id, and item_id from get_transactions_live. ' +
+        'Writes are issued via GraphQL in parallel with ' +
         'a cap of 5 in flight at a time. On the first GraphQL error, new writes stop, in-flight ' +
         'writes settle, and the error is thrown with a `reviewed_count` reflecting how many ' +
         'succeeded before the failure (partial success is possible).',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           transaction_ids: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Transaction IDs to mark as reviewed',
+            description:
+              'Transaction IDs to mark as reviewed. Use only for transactions present in the local cache.',
+          },
+          transactions: {
+            type: 'array',
+            description:
+              'Full transaction references to mark as reviewed. Use this for transactions returned by get_transactions_live.',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                transaction_id: {
+                  type: 'string',
+                  description: 'Transaction ID from get_transactions_live.',
+                },
+                account_id: {
+                  type: 'string',
+                  description: 'Account ID from get_transactions_live.',
+                },
+                item_id: {
+                  type: 'string',
+                  description: 'Item ID from get_transactions_live.',
+                },
+              },
+              required: ['transaction_id', 'account_id', 'item_id'],
+            },
           },
           reviewed: {
             type: 'boolean',
             description: 'Set to true to mark as reviewed, false to unmark. Defaults to true.',
           },
         },
-        required: ['transaction_ids'],
       },
       annotations: {
         readOnlyHint: false,
