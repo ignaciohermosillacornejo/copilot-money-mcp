@@ -74,7 +74,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.2.0",
     "classic-level": "^3.0.0",
-    "protobufjs": "^8.4.2",
+    "protobufjs": "^8.5.0",
     "zod": "^4.3.5"
   },
   "devDependencies": {
@@ -85,10 +85,10 @@
     "eslint": "^10.4.0",
     "eslint-config-prettier": "^10.0.0",
     "globals": "^17.0.0",
-    "graphql": "^16.13.2",
+    "graphql": "^16.14.1",
     "husky": "^9.1.7",
     "prettier": "^3.2.5",
     "typescript": "^6.0.2",
-    "typescript-eslint": "^8.59.4"
+    "typescript-eslint": "^8.60.1"
   }
 }
