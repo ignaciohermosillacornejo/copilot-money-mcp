@@ -3522,6 +3522,8 @@ export class CopilotMoneyTools {
    */
   async updateRecurring(args: {
     recurring_id: string;
+    name?: string;
+    category_id?: string;
     rule?: {
       name_contains?: string;
       min_amount?: string;
@@ -3531,6 +3533,19 @@ export class CopilotMoneyTools {
     state?: string;
   }): Promise<{ success: true; recurring_id: string; updated: string[] }> {
     const client = this.getGraphQLClient();
+    if (args.name !== undefined) {
+      const trimmed = args.name.trim();
+      if (trimmed.length === 0) {
+        throw new Error('update_recurring: name must not be empty');
+      }
+    }
+    if (args.category_id !== undefined) {
+      validateDocId(args.category_id, 'category_id');
+      const categories = await this.db.getUserCategories();
+      if (!categories.find((c) => c.category_id === args.category_id)) {
+        throw new Error(`Category not found: ${args.category_id}`);
+      }
+    }
     if (args.state !== undefined) {
       const VALID_STATES = ['ACTIVE', 'PAUSED', 'ARCHIVED'];
       if (!VALID_STATES.includes(args.state)) {
@@ -3538,6 +3553,8 @@ export class CopilotMoneyTools {
       }
     }
     const input: Record<string, unknown> = {};
+    if (args.name !== undefined) input.name = args.name.trim();
+    if (args.category_id !== undefined) input.categoryId = args.category_id;
     if (args.state !== undefined) input.state = args.state;
     if (args.rule !== undefined) {
       const rule: Record<string, unknown> = {};
@@ -3554,6 +3571,8 @@ export class CopilotMoneyTools {
     try {
       const result = await gqlEditRecurring(client, { id: args.recurring_id, input });
       const patch: Partial<Recurring> = { recurring_id: args.recurring_id };
+      if (args.name !== undefined) patch.name = args.name.trim();
+      if (args.category_id !== undefined) patch.category_id = args.category_id;
       if (args.state !== undefined) {
         patch.state = args.state.toLowerCase() as 'active' | 'paused' | 'archived';
       }
@@ -3589,6 +3608,8 @@ export class CopilotMoneyTools {
               : cached.rule;
           const merged: RecurringNode = {
             ...cached,
+            ...(args.name !== undefined ? { name: args.name.trim() } : {}),
+            ...(args.category_id !== undefined ? { categoryId: args.category_id } : {}),
             ...(args.state !== undefined ? { state: args.state } : {}),
             rule: mergedRule,
           };
@@ -4953,15 +4974,24 @@ export function createWriteToolSchemas(): ToolSchema[] {
       name: 'update_recurring',
       description:
         'Update an existing recurring transaction. Pass recurring_id plus any combination of ' +
-        'state or rule (name_contains, min_amount, max_amount, days). The recurring cannot be ' +
-        'renamed or re-linked to a different transaction through this tool — those fields must ' +
-        'be changed in the Copilot Money web app. Writes directly to Copilot Money via GraphQL.',
+        'name, category_id, state, or rule (name_contains, min_amount, max_amount, days). ' +
+        'At least one mutable field must be provided besides recurring_id. ' +
+        'Writes directly to Copilot Money via GraphQL.',
       inputSchema: {
         type: 'object' as const,
         properties: {
           recurring_id: {
             type: 'string' as const,
             description: 'ID of the recurring to update.',
+          },
+          name: {
+            type: 'string' as const,
+            description: 'New display name for the recurring series. Must not be empty.',
+          },
+          category_id: {
+            type: 'string' as const,
+            description:
+              'New category ID to assign (from get_categories results). Changes the default category for future matched transactions.',
           },
           state: {
             type: 'string' as const,

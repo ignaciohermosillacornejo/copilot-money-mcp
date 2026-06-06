@@ -45,11 +45,15 @@ export interface EditRecurringInputRule {
 }
 
 export interface EditRecurringInput {
+  name?: string;
+  categoryId?: string;
   state?: string;
   rule?: EditRecurringInputRule;
 }
 
 export interface EditRecurringChanges {
+  name?: string;
+  categoryId?: string;
   state?: string;
   rule?: EditRecurringInputRule;
 }
@@ -73,6 +77,8 @@ interface EditRecurringResponse {
   editRecurring: {
     recurring: {
       id: string;
+      name: string;
+      categoryId: string;
       state: string;
     };
   };
@@ -96,7 +102,14 @@ export async function editRecurring(
 ): Promise<{ id: string; changed: EditRecurringChanges }> {
   // Convert MCP string amounts to wire Float. Keeps MCP contract stable;
   // matches what setBudget does for its amount field.
-  const wireInput: { state?: string; rule?: EditRecurringWireRule } = {};
+  const wireInput: {
+    name?: string;
+    categoryId?: string;
+    state?: string;
+    rule?: EditRecurringWireRule;
+  } = {};
+  if ('name' in args.input) wireInput.name = args.input.name;
+  if ('categoryId' in args.input) wireInput.categoryId = args.input.categoryId;
   if ('state' in args.input) wireInput.state = args.input.state;
   if ('rule' in args.input && args.input.rule) {
     const rule = args.input.rule;
@@ -113,7 +126,10 @@ export async function editRecurring(
   }
 
   const data = await client.mutate<
-    { id: string; input: { state?: string; rule?: EditRecurringWireRule } },
+    {
+      id: string;
+      input: { name?: string; categoryId?: string; state?: string; rule?: EditRecurringWireRule };
+    },
     EditRecurringResponse
   >('EditRecurring', EDIT_RECURRING, { id: args.id, input: wireInput });
   const recurring = data.editRecurring.recurring;
@@ -124,6 +140,8 @@ export async function editRecurring(
   // non-nullable-nameContains server error). In practice tools.ts builds
   // args.input via conditional spread, so explicit-undefined shouldn't reach us.
   const changed: EditRecurringChanges = {};
+  if ('name' in args.input) changed.name = recurring.name;
+  if ('categoryId' in args.input) changed.categoryId = recurring.categoryId;
   if ('state' in args.input) changed.state = recurring.state;
   if ('rule' in args.input && args.input.rule) {
     changed.rule = { ...args.input.rule };

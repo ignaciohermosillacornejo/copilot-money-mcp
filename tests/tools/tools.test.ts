@@ -3369,7 +3369,13 @@ describe('updateRecurring', () => {
   beforeEach(() => {
     mockDb = new CopilotDatabase('/nonexistent');
     (mockDb as any).dbPath = '/fake';
-    (mockDb as any)._recurring = [{ recurring_id: 'rec-1', name: 'Netflix', state: 'ACTIVE' }];
+    (mockDb as any)._recurring = [
+      { recurring_id: 'rec-1', name: 'Netflix', state: 'ACTIVE', category_id: 'entertainment' },
+    ];
+    (mockDb as any)._userCategories = [
+      { category_id: 'entertainment', name: 'Entertainment' },
+      { category_id: 'subscriptions', name: 'Subscriptions' },
+    ];
     (mockDb as any)._allCollectionsLoaded = true;
   });
 
@@ -3391,10 +3397,90 @@ describe('updateRecurring', () => {
     expect(client._calls).toHaveLength(0);
   });
 
+  test('dispatches EditRecurring with name', async () => {
+    const client = createMockGraphQLClient({
+      EditRecurring: {
+        editRecurring: {
+          recurring: {
+            id: 'rec-1',
+            name: 'Netflix HD',
+            categoryId: 'entertainment',
+            state: 'ACTIVE',
+          },
+        },
+      },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    const result = await tools.updateRecurring({ recurring_id: 'rec-1', name: 'Netflix HD' });
+    expect(result.success).toBe(true);
+    expect(result.updated).toEqual(['name']);
+    expect(client._calls[0].variables).toEqual({
+      id: 'rec-1',
+      input: { name: 'Netflix HD' },
+    });
+  });
+
+  test('name trims whitespace', async () => {
+    const client = createMockGraphQLClient({
+      EditRecurring: {
+        editRecurring: {
+          recurring: { id: 'rec-1', name: 'Trimmed', categoryId: 'entertainment', state: 'ACTIVE' },
+        },
+      },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await tools.updateRecurring({ recurring_id: 'rec-1', name: '  Trimmed  ' });
+    expect(client._calls[0].variables).toMatchObject({ input: { name: 'Trimmed' } });
+  });
+
+  test('empty name throws', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+    await expect(tools.updateRecurring({ recurring_id: 'rec-1', name: '' })).rejects.toThrow(
+      /name must not be empty/i
+    );
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('dispatches EditRecurring with category_id', async () => {
+    const client = createMockGraphQLClient({
+      EditRecurring: {
+        editRecurring: {
+          recurring: { id: 'rec-1', name: 'Netflix', categoryId: 'subscriptions', state: 'ACTIVE' },
+        },
+      },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    const result = await tools.updateRecurring({
+      recurring_id: 'rec-1',
+      category_id: 'subscriptions',
+    });
+    expect(result.success).toBe(true);
+    expect(result.updated).toEqual(['categoryId']);
+    expect(client._calls[0].variables).toEqual({
+      id: 'rec-1',
+      input: { categoryId: 'subscriptions' },
+    });
+  });
+
+  test('non-existent category_id throws', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+    await expect(
+      tools.updateRecurring({ recurring_id: 'rec-1', category_id: 'ghost' })
+    ).rejects.toThrow(/Category not found/i);
+    expect(client._calls).toHaveLength(0);
+  });
+
   test('dispatches EditRecurring with state', async () => {
     const client = createMockGraphQLClient({
       EditRecurring: {
-        editRecurring: { recurring: { id: 'rec-1', state: 'PAUSED' } },
+        editRecurring: {
+          recurring: { id: 'rec-1', name: 'Netflix', categoryId: 'entertainment', state: 'PAUSED' },
+        },
       },
     });
     tools = new CopilotMoneyTools(mockDb, client);
@@ -3421,6 +3507,8 @@ describe('updateRecurring', () => {
         editRecurring: {
           recurring: {
             id: 'rec-1',
+            name: 'Netflix',
+            categoryId: 'entertainment',
             state: 'ACTIVE',
             rule: {
               nameContains: 'NETFLIX',
@@ -3464,6 +3552,8 @@ describe('updateRecurring', () => {
         editRecurring: {
           recurring: {
             id: 'rec-1',
+            name: 'Netflix',
+            categoryId: 'entertainment',
             state: 'ARCHIVED',
             rule: { days: [5] },
           },
