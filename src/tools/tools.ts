@@ -2422,6 +2422,7 @@ export class CopilotMoneyTools {
    */
   async updateTransaction(args: {
     transaction_id: string;
+    name?: string;
     category_id?: string;
     note?: string;
     tag_ids?: string[];
@@ -2436,7 +2437,7 @@ export class CopilotMoneyTools {
     // Reject unknown fields (equivalent to JSON Schema additionalProperties: false,
     // but re-checked here as a defense in depth in case the method is called directly
     // without going through the MCP dispatch layer).
-    const allowedKeys = new Set(['transaction_id', 'category_id', 'note', 'tag_ids']);
+    const allowedKeys = new Set(['transaction_id', 'name', 'category_id', 'note', 'tag_ids']);
     for (const key of Object.keys(args)) {
       if (!allowedKeys.has(key)) {
         throw new Error(`update_transaction: unknown field "${key}"`);
@@ -2462,6 +2463,12 @@ export class CopilotMoneyTools {
     }
 
     // Per-field validation (runs BEFORE any write for atomicity).
+    if ('name' in args && args.name !== undefined) {
+      const trimmed = args.name.trim();
+      if (trimmed.length === 0) {
+        throw new Error('update_transaction: name must not be empty');
+      }
+    }
     if ('category_id' in args && args.category_id !== undefined) {
       validateDocId(args.category_id, 'category_id');
       const categories = await this.db.getUserCategories();
@@ -2484,11 +2491,13 @@ export class CopilotMoneyTools {
     }
     // Map MCP fields → EditTransaction input shape.
     const input: {
+      name?: string;
       categoryId?: string;
       userNotes?: string | null;
       tagIds?: string[];
       isReviewed?: boolean;
     } = {};
+    if ('name' in args && args.name !== undefined) input.name = args.name.trim();
     if ('category_id' in args && args.category_id !== undefined)
       input.categoryId = args.category_id;
     if ('note' in args && args.note !== undefined) input.userNotes = args.note;
@@ -2507,6 +2516,7 @@ export class CopilotMoneyTools {
       });
       // Map GraphQL field names back to MCP API names in the response.
       const graphqlToApiName: Record<string, string> = {
+        name: 'name',
         categoryId: 'category_id',
         userNotes: 'note',
         tagIds: 'tag_ids',
@@ -2517,6 +2527,7 @@ export class CopilotMoneyTools {
       // Optimistic cache patch: writes to the in-memory cache so a subsequent
       // read returns the new value without needing refresh_database + re-decode.
       const patch: Partial<Transaction> = {};
+      if ('name' in args && args.name !== undefined) patch.name = args.name.trim();
       if ('category_id' in args && args.category_id !== undefined)
         patch.category_id = args.category_id;
       if ('note' in args && args.note !== undefined) patch.user_note = args.note;
@@ -4571,10 +4582,10 @@ export function createWriteToolSchemas(): ToolSchema[] {
     {
       name: 'update_transaction',
       description:
-        "Update a single transaction's category, note, or tags. Pass transaction_id plus " +
-        'any combination of category_id, note, or tag_ids — only specified fields are changed. ' +
+        "Update a single transaction's name, category, note, or tags. Pass transaction_id plus " +
+        'any combination of name, category_id, note, or tag_ids — only specified fields are changed. ' +
         'Pass note="" to clear the note. Pass tag_ids=[] to clear all tags. At least one mutable ' +
-        'field must be provided besides transaction_id. Other fields (name, excluded, ' +
+        'field must be provided besides transaction_id. Other fields (excluded, ' +
         'internal_transfer, goal_id) are not writable through the GraphQL API and were removed ' +
         'from this tool when the backend was migrated.',
       inputSchema: {
@@ -4584,6 +4595,10 @@ export function createWriteToolSchemas(): ToolSchema[] {
           transaction_id: {
             type: 'string',
             description: 'Transaction ID to update (from get_transactions results)',
+          },
+          name: {
+            type: 'string',
+            description: 'New display name for the transaction. Must not be empty.',
           },
           category_id: {
             type: 'string',
