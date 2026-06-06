@@ -1,8 +1,8 @@
 /**
  * Unit tests for the update_transaction tool (GraphQL-based).
  *
- * Only category_id, note, and tag_ids are supported via GraphQL's
- * EditTransaction mutation. Legacy fields (excluded, name, internal_transfer,
+ * Supported fields: name, category_id, note, and tag_ids via GraphQL's
+ * EditTransaction mutation. Legacy fields (excluded, internal_transfer,
  * goal_id) were removed from the schema when the backend was migrated to
  * GraphQL; they now hit the defense-in-depth "unknown field" check in
  * updateTransaction.
@@ -20,6 +20,7 @@ type EditTxnResponse = {
   editTransaction: {
     transaction: {
       id: string;
+      name: string;
       categoryId: string;
       userNotes: string | null;
       isReviewed: boolean;
@@ -33,6 +34,7 @@ function makeEchoResponse(): (vars: any) => EditTxnResponse {
     editTransaction: {
       transaction: {
         id: vars.id,
+        name: vars.input.name ?? 'Coffee Shop',
         categoryId: vars.input.categoryId ?? 'food',
         userNotes: vars.input.userNotes ?? null,
         isReviewed: vars.input.isReviewed ?? false,
@@ -87,6 +89,49 @@ function makeTools(overrides?: {
 }
 
 describe('updateTransaction — single-field mapping to EditTransaction', () => {
+  test('name: dispatches with name input', async () => {
+    const { tools, client } = makeTools();
+    const result = await tools.updateTransaction({
+      transaction_id: 'txn1',
+      name: 'Renamed Transaction',
+    });
+    expect(result.success).toBe(true);
+    expect(result.transaction_id).toBe('txn1');
+    expect(result.updated).toEqual(['name']);
+
+    expect(client._calls).toHaveLength(1);
+    expect(client._calls[0].variables).toEqual({
+      id: 'txn1',
+      accountId: 'acct1',
+      itemId: 'item1',
+      input: { name: 'Renamed Transaction' },
+    });
+  });
+
+  test('name: trims whitespace', async () => {
+    const { tools, client } = makeTools();
+    await tools.updateTransaction({ transaction_id: 'txn1', name: '  Padded Name  ' });
+    expect(client._calls[0].variables).toMatchObject({
+      input: { name: 'Padded Name' },
+    });
+  });
+
+  test('name: empty string throws', async () => {
+    const { tools, client } = makeTools();
+    await expect(tools.updateTransaction({ transaction_id: 'txn1', name: '' })).rejects.toThrow(
+      /name must not be empty/i
+    );
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('name: whitespace-only string throws', async () => {
+    const { tools, client } = makeTools();
+    await expect(tools.updateTransaction({ transaction_id: 'txn1', name: '   ' })).rejects.toThrow(
+      /name must not be empty/i
+    );
+    expect(client._calls).toHaveLength(0);
+  });
+
   test('category_id: dispatches with categoryId input', async () => {
     const { tools, client } = makeTools();
     const result = await tools.updateTransaction({
@@ -168,13 +213,12 @@ describe('updateTransaction — multi-field atomic dispatch', () => {
 });
 
 describe('updateTransaction — legacy-field rejection', () => {
-  test.each(['excluded', 'name', 'internal_transfer', 'goal_id'])(
+  test.each(['excluded', 'internal_transfer', 'goal_id'])(
     'rejects legacy (non-GraphQL) field: %s',
     async (field) => {
       const { tools, client } = makeTools();
       const args: Record<string, unknown> = { transaction_id: 'txn1' };
       if (field === 'excluded') args.excluded = true;
-      if (field === 'name') args.name = 'New Name';
       if (field === 'internal_transfer') args.internal_transfer = true;
       if (field === 'goal_id') args.goal_id = 'goal1';
       await expect(tools.updateTransaction(args as any)).rejects.toThrow(/unknown field/i);

@@ -77,6 +77,7 @@ export async function createTransaction(
 }
 
 export interface EditTransactionInput {
+  name?: string;
   categoryId?: string;
   userNotes?: string | null;
   tagIds?: string[];
@@ -94,6 +95,7 @@ interface EditTransactionResponse {
   editTransaction: {
     transaction: {
       id: string;
+      name: string;
       categoryId: string;
       userNotes: string | null;
       isReviewed: boolean;
@@ -103,6 +105,7 @@ interface EditTransactionResponse {
 }
 
 export interface EditTransactionChanges {
+  name?: string;
   categoryId?: string;
   userNotes?: string | null;
   isReviewed?: boolean;
@@ -247,6 +250,7 @@ export async function editTransaction(
   // not by value. Lets callers explicitly "change to undefined" if ever needed;
   // tools.ts builds args.input via conditional spread so explicit-undefined
   // shouldn't normally reach us.
+  if ('name' in args.input) changed.name = tx.name;
   if ('categoryId' in args.input) changed.categoryId = tx.categoryId;
   if ('userNotes' in args.input) changed.userNotes = tx.userNotes;
   if ('isReviewed' in args.input) changed.isReviewed = tx.isReviewed;
