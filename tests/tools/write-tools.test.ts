@@ -559,6 +559,18 @@ describe('createTransaction', () => {
     expect(result.transaction.user_note).toBe('reimbursable');
   });
 
+  test('create_transaction with tag_ids:[] sends empty tagIds and skips existence check', async () => {
+    // No seedTags(): an empty array must skip the getTags() existence lookup
+    // entirely (the length > 0 guard), so this passes without any seeded tags.
+    const client = createMockGraphQLClient({ CreateTransaction: echoCreate });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    const result = await tools.createTransaction({ ...validArgs, tag_ids: [] });
+
+    expect((client._calls[0].variables as any).input.tagIds).toEqual([]);
+    expect(result.transaction.tag_ids).toEqual([]);
+  });
+
   test('create_transaction with recurring_id dispatches recurringId', async () => {
     const client = createMockGraphQLClient({ CreateTransaction: echoCreate });
     tools = new CopilotMoneyTools(mockDb, client);
