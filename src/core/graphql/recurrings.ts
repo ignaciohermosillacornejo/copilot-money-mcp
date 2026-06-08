@@ -1,6 +1,21 @@
 import type { GraphQLClient } from './client.js';
 import { CREATE_RECURRING, EDIT_RECURRING, DELETE_RECURRING } from './operations.generated.js';
 
+/** The 8 valid Copilot `RecurringFrequency` GraphQL enum values (uppercase wire form).
+ * Verified against production (issue #419). Single source of truth for both
+ * create_recurring and update_recurring validation + schema. */
+export const RECURRING_FREQUENCIES = [
+  'WEEKLY',
+  'BIWEEKLY',
+  'MONTHLY',
+  'BIMONTHLY',
+  'QUARTERLY',
+  'QUADMONTHLY',
+  'SEMIANNUALLY',
+  'ANNUALLY',
+] as const;
+export type RecurringFrequency = (typeof RECURRING_FREQUENCIES)[number];
+
 export interface CreateRecurringInput {
   frequency: string;
   transaction: { accountId: string; itemId: string; transactionId: string };
