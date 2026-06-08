@@ -3475,6 +3475,40 @@ describe('updateRecurring', () => {
     expect(client._calls).toHaveLength(0);
   });
 
+  test('dispatches EditRecurring with frequency', async () => {
+    const client = createMockGraphQLClient({
+      EditRecurring: {
+        editRecurring: {
+          recurring: {
+            id: 'rec-1',
+            name: 'Netflix',
+            categoryId: 'entertainment',
+            state: 'ACTIVE',
+            frequency: 'ANNUALLY',
+          },
+        },
+      },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    const result = await tools.updateRecurring({ recurring_id: 'rec-1', frequency: 'ANNUALLY' });
+    expect(result.success).toBe(true);
+    expect(result.updated).toEqual(['frequency']);
+    expect(client._calls[0].variables).toEqual({
+      id: 'rec-1',
+      input: { frequency: 'ANNUALLY' },
+    });
+  });
+
+  test('invalid frequency throws', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+    await expect(
+      tools.updateRecurring({ recurring_id: 'rec-1', frequency: 'YEARLY' })
+    ).rejects.toThrow(/frequency must be one of/i);
+    expect(client._calls).toHaveLength(0);
+  });
+
   test('dispatches EditRecurring with state', async () => {
     const client = createMockGraphQLClient({
       EditRecurring: {

@@ -47,6 +47,7 @@ export interface EditRecurringInputRule {
 export interface EditRecurringInput {
   name?: string;
   categoryId?: string;
+  frequency?: string;
   state?: string;
   rule?: EditRecurringInputRule;
 }
@@ -54,6 +55,7 @@ export interface EditRecurringInput {
 export interface EditRecurringChanges {
   name?: string;
   categoryId?: string;
+  frequency?: string;
   state?: string;
   rule?: EditRecurringInputRule;
 }
@@ -79,6 +81,7 @@ interface EditRecurringResponse {
       id: string;
       name: string;
       categoryId: string;
+      frequency: string;
       state: string;
     };
   };
@@ -105,11 +108,14 @@ export async function editRecurring(
   const wireInput: {
     name?: string;
     categoryId?: string;
+    frequency?: string;
     state?: string;
     rule?: EditRecurringWireRule;
   } = {};
   if ('name' in args.input) wireInput.name = args.input.name;
   if ('categoryId' in args.input) wireInput.categoryId = args.input.categoryId;
+  // Send frequency as-is (uppercase RecurringFrequency enum) — no float conversion.
+  if ('frequency' in args.input) wireInput.frequency = args.input.frequency;
   if ('state' in args.input) wireInput.state = args.input.state;
   if ('rule' in args.input && args.input.rule) {
     const rule = args.input.rule;
@@ -128,7 +134,13 @@ export async function editRecurring(
   const data = await client.mutate<
     {
       id: string;
-      input: { name?: string; categoryId?: string; state?: string; rule?: EditRecurringWireRule };
+      input: {
+        name?: string;
+        categoryId?: string;
+        frequency?: string;
+        state?: string;
+        rule?: EditRecurringWireRule;
+      };
     },
     EditRecurringResponse
   >('EditRecurring', EDIT_RECURRING, { id: args.id, input: wireInput });
@@ -142,6 +154,7 @@ export async function editRecurring(
   const changed: EditRecurringChanges = {};
   if ('name' in args.input) changed.name = recurring.name;
   if ('categoryId' in args.input) changed.categoryId = recurring.categoryId;
+  if ('frequency' in args.input) changed.frequency = recurring.frequency;
   if ('state' in args.input) changed.state = recurring.state;
   if ('rule' in args.input && args.input.rule) {
     changed.rule = { ...args.input.rule };
