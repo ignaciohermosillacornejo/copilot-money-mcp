@@ -17,7 +17,8 @@ import {
  *   - Accepted values pass the enum layer and fail downstream on ID
  *     validation, confirming the enum match.
  */
-export type TransactionType = 'REGULAR' | 'INCOME' | 'INTERNAL_TRANSFER';
+export const TRANSACTION_TYPES = ['REGULAR', 'INCOME', 'INTERNAL_TRANSFER'] as const;
+export type TransactionType = (typeof TRANSACTION_TYPES)[number];
 
 export interface CreateTransactionInput {
   name: string;
