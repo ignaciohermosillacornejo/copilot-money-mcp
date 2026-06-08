@@ -67,7 +67,7 @@ export interface EditRecurringInput {
   name?: string;
   categoryId?: string;
   frequency?: RecurringFrequency;
-  state?: string;
+  state?: RecurringStateValue;
   rule?: EditRecurringInputRule;
 }
 
