@@ -39,6 +39,7 @@ import {
   RECURRING_FREQUENCIES,
   RECURRING_STATE_VALUES,
   type RecurringFrequency,
+  type RecurringStateValue,
 } from '../core/graphql/recurrings.js';
 import { setBudget as gqlSetBudget } from '../core/graphql/budgets.js';
 import { graphQLErrorToMcpError } from './errors.js';
@@ -3369,7 +3370,8 @@ export class CopilotMoneyTools {
     try {
       const result = await gqlEditRecurring(client, {
         id: args.recurring_id,
-        input: { state: args.state },
+        // Validated against RECURRING_STATE_VALUES above, so the cast is safe.
+        input: { state: args.state as RecurringStateValue },
       });
       // GraphQL returns uppercase state ("ACTIVE"); the LevelDB cache stores
       // lowercase ("active"). Normalize to the cache's shape on patch.

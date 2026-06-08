@@ -22,6 +22,8 @@ import {
 async function main(): Promise<void> {
   const idToken = await getIdToken();
 
+  // Checks run sequentially across enums to keep peak concurrency bounded —
+  // each check already fires its own values + control in parallel internally.
   const results: EnumConformanceResult[] = [];
   for (const check of ALL_CONFORMANCE_CHECKS) {
     const result = await assertEnumConformance({ ...check, idToken });

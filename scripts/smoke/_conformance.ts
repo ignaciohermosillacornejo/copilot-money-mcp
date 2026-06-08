@@ -62,7 +62,10 @@ async function probe(
       Authorization: `Bearer ${idToken}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ query, variables: {} }),
+    // Everything is inlined into `query`; no variables to send.
+    body: JSON.stringify({ query }),
+    // Predictable failure mode if a connection hangs.
+    signal: AbortSignal.timeout(10_000),
   });
 
   // Both 200 (errors array) and 400 (validation failure) carry an `errors`
@@ -109,9 +112,17 @@ export async function assertEnumConformance(
   const fragment = `does not exist in "${enumName}" enum`;
   const failures: string[] = [];
 
+  // Probes are independent round-trips — fire all values + the control
+  // concurrently, then evaluate. (Logging below stays in declared order.)
+  const [valueResults, controlBody] = await Promise.all([
+    Promise.all(
+      ourValues.map(async (value) => ({ value, body: await probe(idToken, buildQuery, value) }))
+    ),
+    probe(idToken, buildQuery, knownBad),
+  ]);
+
   // 1. Every value in our constant must be server-valid (no enum error).
-  for (const value of ourValues) {
-    const body = await probe(idToken, buildQuery, value);
+  for (const { value, body } of valueResults) {
     const rejected = body.includes(fragment) && body.includes(`"${value}"`);
     if (rejected) {
       failures.push(`${value}: REJECTED by server but present in our ${enumName} constant`);
@@ -122,7 +133,6 @@ export async function assertEnumConformance(
   }
 
   // 2. Control: a known-bad value MUST be rejected, proving the probe works.
-  const controlBody = await probe(idToken, buildQuery, knownBad);
   const controlRejected = controlBody.includes(fragment) && controlBody.includes(`"${knownBad}"`);
   if (!controlRejected) {
     failures.push(
