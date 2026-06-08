@@ -511,6 +511,74 @@ describe('createTransaction', () => {
     );
     expect(client._calls).toHaveLength(0);
   });
+
+  // Echoes the create input back into a CreatedTransaction shape so the
+  // returned transaction reflects the optional metadata we sent.
+  const echoCreate = (vars: any) => ({
+    createTransaction: {
+      ...createdTx,
+      recurringId: vars.input.recurringId ?? null,
+      userNotes: vars.input.userNotes ?? null,
+      tags: (vars.input.tagIds ?? []).map((id: string) => ({
+        id,
+        name: id,
+        colorName: 'blue',
+      })),
+    },
+  });
+
+  // Tags must exist in getTags() for the tag-validation path to pass.
+  // _cacheLoadedAt keeps the in-memory cache from being treated as stale
+  // (which would otherwise clear _tags and try to hit the real DB).
+  const seedTags = () => {
+    (mockDb as any)._tags = [
+      { tag_id: 'tag1', name: 'Important' },
+      { tag_id: 'tag2', name: 'Recurring' },
+    ];
+    (mockDb as any)._cacheLoadedAt = Date.now();
+  };
+
+  test('create_transaction with tag_ids dispatches tagIds', async () => {
+    seedTags();
+    const client = createMockGraphQLClient({ CreateTransaction: echoCreate });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    const result = await tools.createTransaction({ ...validArgs, tag_ids: ['tag1', 'tag2'] });
+
+    expect((client._calls[0].variables as any).input.tagIds).toEqual(['tag1', 'tag2']);
+    expect(result.transaction.tag_ids).toEqual(['tag1', 'tag2']);
+  });
+
+  test('create_transaction with note dispatches userNotes', async () => {
+    const client = createMockGraphQLClient({ CreateTransaction: echoCreate });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    const result = await tools.createTransaction({ ...validArgs, note: 'reimbursable' });
+
+    expect((client._calls[0].variables as any).input.userNotes).toBe('reimbursable');
+    expect(result.transaction.user_note).toBe('reimbursable');
+  });
+
+  test('create_transaction with recurring_id dispatches recurringId', async () => {
+    const client = createMockGraphQLClient({ CreateTransaction: echoCreate });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    const result = await tools.createTransaction({ ...validArgs, recurring_id: 'rec1' });
+
+    expect((client._calls[0].variables as any).input.recurringId).toBe('rec1');
+    expect(result.transaction.recurring_id).toBe('rec1');
+  });
+
+  test('create_transaction rejects unknown tag_id', async () => {
+    seedTags();
+    const client = createMockGraphQLClient({ CreateTransaction: echoCreate });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(
+      tools.createTransaction({ ...validArgs, tag_ids: ['tag1', 'ghost_tag'] })
+    ).rejects.toThrow(/Tag not found.*ghost_tag/i);
+    expect(client._calls).toHaveLength(0);
+  });
 });
 
 describe('deleteTransaction', () => {
