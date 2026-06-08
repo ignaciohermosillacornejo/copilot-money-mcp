@@ -17,6 +17,7 @@ import {
   type CreatedTransaction,
   type CreateTransactionInput,
   type TransactionType,
+  TRANSACTION_TYPES,
 } from '../core/graphql/transactions.js';
 import {
   createCategory as gqlCreateCategory,
@@ -36,6 +37,7 @@ import {
   editRecurring as gqlEditRecurring,
   deleteRecurring as gqlDeleteRecurring,
   RECURRING_FREQUENCIES,
+  RECURRING_STATE_VALUES,
   type RecurringFrequency,
 } from '../core/graphql/recurrings.js';
 import { setBudget as gqlSetBudget } from '../core/graphql/budgets.js';
@@ -2610,8 +2612,9 @@ export class CopilotMoneyTools {
       throw new Error(`amount exceeds maximum valid value (${MAX_VALID_AMOUNT}): ${amount}`);
     }
 
-    const VALID_TYPES: TransactionType[] = ['REGULAR', 'INCOME', 'INTERNAL_TRANSFER'];
-    if (!VALID_TYPES.includes(type)) {
+    // .includes() on the `as const` tuple needs widening to string[] to accept
+    // an arbitrary string arg (TS narrows the tuple's element type otherwise).
+    if (!(TRANSACTION_TYPES as readonly string[]).includes(type)) {
       throw new Error(`type must be one of: REGULAR, INCOME, INTERNAL_TRANSFER. Got: ${type}`);
     }
 
@@ -3355,9 +3358,12 @@ export class CopilotMoneyTools {
     state: string;
   }): Promise<{ success: true; recurring_id: string; state: string }> {
     const client = this.getGraphQLClient();
-    const VALID_STATES = ['ACTIVE', 'PAUSED', 'ARCHIVED'];
-    if (!VALID_STATES.includes(args.state)) {
-      throw new Error(`state must be one of: ${VALID_STATES.join(', ')}. Got: ${args.state}`);
+    // .includes() on the `as const` tuple needs widening to string[] to accept
+    // an arbitrary string arg (TS narrows the tuple's element type otherwise).
+    if (!(RECURRING_STATE_VALUES as readonly string[]).includes(args.state)) {
+      throw new Error(
+        `state must be one of: ${RECURRING_STATE_VALUES.join(', ')}. Got: ${args.state}`
+      );
     }
 
     try {
@@ -3588,9 +3594,12 @@ export class CopilotMoneyTools {
       }
     }
     if (args.state !== undefined) {
-      const VALID_STATES = ['ACTIVE', 'PAUSED', 'ARCHIVED'];
-      if (!VALID_STATES.includes(args.state)) {
-        throw new Error(`state must be one of: ${VALID_STATES.join(', ')}. Got: ${args.state}`);
+      // .includes() on the `as const` tuple needs widening to string[] to accept
+      // an arbitrary string arg (TS narrows the tuple's element type otherwise).
+      if (!(RECURRING_STATE_VALUES as readonly string[]).includes(args.state)) {
+        throw new Error(
+          `state must be one of: ${RECURRING_STATE_VALUES.join(', ')}. Got: ${args.state}`
+        );
       }
     }
     const input: Record<string, unknown> = {};
@@ -4491,7 +4500,7 @@ export function createWriteToolSchemas(): ToolSchema[] {
           },
           type: {
             type: 'string',
-            enum: ['REGULAR', 'INCOME', 'INTERNAL_TRANSFER'],
+            enum: [...TRANSACTION_TYPES],
             description:
               'Transaction type. REGULAR for typical expenses, INCOME for inflows, INTERNAL_TRANSFER for between-account moves.',
           },
@@ -4941,7 +4950,7 @@ export function createWriteToolSchemas(): ToolSchema[] {
           },
           state: {
             type: 'string',
-            enum: ['ACTIVE', 'PAUSED', 'ARCHIVED'],
+            enum: [...RECURRING_STATE_VALUES],
             description: 'New state for the recurring item (uppercase: ACTIVE, PAUSED, ARCHIVED)',
           },
         },
@@ -5074,7 +5083,7 @@ export function createWriteToolSchemas(): ToolSchema[] {
           },
           state: {
             type: 'string' as const,
-            enum: ['ACTIVE', 'PAUSED', 'ARCHIVED'] as const,
+            enum: [...RECURRING_STATE_VALUES],
             description:
               'State of the recurring. Use set_recurring_state instead if you only want to ' +
               'change state — this tool is for broader edits.',

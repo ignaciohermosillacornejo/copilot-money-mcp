@@ -16,6 +16,10 @@ export const RECURRING_FREQUENCIES = [
 ] as const;
 export type RecurringFrequency = (typeof RECURRING_FREQUENCIES)[number];
 
+/** The 3 valid Copilot `RecurringState` GraphQL enum values (uppercase wire form). */
+export const RECURRING_STATE_VALUES = ['ACTIVE', 'PAUSED', 'ARCHIVED'] as const;
+export type RecurringStateValue = (typeof RECURRING_STATE_VALUES)[number];
+
 export interface CreateRecurringInput {
   frequency: RecurringFrequency;
   transaction: { accountId: string; itemId: string; transactionId: string };
