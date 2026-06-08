@@ -35,8 +35,12 @@ const ENUM_ERROR_FRAGMENT = 'does not exist in "RecurringFrequency" enum';
 
 /**
  * Send a validation-only editRecurring probe with the given frequency enum
- * value inlined into the query. Returns the raw response text so the caller
- * can inspect it for the enum-rejection fragment.
+ * value inlined into the query. Returns the server's error messages joined into
+ * one string (with unescaped quotes), so the caller can scan for the
+ * enum-rejection fragment. We parse the JSON `errors[].message` rather than
+ * scanning the raw body: in the raw response the quotes in
+ * `... "RecurringFrequency" enum` are JSON-escaped (`\"`), so a literal-quote
+ * fragment would never match the raw text (a false "valid" for every value).
  */
 async function probeFrequency(idToken: string, frequency: string): Promise<string> {
   // Inline the enum literal so it is validated at parse time. The malformed
@@ -58,9 +62,16 @@ async function probeFrequency(idToken: string, frequency: string): Promise<strin
     body: JSON.stringify({ operationName: 'FrequencyProbe', query, variables: {} }),
   });
 
-  // Both 200 (errors array) and 400 (validation failure) carry the message
-  // body we care about; read as text and scan regardless of status.
-  return response.text();
+  // Both 200 (errors array) and 400 (validation failure) carry an `errors`
+  // array. Parse it and join the messages so quotes are unescaped; fall back to
+  // raw text if the body isn't JSON.
+  const text = await response.text();
+  try {
+    const json = JSON.parse(text) as { errors?: Array<{ message: string }> };
+    return (json.errors ?? []).map((e) => e.message).join(' || ');
+  } catch {
+    return text;
+  }
 }
 
 function log(msg: string, fields?: Record<string, unknown>): void {
