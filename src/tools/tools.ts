@@ -3524,6 +3524,7 @@ export class CopilotMoneyTools {
     recurring_id: string;
     name?: string;
     category_id?: string;
+    frequency?: string;
     rule?: {
       name_contains?: string;
       min_amount?: string;
@@ -3546,6 +3547,23 @@ export class CopilotMoneyTools {
         throw new Error(`Category not found: ${args.category_id}`);
       }
     }
+    if (args.frequency !== undefined) {
+      const VALID_FREQUENCIES = [
+        'WEEKLY',
+        'BIWEEKLY',
+        'MONTHLY',
+        'BIMONTHLY',
+        'QUARTERLY',
+        'QUADMONTHLY',
+        'SEMIANNUALLY',
+        'ANNUALLY',
+      ];
+      if (!VALID_FREQUENCIES.includes(args.frequency)) {
+        throw new Error(
+          `frequency must be one of: ${VALID_FREQUENCIES.join(', ')}. Got: ${args.frequency}`
+        );
+      }
+    }
     if (args.state !== undefined) {
       const VALID_STATES = ['ACTIVE', 'PAUSED', 'ARCHIVED'];
       if (!VALID_STATES.includes(args.state)) {
@@ -3555,6 +3573,7 @@ export class CopilotMoneyTools {
     const input: Record<string, unknown> = {};
     if (args.name !== undefined) input.name = args.name.trim();
     if (args.category_id !== undefined) input.categoryId = args.category_id;
+    if (args.frequency !== undefined) input.frequency = args.frequency;
     if (args.state !== undefined) input.state = args.state;
     if (args.rule !== undefined) {
       const rule: Record<string, unknown> = {};
@@ -3573,6 +3592,12 @@ export class CopilotMoneyTools {
       const patch: Partial<Recurring> = { recurring_id: args.recurring_id };
       if (args.name !== undefined) patch.name = args.name.trim();
       if (args.category_id !== undefined) patch.category_id = args.category_id;
+      if (args.frequency !== undefined) {
+        // The GraphQL enum value ANNUALLY maps to 'yearly' in the read-side cache
+        // model (KNOWN_FREQUENCIES); every other lowercased value matches directly.
+        const lowered = args.frequency.toLowerCase();
+        patch.frequency = lowered === 'annually' ? 'yearly' : lowered;
+      }
       if (args.state !== undefined) {
         patch.state = args.state.toLowerCase() as 'active' | 'paused' | 'archived';
       }
@@ -3610,6 +3635,7 @@ export class CopilotMoneyTools {
             ...cached,
             ...(args.name !== undefined ? { name: args.name.trim() } : {}),
             ...(args.category_id !== undefined ? { categoryId: args.category_id } : {}),
+            ...(args.frequency !== undefined ? { frequency: args.frequency } : {}),
             ...(args.state !== undefined ? { state: args.state } : {}),
             rule: mergedRule,
           };
@@ -4974,7 +5000,7 @@ export function createWriteToolSchemas(): ToolSchema[] {
       name: 'update_recurring',
       description:
         'Update an existing recurring transaction. Pass recurring_id plus any combination of ' +
-        'name, category_id, state, or rule (name_contains, min_amount, max_amount, days). ' +
+        'name, category_id, frequency, state, or rule (name_contains, min_amount, max_amount, days). ' +
         'At least one mutable field must be provided besides recurring_id. ' +
         'Writes directly to Copilot Money via GraphQL.',
       inputSchema: {
@@ -4992,6 +5018,24 @@ export function createWriteToolSchemas(): ToolSchema[] {
             type: 'string' as const,
             description:
               'New category ID to assign (from get_categories results). Changes the default category for future matched transactions.',
+          },
+          frequency: {
+            type: 'string' as const,
+            enum: [
+              'WEEKLY',
+              'BIWEEKLY',
+              'MONTHLY',
+              'BIMONTHLY',
+              'QUARTERLY',
+              'QUADMONTHLY',
+              'SEMIANNUALLY',
+              'ANNUALLY',
+            ] as const,
+            description:
+              'How often the recurring repeats. Maps to the Copilot frequency options: ' +
+              'WEEKLY (every week), BIWEEKLY (every 2 weeks), MONTHLY (every month), ' +
+              'BIMONTHLY (every 2 months), QUARTERLY (every 3 months), QUADMONTHLY (every 4 months), ' +
+              'SEMIANNUALLY (every 6 months), ANNUALLY (every year).',
           },
           state: {
             type: 'string' as const,
