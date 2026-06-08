@@ -25,6 +25,9 @@ export interface CreateTransactionInput {
   amount: number;
   categoryId: string;
   type: TransactionType;
+  tagIds?: string[];
+  userNotes?: string | null;
+  recurringId?: string;
 }
 
 export interface CreateTransactionArgs {

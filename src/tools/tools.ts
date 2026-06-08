@@ -15,6 +15,7 @@ import {
   addTransactionToRecurring as gqlAddTransactionToRecurring,
   splitTransaction as gqlSplitTransaction,
   type CreatedTransaction,
+  type CreateTransactionInput,
   type TransactionType,
 } from '../core/graphql/transactions.js';
 import {
@@ -2572,6 +2573,9 @@ export class CopilotMoneyTools {
     amount: number;
     category_id: string;
     type: TransactionType;
+    tag_ids?: string[];
+    note?: string;
+    recurring_id?: string;
   }): Promise<{
     success: true;
     transaction_id: string;
@@ -2609,17 +2613,40 @@ export class CopilotMoneyTools {
       throw new Error(`type must be one of: REGULAR, INCOME, INTERNAL_TRANSFER. Got: ${type}`);
     }
 
+    // Optional metadata validation (runs BEFORE any write for atomicity).
+    if (args.tag_ids !== undefined) {
+      for (const tagId of args.tag_ids) {
+        validateDocId(tagId, 'tag_id');
+      }
+      if (args.tag_ids.length > 0) {
+        const tags = await this.db.getTags();
+        for (const tagId of args.tag_ids) {
+          if (!tags.find((t) => t.tag_id === tagId)) {
+            throw new Error(`Tag not found: ${tagId}`);
+          }
+        }
+      }
+    }
+    if (args.recurring_id !== undefined) {
+      validateDocId(args.recurring_id, 'recurring_id');
+    }
+
+    const input: CreateTransactionInput = {
+      name: trimmedName,
+      date,
+      amount,
+      categoryId: category_id,
+      type,
+    };
+    if (args.tag_ids !== undefined) input.tagIds = args.tag_ids;
+    if (args.note !== undefined) input.userNotes = args.note;
+    if (args.recurring_id !== undefined) input.recurringId = args.recurring_id;
+
     try {
       const tx = await gqlCreateTransaction(client, {
         accountId: account_id,
         itemId: item_id,
-        input: {
-          name: trimmedName,
-          date,
-          amount,
-          categoryId: category_id,
-          type,
-        },
+        input,
       });
       // Map the GraphQL camelCase Transaction fields back to the project's
       // local snake_case Transaction shape. Only fields Copilot actually
@@ -4428,11 +4455,14 @@ export function createWriteToolSchemas(): ToolSchema[] {
     {
       name: 'create_transaction',
       description:
-        'Create a brand-new manual transaction on an existing account. All seven ' +
+        'Create a brand-new manual transaction on an existing account. Seven ' +
         'fields are required: account_id, item_id (from get_accounts), name, date ' +
         '(YYYY-MM-DD), amount (positive = expense, negative = income; Copilot sign ' +
         'convention), category_id (from get_categories), and type. type is one of ' +
-        'REGULAR, INCOME, or INTERNAL_TRANSFER. Returns the newly-created transaction.',
+        'REGULAR, INCOME, or INTERNAL_TRANSFER. Three optional metadata fields may ' +
+        'also be supplied: tag_ids (from get_tags), note (free-text), and ' +
+        'recurring_id (link to an existing recurring series, from ' +
+        'get_recurring_transactions). Returns the newly-created transaction.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -4468,6 +4498,20 @@ export function createWriteToolSchemas(): ToolSchema[] {
             enum: ['REGULAR', 'INCOME', 'INTERNAL_TRANSFER'],
             description:
               'Transaction type. REGULAR for typical expenses, INCOME for inflows, INTERNAL_TRANSFER for between-account moves.',
+          },
+          tag_ids: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional. Tag IDs to attach to the new transaction (from get_tags).',
+          },
+          note: {
+            type: 'string',
+            description: 'Optional. Free-text note to attach to the new transaction.',
+          },
+          recurring_id: {
+            type: 'string',
+            description:
+              'Optional. Link this new transaction to an existing recurring series (from get_recurring_transactions).',
           },
         },
         required: ['account_id', 'item_id', 'name', 'date', 'amount', 'category_id', 'type'],
