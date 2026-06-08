@@ -3509,6 +3509,34 @@ describe('updateRecurring', () => {
     expect(client._calls).toHaveLength(0);
   });
 
+  test('frequency cache patch lowercases, mapping ANNUALLY to "yearly"', async () => {
+    const mockEdit = (freq: string) =>
+      createMockGraphQLClient({
+        EditRecurring: {
+          editRecurring: {
+            recurring: {
+              id: 'rec-1',
+              name: 'Netflix',
+              categoryId: 'entertainment',
+              state: 'ACTIVE',
+              frequency: freq,
+            },
+          },
+        },
+      });
+
+    // General branch: the lowercased enum matches KNOWN_FREQUENCIES directly.
+    tools = new CopilotMoneyTools(mockDb, mockEdit('MONTHLY'));
+    await tools.updateRecurring({ recurring_id: 'rec-1', frequency: 'MONTHLY' });
+    expect((mockDb as any)._recurring[0].frequency).toBe('monthly');
+
+    // Special case: ANNUALLY's lowercase ('annually') is NOT in KNOWN_FREQUENCIES,
+    // so it must be stored as 'yearly' to keep read-side cache values consistent.
+    tools = new CopilotMoneyTools(mockDb, mockEdit('ANNUALLY'));
+    await tools.updateRecurring({ recurring_id: 'rec-1', frequency: 'ANNUALLY' });
+    expect((mockDb as any)._recurring[0].frequency).toBe('yearly');
+  });
+
   test('dispatches EditRecurring with state', async () => {
     const client = createMockGraphQLClient({
       EditRecurring: {
