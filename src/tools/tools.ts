@@ -36,6 +36,7 @@ import {
   editRecurring as gqlEditRecurring,
   deleteRecurring as gqlDeleteRecurring,
   RECURRING_FREQUENCIES,
+  type RecurringFrequency,
 } from '../core/graphql/recurrings.js';
 import { setBudget as gqlSetBudget } from '../core/graphql/budgets.js';
 import { graphQLErrorToMcpError } from './errors.js';
@@ -3477,6 +3478,8 @@ export class CopilotMoneyTools {
     frequency: string;
   }> {
     const client = this.getGraphQLClient();
+    // .includes() on the `as const` tuple needs widening to string[] to accept
+    // an arbitrary string arg (TS narrows the tuple's element type otherwise).
     if (!(RECURRING_FREQUENCIES as readonly string[]).includes(args.frequency)) {
       throw new Error(
         `frequency must be one of: ${RECURRING_FREQUENCIES.join(', ')}. Got: ${args.frequency}`
@@ -3495,7 +3498,8 @@ export class CopilotMoneyTools {
     try {
       const result = await gqlCreateRecurring(client, {
         input: {
-          frequency: args.frequency,
+          // Validated against RECURRING_FREQUENCIES above, so the widening cast is safe.
+          frequency: args.frequency as RecurringFrequency,
           transaction: {
             accountId: txn.account_id,
             itemId: txn.item_id,
@@ -3575,6 +3579,8 @@ export class CopilotMoneyTools {
       }
     }
     if (args.frequency !== undefined) {
+      // .includes() on the `as const` tuple needs widening to string[] to accept
+      // an arbitrary string arg (TS narrows the tuple's element type otherwise).
       if (!(RECURRING_FREQUENCIES as readonly string[]).includes(args.frequency)) {
         throw new Error(
           `frequency must be one of: ${RECURRING_FREQUENCIES.join(', ')}. Got: ${args.frequency}`
@@ -5018,7 +5024,11 @@ export function createWriteToolSchemas(): ToolSchema[] {
           frequency: {
             type: 'string' as const,
             enum: [...RECURRING_FREQUENCIES],
-            description: 'How often the recurring payment occurs.',
+            description:
+              'How often the recurring repeats. Maps to the Copilot frequency options: ' +
+              'WEEKLY (every week), BIWEEKLY (every 2 weeks), MONTHLY (every month), ' +
+              'BIMONTHLY (every 2 months), QUARTERLY (every 3 months), QUADMONTHLY (every 4 months), ' +
+              'SEMIANNUALLY (every 6 months), ANNUALLY (every year).',
           },
         },
         required: ['transaction_id', 'frequency'],
