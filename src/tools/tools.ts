@@ -2616,7 +2616,7 @@ export class CopilotMoneyTools {
     // .includes() on the `as const` tuple needs widening to string[] to accept
     // an arbitrary string arg (TS narrows the tuple's element type otherwise).
     if (!(TRANSACTION_TYPES as readonly string[]).includes(type)) {
-      throw new Error(`type must be one of: REGULAR, INCOME, INTERNAL_TRANSFER. Got: ${type}`);
+      throw new Error(`type must be one of: ${TRANSACTION_TYPES.join(', ')}. Got: ${type}`);
     }
 
     // Optional metadata validation (runs BEFORE any write for atomicity).

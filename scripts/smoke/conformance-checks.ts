@@ -38,6 +38,8 @@ export interface ConformanceCheck {
 
 // --- RecurringFrequency -----------------------------------------------------
 // Malformed `state: { z: 1 }` forces pre-execution validation failure.
+// Control: 'YEARLY' is the intuitive-but-wrong value — it's the exact bug from
+// issue #419 (the real enum uses 'ANNUALLY'), so it must be server-rejected.
 export const KNOWN_BAD_RECURRING_FREQUENCY = 'YEARLY';
 
 export const RECURRING_FREQUENCY_CHECK: ConformanceCheck = {
@@ -56,6 +58,8 @@ export const RECURRING_FREQUENCY_CHECK: ConformanceCheck = {
 
 // --- RecurringState ---------------------------------------------------------
 // Malformed `frequency: { z: 1 }` forces pre-execution validation failure.
+// Control: 'ACTIVATED' is a plausible-looking but non-existent state (the real
+// set is ACTIVE/PAUSED/ARCHIVED), so it must be server-rejected.
 export const KNOWN_BAD_RECURRING_STATE = 'ACTIVATED';
 
 export const RECURRING_STATE_CHECK: ConformanceCheck = {
@@ -74,8 +78,15 @@ export const RECURRING_STATE_CHECK: ConformanceCheck = {
 
 // --- TransactionType --------------------------------------------------------
 // Malformed `categoryId: { z: 1 }` forces pre-execution validation failure.
+// Control: 'EXPENSE' is a plausible-but-invalid type — the real set is
+// REGULAR/INCOME/INTERNAL_TRANSFER — so it must be server-rejected.
 export const KNOWN_BAD_TRANSACTION_TYPE = 'EXPENSE';
 
+// We probe `editTransaction` (not `createTransaction`) because the server
+// validates `type` as a `TransactionType` enum there with the fewest required
+// args, keeping the malformed-sibling setup simple. Note `EditTransactionInput`
+// in transactions.ts doesn't expose `type` as a writable field even though the
+// server accepts it — that latent capability is tracked in #415.
 export const TRANSACTION_TYPE_CHECK: ConformanceCheck = {
   enumName: 'TransactionType',
   ourValues: TRANSACTION_TYPES,
