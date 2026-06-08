@@ -35,6 +35,7 @@ import {
   createRecurring as gqlCreateRecurring,
   editRecurring as gqlEditRecurring,
   deleteRecurring as gqlDeleteRecurring,
+  RECURRING_FREQUENCIES,
 } from '../core/graphql/recurrings.js';
 import { setBudget as gqlSetBudget } from '../core/graphql/budgets.js';
 import { graphQLErrorToMcpError } from './errors.js';
@@ -3476,10 +3477,9 @@ export class CopilotMoneyTools {
     frequency: string;
   }> {
     const client = this.getGraphQLClient();
-    const VALID_FREQUENCIES = ['WEEKLY', 'BIWEEKLY', 'MONTHLY', 'YEARLY'];
-    if (!VALID_FREQUENCIES.includes(args.frequency)) {
+    if (!(RECURRING_FREQUENCIES as readonly string[]).includes(args.frequency)) {
       throw new Error(
-        `frequency must be one of: ${VALID_FREQUENCIES.join(', ')}. Got: ${args.frequency}`
+        `frequency must be one of: ${RECURRING_FREQUENCIES.join(', ')}. Got: ${args.frequency}`
       );
     }
 
@@ -3575,19 +3575,9 @@ export class CopilotMoneyTools {
       }
     }
     if (args.frequency !== undefined) {
-      const VALID_FREQUENCIES = [
-        'WEEKLY',
-        'BIWEEKLY',
-        'MONTHLY',
-        'BIMONTHLY',
-        'QUARTERLY',
-        'QUADMONTHLY',
-        'SEMIANNUALLY',
-        'ANNUALLY',
-      ];
-      if (!VALID_FREQUENCIES.includes(args.frequency)) {
+      if (!(RECURRING_FREQUENCIES as readonly string[]).includes(args.frequency)) {
         throw new Error(
-          `frequency must be one of: ${VALID_FREQUENCIES.join(', ')}. Got: ${args.frequency}`
+          `frequency must be one of: ${RECURRING_FREQUENCIES.join(', ')}. Got: ${args.frequency}`
         );
       }
     }
@@ -5027,7 +5017,7 @@ export function createWriteToolSchemas(): ToolSchema[] {
           },
           frequency: {
             type: 'string' as const,
-            enum: ['WEEKLY', 'BIWEEKLY', 'MONTHLY', 'YEARLY'] as const,
+            enum: [...RECURRING_FREQUENCIES],
             description: 'How often the recurring payment occurs.',
           },
         },
@@ -5065,16 +5055,7 @@ export function createWriteToolSchemas(): ToolSchema[] {
           },
           frequency: {
             type: 'string' as const,
-            enum: [
-              'WEEKLY',
-              'BIWEEKLY',
-              'MONTHLY',
-              'BIMONTHLY',
-              'QUARTERLY',
-              'QUADMONTHLY',
-              'SEMIANNUALLY',
-              'ANNUALLY',
-            ] as const,
+            enum: [...RECURRING_FREQUENCIES],
             description:
               'How often the recurring repeats. Maps to the Copilot frequency options: ' +
               'WEEKLY (every week), BIWEEKLY (every 2 weeks), MONTHLY (every month), ' +

@@ -139,8 +139,44 @@ describe('createRecurring', () => {
 
     await expect(
       tools.createRecurring({ transaction_id: 'txn-abc', frequency: 'daily' })
-    ).rejects.toThrow('frequency must be one of: WEEKLY, BIWEEKLY, MONTHLY, YEARLY');
+    ).rejects.toThrow('frequency must be one of:');
     expect(client._calls).toHaveLength(0);
+  });
+
+  test('rejects YEARLY locally (regression: not a valid RecurringFrequency)', async () => {
+    // YEARLY is NOT a server-valid RecurringFrequency value (issue #419). It must
+    // be rejected LOCALLY — never forwarded to fail at the server with SCHEMA_ERROR.
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(
+      tools.createRecurring({ transaction_id: 'txn-abc', frequency: 'YEARLY' })
+    ).rejects.toThrow('frequency must be one of:');
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('accepts ANNUALLY (previously wrongly rejected)', async () => {
+    const client = createMockGraphQLClient({
+      CreateRecurring: {
+        createRecurring: {
+          id: 'rec-annual',
+          name: 'Netflix',
+          state: 'ACTIVE',
+          frequency: 'ANNUALLY',
+        },
+      },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    const result = await tools.createRecurring({
+      transaction_id: 'txn-abc',
+      frequency: 'ANNUALLY',
+    });
+
+    expect(result.frequency).toBe('ANNUALLY');
+    expect(client._calls).toHaveLength(1);
+    expect(client._calls[0].op).toBe('CreateRecurring');
+    expect((client._calls[0].variables as any).input.frequency).toBe('ANNUALLY');
   });
 
   test('throws when transaction is not found in local cache', async () => {
@@ -167,8 +203,20 @@ describe('createRecurring', () => {
     expect(client._calls).toHaveLength(0);
   });
 
-  test('accepts all valid frequencies', async () => {
-    for (const freq of ['WEEKLY', 'BIWEEKLY', 'MONTHLY', 'YEARLY']) {
+  test('accepts all 8 valid frequencies including BIMONTHLY/QUARTERLY/etc', async () => {
+    // The full server-verified set (issue #419) — includes the 5 values
+    // (BIMONTHLY, QUARTERLY, QUADMONTHLY, SEMIANNUALLY, ANNUALLY) that the
+    // old WEEKLY/BIWEEKLY/MONTHLY/YEARLY allowlist wrongly rejected.
+    for (const freq of [
+      'WEEKLY',
+      'BIWEEKLY',
+      'MONTHLY',
+      'BIMONTHLY',
+      'QUARTERLY',
+      'QUADMONTHLY',
+      'SEMIANNUALLY',
+      'ANNUALLY',
+    ]) {
       const client = createMockGraphQLClient({
         CreateRecurring: {
           createRecurring: { id: `rec-${freq}`, name: 'Netflix', state: 'ACTIVE', frequency: freq },
