@@ -17,7 +17,7 @@ export const RECURRING_FREQUENCIES = [
 export type RecurringFrequency = (typeof RECURRING_FREQUENCIES)[number];
 
 export interface CreateRecurringInput {
-  frequency: string;
+  frequency: RecurringFrequency;
   transaction: { accountId: string; itemId: string; transactionId: string };
 }
 
@@ -62,7 +62,7 @@ export interface EditRecurringInputRule {
 export interface EditRecurringInput {
   name?: string;
   categoryId?: string;
-  frequency?: string;
+  frequency?: RecurringFrequency;
   state?: string;
   rule?: EditRecurringInputRule;
 }

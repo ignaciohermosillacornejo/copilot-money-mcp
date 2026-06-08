@@ -7,6 +7,7 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
+import { RECURRING_FREQUENCIES } from '../../src/core/graphql/recurrings.js';
 import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
 
 describe('updateTag', () => {
@@ -207,16 +208,8 @@ describe('createRecurring', () => {
     // The full server-verified set (issue #419) — includes the 5 values
     // (BIMONTHLY, QUARTERLY, QUADMONTHLY, SEMIANNUALLY, ANNUALLY) that the
     // old WEEKLY/BIWEEKLY/MONTHLY/YEARLY allowlist wrongly rejected.
-    for (const freq of [
-      'WEEKLY',
-      'BIWEEKLY',
-      'MONTHLY',
-      'BIMONTHLY',
-      'QUARTERLY',
-      'QUADMONTHLY',
-      'SEMIANNUALLY',
-      'ANNUALLY',
-    ]) {
+    // Iterate the source of truth so a 9th value added later is covered automatically.
+    for (const freq of RECURRING_FREQUENCIES) {
       const client = createMockGraphQLClient({
         CreateRecurring: {
           createRecurring: { id: `rec-${freq}`, name: 'Netflix', state: 'ACTIVE', frequency: freq },
