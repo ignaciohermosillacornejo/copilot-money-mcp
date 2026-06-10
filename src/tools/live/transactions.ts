@@ -341,7 +341,7 @@ export class LiveTransactionsTools {
 
   private validate(opts: GetTransactionsLiveOptions): void {
     const o = opts as Record<string, unknown>;
-    const supported = `start_date, end_date, period, account_id (+ item_id), category, merchant, query, tag, min_amount, max_amount, limit, offset, pending, exclude_transfers, exclude_deleted, exclude_excluded, transaction_type (${LIVE_TRANSACTION_TYPES.join('|')}), transaction_id (+ account_id + item_id)`;
+    const supported = `start_date, end_date, period, account_id (+ item_id), category, merchant, query, tag, min_amount, max_amount, limit, offset, pending, exclude_transfers, exclude_deleted, exclude_excluded, transaction_type (${LIVE_TRANSACTION_TYPES.join(', ')}), transaction_id (+ account_id + item_id)`;
 
     for (const key of UNSUPPORTED_KEYS) {
       if (o[key] !== undefined) {
