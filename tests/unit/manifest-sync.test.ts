@@ -1,10 +1,12 @@
 /**
  * Tests to ensure manifest.json stays in sync with the published tool set.
  *
- * The published CLI runs read-only, so the manifest only lists read tools.
- * Write schemas (`createWriteToolSchemas()`) are intentionally excluded from
- * `actualSchemas` here — they still exist in the source for a future
- * GraphQL-based write path, but are not shipped.
+ * The published bundle runs read-only by default, so the committed
+ * manifest.json only lists the cache-mode read tools. Write schemas
+ * (`createWriteToolSchemas()`) are intentionally excluded from
+ * `actualSchemas` here — write tools ship behind the `--write` flag and are
+ * packaged separately via the generated `manifest.write.json`
+ * (`bun run pack:mcpb:write`; see scripts/build-write-manifest.ts).
  */
 
 import { describe, test, expect } from 'bun:test';

@@ -1,6 +1,6 @@
 # Copilot Money MCP Server
 
-MCP (Model Context Protocol) server that enables AI-powered queries and management of Copilot Money personal finance data. Reads come from the locally cached Firestore database (LevelDB + Protocol Buffers); writes go through Copilot's GraphQL API at `app.copilot.money/api/graphql`. 34 tools (17 read + 17 write). Read-only by default, write tools opt-in via `--write` flag.
+MCP (Model Context Protocol) server that enables AI-powered queries and management of Copilot Money personal finance data. Reads come from the locally cached Firestore database (LevelDB + Protocol Buffers); writes go through Copilot's GraphQL API at `app.copilot.money/api/graphql`. 31 base tools (14 read + 17 write); `--live-reads` swaps 6 cache reads for 13 live tools (21 read tools in live mode). Counting convention: "base" = cache-mode read tools (`createToolSchemas()`) + write tools (`createWriteToolSchemas()`); live-mode `_live` variants are counted separately. Read-only by default, write tools opt-in via `--write` flag.
 
 ## Quick Reference
 
@@ -39,7 +39,8 @@ src/
 │   ├── category.ts     # Category mappings (Plaid taxonomy)
 │   └── ...             # Other entity schemas (30+ models)
 ├── tools/
-│   └── tools.ts        # All MCP tool implementations (34 tools)
+│   ├── tools.ts        # Base tool implementations (14 read + 17 write)
+│   └── live/           # 13 GraphQL-backed live read tools (--live-reads mode)
 ├── utils/
 │   ├── date.ts         # Date period parsing (this_month, last_30_days, etc.)
 │   └── categories.ts   # Category name resolution
@@ -49,7 +50,7 @@ src/
 
 ## Key Files
 
-- **`src/tools/tools.ts`** - All 34 MCP tools (17 read + 17 write) are implemented here as async methods in the `CopilotMoneyTools` class. Read schemas in `createToolSchemas()`, write schemas in `createWriteToolSchemas()`.
+- **`src/tools/tools.ts`** - All 31 base tools (14 read + 17 write) are implemented here as async methods in the `CopilotMoneyTools` class. Read schemas in `createToolSchemas()`, write schemas in `createWriteToolSchemas()`. The 13 live-mode tools live in `src/tools/live/*.ts`.
 - **`src/core/database.ts`** - `CopilotDatabase` class with methods like `getTransactions()`, `getAccounts()`, `getIncome()`, etc.
 - **`src/core/decoder.ts`** - Binary decoder that reads LevelDB files and parses Firestore Protocol Buffers.
 - **`manifest.json`** - MCP bundle metadata for .mcpb packaging.
@@ -66,7 +67,7 @@ src/
 ### Testing
 - Bun test runner
 - Tests in `tests/` mirror `src/` structure
-- Synthetic test fixtures in `tests/fixtures/synthetic-db/`
+- Synthetic test DB is generated at runtime by `tests/helpers/test-db.ts` (no checked-in DB fixtures)
 - Run specific tests: `bun test tests/tools/tools.test.ts`
 
 ### Tool Implementation Pattern
@@ -82,7 +83,7 @@ Each MCP tool follows this pattern:
 - **Privacy First**: Default-mode reads are 100% local with zero network requests. Opt-in writes (`--write`) send authenticated GraphQL requests directly to Copilot Money's own backend at `app.copilot.money/api/graphql` via `src/core/graphql/` — no third-party services, no project-operated servers. `--write` also implies `--live-reads` (see below): once writes are authenticated, there's no privacy reason to keep reads on the stale cache, and write tools need live transaction metadata to resolve account/item IDs outside the local cache window.
 - **Scrub PII before pushing**: real financial figures (account balances, category totals, transaction amounts, account names like "AmEx Platinum" or "Doordash 401(k)") are PII. Never put them in commit messages, PR titles, PR descriptions, or source/test comments. Tests use synthetic numbers (e.g., 100, 200, 5000); narrative uses placeholders ("$X", "the user's data"). Real values belong only in gitignored local scratch (`docs/superpowers/` — already excluded via `.gitignore`; do NOT add new files under that tree to the index — pre-existing tracked files there are design docs that predate the rule and are PII-clean, but anything new stays local). Before every push to a remote branch, scan the diff and the PR body for `\$[0-9]`-style figures, bare 4-digit-or-larger integers in financial context, and bank/account names. If PII slips through to a pushed branch, force-push `--force-with-lease` the redacted version, then check the AI review bot comments with `gh pr view <num> --json comments` — they often quote the body verbatim and need editing too (the repo owner can `PATCH` bot comments via `gh api repos/<owner>/<repo>/issues/comments/<id>`).
 - **Read-Only by Default**: Write tools require `--write` flag, which also auto-enables `--live-reads`
-- **Live Reads (Opt-in, also implied by `--write`)**: `--live-reads` swaps cache-backed reads (`get_transactions`, `get_accounts`, `get_categories`, `get_budgets`, `get_recurring_transactions`) for GraphQL-backed `_live` variants (`get_recurring_transactions` → `get_recurring_live`; the others follow the `{name}_live` pattern) and adds `get_tags_live`. See `docs/graphql-live-reads.md`. Requires browser session auth.
+- **Live Reads (Opt-in, also implied by `--write`)**: `--live-reads` swaps 6 cache-backed reads (`get_transactions`, `get_accounts`, `get_categories`, `get_budgets`, `get_recurring_transactions`, `get_holdings`) for GraphQL-backed `_live` variants (`get_recurring_transactions` → `get_recurring_live`; the others follow the `{name}_live` pattern) and adds 7 net-new tools (`get_tags_live`, `get_networth_live`, `get_upcoming_recurrings_live`, `get_monthly_spend_live`, `get_balance_history_live`, `get_investment_prices_live`, `refresh_cache`) — 13 live tools total. See `docs/graphql-live-reads.md`. Requires browser session auth.
 - **Verify `--live-reads` is on (when needed)**: before any work that depends on live mode (parity audits, smoke tests, anything that must reflect current server state), confirm the running MCP host has `--live-reads` enabled. **Cheap check:** call `mcp__copilot-money__get_accounts` (or any read tool that has a `_live` variant) — if the tool list contains `get_accounts_live` and excludes `get_accounts`, `--live-reads` is on. If you see the cache-mode names, the flag is missing — add `--live-reads` to the `args` array of the `copilot-money` entry in `~/.claude.json` (or `~/Library/Application Support/Claude/claude_desktop_config.json` for Claude Desktop), then ask the user to restart the MCP host (Claude Code: `/mcp` reload, or quit + relaunch). Do NOT proceed with live-mode work assuming the flag is on without verifying.
 - **Database Location**: `~/Library/Containers/com.copilot.production/Data/Library/Application Support/firestore/__FIRAPP_DEFAULT/copilot-production-22904/main`
 

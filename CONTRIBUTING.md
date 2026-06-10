@@ -42,7 +42,7 @@ bun run sync-manifest  # Verify manifest.json matches code
 #### Writes-enabled bundle (local-only)
 
 `bun run pack:mcpb:write` produces `copilot-money-mcp-write.mcpb`, a variant
-that advertises all 34 tools (17 read + 17 write) and passes `--write` to the
+that advertises all 31 base tools (14 read + 17 write) and passes `--write` to the
 CLI so write tools are unlocked. It is intended for **self-install only** and
 is **not published to Claude Desktop**; the release workflow continues to ship
 only the read-only bundle. The committed `manifest.json` is never modified —
@@ -56,7 +56,7 @@ the writes-enabled metadata is generated into a gitignored
 1. Copilot Money stores data in a local LevelDB/Firestore cache on macOS
 2. `src/core/decoder.ts` reads `.ldb` files and parses Firestore Protocol Buffers
 3. `src/core/database.ts` provides cached, filtered access to all collections
-4. `src/tools/tools.ts` implements 34 MCP tools (17 read + 17 write)
+4. `src/tools/tools.ts` implements the 31 base tools (14 read + 17 write); `src/tools/live/` adds 13 GraphQL-backed live read tools in `--live-reads` mode
 5. `src/server.ts` handles MCP protocol communication and tool routing
 6. Write tools use `src/core/graphql/` to call Copilot's GraphQL API at `app.copilot.money/api/graphql`
 
@@ -82,7 +82,8 @@ src/
 │   ├── balance-history.ts   # Balance history schema
 │   └── ...                  # Other entity schemas (tag, category, etc.)
 ├── tools/
-│   └── tools.ts             # All MCP tool implementations
+│   ├── tools.ts             # Base tool implementations (cache reads + writes)
+│   └── live/                # GraphQL-backed live read tools (--live-reads mode)
 ├── utils/
 │   ├── date.ts              # Date period parsing (this_month, last_30_days, etc.)
 │   └── categories.ts        # Category name resolution
@@ -92,7 +93,7 @@ src/
 
 ### Key Files
 
-- **`src/tools/tools.ts`** — All 34 tools as async methods in `CopilotMoneyTools`. Read tool schemas in `createToolSchemas()`, write tool schemas in `createWriteToolSchemas()`.
+- **`src/tools/tools.ts`** — All 31 base tools (14 read + 17 write) as async methods in `CopilotMoneyTools`. Read tool schemas in `createToolSchemas()`, write tool schemas in `createWriteToolSchemas()`.
 - **`src/core/database.ts`** — `CopilotDatabase` class with 5-minute cache TTL, batch loading via `decodeAllCollectionsIsolated()` (worker thread), and filtered accessors.
 - **`src/core/decoder.ts`** — Binary decoder that reads LevelDB and parses Firestore Protocol Buffers. Decodes 30+ collection paths.
 - **`src/server.ts`** — MCP server with tool routing switch. `WRITE_TOOLS` set gates write operations behind the `--write` flag.
@@ -141,7 +142,7 @@ bun test tests/tools/tools.test.ts          # Specific file
 bun test --filter "getBalanceHistory"        # Pattern match
 ```
 
-Tests mirror the `src/` structure in `tests/`. Synthetic fixtures in `tests/fixtures/synthetic-db/`.
+Tests mirror the `src/` structure in `tests/`. The synthetic test DB is generated at runtime by `tests/helpers/test-db.ts` (no checked-in DB fixtures).
 
 ### Writing Tests
 
