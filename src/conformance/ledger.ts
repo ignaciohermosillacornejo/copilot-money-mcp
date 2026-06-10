@@ -63,10 +63,18 @@ export type ConformanceClass = (typeof CONFORMANCE_CLASSES)[number];
  * Recurring oracle that re-verifies an assumption.
  * - `smoke:<name>`   → `scripts/smoke/<name>.ts` (existence enforced by the
  *                      ledger test; runs locally pre-push, needs auth)
- * - `runtime:<name>` → an always-on runtime check (e.g. a zod schema that
- *                      warns on response drift)
+ * - `runtime:<name>` → an always-on runtime check; `<name>` must be
+ *                      registered in `RUNTIME_CHECK_NAMES` (existence
+ *                      enforced by the ledger test, same as smoke scripts)
  */
 export type ConformanceOracle = `smoke:${string}` | `runtime:${string}`;
+
+/**
+ * Registered always-on runtime checks that `runtime:<name>` oracles may
+ * reference. Empty until B3 (#437) lands the zod warn-mode response
+ * validators; B3 should register e.g. 'zod-warn' here when it ships.
+ */
+export const RUNTIME_CHECK_NAMES: readonly string[] = [];
 
 export interface LedgerEntry {
   /** External assumption surface (see naming convention above). Unique. */
@@ -208,6 +216,9 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'String union transcribed from web-app captures (src/core/graphql/queries/_shared.ts); per-operation server validation never probed',
     values: ALL_TIME_FRAMES,
     // Read-side only (live-reads tools); not reachable from write schemas.
+    // If TimeFrame is ever added to a write tool, add `toolParams` to THIS
+    // entry (don't create a duplicate) so the enum matcher in the ledger
+    // test resolves to it.
   },
 
   // ----- Transactions -----------------------------------------------------
@@ -263,6 +274,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   responseShape('splitTransaction'),
 
   // ----- Tags ---------------------------------------------------------------
+  // No top-level args beyond the input object (covered by CreateTagInput.*).
   operation('createTag'),
   inputField('CreateTagInput.name', ['create_tag.name']),
   inputField('CreateTagInput.colorName', ['create_tag.color_name']),
@@ -277,6 +289,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   responseShape('deleteTag'),
 
   // ----- Categories ---------------------------------------------------------
+  // No top-level args beyond the input object (covered by CreateCategoryInput.*).
   operation('createCategory'),
   inputField('CreateCategoryInput.name', ['create_category.name']),
   inputField('CreateCategoryInput.colorName', ['create_category.color_name']),
@@ -295,6 +308,13 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   responseShape('deleteCategory'),
 
   // ----- Budgets ------------------------------------------------------------
+  // The single set_budget MCP tool fans out to one of two mutations
+  // (editCategoryBudgetMonthly when `month` is given, editCategoryBudget
+  // otherwise), so set_budget.category_id / set_budget.amount are
+  // intentionally claimed by BOTH operations' entries. Note the coverage
+  // consequence: deleting one entry would not fail the param-coverage test
+  // (the other still claims the paths) — it would only fail the
+  // unique-surface inventory expectations downstream.
   operation('editCategoryBudget', ['set_budget.category_id']),
   inputField('EditCategoryBudgetInput.amount', ['set_budget.amount']),
   responseShape('editCategoryBudget'),
@@ -305,6 +325,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   responseShape('editCategoryBudgetMonthly'),
 
   // ----- Recurrings ---------------------------------------------------------
+  // No top-level args beyond the input object (covered by CreateRecurringInput.*).
   operation('createRecurring'),
   inputField('CreateRecurringInput.frequency', ['create_recurring.frequency']),
   inputField('CreateRecurringInput.transaction', ['create_recurring.transaction_id']),
