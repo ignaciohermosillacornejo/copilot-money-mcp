@@ -58,18 +58,17 @@ function parseErrorBody(text: string): ParsedErrorBody | undefined {
 }
 
 /**
- * Classify a non-2xx response by CONTENT (Apollo `errors[].extensions.code`)
- * first, falling back to HTTP status. This is what attributes failures
- * correctly:
- *  - parse/validation/coercion rejections → SCHEMA_ERROR (OUR request shape
- *    or enum model doesn't match the server schema — a client-side bug)
- *  - ownership / resource errors → USER_ACTION_REQUIRED (server rejected
- *    the request for reasons the user/agent can act on)
- *  - auth → AUTH_FAILED; 5xx → SERVER_ERROR (possibly transient)
+ * Classify by Apollo `errors[].extensions.code` alone (shared by the non-2xx
+ * and 2xx-with-errors[] paths). Returns undefined when no recognizable code
+ * is present so callers can apply their own status-based fallback.
+ *
+ * Priority is intentional: auth first, then ownership/resource errors
+ * (USER_ACTION_REQUIRED) BEFORE schema codes — if a response carries both,
+ * the ownership error is the one the user/agent can act on, while the schema
+ * code on the same response is usually downstream noise. Don't reorder.
  */
-function classifyHttpError(status: number, parsed?: ParsedErrorBody): GraphQLErrorCode {
-  const codes = parsed?.extensionCodes ?? new Set<string>();
-  if (status === 401 || codes.has('UNAUTHENTICATED')) return 'AUTH_FAILED';
+function classifyExtensionCodes(codes: Set<string>): GraphQLErrorCode | undefined {
+  if (codes.has('UNAUTHENTICATED')) return 'AUTH_FAILED';
   if (codes.has('FORBIDDEN') || codes.has('NOT_FOUND')) return 'USER_ACTION_REQUIRED';
   if (
     codes.has('GRAPHQL_PARSE_FAILED') ||
@@ -81,6 +80,23 @@ function classifyHttpError(status: number, parsed?: ParsedErrorBody): GraphQLErr
   ) {
     return 'SCHEMA_ERROR';
   }
+  return undefined;
+}
+
+/**
+ * Classify a non-2xx response by CONTENT (Apollo `errors[].extensions.code`)
+ * first, falling back to HTTP status. This is what attributes failures
+ * correctly:
+ *  - parse/validation/coercion rejections → SCHEMA_ERROR (OUR request shape
+ *    or enum model doesn't match the server schema — a client-side bug)
+ *  - ownership / resource errors → USER_ACTION_REQUIRED (server rejected
+ *    the request for reasons the user/agent can act on)
+ *  - auth → AUTH_FAILED; 5xx → SERVER_ERROR (possibly transient)
+ */
+function classifyHttpError(status: number, parsed?: ParsedErrorBody): GraphQLErrorCode {
+  if (status === 401) return 'AUTH_FAILED';
+  const fromCodes = classifyExtensionCodes(parsed?.extensionCodes ?? new Set<string>());
+  if (fromCodes) return fromCodes;
   if (status >= 500) return 'SERVER_ERROR';
   // A 400 without a recognizable extension code is still a parse-time
   // rejection of our request shape.
@@ -163,10 +179,16 @@ export class GraphQLClient {
     }
 
     if (body.errors && body.errors.length > 0) {
-      // 2xx + errors[] = a resolver-level rejection (input/ownership/domain).
-      // Auth expiry can also surface here as UNAUTHENTICATED with HTTP 200.
-      const isAuth = body.errors.some((e) => e.extensions?.code === 'UNAUTHENTICATED');
-      const code: GraphQLErrorCode = isAuth ? 'AUTH_FAILED' : 'USER_ACTION_REQUIRED';
+      // 2xx + errors[] is usually a resolver-level rejection
+      // (input/ownership/domain) → USER_ACTION_REQUIRED, but extension codes
+      // still win when present: auth expiry surfaces as UNAUTHENTICATED with
+      // HTTP 200, and a spec-legal 200 + GRAPHQL_VALIDATION_FAILED is still
+      // a schema mismatch on our side.
+      const extensionCodes = new Set(
+        body.errors.map((e) => e.extensions?.code).filter((c): c is string => typeof c === 'string')
+      );
+      const code: GraphQLErrorCode =
+        classifyExtensionCodes(extensionCodes) ?? 'USER_ACTION_REQUIRED';
       const firstMessage = body.errors[0]?.message ?? 'GraphQL error (no message)';
       this.logError(operationName, code, response.status);
       throw new GraphQLError(

@@ -154,6 +154,45 @@ describe('GraphQLClient', () => {
     }
   });
 
+  test('4xx with FORBIDDEN extension is USER_ACTION_REQUIRED (ownership)', async () => {
+    const body = {
+      errors: [
+        {
+          message: 'Not authorized to modify this transaction',
+          extensions: { code: 'FORBIDDEN' },
+        },
+      ],
+    };
+    mockFetch(body, 403);
+    const client = new GraphQLClient(createMockAuth());
+    try {
+      await client.mutate('EditTransaction', 'mutation EditTransaction { ok }', {});
+      throw new Error('should have thrown');
+    } catch (e) {
+      expect((e as GraphQLError).code).toBe('USER_ACTION_REQUIRED');
+      expect((e as GraphQLError).message).toContain('Not authorized to modify this transaction');
+    }
+  });
+
+  test('2xx + GRAPHQL_VALIDATION_FAILED errors[] is SCHEMA_ERROR (not USER_ACTION_REQUIRED)', async () => {
+    mockFetch({
+      errors: [
+        {
+          message: 'Cannot query field "bogus" on type "Mutation".',
+          extensions: { code: 'GRAPHQL_VALIDATION_FAILED' },
+        },
+      ],
+    });
+    const client = new GraphQLClient(createMockAuth());
+    try {
+      await client.mutate('TestOp', 'mutation TestOp { ok }', {});
+      throw new Error('should have thrown');
+    } catch (e) {
+      expect((e as GraphQLError).code).toBe('SCHEMA_ERROR');
+      expect((e as GraphQLError).message).toContain('Cannot query field "bogus"');
+    }
+  });
+
   test('UNAUTHENTICATED extension is AUTH_FAILED regardless of HTTP status', async () => {
     const body = {
       errors: [{ message: 'Token expired', extensions: { code: 'UNAUTHENTICATED' } }],
