@@ -36,7 +36,13 @@ import {
   Item,
   getTransactionDisplayName,
 } from '../models/index.js';
-import type { Security, HoldingsHistory, Tag, InvestmentSplit } from '../models/index.js';
+import type {
+  Security,
+  HoldingsHistory,
+  Tag,
+  InvestmentSplit,
+  PriceType,
+} from '../models/index.js';
 import type { BalanceHistory } from '../models/balance-history.js';
 import { getCategoryName } from '../utils/categories.js';
 
@@ -1353,7 +1359,7 @@ export class CopilotDatabase {
       tickerSymbol?: string;
       startDate?: string;
       endDate?: string;
-      priceType?: 'daily' | 'hf';
+      priceType?: PriceType;
     } = {}
   ): Promise<InvestmentPrice[]> {
     const { tickerSymbol, startDate, endDate, priceType } = options;

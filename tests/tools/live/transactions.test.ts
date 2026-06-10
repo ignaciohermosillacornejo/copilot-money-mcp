@@ -2,6 +2,7 @@ import { describe, test, expect, mock } from 'bun:test';
 import {
   LiveTransactionsTools,
   createLiveToolSchemas,
+  LIVE_TRANSACTION_TYPES,
 } from '../../../src/tools/live/transactions.js';
 import { LiveCopilotDatabase } from '../../../src/core/live-database.js';
 import type { GraphQLClient } from '../../../src/core/graphql/client.js';
@@ -49,12 +50,15 @@ describe('LiveTransactionsTools — input validation', () => {
 
   test('rejects transaction_type=foreign and =duplicates', async () => {
     const tools = new LiveTransactionsTools(mkLive());
+    const retryHint = `Retry with one of: ${LIVE_TRANSACTION_TYPES.join(', ')}.`;
     await expect(tools.getTransactions({ transaction_type: 'foreign' } as never)).rejects.toThrow(
-      /foreign.*not supported/i
+      `Parameter 'transaction_type=foreign' is not supported in live mode. ${retryHint}`
     );
     await expect(
       tools.getTransactions({ transaction_type: 'duplicates' } as never)
-    ).rejects.toThrow(/duplicates.*not supported/i);
+    ).rejects.toThrow(
+      `Parameter 'transaction_type=duplicates' is not supported in live mode. ${retryHint}`
+    );
   });
 
   test('rejects exclude_split_parents=false', async () => {
@@ -432,7 +436,9 @@ describe('createLiveToolSchemas', () => {
     const { inputSchema } = createLiveToolSchemas()[0]!;
     const ttype = (inputSchema as { properties: { transaction_type?: { enum?: string[] } } })
       .properties.transaction_type;
-    expect(ttype?.enum).toEqual(['refunds', 'credits', 'hsa_eligible', 'tagged']);
+    expect(ttype?.enum).toEqual([...LIVE_TRANSACTION_TYPES]);
+    expect(ttype?.enum).not.toContain('foreign');
+    expect(ttype?.enum).not.toContain('duplicates');
   });
 
   test('readOnlyHint is true', () => {

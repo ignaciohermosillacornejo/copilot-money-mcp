@@ -51,7 +51,15 @@ import {
   isIncomeCategory,
   isKnownPlaidCategory,
 } from '../utils/categories.js';
-import type { Transaction, Account, InvestmentPrice, Tag, Recurring } from '../models/index.js';
+import type {
+  Transaction,
+  Account,
+  InvestmentPrice,
+  Tag,
+  Recurring,
+  PriceType,
+} from '../models/index.js';
+import { PRICE_TYPES } from '../models/index.js';
 import {
   getTransactionDisplayName,
   getRecurringDisplayName,
@@ -120,6 +128,37 @@ const DEFAULT_QUERY_LIMIT = 100;
 
 /** Minimum allowed limit */
 const MIN_QUERY_LIMIT = 1;
+
+// ============================================
+// Tool Value-Set Constants
+// ============================================
+
+/**
+ * Special transaction-type filters accepted by `get_transactions` (cache mode).
+ * Single source of truth for the param type, schema enum, tool description,
+ * and `_filterByTransactionType` branching. The live tool supports a subset —
+ * see `LIVE_TRANSACTION_TYPES` in `live/transactions.ts`.
+ */
+export const TRANSACTION_TYPE_FILTERS = [
+  'foreign',
+  'refunds',
+  'credits',
+  'duplicates',
+  'hsa_eligible',
+  'tagged',
+] as const;
+export type TransactionTypeFilter = (typeof TRANSACTION_TYPE_FILTERS)[number];
+
+/** View modes accepted by `get_categories` (param type + schema enum + handler branching). */
+export const CATEGORY_VIEWS = ['list', 'tree', 'search'] as const;
+export type CategoryView = (typeof CATEGORY_VIEWS)[number];
+
+/**
+ * Downsampling granularities accepted by `get_balance_history`
+ * (param type + runtime guard + error messages + schema enum).
+ */
+export const BALANCE_HISTORY_GRANULARITIES = ['daily', 'weekly', 'monthly'] as const;
+export type BalanceHistoryGranularity = (typeof BALANCE_HISTORY_GRANULARITIES)[number];
 
 // ============================================
 // Amount Validation Constants
@@ -482,7 +521,7 @@ export class CopilotMoneyTools {
     // NEW: Text search
     query?: string;
     // NEW: Special types
-    transaction_type?: 'foreign' | 'refunds' | 'credits' | 'duplicates' | 'hsa_eligible' | 'tagged';
+    transaction_type?: TransactionTypeFilter;
     // NEW: Tag filter
     tag?: string;
     // NEW: Location
@@ -723,7 +762,7 @@ export class CopilotMoneyTools {
    */
   private _filterByTransactionType(
     transactions: Transaction[],
-    type: 'foreign' | 'refunds' | 'credits' | 'duplicates' | 'hsa_eligible' | 'tagged',
+    type: TransactionTypeFilter,
     _startDate?: string,
     _endDate?: string
   ): { transactions: Transaction[]; typeSpecificData?: Record<string, unknown> } {
@@ -1128,7 +1167,7 @@ export class CopilotMoneyTools {
    */
   async getCategories(
     options: {
-      view?: 'list' | 'tree' | 'search';
+      view?: CategoryView;
       parent_id?: string;
       query?: string;
       period?: string;
@@ -2079,7 +2118,7 @@ export class CopilotMoneyTools {
       ticker_symbol?: string;
       start_date?: string;
       end_date?: string;
-      price_type?: 'daily' | 'hf';
+      price_type?: PriceType;
       limit?: number;
       offset?: number;
     } = {}
@@ -3693,7 +3732,7 @@ export class CopilotMoneyTools {
     account_id?: string;
     start_date?: string;
     end_date?: string;
-    granularity: 'daily' | 'weekly' | 'monthly';
+    granularity: BalanceHistoryGranularity;
     limit?: number;
     offset?: number;
   }): Promise<{
@@ -3716,12 +3755,13 @@ export class CopilotMoneyTools {
     const validatedOffset = validateOffset(options.offset);
 
     if (!granularity) {
-      throw new Error('granularity is required — must be "daily", "weekly", or "monthly"');
-    }
-    const validGranularities = ['daily', 'weekly', 'monthly'] as const;
-    if (!(validGranularities as readonly string[]).includes(granularity)) {
       throw new Error(
-        `Invalid granularity: ${granularity}. Must be one of: ${validGranularities.join(', ')}`
+        `granularity is required — must be one of: ${BALANCE_HISTORY_GRANULARITIES.join(', ')}`
+      );
+    }
+    if (!(BALANCE_HISTORY_GRANULARITIES as readonly string[]).includes(granularity)) {
+      throw new Error(
+        `Invalid granularity: ${granularity}. Must be one of: ${BALANCE_HISTORY_GRANULARITIES.join(', ')}`
       );
     }
     if (start_date) validateDate(start_date, 'start_date');
@@ -3882,7 +3922,7 @@ export function createToolSchemas(): ToolSchema[] {
         '(1) Filter-based: Use period, date range, category, merchant, amount filters. ' +
         '(2) Single lookup: Provide transaction_id to get one transaction. ' +
         '(3) Text search: Use query for free-text merchant search. ' +
-        '(4) Special types: Use transaction_type for foreign/refunds/credits/duplicates/hsa_eligible/tagged. ' +
+        `(4) Special types: Use transaction_type for ${TRANSACTION_TYPE_FILTERS.join('/')}. ` +
         '(5) Location-based: Use city or lat/lon with radius_km. ' +
         '(6) Tag filter: Use tag to find transactions with a specific tag. ' +
         'Returns human-readable category names and normalized merchant names.',
@@ -3989,7 +4029,7 @@ export function createToolSchemas(): ToolSchema[] {
           // NEW: Special transaction types
           transaction_type: {
             type: 'string',
-            enum: ['foreign', 'refunds', 'credits', 'duplicates', 'hsa_eligible', 'tagged'],
+            enum: [...TRANSACTION_TYPE_FILTERS],
             description:
               'Filter by special type: foreign (international), refunds, credits (cashback/rewards), ' +
               'duplicates (potential duplicate transactions), hsa_eligible (medical expenses), tagged (has tags)',
@@ -4109,7 +4149,7 @@ export function createToolSchemas(): ToolSchema[] {
         properties: {
           view: {
             type: 'string',
-            enum: ['list', 'tree', 'search'],
+            enum: [...CATEGORY_VIEWS],
             description:
               'View mode: list (categories with spend totals), tree (parent/child hierarchy), search (find by keyword)',
           },
@@ -4264,7 +4304,7 @@ export function createToolSchemas(): ToolSchema[] {
           end_date: { type: 'string', description: 'End date (YYYY-MM-DD or YYYY-MM)' },
           price_type: {
             type: 'string',
-            enum: ['daily', 'hf'],
+            enum: [...PRICE_TYPES],
             description:
               'Filter by price type: daily (monthly aggregates) or hf (high-frequency intraday)',
           },
@@ -4368,7 +4408,7 @@ export function createToolSchemas(): ToolSchema[] {
         'Get daily balance snapshots for accounts over time. Each entry returns current_balance, ' +
         'available_balance, limit, account_id, and account_name. The response also includes an ' +
         '`accounts` array listing the distinct account IDs in the paginated page. Requires a ' +
-        'granularity parameter (daily, weekly, or monthly) to control response size. Weekly and ' +
+        `granularity parameter (${BALANCE_HISTORY_GRANULARITIES.join(', ')}) to control response size. Weekly and ` +
         'monthly modes downsample by keeping the last data point per period. Filter by ' +
         'account_id and date range.',
       inputSchema: {
@@ -4388,7 +4428,7 @@ export function createToolSchemas(): ToolSchema[] {
           },
           granularity: {
             type: 'string',
-            enum: ['daily', 'weekly', 'monthly'],
+            enum: [...BALANCE_HISTORY_GRANULARITIES],
             description:
               'Required. Controls response density: daily (every day), weekly (one per week), ' +
               'or monthly (one per month). Use weekly or monthly for longer time ranges.',

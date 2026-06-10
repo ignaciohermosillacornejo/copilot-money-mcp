@@ -60,6 +60,8 @@ export {
 export {
   InvestmentPriceSchema,
   type InvestmentPrice,
+  PRICE_TYPES,
+  type PriceType,
   getBestPrice,
   getPriceDate,
   isHighFrequencyPrice,

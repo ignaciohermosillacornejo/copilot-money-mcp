@@ -3,7 +3,11 @@
  */
 
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { CopilotMoneyTools, createToolSchemas } from '../../src/tools/tools.js';
+import {
+  CopilotMoneyTools,
+  createToolSchemas,
+  BALANCE_HISTORY_GRANULARITIES,
+} from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import type { Transaction, Account, Security, HoldingsHistory } from '../../src/models/index.js';
 import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
@@ -3226,12 +3230,14 @@ describe('getBalanceHistory', () => {
   });
 
   test('requires granularity parameter', async () => {
-    await expect(tools.getBalanceHistory({} as any)).rejects.toThrow('granularity is required');
+    await expect(tools.getBalanceHistory({} as any)).rejects.toThrow(
+      `granularity is required — must be one of: ${BALANCE_HISTORY_GRANULARITIES.join(', ')}`
+    );
   });
 
   test('rejects invalid granularity', async () => {
     await expect(tools.getBalanceHistory({ granularity: 'hourly' as any })).rejects.toThrow(
-      'Invalid granularity'
+      `Invalid granularity: hourly. Must be one of: ${BALANCE_HISTORY_GRANULARITIES.join(', ')}`
     );
   });
 
