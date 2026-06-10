@@ -133,13 +133,11 @@ export class LiveBalanceHistoryTools {
     if (entry !== undefined && startedAt - entry.fetched_at < this.ttlMs) {
       hit = true;
     } else {
-      const rows = await this.live.withRetry(() =>
-        fetchAccountBalanceHistory(this.live.getClient(), {
-          itemId: args.item_id,
-          accountId: args.account_id,
-          timeFrame: args.time_frame,
-        })
-      );
+      const rows = await fetchAccountBalanceHistory(this.live.getClient(), {
+        itemId: args.item_id,
+        accountId: args.account_id,
+        timeFrame: args.time_frame,
+      });
       entry = { rows, fetched_at: Date.now() };
       this.cache.set(key, entry);
     }

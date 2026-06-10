@@ -17,54 +17,8 @@ function mkCache(): CopilotDatabase {
   return { getAccounts: mock() } as unknown as CopilotDatabase;
 }
 
-describe('LiveCopilotDatabase — withRetry', () => {
-  test('succeeds on first try without retry', async () => {
-    const live = new LiveCopilotDatabase(mkClient(), mkCache());
-    let calls = 0;
-    const result = await live.withRetry(async () => {
-      calls += 1;
-      return 'ok';
-    });
-    expect(result).toBe('ok');
-    expect(calls).toBe(1);
-  });
-
-  test('retries once on NETWORK error and succeeds', async () => {
-    const live = new LiveCopilotDatabase(mkClient(), mkCache());
-    let calls = 0;
-    const result = await live.withRetry(async () => {
-      calls += 1;
-      if (calls === 1) throw new GraphQLError('NETWORK', 'boom', 'Op');
-      return 'ok';
-    });
-    expect(result).toBe('ok');
-    expect(calls).toBe(2);
-  });
-
-  test('does not retry on AUTH_FAILED', async () => {
-    const live = new LiveCopilotDatabase(mkClient(), mkCache());
-    let calls = 0;
-    await expect(
-      live.withRetry(async () => {
-        calls += 1;
-        throw new GraphQLError('AUTH_FAILED', '401', 'Op');
-      })
-    ).rejects.toThrow('401');
-    expect(calls).toBe(1);
-  });
-
-  test('surfaces error after second NETWORK failure', async () => {
-    const live = new LiveCopilotDatabase(mkClient(), mkCache());
-    let calls = 0;
-    await expect(
-      live.withRetry(async () => {
-        calls += 1;
-        throw new GraphQLError('NETWORK', 'still broken', 'Op');
-      })
-    ).rejects.toThrow('still broken');
-    expect(calls).toBe(2);
-  });
-});
+// NOTE: transport retry/backoff moved into GraphQLClient (issue #443);
+// LiveCopilotDatabase no longer has a withRetry layer of its own.
 
 describe('LiveCopilotDatabase.getTransactions (windowed)', () => {
   function mkClientReturning(pages: TransactionsPage[]): GraphQLClient {

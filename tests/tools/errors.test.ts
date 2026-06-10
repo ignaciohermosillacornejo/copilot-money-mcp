@@ -64,6 +64,44 @@ describe('graphQLErrorToMcpError', () => {
     expect(msg).toContain('418: teapot');
   });
 
+  test('NETWORK write with ambiguous delivery → "may or may not have applied" warning (#443)', () => {
+    const err = new GraphQLError(
+      'NETWORK',
+      'request timed out after 30000ms',
+      'EditTag',
+      undefined,
+      undefined,
+      {
+        writeMayHaveApplied: true,
+      }
+    );
+    const msg = graphQLErrorToMcpError(err);
+    expect(msg).toContain('may or may not have applied');
+    expect(msg).toContain('verify the current state');
+    expect(msg).toContain('request timed out after 30000ms');
+    // Must NOT advise a blind retry.
+    expect(msg).not.toContain('Transient network problem');
+  });
+
+  test('SERVER_ERROR write with ambiguous delivery → warning instead of blind-retry advice (#443)', () => {
+    const err = new GraphQLError('SERVER_ERROR', '500: internal error', 'EditTag', 500, undefined, {
+      writeMayHaveApplied: true,
+    });
+    const msg = graphQLErrorToMcpError(err);
+    expect(msg).toContain('may or may not have applied');
+    expect(msg).not.toContain('This may be transient — retry.');
+    expect(msg).toContain('500: internal error');
+  });
+
+  test('NETWORK read failure after exhausted retries mentions attempt count (#443)', () => {
+    const err = new GraphQLError('NETWORK', 'fetch failed', 'Transactions', undefined, undefined, {
+      attempts: 4,
+    });
+    const msg = graphQLErrorToMcpError(err);
+    expect(msg).toContain('after 4 attempts');
+    expect(msg).toContain('retry');
+  });
+
   test('no branch emits the old misleading blanket message', () => {
     const codes = [
       'AUTH_FAILED',
