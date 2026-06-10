@@ -18,6 +18,7 @@ import {
   getIdToken,
   type EnumConformanceResult,
 } from './conformance-checks.js';
+import { formatClassDistribution } from '../../src/conformance/ledger.js';
 
 async function main(): Promise<void> {
   const idToken = await getIdToken();
@@ -38,6 +39,10 @@ async function main(): Promise<void> {
     const status = r.failures.length === 0 ? 'PASS' : 'FAIL';
     console.error(`  ${r.label.padEnd(width)}  ${status}`);
   }
+
+  // Conformance ledger class distribution (issue #435) — the
+  // "are we getting better" number, printed pass or fail.
+  console.error(`\n${formatClassDistribution()}`);
 
   const failed = results.filter((r) => r.failures.length > 0);
   if (failed.length > 0) {
