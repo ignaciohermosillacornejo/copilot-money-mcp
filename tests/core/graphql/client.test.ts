@@ -81,15 +81,116 @@ describe('GraphQLClient', () => {
     }
   });
 
-  test.each([400, 500])('classifies HTTP %i as SCHEMA_ERROR', async (status) => {
-    mockFetch('Schema/validation error body', status);
+  test('classifies bare 400 (no recognizable body) as SCHEMA_ERROR with raw text', async () => {
+    mockFetch('Schema/validation error body', 400);
     const client = new GraphQLClient(createMockAuth());
     try {
       await client.mutate('TestOp', 'mutation TestOp { ok }', {});
       throw new Error('should have thrown');
     } catch (e) {
       expect((e as GraphQLError).code).toBe('SCHEMA_ERROR');
-      expect((e as GraphQLError).httpStatus).toBe(status);
+      expect((e as GraphQLError).httpStatus).toBe(400);
+      expect((e as GraphQLError).message).toContain('Schema/validation error body');
+    }
+  });
+
+  test.each([500, 502, 503])(
+    'classifies HTTP %i as SERVER_ERROR (not SCHEMA_ERROR)',
+    async (status) => {
+      mockFetch('upstream blew up', status);
+      const client = new GraphQLClient(createMockAuth());
+      try {
+        await client.mutate('TestOp', 'mutation TestOp { ok }', {});
+        throw new Error('should have thrown');
+      } catch (e) {
+        expect((e as GraphQLError).code).toBe('SERVER_ERROR');
+        expect((e as GraphQLError).httpStatus).toBe(status);
+        expect((e as GraphQLError).message).toContain('upstream blew up');
+      }
+    }
+  );
+
+  test('400 with BAD_USER_INPUT (variable coercion, the #419 shape) is SCHEMA_ERROR', async () => {
+    const body = {
+      errors: [
+        {
+          message:
+            'Variable "$input" got invalid value "YEARLY" at "input.frequency"; Value "YEARLY" does not exist in "RecurringFrequency" enum.',
+          extensions: { code: 'BAD_USER_INPUT' },
+        },
+      ],
+    };
+    mockFetch(body, 400);
+    const client = new GraphQLClient(createMockAuth());
+    try {
+      await client.mutate('CreateRecurring', 'mutation CreateRecurring { ok }', {});
+      throw new Error('should have thrown');
+    } catch (e) {
+      expect((e as GraphQLError).code).toBe('SCHEMA_ERROR');
+      // Raw server reason is surfaced, not swallowed.
+      expect((e as GraphQLError).message).toContain(
+        'Value "YEARLY" does not exist in "RecurringFrequency" enum.'
+      );
+    }
+  });
+
+  test('4xx with NOT_FOUND/FORBIDDEN extensions is USER_ACTION_REQUIRED (input/ownership)', async () => {
+    const body = {
+      errors: [
+        {
+          message: 'Recurring not found or not owned by user',
+          extensions: { code: 'NOT_FOUND' },
+        },
+      ],
+    };
+    mockFetch(body, 404);
+    const client = new GraphQLClient(createMockAuth());
+    try {
+      await client.mutate('EditRecurring', 'mutation EditRecurring { ok }', {});
+      throw new Error('should have thrown');
+    } catch (e) {
+      expect((e as GraphQLError).code).toBe('USER_ACTION_REQUIRED');
+      expect((e as GraphQLError).message).toContain('Recurring not found');
+    }
+  });
+
+  test('UNAUTHENTICATED extension is AUTH_FAILED regardless of HTTP status', async () => {
+    const body = {
+      errors: [{ message: 'Token expired', extensions: { code: 'UNAUTHENTICATED' } }],
+    };
+    mockFetch(body, 403);
+    const client = new GraphQLClient(createMockAuth());
+    try {
+      await client.mutate('TestOp', 'mutation TestOp { ok }', {});
+      throw new Error('should have thrown');
+    } catch (e) {
+      expect((e as GraphQLError).code).toBe('AUTH_FAILED');
+    }
+  });
+
+  test('2xx + UNAUTHENTICATED errors[] is AUTH_FAILED', async () => {
+    mockFetch({
+      errors: [{ message: 'Token expired', extensions: { code: 'UNAUTHENTICATED' } }],
+    });
+    const client = new GraphQLClient(createMockAuth());
+    try {
+      await client.mutate('TestOp', 'mutation TestOp { ok }', {});
+      throw new Error('should have thrown');
+    } catch (e) {
+      expect((e as GraphQLError).code).toBe('AUTH_FAILED');
+    }
+  });
+
+  test('truncates oversized raw server text in the error message', async () => {
+    mockFetch('x'.repeat(5000), 502);
+    const client = new GraphQLClient(createMockAuth());
+    try {
+      await client.mutate('TestOp', 'mutation TestOp { ok }', {});
+      throw new Error('should have thrown');
+    } catch (e) {
+      expect((e as GraphQLError).code).toBe('SERVER_ERROR');
+      expect((e as GraphQLError).message).toContain('[truncated]');
+      expect((e as GraphQLError).message.length).toBeLessThan(1000);
     }
   });
 
