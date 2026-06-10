@@ -3922,7 +3922,7 @@ export function createToolSchemas(): ToolSchema[] {
         '(1) Filter-based: Use period, date range, category, merchant, amount filters. ' +
         '(2) Single lookup: Provide transaction_id to get one transaction. ' +
         '(3) Text search: Use query for free-text merchant search. ' +
-        `(4) Special types: Use transaction_type for ${TRANSACTION_TYPE_FILTERS.join('/')}. ` +
+        `(4) Special types: Use transaction_type for ${TRANSACTION_TYPE_FILTERS.join(', ')}. ` +
         '(5) Location-based: Use city or lat/lon with radius_km. ' +
         '(6) Tag filter: Use tag to find transactions with a specific tag. ' +
         'Returns human-readable category names and normalized merchant names.',

@@ -7,7 +7,10 @@ import {
   CopilotMoneyTools,
   createToolSchemas,
   BALANCE_HISTORY_GRANULARITIES,
+  CATEGORY_VIEWS,
+  TRANSACTION_TYPE_FILTERS,
 } from '../../src/tools/tools.js';
+import { PRICE_TYPES } from '../../src/models/index.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import type { Transaction, Account, Security, HoldingsHistory } from '../../src/models/index.js';
 import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
@@ -1875,6 +1878,24 @@ describe('createToolSchemas', () => {
 
     // Should have exactly 14 tools
     expect(names.length).toBe(14);
+  });
+
+  test('schema enums render from the value-set constants', async () => {
+    const schemas = createToolSchemas();
+    const enumOf = (tool: string, prop: string): string[] | undefined => {
+      const schema = schemas.find((s) => s.name === tool);
+      const props = schema?.inputSchema.properties as
+        | Record<string, { enum?: string[] }>
+        | undefined;
+      return props?.[prop]?.enum;
+    };
+
+    expect(enumOf('get_transactions', 'transaction_type')).toEqual([...TRANSACTION_TYPE_FILTERS]);
+    expect(enumOf('get_categories', 'view')).toEqual([...CATEGORY_VIEWS]);
+    expect(enumOf('get_investment_prices', 'price_type')).toEqual([...PRICE_TYPES]);
+    expect(enumOf('get_balance_history', 'granularity')).toEqual([
+      ...BALANCE_HISTORY_GRANULARITIES,
+    ]);
   });
 });
 

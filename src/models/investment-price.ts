@@ -62,7 +62,7 @@ export const InvestmentPriceSchema = z
     // Metadata
     currency: z.string().optional(), // "USD", etc.
     source: z.string().optional(), // Data source identifier
-    price_type: z.string().optional(), // "daily" or "hf"
+    price_type: z.enum(PRICE_TYPES).optional(), // always decoder-assigned from the subcollection path
 
     // Nested price payload. For daily docs this is keyed by day-of-month (`01`–`31`);
     // for hf docs it's keyed by intraday timestamp. Values carry the numeric price
