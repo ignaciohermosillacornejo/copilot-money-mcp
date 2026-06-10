@@ -40,22 +40,16 @@ export function smokeLog(msg: string, fields?: Record<string, unknown>): void {
 }
 
 /**
- * Send a validation-only probe with the candidate enum value inlined into the
- * query. Returns the server's error messages joined into one string (with
- * unescaped quotes), so the caller can scan for the enum-rejection fragment.
+ * Send a validation-only probe query and return the server's error messages
+ * joined into one string (with unescaped quotes), so the caller can scan for a
+ * rejection fragment. An empty string means the server reported NO errors.
  *
  * We parse the JSON `errors[].message` rather than scanning the raw body: in the
  * raw response the quotes in `... "<EnumName>" enum` are JSON-escaped (`\"`), so
  * a literal-quote fragment would never match the raw text (a false "valid" for
  * every value).
  */
-async function probe(
-  idToken: string,
-  buildQuery: (value: string) => string,
-  value: string
-): Promise<string> {
-  const query = buildQuery(value);
-
+export async function sendValidationProbe(idToken: string, query: string): Promise<string> {
   const response = await fetch(ENDPOINT, {
     method: 'POST',
     headers: {
@@ -116,9 +110,12 @@ export async function assertEnumConformance(
   // concurrently, then evaluate. (Logging below stays in declared order.)
   const [valueResults, controlBody] = await Promise.all([
     Promise.all(
-      ourValues.map(async (value) => ({ value, body: await probe(idToken, buildQuery, value) }))
+      ourValues.map(async (value) => ({
+        value,
+        body: await sendValidationProbe(idToken, buildQuery(value)),
+      }))
     ),
-    probe(idToken, buildQuery, knownBad),
+    sendValidationProbe(idToken, buildQuery(knownBad)),
   ]);
 
   // 1. Every value in our constant must be server-valid (no enum error).
