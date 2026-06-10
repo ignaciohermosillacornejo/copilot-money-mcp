@@ -19,6 +19,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { createToolSchemas, createWriteToolSchemas } from '../../src/tools/tools.js';
 import { CopilotMoneyServer } from '../../src/server.js';
+import type { GraphQLClient } from '../../src/core/graphql/client.js';
 
 const repoRoot = join(import.meta.dir, '../..');
 const claudeMd = readFileSync(join(repoRoot, 'CLAUDE.md'), 'utf-8');
@@ -36,12 +37,28 @@ const baseCount = readCount + writeCount;
 const cacheModeNames = new Set(
   new CopilotMoneyServer('/nonexistent/doc-sync').handleListTools().tools.map((t) => t.name)
 );
-const liveModeNames = new CopilotMoneyServer('/nonexistent/doc-sync', undefined, false, true)
+// Inject a stub GraphQLClient so the live-mode constructor never touches
+// FirebaseAuth/browser-session token extraction (handleListTools() is pure
+// list assembly and must not need real auth).
+const stubGraphqlClient = {
+  query: () => Promise.reject(new Error('doc-sync gate must not issue GraphQL requests')),
+  mutate: () => Promise.reject(new Error('doc-sync gate must not issue GraphQL requests')),
+} as unknown as GraphQLClient;
+const liveModeNames = new CopilotMoneyServer(
+  '/nonexistent/doc-sync',
+  undefined,
+  false,
+  true,
+  stubGraphqlClient
+)
   .handleListTools()
   .tools.map((t) => t.name);
 
 const liveModeReadCount = liveModeNames.length;
 const survivingCacheCount = liveModeNames.filter((n) => cacheModeNames.has(n)).length;
+// All live tool schemas (cache-read replacements + net-new tools), NOT just
+// the net-new ones. E.g. 6 swapped cache reads -> 6 `_live` replacements,
+// plus the net-new live tools, all counted here.
 const liveToolCount = liveModeReadCount - survivingCacheCount;
 const swappedCacheCount = readCount - survivingCacheCount;
 
@@ -84,13 +101,15 @@ describe('Doc-sync: tool counts match code', () => {
   });
 
   // Catch reintroduced stale "(X read + Y write)" anywhere, even without
-  // the "base tools" wording.
+  // the "base tools" wording. README.md has no such phrase today
+  // (minOccurrences 0), but any future occurrence is still validated.
   test.each([
-    ['CLAUDE.md', claudeMd],
-    ['CONTRIBUTING.md', contributingMd],
-  ])('%s: every "(X read + Y write)" matches code counts', (file, content) => {
+    ['CLAUDE.md', claudeMd, 1],
+    ['CONTRIBUTING.md', contributingMd, 1],
+    ['README.md', readmeMd, 0],
+  ])('%s: every "(X read + Y write)" matches code counts', (file, content, minOccurrences) => {
     const matches = allMatches(content, /\((\d+) read \+ (\d+) write\)/g);
-    expect(matches.length).toBeGreaterThan(0);
+    expect(matches.length).toBeGreaterThanOrEqual(minOccurrences);
     for (const m of matches) {
       expect(Number(m[1]), `${file}: "${m[0]}" read count != ${readCount}`).toBe(readCount);
       expect(Number(m[2]), `${file}: "${m[0]}" write count != ${writeCount}`).toBe(writeCount);
