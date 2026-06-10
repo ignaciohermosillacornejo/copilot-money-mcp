@@ -121,7 +121,7 @@ const SHIPPED_WITH_LIVE_SMOKE =
  * the recurring smoke gate. Builds on the write-field audit lineage. */
 const FIELD_PROBE_GATED =
   'Write-field audit lineage (PR #414/#417/#418/#420) + per-field name probe with ' +
-  'unknown-field control; gated by scripts/smoke/conformance.ts (issue #436, PR #455)';
+  'unknown-field control; gated by scripts/smoke/conformance.ts (issue #436, PR #456)';
 
 /** Response-shape interfaces are hand-written mirrors of captured
  * responses; nothing validates live responses against them at runtime. */
