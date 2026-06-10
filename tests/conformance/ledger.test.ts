@@ -20,6 +20,8 @@ import { join } from 'node:path';
 import { createWriteToolSchemas } from '../../src/tools/tools.js';
 import {
   CONFORMANCE_LEDGER,
+  CONFORMANCE_CLASSES,
+  RUNTIME_CHECK_NAMES,
   classDistribution,
   formatClassDistribution,
 } from '../../src/conformance/ledger.js';
@@ -114,6 +116,19 @@ describe('conformance ledger', () => {
     }
   });
 
+  test('(b) every named runtime oracle is registered in RUNTIME_CHECK_NAMES', () => {
+    for (const entry of CONFORMANCE_LEDGER) {
+      if (entry.oracle === null || !entry.oracle.startsWith('runtime:')) continue;
+      const name = entry.oracle.slice('runtime:'.length);
+      expect(
+        RUNTIME_CHECK_NAMES.includes(name),
+        `Oracle '${entry.oracle}' on surface '${entry.surface}' is not registered in ` +
+          'RUNTIME_CHECK_NAMES (src/conformance/ledger.ts) — register the runtime check ' +
+          'when it ships, not before'
+      ).toBe(true);
+    }
+  });
+
   test("(c) class 'gated' requires a non-null oracle", () => {
     const offenders = CONFORMANCE_LEDGER.filter(
       (entry) => entry.class === 'gated' && entry.oracle === null
@@ -163,6 +178,6 @@ describe('conformance ledger', () => {
     expect(rendered).toContain('gated');
     expect(rendered).toContain('verified-once');
     expect(rendered).toContain('unverified');
-    expect(rendered.split('\n')).toHaveLength(4);
+    expect(rendered.split('\n')).toHaveLength(CONFORMANCE_CLASSES.length + 1);
   });
 });
