@@ -18,6 +18,54 @@ export type DecodeContext = {
   docId: string;
 };
 
+/**
+ * Per-collection decode counters, accumulated during a decode pass.
+ *
+ * Unlike the warn dedupe sets (which persist for the process lifetime so a
+ * refresh doesn't re-flood stderr), these counters are reset at the start of
+ * every `decodeAllCollections` pass so they always describe the latest load:
+ *   - `decoded`: docs that passed Zod validation (raw, pre-dedup).
+ *   - `dropped`: docs that failed Zod validation and were silently omitted
+ *     from results. Counted per document, NOT deduped like the warnings.
+ *   - `unread_field_warnings`: unique `(collection, field)` pairs present in
+ *     raw docs but neither consumed nor explicitly ignored by the processor.
+ */
+export type CollectionDecodeStats = {
+  decoded: number;
+  dropped: number;
+  unread_field_warnings: number;
+};
+
+export type DecodeStatsByCollection = Record<string, CollectionDecodeStats>;
+
+const decodeStats = new Map<string, CollectionDecodeStats>();
+
+// Per-pass dedupe for the unread_field_warnings counter. Separate from
+// `warnedUnreadKeys` (process-lifetime, governs stderr flood control) so a
+// re-decode in the same process still counts fields that are still unread
+// even though their stderr warning was already emitted on an earlier pass.
+const countedUnreadKeys = new Set<string>();
+
+function statsFor(collection: string): CollectionDecodeStats {
+  let stats = decodeStats.get(collection);
+  if (!stats) {
+    stats = { decoded: 0, dropped: 0, unread_field_warnings: 0 };
+    decodeStats.set(collection, stats);
+  }
+  return stats;
+}
+
+/** Snapshot of the per-collection counters (deep copy, safe to mutate). */
+export function getDecodeStats(): DecodeStatsByCollection {
+  return Object.fromEntries([...decodeStats].map(([k, v]) => [k, { ...v }]));
+}
+
+/** Reset counters. Called at the start of each full decode pass. */
+export function resetDecodeStats(): void {
+  decodeStats.clear();
+  countedUnreadKeys.clear();
+}
+
 // Dedupe key = `${collection}::${firstIssue.path.join('.')}::${firstIssue.code}`.
 // One warn per unique key per process. Prevents log flood when Copilot ships
 // a new field shape that affects every doc in a collection. Note: only the
@@ -33,7 +81,14 @@ const warnedUnreadKeys = new Set<string>();
 
 export function validateOrWarn<T>(schema: ZodType<T>, data: unknown, ctx: DecodeContext): T | null {
   const result = schema.safeParse(data);
-  if (result.success) return result.data;
+  if (result.success) {
+    statsFor(ctx.collection).decoded++;
+    return result.data;
+  }
+
+  // Count every dropped doc — drops are NOT deduped like the warnings below,
+  // so the counters reflect the true number of missing documents.
+  statsFor(ctx.collection).dropped++;
 
   // Zod always provides ≥1 issue on failure; guard is defensive only.
   const first = result.error.issues[0];
@@ -82,6 +137,10 @@ export function warnUnreadFields(
   for (const key of fields.keys()) {
     if (known.has(key)) continue;
     const dedupeKey = `unread::${ctx.collection}::${key}`;
+    if (!countedUnreadKeys.has(dedupeKey)) {
+      countedUnreadKeys.add(dedupeKey);
+      statsFor(ctx.collection).unread_field_warnings++;
+    }
     if (warnedUnreadKeys.has(dedupeKey)) continue;
     warnedUnreadKeys.add(dedupeKey);
     console.warn(
@@ -90,8 +149,10 @@ export function warnUnreadFields(
   }
 }
 
-// Exposed for tests only.
+// Exposed for tests only. Clears dedupe sets AND the per-pass counters so
+// each test starts from a clean slate.
 export function __resetWarnedKeys(): void {
   warnedKeys.clear();
   warnedUnreadKeys.clear();
+  resetDecodeStats();
 }

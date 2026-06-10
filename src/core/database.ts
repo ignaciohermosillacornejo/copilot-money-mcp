@@ -24,6 +24,7 @@ import {
   UserAccountCustomization,
   AllCollectionsResult,
 } from './decoder.js';
+import type { DecodeStatsByCollection } from './schema-warn.js';
 import {
   Account,
   Transaction,
@@ -138,6 +139,26 @@ function getCacheTTLMs(): number {
 }
 
 /**
+ * Decode-health summary surfaced via get_cache_info / get_connection_status
+ * (issue #442). Makes silent schema drops visible to MCP users who never see
+ * the stderr warnings.
+ *
+ * - `status`: 'ok' (no drops), 'degraded' (>=1 document dropped on schema
+ *   validation failure), or 'unknown' (no decode pass has run, e.g. cache was
+ *   injected or never loaded).
+ * - `note`: human-readable health line. Terse in the zero-drop case; when
+ *   drops exist it explains what happened and what to do.
+ * - `collections`: per-collection `{ decoded, dropped, unread_field_warnings }`
+ *   counters, present only when at least one collection has drops or
+ *   unread-field warnings (so clean output stays terse).
+ */
+export interface DecodeHealth {
+  status: 'ok' | 'degraded' | 'unknown';
+  note: string;
+  collections?: DecodeStatsByCollection;
+}
+
+/**
  * Abstraction layer for querying Copilot Money data.
  *
  * Wraps the decoder and provides filtering capabilities.
@@ -182,6 +203,10 @@ export class CopilotDatabase {
   // Batch loading state
   private _loadingAllCollections: Promise<AllCollectionsResult> | null = null;
   private _allCollectionsLoaded = false;
+
+  // Per-collection decode health from the last full decode pass (issue #442).
+  // Null until a real decode has run (e.g. injected/mocked data has no stats).
+  private _decodeStats: DecodeStatsByCollection | null = null;
 
   // Cache TTL tracking
   private _cacheLoadedAt: number | null = null;
@@ -301,6 +326,7 @@ export class CopilotDatabase {
     // Reset batch loading state
     this._allCollectionsLoaded = false;
     this._cacheLoadedAt = null;
+    this._decodeStats = null;
 
     if (wasLoaded || hadData) {
       return {
@@ -528,6 +554,69 @@ export class CopilotDatabase {
   }
 
   /**
+   * Summarize per-collection decode health from the last full decode pass.
+   *
+   * Surfaces silent schema drops (issue #442): documents that failed Zod
+   * validation are omitted from results with only a deduped stderr warning,
+   * which MCP users never see. This summary makes the drop counts visible
+   * via get_cache_info and get_connection_status.
+   */
+  getDecodeHealth(): DecodeHealth {
+    const stats = this._decodeStats;
+    if (stats === null) {
+      return {
+        status: 'unknown',
+        note: 'Decode statistics unavailable — the local database has not been decoded in this session.',
+      };
+    }
+
+    let totalDecoded = 0;
+    let totalDropped = 0;
+    let totalUnread = 0;
+    const flagged: DecodeStatsByCollection = {};
+    for (const [collection, s] of Object.entries(stats)) {
+      totalDecoded += s.decoded;
+      totalDropped += s.dropped;
+      totalUnread += s.unread_field_warnings;
+      if (s.dropped > 0 || s.unread_field_warnings > 0) {
+        flagged[collection] = { ...s };
+      }
+    }
+
+    if (totalDropped > 0) {
+      const phrase =
+        totalDropped === 1
+          ? '1 document failed schema validation and is missing from results'
+          : `${totalDropped} documents failed schema validation and are missing from results`;
+      return {
+        status: 'degraded',
+        note:
+          `${phrase} — likely a Copilot app update changed the data shape. ` +
+          'File an issue at https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues ' +
+          "and include the 'schema drop' warnings from the MCP server's stderr log.",
+        collections: flagged,
+      };
+    }
+
+    if (totalUnread > 0) {
+      const fields = totalUnread === 1 ? 'field' : 'fields';
+      return {
+        status: 'ok',
+        note:
+          `All ${totalDecoded} validated documents decoded cleanly, but ${totalUnread} raw ${fields} ` +
+          'in the cache are not yet read by the decoder (see unread-field warnings on stderr). ' +
+          'No data was dropped.',
+        collections: flagged,
+      };
+    }
+
+    return {
+      status: 'ok',
+      note: `All ${totalDecoded} validated documents decoded cleanly. No schema drops.`,
+    };
+  }
+
+  /**
    * Load all collections in a single database pass for optimal performance.
    *
    * This is ~10x faster than loading each collection individually because
@@ -577,6 +666,8 @@ export class CopilotDatabase {
       this._holdingsHistory = result.holdingsHistory;
       this._tags = result.tags;
       this._balanceHistory = result.balanceHistory;
+
+      this._decodeStats = result.decodeStats;
 
       this._allCollectionsLoaded = true;
       this._cacheLoadedAt = Date.now();
@@ -1540,6 +1631,7 @@ export class CopilotDatabase {
     newest_transaction_date: string | null;
     transaction_count: number;
     cache_note: string;
+    decode_health: DecodeHealth;
   }> {
     const transactions = await this.loadTransactions();
     if (transactions.length === 0) {
@@ -1548,6 +1640,7 @@ export class CopilotDatabase {
         newest_transaction_date: null,
         transaction_count: 0,
         cache_note: 'No transactions in local cache. Open Copilot Money app to sync data.',
+        decode_health: this.getDecodeHealth(),
       };
     }
 
@@ -1563,6 +1656,7 @@ export class CopilotDatabase {
         `Local cache contains ${transactions.length} transactions from ${oldestDate} to ${newestDate}. ` +
         'This is a subset of your full transaction history. ' +
         'Open Copilot Money app and browse transactions to sync more data.',
+      decode_health: this.getDecodeHealth(),
     };
   }
 

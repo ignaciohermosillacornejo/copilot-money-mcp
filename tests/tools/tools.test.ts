@@ -1815,6 +1815,7 @@ describe('refreshDatabase', () => {
       newest_transaction_date: '2024-03-01',
       transaction_count: 100,
       cache_note: 'Test cache info',
+      decode_health: { status: 'ok' as const, note: 'test' },
     };
     db.getCacheInfo = async () => mockCacheInfo;
 
