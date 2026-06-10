@@ -136,6 +136,7 @@ describe('refreshDatabase — expanded', () => {
       newest_transaction_date: '2024-06-01',
       transaction_count: 2,
       cache_note: 'test',
+      decode_health: { status: 'ok' as const, note: 'test' },
     });
 
     const result = await tools.refreshDatabase();
@@ -160,6 +161,7 @@ describe('refreshDatabase — expanded', () => {
       newest_transaction_date: null,
       transaction_count: 0,
       cache_note: 'empty',
+      decode_health: { status: 'ok' as const, note: 'test' },
     });
 
     const result = await tools.refreshDatabase();
@@ -182,6 +184,7 @@ describe('refreshDatabase — expanded', () => {
         newest_transaction_date: '2024-02-01',
         transaction_count: 1,
         cache_note: `call ${callCount}`,
+        decode_health: { status: 'ok' as const, note: 'test' },
       };
     };
 

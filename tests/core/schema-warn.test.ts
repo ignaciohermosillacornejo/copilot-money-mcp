@@ -11,7 +11,13 @@
 
 import { describe, test, expect, beforeEach, afterEach, spyOn } from 'bun:test';
 import { z } from 'zod';
-import { validateOrWarn, warnUnreadFields, __resetWarnedKeys } from '../../src/core/schema-warn.js';
+import {
+  validateOrWarn,
+  warnUnreadFields,
+  __resetWarnedKeys,
+  getDecodeStats,
+  resetDecodeStats,
+} from '../../src/core/schema-warn.js';
 import type { FirestoreValue } from '../../src/core/protobuf-parser.js';
 
 const Schema = z.object({
@@ -275,5 +281,117 @@ describe('warnUnreadFields', () => {
       { collection: 'transactions', docId: 'doc2' }
     );
     expect(warnSpy).toHaveBeenCalledTimes(2);
+  });
+});
+
+// Per-collection decode counters (issue #442). Unlike the stderr warns above,
+// drops are counted per document (NOT deduped) so the counters reflect the
+// true number of missing documents.
+describe('decode stats counters', () => {
+  let warnSpy: ReturnType<typeof spyOn>;
+
+  function fakeFields(keys: string[]): Map<string, FirestoreValue> {
+    return new Map(keys.map((k) => [k, { type: 'string', value: '' } as FirestoreValue]));
+  }
+
+  beforeEach(() => {
+    __resetWarnedKeys();
+    warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  test('counts decoded and dropped documents per collection', () => {
+    validateOrWarn(Schema, { id: 'a', amount: 1 }, { collection: 'accounts', docId: 'doc1' });
+    validateOrWarn(Schema, { id: 'b', amount: 2 }, { collection: 'accounts', docId: 'doc2' });
+    validateOrWarn(Schema, { id: 'c', amount: 'bad' }, { collection: 'accounts', docId: 'doc3' });
+
+    expect(getDecodeStats()).toEqual({
+      accounts: { decoded: 2, dropped: 1, unread_field_warnings: 0 },
+    });
+  });
+
+  test('drops are counted per document even when the stderr warn is deduped', () => {
+    // Same failure path + code in both docs → one stderr warn, two drops.
+    validateOrWarn(Schema, { id: 'a', amount: 'bad' }, { collection: 'accounts', docId: 'doc1' });
+    validateOrWarn(
+      Schema,
+      { id: 'b', amount: 'also-bad' },
+      { collection: 'accounts', docId: 'doc2' }
+    );
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(getDecodeStats().accounts?.dropped).toBe(2);
+  });
+
+  test('tracks collections independently', () => {
+    validateOrWarn(Schema, { id: 'a', amount: 1 }, { collection: 'accounts', docId: 'doc1' });
+    validateOrWarn(Schema, { id: 'b', amount: 'bad' }, { collection: 'transactions', docId: 'd2' });
+
+    expect(getDecodeStats()).toEqual({
+      accounts: { decoded: 1, dropped: 0, unread_field_warnings: 0 },
+      transactions: { decoded: 0, dropped: 1, unread_field_warnings: 0 },
+    });
+  });
+
+  test('counts unique unread fields once per (collection, field)', () => {
+    warnUnreadFields(
+      fakeFields(['mystery_a', 'mystery_b']),
+      { consumed: [], ignored: [] },
+      { collection: 'transactions', docId: 'doc1' }
+    );
+    // Same fields on a second doc — already counted.
+    warnUnreadFields(
+      fakeFields(['mystery_a', 'mystery_b']),
+      { consumed: [], ignored: [] },
+      { collection: 'transactions', docId: 'doc2' }
+    );
+
+    expect(getDecodeStats().transactions?.unread_field_warnings).toBe(2);
+  });
+
+  test('resetDecodeStats clears counters but not stderr dedupe state', () => {
+    validateOrWarn(Schema, { id: 'a', amount: 'bad' }, { collection: 'accounts', docId: 'doc1' });
+    warnUnreadFields(
+      fakeFields(['mystery']),
+      { consumed: [], ignored: [] },
+      { collection: 'accounts', docId: 'doc1' }
+    );
+    expect(getDecodeStats().accounts).toEqual({
+      decoded: 0,
+      dropped: 1,
+      unread_field_warnings: 1,
+    });
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+
+    resetDecodeStats();
+    expect(getDecodeStats()).toEqual({});
+
+    // A new pass re-counts the still-unread field even though its stderr
+    // warning was already emitted (per-pass counter vs process-lifetime warn).
+    validateOrWarn(Schema, { id: 'b', amount: 'bad' }, { collection: 'accounts', docId: 'doc2' });
+    warnUnreadFields(
+      fakeFields(['mystery']),
+      { consumed: [], ignored: [] },
+      { collection: 'accounts', docId: 'doc2' }
+    );
+    expect(getDecodeStats().accounts).toEqual({
+      decoded: 0,
+      dropped: 1,
+      unread_field_warnings: 1,
+    });
+    // No new stderr output: both the schema-drop and unread-field warns dedupe
+    // for the lifetime of the process.
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+  });
+
+  test('getDecodeStats returns an independent snapshot', () => {
+    validateOrWarn(Schema, { id: 'a', amount: 1 }, { collection: 'accounts', docId: 'doc1' });
+    const snapshot = getDecodeStats();
+    snapshot.accounts.decoded = 999;
+
+    expect(getDecodeStats().accounts?.decoded).toBe(1);
   });
 });

@@ -11,7 +11,13 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { iterateDocuments } from './leveldb-reader.js';
 import { type FirestoreValue, toPlainObject } from './protobuf-parser.js';
-import { validateOrWarn, warnUnreadFields } from './schema-warn.js';
+import {
+  validateOrWarn,
+  warnUnreadFields,
+  getDecodeStats,
+  resetDecodeStats,
+  type DecodeStatsByCollection,
+} from './schema-warn.js';
 
 // Re-export for potential use by other modules
 export { toPlainObject } from './protobuf-parser.js';
@@ -666,6 +672,13 @@ export interface AllCollectionsResult {
   userItems: UserItems[];
   featureTracking: FeatureTracking[];
   supportDocs: Support[];
+  /**
+   * Per-collection decode health for this pass: docs that passed Zod
+   * (`decoded`), docs silently dropped on Zod failure (`dropped`), and unique
+   * unread raw fields (`unread_field_warnings`). Surfaced to users via
+   * get_cache_info / get_connection_status (issue #442).
+   */
+  decodeStats: DecodeStatsByCollection;
 }
 
 /**
@@ -2694,6 +2707,11 @@ export function collectionMatches(collection: string, target: string): boolean {
  * @returns All collections decoded and deduplicated
  */
 export async function decodeAllCollections(dbPath: string): Promise<AllCollectionsResult> {
+  // Fresh counters per pass so `decodeStats` always describes this load.
+  // (In production each pass runs in a fresh worker thread anyway; this
+  // matters for in-process callers like tests and the fallback path.)
+  resetDecodeStats();
+
   const rawTransactions: Transaction[] = [];
   const rawAccounts: Account[] = [];
   const rawRecurring: Recurring[] = [];
@@ -3195,6 +3213,7 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     userItems,
     featureTracking,
     supportDocs,
+    decodeStats: getDecodeStats(),
   };
 }
 

@@ -4,7 +4,7 @@
  * Exposes database functionality through the Model Context Protocol.
  */
 
-import { CopilotDatabase } from '../core/database.js';
+import { CopilotDatabase, type DecodeHealth } from '../core/database.js';
 import type { LiveCopilotDatabase } from '../core/live-database.js';
 import type { GraphQLClient } from '../core/graphql/client.js';
 import { GraphQLError } from '../core/graphql/client.js';
@@ -923,6 +923,7 @@ export class CopilotMoneyTools {
     newest_transaction_date: string | null;
     transaction_count: number;
     cache_note: string;
+    decode_health: DecodeHealth;
   }> {
     return await this.db.getCacheInfo();
   }
@@ -1057,6 +1058,7 @@ export class CopilotMoneyTools {
       connected: number;
       needs_attention: number;
     };
+    decode_health: DecodeHealth;
   }> {
     const items = await this.db.getItems();
 
@@ -1107,6 +1109,7 @@ export class CopilotMoneyTools {
         connected: connections.length - needsAttention,
         needs_attention: needsAttention,
       },
+      decode_health: this.db.getDecodeHealth(),
     };
   }
 
@@ -4028,7 +4031,9 @@ export function createToolSchemas(): ToolSchema[] {
       description:
         'Get information about the local data cache, including the date range of cached transactions ' +
         'and total count. Useful for understanding data availability before running historical queries. ' +
-        'This tool reads from a local cache that may not contain your complete transaction history.',
+        'This tool reads from a local cache that may not contain your complete transaction history. ' +
+        'Also reports decode_health: per-collection counts of documents dropped on schema validation ' +
+        'failure (a "degraded" status means some cached documents are missing from results).',
       inputSchema: {
         type: 'object',
         properties: {},
@@ -4086,7 +4091,9 @@ export function createToolSchemas(): ToolSchema[] {
         'Get connection status for all linked financial institutions. ' +
         'Shows per-institution sync health including last successful update timestamps ' +
         'for transactions and investments, login requirements, and error states. ' +
-        'Use this to check when accounts were last synced or to identify connections needing attention.',
+        'Use this to check when accounts were last synced or to identify connections needing attention. ' +
+        'Also reports decode_health: per-collection counts of cached documents dropped on schema ' +
+        'validation failure (a "degraded" status means some documents are missing from results).',
       inputSchema: {
         type: 'object',
         properties: {},
