@@ -12,6 +12,15 @@
 import { z } from 'zod';
 
 /**
+ * The two investment-price subcollections in the Firestore cache.
+ * Single source of truth for the `price_type` filter accepted by the decoder,
+ * `CopilotDatabase.getInvestmentPrices`, and the `get_investment_prices` tool
+ * (param type + schema enum).
+ */
+export const PRICE_TYPES = ['daily', 'hf'] as const;
+export type PriceType = (typeof PRICE_TYPES)[number];
+
+/**
  * Date format regex for YYYY-MM-DD validation.
  */
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;

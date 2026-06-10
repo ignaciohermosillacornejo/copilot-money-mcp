@@ -16,11 +16,22 @@ import type {
 } from '../../core/graphql/queries/transactions.js';
 import { fetchCategories } from '../../core/graphql/queries/categories.js';
 import { fetchTags } from '../../core/graphql/queries/tags.js';
-import type { ToolSchema } from '../tools.js';
+import type { ToolSchema, TransactionTypeFilter } from '../tools.js';
 import { normalizeMerchantName } from '../tools.js';
 import { parsePeriod } from '../../utils/date.js';
 
-export type LiveTransactionType = 'refunds' | 'credits' | 'hsa_eligible' | 'tagged';
+/**
+ * Subset of `TRANSACTION_TYPE_FILTERS` supported in live mode (`foreign` and
+ * `duplicates` are cache-only). The `satisfies` clause guarantees at compile
+ * time that every entry is a valid cache-mode filter value.
+ */
+export const LIVE_TRANSACTION_TYPES = [
+  'refunds',
+  'credits',
+  'hsa_eligible',
+  'tagged',
+] as const satisfies readonly TransactionTypeFilter[];
+export type LiveTransactionType = (typeof LIVE_TRANSACTION_TYPES)[number];
 
 export interface GetTransactionsLiveOptions {
   period?: string;
@@ -330,8 +341,7 @@ export class LiveTransactionsTools {
 
   private validate(opts: GetTransactionsLiveOptions): void {
     const o = opts as Record<string, unknown>;
-    const supported =
-      'start_date, end_date, period, account_id (+ item_id), category, merchant, query, tag, min_amount, max_amount, limit, offset, pending, exclude_transfers, exclude_deleted, exclude_excluded, transaction_type (refunds|credits|hsa_eligible|tagged), transaction_id (+ account_id + item_id)';
+    const supported = `start_date, end_date, period, account_id (+ item_id), category, merchant, query, tag, min_amount, max_amount, limit, offset, pending, exclude_transfers, exclude_deleted, exclude_excluded, transaction_type (${LIVE_TRANSACTION_TYPES.join('|')}), transaction_id (+ account_id + item_id)`;
 
     for (const key of UNSUPPORTED_KEYS) {
       if (o[key] !== undefined) {
@@ -343,10 +353,10 @@ export class LiveTransactionsTools {
 
     if (
       opts.transaction_type !== undefined &&
-      !['refunds', 'credits', 'hsa_eligible', 'tagged'].includes(opts.transaction_type)
+      !(LIVE_TRANSACTION_TYPES as readonly string[]).includes(opts.transaction_type)
     ) {
       throw new Error(
-        `Parameter 'transaction_type=${opts.transaction_type}' is not supported in live mode. Retry with one of: refunds, credits, hsa_eligible, tagged.`
+        `Parameter 'transaction_type=${opts.transaction_type}' is not supported in live mode. Retry with one of: ${LIVE_TRANSACTION_TYPES.join(', ')}.`
       );
     }
 
@@ -481,7 +491,7 @@ export function createLiveToolSchemas(): ToolSchema[] {
           },
           transaction_type: {
             type: 'string',
-            enum: ['refunds', 'credits', 'hsa_eligible', 'tagged'],
+            enum: [...LIVE_TRANSACTION_TYPES],
             description:
               'Filter by special type. Note: foreign and duplicates are NOT supported in live mode.',
           },

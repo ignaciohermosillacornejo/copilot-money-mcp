@@ -21,7 +21,11 @@ import { Recurring, RecurringSchema } from '../models/recurring.js';
 import { Budget, BudgetSchema } from '../models/budget.js';
 import { Goal, GoalSchema } from '../models/goal.js';
 import { GoalHistory, GoalHistorySchema, DailySnapshot } from '../models/goal-history.js';
-import { InvestmentPrice, InvestmentPriceSchema } from '../models/investment-price.js';
+import {
+  InvestmentPrice,
+  InvestmentPriceSchema,
+  type PriceType,
+} from '../models/investment-price.js';
 import {
   InvestmentSplit,
   InvestmentSplitSchema,
@@ -448,7 +452,7 @@ export async function decodeInvestmentPrices(
     tickerSymbol?: string;
     startDate?: string;
     endDate?: string;
-    priceType?: 'daily' | 'hf';
+    priceType?: PriceType;
   } = {}
 ): Promise<InvestmentPrice[]> {
   const { tickerSymbol, startDate, endDate, priceType } = options;
