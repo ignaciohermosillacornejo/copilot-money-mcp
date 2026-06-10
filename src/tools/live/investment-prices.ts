@@ -193,12 +193,10 @@ export class LiveInvestmentPricesTools {
     timeFrame: TimeFrame
   ): Promise<HighFrequencyPricePointNode[]> {
     try {
-      return await this.live.withRetry(() =>
-        fetchSecurityPricesHighFrequency(this.live.getClient(), {
-          id: securityId,
-          timeFrame,
-        })
-      );
+      return await fetchSecurityPricesHighFrequency(this.live.getClient(), {
+        id: securityId,
+        timeFrame,
+      });
     } catch (err) {
       translateNotFound(err, securityId);
     }
@@ -209,12 +207,10 @@ export class LiveInvestmentPricesTools {
     timeFrame: TimeFrame
   ): Promise<SecurityPricePointNode[]> {
     try {
-      return await this.live.withRetry(() =>
-        fetchSecurityPrices(this.live.getClient(), {
-          id: securityId,
-          timeFrame,
-        })
-      );
+      return await fetchSecurityPrices(this.live.getClient(), {
+        id: securityId,
+        timeFrame,
+      });
     } catch (err) {
       translateNotFound(err, securityId);
     }
@@ -245,9 +241,9 @@ export class LiveInvestmentPricesTools {
       if (entry !== undefined && startedAt - entry.fetched_at < this.intradayTtlMs) {
         hit = true;
       } else {
-        // Translate the ownership-gated error OUTSIDE withRetry. Doing it
-        // inside would swallow the typed GraphQLError before withRetry can
-        // see (and retry) NETWORK errors.
+        // Translate the ownership-gated error AFTER the fetch resolves —
+        // transport-level retry lives inside GraphQLClient (issue #443), so
+        // the typed GraphQLError reaches translateNotFound untouched.
         const rows = await this.fetchIntraday(args.security_id, timeFrame);
         entry = { rows, fetched_at: Date.now() };
         this.intradayCache.set(key, entry);

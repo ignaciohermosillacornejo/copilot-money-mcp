@@ -7,8 +7,8 @@
  * categories, budgets, recurring, and tags.
  *
  * The class owns cross-cutting concerns shared by every method:
- *   - one retry on NETWORK errors (other GraphQL codes surface)
  *   - optional verbose logging to stderr for latency measurement
+ * (Transport retry/backoff lives in GraphQLClient itself — issue #443.)
  *
  * Phase 2 adds tiered-cache primitives (SnapshotCache per entity type +
  * TransactionWindowCache for month-keyed transaction windows) and
@@ -19,7 +19,7 @@
  * See docs/superpowers/plans/2026-04-25-graphql-live-tiered-cache.md.
  */
 
-import { GraphQLError, type GraphQLClient } from './graphql/client.js';
+import type { GraphQLClient } from './graphql/client.js';
 import type { CopilotDatabase } from './database.js';
 import {
   buildTransactionFilter,
@@ -47,8 +47,6 @@ import { ONE_HOUR_MS, SIX_HOURS_MS, ONE_DAY_MS, ONE_WEEK_MS } from '../utils/dur
 export interface LiveDatabaseOptions {
   verbose?: boolean;
 }
-
-const RETRY_BACKOFF_MS = 500;
 
 const DEFAULT_MAX_TX_ROWS = 20_000;
 
@@ -171,18 +169,6 @@ export class LiveCopilotDatabase {
     return this.cache;
   }
 
-  async withRetry<T>(op: () => Promise<T>): Promise<T> {
-    try {
-      return await op();
-    } catch (err) {
-      if (err instanceof GraphQLError && err.code === 'NETWORK') {
-        await new Promise((resolve) => setTimeout(resolve, RETRY_BACKOFF_MS));
-        return await op();
-      }
-      throw err;
-    }
-  }
-
   /**
    * Fetch + paginate one month of transactions; ingest into the
    * window cache; return the rows along with the timestamp the
@@ -200,11 +186,10 @@ export class LiveCopilotDatabase {
     const fetched_at = Date.now();
     let pages = 0;
     const rawRows = await paginateTransactions(
-      (after) =>
-        this.withRetry(async () => {
-          pages += 1;
-          return fetchTransactionsPage(this.graphql, { first: pageSize, after, filter, sort });
-        }),
+      async (after) => {
+        pages += 1;
+        return fetchTransactionsPage(this.graphql, { first: pageSize, after, filter, sort });
+      },
       { startDate: monthStart }
     );
     // Trim leaked tail-page rows that fall outside this month's window.

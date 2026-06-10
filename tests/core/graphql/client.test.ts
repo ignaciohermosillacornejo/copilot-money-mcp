@@ -1,5 +1,10 @@
 import { describe, test, expect, afterEach, mock } from 'bun:test';
-import { GraphQLClient, GraphQLError } from '../../../src/core/graphql/client.js';
+import {
+  GraphQLClient,
+  GraphQLError,
+  DEFAULT_RETRY_DELAYS_MS,
+  DEFAULT_TIMEOUT_MS,
+} from '../../../src/core/graphql/client.js';
 import type { FirebaseAuth } from '../../../src/core/auth/firebase-auth.js';
 
 let fetchCalls: { url: string; options: RequestInit }[] = [];
@@ -333,6 +338,17 @@ describe('GraphQLClient', () => {
     }
   });
 
+  test('failed responses carry requestReachedServer=true (an HTTP response arrived)', async () => {
+    mockFetch('upstream blew up', 502);
+    const client = new GraphQLClient(createMockAuth());
+    try {
+      await client.mutate('TestOp', 'mutation TestOp { ok }', {});
+      throw new Error('should have thrown');
+    } catch (e) {
+      expect((e as GraphQLError).requestReachedServer).toBe(true);
+    }
+  });
+
   test('logs to stderr when throwing on classified errors', async () => {
     mockFetch({ errors: [{ message: 'unauthorized' }] }, 401);
     const originalError = console.error;
@@ -359,5 +375,310 @@ describe('GraphQLClient', () => {
     } finally {
       console.error = originalError;
     }
+  });
+});
+
+// ── Retry / backoff (issue #443) ─────────────────────────────────────────────
+
+type FetchStep = { throwErr: Error } | { body: unknown; status?: number };
+
+/** Mock fetch with a per-call script; the last step repeats if exhausted. */
+function mockFetchSequence(steps: FetchStep[]) {
+  fetchCalls = [];
+  let i = 0;
+  globalThis.fetch = mock((url: string | URL | Request, options?: RequestInit) => {
+    fetchCalls.push({ url: String(url), options: options ?? {} });
+    const step = steps[Math.min(i, steps.length - 1)];
+    i += 1;
+    if ('throwErr' in step) return Promise.reject(step.throwErr);
+    return Promise.resolve(
+      new Response(JSON.stringify(step.body), {
+        status: step.status ?? 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+  }) as typeof fetch;
+}
+
+/** Client with zero backoff/jitter so retry tests run instantly. */
+function fastClient(opts: ConstructorParameters<typeof GraphQLClient>[1] = {}) {
+  return new GraphQLClient(createMockAuth(), { retryDelaysMs: [0, 0, 0], jitterMs: 0, ...opts });
+}
+
+/** Node-shaped fetch rejection: TypeError('fetch failed') with errno cause. */
+function fetchRejection(code?: string, causeMessage = 'socket-level failure'): Error {
+  const err = new Error('fetch failed') as Error & { cause?: unknown };
+  if (code) {
+    const cause = new Error(`${causeMessage} (${code})`) as Error & { code?: string };
+    cause.code = code;
+    err.cause = cause;
+  }
+  return err;
+}
+
+function silencingConsoleError<T>(fn: () => Promise<T>): Promise<T> {
+  const original = console.error;
+  console.error = (() => {}) as typeof console.error;
+  return fn().finally(() => {
+    console.error = original;
+  });
+}
+
+describe('GraphQLClient — retry/backoff (#443)', () => {
+  afterEach(() => restoreFetch());
+
+  test('default backoff schedule is 3 retries at 250ms/1s/4s', () => {
+    expect([...DEFAULT_RETRY_DELAYS_MS]).toEqual([250, 1000, 4000]);
+    expect(DEFAULT_TIMEOUT_MS).toBe(30_000);
+  });
+
+  test('passes an AbortSignal (timeout) to fetch by default', async () => {
+    mockFetch({ data: { ok: true } });
+    await new GraphQLClient(createMockAuth()).query('Q', 'query Q { ok }', {});
+    expect(fetchCalls[0].options.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  test('timeoutMs: Infinity disables the abort signal', async () => {
+    mockFetch({ data: { ok: true } });
+    await new GraphQLClient(createMockAuth(), { timeoutMs: Infinity }).query(
+      'Q',
+      'query Q { ok }',
+      {}
+    );
+    expect(fetchCalls[0].options.signal).toBeUndefined();
+  });
+
+  test('query recovers from a transient fetch rejection', async () => {
+    mockFetchSequence([{ throwErr: fetchRejection() }, { body: { data: { ok: true } } }]);
+    const out = await silencingConsoleError(() =>
+      fastClient().query<unknown, { ok: boolean }>('Q', 'query Q { ok }', {})
+    );
+    expect(out.ok).toBe(true);
+    expect(fetchCalls).toHaveLength(2);
+  });
+
+  test('query recovers from a 5xx with no GraphQL error body', async () => {
+    mockFetchSequence([{ body: 'bad gateway', status: 502 }, { body: { data: { ok: true } } }]);
+    const out = await silencingConsoleError(() =>
+      fastClient().query<unknown, { ok: boolean }>('Q', 'query Q { ok }', {})
+    );
+    expect(out.ok).toBe(true);
+    expect(fetchCalls).toHaveLength(2);
+  });
+
+  test('query does NOT retry a 5xx that carries a GraphQL errors[] body', async () => {
+    mockFetchSequence([
+      { body: { errors: [{ message: 'resolver exploded' }] }, status: 500 },
+      { body: { data: { ok: true } } },
+    ]);
+    await silencingConsoleError(async () => {
+      try {
+        await fastClient().query('Q', 'query Q { ok }', {});
+        throw new Error('should have thrown');
+      } catch (e) {
+        expect((e as GraphQLError).code).toBe('SERVER_ERROR');
+      }
+    });
+    expect(fetchCalls).toHaveLength(1);
+  });
+
+  test('query does NOT retry GraphQL-level errors (2xx + errors[])', async () => {
+    mockFetchSequence([
+      { body: { errors: [{ message: 'Budgeting is disabled.' }] } },
+      { body: { data: { ok: true } } },
+    ]);
+    await silencingConsoleError(async () => {
+      try {
+        await fastClient().query('Q', 'query Q { ok }', {});
+        throw new Error('should have thrown');
+      } catch (e) {
+        expect((e as GraphQLError).code).toBe('USER_ACTION_REQUIRED');
+      }
+    });
+    expect(fetchCalls).toHaveLength(1);
+  });
+
+  test('query gives up after exhausting retries; error carries attempts', async () => {
+    mockFetchSequence([{ throwErr: fetchRejection() }]);
+    await silencingConsoleError(async () => {
+      try {
+        await fastClient().query('Q', 'query Q { ok }', {});
+        throw new Error('should have thrown');
+      } catch (e) {
+        expect((e as GraphQLError).code).toBe('NETWORK');
+        expect((e as GraphQLError).attempts).toBe(4);
+      }
+    });
+    expect(fetchCalls).toHaveLength(4); // 1 initial + 3 retries
+  });
+
+  test('query retries a timed-out attempt and recovers', async () => {
+    fetchCalls = [];
+    let call = 0;
+    globalThis.fetch = mock((url: string | URL | Request, options?: RequestInit) => {
+      fetchCalls.push({ url: String(url), options: options ?? {} });
+      call += 1;
+      if (call === 1) {
+        // Hang until the timeout signal aborts us.
+        return new Promise<Response>((_resolve, reject) => {
+          options?.signal?.addEventListener('abort', () => reject(options.signal?.reason));
+        });
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ data: { ok: true } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+    }) as typeof fetch;
+
+    const out = await silencingConsoleError(() =>
+      fastClient({ timeoutMs: 20 }).query<unknown, { ok: boolean }>('Q', 'query Q { ok }', {})
+    );
+    expect(out.ok).toBe(true);
+    expect(fetchCalls).toHaveLength(2);
+  });
+
+  test('mutation retries a provably-unsent failure (ECONNREFUSED) and recovers', async () => {
+    mockFetchSequence([
+      { throwErr: fetchRejection('ECONNREFUSED') },
+      { body: { data: { ok: true } } },
+    ]);
+    const out = await silencingConsoleError(() =>
+      fastClient().mutate<unknown, { ok: boolean }>('M', 'mutation M { ok }', {})
+    );
+    expect(out.ok).toBe(true);
+    expect(fetchCalls).toHaveLength(2);
+  });
+
+  test('mutation retries a DNS failure (ENOTFOUND) and recovers', async () => {
+    mockFetchSequence([
+      { throwErr: fetchRejection('ENOTFOUND', 'getaddrinfo failure') },
+      { body: { data: { ok: true } } },
+    ]);
+    const out = await silencingConsoleError(() =>
+      fastClient().mutate<unknown, { ok: boolean }>('M', 'mutation M { ok }', {})
+    );
+    expect(out.ok).toBe(true);
+    expect(fetchCalls).toHaveLength(2);
+  });
+
+  test('mutation retries Bun-style ConnectionRefused (top-level code, no cause)', async () => {
+    const bunErr = new Error('Unable to connect.') as Error & { code?: string };
+    bunErr.code = 'ConnectionRefused';
+    mockFetchSequence([{ throwErr: bunErr }, { body: { data: { ok: true } } }]);
+    const out = await silencingConsoleError(() =>
+      fastClient().mutate<unknown, { ok: boolean }>('M', 'mutation M { ok }', {})
+    );
+    expect(out.ok).toBe(true);
+    expect(fetchCalls).toHaveLength(2);
+  });
+
+  test('exhausted provably-unsent mutation keeps writeMayHaveApplied=false', async () => {
+    mockFetchSequence([{ throwErr: fetchRejection('ECONNREFUSED') }]);
+    await silencingConsoleError(async () => {
+      try {
+        await fastClient().mutate('M', 'mutation M { ok }', {});
+        throw new Error('should have thrown');
+      } catch (e) {
+        const err = e as GraphQLError;
+        expect(err.code).toBe('NETWORK');
+        expect(err.requestReachedServer).toBe(false);
+        expect(err.writeMayHaveApplied).toBe(false);
+        expect(err.attempts).toBe(4);
+      }
+    });
+    expect(fetchCalls).toHaveLength(4);
+  });
+
+  test('mutation does NOT retry an ambiguous fetch rejection (ECONNRESET)', async () => {
+    mockFetchSequence([
+      { throwErr: new Error('read ECONNRESET') },
+      { body: { data: { ok: true } } },
+    ]);
+    await silencingConsoleError(async () => {
+      try {
+        await fastClient().mutate('M', 'mutation M { ok }', {});
+        throw new Error('should have thrown');
+      } catch (e) {
+        const err = e as GraphQLError;
+        expect(err.code).toBe('NETWORK');
+        expect(err.requestReachedServer).toBeUndefined();
+        expect(err.writeMayHaveApplied).toBe(true);
+      }
+    });
+    expect(fetchCalls).toHaveLength(1);
+  });
+
+  test('mutation does NOT retry a timeout; flags writeMayHaveApplied', async () => {
+    fetchCalls = [];
+    globalThis.fetch = mock((url: string | URL | Request, options?: RequestInit) => {
+      fetchCalls.push({ url: String(url), options: options ?? {} });
+      return new Promise<Response>((_resolve, reject) => {
+        options?.signal?.addEventListener('abort', () => reject(options.signal?.reason));
+      });
+    }) as typeof fetch;
+
+    await silencingConsoleError(async () => {
+      try {
+        await fastClient({ timeoutMs: 20 }).mutate('M', 'mutation M { ok }', {});
+        throw new Error('should have thrown');
+      } catch (e) {
+        const err = e as GraphQLError;
+        expect(err.code).toBe('NETWORK');
+        expect(err.message).toContain('timed out after 20ms');
+        expect(err.writeMayHaveApplied).toBe(true);
+      }
+    });
+    expect(fetchCalls).toHaveLength(1);
+  });
+
+  test('mutation does NOT retry a 5xx; flags writeMayHaveApplied', async () => {
+    mockFetchSequence([{ body: 'internal error', status: 500 }, { body: { data: { ok: true } } }]);
+    await silencingConsoleError(async () => {
+      try {
+        await fastClient().mutate('M', 'mutation M { ok }', {});
+        throw new Error('should have thrown');
+      } catch (e) {
+        const err = e as GraphQLError;
+        expect(err.code).toBe('SERVER_ERROR');
+        expect(err.writeMayHaveApplied).toBe(true);
+      }
+    });
+    expect(fetchCalls).toHaveLength(1);
+  });
+
+  test('server-rejected mutation (SCHEMA_ERROR) is definitive: no retry, no ambiguity flag', async () => {
+    mockFetchSequence([
+      {
+        body: { errors: [{ message: 'bad enum', extensions: { code: 'BAD_USER_INPUT' } }] },
+        status: 400,
+      },
+    ]);
+    await silencingConsoleError(async () => {
+      try {
+        await fastClient().mutate('M', 'mutation M { ok }', {});
+        throw new Error('should have thrown');
+      } catch (e) {
+        const err = e as GraphQLError;
+        expect(err.code).toBe('SCHEMA_ERROR');
+        expect(err.writeMayHaveApplied).toBe(false);
+      }
+    });
+    expect(fetchCalls).toHaveLength(1);
+  });
+
+  test('retryDelaysMs: [] disables retries entirely', async () => {
+    mockFetchSequence([{ throwErr: fetchRejection() }]);
+    await silencingConsoleError(async () => {
+      try {
+        await fastClient({ retryDelaysMs: [] }).query('Q', 'query Q { ok }', {});
+        throw new Error('should have thrown');
+      } catch (e) {
+        expect((e as GraphQLError).code).toBe('NETWORK');
+        expect((e as GraphQLError).attempts).toBe(1);
+      }
+    });
+    expect(fetchCalls).toHaveLength(1);
   });
 });
