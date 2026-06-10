@@ -134,7 +134,7 @@ describe('GraphQLClient', () => {
     }
   });
 
-  test('4xx with NOT_FOUND/FORBIDDEN extensions is USER_ACTION_REQUIRED (input/ownership)', async () => {
+  test('4xx with NOT_FOUND extension is USER_ACTION_REQUIRED (input/ownership)', async () => {
     const body = {
       errors: [
         {
