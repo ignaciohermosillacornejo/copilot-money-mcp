@@ -44,6 +44,10 @@ import {
 import { setBudget as gqlSetBudget } from '../core/graphql/budgets.js';
 import { graphQLErrorToMcpError } from './errors.js';
 import { parsePeriod } from '../utils/date.js';
+import {
+  readScheduledSmokeStatus,
+  type ScheduledSmokeStatus,
+} from '../utils/scheduled-smoke-status.js';
 import { computeTotalReturnPercent, roundAmount } from '../utils/round.js';
 import {
   getCategoryName,
@@ -1098,6 +1102,7 @@ export class CopilotMoneyTools {
       needs_attention: number;
     };
     decode_health: DecodeHealth;
+    scheduled_smoke: ScheduledSmokeStatus | null;
   }> {
     const items = await this.db.getItems();
 
@@ -1149,6 +1154,7 @@ export class CopilotMoneyTools {
         needs_attention: needsAttention,
       },
       decode_health: this.db.getDecodeHealth(),
+      scheduled_smoke: readScheduledSmokeStatus(),
     };
   }
 
@@ -4133,7 +4139,9 @@ export function createToolSchemas(): ToolSchema[] {
         'for transactions and investments, login requirements, and error states. ' +
         'Use this to check when accounts were last synced or to identify connections needing attention. ' +
         'Also reports decode_health: per-collection counts of cached documents dropped on schema ' +
-        'validation failure (a "degraded" status means some documents are missing from results).',
+        'validation failure (a "degraded" status means some documents are missing from results). ' +
+        'Also reports scheduled_smoke: the last scheduled API-drift check (pass / fail / ' +
+        'auth-missing with timestamp), or null if the weekly job is not installed.',
       inputSchema: {
         type: 'object',
         properties: {},

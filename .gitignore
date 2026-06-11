@@ -71,6 +71,9 @@ scripts/*
 !scripts/check-version-sync.ts
 !scripts/check-server-json.ts
 !scripts/check-skills.py
+!scripts/scheduled-smoke.ts
+!scripts/install-scheduled-smoke.sh
+!scripts/uninstall-scheduled-smoke.sh
 # License-check scratch directory (created by CI license gate)
 .license-check/
 # Generated test fixtures
