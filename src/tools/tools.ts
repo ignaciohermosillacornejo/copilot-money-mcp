@@ -11,51 +11,9 @@ import {
   type CategoryView,
   type BalanceHistoryGranularity,
 } from './constants.js';
-// Registry-migrated tool definitions (E1). While the migration is in
-// progress the schema factories below splice these in so the schema list
-// (and its order) is unchanged; once all domains are migrated the
-// factories move into the registry as pure projections.
-import {
-  getTransactionsTool,
-  createTransactionTool,
-  deleteTransactionTool,
-  addTransactionToRecurringTool,
-  splitTransactionTool,
-  updateTransactionTool,
-  reviewTransactionsTool,
-} from './registry/transactions.js';
-import {
-  getCategoriesTool,
-  createCategoryTool,
-  updateCategoryTool,
-  deleteCategoryTool,
-} from './registry/categories.js';
-import { createTagTool, deleteTagTool, updateTagTool } from './registry/tags.js';
-import {
-  getRecurringTransactionsTool,
-  setRecurringStateTool,
-  deleteRecurringTool,
-  createRecurringTool,
-  updateRecurringTool,
-} from './registry/recurring.js';
-import {
-  getBudgetsTool,
-  setBudgetTool,
-  getGoalsTool,
-  getGoalHistoryTool,
-} from './registry/budgets-goals.js';
-import {
-  getInvestmentPricesTool,
-  getInvestmentSplitsTool,
-  getHoldingsTool,
-  getBalanceHistoryTool,
-} from './registry/investments.js';
-import {
-  getCacheInfoTool,
-  refreshDatabaseTool,
-  getAccountsTool,
-  getConnectionStatusTool,
-} from './registry/accounts-system.js';
+// All tool schemas live in the registry (E1, #446); the factories below are
+// pure projections of its ordered definition lists.
+import { READ_TOOL_DEFS, WRITE_TOOL_DEFS } from './registry/index.js';
 import { normalizeMerchantName } from '../utils/merchant.js';
 import type { LiveCopilotDatabase } from '../core/live-database.js';
 import type { GraphQLClient } from '../core/graphql/client.js';
@@ -3906,57 +3864,28 @@ export interface ToolSchema {
 }
 
 /**
- * Create MCP tool schemas for all tools.
+ * Create MCP tool schemas for all cache-mode read tools.
+ *
+ * Pure projection of the registry's `READ_TOOL_DEFS` (one `ToolDefinition`
+ * per tool — schema, handler, and classification in a single object).
  *
  * CRITICAL: All tools have readOnlyHint: true as they only read data.
  *
  * @returns List of tool schema definitions
  */
 export function createToolSchemas(): ToolSchema[] {
-  return [
-    getTransactionsTool.schema,
-    getCacheInfoTool.schema,
-    refreshDatabaseTool.schema,
-    getAccountsTool.schema,
-    getConnectionStatusTool.schema,
-    getCategoriesTool.schema,
-    getRecurringTransactionsTool.schema,
-    getBudgetsTool.schema,
-    getGoalsTool.schema,
-    getInvestmentPricesTool.schema,
-    getInvestmentSplitsTool.schema,
-    getHoldingsTool.schema,
-    getBalanceHistoryTool.schema,
-    getGoalHistoryTool.schema,
-  ];
+  return READ_TOOL_DEFS.map((def) => def.schema);
 }
 
 /**
  * Create MCP tool schemas for write tools.
  *
- * These tools modify Copilot Money data via GraphQL and are
- * only registered when the server is started with the --write flag.
+ * Pure projection of the registry's `WRITE_TOOL_DEFS`. These tools modify
+ * Copilot Money data via GraphQL and are only registered when the server
+ * is started with the --write flag.
  *
  * @returns List of write tool schema definitions
  */
 export function createWriteToolSchemas(): ToolSchema[] {
-  return [
-    createTransactionTool.schema,
-    deleteTransactionTool.schema,
-    addTransactionToRecurringTool.schema,
-    splitTransactionTool.schema,
-    updateTransactionTool.schema,
-    reviewTransactionsTool.schema,
-    createTagTool.schema,
-    deleteTagTool.schema,
-    createCategoryTool.schema,
-    updateCategoryTool.schema,
-    deleteCategoryTool.schema,
-    setBudgetTool.schema,
-    setRecurringStateTool.schema,
-    deleteRecurringTool.schema,
-    updateTagTool.schema,
-    createRecurringTool.schema,
-    updateRecurringTool.schema,
-  ];
+  return WRITE_TOOL_DEFS.map((def) => def.schema);
 }

@@ -13,37 +13,25 @@ import {
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import { CopilotDatabase } from './core/database.js';
-import { CopilotMoneyTools, createToolSchemas, createWriteToolSchemas } from './tools/index.js';
-import { TOOL_REGISTRY, type LiveToolContext } from './tools/registry/index.js';
+import { CopilotMoneyTools } from './tools/index.js';
+import { ALL_TOOL_DEFS, TOOL_REGISTRY, type LiveToolContext } from './tools/registry/index.js';
 import { GraphQLClient } from './core/graphql/client.js';
 import { FirebaseAuth } from './core/auth/firebase-auth.js';
 import { extractRefreshToken } from './core/auth/browser-token.js';
 import { LiveCopilotDatabase, preflightLiveAuth } from './core/live-database.js';
-import { LiveTransactionsTools, createLiveToolSchemas } from './tools/live/transactions.js';
-import { LiveAccountsTools, createLiveAccountsToolSchema } from './tools/live/accounts.js';
-import { LiveCategoriesTools, createLiveCategoriesToolSchema } from './tools/live/categories.js';
-import { LiveTagsTools, createLiveTagsToolSchema } from './tools/live/tags.js';
-import { LiveBudgetsTools, createLiveBudgetsToolSchema } from './tools/live/budgets.js';
-import { LiveRecurringTools, createLiveRecurringToolSchema } from './tools/live/recurring.js';
-import { LiveNetworthTools, createLiveNetworthToolSchema } from './tools/live/networth.js';
-import {
-  LiveUpcomingRecurringsTools,
-  createLiveUpcomingRecurringsToolSchema,
-} from './tools/live/upcoming-recurrings.js';
-import {
-  LiveMonthlySpendTools,
-  createLiveMonthlySpendToolSchema,
-} from './tools/live/monthly-spend.js';
-import { LiveHoldingsTools, createLiveHoldingsToolSchema } from './tools/live/holdings.js';
-import {
-  LiveBalanceHistoryTools,
-  createLiveBalanceHistoryToolSchema,
-} from './tools/live/balance-history.js';
-import {
-  LiveInvestmentPricesTools,
-  createLiveInvestmentPricesToolSchema,
-} from './tools/live/investment-prices.js';
-import { RefreshCacheTool, createRefreshCacheToolSchema } from './tools/live/refresh-cache.js';
+import { LiveTransactionsTools } from './tools/live/transactions.js';
+import { LiveAccountsTools } from './tools/live/accounts.js';
+import { LiveCategoriesTools } from './tools/live/categories.js';
+import { LiveTagsTools } from './tools/live/tags.js';
+import { LiveBudgetsTools } from './tools/live/budgets.js';
+import { LiveRecurringTools } from './tools/live/recurring.js';
+import { LiveNetworthTools } from './tools/live/networth.js';
+import { LiveUpcomingRecurringsTools } from './tools/live/upcoming-recurrings.js';
+import { LiveMonthlySpendTools } from './tools/live/monthly-spend.js';
+import { LiveHoldingsTools } from './tools/live/holdings.js';
+import { LiveBalanceHistoryTools } from './tools/live/balance-history.js';
+import { LiveInvestmentPricesTools } from './tools/live/investment-prices.js';
+import { RefreshCacheTool } from './tools/live/refresh-cache.js';
 
 // Read version from package.json
 import { createRequire } from 'module';
@@ -130,52 +118,16 @@ export class CopilotMoneyServer {
    * Exposed for testing purposes.
    */
   handleListTools(): { tools: Tool[] } {
-    const readSchemas = createToolSchemas();
-    // When --live-reads is on, the cache-mode reads in this list are swapped
-    // out for their _live counterparts below. Keep this in sync with the
-    // liveSchemas array — for every name removed here there must be a live
-    // schema added below (and vice versa) so users see exactly one tool per
-    // semantic read.
-    // Note: `get_balance_history` is deliberately NOT swapped out for
-    // `get_balance_history_live`. The live tool's GraphQL backing is
-    // strictly narrower than cache mode — single-account, timeFrame-enum
-    // only, no weekly/monthly downsampling, no name/limit enrichment. Both
-    // tools coexist so callers can pick the right shape per use case.
-    const filteredReads = this.liveReadsEnabled
-      ? readSchemas.filter(
-          (s) =>
-            s.name !== 'get_transactions' &&
-            s.name !== 'get_accounts' &&
-            s.name !== 'get_categories' &&
-            s.name !== 'get_budgets' &&
-            s.name !== 'get_recurring_transactions' &&
-            s.name !== 'get_holdings'
-        )
-      : readSchemas;
-    const liveSchemas = this.liveReadsEnabled
-      ? [
-          ...createLiveToolSchemas(),
-          createLiveAccountsToolSchema(),
-          createLiveCategoriesToolSchema(),
-          createLiveTagsToolSchema(),
-          createLiveBudgetsToolSchema(),
-          createLiveRecurringToolSchema(),
-          createLiveNetworthToolSchema(),
-          createLiveUpcomingRecurringsToolSchema(),
-          createLiveMonthlySpendToolSchema(),
-          createLiveHoldingsToolSchema(),
-          createLiveBalanceHistoryToolSchema(),
-          createLiveInvestmentPricesToolSchema(),
-          createRefreshCacheToolSchema(),
-        ]
-      : [];
-    const allSchemas = [
-      ...filteredReads,
-      ...liveSchemas,
-      ...(this.writeEnabled ? createWriteToolSchemas() : []),
-    ];
-
-    const tools: Tool[] = allSchemas.map((schema) => ({
+    // The list is fully derived from the registry: write tools require
+    // --write, live tools require --live-reads, and cache-mode reads with a
+    // `_live` replacement (`swappedOutInLiveMode`) are hidden when
+    // --live-reads is on, so users see exactly one tool per semantic read.
+    const tools: Tool[] = ALL_TOOL_DEFS.filter((def) => {
+      if (!def.readOnly && !this.writeEnabled) return false;
+      if (def.requiresLiveReads && !this.liveReadsEnabled) return false;
+      if (def.swappedOutInLiveMode && this.liveReadsEnabled) return false;
+      return true;
+    }).map(({ schema }) => ({
       name: schema.name,
       description: schema.description,
       inputSchema: schema.inputSchema,
@@ -272,7 +224,9 @@ export class CopilotMoneyServer {
         content: [
           {
             type: 'text' as const,
-            text: toolDef.formatError ? toolDef.formatError(errorMessage) : `Error: ${errorMessage}`,
+            text: toolDef.formatError
+              ? toolDef.formatError(errorMessage)
+              : `Error: ${errorMessage}`,
           },
         ],
         isError: true,

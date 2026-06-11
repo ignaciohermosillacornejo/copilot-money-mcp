@@ -6,7 +6,7 @@
  * LevelDB cache rather than a financial entity.
  */
 
-import { defineTool, type ToolMethodArgs } from './types.js';
+import { defineTool } from './types.js';
 
 export const getCacheInfoTool = defineTool({
   schema: {
@@ -80,7 +80,7 @@ export const getAccountsTool = defineTool({
   },
   readOnly: true,
   swappedOutInLiveMode: true,
-  handler: (ctx, args) => ctx.tools.getAccounts(args as ToolMethodArgs<'getAccounts'>),
+  handler: (ctx, args) => ctx.tools.getAccounts(args),
 });
 
 export const getConnectionStatusTool = defineTool({
