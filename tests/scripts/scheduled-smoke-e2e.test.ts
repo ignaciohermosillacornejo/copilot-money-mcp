@@ -1,50 +1,49 @@
 /**
- * End-to-end runs of scripts/scheduled-smoke.ts against a stub repo whose
- * `smoke` script produces each outcome. Exercises main(): subprocess spawn,
- * outcome classification, status-file write, report write, and exit codes —
- * without touching the network or the real status file.
+ * Full-flow runs of the scheduled-smoke runner against a stub repo whose
+ * `smoke` script produces each outcome. runScheduledSmoke() executes
+ * in-process (so coverage sees it); only `bun run smoke` is a subprocess.
+ * Exercises outcome classification, status-file write, report write, and
+ * exit codes — without touching the network or the real status file.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { spawnSync } from 'child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { runScheduledSmoke } from '../../scripts/scheduled-smoke.js';
 
-const RUNNER = join(import.meta.dir, '../../scripts/scheduled-smoke.ts');
-
+const ENV_KEYS = ['COPILOT_MCP_REPO', 'COPILOT_MCP_SMOKE_STATUS_PATH', 'COPILOT_MCP_SMOKE_QUIET'];
+const savedEnv = new Map(ENV_KEYS.map((k) => [k, process.env[k]]));
 let dir: string | null = null;
+
 afterEach(() => {
+  for (const [k, v] of savedEnv) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
   if (dir) rmSync(dir, { recursive: true, force: true });
   dir = null;
 });
 
-function runScheduledSmoke(smokeScript: string): {
+function runWithStubSmoke(smokeScript: string): {
   exitCode: number;
   status: Record<string, unknown>;
-  statusPath: string;
 } {
   dir = mkdtempSync(join(tmpdir(), 'sched-smoke-e2e-'));
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts: { smoke: smokeScript } }));
   const statusPath = join(dir, 'status.json');
-  const run = spawnSync(process.execPath, ['run', RUNNER], {
-    encoding: 'utf-8',
-    env: {
-      ...process.env,
-      COPILOT_MCP_REPO: dir,
-      COPILOT_MCP_SMOKE_STATUS_PATH: statusPath,
-      COPILOT_MCP_SMOKE_QUIET: '1',
-    },
-  });
+  process.env.COPILOT_MCP_REPO = dir;
+  process.env.COPILOT_MCP_SMOKE_STATUS_PATH = statusPath;
+  process.env.COPILOT_MCP_SMOKE_QUIET = '1';
+  const exitCode = runScheduledSmoke();
   return {
-    exitCode: run.status ?? -1,
+    exitCode,
     status: JSON.parse(readFileSync(statusPath, 'utf-8')) as Record<string, unknown>,
-    statusPath,
   };
 }
 
-describe('scheduled-smoke runner (subprocess e2e)', () => {
+describe('scheduled-smoke runner (full flow, stub smoke)', () => {
   test('passing smoke → result pass, no report, exit 0', () => {
-    const { exitCode, status } = runScheduledSmoke("echo '[smoke] PASS — synthetic all-clear'");
+    const { exitCode, status } = runWithStubSmoke("echo '[smoke] PASS — synthetic all-clear'");
     expect(exitCode).toBe(0);
     expect(status.result).toBe('pass');
     expect(status.summary).toBe('[smoke] PASS — synthetic all-clear');
@@ -53,7 +52,7 @@ describe('scheduled-smoke runner (subprocess e2e)', () => {
   });
 
   test('failing smoke → result fail, dated report with full output, exit 1', () => {
-    const { exitCode, status } = runScheduledSmoke(
+    const { exitCode, status } = runWithStubSmoke(
       "echo '[smoke] FAIL — synthetic drift detected' && exit 1"
     );
     expect(exitCode).toBe(1);
@@ -64,7 +63,7 @@ describe('scheduled-smoke runner (subprocess e2e)', () => {
   });
 
   test('auth failure → result auth-missing, no report, exit 0', () => {
-    const { exitCode, status } = runScheduledSmoke(
+    const { exitCode, status } = runWithStubSmoke(
       "echo 'error: No Copilot Money session found. Searched: Chrome' && exit 1"
     );
     expect(exitCode).toBe(0);
