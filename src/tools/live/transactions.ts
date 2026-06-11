@@ -17,7 +17,7 @@ import type {
 import { fetchCategories } from '../../core/graphql/queries/categories.js';
 import { fetchTags } from '../../core/graphql/queries/tags.js';
 import type { ToolSchema, TransactionTypeFilter } from '../tools.js';
-import { normalizeMerchantName } from '../tools.js';
+import { normalizeMerchantName } from '../../utils/merchant.js';
 import { parsePeriod } from '../../utils/date.js';
 
 /**
