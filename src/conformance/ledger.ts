@@ -134,7 +134,7 @@ const FIELD_PROBE_GATED =
 const RESPONSE_SHAPE_GATED =
   'Hand-written TS interface mirrored into a Zod schema; every mutation response ' +
   'is validated warn-mode at runtime (src/core/graphql/response-validation.ts, ' +
-  'issue #437, PR #TBD)';
+  'issue #437, PR #467)';
 
 // ---------------------------------------------------------------------------
 // Entry factories (keep the inventory compact; pass overrides to upgrade an
