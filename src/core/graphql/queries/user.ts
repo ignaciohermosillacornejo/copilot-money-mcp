@@ -32,7 +32,7 @@ export interface UserNode {
   budgetingConfig: BudgetingConfig | null;
 }
 
-interface UserResponse {
+export interface UserResponse {
   user: UserNode;
 }
 

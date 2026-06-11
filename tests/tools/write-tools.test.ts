@@ -11,6 +11,10 @@ import { describe, test, expect, beforeEach } from 'bun:test';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
+import type {
+  CreatedTransaction,
+  CreateTransactionResponse,
+} from '../../src/core/graphql/transactions.js';
 
 describe('updateCategory', () => {
   let tools: CopilotMoneyTools;
@@ -236,7 +240,15 @@ describe('setRecurringState', () => {
   test('dispatches EditRecurring with state=PAUSED', async () => {
     const client = createMockGraphQLClient({
       EditRecurring: {
-        editRecurring: { recurring: { id: 'rec1', state: 'PAUSED' } },
+        editRecurring: {
+          recurring: {
+            id: 'rec1',
+            name: 'Netflix',
+            categoryId: 'cat1',
+            frequency: 'MONTHLY',
+            state: 'PAUSED',
+          },
+        },
       },
     });
     tools = new CopilotMoneyTools(mockDb, client);
@@ -270,7 +282,15 @@ describe('setRecurringState', () => {
     // uppercase contract so the schema and implementation stay aligned.
     const activeClient = createMockGraphQLClient({
       EditRecurring: {
-        editRecurring: { recurring: { id: 'rec1', state: 'ACTIVE' } },
+        editRecurring: {
+          recurring: {
+            id: 'rec1',
+            name: 'Netflix',
+            categoryId: 'cat1',
+            frequency: 'MONTHLY',
+            state: 'ACTIVE',
+          },
+        },
       },
     });
     tools = new CopilotMoneyTools(mockDb, activeClient);
@@ -317,7 +337,7 @@ describe('createTransaction', () => {
   let mockDb: CopilotDatabase;
 
   // Canned server response used across several happy-path tests.
-  const createdTx = {
+  const createdTx: CreatedTransaction = {
     id: 'new-tx-1',
     name: 'Coffee',
     date: '2026-04-21',
@@ -483,7 +503,7 @@ describe('createTransaction', () => {
   });
 
   test('sets internal_transfer=true on returned transaction when type is INTERNAL_TRANSFER', async () => {
-    const serverTx = { ...createdTx, type: 'INTERNAL_TRANSFER' };
+    const serverTx: CreatedTransaction = { ...createdTx, type: 'INTERNAL_TRANSFER' };
     const client = createMockGraphQLClient({ CreateTransaction: { createTransaction: serverTx } });
     tools = new CopilotMoneyTools(mockDb, client);
 
@@ -514,7 +534,7 @@ describe('createTransaction', () => {
 
   // Echoes the create input back into a CreatedTransaction shape so the
   // returned transaction reflects the optional metadata we sent.
-  const echoCreate = (vars: any) => ({
+  const echoCreate = (vars: any): CreateTransactionResponse => ({
     createTransaction: {
       ...createdTx,
       recurringId: vars.input.recurringId ?? null,
@@ -740,7 +760,7 @@ describe('deleteTransaction', () => {
     const { GraphQLError } = await import('../../src/core/graphql/client.js');
     const client = createMockGraphQLClient({
       DeleteTransaction: new GraphQLError(
-        'NOT_FOUND',
+        'USER_ACTION_REQUIRED',
         'Transaction not found',
         'DeleteTransaction',
         200
@@ -780,7 +800,7 @@ describe('addTransactionToRecurring', () => {
 
   // Server response shape: { addTransactionToRecurring: { transaction: {...} } }.
   // recurringId is populated because linking the tx succeeded.
-  const linkedTx = {
+  const linkedTx: CreatedTransaction = {
     id: 'tx1',
     name: 'Rent',
     date: '2026-04-01',
@@ -945,7 +965,7 @@ describe('addTransactionToRecurring', () => {
     const { GraphQLError } = await import('../../src/core/graphql/client.js');
     const client = createMockGraphQLClient({
       AddTransactionToRecurring: new GraphQLError(
-        'NOT_FOUND',
+        'USER_ACTION_REQUIRED',
         'Transaction not found',
         'AddTransactionToRecurring',
         200
@@ -971,7 +991,7 @@ describe('addTransactionToRecurring', () => {
     // Mirrors the createTransaction load-bearing mapping — the response's
     // `type` field drives local `internal_transfer`, independent of what
     // the cache had before.
-    const serverTx = { ...linkedTx, type: 'INTERNAL_TRANSFER' };
+    const serverTx: CreatedTransaction = { ...linkedTx, type: 'INTERNAL_TRANSFER' };
     const client = createMockGraphQLClient({
       AddTransactionToRecurring: { addTransactionToRecurring: { transaction: serverTx } },
     });

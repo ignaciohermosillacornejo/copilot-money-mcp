@@ -27,7 +27,7 @@ export interface DailySpendNode {
   comparisonAmount: string | null;
 }
 
-interface MonthlySpendResponse {
+export interface MonthlySpendResponse {
   monthlySpending: DailySpendNode[];
 }
 

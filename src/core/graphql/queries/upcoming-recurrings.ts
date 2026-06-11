@@ -28,7 +28,7 @@ export type { RecurringIcon, RecurringPaymentNode, RecurringRuleNode };
 
 export type UpcomingRecurringNode = RecurringNode;
 
-interface UpcomingRecurringsResponse {
+export interface UpcomingRecurringsResponse {
   unpaidUpcomingRecurrings: UpcomingRecurringNode[];
 }
 

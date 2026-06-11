@@ -37,7 +37,7 @@ export interface FetchSecurityPricesHighFrequencyOpts {
   timeFrame?: TimeFrame;
 }
 
-interface SecurityPricesHighFrequencyResponse {
+export interface SecurityPricesHighFrequencyResponse {
   securityPricesHighFrequency: HighFrequencyPricePointNode[];
 }
 

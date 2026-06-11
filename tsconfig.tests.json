@@ -1,0 +1,34 @@
+// Typechecks the GraphQL-mock test surface (the base tsconfig deliberately
+// excludes tests/ from the build). This is the gate that makes typed GraphQL
+// mocks real: a mock response whose shape drifts from src/core/graphql/ fails
+// `bun run typecheck` instead of silently keeping the suite green (#433).
+//
+// Scope: tests/helpers/mock-graphql.ts plus every test file that calls
+// createMockGraphQLClient (tsc also follows their imports). The rest of
+// tests/ carries ~87 pre-existing type errors and is intentionally NOT
+// included yet — expanding this include list to tests/**/* is follow-up
+// work tracked outside this gate. When a new test file adopts
+// createMockGraphQLClient, add it here.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true,
+    // Tests routinely index into arrays they just asserted the length of;
+    // the strict-src setting stays on in tsconfig.json.
+    "noUncheckedIndexedAccess": false
+  },
+  "include": [
+    "tests/helpers/mock-graphql.ts",
+    "tests/e2e/server.test.ts",
+    "tests/integration/tools.test.ts",
+    "tests/tools/optimistic-cache.test.ts",
+    "tests/tools/review-transactions-batching.test.ts",
+    "tests/tools/tools.test.ts",
+    "tests/tools/unit-coverage-gaps.test.ts",
+    "tests/tools/write-tools-phase3.test.ts",
+    "tests/tools/write-tools.test.ts",
+    "tests/unit/update-transaction.test.ts"
+  ],
+  "exclude": ["node_modules", "dist"]
+}

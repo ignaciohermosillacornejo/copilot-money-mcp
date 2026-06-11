@@ -11,7 +11,7 @@ export interface CreateCategoryInput {
   // editCategory. Verified by smoke test against real server.
 }
 
-interface CreateCategoryResponse {
+export interface CreateCategoryResponse {
   createCategory: {
     id: string;
     name: string;
@@ -44,7 +44,7 @@ export interface EditCategoryInput {
   // writable through Copilot's GraphQL mutations. Verified by smoke test.
 }
 
-interface EditCategoryResponse {
+export interface EditCategoryResponse {
   editCategory: {
     category: {
       id: string;
@@ -87,14 +87,16 @@ export async function editCategory(
   return { id: cat.id, changed };
 }
 
+export interface DeleteCategoryResponse {
+  deleteCategory: boolean;
+}
+
 export async function deleteCategory(
   client: GraphQLClient,
   args: { id: string }
 ): Promise<{ id: string; deleted: true }> {
-  await client.mutate<{ id: string }, { deleteCategory: boolean }>(
-    'DeleteCategory',
-    DELETE_CATEGORY,
-    { id: args.id }
-  );
+  await client.mutate<{ id: string }, DeleteCategoryResponse>('DeleteCategory', DELETE_CATEGORY, {
+    id: args.id,
+  });
   return { id: args.id, deleted: true };
 }

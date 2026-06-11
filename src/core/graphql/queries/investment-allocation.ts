@@ -36,7 +36,7 @@ export interface FetchInvestmentAllocationOpts {
   filter?: AllocationFilter;
 }
 
-interface InvestmentAllocationResponse {
+export interface InvestmentAllocationResponse {
   investmentAllocation: AllocationNode[];
 }
 

@@ -27,6 +27,8 @@ import type {
   HoldingsHistory,
 } from '../../src/models/index.js';
 import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
+import type { EditTransactionResponse } from '../../src/core/graphql/transactions.js';
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 // Temp directory with a dummy .ldb so CopilotDatabase.isAvailable() returns true
 const FAKE_DB_DIR = mkdtempSync(join(tmpdir(), 'copilot-test-'));
@@ -505,10 +507,11 @@ function createMockDb(): CopilotDatabase {
  */
 function createMockWriteClient() {
   return createMockGraphQLClient({
-    EditTransaction: (vars: any) => ({
+    EditTransaction: (vars: any): EditTransactionResponse => ({
       editTransaction: {
         transaction: {
           id: vars.id,
+          name: vars.input?.name ?? 'Existing Txn',
           categoryId: vars.input?.categoryId ?? 'c',
           userNotes: vars.input?.userNotes ?? null,
           isReviewed: vars.input?.isReviewed ?? false,
@@ -552,7 +555,13 @@ function createMockWriteClient() {
     EditBudgetMonthly: { editCategoryBudgetMonthly: true },
     EditRecurring: (vars: any) => ({
       editRecurring: {
-        recurring: { id: vars.id, state: vars.input?.state ?? 'ACTIVE' },
+        recurring: {
+          id: vars.id,
+          name: vars.input?.name ?? 'Existing Rec',
+          categoryId: vars.input?.categoryId ?? 'c',
+          frequency: vars.input?.frequency ?? 'MONTHLY',
+          state: vars.input?.state ?? 'ACTIVE',
+        },
       },
     }),
     DeleteRecurring: { deleteRecurring: true },
@@ -567,15 +576,20 @@ function createMockWriteClient() {
   });
 }
 
+/** Extract the first content block's text, asserting it IS a text block. */
+function firstText(result: CallToolResult): string {
+  const first = result.content[0];
+  if (!first || first.type !== 'text') {
+    throw new Error(`Expected first content block to be text, got: ${first?.type ?? 'none'}`);
+  }
+  return first.text;
+}
+
 /** Parse the JSON text from a handleCallTool result. */
-function parseToolResult(result: {
-  content: Array<{ type: string; text: string }>;
-  isError?: boolean;
-}): unknown {
+function parseToolResult(result: CallToolResult): unknown {
   expect(result.content).toBeArray();
   expect(result.content.length).toBeGreaterThanOrEqual(1);
-  expect(result.content[0].type).toBe('text');
-  return JSON.parse(result.content[0].text);
+  return JSON.parse(firstText(result));
 }
 
 describe('handleCallTool — read tools', () => {
@@ -605,7 +619,7 @@ describe('handleCallTool — read tools', () => {
     const result = await server.handleCallTool('refresh_database');
     expect(result.isError).toBe(true);
     expect(result.content[0].type).toBe('text');
-    expect(result.content[0].text).toContain('Error');
+    expect(firstText(result)).toContain('Error');
   });
 
   test('get_categories returns list view with count', async () => {
@@ -742,7 +756,7 @@ describe('handleCallTool — write tools', () => {
       transaction_id: 'txn1',
     });
     expect(result.isError).toBe(true);
-    expect((result.content[0] as { text: string }).text).toMatch(/at least one field/i);
+    expect(firstText(result)).toMatch(/at least one field/i);
   });
 
   test('update_transaction with name field succeeds', async () => {
@@ -751,7 +765,7 @@ describe('handleCallTool — write tools', () => {
       name: 'rename attempt',
     });
     expect(result.isError).toBeUndefined();
-    const text = (result.content[0] as { text: string }).text;
+    const text = firstText(result);
     expect(text).toContain('"success": true');
   });
 
@@ -761,7 +775,7 @@ describe('handleCallTool — write tools', () => {
       goal_id: 'goal1',
     });
     expect(result.isError).toBe(true);
-    expect((result.content[0] as { text: string }).text).toMatch(/unknown field/i);
+    expect(firstText(result)).toMatch(/unknown field/i);
   });
 });
 
@@ -773,7 +787,7 @@ describe('handleCallTool — error handling', () => {
 
     const result = await server.handleCallTool('nonexistent_tool', {});
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('Unknown tool');
+    expect(firstText(result)).toContain('Unknown tool');
   });
 
   test('write tool on read-only server returns isError with --write hint', async () => {
@@ -786,7 +800,7 @@ describe('handleCallTool — error handling', () => {
       category_id: 'food_dining',
     });
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('--write');
+    expect(firstText(result)).toContain('--write');
   });
 
   test('database unavailable returns informative message', async () => {
@@ -795,7 +809,7 @@ describe('handleCallTool — error handling', () => {
     server._injectForTesting(badDb, new CopilotMoneyTools(badDb));
 
     const result = await server.handleCallTool('get_cache_info');
-    expect(result.content[0].text).toContain('Database not available');
+    expect(firstText(result)).toContain('Database not available');
     // Server intentionally omits isError for unavailable DB (server.ts:134-145)
     // so the LLM receives the message as guidance rather than a hard error.
     expect(result.isError).toBeUndefined();
@@ -810,7 +824,7 @@ describe('handleCallTool — error handling', () => {
       category_id: 'food_dining',
     });
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('Error');
+    expect(firstText(result)).toContain('Error');
   });
 });
 
@@ -1203,7 +1217,7 @@ describe('handleCallTool — write tool validation', () => {
       name: '   ',
     });
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('empty');
+    expect(firstText(result)).toContain('empty');
   });
 
   test('delete_tag surfaces GraphQL errors', async () => {
@@ -1223,7 +1237,7 @@ describe('handleCallTool — write tool validation', () => {
       tag_id: 'whatever',
     });
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toMatch(/tag not found/i);
+    expect(firstText(result)).toMatch(/tag not found/i);
   });
 
   test('update_category with no fields returns error', async () => {
@@ -1231,7 +1245,7 @@ describe('handleCallTool — write tool validation', () => {
       category_id: 'custom_cat_1',
     });
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('at least one field');
+    expect(firstText(result)).toContain('at least one field');
   });
 
   test('create_recurring with invalid frequency returns error', async () => {
@@ -1240,7 +1254,7 @@ describe('handleCallTool — write tool validation', () => {
       frequency: 'hourly',
     });
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('frequency must be one of');
+    expect(firstText(result)).toContain('frequency must be one of');
   });
 
   test('set_recurring_state with invalid state returns error', async () => {
@@ -1249,7 +1263,7 @@ describe('handleCallTool — write tool validation', () => {
       state: 'invalid_state',
     });
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('state must be one of');
+    expect(firstText(result)).toContain('state must be one of');
   });
 
   test('review_transactions with empty array returns error', async () => {
@@ -1257,7 +1271,7 @@ describe('handleCallTool — write tool validation', () => {
       transaction_ids: [],
     });
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('non-empty');
+    expect(firstText(result)).toContain('non-empty');
   });
 });
 
@@ -2062,7 +2076,7 @@ describe('--live-reads accounts wiring', () => {
 
     const result = await server.handleCallTool('get_accounts_live', {});
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('--live-reads');
+    expect(firstText(result)).toContain('--live-reads');
   });
 
   test('get_accounts_live with --live-reads dispatches to LiveAccountsTools', async () => {
@@ -2088,7 +2102,7 @@ describe('--live-reads accounts wiring', () => {
 
     const result = await server.handleCallTool('get_accounts_live', {});
     expect(result.isError).toBeUndefined();
-    const data = JSON.parse(result.content[0].text) as typeof stubResult;
+    const data = JSON.parse(firstText(result)) as typeof stubResult;
     expect(data.count).toBe(1);
     expect(data._cache_hit).toBe(false);
   });
@@ -2125,7 +2139,7 @@ describe('--live-reads categories wiring', () => {
 
     const result = await server.handleCallTool('get_categories_live', {});
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('--live-reads');
+    expect(firstText(result)).toContain('--live-reads');
   });
 
   test('get_categories_live with --live-reads dispatches to LiveCategoriesTools', async () => {
@@ -2160,7 +2174,7 @@ describe('--live-reads categories wiring', () => {
 
     const result = await server.handleCallTool('get_categories_live', {});
     expect(result.isError).toBeUndefined();
-    const data = JSON.parse(result.content[0].text) as typeof stubResult;
+    const data = JSON.parse(firstText(result)) as typeof stubResult;
     expect(data.count).toBe(1);
     expect(data._cache_hit).toBe(false);
   });
@@ -2195,7 +2209,7 @@ describe('--live-reads tags wiring', () => {
 
     const result = await server.handleCallTool('get_tags_live', {});
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('--live-reads');
+    expect(firstText(result)).toContain('--live-reads');
   });
 
   test('get_tags_live with --live-reads dispatches to liveTagsTools.getTags', async () => {
@@ -2218,7 +2232,7 @@ describe('--live-reads tags wiring', () => {
 
     const result = await server.handleCallTool('get_tags_live', {});
     expect(result.isError).toBeUndefined();
-    const data = JSON.parse(result.content[0].text) as typeof stubResult;
+    const data = JSON.parse(firstText(result)) as typeof stubResult;
     expect(data.count).toBe(1);
     expect(data._cache_hit).toBe(false);
   });
@@ -2254,7 +2268,7 @@ describe('--live-reads budgets wiring', () => {
 
     const result = await server.handleCallTool('get_budgets_live', {});
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('--live-reads');
+    expect(firstText(result)).toContain('--live-reads');
   });
 
   test('get_budgets_live with --live-reads dispatches to liveBudgetsTools.getBudgets', async () => {
@@ -2286,7 +2300,7 @@ describe('--live-reads budgets wiring', () => {
 
     const result = await server.handleCallTool('get_budgets_live', {});
     expect(result.isError).toBeUndefined();
-    const data = JSON.parse(result.content[0].text) as typeof stubResult;
+    const data = JSON.parse(firstText(result)) as typeof stubResult;
     expect(data.count).toBe(1);
     expect(data.total_budgeted).toBe(500);
     expect(data._cache_hit).toBe(false);
@@ -2325,7 +2339,7 @@ describe('--live-reads recurring wiring', () => {
 
     const result = await server.handleCallTool('get_recurring_live', {});
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('--live-reads');
+    expect(firstText(result)).toContain('--live-reads');
   });
 
   test('get_recurring_live with --live-reads dispatches to liveRecurringTools.getRecurring', async () => {
@@ -2362,7 +2376,7 @@ describe('--live-reads recurring wiring', () => {
 
     const result = await server.handleCallTool('get_recurring_live', {});
     expect(result.isError).toBeUndefined();
-    const data = JSON.parse(result.content[0].text) as typeof stubResult;
+    const data = JSON.parse(firstText(result)) as typeof stubResult;
     expect(data.count).toBe(1);
     expect(data.recurring[0]?.name).toBe('Netflix');
     expect(data._cache_hit).toBe(false);
@@ -2396,7 +2410,7 @@ describe('--live-reads networth wiring', () => {
 
     const result = await server.handleCallTool('get_networth_live', {});
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('--live-reads');
+    expect(firstText(result)).toContain('--live-reads');
   });
 
   test('get_networth_live with --live-reads dispatches to liveNetworthTools.getNetworth', async () => {
@@ -2418,7 +2432,7 @@ describe('--live-reads networth wiring', () => {
 
     const result = await server.handleCallTool('get_networth_live', {});
     expect(result.isError).toBeUndefined();
-    const data = JSON.parse(result.content[0].text) as typeof stubResult;
+    const data = JSON.parse(firstText(result)) as typeof stubResult;
     expect(data.count).toBe(1);
     expect(data.networth_history[0]?.date).toBe('2026-01-01');
     expect(data._cache_hit).toBe(false);
@@ -2454,7 +2468,7 @@ describe('--live-reads upcoming-recurrings wiring', () => {
 
     const result = await server.handleCallTool('get_upcoming_recurrings_live', {});
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('--live-reads');
+    expect(firstText(result)).toContain('--live-reads');
   });
 
   test('get_upcoming_recurrings_live with --live-reads dispatches to liveUpcomingRecurringsTools.getUpcomingRecurrings', async () => {
@@ -2491,7 +2505,7 @@ describe('--live-reads upcoming-recurrings wiring', () => {
 
     const result = await server.handleCallTool('get_upcoming_recurrings_live', {});
     expect(result.isError).toBeUndefined();
-    const data = JSON.parse(result.content[0].text) as typeof stubResult;
+    const data = JSON.parse(firstText(result)) as typeof stubResult;
     expect(data.count).toBe(1);
     expect(data.upcoming[0]?.name).toBe('Subscription A');
     expect(data._cache_hit).toBe(false);
@@ -2527,7 +2541,7 @@ describe('--live-reads monthly-spend wiring', () => {
 
     const result = await server.handleCallTool('get_monthly_spend_live', {});
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('--live-reads');
+    expect(firstText(result)).toContain('--live-reads');
   });
 
   test('get_monthly_spend_live with --live-reads dispatches to liveMonthlySpendTools.getMonthlySpend', async () => {
@@ -2550,7 +2564,7 @@ describe('--live-reads monthly-spend wiring', () => {
 
     const result = await server.handleCallTool('get_monthly_spend_live', {});
     expect(result.isError).toBeUndefined();
-    const data = JSON.parse(result.content[0].text) as typeof stubResult;
+    const data = JSON.parse(firstText(result)) as typeof stubResult;
     expect(data.count).toBe(1);
     expect(data.daily_spending[0]?.id).toBe('d1');
     expect(data._cache_hit).toBe(false);
@@ -2588,7 +2602,7 @@ describe('--live-reads holdings wiring', () => {
 
     const result = await server.handleCallTool('get_holdings_live', {});
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('--live-reads');
+    expect(firstText(result)).toContain('--live-reads');
   });
 
   test('get_holdings_live with --live-reads dispatches to liveHoldingsTools.getHoldings', async () => {
@@ -2627,7 +2641,7 @@ describe('--live-reads holdings wiring', () => {
 
     const result = await server.handleCallTool('get_holdings_live', {});
     expect(result.isError).toBeUndefined();
-    const data = JSON.parse(result.content[0].text) as typeof stubResult;
+    const data = JSON.parse(firstText(result)) as typeof stubResult;
     expect(data.count).toBe(1);
     expect(data.holdings[0]?.security_id).toBe('sec-1');
     expect(data._cache_hit).toBe(false);

@@ -8,6 +8,7 @@ import { describe, test, expect, beforeEach } from 'bun:test';
 import { CopilotMoneyTools, createToolSchemas } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
+import type { EditTransactionResponse } from '../../src/core/graphql/transactions.js';
 import type {
   Transaction,
   Account,
@@ -329,16 +330,6 @@ function createMockDatabase(overrides?: {
   (db as any)._allCollectionsLoaded = true;
   (db as any)._cacheLoadedAt = Date.now();
   return db;
-}
-
-/** Create a mock GraphQLClient for write tool tests. */
-function createMockWriteClient() {
-  return {
-    requireUserId: async () => 'test-user-123',
-    createDocument: async (_col: string, docId: string | undefined) => docId ?? 'auto_generated_id',
-    updateDocument: async () => {},
-    deleteDocument: async () => {},
-  } as any;
 }
 
 describe('CopilotMoneyTools Integration', () => {
@@ -935,10 +926,11 @@ describe('CopilotMoneyTools Integration', () => {
         goalHistory: [...mockGoalHistory],
       });
       client = createMockGraphQLClient({
-        EditTransaction: (vars: any) => ({
+        EditTransaction: (vars: any): EditTransactionResponse => ({
           editTransaction: {
             transaction: {
               id: vars.id,
+              name: vars.input.name ?? 'Existing Txn',
               categoryId: vars.input.categoryId ?? 'c',
               userNotes: vars.input.userNotes ?? null,
               isReviewed: vars.input.isReviewed ?? false,
@@ -982,7 +974,13 @@ describe('CopilotMoneyTools Integration', () => {
         EditBudgetMonthly: { editCategoryBudgetMonthly: true },
         EditRecurring: (vars: any) => ({
           editRecurring: {
-            recurring: { id: vars.id, state: vars.input.state ?? 'ACTIVE' },
+            recurring: {
+              id: vars.id,
+              name: vars.input.name ?? 'Existing Rec',
+              categoryId: vars.input.categoryId ?? 'c',
+              frequency: vars.input.frequency ?? 'MONTHLY',
+              state: vars.input.state ?? 'ACTIVE',
+            },
           },
         }),
         DeleteRecurring: { deleteRecurring: true },

@@ -55,7 +55,7 @@
     "lint:fix": "eslint src --fix",
     "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\"",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.tests.json",
     "check": "bun run typecheck && bun run lint && bun run format:check && bun run check:version-sync && bun run check:server-json && bun test --bail",
     "snapshot:create": "bun run scripts/snapshot.ts create",
     "snapshot:restore": "bun run scripts/snapshot.ts restore",

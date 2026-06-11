@@ -216,7 +216,7 @@ export interface FetchTransactionsArgs {
   sort: TransactionSortInput[];
 }
 
-interface TransactionsResponse {
+export interface TransactionsResponse {
   transactions: TransactionsPage;
 }
 

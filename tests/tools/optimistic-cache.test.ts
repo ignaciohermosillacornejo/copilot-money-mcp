@@ -48,6 +48,7 @@ describe('optimistic cache patching — transactions', () => {
         editTransaction: {
           transaction: {
             id: 'txn1',
+            name: 'Coffee Shop',
             categoryId: 'cat_food',
             userNotes: 'new note',
             isReviewed: false,
@@ -87,7 +88,14 @@ describe('optimistic cache patching — transactions', () => {
     const client = createMockGraphQLClient({
       EditTransaction: {
         editTransaction: {
-          transaction: { id: 't1', categoryId: '', userNotes: null, isReviewed: true, tags: [] },
+          transaction: {
+            id: 't1',
+            name: 'T1',
+            categoryId: '',
+            userNotes: null,
+            isReviewed: true,
+            tags: [],
+          },
         },
       },
     });
@@ -331,7 +339,6 @@ describe('optimistic cache patching — recurrings', () => {
           name: 'Spotify',
           state: 'ACTIVE',
           frequency: 'MONTHLY',
-          categoryId: '',
         },
       },
     });

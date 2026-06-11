@@ -37,7 +37,7 @@ export interface AccountNode {
   latestBalanceUpdate: string | null;
 }
 
-interface AccountsResponse {
+export interface AccountsResponse {
   accounts: AccountNode[];
 }
 

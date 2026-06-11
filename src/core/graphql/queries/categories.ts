@@ -81,7 +81,7 @@ interface CategoryResponseNode extends CategoryRawFields {
   childCategories?: CategoryRawFields[];
 }
 
-interface CategoriesResponse {
+export interface CategoriesResponse {
   categories: CategoryResponseNode[];
 }
 

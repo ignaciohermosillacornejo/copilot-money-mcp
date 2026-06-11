@@ -1,6 +1,14 @@
 import type { GraphQLClient } from './client.js';
 import { EDIT_BUDGET, EDIT_BUDGET_MONTHLY } from './operations.generated.js';
 
+export interface EditBudgetResponse {
+  editCategoryBudget: boolean;
+}
+
+export interface EditBudgetMonthlyResponse {
+  editCategoryBudgetMonthly: boolean;
+}
+
 export interface SetBudgetArgs {
   categoryId: string;
   /** Non-negative decimal. "0" clears the budget. Accepts string form like "250.00" or "0". */
@@ -24,19 +32,20 @@ export async function setBudget(
   if (args.month) {
     await client.mutate<
       { categoryId: string; input: Array<{ amount: number; month: string }> },
-      { editCategoryBudgetMonthly: boolean }
+      EditBudgetMonthlyResponse
     >('EditBudgetMonthly', EDIT_BUDGET_MONTHLY, {
       categoryId: args.categoryId,
       input: [{ amount: amountFloat, month: args.month }],
     });
     return { categoryId: args.categoryId, amount: args.amount, month: args.month, cleared };
   }
-  await client.mutate<
-    { categoryId: string; input: { amount: number } },
-    { editCategoryBudget: boolean }
-  >('EditBudget', EDIT_BUDGET, {
-    categoryId: args.categoryId,
-    input: { amount: amountFloat },
-  });
+  await client.mutate<{ categoryId: string; input: { amount: number } }, EditBudgetResponse>(
+    'EditBudget',
+    EDIT_BUDGET,
+    {
+      categoryId: args.categoryId,
+      input: { amount: amountFloat },
+    }
+  );
   return { categoryId: args.categoryId, amount: args.amount, cleared };
 }

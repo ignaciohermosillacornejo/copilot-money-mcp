@@ -11,7 +11,7 @@ export interface EditAccountChanges {
   isUserHidden?: boolean;
 }
 
-interface EditAccountResponse {
+export interface EditAccountResponse {
   editAccount: {
     account: {
       id: string;

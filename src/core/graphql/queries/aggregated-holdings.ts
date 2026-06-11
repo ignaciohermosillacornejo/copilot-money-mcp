@@ -54,7 +54,7 @@ export interface FetchAggregatedHoldingsOpts {
   itemId?: string;
 }
 
-interface AggregatedHoldingsResponse {
+export interface AggregatedHoldingsResponse {
   aggregatedHoldings: AggregatedHoldingNode[];
 }
 

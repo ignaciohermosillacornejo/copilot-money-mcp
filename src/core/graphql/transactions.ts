@@ -64,7 +64,7 @@ export interface CreatedTransaction {
   goal: { id: string; name: string } | null;
 }
 
-interface CreateTransactionResponse {
+export interface CreateTransactionResponse {
   createTransaction: CreatedTransaction;
 }
 
@@ -95,7 +95,7 @@ export interface EditTransactionArgs {
   input: EditTransactionInput;
 }
 
-interface EditTransactionResponse {
+export interface EditTransactionResponse {
   editTransaction: {
     transaction: {
       id: string;
@@ -122,7 +122,7 @@ export interface DeleteTransactionArgs {
   itemId: string;
 }
 
-interface DeleteTransactionResponse {
+export interface DeleteTransactionResponse {
   deleteTransaction: boolean;
 }
 
@@ -160,7 +160,7 @@ export interface AddTransactionToRecurringArgs {
   input: AddTransactionToRecurringInput;
 }
 
-interface AddTransactionToRecurringResponse {
+export interface AddTransactionToRecurringResponse {
   addTransactionToRecurring: {
     transaction: CreatedTransaction;
   };
@@ -209,7 +209,7 @@ export interface SplitTransactionResult {
   splitTransactions: CreatedTransaction[];
 }
 
-interface SplitTransactionResponse {
+export interface SplitTransactionResponse {
   splitTransaction: SplitTransactionResult;
 }
 

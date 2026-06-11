@@ -36,7 +36,7 @@ export interface HoldingNode {
   metrics: HoldingMetricNode | null;
 }
 
-interface HoldingsResponse {
+export interface HoldingsResponse {
   holdings: HoldingNode[];
 }
 
