@@ -549,24 +549,6 @@ export class CopilotMoneyServer {
           result = await this.tools.getConnectionStatus();
           break;
 
-        case 'get_investment_prices':
-          result = await this.tools.getInvestmentPrices(typedArgs || {});
-          break;
-
-        case 'get_investment_splits':
-          result = await this.tools.getInvestmentSplits(typedArgs || {});
-          break;
-
-        case 'get_holdings':
-          result = await this.tools.getHoldings(typedArgs || {});
-          break;
-
-        case 'get_balance_history':
-          result = await this.tools.getBalanceHistory(
-            (typedArgs as Parameters<typeof this.tools.getBalanceHistory>[0]) || {}
-          );
-          break;
-
         default:
           return {
             content: [

@@ -37,6 +37,12 @@ import {
   getGoalsTool,
   getGoalHistoryTool,
 } from './budgets-goals.js';
+import {
+  getInvestmentPricesTool,
+  getInvestmentSplitsTool,
+  getHoldingsTool,
+  getBalanceHistoryTool,
+} from './investments.js';
 
 export type { ToolDefinition, ToolContext, LiveToolContext } from './types.js';
 
@@ -65,6 +71,10 @@ export const ALL_TOOL_DEFS: readonly ToolDefinition[] = [
   setBudgetTool,
   getGoalsTool,
   getGoalHistoryTool,
+  getInvestmentPricesTool,
+  getInvestmentSplitsTool,
+  getHoldingsTool,
+  getBalanceHistoryTool,
 ];
 
 /** Name → definition lookup used by the server's dispatch. */
