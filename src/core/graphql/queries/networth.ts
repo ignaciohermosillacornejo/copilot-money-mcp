@@ -3,8 +3,10 @@
  *
  * Returns a flat, date-sorted list of `{date, assets, debt}` snapshots.
  * The captured `Networth` query takes a `$timeFrame: TimeFrame` enum
- * (commonly `"ALL"`, `"YEAR"`, `"MONTH"`); response shape is a simple
- * array (no nesting, no pagination).
+ * (see `ALL_TIME_FRAMES` in ./_shared.ts — e.g. `"ALL"`, `"ONE_YEAR"`,
+ * `"ONE_MONTH"`; bare `"YEAR"`/`"MONTH"` are NOT valid, verified by the
+ * TimeFrame conformance probe); response shape is a simple array (no
+ * nesting, no pagination).
  *
  * The response includes a client-side `total` field stripped by the
  * operations generator — net worth at each point is `assets - debt`.

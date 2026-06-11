@@ -174,14 +174,14 @@ describe('optimistic cache patching — categories', () => {
   test('create_category — new category appears in cache without refresh', async () => {
     const client = createMockGraphQLClient({
       CreateCategory: {
-        createCategory: { id: 'cat2', name: 'Travel', colorName: 'BLUE2' },
+        createCategory: { id: 'cat2', name: 'Travel', colorName: 'BLUE1' },
       },
     });
     tools = new CopilotMoneyTools(db, client);
 
     await tools.createCategory({
       name: 'Travel',
-      color_name: 'BLUE2',
+      color_name: 'BLUE1',
       emoji: '✈️',
       is_excluded: false,
     });

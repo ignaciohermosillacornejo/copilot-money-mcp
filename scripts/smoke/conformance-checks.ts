@@ -20,6 +20,8 @@ import {
   RECURRING_STATE_VALUES,
 } from '../../src/core/graphql/recurrings.js';
 import { TRANSACTION_TYPES } from '../../src/core/graphql/transactions.js';
+import { COLOR_NAMES } from '../../src/core/graphql/colors.js';
+import { ALL_TIME_FRAMES } from '../../src/core/graphql/queries/_shared.js';
 
 export {
   assertEnumConformance,
@@ -101,9 +103,54 @@ export const TRANSACTION_TYPE_CHECK: ConformanceCheck = {
 }`,
 };
 
+// --- ColorName ----------------------------------------------------------------
+// Malformed `name: { z: 1 }` (CreateTagInput.name is String!) forces
+// pre-execution validation failure. Control: 'GREEN2' is the plausible-but-wrong
+// value — five palette bases (ORANGE/PINK/PURPLE/RED/YELLOW) have a *2 variant
+// but GREEN does not, so it must be server-rejected.
+export const KNOWN_BAD_COLOR_NAME = 'GREEN2';
+
+export const COLOR_NAME_CHECK: ConformanceCheck = {
+  enumName: 'ColorName',
+  ourValues: COLOR_NAMES,
+  knownBad: KNOWN_BAD_COLOR_NAME,
+  buildQuery: (value) =>
+    `mutation ColorNameProbe {
+  createTag(input: { name: { z: 1 }, colorName: ${value} }) {
+    id
+  }
+}`,
+};
+
+// --- TimeFrame ----------------------------------------------------------------
+// Read-side enum (live-reads query wrappers, src/core/graphql/queries/_shared.ts).
+// Probed through BalanceHistory's `timeFrame` arg; the malformed `itemId: { z: 1 }`
+// (ID!) forces pre-execution validation failure so the probe never reaches a
+// resolver. Control: 'YEAR' is the intuitive-but-wrong value (the real enum uses
+// 'ONE_YEAR'), so it must be server-rejected.
+//
+// Scope note: this gates enum MEMBERSHIP at the schema level. Per-operation
+// value restrictions (e.g. the high-frequency prices endpoint only honoring
+// ONE_DAY/ONE_WEEK) are resolver behavior and not covered here.
+export const KNOWN_BAD_TIME_FRAME = 'YEAR';
+
+export const TIME_FRAME_CHECK: ConformanceCheck = {
+  enumName: 'TimeFrame',
+  ourValues: ALL_TIME_FRAMES,
+  knownBad: KNOWN_BAD_TIME_FRAME,
+  buildQuery: (value) =>
+    `query TimeFrameProbe {
+  accountBalanceHistory(itemId: { z: 1 }, accountId: "x", timeFrame: ${value}) {
+    date
+  }
+}`,
+};
+
 /** All conformance checks, in runner order. */
 export const ALL_CONFORMANCE_CHECKS: readonly ConformanceCheck[] = [
   RECURRING_FREQUENCY_CHECK,
   RECURRING_STATE_CHECK,
   TRANSACTION_TYPE_CHECK,
+  COLOR_NAME_CHECK,
+  TIME_FRAME_CHECK,
 ];

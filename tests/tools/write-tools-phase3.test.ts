@@ -46,20 +46,20 @@ describe('updateTag', () => {
 
   test('dispatches EditTag with name and colorName', async () => {
     const client = createMockGraphQLClient({
-      EditTag: { editTag: { id: 'vacation', name: 'Trip', colorName: 'GREEN' } },
+      EditTag: { editTag: { id: 'vacation', name: 'Trip', colorName: 'GREEN1' } },
     });
     tools = new CopilotMoneyTools(mockDb, client);
 
     const result = await tools.updateTag({
       tag_id: 'vacation',
       name: 'Trip',
-      color_name: 'GREEN',
+      color_name: 'GREEN1',
     });
     expect(result.success).toBe(true);
     expect(result.updated).toEqual(['name', 'colorName']);
     expect(client._calls[0].variables).toEqual({
       id: 'vacation',
-      input: { name: 'Trip', colorName: 'GREEN' },
+      input: { name: 'Trip', colorName: 'GREEN1' },
     });
   });
 
@@ -69,6 +69,16 @@ describe('updateTag', () => {
 
     await expect(tools.updateTag({ tag_id: 'vacation' })).rejects.toThrow(
       'update_tag requires at least one field to update'
+    );
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('rejects a color_name outside the ColorName enum (no dispatch)', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(tools.updateTag({ tag_id: 'vacation', color_name: 'BLUE2' })).rejects.toThrow(
+      /color_name must be one of/
     );
     expect(client._calls).toHaveLength(0);
   });

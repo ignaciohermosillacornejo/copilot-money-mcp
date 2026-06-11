@@ -43,7 +43,7 @@ describe('updateCategory', () => {
     const client = createMockGraphQLClient({
       EditCategory: {
         editCategory: {
-          category: { id: 'cat1', name: 'Dining', colorName: 'RED' },
+          category: { id: 'cat1', name: 'Dining', colorName: 'RED1' },
         },
       },
     });
@@ -52,7 +52,7 @@ describe('updateCategory', () => {
     const result = await tools.updateCategory({
       category_id: 'cat1',
       name: 'Dining',
-      color_name: 'RED',
+      color_name: 'RED1',
     });
 
     expect(result.success).toBe(true);
@@ -65,7 +65,7 @@ describe('updateCategory', () => {
       id: 'cat1',
       spend: false,
       budget: false,
-      input: { name: 'Dining', colorName: 'RED' },
+      input: { name: 'Dining', colorName: 'RED1' },
     });
   });
 
@@ -77,6 +77,17 @@ describe('updateCategory', () => {
     await expect(tools.updateCategory({ category_id: 'cat1' })).rejects.toThrow(
       /requires at least one field/
     );
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('rejects a color_name outside the ColorName enum (no dispatch)', async () => {
+    // 'GREEN2' is plausible (five palette bases have a *2 variant) but not a
+    // real server value — the local guard must reject before any round-trip.
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+    await expect(
+      tools.updateCategory({ category_id: 'cat1', color_name: 'GREEN2' })
+    ).rejects.toThrow(/color_name must be one of/);
     expect(client._calls).toHaveLength(0);
   });
 });

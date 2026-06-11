@@ -1,9 +1,10 @@
 import type { GraphQLClient } from './client.js';
+import type { ColorName } from './colors.js';
 import { CREATE_TAG, EDIT_TAG, DELETE_TAG } from './operations.generated.js';
 
 export interface CreateTagInput {
   name: string;
-  colorName: string;
+  colorName: ColorName;
 }
 
 export interface CreateTagResponse {
@@ -32,7 +33,7 @@ export async function createTag(
 
 export interface EditTagInput {
   name?: string;
-  colorName?: string;
+  colorName?: ColorName;
 }
 
 export interface EditTagChanges {

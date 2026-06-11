@@ -1022,13 +1022,13 @@ describe('CopilotMoneyTools Integration', () => {
     test('createTag creates new tag via CreateTag', async () => {
       const result = await writeTools.createTag({
         name: 'Work Expense',
-        color_name: 'BLUE',
+        color_name: 'BLUE1',
       });
 
       expect(result.success).toBe(true);
       expect(result.tag_id).toBe('tag-created');
       expect(result.name).toBe('Work Expense');
-      expect(result.color_name).toBe('BLUE');
+      expect(result.color_name).toBe('BLUE1');
       expect(client._calls[0].op).toBe('CreateTag');
     });
 
@@ -1043,7 +1043,7 @@ describe('CopilotMoneyTools Integration', () => {
     test('createCategory creates new user category via CreateCategory', async () => {
       const result = await writeTools.createCategory({
         name: 'Pet Supplies',
-        color_name: 'ORANGE',
+        color_name: 'ORANGE1',
         emoji: '\uD83D\uDC36',
       });
 

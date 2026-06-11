@@ -25,9 +25,10 @@
  * - `enum`           → GraphQL enum type name, e.g. `TransactionType`
  * - `input-field`    → `<InputType>.<field>`, e.g. `CreateTransactionInput.tagIds`
  *                      (nested input objects use `<InputType>.<field>.<subfield>`)
- * - `operation`      → `Mutation.<fieldName>`, e.g. `Mutation.createTransaction`
+ * - `operation`      → `Mutation.<fieldName>` or `Query.<fieldName>`, e.g.
+ *                      `Mutation.createTransaction`, `Query.accounts`
  *                      (covers the operation's existence + top-level args)
- * - `response-shape` → `Mutation.<fieldName>:response`
+ * - `response-shape` → `Mutation.<fieldName>:response` / `Query.<fieldName>:response`
  *
  * How to update:
  * - Adding a write-tool param? Add (or extend) an entry whose `toolParams`
@@ -40,6 +41,7 @@
 
 import { TRANSACTION_TYPES } from '../core/graphql/transactions.js';
 import { RECURRING_FREQUENCIES, RECURRING_STATE_VALUES } from '../core/graphql/recurrings.js';
+import { COLOR_NAMES } from '../core/graphql/colors.js';
 import { ALL_TIME_FRAMES } from '../core/graphql/queries/_shared.js';
 import { RESPONSE_SHAPE_RUNTIME_CHECK } from '../core/graphql/response-validation.js';
 
@@ -136,6 +138,21 @@ const RESPONSE_SHAPE_GATED =
   'is validated warn-mode at runtime (src/core/graphql/response-validation.ts, ' +
   'issue #437, PR #467)';
 
+/** B5 (#439): every read query is fired against production on each smoke
+ * run, asserting the wrapper-critical fields. Gates the operation
+ * signature; the full response interface stays a separate surface. */
+const READ_SMOKE_GATED =
+  'Tier-0 read smoke fires the operation against production and asserts the ' +
+  'wrapper-critical fields on every run; gated by scripts/smoke/reads.ts ' +
+  '(issues #439/#460)';
+
+/** Read response shapes: the Tier-0 smoke spot-checks load-bearing fields,
+ * but nothing validates the full hand-written interface at runtime. */
+const QUERY_RESPONSE_SHAPE_UNVERIFIED =
+  'Hand-written TS interface mirrors captured responses (src/core/graphql/queries/); ' +
+  'the Tier-0 read smoke spot-checks load-bearing fields but no runtime schema ' +
+  'validation exists — full-shape drift would surface only as downstream undefineds';
+
 // ---------------------------------------------------------------------------
 // Entry factories (keep the inventory compact; pass overrides to upgrade an
 // entry's class/oracle/evidence as verification lands)
@@ -198,6 +215,34 @@ function responseShape(name: string, overrides?: Partial<LedgerEntry>): LedgerEn
   };
 }
 
+/**
+ * A read query whose operation signature is re-fired against production by
+ * the Tier-0 read smoke on every run (issues #439/#460). `name` is the root
+ * Query field, e.g. 'accounts'. The companion `queryResponseShape` entry
+ * tracks the hand-written response interface separately (still unverified:
+ * B3's warn-mode Zod validation (#437) covers MUTATION responses only, not
+ * the read wrappers).
+ */
+function queryOperation(name: string): LedgerEntry {
+  return {
+    surface: `Query.${name}`,
+    kind: 'operation',
+    oracle: 'smoke:reads',
+    class: 'gated',
+    evidence: READ_SMOKE_GATED,
+  };
+}
+
+function queryResponseShape(name: string): LedgerEntry {
+  return {
+    surface: `Query.${name}:response`,
+    kind: 'response-shape',
+    oracle: null,
+    class: 'unverified',
+    evidence: QUERY_RESPONSE_SHAPE_UNVERIFIED,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // The ledger
 // ---------------------------------------------------------------------------
@@ -237,15 +282,33 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   {
     surface: 'TimeFrame',
     kind: 'enum',
-    oracle: null,
-    class: 'unverified',
+    oracle: 'smoke:conformance',
+    class: 'gated',
     evidence:
-      'String union transcribed from web-app captures (src/core/graphql/queries/_shared.ts); per-operation server validation never probed',
+      'Per-value live probes (all 7 values accepted, YEAR control rejected, 2026-06-11); ' +
+      'gated by scripts/smoke/conformance.ts (issue #439)',
     values: ALL_TIME_FRAMES,
     // Read-side only (live-reads tools); not reachable from write schemas.
     // If TimeFrame is ever added to a write tool, add `toolParams` to THIS
     // entry (don't create a duplicate) so the enum matcher in the ledger
     // test resolves to it.
+  },
+  {
+    surface: 'ColorName',
+    kind: 'enum',
+    oracle: 'smoke:conformance',
+    class: 'gated',
+    evidence:
+      'Value set discovered by error-leak harvesting (40-base × 5-suffix sweep converged on ' +
+      '16 values, "Did you mean" suggestions matched exactly, 2026-06-11); gated by ' +
+      'scripts/smoke/conformance.ts (issue #439)',
+    values: COLOR_NAMES,
+    toolParams: [
+      'create_tag.color_name',
+      'update_tag.color_name',
+      'create_category.color_name',
+      'update_category.color_name',
+    ],
   },
 
   // ----- Transactions -----------------------------------------------------
@@ -387,6 +450,54 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   gatedInputField('EditAccountInput.name'),
   gatedInputField('EditAccountInput.isUserHidden'),
   responseShape('editAccount'),
+
+  // ----- Read queries (issues #439/#460) -------------------------------------
+  // One operation + one response-shape entry per QUERY in
+  // operations.generated.ts, named by root Query field.
+  // `tests/scripts/read-smoke-coverage.test.ts` enforces this list stays in
+  // lockstep with the generated operations AND with the Tier-0 read smoke
+  // checks (scripts/smoke/read-checks.ts) — a new query cannot ship without
+  // both a smoke check and these entries.
+  queryOperation('user'),
+  queryResponseShape('user'),
+  queryOperation('accounts'),
+  queryResponseShape('accounts'),
+  // Singular Account: generated document exists but has no hand-written
+  // wrapper; the read smoke probes the document directly.
+  queryOperation('account'),
+  queryResponseShape('account'),
+  queryOperation('transactions'),
+  queryResponseShape('transactions'),
+  queryOperation('categories'),
+  queryResponseShape('categories'),
+  queryOperation('tags'),
+  queryResponseShape('tags'),
+  queryOperation('recurrings'),
+  queryResponseShape('recurrings'),
+  queryOperation('unpaidUpcomingRecurrings'),
+  queryResponseShape('unpaidUpcomingRecurrings'),
+  queryOperation('monthlySpending'),
+  queryResponseShape('monthlySpending'),
+  queryOperation('networthHistory'),
+  queryResponseShape('networthHistory'),
+  queryOperation('accountBalanceHistory'),
+  queryResponseShape('accountBalanceHistory'),
+  queryOperation('holdings'),
+  queryResponseShape('holdings'),
+  queryOperation('aggregatedHoldings'),
+  queryResponseShape('aggregatedHoldings'),
+  queryOperation('investmentBalance'),
+  queryResponseShape('investmentBalance'),
+  queryOperation('investmentLiveBalance'),
+  queryResponseShape('investmentLiveBalance'),
+  queryOperation('investmentAllocation'),
+  queryResponseShape('investmentAllocation'),
+  queryOperation('topMovers'),
+  queryResponseShape('topMovers'),
+  queryOperation('securityPrices'),
+  queryResponseShape('securityPrices'),
+  queryOperation('securityPricesHighFrequency'),
+  queryResponseShape('securityPricesHighFrequency'),
 ];
 
 // ---------------------------------------------------------------------------

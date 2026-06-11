@@ -83,6 +83,23 @@ export function addTypenameToSelectionSets(query: string): string {
     },
   });
 
+  // Pass 1b: strip client-only DIRECTIVES that the server schema doesn't
+  // declare (e.g. `@connection`, Apollo's cache-pagination hint on
+  // UpcomingRecurrings). Unlike `@client`, these annotate a field that must
+  // STAY in the query — only the directive is removed. Apollo's
+  // documentTransform drops them before the wire send; forwarding them
+  // unstripped makes the server reject the query with
+  // `Unknown directive "@connection"`.
+  const CLIENT_ONLY_DIRECTIVES = new Set(['connection']);
+  ast = visit(ast, {
+    Directive(node) {
+      if (CLIENT_ONLY_DIRECTIVES.has(node.name.value)) {
+        return null; // removes just this directive, keeping its field
+      }
+      return undefined;
+    },
+  });
+
   // Pass 2: inject __typename into every non-root selection set (matches
   // Apollo's documentTransform behavior required by Copilot's GraphQL server).
   let transformed = visit(ast, {
