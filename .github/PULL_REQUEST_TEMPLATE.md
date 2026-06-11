@@ -14,11 +14,11 @@
 
 None
 
-## Bug fix?
-
-<!-- If this PR fixes a bug, uncomment and fill the bug-response template
+<!-- Fixing a bug? Replace this whole comment with the filled template below
      (CONTRIBUTING.md "Bug Response Ritual" — fix the class, not the instance).
-     Delete this section otherwise.
+     Not a bug fix: just delete this comment; nothing renders either way.
+
+## Bug fix?
 
 Root cause:       <one line — the mechanism, not the symptom>
 Bug class:        <name the class this bug belongs to, not the instance>
