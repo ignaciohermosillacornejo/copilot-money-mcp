@@ -39,6 +39,11 @@ cat > "$PLIST" <<EOF
 </plist>
 EOF
 
+plutil -lint "$PLIST" > /dev/null || {
+  echo "error: generated plist is malformed — check for XML special chars in $REPO_DIR / $BUN" >&2
+  exit 1
+}
+
 launchctl bootout "gui/$(id -u)" "$PLIST" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 echo "installed: $LABEL (weekly, Monday 10:00 local)"

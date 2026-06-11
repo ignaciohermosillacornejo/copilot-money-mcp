@@ -41,11 +41,14 @@ export function summarizeSmokeOutput(result: ScheduledSmokeResult, output: strin
     return 'no Copilot browser session — drift NOT checked (log into app.copilot.money)';
   }
   const lines = output.trim().split('\n');
-  const marker = lines.reverse().find((l) => l.startsWith('[smoke]'));
+  const marker = [...lines].reverse().find((l) => l.startsWith('[smoke]'));
   return (marker ?? lines[0] ?? '').slice(0, 300);
 }
 
 function notify(title: string, message: string): void {
+  // COPILOT_MCP_SMOKE_QUIET suppresses the popup (tests exercise the fail
+  // path; they must not spam real notifications).
+  if (process.env.COPILOT_MCP_SMOKE_QUIET) return;
   // Best-effort; a failed notification must not mask the status write.
   spawnSync('osascript', [
     '-e',
@@ -72,7 +75,8 @@ function main(): void {
   let report: string | null = null;
   if (result === 'fail') {
     mkdirSync(reportsDir, { recursive: true });
-    report = join(reportsDir, `${lastRun.slice(0, 10)}-smoke-failure.txt`);
+    // Full timestamp so same-day failures (manual kickstarts) never overwrite.
+    report = join(reportsDir, `${lastRun.replace(/[:.]/g, '-')}-smoke-failure.txt`);
     writeFileSync(report, output);
     notify(
       'Copilot MCP drift check FAILED',
