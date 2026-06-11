@@ -47,6 +47,22 @@ describe('summarizeSmokeOutput', () => {
     expect(summarizeSmokeOutput('pass', out)).toBe('[smoke] PASS — all 3 enums match.');
   });
 
+  test('fail summaries also come from the last [smoke] marker line', () => {
+    const out = '[smoke] value ...\n[smoke] FAIL — conformance drift detected:\ndetail line';
+    expect(summarizeSmokeOutput('fail', out)).toBe('[smoke] FAIL — conformance drift detected:');
+  });
+
+  test('truncates summaries to 300 chars', () => {
+    const out = `[smoke] ${'x'.repeat(500)}`;
+    expect(summarizeSmokeOutput('fail', out).length).toBe(300);
+  });
+
+  test('falls back to the first line when no [smoke] marker exists', () => {
+    expect(summarizeSmokeOutput('fail', 'error: something exploded\nstack')).toBe(
+      'error: something exploded'
+    );
+  });
+
   test('auth-missing has a fixed actionable summary', () => {
     expect(summarizeSmokeOutput('auth-missing', 'whatever')).toContain('drift NOT checked');
   });

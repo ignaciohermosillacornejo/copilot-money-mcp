@@ -78,4 +78,11 @@ describe('readScheduledSmokeStatus', () => {
     const file = statusFile(JSON.stringify({ something: 'else' }));
     expect(readScheduledSmokeStatus(file)).toBeNull();
   });
+
+  test('returns null on an unknown result value (hand-edited file)', () => {
+    const file = statusFile(
+      JSON.stringify({ last_run: '2026-06-11T10:00:00Z', result: 'unknown', summary: 'x' })
+    );
+    expect(readScheduledSmokeStatus(file)).toBeNull();
+  });
 });

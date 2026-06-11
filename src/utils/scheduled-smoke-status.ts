@@ -8,17 +8,24 @@
 import { readFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
+import { z } from 'zod';
 
 export const SCHEDULED_SMOKE_RESULTS = ['pass', 'fail', 'auth-missing'] as const;
 export type ScheduledSmokeResult = (typeof SCHEDULED_SMOKE_RESULTS)[number];
 
-export interface ScheduledSmokeStatus {
-  last_run: string;
-  result: ScheduledSmokeResult;
-  summary: string;
+const ScheduledSmokeStatusSchema = z.object({
+  last_run: z.string(),
+  result: z.enum(SCHEDULED_SMOKE_RESULTS),
+  summary: z.string(),
   /** Dated report file for failures; null for pass/auth-missing. */
-  report: string | null;
-}
+  report: z
+    .string()
+    .nullable()
+    .optional()
+    .transform((v) => v ?? null),
+});
+
+export type ScheduledSmokeStatus = z.infer<typeof ScheduledSmokeStatusSchema>;
 
 export function defaultScheduledSmokeStatusPath(): string {
   return join(homedir(), '.claude', 'copilot-money', 'scheduled-smoke.json');
@@ -39,20 +46,6 @@ export function readScheduledSmokeStatus(
   } catch {
     return null;
   }
-  if (typeof parsed !== 'object' || parsed === null) return null;
-  const obj = parsed as Record<string, unknown>;
-  if (
-    typeof obj.last_run !== 'string' ||
-    typeof obj.summary !== 'string' ||
-    typeof obj.result !== 'string' ||
-    !(SCHEDULED_SMOKE_RESULTS as readonly string[]).includes(obj.result)
-  ) {
-    return null;
-  }
-  return {
-    last_run: obj.last_run,
-    result: obj.result as ScheduledSmokeResult,
-    summary: obj.summary,
-    report: typeof obj.report === 'string' ? obj.report : null,
-  };
+  const result = ScheduledSmokeStatusSchema.safeParse(parsed);
+  return result.success ? result.data : null;
 }
