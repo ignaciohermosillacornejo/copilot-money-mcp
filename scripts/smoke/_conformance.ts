@@ -128,6 +128,14 @@ export async function assertEnumConformance(
 
   // 1. Every value in our constant must be server-valid (no enum error).
   for (const { value, body } of valueResults) {
+    if (body.trim() === '') {
+      failures.push(
+        `${value}: probe produced NO validation errors — a validation-only probe must ` +
+          `never reach execution; the query shape is wrong (rules of engagement)`
+      );
+      smokeLog('value', { enum: enumName, value, error: 'none' });
+      continue;
+    }
     const rejected = body.includes(fragment) && body.includes(`"${value}"`);
     if (rejected) {
       failures.push(`${value}: REJECTED by server but present in our ${enumName} constant`);
