@@ -43,6 +43,12 @@ import {
   getHoldingsTool,
   getBalanceHistoryTool,
 } from './investments.js';
+import {
+  getCacheInfoTool,
+  refreshDatabaseTool,
+  getAccountsTool,
+  getConnectionStatusTool,
+} from './accounts-system.js';
 
 export type { ToolDefinition, ToolContext, LiveToolContext } from './types.js';
 
@@ -75,6 +81,10 @@ export const ALL_TOOL_DEFS: readonly ToolDefinition[] = [
   getInvestmentSplitsTool,
   getHoldingsTool,
   getBalanceHistoryTool,
+  getCacheInfoTool,
+  refreshDatabaseTool,
+  getAccountsTool,
+  getConnectionStatusTool,
 ];
 
 /** Name → definition lookup used by the server's dispatch. */
