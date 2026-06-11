@@ -25,6 +25,10 @@ import {
   classDistribution,
   formatClassDistribution,
 } from '../../src/conformance/ledger.js';
+import {
+  MUTATION_RESPONSE_SCHEMAS,
+  RESPONSE_SHAPE_RUNTIME_CHECK,
+} from '../../src/core/graphql/response-validation.js';
 
 const SMOKE_DIR = join(import.meta.dir, '..', '..', 'scripts', 'smoke');
 
@@ -127,6 +131,25 @@ describe('conformance ledger', () => {
           'when it ships, not before'
       ).toBe(true);
     }
+  });
+
+  test('(b) runtime:zod-warn-gated response shapes exactly match the registered Zod schemas', () => {
+    // Bidirectional: a ledger entry claiming the zod-warn oracle without a
+    // registered schema would be a paper gate; a registered schema without a
+    // ledger entry would be untracked verification. Both directions fail here.
+    const ledgerSurfaces = CONFORMANCE_LEDGER.filter(
+      (entry) =>
+        entry.kind === 'response-shape' &&
+        entry.oracle === `runtime:${RESPONSE_SHAPE_RUNTIME_CHECK}`
+    )
+      .map((entry) => entry.surface)
+      .sort();
+    const registeredSurfaces = Object.values(MUTATION_RESPONSE_SCHEMAS)
+      .map((entry) => entry.surface)
+      .sort();
+    expect(registeredSurfaces).toEqual(ledgerSurfaces);
+    // Guard against the comparison passing vacuously.
+    expect(registeredSurfaces.length).toBeGreaterThanOrEqual(17);
   });
 
   test("(c) class 'gated' requires a non-null oracle", () => {

@@ -16,6 +16,7 @@
  */
 
 import type { FirebaseAuth } from '../auth/firebase-auth.js';
+import { validateMutationResponse } from './response-validation.js';
 
 const ENDPOINT = 'https://app.copilot.money/api/graphql';
 
@@ -289,7 +290,13 @@ export class GraphQLClient {
     const maxAttempts = this.retryDelaysMs.length + 1;
     for (let attempt = 1; ; attempt++) {
       try {
-        return await this.requestOnce<TVariables, TResponse>(operationName, query, variables);
+        const data = await this.requestOnce<TVariables, TResponse>(operationName, query, variables);
+        // Warn-mode response-shape validation (issue #437): logs + counts
+        // drift against the registered Zod schema, never throws, never
+        // alters the payload. Mutations only — live-read queries have their
+        // own response handling.
+        if (kind === 'mutation') validateMutationResponse(operationName, data);
+        return data;
       } catch (e) {
         if (!(e instanceof GraphQLError)) throw e;
         if (attempt >= maxAttempts || !isRetryable(e, kind)) {
