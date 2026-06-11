@@ -76,4 +76,29 @@ describe('assertEnumConformance — silent-acceptance guard', () => {
       }
     );
   });
+
+  test('one silent value among valid siblings fails alone (per-value independence)', async () => {
+    await withRoutedFetch(
+      (query) => {
+        if (query.includes('known_bad')) {
+          return {
+            errors: [{ message: `Value "known_bad" does not exist in "${FRAGMENT_ENUM}" enum.` }],
+          };
+        }
+        if (query.includes('weekly')) return {}; // silent acceptance for this value only
+        return { errors: [{ message: 'Field "z" is not defined by type "SiblingInput".' }] };
+      },
+      async () => {
+        const { failures } = await assertEnumConformance({
+          enumName: FRAGMENT_ENUM,
+          ourValues: ['monthly', 'weekly', 'yearly'],
+          knownBad: 'known_bad',
+          buildQuery,
+          idToken: 'test-token',
+        });
+        expect(failures).toHaveLength(1);
+        expect(failures[0]).toContain('weekly: probe produced NO validation errors');
+      }
+    );
+  });
 });
