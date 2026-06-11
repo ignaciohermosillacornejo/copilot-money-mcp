@@ -80,7 +80,7 @@ export const getAccountsTool = defineTool({
   },
   readOnly: true,
   swappedOutInLiveMode: true,
-  handler: (ctx, args) => ctx.tools.getAccounts(args),
+  handler: (ctx, args) => ctx.tools.getAccounts(args ?? {}),
 });
 
 export const getConnectionStatusTool = defineTool({

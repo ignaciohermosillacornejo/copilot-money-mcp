@@ -13,7 +13,10 @@
  */
 
 import { defineTool } from './types.js';
-import { createLiveToolSchemas, type LiveTransactionsTools } from '../live/transactions.js';
+import {
+  createLiveTransactionsToolSchema,
+  type LiveTransactionsTools,
+} from '../live/transactions.js';
 import { createLiveAccountsToolSchema, type LiveAccountsTools } from '../live/accounts.js';
 import { createLiveCategoriesToolSchema, type LiveCategoriesTools } from '../live/categories.js';
 import { createLiveTagsToolSchema, type LiveTagsTools } from '../live/tags.js';
@@ -40,7 +43,7 @@ import {
 import { createRefreshCacheToolSchema, type RefreshCacheTool } from '../live/refresh-cache.js';
 
 export const getTransactionsLiveTool = defineTool({
-  schema: createLiveToolSchemas()[0]!,
+  schema: createLiveTransactionsToolSchema(),
   readOnly: true,
   requiresLiveReads: true,
   handler: (ctx, args) =>

@@ -139,15 +139,15 @@ export const createRecurringTool = defineTool({
       'The recurring inherits its merchant name, account, and initial amount from that transaction; ' +
       'you only supply the cadence (frequency). Writes directly to Copilot Money via GraphQL.',
     inputSchema: {
-      type: 'object' as const,
+      type: 'object',
       properties: {
         transaction_id: {
-          type: 'string' as const,
+          type: 'string',
           description:
             'ID of an existing transaction to seed the recurring from. The recurring inherits its merchant name, account, and initial amount from this transaction.',
         },
         frequency: {
-          type: 'string' as const,
+          type: 'string',
           enum: [...RECURRING_FREQUENCIES],
           description:
             'How often the recurring repeats. Maps to the Copilot frequency options: ' +
@@ -178,23 +178,23 @@ export const updateRecurringTool = defineTool({
       'At least one mutable field must be provided besides recurring_id. ' +
       'Writes directly to Copilot Money via GraphQL.',
     inputSchema: {
-      type: 'object' as const,
+      type: 'object',
       properties: {
         recurring_id: {
-          type: 'string' as const,
+          type: 'string',
           description: 'ID of the recurring to update.',
         },
         name: {
-          type: 'string' as const,
+          type: 'string',
           description: 'New display name for the recurring series. Must not be empty.',
         },
         category_id: {
-          type: 'string' as const,
+          type: 'string',
           description:
             'New category ID to assign (from get_categories results). Changes the default category for future matched transactions.',
         },
         frequency: {
-          type: 'string' as const,
+          type: 'string',
           enum: [...RECURRING_FREQUENCIES],
           description:
             'How often the recurring repeats. Maps to the Copilot frequency options: ' +
@@ -203,31 +203,31 @@ export const updateRecurringTool = defineTool({
             'SEMIANNUALLY (every 6 months), ANNUALLY (every year).',
         },
         state: {
-          type: 'string' as const,
+          type: 'string',
           enum: [...RECURRING_STATE_VALUES],
           description:
             'State of the recurring. Use set_recurring_state instead if you only want to ' +
             'change state — this tool is for broader edits.',
         },
         rule: {
-          type: 'object' as const,
+          type: 'object',
           description: 'Matching rule. Controls how Copilot auto-detects future payments.',
           properties: {
             name_contains: {
-              type: 'string' as const,
+              type: 'string',
               description: 'Substring that must appear in the merchant/payee name.',
             },
             min_amount: {
-              type: 'string' as const,
+              type: 'string',
               description: 'Minimum amount (as a decimal string) for a transaction to match.',
             },
             max_amount: {
-              type: 'string' as const,
+              type: 'string',
               description: 'Maximum amount (as a decimal string) for a transaction to match.',
             },
             days: {
-              type: 'array' as const,
-              items: { type: 'number' as const },
+              type: 'array',
+              items: { type: 'number' },
               description: 'Days of the month (1-31) when this recurring is expected.',
             },
           },
