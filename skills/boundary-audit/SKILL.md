@@ -134,7 +134,7 @@ aggregate.
 1. Collect incidents:
 
    ```bash
-   gh pr list --state merged --search "merged:>=LAST_AUDIT" --limit 200 --json number,title,mergedAt
+   gh pr list --search "merged:>=LAST_AUDIT" --limit 200 --json number,title,mergedAt
    gh issue list --state all --label bug --search "created:>=LAST_AUDIT" --json number,title,state
    ```
 
@@ -209,7 +209,8 @@ in financial context, and account/bank names.
    when it concerns the ledger/GraphQL surface, `documentation` for docs rot;
    body links the report path and the audit date.
 2. Backfill the issue numbers into the report's findings table.
-3. Branch, commit the report (only the report), open a ready-for-review PR
+3. Branch, commit the report (only the report; commit-message conventions —
+   trailers, PII rules — per CLAUDE.md), open a ready-for-review PR
    titled `audit: boundary audit <YYYY-MM-DD>`, and reference the filed issues
    in the body (plain references — do not write "Closes #N"; the issues stay
    open until their own PRs land).
