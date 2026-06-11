@@ -31,6 +31,12 @@ import {
   createRecurringTool,
   updateRecurringTool,
 } from './recurring.js';
+import {
+  getBudgetsTool,
+  setBudgetTool,
+  getGoalsTool,
+  getGoalHistoryTool,
+} from './budgets-goals.js';
 
 export type { ToolDefinition, ToolContext, LiveToolContext } from './types.js';
 
@@ -55,6 +61,10 @@ export const ALL_TOOL_DEFS: readonly ToolDefinition[] = [
   deleteRecurringTool,
   createRecurringTool,
   updateRecurringTool,
+  getBudgetsTool,
+  setBudgetTool,
+  getGoalsTool,
+  getGoalHistoryTool,
 ];
 
 /** Name → definition lookup used by the server's dispatch. */

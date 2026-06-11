@@ -203,20 +203,13 @@ export class CopilotMoneyServer {
    * @param name - Tool name
    * @param typedArgs - Tool arguments
    */
-  /**
-   * Write tools not yet migrated to the tool registry. Registry-migrated
-   * tools derive their write classification from `ToolDefinition.readOnly`;
-   * names shrink from this set as domains migrate (E1, #446).
-   */
-  private static readonly LEGACY_WRITE_TOOLS = new Set(['set_budget']);
-
   async handleCallTool(name: string, typedArgs?: Record<string, unknown>): Promise<CallToolResult> {
     const toolDef = TOOL_REGISTRY.get(name);
 
-    // Block write tools when not in write mode (before db check so the error is clear)
-    const isWriteTool = toolDef
-      ? !toolDef.readOnly
-      : CopilotMoneyServer.LEGACY_WRITE_TOOLS.has(name);
+    // Block write tools when not in write mode (before db check so the error
+    // is clear). Write classification is derived from the registry — every
+    // write tool is a `ToolDefinition` with `readOnly: false`.
+    const isWriteTool = toolDef !== undefined && !toolDef.readOnly;
     if (isWriteTool && !this.writeEnabled) {
       return {
         content: [
@@ -556,14 +549,6 @@ export class CopilotMoneyServer {
           result = await this.tools.getConnectionStatus();
           break;
 
-        case 'get_budgets':
-          result = await this.tools.getBudgets(typedArgs || {});
-          break;
-
-        case 'get_goals':
-          result = await this.tools.getGoals(typedArgs || {});
-          break;
-
         case 'get_investment_prices':
           result = await this.tools.getInvestmentPrices(typedArgs || {});
           break;
@@ -579,16 +564,6 @@ export class CopilotMoneyServer {
         case 'get_balance_history':
           result = await this.tools.getBalanceHistory(
             (typedArgs as Parameters<typeof this.tools.getBalanceHistory>[0]) || {}
-          );
-          break;
-
-        case 'get_goal_history':
-          result = await this.tools.getGoalHistory(typedArgs || {});
-          break;
-
-        case 'set_budget':
-          result = await this.tools.setBudget(
-            typedArgs as Parameters<typeof this.tools.setBudget>[0]
           );
           break;
 
