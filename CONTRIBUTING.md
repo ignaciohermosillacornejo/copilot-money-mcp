@@ -189,7 +189,25 @@ entry with a comment.
 2. Create a feature branch (`git checkout -b feat/amazing-feature`)
 3. Make changes with tests
 4. Run `bun run check` to verify
-5. Push and open a Pull Request
+5. Push and open a Pull Request — fill every section of the PR template,
+   including "External assumptions" (see `.github/PULL_REQUEST_TEMPLATE.md`)
+
+## Bug Response Ritual
+
+Every bug-fix PR ratchets the system: fix the **class**, not just the instance.
+Copy this template into the PR description and fill every line:
+
+```text
+Root cause:       <one line — the mechanism, not the symptom>
+Bug class:        <name the class this bug belongs to, not the instance>
+Detector added:   <the class-level gate/test that now catches the whole class>
+Siblings checked: <other instances of the class audited; list them or "none found">
+Ledger updated:   <src/conformance/ledger.ts entries touched, or "n/a — not an external-assumption bug">
+```
+
+A regression test for the instance alone does not satisfy "Detector added" — the
+detector must cover the class. Canonical example: the #419→#424 arc (one bad enum
+value → a conformance harness that gates every enum, plus sibling coverage).
 
 ## Publishing to the MCP Registry
 
