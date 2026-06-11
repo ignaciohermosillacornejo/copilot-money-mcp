@@ -123,7 +123,9 @@ Record the table in the report next to `LAST_AUDIT`'s numbers. Findings:
 - `unverified` count grew with no corresponding open follow-up issue
 - `gated` share shrank (an oracle was removed or downgraded)
 - Any `unverified` entry that has survived two consecutive audits with no
-  filed issue → file one now (per-entry, with the surface name in the title)
+  filed issue (i.e. it appeared `unverified` in the previous report and
+  remains `unverified` now) → file one (per-entry, with the surface name in
+  the title)
 
 ## Phase 3 — Bug-class review (retroactive ratchet check)
 
