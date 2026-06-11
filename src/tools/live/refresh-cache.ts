@@ -11,6 +11,7 @@
 import type { LiveCopilotDatabase } from '../../core/live-database.js';
 import type { LiveBalanceHistoryTools } from './balance-history.js';
 import type { LiveInvestmentPricesTools } from './investment-prices.js';
+import type { ToolSchema } from '../tools.js';
 
 const VALID_SCOPES = [
   'all',
@@ -213,7 +214,7 @@ export class RefreshCacheTool {
   }
 }
 
-export function createRefreshCacheToolSchema() {
+export function createRefreshCacheToolSchema(): ToolSchema {
   return {
     name: 'refresh_cache',
     description:

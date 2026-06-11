@@ -15,6 +15,7 @@
 import type { LiveCopilotDatabase } from '../../core/live-database.js';
 import { fetchCategories, type CategoryNode } from '../../core/graphql/queries/categories.js';
 import { parseAmount, roundAmount } from '../../utils/round.js';
+import type { ToolSchema } from '../tools.js';
 
 export interface GetBudgetsLiveArgs {
   /**
@@ -149,7 +150,7 @@ export class LiveBudgetsTools {
   }
 }
 
-export function createLiveBudgetsToolSchema() {
+export function createLiveBudgetsToolSchema(): ToolSchema {
   return {
     name: 'get_budgets_live',
     description:

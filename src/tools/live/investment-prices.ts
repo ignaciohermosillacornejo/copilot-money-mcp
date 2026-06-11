@@ -83,6 +83,7 @@ import { GraphQLError } from '../../core/graphql/client.js';
 import { paginate, DEFAULT_MAX_ROWS } from '../../utils/pagination.js';
 import { FIVE_MIN_MS, ONE_HOUR_MS } from '../../utils/durations.js';
 import { makeTupleKey } from '../../utils/cache-key.js';
+import type { ToolSchema } from '../tools.js';
 
 const DEFAULT_TIME_FRAME: TimeFrame = 'ONE_MONTH';
 
@@ -300,7 +301,7 @@ export class LiveInvestmentPricesTools {
   }
 }
 
-export function createLiveInvestmentPricesToolSchema() {
+export function createLiveInvestmentPricesToolSchema(): ToolSchema {
   return {
     name: 'get_investment_prices_live',
     description:

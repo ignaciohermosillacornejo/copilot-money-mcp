@@ -11,6 +11,7 @@
 
 import type { LiveCopilotDatabase } from '../../core/live-database.js';
 import { fetchCategories, type CategoryNode } from '../../core/graphql/queries/categories.js';
+import type { ToolSchema } from '../tools.js';
 
 export interface GetCategoriesLiveArgs {
   excluded_only?: boolean;
@@ -96,7 +97,7 @@ export class LiveCategoriesTools {
   }
 }
 
-export function createLiveCategoriesToolSchema() {
+export function createLiveCategoriesToolSchema(): ToolSchema {
   return {
     name: 'get_categories_live',
     description:

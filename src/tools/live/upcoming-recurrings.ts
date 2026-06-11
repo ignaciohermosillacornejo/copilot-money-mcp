@@ -18,6 +18,7 @@ import {
   fetchUpcomingRecurrings,
   type UpcomingRecurringNode,
 } from '../../core/graphql/queries/upcoming-recurrings.js';
+import type { ToolSchema } from '../tools.js';
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface GetUpcomingRecurringsLiveArgs {
@@ -90,7 +91,7 @@ export class LiveUpcomingRecurringsTools {
   }
 }
 
-export function createLiveUpcomingRecurringsToolSchema() {
+export function createLiveUpcomingRecurringsToolSchema(): ToolSchema {
   return {
     name: 'get_upcoming_recurrings_live',
     description:
