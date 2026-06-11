@@ -127,9 +127,9 @@ Record the table in the report next to `LAST_AUDIT`'s numbers. Findings:
 
 ## Phase 3 — Bug-class review (retroactive ratchet check)
 
-Apply the D1 ratchet questions to every incident since `LAST_AUDIT` — read
-them together, not one-by-one; bug-class patterns only show up in the
-aggregate.
+Apply the Bug Response Ritual questions (CONTRIBUTING.md, from D1 #444) to
+every incident since `LAST_AUDIT` — read them together, not one-by-one;
+bug-class patterns only show up in the aggregate.
 
 1. Collect incidents:
 
@@ -153,9 +153,9 @@ aggregate.
    - **Siblings?** — was the same class checked across sibling surfaces, or
      only where it bit?
 
-3. Missing class-level detector or unchecked siblings → finding → issue. If
-   CONTRIBUTING.md has the D1 bug-response template, link the issue to it; if
-   D1 hasn't landed yet, apply the questions anyway (they are the template).
+3. Missing class-level detector or unchecked siblings → finding → issue,
+   linking the "Bug Response Ritual" template in CONTRIBUTING.md (the audit
+   questions above are that template, applied retroactively).
 
 ## Phase 4 — Docs freshness
 
