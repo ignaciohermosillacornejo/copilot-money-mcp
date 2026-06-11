@@ -19,6 +19,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createAccountDb } from '../helpers/test-db';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, '..', '..');
@@ -95,9 +96,10 @@ function send(proc: ChildProcessWithoutNullStreams, msg: object): void {
 }
 
 async function startAndInitialize(
-  extractDir: string
+  extractDir: string,
+  cliArgs: string[] = []
 ): Promise<{ proc: ChildProcessWithoutNullStreams; initializeResult: JsonRpcResponse }> {
-  const proc = spawn('node', [join(extractDir, 'dist/cli.js')], {
+  const proc = spawn('node', [join(extractDir, 'dist/cli.js'), ...cliArgs], {
     cwd: extractDir,
     env: { ...process.env, NODE_PATH: '' },
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -122,11 +124,15 @@ async function startAndInitialize(
   }
 }
 
+// Firestore-shaped opaque ID (trivial IDs mask resolution bugs).
+const SYNTHETIC_ACCOUNT_ID = 'qZx8Kw2nRfTb6Lm1Vc3PYd0a';
+
 describe('mcpb bundle', () => {
   let extractDir: string;
+  let syntheticDbDir: string;
   let bundledVersion: string;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     // `unzip` is used to extract the bundle the way Claude Desktop does.
     // Pre-flight so the failure is clear on minimal images (e.g. Alpine).
     try {
@@ -142,11 +148,28 @@ describe('mcpb bundle', () => {
     extractDir = mkdtempSync(join(tmpdir(), 'copilot-mcpb-test-'));
     execSync(`unzip -q ${JSON.stringify(bundlePath)} -d ${JSON.stringify(extractDir)}`);
     bundledVersion = JSON.parse(readFileSync(join(extractDir, 'package.json'), 'utf8')).version;
+
+    // Synthetic LevelDB for the tools/call round-trip test. Built here (in the
+    // test process) and handed to the spawned bundle via --db-path.
+    syntheticDbDir = mkdtempSync(join(tmpdir(), 'copilot-mcpb-db-'));
+    await createAccountDb(syntheticDbDir, [
+      {
+        account_id: SYNTHETIC_ACCOUNT_ID,
+        name: 'Synthetic Checking',
+        account_type: 'depository',
+        subtype: 'checking',
+        current_balance: 100,
+        iso_currency_code: 'USD',
+      },
+    ]);
   }, 120_000);
 
   afterAll(() => {
     if (extractDir) {
       rmSync(extractDir, { recursive: true, force: true });
+    }
+    if (syntheticDbDir) {
+      rmSync(syntheticDbDir, { recursive: true, force: true });
     }
   });
 
@@ -176,6 +199,44 @@ describe('mcpb bundle', () => {
       expect(Array.isArray(tools)).toBe(true);
       // Bundled CLI runs read-only; write tools are excluded.
       expect(tools.length).toBe(14);
+    } finally {
+      proc.kill('SIGTERM');
+    }
+  }, 20_000);
+
+  test('tools/call round-trips a well-formed result over stdio', async () => {
+    const { proc } = await startAndInitialize(extractDir, ['--db-path', syntheticDbDir]);
+    try {
+      send(proc, { jsonrpc: '2.0', method: 'notifications/initialized' });
+      send(proc, {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'get_accounts', arguments: {} },
+      });
+      const response = await readResponse(proc, 2, 10_000);
+
+      expect(response.error).toBeUndefined();
+      const result = response.result as {
+        content: Array<{ type: string; text: string }>;
+        isError?: boolean;
+      };
+      expect(result.isError).toBeFalsy();
+
+      // A well-formed MCP result carries text content blocks whose payload is
+      // valid JSON — this is where non-serializable tool output would surface.
+      expect(Array.isArray(result.content)).toBe(true);
+      expect(result.content.length).toBeGreaterThan(0);
+      const block = result.content[0];
+      expect(block.type).toBe('text');
+
+      const payload = JSON.parse(block.text) as {
+        count: number;
+        accounts: Array<{ account_id: string; name?: string; current_balance?: number }>;
+      };
+      expect(payload.count).toBe(1);
+      expect(payload.accounts[0].account_id).toBe(SYNTHETIC_ACCOUNT_ID);
+      expect(payload.accounts[0].name).toBe('Synthetic Checking');
     } finally {
       proc.kill('SIGTERM');
     }
