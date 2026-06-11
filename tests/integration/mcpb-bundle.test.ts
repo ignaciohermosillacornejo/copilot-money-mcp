@@ -64,11 +64,11 @@ function readResponse(
     const onStderr = (chunk: Buffer) => {
       stderr += chunk.toString('utf8');
     };
-    const onExit = (code: number | null) => {
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
       cleanup();
       reject(
         new Error(
-          `Server exited with code ${code} before responding to id=${id}\n` +
+          `Server exited (code=${code}, signal=${signal}) before responding to id=${id}\n` +
             `stdout buffer: ${buffer}\nstderr: ${stderr}`
         )
       );
@@ -87,7 +87,7 @@ function readResponse(
     };
     proc.stdout.on('data', onData);
     proc.stderr.on('data', onStderr);
-    proc.once('exit', onExit);
+    proc.on('exit', onExit);
   });
 }
 
@@ -237,6 +237,8 @@ describe('mcpb bundle', () => {
       expect(payload.count).toBe(1);
       expect(payload.accounts[0].account_id).toBe(SYNTHETIC_ACCOUNT_ID);
       expect(payload.accounts[0].name).toBe('Synthetic Checking');
+      // Numeric fields exercise the serialization path this test exists for.
+      expect(payload.accounts[0].current_balance).toBe(100);
     } finally {
       proc.kill('SIGTERM');
     }
