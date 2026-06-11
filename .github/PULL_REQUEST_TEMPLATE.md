@@ -16,5 +16,13 @@ None
 
 ## Bug fix?
 
-<!-- If this PR fixes a bug, paste and fill the bug-response template from
-     CONTRIBUTING.md ("Bug Response Ritual"). Delete this section otherwise. -->
+<!-- If this PR fixes a bug, uncomment and fill the bug-response template
+     (CONTRIBUTING.md "Bug Response Ritual" — fix the class, not the instance).
+     Delete this section otherwise.
+
+Root cause:       <one line — the mechanism, not the symptom>
+Bug class:        <name the class this bug belongs to, not the instance>
+Detector added:   <the class-level gate/test that now catches the whole class>
+Siblings checked: <other instances of the class audited; list them or "none found">
+Ledger updated:   <src/conformance/ledger.ts entries touched, or "n/a — not an external-assumption bug">
+-->
