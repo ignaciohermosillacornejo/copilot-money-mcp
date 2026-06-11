@@ -48,6 +48,11 @@ export function smokeLog(msg: string, fields?: Record<string, unknown>): void {
  * raw response the quotes in `... "<EnumName>" enum` are JSON-escaped (`\"`), so
  * a literal-quote fragment would never match the raw text (a false "valid" for
  * every value).
+ *
+ * A non-JSON body (e.g. an HTML error page after the session expires mid-run)
+ * is NOT a GraphQL validation verdict, so it throws instead of returning text:
+ * returning it would never contain any rejection fragment and every probe
+ * built on it would silently look like a pass (a false negative for drift).
  */
 export async function sendValidationProbe(idToken: string, query: string): Promise<string> {
   const response = await fetch(ENDPOINT, {
@@ -63,15 +68,18 @@ export async function sendValidationProbe(idToken: string, query: string): Promi
   });
 
   // Both 200 (errors array) and 400 (validation failure) carry an `errors`
-  // array. Parse it and join the messages so quotes are unescaped; fall back to
-  // raw text if the body isn't JSON.
+  // array. Parse it and join the messages so quotes are unescaped.
   const text = await response.text();
+  let json: { errors?: Array<{ message: string }> };
   try {
-    const json = JSON.parse(text) as { errors?: Array<{ message: string }> };
-    return (json.errors ?? []).map((e) => e.message).join(' || ');
+    json = JSON.parse(text) as { errors?: Array<{ message: string }> };
   } catch {
-    return text;
+    throw new Error(
+      `validation probe got a non-JSON response (HTTP ${response.status}) — ` +
+        `likely an expired or unauthenticated session, not a GraphQL validation verdict`
+    );
   }
+  return (json.errors ?? []).map((e) => e.message).join(' || ');
 }
 
 export interface EnumConformanceOptions {

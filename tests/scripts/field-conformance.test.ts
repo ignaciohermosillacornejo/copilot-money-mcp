@@ -8,14 +8,19 @@
  * Covers:
  *   - assertFieldConformance verdict logic (exists / not-defined / silent
  *     acceptance / control discrimination);
+ *   - sendValidationProbe response handling (mocked fetch): JSON errors are
+ *     joined with unescaped quotes; non-JSON bodies (expired session) throw
+ *     instead of masquerading as a passing probe;
  *   - the check definitions: full coverage of the #436 input types, valid
- *     GraphQL probe shapes, fake-ids-only, malformed-element safety, the
- *     bulkEditTransactions ban, and bidirectional alignment with the
- *     conformance ledger's smoke-gated input-field surfaces.
+ *     GraphQL probe shapes, fake-ids-only, malformed-element safety incl.
+ *     ledger-derived siblings, the bulkEditTransactions ban, and
+ *     bidirectional alignment with the conformance ledger's smoke-gated
+ *     input-field surfaces.
  */
 
 import { describe, expect, test } from 'bun:test';
 import { parse } from 'graphql';
+import { sendValidationProbe } from '../../scripts/smoke/_conformance.js';
 import { assertFieldConformance } from '../../scripts/smoke/_field-conformance.js';
 import {
   ALL_FIELD_CONFORMANCE_CHECKS,
@@ -126,6 +131,43 @@ describe('assertFieldConformance', () => {
 });
 
 // ---------------------------------------------------------------------------
+// sendValidationProbe response handling (mocked fetch — no network)
+// ---------------------------------------------------------------------------
+
+describe('sendValidationProbe', () => {
+  async function withMockedFetch(response: Response, run: () => Promise<void>): Promise<void> {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (() => Promise.resolve(response)) as unknown as typeof fetch;
+    try {
+      await run();
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  }
+
+  test('joins JSON errors[].message with unescaped quotes', async () => {
+    const body = JSON.stringify({
+      errors: [{ message: 'Field "zz" is not defined by type "SomeInput".' }],
+    });
+    await withMockedFetch(new Response(body, { status: 400 }), async () => {
+      const result = await sendValidationProbe('token', 'mutation { x }');
+      expect(result).toBe('Field "zz" is not defined by type "SomeInput".');
+    });
+  });
+
+  test('throws on a non-JSON body — an expired session must not look like a pass', async () => {
+    // An HTML error page contains no rejection fragment; if it were returned
+    // as text, every field probe built on it would read as serverDefined:
+    // true (a silent false negative for drift). It must throw instead.
+    await withMockedFetch(new Response('<html>session expired</html>', { status: 401 }), () =>
+      expect(sendValidationProbe('token', 'mutation { x }')).rejects.toThrow(
+        'non-JSON response (HTTP 401)'
+      )
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Check definitions
 // ---------------------------------------------------------------------------
 
@@ -183,22 +225,35 @@ describe('field conformance checks', () => {
     }
   });
 
-  test('multi-field types include a malformed sibling distinct from the probed field', () => {
+  test('every probe carries a malformed sibling whenever a distinct field exists', () => {
     for (const check of ALL_FIELD_CONFORMANCE_CHECKS) {
-      // Single-field / nested-rule checks carry their malformed element in
-      // the probed value (and the outer frequency sibling for the rule).
-      if (
-        check.inputTypeName === 'AddTransactionToRecurringInput' ||
-        check.inputTypeName === 'EditRecurringInput.rule'
-      ) {
-        continue;
-      }
+      // The nested-rule check carries its malformed sibling OUTSIDE the rule
+      // object (covered by its dedicated test below).
+      if (check.inputTypeName === 'EditRecurringInput.rule') continue;
       for (const field of [...check.fields, check.knownBadField]) {
         const bogusAssignments = [...check.buildQuery(field).matchAll(/(\w+): \{ z: 1 \}/g)].map(
           (m) => m[1]
         );
         expect(bogusAssignments).toContain(field);
-        expect(bogusAssignments.some((name) => name !== field)).toBe(true);
+        // A distinct sibling must appear exactly when the type has another
+        // field to draw it from (single-field types probing their own field
+        // legitimately have none).
+        const expectSibling = check.fields.some((name) => name !== field);
+        expect(bogusAssignments.some((name) => name !== field)).toBe(expectSibling);
+      }
+    }
+  });
+
+  test('malformed siblings are drawn from the ledger-derived field list (never stale)', () => {
+    for (const check of ALL_FIELD_CONFORMANCE_CHECKS) {
+      if (check.inputTypeName === 'EditRecurringInput.rule') continue;
+      for (const field of [...check.fields, check.knownBadField]) {
+        const bogusAssignments = [...check.buildQuery(field).matchAll(/(\w+): \{ z: 1 \}/g)].map(
+          (m) => m[1]
+        );
+        for (const sibling of bogusAssignments.filter((name) => name !== field)) {
+          expect(check.fields).toContain(sibling);
+        }
       }
     }
   });
@@ -213,6 +268,12 @@ describe('field conformance checks', () => {
       expect(query).toContain(`rule: { ${field}: { z: 1 } }`);
       expect(query).toContain('frequency: { z: 1 }');
     }
+    // The outer sibling must itself be a real (ledger-derived) field of the
+    // enclosing EditRecurringInput type.
+    const outer = ALL_FIELD_CONFORMANCE_CHECKS.find(
+      (c) => c.inputTypeName === 'EditRecurringInput'
+    );
+    expect(outer?.fields).toContain('frequency');
   });
 
   test('NEVER probes bulkEditTransactions (rules of engagement)', () => {

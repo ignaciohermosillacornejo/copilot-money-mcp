@@ -26,13 +26,11 @@ import {
 import {
   ALL_FIELD_CONFORMANCE_CHECKS,
   assertFieldConformance,
+  type FieldConformanceResult,
 } from './field-conformance-checks.js';
 import { formatClassDistribution } from '../../src/conformance/ledger.js';
 
-interface ConformanceResult {
-  label: string;
-  failures: string[];
-}
+type ConformanceResult = EnumConformanceResult | FieldConformanceResult;
 
 async function main(): Promise<void> {
   let idToken: string;

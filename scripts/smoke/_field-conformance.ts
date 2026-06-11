@@ -32,7 +32,13 @@ import { sendValidationProbe, smokeLog } from './_conformance.js';
 
 /** The exact Apollo unknown-input-field error prefix for `field`. We match
  * without the trailing type name because the server's internal input-type
- * names are not guaranteed to equal our local interface names. */
+ * names are not guaranteed to equal our local interface names.
+ *
+ * Substring matching is safe ONLY because the fragment keeps BOTH double
+ * quotes around the field name: `Field "name" is not defined` cannot match
+ * inside the error for a longer field (`Field "colorName" is not defined`)
+ * since `"` must immediately precede the name. Do not weaken this to an
+ * unquoted or suffix-only match. */
 function notDefinedFragment(field: string): string {
   return `Field "${field}" is not defined`;
 }

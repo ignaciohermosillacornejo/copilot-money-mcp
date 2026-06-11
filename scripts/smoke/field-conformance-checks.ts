@@ -18,8 +18,10 @@
  *     resolver runs;
  *   - where the input type has a second known field, a malformed sibling
  *     (`<sibling>: { z: 1 }`) is added as defense in depth (same pattern as
- *     the enum probes); single-field input types rely on the probed value
- *     alone, which is still validation-fatal;
+ *     the enum probes); the sibling is drawn from the type's own
+ *     ledger-derived field list so it cannot go stale, and probes with no
+ *     distinct sibling rely on the probed value alone, which is still
+ *     validation-fatal;
  *   - `bulkEditTransactions` is NEVER probed — it reaches the data layer on
  *     empty input (see introspection-recon.md) and is permanently off-limits.
  */
@@ -62,8 +64,8 @@ function ledgerFields(inputTypeName: string): readonly string[] {
 /**
  * `<field>: { z: 1 }` plus the first sibling ≠ field, also malformed.
  * `siblings` lists known-existing fields of the type to draw the malformed
- * sibling from; empty for single-field input types (the probed value alone
- * still guarantees validation failure).
+ * sibling from; when none qualifies (single-field input types probing their
+ * own field) the probed value alone still guarantees validation failure.
  */
 function assignments(field: string, siblings: readonly string[]): string {
   const sibling = siblings.find((candidate) => candidate !== field);
@@ -71,16 +73,24 @@ function assignments(field: string, siblings: readonly string[]): string {
   return sibling ? `${probe}, ${sibling}: ${BOGUS_VALUE}` : probe;
 }
 
+/**
+ * The malformed-sibling pool is the type's own ledger-derived field list, so
+ * it can never go stale relative to what we declare (a hardcoded sibling
+ * could outlive a field rename and skew the probe's error message).
+ * `siblingPool` overrides this only for the nested rule check, whose wrap
+ * supplies its malformed sibling at the OUTER input level instead.
+ */
 function check(
   inputTypeName: string,
-  siblings: readonly string[],
-  wrap: (fieldAssignments: string) => string
+  wrap: (fieldAssignments: string) => string,
+  siblingPool?: readonly string[]
 ): FieldConformanceCheck {
+  const fields = ledgerFields(inputTypeName);
   return {
     inputTypeName,
-    fields: ledgerFields(inputTypeName),
+    fields,
     knownBadField: KNOWN_BAD_FIELD,
-    buildQuery: (fieldName) => wrap(assignments(fieldName, siblings)),
+    buildQuery: (fieldName) => wrap(assignments(fieldName, siblingPool ?? fields)),
   };
 }
 
@@ -92,7 +102,6 @@ export const ALL_FIELD_CONFORMANCE_CHECKS: readonly FieldConformanceCheck[] = [
   // ----- Transactions -------------------------------------------------------
   check(
     'CreateTransactionInput',
-    ['categoryId', 'name'],
     (a) => `mutation FieldProbe {
   createTransaction(itemId: "x", accountId: "x", input: { ${a} }) {
     __typename
@@ -101,7 +110,6 @@ export const ALL_FIELD_CONFORMANCE_CHECKS: readonly FieldConformanceCheck[] = [
   ),
   check(
     'EditTransactionInput',
-    ['categoryId', 'name'],
     (a) => `mutation FieldProbe {
   editTransaction(itemId: "x", accountId: "x", id: "x", input: { ${a} }) {
     __typename
@@ -110,18 +118,17 @@ export const ALL_FIELD_CONFORMANCE_CHECKS: readonly FieldConformanceCheck[] = [
   ),
   check(
     'SplitTransactionInput',
-    ['categoryId', 'name'],
     (a) => `mutation FieldProbe {
   splitTransaction(itemId: "x", accountId: "x", id: "x", input: [{ ${a} }]) {
     __typename
   }
 }`
   ),
-  // Single-field input type — no sibling exists; the probed value alone is
-  // validation-fatal (ID/unknown-field both fail before execution).
+  // Single-field input type: probing its one field yields no distinct sibling
+  // (the probed value alone is validation-fatal); the control probe still
+  // draws that field as its malformed sibling.
   check(
     'AddTransactionToRecurringInput',
-    [],
     (a) => `mutation FieldProbe {
   addTransactionToRecurring(itemId: "x", accountId: "x", id: "x", input: { ${a} }) {
     __typename
@@ -132,7 +139,6 @@ export const ALL_FIELD_CONFORMANCE_CHECKS: readonly FieldConformanceCheck[] = [
   // ----- Recurrings ---------------------------------------------------------
   check(
     'CreateRecurringInput',
-    ['frequency', 'transaction'],
     (a) => `mutation FieldProbe {
   createRecurring(input: { ${a} }) {
     __typename
@@ -141,7 +147,6 @@ export const ALL_FIELD_CONFORMANCE_CHECKS: readonly FieldConformanceCheck[] = [
   ),
   check(
     'EditRecurringInput',
-    ['frequency', 'state'],
     (a) => `mutation FieldProbe {
   editRecurring(id: "x", input: { ${a} }) {
     __typename
@@ -149,22 +154,23 @@ export const ALL_FIELD_CONFORMANCE_CHECKS: readonly FieldConformanceCheck[] = [
 }`
   ),
   // Nested rule object: probed field sits INSIDE rule; the malformed sibling
-  // (`frequency: { z: 1 }`) sits at the outer level, so the request fails
-  // validation even if every rule subfield were somehow accepted.
+  // (`frequency: { z: 1 }`, a real EditRecurringInput field) sits at the
+  // outer level, so the request fails validation even if every rule subfield
+  // were somehow accepted. siblingPool is empty so no rule subfield is added
+  // next to the probed one.
   check(
     'EditRecurringInput.rule',
-    [],
     (a) => `mutation FieldProbe {
   editRecurring(id: "x", input: { rule: { ${a} }, frequency: ${BOGUS_VALUE} }) {
     __typename
   }
-}`
+}`,
+    []
   ),
 
   // ----- Categories ---------------------------------------------------------
   check(
     'CreateCategoryInput',
-    ['isExcluded', 'name'],
     (a) => `mutation FieldProbe {
   createCategory(input: { ${a} }) {
     __typename
@@ -173,7 +179,6 @@ export const ALL_FIELD_CONFORMANCE_CHECKS: readonly FieldConformanceCheck[] = [
   ),
   check(
     'EditCategoryInput',
-    ['isExcluded', 'name'],
     (a) => `mutation FieldProbe {
   editCategory(id: "x", input: { ${a} }) {
     __typename
@@ -184,7 +189,6 @@ export const ALL_FIELD_CONFORMANCE_CHECKS: readonly FieldConformanceCheck[] = [
   // ----- Tags ---------------------------------------------------------------
   check(
     'CreateTagInput',
-    ['colorName', 'name'],
     (a) => `mutation FieldProbe {
   createTag(input: { ${a} }) {
     __typename
@@ -193,7 +197,6 @@ export const ALL_FIELD_CONFORMANCE_CHECKS: readonly FieldConformanceCheck[] = [
   ),
   check(
     'EditTagInput',
-    ['colorName', 'name'],
     (a) => `mutation FieldProbe {
   editTag(id: "x", input: { ${a} }) {
     __typename
@@ -204,7 +207,6 @@ export const ALL_FIELD_CONFORMANCE_CHECKS: readonly FieldConformanceCheck[] = [
   // ----- Accounts -----------------------------------------------------------
   check(
     'EditAccountInput',
-    ['isUserHidden', 'name'],
     (a) => `mutation FieldProbe {
   editAccount(itemId: "x", id: "x", input: { ${a} }) {
     __typename
