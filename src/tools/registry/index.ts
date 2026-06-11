@@ -24,6 +24,13 @@ import {
   deleteCategoryTool,
 } from './categories.js';
 import { createTagTool, deleteTagTool, updateTagTool } from './tags.js';
+import {
+  getRecurringTransactionsTool,
+  setRecurringStateTool,
+  deleteRecurringTool,
+  createRecurringTool,
+  updateRecurringTool,
+} from './recurring.js';
 
 export type { ToolDefinition, ToolContext, LiveToolContext } from './types.js';
 
@@ -43,6 +50,11 @@ export const ALL_TOOL_DEFS: readonly ToolDefinition[] = [
   createTagTool,
   deleteTagTool,
   updateTagTool,
+  getRecurringTransactionsTool,
+  setRecurringStateTool,
+  deleteRecurringTool,
+  createRecurringTool,
+  updateRecurringTool,
 ];
 
 /** Name → definition lookup used by the server's dispatch. */

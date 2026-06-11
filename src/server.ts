@@ -208,13 +208,7 @@ export class CopilotMoneyServer {
    * tools derive their write classification from `ToolDefinition.readOnly`;
    * names shrink from this set as domains migrate (E1, #446).
    */
-  private static readonly LEGACY_WRITE_TOOLS = new Set([
-    'set_budget',
-    'set_recurring_state',
-    'create_recurring',
-    'update_recurring',
-    'delete_recurring',
-  ]);
+  private static readonly LEGACY_WRITE_TOOLS = new Set(['set_budget']);
 
   async handleCallTool(name: string, typedArgs?: Record<string, unknown>): Promise<CallToolResult> {
     const toolDef = TOOL_REGISTRY.get(name);
@@ -562,10 +556,6 @@ export class CopilotMoneyServer {
           result = await this.tools.getConnectionStatus();
           break;
 
-        case 'get_recurring_transactions':
-          result = await this.tools.getRecurringTransactions(typedArgs || {});
-          break;
-
         case 'get_budgets':
           result = await this.tools.getBudgets(typedArgs || {});
           break;
@@ -599,30 +589,6 @@ export class CopilotMoneyServer {
         case 'set_budget':
           result = await this.tools.setBudget(
             typedArgs as Parameters<typeof this.tools.setBudget>[0]
-          );
-          break;
-
-        case 'set_recurring_state':
-          result = await this.tools.setRecurringState(
-            typedArgs as Parameters<typeof this.tools.setRecurringState>[0]
-          );
-          break;
-
-        case 'delete_recurring':
-          result = await this.tools.deleteRecurring(
-            typedArgs as Parameters<typeof this.tools.deleteRecurring>[0]
-          );
-          break;
-
-        case 'create_recurring':
-          result = await this.tools.createRecurring(
-            typedArgs as Parameters<typeof this.tools.createRecurring>[0]
-          );
-          break;
-
-        case 'update_recurring':
-          result = await this.tools.updateRecurring(
-            typedArgs as Parameters<typeof this.tools.updateRecurring>[0]
           );
           break;
 
