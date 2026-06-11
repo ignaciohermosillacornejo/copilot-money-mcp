@@ -77,7 +77,7 @@ Anything external, new, and unlisted is a finding.
    `bun run generate:graphql` from `docs/graphql-capture/operations/`):
 
    ```bash
-   grep -hoE "(query|mutation) [A-Za-z]+" src/core/graphql/operations.generated.ts | sort -u
+   grep -hoE "(query|mutation) [A-Za-z0-9_]+" src/core/graphql/operations.generated.ts | sort -u
    ```
 
    Note the operation *name* (e.g. `EditBudget`) can differ from the mutation
@@ -139,6 +139,9 @@ aggregate.
    ```
 
    Keep PRs whose titles/bodies are `fix:`-shaped or reference a bug issue.
+   Don't trust the `bug` label alone — bug reports sometimes land unlabeled,
+   so also scan the merged-PR list for incident-shaped titles (`fix`,
+   `regression`, "wrong", "missing") regardless of label.
 
 2. For each incident, answer in the report (one table row each):
    - **Class** — name the bug *class*, not the instance (e.g. "local enum
