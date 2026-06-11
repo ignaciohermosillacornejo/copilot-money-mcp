@@ -11,6 +11,13 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { parse, print, visit, Kind } from 'graphql';
 
+/**
+ * Apollo client-only DIRECTIVES the server schema doesn't declare. They
+ * annotate a field that must stay in the query — only the directive is
+ * stripped (Apollo's documentTransform does the same before the wire send).
+ */
+const CLIENT_ONLY_DIRECTIVES = new Set(['connection']);
+
 const IN_SCOPE_MUTATIONS = [
   'CreateTransaction',
   'EditTransaction',
@@ -83,14 +90,11 @@ export function addTypenameToSelectionSets(query: string): string {
     },
   });
 
-  // Pass 1b: strip client-only DIRECTIVES that the server schema doesn't
-  // declare (e.g. `@connection`, Apollo's cache-pagination hint on
-  // UpcomingRecurrings). Unlike `@client`, these annotate a field that must
-  // STAY in the query — only the directive is removed. Apollo's
-  // documentTransform drops them before the wire send; forwarding them
-  // unstripped makes the server reject the query with
-  // `Unknown directive "@connection"`.
-  const CLIENT_ONLY_DIRECTIVES = new Set(['connection']);
+  // Pass 1b: strip client-only DIRECTIVES (CLIENT_ONLY_DIRECTIVES, e.g.
+  // `@connection`, Apollo's cache-pagination hint on UpcomingRecurrings).
+  // Unlike `@client`, these annotate a field that must STAY in the query —
+  // only the directive is removed. Forwarding them unstripped makes the
+  // server reject the query with `Unknown directive "@connection"`.
   ast = visit(ast, {
     Directive(node) {
       if (CLIENT_ONLY_DIRECTIVES.has(node.name.value)) {
