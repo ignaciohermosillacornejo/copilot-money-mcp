@@ -137,6 +137,11 @@ export const getHoldingsTool = defineTool({
   handler: (ctx, args) => ctx.tools.getHoldings(args || {}),
 });
 
+// Deliberately NOT `swappedOutInLiveMode`: get_balance_history_live's
+// GraphQL backing is strictly narrower than cache mode — single-account,
+// timeFrame-enum only, no weekly/monthly downsampling, no name/limit
+// enrichment. Both tools coexist so callers can pick the right shape per
+// use case.
 export const getBalanceHistoryTool = defineTool({
   schema: {
     name: 'get_balance_history',
