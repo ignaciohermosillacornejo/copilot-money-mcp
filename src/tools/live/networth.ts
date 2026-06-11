@@ -29,6 +29,7 @@ import {
   type NetworthHistoryNode,
 } from '../../core/graphql/queries/networth.js';
 import { paginate, DEFAULT_MAX_ROWS } from '../../utils/pagination.js';
+import type { ToolSchema } from '../tools.js';
 
 const DEFAULT_TIME_FRAME = 'YTD';
 
@@ -120,7 +121,7 @@ export class LiveNetworthTools {
   }
 }
 
-export function createLiveNetworthToolSchema() {
+export function createLiveNetworthToolSchema(): ToolSchema {
   return {
     name: 'get_networth_live',
     description:

@@ -10,6 +10,7 @@
 import type { LiveCopilotDatabase } from '../../core/live-database.js';
 import { fetchAccounts, type AccountNode } from '../../core/graphql/queries/accounts.js';
 import { roundAmount } from '../../utils/round.js';
+import type { ToolSchema } from '../tools.js';
 
 export interface GetAccountsLiveArgs {
   account_type?: string;
@@ -94,7 +95,7 @@ export class LiveAccountsTools {
   }
 }
 
-export function createLiveAccountsToolSchema() {
+export function createLiveAccountsToolSchema(): ToolSchema {
   return {
     name: 'get_accounts_live',
     description:

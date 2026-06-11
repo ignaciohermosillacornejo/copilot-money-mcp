@@ -8,6 +8,7 @@
 
 import type { LiveCopilotDatabase } from '../../core/live-database.js';
 import { fetchTags, type TagNode } from '../../core/graphql/queries/tags.js';
+import type { ToolSchema } from '../tools.js';
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface GetTagsLiveArgs {
@@ -57,7 +58,7 @@ export class LiveTagsTools {
   }
 }
 
-export function createLiveTagsToolSchema() {
+export function createLiveTagsToolSchema(): ToolSchema {
   return {
     name: 'get_tags_live',
     description:

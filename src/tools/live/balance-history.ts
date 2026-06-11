@@ -52,6 +52,7 @@ import { ALL_TIME_FRAMES, type TimeFrame } from '../../core/graphql/queries/_sha
 import { paginate, DEFAULT_MAX_ROWS } from '../../utils/pagination.js';
 import { ONE_HOUR_MS } from '../../utils/durations.js';
 import { makeTupleKey } from '../../utils/cache-key.js';
+import type { ToolSchema } from '../tools.js';
 
 export interface GetBalanceHistoryLiveArgs {
   /** Plaid item ID. Required by the server. */
@@ -176,7 +177,7 @@ export class LiveBalanceHistoryTools {
   }
 }
 
-export function createLiveBalanceHistoryToolSchema() {
+export function createLiveBalanceHistoryToolSchema(): ToolSchema {
   return {
     name: 'get_balance_history_live',
     description:

@@ -23,6 +23,7 @@ import {
   type DailySpendNode,
 } from '../../core/graphql/queries/monthly-spend.js';
 import { parseAmount } from '../../utils/round.js';
+import type { ToolSchema } from '../tools.js';
 
 export interface GetMonthlySpendLiveArgs {
   /**
@@ -103,7 +104,7 @@ export class LiveMonthlySpendTools {
   }
 }
 
-export function createLiveMonthlySpendToolSchema() {
+export function createLiveMonthlySpendToolSchema(): ToolSchema {
   return {
     name: 'get_monthly_spend_live',
     description:

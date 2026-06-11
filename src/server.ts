@@ -14,7 +14,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { CopilotDatabase } from './core/database.js';
 import { CopilotMoneyTools, createToolSchemas, createWriteToolSchemas } from './tools/index.js';
-import { TOOL_REGISTRY } from './tools/registry/index.js';
+import { TOOL_REGISTRY, type LiveToolContext } from './tools/registry/index.js';
 import { GraphQLClient } from './core/graphql/client.js';
 import { FirebaseAuth } from './core/auth/firebase-auth.js';
 import { extractRefreshToken } from './core/auth/browser-token.js';
@@ -59,19 +59,8 @@ export class CopilotMoneyServer {
   private server: Server;
   private writeEnabled: boolean;
   private liveReadsEnabled: boolean;
-  private liveTools?: LiveTransactionsTools;
-  private liveAccountsTools?: LiveAccountsTools;
-  private liveCategoriesTools?: LiveCategoriesTools;
-  private liveTagsTools?: LiveTagsTools;
-  private liveBudgetsTools?: LiveBudgetsTools;
-  private liveRecurringTools?: LiveRecurringTools;
-  private liveNetworthTools?: LiveNetworthTools;
-  private liveUpcomingRecurringsTools?: LiveUpcomingRecurringsTools;
-  private liveMonthlySpendTools?: LiveMonthlySpendTools;
-  private liveHoldingsTools?: LiveHoldingsTools;
-  private liveBalanceHistoryTools?: LiveBalanceHistoryTools;
-  private liveInvestmentPricesTools?: LiveInvestmentPricesTools;
-  private refreshCacheTool?: RefreshCacheTool;
+  /** Live (GraphQL-backed) tool instances; present only with --live-reads. */
+  private live?: LiveToolContext;
 
   /**
    * Initialize the MCP server.
@@ -101,23 +90,23 @@ export class CopilotMoneyServer {
     let liveDb: LiveCopilotDatabase | undefined;
     if (liveReadsEnabled && graphqlClient) {
       liveDb = new LiveCopilotDatabase(graphqlClient, this.db);
-      this.liveTools = new LiveTransactionsTools(liveDb);
-      this.liveAccountsTools = new LiveAccountsTools(liveDb);
-      this.liveCategoriesTools = new LiveCategoriesTools(liveDb);
-      this.liveTagsTools = new LiveTagsTools(liveDb);
-      this.liveBudgetsTools = new LiveBudgetsTools(liveDb);
-      this.liveRecurringTools = new LiveRecurringTools(liveDb);
-      this.liveNetworthTools = new LiveNetworthTools(liveDb);
-      this.liveUpcomingRecurringsTools = new LiveUpcomingRecurringsTools(liveDb);
-      this.liveMonthlySpendTools = new LiveMonthlySpendTools(liveDb);
-      this.liveHoldingsTools = new LiveHoldingsTools(liveDb);
-      this.liveBalanceHistoryTools = new LiveBalanceHistoryTools(liveDb);
-      this.liveInvestmentPricesTools = new LiveInvestmentPricesTools(liveDb);
-      this.refreshCacheTool = new RefreshCacheTool(
-        liveDb,
-        this.liveBalanceHistoryTools,
-        this.liveInvestmentPricesTools
-      );
+      const balanceHistory = new LiveBalanceHistoryTools(liveDb);
+      const investmentPrices = new LiveInvestmentPricesTools(liveDb);
+      this.live = {
+        transactions: new LiveTransactionsTools(liveDb),
+        accounts: new LiveAccountsTools(liveDb),
+        categories: new LiveCategoriesTools(liveDb),
+        tags: new LiveTagsTools(liveDb),
+        budgets: new LiveBudgetsTools(liveDb),
+        recurring: new LiveRecurringTools(liveDb),
+        networth: new LiveNetworthTools(liveDb),
+        upcomingRecurrings: new LiveUpcomingRecurringsTools(liveDb),
+        monthlySpend: new LiveMonthlySpendTools(liveDb),
+        holdings: new LiveHoldingsTools(liveDb),
+        balanceHistory,
+        investmentPrices,
+        refreshCache: new RefreshCacheTool(liveDb, balanceHistory, investmentPrices),
+      };
     }
 
     this.tools = new CopilotMoneyTools(this.db, graphqlClient, liveDb);
@@ -222,158 +211,15 @@ export class CopilotMoneyServer {
       };
     }
 
-    // Block live-read tools when --live-reads is off (before db check — this is a
-    // configuration issue independent of cache availability).
-    if (name === 'get_transactions_live' && !this.liveTools) {
+    // Block live-read tools when --live-reads is off (before db check — this
+    // is a configuration issue independent of cache availability). Live
+    // classification is derived from the registry (`requiresLiveReads`).
+    if (toolDef?.requiresLiveReads && !this.live) {
       return {
         content: [
           {
             type: 'text' as const,
-            text: 'get_transactions_live is only available when the server runs with --live-reads.',
-          },
-        ],
-        isError: true,
-      };
-    }
-
-    if (name === 'get_accounts_live' && !this.liveAccountsTools) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: 'get_accounts_live is only available when the server runs with --live-reads.',
-          },
-        ],
-        isError: true,
-      };
-    }
-
-    if (name === 'get_categories_live' && !this.liveCategoriesTools) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: 'get_categories_live is only available when the server runs with --live-reads.',
-          },
-        ],
-        isError: true,
-      };
-    }
-
-    if (name === 'get_tags_live' && !this.liveTagsTools) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: 'get_tags_live is only available when the server runs with --live-reads.',
-          },
-        ],
-        isError: true,
-      };
-    }
-
-    if (name === 'get_budgets_live' && !this.liveBudgetsTools) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: 'get_budgets_live is only available when the server runs with --live-reads.',
-          },
-        ],
-        isError: true,
-      };
-    }
-
-    if (name === 'get_recurring_live' && !this.liveRecurringTools) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: 'get_recurring_live is only available when the server runs with --live-reads.',
-          },
-        ],
-        isError: true,
-      };
-    }
-
-    if (name === 'get_networth_live' && !this.liveNetworthTools) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: 'get_networth_live is only available when the server runs with --live-reads.',
-          },
-        ],
-        isError: true,
-      };
-    }
-
-    if (name === 'get_upcoming_recurrings_live' && !this.liveUpcomingRecurringsTools) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: 'get_upcoming_recurrings_live is only available when the server runs with --live-reads.',
-          },
-        ],
-        isError: true,
-      };
-    }
-
-    if (name === 'get_monthly_spend_live' && !this.liveMonthlySpendTools) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: 'get_monthly_spend_live is only available when the server runs with --live-reads.',
-          },
-        ],
-        isError: true,
-      };
-    }
-
-    if (name === 'get_holdings_live' && !this.liveHoldingsTools) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: 'get_holdings_live is only available when the server runs with --live-reads.',
-          },
-        ],
-        isError: true,
-      };
-    }
-
-    if (name === 'get_balance_history_live' && !this.liveBalanceHistoryTools) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: 'get_balance_history_live is only available when the server runs with --live-reads.',
-          },
-        ],
-        isError: true,
-      };
-    }
-
-    if (name === 'get_investment_prices_live' && !this.liveInvestmentPricesTools) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: 'get_investment_prices_live is only available when the server runs with --live-reads.',
-          },
-        ],
-        isError: true,
-      };
-    }
-
-    if (name === 'refresh_cache' && !this.refreshCacheTool) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: 'refresh_cache is only available when the server runs with --live-reads.',
+            text: `${name} is only available when the server runs with --live-reads.`,
           },
         ],
         isError: true,
@@ -394,156 +240,20 @@ export class CopilotMoneyServer {
       };
     }
 
+    if (!toolDef) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Unknown tool: ${name}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+
     try {
-      let result: unknown;
-
-      // Registry-migrated tool: dispatch through its single definition.
-      if (toolDef) {
-        result = await toolDef.handler({ tools: this.tools }, typedArgs);
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(result, null, 2),
-            },
-          ],
-        };
-      }
-
-      // Legacy dispatch for tools not yet migrated to the registry (E1, #446).
-      switch (name) {
-        case 'get_transactions_live':
-          // liveTools non-null invariant enforced by the early guard above.
-          result = await this.liveTools!.getTransactions(
-            (typedArgs as Parameters<NonNullable<typeof this.liveTools>['getTransactions']>[0]) ||
-              {}
-          );
-          break;
-
-        case 'get_accounts_live':
-          // liveAccountsTools non-null invariant enforced by the early guard above.
-          result = await this.liveAccountsTools!.getAccounts(
-            (typedArgs as Parameters<
-              NonNullable<typeof this.liveAccountsTools>['getAccounts']
-            >[0]) ?? {}
-          );
-          break;
-
-        case 'get_categories_live':
-          result = await this.liveCategoriesTools!.getCategories(
-            (typedArgs as Parameters<
-              NonNullable<typeof this.liveCategoriesTools>['getCategories']
-            >[0]) ?? {}
-          );
-          break;
-
-        case 'get_tags_live':
-          result = await this.liveTagsTools!.getTags(
-            (typedArgs as Parameters<NonNullable<typeof this.liveTagsTools>['getTags']>[0]) ?? {}
-          );
-          break;
-
-        case 'get_budgets_live':
-          result = await this.liveBudgetsTools!.getBudgets(
-            (typedArgs as Parameters<NonNullable<typeof this.liveBudgetsTools>['getBudgets']>[0]) ??
-              {}
-          );
-          break;
-
-        case 'get_recurring_live':
-          result = await this.liveRecurringTools!.getRecurring(
-            (typedArgs as Parameters<
-              NonNullable<typeof this.liveRecurringTools>['getRecurring']
-            >[0]) ?? {}
-          );
-          break;
-
-        case 'get_networth_live':
-          // liveNetworthTools non-null invariant enforced by the early guard above.
-          result = await this.liveNetworthTools!.getNetworth(
-            (typedArgs as Parameters<
-              NonNullable<typeof this.liveNetworthTools>['getNetworth']
-            >[0]) ?? {}
-          );
-          break;
-
-        case 'get_upcoming_recurrings_live':
-          // liveUpcomingRecurringsTools non-null invariant enforced by the early guard above.
-          result = await this.liveUpcomingRecurringsTools!.getUpcomingRecurrings(
-            (typedArgs as Parameters<
-              NonNullable<typeof this.liveUpcomingRecurringsTools>['getUpcomingRecurrings']
-            >[0]) ?? {}
-          );
-          break;
-
-        case 'get_monthly_spend_live':
-          // liveMonthlySpendTools non-null invariant enforced by the early guard above.
-          result = await this.liveMonthlySpendTools!.getMonthlySpend(
-            (typedArgs as Parameters<
-              NonNullable<typeof this.liveMonthlySpendTools>['getMonthlySpend']
-            >[0]) ?? {}
-          );
-          break;
-
-        case 'get_holdings_live':
-          // liveHoldingsTools non-null invariant enforced by the early guard above.
-          result = await this.liveHoldingsTools!.getHoldings(
-            (typedArgs as Parameters<
-              NonNullable<typeof this.liveHoldingsTools>['getHoldings']
-            >[0]) ?? {}
-          );
-          break;
-
-        case 'get_balance_history_live':
-          // liveBalanceHistoryTools non-null invariant enforced by the early guard above.
-          // item_id and account_id are required by the schema; the runtime
-          // validation (in getBalanceHistory) surfaces a clean error if a
-          // caller bypasses the schema.
-          result = await this.liveBalanceHistoryTools!.getBalanceHistory(
-            (typedArgs ?? {}) as unknown as Parameters<
-              NonNullable<typeof this.liveBalanceHistoryTools>['getBalanceHistory']
-            >[0]
-          );
-          break;
-
-        case 'get_investment_prices_live':
-          // liveInvestmentPricesTools non-null invariant enforced by the early guard above.
-          // security_id is required by the schema; the runtime validation
-          // (in getInvestmentPrices) surfaces a clean error if a caller
-          // bypasses the schema.
-          result = await this.liveInvestmentPricesTools!.getInvestmentPrices(
-            (typedArgs ?? {}) as unknown as Parameters<
-              NonNullable<typeof this.liveInvestmentPricesTools>['getInvestmentPrices']
-            >[0]
-          );
-          break;
-
-        case 'refresh_cache':
-          // refreshCacheTool non-null invariant enforced by the early guard above.
-          try {
-            result = await this.refreshCacheTool!.refresh(
-              (typedArgs as Parameters<NonNullable<typeof this.refreshCacheTool>['refresh']>[0]) ??
-                {}
-            );
-          } catch (err) {
-            return {
-              content: [{ type: 'text' as const, text: (err as Error).message }],
-              isError: true,
-            };
-          }
-          break;
-
-        default:
-          return {
-            content: [
-              {
-                type: 'text' as const,
-                text: `Unknown tool: ${name}`,
-              },
-            ],
-            isError: true,
-          };
-      }
+      const result = await toolDef.handler({ tools: this.tools, live: this.live }, typedArgs);
 
       // Format response
       return {
@@ -562,7 +272,7 @@ export class CopilotMoneyServer {
         content: [
           {
             type: 'text' as const,
-            text: `Error: ${errorMessage}`,
+            text: toolDef.formatError ? toolDef.formatError(errorMessage) : `Error: ${errorMessage}`,
           },
         ],
         isError: true,

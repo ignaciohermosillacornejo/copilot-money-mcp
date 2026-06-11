@@ -2096,7 +2096,7 @@ describe('--live-reads accounts wiring', () => {
       _cache_newest_fetched_at: '2025-01-01T00:00:00.000Z',
       _cache_hit: false,
     };
-    (server as any).liveAccountsTools = {
+    (server as any).live.accounts = {
       getAccounts: async (_args: unknown) => stubResult,
     };
 
@@ -2168,7 +2168,7 @@ describe('--live-reads categories wiring', () => {
       _cache_newest_fetched_at: '2025-01-01T00:00:00.000Z',
       _cache_hit: false,
     };
-    (server as any).liveCategoriesTools = {
+    (server as any).live.categories = {
       getCategories: async (_args: unknown) => stubResult,
     };
 
@@ -2226,7 +2226,7 @@ describe('--live-reads tags wiring', () => {
       _cache_newest_fetched_at: '2025-01-01T00:00:00.000Z',
       _cache_hit: false,
     };
-    (server as any).liveTagsTools = {
+    (server as any).live.tags = {
       getTags: async (_args: unknown) => stubResult,
     };
 
@@ -2294,7 +2294,7 @@ describe('--live-reads budgets wiring', () => {
       _cache_newest_fetched_at: '2025-01-01T00:00:00.000Z',
       _cache_hit: false,
     };
-    (server as any).liveBudgetsTools = {
+    (server as any).live.budgets = {
       getBudgets: async (_args: unknown) => stubResult,
     };
 
@@ -2370,7 +2370,7 @@ describe('--live-reads recurring wiring', () => {
       _cache_newest_fetched_at: '2025-01-01T00:00:00.000Z',
       _cache_hit: false,
     };
-    (server as any).liveRecurringTools = {
+    (server as any).live.recurring = {
       getRecurring: async (_args: unknown) => stubResult,
     };
 
@@ -2426,7 +2426,7 @@ describe('--live-reads networth wiring', () => {
       _cache_newest_fetched_at: '2025-01-01T00:00:00.000Z',
       _cache_hit: false,
     };
-    (server as any).liveNetworthTools = {
+    (server as any).live.networth = {
       getNetworth: async (_args: unknown) => stubResult,
     };
 
@@ -2499,7 +2499,7 @@ describe('--live-reads upcoming-recurrings wiring', () => {
       _cache_newest_fetched_at: '2025-01-01T00:00:00.000Z',
       _cache_hit: false,
     };
-    (server as any).liveUpcomingRecurringsTools = {
+    (server as any).live.upcomingRecurrings = {
       getUpcomingRecurrings: async (_args: unknown) => stubResult,
     };
 
@@ -2558,7 +2558,7 @@ describe('--live-reads monthly-spend wiring', () => {
       _cache_newest_fetched_at: '2025-01-01T00:00:00.000Z',
       _cache_hit: false,
     };
-    (server as any).liveMonthlySpendTools = {
+    (server as any).live.monthlySpend = {
       getMonthlySpend: async (_args: unknown) => stubResult,
     };
 
@@ -2635,7 +2635,7 @@ describe('--live-reads holdings wiring', () => {
       _cache_newest_fetched_at: '2025-01-01T00:00:00.000Z',
       _cache_hit: false,
     };
-    (server as any).liveHoldingsTools = {
+    (server as any).live.holdings = {
       getHoldings: async (_args: unknown) => stubResult,
     };
 

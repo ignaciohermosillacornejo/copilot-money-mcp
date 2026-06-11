@@ -14,6 +14,7 @@
 
 import type { LiveCopilotDatabase } from '../../core/live-database.js';
 import { fetchRecurrings, type RecurringNode } from '../../core/graphql/queries/recurrings.js';
+import type { ToolSchema } from '../tools.js';
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface GetRecurringLiveArgs {
@@ -78,7 +79,7 @@ export class LiveRecurringTools {
   }
 }
 
-export function createLiveRecurringToolSchema() {
+export function createLiveRecurringToolSchema(): ToolSchema {
   return {
     name: 'get_recurring_live',
     description:

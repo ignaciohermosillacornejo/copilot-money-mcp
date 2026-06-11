@@ -35,6 +35,7 @@ import type { LiveCopilotDatabase } from '../../core/live-database.js';
 import { fetchHoldings, type HoldingNode } from '../../core/graphql/queries/holdings.js';
 import { computeTotalReturnPercent, roundAmount } from '../../utils/round.js';
 import { clampMaxRows, clampOffset } from '../../utils/pagination.js';
+import type { ToolSchema } from '../tools.js';
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 10_000;
@@ -159,7 +160,7 @@ export class LiveHoldingsTools {
   }
 }
 
-export function createLiveHoldingsToolSchema() {
+export function createLiveHoldingsToolSchema(): ToolSchema {
   return {
     name: 'get_holdings_live',
     description:
