@@ -18,7 +18,7 @@ export interface TagNode {
   colorName: string | null;
 }
 
-interface TagsResponse {
+export interface TagsResponse {
   tags: TagNode[];
 }
 

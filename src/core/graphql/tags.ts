@@ -6,7 +6,7 @@ export interface CreateTagInput {
   colorName: string;
 }
 
-interface CreateTagResponse {
+export interface CreateTagResponse {
   createTag: {
     id: string;
     name: string;
@@ -40,7 +40,7 @@ export interface EditTagChanges {
   colorName?: string;
 }
 
-interface EditTagResponse {
+export interface EditTagResponse {
   editTag: {
     id: string;
     name: string;
@@ -68,11 +68,15 @@ export async function editTag(
   return { id: tag.id, changed };
 }
 
+export interface DeleteTagResponse {
+  deleteTag: boolean;
+}
+
 export async function deleteTag(
   client: GraphQLClient,
   args: { id: string }
 ): Promise<{ id: string; deleted: true }> {
-  await client.mutate<{ id: string }, { deleteTag: boolean }>('DeleteTag', DELETE_TAG, {
+  await client.mutate<{ id: string }, DeleteTagResponse>('DeleteTag', DELETE_TAG, {
     id: args.id,
   });
   return { id: args.id, deleted: true };

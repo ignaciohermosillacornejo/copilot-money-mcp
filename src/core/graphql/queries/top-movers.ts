@@ -45,7 +45,7 @@ export interface FetchTopMoversOpts {
   filter?: TopMoversFilter;
 }
 
-interface TopMoversResponse {
+export interface TopMoversResponse {
   topMovers: TopMoverNode[];
 }
 

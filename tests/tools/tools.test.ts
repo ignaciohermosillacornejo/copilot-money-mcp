@@ -702,12 +702,13 @@ describe('CopilotMoneyTools', () => {
 
       const result = await tools.getTransactions({ transaction_type: 'tagged' });
       expect(result.count).toBe(2);
-      const tagNames = result.type_specific_data?.tags?.map((t: { tag: string }) => t.tag);
+      const tags = result.type_specific_data?.tags as
+        | Array<{ tag: string; count: number }>
+        | undefined;
+      const tagNames = tags?.map((t) => t.tag);
       expect(tagNames).toContain('frenchpolynesia');
       expect(tagNames).toContain('vacation');
-      const vacationTag = result.type_specific_data?.tags?.find(
-        (t: { tag: string }) => t.tag === 'vacation'
-      );
+      const vacationTag = tags?.find((t) => t.tag === 'vacation');
       expect(vacationTag?.count).toBe(2);
     });
   });
@@ -2810,6 +2811,7 @@ describe('reviewTransactions', () => {
         editTransaction: {
           transaction: {
             id: 'txn1',
+            name: 'Coffee Shop',
             categoryId: 'food_and_drink_coffee',
             userNotes: null,
             isReviewed: true,
@@ -2841,6 +2843,7 @@ describe('reviewTransactions', () => {
         editTransaction: {
           transaction: {
             id: vars.id,
+            name: 'Coffee Shop',
             categoryId: 'c',
             userNotes: null,
             isReviewed: true,
@@ -2873,6 +2876,7 @@ describe('reviewTransactions', () => {
         editTransaction: {
           transaction: {
             id: 'txn1',
+            name: 'Coffee Shop',
             categoryId: 'c',
             userNotes: null,
             isReviewed: false,
@@ -2897,7 +2901,14 @@ describe('reviewTransactions', () => {
     const client = createMockGraphQLClient({
       EditTransaction: {
         editTransaction: {
-          transaction: { id: 'txn1', categoryId: 'c', userNotes: null, isReviewed: true, tags: [] },
+          transaction: {
+            id: 'txn1',
+            name: 'Coffee Shop',
+            categoryId: 'c',
+            userNotes: null,
+            isReviewed: true,
+            tags: [],
+          },
         },
       },
     });
@@ -3433,6 +3444,7 @@ describe('updateRecurring', () => {
             id: 'rec-1',
             name: 'Netflix HD',
             categoryId: 'entertainment',
+            frequency: 'MONTHLY',
             state: 'ACTIVE',
           },
         },
@@ -3453,7 +3465,13 @@ describe('updateRecurring', () => {
     const client = createMockGraphQLClient({
       EditRecurring: {
         editRecurring: {
-          recurring: { id: 'rec-1', name: 'Trimmed', categoryId: 'entertainment', state: 'ACTIVE' },
+          recurring: {
+            id: 'rec-1',
+            name: 'Trimmed',
+            categoryId: 'entertainment',
+            frequency: 'MONTHLY',
+            state: 'ACTIVE',
+          },
         },
       },
     });
@@ -3476,7 +3494,13 @@ describe('updateRecurring', () => {
     const client = createMockGraphQLClient({
       EditRecurring: {
         editRecurring: {
-          recurring: { id: 'rec-1', name: 'Netflix', categoryId: 'subscriptions', state: 'ACTIVE' },
+          recurring: {
+            id: 'rec-1',
+            name: 'Netflix',
+            categoryId: 'subscriptions',
+            frequency: 'MONTHLY',
+            state: 'ACTIVE',
+          },
         },
       },
     });
@@ -3569,7 +3593,13 @@ describe('updateRecurring', () => {
     const client = createMockGraphQLClient({
       EditRecurring: {
         editRecurring: {
-          recurring: { id: 'rec-1', name: 'Netflix', categoryId: 'entertainment', state: 'PAUSED' },
+          recurring: {
+            id: 'rec-1',
+            name: 'Netflix',
+            categoryId: 'entertainment',
+            frequency: 'MONTHLY',
+            state: 'PAUSED',
+          },
         },
       },
     });
@@ -3595,17 +3625,15 @@ describe('updateRecurring', () => {
     const client = createMockGraphQLClient({
       EditRecurring: {
         editRecurring: {
+          // NOTE: no `rule` here — production deliberately does not select
+          // `rule { ... }` on the EditRecurring response (issue #288); the
+          // typed mock map rejects it. `changed.rule` is echoed from input.
           recurring: {
             id: 'rec-1',
             name: 'Netflix',
             categoryId: 'entertainment',
+            frequency: 'MONTHLY',
             state: 'ACTIVE',
-            rule: {
-              nameContains: 'NETFLIX',
-              minAmount: 10,
-              maxAmount: 20,
-              days: [1, 15],
-            },
           },
         },
       },
@@ -3644,8 +3672,8 @@ describe('updateRecurring', () => {
             id: 'rec-1',
             name: 'Netflix',
             categoryId: 'entertainment',
+            frequency: 'MONTHLY',
             state: 'ARCHIVED',
-            rule: { days: [5] },
           },
         },
       },

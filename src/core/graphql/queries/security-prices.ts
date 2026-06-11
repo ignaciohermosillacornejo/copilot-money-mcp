@@ -29,7 +29,7 @@ export interface FetchSecurityPricesOpts {
   timeFrame?: TimeFrame;
 }
 
-interface SecurityPricesResponse {
+export interface SecurityPricesResponse {
   securityPrices: SecurityPricePointNode[];
 }
 

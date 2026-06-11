@@ -4,7 +4,7 @@
  * GraphQL-stub tests in write-tools.test.ts and write-tools-phase3.test.ts.
  */
 
-import { describe, test, expect, beforeEach } from 'bun:test';
+import { describe, test, expect } from 'bun:test';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import type { Transaction, Account, Category, Tag, Budget } from '../../src/models/index.js';
@@ -256,6 +256,7 @@ describe('cross-tool interactions', () => {
         editTransaction: {
           transaction: {
             id: 'txn_cross',
+            name: 'Cross Tool Txn',
             categoryId: 'food_and_drink',
             userNotes: null,
             isReviewed: false,
@@ -293,6 +294,7 @@ describe('cross-tool interactions', () => {
         editTransaction: {
           transaction: {
             id: 'txn_cross',
+            name: 'Cross Tool Txn',
             categoryId: 'cat-custom',
             userNotes: null,
             isReviewed: false,
@@ -342,6 +344,7 @@ describe('cross-tool interactions', () => {
         editTransaction: {
           transaction: {
             id: vars.id,
+            name: 'Coffee Shop',
             categoryId: 'c',
             userNotes: null,
             isReviewed: vars.input.isReviewed,

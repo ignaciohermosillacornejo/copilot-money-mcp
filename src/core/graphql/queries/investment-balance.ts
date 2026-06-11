@@ -28,7 +28,7 @@ export interface FetchInvestmentBalanceOpts {
   timeFrame?: TimeFrame;
 }
 
-interface InvestmentBalanceResponse {
+export interface InvestmentBalanceResponse {
   investmentBalance: InvestmentBalanceNode[];
 }
 

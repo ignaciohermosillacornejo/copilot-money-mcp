@@ -31,7 +31,7 @@ export interface FetchAccountBalanceHistoryOpts {
   timeFrame?: TimeFrame;
 }
 
-interface BalanceHistoryResponse {
+export interface BalanceHistoryResponse {
   accountBalanceHistory: BalanceHistoryPointNode[];
 }
 

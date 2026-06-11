@@ -29,7 +29,7 @@ export interface FetchNetworthHistoryOpts {
   timeFrame: string;
 }
 
-interface NetworthResponse {
+export interface NetworthResponse {
   networthHistory: NetworthHistoryNode[];
 }
 

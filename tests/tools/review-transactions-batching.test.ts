@@ -17,6 +17,7 @@ import { CopilotDatabase } from '../../src/core/database.js';
 import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
 import { GraphQLError } from '../../src/core/graphql/client.js';
 import type { GraphQLClient } from '../../src/core/graphql/client.js';
+import type { EditTransactionResponse } from '../../src/core/graphql/transactions.js';
 
 function makeMockDb(txnIds: string[]): CopilotDatabase {
   const db = new CopilotDatabase('/nonexistent');
@@ -45,6 +46,7 @@ describe('review_transactions dispatches one EditTransaction per id', () => {
         editTransaction: {
           transaction: {
             id: 'txn-1',
+            name: 'Coffee Shop',
             categoryId: 'c',
             userNotes: null,
             isReviewed: true,
@@ -76,6 +78,7 @@ describe('review_transactions dispatches one EditTransaction per id', () => {
         editTransaction: {
           transaction: {
             id: vars.id,
+            name: 'Coffee Shop',
             categoryId: 'c',
             userNotes: null,
             isReviewed: true,
@@ -106,6 +109,7 @@ describe('review_transactions dispatches one EditTransaction per id', () => {
         editTransaction: {
           transaction: {
             id: vars.id,
+            name: 'Coffee Shop',
             categoryId: 'c',
             userNotes: null,
             isReviewed: vars.input.isReviewed,
@@ -137,7 +141,7 @@ describe('review_transactions respects 5-parallel concurrency cap', () => {
     let totalCalls = 0;
 
     const client = {
-      mutate: mock(async (op: string, _query: string, vars: unknown) => {
+      mutate: mock(async (_op: string, _query: string, vars: unknown): Promise<unknown> => {
         inflight++;
         totalCalls++;
         maxConcurrent = Math.max(maxConcurrent, inflight);
@@ -145,10 +149,11 @@ describe('review_transactions respects 5-parallel concurrency cap', () => {
         try {
           await new Promise((r) => setTimeout(r, delayMs));
           const v = vars as { id: string; input: { isReviewed: boolean } };
-          return {
+          const response: EditTransactionResponse = {
             editTransaction: {
               transaction: {
                 id: v.id,
+                name: 'Coffee Shop',
                 categoryId: 'c',
                 userNotes: null,
                 isReviewed: v.input.isReviewed,
@@ -156,6 +161,7 @@ describe('review_transactions respects 5-parallel concurrency cap', () => {
               },
             },
           };
+          return response;
         } finally {
           inflight--;
         }

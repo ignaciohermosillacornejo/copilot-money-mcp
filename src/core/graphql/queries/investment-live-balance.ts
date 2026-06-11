@@ -17,7 +17,7 @@ import type { GraphQLClient } from '../client.js';
 import { INVESTMENT_LIVE_BALANCE } from '../operations.generated.js';
 import type { InvestmentBalanceNode } from './investment-balance.js';
 
-interface InvestmentLiveBalanceResponse {
+export interface InvestmentLiveBalanceResponse {
   investmentLiveBalance: InvestmentBalanceNode;
 }
 

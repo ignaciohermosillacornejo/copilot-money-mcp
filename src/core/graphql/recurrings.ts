@@ -25,7 +25,7 @@ export interface CreateRecurringInput {
   transaction: { accountId: string; itemId: string; transactionId: string };
 }
 
-interface CreateRecurringResponse {
+export interface CreateRecurringResponse {
   createRecurring: {
     id: string;
     name: string;
@@ -87,7 +87,7 @@ interface EditRecurringWireRule {
   days?: number[];
 }
 
-interface EditRecurringResponse {
+export interface EditRecurringResponse {
   // Captured wire shape: editRecurring wraps a nested `recurring` object.
   // We deliberately do NOT select `rule { ... }` on the response (issue #288):
   // `RecurringRule.nameContains` is non-nullable in Copilot's schema but the
@@ -181,12 +181,16 @@ export async function editRecurring(
   return { id: recurring.id, changed };
 }
 
+export interface DeleteRecurringResponse {
+  deleteRecurring: boolean;
+}
+
 export async function deleteRecurring(
   client: GraphQLClient,
   args: { id: string }
 ): Promise<{ id: string; deleted: true }> {
   // Note: variable is named `deleteRecurringId`, not `id` — preserved from captured wire shape.
-  await client.mutate<{ deleteRecurringId: string }, { deleteRecurring: boolean }>(
+  await client.mutate<{ deleteRecurringId: string }, DeleteRecurringResponse>(
     'DeleteRecurring',
     DELETE_RECURRING,
     { deleteRecurringId: args.id }

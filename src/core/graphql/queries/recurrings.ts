@@ -49,7 +49,7 @@ export interface RecurringNode {
   payments: RecurringPaymentNode[];
 }
 
-interface RecurringsResponse {
+export interface RecurringsResponse {
   recurrings: RecurringNode[];
 }
 
