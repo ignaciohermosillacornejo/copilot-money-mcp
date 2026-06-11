@@ -22,11 +22,13 @@ function walk(dir: string): string[] {
   });
 }
 
-// tsconfig.tests.json is JSONC (leading // comments) — strip them to parse.
+// tsconfig.tests.json is JSONC — strip full-line and inline // comments
+// before parsing. The comment marker must sit at line start or after
+// whitespace so protocol-relative strings like "https://x" survive.
 function readJsonc(path: string): { include: string[] } {
   const raw = readFileSync(join(repoRoot, path), 'utf-8')
     .split('\n')
-    .filter((line) => !line.trimStart().startsWith('//'))
+    .map((line) => line.replace(/(^|\s)\/\/.*$/, '$1'))
     .join('\n');
   return JSON.parse(raw) as { include: string[] };
 }
