@@ -3227,8 +3227,10 @@ export class CopilotMoneyTools {
   }): Promise<{ success: true; tag_id: string; name: string; color_name: string }> {
     const client = this.getGraphQLClient();
     if (!args.name?.trim()) throw new Error('Tag name must not be empty');
-    // Default matches the captured CreateTag example.
-    const colorName = validateColorName(args.color_name ?? 'PURPLE2');
+    // Default matches the captured CreateTag example; only a caller-supplied
+    // value needs guarding (the literal default is a known-good ColorName).
+    const colorName: ColorName =
+      args.color_name === undefined ? 'PURPLE2' : validateColorName(args.color_name);
 
     try {
       const result = await gqlCreateTag(client, {
