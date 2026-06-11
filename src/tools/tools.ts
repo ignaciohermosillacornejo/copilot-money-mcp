@@ -23,6 +23,7 @@ import {
   createCategory as gqlCreateCategory,
   editCategory as gqlEditCategory,
   deleteCategory as gqlDeleteCategory,
+  type EditCategoryInput,
 } from '../core/graphql/categories.js';
 import type { CategoryNode } from '../core/graphql/queries/categories.js';
 import type { TagNode } from '../core/graphql/queries/tags.js';
@@ -31,7 +32,9 @@ import {
   createTag as gqlCreateTag,
   editTag as gqlEditTag,
   deleteTag as gqlDeleteTag,
+  type EditTagInput,
 } from '../core/graphql/tags.js';
+import { COLOR_NAMES, type ColorName } from '../core/graphql/colors.js';
 import {
   createRecurring as gqlCreateRecurring,
   editRecurring as gqlEditRecurring,
@@ -105,6 +108,19 @@ function validateDocId(id: string, label: string): void {
   if (!SAFE_ID_RE.test(id)) {
     throw new Error(`Invalid ${label} format: ${id}`);
   }
+}
+
+/**
+ * Validate a `color_name` argument against the server's `ColorName` enum
+ * (issue #439, same pattern as the RECURRING_FREQUENCIES guard) and narrow
+ * it to the wire type. Rejecting locally gives a clear MCP error instead of
+ * a server-side GRAPHQL_VALIDATION_FAILED round-trip.
+ */
+function validateColorName(value: string): ColorName {
+  if (!(COLOR_NAMES as readonly string[]).includes(value)) {
+    throw new Error(`color_name must be one of: ${COLOR_NAMES.join(', ')}. Got: ${value}`);
+  }
+  return value as ColorName;
 }
 
 /**
@@ -2403,6 +2419,7 @@ export class CopilotMoneyTools {
     if (!args.name?.trim()) throw new Error('Category name must not be empty');
     if (!args.color_name?.trim()) throw new Error('color_name is required');
     if (!args.emoji?.trim()) throw new Error('emoji is required');
+    const colorName = validateColorName(args.color_name);
 
     // Copilot's GraphQL schema does not accept parentId on CreateCategoryInput
     // (nor on EditCategoryInput). Parent/child category hierarchies exist in
@@ -2422,7 +2439,7 @@ export class CopilotMoneyTools {
       const result = await gqlCreateCategory(client, {
         input: {
           name: args.name.trim(),
-          colorName: args.color_name,
+          colorName,
           emoji: args.emoji,
           isExcluded: args.is_excluded ?? false,
         },
@@ -3210,7 +3227,8 @@ export class CopilotMoneyTools {
   }): Promise<{ success: true; tag_id: string; name: string; color_name: string }> {
     const client = this.getGraphQLClient();
     if (!args.name?.trim()) throw new Error('Tag name must not be empty');
-    const colorName = args.color_name ?? 'PURPLE2'; // default matches captured CreateTag example
+    // Default matches the captured CreateTag example.
+    const colorName = validateColorName(args.color_name ?? 'PURPLE2');
 
     try {
       const result = await gqlCreateTag(client, {
@@ -3276,9 +3294,9 @@ export class CopilotMoneyTools {
     is_excluded?: boolean;
   }): Promise<{ success: true; category_id: string; updated: string[] }> {
     const client = this.getGraphQLClient();
-    const input: Record<string, unknown> = {};
+    const input: EditCategoryInput = {};
     if (args.name !== undefined) input.name = args.name;
-    if (args.color_name !== undefined) input.colorName = args.color_name;
+    if (args.color_name !== undefined) input.colorName = validateColorName(args.color_name);
     if (args.emoji !== undefined) input.emoji = args.emoji;
     if (args.is_excluded !== undefined) input.isExcluded = args.is_excluded;
     if (Object.keys(input).length === 0) {
@@ -3482,9 +3500,9 @@ export class CopilotMoneyTools {
     color_name?: string;
   }): Promise<{ success: true; tag_id: string; updated: string[] }> {
     const client = this.getGraphQLClient();
-    const input: Record<string, unknown> = {};
+    const input: EditTagInput = {};
     if (args.name !== undefined) input.name = args.name;
-    if (args.color_name !== undefined) input.colorName = args.color_name;
+    if (args.color_name !== undefined) input.colorName = validateColorName(args.color_name);
     if (Object.keys(input).length === 0) {
       throw new Error('update_tag requires at least one field to update');
     }
@@ -4819,9 +4837,10 @@ export function createWriteToolSchemas(): ToolSchema[] {
           },
           color_name: {
             type: 'string',
+            enum: [...COLOR_NAMES],
             description:
               'Optional palette token from Copilot (e.g. "PURPLE2", "OLIVE1", "RED1"). ' +
-              'Defaults to "PURPLE2" when omitted. See existing tags for valid values.',
+              'Defaults to "PURPLE2" when omitted.',
           },
         },
         required: ['name'],
@@ -4870,9 +4889,9 @@ export function createWriteToolSchemas(): ToolSchema[] {
           },
           color_name: {
             type: 'string',
+            enum: [...COLOR_NAMES],
             description:
-              'Named color from the Copilot palette (e.g., "RED1", "OLIVE1", "PURPLE2"). ' +
-              'See existing categories via get_categories for valid values.',
+              'Named color from the Copilot palette (e.g., "RED1", "OLIVE1", "PURPLE2").',
           },
           emoji: {
             type: 'string',
@@ -4917,6 +4936,7 @@ export function createWriteToolSchemas(): ToolSchema[] {
           },
           color_name: {
             type: 'string',
+            enum: [...COLOR_NAMES],
             description:
               'New named color from the Copilot palette (e.g., "RED1", "OLIVE1", "PURPLE2").',
           },
@@ -5060,9 +5080,8 @@ export function createWriteToolSchemas(): ToolSchema[] {
           },
           color_name: {
             type: 'string',
-            description:
-              'New palette token from Copilot (e.g. "PURPLE2", "OLIVE1", "RED1"). ' +
-              'See existing tags for valid values.',
+            enum: [...COLOR_NAMES],
+            description: 'New palette token from Copilot (e.g. "PURPLE2", "OLIVE1", "RED1").',
           },
         },
         required: ['tag_id'],

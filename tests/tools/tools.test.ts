@@ -3004,15 +3004,15 @@ describe('createTag', () => {
   test('passes through explicit colorName', async () => {
     const client = createMockGraphQLClient({
       CreateTag: {
-        createTag: { id: 'tag-xyz', name: 'Business', colorName: 'BLUE' },
+        createTag: { id: 'tag-xyz', name: 'Business', colorName: 'BLUE1' },
       },
     });
     tools = new CopilotMoneyTools(mockDb, client);
 
-    const result = await tools.createTag({ name: 'Business', color_name: 'BLUE' });
-    expect(result.color_name).toBe('BLUE');
+    const result = await tools.createTag({ name: 'Business', color_name: 'BLUE1' });
+    expect(result.color_name).toBe('BLUE1');
     expect(client._calls[0].variables).toEqual({
-      input: { name: 'Business', colorName: 'BLUE' },
+      input: { name: 'Business', colorName: 'BLUE1' },
     });
   });
 
@@ -3041,6 +3041,17 @@ describe('createTag', () => {
     const client = createMockGraphQLClient({});
     tools = new CopilotMoneyTools(mockDb, client);
     await expect(tools.createTag({ name: '   ' })).rejects.toThrow('Tag name must not be empty');
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('rejects a color_name outside the ColorName enum (no dispatch)', async () => {
+    // 'GREEN2' is plausible (five palette bases have a *2 variant) but not a
+    // real server value — the local guard must reject before any round-trip.
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+    await expect(tools.createTag({ name: 'vacation', color_name: 'GREEN2' })).rejects.toThrow(
+      /color_name must be one of/
+    );
     expect(client._calls).toHaveLength(0);
   });
 
@@ -3106,20 +3117,20 @@ describe('createCategory', () => {
   test('dispatches CreateCategory with all required fields', async () => {
     const client = createMockGraphQLClient({
       CreateCategory: {
-        createCategory: { id: 'cat-new', name: 'Streaming', colorName: 'RED' },
+        createCategory: { id: 'cat-new', name: 'Streaming', colorName: 'RED1' },
       },
     });
     tools = new CopilotMoneyTools(mockDb, client);
 
     const result = await tools.createCategory({
       name: 'Streaming',
-      color_name: 'RED',
+      color_name: 'RED1',
       emoji: '🎬',
     });
     expect(result.success).toBe(true);
     expect(result.category_id).toBe('cat-new');
     expect(result.name).toBe('Streaming');
-    expect(result.color_name).toBe('RED');
+    expect(result.color_name).toBe('RED1');
 
     expect(client._calls).toHaveLength(1);
     expect(client._calls[0].op).toBe('CreateCategory');
@@ -3128,7 +3139,7 @@ describe('createCategory', () => {
       budget: false,
       input: {
         name: 'Streaming',
-        colorName: 'RED',
+        colorName: 'RED1',
         emoji: '🎬',
         isExcluded: false,
       },
@@ -3142,7 +3153,7 @@ describe('createCategory', () => {
     await expect(
       tools.createCategory({
         name: 'Sub',
-        color_name: 'BLUE',
+        color_name: 'BLUE1',
         emoji: '📁',
         parent_id: 'shopping',
       })
@@ -3153,12 +3164,12 @@ describe('createCategory', () => {
   test('trims whitespace from name', async () => {
     const client = createMockGraphQLClient({
       CreateCategory: {
-        createCategory: { id: 'cat-1', name: 'Entertainment', colorName: 'GREEN' },
+        createCategory: { id: 'cat-1', name: 'Entertainment', colorName: 'GREEN1' },
       },
     });
     tools = new CopilotMoneyTools(mockDb, client);
 
-    await tools.createCategory({ name: '  Entertainment  ', color_name: 'GREEN', emoji: '🎮' });
+    await tools.createCategory({ name: '  Entertainment  ', color_name: 'GREEN1', emoji: '🎮' });
     expect(client._calls[0].variables).toMatchObject({
       input: expect.objectContaining({ name: 'Entertainment' }),
     });
@@ -3168,7 +3179,7 @@ describe('createCategory', () => {
     const client = createMockGraphQLClient({});
     tools = new CopilotMoneyTools(mockDb, client);
     await expect(
-      tools.createCategory({ name: '', color_name: 'RED', emoji: '🎬' })
+      tools.createCategory({ name: '', color_name: 'RED1', emoji: '🎬' })
     ).rejects.toThrow('Category name must not be empty');
     expect(client._calls).toHaveLength(0);
   });
@@ -3184,15 +3195,24 @@ describe('createCategory', () => {
   test('throws when emoji is missing', async () => {
     const client = createMockGraphQLClient({});
     tools = new CopilotMoneyTools(mockDb, client);
-    await expect(tools.createCategory({ name: 'X', color_name: 'RED', emoji: '' })).rejects.toThrow(
-      'emoji is required'
-    );
+    await expect(
+      tools.createCategory({ name: 'X', color_name: 'RED1', emoji: '' })
+    ).rejects.toThrow('emoji is required');
+  });
+
+  test('rejects a color_name outside the ColorName enum (no dispatch)', async () => {
+    const client = createMockGraphQLClient({});
+    tools = new CopilotMoneyTools(mockDb, client);
+    await expect(
+      tools.createCategory({ name: 'X', color_name: 'GREEN2', emoji: '🎬' })
+    ).rejects.toThrow(/color_name must be one of/);
+    expect(client._calls).toHaveLength(0);
   });
 
   test('throws when no GraphQL client configured (read-only mode)', async () => {
     const readOnlyTools = new CopilotMoneyTools(mockDb);
     await expect(
-      readOnlyTools.createCategory({ name: 'Test', color_name: 'RED', emoji: '🎬' })
+      readOnlyTools.createCategory({ name: 'Test', color_name: 'RED1', emoji: '🎬' })
     ).rejects.toThrow('Write tools require --write flag to be set');
   });
 });

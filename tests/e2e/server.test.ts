@@ -1086,7 +1086,7 @@ describe('handleCallTool — write tools (extended)', () => {
   test('create_category creates a new category', async () => {
     const result = await writeServer.handleCallTool('create_category', {
       name: 'Side Projects',
-      color_name: 'ORANGE',
+      color_name: 'ORANGE1',
       emoji: '🛠️',
     });
     expect(result.isError).toBeUndefined();

@@ -1,9 +1,10 @@
 import type { GraphQLClient } from './client.js';
+import type { ColorName } from './colors.js';
 import { CREATE_CATEGORY, EDIT_CATEGORY, DELETE_CATEGORY } from './operations.generated.js';
 
 export interface CreateCategoryInput {
   name: string;
-  colorName: string;
+  colorName: ColorName;
   emoji: string;
   isExcluded: boolean;
   // NOTE: parentId is NOT accepted by CreateCategoryInput (server rejects with
@@ -36,7 +37,7 @@ export async function createCategory(
 
 export interface EditCategoryInput {
   name?: string;
-  colorName?: string;
+  colorName?: ColorName;
   emoji?: string;
   isExcluded?: boolean;
   // NOTE: parentId is NOT accepted by EditCategoryInput either. The server

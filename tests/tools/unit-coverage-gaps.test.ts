@@ -222,7 +222,7 @@ describe('cross-tool interactions', () => {
     const db = createMockDb({ userCategories: baseCategories });
     const client = createMockGraphQLClient({
       CreateCategory: {
-        createCategory: { id: 'cat-new', name: 'Streaming', colorName: 'RED' },
+        createCategory: { id: 'cat-new', name: 'Streaming', colorName: 'RED1' },
       },
       EditBudget: { editCategoryBudget: true },
     });
@@ -230,7 +230,7 @@ describe('cross-tool interactions', () => {
 
     const catResult = await tools.createCategory({
       name: 'Streaming',
-      color_name: 'RED',
+      color_name: 'RED1',
       emoji: '🎬',
     });
     expect(catResult.success).toBe(true);
@@ -288,7 +288,7 @@ describe('cross-tool interactions', () => {
     });
     const client = createMockGraphQLClient({
       CreateCategory: {
-        createCategory: { id: 'cat-custom', name: 'Custom Cat', colorName: 'BLUE' },
+        createCategory: { id: 'cat-custom', name: 'Custom Cat', colorName: 'BLUE1' },
       },
       EditTransaction: {
         editTransaction: {
@@ -307,7 +307,7 @@ describe('cross-tool interactions', () => {
 
     const catResult = await tools.createCategory({
       name: 'Custom Cat',
-      color_name: 'BLUE',
+      color_name: 'BLUE1',
       emoji: '📁',
     });
     expect(catResult.success).toBe(true);

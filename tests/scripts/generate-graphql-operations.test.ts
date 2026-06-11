@@ -110,6 +110,18 @@ describe('addTypenameToSelectionSets', () => {
     expect(out).toContain('fragment Keep on X');
     expect(out).toContain('...Keep');
   });
+
+  test('strips @connection directives but keeps the annotated field', () => {
+    // @connection is an Apollo cache-pagination hint (UpcomingRecurrings) that
+    // the server schema does not declare — unstripped it triggers
+    // `Unknown directive "@connection"`. Only the directive is removed; the
+    // field and its selection set stay (issue #439).
+    const input = `query Q { thing { payments @connection(key: "upcoming") { amount } } }`;
+    const out = addTypenameToSelectionSets(input);
+    expect(out).not.toContain('@connection');
+    expect(out).toContain('payments');
+    expect(out).toContain('amount');
+  });
 });
 
 describe('extractQueryBlock', () => {
