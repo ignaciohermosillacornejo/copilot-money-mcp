@@ -14,6 +14,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { CopilotDatabase } from './core/database.js';
 import { CopilotMoneyTools, createToolSchemas, createWriteToolSchemas } from './tools/index.js';
+import { TOOL_REGISTRY } from './tools/registry/index.js';
 import { GraphQLClient } from './core/graphql/client.js';
 import { FirebaseAuth } from './core/auth/firebase-auth.js';
 import { extractRefreshToken } from './core/auth/browser-token.js';
@@ -202,13 +203,12 @@ export class CopilotMoneyServer {
    * @param name - Tool name
    * @param typedArgs - Tool arguments
    */
-  private static readonly WRITE_TOOLS = new Set([
-    'create_transaction',
-    'delete_transaction',
-    'add_transaction_to_recurring',
-    'split_transaction',
-    'update_transaction',
-    'review_transactions',
+  /**
+   * Write tools not yet migrated to the tool registry. Registry-migrated
+   * tools derive their write classification from `ToolDefinition.readOnly`;
+   * names shrink from this set as domains migrate (E1, #446).
+   */
+  private static readonly LEGACY_WRITE_TOOLS = new Set([
     'create_tag',
     'update_tag',
     'delete_tag',
@@ -223,8 +223,13 @@ export class CopilotMoneyServer {
   ]);
 
   async handleCallTool(name: string, typedArgs?: Record<string, unknown>): Promise<CallToolResult> {
+    const toolDef = TOOL_REGISTRY.get(name);
+
     // Block write tools when not in write mode (before db check so the error is clear)
-    if (CopilotMoneyServer.WRITE_TOOLS.has(name) && !this.writeEnabled) {
+    const isWriteTool = toolDef
+      ? !toolDef.readOnly
+      : CopilotMoneyServer.LEGACY_WRITE_TOOLS.has(name);
+    if (isWriteTool && !this.writeEnabled) {
       return {
         content: [
           {
@@ -411,14 +416,21 @@ export class CopilotMoneyServer {
     try {
       let result: unknown;
 
-      // Route to appropriate tool handler
-      switch (name) {
-        case 'get_transactions':
-          result = await this.tools.getTransactions(
-            (typedArgs as Parameters<typeof this.tools.getTransactions>[0]) || {}
-          );
-          break;
+      // Registry-migrated tool: dispatch through its single definition.
+      if (toolDef) {
+        result = await toolDef.handler({ tools: this.tools }, typedArgs);
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      }
 
+      // Legacy dispatch for tools not yet migrated to the registry (E1, #446).
+      switch (name) {
         case 'get_transactions_live':
           // liveTools non-null invariant enforced by the early guard above.
           result = await this.liveTools!.getTransactions(
@@ -592,41 +604,6 @@ export class CopilotMoneyServer {
 
         case 'get_goal_history':
           result = await this.tools.getGoalHistory(typedArgs || {});
-          break;
-
-        case 'create_transaction':
-          result = await this.tools.createTransaction(
-            typedArgs as Parameters<typeof this.tools.createTransaction>[0]
-          );
-          break;
-
-        case 'delete_transaction':
-          result = await this.tools.deleteTransaction(
-            typedArgs as Parameters<typeof this.tools.deleteTransaction>[0]
-          );
-          break;
-
-        case 'add_transaction_to_recurring':
-          result = await this.tools.addTransactionToRecurring(
-            typedArgs as Parameters<typeof this.tools.addTransactionToRecurring>[0]
-          );
-          break;
-
-        case 'split_transaction':
-          result = await this.tools.splitTransaction(
-            typedArgs as Parameters<typeof this.tools.splitTransaction>[0]
-          );
-          break;
-
-        case 'update_transaction':
-          result = await this.tools.updateTransaction(
-            typedArgs as Parameters<typeof this.tools.updateTransaction>[0]
-          );
-          break;
-        case 'review_transactions':
-          result = await this.tools.reviewTransactions(
-            typedArgs as Parameters<typeof this.tools.reviewTransactions>[0]
-          );
           break;
 
         case 'create_tag':
