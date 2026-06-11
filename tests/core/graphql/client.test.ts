@@ -563,6 +563,41 @@ describe('GraphQLClient — retry/backoff (#443)', () => {
     expect(fetchCalls).toHaveLength(2);
   });
 
+  test('mutation retries when the errno lives two levels deep in the cause chain', async () => {
+    const inner = new Error('connect ECONNREFUSED 127.0.0.1:443');
+    const mid = new Error('connect error') as Error & { cause?: unknown };
+    mid.cause = inner;
+    const outer = new Error('fetch failed') as Error & { cause?: unknown };
+    outer.cause = mid;
+    mockFetchSequence([{ throwErr: outer }, { body: { data: { ok: true } } }]);
+    const out = await silencingConsoleError(() =>
+      fastClient().mutate<unknown, { ok: boolean }>('M', 'mutation M { ok }', {})
+    );
+    expect(out.ok).toBe(true);
+    expect(fetchCalls).toHaveLength(2);
+  });
+
+  test('mutation does NOT retry when only a WRAPPER message quotes an errno string', async () => {
+    // The innermost error is ambiguous (no code, no errno text); the wrapper
+    // merely quotes "ECONNREFUSED" in prose. Message-scanning must not treat
+    // this as provably unsent — the write may have been sent.
+    const inner = new Error('socket hang up mid-flight');
+    const outer = new Error('request failed (saw ECONNREFUSED earlier in pool)') as Error & {
+      cause?: unknown;
+    };
+    outer.cause = inner;
+    mockFetchSequence([{ throwErr: outer }]);
+    await silencingConsoleError(async () => {
+      try {
+        await fastClient().mutate('M', 'mutation M { ok }', {});
+        expect.unreachable('mutate should have thrown');
+      } catch (e) {
+        expect((e as GraphQLError).writeMayHaveApplied).toBe(true);
+      }
+    });
+    expect(fetchCalls).toHaveLength(1);
+  });
+
   test('mutation retries Bun-style ConnectionRefused (top-level code, no cause)', async () => {
     const bunErr = new Error('Unable to connect.') as Error & { code?: string };
     bunErr.code = 'ConnectionRefused';
