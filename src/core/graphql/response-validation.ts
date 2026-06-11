@@ -49,7 +49,14 @@ const TagSchema = z.looseObject({
   colorName: z.string(),
 });
 
-/** Mirrors `CreatedTransaction` (transactions.ts), the TransactionFields shape. */
+/**
+ * Mirrors `CreatedTransaction` (transactions.ts), the TransactionFields shape.
+ *
+ * Note: `type` is gated by the TransactionType enum on purpose — if the
+ * server ever ships a NEW transaction type, responses carrying it will
+ * warn until TRANSACTION_TYPES (and its smoke conformance probe) are
+ * updated. That first warn is the drift signal working, not a bug.
+ */
 const CreatedTransactionSchema = z.looseObject({
   id: z.string(),
   name: z.string(),
@@ -96,8 +103,10 @@ export const MUTATION_RESPONSE_SCHEMAS: Readonly<Record<string, ResponseShapeEnt
     'createTransaction',
     z.looseObject({ createTransaction: CreatedTransactionSchema })
   ),
-  // Mirrors EditTransactionResponse — the subset of TransactionFields the
-  // wrapper actually reads back.
+  // Mirrors EditTransactionResponse — deliberately the SUBSET of
+  // TransactionFields the wrapper actually reads back (no `type`, `amount`,
+  // etc.). The wire selection returns more, but only fields code consumes
+  // are drift-gated; the rest flow through loose.
   EditTransaction: entry(
     'editTransaction',
     z.looseObject({
@@ -253,20 +262,23 @@ export function validateMutationResponse(operationName: string, data: unknown): 
 
   driftCounts.set(registered.surface, (driftCounts.get(registered.surface) ?? 0) + 1);
 
-  // Zod always provides ≥1 issue on failure; guard is defensive only.
-  const first = result.error.issues[0];
-  if (!first) return;
-  const pathStr = first.path.join('.');
-  const key = `${operationName}::${pathStr}::${first.code}`;
-  if (warnedKeys.has(key)) return;
-  warnedKeys.add(key);
-  // `message` describes expected/received TYPES (and enum option lists over
-  // system-controlled values like TransactionType) — it does not embed the
-  // user's data; stderr stays local to the user's machine either way.
-  console.warn(
-    `[copilot-money-mcp] response shape drift: operation=${operationName} ` +
-      `surface=${registered.surface} path=${pathStr} code=${first.code} message="${first.message}"`
-  );
+  // Warn for EVERY issue (a response dropping several fields at once should
+  // name all of them), each deduped per (operation, path, code) per process
+  // — so the unique drift inventory is logged in full while repeats stay
+  // silent. The dedupe set bounds total output regardless of call volume.
+  for (const issue of result.error.issues) {
+    const pathStr = issue.path.join('.');
+    const key = `${operationName}::${pathStr}::${issue.code}`;
+    if (warnedKeys.has(key)) continue;
+    warnedKeys.add(key);
+    // `message` describes expected/received TYPES (and enum option lists over
+    // system-controlled values like TransactionType) — it does not embed the
+    // user's data; stderr stays local to the user's machine either way.
+    console.warn(
+      `[copilot-money-mcp] response shape drift: operation=${operationName} ` +
+        `surface=${registered.surface} path=${pathStr} code=${issue.code} message="${issue.message}"`
+    );
+  }
 }
 
 // Exposed for tests only: clears the dedupe set and drift counters.

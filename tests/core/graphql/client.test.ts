@@ -776,4 +776,26 @@ describe('GraphQLClient — warn-mode response-shape validation (#437)', () => {
     expect(warnSpy).not.toHaveBeenCalled();
     expect(getResponseDriftStats()).toEqual({});
   });
+
+  test('validation still runs when a mutation succeeds on a retry attempt', async () => {
+    // Attempt 1 provably never reached the server (retryable for mutations);
+    // attempt 2 succeeds with a drifted payload — the validator must fire on
+    // the retried response.
+    mockFetchSequence([
+      { throwErr: fetchRejection('ECONNREFUSED') },
+      { body: { data: { deleteTag: 'yes' } } },
+    ]);
+    const out = await silencingConsoleError(() =>
+      fastClient().mutate<unknown, { deleteTag: unknown }>(
+        'DeleteTag',
+        'mutation DeleteTag($id: ID!) { deleteTag(id: $id) }',
+        { id: 'tAg111BbB222CcC333Dd' }
+      )
+    );
+    expect(fetchCalls).toHaveLength(2);
+    expect(out).toEqual({ deleteTag: 'yes' });
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(String(warnSpy.mock.calls[0][0])).toContain('response shape drift');
+    expect(getResponseDriftStats()).toEqual({ 'Mutation.deleteTag:response': 1 });
+  });
 });

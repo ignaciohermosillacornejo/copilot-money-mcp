@@ -178,6 +178,25 @@ describe('validateMutationResponse', () => {
     expect(getResponseDriftStats()).toEqual({ 'Mutation.createTransaction:response': 3 });
   });
 
+  test('multi-field drift in one response warns per field (each deduped), counted once', () => {
+    const drifted = () => {
+      const tx = makeTransaction();
+      delete (tx as Record<string, unknown>).categoryId;
+      delete (tx as Record<string, unknown>).date;
+      return { createTransaction: tx };
+    };
+    validateMutationResponse('CreateTransaction', drifted());
+    expect(warnSpy).toHaveBeenCalledTimes(2); // both missing fields named
+    const messages = warnSpy.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(messages).toContain('path=createTransaction.categoryId');
+    expect(messages).toContain('path=createTransaction.date');
+    expect(getResponseDriftStats()).toEqual({ 'Mutation.createTransaction:response': 1 });
+
+    validateMutationResponse('CreateTransaction', drifted());
+    expect(warnSpy).toHaveBeenCalledTimes(2); // repeats stay silent
+    expect(getResponseDriftStats()).toEqual({ 'Mutation.createTransaction:response': 2 });
+  });
+
   test('a different drift path on the same operation warns again', () => {
     const missingCategory = makeTransaction();
     delete (missingCategory as Record<string, unknown>).categoryId;
