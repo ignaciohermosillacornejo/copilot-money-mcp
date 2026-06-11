@@ -41,6 +41,7 @@
 import { TRANSACTION_TYPES } from '../core/graphql/transactions.js';
 import { RECURRING_FREQUENCIES, RECURRING_STATE_VALUES } from '../core/graphql/recurrings.js';
 import { ALL_TIME_FRAMES } from '../core/graphql/queries/_shared.js';
+import { RESPONSE_SHAPE_RUNTIME_CHECK } from '../core/graphql/response-validation.js';
 
 /** What kind of external surface the assumption is about. */
 export const SURFACE_KINDS = ['enum', 'input-field', 'response-shape', 'operation'] as const;
@@ -71,10 +72,13 @@ export type ConformanceOracle = `smoke:${string}` | `runtime:${string}`;
 
 /**
  * Registered always-on runtime checks that `runtime:<name>` oracles may
- * reference. Empty until B3 (#437) lands the zod warn-mode response
- * validators; B3 should register e.g. 'zod-warn' here when it ships.
+ * reference.
+ * - `zod-warn` (B3, #437): every mutation response is validated warn-mode
+ *   against a Zod schema mirroring the hand-written response interface
+ *   (src/core/graphql/response-validation.ts); drift logs a structured
+ *   warning and increments a per-surface counter, never failing the call.
  */
-export const RUNTIME_CHECK_NAMES: readonly string[] = [];
+export const RUNTIME_CHECK_NAMES: readonly string[] = [RESPONSE_SHAPE_RUNTIME_CHECK];
 
 export interface LedgerEntry {
   /** External assumption surface (see naming convention above). Unique. */
@@ -123,11 +127,14 @@ const FIELD_PROBE_GATED =
   'Write-field audit lineage (PR #414/#417/#418/#420) + per-field name probe with ' +
   'unknown-field control; gated by scripts/smoke/conformance.ts (issue #436, PR #456)';
 
-/** Response-shape interfaces are hand-written mirrors of captured
- * responses; nothing validates live responses against them at runtime. */
-const RESPONSE_SHAPE_UNVERIFIED =
-  'Hand-written TS interface mirrors captured responses; no runtime schema ' +
-  'validation, drift would surface only as downstream undefineds';
+/** B3 (#437): response-shape interfaces are mirrored into Zod schemas and
+ * every live mutation response is validated against them warn-mode, so
+ * drift surfaces as a structured warning + counter instead of downstream
+ * undefineds. */
+const RESPONSE_SHAPE_GATED =
+  'Hand-written TS interface mirrored into a Zod schema; every mutation response ' +
+  'is validated warn-mode at runtime (src/core/graphql/response-validation.ts, ' +
+  'issue #437, PR #TBD)';
 
 // ---------------------------------------------------------------------------
 // Entry factories (keep the inventory compact; pass overrides to upgrade an
@@ -184,9 +191,9 @@ function responseShape(name: string, overrides?: Partial<LedgerEntry>): LedgerEn
   return {
     surface: `Mutation.${name}:response`,
     kind: 'response-shape',
-    oracle: null,
-    class: 'unverified',
-    evidence: RESPONSE_SHAPE_UNVERIFIED,
+    oracle: `runtime:${RESPONSE_SHAPE_RUNTIME_CHECK}`,
+    class: 'gated',
+    evidence: RESPONSE_SHAPE_GATED,
     ...overrides,
   };
 }

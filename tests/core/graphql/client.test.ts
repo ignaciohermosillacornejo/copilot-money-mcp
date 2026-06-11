@@ -1,10 +1,14 @@
-import { describe, test, expect, afterEach, mock } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
 import {
   GraphQLClient,
   GraphQLError,
   DEFAULT_RETRY_DELAYS_MS,
   DEFAULT_TIMEOUT_MS,
 } from '../../../src/core/graphql/client.js';
+import {
+  getResponseDriftStats,
+  __resetResponseDriftState,
+} from '../../../src/core/graphql/response-validation.js';
 import type { FirebaseAuth } from '../../../src/core/auth/firebase-auth.js';
 
 let fetchCalls: { url: string; options: RequestInit }[] = [];
@@ -715,5 +719,61 @@ describe('GraphQLClient — retry/backoff (#443)', () => {
       }
     });
     expect(fetchCalls).toHaveLength(1);
+  });
+});
+
+describe('GraphQLClient — warn-mode response-shape validation (#437)', () => {
+  let warnSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    __resetResponseDriftState();
+    warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+    restoreFetch();
+  });
+
+  test('a drifted mutation response warns but still resolves with the payload unchanged', async () => {
+    // DeleteTag's registered schema expects { deleteTag: boolean }; a string
+    // simulates server drift on a field we read.
+    mockFetch({ data: { deleteTag: 'yes' } });
+    const client = new GraphQLClient(createMockAuth());
+    const out = await client.mutate<unknown, { deleteTag: unknown }>(
+      'DeleteTag',
+      'mutation DeleteTag($id: ID!) { deleteTag(id: $id) }',
+      { id: 'tAg111BbB222CcC333Dd' }
+    );
+    expect(out).toEqual({ deleteTag: 'yes' }); // payload untouched — warn-mode
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(String(warnSpy.mock.calls[0][0])).toContain('response shape drift');
+    expect(getResponseDriftStats()).toEqual({ 'Mutation.deleteTag:response': 1 });
+  });
+
+  test('a conforming mutation response produces no warnings and no drift counts', async () => {
+    mockFetch({ data: { deleteTag: true } });
+    const client = new GraphQLClient(createMockAuth());
+    const out = await client.mutate<unknown, { deleteTag: boolean }>(
+      'DeleteTag',
+      'mutation DeleteTag($id: ID!) { deleteTag(id: $id) }',
+      { id: 'tAg111BbB222CcC333Dd' }
+    );
+    expect(out.deleteTag).toBe(true);
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(getResponseDriftStats()).toEqual({});
+  });
+
+  test('query responses are not shape-validated (live reads have their own handling)', async () => {
+    mockFetch({ data: { tags: 'not-even-an-array' } });
+    const client = new GraphQLClient(createMockAuth());
+    const out = await client.query<unknown, { tags: unknown }>(
+      'Tags',
+      'query Tags { tags { id } }',
+      {}
+    );
+    expect(out).toEqual({ tags: 'not-even-an-array' });
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(getResponseDriftStats()).toEqual({});
   });
 });

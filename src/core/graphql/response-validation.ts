@@ -1,0 +1,276 @@
+/**
+ * Warn-mode Zod validation for mutation response payloads (issue #437,
+ * Epic B #421).
+ *
+ * Why: the write path's response shapes are hand-typed casts (e.g.
+ * `CreatedTransaction` in transactions.ts). If Copilot renames or removes a
+ * response field, downstream code reads `undefined` and output degrades
+ * silently. The read path already solved this pattern — `src/core/
+ * schema-warn.ts` validates and warns with dedup. This module is the same
+ * idea pointed at GraphQL mutation responses.
+ *
+ * Semantics — strictly WARN-MODE:
+ * - A mismatched response NEVER throws and NEVER drops data. The caller
+ *   always receives the server payload unchanged; validation only logs a
+ *   structured drift warning (deduped per process, like schema-warn) and
+ *   increments a per-surface drift counter (exposed via
+ *   `getResponseDriftStats()` so C3's drop-visibility work can surface it).
+ * - Schemas mirror the hand-written response interfaces in the per-domain
+ *   modules (transactions.ts, tags.ts, ...) field-for-field, but use
+ *   `z.looseObject` everywhere so NEW server fields (and `__typename`)
+ *   flow through without warnings. Drift = a field we READ going missing
+ *   or changing type, not the server adding things.
+ *
+ * This is the `runtime:zod-warn` oracle in the conformance ledger
+ * (src/conformance/ledger.ts): every `Mutation.<name>:response` surface it
+ * gates must have a schema registered here — enforced bidirectionally by
+ * `tests/conformance/ledger.test.ts`.
+ */
+
+import { z, type ZodType } from 'zod';
+import { TRANSACTION_TYPES } from './transactions.js';
+
+/**
+ * Name of this runtime check as registered in the ledger's
+ * RUNTIME_CHECK_NAMES. `runtime:zod-warn` oracles point here.
+ */
+export const RESPONSE_SHAPE_RUNTIME_CHECK = 'zod-warn' as const;
+
+// ---------------------------------------------------------------------------
+// Schemas — mirror the response interfaces in the per-domain modules.
+// Keep every object `loose`: unknown keys are expected (new server fields,
+// __typename) and must pass through silently.
+// ---------------------------------------------------------------------------
+
+/** Mirrors the tag objects selected by TagFields (tags.ts). */
+const TagSchema = z.looseObject({
+  id: z.string(),
+  name: z.string(),
+  colorName: z.string(),
+});
+
+/** Mirrors `CreatedTransaction` (transactions.ts), the TransactionFields shape. */
+const CreatedTransactionSchema = z.looseObject({
+  id: z.string(),
+  name: z.string(),
+  date: z.string(),
+  amount: z.number(),
+  categoryId: z.string(),
+  type: z.enum(TRANSACTION_TYPES),
+  accountId: z.string(),
+  itemId: z.string(),
+  isPending: z.boolean(),
+  isReviewed: z.boolean(),
+  createdAt: z.number(),
+  recurringId: z.string().nullable(),
+  userNotes: z.string().nullable(),
+  tipAmount: z.number().nullable(),
+  suggestedCategoryIds: z.array(z.string()),
+  tags: z.array(TagSchema),
+  goal: z.looseObject({ id: z.string(), name: z.string() }).nullable(),
+});
+
+export interface ResponseShapeEntry {
+  /** Conformance ledger surface this schema verifies. */
+  surface: `Mutation.${string}:response`;
+  schema: ZodType;
+}
+
+function entry(mutationField: string, schema: ZodType): ResponseShapeEntry {
+  return { surface: `Mutation.${mutationField}:response`, schema };
+}
+
+/**
+ * Registry keyed by GraphQL OPERATION name (the first argument modules pass
+ * to `client.mutate(...)`) — note operation names don't always match the
+ * mutation field name (EditBudget → editCategoryBudget).
+ *
+ * Every mutation the codebase sends must be registered here; an
+ * unregistered operation name gets a (deduped) warning at runtime, and the
+ * ledger test enforces that registered surfaces exactly match the
+ * `runtime:zod-warn`-gated response-shape entries.
+ */
+export const MUTATION_RESPONSE_SCHEMAS: Readonly<Record<string, ResponseShapeEntry>> = {
+  // ----- Transactions (transactions.ts) -----
+  CreateTransaction: entry(
+    'createTransaction',
+    z.looseObject({ createTransaction: CreatedTransactionSchema })
+  ),
+  // Mirrors EditTransactionResponse — the subset of TransactionFields the
+  // wrapper actually reads back.
+  EditTransaction: entry(
+    'editTransaction',
+    z.looseObject({
+      editTransaction: z.looseObject({
+        transaction: z.looseObject({
+          id: z.string(),
+          name: z.string(),
+          categoryId: z.string(),
+          userNotes: z.string().nullable(),
+          isReviewed: z.boolean(),
+          tags: z.array(z.looseObject({ id: z.string() })),
+        }),
+      }),
+    })
+  ),
+  DeleteTransaction: entry('deleteTransaction', z.looseObject({ deleteTransaction: z.boolean() })),
+  AddTransactionToRecurring: entry(
+    'addTransactionToRecurring',
+    z.looseObject({
+      addTransactionToRecurring: z.looseObject({ transaction: CreatedTransactionSchema }),
+    })
+  ),
+  SplitTransaction: entry(
+    'splitTransaction',
+    z.looseObject({
+      splitTransaction: z.looseObject({
+        parentTransaction: CreatedTransactionSchema,
+        splitTransactions: z.array(CreatedTransactionSchema),
+      }),
+    })
+  ),
+
+  // ----- Tags (tags.ts) -----
+  CreateTag: entry('createTag', z.looseObject({ createTag: TagSchema })),
+  EditTag: entry('editTag', z.looseObject({ editTag: TagSchema })),
+  DeleteTag: entry('deleteTag', z.looseObject({ deleteTag: z.boolean() })),
+
+  // ----- Categories (categories.ts) -----
+  CreateCategory: entry(
+    'createCategory',
+    z.looseObject({
+      createCategory: z.looseObject({ id: z.string(), name: z.string(), colorName: z.string() }),
+    })
+  ),
+  EditCategory: entry(
+    'editCategory',
+    z.looseObject({
+      editCategory: z.looseObject({
+        category: z.looseObject({ id: z.string(), name: z.string(), colorName: z.string() }),
+      }),
+    })
+  ),
+  DeleteCategory: entry('deleteCategory', z.looseObject({ deleteCategory: z.boolean() })),
+
+  // ----- Budgets (budgets.ts) — operation names ≠ mutation field names -----
+  EditBudget: entry('editCategoryBudget', z.looseObject({ editCategoryBudget: z.boolean() })),
+  EditBudgetMonthly: entry(
+    'editCategoryBudgetMonthly',
+    z.looseObject({ editCategoryBudgetMonthly: z.boolean() })
+  ),
+
+  // ----- Recurrings (recurrings.ts) -----
+  CreateRecurring: entry(
+    'createRecurring',
+    z.looseObject({
+      createRecurring: z.looseObject({
+        id: z.string(),
+        name: z.string(),
+        state: z.string(),
+        frequency: z.string(),
+      }),
+    })
+  ),
+  EditRecurring: entry(
+    'editRecurring',
+    z.looseObject({
+      editRecurring: z.looseObject({
+        recurring: z.looseObject({
+          id: z.string(),
+          name: z.string(),
+          categoryId: z.string(),
+          frequency: z.string(),
+          state: z.string(),
+        }),
+      }),
+    })
+  ),
+  DeleteRecurring: entry('deleteRecurring', z.looseObject({ deleteRecurring: z.boolean() })),
+
+  // ----- Accounts (accounts.ts) -----
+  EditAccount: entry(
+    'editAccount',
+    z.looseObject({
+      editAccount: z.looseObject({
+        account: z.looseObject({
+          id: z.string(),
+          name: z.string(),
+          isUserHidden: z.boolean(),
+        }),
+      }),
+    })
+  ),
+};
+
+// ---------------------------------------------------------------------------
+// Warn-mode validation + drift counters
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-surface drift counts accumulated over the process lifetime: how many
+ * mutation responses failed shape validation. NOT deduped (unlike the
+ * warnings) so the counters reflect the true number of drifted responses —
+ * same split as schema-warn's `dropped` counter vs its warn dedup.
+ */
+export type ResponseDriftStats = Record<string, number>;
+
+const driftCounts = new Map<string, number>();
+
+// Dedupe key = `${operationName}::${firstIssue.path}::${firstIssue.code}`.
+// One warn per unique key per process — prevents log flood when every call
+// to the same mutation drifts the same way.
+const warnedKeys = new Set<string>();
+
+/** Snapshot of the per-surface drift counters (copy, safe to mutate). */
+export function getResponseDriftStats(): ResponseDriftStats {
+  return Object.fromEntries(driftCounts);
+}
+
+/**
+ * Validate a mutation response payload against its registered schema,
+ * warn-mode. Never throws; never alters `data` — callers keep using the
+ * raw server payload regardless of the outcome.
+ */
+export function validateMutationResponse(operationName: string, data: unknown): void {
+  const registered = MUTATION_RESPONSE_SCHEMAS[operationName];
+  if (!registered) {
+    const key = `${operationName}::<unregistered>`;
+    if (!warnedKeys.has(key)) {
+      warnedKeys.add(key);
+      // console.warn writes to stderr in Node/Bun — safe for the MCP stdio
+      // transport (stdout carries JSON-RPC).
+      console.warn(
+        `[copilot-money-mcp] response shape drift: operation=${operationName} has no registered ` +
+          'response schema — register it in MUTATION_RESPONSE_SCHEMAS ' +
+          '(src/core/graphql/response-validation.ts) and the conformance ledger'
+      );
+    }
+    return;
+  }
+
+  const result = registered.schema.safeParse(data);
+  if (result.success) return;
+
+  driftCounts.set(registered.surface, (driftCounts.get(registered.surface) ?? 0) + 1);
+
+  // Zod always provides ≥1 issue on failure; guard is defensive only.
+  const first = result.error.issues[0];
+  if (!first) return;
+  const pathStr = first.path.join('.');
+  const key = `${operationName}::${pathStr}::${first.code}`;
+  if (warnedKeys.has(key)) return;
+  warnedKeys.add(key);
+  // `message` describes expected/received TYPES (and enum option lists over
+  // system-controlled values like TransactionType) — it does not embed the
+  // user's data; stderr stays local to the user's machine either way.
+  console.warn(
+    `[copilot-money-mcp] response shape drift: operation=${operationName} ` +
+      `surface=${registered.surface} path=${pathStr} code=${first.code} message="${first.message}"`
+  );
+}
+
+// Exposed for tests only: clears the dedupe set and drift counters.
+export function __resetResponseDriftState(): void {
+  driftCounts.clear();
+  warnedKeys.clear();
+}
