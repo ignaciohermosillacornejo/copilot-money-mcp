@@ -5,6 +5,14 @@
  */
 
 import { CopilotDatabase, type DecodeHealth } from '../core/database.js';
+import {
+  TRANSACTION_TYPE_FILTERS,
+  CATEGORY_VIEWS,
+  BALANCE_HISTORY_GRANULARITIES,
+  type TransactionTypeFilter,
+  type CategoryView,
+  type BalanceHistoryGranularity,
+} from './constants.js';
 import type { LiveCopilotDatabase } from '../core/live-database.js';
 import type { GraphQLClient } from '../core/graphql/client.js';
 import { GraphQLError } from '../core/graphql/client.js';
@@ -152,33 +160,17 @@ const MIN_QUERY_LIMIT = 1;
 // ============================================
 // Tool Value-Set Constants
 // ============================================
+// Moved to ./constants.ts (a leaf module) so the tool registry can share
+// them without a runtime import cycle. Re-exported here for compatibility.
 
-/**
- * Special transaction-type filters accepted by `get_transactions` (cache mode).
- * Single source of truth for the param type, schema enum, tool description,
- * and `_filterByTransactionType` branching. The live tool supports a subset —
- * see `LIVE_TRANSACTION_TYPES` in `live/transactions.ts`.
- */
-export const TRANSACTION_TYPE_FILTERS = [
-  'foreign',
-  'refunds',
-  'credits',
-  'duplicates',
-  'hsa_eligible',
-  'tagged',
-] as const;
-export type TransactionTypeFilter = (typeof TRANSACTION_TYPE_FILTERS)[number];
-
-/** View modes accepted by `get_categories` (param type + schema enum + handler branching). */
-export const CATEGORY_VIEWS = ['list', 'tree', 'search'] as const;
-export type CategoryView = (typeof CATEGORY_VIEWS)[number];
-
-/**
- * Downsampling granularities accepted by `get_balance_history`
- * (param type + runtime guard + error messages + schema enum).
- */
-export const BALANCE_HISTORY_GRANULARITIES = ['daily', 'weekly', 'monthly'] as const;
-export type BalanceHistoryGranularity = (typeof BALANCE_HISTORY_GRANULARITIES)[number];
+export {
+  TRANSACTION_TYPE_FILTERS,
+  CATEGORY_VIEWS,
+  BALANCE_HISTORY_GRANULARITIES,
+  type TransactionTypeFilter,
+  type CategoryView,
+  type BalanceHistoryGranularity,
+} from './constants.js';
 
 // ============================================
 // Amount Validation Constants
