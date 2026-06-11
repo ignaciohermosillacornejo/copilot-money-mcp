@@ -160,7 +160,7 @@ export class GraphQLError extends Error {
 
 export interface GraphQLClientOptions {
   /**
-   * Per-attempt timeout in ms (default 30s). Pass Infinity to disable.
+   * Per-attempt timeout in ms (default 30s). Pass 0 or Infinity to disable.
    * A timed-out QUERY is retried; a timed-out MUTATION is NOT (ambiguous —
    * the request may have been sent).
    */
@@ -205,12 +205,18 @@ function isProvablyUnsent(err: unknown): boolean {
   for (let depth = 0; depth < 5 && current instanceof Error; depth++) {
     const code = (current as Error & { code?: unknown }).code;
     if (typeof code === 'string' && PROVABLY_UNSENT_CODES.has(code)) return true;
+    const cause = (current as Error & { cause?: unknown }).cause;
     // Some runtimes only embed the errno string in the message
-    // (e.g. "connect ECONNREFUSED 127.0.0.1:443").
-    for (const known of PROVABLY_UNSENT_CODES) {
-      if (current.message.includes(known)) return true;
+    // (e.g. "connect ECONNREFUSED 127.0.0.1:443"). Scan only the INNERMOST
+    // error: a wrapper whose message merely quotes a code string (log
+    // fragment, stringified cause) must not flag an ambiguous mutation
+    // failure as provably unsent — a false positive here re-sends a write.
+    if (cause == null) {
+      for (const known of PROVABLY_UNSENT_CODES) {
+        if (current.message.includes(known)) return true;
+      }
     }
-    current = (current as Error & { cause?: unknown }).cause;
+    current = cause;
   }
   return false;
 }
