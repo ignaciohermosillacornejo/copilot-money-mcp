@@ -49,14 +49,17 @@ function notify(title: string, message: string): void {
   // COPILOT_MCP_SMOKE_QUIET suppresses the popup (tests exercise the fail
   // path; they must not spam real notifications).
   if (process.env.COPILOT_MCP_SMOKE_QUIET) return;
-  // Best-effort; a failed notification must not mask the status write.
-  spawnSync('osascript', [
-    '-e',
-    `display notification ${JSON.stringify(message)} with title ${JSON.stringify(title)}`,
-  ]);
+  // Best-effort; a failed or hung notification must not mask the status write.
+  spawnSync(
+    'osascript',
+    ['-e', `display notification ${JSON.stringify(message)} with title ${JSON.stringify(title)}`],
+    { timeout: 10_000 }
+  );
 }
 
-function main(): void {
+/** Runs one drift check and returns the process exit code (importable so
+ * tests can execute the full flow in-process, where coverage is visible). */
+export function runScheduledSmoke(): number {
   const repoDir = process.env.COPILOT_MCP_REPO ?? join(import.meta.dir, '..');
   const statusPath = process.env.COPILOT_MCP_SMOKE_STATUS_PATH ?? defaultScheduledSmokeStatusPath();
   const reportsDir = join(dirname(statusPath), 'smoke-reports');
@@ -95,7 +98,7 @@ function main(): void {
 
   // launchd treats nonzero exit as job failure; auth-missing is an expected
   // state (machine logged out), recorded in the status file, so exit 0.
-  process.exit(result === 'fail' ? 1 : 0);
+  return result === 'fail' ? 1 : 0;
 }
 
-if (import.meta.main) main();
+if (import.meta.main) process.exit(runScheduledSmoke());
