@@ -209,12 +209,6 @@ export class CopilotMoneyServer {
    * names shrink from this set as domains migrate (E1, #446).
    */
   private static readonly LEGACY_WRITE_TOOLS = new Set([
-    'create_tag',
-    'update_tag',
-    'delete_tag',
-    'create_category',
-    'update_category',
-    'delete_category',
     'set_budget',
     'set_recurring_state',
     'create_recurring',
@@ -568,10 +562,6 @@ export class CopilotMoneyServer {
           result = await this.tools.getConnectionStatus();
           break;
 
-        case 'get_categories':
-          result = await this.tools.getCategories(typedArgs || {});
-          break;
-
         case 'get_recurring_transactions':
           result = await this.tools.getRecurringTransactions(typedArgs || {});
           break;
@@ -606,36 +596,6 @@ export class CopilotMoneyServer {
           result = await this.tools.getGoalHistory(typedArgs || {});
           break;
 
-        case 'create_tag':
-          result = await this.tools.createTag(
-            typedArgs as Parameters<typeof this.tools.createTag>[0]
-          );
-          break;
-
-        case 'delete_tag':
-          result = await this.tools.deleteTag(
-            typedArgs as Parameters<typeof this.tools.deleteTag>[0]
-          );
-          break;
-
-        case 'create_category':
-          result = await this.tools.createCategory(
-            typedArgs as Parameters<typeof this.tools.createCategory>[0]
-          );
-          break;
-
-        case 'update_category':
-          result = await this.tools.updateCategory(
-            typedArgs as Parameters<typeof this.tools.updateCategory>[0]
-          );
-          break;
-
-        case 'delete_category':
-          result = await this.tools.deleteCategory(
-            typedArgs as Parameters<typeof this.tools.deleteCategory>[0]
-          );
-          break;
-
         case 'set_budget':
           result = await this.tools.setBudget(
             typedArgs as Parameters<typeof this.tools.setBudget>[0]
@@ -651,12 +611,6 @@ export class CopilotMoneyServer {
         case 'delete_recurring':
           result = await this.tools.deleteRecurring(
             typedArgs as Parameters<typeof this.tools.deleteRecurring>[0]
-          );
-          break;
-
-        case 'update_tag':
-          result = await this.tools.updateTag(
-            typedArgs as Parameters<typeof this.tools.updateTag>[0]
           );
           break;
 

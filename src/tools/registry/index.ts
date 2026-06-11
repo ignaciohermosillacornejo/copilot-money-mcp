@@ -17,6 +17,13 @@ import {
   updateTransactionTool,
   reviewTransactionsTool,
 } from './transactions.js';
+import {
+  getCategoriesTool,
+  createCategoryTool,
+  updateCategoryTool,
+  deleteCategoryTool,
+} from './categories.js';
+import { createTagTool, deleteTagTool, updateTagTool } from './tags.js';
 
 export type { ToolDefinition, ToolContext, LiveToolContext } from './types.js';
 
@@ -29,6 +36,13 @@ export const ALL_TOOL_DEFS: readonly ToolDefinition[] = [
   splitTransactionTool,
   updateTransactionTool,
   reviewTransactionsTool,
+  getCategoriesTool,
+  createCategoryTool,
+  updateCategoryTool,
+  deleteCategoryTool,
+  createTagTool,
+  deleteTagTool,
+  updateTagTool,
 ];
 
 /** Name → definition lookup used by the server's dispatch. */
