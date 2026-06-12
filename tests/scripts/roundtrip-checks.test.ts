@@ -204,6 +204,12 @@ describe('residue detection', () => {
     expect(isResidueName('recurring', 'Smoke 1700000000000 Txn A')).toBe(true);
     expect(isResidueName('recurring', 'Smokehouse BBQ')).toBe(false);
     expect(isResidueName('transaction', 'Smoke 1700000000000 Txn A')).toBe(false);
+    // Documented approximation: a standalone "smoke" word in a REAL
+    // recurring name false-positives, making the pre-flight refuse to
+    // start — the safe direction for an attended gate (see
+    // RECURRING_RESIDUE_RE in roundtrip-checks.ts).
+    expect(isResidueName('recurring', "Smoke's BBQ")).toBe(true);
+    expect(isResidueName('recurring', 'Smoke Shop')).toBe(true);
   });
 
   test('collectResidue reads all four collections and keeps only marker hits', async () => {
@@ -392,6 +398,70 @@ describe('review_transactions check (stubbed client)', () => {
     const outcome = await getCheck('review_transactions').run(ctx);
     expect(outcome?.skipped).toMatch(/no run-created transaction/);
     expect(calls).toEqual([]);
+  });
+});
+
+describe('set_recurring_state check (stubbed client)', () => {
+  const recurringNode = (state: string) => ({
+    id: 'rec-1',
+    name: '__smoke__1700000000000-recurring',
+    state,
+    frequency: 'MONTHLY',
+    nextPaymentAmount: null,
+    nextPaymentDate: null,
+    categoryId: null,
+    emoji: null,
+    icon: null,
+    rule: null,
+    payments: [],
+  });
+
+  const editEcho = (state: string) => ({
+    editRecurring: {
+      recurring: {
+        id: 'rec-1',
+        name: '__smoke__1700000000000-recurring',
+        categoryId: 'cat-1',
+        frequency: 'MONTHLY',
+        state,
+      },
+    },
+  });
+
+  test('flips ACTIVE→PAUSED, verifies via re-read, and restores the original', async () => {
+    let serverState = 'ACTIVE';
+    const { client, calls } = stubClient({
+      Recurrings: () => ({ recurrings: [recurringNode(serverState)] }),
+      EditRecurring: (variables) => {
+        serverState = (variables as { input: { state: string } }).input.state;
+        return editEcho(serverState);
+      },
+    });
+    const ctx = makeContext(client);
+    ctx.state.recurringId = 'rec-1';
+    const outcome = await getCheck('set_recurring_state').run(ctx);
+    expect(outcome).toBeUndefined();
+    const edits = calls.filter((call) => call.operationName === 'EditRecurring');
+    expect(edits.length).toBe(2); // flip + restore
+    expect((edits[0]!.variables as { input: { state: string } }).input.state).toBe('PAUSED');
+    expect((edits[1]!.variables as { input: { state: string } }).input.state).toBe('ACTIVE');
+    expect(serverState).toBe('ACTIVE');
+  });
+
+  test('FAILS when the write is echoed but the re-read never reflects it — and STILL restores the original', async () => {
+    const { client, calls } = stubClient({
+      // Server always reports the original state: accepted-but-ignored write.
+      Recurrings: () => ({ recurrings: [recurringNode('ACTIVE')] }),
+      EditRecurring: () => editEcho('PAUSED'),
+    });
+    const ctx = makeContext(client);
+    ctx.state.recurringId = 'rec-1';
+    await expect(getCheck('set_recurring_state').run(ctx)).rejects.toThrow(
+      /write accepted but re-read state/
+    );
+    const edits = calls.filter((call) => call.operationName === 'EditRecurring');
+    expect(edits.length).toBe(2); // flip + restore, despite the failure
+    expect((edits[1]!.variables as { input: { state: string } }).input.state).toBe('ACTIVE');
   });
 });
 
