@@ -414,22 +414,33 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
       const categoryId = ctx.state.categoryId;
       if (!categoryId) return { skipped: 'no run-created category (create_category did not pass)' };
       const name = `${ctx.state.marker}-cat-edited`;
-      await editCategory(ctx.client, { id: categoryId, input: { name, isExcluded: true } });
-      const after = (await fetchCategories(ctx.client, { rollovers: false })).find(
-        (cat) => cat.id === categoryId
-      );
-      check(after, `update_category: category ${categoryId} missing from Categories re-read`);
-      check(
-        after.name === name,
-        `update_category: write accepted but re-read name is '${after.name}', expected '${name}'`
-      );
-      check(
-        after.isExcluded === true,
-        'update_category: write accepted but re-read isExcluded is still false'
-      );
-      // Restore isExcluded=false so the budget check below behaves like a
-      // normal category (the category itself is deleted at the end either way).
-      await editCategory(ctx.client, { id: categoryId, input: { isExcluded: false } });
+      try {
+        await editCategory(ctx.client, { id: categoryId, input: { name, isExcluded: true } });
+        const after = (await fetchCategories(ctx.client, { rollovers: false })).find(
+          (cat) => cat.id === categoryId
+        );
+        check(after, `update_category: category ${categoryId} missing from Categories re-read`);
+        check(
+          after.name === name,
+          `update_category: write accepted but re-read name is '${after.name}', expected '${name}'`
+        );
+        check(
+          after.isExcluded === true,
+          'update_category: write accepted but re-read isExcluded is still false'
+        );
+      } finally {
+        // Restore isExcluded=false even when verification failed, so the
+        // set_budget check downstream sees a normal (non-excluded) category
+        // (the category itself is deleted at the end either way).
+        try {
+          await editCategory(ctx.client, { id: categoryId, input: { isExcluded: false } });
+        } catch (err: unknown) {
+          ctx.log('update_category: WARNING — failed to restore isExcluded', {
+            categoryId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
       return undefined;
     },
   },
@@ -596,10 +607,12 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
       ctx.registry.add({
         kind: 'recurring',
         id: created.id,
-        // The server derives the recurring's name from the transaction, so it
-        // should carry the marker — but that derivation is the server's, so
-        // the label records what the echo said.
-        label: created.name,
+        // Deliberately NOT `created.name`: the server derives the recurring's
+        // name (usually from the marker-bearing transaction, but that
+        // derivation is the server's), and labels are logged — so a
+        // server-derived name could leak real merchant data into output.
+        // A synthetic marker label keeps logs PII-safe regardless.
+        label: `${ctx.state.marker}-recurring`,
         cleanup: () => deleteRecurring(ctx.client, { id: created.id }).then(() => undefined),
       });
       const after = (await fetchRecurrings(ctx.client)).find((rec) => rec.id === created.id);
@@ -846,6 +859,12 @@ export interface ResidueReaders {
  * whose name was normalized away from the raw `__smoke__` marker. The
  * word-boundary regex catches 'Smoke 176...' style derivations without
  * matching e.g. 'Smokehouse BBQ'.
+ *
+ * Known approximation: a real recurring whose name contains the standalone
+ * word ("Smoke's BBQ", "Smoke Shop") WILL match, and the pre-flight check
+ * will refuse to start. That's the safe direction for an attended local
+ * gate — a false refusal is a one-line message the maintainer can act on,
+ * while a false negative would leave residue undetected.
  */
 const RECURRING_RESIDUE_RE = /\bsmoke\b/i;
 
