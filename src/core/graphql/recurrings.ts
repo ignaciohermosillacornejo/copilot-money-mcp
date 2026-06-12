@@ -1,5 +1,23 @@
 import type { GraphQLClient } from './client.js';
-import { CREATE_RECURRING, EDIT_RECURRING, DELETE_RECURRING } from './operations.generated.js';
+import { EDIT_RECURRING, DELETE_RECURRING } from './operations.generated.js';
+
+/**
+ * Minimal CreateRecurring selection — deliberately NOT the app's
+ * RecurringFields fragment. That fragment also selects `emoji`/`icon`, whose
+ * server-side resolvers crash with a null dereference when the new recurring
+ * derives no category (observed live 2026-06-12 against production, B4 #438):
+ * the row is inserted, then response resolution fails, so the create reports
+ * an error while it actually applied. We only read these four fields; selecting
+ * only them keeps the response resolvable for category-less recurrings.
+ */
+export const CREATE_RECURRING_MINIMAL = `mutation CreateRecurring($input: CreateRecurringInput!) {
+  createRecurring(input: $input) {
+    id
+    name
+    state
+    frequency
+  }
+}`;
 
 /** The 8 valid Copilot `RecurringFrequency` GraphQL enum values (uppercase wire form).
  * Verified against production (issue #419). Single source of truth for both
@@ -40,7 +58,7 @@ export async function createRecurring(
 ): Promise<{ id: string; name: string; state: string; frequency: string }> {
   const data = await client.mutate<{ input: CreateRecurringInput }, CreateRecurringResponse>(
     'CreateRecurring',
-    CREATE_RECURRING,
+    CREATE_RECURRING_MINIMAL,
     args
   );
   return {
