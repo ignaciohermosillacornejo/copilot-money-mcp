@@ -3,9 +3,9 @@ import {
   createRecurring,
   editRecurring,
   deleteRecurring,
+  CREATE_RECURRING_MINIMAL,
 } from '../../../src/core/graphql/recurrings.js';
 import {
-  CREATE_RECURRING,
   EDIT_RECURRING,
   DELETE_RECURRING,
 } from '../../../src/core/graphql/operations.generated.js';
@@ -30,7 +30,7 @@ describe('createRecurring', () => {
     });
     const call = (client.mutate as ReturnType<typeof mock>).mock.calls[0];
     expect(call[0]).toBe('CreateRecurring');
-    expect(call[1]).toBe(CREATE_RECURRING);
+    expect(call[1]).toBe(CREATE_RECURRING_MINIMAL);
     expect(call[2]).toEqual({
       input: {
         frequency: 'MONTHLY',
