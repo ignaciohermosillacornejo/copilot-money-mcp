@@ -29,6 +29,10 @@
  *                      `Mutation.createTransaction`, `Query.accounts`
  *                      (covers the operation's existence + top-level args)
  * - `response-shape` → `Mutation.<fieldName>:response` / `Query.<fieldName>:response`
+ * - `applies`        → `Mutation.<fieldName>:applies` — the mutation's effect
+ *                      is actually persisted and visible on an independent
+ *                      re-read (not just echoed). Verified by the Tier-2
+ *                      round-trip smoke (B4, issue #438).
  *
  * How to update:
  * - Adding a write-tool param? Add (or extend) an entry whose `toolParams`
@@ -46,7 +50,13 @@ import { ALL_TIME_FRAMES } from '../core/graphql/queries/_shared.js';
 import { RESPONSE_SHAPE_RUNTIME_CHECK } from '../core/graphql/response-validation.js';
 
 /** What kind of external surface the assumption is about. */
-export const SURFACE_KINDS = ['enum', 'input-field', 'response-shape', 'operation'] as const;
+export const SURFACE_KINDS = [
+  'enum',
+  'input-field',
+  'response-shape',
+  'operation',
+  'applies',
+] as const;
 export type SurfaceKind = (typeof SURFACE_KINDS)[number];
 
 /**
@@ -146,6 +156,15 @@ const READ_SMOKE_GATED =
   'wrapper-critical fields on every run; gated by scripts/smoke/reads.ts ' +
   '(issues #439/#460)';
 
+/** B4 (#438): one reversible round-trip per write tool — every write is
+ * re-read through the corresponding query after mutating (create→verify→
+ * delete or set→verify→revert), so an accepted-but-ignored write turns the
+ * run red. MUTATING — maintainer-run attended gate, never scheduled. */
+const ROUNDTRIP_GATED =
+  'Reversible round-trip smoke: write, then verify by independent re-read, then ' +
+  'delete/revert; gated by scripts/smoke/roundtrip.ts (issue #438). ' +
+  'tests/scripts/roundtrip-coverage.test.ts ratchets the write-tool ↔ round-trip bijection';
+
 /** Read response shapes: the Tier-0 smoke spot-checks load-bearing fields,
  * but nothing validates the full hand-written interface at runtime. */
 const QUERY_RESPONSE_SHAPE_UNVERIFIED =
@@ -202,6 +221,22 @@ function gatedInputField(surface: string, toolParams?: readonly string[]): Ledge
     class: 'gated',
     evidence: FIELD_PROBE_GATED,
   });
+}
+
+/**
+ * A mutation whose persisted effect is re-verified by the Tier-2 round-trip
+ * smoke (B4, #438): the round-trip writes, RE-READS the object through the
+ * corresponding query, and asserts the written values are visible — then
+ * deletes/reverts. `name` is the Mutation field, e.g. 'createTransaction'.
+ */
+function appliesSurface(name: string): LedgerEntry {
+  return {
+    surface: `Mutation.${name}:applies`,
+    kind: 'applies',
+    oracle: 'smoke:roundtrip',
+    class: 'gated',
+    evidence: ROUNDTRIP_GATED,
+  };
 }
 
 function responseShape(name: string, overrides?: Partial<LedgerEntry>): LedgerEntry {
@@ -322,6 +357,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   gatedInputField('CreateTransactionInput.userNotes', ['create_transaction.note']),
   gatedInputField('CreateTransactionInput.recurringId', ['create_transaction.recurring_id']),
   responseShape('createTransaction'),
+  appliesSurface('createTransaction'),
 
   operation('editTransaction', [
     'update_transaction.transaction_id',
@@ -333,6 +369,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   gatedInputField('EditTransactionInput.tagIds', ['update_transaction.tag_ids']),
   gatedInputField('EditTransactionInput.isReviewed', ['review_transactions.reviewed']),
   responseShape('editTransaction'),
+  appliesSurface('editTransaction'),
 
   operation('deleteTransaction', [
     'delete_transaction.transaction_id',
@@ -340,6 +377,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
     'delete_transaction.item_id',
   ]),
   responseShape('deleteTransaction'),
+  appliesSurface('deleteTransaction'),
 
   operation('addTransactionToRecurring', [
     'add_transaction_to_recurring.transaction_id',
@@ -350,6 +388,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
     'add_transaction_to_recurring.recurring_id',
   ]),
   responseShape('addTransactionToRecurring'),
+  appliesSurface('addTransactionToRecurring'),
 
   operation('splitTransaction', [
     'split_transaction.transaction_id',
@@ -362,6 +401,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   gatedInputField('SplitTransactionInput.amount', ['split_transaction.splits[].amount']),
   gatedInputField('SplitTransactionInput.categoryId', ['split_transaction.splits[].category_id']),
   responseShape('splitTransaction'),
+  appliesSurface('splitTransaction'),
 
   // ----- Tags ---------------------------------------------------------------
   // No top-level args beyond the input object (covered by CreateTagInput.*).
@@ -369,14 +409,17 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   gatedInputField('CreateTagInput.name', ['create_tag.name']),
   gatedInputField('CreateTagInput.colorName', ['create_tag.color_name']),
   responseShape('createTag'),
+  appliesSurface('createTag'),
 
   operation('editTag', ['update_tag.tag_id']),
   gatedInputField('EditTagInput.name', ['update_tag.name']),
   gatedInputField('EditTagInput.colorName', ['update_tag.color_name']),
   responseShape('editTag'),
+  appliesSurface('editTag'),
 
   operation('deleteTag', ['delete_tag.tag_id']),
   responseShape('deleteTag'),
+  appliesSurface('deleteTag'),
 
   // ----- Categories ---------------------------------------------------------
   // No top-level args beyond the input object (covered by CreateCategoryInput.*).
@@ -386,6 +429,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   gatedInputField('CreateCategoryInput.emoji', ['create_category.emoji']),
   gatedInputField('CreateCategoryInput.isExcluded', ['create_category.is_excluded']),
   responseShape('createCategory'),
+  appliesSurface('createCategory'),
 
   operation('editCategory', ['update_category.category_id']),
   gatedInputField('EditCategoryInput.name', ['update_category.name']),
@@ -393,9 +437,11 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   gatedInputField('EditCategoryInput.emoji', ['update_category.emoji']),
   gatedInputField('EditCategoryInput.isExcluded', ['update_category.is_excluded']),
   responseShape('editCategory'),
+  appliesSurface('editCategory'),
 
   operation('deleteCategory', ['delete_category.category_id']),
   responseShape('deleteCategory'),
+  appliesSurface('deleteCategory'),
 
   // ----- Budgets ------------------------------------------------------------
   // The single set_budget MCP tool fans out to one of two mutations
@@ -411,11 +457,13 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   // stay verified-once until a budget probe lands.
   inputField('EditCategoryBudgetInput.amount', ['set_budget.amount']),
   responseShape('editCategoryBudget'),
+  appliesSurface('editCategoryBudget'),
 
   operation('editCategoryBudgetMonthly', ['set_budget.category_id']),
   inputField('EditCategoryBudgetMonthlyInput.amount', ['set_budget.amount']),
   inputField('EditCategoryBudgetMonthlyInput.month', ['set_budget.month']),
   responseShape('editCategoryBudgetMonthly'),
+  appliesSurface('editCategoryBudgetMonthly'),
 
   // ----- Recurrings ---------------------------------------------------------
   // No top-level args beyond the input object (covered by CreateRecurringInput.*).
@@ -423,6 +471,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   gatedInputField('CreateRecurringInput.frequency', ['create_recurring.frequency']),
   gatedInputField('CreateRecurringInput.transaction', ['create_recurring.transaction_id']),
   responseShape('createRecurring'),
+  appliesSurface('createRecurring'),
 
   operation('editRecurring', ['set_recurring_state.recurring_id', 'update_recurring.recurring_id']),
   gatedInputField('EditRecurringInput.name', ['update_recurring.name']),
@@ -438,9 +487,11 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   gatedInputField('EditRecurringInput.rule.maxAmount', ['update_recurring.rule.max_amount']),
   gatedInputField('EditRecurringInput.rule.days', ['update_recurring.rule.days']),
   responseShape('editRecurring'),
+  appliesSurface('editRecurring'),
 
   operation('deleteRecurring', ['delete_recurring.recurring_id']),
   responseShape('deleteRecurring'),
+  appliesSurface('deleteRecurring'),
 
   // ----- Accounts -----------------------------------------------------------
   // editAccount has a GraphQL wrapper (src/core/graphql/accounts.ts) but no
@@ -450,6 +501,10 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   gatedInputField('EditAccountInput.name'),
   gatedInputField('EditAccountInput.isUserHidden'),
   responseShape('editAccount'),
+  // No `applies` entry for editAccount: there is no MCP write tool for it,
+  // so the B4 round-trip suite (one round-trip PER WRITE TOOL) does not
+  // cover the wrapper. Add appliesSurface('editAccount') + a round-trip
+  // check when an update_account tool ships.
 
   // ----- Read queries (issues #439/#460) -------------------------------------
   // One operation + one response-shape entry per QUERY in

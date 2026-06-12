@@ -67,6 +67,7 @@
     "fix": "bun run lint:fix && bun run format",
     "smoke": "bun run scripts/smoke/conformance.ts && bun run scripts/smoke/reads.ts",
     "smoke:conformance": "bun run scripts/smoke/conformance.ts",
+    "smoke:roundtrip": "bun run scripts/smoke/roundtrip.ts",
     "smoke:reads": "bun run scripts/smoke/reads.ts",
     "smoke:recurring-frequency": "bun run scripts/smoke/recurring-frequency-conformance.ts",
     "smoke:recurring-state": "bun run scripts/smoke/recurring-state-conformance.ts",
