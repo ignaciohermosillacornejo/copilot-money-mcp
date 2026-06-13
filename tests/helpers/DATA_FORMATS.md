@@ -8,24 +8,25 @@ The test helper (`test-db.ts`) creates LevelDB databases with Firestore-compatib
 
 ## Collection Mappings
 
-| Test Collection | Production Collection | Notes |
-|----------------|----------------------|-------|
-| `transactions` | `transactions` | Same |
-| `accounts` | `accounts` | Same |
-| `recurring` | `recurring` | Same |
-| `budgets` | `budgets` | Same |
-| `financial_goals` | `financial_goals` | **Note: NOT `goals`** |
-| `goalHistory` | `goalHistory` | May have subcollection path |
-| `investmentPrices` | `investmentPrices` | Same |
-| `investmentSplits` | `investmentSplits` | Same |
-| `items` | `items` | Same |
-| `categories` | User subcollection | Usually `users/{userId}/categories` |
+| Test Collection    | Production Collection | Notes                               |
+| ------------------ | --------------------- | ----------------------------------- |
+| `transactions`     | `transactions`        | Same                                |
+| `accounts`         | `accounts`            | Same                                |
+| `recurring`        | `recurring`           | Same                                |
+| `budgets`          | `budgets`             | Same                                |
+| `financial_goals`  | `financial_goals`     | **Note: NOT `goals`**               |
+| `goalHistory`      | `goalHistory`         | May have subcollection path         |
+| `investmentPrices` | `investmentPrices`    | Same                                |
+| `investmentSplits` | `investmentSplits`    | Same                                |
+| `items`            | `items`               | Same                                |
+| `categories`       | User subcollection    | Usually `users/{userId}/categories` |
 
 ## Nested Structure Differences
 
 ### Goals (`financial_goals`)
 
 **Production Format:**
+
 ```json
 {
   "goal_id": "goal_abc123",
@@ -39,8 +40,8 @@ The test helper (`test-db.ts`) creates LevelDB databases with Firestore-compatib
     "type": "savings",
     "status": "active",
     "tracking_type": "automatic",
-    "tracking_type_monthly_contribution": 500.00,
-    "target_amount": 10000.00,
+    "tracking_type_monthly_contribution": 500.0,
+    "target_amount": 10000.0,
     "start_date": "2024-01-15",
     "modified_start_date": false,
     "inflates_budget": false,
@@ -50,6 +51,7 @@ The test helper (`test-db.ts`) creates LevelDB databases with Firestore-compatib
 ```
 
 **Test Format (simplified):**
+
 ```typescript
 {
   goal_id: 'goal_abc123',
@@ -95,9 +97,25 @@ Documents stored in subcollection: `users/{userId}/categories/{categoryId}`
 }
 ```
 
+## Opaque-ID invariant (issue #461)
+
+Synthetic fixtures for ID-keyed entities (`categories`, `accounts`, `recurring`,
+`tags`) **must use opaque IDs that are distinct from their display name**. A
+fixture where `id === name` (e.g. `tag_id: 'work'` for a tag named `work`) lets
+a broken `name === id` comparison pass by accident — exactly the bug class fixed
+in PR #394, where cache-mode `get_transactions` compared a user-facing tag _name_
+against opaque tag _IDs_.
+
+`assertOpaqueIds()` (in `test-db.ts`) enforces this and is wired into
+`createTestDb()`, so every LevelDB-backed fixture is validated as it is built.
+Use Firestore-shaped opaque IDs (`9qyEMnfMXknwvx9OnYhk`) or `prefix_xxxxxx`
+slugs. Plaid-taxonomy category slugs (`food_dining`) are fine — they look
+name-ish but never equal the display name (`Food & Dining`).
+
 ## Field Name Conventions
 
 All field names in production Firestore use **snake_case**:
+
 - `transaction_id` (not `transactionId`)
 - `account_id` (not `accountId`)
 - `current_balance` (not `currentBalance`)
@@ -108,6 +126,7 @@ The decoder looks for snake_case fields, so test data must use snake_case.
 
 **Production Format:**
 Firestore timestamps are stored as protobuf Timestamp messages:
+
 ```json
 {
   "created_at": {
@@ -119,6 +138,7 @@ Firestore timestamps are stored as protobuf Timestamp messages:
 
 **Test Format:**
 The test helper accepts ISO date strings which are converted:
+
 ```typescript
 {
   date: '2024-01-15',  // Converted to timestamp during encoding
@@ -130,11 +150,13 @@ The test helper accepts ISO date strings which are converted:
 To achieve full production data parity, the following enhancements are needed:
 
 ### 1. Nested Object Support in Goals
+
 ```typescript
 interface TestGoal {
   goal_id: string;
   name?: string;
-  savings?: {  // Add nested savings support
+  savings?: {
+    // Add nested savings support
     type?: string;
     status?: string;
     target_amount?: number;
@@ -145,6 +167,7 @@ interface TestGoal {
 ```
 
 ### 2. Subcollection Support
+
 ```typescript
 // Support for user subcollections
 createDocument({
@@ -155,6 +178,7 @@ createDocument({
 ```
 
 ### 3. Timestamp Field Types
+
 ```typescript
 interface TestTransaction {
   // Add proper timestamp fields
@@ -164,16 +188,18 @@ interface TestTransaction {
 ```
 
 ### 4. Reference Fields
+
 ```typescript
 // Some fields are Firestore references
 {
-  account_ref: 'projects/copilot-production/databases/(default)/documents/accounts/acc_123'
+  account_ref: 'projects/copilot-production/databases/(default)/documents/accounts/acc_123';
 }
 ```
 
 ## Usage Example
 
 Current simplified test data creation:
+
 ```typescript
 await createTransactionDb(dbPath, [
   {
@@ -186,6 +212,7 @@ await createTransactionDb(dbPath, [
 ```
 
 Future production-equivalent:
+
 ```typescript
 await createTransactionDb(dbPath, [
   {
@@ -212,6 +239,7 @@ await createTransactionDb(dbPath, [
 The decoder extracts fields from Firestore documents based on field names. See `src/core/decoder.ts` for the complete list of expected fields for each collection.
 
 Key decoder functions:
+
 - `decodeTransactions()` - Expects `amount`, `date`, various string/bool fields
 - `decodeAccounts()` - Expects `current_balance` (required), type fields
 - `decodeGoals()` - Expects nested `savings` object with amounts/dates
