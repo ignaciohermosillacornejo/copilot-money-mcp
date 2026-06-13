@@ -74,6 +74,7 @@ scripts/*
 !scripts/scheduled-smoke.ts
 !scripts/install-scheduled-smoke.sh
 !scripts/uninstall-scheduled-smoke.sh
+!scripts/check-pr-sections.sh
 # License-check scratch directory (created by CI license gate)
 .license-check/
 # Generated test fixtures

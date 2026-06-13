@@ -192,6 +192,14 @@ entry with a comment.
 5. Push and open a Pull Request — fill every section of the PR template,
    including "External assumptions" (see `.github/PULL_REQUEST_TEMPLATE.md`)
 
+The **Required PR Sections** check (`.github/workflows/required-sections.yml`)
+enforces this: a PR fails CI unless its body contains a non-empty
+`## External assumptions` section (write `None` if there are no new
+assumptions), and `fix:`-titled PRs must additionally include every Bug
+Response Ritual field below. The matching logic lives in
+`scripts/check-pr-sections.sh` and is covered by
+`tests/scripts/check-pr-sections.test.ts`.
+
 ## Bug Response Ritual
 
 Every bug-fix PR ratchets the system: fix the **class**, not just the instance.
