@@ -15,6 +15,11 @@ bun run fix          # Run lint:fix + format
 
 ## Architecture
 
+> **Defending against Copilot API drift:** the conformance ledger, live smokes,
+> PR rituals, and weekly drift check are explained as one system in
+> [`docs/CONFORMANCE_ARCHITECTURE.md`](docs/CONFORMANCE_ARCHITECTURE.md). Read it
+> before touching the GraphQL surface, adding a tool, or fixing a boundary bug.
+
 ### Data Flow
 1. Copilot Money stores data in local LevelDB/Firestore cache
 2. `src/core/decoder.ts` reads `.ldb` files and parses Protocol Buffers

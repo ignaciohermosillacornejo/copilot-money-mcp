@@ -25,6 +25,8 @@ An [MCP](https://modelcontextprotocol.io/) server that gives AI assistants acces
 
 **14 cache-mode read tools (or 21 in `--live-reads` mode: 8 surviving cache + 13 live), plus up to 17 write tools** — query and modify transactions, accounts, holdings, balances, categories, recurring charges, budgets, goals, and investment performance. See [Tools by Mode](#tools-by-mode) below.
 
+> Contributors: writes go through an API we don't own. How the repo keeps its model of Copilot's GraphQL surface from silently drifting — the conformance ledger, live smokes, and weekly drift check — is documented in [`docs/CONFORMANCE_ARCHITECTURE.md`](docs/CONFORMANCE_ARCHITECTURE.md).
+
 ## Privacy First
 
 We never collect, store, or transmit your data to any server operated by this project — we don't have any. See our [Privacy Policy](PRIVACY.md) for details.
