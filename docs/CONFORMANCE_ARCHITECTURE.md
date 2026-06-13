@@ -54,10 +54,20 @@ strongest-available wins:
    `create_recurring` bug: the server *said* the create failed, the read-back
    proved it had secretly succeeded.
 
-A runtime fourth layer backs the write *responses*: `runtime:zod-warn` validates
-every mutation response against a Zod schema inside the GraphQL client
-(`src/core/graphql/client.ts`) and **warns without ever throwing or dropping
-data** — drift is counted and logged, never fatal.
+These three are *oracles* in the strict sense: each independently verifies an
+assumption on demand. A **complementary runtime layer** backs the write
+*responses* — `runtime:zod-warn` is **not an oracle** (it doesn't proactively
+verify anything), but it surfaces drift *as it happens*: every mutation response
+is validated against a Zod schema inside the GraphQL client
+(`src/core/graphql/client.ts`) and drift is **counted and logged, never thrown or
+dropped**. Proactive oracles catch drift on a run; this catches it in
+production.
+
+Operationally the oracles split into two tiers by safety: **Tier 1** is the
+non-mutating set — conformance probes + read-backs (`bun run smoke`), safe to run
+unattended and on a schedule; **Tier 2** is the mutating round-trips
+(`bun run smoke:roundtrip`), owner-attended only. The table and commands below
+use this Tier 1 / Tier 2 shorthand.
 
 ## The ledger: the spine
 
@@ -72,7 +82,9 @@ assumption and the oracle (if any) guarding it. Each entry carries a
 | `unverified` | We assume it; nothing checks it yet. Honest debt. |
 
 `bun run smoke` prints the class distribution at the end — the "are we getting
-better?" number. As of the 2026-06 program it sits near 99% gated/verified.
+better?" number. For the current figure, run it or read the latest dated report
+in `docs/audits/` (the `/boundary-audit` skill records the distribution each
+quarter); the 2026-06 program drove it to near 99% gated/verified.
 
 The ledger is enforced by plain unit tests that run in cloud CI (no auth, no
 network): `tests/conformance/ledger.test.ts` fails the build if a write-tool
@@ -121,8 +133,9 @@ Every gate above is *activity-triggered* (push, PR, pre-push). The original
 threat — Copilot changing the API while no development is happening — needs a
 time trigger. A weekly launchd job (`scripts/scheduled-smoke.ts`, installed via
 `scripts/install-scheduled-smoke.sh`, documented in `docs/scheduled-smoke.md`)
-runs **Tier-1 only** (non-mutating; never the round-trips) on the owner's
-machine, where the browser session lives. Its outcome is three-state —
+runs the **non-mutating smokes only** — the conformance probes and read-backs
+(`bun run smoke`), never the mutating round-trip suite — on the owner's machine,
+where the browser session lives. Its outcome is three-state —
 `pass` / `fail` / `auth-missing` — because **absence of auth must never look like
 absence of drift**. The result is surfaced inside a dev session via
 `get_connection_status` (`src/utils/scheduled-smoke-status.ts`), so stale or
