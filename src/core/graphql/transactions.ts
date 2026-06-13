@@ -86,6 +86,7 @@ export interface EditTransactionInput {
   userNotes?: string | null;
   tagIds?: string[];
   isReviewed?: boolean;
+  type?: TransactionType;
 }
 
 export interface EditTransactionArgs {
@@ -103,6 +104,7 @@ export interface EditTransactionResponse {
       categoryId: string;
       userNotes: string | null;
       isReviewed: boolean;
+      type: TransactionType;
       tags: Array<{ id: string }>;
     };
   };
@@ -114,6 +116,7 @@ export interface EditTransactionChanges {
   userNotes?: string | null;
   isReviewed?: boolean;
   tagIds?: string[];
+  type?: TransactionType;
 }
 
 export interface DeleteTransactionArgs {
@@ -259,5 +262,6 @@ export async function editTransaction(
   if ('userNotes' in args.input) changed.userNotes = tx.userNotes;
   if ('isReviewed' in args.input) changed.isReviewed = tx.isReviewed;
   if ('tagIds' in args.input) changed.tagIds = tx.tags.map((t) => t.id);
+  if ('type' in args.input) changed.type = tx.type;
   return { id: tx.id, changed };
 }

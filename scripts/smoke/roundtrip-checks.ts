@@ -520,7 +520,7 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
   {
     tool: 'update_transaction',
     domain: 'transactions',
-    flow: 'rename + set note on the run-created transaction → verify via Transactions re-read',
+    flow: 'rename + set note + flip type→INTERNAL_TRANSFER (pins the server-side category clear) on the run-created transaction → verify via Transactions re-read → revert type/category',
     appliesSurfaces: ['Mutation.editTransaction:applies'],
     run: async (ctx) => {
       const txn = ctx.state.txnA;
@@ -543,6 +543,37 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
         after.userNotes === note,
         `update_transaction: write accepted but re-read userNotes is '${String(after.userNotes)}', expected '${note}'`
       );
+
+      // type round-trip (#415). INTERNAL_TRANSFER avoids INCOME's net-positive
+      // sign rule and exercises the verified behavior: the server applies the
+      // type AND silently clears the category. Pin both via re-read, then revert.
+      try {
+        await editTransaction(ctx.client, {
+          id: txn.id,
+          accountId: txn.accountId,
+          itemId: txn.itemId,
+          input: { type: 'INTERNAL_TRANSFER' },
+        });
+        const afterType = await readTransactionById(ctx.client, ctx.state.marker, txn.id);
+        check(afterType, `update_transaction: transaction ${txn.id} missing from type re-read`);
+        check(
+          afterType.type === 'INTERNAL_TRANSFER',
+          `update_transaction: type write not applied; re-read type is '${afterType.type}', expected INTERNAL_TRANSFER`
+        );
+        check(
+          !afterType.categoryId,
+          `update_transaction: INTERNAL_TRANSFER must clear the category, but re-read categoryId is '${String(afterType.categoryId)}'`
+        );
+      } finally {
+        // Restore REGULAR + the original category so downstream checks (e.g.
+        // create_recurring) see a normal categorized transaction.
+        await editTransaction(ctx.client, {
+          id: txn.id,
+          accountId: txn.accountId,
+          itemId: txn.itemId,
+          input: { type: 'REGULAR', categoryId: ctx.state.categoryId },
+        });
+      }
       return undefined;
     },
   },

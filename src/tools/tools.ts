@@ -2427,6 +2427,7 @@ export class CopilotMoneyTools {
     category_id?: string;
     note?: string;
     tag_ids?: string[];
+    type?: TransactionType;
   }): Promise<{
     success: true;
     transaction_id: string;
@@ -2438,7 +2439,14 @@ export class CopilotMoneyTools {
     // Reject unknown fields (equivalent to JSON Schema additionalProperties: false,
     // but re-checked here as a defense in depth in case the method is called directly
     // without going through the MCP dispatch layer).
-    const allowedKeys = new Set(['transaction_id', 'name', 'category_id', 'note', 'tag_ids']);
+    const allowedKeys = new Set([
+      'transaction_id',
+      'name',
+      'category_id',
+      'note',
+      'tag_ids',
+      'type',
+    ]);
     for (const key of Object.keys(args)) {
       if (!allowedKeys.has(key)) {
         throw new Error(`update_transaction: unknown field "${key}"`);
@@ -2490,6 +2498,29 @@ export class CopilotMoneyTools {
         }
       }
     }
+    if ('type' in args && args.type !== undefined) {
+      if (!TRANSACTION_TYPES.includes(args.type)) {
+        throw new Error(
+          `update_transaction: type must be one of ${TRANSACTION_TYPES.join(', ')}. Got: ${args.type}`
+        );
+      }
+      // Verified live (2026-06-12): setting type=INCOME or INTERNAL_TRANSFER
+      // makes the server silently clear the category (no error). So a
+      // category_id + INCOME/INTERNAL_TRANSFER request is self-contradictory —
+      // the server would drop the category half. Reject it with an accurate
+      // message instead of issuing a write that half-applies.
+      if (
+        (args.type === 'INCOME' || args.type === 'INTERNAL_TRANSFER') &&
+        'category_id' in args &&
+        args.category_id !== undefined
+      ) {
+        throw new Error(
+          `update_transaction: category_id cannot be combined with type ${args.type} — Copilot ` +
+            `clears the category for INCOME/INTERNAL_TRANSFER transactions. Set the type alone ` +
+            `(its category is removed), or use type REGULAR to keep/set a category.`
+        );
+      }
+    }
     // Map MCP fields → EditTransaction input shape.
     const input: {
       name?: string;
@@ -2497,12 +2528,14 @@ export class CopilotMoneyTools {
       userNotes?: string | null;
       tagIds?: string[];
       isReviewed?: boolean;
+      type?: TransactionType;
     } = {};
     if ('name' in args && args.name !== undefined) input.name = args.name.trim();
     if ('category_id' in args && args.category_id !== undefined)
       input.categoryId = args.category_id;
     if ('note' in args && args.note !== undefined) input.userNotes = args.note;
     if ('tag_ids' in args && args.tag_ids !== undefined) input.tagIds = args.tag_ids;
+    if ('type' in args && args.type !== undefined) input.type = args.type;
 
     if (!txn.account_id || !txn.item_id) {
       throw new Error(`Transaction ${transaction_id} missing account_id or item_id in local cache`);
@@ -2522,6 +2555,7 @@ export class CopilotMoneyTools {
         userNotes: 'note',
         tagIds: 'tag_ids',
         isReviewed: 'reviewed',
+        type: 'type',
       };
       const updated = Object.keys(result.changed).map((k) => graphqlToApiName[k] ?? k);
 
@@ -2533,6 +2567,11 @@ export class CopilotMoneyTools {
         patch.category_id = args.category_id;
       if ('note' in args && args.note !== undefined) patch.user_note = args.note;
       if ('tag_ids' in args && args.tag_ids !== undefined) patch.tag_ids = args.tag_ids;
+      // INCOME/INTERNAL_TRANSFER clears the category server-side (verified live);
+      // mirror that in the cache so a follow-up read doesn't show a stale category.
+      if (args.type === 'INCOME' || args.type === 'INTERNAL_TRANSFER') {
+        patch.category_id = '';
+      }
       if (Object.keys(patch).length > 0) {
         this.db.patchCachedTransaction(transaction_id, patch);
         this.liveDb?.patchLiveTransaction(transaction_id, patch);
