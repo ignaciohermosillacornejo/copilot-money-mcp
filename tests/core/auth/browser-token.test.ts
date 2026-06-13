@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import {
   extractRefreshToken,
+  extractRefreshTokenCandidates,
   BROWSER_CONFIGS,
   getChromiumProfileStoragePaths,
   type BrowserConfig,
@@ -367,5 +368,66 @@ describe('extractRefreshToken', () => {
     const result = await extractRefreshToken(overrides);
     expect(result.token).toBe(token2);
     expect(result.browser).toBe('HasToken');
+  });
+});
+
+describe('extractRefreshTokenCandidates', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'browser-token-candidates-'));
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test('yields ALL AMf- tokens found, in browser/path order, with no exchange', async () => {
+    const dir1 = join(tempDir, 'browser1');
+    const dir2 = join(tempDir, 'browser2');
+    mkdirSync(dir1, { recursive: true });
+    mkdirSync(dir2, { recursive: true });
+
+    const foreign = 'AMf-' + 'X'.repeat(150);
+    const real = 'AMf-' + 'Y'.repeat(200);
+    // First browser holds only a foreign token; second holds the real one.
+    writeFileSync(join(dir1, '000001.ldb'), `other site ${foreign}`);
+    writeFileSync(join(dir2, '000001.ldb'), `copilot ${real}`);
+
+    const overrides: BrowserConfig[] = [
+      { name: 'FirstBrowser', paths: [dir1], type: 'chromium' },
+      { name: 'SecondBrowser', paths: [dir2], type: 'chromium' },
+    ];
+
+    const { candidates, checked } = await extractRefreshTokenCandidates(overrides);
+    expect(candidates.map((c) => c.token)).toEqual([foreign, real]);
+    expect(candidates.map((c) => c.browser)).toEqual(['FirstBrowser', 'SecondBrowser']);
+    expect(checked).toEqual(['FirstBrowser', 'SecondBrowser']);
+  });
+
+  test('returns an empty candidate list (not a throw) when no token is found', async () => {
+    const ldbDir = join(tempDir, 'leveldb');
+    mkdirSync(ldbDir, { recursive: true });
+    writeFileSync(join(ldbDir, '000001.ldb'), 'no tokens here');
+
+    const overrides: BrowserConfig[] = [{ name: 'TestBrowser', paths: [ldbDir], type: 'chromium' }];
+
+    const { candidates, checked } = await extractRefreshTokenCandidates(overrides);
+    expect(candidates).toEqual([]);
+    expect(checked).toEqual(['TestBrowser']);
+  });
+
+  test('de-duplicates the same token discovered across multiple paths/files', async () => {
+    const ldbDir = join(tempDir, 'leveldb');
+    mkdirSync(ldbDir, { recursive: true });
+    const token = 'AMf-' + 'Z'.repeat(200);
+    // Same token appears in two files in the same dir.
+    writeFileSync(join(ldbDir, '000001.ldb'), token);
+    writeFileSync(join(ldbDir, '000002.ldb'), `dup ${token}`);
+
+    const overrides: BrowserConfig[] = [{ name: 'TestBrowser', paths: [ldbDir], type: 'chromium' }];
+
+    const { candidates } = await extractRefreshTokenCandidates(overrides);
+    expect(candidates.map((c) => c.token)).toEqual([token]);
   });
 });

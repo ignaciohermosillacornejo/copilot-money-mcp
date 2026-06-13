@@ -17,7 +17,7 @@ import { CopilotMoneyTools } from './tools/index.js';
 import { ALL_TOOL_DEFS, TOOL_REGISTRY, type LiveToolContext } from './tools/registry/index.js';
 import { GraphQLClient } from './core/graphql/client.js';
 import { FirebaseAuth } from './core/auth/firebase-auth.js';
-import { extractRefreshToken } from './core/auth/browser-token.js';
+import { extractRefreshTokenCandidates } from './core/auth/browser-token.js';
 import { LiveCopilotDatabase, preflightLiveAuth } from './core/live-database.js';
 import { LiveTransactionsTools } from './tools/live/transactions.js';
 import { LiveAccountsTools } from './tools/live/accounts.js';
@@ -71,7 +71,7 @@ export class CopilotMoneyServer {
 
     let graphqlClient = injectedGraphqlClient;
     if ((writeEnabled || liveReadsEnabled) && !graphqlClient) {
-      const auth = new FirebaseAuth(() => extractRefreshToken());
+      const auth = new FirebaseAuth(() => extractRefreshTokenCandidates());
       graphqlClient = new GraphQLClient(auth);
     }
 
@@ -291,7 +291,7 @@ export async function runServer(
 ): Promise<void> {
   let graphqlClient: GraphQLClient | undefined;
   if (writeEnabled || liveReadsEnabled) {
-    const auth = new FirebaseAuth(() => extractRefreshToken());
+    const auth = new FirebaseAuth(() => extractRefreshTokenCandidates());
     graphqlClient = new GraphQLClient(auth);
   }
 
