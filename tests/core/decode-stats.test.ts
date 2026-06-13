@@ -56,6 +56,21 @@ const ITEM_DOC = {
   },
 };
 
+// Valid transaction carrying one extra field the processor neither consumes
+// nor ignores. It passes Zod (so it is NOT dropped) but trips
+// warnUnreadFields, giving unread_field_warnings > 0 with zero drops.
+const UNREAD_FIELD_TXN = {
+  collection: 'transactions',
+  id: 'txn_unread',
+  fields: {
+    transaction_id: 'txn_unread',
+    amount: 300,
+    date: '2024-01-16',
+    name: 'Synthetic Unread Field',
+    copilot_future_field: 'value the decoder does not read yet',
+  },
+};
+
 let warnSpy: ReturnType<typeof spyOn>;
 
 beforeEach(() => {
@@ -148,6 +163,32 @@ describe('decode_health on the tool surface', () => {
     const status = await tools.getConnectionStatus();
     expect(status.decode_health.status).toBe('ok');
     expect(status.decode_health.collections).toBeUndefined();
+  }, 30_000);
+
+  test('unread-only data reports ok status WITH a per-collection breakdown', async () => {
+    const dbPath = path.join(FIXTURES_DIR, 'tool-unread-db');
+    await createTestDb(dbPath, [VALID_TXN, UNREAD_FIELD_TXN, ITEM_DOC]);
+
+    const tools = new CopilotMoneyTools(new CopilotDatabase(dbPath));
+    const info = await tools.getCacheInfo();
+
+    // Nothing dropped: both transactions survive.
+    expect(info.transaction_count).toBe(2);
+    // Status stays 'ok' because there are zero drops...
+    expect(info.decode_health.status).toBe('ok');
+    // ...but the note and collections field surface the unread field.
+    expect(info.decode_health.note).toContain('not yet read by the decoder');
+    expect(info.decode_health.note).toContain('No data was dropped');
+    // Per-collection breakdown is present (unlike the terse zero-warning case)
+    // and includes only the flagged collection with dropped === 0.
+    expect(info.decode_health.collections).toEqual({
+      transactions: { decoded: 2, dropped: 0, unread_field_warnings: 1 },
+    });
+
+    const status = await tools.getConnectionStatus();
+    expect(status.decode_health.status).toBe('ok');
+    expect(status.decode_health.collections?.transactions?.unread_field_warnings).toBe(1);
+    expect(status.decode_health.collections?.transactions?.dropped).toBe(0);
   }, 30_000);
 
   test('injected (non-decoded) data reports unknown decode health', async () => {

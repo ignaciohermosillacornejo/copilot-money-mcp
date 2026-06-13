@@ -35,10 +35,26 @@ function runWithStubSmoke(smokeScript: string): {
   process.env.COPILOT_MCP_SMOKE_STATUS_PATH = statusPath;
   process.env.COPILOT_MCP_SMOKE_QUIET = '1';
   const exitCode = runScheduledSmoke();
-  return {
-    exitCode,
-    status: JSON.parse(readFileSync(statusPath, 'utf-8')) as Record<string, unknown>,
-  };
+  let raw: string;
+  try {
+    raw = readFileSync(statusPath, 'utf-8');
+  } catch (err) {
+    throw new Error(
+      `Expected runScheduledSmoke() to write a status file at ${statusPath}, ` +
+        `but it could not be read (exitCode=${exitCode}). The runner likely ` +
+        `exited before writing status. Underlying error: ${String(err)}`
+    );
+  }
+  let status: Record<string, unknown>;
+  try {
+    status = JSON.parse(raw) as Record<string, unknown>;
+  } catch (err) {
+    throw new Error(
+      `Status file at ${statusPath} is not valid JSON (exitCode=${exitCode}). ` +
+        `Contents: ${JSON.stringify(raw)}. Parse error: ${String(err)}`
+    );
+  }
+  return { exitCode, status };
 }
 
 describe('scheduled-smoke runner (full flow, stub smoke)', () => {

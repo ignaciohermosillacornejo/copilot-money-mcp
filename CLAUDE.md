@@ -9,9 +9,12 @@ bun install          # Install dependencies
 bun test             # Run tests
 bun run build        # Build for production
 bun run pack:mcpb    # Create .mcpb bundle for Claude Desktop
-bun run check        # Run typecheck + lint + format:check + test
+bun run check        # typecheck + lint + format:check + check:version-sync + check:server-json + bun test --bail
 bun run fix          # Run lint:fix + format
 ```
+
+> `bun run check` does NOT run `check:skills` (the `skills/` linter). Run
+> `bun run check:skills` separately when touching anything under `skills/`.
 
 ## Architecture
 

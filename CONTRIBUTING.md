@@ -34,9 +34,10 @@ bun test               # Run tests
 bun run build          # Build for production
 bun run pack:mcpb      # Create read-only .mcpb bundle for Claude Desktop
 bun run pack:mcpb:write # Create writes-enabled .mcpb bundle (local self-install only)
-bun run check          # Run typecheck + lint + format:check + test
+bun run check          # typecheck + lint + format:check + check:version-sync + check:server-json + bun test --bail
 bun run fix            # Run lint:fix + format
 bun run sync-manifest  # Verify manifest.json matches code
+bun run check:skills   # Lint skills/ (NOT part of `check` — run separately for skills work)
 ```
 
 #### Writes-enabled bundle (local-only)
@@ -148,7 +149,7 @@ Tests mirror the `src/` structure in `tests/`. The synthetic test DB is generate
 
 - Use `(db as any)._fieldName = [...]` to inject mock data in `beforeEach`
 - Write tool tests need a mock `GraphQLClient` — use `createMockGraphQLClient` from `tests/helpers/mock-graphql.ts`
-- Run `bun run check` before submitting to catch typecheck, lint, and format issues
+- Run `bun run check` before submitting to catch typecheck, lint, format, version-sync, server-json, and test failures (run `bun run check:skills` too if you touched `skills/` — it is not part of `check`)
 
 ### License check
 
