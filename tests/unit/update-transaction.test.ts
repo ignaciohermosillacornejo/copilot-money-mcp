@@ -388,3 +388,52 @@ describe('updateTransaction — type (#415)', () => {
     expect(cached?.category_id).toBe('');
   });
 });
+
+describe('updateTransaction — reviewed (#416)', () => {
+  test('reviewed=true: dispatches with isReviewed input, response maps back to "reviewed"', async () => {
+    const { tools, client } = makeTools();
+    const result = await tools.updateTransaction({ transaction_id: 'txn1', reviewed: true });
+    expect(client._calls).toHaveLength(1);
+    const call = client._calls[0] as any;
+    expect(call.op).toBe('EditTransaction');
+    expect(call.variables.input.isReviewed).toBe(true);
+    expect(result.updated).toEqual(['reviewed']);
+  });
+
+  test('reviewed=false: dispatches with isReviewed=false (un-review a single transaction)', async () => {
+    const { tools, client } = makeTools();
+    const result = await tools.updateTransaction({ transaction_id: 'txn1', reviewed: false });
+    expect(client._calls).toHaveLength(1);
+    expect((client._calls[0] as any).variables.input.isReviewed).toBe(false);
+    expect(result.updated).toEqual(['reviewed']);
+  });
+
+  test('reviewed: optimistic cache patches user_reviewed', async () => {
+    const { tools, mockDb } = makeTools();
+    await tools.updateTransaction({ transaction_id: 'txn1', reviewed: true });
+    const cached = (await mockDb.getTransactions()).find((t) => t.transaction_id === 'txn1');
+    expect(cached?.user_reviewed).toBe(true);
+  });
+
+  test('reviewed combined with category_id: one merged EditTransaction call', async () => {
+    const { tools, client } = makeTools();
+    const result = await tools.updateTransaction({
+      transaction_id: 'txn1',
+      reviewed: true,
+      category_id: 'groceries',
+    });
+    expect(client._calls).toHaveLength(1);
+    const input = (client._calls[0] as any).variables.input;
+    expect(input.isReviewed).toBe(true);
+    expect(input.categoryId).toBe('groceries');
+    expect(result.updated.sort()).toEqual(['category_id', 'reviewed']);
+  });
+
+  test('reviewed: non-boolean value throws, no write', async () => {
+    const { tools, client } = makeTools();
+    await expect(
+      tools.updateTransaction({ transaction_id: 'txn1', reviewed: 'yes' as any })
+    ).rejects.toThrow(/reviewed must be a boolean/i);
+    expect(client._calls).toHaveLength(0);
+  });
+});
