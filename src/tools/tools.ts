@@ -2428,6 +2428,7 @@ export class CopilotMoneyTools {
     note?: string;
     tag_ids?: string[];
     type?: TransactionType;
+    reviewed?: boolean;
   }): Promise<{
     success: true;
     transaction_id: string;
@@ -2446,6 +2447,7 @@ export class CopilotMoneyTools {
       'note',
       'tag_ids',
       'type',
+      'reviewed',
     ]);
     for (const key of Object.keys(args)) {
       if (!allowedKeys.has(key)) {
@@ -2521,6 +2523,13 @@ export class CopilotMoneyTools {
         );
       }
     }
+    if ('reviewed' in args && args.reviewed !== undefined) {
+      if (typeof args.reviewed !== 'boolean') {
+        throw new Error(
+          `update_transaction: reviewed must be a boolean. Got: ${String(args.reviewed)}`
+        );
+      }
+    }
     // Map MCP fields → EditTransaction input shape.
     const input: {
       name?: string;
@@ -2536,6 +2545,7 @@ export class CopilotMoneyTools {
     if ('note' in args && args.note !== undefined) input.userNotes = args.note;
     if ('tag_ids' in args && args.tag_ids !== undefined) input.tagIds = args.tag_ids;
     if ('type' in args && args.type !== undefined) input.type = args.type;
+    if ('reviewed' in args && args.reviewed !== undefined) input.isReviewed = args.reviewed;
 
     if (!txn.account_id || !txn.item_id) {
       throw new Error(`Transaction ${transaction_id} missing account_id or item_id in local cache`);
@@ -2567,6 +2577,7 @@ export class CopilotMoneyTools {
         patch.category_id = args.category_id;
       if ('note' in args && args.note !== undefined) patch.user_note = args.note;
       if ('tag_ids' in args && args.tag_ids !== undefined) patch.tag_ids = args.tag_ids;
+      if ('reviewed' in args && args.reviewed !== undefined) patch.user_reviewed = args.reviewed;
       // `type` itself isn't mirrored into the cache: the local Transaction model
       // stores Plaid's `transaction_type`/`plaid_transaction_type`, not Copilot's
       // REGULAR/INCOME/INTERNAL_TRANSFER classification, so there's no field to

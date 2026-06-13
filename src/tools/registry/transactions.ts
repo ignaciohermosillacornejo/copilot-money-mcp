@@ -406,16 +406,19 @@ export const updateTransactionTool = defineTool({
   schema: {
     name: 'update_transaction',
     description:
-      "Update a single transaction's name, category, note, tags, or type. Pass transaction_id " +
-      'plus any combination of name, category_id, note, tag_ids, or type — only specified fields ' +
-      'are changed. Pass note="" to clear the note. Pass tag_ids=[] to clear all tags. `type` sets ' +
-      'the high-level classification (REGULAR, INCOME, or INTERNAL_TRANSFER) — use ' +
-      'INTERNAL_TRANSFER to exclude internal/transfer mechanics from spending. Setting type to ' +
-      "INCOME or INTERNAL_TRANSFER clears the transaction's category (Copilot does this " +
-      'server-side), so category_id cannot be combined with those two types — pass the type alone, ' +
-      'or use REGULAR to keep/set a category. At least one mutable field must be provided besides ' +
-      'transaction_id. Other fields (excluded, internal_transfer, goal_id) are not writable ' +
-      'through the GraphQL API and were removed from this tool when the backend was migrated.',
+      "Update a single transaction's name, category, note, tags, type, or reviewed-state. Pass " +
+      'transaction_id plus any combination of name, category_id, note, tag_ids, type, or reviewed ' +
+      '— only specified fields are changed. Pass note="" to clear the note. Pass tag_ids=[] to ' +
+      'clear all tags. `type` sets the high-level classification (REGULAR, INCOME, or ' +
+      'INTERNAL_TRANSFER) — use INTERNAL_TRANSFER to exclude internal/transfer mechanics from ' +
+      "spending. Setting type to INCOME or INTERNAL_TRANSFER clears the transaction's category " +
+      '(Copilot does this server-side), so category_id cannot be combined with those two types — ' +
+      'pass the type alone, or use REGULAR to keep/set a category. `reviewed` marks a single ' +
+      'transaction reviewed (true) or un-reviewed (false), and can be set inline with other edits ' +
+      '— use review_transactions instead for bulk/filter-based review. At least one mutable field ' +
+      'must be provided besides transaction_id. Other fields (excluded, internal_transfer, ' +
+      'goal_id) are not writable through the GraphQL API and were removed from this tool when the ' +
+      'backend was migrated.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -447,6 +450,12 @@ export const updateTransactionTool = defineTool({
           description:
             'High-level classification. INTERNAL_TRANSFER excludes the transaction from spending. ' +
             'INCOME/INTERNAL_TRANSFER clear the category server-side — do not pass category_id with them.',
+        },
+        reviewed: {
+          type: 'boolean',
+          description:
+            'Mark this transaction reviewed (true) or un-reviewed (false). For bulk/filter-based ' +
+            'review across many transactions, use review_transactions instead.',
         },
       },
       required: ['transaction_id'],
