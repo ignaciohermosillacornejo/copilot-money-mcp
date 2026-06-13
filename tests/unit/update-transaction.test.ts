@@ -1,11 +1,11 @@
 /**
  * Unit tests for the update_transaction tool (GraphQL-based).
  *
- * Supported fields: name, category_id, note, and tag_ids via GraphQL's
- * EditTransaction mutation. Legacy fields (excluded, internal_transfer,
- * goal_id) were removed from the schema when the backend was migrated to
- * GraphQL; they now hit the defense-in-depth "unknown field" check in
- * updateTransaction.
+ * Supported fields: name, category_id, note, tag_ids, type, and reviewed via
+ * GraphQL's EditTransaction mutation. Legacy fields (excluded,
+ * internal_transfer, goal_id) were removed from the schema when the backend
+ * was migrated to GraphQL; they now hit the defense-in-depth "unknown field"
+ * check in updateTransaction.
  *
  * Covers: per-field mapping, multi-field atomic dispatch, argument
  * validation, referential integrity checks, unknown-field rejection.
