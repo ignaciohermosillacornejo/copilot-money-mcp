@@ -141,17 +141,93 @@ export interface TestCategory {
 }
 
 /**
+ * A synthetic Firestore document as accepted by {@link createTestDb}.
+ */
+export interface TestDocument {
+  collection: string;
+  id: string;
+  fields: Record<string, unknown>;
+}
+
+/**
+ * Fixture-shape invariant config (issue #461).
+ *
+ * For each ID-keyed entity whose IDs are opaque Firestore-generated strings,
+ * lists the doc-id field and the display-name field that must NOT collide.
+ *
+ * `collectionPrefix` is matched against the leading segment of the document's
+ * collection path so subcollection paths (e.g.
+ * `financial_goals/{id}/financial_goal_history`) are handled by their root.
+ *
+ * This is the class-level ratchet for the name→ID resolution bug class fixed
+ * in PR #394: a fixture where `id === name` lets a broken `name === id`
+ * comparison pass by accident, masking the bug. Plaid-taxonomy category slugs
+ * (`food_dining`) are name-ish but never equal the display name (`Food &
+ * Dining`), so they satisfy the invariant naturally.
+ */
+export const ID_NAME_FIELD_PAIRS: ReadonlyArray<{
+  collectionPrefix: string;
+  idField: string;
+  nameField: string;
+}> = [
+  { collectionPrefix: 'categories', idField: 'category_id', nameField: 'name' },
+  { collectionPrefix: 'accounts', idField: 'account_id', nameField: 'name' },
+  { collectionPrefix: 'recurring', idField: 'recurring_id', nameField: 'name' },
+  { collectionPrefix: 'tags', idField: 'tag_id', nameField: 'name' },
+];
+
+/**
+ * Assert that synthetic fixture documents use opaque IDs distinct from their
+ * own display name (issue #461).
+ *
+ * Throws if any ID-keyed document has an ID that equals its display name
+ * (case-insensitive), on either the doc id or the in-fields `*_id`. Such
+ * fixtures mask the name→ID resolution bug class (PR #394) because a filter
+ * that skips name→id resolution still matches.
+ *
+ * Documents without a display-name field, and collections not listed in
+ * {@link ID_NAME_FIELD_PAIRS}, are ignored — there is nothing for the id to
+ * collide with.
+ */
+export function assertOpaqueIds(documents: TestDocument[]): void {
+  for (const doc of documents) {
+    const root = doc.collection.split('/')[0];
+    const pair = ID_NAME_FIELD_PAIRS.find((p) => p.collectionPrefix === root);
+    if (!pair) continue;
+
+    const name = doc.fields[pair.nameField];
+    if (typeof name !== 'string' || name.length === 0) continue;
+    const nameLower = name.toLowerCase();
+
+    const candidateIds = [doc.id, doc.fields[pair.idField]].filter(
+      (v): v is string => typeof v === 'string' && v.length > 0
+    );
+
+    for (const id of candidateIds) {
+      if (id.toLowerCase() === nameLower) {
+        throw new Error(
+          `Fixture-shape invariant violated (issue #461): document in collection ` +
+            `'${doc.collection}' has an id-equals-name shape (id='${id}', ` +
+            `${pair.nameField}='${name}'). Synthetic fixtures for ID-keyed ` +
+            `entities must use opaque IDs distinct from display names, or a ` +
+            `name→ID resolution bug (see PR #394) can be masked. Use a ` +
+            `Firestore-shaped opaque id (e.g. '9qyEMnfMXknwvx9OnYhk' or ` +
+            `'${pair.collectionPrefix}_${Math.random().toString(36).slice(2, 8)}').`
+        );
+      }
+    }
+  }
+}
+
+/**
  * Create a test database with the given documents.
  * The database is created in the specified directory.
  */
-export async function createTestDb(
-  dbPath: string,
-  documents: Array<{
-    collection: string;
-    id: string;
-    fields: Record<string, unknown>;
-  }>
-): Promise<void> {
+export async function createTestDb(dbPath: string, documents: TestDocument[]): Promise<void> {
+  // Gate fixtures on the name→ID opaque-id invariant (issue #461) before they
+  // can mask a resolution bug.
+  assertOpaqueIds(documents);
+
   // Remove existing directory if it exists
   if (fs.existsSync(dbPath)) {
     fs.rmSync(dbPath, { recursive: true, force: true });
