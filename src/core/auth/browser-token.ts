@@ -283,6 +283,11 @@ export function noCopilotSessionError(checked: string[]): Error {
  *
  * @param browserOverrides - Override browser configs for testing
  */
+// Returns a Promise (the TokenExtractor contract is async) but the body is
+// fully synchronous — all browser reads are sync readFileSync. It is NOT
+// declared `async` on purpose: `async` with no `await` trips
+// @typescript-eslint/require-await, so the explicit Promise.resolve() is the
+// lint-clean way to satisfy the async signature. (Reviewed: #482.)
 export function extractRefreshTokenCandidates(
   browserOverrides?: BrowserConfig[]
 ): Promise<TokenCandidates> {
