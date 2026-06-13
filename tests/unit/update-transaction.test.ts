@@ -436,4 +436,18 @@ describe('updateTransaction — reviewed (#416)', () => {
     ).rejects.toThrow(/reviewed must be a boolean/i);
     expect(client._calls).toHaveLength(0);
   });
+
+  test('reviewed combined with type: both merge into one call, neither blocks the other', async () => {
+    const { tools, client } = makeTools();
+    const result = await tools.updateTransaction({
+      transaction_id: 'txn1',
+      type: 'INCOME',
+      reviewed: true,
+    });
+    expect(client._calls).toHaveLength(1);
+    const input = (client._calls[0] as any).variables.input;
+    expect(input.type).toBe('INCOME');
+    expect(input.isReviewed).toBe(true);
+    expect(result.updated.sort()).toEqual(['reviewed', 'type']);
+  });
 });

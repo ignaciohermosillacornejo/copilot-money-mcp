@@ -2415,11 +2415,14 @@ export class CopilotMoneyTools {
   /**
    * Update one or more fields on a transaction in a single atomic write.
    *
-   * Supported fields: category_id, note, tag_ids. Omitted fields are preserved.
-   * note="" clears the note. tag_ids=[] clears all tags. Other legacy fields
-   * (name, excluded, internal_transfer, goal_id) are not writable through the
-   * GraphQL EditTransaction mutation and were removed from this tool when the
-   * backend was migrated.
+   * Supported fields: name, category_id, note, tag_ids, type, reviewed.
+   * Omitted fields are preserved. note="" clears the note. tag_ids=[] clears
+   * all tags. type=INCOME/INTERNAL_TRANSFER clears the category server-side
+   * (so category_id can't be combined with them). reviewed sets the
+   * reviewed-state of a single transaction. Other legacy fields (excluded,
+   * internal_transfer, goal_id) are not writable through the GraphQL
+   * EditTransaction mutation and were removed from this tool when the backend
+   * was migrated.
    */
   async updateTransaction(args: {
     transaction_id: string;
