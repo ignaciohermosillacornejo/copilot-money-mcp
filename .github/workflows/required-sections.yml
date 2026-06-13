@@ -1,0 +1,36 @@
+name: Required PR Sections
+
+# Enforces that PR bodies keep the sections the template marks as mandatory:
+#   - "## External assumptions" (with a non-empty answer — "None" is valid)
+#   - the Bug Response Ritual fields when the title is a `fix:` PR
+#
+# Lightweight by design: one job, no checkout of code dependencies, no network
+# beyond reading the PR event payload. Re-runs on body/title edits so clearing
+# a section can't sneak past after the initial green check.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  required-sections:
+    name: Check required PR sections
+    runs-on: ubuntu-latest
+    # Bots (Dependabot, etc.) open PRs that don't use the human template, so
+    # holding them to it would only produce noise. Skip any `[bot]` actor.
+    if: ${{ !endsWith(github.event.pull_request.user.login, '[bot]') }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Check required sections
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # Pass the body via stdin (never via an arg or inline expansion) so
+          # arbitrary content — backticks, $(...), quotes — can't be interpreted
+          # by the shell.
+          printf '%s' "$PR_BODY" | bash scripts/check-pr-sections.sh -
