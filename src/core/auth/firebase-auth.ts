@@ -16,6 +16,14 @@ const TOKEN_ENDPOINT = `https://securetoken.googleapis.com/v1/token?key=${FIREBA
 const EXPIRY_MARGIN_MS = 60_000;
 
 /**
+ * Upper bound on how many discovered refresh-token candidates we'll try to
+ * exchange. A normal browser has a handful of Firebase-backed sites; this caps
+ * the pathological case (many `AMf-` tokens in the Local Storage fallback) so a
+ * logged-out user can't trigger an unbounded run of sequential token exchanges.
+ */
+const MAX_EXCHANGE_CANDIDATES = 10;
+
+/**
  * Securetoken rejection code returned when a refresh token belongs to a
  * DIFFERENT Firebase project than copilot-production-22904. The browser-wide
  * Local Storage fallback surfaces other sites' `AMf-` tokens as candidates, so
@@ -58,7 +66,7 @@ export class FirebaseAuth {
     // Cold path: try each discovered candidate, discarding foreign-project ones
     // (PROJECT_NUMBER_MISMATCH) and keeping the first that exchanges cleanly.
     const { candidates, checked } = await this.extractToken();
-    for (const candidate of candidates) {
+    for (const candidate of candidates.slice(0, MAX_EXCHANGE_CANDIDATES)) {
       try {
         await this.exchangeToken(candidate.token);
       } catch (err) {

@@ -125,7 +125,10 @@ describe('FirebaseAuth', () => {
     mockFetch({ error: { message: 'PROJECT_NUMBER_MISMATCH' } }, 400);
 
     await expect(auth.getIdToken()).rejects.toThrow('No Copilot Money session found');
-    // The misleading raw exchange error must not leak through.
+    // A SECOND, independent getIdToken() call (the mockResolvedValueOnce is
+    // spent, so this uses the default single-valid-candidate extractor against
+    // the same PROJECT_NUMBER_MISMATCH fetch mock): assert the raw code never
+    // leaks on any attempt, not just that a cached error was reused.
     await expect(auth.getIdToken()).rejects.not.toThrow('PROJECT_NUMBER_MISMATCH');
   });
 
@@ -167,6 +170,23 @@ describe('FirebaseAuth', () => {
 
     await expect(auth.getIdToken()).rejects.toThrow('No Copilot Money session found');
     expect(fetchCalls).toHaveLength(0);
+  });
+
+  test('caps the exchange loop at MAX_EXCHANGE_CANDIDATES foreign tokens', async () => {
+    // Pathological case: many foreign AMf- tokens in the Local Storage fallback.
+    // The loop must bound its sequential exchanges (cap 10) rather than trying
+    // all 25, then surface the "no session" error.
+    mockExtractor.mockResolvedValueOnce({
+      candidates: Array.from({ length: 25 }, (_, i) => ({
+        token: `AMf-foreign-${i}`,
+        browser: 'Chrome',
+      })),
+      checked: ['Chrome'],
+    });
+    mockFetch({ error: { message: 'PROJECT_NUMBER_MISMATCH' } }, 400);
+
+    await expect(auth.getIdToken()).rejects.toThrow('No Copilot Money session found');
+    expect(fetchCalls).toHaveLength(10);
   });
 
   test('a non-mismatch exchange error on a candidate is surfaced raw (not "no session")', async () => {
