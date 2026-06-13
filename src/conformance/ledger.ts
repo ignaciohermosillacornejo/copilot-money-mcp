@@ -292,7 +292,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
     evidence:
       'Per-value live probes + invalid-value control; gated by scripts/smoke/conformance.ts (issue #421, PR #422)',
     values: TRANSACTION_TYPES,
-    toolParams: ['create_transaction.type'],
+    toolParams: ['create_transaction.type', 'update_transaction.type'],
   },
   {
     surface: 'RecurringFrequency',
@@ -368,6 +368,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   gatedInputField('EditTransactionInput.userNotes', ['update_transaction.note']),
   gatedInputField('EditTransactionInput.tagIds', ['update_transaction.tag_ids']),
   gatedInputField('EditTransactionInput.isReviewed', ['review_transactions.reviewed']),
+  gatedInputField('EditTransactionInput.type', ['update_transaction.type']),
   responseShape('editTransaction'),
   appliesSurface('editTransaction'),
 

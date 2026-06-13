@@ -515,6 +515,7 @@ function createMockWriteClient() {
           categoryId: vars.input?.categoryId ?? 'c',
           userNotes: vars.input?.userNotes ?? null,
           isReviewed: vars.input?.isReviewed ?? false,
+          type: 'REGULAR',
           tags: (vars.input?.tagIds ?? []).map((id: string) => ({ id })),
         },
       },

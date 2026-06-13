@@ -24,6 +24,7 @@ type EditTxnResponse = {
       categoryId: string;
       userNotes: string | null;
       isReviewed: boolean;
+      type: string;
       tags: Array<{ id: string }>;
     };
   };
@@ -35,9 +36,15 @@ function makeEchoResponse(): (vars: any) => EditTxnResponse {
       transaction: {
         id: vars.id,
         name: vars.input.name ?? 'Coffee Shop',
-        categoryId: vars.input.categoryId ?? 'food',
+        // Mirror the verified server behavior: INCOME/INTERNAL_TRANSFER clears
+        // the category; REGULAR keeps whatever category was sent.
+        categoryId:
+          vars.input.type === 'INCOME' || vars.input.type === 'INTERNAL_TRANSFER'
+            ? ''
+            : (vars.input.categoryId ?? 'food'),
         userNotes: vars.input.userNotes ?? null,
         isReviewed: vars.input.isReviewed ?? false,
+        type: vars.input.type ?? 'REGULAR',
         tags: (vars.input.tagIds ?? []).map((id: string) => ({ id })),
       },
     },
@@ -319,5 +326,65 @@ describe('updateTransaction — atomicity on validation failure', () => {
       })
     ).rejects.toThrow(/Category not found/i);
     expect(client._calls).toHaveLength(0);
+  });
+});
+
+describe('updateTransaction — type (#415)', () => {
+  test('type: dispatches with type input, response maps back to "type"', async () => {
+    const { tools, client } = makeTools();
+    const result = await tools.updateTransaction({ transaction_id: 'txn1', type: 'INCOME' });
+    expect(client._calls).toHaveLength(1);
+    const call = client._calls[0] as any;
+    expect(call.op).toBe('EditTransaction');
+    expect(call.variables.input.type).toBe('INCOME');
+    expect(result.updated).toContain('type');
+  });
+
+  test('type: REGULAR together with category_id is allowed (both dispatched)', async () => {
+    const { tools, client } = makeTools();
+    await tools.updateTransaction({
+      transaction_id: 'txn1',
+      type: 'REGULAR',
+      category_id: 'groceries',
+    });
+    expect(client._calls).toHaveLength(1);
+    const input = (client._calls[0] as any).variables.input;
+    expect(input.type).toBe('REGULAR');
+    expect(input.categoryId).toBe('groceries');
+  });
+
+  test('type: invalid value throws, no write', async () => {
+    const { tools, client } = makeTools();
+    await expect(
+      tools.updateTransaction({ transaction_id: 'txn1', type: 'SPENDING' as any })
+    ).rejects.toThrow(/REGULAR.*INCOME.*INTERNAL_TRANSFER/);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('type INCOME + category_id together throws (server clears category), no write', async () => {
+    const { tools, client } = makeTools();
+    await expect(
+      tools.updateTransaction({ transaction_id: 'txn1', type: 'INCOME', category_id: 'groceries' })
+    ).rejects.toThrow(/clears the category|cannot be combined/i);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('type INTERNAL_TRANSFER + category_id together throws, no write', async () => {
+    const { tools, client } = makeTools();
+    await expect(
+      tools.updateTransaction({
+        transaction_id: 'txn1',
+        type: 'INTERNAL_TRANSFER',
+        category_id: 'groceries',
+      })
+    ).rejects.toThrow(/clears the category|cannot be combined/i);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('type INCOME alone: optimistic cache reflects the server-side category clear', async () => {
+    const { tools, mockDb } = makeTools();
+    await tools.updateTransaction({ transaction_id: 'txn1', type: 'INCOME' });
+    const cached = (await mockDb.getTransactions()).find((t) => t.transaction_id === 'txn1');
+    expect(cached?.category_id).toBe('');
   });
 });
