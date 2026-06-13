@@ -61,14 +61,14 @@ body="$(printf '%s' "$raw_body" | perl -0777 -pe 's/<!--.*?-->//gs')"
 # trailing whitespace after the title.
 section="$(
   printf '%s\n' "$body" | awk -v hdr="$REQUIRED_HEADER" '
-    BEGIN { want = tolower("## " hdr); capturing = 0 }
+    BEGIN { want = "^## +" tolower(hdr) " *$"; capturing = 0 }
     {
       line = $0
       stripped = line
       sub(/[ \t\r]+$/, "", stripped)        # rstrip
       lower = tolower(stripped)
       if (capturing && line ~ /^##[ \t]/) { capturing = 0 }
-      if (lower == want) { capturing = 1; next }
+      if (lower ~ want) { capturing = 1; next }
       if (capturing) { print line }
     }
   '
