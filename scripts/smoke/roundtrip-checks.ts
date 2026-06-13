@@ -520,7 +520,7 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
   {
     tool: 'update_transaction',
     domain: 'transactions',
-    flow: 'rename + set note + flip type→INTERNAL_TRANSFER (pins the server-side category clear) on the run-created transaction → verify via Transactions re-read → revert type/category',
+    flow: 'rename + set note + flip type→INTERNAL_TRANSFER and verify category cleared on the run-created transaction → verify via Transactions re-read → revert type/category',
     appliesSurfaces: ['Mutation.editTransaction:applies'],
     run: async (ctx) => {
       const txn = ctx.state.txnA;

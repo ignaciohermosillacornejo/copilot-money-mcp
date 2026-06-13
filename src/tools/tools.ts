@@ -2567,8 +2567,12 @@ export class CopilotMoneyTools {
         patch.category_id = args.category_id;
       if ('note' in args && args.note !== undefined) patch.user_note = args.note;
       if ('tag_ids' in args && args.tag_ids !== undefined) patch.tag_ids = args.tag_ids;
-      // INCOME/INTERNAL_TRANSFER clears the category server-side (verified live);
-      // mirror that in the cache so a follow-up read doesn't show a stale category.
+      // `type` itself isn't mirrored into the cache: the local Transaction model
+      // stores Plaid's `transaction_type`/`plaid_transaction_type`, not Copilot's
+      // REGULAR/INCOME/INTERNAL_TRANSFER classification, so there's no field to
+      // patch. Only its side-effect is patchable — INCOME/INTERNAL_TRANSFER clears
+      // the category server-side (verified live), so mirror that so a follow-up
+      // read doesn't show a stale category.
       if (args.type === 'INCOME' || args.type === 'INTERNAL_TRANSFER') {
         patch.category_id = '';
       }
