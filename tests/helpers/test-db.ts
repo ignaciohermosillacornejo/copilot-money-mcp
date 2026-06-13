@@ -212,7 +212,7 @@ export function assertOpaqueIds(documents: TestDocument[]): void {
             `entities must use opaque IDs distinct from display names, or a ` +
             `name→ID resolution bug (see PR #394) can be masked. Use a ` +
             `Firestore-shaped opaque id (e.g. '9qyEMnfMXknwvx9OnYhk' or ` +
-            `'${pair.collectionPrefix}_${Math.random().toString(36).slice(2, 8)}').`
+            `'${pair.collectionPrefix}_a1b2c3').`
         );
       }
     }

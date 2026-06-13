@@ -111,17 +111,33 @@ describe('fixture-shape invariant (issue #461)', () => {
     expect(message).toContain('Savings');
   });
 
-  test('ignores documents without a name field (nothing to collide with)', () => {
+  test('ignores collections not in ID_NAME_FIELD_PAIRS', () => {
+    // 'budgets' is not a name→ID resolution surface (no entry in
+    // ID_NAME_FIELD_PAIRS), so the gate doesn't inspect it — even though the
+    // id happens to equal the category_id here.
     expect(() =>
       assertOpaqueIds([
         {
           collection: 'budgets',
-          // budgets have no display name; id-equals-name is not a concern
           id: 'food_dining',
           fields: { budget_id: 'food_dining', category_id: 'food_dining' },
         },
       ])
     ).not.toThrow();
+  });
+
+  test('throws for a tag doc whose id equals its name', () => {
+    // tags are in ID_NAME_FIELD_PAIRS (the #394 bug was the tag filter);
+    // pin that the gate actually fires for them, not just categories/accounts.
+    expect(() =>
+      assertOpaqueIds([
+        {
+          collection: 'tags',
+          id: 'vacation',
+          fields: { tag_id: 'vacation', name: 'vacation' },
+        },
+      ])
+    ).toThrow(/id-equals-name/i);
   });
 
   test('covers the documented name→ID-keyed collections', () => {

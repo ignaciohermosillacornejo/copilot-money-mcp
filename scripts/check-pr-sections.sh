@@ -18,7 +18,7 @@
 # placeholder text never counts as a real answer.
 #
 # This logic lives in a script (not inline YAML) so it can be unit-tested
-# locally: see tests/check-pr-sections.test.sh.
+# locally: see tests/scripts/check-pr-sections.test.ts.
 
 set -euo pipefail
 
@@ -61,7 +61,7 @@ body="$(printf '%s' "$raw_body" | perl -0777 -pe 's/<!--.*?-->//gs')"
 # trailing whitespace after the title.
 section="$(
   printf '%s\n' "$body" | awk -v hdr="$REQUIRED_HEADER" '
-    BEGIN { want = "^## +" tolower(hdr) " *$"; capturing = 0 }
+    BEGIN { want = "^##[ \t]+" tolower(hdr) "[ \t]*$"; capturing = 0 }
     {
       line = $0
       stripped = line
