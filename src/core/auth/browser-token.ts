@@ -23,6 +23,24 @@ export interface TokenResult {
   browser: string;
 }
 
+/**
+ * All refresh-token candidates discovered across browsers, plus the list of
+ * browsers searched (for the actionable "no session" message).
+ *
+ * Why a *list*: the browser-wide `Local Storage/leveldb` fallback contains
+ * EVERY site's storage, so any other Firebase-backed site's `AMf-` refresh
+ * token shows up here too. We can't tell from disk alone which (if any)
+ * belongs to Copilot's project (copilot-production-22904) — only the
+ * securetoken exchange knows. So we surface every candidate and let the
+ * exchange in `firebase-auth.ts` discard foreign-project ones
+ * (PROJECT_NUMBER_MISMATCH) and keep trying.
+ */
+export interface TokenCandidates {
+  candidates: TokenResult[];
+  /** Browser names searched, in order — used to build the "no session" error. */
+  checked: string[];
+}
+
 /** Firebase refresh token regex: AMf- followed by 100+ URL-safe base64 chars. */
 const REFRESH_TOKEN_REGEX = /AMf-[A-Za-z0-9_-]{100,}/g;
 const COPILOT_INDEXEDDB_DIR = 'IndexedDB/https_app.copilot.money_0.indexeddb.leveldb';
@@ -134,35 +152,45 @@ export const BROWSER_CONFIGS: BrowserConfig[] = [
   },
 ];
 
+/**
+ * Extract every refresh token from a file's raw bytes.
+ *
+ * Returns ALL matches (longest first), not just the longest one: on disk we
+ * cannot tell which `AMf-` token belongs to Copilot's Firebase project, so we
+ * surface every candidate and let the securetoken exchange reject foreign
+ * ones. The longest-first ordering preserves the old "newer tokens tend to be
+ * longer" heuristic as a try-order preference, not a hard pick.
+ */
+function tokensInFile(filePath: string): string[] {
+  try {
+    const content = readFileSync(filePath, 'latin1');
+    const matches = content.match(REFRESH_TOKEN_REGEX);
+    if (!matches || matches.length === 0) return [];
+    return [...matches].sort((a, b) => b.length - a.length);
+  } catch {
+    /* Skip unreadable files */
+    return [];
+  }
+}
+
 /** Search a directory for .ldb and .log files containing refresh tokens. */
-function searchLevelDBDir(dirPath: string): string | undefined {
-  if (!existsSync(dirPath)) return undefined;
+function searchLevelDBDir(dirPath: string): string[] {
+  if (!existsSync(dirPath)) return [];
   let files: string[];
   try {
     files = readdirSync(dirPath);
   } catch {
-    return undefined;
+    return [];
   }
 
   const targetFiles = files.filter((f) => f.endsWith('.ldb') || f.endsWith('.log'));
-  for (const file of targetFiles) {
-    try {
-      const content = readFileSync(join(dirPath, file), 'latin1');
-      const matches = content.match(REFRESH_TOKEN_REGEX);
-      if (matches && matches.length > 0) {
-        // Pick the longest match — newer Firebase tokens tend to be longer
-        return matches.reduce((a, b) => (a.length >= b.length ? a : b));
-      }
-    } catch {
-      /* Skip unreadable files */
-    }
-  }
-  return undefined;
+  return targetFiles.flatMap((file) => tokensInFile(join(dirPath, file)));
 }
 
 /** Search Firefox profiles for refresh tokens. */
-function searchFirefoxProfiles(profilesDir: string): string | undefined {
-  if (!existsSync(profilesDir)) return undefined;
+function searchFirefoxProfiles(profilesDir: string): string[] {
+  if (!existsSync(profilesDir)) return [];
+  const found: string[] = [];
   try {
     const profiles = readdirSync(profilesDir, { withFileTypes: true })
       .filter((d) => d.isDirectory())
@@ -176,95 +204,123 @@ function searchFirefoxProfiles(profilesDir: string): string | undefined {
       for (const origin of origins) {
         const idbDir = join(idbBase, origin, 'idb');
         if (!existsSync(idbDir)) continue;
-        const files = readdirSync(idbDir);
-        for (const file of files) {
-          try {
-            const content = readFileSync(join(idbDir, file), 'latin1');
-            const matches = content.match(REFRESH_TOKEN_REGEX);
-            if (matches && matches.length > 0) {
-              // Pick the longest match — newer Firebase tokens tend to be longer
-              return matches.reduce((a, b) => (a.length >= b.length ? a : b));
-            }
-          } catch {
-            /* Skip */
-          }
+        for (const file of readdirSync(idbDir)) {
+          found.push(...tokensInFile(join(idbDir, file)));
         }
       }
     }
   } catch {
     /* Skip */
   }
-  return undefined;
+  return found;
 }
 
 /** Search Safari databases for refresh tokens. */
-function searchSafariDatabases(dbDir: string): string | undefined {
-  if (!existsSync(dbDir)) return undefined;
+function searchSafariDatabases(dbDir: string): string[] {
+  if (!existsSync(dbDir)) return [];
+  const found: string[] = [];
   try {
-    const searchDir = (dir: string, depth: number): string | undefined => {
-      if (depth > 4) return undefined;
+    const searchDir = (dir: string, depth: number): void => {
+      if (depth > 4) return;
       const entries = readdirSync(dir, { withFileTypes: true });
       for (const entry of entries) {
         const fullPath = join(dir, entry.name);
         if (entry.isDirectory()) {
-          const found = searchDir(fullPath, depth + 1);
-          if (found) return found;
+          searchDir(fullPath, depth + 1);
         } else if (entry.isFile()) {
           try {
             if (statSync(fullPath).size > 10_000_000) continue;
-            const content = readFileSync(fullPath, 'latin1');
-            const matches = content.match(REFRESH_TOKEN_REGEX);
-            if (matches && matches.length > 0) {
-              // Pick the longest match — newer Firebase tokens tend to be longer
-              return matches.reduce((a, b) => (a.length >= b.length ? a : b));
-            }
           } catch {
-            /* Skip */
+            continue;
           }
+          found.push(...tokensInFile(fullPath));
         }
       }
-      return undefined;
     };
-    return searchDir(dbDir, 0);
+    searchDir(dbDir, 0);
   } catch {
-    return undefined;
+    /* Skip */
   }
+  return found;
+}
+
+/** Search one browser config's paths, returning every token found. */
+function searchBrowser(browser: BrowserConfig): string[] {
+  const search: (path: string) => string[] =
+    browser.type === 'chromium'
+      ? searchLevelDBDir
+      : browser.type === 'firefox'
+        ? searchFirefoxProfiles
+        : searchSafariDatabases;
+  return browser.paths.flatMap(search);
 }
 
 /**
- * Extract a Firebase refresh token from browser local storage.
- * Searches browsers in order: the Chromium family (Chrome, Arc, Edge, Brave,
- * Vivaldi, Chromium, Opera, Opera GX), then Safari, then Firefox.
- * @param browserOverrides - Override browser configs for testing
- * @throws Error if no token is found in any browser
+ * Build the actionable "no Copilot session" error from the searched browsers.
+ * Used both when zero `AMf-` tokens exist anywhere AND when every discovered
+ * token turned out to belong to a foreign Firebase project (the exchange in
+ * firebase-auth.ts rejected them all with PROJECT_NUMBER_MISMATCH). Both states
+ * mean the same thing to the user: log in. This is AUTH_FAILED /
+ * user-action-required, never schema/API drift.
  */
-export function extractRefreshToken(browserOverrides?: BrowserConfig[]): Promise<TokenResult> {
+export function noCopilotSessionError(checked: string[]): Error {
+  return new Error(
+    `No Copilot Money session found. Searched: ${checked.join(', ')}. ` +
+      'Please log into Copilot Money at https://app.copilot.money in your browser, then try again.'
+  );
+}
+
+/**
+ * Extract ALL Firebase refresh-token candidates from browser local storage.
+ *
+ * Searches browsers in order: the Chromium family (Chrome, Arc, Edge, Brave,
+ * Vivaldi, Chromium, Opera, Opera GX), then Safari, then Firefox — and within
+ * each, every configured path. Returns every distinct `AMf-` token discovered,
+ * because the browser-wide Local Storage fallback contains other sites' tokens
+ * too; only the securetoken exchange can tell which belongs to Copilot's
+ * project. Does NOT throw on empty — returns `{ candidates: [], checked }` so
+ * the caller can attempt exchanges and build a single, consistent error.
+ *
+ * @param browserOverrides - Override browser configs for testing
+ */
+export function extractRefreshTokenCandidates(
+  browserOverrides?: BrowserConfig[]
+): Promise<TokenCandidates> {
   const browsers = browserOverrides ?? BROWSER_CONFIGS;
   const checked: string[] = [];
+  const candidates: TokenResult[] = [];
+  const seen = new Set<string>();
 
   for (const browser of browsers) {
     checked.push(browser.name);
-    for (const searchPath of browser.paths) {
-      let token: string | undefined;
-      switch (browser.type) {
-        case 'chromium':
-          token = searchLevelDBDir(searchPath);
-          break;
-        case 'firefox':
-          token = searchFirefoxProfiles(searchPath);
-          break;
-        case 'safari':
-          token = searchSafariDatabases(searchPath);
-          break;
-      }
-      if (token) return Promise.resolve({ token, browser: browser.name });
+    for (const token of searchBrowser(browser)) {
+      if (seen.has(token)) continue;
+      seen.add(token);
+      candidates.push({ token, browser: browser.name });
     }
   }
 
-  return Promise.reject(
-    new Error(
-      `No Copilot Money session found. Searched: ${checked.join(', ')}. ` +
-        'Please log into Copilot Money at https://app.copilot.money in your browser, then try again.'
-    )
-  );
+  return Promise.resolve({ candidates, checked });
+}
+
+/**
+ * Extract the first Firebase refresh-token candidate from browser storage.
+ *
+ * Thin wrapper over {@link extractRefreshTokenCandidates} that returns the
+ * first candidate and throws the actionable "no session" error when none
+ * exist. Note: this does NOT validate that the token belongs to Copilot's
+ * project — callers that need foreign-project rejection should consume the
+ * full candidate list and drive the exchange-and-discard loop (see
+ * `FirebaseAuth`). Retained for backward compatibility.
+ *
+ * @param browserOverrides - Override browser configs for testing
+ * @throws Error if no token is found in any browser
+ */
+export async function extractRefreshToken(
+  browserOverrides?: BrowserConfig[]
+): Promise<TokenResult> {
+  const { candidates, checked } = await extractRefreshTokenCandidates(browserOverrides);
+  const [first] = candidates;
+  if (!first) throw noCopilotSessionError(checked);
+  return first;
 }
