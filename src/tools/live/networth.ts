@@ -28,6 +28,7 @@ import {
   fetchNetworthHistory,
   type NetworthHistoryNode,
 } from '../../core/graphql/queries/networth.js';
+import { ALL_TIME_FRAMES } from '../../core/graphql/queries/_shared.js';
 import { paginate, DEFAULT_MAX_ROWS } from '../../utils/pagination.js';
 import type { ToolSchema } from '../tools.js';
 
@@ -129,8 +130,9 @@ export function createLiveNetworthToolSchema(): ToolSchema {
       'sorted oldest→newest by date; for each row, `assets - debt` gives the net worth ' +
       'at that point in time. Both `assets` and `debt` are nullable strings — early dates ' +
       "in the user's history may have `assets: null` until backfilled. Available when " +
-      '--live-reads is on. Optional `time_frame` arg (default "YTD"; other server-supported ' +
-      'values include "ALL", "YEAR", "MONTH"). The cache holds the most-recently-requested ' +
+      '--live-reads is on. Optional `time_frame` arg (default "YTD"; accepts the canonical ' +
+      'TimeFrame values "ONE_DAY", "ONE_WEEK", "ONE_MONTH", "THREE_MONTHS", "YTD", ' +
+      '"ONE_YEAR", "ALL"). The cache holds the most-recently-requested ' +
       'time_frame; requesting a different value triggers a fresh fetch. ' +
       'Long-range responses are paginated via `max_rows` (default 500, max 5000) and ' +
       '`offset`; `total_rows` and `truncated` indicate whether older rows remain.',
@@ -139,12 +141,13 @@ export function createLiveNetworthToolSchema(): ToolSchema {
       properties: {
         time_frame: {
           type: 'string',
-          enum: ['ALL', 'YEAR', 'MONTH', 'YTD'],
+          enum: [...ALL_TIME_FRAMES],
           description:
             "TimeFrame enum passed through to the Networth query. Default 'YTD' " +
-            "(tightened from 'ALL' on 2026-05). Note: this enum is smaller than the canonical " +
-            'TimeFrame used by other live time-series tools (no ONE_DAY/ONE_WEEK/ONE_MONTH/' +
-            'THREE_MONTHS/ONE_YEAR). The Networth GraphQL endpoint accepts only these four values.',
+            "(tightened from 'ALL' on 2026-05). Networth accepts the full canonical " +
+            'TimeFrame enum (the same `ALL_TIME_FRAMES` set used by the other live ' +
+            'time-series tools); bare "MONTH"/"YEAR" are NOT valid TimeFrame members ' +
+            'and return a 400 (see #494).',
           default: DEFAULT_TIME_FRAME,
         },
         max_rows: {

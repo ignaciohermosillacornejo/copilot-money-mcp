@@ -202,6 +202,18 @@ describe('createLiveNetworthToolSchema', () => {
     expect(schema.description).toMatch(/YTD/);
   });
 
+  test('time_frame enum equals the canonical TimeFrame set and excludes bogus MONTH/YEAR (#494)', async () => {
+    const { createLiveNetworthToolSchema } = await import('../../../src/tools/live/networth.js');
+    const { ALL_TIME_FRAMES } = await import('../../../src/core/graphql/queries/_shared.js');
+    const schema = createLiveNetworthToolSchema();
+    const props = schema.inputSchema.properties as Record<string, { enum?: string[] }>;
+    // Networth uses the same canonical TimeFrame GraphQL enum as the other
+    // live time-series tools — bare MONTH/YEAR are not members and 400 on use.
+    expect(props.time_frame?.enum).toEqual([...ALL_TIME_FRAMES]);
+    expect(props.time_frame?.enum).not.toContain('MONTH');
+    expect(props.time_frame?.enum).not.toContain('YEAR');
+  });
+
   test('exposes max_rows and offset pagination args', async () => {
     const { createLiveNetworthToolSchema } = await import('../../../src/tools/live/networth.js');
     const schema = createLiveNetworthToolSchema();
