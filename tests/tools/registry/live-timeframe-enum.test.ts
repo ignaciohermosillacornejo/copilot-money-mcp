@@ -24,7 +24,8 @@ function isToolEntry(v: unknown): v is ToolEntry {
     typeof v === 'object' &&
     v !== null &&
     'schema' in v &&
-    typeof (v as ToolEntry).schema?.name === 'string'
+    typeof (v as ToolEntry).schema?.name === 'string' &&
+    typeof (v as ToolEntry).schema?.inputSchema === 'object'
   );
 }
 
