@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-06-14
+
+Write-path capability additions plus a repo-wide "boundary hardening" program: every assumption this server makes about Copilot's GraphQL API is now inventoried and re-verified by an oracle (live conformance smokes, runtime response validation, reversible write round-trips, and a weekly scheduled drift check), so API drift surfaces as a red build instead of a confusing user-facing failure. See [`docs/CONFORMANCE_ARCHITECTURE.md`](docs/CONFORMANCE_ARCHITECTURE.md).
+
+### Added
+
+- **`update_transaction` can now edit `type`** (`REGULAR` / `INCOME` / `INTERNAL_TRANSFER`) ([#473](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/473)), `reviewed` ([#475](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/475)), and `name` ([#414](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/414)). Setting `type` to `INCOME`/`INTERNAL_TRANSFER` clears the category server-side, so `category_id` can't be combined with them (verified live, with an accurate error).
+- **`update_recurring` can now edit `frequency`** ([#417](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/417)).
+- **`create_transaction` accepts `tag_ids`, `note`, and `recurring_id`** ([#418](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/418)).
+- **`--write` now implies `--live-reads`** ([#407](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/407)) — write tools need live transaction metadata, and once authenticated there's no privacy reason to keep reads on the stale cache.
+- **Browser session discovery** extended to all Chromium browsers (Chrome multi-profile, Edge, Brave, Vivaldi, Arc, Opera) ([#409](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/409), [#410](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/410)).
+- **`get_cache_info` / `get_connection_status`** now report per-collection schema-drop counts ([#452](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/452)) and the last weekly drift-check result ([#466](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/466)).
+
+### Fixed
+
+- **`create_recurring`** no longer reports failure when it actually created a recurring: Copilot's server inserts the recurring, then its emoji/icon resolver crashes for category-less recurrings. The wrapper now requests only the fields it reads ([#471](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/471)).
+- **`get_upcoming_recurrings_live`** was broken — the generated query carried an Apollo-only `@connection` directive the server rejects; the generator now strips client-only directives ([#469](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/469)).
+- **Auth:** a logged-out browser now yields an actionable "no Copilot Money session found" message instead of a misleading `PROJECT_NUMBER_MISMATCH` — the extractor surfaces every candidate token and discards foreign-project ones during exchange ([#478](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/478)).
+- **GraphQL error reporting** classifies failures by content (schema vs. user-action vs. server vs. network) and surfaces the server's raw message, instead of a blanket "the API changed" ([#449](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/449)).
+- Bounded retry/backoff for transport-level read failures (and provably-unsent mutations only) ([#455](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/455)).
+
+### Changed
+
+- **Boundary conformance hardening** — a machine-readable ledger of every external assumption + its oracle ([#450](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/450)); live enum/input-field/read smokes ([#456](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/456), [#469](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/469)); warn-mode Zod validation on mutation responses ([#467](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/467)); reversible per-write-tool round-trip smokes ([#471](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/471)); a weekly launchd drift check ([#466](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/466)); and a `/boundary-audit` skill ([#465](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/465)).
+- **Internal architecture** — a single tool-registry definition per tool now drives schema, dispatch, write-gating, and the manifest ([#470](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/470)); test mocks are derived from the real GraphQL types so a wrong mock shape fails `tsc` ([#457](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/457)); doc-sync and PR-template gates in CI ([#448](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/448), [#476](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/476)).
+- Dependency bumps: protobufjs `8.6.x`, graphql `16.14.2`, plus dev-tooling (eslint, prettier, typescript-eslint, @types/node) and codecov-action v7.
+
 ## [2.2.0] - 2026-05-12
 
 This release closes Phases 1–3 of the `--live-reads` migration (GraphQL-backed reads layered over the local LevelDB cache, gated by `--live-reads` and a browser session). The live surface now covers transactions, accounts, categories, budgets, recurring charges, holdings, balances, investment prices, tags, net worth, monthly spend, and upcoming recurrings — 13 live read/utility tools that swap in for 6 cache-mode equivalents and add 7 new ones. Default mode (no flags) stays fully local and offline.
