@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-06-14
+
+### Fixed
+
+- **`get_networth_live` `time_frame` enum** now matches the canonical `TimeFrame` the Networth endpoint actually accepts (`ONE_DAY` / `ONE_WEEK` / `ONE_MONTH` / `THREE_MONTHS` / `YTD` / `ONE_YEAR` / `ALL`). The previously-advertised bare `MONTH` / `YEAR` were not valid `TimeFrame` members and returned a `400`; the enum now reuses the shared `ALL_TIME_FRAMES` constant, so the documented values all work, and a class-level test gates every live tool's `time_frame` enum against drift ([#495](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/495)). Fixes [#494](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/494).
+
 ## [2.2.1] - 2026-06-14
 
 Write-path capability additions plus a repo-wide "boundary hardening" program: every assumption this server makes about Copilot's GraphQL API is now inventoried and re-verified by an oracle (live conformance smokes, runtime response validation, reversible write round-trips, and a weekly scheduled drift check), so API drift surfaces as a red build instead of a confusing user-facing failure. See [`docs/CONFORMANCE_ARCHITECTURE.md`](docs/CONFORMANCE_ARCHITECTURE.md).
