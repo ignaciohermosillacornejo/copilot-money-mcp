@@ -283,7 +283,10 @@ describe('updateTransaction — validation errors', () => {
     expect(client._calls).toHaveLength(0);
   });
 
-  test('transaction missing item_id or account_id throws', async () => {
+  test('transaction present locally but missing item_id/account_id is unresolved (no live fallback) and throws', async () => {
+    // The local row lacks account_id/item_id, so it can't supply the mutation
+    // metadata. With no live DB to fall back to, resolution finds nothing and
+    // the write is rejected before any GraphQL call.
     const { tools, client } = makeTools({
       transactions: [
         {
@@ -298,7 +301,7 @@ describe('updateTransaction — validation errors', () => {
     });
     await expect(
       tools.updateTransaction({ transaction_id: 'txn1', category_id: 'food' })
-    ).rejects.toThrow(/account_id or item_id/i);
+    ).rejects.toThrow(/Transaction not found/i);
     expect(client._calls).toHaveLength(0);
   });
 });
