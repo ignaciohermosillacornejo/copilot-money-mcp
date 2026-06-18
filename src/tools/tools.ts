@@ -2413,6 +2413,51 @@ export class CopilotMoneyTools {
   }
 
   /**
+   * Resolve accountId/itemId for a set of transaction ids — required to build
+   * EditTransaction mutations. Prefers the local LevelDB cache; for ids not
+   * present (or missing account/item) locally, falls back to a single live
+   * GraphQL window fetch so write tools can edit any transaction the API
+   * exposes, not just the subset the local cache holds. (The local cache only
+   * auto-fetches ~30 days and Firestore LRU-evicts older docs, so cache-only
+   * resolution silently fails for older transactions.) The live window defaults
+   * to the last 13 months and is overridable via the
+   * COPILOT_WRITE_RESOLVE_WINDOW_MONTHS env var. Returns a map of only the ids
+   * that resolved; callers treat absence as "not found".
+   */
+  private async resolveTransactionMeta(
+    ids: string[]
+  ): Promise<Map<string, { accountId: string; itemId: string }>> {
+    const out = new Map<string, { accountId: string; itemId: string }>();
+    const local = await this.db.getAllTransactions();
+    const localById = new Map(local.map((t) => [t.transaction_id, t]));
+    const missing: string[] = [];
+    for (const id of ids) {
+      const t = localById.get(id);
+      if (t?.account_id && t?.item_id) {
+        out.set(id, { accountId: t.account_id, itemId: t.item_id });
+      } else {
+        missing.push(id);
+      }
+    }
+    if (missing.length > 0 && this.liveDb) {
+      const months = Number(process.env.COPILOT_WRITE_RESOLVE_WINDOW_MONTHS) || 13;
+      const to = new Date().toISOString().slice(0, 10);
+      const fromDate = new Date();
+      fromDate.setMonth(fromDate.getMonth() - months);
+      const from = fromDate.toISOString().slice(0, 10);
+      const live = await this.liveDb.getTransactions({ from, to });
+      const liveById = new Map(live.rows.map((n) => [n.id, n]));
+      for (const id of missing) {
+        const n = liveById.get(id);
+        if (n?.accountId && n?.itemId) {
+          out.set(id, { accountId: n.accountId, itemId: n.itemId });
+        }
+      }
+    }
+    return out;
+  }
+
+  /**
    * Update one or more fields on a transaction in a single atomic write.
    *
    * Supported fields: name, category_id, note, tag_ids, type, reviewed.
@@ -2468,13 +2513,17 @@ export class CopilotMoneyTools {
 
     validateDocId(transaction_id, 'transaction_id');
 
-    // Resolve the transaction from the local cache so we can supply accountId /
-    // itemId to the GraphQL mutation.
-    const allTxns = await this.db.getAllTransactions();
-    const txn = allTxns.find((t) => t.transaction_id === transaction_id);
-    if (!txn) {
+    // Resolve the transaction's accountId/itemId for the GraphQL mutation.
+    // Prefers the local cache; falls back to a live GraphQL window fetch so we
+    // can edit any transaction the API exposes — not just the subset the local
+    // cache happens to hold. See resolveTransactionMeta().
+    const metaMap = await this.resolveTransactionMeta([transaction_id]);
+    const meta = metaMap.get(transaction_id);
+    if (!meta) {
       throw new Error(`Transaction not found: ${transaction_id}`);
     }
+    const resolvedAccountId = meta.accountId;
+    const resolvedItemId = meta.itemId;
 
     // Per-field validation (runs BEFORE any write for atomicity).
     if ('name' in args && args.name !== undefined) {
@@ -2550,15 +2599,11 @@ export class CopilotMoneyTools {
     if ('type' in args && args.type !== undefined) input.type = args.type;
     if ('reviewed' in args && args.reviewed !== undefined) input.isReviewed = args.reviewed;
 
-    if (!txn.account_id || !txn.item_id) {
-      throw new Error(`Transaction ${transaction_id} missing account_id or item_id in local cache`);
-    }
-
     try {
       const result = await editTransaction(client, {
         id: transaction_id,
-        accountId: txn.account_id,
-        itemId: txn.item_id,
+        accountId: resolvedAccountId,
+        itemId: resolvedItemId,
         input,
       });
       // Map GraphQL field names back to MCP API names in the response.
@@ -3114,21 +3159,12 @@ export class CopilotMoneyTools {
       validateDocId(id, 'transaction_id');
     }
 
-    const allTransactions = await this.db.getAllTransactions();
-    const txnMap = new Map(allTransactions.map((t) => [t.transaction_id, t]));
-
-    const missing = transaction_ids.filter((id) => !txnMap.has(id));
+    // Resolve account/item ids for all targets (local cache first, live
+    // fallback for older transactions). See resolveTransactionMeta().
+    const metaMap = await this.resolveTransactionMeta(transaction_ids);
+    const missing = transaction_ids.filter((id) => !metaMap.has(id));
     if (missing.length > 0) {
       throw new Error(`Transactions not found: ${missing.join(', ')}`);
-    }
-
-    // Pre-flight: confirm every transaction has account/item ids before
-    // issuing any writes. Keeps partial-failure surface small.
-    for (const id of transaction_ids) {
-      const txn = txnMap.get(id)!;
-      if (!txn.account_id || !txn.item_id) {
-        throw new Error(`Transaction ${id} missing account_id or item_id in local cache`);
-      }
     }
 
     // Bounded concurrency: never more than CONCURRENCY in flight at once.
@@ -3155,12 +3191,12 @@ export class CopilotMoneyTools {
         const idx = cursor++;
         if (idx >= transaction_ids.length) return;
         const id = transaction_ids[idx]!;
-        const txn = txnMap.get(id)!;
+        const meta = metaMap.get(id)!;
         try {
           await editTransaction(client, {
             id,
-            accountId: txn.account_id!,
-            itemId: txn.item_id!,
+            accountId: meta.accountId,
+            itemId: meta.itemId,
             input: { isReviewed: reviewed },
           });
           reviewed_count++;

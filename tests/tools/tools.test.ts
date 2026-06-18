@@ -2948,11 +2948,13 @@ describe('reviewTransactions', () => {
     ).rejects.toThrow('Invalid transaction_id format: invalid/id');
   });
 
-  test('throws when transaction is missing item_id or account_id', async () => {
+  test('throws not-found when a transaction cannot be resolved locally or live', async () => {
+    // txn3 isn't in the local cache (and there's no live DB here), so its
+    // account/item can't be resolved and the bulk review is rejected up front.
     const client = createMockGraphQLClient({});
     tools = new CopilotMoneyTools(mockDb, client);
     await expect(tools.reviewTransactions({ transaction_ids: ['txn3'] })).rejects.toThrow(
-      /missing account_id or item_id/
+      /not found/i
     );
   });
 
