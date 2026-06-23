@@ -101,7 +101,10 @@ export function createLiveCategoriesToolSchema(): ToolSchema {
   return {
     name: 'get_categories_live',
     description:
-      'Get user categories (live, GraphQL-backed). Includes per-category budget data so get_budgets_live can read from the same cache. ' +
+      'Get user categories (live, GraphQL-backed), including each category id, parentId, and budget data. ' +
+      "IMPORTANT: a category's budget block (`amount`/`resolvedAmount`) is the BUDGETED amount for the month — NOT the amount spent. " +
+      'To find actual spending in a category, call get_transactions_live with that category id and sum the transaction amounts; do not report the budget as spend. ' +
+      'The budget data here is the same cache get_budgets_live reads from. ' +
       'Each row carries a `parentId` field: `null` for top-level categories (parents AND standalones), or the parent category id for children. ' +
       'To detect a parent specifically: build a Set of parent ids from the rows where `parentId !== null`. ' +
       'By default, `budget.histories[]` is stripped to keep the response small — pass `include_history: true` to receive the full multi-year history. ' +
