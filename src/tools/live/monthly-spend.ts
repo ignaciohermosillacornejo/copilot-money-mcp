@@ -108,7 +108,9 @@ export function createLiveMonthlySpendToolSchema(): ToolSchema {
   return {
     name: 'get_monthly_spend_live',
     description:
-      "Get the current month's daily spending series (live, GraphQL-backed). " +
+      "Get the current month's TOTAL daily spending series across ALL categories (live, GraphQL-backed) — " +
+      'use for overall month-to-date spend, not for one category (for a single category use ' +
+      'get_transactions_live filtered by its category id). ' +
       "Each row carries `total_amount` (this period's spend on `date`) and " +
       '`comparison_amount` (same-day-of-prior-period spend, used by the web app ' +
       'for "vs last month" deltas). Future-dated placeholder rows (where both ' +
