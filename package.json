@@ -90,7 +90,7 @@
     "@anthropic-ai/mcpb": "latest",
     "@eslint/js": "^10.0.1",
     "@types/bun": "^1.3.14",
-    "@types/node": "^25.9.3",
+    "@types/node": "^26.0.1",
     "eslint": "^10.5.0",
     "eslint-config-prettier": "^10.0.0",
     "globals": "^17.7.0",
