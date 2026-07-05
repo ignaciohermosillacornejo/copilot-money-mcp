@@ -90,6 +90,15 @@ export class LiveCopilotDatabase {
   // who need a fresh snapshot can use refresh_cache with scope='holdings'.
   private readonly holdingsCache: SnapshotCache<HoldingNode>;
   private readonly transactionsWindowCache: TransactionWindowCache<TransactionNode>;
+  /**
+   * Append-only id → (accountId, itemId) index fed by every live
+   * transaction fetch. The mapping is immutable server-side (a transaction
+   * never moves accounts; Plaid pending→posted replaces the id itself), so
+   * entries are never invalidated, evicted, or TTL'd. Write tools use this
+   * to resolve mutation routing ids without a network fetch (~100
+   * bytes/entry; a full history is a few MB).
+   */
+  private readonly txnMetaIndex = new Map<string, { accountId: string; itemId: string }>();
 
   constructor(
     private readonly graphql: GraphQLClient,
@@ -192,6 +201,12 @@ export class LiveCopilotDatabase {
       },
       { startDate: monthStart }
     );
+    // Feed the append-only id→(accountId,itemId) index from the raw page
+    // rows — pre-trim, because leaked tail rows are real transactions too
+    // and their routing ids are just as valid.
+    for (const r of rawRows) {
+      this.txnMetaIndex.set(r.id, { accountId: r.accountId, itemId: r.itemId });
+    }
     // Trim leaked tail-page rows that fall outside this month's window.
     // `paginateTransactions` early-exits AFTER appending a page, so the
     // trailing edge of the last page can dip into the previous month.
@@ -422,6 +437,24 @@ export class LiveCopilotDatabase {
     return this.transactionsWindowCache;
   }
 
+  /** Feed the meta index for a transaction learned outside a month fetch
+   *  (e.g. the create_transaction response). */
+  indexTransactionMeta(id: string, meta: { accountId: string; itemId: string }): void {
+    this.txnMetaIndex.set(id, meta);
+  }
+
+  /** Resolve routing ids for the given transaction ids from the in-memory
+   *  index. Returns only the ids present; callers treat absence as
+   *  "not seen by any live fetch this session". */
+  lookupTransactionMeta(ids: string[]): Map<string, { accountId: string; itemId: string }> {
+    const out = new Map<string, { accountId: string; itemId: string }>();
+    for (const id of ids) {
+      const m = this.txnMetaIndex.get(id);
+      if (m) out.set(id, m);
+    }
+    return out;
+  }
+
   // ── Phase 2: write-through patch methods ─────────────────────────────────
 
   /**
@@ -440,6 +473,9 @@ export class LiveCopilotDatabase {
     }
     if (!existing) return;
     const merged: TransactionNode = { ...existing, ...fields, id };
+    // Keep the meta index consistent with the invariant "any row this class
+    // has seen is indexed" (redundant for ingested rows, cheap insurance).
+    this.txnMetaIndex.set(id, { accountId: merged.accountId, itemId: merged.itemId });
     this.transactionsWindowCache.upsert(merged);
   }
 
