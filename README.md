@@ -175,6 +175,14 @@ COPILOT_CACHE_TTL_MINUTES=0 copilot-money-mcp
 
 You can also refresh manually using the `refresh_database` tool.
 
+### Write Resolution Window
+
+Write tools resolve account/item ids for a transaction id via a live window fetch when the in-memory index (fed by live reads) misses. Default window: 13 months. Raise it to edit older transactions:
+
+```bash
+COPILOT_WRITE_RESOLVE_WINDOW_MONTHS=30 copilot-money-mcp --write
+```
+
 ### Decode Timeout
 
 For large databases (500MB+), increase the decode timeout (default: 90 seconds):
