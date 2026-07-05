@@ -960,3 +960,71 @@ describe('LiveCopilotDatabase — logReadCall', () => {
     }
   });
 });
+
+describe('transaction meta index', () => {
+  function metaNode(id: string, date: string, accountId: string, itemId: string) {
+    return {
+      id,
+      accountId,
+      itemId,
+      categoryId: 'c1',
+      recurringId: null,
+      parentId: null,
+      isReviewed: false,
+      isPending: false,
+      amount: 10,
+      date,
+      name: `tx-${id}`,
+      type: 'REGULAR' as const,
+      userNotes: null,
+      tipAmount: null,
+      suggestedCategoryIds: [],
+      isoCurrencyCode: null,
+      createdAt: 1,
+      tags: [],
+      goal: null,
+    };
+  }
+
+  function metaPage(nodes: ReturnType<typeof metaNode>[]): TransactionsPage {
+    return {
+      edges: nodes.map((n) => ({ cursor: `c-${n.id}`, node: n })),
+      pageInfo: { endCursor: null, hasNextPage: false },
+    };
+  }
+
+  test('getTransactions feeds the index; lookupTransactionMeta resolves fetched ids', async () => {
+    const page = metaPage([metaNode('meta-t1', '2025-01-15', 'acct-A', 'item-A')]);
+    const client = {
+      mutate: mock(),
+      query: mock(() => Promise.resolve({ transactions: page })),
+    } as unknown as GraphQLClient;
+    const live = new LiveCopilotDatabase(client, {} as CopilotDatabase);
+
+    await live.getTransactions({ from: '2025-01-01', to: '2025-01-31' });
+
+    const found = live.lookupTransactionMeta(['meta-t1', 'meta-unknown']);
+    expect(found.get('meta-t1')).toEqual({ accountId: 'acct-A', itemId: 'item-A' });
+    expect(found.has('meta-unknown')).toBe(false);
+  });
+
+  test('indexTransactionMeta feeds the index directly', () => {
+    const live = new LiveCopilotDatabase(
+      { mutate: mock(), query: mock() } as unknown as GraphQLClient,
+      {} as CopilotDatabase
+    );
+    live.indexTransactionMeta('meta-t2', { accountId: 'acct-B', itemId: 'item-B' });
+    expect(live.lookupTransactionMeta(['meta-t2']).get('meta-t2')).toEqual({
+      accountId: 'acct-B',
+      itemId: 'item-B',
+    });
+  });
+
+  test('lookupTransactionMeta returns an empty map for unknown ids', () => {
+    const live = new LiveCopilotDatabase(
+      { mutate: mock(), query: mock() } as unknown as GraphQLClient,
+      {} as CopilotDatabase
+    );
+    expect(live.lookupTransactionMeta(['nope']).size).toBe(0);
+  });
+});
