@@ -28,6 +28,7 @@
     "tests/tools/unit-coverage-gaps.test.ts",
     "tests/tools/write-tools-phase3.test.ts",
     "tests/tools/write-tools.test.ts",
+    "tests/unit/resolve-transaction-meta.test.ts",
     "tests/unit/update-transaction.test.ts"
   ],
   "exclude": ["node_modules", "dist"]

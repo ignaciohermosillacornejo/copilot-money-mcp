@@ -374,6 +374,18 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   gatedInputField('EditTransactionInput.type', ['update_transaction.type']),
   responseShape('editTransaction'),
   appliesSurface('editTransaction'),
+  {
+    surface: 'Mutation.editTransaction:routing',
+    kind: 'operation',
+    oracle: null,
+    class: 'verified-once',
+    evidence:
+      'Live probe 2026-07-05: EditTransaction validates the full (id, accountId, itemId) ' +
+      'binding, not mere existence — fabricated accountId → "accountId … Not Found"; ' +
+      'real-but-wrong pair → "Transaction not found" (server scopes the txn lookup under ' +
+      'account/item); correct pair → edit applied. Routing ids therefore cannot be ' +
+      'defaulted or faked; resolveTransactionMeta must supply the true pair.',
+  },
 
   operation('deleteTransaction', [
     'delete_transaction.transaction_id',
