@@ -2413,34 +2413,60 @@ export class CopilotMoneyTools {
   }
 
   /**
-   * Resolve accountId/itemId for a set of transaction ids — required to build
-   * EditTransaction mutations. Prefers the local LevelDB cache; for ids not
-   * present (or missing account/item) locally, falls back to a single live
-   * GraphQL window fetch so write tools can edit any transaction the API
-   * exposes, not just the subset the local cache holds. (The local cache only
-   * auto-fetches ~30 days and Firestore LRU-evicts older docs, so cache-only
-   * resolution silently fails for older transactions.) The live window defaults
-   * to the last 13 months and is overridable via the
-   * COPILOT_WRITE_RESOLVE_WINDOW_MONTHS env var. Returns a map of only the ids
-   * that resolved; callers treat absence as "not found".
+   * Resolve accountId/itemId routing ids for a set of transaction ids —
+   * required by EditTransaction/CreateRecurring mutations (the server
+   * validates the full binding; see the Mutation.editTransaction:routing
+   * ledger entry).
+   *
+   * Live mode (liveDb present — all production writes, since --write
+   * implies --live-reads): ① the in-memory meta index fed by every live
+   * read (O(1), no network) → ② one windowed live fetch for ids the index
+   * misses (default 13 months, COPILOT_WRITE_RESOLVE_WINDOW_MONTHS
+   * overrides; the fetch itself re-feeds the index via fetchMonth). The
+   * local LevelDB cache is deliberately NOT consulted: README's contract
+   * is that writes resolve against the live GraphQL surface, and the
+   * desktop app's cache may belong to a different login than the browser
+   * session token.
+   *
+   * Degraded mode (no liveDb — unit tests / hypothetical configs): the
+   * local LevelDB cache is the only resolver, as before.
+   *
+   * Returns the resolved map plus liveWindowMonths (null iff no live fetch
+   * could be attempted) so callers can compose an honest not-found error.
    */
   private async resolveTransactionMeta(
     ids: string[]
-  ): Promise<Map<string, { accountId: string; itemId: string }>> {
+  ): Promise<{
+    meta: Map<string, { accountId: string; itemId: string }>;
+    liveWindowMonths: number | null;
+  }> {
     const out = new Map<string, { accountId: string; itemId: string }>();
-    const local = await this.db.getAllTransactions();
-    const localById = new Map(local.map((t) => [t.transaction_id, t]));
+
+    if (!this.liveDb) {
+      const local = await this.db.getAllTransactions();
+      const localById = new Map(local.map((t) => [t.transaction_id, t]));
+      for (const id of ids) {
+        const t = localById.get(id);
+        if (t?.account_id && t?.item_id) {
+          out.set(id, { accountId: t.account_id, itemId: t.item_id });
+        }
+      }
+      return { meta: out, liveWindowMonths: null };
+    }
+
+    const indexed = this.liveDb.lookupTransactionMeta(ids);
     const missing: string[] = [];
     for (const id of ids) {
-      const t = localById.get(id);
-      if (t?.account_id && t?.item_id) {
-        out.set(id, { accountId: t.account_id, itemId: t.item_id });
+      const m = indexed.get(id);
+      if (m) {
+        out.set(id, m);
       } else {
         missing.push(id);
       }
     }
-    if (missing.length > 0 && this.liveDb) {
-      const months = Number(process.env.COPILOT_WRITE_RESOLVE_WINDOW_MONTHS) || 13;
+
+    const months = CopilotMoneyTools.resolveWindowMonths();
+    if (missing.length > 0) {
       const to = new Date().toISOString().slice(0, 10);
       const fromDate = new Date();
       fromDate.setMonth(fromDate.getMonth() - months);
@@ -2449,12 +2475,44 @@ export class CopilotMoneyTools {
       const liveById = new Map(live.rows.map((n) => [n.id, n]));
       for (const id of missing) {
         const n = liveById.get(id);
-        if (n?.accountId && n?.itemId) {
-          out.set(id, { accountId: n.accountId, itemId: n.itemId });
-        }
+        if (n) out.set(id, { accountId: n.accountId, itemId: n.itemId });
       }
     }
-    return out;
+    return { meta: out, liveWindowMonths: months };
+  }
+
+  /**
+   * Window size for the live resolution fetch. Mirrors the
+   * getCacheTTLMs() env-parse convention (src/core/database.ts): explicit
+   * positive integer wins, anything else falls back to the default.
+   */
+  private static resolveWindowMonths(): number {
+    const envValue = process.env.COPILOT_WRITE_RESOLVE_WINDOW_MONTHS;
+    if (envValue !== undefined) {
+      const months = parseInt(envValue, 10);
+      if (!isNaN(months) && months > 0) return months;
+    }
+    return 13;
+  }
+
+  /**
+   * Compose the not-found error for unresolved write targets. The window
+   * suffix appears only when a live fetch was actually attempted
+   * (liveWindowMonths non-null) — three distinct failures otherwise share
+   * one string: typo'd id, out-of-window id, and the server's own
+   * wrong-routing error (verified byte-identical by the 2026-07-05 probe).
+   */
+  private static transactionsNotFoundMessage(
+    missing: string[],
+    liveWindowMonths: number | null
+  ): string {
+    const base = `Transaction${missing.length > 1 ? 's' : ''} not found: ${missing.join(', ')}`;
+    if (liveWindowMonths === null) return base;
+    return (
+      `${base} — not found in the last ${liveWindowMonths} months of live data. ` +
+      `If the transaction is older, raise COPILOT_WRITE_RESOLVE_WINDOW_MONTHS; ` +
+      `if it should be recent, verify the id.`
+    );
   }
 
   /**
@@ -2517,10 +2575,14 @@ export class CopilotMoneyTools {
     // Prefers the local cache; falls back to a live GraphQL window fetch so we
     // can edit any transaction the API exposes — not just the subset the local
     // cache happens to hold. See resolveTransactionMeta().
-    const metaMap = await this.resolveTransactionMeta([transaction_id]);
+    const { meta: metaMap, liveWindowMonths } = await this.resolveTransactionMeta([
+      transaction_id,
+    ]);
     const meta = metaMap.get(transaction_id);
     if (!meta) {
-      throw new Error(`Transaction not found: ${transaction_id}`);
+      throw new Error(
+        CopilotMoneyTools.transactionsNotFoundMessage([transaction_id], liveWindowMonths)
+      );
     }
     const resolvedAccountId = meta.accountId;
     const resolvedItemId = meta.itemId;
@@ -3161,10 +3223,10 @@ export class CopilotMoneyTools {
 
     // Resolve account/item ids for all targets (local cache first, live
     // fallback for older transactions). See resolveTransactionMeta().
-    const metaMap = await this.resolveTransactionMeta(transaction_ids);
+    const { meta: metaMap, liveWindowMonths } = await this.resolveTransactionMeta(transaction_ids);
     const missing = transaction_ids.filter((id) => !metaMap.has(id));
     if (missing.length > 0) {
-      throw new Error(`Transactions not found: ${missing.join(', ')}`);
+      throw new Error(CopilotMoneyTools.transactionsNotFoundMessage(missing, liveWindowMonths));
     }
 
     // Bounded concurrency: never more than CONCURRENCY in flight at once.
