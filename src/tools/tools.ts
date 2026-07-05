@@ -2571,10 +2571,9 @@ export class CopilotMoneyTools {
 
     validateDocId(transaction_id, 'transaction_id');
 
-    // Resolve the transaction's accountId/itemId for the GraphQL mutation.
-    // Prefers the local cache; falls back to a live GraphQL window fetch so we
-    // can edit any transaction the API exposes — not just the subset the local
-    // cache happens to hold. See resolveTransactionMeta().
+    // Resolve the transaction's accountId/itemId for the GraphQL mutation —
+    // live-first via the meta index / windowed fetch; local cache only in
+    // degraded (no-liveDb) mode. See resolveTransactionMeta().
     const { meta: metaMap, liveWindowMonths } = await this.resolveTransactionMeta([
       transaction_id,
     ]);
@@ -2833,6 +2832,10 @@ export class CopilotMoneyTools {
         internal_transfer: tx.type === 'INTERNAL_TRANSFER',
         is_manual: true,
       };
+
+      // Feed the live meta index so an immediate follow-up write on the new
+      // transaction resolves without a network fetch.
+      this.liveDb?.indexTransactionMeta(tx.id, { accountId: tx.accountId, itemId: tx.itemId });
 
       return {
         success: true,
@@ -3221,8 +3224,9 @@ export class CopilotMoneyTools {
       validateDocId(id, 'transaction_id');
     }
 
-    // Resolve account/item ids for all targets (local cache first, live
-    // fallback for older transactions). See resolveTransactionMeta().
+    // Resolve account/item ids for all targets — live-first via the meta
+    // index / windowed fetch; local cache only in degraded (no-liveDb)
+    // mode. See resolveTransactionMeta().
     const { meta: metaMap, liveWindowMonths } = await this.resolveTransactionMeta(transaction_ids);
     const missing = transaction_ids.filter((id) => !metaMap.has(id));
     if (missing.length > 0) {
@@ -3647,12 +3651,15 @@ export class CopilotMoneyTools {
       );
     }
 
-    const all = await this.db.getAllTransactions();
-    const txn = all.find((t) => t.transaction_id === args.transaction_id);
-    if (!txn) throw new Error(`Transaction not found: ${args.transaction_id}`);
-    if (!txn.account_id || !txn.item_id) {
+    // Resolve routing ids the same way update_transaction does — live-first
+    // in live mode, local cache only in degraded mode. See
+    // resolveTransactionMeta(). Fixes the class bug where a transaction
+    // older than the local cache window could not be made recurring.
+    const { meta, liveWindowMonths } = await this.resolveTransactionMeta([args.transaction_id]);
+    const txnMeta = meta.get(args.transaction_id);
+    if (!txnMeta) {
       throw new Error(
-        `Transaction ${args.transaction_id} missing account_id or item_id in local cache`
+        CopilotMoneyTools.transactionsNotFoundMessage([args.transaction_id], liveWindowMonths)
       );
     }
 
@@ -3662,8 +3669,8 @@ export class CopilotMoneyTools {
           // Validated against RECURRING_FREQUENCIES above, so the widening cast is safe.
           frequency: args.frequency as RecurringFrequency,
           transaction: {
-            accountId: txn.account_id,
-            itemId: txn.item_id,
+            accountId: txnMeta.accountId,
+            itemId: txnMeta.itemId,
             transactionId: args.transaction_id,
           },
         },

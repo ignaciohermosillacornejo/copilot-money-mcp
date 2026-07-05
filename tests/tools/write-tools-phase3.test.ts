@@ -200,7 +200,10 @@ describe('createRecurring', () => {
     expect(client._calls).toHaveLength(0);
   });
 
-  test('throws when transaction is missing account_id or item_id', async () => {
+  test('locally-incomplete transaction is unresolved (no live fallback here) and throws not-found', async () => {
+    // txn-orphan lacks account_id/item_id and there is no liveDb, so
+    // resolution finds nothing — the old "missing account_id or item_id"
+    // message is retired in favor of the resolver's not-found contract.
     (mockDb as any)._transactions = [
       { transaction_id: 'txn-orphan', amount: 10, date: '2024-01-01', name: 'Orphan' },
     ];
@@ -210,7 +213,7 @@ describe('createRecurring', () => {
 
     await expect(
       tools.createRecurring({ transaction_id: 'txn-orphan', frequency: 'MONTHLY' })
-    ).rejects.toThrow('missing account_id or item_id');
+    ).rejects.toThrow('Transaction not found: txn-orphan');
     expect(client._calls).toHaveLength(0);
   });
 
