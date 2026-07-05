@@ -475,6 +475,9 @@ export class LiveCopilotDatabase {
     const merged: TransactionNode = { ...existing, ...fields, id };
     // Keep the meta index consistent with the invariant "any row this class
     // has seen is indexed" (redundant for ingested rows, cheap insurance).
+    // Merging `fields` cannot change the routing ids: it is
+    // Partial<Transaction> (snake_case account_id/item_id, not the node's
+    // camelCase keys), and the ids are server-immutable regardless.
     this.txnMetaIndex.set(id, { accountId: merged.accountId, itemId: merged.itemId });
     this.transactionsWindowCache.upsert(merged);
   }

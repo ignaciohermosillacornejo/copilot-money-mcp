@@ -2478,6 +2478,11 @@ export class CopilotMoneyTools {
         }
       }
     }
+    // liveWindowMonths is non-null here even when no fetch ran
+    // (missing.length === 0). Safe by invariant: callers only compose the
+    // window error for ids absent from `meta`, and an empty `missing` means
+    // every requested id IS in `meta` — the error path is unreachable
+    // without an attempted fetch.
     return { meta: out, liveWindowMonths: months };
   }
 
