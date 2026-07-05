@@ -1027,4 +1027,21 @@ describe('transaction meta index', () => {
     );
     expect(live.lookupTransactionMeta(['nope']).size).toBe(0);
   });
+
+  test('rows with empty routing ids are not indexed (drift guard)', async () => {
+    const bad = { ...metaNode('meta-bad', '2025-01-16', '', 'item-X') };
+    const good = metaNode('meta-good', '2025-01-17', 'acct-C', 'item-C');
+    const page = metaPage([good, bad as ReturnType<typeof metaNode>]);
+    const client = {
+      mutate: mock(),
+      query: mock(() => Promise.resolve({ transactions: page })),
+    } as unknown as GraphQLClient;
+    const live = new LiveCopilotDatabase(client, {} as CopilotDatabase);
+
+    await live.getTransactions({ from: '2025-01-01', to: '2025-01-31' });
+
+    const found = live.lookupTransactionMeta(['meta-good', 'meta-bad']);
+    expect(found.has('meta-good')).toBe(true);
+    expect(found.has('meta-bad')).toBe(false);
+  });
 });

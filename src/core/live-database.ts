@@ -203,9 +203,12 @@ export class LiveCopilotDatabase {
     );
     // Feed the append-only id→(accountId,itemId) index from the raw page
     // rows — pre-trim, because leaked tail rows are real transactions too
-    // and their routing ids are just as valid.
+    // and their routing ids are just as valid. Guard against drifted
+    // responses with null/empty routing ids (see review finding).
     for (const r of rawRows) {
-      this.txnMetaIndex.set(r.id, { accountId: r.accountId, itemId: r.itemId });
+      if (r.accountId && r.itemId) {
+        this.txnMetaIndex.set(r.id, { accountId: r.accountId, itemId: r.itemId });
+      }
     }
     // Trim leaked tail-page rows that fall outside this month's window.
     // `paginateTransactions` early-exits AFTER appending a page, so the
@@ -478,7 +481,10 @@ export class LiveCopilotDatabase {
     // Merging `fields` cannot change the routing ids: it is
     // Partial<Transaction> (snake_case account_id/item_id, not the node's
     // camelCase keys), and the ids are server-immutable regardless.
-    this.txnMetaIndex.set(id, { accountId: merged.accountId, itemId: merged.itemId });
+    // Guard against drifted responses with null/empty routing ids (review finding).
+    if (merged.accountId && merged.itemId) {
+      this.txnMetaIndex.set(id, { accountId: merged.accountId, itemId: merged.itemId });
+    }
     this.transactionsWindowCache.upsert(merged);
   }
 
