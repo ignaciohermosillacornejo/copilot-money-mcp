@@ -218,3 +218,87 @@ describe('resolveTransactionMeta v2 — degraded mode (no liveDb)', () => {
     expect(msg).not.toMatch(/COPILOT_WRITE_RESOLVE_WINDOW_MONTHS/);
   });
 });
+
+describe('createRecurring uses resolveTransactionMeta', () => {
+  test('uncached id resolves via live fetch; mutation receives the triple', async () => {
+    const client = createMockGraphQLClient({
+      CreateRecurring: {
+        createRecurring: { id: 'rec-1', name: 'n', state: 'ACTIVE', frequency: 'MONTHLY' },
+      },
+    });
+    const { liveDb } = stubLiveDb({
+      liveRows: [{ id: 'tOld', accountId: 'acct-9', itemId: 'item-9' }],
+    });
+    (liveDb as any).patchLiveRecurringUpsert = () => {};
+    const tools = new CopilotMoneyTools(makeDb(), client, liveDb);
+
+    await tools.createRecurring({ transaction_id: 'tOld', frequency: 'MONTHLY' });
+
+    const call = client._calls.find((c) => c.op === 'CreateRecurring')!;
+    expect((call.variables as any).input.transaction).toEqual({
+      accountId: 'acct-9',
+      itemId: 'item-9',
+      transactionId: 'tOld',
+    });
+  });
+
+  test('unresolvable id gets the honest window error', async () => {
+    const client = createMockGraphQLClient({});
+    const { liveDb } = stubLiveDb({});
+    const tools = new CopilotMoneyTools(makeDb(), client, liveDb);
+
+    await expect(
+      tools.createRecurring({ transaction_id: 'tGone', frequency: 'MONTHLY' })
+    ).rejects.toThrow(/Transaction not found: tGone.*last 13 months/);
+    expect(client._calls).toHaveLength(0);
+  });
+});
+
+describe('createTransaction feeds the meta index', () => {
+  test('created id becomes resolvable without a fetch', async () => {
+    const client = createMockGraphQLClient({
+      CreateTransaction: {
+        createTransaction: {
+          id: 'tNew',
+          name: 'Synthetic',
+          date: '2026-07-01',
+          amount: 100,
+          categoryId: 'c1',
+          type: 'REGULAR',
+          accountId: 'acct-5',
+          itemId: 'item-5',
+          isPending: false,
+          isReviewed: true,
+          createdAt: 1,
+          recurringId: null,
+          userNotes: null,
+          tipAmount: null,
+          suggestedCategoryIds: [],
+          tags: [],
+          goal: null,
+        },
+      },
+    });
+    const indexTransactionMeta = mock();
+    const { liveDb } = stubLiveDb({});
+    (liveDb as any).indexTransactionMeta = indexTransactionMeta;
+    const db = makeDb();
+    (db as any)._userCategories = [{ category_id: 'c1', name: 'Synthetic Cat' }];
+    const tools = new CopilotMoneyTools(db, client, liveDb);
+
+    await tools.createTransaction({
+      account_id: 'acct-5',
+      item_id: 'item-5',
+      name: 'Synthetic',
+      date: '2026-07-01',
+      amount: 100,
+      category_id: 'c1',
+      type: 'REGULAR',
+    });
+
+    expect(indexTransactionMeta).toHaveBeenCalledWith('tNew', {
+      accountId: 'acct-5',
+      itemId: 'item-5',
+    });
+  });
+});
