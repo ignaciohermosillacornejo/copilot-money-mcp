@@ -161,9 +161,9 @@ describe('resolveTransactionMeta v2 — live mode', () => {
 
     const { liveDb: emptyLive } = stubLiveDb({});
     const tools2 = new CopilotMoneyTools(makeDb(), createMockGraphQLClient({}), emptyLive);
-    await expect(
-      tools2.reviewTransactions({ transaction_ids: ['tX', 'tY'] })
-    ).rejects.toThrow(/Transactions not found: tX, tY.*last 13 months/);
+    await expect(tools2.reviewTransactions({ transaction_ids: ['tX', 'tY'] })).rejects.toThrow(
+      /Transactions not found: tX, tY.*last 13 months/
+    );
   });
 
   test('env var override is honored; garbage/zero/negative fall back to 13', async () => {
