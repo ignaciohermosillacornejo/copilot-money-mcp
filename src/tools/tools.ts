@@ -2434,9 +2434,7 @@ export class CopilotMoneyTools {
    * Returns the resolved map plus liveWindowMonths (null iff no live fetch
    * could be attempted) so callers can compose an honest not-found error.
    */
-  private async resolveTransactionMeta(
-    ids: string[]
-  ): Promise<{
+  private async resolveTransactionMeta(ids: string[]): Promise<{
     meta: Map<string, { accountId: string; itemId: string }>;
     liveWindowMonths: number | null;
   }> {
@@ -2475,7 +2473,9 @@ export class CopilotMoneyTools {
       const liveById = new Map(live.rows.map((n) => [n.id, n]));
       for (const id of missing) {
         const n = liveById.get(id);
-        if (n) out.set(id, { accountId: n.accountId, itemId: n.itemId });
+        if (n?.accountId && n?.itemId) {
+          out.set(id, { accountId: n.accountId, itemId: n.itemId });
+        }
       }
     }
     return { meta: out, liveWindowMonths: months };
@@ -2574,9 +2574,7 @@ export class CopilotMoneyTools {
     // Resolve the transaction's accountId/itemId for the GraphQL mutation —
     // live-first via the meta index / windowed fetch; local cache only in
     // degraded (no-liveDb) mode. See resolveTransactionMeta().
-    const { meta: metaMap, liveWindowMonths } = await this.resolveTransactionMeta([
-      transaction_id,
-    ]);
+    const { meta: metaMap, liveWindowMonths } = await this.resolveTransactionMeta([transaction_id]);
     const meta = metaMap.get(transaction_id);
     if (!meta) {
       throw new Error(
