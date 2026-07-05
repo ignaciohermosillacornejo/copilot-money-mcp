@@ -2928,7 +2928,7 @@ describe('reviewTransactions', () => {
     const client = createMockGraphQLClient({});
     tools = new CopilotMoneyTools(mockDb, client);
     await expect(tools.reviewTransactions({ transaction_ids: ['nonexistent'] })).rejects.toThrow(
-      'Transactions not found: nonexistent'
+      'Transaction not found: nonexistent'
     );
   });
 
