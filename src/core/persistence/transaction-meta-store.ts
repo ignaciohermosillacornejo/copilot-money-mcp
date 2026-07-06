@@ -45,7 +45,9 @@ export class TransactionMetaStore {
   /** ids known to be on disk already (loaded or flushed this session). */
   private readonly persisted = new Set<string>();
   private pending = new Map<string, { meta: Meta; uid: string | null }>();
-  private warnedLoad = false;
+  // Load warnings are per-uid: a corrupt file for a SECOND login must
+  // still warn even after the first login's file already did.
+  private readonly warnedLoadUids = new Set<string>();
   private warnedAppend = false;
   private warnedSkip = false;
   private dirCreated = false;
@@ -151,8 +153,8 @@ export class TransactionMetaStore {
           writeFileSync(tmp, this.serialize(out));
           renameSync(tmp, file);
         } catch (e) {
-          if (!this.warnedLoad) {
-            this.warnedLoad = true;
+          if (!this.warnedLoadUids.has(uid)) {
+            this.warnedLoadUids.add(uid);
             console.warn(
               `[copilot-money-mcp] persistent meta index cap-valve failed (${(e as Error).message}) — file not compacted. File: ${file}`
             );
@@ -160,8 +162,8 @@ export class TransactionMetaStore {
         }
       }
     } catch (e) {
-      if (!this.warnedLoad) {
-        this.warnedLoad = true;
+      if (!this.warnedLoadUids.has(uid)) {
+        this.warnedLoadUids.add(uid);
         console.warn(
           `[copilot-money-mcp] persistent meta index unreadable (${(e as Error).message}) — continuing in-memory. File: ${file}`
         );
