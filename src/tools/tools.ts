@@ -35,6 +35,7 @@ import {
   deleteCategory as gqlDeleteCategory,
   type EditCategoryInput,
 } from '../core/graphql/categories.js';
+import { fetchCategories } from '../core/graphql/queries/categories.js';
 import type { CategoryNode } from '../core/graphql/queries/categories.js';
 import type { TagNode } from '../core/graphql/queries/tags.js';
 import type { RecurringNode } from '../core/graphql/queries/recurrings.js';
@@ -44,6 +45,7 @@ import {
   deleteTag as gqlDeleteTag,
   type EditTagInput,
 } from '../core/graphql/tags.js';
+import { fetchTags } from '../core/graphql/queries/tags.js';
 import { COLOR_NAMES, type ColorName } from '../core/graphql/colors.js';
 import {
   createRecurring as gqlCreateRecurring,
@@ -2578,6 +2580,50 @@ export class CopilotMoneyTools {
   }
 
   /**
+   * Validate a category id against the authoritative source — the live
+   * categories cache (fetch-on-cold, existing TTLs) in live mode; the local
+   * LevelDB cache only in degraded mode. Message contract unchanged (#510).
+   */
+  private async validateCategoryId(categoryId: string): Promise<void> {
+    const liveDb = this.liveDb;
+    if (liveDb) {
+      const { rows } = await liveDb.getCategoriesCache().read(async () => {
+        const rollovers = await liveDb.resolveRolloversFlag();
+        return fetchCategories(liveDb.getClient(), { rollovers });
+      });
+      if (!rows.find((c) => c.id === categoryId)) {
+        throw new Error(`Category not found: ${categoryId}`);
+      }
+      return;
+    }
+    const categories = await this.db.getUserCategories();
+    if (!categories.find((c) => c.category_id === categoryId)) {
+      throw new Error(`Category not found: ${categoryId}`);
+    }
+  }
+
+  /** Tag-ids sibling of validateCategoryId — same mode split, same messages. */
+  private async validateTagIds(tagIds: string[]): Promise<void> {
+    if (tagIds.length === 0) return;
+    const liveDb = this.liveDb;
+    if (liveDb) {
+      const { rows } = await liveDb.getTagsCache().read(() => fetchTags(liveDb.getClient()));
+      for (const tagId of tagIds) {
+        if (!rows.find((t) => t.id === tagId)) {
+          throw new Error(`Tag not found: ${tagId}`);
+        }
+      }
+      return;
+    }
+    const tags = await this.db.getTags();
+    for (const tagId of tagIds) {
+      if (!tags.find((t) => t.tag_id === tagId)) {
+        throw new Error(`Tag not found: ${tagId}`);
+      }
+    }
+  }
+
+  /**
    * Update one or more fields on a transaction in a single atomic write.
    *
    * Supported fields: name, category_id, note, tag_ids, type, reviewed.
@@ -2655,23 +2701,13 @@ export class CopilotMoneyTools {
     }
     if ('category_id' in args && args.category_id !== undefined) {
       validateDocId(args.category_id, 'category_id');
-      const categories = await this.db.getUserCategories();
-      if (!categories.find((c) => c.category_id === args.category_id)) {
-        throw new Error(`Category not found: ${args.category_id}`);
-      }
+      await this.validateCategoryId(args.category_id);
     }
     if ('tag_ids' in args && args.tag_ids !== undefined) {
       for (const tagId of args.tag_ids) {
         validateDocId(tagId, 'tag_id');
       }
-      if (args.tag_ids.length > 0) {
-        const tags = await this.db.getTags();
-        for (const tagId of args.tag_ids) {
-          if (!tags.find((t) => t.tag_id === tagId)) {
-            throw new Error(`Tag not found: ${tagId}`);
-          }
-        }
-      }
+      await this.validateTagIds(args.tag_ids);
     }
     if ('type' in args && args.type !== undefined) {
       if (!TRANSACTION_TYPES.includes(args.type)) {
@@ -2842,14 +2878,7 @@ export class CopilotMoneyTools {
       for (const tagId of args.tag_ids) {
         validateDocId(tagId, 'tag_id');
       }
-      if (args.tag_ids.length > 0) {
-        const tags = await this.db.getTags();
-        for (const tagId of args.tag_ids) {
-          if (!tags.find((t) => t.tag_id === tagId)) {
-            throw new Error(`Tag not found: ${tagId}`);
-          }
-        }
-      }
+      await this.validateTagIds(args.tag_ids);
     }
     if (args.recurring_id !== undefined) {
       validateDocId(args.recurring_id, 'recurring_id');
@@ -3816,10 +3845,7 @@ export class CopilotMoneyTools {
     }
     if (args.category_id !== undefined) {
       validateDocId(args.category_id, 'category_id');
-      const categories = await this.db.getUserCategories();
-      if (!categories.find((c) => c.category_id === args.category_id)) {
-        throw new Error(`Category not found: ${args.category_id}`);
-      }
+      await this.validateCategoryId(args.category_id);
     }
     if (args.frequency !== undefined) {
       // .includes() on the `as const` tuple needs widening to string[] to accept
