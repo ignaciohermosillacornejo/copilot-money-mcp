@@ -37,32 +37,48 @@ function makeDb(transactions: unknown[] = []) {
   return db;
 }
 
-/** Stub liveDb: `indexed` backs lookupTransactionMeta; `liveRows` backs the
- *  windowed getTransactions fetch. Returns the spy so tests can assert
- *  whether the network fallback fired. */
+/** Stub liveDb: `indexed` backs lookupTransactionMeta from the start;
+ *  `liveRows` backs the windowed getTransactions RETURN VALUE and — like the
+ *  real fetchMonth feed — becomes visible via lookupTransactionMeta once the
+ *  fetch has run; `storeOnlyRows` simulates rows the fetch feeds to the store
+ *  but does NOT return (same-month future-dated rows; #513). Returns the
+ *  getTransactions spy so tests can assert whether the fallback fired. */
 function stubLiveDb(overrides: {
   indexed?: Record<string, { accountId: string; itemId: string }>;
   liveRows?: Array<{ id: string; accountId: string; itemId: string }>;
+  storeOnlyRows?: Array<{ id: string; accountId: string; itemId: string }>;
 }) {
-  const getTransactions = mock(() =>
-    Promise.resolve({
+  let fetched = false;
+  const getTransactions = mock(() => {
+    fetched = true;
+    return Promise.resolve({
       rows: overrides.liveRows ?? [],
       oldest_fetched_at: 0,
       newest_fetched_at: 0,
       hit: false,
-    })
-  );
-  const liveDb = {
-    lookupTransactionMeta: (ids: string[]) => {
-      const out = new Map<string, { accountId: string; itemId: string }>();
-      for (const id of ids) {
-        const m = overrides.indexed?.[id];
-        if (m) out.set(id, m);
+    });
+  });
+  const lookupTransactionMeta = (ids: string[]) => {
+    const out = new Map<string, { accountId: string; itemId: string }>();
+    for (const id of ids) {
+      const m = overrides.indexed?.[id];
+      if (m) {
+        out.set(id, m);
+        continue;
       }
-      return out;
-    },
+      if (fetched) {
+        const r = [...(overrides.liveRows ?? []), ...(overrides.storeOnlyRows ?? [])].find(
+          (n) => n.id === id
+        );
+        if (r?.accountId && r?.itemId) out.set(id, { accountId: r.accountId, itemId: r.itemId });
+      }
+    }
+    return out;
+  };
+  const liveDb = {
+    lookupTransactionMeta,
     getTransactions,
-    patchLiveTransaction: () => {}, // no-op for tests
+    patchLiveTransaction: () => {},
   } as unknown as LiveCopilotDatabase;
   return { liveDb, getTransactions };
 }
@@ -182,6 +198,24 @@ describe('resolveTransactionMeta v2 — live mode', () => {
         tools.updateTransaction({ transaction_id: 'tGone', reviewed: true })
       ).rejects.toThrow(/last 13 months/);
     }
+  });
+
+  test('same-month future-dated id resolves on the FIRST call (#513)', async () => {
+    // The row is fed to the meta index by the fetch but NOT present in the
+    // date-filtered return value — the pre-#513 code threw the window error
+    // here and only succeeded on retry.
+    const client = createMockGraphQLClient({ EditTransaction: echoEdit as any });
+    const { liveDb, getTransactions } = stubLiveDb({
+      storeOnlyRows: [{ id: 'tFuture', accountId: 'acct-F', itemId: 'item-F' }],
+    });
+    const tools = new CopilotMoneyTools(makeDb(), client, liveDb);
+
+    await tools.updateTransaction({ transaction_id: 'tFuture', reviewed: true });
+
+    expect(getTransactions).toHaveBeenCalledTimes(1);
+    const call = client._calls.find((c) => c.op === 'EditTransaction')!;
+    expect((call.variables as any).accountId).toBe('acct-F');
+    expect((call.variables as any).itemId).toBe('item-F');
   });
 });
 

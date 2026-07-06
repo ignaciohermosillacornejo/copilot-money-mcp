@@ -1074,4 +1074,29 @@ describe('transaction meta index', () => {
     );
     expect(live.lookupTransactionNodes(['anything']).size).toBe(0);
   });
+
+  test('rows dated after the requested range still land in the index and window cache (#513)', async () => {
+    // Range ends Jan 20 but the page contains a Jan 25 row: it is excluded
+    // from the RETURNED rows (date filter) yet fed to the meta index
+    // (pre-trim) and stored in the month bucket (within month boundary) —
+    // the asymmetry the write-resolvers rely on after their fallback fetch.
+    const page = metaPage([
+      metaNode('in-range', '2025-01-15', 'acct-A', 'item-A'),
+      metaNode('future-ish', '2025-01-25', 'acct-B', 'item-B'),
+    ]);
+    const client = {
+      mutate: mock(),
+      query: mock(() => Promise.resolve({ transactions: page })),
+    } as unknown as GraphQLClient;
+    const live = new LiveCopilotDatabase(client, {} as CopilotDatabase);
+
+    const result = await live.getTransactions({ from: '2025-01-01', to: '2025-01-20' });
+
+    expect(result.rows.map((r) => r.id)).toEqual(['in-range']);
+    expect(live.lookupTransactionMeta(['future-ish']).get('future-ish')).toEqual({
+      accountId: 'acct-B',
+      itemId: 'item-B',
+    });
+    expect(live.lookupTransactionNodes(['future-ish']).has('future-ish')).toBe(true);
+  });
 });
