@@ -64,7 +64,11 @@ export function stripInvalidTransactionNodes(
   const edges = page.edges.filter((edge) => {
     const parsed = transactionNodeSchema.safeParse(edge.node);
     if (parsed.success) return true;
-    const fields = [...new Set(parsed.error.issues.map((i) => String(i.path[0])))];
+    const fields = [
+      ...new Set(
+        parsed.error.issues.map((i) => (i.path[0] != null ? String(i.path[0]) : '<root>'))
+      ),
+    ];
     const rawId = (edge.node as { id?: unknown })?.id;
     const id =
       typeof rawId === 'string' && rawId.length > 0 && !fields.includes('id') ? rawId : null;

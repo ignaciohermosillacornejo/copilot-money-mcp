@@ -51,8 +51,8 @@ import {
   RESPONSE_SHAPE_RUNTIME_CHECK,
   RUNTIME_CHECK_NAMES,
 } from '../core/graphql/response-validation.js';
-export { RUNTIME_CHECK_NAMES };
 import { TRANSACTIONS_READ_SHAPE_RUNTIME_CHECK } from '../core/graphql/read-validation.js';
+export { RUNTIME_CHECK_NAMES };
 
 /** What kind of external surface the assumption is about. */
 export const SURFACE_KINDS = [
