@@ -49,7 +49,9 @@ export class TransactionMetaStore {
   // still warn even after the first login's file already did.
   private readonly warnedLoadUids = new Set<string>();
   private warnedAppend = false;
-  private warnedSkip = false;
+  // Skip warnings are per-uid for the same reason load warnings are: a
+  // second login's torn file must still warn.
+  private readonly warnedSkipUids = new Set<string>();
   private dirCreated = false;
 
   constructor(opts: TransactionMetaStoreOptions) {
@@ -138,8 +140,8 @@ export class TransactionMetaStore {
           skipped += 1;
         }
       }
-      if (skipped > 0 && !this.warnedSkip) {
-        this.warnedSkip = true;
+      if (skipped > 0 && !this.warnedSkipUids.has(uid)) {
+        this.warnedSkipUids.add(uid);
         console.warn(
           `[copilot-money-mcp] persistent meta index: skipped ${skipped} unparseable line(s) — continuing with the valid remainder.`
         );
