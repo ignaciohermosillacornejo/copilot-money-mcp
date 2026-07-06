@@ -458,6 +458,30 @@ export class LiveCopilotDatabase {
     return out;
   }
 
+  /**
+   * Full-row lookup across cached window months. Read-only; returns only
+   * the ids found. For write tools that need transaction CONTENT
+   * (amount/name/date) rather than routing ids — e.g. split_transaction's
+   * sum check and defaults. Content fields are as fresh as the window
+   * cache (live tier always refetched; cold tier 1-week TTL) — strictly
+   * fresher-or-equal vs the local LevelDB cache, and the server remains
+   * the final enforcer of content-derived checks.
+   */
+  lookupTransactionNodes(ids: string[]): Map<string, TransactionNode> {
+    const remaining = new Set(ids);
+    const out = new Map<string, TransactionNode>();
+    for (const month of this.transactionsWindowCache.cachedMonths()) {
+      if (remaining.size === 0) break;
+      for (const row of this.transactionsWindowCache.entriesForMonth(month)) {
+        if (remaining.has(row.id)) {
+          out.set(row.id, row);
+          remaining.delete(row.id);
+        }
+      }
+    }
+    return out;
+  }
+
   // ── Phase 2: write-through patch methods ─────────────────────────────────
 
   /**
