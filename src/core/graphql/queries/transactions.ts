@@ -8,6 +8,7 @@
 
 import type { GraphQLClient } from '../client.js';
 import { TRANSACTIONS } from '../operations.generated.js';
+import { stripInvalidTransactionNodes, type InvalidNodeInfo } from '../read-validation.js';
 
 /**
  * TransactionType enum accepted by the read-side TransactionFilter.
@@ -228,12 +229,15 @@ export interface TransactionsResponse {
  */
 export async function fetchTransactionsPage(
   client: GraphQLClient,
-  args: FetchTransactionsArgs
+  args: FetchTransactionsArgs,
+  onInvalidNode?: (info: InvalidNodeInfo) => void
 ): Promise<TransactionsPage> {
   const data = await client.query<FetchTransactionsArgs, TransactionsResponse>(
     'Transactions',
     TRANSACTIONS,
     args
   );
-  return data.transactions;
+  // Warn-and-skip read-shape validation (#512): invalid nodes never reach
+  // rows, the window cache, or the meta index.
+  return stripInvalidTransactionNodes(data.transactions, onInvalidNode);
 }
