@@ -1099,6 +1099,30 @@ describe('transaction meta index', () => {
     expect(live.getDroppedInvalidRows()).toBe(1);
   });
 
+  test('session drop counter accumulates across separate fetches (#512)', async () => {
+    const badA = { ...metaNode('bad-a', '2025-01-16', '', 'item-X') };
+    const badB = { ...metaNode('bad-b', '2025-02-16', '', 'item-X') };
+    const pages = [metaPage([badA]), metaPage([badB])];
+    let i = 0;
+    const client = {
+      mutate: mock(),
+      query: mock(() => Promise.resolve({ transactions: pages[i++] })),
+    } as unknown as GraphQLClient;
+    const live = new LiveCopilotDatabase(client, {} as CopilotDatabase);
+
+    const origWarn = console.warn;
+    console.warn = () => {};
+    try {
+      const r1 = await live.getTransactions({ from: '2025-01-01', to: '2025-01-31' });
+      const r2 = await live.getTransactions({ from: '2025-02-01', to: '2025-02-28' });
+      expect(r1.dropped_invalid_rows).toBe(1);
+      expect(r2.dropped_invalid_rows).toBe(1);
+      expect(live.getDroppedInvalidRows()).toBe(2);
+    } finally {
+      console.warn = origWarn;
+    }
+  });
+
   test('clean fetch reports zero drops (#512)', async () => {
     const page = metaPage([metaNode('ok-2', '2025-02-15', 'acct-A', 'item-A')]);
     const client = {

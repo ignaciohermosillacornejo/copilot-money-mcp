@@ -27,8 +27,15 @@ export interface InvalidNodeInfo {
   fields: string[];
 }
 
-// Strict on write-critical fields; everything else typed-permissive per the
-// TransactionNode interface. looseObject(): unknown extra fields are fine.
+// Strict on write-critical fields (id/accountId/itemId/date/amount/name:
+// value constraints); everything else typed-permissive per the
+// TransactionNode interface. "Typed-permissive" means permissive on VALUE
+// (any string satisfies `type`, unknown extra fields pass), but PRESENCE of
+// every listed field is still required: the fragment selects them, and a
+// node missing a typed field would leak `undefined` into downstream
+// sorting/filters — a visible drop (counter + warning) is safer than
+// silent undefined propagation. looseObject(): unknown extra fields are
+// fine, never a failure.
 const transactionNodeSchema = z.looseObject({
   id: z.string().min(1),
   accountId: z.string().min(1),
@@ -47,8 +54,11 @@ const transactionNodeSchema = z.looseObject({
   suggestedCategoryIds: z.array(z.string()),
   isoCurrencyCode: z.string().nullable(),
   createdAt: z.number(),
+  // A tag missing `id` drops the whole node deliberately: tag ids from
+  // reads round-trip into update_transaction.tag_ids write params, so a
+  // malformed tag is write-relevant drift, not cosmetic.
   tags: z.array(z.looseObject({ id: z.string() })),
-  goal: z.unknown().nullable(),
+  goal: z.unknown(),
 });
 
 /**
