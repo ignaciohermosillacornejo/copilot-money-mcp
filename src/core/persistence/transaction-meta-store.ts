@@ -48,6 +48,7 @@ export class TransactionMetaStore {
   private warnedLoad = false;
   private warnedAppend = false;
   private warnedSkip = false;
+  private dirCreated = false;
 
   constructor(opts: TransactionMetaStoreOptions) {
     this.baseDir = opts.baseDir;
@@ -60,7 +61,9 @@ export class TransactionMetaStore {
   }
 
   private fileFor(uid: string): string {
-    return join(this.baseDir, `txn-meta-index.${uid}.jsonl`);
+    // Firebase uids are alphanumeric; this guards a future non-Firebase uid source.
+    const safe = uid.replace(/[^a-zA-Z0-9_-]/g, '_');
+    return join(this.baseDir, `txn-meta-index.${safe}.jsonl`);
   }
 
   /** Never-throw wrapper around uidProvider: returns null on any exception. */
@@ -82,6 +85,24 @@ export class TransactionMetaStore {
     return this.safeUid();
   }
 
+  /**
+   * Entries currently buffered under the given uid (or stamped null —
+   * pre-auth entries that will adopt it). For post-transition replay.
+   */
+  pendingFor(uid: string): Map<string, Meta> {
+    const out = new Map<string, Meta>();
+    for (const [id, e] of this.pending) {
+      if (e.uid === uid || e.uid === null) out.set(id, e.meta);
+    }
+    return out;
+  }
+
+  /**
+   * Load the on-disk index for the current uid into a fresh Map and return it.
+   * Repeat calls for the same uid return an EMPTY map — the disk is read once
+   * per uid; the in-memory index (txnMetaIndex in live-database) owns all
+   * entries thereafter.
+   */
   loadOnce(): Map<string, Meta> {
     const out = new Map<string, Meta>();
     if (this.disabled()) return out;
@@ -183,16 +204,28 @@ export class TransactionMetaStore {
     this.pending = stillPending;
 
     if (groups.size === 0) return;
-    try {
-      mkdirSync(this.baseDir, { recursive: true });
-    } catch (e) {
-      if (!this.warnedAppend) {
-        this.warnedAppend = true;
-        console.warn(
-          `[copilot-money-mcp] persistent meta index append failed (${(e as Error).message}) — continuing in-memory.`
-        );
+
+    if (!this.dirCreated) {
+      try {
+        mkdirSync(this.baseDir, { recursive: true });
+        this.dirCreated = true;
+      } catch (e) {
+        // Re-stamp: entries are not yet on disk; a uid-transition replay needs
+        // them. Bounded: same batch re-cycles until persisted or session ends —
+        // no growth because buffer() skips already-persisted ids.
+        for (const [uidKey, batch] of groups) {
+          for (const [id, meta] of batch) {
+            this.pending.set(id, { meta, uid: uidKey });
+          }
+        }
+        if (!this.warnedAppend) {
+          this.warnedAppend = true;
+          console.warn(
+            `[copilot-money-mcp] persistent meta index append failed (${(e as Error).message}) — continuing in-memory.`
+          );
+        }
+        return;
       }
-      return;
     }
 
     for (const [uidKey, batch] of groups) {
@@ -200,14 +233,18 @@ export class TransactionMetaStore {
         appendFileSync(this.fileFor(uidKey), this.serialize(batch));
         for (const id of batch.keys()) this.persisted.add(id);
       } catch (e) {
+        // Re-stamp: entries are not yet on disk; a uid-transition replay needs
+        // them. Bounded: same batch re-cycles until persisted or session ends —
+        // no growth because buffer() skips already-persisted ids.
+        for (const [id, meta] of batch) {
+          this.pending.set(id, { meta, uid: uidKey });
+        }
         if (!this.warnedAppend) {
           this.warnedAppend = true;
           console.warn(
             `[copilot-money-mcp] persistent meta index append failed (${(e as Error).message}) — continuing in-memory.`
           );
         }
-        // Do not re-buffer: repeated failures would grow memory; the entries
-        // stay served by the in-memory index for this session regardless.
       }
     }
   }
