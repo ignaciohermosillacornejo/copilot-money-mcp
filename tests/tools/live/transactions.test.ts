@@ -133,6 +133,7 @@ async function mkLiveReturning(
         oldest_fetched_at: number;
         newest_fetched_at: number;
         hit: boolean;
+        dropped_invalid_rows: number;
       }>;
     }
   ).getTransactions = async () => ({
@@ -140,6 +141,7 @@ async function mkLiveReturning(
     oldest_fetched_at: fetchedAt,
     newest_fetched_at: fetchedAt,
     hit: false,
+    dropped_invalid_rows: 0,
   });
   // Pre-warm categoriesCache with empty so tests that don't exercise
   // category-dependent paths never call fetchCategories on the mock client.

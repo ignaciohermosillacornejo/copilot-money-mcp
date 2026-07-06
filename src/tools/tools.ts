@@ -3225,7 +3225,7 @@ export class CopilotMoneyTools {
     const parentDefaultName = parentTxn.name;
     if (splits.some((s) => s.name === undefined) && !parentDefaultName) {
       throw new Error(
-        `Cannot default split name from parent ${transaction_id}: parent has no name or original_name. Pass an explicit name on each split.`
+        `Cannot default split name from parent ${transaction_id}: parent has no usable name. Pass an explicit name on each split.`
       );
     }
 
