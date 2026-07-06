@@ -19,8 +19,11 @@
  * See docs/superpowers/plans/2026-04-25-graphql-live-tiered-cache.md.
  */
 
+import { homedir } from 'os';
+import { join } from 'path';
 import type { GraphQLClient } from './graphql/client.js';
 import type { CopilotDatabase } from './database.js';
+import { TransactionMetaStore } from './persistence/transaction-meta-store.js';
 import {
   buildTransactionFilter,
   buildTransactionSort,
@@ -47,6 +50,10 @@ import { ONE_HOUR_MS, SIX_HOURS_MS, ONE_DAY_MS, ONE_WEEK_MS } from '../utils/dur
 
 export interface LiveDatabaseOptions {
   verbose?: boolean;
+  /** Injectable persistence store for the routing-id index (#511). Defaults
+   *  to a uid-scoped JSONL store in ~/.claude/copilot-money/. Pass an
+   *  explicit instance in tests to avoid touching the real home directory. */
+  metaStore?: TransactionMetaStore;
 }
 
 const DEFAULT_MAX_TX_ROWS = 20_000;
@@ -100,6 +107,10 @@ export class LiveCopilotDatabase {
    * bytes/entry; a full history is a few MB).
    */
   private readonly txnMetaIndex = new Map<string, { accountId: string; itemId: string }>();
+  /** Persistent backing store for txnMetaIndex (#511). Defaults to a
+   *  uid-scoped JSONL file under ~/.claude/copilot-money/. Inert when
+   *  COPILOT_DISABLE_PERSISTENT_INDEX=1 or uid is unavailable. */
+  private readonly metaStore: TransactionMetaStore;
 
   /** Session-total Transactions nodes dropped by read-shape validation (#512). */
   private droppedInvalidRows = 0;
@@ -114,6 +125,18 @@ export class LiveCopilotDatabase {
     opts: LiveDatabaseOptions = {}
   ) {
     this.verbose = opts.verbose ?? false;
+    this.metaStore =
+      opts.metaStore ??
+      new TransactionMetaStore({
+        baseDir: join(homedir(), '.claude', 'copilot-money'),
+        uidProvider: () => {
+          try {
+            return this.graphql.getUserId();
+          } catch {
+            return null;
+          }
+        },
+      });
 
     this.inflight = new InFlightRegistry();
     this.fetchLimit = pLimit(4);
@@ -229,9 +252,10 @@ export class LiveCopilotDatabase {
     // responses with null/empty routing ids (see review finding).
     for (const r of rawRows) {
       if (r.accountId && r.itemId) {
-        this.txnMetaIndex.set(r.id, { accountId: r.accountId, itemId: r.itemId });
+        this.feedMeta(r.id, { accountId: r.accountId, itemId: r.itemId });
       }
     }
+    this.metaStore.flush();
     // Trim leaked tail-page rows that fall outside this month's window.
     // `paginateTransactions` early-exits AFTER appending a page, so the
     // trailing edge of the last page can dip into the previous month.
@@ -488,16 +512,31 @@ export class LiveCopilotDatabase {
     return this.transactionsWindowCache;
   }
 
+  /** Single funnel for meta-index writes: in-memory map + persistence
+   *  buffer (#511). Entries here already passed #512 validation (all feeds
+   *  are downstream of the fetch strip) or came from mutation responses
+   *  guarded at their call sites. */
+  private feedMeta(id: string, meta: { accountId: string; itemId: string }): void {
+    this.txnMetaIndex.set(id, meta);
+    this.metaStore.buffer(id, meta);
+  }
+
   /** Feed the meta index for a transaction learned outside a month fetch
    *  (e.g. the create_transaction response). */
   indexTransactionMeta(id: string, meta: { accountId: string; itemId: string }): void {
-    this.txnMetaIndex.set(id, meta);
+    this.feedMeta(id, meta);
+    this.metaStore.flush();
   }
 
   /** Resolve routing ids for the given transaction ids from the in-memory
    *  index. Returns only the ids present; callers treat absence as
    *  "not seen by any live fetch this session". */
   lookupTransactionMeta(ids: string[]): Map<string, { accountId: string; itemId: string }> {
+    // Opportunistic hydration from disk (#511): in-memory entries win (they
+    // are newest); loadOnce is idempotent/cheap after the first real load.
+    for (const [id, m] of this.metaStore.loadOnce()) {
+      if (!this.txnMetaIndex.has(id)) this.txnMetaIndex.set(id, m);
+    }
     const out = new Map<string, { accountId: string; itemId: string }>();
     for (const id of ids) {
       const m = this.txnMetaIndex.get(id);
@@ -555,7 +594,8 @@ export class LiveCopilotDatabase {
     // camelCase keys), and the ids are server-immutable regardless.
     // Guard against drifted responses with null/empty routing ids (review finding).
     if (merged.accountId && merged.itemId) {
-      this.txnMetaIndex.set(id, { accountId: merged.accountId, itemId: merged.itemId });
+      this.feedMeta(id, { accountId: merged.accountId, itemId: merged.itemId });
+      this.metaStore.flush();
     }
     this.transactionsWindowCache.upsert(merged);
   }

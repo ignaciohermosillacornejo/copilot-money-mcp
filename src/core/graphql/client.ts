@@ -261,6 +261,12 @@ export class GraphQLClient {
     this.jitterMs = opts.jitterMs ?? DEFAULT_JITTER_MS;
   }
 
+  /** Firebase uid of the authenticated session, or null before the first
+   *  token exchange. Used to identity-scope local persistence (#511). */
+  getUserId(): string | null {
+    return this.auth.getUserId();
+  }
+
   async mutate<TVariables, TResponse>(
     operationName: string,
     query: string,

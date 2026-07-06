@@ -9,6 +9,10 @@ import type { Tag } from '../../src/models/index.js';
 import type { CategoryNode } from '../../src/core/graphql/queries/categories.js';
 import type { RecurringNode } from '../../src/core/graphql/queries/recurrings.js';
 import type { UserNode } from '../../src/core/graphql/queries/user.js';
+import { TransactionMetaStore } from '../../src/core/persistence/transaction-meta-store.js';
+import { mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 function mkClient(): GraphQLClient {
   return { mutate: mock(), query: mock() } as unknown as GraphQLClient;
@@ -1158,5 +1162,55 @@ describe('transaction meta index', () => {
       itemId: 'item-B',
     });
     expect(live.lookupTransactionNodes(['future-ish']).has('future-ish')).toBe(true);
+  });
+
+  test('persistent store round-trip: fetched ids resolve in a NEW LiveCopilotDatabase with zero fetches (#511)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'live-meta-'));
+    try {
+      const store1 = new TransactionMetaStore({ baseDir: dir, uidProvider: () => 'user-1' });
+      const page = metaPage([metaNode('persist-t1', '2025-01-15', 'acct-P', 'item-P')]);
+      const client1 = {
+        mutate: mock(),
+        query: mock(() => Promise.resolve({ transactions: page })),
+      } as unknown as GraphQLClient;
+      const live1 = new LiveCopilotDatabase(client1, {} as CopilotDatabase, { metaStore: store1 });
+      await live1.getTransactions({ from: '2025-01-01', to: '2025-01-31' });
+
+      // Fresh instance, fresh store on the same dir/uid — no fetches issued.
+      const store2 = new TransactionMetaStore({ baseDir: dir, uidProvider: () => 'user-1' });
+      const client2 = { mutate: mock(), query: mock() } as unknown as GraphQLClient;
+      const live2 = new LiveCopilotDatabase(client2, {} as CopilotDatabase, { metaStore: store2 });
+      const found = live2.lookupTransactionMeta(['persist-t1']);
+      expect(found.get('persist-t1')).toEqual({ accountId: 'acct-P', itemId: 'item-P' });
+      expect((client2.query as ReturnType<typeof mock>).mock.calls).toHaveLength(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('indexTransactionMeta feeds persistence too (#511)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'live-meta-'));
+    try {
+      const store1 = new TransactionMetaStore({ baseDir: dir, uidProvider: () => 'user-1' });
+      const live1 = new LiveCopilotDatabase(
+        { mutate: mock(), query: mock() } as unknown as GraphQLClient,
+        {} as CopilotDatabase,
+        { metaStore: store1 }
+      );
+      live1.indexTransactionMeta('created-t1', { accountId: 'acct-C', itemId: 'item-C' });
+
+      const store2 = new TransactionMetaStore({ baseDir: dir, uidProvider: () => 'user-1' });
+      const live2 = new LiveCopilotDatabase(
+        { mutate: mock(), query: mock() } as unknown as GraphQLClient,
+        {} as CopilotDatabase,
+        { metaStore: store2 }
+      );
+      expect(live2.lookupTransactionMeta(['created-t1']).get('created-t1')).toEqual({
+        accountId: 'acct-C',
+        itemId: 'item-C',
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
