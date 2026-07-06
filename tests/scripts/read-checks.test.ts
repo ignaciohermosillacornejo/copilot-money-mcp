@@ -62,7 +62,32 @@ function validResponses(): Record<string, unknown> {
     Account: { account: { id: 'acc-1' } },
     Transactions: {
       transactions: {
-        edges: [{ cursor: 'c1', node: { id: 'txn-1', amount: 5, date: '2026-06-01' } }],
+        edges: [
+          {
+            cursor: 'c1',
+            node: {
+              id: 'txn-1',
+              accountId: 'acc-1',
+              itemId: 'item-1',
+              amount: 5,
+              date: '2026-06-01',
+              name: 'Test',
+              categoryId: null,
+              recurringId: null,
+              parentId: null,
+              isReviewed: false,
+              isPending: false,
+              type: 'REGULAR',
+              userNotes: null,
+              tipAmount: null,
+              suggestedCategoryIds: [],
+              isoCurrencyCode: null,
+              createdAt: 0,
+              tags: [],
+              goal: null,
+            },
+          },
+        ],
         pageInfo: {
           endCursor: 'c1',
           hasNextPage: false,

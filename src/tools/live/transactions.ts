@@ -91,6 +91,7 @@ export interface GetTransactionsLiveResult extends PageResult {
   _cache_oldest_fetched_at: string;
   _cache_newest_fetched_at: string;
   _cache_hit: boolean;
+  _dropped_invalid_rows?: number;
 }
 
 const UNSUPPORTED_KEYS = ['city', 'lat', 'lon', 'radius_km', 'region', 'country'] as const;
@@ -132,6 +133,7 @@ export class LiveTransactionsTools {
       oldest_fetched_at,
       newest_fetched_at,
       hit,
+      dropped_invalid_rows,
     } = await this.live.getTransactions({ from: start_date, to: end_date });
 
     const filtered = await this.postFilter(nodes, opts);
@@ -141,6 +143,7 @@ export class LiveTransactionsTools {
       _cache_oldest_fetched_at: new Date(oldest_fetched_at).toISOString(),
       _cache_newest_fetched_at: new Date(newest_fetched_at).toISOString(),
       _cache_hit: hit,
+      ...(dropped_invalid_rows > 0 ? { _dropped_invalid_rows: dropped_invalid_rows } : {}),
     };
   }
 
@@ -160,6 +163,7 @@ export class LiveTransactionsTools {
       oldest_fetched_at,
       newest_fetched_at,
       hit,
+      dropped_invalid_rows,
     } = await this.live.getTransactions({ from: start_date, to: end_date });
     const fetchedAtIso = new Date(oldest_fetched_at).toISOString();
     const newestIso = new Date(newest_fetched_at).toISOString();
@@ -179,6 +183,7 @@ export class LiveTransactionsTools {
         _cache_oldest_fetched_at: fetchedAtIso,
         _cache_newest_fetched_at: newestIso,
         _cache_hit: hit,
+        ...(dropped_invalid_rows > 0 ? { _dropped_invalid_rows: dropped_invalid_rows } : {}),
       };
     }
     const enriched = await this.enrich([match]);
@@ -191,6 +196,7 @@ export class LiveTransactionsTools {
       _cache_oldest_fetched_at: fetchedAtIso,
       _cache_newest_fetched_at: newestIso,
       _cache_hit: hit,
+      ...(dropped_invalid_rows > 0 ? { _dropped_invalid_rows: dropped_invalid_rows } : {}),
     };
   }
 

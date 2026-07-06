@@ -784,6 +784,72 @@ describe('LiveTransactionsTools — hsa_eligible filter', () => {
   });
 });
 
+describe('LiveTransactionsTools — _dropped_invalid_rows field', () => {
+  test('get_transactions_live surfaces _dropped_invalid_rows only when > 0 (#512)', async () => {
+    const { LiveCopilotDatabase: LiveDB } = await import('../../../src/core/live-database.js');
+    type GQLClient = import('../../../src/core/graphql/client.js').GraphQLClient;
+    type CopilotDB = import('../../../src/core/database.js').CopilotDatabase;
+
+    // ── Dirty page: one valid node + one node with empty accountId ──────────
+    const dirtyPage = {
+      edges: [
+        {
+          cursor: 'c1',
+          node: mkNode({ id: 'valid-1', date: '2025-01-15', accountId: 'a1', itemId: 'i1' }),
+        },
+        {
+          cursor: 'c2',
+          node: mkNode({ id: 'bad-1', date: '2025-01-16', accountId: '', itemId: 'i1' }),
+        },
+      ],
+      pageInfo: { endCursor: null, hasNextPage: false },
+    };
+    const dirtyClient = {
+      mutate: mock(),
+      query: mock(() => Promise.resolve({ transactions: dirtyPage })),
+    } as unknown as GQLClient;
+    const sharedCache = {
+      getAccounts: mock(() => Promise.resolve([])),
+      getTags: mock(() => Promise.resolve([])),
+    } as unknown as CopilotDB;
+    const dirtyLive = new LiveDB(dirtyClient, sharedCache);
+    await dirtyLive.getCategoriesCache().read(() => Promise.resolve([]));
+    await dirtyLive.getTagsCache().read(() => Promise.resolve([]));
+    const dirtyTools = new LiveTransactionsTools(dirtyLive);
+
+    const result = await dirtyTools.getTransactions({
+      start_date: '2025-01-01',
+      end_date: '2025-01-31',
+    });
+    expect(result._dropped_invalid_rows).toBe(1);
+
+    // ── Clean page: only valid nodes ────────────────────────────────────────
+    const cleanPage = {
+      edges: [
+        {
+          cursor: 'c1',
+          node: mkNode({ id: 'ok-1', date: '2025-02-15', accountId: 'a1', itemId: 'i1' }),
+        },
+      ],
+      pageInfo: { endCursor: null, hasNextPage: false },
+    };
+    const cleanClient = {
+      mutate: mock(),
+      query: mock(() => Promise.resolve({ transactions: cleanPage })),
+    } as unknown as GQLClient;
+    const cleanLive = new LiveDB(cleanClient, sharedCache);
+    await cleanLive.getCategoriesCache().read(() => Promise.resolve([]));
+    await cleanLive.getTagsCache().read(() => Promise.resolve([]));
+    const cleanTools = new LiveTransactionsTools(cleanLive);
+
+    const cleanResult = await cleanTools.getTransactions({
+      start_date: '2025-02-01',
+      end_date: '2025-02-28',
+    });
+    expect('_dropped_invalid_rows' in cleanResult).toBe(false);
+  });
+});
+
 describe('LiveTransactionsTools — date-less query rejection', () => {
   test('throws when query is set without dates or period', async () => {
     const tools = new LiveTransactionsTools(mkLive());
