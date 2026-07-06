@@ -2463,12 +2463,8 @@ export class CopilotMoneyTools {
       }
     }
 
-    const months = CopilotMoneyTools.resolveWindowMonths();
+    const { from, to, months } = CopilotMoneyTools.writeResolveWindow();
     if (missing.length > 0) {
-      const to = new Date().toISOString().slice(0, 10);
-      const fromDate = new Date();
-      fromDate.setMonth(fromDate.getMonth() - months);
-      const from = fromDate.toISOString().slice(0, 10);
       const live = await this.liveDb.getTransactions({ from, to });
       const liveById = new Map(live.rows.map((n) => [n.id, n]));
       for (const id of missing) {
@@ -2500,6 +2496,17 @@ export class CopilotMoneyTools {
     return 13;
   }
 
+  /** The [from, to] date range + month count for write-resolution live
+   *  fetches. Shared by resolveTransactionMeta and resolveParentSnapshot. */
+  private static writeResolveWindow(): { from: string; to: string; months: number } {
+    const months = CopilotMoneyTools.resolveWindowMonths();
+    const to = new Date().toISOString().slice(0, 10);
+    const fromDate = new Date();
+    fromDate.setMonth(fromDate.getMonth() - months);
+    const from = fromDate.toISOString().slice(0, 10);
+    return { from, to, months };
+  }
+
   /**
    * Compose the not-found error for unresolved write targets. The window
    * suffix appears only when a live fetch was actually attempted
@@ -2518,6 +2525,49 @@ export class CopilotMoneyTools {
       `If the transaction is older, raise COPILOT_WRITE_RESOLVE_WINDOW_MONTHS; ` +
       `if it should be recent, verify the id.`
     );
+  }
+
+  /**
+   * Full-row parent snapshot for split_transaction — CONTENT fields only
+   * (amount for the sum check, name/date for split defaults). Routing ids
+   * are NOT resolved here: split's schema requires the caller-supplied
+   * triple. Live mode: window cache → one windowed live fetch (which feeds
+   * the window cache and meta index as side effects) → null. Degraded mode
+   * (no liveDb): local LevelDB row, preserving the name ?? original_name
+   * fallback (older Plaid rows only carry original_name). Content freshness
+   * note: unlike routing ids, amount is NOT immutable (pending→posted
+   * drift), so live-first here is a correctness improvement over the
+   * stale-first LevelDB read it replaces; the server remains the final
+   * enforcer of the sum.
+   */
+  private async resolveParentSnapshot(id: string): Promise<{
+    snapshot: { amount: number; date: string; name?: string } | null;
+    liveWindowMonths: number | null;
+  }> {
+    if (!this.liveDb) {
+      const all = await this.db.getAllTransactions();
+      const t = all.find((x) => x.transaction_id === id);
+      if (!t) return { snapshot: null, liveWindowMonths: null };
+      return {
+        snapshot: { amount: t.amount, date: t.date, name: t.name ?? t.original_name },
+        liveWindowMonths: null,
+      };
+    }
+    const { from, to, months } = CopilotMoneyTools.writeResolveWindow();
+    const cached = this.liveDb.lookupTransactionNodes([id]).get(id);
+    if (cached) {
+      return {
+        snapshot: { amount: cached.amount, date: cached.date, name: cached.name },
+        liveWindowMonths: months,
+      };
+    }
+    const live = await this.liveDb.getTransactions({ from, to });
+    const n = live.rows.find((r) => r.id === id);
+    if (!n) return { snapshot: null, liveWindowMonths: months };
+    return {
+      snapshot: { amount: n.amount, date: n.date, name: n.name },
+      liveWindowMonths: months,
+    };
   }
 
   /**
@@ -3105,13 +3155,17 @@ export class CopilotMoneyTools {
       }
     }
 
-    // Resolve parent from the cache — needed for default name/date and the
-    // client-side sum check. Reject if missing, matching update_transaction's
-    // "Transaction not found" contract.
-    const allTxns = await this.db.getAllTransactions();
-    const parentTxn = allTxns.find((t) => t.transaction_id === transaction_id);
+    // Resolve the parent's CONTENT (amount for the sum check, name/date for
+    // defaults) — live-first via the window cache / windowed fetch; local
+    // cache only in degraded (no-liveDb) mode. Routing ids are NOT resolved
+    // here: the schema requires the caller-supplied triple. See
+    // resolveParentSnapshot().
+    const { snapshot: parentTxn, liveWindowMonths } =
+      await this.resolveParentSnapshot(transaction_id);
     if (!parentTxn) {
-      throw new Error(`Transaction not found: ${transaction_id}`);
+      throw new Error(
+        CopilotMoneyTools.transactionsNotFoundMessage([transaction_id], liveWindowMonths)
+      );
     }
 
     // Client-side sum check. Server also enforces this, but a local error
@@ -3128,13 +3182,11 @@ export class CopilotMoneyTools {
       );
     }
 
-    // Resolve the default name from the parent — `name` is optional on the
-    // local Transaction model (some older Plaid rows only have
-    // `original_name`), so fall through to that before giving up. A split
-    // without a usable default can't succeed since the server requires
-    // `name: String!` on every SplitTransactionInput — surface that as a
-    // local error rather than sending an empty string.
-    const parentDefaultName = parentTxn.name ?? parentTxn.original_name;
+    // Resolve the default name from the parent. A split without a usable
+    // default can't succeed since the server requires `name: String!` on
+    // every SplitTransactionInput — surface that as a local error rather
+    // than sending an empty string.
+    const parentDefaultName = parentTxn.name;
     if (splits.some((s) => s.name === undefined) && !parentDefaultName) {
       throw new Error(
         `Cannot default split name from parent ${transaction_id}: parent has no name or original_name. Pass an explicit name on each split.`
