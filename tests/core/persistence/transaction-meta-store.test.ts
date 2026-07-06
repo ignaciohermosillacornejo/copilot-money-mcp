@@ -4,7 +4,15 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from 'fs';
+import {
+  mkdtempSync,
+  rmSync,
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  mkdirSync,
+  chmodSync,
+} from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { TransactionMetaStore } from '../../../src/core/persistence/transaction-meta-store.js';
@@ -146,5 +154,22 @@ describe('TransactionMetaStore', () => {
     expect(m.size).toBe(1);
     const rewritten = readFileSync(fileFor('userA'), 'utf8').trim().split('\n');
     expect(rewritten).toHaveLength(1);
+  });
+
+  test('uid change between buffer and flush: entries stay with the uid captured at buffer time', () => {
+    let current: string | null = 'userA';
+    const s = new TransactionMetaStore({ baseDir: dir, uidProvider: () => current });
+    s.loadOnce();
+    s.buffer('tA', META); // buffered under userA
+    current = 'userB'; // re-auth as a different account
+    s.buffer('tB', { accountId: 'acct-2', itemId: 'item-2' }); // buffered under userB
+    s.flush();
+
+    const a = new TransactionMetaStore({ baseDir: dir, uidProvider: uid('userA') }).loadOnce();
+    const b = new TransactionMetaStore({ baseDir: dir, uidProvider: uid('userB') }).loadOnce();
+    expect(a.get('tA')).toEqual(META);
+    expect(a.has('tB')).toBe(false);
+    expect(b.get('tB')).toEqual({ accountId: 'acct-2', itemId: 'item-2' });
+    expect(b.has('tA')).toBe(false);
   });
 });

@@ -16,7 +16,15 @@
  * Opt-out: COPILOT_DISABLE_PERSISTENT_INDEX=1.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from 'fs';
 import { join } from 'path';
 
 type Meta = { accountId: string; itemId: string };
@@ -36,7 +44,7 @@ export class TransactionMetaStore {
   private loadedForUid: string | null = null;
   /** ids known to be on disk already (loaded or flushed this session). */
   private readonly persisted = new Set<string>();
-  private pending = new Map<string, Meta>();
+  private pending = new Map<string, { meta: Meta; uid: string | null }>();
   private warnedLoad = false;
   private warnedAppend = false;
 
@@ -59,6 +67,7 @@ export class TransactionMetaStore {
     if (this.disabled()) return out;
     const uid = this.uidProvider();
     if (!uid || this.loadedForUid === uid) return out;
+    // Latch before the try: a transient load error should not retry — warn once and degrade for the session.
     this.loadedForUid = uid;
     const file = this.fileFor(uid);
     try {
@@ -69,9 +78,12 @@ export class TransactionMetaStore {
         try {
           const rec = JSON.parse(line) as { i?: unknown; a?: unknown; t?: unknown };
           if (
-            typeof rec.i === 'string' && rec.i.length > 0 &&
-            typeof rec.a === 'string' && rec.a.length > 0 &&
-            typeof rec.t === 'string' && rec.t.length > 0
+            typeof rec.i === 'string' &&
+            rec.i.length > 0 &&
+            typeof rec.a === 'string' &&
+            rec.a.length > 0 &&
+            typeof rec.t === 'string' &&
+            rec.t.length > 0
           ) {
             out.set(rec.i, { accountId: rec.a, itemId: rec.t });
           }
@@ -83,9 +95,18 @@ export class TransactionMetaStore {
       // Size valve: duplicates across many sessions can bloat the file far
       // past its logical content; rewrite deduped once, atomically.
       if (statSync(file).size > this.maxBytes) {
-        const tmp = `${file}.tmp`;
-        writeFileSync(tmp, this.serialize(out));
-        renameSync(tmp, file);
+        try {
+          const tmp = `${file}.tmp`;
+          writeFileSync(tmp, this.serialize(out));
+          renameSync(tmp, file);
+        } catch (e) {
+          if (!this.warnedLoad) {
+            this.warnedLoad = true;
+            console.warn(
+              `[copilot-money-mcp] persistent meta index cap-valve failed (${(e as Error).message}) — file not compacted. File: ${file}`
+            );
+          }
+        }
       }
     } catch (e) {
       if (!this.warnedLoad) {
@@ -102,19 +123,38 @@ export class TransactionMetaStore {
   buffer(id: string, meta: Meta): void {
     if (this.disabled()) return;
     if (this.persisted.has(id)) return;
-    this.pending.set(id, meta);
+    // Stamp the uid at buffer time so a mid-session re-auth cannot redirect
+    // this entry to a different user's file at flush.
+    this.pending.set(id, { meta, uid: this.uidProvider() });
   }
 
   flush(): void {
     if (this.disabled() || this.pending.size === 0) return;
-    const uid = this.uidProvider();
-    if (!uid) return; // keep buffering until authenticated
-    const batch = this.pending;
-    this.pending = new Map();
+    const flushUid = this.uidProvider();
+
+    // Group entries by effective uid: use the uid captured at buffer time when
+    // available; null-stamped (pre-auth) entries adopt the current flush-time
+    // uid. Entries still unresolvable (both stamps null) stay pending.
+    const groups = new Map<string, Map<string, Meta>>();
+    const stillPending = new Map<string, { meta: Meta; uid: string | null }>();
+    for (const [id, entry] of this.pending) {
+      const effectiveUid = entry.uid ?? flushUid;
+      if (!effectiveUid) {
+        stillPending.set(id, entry);
+        continue;
+      }
+      let group = groups.get(effectiveUid);
+      if (!group) {
+        group = new Map();
+        groups.set(effectiveUid, group);
+      }
+      group.set(id, entry.meta);
+    }
+    this.pending = stillPending;
+
+    if (groups.size === 0) return;
     try {
       mkdirSync(this.baseDir, { recursive: true });
-      appendFileSync(this.fileFor(uid), this.serialize(batch));
-      for (const id of batch.keys()) this.persisted.add(id);
     } catch (e) {
       if (!this.warnedAppend) {
         this.warnedAppend = true;
@@ -122,8 +162,23 @@ export class TransactionMetaStore {
           `[copilot-money-mcp] persistent meta index append failed (${(e as Error).message}) — continuing in-memory.`
         );
       }
-      // Do not re-buffer: repeated failures would grow memory; the entries
-      // stay served by the in-memory index for this session regardless.
+      return;
+    }
+
+    for (const [uidKey, batch] of groups) {
+      try {
+        appendFileSync(this.fileFor(uidKey), this.serialize(batch));
+        for (const id of batch.keys()) this.persisted.add(id);
+      } catch (e) {
+        if (!this.warnedAppend) {
+          this.warnedAppend = true;
+          console.warn(
+            `[copilot-money-mcp] persistent meta index append failed (${(e as Error).message}) — continuing in-memory.`
+          );
+        }
+        // Do not re-buffer: repeated failures would grow memory; the entries
+        // stay served by the in-memory index for this session regardless.
+      }
     }
   }
 
