@@ -57,7 +57,6 @@ export interface CreatedTransaction {
   isReviewed: boolean;
   createdAt: number;
   recurringId: string | null;
-  parentId?: string | null;
   userNotes: string | null;
   tipAmount: number | null;
   suggestedCategoryIds: string[];
