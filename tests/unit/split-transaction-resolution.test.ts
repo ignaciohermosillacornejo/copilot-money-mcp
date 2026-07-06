@@ -11,6 +11,7 @@ import { CopilotDatabase } from '../../src/core/database.js';
 import type { LiveCopilotDatabase } from '../../src/core/live-database.js';
 import type { TransactionNode } from '../../src/core/graphql/queries/transactions.js';
 import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
+import type { CreatedTransaction } from '../../src/core/graphql/transactions.js';
 
 function node(id: string, amount: number, date: string, name: string): TransactionNode {
   return {
@@ -37,7 +38,7 @@ function node(id: string, amount: number, date: string, name: string): Transacti
 }
 
 /** Server-shaped TransactionFields for the SplitTransaction mock response. */
-function serverTx(id: string, amount: number) {
+function serverTx(id: string, amount: number): CreatedTransaction {
   return {
     id,
     accountId: 'acct-P',
@@ -54,10 +55,9 @@ function serverTx(id: string, amount: number) {
     userNotes: null,
     tipAmount: null,
     suggestedCategoryIds: [],
-    isoCurrencyCode: null,
-    createdAt: 1,
     tags: [],
     goal: null,
+    createdAt: 1,
   };
 }
 
@@ -99,7 +99,14 @@ function stubLiveDb(overrides: { cachedNodes?: TransactionNode[]; liveRows?: Tra
   return { liveDb, getTransactions, indexTransactionMeta };
 }
 
-const SPLIT_RESPONSE = {
+const SPLIT_RESPONSE: {
+  SplitTransaction: {
+    splitTransaction: {
+      parentTransaction: CreatedTransaction;
+      splitTransactions: CreatedTransaction[];
+    };
+  };
+} = {
   SplitTransaction: {
     splitTransaction: {
       parentTransaction: serverTx('parent-1', 120),
@@ -124,7 +131,7 @@ afterEach(() => {
 
 describe('splitTransaction parent resolution — live mode', () => {
   test('window-cache hit: no live fetch; defaults come from the cached node', async () => {
-    const client = createMockGraphQLClient(SPLIT_RESPONSE as any);
+    const client = createMockGraphQLClient(SPLIT_RESPONSE);
     const { liveDb, getTransactions } = stubLiveDb({
       cachedNodes: [node('parent-1', 120, '2025-10-05', 'Cached Parent')],
     });
@@ -145,7 +152,7 @@ describe('splitTransaction parent resolution — live mode', () => {
   });
 
   test('window-cache miss: one windowed fetch resolves the parent', async () => {
-    const client = createMockGraphQLClient(SPLIT_RESPONSE as any);
+    const client = createMockGraphQLClient(SPLIT_RESPONSE);
     const { liveDb, getTransactions } = stubLiveDb({
       liveRows: [node('parent-1', 120, '2025-10-05', 'Fetched Parent')],
     });
@@ -160,12 +167,28 @@ describe('splitTransaction parent resolution — live mode', () => {
 
     expect(result.success).toBe(true);
     expect(getTransactions).toHaveBeenCalledTimes(1);
+    const sent = (client._calls[0]!.variables as any).input;
+    expect(sent[0].name).toBe('Fetched Parent');
+    expect(sent[0].date).toBe('2025-10-05');
   });
 
   test('still missing after fetch: honest window error, no mutation issued', async () => {
     const client = createMockGraphQLClient({});
     const { liveDb } = stubLiveDb({});
-    const tools = new CopilotMoneyTools(makeDb(), client, liveDb);
+    const tools = new CopilotMoneyTools(
+      makeDb([
+        {
+          transaction_id: 'parent-gone',
+          amount: 100,
+          date: '2025-10-05',
+          name: 'Stale Local Parent',
+          account_id: 'acct-P',
+          item_id: 'item-P',
+        },
+      ]),
+      client,
+      liveDb
+    );
 
     await expect(
       tools.splitTransaction({
@@ -198,7 +221,7 @@ describe('splitTransaction parent resolution — live mode', () => {
       account_id: 'acct-P',
       item_id: 'item-P',
     };
-    const client = createMockGraphQLClient(SPLIT_RESPONSE as any);
+    const client = createMockGraphQLClient(SPLIT_RESPONSE);
     const { liveDb } = stubLiveDb({
       cachedNodes: [node('parent-1', 120, '2025-10-05', 'Fresh Parent')],
     });
@@ -236,7 +259,7 @@ describe('splitTransaction output feeds the meta index', () => {
           splitTransactions: [serverTx('child-a', 70), serverTx('child-b', 50), emptyIdChild],
         },
       },
-    } as any);
+    });
     const { liveDb, indexTransactionMeta } = stubLiveDb({
       cachedNodes: [node('parent-1', 120, '2025-10-05', 'Cached Parent')],
     });
@@ -258,5 +281,8 @@ describe('splitTransaction output feeds the meta index', () => {
     expect(indexedIds).toContain('child-a');
     expect(indexedIds).toContain('child-b');
     expect(indexedIds).not.toContain('child-c'); // empty accountId → skipped
+    for (const call of indexTransactionMeta.mock.calls as any[]) {
+      expect(call[1]).toEqual({ accountId: 'acct-P', itemId: 'item-P' });
+    }
   });
 });
