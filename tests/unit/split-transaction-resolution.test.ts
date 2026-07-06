@@ -45,7 +45,6 @@ function serverTx(id: string, amount: number): CreatedTransaction {
     itemId: 'item-P',
     categoryId: '',
     recurringId: null,
-    parentId: id.startsWith('child') ? 'parent-1' : null,
     isReviewed: false,
     isPending: false,
     amount,
