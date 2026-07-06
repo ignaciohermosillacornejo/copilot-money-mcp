@@ -2562,11 +2562,14 @@ export class CopilotMoneyTools {
         liveWindowMonths: months,
       };
     }
-    await this.liveDb.getTransactions({ from, to });
-    // Consult the window cache the fetch just fed rather than the
-    // date-filtered return value — it holds same-month future-dated rows the
-    // rows scan would miss (#513).
-    const n = this.liveDb.lookupTransactionNodes([id]).get(id);
+    const live = await this.liveDb.getTransactions({ from, to });
+    // Cache-first: the window cache holds same-month future-dated rows the
+    // date-filtered return value misses (#513). Rows-fallback: unlike the
+    // append-only meta index resolveTransactionMeta reads, the window cache
+    // LRU-evicts per ingest, so a very large window can evict early months
+    // before the fetch returns — the in-hand rows are immune to that.
+    const n =
+      this.liveDb.lookupTransactionNodes([id]).get(id) ?? live.rows.find((r) => r.id === id);
     if (!n) return { snapshot: null, liveWindowMonths: months };
     return {
       snapshot: { amount: n.amount, date: n.date, name: n.name },
