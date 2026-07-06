@@ -79,16 +79,29 @@ describe('TransactionMetaStore', () => {
       '{"i":"t1","a":"acct-1","t":"item-1"}\n{"i":"t2","a":"acc' // torn
     );
     const s = new TransactionMetaStore({ baseDir: dir, uidProvider: uid('userA') });
-    const m = s.loadOnce();
-    expect(m.get('t1')).toEqual(META);
-    expect(m.has('t2')).toBe(false);
+    const origWarn = console.warn;
+    console.warn = () => {};
+    let m: ReturnType<typeof s.loadOnce>;
+    try {
+      m = s.loadOnce();
+    } finally {
+      console.warn = origWarn;
+    }
+    expect(m!.get('t1')).toEqual(META);
+    expect(m!.has('t2')).toBe(false);
   });
 
   test('corrupt file: warn + start fresh, no crash', () => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(fileFor('userA'), 'not json at all\x00\x01');
     const s = new TransactionMetaStore({ baseDir: dir, uidProvider: uid('userA') });
-    expect(() => s.loadOnce()).not.toThrow();
+    const origWarn = console.warn;
+    console.warn = () => {};
+    try {
+      expect(() => s.loadOnce()).not.toThrow();
+    } finally {
+      console.warn = origWarn;
+    }
   });
 
   test('dedupe on load: duplicate ids hydrate once, last wins', () => {
@@ -154,6 +167,30 @@ describe('TransactionMetaStore', () => {
     expect(m.size).toBe(1);
     const rewritten = readFileSync(fileFor('userA'), 'utf8').trim().split('\n');
     expect(rewritten).toHaveLength(1);
+  });
+
+  test('skipped lines emit a warn-once warning, valid entries still load', () => {
+    mkdirSync(dir, { recursive: true });
+    // One valid line, two invalid: a torn line and a JSON object missing required fields.
+    writeFileSync(
+      fileFor('userA'),
+      '{"i":"t1","a":"acct-1","t":"item-1"}\n{"i":"bad"\n{"bad":true}\n'
+    );
+    const s = new TransactionMetaStore({ baseDir: dir, uidProvider: uid('userA') });
+    const warns: string[] = [];
+    const origWarn = console.warn;
+    console.warn = (...args: unknown[]) => warns.push(args.join(' '));
+    let m: Map<string, { accountId: string; itemId: string }>;
+    try {
+      m = s.loadOnce();
+    } finally {
+      console.warn = origWarn;
+    }
+    // Valid entry survives.
+    expect(m!.get('t1')).toEqual(META);
+    // Exactly one warning, mentioning the skip count.
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).toContain('skipped 2 unparseable line');
   });
 
   test('uid change between buffer and flush: entries stay with the uid captured at buffer time', () => {
