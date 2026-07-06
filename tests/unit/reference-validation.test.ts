@@ -35,8 +35,6 @@ function makeDb(overrides?: { categories?: unknown[]; tags?: unknown[]; recurrin
   (db as any)._tags = overrides?.tags ?? [];
   (db as any)._recurring = overrides?.recurring ?? [];
   (db as any)._goals = [];
-  // Suppress decoder initialization for test mocks
-  (db as any)._allCollectionsPromise = Promise.resolve(null);
   return db;
 }
 
@@ -218,15 +216,8 @@ describe('live-mode reference validation (#510)', () => {
     (db as any)._transactions = [
       { transaction_id: 'txn-degraded', account_id: 'acct-1', item_id: 'item-1' },
     ];
-    // Mock data accessors to prevent decoder initialization in degraded mode
-    // All validation should use the seeded categories/tags without DB access
-    (db as any).getAccounts = async () => [];
-    (db as any).getTransactions = async () => [];
-    (db as any).getItems = async () => [];
-    (db as any).getRecurring = async () => [];
-    (db as any).getBudgets = async () => [];
+    // getTags unconditionally triggers a full collection load against the fake db path, so it's overridden
     (db as any).getTags = async () => (db as any)._tags;
-    (db as any).getCategories = async () => (db as any)._userCategories;
     const tools = new CopilotMoneyTools(db, client); // no liveDb — degraded
 
     // Known local ids pass through to the mutation.
