@@ -1075,6 +1075,36 @@ describe('transaction meta index', () => {
     expect(live.lookupTransactionNodes(['anything']).size).toBe(0);
   });
 
+  test('invalid nodes are dropped from rows AND feeds, counted, surfaced (#512)', async () => {
+    const badNode = { ...metaNode('bad-1', '2025-01-16', '', 'item-X') }; // empty accountId
+    const page = metaPage([metaNode('ok-1', '2025-01-15', 'acct-A', 'item-A'), badNode]);
+    const client = {
+      mutate: mock(),
+      query: mock(() => Promise.resolve({ transactions: page })),
+    } as unknown as GraphQLClient;
+    const live = new LiveCopilotDatabase(client, {} as CopilotDatabase);
+
+    const result = await live.getTransactions({ from: '2025-01-01', to: '2025-01-31' });
+
+    expect(result.rows.map((r) => r.id)).toEqual(['ok-1']);
+    expect(result.dropped_invalid_rows).toBe(1);
+    expect(live.lookupTransactionMeta(['bad-1']).size).toBe(0);
+    expect(live.lookupTransactionNodes(['bad-1']).size).toBe(0);
+    expect(live.getDroppedInvalidRows()).toBe(1);
+  });
+
+  test('clean fetch reports zero drops (#512)', async () => {
+    const page = metaPage([metaNode('ok-2', '2025-02-15', 'acct-A', 'item-A')]);
+    const client = {
+      mutate: mock(),
+      query: mock(() => Promise.resolve({ transactions: page })),
+    } as unknown as GraphQLClient;
+    const live = new LiveCopilotDatabase(client, {} as CopilotDatabase);
+
+    const result = await live.getTransactions({ from: '2025-02-01', to: '2025-02-28' });
+    expect(result.dropped_invalid_rows).toBe(0);
+  });
+
   test('rows dated after the requested range still land in the index and window cache (#513)', async () => {
     // Range ends Jan 20 but the page contains a Jan 25 row: it is excluded
     // from the RETURNED rows (date filter) yet fed to the meta index

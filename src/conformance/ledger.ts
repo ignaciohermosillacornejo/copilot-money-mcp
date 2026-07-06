@@ -47,7 +47,12 @@ import { TRANSACTION_TYPES } from '../core/graphql/transactions.js';
 import { RECURRING_FREQUENCIES, RECURRING_STATE_VALUES } from '../core/graphql/recurrings.js';
 import { COLOR_NAMES } from '../core/graphql/colors.js';
 import { ALL_TIME_FRAMES } from '../core/graphql/queries/_shared.js';
-import { RESPONSE_SHAPE_RUNTIME_CHECK } from '../core/graphql/response-validation.js';
+import {
+  RESPONSE_SHAPE_RUNTIME_CHECK,
+  RUNTIME_CHECK_NAMES,
+} from '../core/graphql/response-validation.js';
+export { RUNTIME_CHECK_NAMES };
+import { TRANSACTIONS_READ_SHAPE_RUNTIME_CHECK } from '../core/graphql/read-validation.js';
 
 /** What kind of external surface the assumption is about. */
 export const SURFACE_KINDS = [
@@ -84,13 +89,16 @@ export type ConformanceOracle = `smoke:${string}` | `runtime:${string}`;
 
 /**
  * Registered always-on runtime checks that `runtime:<name>` oracles may
- * reference.
+ * reference. Defined in src/core/graphql/response-validation.ts and
+ * re-exported here for backward compatibility.
  * - `zod-warn` (B3, #437): every mutation response is validated warn-mode
- *   against a Zod schema mirroring the hand-written response interface
- *   (src/core/graphql/response-validation.ts); drift logs a structured
- *   warning and increments a per-surface counter, never failing the call.
+ *   against a Zod schema mirroring the hand-written response interface;
+ *   drift logs a structured warning and increments a per-surface counter.
+ * - `transactions-read-shape` (#512): per-node Zod validation for the
+ *   Transactions read query; invalid nodes are dropped, counted, and
+ *   surfaced via _dropped_invalid_rows.
  */
-export const RUNTIME_CHECK_NAMES: readonly string[] = [RESPONSE_SHAPE_RUNTIME_CHECK];
+// RUNTIME_CHECK_NAMES is imported from response-validation.ts and re-exported above.
 
 export interface LedgerEntry {
   /** External assumption surface (see naming convention above). Unique. */
@@ -256,7 +264,9 @@ function responseShape(name: string, overrides?: Partial<LedgerEntry>): LedgerEn
  * Query field, e.g. 'accounts'. The companion `queryResponseShape` entry
  * tracks the hand-written response interface separately (still unverified:
  * B3's warn-mode Zod validation (#437) covers MUTATION responses only, not
- * the read wrappers).
+ * the read wrappers — exception: Query.transactions:response is now
+ * runtime-gated via the transactions-read-shape check (#512); other read
+ * response shapes remain unverified).
  */
 function queryOperation(name: string): LedgerEntry {
   return {
@@ -538,7 +548,16 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   queryOperation('account'),
   queryResponseShape('account'),
   queryOperation('transactions'),
-  queryResponseShape('transactions'),
+  {
+    surface: 'Query.transactions:response',
+    kind: 'response-shape',
+    oracle: `runtime:${TRANSACTIONS_READ_SHAPE_RUNTIME_CHECK}`,
+    class: 'gated',
+    evidence:
+      'Per-node Zod validation at fetchTransactionsPage (warn-and-skip, #512): ' +
+      'invalid nodes are dropped from rows and all cache/index feeds, counted, and ' +
+      'surfaced via _dropped_invalid_rows + a deduped stderr warning.',
+  },
   queryOperation('categories'),
   queryResponseShape('categories'),
   queryOperation('tags'),

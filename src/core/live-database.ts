@@ -29,6 +29,7 @@ import {
   type TransactionNode,
   type TransactionSortInput,
 } from './graphql/queries/transactions.js';
+import { warnReadShapeDrift } from './graphql/read-validation.js';
 import { getMonthRange, monthsCovered } from '../utils/date.js';
 import { pLimit } from '../utils/concurrency.js';
 import { InFlightRegistry, SnapshotCache, TransactionWindowCache } from './cache/index.js';
@@ -99,6 +100,13 @@ export class LiveCopilotDatabase {
    * bytes/entry; a full history is a few MB).
    */
   private readonly txnMetaIndex = new Map<string, { accountId: string; itemId: string }>();
+
+  /** Session-total Transactions nodes dropped by read-shape validation (#512). */
+  private droppedInvalidRows = 0;
+
+  getDroppedInvalidRows(): number {
+    return this.droppedInvalidRows;
+  }
 
   constructor(
     private readonly graphql: GraphQLClient,
@@ -187,17 +195,31 @@ export class LiveCopilotDatabase {
     month: string,
     sort: TransactionSortInput[],
     pageSize: number
-  ): Promise<{ rows: TransactionNode[]; fetched_at: number; pages: number }> {
+  ): Promise<{
+    rows: TransactionNode[];
+    fetched_at: number;
+    pages: number;
+    droppedInvalid: number;
+  }> {
     const year = Number(month.slice(0, 4));
     const m = Number(month.slice(5, 7));
     const [monthStart, monthEnd] = getMonthRange(year, m);
     const filter = buildTransactionFilter({ startDate: monthStart, endDate: monthEnd });
     const fetched_at = Date.now();
     let pages = 0;
+    let droppedInvalid = 0;
     const rawRows = await paginateTransactions(
       async (after) => {
         pages += 1;
-        return fetchTransactionsPage(this.graphql, { first: pageSize, after, filter, sort });
+        return fetchTransactionsPage(
+          this.graphql,
+          { first: pageSize, after, filter, sort },
+          (info) => {
+            droppedInvalid += 1;
+            this.droppedInvalidRows += 1;
+            warnReadShapeDrift('Transactions', info);
+          }
+        );
       },
       { startDate: monthStart }
     );
@@ -217,7 +239,7 @@ export class LiveCopilotDatabase {
     // get double-counted on subsequent full-range queries.
     const rows = rawRows.filter((r) => r.date >= monthStart && r.date <= monthEnd);
     this.transactionsWindowCache.ingestMonth(month, rows, fetched_at);
-    return { rows, fetched_at, pages };
+    return { rows, fetched_at, pages, droppedInvalid };
   }
 
   logReadCall(log: {
@@ -231,6 +253,7 @@ export class LiveCopilotDatabase {
     month?: string;
     from_to_months?: number;
     fetched_months?: number;
+    dropped_invalid_rows?: number;
   }): void {
     if (!this.verbose) return;
     const parts = [
@@ -245,6 +268,9 @@ export class LiveCopilotDatabase {
       log.from_to_months !== undefined ? `from_to_months=${log.from_to_months}` : null,
       log.fetched_months !== undefined ? `fetched_months=${log.fetched_months}` : null,
       log.staleness_ms !== undefined ? `staleness_ms=${log.staleness_ms ?? 'null'}` : null,
+      log.dropped_invalid_rows !== undefined
+        ? `dropped_invalid_rows=${log.dropped_invalid_rows}`
+        : null,
     ].filter(Boolean);
     console.error(parts.join(' '));
   }
@@ -270,6 +296,7 @@ export class LiveCopilotDatabase {
     oldest_fetched_at: number;
     newest_fetched_at: number;
     hit: boolean;
+    dropped_invalid_rows: number;
   }> {
     if (!range.from || !range.to) {
       throw new Error(
@@ -302,7 +329,12 @@ export class LiveCopilotDatabase {
     );
 
     const failures: Array<{ month: string; reason: unknown }> = [];
-    const successes: Array<{ month: string; rows: TransactionNode[]; fetched_at: number }> = [];
+    const successes: Array<{
+      month: string;
+      rows: TransactionNode[];
+      fetched_at: number;
+      droppedInvalid: number;
+    }> = [];
     for (let i = 0; i < settled.length; i += 1) {
       const s = settled[i]!;
       if (s.status === 'fulfilled') {
@@ -316,6 +348,11 @@ export class LiveCopilotDatabase {
         .map((f) => `${f.month}: ${(f.reason as Error)?.message ?? String(f.reason)}`)
         .join('; ');
       throw new Error(`Failed to fetch months: ${summary}`);
+    }
+
+    let totalDropped = 0;
+    for (const s of successes) {
+      totalDropped += s.droppedInvalid;
     }
 
     const freshRows = successes.flatMap((s) => s.rows);
@@ -348,9 +385,16 @@ export class LiveCopilotDatabase {
       cache_hit: hit,
       from_to_months: allMonths.length,
       fetched_months: toFetch.length,
+      dropped_invalid_rows: totalDropped,
     });
 
-    return { rows: merged, oldest_fetched_at: oldest, newest_fetched_at: newest, hit };
+    return {
+      rows: merged,
+      oldest_fetched_at: oldest,
+      newest_fetched_at: newest,
+      hit,
+      dropped_invalid_rows: totalDropped,
+    };
   }
 
   // ── Phase 2: cache accessors ──────────────────────────────────────────────

@@ -486,11 +486,28 @@ describe('delete_transaction check (stubbed client)', () => {
   });
 
   test('FAILS when the delete is echoed true but the transaction is still readable', async () => {
+    // Node must pass stripInvalidTransactionNodes (Task 1, #512) so it survives
+    // the re-read and triggers the "still present" detection.
     const node = {
       id: 'txn-1',
+      accountId: 'acct-1',
+      itemId: 'item-1',
+      date: '2023-11-14',
       name: '__smoke__1700000000000-txn-a',
       parentId: null,
       amount: 100,
+      categoryId: null,
+      recurringId: null,
+      isReviewed: false,
+      isPending: false,
+      type: 'REGULAR',
+      userNotes: null,
+      tipAmount: null,
+      suggestedCategoryIds: [],
+      isoCurrencyCode: null,
+      createdAt: 1700000000000,
+      tags: [],
+      goal: null,
     };
     const { client } = stubClient({
       DeleteTransaction: () => ({ deleteTransaction: true }),
