@@ -8,7 +8,11 @@
 
 import type { GraphQLClient } from '../client.js';
 import { TRANSACTIONS } from '../operations.generated.js';
-import { stripInvalidTransactionNodes, type InvalidNodeInfo } from '../read-validation.js';
+import {
+  stripInvalidTransactionNodes,
+  warnReadShapeDrift,
+  type InvalidNodeInfo,
+} from '../read-validation.js';
 
 /**
  * TransactionType enum accepted by the read-side TransactionFilter.
@@ -238,6 +242,10 @@ export async function fetchTransactionsPage(
     args
   );
   // Warn-and-skip read-shape validation (#512): invalid nodes never reach
-  // rows, the window cache, or the meta index.
-  return stripInvalidTransactionNodes(data.transactions, onInvalidNode);
+  // rows, the window cache, or the meta index. Default the callback so
+  // callback-less callers (smoke scripts, preflight) still surface drift.
+  return stripInvalidTransactionNodes(
+    data.transactions,
+    onInvalidNode ?? ((info) => warnReadShapeDrift('Transactions', info))
+  );
 }

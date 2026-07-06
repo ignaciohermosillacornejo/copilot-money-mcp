@@ -10,10 +10,12 @@ import {
   warnReadShapeDrift,
   __resetReadShapeWarnDedupe,
 } from '../../../src/core/graphql/read-validation.js';
-import type {
-  TransactionsPage,
-  TransactionNode,
+import {
+  fetchTransactionsPage,
+  type TransactionsPage,
+  type TransactionNode,
 } from '../../../src/core/graphql/queries/transactions.js';
+import type { GraphQLClient } from '../../../src/core/graphql/client.js';
 
 function goodNode(id: string, extra?: Record<string, unknown>): TransactionNode {
   return {
@@ -105,6 +107,32 @@ describe('warnReadShapeDrift dedupe', () => {
       expect(first).toContain('Transactions');
       expect(first).toContain('accountId');
       expect(first).toContain('Query.transactions:response');
+    } finally {
+      console.warn = orig;
+    }
+  });
+});
+
+describe('fetchTransactionsPage default callback', () => {
+  test('fetchTransactionsPage without a callback still warns on drops (#512 default)', async () => {
+    const spy = mock();
+    const orig = console.warn;
+    console.warn = spy as unknown as typeof console.warn;
+    try {
+      __resetReadShapeWarnDedupe();
+      const bad = goodNode('bad-default', { accountId: '' });
+      const client = {
+        query: mock(() => Promise.resolve({ transactions: page([bad]) })),
+        mutate: mock(),
+      } as unknown as GraphQLClient;
+      const result = await fetchTransactionsPage(client, {
+        first: 25,
+        after: null,
+        filter: null,
+        sort: [],
+      });
+      expect(result.edges).toHaveLength(0);
+      expect(spy).toHaveBeenCalledTimes(1);
     } finally {
       console.warn = orig;
     }
