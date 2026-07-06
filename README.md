@@ -178,8 +178,9 @@ COPILOT_CACHE_TTL_MINUTES=0 copilot-money-mcp
 COPILOT_WRITE_RESOLVE_WINDOW_MONTHS=30 copilot-money-mcp --write
 
 # Write-resolution routing ids (opaque transaction/account/item ids only —
-# never amounts or names) persist to ~/.claude/copilot-money/ keyed by the
-# logged-in account, so cross-session writes skip the live window fetch.
+# never amounts or names) persist whenever live reads are enabled (including
+# --write mode), keyed by the logged-in account, so cross-session writes
+# skip the live window fetch.
 # Disable entirely:
 COPILOT_DISABLE_PERSISTENT_INDEX=1 copilot-money-mcp --write
 ```

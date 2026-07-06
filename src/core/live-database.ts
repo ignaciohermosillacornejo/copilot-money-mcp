@@ -532,6 +532,15 @@ export class LiveCopilotDatabase {
    *  index. Returns only the ids present; callers treat absence as
    *  "not seen by any live fetch this session". */
   lookupTransactionMeta(ids: string[]): Map<string, { accountId: string; itemId: string }> {
+    // Identity guard (#511): on a non-null → different-non-null uid transition
+    // (re-auth as another account), drop the previous login's in-memory routing
+    // entries before hydrating the new login's history — the memory tier must
+    // honor the same isolation the per-uid files do.
+    const prevUid = this.metaStore.loadedUid();
+    const curUid = this.metaStore.currentUid();
+    if (prevUid !== null && curUid !== null && prevUid !== curUid) {
+      this.txnMetaIndex.clear();
+    }
     // Opportunistic hydration from disk (#511): in-memory entries win (they
     // are newest); loadOnce is idempotent/cheap after the first real load.
     for (const [id, m] of this.metaStore.loadOnce()) {

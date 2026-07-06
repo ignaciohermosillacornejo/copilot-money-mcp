@@ -47,6 +47,7 @@ export class TransactionMetaStore {
   private pending = new Map<string, { meta: Meta; uid: string | null }>();
   private warnedLoad = false;
   private warnedAppend = false;
+  private warnedSkip = false;
 
   constructor(opts: TransactionMetaStoreOptions) {
     this.baseDir = opts.baseDir;
@@ -62,10 +63,29 @@ export class TransactionMetaStore {
     return join(this.baseDir, `txn-meta-index.${uid}.jsonl`);
   }
 
+  /** Never-throw wrapper around uidProvider: returns null on any exception. */
+  private safeUid(): string | null {
+    try {
+      return this.uidProvider();
+    } catch {
+      return null;
+    }
+  }
+
+  /** The uid for which the disk index was last loaded (null = not yet loaded). */
+  loadedUid(): string | null {
+    return this.loadedForUid;
+  }
+
+  /** The current uid as seen by the provider right now (null = not authenticated). */
+  currentUid(): string | null {
+    return this.safeUid();
+  }
+
   loadOnce(): Map<string, Meta> {
     const out = new Map<string, Meta>();
     if (this.disabled()) return out;
-    const uid = this.uidProvider();
+    const uid = this.safeUid();
     if (!uid || this.loadedForUid === uid) return out;
     // Latch before the try: a transient load error should not retry — warn once and degrade for the session.
     this.loadedForUid = uid;
@@ -73,6 +93,7 @@ export class TransactionMetaStore {
     try {
       if (!existsSync(file)) return out;
       const raw = readFileSync(file, 'utf8');
+      let skipped = 0;
       for (const line of raw.split('\n')) {
         if (!line.trim()) continue;
         try {
@@ -86,17 +107,26 @@ export class TransactionMetaStore {
             rec.t.length > 0
           ) {
             out.set(rec.i, { accountId: rec.a, itemId: rec.t });
+          } else {
+            skipped += 1;
           }
         } catch {
           // torn/corrupt line (crash mid-append) — skip; valid prefix wins.
+          skipped += 1;
         }
+      }
+      if (skipped > 0 && !this.warnedSkip) {
+        this.warnedSkip = true;
+        console.warn(
+          `[copilot-money-mcp] persistent meta index: skipped ${skipped} unparseable line(s) — continuing with the valid remainder.`
+        );
       }
       for (const id of out.keys()) this.persisted.add(id);
       // Size valve: duplicates across many sessions can bloat the file far
       // past its logical content; rewrite deduped once, atomically.
       if (statSync(file).size > this.maxBytes) {
         try {
-          const tmp = `${file}.tmp`;
+          const tmp = `${file}.${process.pid}.tmp`;
           writeFileSync(tmp, this.serialize(out));
           renameSync(tmp, file);
         } catch (e) {
@@ -125,12 +155,12 @@ export class TransactionMetaStore {
     if (this.persisted.has(id)) return;
     // Stamp the uid at buffer time so a mid-session re-auth cannot redirect
     // this entry to a different user's file at flush.
-    this.pending.set(id, { meta, uid: this.uidProvider() });
+    this.pending.set(id, { meta, uid: this.safeUid() });
   }
 
   flush(): void {
     if (this.disabled() || this.pending.size === 0) return;
-    const flushUid = this.uidProvider();
+    const flushUid = this.safeUid();
 
     // Group entries by effective uid: use the uid captured at buffer time when
     // available; null-stamped (pre-auth) entries adopt the current flush-time

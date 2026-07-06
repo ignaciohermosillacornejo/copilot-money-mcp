@@ -1213,4 +1213,34 @@ describe('transaction meta index', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test('uid transition: previous login entries are cleared from in-memory index before new login hydrates (#511)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'live-meta-uid-'));
+    try {
+      let currentUid: string | null = 'userA';
+      const store = new TransactionMetaStore({
+        baseDir: dir,
+        uidProvider: () => currentUid,
+      });
+      const live = new LiveCopilotDatabase(
+        { mutate: mock(), query: mock() } as unknown as GraphQLClient,
+        {} as CopilotDatabase,
+        { metaStore: store }
+      );
+
+      // Feed an entry as userA; indexTransactionMeta buffers + flushes to disk.
+      live.indexTransactionMeta('txA', { accountId: 'acct-A', itemId: 'item-A' });
+      // Trigger a lookup to latch loadOnce under userA.
+      const beforeSwitch = live.lookupTransactionMeta(['txA']);
+      expect(beforeSwitch.get('txA')).toEqual({ accountId: 'acct-A', itemId: 'item-A' });
+
+      // Re-auth as a different account — userA's entries must not leak.
+      currentUid = 'userB';
+
+      const afterSwitch = live.lookupTransactionMeta(['txA']);
+      expect(afterSwitch.has('txA')).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
