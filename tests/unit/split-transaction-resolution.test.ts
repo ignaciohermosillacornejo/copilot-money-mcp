@@ -74,11 +74,14 @@ function makeDb(transactions: unknown[] = []) {
  *  `liveRows` back the windowed getTransactions RETURN VALUE and — like the
  *  real ingestMonth — become visible via lookupTransactionNodes once the
  *  fetch has run; `storeOnlyNodes` simulate same-month future-dated rows the
- *  fetch stores but does not return (#513). */
+ *  fetch stores but does not return (#513); `evictedIds` are nodes present in
+ *  liveRows/storeOnlyNodes but excluded from the lookupTransactionNodes pool
+ *  (modeling LRU eviction mid-fetch). */
 function stubLiveDb(overrides: {
   cachedNodes?: TransactionNode[];
   liveRows?: TransactionNode[];
   storeOnlyNodes?: TransactionNode[];
+  evictedIds?: string[];
 }) {
   let fetched = false;
   const getTransactions = mock(() => {
@@ -99,7 +102,7 @@ function stubLiveDb(overrides: {
     const out = new Map<string, TransactionNode>();
     for (const id of ids) {
       const n = pool.find((c) => c.id === id);
-      if (n) out.set(id, n);
+      if (n && !(overrides.evictedIds ?? []).includes(id)) out.set(id, n);
     }
     return out;
   };
@@ -281,6 +284,27 @@ describe('splitTransaction parent resolution — live mode', () => {
     expect(getTransactions).toHaveBeenCalledTimes(1);
     const sent = (client._calls[0]!.variables as any).input;
     expect(sent[0].name).toBe('Future Parent');
+  });
+
+  test('parent evicted from the window cache mid-fetch still resolves via returned rows', async () => {
+    const client = createMockGraphQLClient(SPLIT_RESPONSE);
+    const { liveDb, getTransactions } = stubLiveDb({
+      liveRows: [node('parent-1', 120, '2025-10-05', 'Evicted Parent')],
+      evictedIds: ['parent-1'],
+    });
+    const tools = new CopilotMoneyTools(makeDb(), client, liveDb);
+
+    const result = await tools.splitTransaction({
+      transaction_id: 'parent-1',
+      account_id: 'acct-P',
+      item_id: 'item-P',
+      splits: VALID_SPLITS,
+    });
+
+    expect(result.success).toBe(true);
+    expect(getTransactions).toHaveBeenCalledTimes(1);
+    const sent = (client._calls[0]!.variables as any).input;
+    expect(sent[0].name).toBe('Evicted Parent');
   });
 });
 
