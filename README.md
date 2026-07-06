@@ -176,6 +176,12 @@ COPILOT_CACHE_TTL_MINUTES=0 copilot-money-mcp
 # window fetch when the in-memory index (fed by live reads) misses.
 # Default window: 13 months. Raise it to edit older transactions:
 COPILOT_WRITE_RESOLVE_WINDOW_MONTHS=30 copilot-money-mcp --write
+
+# Write-resolution routing ids (opaque transaction/account/item ids only —
+# never amounts or names) persist to ~/.claude/copilot-money/ keyed by the
+# logged-in account, so cross-session writes skip the live window fetch.
+# Disable entirely:
+COPILOT_DISABLE_PERSISTENT_INDEX=1 copilot-money-mcp --write
 ```
 
 You can also refresh manually using the `refresh_database` tool.
