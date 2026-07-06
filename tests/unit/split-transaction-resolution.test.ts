@@ -71,10 +71,7 @@ function makeDb(transactions: unknown[] = []) {
   return db;
 }
 
-function stubLiveDb(overrides: {
-  cachedNodes?: TransactionNode[];
-  liveRows?: TransactionNode[];
-}) {
+function stubLiveDb(overrides: { cachedNodes?: TransactionNode[]; liveRows?: TransactionNode[] }) {
   const getTransactions = mock(() =>
     Promise.resolve({
       rows: overrides.liveRows ?? [],
@@ -226,5 +223,40 @@ describe('splitTransaction parent resolution — live mode', () => {
         ], // sums to the stale 100
       })
     ).rejects.toThrow(/Parent=120/);
+  });
+});
+
+describe('splitTransaction output feeds the meta index', () => {
+  test('parent and children are indexed from the mutation response; empty ids skipped', async () => {
+    const emptyIdChild = { ...serverTx('child-c', 0), accountId: '' };
+    const client = createMockGraphQLClient({
+      SplitTransaction: {
+        splitTransaction: {
+          parentTransaction: serverTx('parent-1', 120),
+          splitTransactions: [serverTx('child-a', 70), serverTx('child-b', 50), emptyIdChild],
+        },
+      },
+    } as any);
+    const { liveDb, indexTransactionMeta } = stubLiveDb({
+      cachedNodes: [node('parent-1', 120, '2025-10-05', 'Cached Parent')],
+    });
+    const tools = new CopilotMoneyTools(makeDb(), client, liveDb);
+
+    await tools.splitTransaction({
+      transaction_id: 'parent-1',
+      account_id: 'acct-P',
+      item_id: 'item-P',
+      splits: [
+        { amount: 70, category_id: 'catA' },
+        { amount: 50, category_id: 'catB' },
+        { amount: 0, category_id: 'catC' },
+      ],
+    });
+
+    const indexedIds = indexTransactionMeta.mock.calls.map((c: any[]) => c[0]);
+    expect(indexedIds).toContain('parent-1');
+    expect(indexedIds).toContain('child-a');
+    expect(indexedIds).toContain('child-b');
+    expect(indexedIds).not.toContain('child-c'); // empty accountId → skipped
   });
 });

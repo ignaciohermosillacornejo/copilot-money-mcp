@@ -3234,6 +3234,19 @@ export class CopilotMoneyTools {
       const parent = toLocal(result.parentTransaction);
       const children = result.splitTransactions.map(toLocal);
 
+      // Feed the live meta index with everything the mutation returned —
+      // parent and children arrive as full TransactionFields — so a
+      // follow-up edit on a child resolves without a network fetch. Same
+      // empty-id guard as the other feeds (#508).
+      for (const tx of [result.parentTransaction, ...result.splitTransactions]) {
+        if (tx.accountId && tx.itemId) {
+          this.liveDb?.indexTransactionMeta(tx.id, {
+            accountId: tx.accountId,
+            itemId: tx.itemId,
+          });
+        }
+      }
+
       // Evict the parent from the in-memory cache so subsequent
       // get_transactions reads stop surfacing the now-hidden row. No-op
       // if the cache is unloaded or the id is absent — same eviction-is-a-
