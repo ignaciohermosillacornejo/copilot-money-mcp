@@ -70,25 +70,41 @@ function makeDb(transactions: unknown[] = []) {
   return db;
 }
 
-function stubLiveDb(overrides: { cachedNodes?: TransactionNode[]; liveRows?: TransactionNode[] }) {
-  const getTransactions = mock(() =>
-    Promise.resolve({
+/** Stub liveDb: `cachedNodes` back lookupTransactionNodes from the start;
+ *  `liveRows` back the windowed getTransactions RETURN VALUE and — like the
+ *  real ingestMonth — become visible via lookupTransactionNodes once the
+ *  fetch has run; `storeOnlyNodes` simulate same-month future-dated rows the
+ *  fetch stores but does not return (#513). */
+function stubLiveDb(overrides: {
+  cachedNodes?: TransactionNode[];
+  liveRows?: TransactionNode[];
+  storeOnlyNodes?: TransactionNode[];
+}) {
+  let fetched = false;
+  const getTransactions = mock(() => {
+    fetched = true;
+    return Promise.resolve({
       rows: overrides.liveRows ?? [],
       oldest_fetched_at: 0,
       newest_fetched_at: 0,
       hit: false,
-    })
-  );
+    });
+  });
   const indexTransactionMeta = mock();
+  const lookupTransactionNodes = (ids: string[]) => {
+    const pool = [
+      ...(overrides.cachedNodes ?? []),
+      ...(fetched ? [...(overrides.liveRows ?? []), ...(overrides.storeOnlyNodes ?? [])] : []),
+    ];
+    const out = new Map<string, TransactionNode>();
+    for (const id of ids) {
+      const n = pool.find((c) => c.id === id);
+      if (n) out.set(id, n);
+    }
+    return out;
+  };
   const liveDb = {
-    lookupTransactionNodes: (ids: string[]) => {
-      const out = new Map<string, TransactionNode>();
-      for (const id of ids) {
-        const n = (overrides.cachedNodes ?? []).find((c) => c.id === id);
-        if (n) out.set(id, n);
-      }
-      return out;
-    },
+    lookupTransactionNodes,
     lookupTransactionMeta: () => new Map(),
     getTransactions,
     indexTransactionMeta,
@@ -245,6 +261,26 @@ describe('splitTransaction parent resolution — live mode', () => {
         ], // sums to the stale 100
       })
     ).rejects.toThrow(/Parent=120/);
+  });
+
+  test('same-month future-dated parent resolves on the FIRST call (#513)', async () => {
+    const client = createMockGraphQLClient(SPLIT_RESPONSE);
+    const { liveDb, getTransactions } = stubLiveDb({
+      storeOnlyNodes: [node('parent-1', 120, '2025-10-30', 'Future Parent')],
+    });
+    const tools = new CopilotMoneyTools(makeDb(), client, liveDb);
+
+    const result = await tools.splitTransaction({
+      transaction_id: 'parent-1',
+      account_id: 'acct-P',
+      item_id: 'item-P',
+      splits: VALID_SPLITS,
+    });
+
+    expect(result.success).toBe(true);
+    expect(getTransactions).toHaveBeenCalledTimes(1);
+    const sent = (client._calls[0]!.variables as any).input;
+    expect(sent[0].name).toBe('Future Parent');
   });
 });
 

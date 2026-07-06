@@ -2465,13 +2465,14 @@ export class CopilotMoneyTools {
 
     const { from, to, months } = CopilotMoneyTools.writeResolveWindow();
     if (missing.length > 0) {
-      const live = await this.liveDb.getTransactions({ from, to });
-      const liveById = new Map(live.rows.map((n) => [n.id, n]));
-      for (const id of missing) {
-        const n = liveById.get(id);
-        if (n?.accountId && n?.itemId) {
-          out.set(id, { accountId: n.accountId, itemId: n.itemId });
-        }
+      // Consult the meta index the fetch just fed rather than scanning the
+      // date-filtered return value: fetchMonth feeds the index with the FULL
+      // pre-trim month, so this also resolves same-month future-dated
+      // transactions the rows scan missed (#513). The empty-routing-id guard
+      // is enforced at the feed, so indexed entries are always valid.
+      await this.liveDb.getTransactions({ from, to });
+      for (const [id, m] of this.liveDb.lookupTransactionMeta(missing)) {
+        out.set(id, m);
       }
     }
     // liveWindowMonths is non-null here even when no fetch ran
@@ -2561,8 +2562,11 @@ export class CopilotMoneyTools {
         liveWindowMonths: months,
       };
     }
-    const live = await this.liveDb.getTransactions({ from, to });
-    const n = live.rows.find((r) => r.id === id);
+    await this.liveDb.getTransactions({ from, to });
+    // Consult the window cache the fetch just fed rather than the
+    // date-filtered return value — it holds same-month future-dated rows the
+    // rows scan would miss (#513).
+    const n = this.liveDb.lookupTransactionNodes([id]).get(id);
     if (!n) return { snapshot: null, liveWindowMonths: months };
     return {
       snapshot: { amount: n.amount, date: n.date, name: n.name },
