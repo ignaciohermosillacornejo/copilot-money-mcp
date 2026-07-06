@@ -10,7 +10,7 @@ import type { CategoryNode } from '../../src/core/graphql/queries/categories.js'
 import type { RecurringNode } from '../../src/core/graphql/queries/recurrings.js';
 import type { UserNode } from '../../src/core/graphql/queries/user.js';
 import { TransactionMetaStore } from '../../src/core/persistence/transaction-meta-store.js';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync, rmSync, mkdirSync, chmodSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -1241,6 +1241,118 @@ describe('transaction meta index', () => {
       expect(afterSwitch.has('txA')).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('uid-transition clear does not drop entries fed under the new uid when flush failed (#511)', () => {
+    // Uses an unwritable baseDir so every flush attempt fails silently. The
+    // re-stamp fix ensures those buffered entries survive the transition clear
+    // via pendingFor replay, satisfying the invariant: "an entry fed under the
+    // current uid is resolvable until persisted or superseded."
+    const tmpBase = mkdtempSync(join(tmpdir(), 'live-meta-ro-'));
+    const roDir = join(tmpBase, 'store');
+    mkdirSync(roDir);
+    chmodSync(roDir, 0o555);
+    try {
+      let currentUid: string | null = 'userA';
+      const store = new TransactionMetaStore({
+        baseDir: roDir,
+        uidProvider: () => currentUid,
+      });
+      const live = new LiveCopilotDatabase(
+        { mutate: mock(), query: mock() } as unknown as GraphQLClient,
+        {} as CopilotDatabase,
+        { metaStore: store }
+      );
+
+      const origWarn = console.warn;
+      console.warn = () => {};
+      try {
+        // Feed under A; flush fails silently (unwritable dir) — entry re-stamped to pending.
+        live.indexTransactionMeta('txA', { accountId: 'acct-A', itemId: 'item-A' });
+        // Latch loadedUid = userA via a lookup.
+        expect(live.lookupTransactionMeta(['txA']).get('txA')).toEqual({
+          accountId: 'acct-A',
+          itemId: 'item-A',
+        });
+
+        // Switch to B.
+        currentUid = 'userB';
+
+        // Feed under B; flush fails silently — entry re-stamped to pending under userB.
+        live.indexTransactionMeta('bEntry', { accountId: 'acct-B', itemId: 'item-B' });
+
+        // Transition guard fires: clear + replay pending under userB.
+        const found = live.lookupTransactionMeta(['bEntry']);
+        expect(found.get('bEntry')).toEqual({ accountId: 'acct-B', itemId: 'item-B' });
+        // userA's entry must be gone.
+        expect(live.lookupTransactionMeta(['txA']).has('txA')).toBe(false);
+      } finally {
+        console.warn = origWarn;
+      }
+    } finally {
+      try {
+        chmodSync(roDir, 0o755);
+      } catch {}
+      rmSync(tmpBase, { recursive: true, force: true });
+    }
+  });
+
+  test('patchLiveTransaction feeds persistence; new instance resolves the routing id without fetching (#511)', () => {
+    // Verify that patchLiveTransaction's feedMeta path persists entries so a
+    // fresh LiveCopilotDatabase can resolve them without any network call.
+    const tmpDir = mkdtempSync(join(tmpdir(), 'live-meta-patch-'));
+    try {
+      const store1 = new TransactionMetaStore({ baseDir: tmpDir, uidProvider: () => 'user-1' });
+      const live1 = new LiveCopilotDatabase(
+        { mutate: mock(), query: mock() } as unknown as GraphQLClient,
+        {} as CopilotDatabase,
+        { metaStore: store1 }
+      );
+
+      // Seed the window cache directly (bypassing getTransactions so the meta
+      // index is not pre-populated — patchLiveTransaction is the entry point).
+      const wc = live1.getTransactionsWindowCache();
+      wc.ingestMonth(
+        '2025-03',
+        [
+          {
+            id: 'patch-t1',
+            date: '2025-03-10',
+            accountId: 'acct-P',
+            itemId: 'item-P',
+            categoryId: null,
+            recurringId: null,
+            parentId: null,
+            isReviewed: false,
+            isPending: false,
+            amount: 50,
+            name: 'Before Patch',
+            type: 'REGULAR' as const,
+            userNotes: null,
+            tipAmount: null,
+            suggestedCategoryIds: [],
+            isoCurrencyCode: 'USD',
+            createdAt: 0,
+            tags: [],
+            goal: null,
+          },
+        ],
+        Date.now()
+      );
+
+      // patchLiveTransaction feeds the meta index for this not-yet-persisted id.
+      live1.patchLiveTransaction('patch-t1', { name: 'After Patch' } as Record<string, unknown>);
+
+      // Fresh instance + fresh store on the same dir must resolve without fetching.
+      const store2 = new TransactionMetaStore({ baseDir: tmpDir, uidProvider: () => 'user-1' });
+      const client2 = { mutate: mock(), query: mock() } as unknown as GraphQLClient;
+      const live2 = new LiveCopilotDatabase(client2, {} as CopilotDatabase, { metaStore: store2 });
+      const found = live2.lookupTransactionMeta(['patch-t1']);
+      expect(found.get('patch-t1')).toEqual({ accountId: 'acct-P', itemId: 'item-P' });
+      expect((client2.query as ReturnType<typeof mock>).mock.calls).toHaveLength(0);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 });

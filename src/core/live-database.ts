@@ -540,6 +540,12 @@ export class LiveCopilotDatabase {
     const curUid = this.metaStore.currentUid();
     if (prevUid !== null && curUid !== null && prevUid !== curUid) {
       this.txnMetaIndex.clear();
+      // Replay entries buffered under the NEW uid (fed after the switch but
+      // not yet — or not successfully — flushed) so the clear can't drop
+      // fresh data the disk doesn't hold.
+      for (const [id, m] of this.metaStore.pendingFor(curUid)) {
+        this.txnMetaIndex.set(id, m);
+      }
     }
     // Opportunistic hydration from disk (#511): in-memory entries win (they
     // are newest); loadOnce is idempotent/cheap after the first real load.
