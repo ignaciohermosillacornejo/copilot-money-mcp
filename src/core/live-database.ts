@@ -296,6 +296,10 @@ export class LiveCopilotDatabase {
     oldest_fetched_at: number;
     newest_fetched_at: number;
     hit: boolean;
+    /** Invalid nodes dropped by read-shape validation during THIS call's
+     *  fetches. Under in-flight coalescing, concurrent callers sharing a
+     *  month fetch may each report that month's drops; the session total
+     *  (getDroppedInvalidRows) counts each drop exactly once. */
     dropped_invalid_rows: number;
   }> {
     if (!range.from || !range.to) {
@@ -385,7 +389,7 @@ export class LiveCopilotDatabase {
       cache_hit: hit,
       from_to_months: allMonths.length,
       fetched_months: toFetch.length,
-      dropped_invalid_rows: totalDropped,
+      ...(totalDropped > 0 ? { dropped_invalid_rows: totalDropped } : {}),
     });
 
     return {
