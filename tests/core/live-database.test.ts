@@ -1044,4 +1044,34 @@ describe('transaction meta index', () => {
     expect(found.has('meta-good')).toBe(true);
     expect(found.has('meta-bad')).toBe(false);
   });
+
+  test('lookupTransactionNodes returns full cached rows by id', async () => {
+    const page = metaPage([
+      metaNode('node-t1', '2025-01-15', 'acct-A', 'item-A'),
+      metaNode('node-t2', '2025-01-16', 'acct-B', 'item-B'),
+    ]);
+    const client = {
+      mutate: mock(),
+      query: mock(() => Promise.resolve({ transactions: page })),
+    } as unknown as GraphQLClient;
+    const live = new LiveCopilotDatabase(client, {} as CopilotDatabase);
+
+    await live.getTransactions({ from: '2025-01-01', to: '2025-01-31' });
+
+    const found = live.lookupTransactionNodes(['node-t1', 'node-missing']);
+    expect(found.size).toBe(1);
+    const n = found.get('node-t1')!;
+    expect(n.amount).toBe(10);
+    expect(n.date).toBe('2025-01-15');
+    expect(n.name).toBe('tx-node-t1');
+    expect(found.has('node-missing')).toBe(false);
+  });
+
+  test('lookupTransactionNodes on an empty cache returns an empty map', () => {
+    const live = new LiveCopilotDatabase(
+      { mutate: mock(), query: mock() } as unknown as GraphQLClient,
+      {} as CopilotDatabase
+    );
+    expect(live.lookupTransactionNodes(['anything']).size).toBe(0);
+  });
 });
