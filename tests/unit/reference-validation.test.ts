@@ -35,6 +35,8 @@ function makeDb(overrides?: { categories?: unknown[]; tags?: unknown[]; recurrin
   (db as any)._tags = overrides?.tags ?? [];
   (db as any)._recurring = overrides?.recurring ?? [];
   (db as any)._goals = [];
+  // Suppress decoder initialization for test mocks
+  (db as any)._allCollectionsPromise = Promise.resolve(null);
   return db;
 }
 
@@ -193,7 +195,7 @@ describe('live-mode reference validation (#510)', () => {
       name: 'Synthetic',
       date: '2026-07-01',
       amount: 100,
-      category_id: 'cat-live',
+      category_id: 'c1',
       type: 'REGULAR',
       tag_ids: ['tag-live'],
     });
@@ -209,19 +211,38 @@ describe('live-mode reference validation (#510)', () => {
 
   test('degraded mode still validates from LevelDB with unchanged messages', async () => {
     const client = createMockGraphQLClient({ EditTransaction: echoEdit as any });
-    const tools = new CopilotMoneyTools(
-      makeDb({
-        categories: [{ category_id: 'cat-local', name: 'Local' }],
-        tags: [{ tag_id: 'tag-local', name: 'local' }],
-      }),
-      client
-    );
-    // no liveDb — degraded
+    const db = makeDb({
+      categories: [{ category_id: 'cat-local', name: 'Local' }],
+      tags: [{ tag_id: 'tag-local', name: 'local' }],
+    });
+    (db as any)._transactions = [
+      { transaction_id: 'txn-degraded', account_id: 'acct-1', item_id: 'item-1' },
+    ];
+    // Mock data accessors to prevent decoder initialization in degraded mode
+    // All validation should use the seeded categories/tags without DB access
+    (db as any).getAccounts = async () => [];
+    (db as any).getTransactions = async () => [];
+    (db as any).getItems = async () => [];
+    (db as any).getRecurring = async () => [];
+    (db as any).getBudgets = async () => [];
+    (db as any).getTags = async () => (db as any)._tags;
+    (db as any).getCategories = async () => (db as any)._userCategories;
+    const tools = new CopilotMoneyTools(db, client); // no liveDb — degraded
 
-    // Existing degraded behavior is covered by the pre-existing suites;
-    // this is a spot check that the helpers' degraded legs work end-to-end.
+    // Known local ids pass through to the mutation.
+    await tools.updateTransaction({
+      transaction_id: 'txn-degraded',
+      category_id: 'cat-local',
+      tag_ids: ['tag-local'],
+    });
+    expect(client._calls.some((c) => c.op === 'EditTransaction')).toBe(true);
+
+    // Unknown ids fail with the exact unchanged messages from the LevelDB leg.
     await expect(
-      tools.updateTransaction({ transaction_id: 'missing-txn', category_id: 'cat-ghost' })
-    ).rejects.toThrow(/not found/i);
+      tools.updateTransaction({ transaction_id: 'txn-degraded', category_id: 'cat-ghost' })
+    ).rejects.toThrow('Category not found: cat-ghost');
+    await expect(
+      tools.updateTransaction({ transaction_id: 'txn-degraded', tag_ids: ['tag-ghost'] })
+    ).rejects.toThrow('Tag not found: tag-ghost');
   });
 });
