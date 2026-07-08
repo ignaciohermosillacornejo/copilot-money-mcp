@@ -126,7 +126,7 @@ Examples:
 - `refresh_cache({scope: "accounts"})` — flushes only the accounts snapshot.
 - `refresh_cache({scope: "transactions", months: ["2026-04"]})` — flushes one transaction month.
 
-All live caches are identity-scoped by sweep: if a token exchange lands on a different Firebase uid mid-session (re-auth as another account), the server flushes every live cache — the same full flush `refresh_cache` performs — so reads never mix two logins' data. Fetches already in flight across the flush are served to their caller but not re-cached.
+All live caches are identity-scoped by sweep: if a token exchange lands on a different Firebase uid mid-session (re-auth as another account), the server flushes every live cache — the same full flush `refresh_cache` performs — so reads never mix two logins' data. Fetches already in flight across the flush are served to their caller and — except for a ≤ one-request window around the exchange (derived-analytics map caches, and readers that coalesce onto a still-pending pre-flush loader) — not re-cached.
 
 ## Performance note
 

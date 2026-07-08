@@ -250,6 +250,8 @@ export class LiveCopilotDatabase {
     // A flush during the fetch (uid transition / refresh_cache) means these
     // rows may belong to the previous identity: serve them to this caller,
     // but let neither the window cache nor the meta index keep them (#521).
+    // Fail-closed: this may also discard rows fetched under the NEW identity
+    // when the exchange resolved mid-fetch — one redundant refetch, never a mix.
     const flushedMidFetch = this.transactionsWindowCache.generationId() !== cacheGen;
     if (!flushedMidFetch) {
       // Feed the append-only id→(accountId,itemId) index from the raw page

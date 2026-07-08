@@ -127,6 +127,8 @@ export class FirebaseAuth {
 
     // Identity can only change here — userId is assigned nowhere else — so
     // this is THE chokepoint for the mid-session re-auth sweep (#521).
+    // `data.user_id &&` is an empty-string drift guard, not type noise: a
+    // drifted "" must not fire the listener with a bogus uid pair.
     if (prevUid !== null && data.user_id && prevUid !== data.user_id) {
       try {
         this.uidTransitionListener?.(prevUid, data.user_id);
