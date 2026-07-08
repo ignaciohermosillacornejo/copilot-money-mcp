@@ -45,6 +45,7 @@ export class FirebaseAuth {
   private userId: string | null = null;
   private expiresAt: number = 0;
   private extractToken: TokenExtractor;
+  private uidTransitionListener: ((prevUid: string, newUid: string) => void) | null = null;
 
   constructor(extractToken: TokenExtractor) {
     this.extractToken = extractToken;
@@ -86,6 +87,18 @@ export class FirebaseAuth {
     return this.userId;
   }
 
+  /**
+   * Register the single subscriber fired when a token exchange lands on a
+   * DIFFERENT non-null uid than the previous one — a mid-session re-auth as
+   * another account (refresh failure → cold re-extract picking up another
+   * browser login, #521). Fires AFTER the new auth state is fully installed.
+   * Listener exceptions are swallowed: a subscriber must never be able to
+   * break the token exchange.
+   */
+  setUidTransitionListener(listener: (prevUid: string, newUid: string) => void): void {
+    this.uidTransitionListener = listener;
+  }
+
   private async exchangeToken(refreshToken: string): Promise<void> {
     const response = await fetch(TOKEN_ENDPOINT, {
       method: 'POST',
@@ -106,10 +119,21 @@ export class FirebaseAuth {
       user_id: string;
     };
 
+    const prevUid = this.userId;
     this.idToken = data.id_token;
     this.refreshToken = data.refresh_token;
     this.userId = data.user_id;
     this.expiresAt = Date.now() + Number(data.expires_in) * 1000 - EXPIRY_MARGIN_MS;
+
+    // Identity can only change here — userId is assigned nowhere else — so
+    // this is THE chokepoint for the mid-session re-auth sweep (#521).
+    if (prevUid !== null && data.user_id && prevUid !== data.user_id) {
+      try {
+        this.uidTransitionListener?.(prevUid, data.user_id);
+      } catch {
+        // Subscriber failures must not break the exchange.
+      }
+    }
   }
 }
 

@@ -226,4 +226,58 @@ describe('FirebaseAuth', () => {
     expect(token2).toBe('refreshed-token');
     expect(fetchCalls).toHaveLength(2);
   });
+
+  describe('uid-transition listener (#521)', () => {
+    const tokenBody = (uid: string, expiresIn: string) => ({
+      id_token: `tok-${uid}`,
+      refresh_token: 'AMf-fake-refresh-token',
+      expires_in: expiresIn,
+      token_type: 'Bearer',
+      user_id: uid,
+    });
+
+    test('fires on a non-null → different-non-null uid change', async () => {
+      const transitions: [string, string][] = [];
+      auth.setUidTransitionListener((prev, next) => transitions.push([prev, next]));
+      // First exchange expires immediately so the second call re-exchanges.
+      mockFetchSequence([
+        [tokenBody('user-A', '0'), 200],
+        [tokenBody('user-B', '3600'), 200],
+      ]);
+
+      await auth.getIdToken();
+      expect(transitions).toEqual([]); // null → user-A is NOT a transition
+      await auth.getIdToken();
+      expect(transitions).toEqual([['user-A', 'user-B']]);
+    });
+
+    test('does not fire on a same-uid refresh', async () => {
+      const transitions: [string, string][] = [];
+      auth.setUidTransitionListener((prev, next) => transitions.push([prev, next]));
+      mockFetchSequence([
+        [tokenBody('user-A', '0'), 200],
+        [tokenBody('user-A', '3600'), 200],
+      ]);
+
+      await auth.getIdToken();
+      await auth.getIdToken();
+      expect(fetchCalls).toHaveLength(2); // a refresh really happened
+      expect(transitions).toEqual([]);
+    });
+
+    test('a throwing listener never breaks the exchange', async () => {
+      auth.setUidTransitionListener(() => {
+        throw new Error('subscriber bug');
+      });
+      mockFetchSequence([
+        [tokenBody('user-A', '0'), 200],
+        [tokenBody('user-B', '3600'), 200],
+      ]);
+
+      await auth.getIdToken();
+      const token = await auth.getIdToken();
+      expect(token).toBe('tok-user-B');
+      expect(auth.getUserId()).toBe('user-B');
+    });
+  });
 });
