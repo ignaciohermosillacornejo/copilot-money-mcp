@@ -2923,8 +2923,12 @@ export class CopilotMoneyTools {
       };
 
       // Feed the live meta index so an immediate follow-up write on the new
-      // transaction resolves without a network fetch.
-      this.liveDb?.indexTransactionMeta(tx.id, { accountId: tx.accountId, itemId: tx.itemId });
+      // transaction resolves without a network fetch. Same empty-id guard as
+      // the other mutation feeds (#518) — response validation is warn-only,
+      // so a drifted response must not reach the index.
+      if (tx.accountId && tx.itemId) {
+        this.liveDb?.indexTransactionMeta(tx.id, { accountId: tx.accountId, itemId: tx.itemId });
+      }
 
       return {
         success: true,
