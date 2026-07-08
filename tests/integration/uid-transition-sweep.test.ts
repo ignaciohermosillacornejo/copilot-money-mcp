@@ -10,17 +10,26 @@
  * refetch under the new identity.
  */
 import { test, expect, afterEach, mock } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { CopilotMoneyServer } from '../../src/server.js';
 import { FirebaseAuth } from '../../src/core/auth/firebase-auth.js';
 import { GraphQLClient } from '../../src/core/graphql/client.js';
 import type { TokenResult } from '../../src/core/auth/browser-token.js';
+import { createTestDb } from '../helpers/test-db.js';
 
 const originalFetch = globalThis.fetch;
 const originalDisable = process.env.COPILOT_DISABLE_PERSISTENT_INDEX;
+let tempDbDir: string | undefined;
 afterEach(() => {
   globalThis.fetch = originalFetch;
   if (originalDisable === undefined) delete process.env.COPILOT_DISABLE_PERSISTENT_INDEX;
   else process.env.COPILOT_DISABLE_PERSISTENT_INDEX = originalDisable;
+  if (tempDbDir) {
+    rmSync(tempDbDir, { recursive: true, force: true });
+    tempDbDir = undefined;
+  }
 });
 
 const account = (id: string, name: string) => ({
@@ -92,6 +101,11 @@ test('mid-session uid transition flushes all live caches (#521)', async () => {
     });
   }) as typeof fetch;
 
+  // Provide a synthetic LevelDB so isAvailable() passes on CI (no real DB).
+  // The live tools never touch LevelDB; the DB only needs to satisfy the guard.
+  tempDbDir = mkdtempSync(join(tmpdir(), 'copilot-sweep-'));
+  await createTestDb(tempDbDir, []);
+
   const extractor = mock(() =>
     Promise.resolve({
       candidates: [{ token: 'AMf-r', browser: 'Chrome' }] as TokenResult[],
@@ -99,7 +113,7 @@ test('mid-session uid transition flushes all live caches (#521)', async () => {
     })
   );
   const client = new GraphQLClient(new FirebaseAuth(extractor));
-  const server = new CopilotMoneyServer(undefined, undefined, false, true, client);
+  const server = new CopilotMoneyServer(tempDbDir, undefined, false, true, client);
 
   const warns: string[] = [];
   const origWarn = console.warn;
