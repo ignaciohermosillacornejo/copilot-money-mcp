@@ -53,6 +53,9 @@ export class TransactionWindowCache<T extends CachedTransaction = CachedTransact
   // Running row count maintained by every mutation. Avoids the previous
   // O(n²) loop where evictLRU recomputed totalRows() on each iteration.
   private _totalRows = 0;
+  // Bumped by every invalidate(); fetchMonth captures it before a network
+  // fetch and skips ingest + meta feed when it moved (#521).
+  private generation = 0;
 
   constructor(
     private readonly opts: TransactionWindowCacheOptions,
@@ -159,7 +162,13 @@ export class TransactionWindowCache<T extends CachedTransaction = CachedTransact
     }
   }
 
+  /** Monotonic invalidation stamp — see the generation field. */
+  generationId(): number {
+    return this.generation;
+  }
+
   invalidate(scope: 'all' | YearMonth[]): void {
+    this.generation += 1;
     if (scope === 'all') {
       this.windows.clear();
       this.lastAccessed.clear();
