@@ -44,6 +44,10 @@ interface Entry<T> {
 
 export class SnapshotCache<T> {
   private entry: Entry<T> | null = null;
+  // Bumped by invalidate(); loaders capture it before fetching so a flush
+  // during the fetch (uid transition, refresh_cache) can't be overwritten
+  // by the stale write-back (#521).
+  private generation = 0;
 
   constructor(
     private readonly opts: SnapshotCacheOptions<T>,
@@ -55,14 +59,15 @@ export class SnapshotCache<T> {
       return { rows: this.entry.rows, fetched_at: this.entry.fetched_at, hit: true };
     }
 
+    const gen = this.generation;
     const result = await this.inflight.run(this.opts.key, async () => {
       const rows = await loader();
       // Cache write happens-before the loader's returned promise resolves,
       // ensuring it precedes the InFlightRegistry's .finally() cleanup.
-      // This also guards against a concurrent invalidate() racing between
-      // awaits — the local `entry` is captured before any external code runs.
+      // Skipped when invalidate() fired mid-flight: callers still receive
+      // the rows, but the next read() refetches fresh (#521).
       const entry: Entry<T> = { rows, fetched_at: Date.now() };
-      this.entry = entry;
+      if (this.generation === gen) this.entry = entry;
       return entry;
     });
 
@@ -87,6 +92,7 @@ export class SnapshotCache<T> {
 
   invalidate(): void {
     this.entry = null;
+    this.generation += 1;
   }
 
   /**

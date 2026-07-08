@@ -136,6 +136,31 @@ describe('SnapshotCache', () => {
     expect(a.rows).toEqual([{ id: '1', name: 'one' }]);
     expect(b.rows).toEqual([{ id: '1', name: 'one' }]);
   });
+
+  test('invalidate during an in-flight load discards the stale write-back (#521)', async () => {
+    const cache = makeCache();
+    let release!: (rows: Row[]) => void;
+    const gate = new Promise<Row[]>((resolve) => {
+      release = resolve;
+    });
+
+    const pending = cache.read(() => gate); // loader in flight
+    cache.invalidate(); // uid-transition flush fires mid-flight
+    release([{ id: 'stale', name: 'previous login' }]);
+    const result = await pending;
+
+    // The caller that initiated the fetch still gets its rows…
+    expect(result.rows.map((r) => r.id)).toEqual(['stale']);
+    // …but nothing was cached: the next read must reload.
+    expect(cache.peek()).toBeUndefined();
+    let reloads = 0;
+    await cache.read(async () => {
+      reloads += 1;
+      return [{ id: 'fresh', name: 'current login' }];
+    });
+    expect(reloads).toBe(1);
+    expect(cache.peek()?.map((r) => r.id)).toEqual(['fresh']);
+  });
 });
 
 describe('SnapshotCache.peek', () => {
