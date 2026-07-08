@@ -193,6 +193,50 @@ describe('TransactionMetaStore', () => {
     expect(warns[0]).toContain('skipped 2 unparseable line');
   });
 
+  test('cap-valve and load-failure warnings suppress independently per uid (#521 polish)', () => {
+    mkdirSync(dir, { recursive: true });
+    const line = '{"i":"t1","a":"acct-1","t":"item-1"}\n';
+    writeFileSync(fileFor('userA'), line.repeat(200));
+    writeFileSync(fileFor('userB'), line);
+
+    let current: string | null = 'userA';
+    const s = new TransactionMetaStore({
+      baseDir: dir,
+      uidProvider: () => current,
+      maxBytes: 1024, // force the valve on userA's oversized file
+    });
+
+    const warns: string[] = [];
+    const origWarn = console.warn;
+    console.warn = (...args: unknown[]) => warns.push(args.join(' '));
+    try {
+      chmodSync(dir, 0o555); // tmp-file write fails → cap-valve failure path
+      s.loadOnce();
+      expect(warns.some((w) => w.includes('cap-valve failed'))).toBe(true);
+      chmodSync(dir, 0o755);
+
+      // Rotate away and back so userA's file is re-read (loadedForUid moves).
+      current = 'userB';
+      s.loadOnce();
+
+      // Now make userA's file unreadable: the LOAD failure for userA must
+      // still warn — the cap-valve warning above must not have consumed
+      // userA's load-failure suppression slot.
+      chmodSync(fileFor('userA'), 0o000);
+      current = 'userA';
+      s.loadOnce();
+      expect(warns.some((w) => w.includes('unreadable'))).toBe(true);
+    } finally {
+      console.warn = origWarn;
+      chmodSync(dir, 0o755);
+      try {
+        chmodSync(fileFor('userA'), 0o644);
+      } catch {
+        // best-effort cleanup
+      }
+    }
+  });
+
   test('uid change between buffer and flush: entries stay with the uid captured at buffer time', () => {
     let current: string | null = 'userA';
     const s = new TransactionMetaStore({ baseDir: dir, uidProvider: () => current });
