@@ -267,6 +267,13 @@ export class GraphQLClient {
     return this.auth.getUserId();
   }
 
+  /** Register the uid-transition subscriber on the underlying auth — the
+   *  composition root uses this to flush all live caches on a mid-session
+   *  identity change (#521). See FirebaseAuth.setUidTransitionListener. */
+  setUidTransitionListener(listener: (prevUid: string, newUid: string) => void): void {
+    this.auth.setUidTransitionListener(listener);
+  }
+
   async mutate<TVariables, TResponse>(
     operationName: string,
     query: string,
