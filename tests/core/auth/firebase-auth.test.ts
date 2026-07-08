@@ -279,5 +279,18 @@ describe('FirebaseAuth', () => {
       expect(token).toBe('tok-user-B');
       expect(auth.getUserId()).toBe('user-B');
     });
+
+    test('empty user_id in a drifted exchange response does not fire the listener', async () => {
+      const transitions: [string, string][] = [];
+      auth.setUidTransitionListener((prev, next) => transitions.push([prev, next]));
+      mockFetchSequence([
+        [tokenBody('user-A', '0'), 200],
+        [tokenBody('', '3600'), 200],
+      ]);
+
+      await auth.getIdToken();
+      await auth.getIdToken();
+      expect(transitions).toEqual([]);
+    });
   });
 });

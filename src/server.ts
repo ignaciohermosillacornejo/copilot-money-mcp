@@ -109,8 +109,9 @@ export class CopilotMoneyServer {
           console.warn(
             '[copilot-money-mcp] authenticated uid changed mid-session — flushing all live caches'
           );
-          refreshCache.refresh({ scope: 'all' }).catch(() => {
-            // scope:'all' cannot reject today; guard future rejectable awaits.
+          refreshCache.refresh({ scope: 'all' }).catch((e: unknown) => {
+            // scope:'all' cannot reject today; keep future rejections visible.
+            console.warn('[copilot-money-mcp] cache sweep after uid transition failed:', e);
           });
         });
       }
