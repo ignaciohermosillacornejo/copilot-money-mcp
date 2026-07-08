@@ -7,7 +7,7 @@
  * into set_budget.
  */
 
-import { describe, test, expect, beforeEach } from 'bun:test';
+import { describe, test, expect, beforeEach, mock } from 'bun:test';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
@@ -15,6 +15,7 @@ import type {
   CreatedTransaction,
   CreateTransactionResponse,
 } from '../../src/core/graphql/transactions.js';
+import type { LiveCopilotDatabase } from '../../src/core/live-database.js';
 
 describe('updateCategory', () => {
   let tools: CopilotMoneyTools;
@@ -621,6 +622,54 @@ describe('createTransaction', () => {
       tools.createTransaction({ ...validArgs, tag_ids: ['tag1', 'ghost_tag'] })
     ).rejects.toThrow(/Tag not found.*ghost_tag/i);
     expect(client._calls).toHaveLength(0);
+  });
+
+  test('response routing ids feed the live meta index', async () => {
+    const client = createMockGraphQLClient({ CreateTransaction: { createTransaction: createdTx } });
+    const indexTransactionMeta = mock();
+    tools = new CopilotMoneyTools(mockDb, client, {
+      indexTransactionMeta,
+    } as unknown as LiveCopilotDatabase);
+
+    await tools.createTransaction(validArgs);
+
+    expect(indexTransactionMeta).toHaveBeenCalledTimes(1);
+    expect(indexTransactionMeta).toHaveBeenCalledWith('new-tx-1', {
+      accountId: 'acc1',
+      itemId: 'item1',
+    });
+  });
+
+  test('drifted response with empty routing ids is not fed to the index (#518)', async () => {
+    // Mutation responses are validated WARN-ONLY (response-validation.ts never
+    // strips), so a drifted CreateTransaction response reaches this feed
+    // as-is. Same guard as the split_transaction feed.
+    const client = createMockGraphQLClient({
+      CreateTransaction: { createTransaction: { ...createdTx, accountId: '' } },
+    });
+    const indexTransactionMeta = mock();
+    tools = new CopilotMoneyTools(mockDb, client, {
+      indexTransactionMeta,
+    } as unknown as LiveCopilotDatabase);
+
+    await tools.createTransaction(validArgs);
+
+    expect(indexTransactionMeta).not.toHaveBeenCalled();
+  });
+
+  test('drifted response with empty itemId is not fed to the index (#518)', async () => {
+    // Symmetric case: the guard must check both routing ids.
+    const client = createMockGraphQLClient({
+      CreateTransaction: { createTransaction: { ...createdTx, itemId: '' } },
+    });
+    const indexTransactionMeta = mock();
+    tools = new CopilotMoneyTools(mockDb, client, {
+      indexTransactionMeta,
+    } as unknown as LiveCopilotDatabase);
+
+    await tools.createTransaction(validArgs);
+
+    expect(indexTransactionMeta).not.toHaveBeenCalled();
   });
 });
 
