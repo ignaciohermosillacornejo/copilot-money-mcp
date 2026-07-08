@@ -95,6 +95,23 @@ export class CopilotMoneyServer {
         investmentPrices,
         refreshCache: new RefreshCacheTool(liveDb, balanceHistory, investmentPrices),
       };
+
+      // Mid-session re-auth as a DIFFERENT account (#521): without this,
+      // every live cache keeps serving the previous login's data until TTL.
+      // One chokepoint, one sweep: reuse refresh_cache's full flush, which
+      // already enumerates every live cache — caches added there later join
+      // this sweep automatically. Feature-check because injected test
+      // doubles are structural casts without the method (they have no real
+      // auth, so no transitions can occur).
+      const refreshCache = this.live.refreshCache;
+      if (typeof graphqlClient.setUidTransitionListener === 'function') {
+        graphqlClient.setUidTransitionListener(() => {
+          console.warn(
+            '[copilot-money-mcp] authenticated uid changed mid-session — flushing all live caches'
+          );
+          void refreshCache.refresh({ scope: 'all' });
+        });
+      }
     }
 
     this.tools = new CopilotMoneyTools(this.db, graphqlClient, liveDb);
