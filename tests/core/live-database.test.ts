@@ -1024,6 +1024,19 @@ describe('transaction meta index', () => {
     });
   });
 
+  test('indexTransactionMeta ignores empty routing ids at the funnel (#518)', () => {
+    // Mutation responses are Zod-validated warn-only (never stripped), so a
+    // drifted response can hand empty routing ids to any feed. The funnel
+    // must drop them even when a call site forgets its own guard.
+    const live = new LiveCopilotDatabase(
+      { mutate: mock(), query: mock() } as unknown as GraphQLClient,
+      {} as CopilotDatabase
+    );
+    live.indexTransactionMeta('meta-no-acct', { accountId: '', itemId: 'item-B' });
+    live.indexTransactionMeta('meta-no-item', { accountId: 'acct-B', itemId: '' });
+    expect(live.lookupTransactionMeta(['meta-no-acct', 'meta-no-item']).size).toBe(0);
+  });
+
   test('lookupTransactionMeta returns an empty map for unknown ids', () => {
     const live = new LiveCopilotDatabase(
       { mutate: mock(), query: mock() } as unknown as GraphQLClient,
