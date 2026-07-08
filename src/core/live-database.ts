@@ -229,6 +229,7 @@ export class LiveCopilotDatabase {
     const [monthStart, monthEnd] = getMonthRange(year, m);
     const filter = buildTransactionFilter({ startDate: monthStart, endDate: monthEnd });
     const fetched_at = Date.now();
+    const cacheGen = this.transactionsWindowCache.generationId();
     let pages = 0;
     let droppedInvalid = 0;
     const rawRows = await paginateTransactions(
@@ -246,23 +247,31 @@ export class LiveCopilotDatabase {
       },
       { startDate: monthStart }
     );
-    // Feed the append-only id→(accountId,itemId) index from the raw page
-    // rows — pre-trim, because leaked tail rows are real transactions too
-    // and their routing ids are just as valid. Guard against drifted
-    // responses with null/empty routing ids (see review finding).
-    for (const r of rawRows) {
-      if (r.accountId && r.itemId) {
-        this.feedMeta(r.id, { accountId: r.accountId, itemId: r.itemId });
+    // A flush during the fetch (uid transition / refresh_cache) means these
+    // rows may belong to the previous identity: serve them to this caller,
+    // but let neither the window cache nor the meta index keep them (#521).
+    const flushedMidFetch = this.transactionsWindowCache.generationId() !== cacheGen;
+    if (!flushedMidFetch) {
+      // Feed the append-only id→(accountId,itemId) index from the raw page
+      // rows — pre-trim, because leaked tail rows are real transactions too
+      // and their routing ids are just as valid. Guard against drifted
+      // responses with null/empty routing ids (see review finding).
+      for (const r of rawRows) {
+        if (r.accountId && r.itemId) {
+          this.feedMeta(r.id, { accountId: r.accountId, itemId: r.itemId });
+        }
       }
+      this.metaStore.flush();
     }
-    this.metaStore.flush();
     // Trim leaked tail-page rows that fall outside this month's window.
     // `paginateTransactions` early-exits AFTER appending a page, so the
     // trailing edge of the last page can dip into the previous month.
     // Without this trim, those rows pollute the wrong cache bucket and
     // get double-counted on subsequent full-range queries.
     const rows = rawRows.filter((r) => r.date >= monthStart && r.date <= monthEnd);
-    this.transactionsWindowCache.ingestMonth(month, rows, fetched_at);
+    if (!flushedMidFetch) {
+      this.transactionsWindowCache.ingestMonth(month, rows, fetched_at);
+    }
     return { rows, fetched_at, pages, droppedInvalid };
   }
 

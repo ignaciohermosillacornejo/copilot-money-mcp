@@ -1311,6 +1311,40 @@ describe('transaction meta index', () => {
     }
   });
 
+  test('flush during an in-flight month fetch discards ingest and meta feed (#521)', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const page = metaPage([metaNode('race-t1', '2025-01-15', 'acct-A', 'item-A')]);
+    let queries = 0;
+    const client = {
+      mutate: mock(),
+      query: mock(async () => {
+        queries += 1;
+        if (queries === 1) await gate; // hold the first fetch in flight
+        return { transactions: page };
+      }),
+    } as unknown as GraphQLClient;
+    const live = new LiveCopilotDatabase(client, {} as CopilotDatabase);
+
+    const pending = live.getTransactions({ from: '2025-01-01', to: '2025-01-31' });
+    // Let getTransactions reach the awaited fetch before flushing.
+    await Bun.sleep(0);
+    live.getTransactionsWindowCache().invalidate('all'); // uid-transition sweep fires
+    release();
+    const result = await pending;
+
+    // The in-flight caller is still served its rows…
+    expect(result.rows.map((r) => r.id)).toEqual(['race-t1']);
+    // …but neither the window cache nor the meta index kept them.
+    expect(live.lookupTransactionMeta(['race-t1']).size).toBe(0);
+    expect(live.getTransactionsWindowCache().hasMonth('2025-01')).toBe(false);
+    // A follow-up read refetches instead of serving the discarded ingest.
+    await live.getTransactions({ from: '2025-01-01', to: '2025-01-31' });
+    expect(queries).toBe(2);
+  });
+
   test('patchLiveTransaction feeds persistence; new instance resolves the routing id without fetching (#511)', () => {
     // Verify that patchLiveTransaction's feedMeta path persists entries so a
     // fresh LiveCopilotDatabase can resolve them without any network call.
