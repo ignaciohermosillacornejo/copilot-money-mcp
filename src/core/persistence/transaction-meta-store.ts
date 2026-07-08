@@ -48,6 +48,9 @@ export class TransactionMetaStore {
   // Load warnings are per-uid: a corrupt file for a SECOND login must
   // still warn even after the first login's file already did.
   private readonly warnedLoadUids = new Set<string>();
+  // Cap-valve failures warn independently from load failures — two distinct
+  // messages must not share one suppression slot (#522 review, absorbed here).
+  private readonly warnedCapValveUids = new Set<string>();
   private warnedAppend = false;
   // Skip warnings are per-uid for the same reason load warnings are: a
   // second login's torn file must still warn.
@@ -155,8 +158,8 @@ export class TransactionMetaStore {
           writeFileSync(tmp, this.serialize(out));
           renameSync(tmp, file);
         } catch (e) {
-          if (!this.warnedLoadUids.has(uid)) {
-            this.warnedLoadUids.add(uid);
+          if (!this.warnedCapValveUids.has(uid)) {
+            this.warnedCapValveUids.add(uid);
             console.warn(
               `[copilot-money-mcp] persistent meta index cap-valve failed (${(e as Error).message}) — file not compacted. File: ${file}`
             );
