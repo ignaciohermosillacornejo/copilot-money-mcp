@@ -280,6 +280,28 @@ describe('validateMutationResponse', () => {
         'Mutation.splitTransaction:response': 1,
       });
       expect(warnSpy).toHaveBeenCalledTimes(1);
+      const message = warnSpy.mock.calls[0][0] as string;
+      expect(message).toContain('operation=SplitTransaction');
+      expect(message).toContain('path=splitTransaction.splitTransactions.0.itemId');
+      expect(message).toContain('code=too_small');
+    });
+
+    // AddTransactionToRecurring reuses CreatedTransactionSchema, so it inherits
+    // the .min(1) guard; pin it explicitly so the coverage is visible per-op.
+    test('empty accountId in an addTransactionToRecurring response warns + counts', () => {
+      const tx = makeTransaction();
+      tx.accountId = '';
+      validateMutationResponse('AddTransactionToRecurring', {
+        addTransactionToRecurring: { transaction: tx },
+      });
+      expect(getResponseDriftStats()).toEqual({
+        'Mutation.addTransactionToRecurring:response': 1,
+      });
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      const message = warnSpy.mock.calls[0][0] as string;
+      expect(message).toContain('operation=AddTransactionToRecurring');
+      expect(message).toContain('path=addTransactionToRecurring.transaction.accountId');
+      expect(message).toContain('code=too_small');
     });
 
     test('non-empty ids still pass clean (no false positives)', () => {
