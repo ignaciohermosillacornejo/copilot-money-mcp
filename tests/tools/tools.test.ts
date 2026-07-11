@@ -703,8 +703,7 @@ describe('CopilotMoneyTools', () => {
       const result = await tools.getTransactions({ transaction_type: 'tagged' });
       expect(result.count).toBe(2);
       const tags = result.type_specific_data?.tags as
-        | Array<{ tag: string; count: number }>
-        | undefined;
+        Array<{ tag: string; count: number }> | undefined;
       const tagNames = tags?.map((t) => t.tag);
       expect(tagNames).toContain('frenchpolynesia');
       expect(tagNames).toContain('vacation');
@@ -1887,8 +1886,7 @@ describe('createToolSchemas', () => {
     const enumOf = (tool: string, prop: string): string[] | undefined => {
       const schema = schemas.find((s) => s.name === tool);
       const props = schema?.inputSchema.properties as
-        | Record<string, { enum?: string[] }>
-        | undefined;
+        Record<string, { enum?: string[] }> | undefined;
       return props?.[prop]?.enum;
     };
 

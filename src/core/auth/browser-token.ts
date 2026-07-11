@@ -112,13 +112,11 @@ const OPERA_USER_DATA_DIRS: ReadonlyArray<{ name: string; userDataDir: string }>
 
 /** Default browser configurations for macOS. */
 export const BROWSER_CONFIGS: BrowserConfig[] = [
-  ...CHROMIUM_USER_DATA_DIRS.map(
-    ({ name, userDataDir }): BrowserConfig => ({
-      name,
-      paths: getChromiumProfileStoragePaths(join(homedir(), userDataDir)),
-      type: 'chromium',
-    })
-  ),
+  ...CHROMIUM_USER_DATA_DIRS.map(({ name, userDataDir }): BrowserConfig => ({
+    name,
+    paths: getChromiumProfileStoragePaths(join(homedir(), userDataDir)),
+    type: 'chromium',
+  })),
   ...OPERA_USER_DATA_DIRS.map(({ name, userDataDir }): BrowserConfig => {
     const root = join(homedir(), userDataDir);
     return {
