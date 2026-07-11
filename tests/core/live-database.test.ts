@@ -10,7 +10,7 @@ import type { CategoryNode } from '../../src/core/graphql/queries/categories.js'
 import type { RecurringNode } from '../../src/core/graphql/queries/recurrings.js';
 import type { UserNode } from '../../src/core/graphql/queries/user.js';
 import { TransactionMetaStore } from '../../src/core/persistence/transaction-meta-store.js';
-import { mkdtempSync, rmSync, mkdirSync, chmodSync } from 'fs';
+import { mkdtempSync, rmSync, mkdirSync, chmodSync, readdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -1035,6 +1035,8 @@ describe('transaction meta index', () => {
     live.indexTransactionMeta('meta-no-acct', { accountId: '', itemId: 'item-B' });
     live.indexTransactionMeta('meta-no-item', { accountId: 'acct-B', itemId: '' });
     expect(live.lookupTransactionMeta(['meta-no-acct', 'meta-no-item']).size).toBe(0);
+    live.indexTransactionMeta('', { accountId: 'acct-B', itemId: 'item-B' });
+    expect(live.lookupTransactionMeta(['']).size).toBe(0);
   });
 
   test('lookupTransactionMeta returns an empty map for unknown ids', () => {
@@ -1222,6 +1224,29 @@ describe('transaction meta index', () => {
         accountId: 'acct-C',
         itemId: 'item-C',
       });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('empty id is dropped at the funnel and never written to disk (#526)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'live-meta-emptyid-'));
+    try {
+      const store = new TransactionMetaStore({ baseDir: dir, uidProvider: () => 'user-1' });
+      const live = new LiveCopilotDatabase(
+        { mutate: mock(), query: mock() } as unknown as GraphQLClient,
+        {} as CopilotDatabase,
+        { metaStore: store }
+      );
+      // Valid routing ids but a drifted empty id: pre-#526 this buffered
+      // {"i":"", ...} to disk, which loadOnce later rejects with a
+      // misleading skip warning about a line we wrote ourselves.
+      live.indexTransactionMeta('', { accountId: 'acct-A', itemId: 'item-A' });
+
+      expect(live.lookupTransactionMeta(['']).size).toBe(0);
+      // Nothing valid was buffered, so no per-uid index file should exist.
+      const files = readdirSync(dir).filter((f) => f.startsWith('txn-meta-index.'));
+      expect(files).toEqual([]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
