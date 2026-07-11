@@ -62,16 +62,20 @@ const TagSchema = z.looseObject({
  * server ever ships a NEW transaction type, responses carrying it will
  * warn until TRANSACTION_TYPES (and its smoke conformance probe) are
  * updated. That first warn is the drift signal working, not a bug.
+ *
+ * Write-critical ids (`id`, `accountId`, `itemId`) are validated with
+ * `.min(1)` to mirror read-validation.ts — empty strings are drift,
+ * symmetric with read-side schema enforcement (#526).
  */
 const CreatedTransactionSchema = z.looseObject({
-  id: z.string(),
+  id: z.string().min(1),
   name: z.string(),
   date: z.string(),
   amount: z.number(),
   categoryId: z.string(),
   type: z.enum(TRANSACTION_TYPES),
-  accountId: z.string(),
-  itemId: z.string(),
+  accountId: z.string().min(1),
+  itemId: z.string().min(1),
   isPending: z.boolean(),
   isReviewed: z.boolean(),
   createdAt: z.number(),
