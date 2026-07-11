@@ -524,12 +524,14 @@ export class LiveCopilotDatabase {
   }
 
   /** Single funnel for meta-index writes: in-memory map + persistence
-   *  buffer (#511). Entries with empty routing ids are dropped HERE, not
-   *  just at call sites (#518) — response validation is warn-only, so a
-   *  drifted read or mutation response must never poison the index even
-   *  if a future call site forgets its own guard. */
+   *  buffer (#511). Entries with empty routing ids (accountId, itemId, or id
+   *  itself) are dropped HERE, not just at call sites (#518, #526) — response
+   *  validation is warn-only, so a drifted read or mutation response must
+   *  never poison the index even if a future call site forgets its own guard.
+   *  The !id check completes the funnel invariant and matches the disk format's
+   *  non-empty-id requirement. */
   private feedMeta(id: string, meta: { accountId: string; itemId: string }): void {
-    if (!meta.accountId || !meta.itemId) return;
+    if (!id || !meta.accountId || !meta.itemId) return;
     this.txnMetaIndex.set(id, meta);
     this.metaStore.buffer(id, meta);
   }
