@@ -33,7 +33,7 @@ import {
 } from '../src/core/leveldb-reader.js';
 import { GraphQLClient } from '../src/core/graphql/client.js';
 import { FirebaseAuth } from '../src/core/auth/firebase-auth.js';
-import { extractRefreshToken } from '../src/core/auth/browser-token.js';
+import { extractRefreshTokenCandidates } from '../src/core/auth/browser-token.js';
 import { CopilotDatabase } from '../src/core/database.js';
 import { CopilotMoneyTools } from '../src/tools/tools.js';
 
@@ -180,7 +180,7 @@ async function main(): Promise<void> {
   if (skip.size > 0) console.log(`Skipping: ${[...skip].join(', ')}`);
   if (only) console.log(`Only: ${only}`);
 
-  const auth = new FirebaseAuth(() => extractRefreshToken());
+  const auth = new FirebaseAuth(() => extractRefreshTokenCandidates());
   const client = new GraphQLClient(auth);
   const db = new CopilotDatabase(dbPath);
   const tools = new CopilotMoneyTools(db, client);

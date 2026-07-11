@@ -34,7 +34,7 @@ import * as readline from 'node:readline';
 import { GraphQLClient, GraphQLError } from '../src/core/graphql/client.js';
 import type { GraphQLErrorCode } from '../src/core/graphql/client.js';
 import { FirebaseAuth } from '../src/core/auth/firebase-auth.js';
-import { extractRefreshToken } from '../src/core/auth/browser-token.js';
+import { extractRefreshTokenCandidates } from '../src/core/auth/browser-token.js';
 import { CopilotDatabase } from '../src/core/database.js';
 import { CopilotMoneyTools } from '../src/tools/tools.js';
 
@@ -2912,7 +2912,7 @@ async function main(): Promise<void> {
       `section=${onlySection ?? 'all'}`
   );
 
-  const auth = new FirebaseAuth(() => extractRefreshToken());
+  const auth = new FirebaseAuth(() => extractRefreshTokenCandidates());
   const client = new GraphQLClient(auth);
   const db = new CopilotDatabase();
   const tools = new CopilotMoneyTools(db, client);

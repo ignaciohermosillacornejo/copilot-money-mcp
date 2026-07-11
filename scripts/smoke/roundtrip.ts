@@ -20,7 +20,7 @@
  */
 
 import { FirebaseAuth } from '../../src/core/auth/firebase-auth.js';
-import { extractRefreshToken } from '../../src/core/auth/browser-token.js';
+import { extractRefreshTokenCandidates } from '../../src/core/auth/browser-token.js';
 import { GraphQLClient } from '../../src/core/graphql/client.js';
 import { getResponseDriftStats } from '../../src/core/graphql/response-validation.js';
 import {
@@ -85,7 +85,7 @@ async function main(): Promise<void> {
   console.error(formatPlan(checks));
   console.error('');
 
-  const auth = new FirebaseAuth(() => extractRefreshToken());
+  const auth = new FirebaseAuth(() => extractRefreshTokenCandidates());
   try {
     await auth.getIdToken();
   } catch (err: unknown) {

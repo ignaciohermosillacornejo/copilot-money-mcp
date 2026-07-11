@@ -10,13 +10,13 @@
  *   log('done', { rows: result.length });
  *
  * Requires an authenticated app.copilot.money browser session — same auth
- * path the production server uses (FirebaseAuth via extractRefreshToken).
+ * path the production server uses (FirebaseAuth via extractRefreshTokenCandidates).
  */
 
 import { CopilotDatabase } from '../../src/core/database.js';
 import { GraphQLClient } from '../../src/core/graphql/client.js';
 import { FirebaseAuth } from '../../src/core/auth/firebase-auth.js';
-import { extractRefreshToken } from '../../src/core/auth/browser-token.js';
+import { extractRefreshTokenCandidates } from '../../src/core/auth/browser-token.js';
 import { LiveCopilotDatabase, preflightLiveAuth } from '../../src/core/live-database.js';
 
 export interface SmokeHarnessOptions {
@@ -38,7 +38,7 @@ export async function setupLiveSmoke(opts: SmokeHarnessOptions = {}): Promise<Sm
   if (opts.injectedClient) {
     graphql = opts.injectedClient;
   } else {
-    const auth = new FirebaseAuth(() => extractRefreshToken());
+    const auth = new FirebaseAuth(() => extractRefreshTokenCandidates());
     graphql = new GraphQLClient(auth);
   }
 

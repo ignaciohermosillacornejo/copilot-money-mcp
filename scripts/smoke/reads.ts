@@ -16,7 +16,7 @@
  */
 
 import { FirebaseAuth } from '../../src/core/auth/firebase-auth.js';
-import { extractRefreshToken } from '../../src/core/auth/browser-token.js';
+import { extractRefreshTokenCandidates } from '../../src/core/auth/browser-token.js';
 import { GraphQLClient } from '../../src/core/graphql/client.js';
 import { READ_SMOKE_CHECKS, type ReadSmokeState } from './read-checks.js';
 
@@ -36,7 +36,7 @@ function log(msg: string, fields?: Record<string, unknown>): void {
 }
 
 async function main(): Promise<void> {
-  const auth = new FirebaseAuth(() => extractRefreshToken());
+  const auth = new FirebaseAuth(() => extractRefreshTokenCandidates());
   try {
     await auth.getIdToken();
   } catch (err: unknown) {

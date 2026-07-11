@@ -16,17 +16,17 @@
  * `Value "<X>" does not exist in "<EnumName>" enum.`
  *
  * Requires an authenticated app.copilot.money browser session — same auth path
- * the production server uses (FirebaseAuth via extractRefreshToken).
+ * the production server uses (FirebaseAuth via extractRefreshTokenCandidates).
  */
 
 import { FirebaseAuth } from '../../src/core/auth/firebase-auth.js';
-import { extractRefreshToken } from '../../src/core/auth/browser-token.js';
+import { extractRefreshTokenCandidates } from '../../src/core/auth/browser-token.js';
 
 const ENDPOINT = 'https://app.copilot.money/api/graphql';
 
 /** Acquire a Firebase id token from the live browser session (once per run). */
 export async function getIdToken(): Promise<string> {
-  const auth = new FirebaseAuth(() => extractRefreshToken());
+  const auth = new FirebaseAuth(() => extractRefreshTokenCandidates());
   return auth.getIdToken();
 }
 
