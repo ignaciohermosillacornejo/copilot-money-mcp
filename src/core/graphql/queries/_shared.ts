@@ -16,13 +16,7 @@
  * here so callers can pass any captured value without per-wrapper unions.
  */
 export type TimeFrame =
-  | 'ONE_DAY'
-  | 'ONE_WEEK'
-  | 'ONE_MONTH'
-  | 'THREE_MONTHS'
-  | 'YTD'
-  | 'ONE_YEAR'
-  | 'ALL';
+  'ONE_DAY' | 'ONE_WEEK' | 'ONE_MONTH' | 'THREE_MONTHS' | 'YTD' | 'ONE_YEAR' | 'ALL';
 
 /**
  * All TimeFrame values, in display order. Use for MCP tool schema

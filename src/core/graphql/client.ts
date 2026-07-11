@@ -21,12 +21,7 @@ import { validateMutationResponse } from './response-validation.js';
 const ENDPOINT = 'https://app.copilot.money/api/graphql';
 
 export type GraphQLErrorCode =
-  | 'AUTH_FAILED'
-  | 'SCHEMA_ERROR'
-  | 'USER_ACTION_REQUIRED'
-  | 'SERVER_ERROR'
-  | 'NETWORK'
-  | 'UNKNOWN';
+  'AUTH_FAILED' | 'SCHEMA_ERROR' | 'USER_ACTION_REQUIRED' | 'SERVER_ERROR' | 'NETWORK' | 'UNKNOWN';
 
 /** Cap on how much raw server text we embed in error messages. */
 const MAX_SERVER_TEXT = 600;
