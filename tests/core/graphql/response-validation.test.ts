@@ -247,4 +247,45 @@ describe('validateMutationResponse', () => {
     expect(message).toContain('no registered response schema');
     expect(getResponseDriftStats()).toEqual({});
   });
+
+  describe('empty-string write-critical id drift (#526)', () => {
+    // These three ids are write-critical: accountId/itemId feed the meta
+    // index (routing for EditTransaction/CreateRecurring); id keys it. An
+    // empty string is drift, symmetric with read-validation.ts's .min(1).
+    for (const field of ['id', 'accountId', 'itemId'] as const) {
+      test(`empty ${field} in a createTransaction response warns + counts`, () => {
+        const tx = makeTransaction();
+        tx[field] = '';
+        validateMutationResponse('CreateTransaction', { createTransaction: tx });
+
+        expect(getResponseDriftStats()).toEqual({
+          'Mutation.createTransaction:response': 1,
+        });
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        const message = warnSpy.mock.calls[0][0] as string;
+        expect(message).toContain('operation=CreateTransaction');
+        expect(message).toContain(`path=createTransaction.${field}`);
+        expect(message).toContain('code=too_small');
+      });
+    }
+
+    test('empty itemId inside a splitTransaction child warns + counts', () => {
+      const parent = makeTransaction();
+      const child = makeTransaction();
+      child.itemId = '';
+      validateMutationResponse('SplitTransaction', {
+        splitTransaction: { parentTransaction: parent, splitTransactions: [child] },
+      });
+      expect(getResponseDriftStats()).toEqual({
+        'Mutation.splitTransaction:response': 1,
+      });
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+    });
+
+    test('non-empty ids still pass clean (no false positives)', () => {
+      validateMutationResponse('CreateTransaction', VALID_RESPONSES.CreateTransaction);
+      expect(warnSpy).not.toHaveBeenCalled();
+      expect(getResponseDriftStats()).toEqual({});
+    });
+  });
 });
