@@ -1,4 +1,4 @@
-import type { RawEntry } from './scrub';
+import type { RawEntry } from './scrub.js';
 
 interface QueryManagerEntry {
   id: string;
@@ -139,7 +139,7 @@ function toRawEntry(
 
 function toRawEntryVerbatim(
   opName: string,
-  kind: 'query' | 'mutation',
+  _kind: 'query' | 'mutation',
   variables: Record<string, unknown>,
   query: string,
   data: unknown,

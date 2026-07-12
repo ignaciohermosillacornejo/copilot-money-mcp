@@ -1,5 +1,5 @@
 import { rename } from 'node:fs/promises';
-import type { RawEntry } from './scrub';
+import type { RawEntry } from './scrub.js';
 
 interface DocumentDump {
   documents: Record<string, string>;
