@@ -171,7 +171,8 @@ describe('sendValidationProbe', () => {
 // Check definitions
 // ---------------------------------------------------------------------------
 
-/** The 11 input types #436 requires, plus the nested rule object. */
+/** The 11 input types #436 requires, plus the nested rule object and the two
+ *  budget input types (added when the budget probe landed). */
 const REQUIRED_COVERAGE = [
   'CreateTransactionInput',
   'EditTransactionInput',
@@ -185,6 +186,8 @@ const REQUIRED_COVERAGE = [
   'CreateTagInput',
   'EditTagInput',
   'EditAccountInput',
+  'EditCategoryBudgetInput',
+  'EditCategoryBudgetMonthlyInput',
 ];
 
 describe('field conformance checks', () => {
@@ -322,14 +325,14 @@ describe('ledger alignment', () => {
     expect(notGatedClass.map((entry) => entry.surface)).toEqual([]);
   });
 
-  test('budget input fields stay verified-once (not covered by B2 probes)', () => {
+  test('budget input fields are gated and covered by B2 probes', () => {
     const budgetEntries = CONFORMANCE_LEDGER.filter(
       (entry) => entry.kind === 'input-field' && entry.surface.startsWith('EditCategoryBudget')
     );
     expect(budgetEntries.length).toBeGreaterThan(0);
     for (const entry of budgetEntries) {
-      expect(entry.class).toBe('verified-once');
-      expect(probedSurfaces.has(entry.surface)).toBe(false);
+      expect(entry.class).toBe('gated');
+      expect(probedSurfaces.has(entry.surface)).toBe(true);
     }
   });
 });

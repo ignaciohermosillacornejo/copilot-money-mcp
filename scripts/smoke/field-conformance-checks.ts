@@ -213,4 +213,23 @@ export const ALL_FIELD_CONFORMANCE_CHECKS: readonly FieldConformanceCheck[] = [
   }
 }`
   ),
+
+  // ----- Budgets ------------------------------------------------------------
+  // editCategoryBudget returns a scalar Boolean, so the probe has NO selection
+  // set (unlike the object-returning mutations above). The malformed input
+  // field still fails validation before any resolver runs.
+  check(
+    'EditCategoryBudgetInput',
+    (a) => `mutation FieldProbe {
+  editCategoryBudget(categoryId: "x", input: { ${a} })
+}`
+  ),
+  // Monthly input is a LIST ([EditCategoryBudgetMonthlyInput!]!); also a scalar
+  // Boolean return (no selection set).
+  check(
+    'EditCategoryBudgetMonthlyInput',
+    (a) => `mutation FieldProbe {
+  editCategoryBudgetMonthly(categoryId: "x", input: [{ ${a} }])
+}`
+  ),
 ];
