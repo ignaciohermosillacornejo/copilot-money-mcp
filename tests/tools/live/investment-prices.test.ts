@@ -110,6 +110,24 @@ describe('LiveInvestmentPricesTools.getInvestmentPrices — happy daily path', (
     expect(result.prices.every((p) => p.price !== null)).toBe(true);
     expect(result.prices.map((p) => p.date)).toEqual(['2026-01-02', '2026-01-03']);
   });
+
+  test('daily: an all-null series yields an empty priced series (#534)', async () => {
+    const client = makeClient({
+      daily: [
+        { id: SECURITY_ID, price: null, date: '2026-01-01' },
+        { id: SECURITY_ID, price: null, date: '2026-01-02' },
+      ],
+    });
+    const tools = new LiveInvestmentPricesTools(makeLive(client));
+    const result = await tools.getInvestmentPrices({
+      security_id: SECURITY_ID,
+      time_frame: 'ONE_MONTH',
+    });
+    expect(result.granularity).toBe('daily');
+    expect(result.count).toBe(0);
+    expect(result.total_rows).toBe(0);
+    expect(result.prices).toEqual([]);
+  });
 });
 
 describe('LiveInvestmentPricesTools.getInvestmentPrices — happy intraday path', () => {

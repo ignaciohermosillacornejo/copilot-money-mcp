@@ -321,6 +321,8 @@ export function createLiveInvestmentPricesToolSchema(): ToolSchema {
       'to enumerate valid security_ids. Long-range responses are paginated via `max_rows` ' +
       '(default 500, max 5000) and `offset` (counts from the most-recent row); the response ' +
       'reports `total_rows` and `truncated` so callers can detect when older data was elided. ' +
+      'Daily series omit days the security had no price (the server returns null for those); ' +
+      '`count`/`total_rows` therefore count priced days, not calendar days. ' +
       'Available when --live-reads is on.',
     inputSchema: {
       type: 'object' as const,
