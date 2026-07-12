@@ -49,7 +49,6 @@ import {
   createTransaction,
   deleteTransaction,
   editTransaction,
-  splitTransaction,
 } from '../src/core/graphql/transactions.js';
 import {
   createRecurring,
@@ -731,7 +730,7 @@ async function smokeTransactionsHappyPath(
   });
 
   // isReviewed toggle
-  const originalReviewed = candidate.is_reviewed ?? false;
+  const originalReviewed = candidate.user_reviewed ?? false;
   await step('transactions', 'isReviewed: true → false → restore', async () => {
     await editTransaction(client, {
       id: txnId,
@@ -1252,6 +1251,7 @@ async function smokeTransactionsWrites(
           throw new Error(`deleteTransaction returned ${ok}, expected true`);
         }
         unregisterCleanup(created.id);
+        return;
       }
     );
   } finally {
@@ -1737,7 +1737,7 @@ async function smokeBulkReviewTransactions(
   // Capture original isReviewed state for restoration.
   const original = new Map<string, boolean>();
   for (const t of usable) {
-    original.set(t.transaction_id, t.is_reviewed ?? false);
+    original.set(t.transaction_id, t.user_reviewed ?? false);
   }
 
   await step(
@@ -2031,9 +2031,9 @@ async function smokeErrorInjection(
   // NETWORK
   await step('errors', 'NETWORK via fetch stub', async () => {
     const origFetch = globalThis.fetch;
-    globalThis.fetch = () => {
+    globalThis.fetch = (() => {
       throw new Error('ECONNRESET');
-    };
+    }) as unknown as typeof fetch;
     try {
       const e = await expectThrows(
         () => editTag(client, { id: 'any', input: { name: 'x' } }),
@@ -2542,7 +2542,7 @@ async function smokeMcpToolEndToEnd(
   const usable = allTxns.filter((t) => t.account_id && t.item_id).slice(0, 3);
   if (usable.length >= 3) {
     const original = new Map<string, boolean>();
-    for (const t of usable) original.set(t.transaction_id, t.is_reviewed ?? false);
+    for (const t of usable) original.set(t.transaction_id, t.user_reviewed ?? false);
 
     await step(
       'mcp-e2e',
@@ -2649,9 +2649,8 @@ async function smokeMcpToolEndToEnd(
       'mcp-e2e',
       'tools.setRecurringState (PAUSED → ACTIVE) happy path',
       async () => {
-        const id = (existingRecurring as { recurring_id?: string; id?: string })
-          .recurring_id ??
-          (existingRecurring as { id: string }).id;
+        const rec = existingRecurring as { recurring_id?: string; id: string };
+        const id = rec.recurring_id ?? rec.id;
         await tools.setRecurringState({ recurring_id: id, state: 'PAUSED' });
         await tools.setRecurringState({ recurring_id: id, state: 'ACTIVE' });
       }

@@ -13,7 +13,6 @@
  * ~/.claude/copilot-money/smoke-reports/. On pass: silent.
  */
 import { mkdirSync, writeFileSync } from 'fs';
-import { homedir } from 'os';
 import { dirname, join } from 'path';
 import { spawnSync } from 'child_process';
 import {

@@ -1,6 +1,6 @@
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import type { RawEntry } from './scrub';
+import type { RawEntry } from './scrub.js';
 
 export interface OperationGroup {
   kind: 'query' | 'mutation';

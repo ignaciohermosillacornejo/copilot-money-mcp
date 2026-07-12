@@ -110,7 +110,7 @@ export function addTypenameToSelectionSets(query: string): string {
     SelectionSet(node, _key, parent) {
       // Skip the operation-level selection set (directly under OperationDefinition).
       // __typename is only meaningful on concrete object type selection sets (fields).
-      if (parent && !Array.isArray(parent) && parent.kind === Kind.OPERATION_DEFINITION) {
+      if (parent && !Array.isArray(parent) && 'kind' in parent && parent.kind === Kind.OPERATION_DEFINITION) {
         return undefined; // no change
       }
       const hasTypename = node.selections.some(
