@@ -96,6 +96,12 @@ function assertNumber(value: unknown, label: string): void {
   }
 }
 
+function assertNumberOrNull(value: unknown, label: string): void {
+  if (value !== null && (typeof value !== 'number' || !Number.isFinite(value))) {
+    throw new Error(`${label}: expected a finite number or null, got ${JSON.stringify(value)}`);
+  }
+}
+
 /**
  * All Tier-0 read smoke checks, in dependency order (id producers before
  * id consumers).
@@ -355,8 +361,13 @@ export const READ_SMOKE_CHECKS: readonly ReadSmokeCheck[] = [
       if (!first) {
         throw new Error('securityPrices: expected at least one price point over ONE_MONTH');
       }
-      assertNumber(first.price, 'securityPrices[0].price');
-      log('security-prices', { rows: rows.length });
+      // price is null for un-priceable days (e.g. the earliest in the window);
+      // tolerate null but assert number-or-null so a type drift still fails (#534).
+      rows.forEach((r, i) => assertNumberOrNull(r.price, `securityPrices[${i}].price`));
+      log('security-prices', {
+        rows: rows.length,
+        null_prices: rows.filter((r) => r.price === null).length,
+      });
       return undefined;
     },
   },

@@ -265,7 +265,12 @@ export class LiveInvestmentPricesTools {
         entry = { rows, fetched_at: Date.now() };
         this.dailyCache.set(key, entry);
       }
-      const sorted = entry.rows.slice().sort((a, b) => a.date.localeCompare(b.date));
+      // Drop null-price days (server returns null for un-priceable days, e.g.
+      // the earliest in a window; #534). The output series is priced days only.
+      const priced = entry.rows.filter(
+        (r): r is SecurityPricePointNode & { price: number } => r.price !== null
+      );
+      const sorted = priced.slice().sort((a, b) => a.date.localeCompare(b.date));
       const page = paginate(sorted, { max_rows: args.max_rows, offset: args.offset });
       totalRows = page.total_rows;
       truncated = page.truncated;
