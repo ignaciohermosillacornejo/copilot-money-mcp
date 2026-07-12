@@ -478,16 +478,16 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   // (the other still claims the paths) — it would only fail the
   // unique-surface inventory expectations downstream.
   operation('editCategoryBudget', ['set_budget.category_id']),
-  // Budget input types are NOT covered by the B2 field probes (#436 scopes
-  // the 11 transaction/recurring/category/tag/account input types); these
-  // stay verified-once until a budget probe lands.
-  inputField('EditCategoryBudgetInput.amount', ['set_budget.amount']),
+  // Budget input types are field-probed by smoke:conformance (validation-only,
+  // Technique 4). The mutations return a scalar Boolean, so the probes carry no
+  // selection set — see the Budgets section of field-conformance-checks.ts.
+  gatedInputField('EditCategoryBudgetInput.amount', ['set_budget.amount']),
   responseShape('editCategoryBudget'),
   appliesSurface('editCategoryBudget'),
 
   operation('editCategoryBudgetMonthly', ['set_budget.category_id']),
-  inputField('EditCategoryBudgetMonthlyInput.amount', ['set_budget.amount']),
-  inputField('EditCategoryBudgetMonthlyInput.month', ['set_budget.month']),
+  gatedInputField('EditCategoryBudgetMonthlyInput.amount', ['set_budget.amount']),
+  gatedInputField('EditCategoryBudgetMonthlyInput.month', ['set_budget.month']),
   responseShape('editCategoryBudgetMonthly'),
   appliesSurface('editCategoryBudgetMonthly'),
 
