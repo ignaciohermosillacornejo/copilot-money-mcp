@@ -191,7 +191,7 @@ const REQUIRED_COVERAGE = [
 ];
 
 describe('field conformance checks', () => {
-  test('covers exactly the #436 input types (plus the nested rule object)', () => {
+  test('covers exactly the #436 input types (plus the nested rule object and two budget input types)', () => {
     const covered = ALL_FIELD_CONFORMANCE_CHECKS.map((c) => c.inputTypeName).sort();
     expect(covered).toEqual([...REQUIRED_COVERAGE].sort());
   });
