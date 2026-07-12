@@ -19,7 +19,14 @@ import type { TimeFrame } from './_shared.js';
 
 export interface SecurityPricePointNode {
   id: string;
-  price: number;
+  /**
+   * Daily close for the security. NULL for a day the security has no price
+   * (e.g. the earliest day in the requested window). Live-verified via
+   * `bun run smoke:reads` on 2026-07-12. Downstream (get_investment_prices_live)
+   * drops null points; this wrapper passes them through so the read-shape gate
+   * can observe them.
+   */
+  price: number | null;
   /** ISO YYYY-MM-DD; one row per market day in the requested range. */
   date: string;
 }

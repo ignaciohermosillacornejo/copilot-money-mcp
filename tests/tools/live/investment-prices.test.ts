@@ -90,6 +90,26 @@ describe('LiveInvestmentPricesTools.getInvestmentPrices — happy daily path', (
     const queryMock = client.query as ReturnType<typeof mock>;
     expect(queryMock.mock.calls[0]?.[0]).toBe('SecurityPrices');
   });
+
+  test('daily: null-price points are dropped from the series (#534)', async () => {
+    const client = makeClient({
+      daily: [
+        { id: SECURITY_ID, price: null, date: '2026-01-01' }, // un-priceable gap day
+        { id: SECURITY_ID, price: 101, date: '2026-01-02' },
+        { id: SECURITY_ID, price: 102, date: '2026-01-03' },
+      ],
+    });
+    const tools = new LiveInvestmentPricesTools(makeLive(client));
+    const result = await tools.getInvestmentPrices({
+      security_id: SECURITY_ID,
+      time_frame: 'ONE_MONTH',
+    });
+    expect(result.granularity).toBe('daily');
+    expect(result.count).toBe(2);
+    expect(result.total_rows).toBe(2);
+    expect(result.prices.every((p) => p.price !== null)).toBe(true);
+    expect(result.prices.map((p) => p.date)).toEqual(['2026-01-02', '2026-01-03']);
+  });
 });
 
 describe('LiveInvestmentPricesTools.getInvestmentPrices — happy intraday path', () => {

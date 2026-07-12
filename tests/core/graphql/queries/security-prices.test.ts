@@ -53,4 +53,25 @@ describe('fetchSecurityPrices', () => {
       timeFrame: undefined,
     });
   });
+
+  test('passes a null-price point through unchanged (#534)', async () => {
+    const client = {
+      query: mock(() =>
+        Promise.resolve({
+          securityPrices: [
+            { id: 'sec-A', price: null, date: '2026-01-01' },
+            { id: 'sec-A', price: 101, date: '2026-01-02' },
+          ],
+        })
+      ),
+    } as unknown as GraphQLClient;
+
+    const { fetchSecurityPrices } =
+      await import('../../../../src/core/graphql/queries/security-prices.js');
+    const rows = await fetchSecurityPrices(client, { id: 'sec-A', timeFrame: 'ONE_MONTH' });
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.price).toBeNull();
+    expect(rows[1]?.price).toBe(101);
+  });
 });
