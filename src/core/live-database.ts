@@ -44,6 +44,7 @@ import type { NetworthHistoryNode } from './graphql/queries/networth.js';
 import type { UpcomingRecurringNode } from './graphql/queries/upcoming-recurrings.js';
 import type { DailySpendNode } from './graphql/queries/monthly-spend.js';
 import type { HoldingNode } from './graphql/queries/holdings.js';
+import type { AllocationNode } from './graphql/queries/investment-allocation.js';
 import { fetchUser, type UserNode } from './graphql/queries/user.js';
 import type { Transaction } from '../models/index.js';
 import { ONE_HOUR_MS, SIX_HOURS_MS, ONE_DAY_MS, ONE_WEEK_MS } from '../utils/durations.js';
@@ -97,6 +98,12 @@ export class LiveCopilotDatabase {
   // `recurringCache` TTL precedent for similarly slow-moving entities. Callers
   // who need a fresh snapshot can use refresh_cache with scope='holdings'.
   private readonly holdingsCache: SnapshotCache<HoldingNode>;
+  // allocationCache stores the portfolio asset-class mix (one row per asset
+  // class). 6h TTL matches holdingsCache — the mix moves slowly; intraday
+  // price drift does not need second-by-second freshness. The scope filter is
+  // server-side, so the single snapshot holds the most-recently-requested
+  // scope (LiveInvestmentAllocationTools invalidates on scope change).
+  private readonly allocationCache: SnapshotCache<AllocationNode>;
   private readonly transactionsWindowCache: TransactionWindowCache<TransactionNode>;
   /**
    * Append-only id → (accountId, itemId) index fed by every live
@@ -180,6 +187,10 @@ export class LiveCopilotDatabase {
     );
     this.holdingsCache = new SnapshotCache<HoldingNode>(
       { key: 'holdings', ttlMs: SIX_HOURS_MS, keyFn: (h) => h.id },
+      this.inflight
+    );
+    this.allocationCache = new SnapshotCache<AllocationNode>(
+      { key: 'investment_allocation', ttlMs: SIX_HOURS_MS, keyFn: (a) => a.id },
       this.inflight
     );
     this.transactionsWindowCache = new TransactionWindowCache<TransactionNode>(
@@ -472,6 +483,10 @@ export class LiveCopilotDatabase {
 
   getHoldingsCache(): SnapshotCache<HoldingNode> {
     return this.holdingsCache;
+  }
+
+  getAllocationCache(): SnapshotCache<AllocationNode> {
+    return this.allocationCache;
   }
 
   /**
