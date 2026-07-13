@@ -98,7 +98,7 @@
     "graphql": "^17.0.2",
     "husky": "^9.1.7",
     "prettier": "^3.9.5",
-    "typescript": "^6.0.2",
+    "typescript": "^7.0.2",
     "typescript-eslint": "^8.62.1"
   }
 }
