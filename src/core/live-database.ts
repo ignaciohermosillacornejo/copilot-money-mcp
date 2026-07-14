@@ -45,6 +45,7 @@ import type { UpcomingRecurringNode } from './graphql/queries/upcoming-recurring
 import type { DailySpendNode } from './graphql/queries/monthly-spend.js';
 import type { HoldingNode } from './graphql/queries/holdings.js';
 import type { AllocationNode } from './graphql/queries/investment-allocation.js';
+import type { TopMoverNode } from './graphql/queries/top-movers.js';
 import { fetchUser, type UserNode } from './graphql/queries/user.js';
 import type { Transaction } from '../models/index.js';
 import { ONE_HOUR_MS, SIX_HOURS_MS, ONE_DAY_MS, ONE_WEEK_MS } from '../utils/durations.js';
@@ -104,6 +105,12 @@ export class LiveCopilotDatabase {
   // server-side, so the single snapshot holds the most-recently-requested
   // scope (LiveInvestmentAllocationTools invalidates on scope change).
   private readonly allocationCache: SnapshotCache<AllocationNode>;
+  // topMoversCache stores the biggest-movers list (one row per security).
+  // 1h TTL: the movers ranking shifts intraday as prices move — faster than
+  // the holdings/allocation snapshots. The `filter` param is server-side, so
+  // the single snapshot holds the most-recently-requested filter
+  // (LiveTopMoversTools invalidates on filter change).
+  private readonly topMoversCache: SnapshotCache<TopMoverNode>;
   private readonly transactionsWindowCache: TransactionWindowCache<TransactionNode>;
   /**
    * Append-only id → (accountId, itemId) index fed by every live
@@ -191,6 +198,10 @@ export class LiveCopilotDatabase {
     );
     this.allocationCache = new SnapshotCache<AllocationNode>(
       { key: 'investment_allocation', ttlMs: SIX_HOURS_MS, keyFn: (a) => a.id },
+      this.inflight
+    );
+    this.topMoversCache = new SnapshotCache<TopMoverNode>(
+      { key: 'top_movers', ttlMs: ONE_HOUR_MS, keyFn: (m) => m.security.id },
       this.inflight
     );
     this.transactionsWindowCache = new TransactionWindowCache<TransactionNode>(
@@ -487,6 +498,10 @@ export class LiveCopilotDatabase {
 
   getAllocationCache(): SnapshotCache<AllocationNode> {
     return this.allocationCache;
+  }
+
+  getTopMoversCache(): SnapshotCache<TopMoverNode> {
+    return this.topMoversCache;
   }
 
   /**
