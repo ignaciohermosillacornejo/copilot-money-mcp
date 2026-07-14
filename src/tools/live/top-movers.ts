@@ -15,9 +15,10 @@
  * a different filter invalidates and refetches (same pattern as
  * get_networth_live's time_frame). Assumes serial callers.
  *
- * `price_points[].timestamp` is passed through as the server returns it — the
- * unit (epoch s vs ms) is documented in the tool description (live-verified,
- * #540).
+ * `price_points[].timestamp` is passed through as the server returns it. The
+ * unit (epoch seconds vs milliseconds) is not yet disambiguated — treat it as
+ * an ordered plotting key. #540's Task 4 pins the unit down against a live
+ * response and records it in the tool description.
  */
 
 import type { LiveCopilotDatabase } from '../../core/live-database.js';
@@ -111,7 +112,9 @@ export function createLiveTopMoversToolSchema(): ToolSchema {
     description:
       'Get the biggest movers across your investment holdings (live, GraphQL-backed). ' +
       'One row per security with an aggregate `change` and a recent price series ' +
-      '(`price_points`: `{timestamp, price}`). The `filter` selects the ranking basis: ' +
+      '(`price_points`: `{timestamp, price}`; the `timestamp` unit — epoch seconds vs ' +
+      'milliseconds — is not yet verified, so treat it as an ordered plotting key). The ' +
+      '`filter` selects the ranking basis: ' +
       '"MY_EQUITY_CHANGE" (default — dollar impact on your position, price change weighted ' +
       'by held quantity) or "PRICE_CHANGE" (raw security price change). The cache holds the ' +
       'most-recently-requested filter; requesting the other triggers a fresh fetch. ' +
