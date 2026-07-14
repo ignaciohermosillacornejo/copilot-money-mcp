@@ -25,9 +25,9 @@ export interface AllocationNode {
   type: string;
   amount: number;
   /**
-   * Share of total invested. The captured payload does not disambiguate
-   * 0..1 vs 0..100; treat as whatever the server returns and verify against
-   * a live response before scaling for display.
+   * Share of total invested, as a percent (0..100) — live-verified against a
+   * real response (#539), not a fraction. Passed through unscaled by the
+   * get_investment_allocation_live tool.
    */
   percentage: number;
 }
