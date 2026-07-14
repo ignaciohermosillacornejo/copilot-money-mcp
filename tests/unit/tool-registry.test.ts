@@ -71,9 +71,9 @@ describe('tool registry invariants', () => {
     }
   });
 
-  test('list sizes match the known tool surface (14 cache reads + 13 live + 17 writes)', () => {
+  test('list sizes match the known tool surface (14 cache reads + 14 live + 17 writes)', () => {
     expect(READ_TOOL_DEFS.length).toBe(14);
-    expect(LIVE_TOOL_DEFS.length).toBe(13);
+    expect(LIVE_TOOL_DEFS.length).toBe(14);
     expect(WRITE_TOOL_DEFS.length).toBe(17);
   });
 });

@@ -40,6 +40,10 @@ import {
   createLiveInvestmentPricesToolSchema,
   type LiveInvestmentPricesTools,
 } from '../live/investment-prices.js';
+import {
+  createLiveInvestmentAllocationToolSchema,
+  type LiveInvestmentAllocationTools,
+} from '../live/investment-allocation.js';
 import { createRefreshCacheToolSchema, type RefreshCacheTool } from '../live/refresh-cache.js';
 
 export const getTransactionsLiveTool = defineTool({
@@ -155,6 +159,16 @@ export const getInvestmentPricesLiveTool = defineTool({
   handler: (ctx, args) =>
     ctx.live!.investmentPrices.getInvestmentPrices(
       (args ?? {}) as unknown as Parameters<LiveInvestmentPricesTools['getInvestmentPrices']>[0]
+    ),
+});
+
+export const getInvestmentAllocationLiveTool = defineTool({
+  schema: createLiveInvestmentAllocationToolSchema(),
+  readOnly: true,
+  requiresLiveReads: true,
+  handler: (ctx, args) =>
+    ctx.live!.investmentAllocation.getInvestmentAllocation(
+      (args as Parameters<LiveInvestmentAllocationTools['getInvestmentAllocation']>[0]) ?? {}
     ),
 });
 

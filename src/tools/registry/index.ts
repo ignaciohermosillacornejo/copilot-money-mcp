@@ -63,6 +63,7 @@ import {
   getHoldingsLiveTool,
   getBalanceHistoryLiveTool,
   getInvestmentPricesLiveTool,
+  getInvestmentAllocationLiveTool,
   refreshCacheTool,
 } from './live.js';
 
@@ -107,6 +108,7 @@ export const LIVE_TOOL_DEFS: readonly ToolDefinition[] = [
   getHoldingsLiveTool,
   getBalanceHistoryLiveTool,
   getInvestmentPricesLiveTool,
+  getInvestmentAllocationLiveTool,
   refreshCacheTool,
 ];
 
