@@ -24,6 +24,7 @@ import type { LiveHoldingsTools } from '../live/holdings.js';
 import type { LiveBalanceHistoryTools } from '../live/balance-history.js';
 import type { LiveInvestmentPricesTools } from '../live/investment-prices.js';
 import type { LiveInvestmentAllocationTools } from '../live/investment-allocation.js';
+import type { LiveTopMoversTools } from '../live/top-movers.js';
 import type { RefreshCacheTool } from '../live/refresh-cache.js';
 
 /**
@@ -44,6 +45,7 @@ export interface LiveToolContext {
   balanceHistory: LiveBalanceHistoryTools;
   investmentPrices: LiveInvestmentPricesTools;
   investmentAllocation: LiveInvestmentAllocationTools;
+  topMovers: LiveTopMoversTools;
   refreshCache: RefreshCacheTool;
 }
 

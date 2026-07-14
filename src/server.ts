@@ -32,6 +32,7 @@ import { LiveHoldingsTools } from './tools/live/holdings.js';
 import { LiveBalanceHistoryTools } from './tools/live/balance-history.js';
 import { LiveInvestmentPricesTools } from './tools/live/investment-prices.js';
 import { LiveInvestmentAllocationTools } from './tools/live/investment-allocation.js';
+import { LiveTopMoversTools } from './tools/live/top-movers.js';
 import { RefreshCacheTool } from './tools/live/refresh-cache.js';
 
 // Read version from package.json
@@ -95,6 +96,7 @@ export class CopilotMoneyServer {
         balanceHistory,
         investmentPrices,
         investmentAllocation: new LiveInvestmentAllocationTools(liveDb),
+        topMovers: new LiveTopMoversTools(liveDb),
         refreshCache: new RefreshCacheTool(liveDb, balanceHistory, investmentPrices),
       };
 
