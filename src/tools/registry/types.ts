@@ -23,6 +23,7 @@ import type { LiveMonthlySpendTools } from '../live/monthly-spend.js';
 import type { LiveHoldingsTools } from '../live/holdings.js';
 import type { LiveBalanceHistoryTools } from '../live/balance-history.js';
 import type { LiveInvestmentPricesTools } from '../live/investment-prices.js';
+import type { LiveInvestmentAllocationTools } from '../live/investment-allocation.js';
 import type { RefreshCacheTool } from '../live/refresh-cache.js';
 
 /**
@@ -42,6 +43,7 @@ export interface LiveToolContext {
   holdings: LiveHoldingsTools;
   balanceHistory: LiveBalanceHistoryTools;
   investmentPrices: LiveInvestmentPricesTools;
+  investmentAllocation: LiveInvestmentAllocationTools;
   refreshCache: RefreshCacheTool;
 }
 
