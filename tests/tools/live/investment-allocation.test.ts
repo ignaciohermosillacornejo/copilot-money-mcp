@@ -14,8 +14,10 @@ function makeLive(client: GraphQLClient): LiveCopilotDatabase {
   return new LiveCopilotDatabase(client, new CopilotDatabase('/tmp/no-such-db'));
 }
 
-const equity = { id: 'a-eq', type: 'EQUITY', amount: 8000, percentage: 0.8 };
-const cash = { id: 'a-cash', type: 'CASH', amount: 2000, percentage: 0.2 };
+// percentage values are percent (0–100), matching the live-verified server
+// scale (#539) — they sum to 100, not 1.
+const equity = { id: 'a-eq', type: 'EQUITY', amount: 8000, percentage: 80 };
+const cash = { id: 'a-cash', type: 'CASH', amount: 2000, percentage: 20 };
 
 describe('LiveInvestmentAllocationTools.getInvestmentAllocation', () => {
   test('projects rows to {type, amount, percentage} pass-through and counts them', async () => {
@@ -26,8 +28,8 @@ describe('LiveInvestmentAllocationTools.getInvestmentAllocation', () => {
 
     expect(result.count).toBe(2);
     expect(result.allocation).toEqual([
-      { type: 'EQUITY', amount: 8000, percentage: 0.8 },
-      { type: 'CASH', amount: 2000, percentage: 0.2 },
+      { type: 'EQUITY', amount: 8000, percentage: 80 },
+      { type: 'CASH', amount: 2000, percentage: 20 },
     ]);
   });
 
@@ -62,6 +64,17 @@ describe('LiveInvestmentAllocationTools.getInvestmentAllocation', () => {
     const queryMock = client.query as ReturnType<typeof mock>;
     const callArgs = queryMock.mock.calls[0] as unknown[];
     expect(callArgs[2]).toEqual({ filter: { accountId: 'acct-1', itemId: undefined } });
+  });
+
+  test('item_id builds a server-side filter variable', async () => {
+    const client = makeClient([equity]);
+    const tools = new LiveInvestmentAllocationTools(makeLive(client));
+
+    await tools.getInvestmentAllocation({ item_id: 'item-1' });
+
+    const queryMock = client.query as ReturnType<typeof mock>;
+    const callArgs = queryMock.mock.calls[0] as unknown[];
+    expect(callArgs[2]).toEqual({ filter: { accountId: undefined, itemId: 'item-1' } });
   });
 
   test('warm call returns cached data with _cache_hit=true and no second fetch', async () => {
