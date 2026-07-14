@@ -41,6 +41,7 @@ function makeMockLive(): {
     networth: ReturnType<typeof makeInvalidateCache>;
     monthlySpend: ReturnType<typeof makeInvalidateCache>;
     holdings: ReturnType<typeof makeInvalidateCache>;
+    allocation: ReturnType<typeof makeInvalidateCache>;
     transactions: { invalidate: ReturnType<typeof mock> };
   };
 } {
@@ -53,6 +54,7 @@ function makeMockLive(): {
   const networth = makeInvalidateCache();
   const monthlySpend = makeInvalidateCache();
   const holdings = makeInvalidateCache();
+  const allocation = makeInvalidateCache();
   const transactions = { invalidate: mock((_arg: string[] | 'all') => {}) };
 
   const live = {
@@ -65,6 +67,7 @@ function makeMockLive(): {
     getNetworthCache: mock(() => networth),
     getMonthlySpendCache: mock(() => monthlySpend),
     getHoldingsCache: mock(() => holdings),
+    getAllocationCache: mock(() => allocation),
     getTransactionsWindowCache: mock(() => transactions),
   } as unknown as LiveCopilotDatabase;
 
@@ -80,6 +83,7 @@ function makeMockLive(): {
       networth,
       monthlySpend,
       holdings,
+      allocation,
       transactions,
     },
   };
@@ -103,6 +107,7 @@ describe('RefreshCacheTool — scope: all', () => {
     expect(mocks.networth.invalidate).toHaveBeenCalledTimes(1);
     expect(mocks.monthlySpend.invalidate).toHaveBeenCalledTimes(1);
     expect(mocks.holdings.invalidate).toHaveBeenCalledTimes(1);
+    expect(mocks.allocation.invalidate).toHaveBeenCalledTimes(1);
     expect(mocks.transactions.invalidate).toHaveBeenCalledTimes(1);
     expect(bh.clearCache).toHaveBeenCalledTimes(1);
     expect(ip.clearCache).toHaveBeenCalledTimes(1);
@@ -116,6 +121,7 @@ describe('RefreshCacheTool — scope: all', () => {
     expect(result.flushed.networth).toBe(true);
     expect(result.flushed.monthly_spend).toBe(true);
     expect(result.flushed.holdings).toBe(true);
+    expect(result.flushed.investment_allocation).toBe(true);
     expect(result.flushed.balance_history).toBe(true);
     expect(result.flushed.investment_prices).toBe(true);
     expect(result.flushed.transactions_months).toBe('all');
@@ -303,6 +309,24 @@ describe('RefreshCacheTool — scope: holdings', () => {
   });
 });
 
+describe('RefreshCacheTool — scope: investment_allocation', () => {
+  test('invalidates only allocationCache', async () => {
+    const { live, mocks } = makeMockLive();
+    const tool = new RefreshCacheTool(live);
+
+    const result = await tool.refresh({ scope: 'investment_allocation' });
+
+    expect(mocks.allocation.invalidate).toHaveBeenCalledTimes(1);
+    expect(mocks.accounts.invalidate).not.toHaveBeenCalled();
+    expect(mocks.categories.invalidate).not.toHaveBeenCalled();
+    expect(mocks.holdings.invalidate).not.toHaveBeenCalled();
+    expect(mocks.transactions.invalidate).not.toHaveBeenCalled();
+    expect(result.flushed.investment_allocation).toBe(true);
+    expect(result.flushed.holdings).toBeUndefined();
+    expect(result.flushed.accounts).toBeUndefined();
+  });
+});
+
 describe('RefreshCacheTool — scope: balance_history', () => {
   test('clears the balance-history tool cache and nothing else', async () => {
     const { live, mocks } = makeMockLive();
@@ -448,6 +472,12 @@ describe('createRefreshCacheToolSchema', () => {
     const schema = createRefreshCacheToolSchema();
     const scopeProp = schema.inputSchema.properties.scope as { enum: string[] };
     expect(scopeProp.enum).toContain('holdings');
+  });
+
+  test('investment_allocation scope is listed in enum', () => {
+    const schema = createRefreshCacheToolSchema();
+    const scopeProp = schema.inputSchema.properties.scope as { enum: string[] };
+    expect(scopeProp.enum).toContain('investment_allocation');
   });
 
   test('balance_history scope is listed in enum', () => {

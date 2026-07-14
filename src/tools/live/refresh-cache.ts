@@ -26,6 +26,7 @@ const VALID_SCOPES = [
   'networth',
   'monthly_spend',
   'holdings',
+  'investment_allocation',
   'balance_history',
   'investment_prices',
 ] as const;
@@ -51,6 +52,7 @@ export interface RefreshCacheResult {
     networth?: boolean;
     monthly_spend?: boolean;
     holdings?: boolean;
+    investment_allocation?: boolean;
     balance_history?: boolean;
     investment_prices?: boolean;
     transactions_months?: string[] | 'all';
@@ -112,6 +114,8 @@ export class RefreshCacheTool {
       flushed.monthly_spend = true;
       this.live.getHoldingsCache().invalidate();
       flushed.holdings = true;
+      this.live.getAllocationCache().invalidate();
+      flushed.investment_allocation = true;
       if (this.balanceHistory) {
         this.balanceHistory.clearCache();
         flushed.balance_history = true;
@@ -184,6 +188,10 @@ export class RefreshCacheTool {
       case 'holdings':
         this.live.getHoldingsCache().invalidate();
         flushed.holdings = true;
+        break;
+      case 'investment_allocation':
+        this.live.getAllocationCache().invalidate();
+        flushed.investment_allocation = true;
         break;
       case 'balance_history':
         // The cache lives on LiveBalanceHistoryTools (Map<tuple, snapshot>),
