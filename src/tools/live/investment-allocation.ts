@@ -13,9 +13,10 @@
  * scope invalidates and refetches (same pattern as get_networth_live's
  * time_frame). Assumes serial callers (the MCP request loop is one-at-a-time).
  *
- * `percentage` is passed through UNSCALED — the captured schema does not
- * disambiguate 0..1 vs 0..100. See the tool description for the live-verified
- * scale (#539).
+ * `percentage` is passed through UNSCALED. Live-verified (#539): the server
+ * returns a percent (0..100), not a fraction — confirmed by summing a real
+ * response's rows to ≈100. No client-side scaling is applied; the value is
+ * forwarded as-is.
  */
 
 import type { LiveCopilotDatabase } from '../../core/live-database.js';
@@ -37,7 +38,7 @@ export interface GetInvestmentAllocationLiveEntry {
   type: string;
   /** Dollar value of this asset class. */
   amount: number;
-  /** Share of total invested, as returned by the server (UNSCALED — see #539). */
+  /** Share of total invested as a percent (0–100), live-verified (#539). */
   percentage: number;
 }
 
@@ -109,7 +110,7 @@ export function createLiveInvestmentAllocationToolSchema(): ToolSchema {
     description:
       'Get the portfolio asset-class allocation (live, GraphQL-backed). Returns one row per ' +
       'asset class — `type` (e.g. "EQUITY", "CASH", "FIXED_INCOME"), `amount` (dollar value), ' +
-      'and `percentage` (share of total invested, as returned by the server). Optional ' +
+      'and `percentage` (share of total invested as a percent, 0–100). Optional ' +
       '`account_id` / `item_id` scope the allocation to a single account (applied server-side). ' +
       'Available when --live-reads is on.',
     inputSchema: {
