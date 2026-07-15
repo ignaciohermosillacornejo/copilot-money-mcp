@@ -45,6 +45,10 @@ import {
   type LiveInvestmentAllocationTools,
 } from '../live/investment-allocation.js';
 import { createLiveTopMoversToolSchema, type LiveTopMoversTools } from '../live/top-movers.js';
+import {
+  createLiveAggregatedHoldingsToolSchema,
+  type LiveAggregatedHoldingsTools,
+} from '../live/aggregated-holdings.js';
 import { createRefreshCacheToolSchema, type RefreshCacheTool } from '../live/refresh-cache.js';
 
 export const getTransactionsLiveTool = defineTool({
@@ -180,6 +184,16 @@ export const getTopMoversLiveTool = defineTool({
   handler: (ctx, args) =>
     ctx.live!.topMovers.getTopMovers(
       (args as Parameters<LiveTopMoversTools['getTopMovers']>[0]) ?? {}
+    ),
+});
+
+export const getAggregatedHoldingsLiveTool = defineTool({
+  schema: createLiveAggregatedHoldingsToolSchema(),
+  readOnly: true,
+  requiresLiveReads: true,
+  handler: (ctx, args) =>
+    ctx.live!.aggregatedHoldings.getAggregatedHoldings(
+      (args as Parameters<LiveAggregatedHoldingsTools['getAggregatedHoldings']>[0]) ?? {}
     ),
 });
 
