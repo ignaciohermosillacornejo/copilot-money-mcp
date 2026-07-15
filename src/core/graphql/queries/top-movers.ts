@@ -24,10 +24,8 @@ export type TopMoversFilter = 'PRICE_CHANGE' | 'MY_EQUITY_CHANGE';
 /**
  * A single price point in a `TopMoverNode.values` series.
  *
- * `timestamp` is whatever opaque numeric the server returns. The captured
- * payload does not disambiguate epoch-millis vs epoch-seconds, so consumers
- * should treat it as an ordered key for plotting and not assume a unit
- * without verifying against a live response.
+ * `timestamp` is epoch milliseconds — live-verified (#540 Task 4, 13-digit
+ * magnitude ~1.7e12). Passed through unscaled by get_top_movers_live.
  */
 export interface PricePointNode {
   id: string;

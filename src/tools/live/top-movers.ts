@@ -111,7 +111,9 @@ export function createLiveTopMoversToolSchema(): ToolSchema {
     name: 'get_top_movers_live',
     description:
       'Get the biggest movers across your investment holdings (live, GraphQL-backed). ' +
-      'One row per security with an aggregate `change` and a recent price series ' +
+      'One row per security with an aggregate `change` (the ranked metric in the requested ' +
+      "filter's units — dollars for MY_EQUITY_CHANGE, raw security price change for " +
+      'PRICE_CHANGE) and a recent price series ' +
       '(`price_points`: `{timestamp, price}`; `timestamp` is epoch milliseconds). The ' +
       '`filter` selects the ranking basis: ' +
       '"MY_EQUITY_CHANGE" (default — dollar impact on your position, price change weighted ' +
