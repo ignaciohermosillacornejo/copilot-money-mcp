@@ -47,6 +47,7 @@ import type { HoldingNode } from './graphql/queries/holdings.js';
 import type { AllocationNode } from './graphql/queries/investment-allocation.js';
 import type { TopMoverNode } from './graphql/queries/top-movers.js';
 import type { AggregatedHoldingNode } from './graphql/queries/aggregated-holdings.js';
+import type { InvestmentBalanceNode } from './graphql/queries/investment-balance.js';
 import { fetchUser, type UserNode } from './graphql/queries/user.js';
 import type { Transaction } from '../models/index.js';
 import { ONE_HOUR_MS, SIX_HOURS_MS, ONE_DAY_MS, ONE_WEEK_MS } from '../utils/durations.js';
@@ -117,6 +118,13 @@ export class LiveCopilotDatabase {
   // item) params are server-side, so the single snapshot holds the most-
   // recently-requested combo (LiveAggregatedHoldingsTools invalidates on change).
   private readonly aggregatedHoldingsCache: SnapshotCache<AggregatedHoldingNode>;
+  // Two caches back get_investment_balance_live. investmentBalanceCache holds the
+  // time_frame-scoped daily timeseries (invalidate-on-time_frame-change); 1h TTL.
+  private readonly investmentBalanceCache: SnapshotCache<InvestmentBalanceNode>;
+  // investmentLiveBalanceCache holds the single current-moment "live dot" (no
+  // params); 1h TTL. Kept as its own cache so a time_frame change on the history
+  // doesn't needlessly drop the live point.
+  private readonly investmentLiveBalanceCache: SnapshotCache<InvestmentBalanceNode>;
   private readonly transactionsWindowCache: TransactionWindowCache<TransactionNode>;
   /**
    * Append-only id → (accountId, itemId) index fed by every live
@@ -212,6 +220,14 @@ export class LiveCopilotDatabase {
     );
     this.aggregatedHoldingsCache = new SnapshotCache<AggregatedHoldingNode>(
       { key: 'aggregated_holdings', ttlMs: SIX_HOURS_MS, keyFn: (h) => h.security.id },
+      this.inflight
+    );
+    this.investmentBalanceCache = new SnapshotCache<InvestmentBalanceNode>(
+      { key: 'investment_balance', ttlMs: ONE_HOUR_MS, keyFn: (n) => n.date },
+      this.inflight
+    );
+    this.investmentLiveBalanceCache = new SnapshotCache<InvestmentBalanceNode>(
+      { key: 'investment_live_balance', ttlMs: ONE_HOUR_MS, keyFn: (n) => n.id },
       this.inflight
     );
     this.transactionsWindowCache = new TransactionWindowCache<TransactionNode>(
@@ -516,6 +532,14 @@ export class LiveCopilotDatabase {
 
   getAggregatedHoldingsCache(): SnapshotCache<AggregatedHoldingNode> {
     return this.aggregatedHoldingsCache;
+  }
+
+  getInvestmentBalanceCache(): SnapshotCache<InvestmentBalanceNode> {
+    return this.investmentBalanceCache;
+  }
+
+  getInvestmentLiveBalanceCache(): SnapshotCache<InvestmentBalanceNode> {
+    return this.investmentLiveBalanceCache;
   }
 
   /**
