@@ -44,6 +44,8 @@ function makeMockLive(): {
     allocation: ReturnType<typeof makeInvalidateCache>;
     topMovers: ReturnType<typeof makeInvalidateCache>;
     aggregatedHoldings: ReturnType<typeof makeInvalidateCache>;
+    investmentBalance: ReturnType<typeof makeInvalidateCache>;
+    investmentLiveBalance: ReturnType<typeof makeInvalidateCache>;
     transactions: { invalidate: ReturnType<typeof mock> };
   };
 } {
@@ -59,6 +61,8 @@ function makeMockLive(): {
   const allocation = makeInvalidateCache();
   const topMovers = makeInvalidateCache();
   const aggregatedHoldings = makeInvalidateCache();
+  const investmentBalance = makeInvalidateCache();
+  const investmentLiveBalance = makeInvalidateCache();
   const transactions = { invalidate: mock((_arg: string[] | 'all') => {}) };
 
   const live = {
@@ -74,6 +78,8 @@ function makeMockLive(): {
     getAllocationCache: mock(() => allocation),
     getTopMoversCache: mock(() => topMovers),
     getAggregatedHoldingsCache: mock(() => aggregatedHoldings),
+    getInvestmentBalanceCache: mock(() => investmentBalance),
+    getInvestmentLiveBalanceCache: mock(() => investmentLiveBalance),
     getTransactionsWindowCache: mock(() => transactions),
   } as unknown as LiveCopilotDatabase;
 
@@ -92,6 +98,8 @@ function makeMockLive(): {
       allocation,
       topMovers,
       aggregatedHoldings,
+      investmentBalance,
+      investmentLiveBalance,
       transactions,
     },
   };
@@ -118,6 +126,8 @@ describe('RefreshCacheTool — scope: all', () => {
     expect(mocks.allocation.invalidate).toHaveBeenCalledTimes(1);
     expect(mocks.topMovers.invalidate).toHaveBeenCalledTimes(1);
     expect(mocks.aggregatedHoldings.invalidate).toHaveBeenCalledTimes(1);
+    expect(mocks.investmentBalance.invalidate).toHaveBeenCalledTimes(1);
+    expect(mocks.investmentLiveBalance.invalidate).toHaveBeenCalledTimes(1);
     expect(mocks.transactions.invalidate).toHaveBeenCalledTimes(1);
     expect(bh.clearCache).toHaveBeenCalledTimes(1);
     expect(ip.clearCache).toHaveBeenCalledTimes(1);
@@ -134,6 +144,7 @@ describe('RefreshCacheTool — scope: all', () => {
     expect(result.flushed.investment_allocation).toBe(true);
     expect(result.flushed.top_movers).toBe(true);
     expect(result.flushed.aggregated_holdings).toBe(true);
+    expect(result.flushed.investment_balance).toBe(true);
     expect(result.flushed.balance_history).toBe(true);
     expect(result.flushed.investment_prices).toBe(true);
     expect(result.flushed.transactions_months).toBe('all');
@@ -375,6 +386,25 @@ describe('RefreshCacheTool — scope: aggregated_holdings', () => {
   });
 });
 
+describe('RefreshCacheTool — scope: investment_balance', () => {
+  test('invalidates BOTH investmentBalanceCache and investmentLiveBalanceCache', async () => {
+    const { live, mocks } = makeMockLive();
+    const tool = new RefreshCacheTool(live);
+
+    const result = await tool.refresh({ scope: 'investment_balance' });
+
+    expect(mocks.investmentBalance.invalidate).toHaveBeenCalledTimes(1);
+    expect(mocks.investmentLiveBalance.invalidate).toHaveBeenCalledTimes(1);
+    expect(mocks.accounts.invalidate).not.toHaveBeenCalled();
+    expect(mocks.categories.invalidate).not.toHaveBeenCalled();
+    expect(mocks.holdings.invalidate).not.toHaveBeenCalled();
+    expect(mocks.transactions.invalidate).not.toHaveBeenCalled();
+    expect(result.flushed.investment_balance).toBe(true);
+    expect(result.flushed.holdings).toBeUndefined();
+    expect(result.flushed.accounts).toBeUndefined();
+  });
+});
+
 describe('RefreshCacheTool — scope: balance_history', () => {
   test('clears the balance-history tool cache and nothing else', async () => {
     const { live, mocks } = makeMockLive();
@@ -538,6 +568,12 @@ describe('createRefreshCacheToolSchema', () => {
     const schema = createRefreshCacheToolSchema();
     const scopeProp = schema.inputSchema.properties.scope as { enum: string[] };
     expect(scopeProp.enum).toContain('aggregated_holdings');
+  });
+
+  test('investment_balance scope is listed in enum', () => {
+    const schema = createRefreshCacheToolSchema();
+    const scopeProp = schema.inputSchema.properties.scope as { enum: string[] };
+    expect(scopeProp.enum).toContain('investment_balance');
   });
 
   test('balance_history scope is listed in enum', () => {

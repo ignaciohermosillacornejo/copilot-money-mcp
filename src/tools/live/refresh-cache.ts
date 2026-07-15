@@ -29,6 +29,7 @@ const VALID_SCOPES = [
   'investment_allocation',
   'top_movers',
   'aggregated_holdings',
+  'investment_balance',
   'balance_history',
   'investment_prices',
 ] as const;
@@ -57,6 +58,7 @@ export interface RefreshCacheResult {
     investment_allocation?: boolean;
     top_movers?: boolean;
     aggregated_holdings?: boolean;
+    investment_balance?: boolean;
     balance_history?: boolean;
     investment_prices?: boolean;
     transactions_months?: string[] | 'all';
@@ -124,6 +126,9 @@ export class RefreshCacheTool {
       flushed.top_movers = true;
       this.live.getAggregatedHoldingsCache().invalidate();
       flushed.aggregated_holdings = true;
+      this.live.getInvestmentBalanceCache().invalidate();
+      this.live.getInvestmentLiveBalanceCache().invalidate();
+      flushed.investment_balance = true;
       if (this.balanceHistory) {
         this.balanceHistory.clearCache();
         flushed.balance_history = true;
@@ -208,6 +213,16 @@ export class RefreshCacheTool {
       case 'aggregated_holdings':
         this.live.getAggregatedHoldingsCache().invalidate();
         flushed.aggregated_holdings = true;
+        break;
+      case 'investment_balance':
+        // get_investment_balance_live combines two GraphQL queries
+        // (investmentBalance history + investmentLiveBalance dot), each
+        // cached separately on LiveCopilotDatabase. Flushing one without
+        // the other would leave a stale half of the combined response, so
+        // this scope always invalidates both.
+        this.live.getInvestmentBalanceCache().invalidate();
+        this.live.getInvestmentLiveBalanceCache().invalidate();
+        flushed.investment_balance = true;
         break;
       case 'balance_history':
         // The cache lives on LiveBalanceHistoryTools (Map<tuple, snapshot>),
