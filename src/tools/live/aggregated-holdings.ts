@@ -28,7 +28,7 @@ import type { ToolSchema } from '../tools.js';
 const DEFAULT_TIME_FRAME: TimeFrame = 'ONE_MONTH';
 
 export interface GetAggregatedHoldingsLiveArgs {
-  time_frame?: string;
+  time_frame?: TimeFrame;
   account_id?: string;
   item_id?: string;
 }
@@ -63,7 +63,7 @@ export class LiveAggregatedHoldingsTools {
   async getAggregatedHoldings(
     args: GetAggregatedHoldingsLiveArgs
   ): Promise<GetAggregatedHoldingsLiveResult> {
-    const timeFrame = (args.time_frame ?? DEFAULT_TIME_FRAME) as TimeFrame;
+    const timeFrame = args.time_frame ?? DEFAULT_TIME_FRAME;
     const accountId = args.account_id;
     const itemId = args.item_id;
     const key = `${timeFrame}|${accountId ?? ''}|${itemId ?? ''}`;
