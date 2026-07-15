@@ -46,6 +46,7 @@ import type { DailySpendNode } from './graphql/queries/monthly-spend.js';
 import type { HoldingNode } from './graphql/queries/holdings.js';
 import type { AllocationNode } from './graphql/queries/investment-allocation.js';
 import type { TopMoverNode } from './graphql/queries/top-movers.js';
+import type { AggregatedHoldingNode } from './graphql/queries/aggregated-holdings.js';
 import { fetchUser, type UserNode } from './graphql/queries/user.js';
 import type { Transaction } from '../models/index.js';
 import { ONE_HOUR_MS, SIX_HOURS_MS, ONE_DAY_MS, ONE_WEEK_MS } from '../utils/durations.js';
@@ -111,6 +112,11 @@ export class LiveCopilotDatabase {
   // the single snapshot holds the most-recently-requested filter
   // (LiveTopMoversTools invalidates on filter change).
   private readonly topMoversCache: SnapshotCache<TopMoverNode>;
+  // aggregatedHoldingsCache stores per-security aggregated positions. 6h TTL
+  // matches holdingsCache — positions move slowly. The (time_frame, account,
+  // item) params are server-side, so the single snapshot holds the most-
+  // recently-requested combo (LiveAggregatedHoldingsTools invalidates on change).
+  private readonly aggregatedHoldingsCache: SnapshotCache<AggregatedHoldingNode>;
   private readonly transactionsWindowCache: TransactionWindowCache<TransactionNode>;
   /**
    * Append-only id → (accountId, itemId) index fed by every live
@@ -202,6 +208,10 @@ export class LiveCopilotDatabase {
     );
     this.topMoversCache = new SnapshotCache<TopMoverNode>(
       { key: 'top_movers', ttlMs: ONE_HOUR_MS, keyFn: (m) => m.security.id },
+      this.inflight
+    );
+    this.aggregatedHoldingsCache = new SnapshotCache<AggregatedHoldingNode>(
+      { key: 'aggregated_holdings', ttlMs: SIX_HOURS_MS, keyFn: (h) => h.security.id },
       this.inflight
     );
     this.transactionsWindowCache = new TransactionWindowCache<TransactionNode>(
@@ -502,6 +512,10 @@ export class LiveCopilotDatabase {
 
   getTopMoversCache(): SnapshotCache<TopMoverNode> {
     return this.topMoversCache;
+  }
+
+  getAggregatedHoldingsCache(): SnapshotCache<AggregatedHoldingNode> {
+    return this.aggregatedHoldingsCache;
   }
 
   /**
