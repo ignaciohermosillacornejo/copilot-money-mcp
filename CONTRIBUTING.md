@@ -57,7 +57,7 @@ the writes-enabled metadata is generated into a gitignored
 1. Copilot Money stores data in a local LevelDB/Firestore cache on macOS
 2. `src/core/decoder.ts` reads `.ldb` files and parses Firestore Protocol Buffers
 3. `src/core/database.ts` provides cached, filtered access to all collections
-4. `src/tools/tools.ts` implements the 31 base tools (14 read + 17 write); `src/tools/live/` adds 16 GraphQL-backed live read tools in `--live-reads` mode
+4. `src/tools/tools.ts` implements the 31 base tools (14 read + 17 write); `src/tools/live/` adds 17 GraphQL-backed live read tools in `--live-reads` mode
 5. `src/server.ts` handles MCP protocol communication and tool routing
 6. Write tools use `src/core/graphql/` to call Copilot's GraphQL API at `app.copilot.money/api/graphql`
 

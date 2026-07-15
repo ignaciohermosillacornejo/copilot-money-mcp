@@ -49,6 +49,10 @@ import {
   createLiveAggregatedHoldingsToolSchema,
   type LiveAggregatedHoldingsTools,
 } from '../live/aggregated-holdings.js';
+import {
+  createLiveInvestmentBalanceToolSchema,
+  type LiveInvestmentBalanceTools,
+} from '../live/investment-balance.js';
 import { createRefreshCacheToolSchema, type RefreshCacheTool } from '../live/refresh-cache.js';
 
 export const getTransactionsLiveTool = defineTool({
@@ -194,6 +198,16 @@ export const getAggregatedHoldingsLiveTool = defineTool({
   handler: (ctx, args) =>
     ctx.live!.aggregatedHoldings.getAggregatedHoldings(
       (args as Parameters<LiveAggregatedHoldingsTools['getAggregatedHoldings']>[0]) ?? {}
+    ),
+});
+
+export const getInvestmentBalanceLiveTool = defineTool({
+  schema: createLiveInvestmentBalanceToolSchema(),
+  readOnly: true,
+  requiresLiveReads: true,
+  handler: (ctx, args) =>
+    ctx.live!.investmentBalance.getInvestmentBalance(
+      (args as Parameters<LiveInvestmentBalanceTools['getInvestmentBalance']>[0]) ?? {}
     ),
 });
 
