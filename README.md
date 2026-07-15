@@ -23,7 +23,7 @@
 
 An [MCP](https://modelcontextprotocol.io/) server that gives AI assistants access to your Copilot Money personal finance data. It reads from the locally cached Firestore database (LevelDB + Protocol Buffers) on your Mac. **Reads are 100% local with zero network requests.**
 
-**14 cache-mode read tools (or 23 in `--live-reads` mode: 8 surviving cache + 15 live), plus up to 17 write tools** — query and modify transactions, accounts, holdings, balances, categories, recurring charges, budgets, goals, and investment performance. See [Tools by Mode](#tools-by-mode) below.
+**14 cache-mode read tools (or 24 in `--live-reads` mode: 8 surviving cache + 16 live), plus up to 17 write tools** — query and modify transactions, accounts, holdings, balances, categories, recurring charges, budgets, goals, and investment performance. See [Tools by Mode](#tools-by-mode) below.
 
 > Contributors: writes go through an API we don't own. How the repo keeps its model of Copilot's GraphQL surface from silently drifting — the conformance ledger, live smokes, and weekly drift check — is documented in [`docs/CONFORMANCE_ARCHITECTURE.md`](docs/CONFORMANCE_ARCHITECTURE.md).
 
@@ -47,8 +47,8 @@ This server exposes different tools depending on which CLI flags you enable.
 | Mode | Flag | What it does | Auth | Network | Tools available |
 |---|---|---|---|---|---|
 | 🟢 Default | _(none)_ | Reads from your local LevelDB cache | ❌ None | 🔌 Zero (offline) | 14 cache-mode read + utility tools |
-| 🌐 Live reads | `--live-reads` | Real-time reads via Copilot's GraphQL API; swaps out 6 cache tools and adds 9 live-only ones | 🔒 Browser session | 🌐 HTTPS per request | 23 read tools (8 cache + 15 live) |
-| ✍️ Writes | `--write` | Adds mutation tools (transactions, tags, categories, budgets, recurrings, splits) **and turns on `--live-reads` automatically** — writes need server-fresh transaction metadata, so live reads are coupled to write mode | 🔒 Browser session | 🌐 HTTPS per request | +17 write tools, on top of the 23 live read tools |
+| 🌐 Live reads | `--live-reads` | Real-time reads via Copilot's GraphQL API; swaps out 6 cache tools and adds 10 live-only ones | 🔒 Browser session | 🌐 HTTPS per request | 24 read tools (8 cache + 16 live) |
+| ✍️ Writes | `--write` | Adds mutation tools (transactions, tags, categories, budgets, recurrings, splits) **and turns on `--live-reads` automatically** — writes need server-fresh transaction metadata, so live reads are coupled to write mode | 🔒 Browser session | 🌐 HTTPS per request | +17 write tools, on top of the 24 live read tools |
 
 Passing `--write` implies `--live-reads`; you can still pass `--live-reads` on its own for read-only live access.
 
@@ -234,7 +234,7 @@ Default mode requires no authentication and makes zero network requests — read
 copilot-money-mcp --live-reads
 ```
 
-Replaces 6 cache-mode read tools (`get_transactions`, `get_accounts`, `get_categories`, `get_budgets`, `get_recurring_transactions`, `get_holdings`) with live GraphQL-backed equivalents, and adds 9 net-new ones (`get_tags_live`, `get_networth_live`, `get_upcoming_recurrings_live`, `get_monthly_spend_live`, `get_balance_history_live`, `get_investment_prices_live`, `refresh_cache`, `get_investment_allocation_live`, `get_top_movers_live`).
+Replaces 6 cache-mode read tools (`get_transactions`, `get_accounts`, `get_categories`, `get_budgets`, `get_recurring_transactions`, `get_holdings`) with live GraphQL-backed equivalents, and adds 10 net-new ones (`get_tags_live`, `get_networth_live`, `get_upcoming_recurrings_live`, `get_monthly_spend_live`, `get_balance_history_live`, `get_investment_prices_live`, `refresh_cache`, `get_investment_allocation_live`, `get_top_movers_live`, `get_aggregated_holdings_live`).
 
 Use this when:
 - You need transactions the macOS app hasn't pre-fetched yet (the auto-fetch window is typically ~30 days; past that, open the app and scroll back to force the cache to populate, or use `--live-reads` to query the server directly).
