@@ -23,7 +23,7 @@ This server exposes different tools depending on which CLI flags you enable. The
 
 ## 🌐 `--live-reads` mode — real-time data via Copilot's GraphQL API (requires browser auth 🔒)
 
-When enabled, 6 cache-mode read tools are replaced with GraphQL-backed equivalents, and 10 new live-only tools are added.
+When enabled, 6 cache-mode read tools are replaced with GraphQL-backed equivalents, and 11 new live-only tools are added.
 
 | Tool | Replaces? | Status | Notes |
 |---|---|---|---|
@@ -42,6 +42,7 @@ When enabled, 6 cache-mode read tools are replaced with GraphQL-backed equivalen
 | `get_investment_allocation_live` | _(additive)_ | ✅ | Portfolio asset-class allocation (`type` / `amount` / `percentage`); `percentage` is a percent (0–100). Optional `account_id` / `item_id` scope (server-side) |
 | `get_top_movers_live` | _(additive)_ | ✅ | Biggest movers across holdings; `filter` = MY_EQUITY_CHANGE (default) or PRICE_CHANGE; each row has `change` + a `price_points` series |
 | `get_aggregated_holdings_live` | _(additive)_ | ✅ | Per-security aggregated market `value` + `change` over `time_frame`; collapses accounts (vs per-position `get_holdings_live`) |
+| `get_investment_balance_live` | _(additive)_ | ✅ | Investments-only combined balance: `current` live dot + daily `history` over `time_frame` (vs whole-net-worth `get_networth_live` / per-account `get_balance_history_live`) |
 | `refresh_cache` | _(utility)_ | ✅ | Invalidate live-mode caches by scope |
 
 ## ✍️ `--write` mode — mutations via Copilot's GraphQL API (requires browser auth 🔒, implies `--live-reads`)
