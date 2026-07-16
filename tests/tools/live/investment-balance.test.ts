@@ -67,6 +67,16 @@ describe('LiveInvestmentBalanceTools.getInvestmentBalance', () => {
     expect(result.current).toEqual({ date: '2026-07-15', balance: 10500 });
   });
 
+  test('absent live dot → current is null, history still resolves (defensive branch)', async () => {
+    // The wrapper types the live balance non-null, but the tool guards a null
+    // dot (`currentNode ? ... : null`); exercise that branch explicitly.
+    const client = makeClient(hist, null);
+    const tools = new LiveInvestmentBalanceTools(makeLive(client));
+    const result = await tools.getInvestmentBalance({});
+    expect(result.current).toBeNull();
+    expect(result.history).toHaveLength(2);
+  });
+
   test('warm call: both caches hit, no re-fetch (2 queries total across two calls)', async () => {
     const client = makeClient(hist, liveDot);
     const tools = new LiveInvestmentBalanceTools(makeLive(client));
