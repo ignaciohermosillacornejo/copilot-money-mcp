@@ -14,6 +14,7 @@
  * The User query takes no variables.
  */
 
+import { z } from 'zod';
 import type { GraphQLClient } from '../client.js';
 import { USER } from '../operations.generated.js';
 
@@ -40,3 +41,25 @@ export async function fetchUser(client: GraphQLClient): Promise<UserNode> {
   const data = await client.query<Record<string, never>, UserResponse>('User', USER, {});
   return data.user;
 }
+
+/**
+ * Zod mirror of `UserResponse` for runtime warn-mode read-shape validation
+ * (#537). Only the fields the wrapper projects are gated; the wire response
+ * carries more (onboarding, intercomUserHash, …) which flow through loose.
+ */
+export const UserResponseSchema = z.looseObject({
+  user: z.looseObject({
+    id: z.string(),
+    budgetingConfig: z
+      .looseObject({
+        isEnabled: z.boolean(),
+        rolloversConfig: z
+          .looseObject({
+            isEnabled: z.boolean(),
+            startDate: z.string().nullable(),
+          })
+          .nullable(),
+      })
+      .nullable(),
+  }),
+});
