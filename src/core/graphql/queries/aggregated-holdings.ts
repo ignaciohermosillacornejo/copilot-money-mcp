@@ -19,9 +19,11 @@
  * `SecurityNode` from `_shared.ts` to keep the type honest.
  */
 
+import { z } from 'zod';
 import type { GraphQLClient } from '../client.js';
 import { AGGREGATED_HOLDINGS } from '../operations.generated.js';
 import type { MarketInfoNode, TimeFrame } from './_shared.js';
+import { MarketInfoNodeSchema } from './_shared.js';
 
 /**
  * Slimmer Security shape used by AggregatedHoldings only.
@@ -78,3 +80,24 @@ export async function fetchAggregatedHoldings(
   });
   return data.aggregatedHoldings;
 }
+
+/** Slimmer security shape (no currentPrice) — mirrors AggregatedSecurityNode. */
+const AggregatedSecurityNodeSchema = z.looseObject({
+  id: z.string(),
+  name: z.string(),
+  symbol: z.string(),
+  type: z.string(),
+  lastUpdate: z.string(),
+  marketInfo: MarketInfoNodeSchema,
+});
+
+/** Zod mirror of `AggregatedHoldingsResponse` (#537). */
+export const AggregatedHoldingsResponseSchema = z.looseObject({
+  aggregatedHoldings: z.array(
+    z.looseObject({
+      security: AggregatedSecurityNodeSchema,
+      change: z.number(),
+      value: z.number(),
+    })
+  ),
+});

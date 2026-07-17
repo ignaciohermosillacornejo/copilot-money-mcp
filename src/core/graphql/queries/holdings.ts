@@ -17,9 +17,11 @@
  * takes no variables. One round-trip per call.
  */
 
+import { z } from 'zod';
 import type { GraphQLClient } from '../client.js';
 import { HOLDINGS } from '../operations.generated.js';
 import type { SecurityNode } from './_shared.js';
+import { SecurityNodeSchema } from './_shared.js';
 
 export interface HoldingMetricNode {
   averageCost: number;
@@ -48,3 +50,24 @@ export async function fetchHoldings(client: GraphQLClient): Promise<HoldingNode[
   );
   return data.holdings;
 }
+
+/** Zod mirror of `HoldingsResponse` (#537). metrics is null for
+ * non-investable (CASH) positions. */
+export const HoldingsResponseSchema = z.looseObject({
+  holdings: z.array(
+    z.looseObject({
+      id: z.string(),
+      accountId: z.string(),
+      itemId: z.string(),
+      quantity: z.number(),
+      security: SecurityNodeSchema,
+      metrics: z
+        .looseObject({
+          averageCost: z.number(),
+          costBasis: z.number(),
+          totalReturn: z.number(),
+        })
+        .nullable(),
+    })
+  ),
+});

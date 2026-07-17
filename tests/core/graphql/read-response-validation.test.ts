@@ -106,6 +106,65 @@ const VALID_RESPONSES: Record<string, unknown> = {
   BalanceHistory: {
     accountBalanceHistory: [{ date: '2026-07-01', balance: 500 }],
   },
+  Holdings: {
+    holdings: [
+      {
+        __typename: 'Holding',
+        id: 'hLd111BbB222CcC333Dd',
+        accountId: 'AbC123dEf456GhI789jK',
+        itemId: 'MnO456pQr789StU012vW',
+        quantity: 10,
+        security: {
+          id: 'sEc111BbB222CcC333Dd',
+          name: 'Synthetic Equity',
+          symbol: 'SYN',
+          type: 'EQUITY',
+          currentPrice: 100,
+          lastUpdate: '2026-07-01',
+          marketInfo: { closeTime: null, openTime: null },
+        },
+        metrics: { averageCost: 90, costBasis: 900, totalReturn: 100 },
+      },
+    ],
+  },
+  AggregatedHoldings: {
+    aggregatedHoldings: [
+      {
+        security: {
+          id: 'sEc111BbB222CcC333Dd',
+          name: 'Synthetic Equity',
+          symbol: 'SYN',
+          type: 'EQUITY',
+          lastUpdate: '2026-07-01',
+          marketInfo: { closeTime: null, openTime: null },
+        },
+        change: 5,
+        value: 1000,
+      },
+    ],
+  },
+  InvestmentAllocation: {
+    investmentAllocation: [
+      { id: 'aLc111BbB222CcC333Dd', type: 'EQUITY', amount: 1000, percentage: 60 },
+    ],
+  },
+  TopMovers: {
+    topMovers: [
+      {
+        security: {
+          id: 'sEc111BbB222CcC333Dd',
+          name: 'Synthetic Equity',
+          symbol: 'SYN',
+          type: 'EQUITY',
+          currentPrice: 100,
+          lastUpdate: '2026-07-01',
+          marketInfo: { closeTime: null, openTime: null },
+        },
+        values: [{ id: 'pPt111BbB222CcC333Dd', timestamp: 1_745_539_200_000, price: 100 }],
+        change: 5,
+      },
+    ],
+  },
 };
 
 describe('validateQueryResponse', () => {
