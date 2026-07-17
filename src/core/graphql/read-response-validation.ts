@@ -30,7 +30,9 @@
 
 import type { ZodType } from 'zod';
 import { AccountResponseSchema, AccountsResponseSchema } from './queries/accounts.js';
+import { RecurringsResponseSchema } from './queries/recurrings.js';
 import { TagsResponseSchema } from './queries/tags.js';
+import { UpcomingRecurringsResponseSchema } from './queries/upcoming-recurrings.js';
 import { UserResponseSchema } from './queries/user.js';
 
 /**
@@ -65,6 +67,8 @@ export const QUERY_RESPONSE_SCHEMAS: Readonly<Record<string, QueryResponseShapeE
   Accounts: entry('accounts', AccountsResponseSchema),
   Account: entry('account', AccountResponseSchema),
   Tags: entry('tags', TagsResponseSchema),
+  Recurrings: entry('recurrings', RecurringsResponseSchema),
+  UpcomingRecurrings: entry('unpaidUpcomingRecurrings', UpcomingRecurringsResponseSchema),
 };
 
 // ---------------------------------------------------------------------------

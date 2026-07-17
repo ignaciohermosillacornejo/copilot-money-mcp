@@ -59,6 +59,42 @@ const VALID_RESPONSES: Record<string, unknown> = {
   Tags: {
     tags: [{ __typename: 'Tag', id: 'tAg111BbB222CcC333Dd', name: 'synthetic', colorName: 'blue' }],
   },
+  Recurrings: {
+    recurrings: [
+      {
+        __typename: 'Recurring',
+        id: 'rEc555FfF666GgG777Hh',
+        name: 'Synthetic Streaming',
+        state: 'ACTIVE',
+        frequency: 'MONTHLY',
+        nextPaymentAmount: 100,
+        nextPaymentDate: '2026-08-01',
+        categoryId: 'a1b2c3d4-e5f6-4a5b-8c7d-9e0f1a2b3c4d',
+        emoji: null,
+        icon: { __typename: 'EmojiUnicode', unicode: '1F4FA' },
+        rule: { nameContains: 'synthetic', minAmount: null, maxAmount: null, days: [1] },
+        payments: [{ amount: 100, isPaid: false, date: '2026-08-01' }],
+      },
+    ],
+  },
+  UpcomingRecurrings: {
+    unpaidUpcomingRecurrings: [
+      {
+        __typename: 'Recurring',
+        id: 'rEc555FfF666GgG777Hh',
+        name: 'Synthetic Streaming',
+        state: 'ACTIVE',
+        frequency: 'MONTHLY',
+        nextPaymentAmount: 100,
+        nextPaymentDate: '2026-08-01',
+        categoryId: 'a1b2c3d4-e5f6-4a5b-8c7d-9e0f1a2b3c4d',
+        emoji: null,
+        icon: null,
+        rule: null,
+        payments: [],
+      },
+    ],
+  },
 };
 
 describe('validateQueryResponse', () => {

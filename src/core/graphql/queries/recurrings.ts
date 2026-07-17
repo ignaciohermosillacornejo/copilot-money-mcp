@@ -12,6 +12,7 @@
  * fragment is @client-only and stripped by the generator.
  */
 
+import { z } from 'zod';
 import type { GraphQLClient } from '../client.js';
 import { RECURRINGS } from '../operations.generated.js';
 
@@ -65,3 +66,46 @@ export async function fetchRecurrings(client: GraphQLClient): Promise<RecurringN
   );
   return data.recurrings;
 }
+
+/** Shared EmojiUnicode|Genmoji icon shape. `__typename` permissive so a new
+ * icon variant doesn't warn; optional subfields mirror RecurringIcon. */
+const RecurringIconSchema = z.looseObject({
+  __typename: z.string(),
+  unicode: z.string().optional(),
+  id: z.string().optional(),
+  src: z.string().optional(),
+});
+
+/** Zod mirror of `RecurringNode` (RecurringFields + rule + payments), shared
+ * by the Recurrings and UpcomingRecurrings queries (#537). */
+export const RecurringNodeSchema = z.looseObject({
+  id: z.string(),
+  name: z.string(),
+  state: z.string(),
+  frequency: z.string(),
+  nextPaymentAmount: z.number().nullable(),
+  nextPaymentDate: z.string().nullable(),
+  categoryId: z.string().nullable(),
+  emoji: z.string().nullable(),
+  icon: RecurringIconSchema.nullable(),
+  rule: z
+    .looseObject({
+      nameContains: z.string().nullable(),
+      minAmount: z.number().nullable(),
+      maxAmount: z.number().nullable(),
+      days: z.array(z.number()).nullable(),
+    })
+    .nullable(),
+  payments: z.array(
+    z.looseObject({
+      amount: z.number(),
+      isPaid: z.boolean(),
+      date: z.string(),
+    })
+  ),
+});
+
+/** Zod mirror of `RecurringsResponse`. */
+export const RecurringsResponseSchema = z.looseObject({
+  recurrings: z.array(RecurringNodeSchema),
+});
