@@ -30,6 +30,7 @@
 import { z, type ZodType } from 'zod';
 import { TRANSACTION_TYPES } from './transactions.js';
 import { TRANSACTIONS_READ_SHAPE_RUNTIME_CHECK } from './read-validation.js';
+import { READ_RESPONSE_SHAPE_RUNTIME_CHECK } from './read-response-validation.js';
 
 /**
  * Name of this runtime check as registered in the ledger's
@@ -40,6 +41,7 @@ export const RESPONSE_SHAPE_RUNTIME_CHECK = 'zod-warn' as const;
 export const RUNTIME_CHECK_NAMES: readonly string[] = [
   RESPONSE_SHAPE_RUNTIME_CHECK,
   TRANSACTIONS_READ_SHAPE_RUNTIME_CHECK,
+  READ_RESPONSE_SHAPE_RUNTIME_CHECK,
 ];
 
 // ---------------------------------------------------------------------------
