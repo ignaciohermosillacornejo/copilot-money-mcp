@@ -29,6 +29,10 @@ import {
   MUTATION_RESPONSE_SCHEMAS,
   RESPONSE_SHAPE_RUNTIME_CHECK,
 } from '../../src/core/graphql/response-validation.js';
+import {
+  QUERY_RESPONSE_SCHEMAS,
+  READ_RESPONSE_SHAPE_RUNTIME_CHECK,
+} from '../../src/core/graphql/read-response-validation.js';
 
 const SMOKE_DIR = join(import.meta.dir, '..', '..', 'scripts', 'smoke');
 
@@ -150,6 +154,26 @@ describe('conformance ledger', () => {
     expect(registeredSurfaces).toEqual(ledgerSurfaces);
     // Guard against the comparison passing vacuously.
     expect(registeredSurfaces.length).toBeGreaterThanOrEqual(17);
+  });
+
+  test('(b) runtime:read-zod-warn-gated response shapes exactly match the registered read schemas', () => {
+    // Bidirectional, same contract as the mutation registry: a ledger entry
+    // claiming the read-zod-warn oracle without a registered schema is a paper
+    // gate; a registered schema without a ledger entry is untracked
+    // verification. Both directions fail here.
+    const ledgerSurfaces = CONFORMANCE_LEDGER.filter(
+      (entry) =>
+        entry.kind === 'response-shape' &&
+        entry.oracle === `runtime:${READ_RESPONSE_SHAPE_RUNTIME_CHECK}`
+    )
+      .map((entry) => entry.surface)
+      .sort();
+    const registeredSurfaces = Object.values(QUERY_RESPONSE_SCHEMAS)
+      .map((entry) => entry.surface)
+      .sort();
+    expect(registeredSurfaces).toEqual(ledgerSurfaces);
+    // Non-vacuous floor; grows toward 18 as #537's follow-up PRs land.
+    expect(registeredSurfaces.length).toBeGreaterThanOrEqual(4);
   });
 
   test("(c) class 'gated' requires a non-null oracle", () => {

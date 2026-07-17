@@ -52,6 +52,7 @@ import {
   RUNTIME_CHECK_NAMES,
 } from '../core/graphql/response-validation.js';
 import { TRANSACTIONS_READ_SHAPE_RUNTIME_CHECK } from '../core/graphql/read-validation.js';
+import { READ_RESPONSE_SHAPE_RUNTIME_CHECK } from '../core/graphql/read-response-validation.js';
 export { RUNTIME_CHECK_NAMES };
 
 /** What kind of external surface the assumption is about. */
@@ -180,6 +181,15 @@ const QUERY_RESPONSE_SHAPE_UNVERIFIED =
   'the Tier-0 read smoke spot-checks load-bearing fields but no runtime schema ' +
   'validation exists — full-shape drift would surface only as downstream undefineds';
 
+/** #537: read response-shape interfaces are mirrored into looseObject Zod
+ * schemas and every live read response is validated warn-mode at runtime, so
+ * drift surfaces as a structured warning + per-surface counter instead of
+ * downstream undefineds. Read analogue of RESPONSE_SHAPE_GATED. */
+const READ_RESPONSE_SHAPE_GATED =
+  'Hand-written TS response interface mirrored into a looseObject Zod schema; every ' +
+  'live read response is validated warn-mode at runtime ' +
+  '(src/core/graphql/read-response-validation.ts, issue #537)';
+
 // ---------------------------------------------------------------------------
 // Entry factories (keep the inventory compact; pass overrides to upgrade an
 // entry's class/oracle/evidence as verification lands)
@@ -285,6 +295,23 @@ function queryResponseShape(name: string): LedgerEntry {
     oracle: null,
     class: 'unverified',
     evidence: QUERY_RESPONSE_SHAPE_UNVERIFIED,
+  };
+}
+
+/**
+ * A read query whose response shape is validated warn-mode at runtime by the
+ * read-side Zod registry (#537). Read analogue of `responseShape` for
+ * mutations. `name` is the root Query field, e.g. 'accounts'. Every name
+ * passed here MUST have a matching QUERY_RESPONSE_SCHEMAS entry — enforced
+ * bidirectionally by tests/conformance/ledger.test.ts.
+ */
+function gatedQueryResponseShape(name: string): LedgerEntry {
+  return {
+    surface: `Query.${name}:response`,
+    kind: 'response-shape',
+    oracle: `runtime:${READ_RESPONSE_SHAPE_RUNTIME_CHECK}`,
+    class: 'gated',
+    evidence: READ_RESPONSE_SHAPE_GATED,
   };
 }
 
@@ -540,13 +567,13 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   // checks (scripts/smoke/read-checks.ts) — a new query cannot ship without
   // both a smoke check and these entries.
   queryOperation('user'),
-  queryResponseShape('user'),
+  gatedQueryResponseShape('user'),
   queryOperation('accounts'),
-  queryResponseShape('accounts'),
+  gatedQueryResponseShape('accounts'),
   // Singular Account: generated document exists but has no hand-written
   // wrapper; the read smoke probes the document directly.
   queryOperation('account'),
-  queryResponseShape('account'),
+  gatedQueryResponseShape('account'),
   queryOperation('transactions'),
   {
     surface: 'Query.transactions:response',
@@ -561,7 +588,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   queryOperation('categories'),
   queryResponseShape('categories'),
   queryOperation('tags'),
-  queryResponseShape('tags'),
+  gatedQueryResponseShape('tags'),
   queryOperation('recurrings'),
   queryResponseShape('recurrings'),
   queryOperation('unpaidUpcomingRecurrings'),
