@@ -15,6 +15,7 @@
  * the two views can import the matching type.
  */
 
+import { z } from 'zod';
 import type { GraphQLClient } from '../client.js';
 import { UPCOMING_RECURRINGS } from '../operations.generated.js';
 import type {
@@ -23,6 +24,7 @@ import type {
   RecurringPaymentNode,
   RecurringRuleNode,
 } from './recurrings.js';
+import { RecurringNodeSchema } from './recurrings.js';
 
 export type { RecurringIcon, RecurringPaymentNode, RecurringRuleNode };
 
@@ -42,3 +44,10 @@ export async function fetchUpcomingRecurrings(
   );
   return data.unpaidUpcomingRecurrings;
 }
+
+/** Zod mirror of `UpcomingRecurringsResponse`. The node shape is identical to
+ * Recurrings (UpcomingRecurringNode = RecurringNode), so it reuses
+ * RecurringNodeSchema (#537). */
+export const UpcomingRecurringsResponseSchema = z.looseObject({
+  unpaidUpcomingRecurrings: z.array(RecurringNodeSchema),
+});
