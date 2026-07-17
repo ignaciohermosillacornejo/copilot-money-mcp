@@ -7,6 +7,8 @@
  * uses a slimmer variant that omits `currentPrice` — see its JSDoc).
  */
 
+import { z } from 'zod';
+
 /**
  * Server-recognized timeframe enum values for investments queries.
  *
@@ -65,3 +67,21 @@ export interface SecurityNode {
   lastUpdate: string;
   marketInfo: MarketInfoNode;
 }
+
+/** Zod mirror of MarketInfoNode (#537). Both epoch-ms fields nullable. */
+export const MarketInfoNodeSchema = z.looseObject({
+  closeTime: z.number().nullable(),
+  openTime: z.number().nullable(),
+});
+
+/** Zod mirror of SecurityNode (SecurityFields fragment) (#537). Shared by
+ * holdings + top-movers; aggregated-holdings uses a slimmer variant. */
+export const SecurityNodeSchema = z.looseObject({
+  id: z.string(),
+  name: z.string(),
+  symbol: z.string(),
+  type: z.string(),
+  currentPrice: z.number(),
+  lastUpdate: z.string(),
+  marketInfo: MarketInfoNodeSchema,
+});

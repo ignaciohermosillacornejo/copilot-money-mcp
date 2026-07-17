@@ -11,6 +11,7 @@
  * server returns the allocation across all investment accounts.
  */
 
+import { z } from 'zod';
 import type { GraphQLClient } from '../client.js';
 import { INVESTMENT_ALLOCATION } from '../operations.generated.js';
 
@@ -51,3 +52,15 @@ export async function fetchInvestmentAllocation(
   );
   return data.investmentAllocation;
 }
+
+/** Zod mirror of `InvestmentAllocationResponse` (#537). percentage is 0..100. */
+export const InvestmentAllocationResponseSchema = z.looseObject({
+  investmentAllocation: z.array(
+    z.looseObject({
+      id: z.string(),
+      type: z.string(),
+      amount: z.number(),
+      percentage: z.number(),
+    })
+  ),
+});

@@ -15,9 +15,11 @@
  * applies its own default; callers usually pass an explicit filter.
  */
 
+import { z } from 'zod';
 import type { GraphQLClient } from '../client.js';
 import { TOP_MOVERS } from '../operations.generated.js';
 import type { SecurityNode } from './_shared.js';
+import { SecurityNodeSchema } from './_shared.js';
 
 export type TopMoversFilter = 'PRICE_CHANGE' | 'MY_EQUITY_CHANGE';
 
@@ -58,3 +60,20 @@ export async function fetchTopMovers(
   );
   return data.topMovers;
 }
+
+/** Zod mirror of `TopMoversResponse` (#537). timestamp is epoch-ms. */
+export const TopMoversResponseSchema = z.looseObject({
+  topMovers: z.array(
+    z.looseObject({
+      security: SecurityNodeSchema,
+      values: z.array(
+        z.looseObject({
+          id: z.string(),
+          timestamp: z.number(),
+          price: z.number(),
+        })
+      ),
+      change: z.number(),
+    })
+  ),
+});

@@ -30,11 +30,15 @@
 
 import type { ZodType } from 'zod';
 import { AccountResponseSchema, AccountsResponseSchema } from './queries/accounts.js';
+import { AggregatedHoldingsResponseSchema } from './queries/aggregated-holdings.js';
 import { BalanceHistoryResponseSchema } from './queries/balance-history.js';
+import { HoldingsResponseSchema } from './queries/holdings.js';
+import { InvestmentAllocationResponseSchema } from './queries/investment-allocation.js';
 import { MonthlySpendResponseSchema } from './queries/monthly-spend.js';
 import { NetworthResponseSchema } from './queries/networth.js';
 import { RecurringsResponseSchema } from './queries/recurrings.js';
 import { TagsResponseSchema } from './queries/tags.js';
+import { TopMoversResponseSchema } from './queries/top-movers.js';
 import { UpcomingRecurringsResponseSchema } from './queries/upcoming-recurrings.js';
 import { UserResponseSchema } from './queries/user.js';
 
@@ -75,6 +79,10 @@ export const QUERY_RESPONSE_SCHEMAS: Readonly<Record<string, QueryResponseShapeE
   MonthlySpend: entry('monthlySpending', MonthlySpendResponseSchema),
   Networth: entry('networthHistory', NetworthResponseSchema),
   BalanceHistory: entry('accountBalanceHistory', BalanceHistoryResponseSchema),
+  Holdings: entry('holdings', HoldingsResponseSchema),
+  AggregatedHoldings: entry('aggregatedHoldings', AggregatedHoldingsResponseSchema),
+  InvestmentAllocation: entry('investmentAllocation', InvestmentAllocationResponseSchema),
+  TopMovers: entry('topMovers', TopMoversResponseSchema),
 };
 
 // ---------------------------------------------------------------------------
