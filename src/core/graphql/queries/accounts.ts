@@ -35,7 +35,13 @@ export interface AccountNode {
   institutionId: string | null;
   hasHistoricalUpdates: boolean;
   hasLiveBalance: boolean;
-  latestBalanceUpdate: string | null;
+  /**
+   * Numeric epoch timestamp (ms), or null. Drifted from the ISO-string shape
+   * seen in the 2026-04 Chrome capture — the server changed the field's type
+   * string→number since then, caught by the read-shape smoke on 2026-07-16
+   * (#537).
+   */
+  latestBalanceUpdate: number | null;
 }
 
 export interface AccountsResponse {
@@ -81,7 +87,7 @@ export const AccountNodeSchema = z.looseObject({
   institutionId: z.string().nullable(),
   hasHistoricalUpdates: z.boolean(),
   hasLiveBalance: z.boolean(),
-  latestBalanceUpdate: z.string().nullable(),
+  latestBalanceUpdate: z.number().nullable(),
 });
 
 /** Zod mirror of `AccountsResponse` (the list query). */
