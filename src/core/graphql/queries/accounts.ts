@@ -10,6 +10,7 @@
  * unused; the response shape mirrors AccountFields.
  */
 
+import { z } from 'zod';
 import type { GraphQLClient } from '../client.js';
 import { ACCOUNTS } from '../operations.generated.js';
 
@@ -56,3 +57,39 @@ export async function fetchAccounts(client: GraphQLClient): Promise<AccountNode[
   );
   return data.accounts;
 }
+
+/**
+ * Zod mirror of `AccountNode` (AccountFields fragment) for warn-mode
+ * read-shape validation (#537). Shared by the Accounts (list) and singular
+ * Account queries — the latter has no wrapper, so its schema is assembled in
+ * QUERY_RESPONSE_SCHEMAS from this node schema.
+ */
+export const AccountNodeSchema = z.looseObject({
+  id: z.string(),
+  itemId: z.string(),
+  name: z.string(),
+  balance: z.number(),
+  liveBalance: z.boolean(),
+  type: z.string(),
+  subType: z.string().nullable(),
+  mask: z.string().nullable(),
+  isUserHidden: z.boolean(),
+  isUserClosed: z.boolean(),
+  isManual: z.boolean(),
+  color: z.string().nullable(),
+  limit: z.number().nullable(),
+  institutionId: z.string().nullable(),
+  hasHistoricalUpdates: z.boolean(),
+  hasLiveBalance: z.boolean(),
+  latestBalanceUpdate: z.string().nullable(),
+});
+
+/** Zod mirror of `AccountsResponse` (the list query). */
+export const AccountsResponseSchema = z.looseObject({
+  accounts: z.array(AccountNodeSchema),
+});
+
+/** Zod mirror of the singular `Account` query response (no wrapper exists). */
+export const AccountResponseSchema = z.looseObject({
+  account: AccountNodeSchema,
+});

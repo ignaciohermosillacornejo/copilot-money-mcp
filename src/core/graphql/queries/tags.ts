@@ -9,6 +9,7 @@
  * exposes only `id`, `name`, `colorName` on each Tag.
  */
 
+import { z } from 'zod';
 import type { GraphQLClient } from '../client.js';
 import { TAGS } from '../operations.generated.js';
 
@@ -26,3 +27,14 @@ export async function fetchTags(client: GraphQLClient): Promise<TagNode[]> {
   const data = await client.query<Record<string, never>, TagsResponse>('Tags', TAGS, {});
   return data.tags;
 }
+
+/** Zod mirror of `TagsResponse` for warn-mode read-shape validation (#537). */
+export const TagsResponseSchema = z.looseObject({
+  tags: z.array(
+    z.looseObject({
+      id: z.string(),
+      name: z.string(),
+      colorName: z.string().nullable(),
+    })
+  ),
+});
