@@ -17,6 +17,7 @@
 
 import type { FirebaseAuth } from '../auth/firebase-auth.js';
 import { validateMutationResponse } from './response-validation.js';
+import { validateQueryResponse } from './read-response-validation.js';
 
 const ENDPOINT = 'https://app.copilot.money/api/graphql';
 
@@ -299,11 +300,14 @@ export class GraphQLClient {
     for (let attempt = 1; ; attempt++) {
       try {
         const data = await this.requestOnce<TVariables, TResponse>(operationName, query, variables);
-        // Warn-mode response-shape validation (issue #437): logs + counts
-        // drift against the registered Zod schema, never throws, never
-        // alters the payload. Mutations only — live-read queries have their
-        // own response handling.
+        // Warn-mode response-shape validation: logs + counts drift against the
+        // registered Zod schema, never throws, never alters the payload.
+        // Mutations (#437) and reads (#537) have parallel registries. Reads
+        // whose nodes feed writes (Transactions) keep their own drop-based
+        // check and are intentionally absent from the read registry, so
+        // validateQueryResponse skips them silently.
         if (kind === 'mutation') validateMutationResponse(operationName, data);
+        else validateQueryResponse(operationName, data);
         return data;
       } catch (e) {
         if (!(e instanceof GraphQLError)) throw e;
