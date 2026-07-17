@@ -80,7 +80,7 @@ describe('LiveMonthlySpendTools.getMonthlySpend', () => {
     expect(result.daily_spending.map((r) => r.id)).toEqual(['a', 'b', 'c']);
   });
 
-  test('parses string amounts into numbers', async () => {
+  test('passes numeric wire amounts through as numbers', async () => {
     const client = makeClient([pastRow]);
     const tools = new LiveMonthlySpendTools(makeLive(client));
 
