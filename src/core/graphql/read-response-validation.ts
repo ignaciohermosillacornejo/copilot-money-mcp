@@ -30,6 +30,9 @@
 
 import type { ZodType } from 'zod';
 import { AccountResponseSchema, AccountsResponseSchema } from './queries/accounts.js';
+import { BalanceHistoryResponseSchema } from './queries/balance-history.js';
+import { MonthlySpendResponseSchema } from './queries/monthly-spend.js';
+import { NetworthResponseSchema } from './queries/networth.js';
 import { RecurringsResponseSchema } from './queries/recurrings.js';
 import { TagsResponseSchema } from './queries/tags.js';
 import { UpcomingRecurringsResponseSchema } from './queries/upcoming-recurrings.js';
@@ -69,6 +72,9 @@ export const QUERY_RESPONSE_SCHEMAS: Readonly<Record<string, QueryResponseShapeE
   Tags: entry('tags', TagsResponseSchema),
   Recurrings: entry('recurrings', RecurringsResponseSchema),
   UpcomingRecurrings: entry('unpaidUpcomingRecurrings', UpcomingRecurringsResponseSchema),
+  MonthlySpend: entry('monthlySpending', MonthlySpendResponseSchema),
+  Networth: entry('networthHistory', NetworthResponseSchema),
+  BalanceHistory: entry('accountBalanceHistory', BalanceHistoryResponseSchema),
 };
 
 // ---------------------------------------------------------------------------

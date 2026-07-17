@@ -14,17 +14,18 @@
  * The captured query at docs/graphql-capture/operations/queries/Networth.md
  * exposes only `assets`, `debt`, `date` on each NetworthHistory entry
  * (after the @client `total` is stripped). `assets` and `debt` are
- * nullable strings — early dates in the user's history may have
+ * nullable numbers — early dates in the user's history may have
  * `assets: null` until backfilled.
  */
 
+import { z } from 'zod';
 import type { GraphQLClient } from '../client.js';
 import { NETWORTH } from '../operations.generated.js';
 
 export interface NetworthHistoryNode {
   date: string;
-  assets: string | null;
-  debt: string | null;
+  assets: number | null;
+  debt: number | null;
 }
 
 export interface FetchNetworthHistoryOpts {
@@ -44,3 +45,16 @@ export async function fetchNetworthHistory(
   });
   return data.networthHistory;
 }
+
+/** Zod mirror of `NetworthResponse` (#537). assets/debt are numbers on the
+ * wire — the interface previously mislabeled them string (server type drift,
+ * probe-confirmed 2026-07-17; same class as latestBalanceUpdate #551). */
+export const NetworthResponseSchema = z.looseObject({
+  networthHistory: z.array(
+    z.looseObject({
+      date: z.string(),
+      assets: z.number().nullable(),
+      debt: z.number().nullable(),
+    })
+  ),
+});

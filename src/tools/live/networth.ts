@@ -128,7 +128,7 @@ export function createLiveNetworthToolSchema(): ToolSchema {
     description:
       'Get net-worth-over-time history (live, GraphQL-backed). Returns daily snapshots ' +
       'sorted oldest→newest by date; for each row, `assets - debt` gives the net worth ' +
-      'at that point in time. Both `assets` and `debt` are nullable strings — early dates ' +
+      'at that point in time. Both `assets` and `debt` are nullable numbers — early dates ' +
       "in the user's history may have `assets: null` until backfilled. Available when " +
       '--live-reads is on. Optional `time_frame` arg (default "YTD"; accepts the canonical ' +
       'TimeFrame values "ONE_DAY", "ONE_WEEK", "ONE_MONTH", "THREE_MONTHS", "YTD", ' +

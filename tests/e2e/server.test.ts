@@ -2422,7 +2422,7 @@ describe('--live-reads networth wiring', () => {
 
     const stubResult = {
       count: 1,
-      networth_history: [{ date: '2026-01-01', assets: '100000', debt: '5000' }],
+      networth_history: [{ date: '2026-01-01', assets: 100000, debt: 5000 }],
       _cache_oldest_fetched_at: '2025-01-01T00:00:00.000Z',
       _cache_newest_fetched_at: '2025-01-01T00:00:00.000Z',
       _cache_hit: false,

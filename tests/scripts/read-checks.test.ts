@@ -101,7 +101,7 @@ function validResponses(): Record<string, unknown> {
     Recurrings: { recurrings: [{ id: 'rec-1', state: 'ACTIVE' }] },
     UpcomingRecurrings: { unpaidUpcomingRecurrings: [] },
     MonthlySpend: { monthlySpending: [{ id: 'm-1', date: '2026-06-01' }] },
-    Networth: { networthHistory: [{ date: '2026-06-01', assets: '1', debt: '0' }] },
+    Networth: { networthHistory: [{ date: '2026-06-01', assets: 1, debt: 0 }] },
     BalanceHistory: { accountBalanceHistory: [{ date: '2026-06-01', balance: 100 }] },
     Holdings: {
       holdings: [{ id: 'h-1', accountId: 'acc-1', itemId: 'item-1', quantity: 1, security }],

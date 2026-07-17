@@ -95,6 +95,17 @@ const VALID_RESPONSES: Record<string, unknown> = {
       },
     ],
   },
+  MonthlySpend: {
+    monthlySpending: [
+      { id: 'dAy111BbB222CcC333Dd', date: '2026-07-01', totalAmount: 150, comparisonAmount: 120 },
+    ],
+  },
+  Networth: {
+    networthHistory: [{ date: '2026-07-01', assets: 1000, debt: 200 }],
+  },
+  BalanceHistory: {
+    accountBalanceHistory: [{ date: '2026-07-01', balance: 500 }],
+  },
 };
 
 describe('validateQueryResponse', () => {

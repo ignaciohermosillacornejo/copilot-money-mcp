@@ -7,8 +7,8 @@ describe('fetchMonthlySpend', () => {
       query: mock(() =>
         Promise.resolve({
           monthlySpending: [
-            { id: 'd1', date: '2026-04-01', totalAmount: '100', comparisonAmount: '90' },
-            { id: 'd2', date: '2026-04-02', totalAmount: '200', comparisonAmount: '180' },
+            { id: 'd1', date: '2026-04-01', totalAmount: 100, comparisonAmount: 90 },
+            { id: 'd2', date: '2026-04-02', totalAmount: 200, comparisonAmount: 180 },
           ],
         })
       ),
@@ -21,8 +21,8 @@ describe('fetchMonthlySpend', () => {
     expect(rows).toHaveLength(2);
     expect(rows.map((r) => r.id)).toEqual(['d1', 'd2']);
     expect(rows[0]?.date).toBe('2026-04-01');
-    expect(rows[0]?.totalAmount).toBe('100');
-    expect(rows[0]?.comparisonAmount).toBe('90');
+    expect(rows[0]?.totalAmount).toBe(100);
+    expect(rows[0]?.comparisonAmount).toBe(90);
   });
 
   test('passes no variables (MonthlySpend query takes none)', async () => {
@@ -53,7 +53,7 @@ describe('fetchMonthlySpend', () => {
       query: mock(() =>
         Promise.resolve({
           monthlySpending: [
-            { id: 'd1', date: '2026-04-01', totalAmount: '100', comparisonAmount: '90' },
+            { id: 'd1', date: '2026-04-01', totalAmount: 100, comparisonAmount: 90 },
             { id: 'd2', date: '2026-04-30', totalAmount: null, comparisonAmount: null },
           ],
         })
