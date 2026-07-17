@@ -49,7 +49,7 @@ const account = (id: string, name: string) => ({
   institutionId: 'inst1',
   hasHistoricalUpdates: true,
   hasLiveBalance: true,
-  latestBalanceUpdate: '2026-04-25T00:00:00Z',
+  latestBalanceUpdate: 1_745_539_200_000,
 });
 
 const emptyTransactionsPage = {

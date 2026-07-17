@@ -22,6 +22,7 @@ import { describe, test, expect } from 'bun:test';
 import * as generated from '../../src/core/graphql/operations.generated.js';
 import { READ_SMOKE_CHECKS } from '../../scripts/smoke/read-checks.js';
 import { CONFORMANCE_LEDGER } from '../../src/conformance/ledger.js';
+import { QUERY_RESPONSE_SCHEMAS } from '../../src/core/graphql/read-response-validation.js';
 
 interface ParsedQuery {
   /** Operation name, e.g. 'Accounts'. */
@@ -108,5 +109,25 @@ describe('read-smoke coverage ratchet', () => {
       stale,
       `Ledger Query.* surfaces without a generated query operation: ${stale.join(', ')}`
     ).toEqual([]);
+  });
+
+  test('(b) every QUERY_RESPONSE_SCHEMAS key is a real generated operation name whose surface matches its root field', () => {
+    // The client dispatches read validation by the registry KEY (the operation
+    // name passed to client.query). A mistyped key would satisfy the ledger
+    // bijection + fixture ratchet yet never fire at runtime — a silent paper
+    // gate. This asserts registration is genuinely activation.
+    const rootFieldByOp = new Map(queries.map((q) => [q.name, q.rootField]));
+    for (const [opName, entry] of Object.entries(QUERY_RESPONSE_SCHEMAS)) {
+      const rootField = rootFieldByOp.get(opName);
+      expect(
+        rootField,
+        `QUERY_RESPONSE_SCHEMAS key '${opName}' is not a generated GraphQL operation name — ` +
+          `client.query('${opName}', …) would never dispatch to it (silent paper gate)`
+      ).toBeDefined();
+      expect(
+        entry.surface,
+        `QUERY_RESPONSE_SCHEMAS['${opName}'].surface must be Query.<rootField>:response for its operation`
+      ).toBe(`Query.${rootField}:response`);
+    }
   });
 });
