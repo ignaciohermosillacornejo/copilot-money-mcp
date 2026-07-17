@@ -9,6 +9,10 @@ import {
   getResponseDriftStats,
   __resetResponseDriftState,
 } from '../../../src/core/graphql/response-validation.js';
+import {
+  getReadResponseDriftStats,
+  __resetReadResponseDriftState,
+} from '../../../src/core/graphql/read-response-validation.js';
 import type { FirebaseAuth } from '../../../src/core/auth/firebase-auth.js';
 
 let fetchCalls: { url: string; options: RequestInit }[] = [];
@@ -764,19 +768,6 @@ describe('GraphQLClient — warn-mode response-shape validation (#437)', () => {
     expect(getResponseDriftStats()).toEqual({});
   });
 
-  test('query responses are not shape-validated (live reads have their own handling)', async () => {
-    mockFetch({ data: { tags: 'not-even-an-array' } });
-    const client = new GraphQLClient(createMockAuth());
-    const out = await client.query<unknown, { tags: unknown }>(
-      'Tags',
-      'query Tags { tags { id } }',
-      {}
-    );
-    expect(out).toEqual({ tags: 'not-even-an-array' });
-    expect(warnSpy).not.toHaveBeenCalled();
-    expect(getResponseDriftStats()).toEqual({});
-  });
-
   test('validation still runs when a mutation succeeds on a retry attempt', async () => {
     // Attempt 1 provably never reached the server (retryable for mutations);
     // attempt 2 succeeds with a drifted payload — the validator must fire on
@@ -797,5 +788,63 @@ describe('GraphQLClient — warn-mode response-shape validation (#437)', () => {
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(String(warnSpy.mock.calls[0][0])).toContain('response shape drift');
     expect(getResponseDriftStats()).toEqual({ 'Mutation.deleteTag:response': 1 });
+  });
+});
+
+describe('GraphQLClient — warn-mode READ response-shape validation (#537)', () => {
+  let warnSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    __resetReadResponseDriftState();
+    warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+    restoreFetch();
+  });
+
+  test('a drifted REGISTERED query response warns but resolves with the payload unchanged', async () => {
+    // Tags' registered schema expects { tags: TagNode[] }; a string simulates
+    // server drift on a field we read.
+    mockFetch({ data: { tags: 'not-even-an-array' } });
+    const client = new GraphQLClient(createMockAuth());
+    const out = await client.query<unknown, { tags: unknown }>(
+      'Tags',
+      'query Tags { tags { id } }',
+      {}
+    );
+    expect(out).toEqual({ tags: 'not-even-an-array' }); // payload untouched — warn-mode
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(String(warnSpy.mock.calls[0][0])).toContain('read response shape drift');
+    expect(getReadResponseDriftStats()).toEqual({ 'Query.tags:response': 1 });
+  });
+
+  test('a conforming registered query response produces no warnings and no drift counts', async () => {
+    mockFetch({
+      data: { tags: [{ id: 'tAg111BbB222CcC333Dd', name: 'trip', colorName: 'green' }] },
+    });
+    const client = new GraphQLClient(createMockAuth());
+    const out = await client.query<unknown, { tags: unknown[] }>(
+      'Tags',
+      'query Tags { tags { id } }',
+      {}
+    );
+    expect(out.tags).toHaveLength(1);
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(getReadResponseDriftStats()).toEqual({});
+  });
+
+  test('an UNREGISTERED query is not shape-validated (skips silently)', async () => {
+    mockFetch({ data: { whatever: 'garbage' } });
+    const client = new GraphQLClient(createMockAuth());
+    const out = await client.query<unknown, { whatever: unknown }>(
+      'SomeFutureQuery',
+      'query SomeFutureQuery { whatever }',
+      {}
+    );
+    expect(out).toEqual({ whatever: 'garbage' });
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(getReadResponseDriftStats()).toEqual({});
   });
 });
