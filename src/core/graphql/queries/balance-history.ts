@@ -15,6 +15,7 @@
  * non-null `ID!` annotation).
  */
 
+import { z } from 'zod';
 import type { GraphQLClient } from '../client.js';
 import { BALANCE_HISTORY } from '../operations.generated.js';
 import type { TimeFrame } from './_shared.js';
@@ -49,3 +50,13 @@ export async function fetchAccountBalanceHistory(
   });
   return data.accountBalanceHistory;
 }
+
+/** Zod mirror of `BalanceHistoryResponse` (#537). */
+export const BalanceHistoryResponseSchema = z.looseObject({
+  accountBalanceHistory: z.array(
+    z.looseObject({
+      date: z.string(),
+      balance: z.number(),
+    })
+  ),
+});

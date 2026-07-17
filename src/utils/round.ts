@@ -26,11 +26,12 @@ export function computeTotalReturnPercent(
 }
 
 /**
- * Parse a string/null/undefined GraphQL amount into a number, returning
- * null when the value can't be parsed. Used by snapshot-mode live tools
- * that receive amounts as Apollo-canonical strings.
+ * Parse a string/number/null/undefined GraphQL amount into a number,
+ * returning null when the value can't be parsed. Used by snapshot-mode live
+ * tools that receive amounts as either Apollo-canonical strings or (for
+ * monthlySpending/networthHistory — server type drift, #537) plain numbers.
  */
-export function parseAmount(value: string | null | undefined): number | null {
+export function parseAmount(value: string | number | null | undefined): number | null {
   if (value === null || value === undefined) return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;

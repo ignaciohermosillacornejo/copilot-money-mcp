@@ -14,7 +14,7 @@ function makeLive(client: GraphQLClient): LiveCopilotDatabase {
   return new LiveCopilotDatabase(client, new CopilotDatabase('/tmp/no-such-db'));
 }
 
-const sampleRow = { date: '2026-01-01', assets: '100000', debt: '5000' };
+const sampleRow = { date: '2026-01-01', assets: 100000, debt: 5000 };
 
 describe('LiveNetworthTools.getNetworth', () => {
   test('cold call: fetches and returns rows with cache_hit=false', async () => {
@@ -27,8 +27,8 @@ describe('LiveNetworthTools.getNetworth', () => {
     expect(result.total_rows).toBe(1);
     expect(result.truncated).toBe(false);
     expect(result.networth_history[0]?.date).toBe('2026-01-01');
-    expect(result.networth_history[0]?.assets).toBe('100000');
-    expect(result.networth_history[0]?.debt).toBe('5000');
+    expect(result.networth_history[0]?.assets).toBe(100000);
+    expect(result.networth_history[0]?.debt).toBe(5000);
     expect(result._cache_hit).toBe(false);
     expect(typeof result._cache_oldest_fetched_at).toBe('string');
     expect(typeof result._cache_newest_fetched_at).toBe('string');
@@ -57,9 +57,9 @@ describe('LiveNetworthTools.getNetworth', () => {
 
   test('output sorted oldest→newest by date', async () => {
     const client = makeClient([
-      { date: '2026-03-01', assets: '300', debt: '30' },
-      { date: '2026-01-01', assets: '100', debt: '10' },
-      { date: '2026-02-01', assets: '200', debt: '20' },
+      { date: '2026-03-01', assets: 300, debt: 30 },
+      { date: '2026-01-01', assets: 100, debt: 10 },
+      { date: '2026-02-01', assets: 200, debt: 20 },
     ]);
     const tools = new LiveNetworthTools(makeLive(client));
 
@@ -122,8 +122,8 @@ describe('LiveNetworthTools.getNetworth', () => {
   test('caps at default max_rows=500 and reports truncated=true', async () => {
     const bigRows = Array.from({ length: 1500 }, (_, i) => ({
       date: `2025-${String(Math.floor(i / 30) + 1).padStart(2, '0')}-${String((i % 30) + 1).padStart(2, '0')}`,
-      assets: String(100 + i),
-      debt: String(10 + i),
+      assets: 100 + i,
+      debt: 10 + i,
     }));
     const client = makeClient(bigRows);
     const tools = new LiveNetworthTools(makeLive(client));
@@ -134,15 +134,15 @@ describe('LiveNetworthTools.getNetworth', () => {
     expect(result.count).toBe(500);
     expect(result.truncated).toBe(true);
     // Sliced to MOST RECENT (tail of ascending series).
-    expect(result.networth_history[0]?.assets).toBe(String(100 + 1000));
-    expect(result.networth_history[499]?.assets).toBe(String(100 + 1499));
+    expect(result.networth_history[0]?.assets).toBe(100 + 1000);
+    expect(result.networth_history[499]?.assets).toBe(100 + 1499);
   });
 
   test('offset=500 returns the next-most-recent batch', async () => {
     const bigRows = Array.from({ length: 1500 }, (_, i) => ({
       date: `2025-${String(Math.floor(i / 30) + 1).padStart(2, '0')}-${String((i % 30) + 1).padStart(2, '0')}`,
-      assets: String(100 + i),
-      debt: String(10 + i),
+      assets: 100 + i,
+      debt: 10 + i,
     }));
     const client = makeClient(bigRows);
     const tools = new LiveNetworthTools(makeLive(client));
@@ -156,7 +156,7 @@ describe('LiveNetworthTools.getNetworth', () => {
     expect(result.count).toBe(500);
     expect(result.total_rows).toBe(1500);
     expect(result.truncated).toBe(true);
-    expect(result.networth_history[0]?.assets).toBe(String(100 + 500));
+    expect(result.networth_history[0]?.assets).toBe(100 + 500);
   });
 
   test('offset beyond total returns empty rows without throwing', async () => {
@@ -171,13 +171,13 @@ describe('LiveNetworthTools.getNetworth', () => {
   });
 
   test('preserves null assets/debt in passthrough (early dates)', async () => {
-    const client = makeClient([{ date: '2022-09-13', assets: null, debt: '500' }]);
+    const client = makeClient([{ date: '2022-09-13', assets: null, debt: 500 }]);
     const tools = new LiveNetworthTools(makeLive(client));
 
     const result = await tools.getNetworth({});
 
     expect(result.networth_history[0]?.assets).toBeNull();
-    expect(result.networth_history[0]?.debt).toBe('500');
+    expect(result.networth_history[0]?.debt).toBe(500);
   });
 });
 

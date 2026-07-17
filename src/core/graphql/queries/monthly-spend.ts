@@ -17,14 +17,15 @@
  * full set with a 1h TTL.
  */
 
+import { z } from 'zod';
 import type { GraphQLClient } from '../client.js';
 import { MONTHLY_SPEND } from '../operations.generated.js';
 
 export interface DailySpendNode {
   id: string;
   date: string;
-  totalAmount: string | null;
-  comparisonAmount: string | null;
+  totalAmount: number | null;
+  comparisonAmount: number | null;
 }
 
 export interface MonthlySpendResponse {
@@ -39,3 +40,17 @@ export async function fetchMonthlySpend(client: GraphQLClient): Promise<DailySpe
   );
   return data.monthlySpending;
 }
+
+/** Zod mirror of `MonthlySpendResponse` (#537). totalAmount/comparisonAmount
+ * are numbers on the wire (interface previously mislabeled them string;
+ * probe-confirmed 2026-07-17). */
+export const MonthlySpendResponseSchema = z.looseObject({
+  monthlySpending: z.array(
+    z.looseObject({
+      id: z.string(),
+      date: z.string(),
+      totalAmount: z.number().nullable(),
+      comparisonAmount: z.number().nullable(),
+    })
+  ),
+});

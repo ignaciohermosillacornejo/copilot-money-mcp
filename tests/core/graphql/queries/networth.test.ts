@@ -7,8 +7,8 @@ describe('fetchNetworthHistory', () => {
       query: mock(() =>
         Promise.resolve({
           networthHistory: [
-            { date: '2026-01-01', assets: '100000', debt: '5000' },
-            { date: '2026-01-02', assets: '101000', debt: '5100' },
+            { date: '2026-01-01', assets: 100000, debt: 5000 },
+            { date: '2026-01-02', assets: 101000, debt: 5100 },
           ],
         })
       ),
@@ -20,8 +20,8 @@ describe('fetchNetworthHistory', () => {
 
     expect(rows).toHaveLength(2);
     expect(rows[0]?.date).toBe('2026-01-01');
-    expect(rows[0]?.assets).toBe('100000');
-    expect(rows[0]?.debt).toBe('5000');
+    expect(rows[0]?.assets).toBe(100000);
+    expect(rows[0]?.debt).toBe(5000);
   });
 
   test('passes timeFrame variable to the query', async () => {
@@ -53,7 +53,7 @@ describe('fetchNetworthHistory', () => {
     const client = {
       query: mock(() =>
         Promise.resolve({
-          networthHistory: [{ date: '2022-09-13', assets: null, debt: '500' }],
+          networthHistory: [{ date: '2022-09-13', assets: null, debt: 500 }],
         })
       ),
     } as unknown as GraphQLClient;
@@ -63,6 +63,6 @@ describe('fetchNetworthHistory', () => {
     const rows = await fetchNetworthHistory(client, { timeFrame: 'ALL' });
 
     expect(rows[0]?.assets).toBeNull();
-    expect(rows[0]?.debt).toBe('500');
+    expect(rows[0]?.debt).toBe(500);
   });
 });

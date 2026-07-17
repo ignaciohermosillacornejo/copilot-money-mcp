@@ -14,8 +14,8 @@ function makeLive(client: GraphQLClient): LiveCopilotDatabase {
   return new LiveCopilotDatabase(client, new CopilotDatabase('/tmp/no-such-db'));
 }
 
-const pastRow = { id: 'd1', date: '2026-04-01', totalAmount: '100', comparisonAmount: '90' };
-const todayRow = { id: 'd2', date: '2026-04-15', totalAmount: '50', comparisonAmount: '40' };
+const pastRow = { id: 'd1', date: '2026-04-01', totalAmount: 100, comparisonAmount: 90 };
+const todayRow = { id: 'd2', date: '2026-04-15', totalAmount: 50, comparisonAmount: 40 };
 const futureRow = { id: 'd3', date: '2026-04-20', totalAmount: null, comparisonAmount: null };
 
 describe('LiveMonthlySpendTools.getMonthlySpend', () => {
@@ -69,9 +69,9 @@ describe('LiveMonthlySpendTools.getMonthlySpend', () => {
 
   test('output sorted by date ascending', async () => {
     const client = makeClient([
-      { id: 'b', date: '2026-04-15', totalAmount: '200', comparisonAmount: '150' },
-      { id: 'a', date: '2026-04-01', totalAmount: '100', comparisonAmount: '90' },
-      { id: 'c', date: '2026-04-30', totalAmount: '300', comparisonAmount: '250' },
+      { id: 'b', date: '2026-04-15', totalAmount: 200, comparisonAmount: 150 },
+      { id: 'a', date: '2026-04-01', totalAmount: 100, comparisonAmount: 90 },
+      { id: 'c', date: '2026-04-30', totalAmount: 300, comparisonAmount: 250 },
     ]);
     const tools = new LiveMonthlySpendTools(makeLive(client));
 
@@ -119,7 +119,7 @@ describe('LiveMonthlySpendTools.getMonthlySpend', () => {
       id: 'd-half',
       date: '2026-04-19',
       totalAmount: null,
-      comparisonAmount: '90',
+      comparisonAmount: 90,
     };
     const client = makeClient([pastRow, halfNull]);
     const tools = new LiveMonthlySpendTools(makeLive(client));
