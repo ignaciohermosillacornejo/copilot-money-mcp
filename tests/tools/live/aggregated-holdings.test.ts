@@ -107,6 +107,14 @@ describe('LiveAggregatedHoldingsTools.getAggregatedHoldings', () => {
     expect(client.query).toHaveBeenCalledTimes(2);
   });
 
+  test('changing scope (item_id) invalidates the cache and refetches', async () => {
+    const client = makeClient([holding]);
+    const tools = new LiveAggregatedHoldingsTools(makeLive(client));
+    await tools.getAggregatedHoldings({});
+    await tools.getAggregatedHoldings({ item_id: 'item-1' });
+    expect(client.query).toHaveBeenCalledTimes(2);
+  });
+
   test('cache metadata: ISO strings, oldest === newest', async () => {
     const client = makeClient([holding]);
     const tools = new LiveAggregatedHoldingsTools(makeLive(client));
