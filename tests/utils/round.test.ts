@@ -37,5 +37,6 @@ describe('parseAmount', () => {
   test('returns null for non-finite numeric input', () => {
     expect(parseAmount(Number.NaN)).toBeNull();
     expect(parseAmount(Number.POSITIVE_INFINITY)).toBeNull();
+    expect(parseAmount(Number.NEGATIVE_INFINITY)).toBeNull();
   });
 });
