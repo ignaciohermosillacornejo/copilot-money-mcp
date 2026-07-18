@@ -15,6 +15,7 @@
  * childCategories field after flattening.
  */
 
+import { z } from 'zod';
 import type { GraphQLClient } from '../client.js';
 import { CATEGORIES } from '../operations.generated.js';
 
@@ -124,3 +125,53 @@ export async function fetchCategories(
   }
   return flat;
 }
+
+const CategoryIconSchema = z.looseObject({
+  __typename: z.string(),
+  unicode: z.string().optional(),
+  id: z.string().optional(),
+  src: z.string().optional(),
+});
+
+/** All 8 amount fields are `number | null` on the wire (probe-confirmed 2026-07-18). */
+const CategoryBudgetMonthlySchema = z.looseObject({
+  unassignedRolloverAmount: z.number().nullable(),
+  childRolloverAmount: z.number().nullable(),
+  unassignedAmount: z.number().nullable(),
+  resolvedAmount: z.number().nullable(),
+  rolloverAmount: z.number().nullable(),
+  childAmount: z.number().nullable(),
+  goalAmount: z.number().nullable(),
+  amount: z.number().nullable(),
+  month: z.string(),
+  id: z.string(),
+});
+
+const CategoryBudgetSchema = z.looseObject({
+  current: CategoryBudgetMonthlySchema.nullable(),
+  histories: z.array(CategoryBudgetMonthlySchema),
+});
+
+/** Raw category fields = Omit<CategoryNode, 'parentId'>. budget present only
+ * when budget:true was requested (fetchCategories always requests it). */
+const CategoryRawFieldsSchema = z.looseObject({
+  id: z.string(),
+  name: z.string(),
+  templateId: z.string().nullable(),
+  colorName: z.string().nullable(),
+  icon: CategoryIconSchema.nullable(),
+  isExcluded: z.boolean(),
+  isRolloverDisabled: z.boolean(),
+  canBeDeleted: z.boolean(),
+  budget: CategoryBudgetSchema.nullable().optional(),
+});
+
+/** Zod mirror of the raw `CategoriesResponse` — nested one-level childCategories,
+ * no synthesized parentId (that happens in fetchCategories, after validation) (#537/#553). */
+export const CategoriesResponseSchema = z.looseObject({
+  categories: z.array(
+    CategoryRawFieldsSchema.extend({
+      childCategories: z.array(CategoryRawFieldsSchema).optional(),
+    })
+  ),
+});

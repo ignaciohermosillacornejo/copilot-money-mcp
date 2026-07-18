@@ -172,8 +172,8 @@ describe('conformance ledger', () => {
       .map((entry) => entry.surface)
       .sort();
     expect(registeredSurfaces).toEqual(ledgerSurfaces);
-    // Non-vacuous floor; grows toward 18 as #537's follow-up PRs land.
-    expect(registeredSurfaces.length).toBeGreaterThanOrEqual(4);
+    // Non-vacuous floor; all 18 read response shapes are gated (#537 closed).
+    expect(registeredSurfaces.length).toBeGreaterThanOrEqual(18);
   });
 
   test("(c) class 'gated' requires a non-null oracle", () => {

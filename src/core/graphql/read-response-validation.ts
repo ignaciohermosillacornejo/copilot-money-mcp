@@ -32,6 +32,7 @@ import type { ZodType } from 'zod';
 import { AccountResponseSchema, AccountsResponseSchema } from './queries/accounts.js';
 import { AggregatedHoldingsResponseSchema } from './queries/aggregated-holdings.js';
 import { BalanceHistoryResponseSchema } from './queries/balance-history.js';
+import { CategoriesResponseSchema } from './queries/categories.js';
 import { HoldingsResponseSchema } from './queries/holdings.js';
 import { InvestmentAllocationResponseSchema } from './queries/investment-allocation.js';
 import { InvestmentBalanceResponseSchema } from './queries/investment-balance.js';
@@ -77,6 +78,7 @@ export const QUERY_RESPONSE_SCHEMAS: Readonly<Record<string, QueryResponseShapeE
   User: entry('user', UserResponseSchema),
   Accounts: entry('accounts', AccountsResponseSchema),
   Account: entry('account', AccountResponseSchema),
+  Categories: entry('categories', CategoriesResponseSchema),
   Tags: entry('tags', TagsResponseSchema),
   Recurrings: entry('recurrings', RecurringsResponseSchema),
   UpcomingRecurrings: entry('unpaidUpcomingRecurrings', UpcomingRecurringsResponseSchema),
