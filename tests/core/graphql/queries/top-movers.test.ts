@@ -14,7 +14,7 @@ describe('fetchTopMovers', () => {
                 symbol: 'SYN',
                 type: 'EQUITY',
                 currentPrice: 100,
-                lastUpdate: '2026-05-01T00:00:00Z',
+                lastUpdate: 1_777_593_600_000,
                 marketInfo: { closeTime: 1700000000000, openTime: 1700000000000 },
               },
               values: [

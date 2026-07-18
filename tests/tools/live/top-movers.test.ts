@@ -20,7 +20,7 @@ const mover = {
     symbol: 'ACME',
     type: 'EQUITY',
     currentPrice: 100,
-    lastUpdate: '2026-07-13',
+    lastUpdate: 1_783_900_800_000,
     marketInfo: { closeTime: null, openTime: null },
   },
   values: [

@@ -13,7 +13,7 @@ describe('fetchAggregatedHoldings', () => {
                 name: 'Synthetic ETF',
                 symbol: 'SYN',
                 type: 'EQUITY',
-                lastUpdate: '2026-05-01T00:00:00Z',
+                lastUpdate: 1_777_593_600_000,
                 marketInfo: { closeTime: 1700000000000, openTime: 1700000000000 },
               },
               change: 50,

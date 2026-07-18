@@ -109,7 +109,6 @@ const VALID_RESPONSES: Record<string, unknown> = {
   Holdings: {
     holdings: [
       {
-        __typename: 'Holding',
         id: 'hLd111BbB222CcC333Dd',
         accountId: 'AbC123dEf456GhI789jK',
         itemId: 'MnO456pQr789StU012vW',
@@ -120,7 +119,7 @@ const VALID_RESPONSES: Record<string, unknown> = {
           symbol: 'SYN',
           type: 'EQUITY',
           currentPrice: 100,
-          lastUpdate: '2026-07-01',
+          lastUpdate: null,
           marketInfo: { closeTime: null, openTime: null },
         },
         metrics: { averageCost: 90, costBasis: 900, totalReturn: 100 },
@@ -135,7 +134,7 @@ const VALID_RESPONSES: Record<string, unknown> = {
           name: 'Synthetic Equity',
           symbol: 'SYN',
           type: 'EQUITY',
-          lastUpdate: '2026-07-01',
+          lastUpdate: 1_782_864_000_000,
           marketInfo: { closeTime: null, openTime: null },
         },
         change: 5,
@@ -157,7 +156,7 @@ const VALID_RESPONSES: Record<string, unknown> = {
           symbol: 'SYN',
           type: 'EQUITY',
           currentPrice: 100,
-          lastUpdate: '2026-07-01',
+          lastUpdate: 1_782_864_000_000,
           marketInfo: { closeTime: null, openTime: null },
         },
         values: [{ id: 'pPt111BbB222CcC333Dd', timestamp: 1_745_539_200_000, price: 100 }],

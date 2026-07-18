@@ -64,7 +64,12 @@ export interface SecurityNode {
   symbol: string;
   type: string;
   currentPrice: number;
-  lastUpdate: string;
+  /**
+   * Epoch-ms timestamp, or null. Server type drift — mislabeled `string` —
+   * caught by the read-shape smoke on 2026-07-17 (#537); same class as
+   * latestBalanceUpdate (#551).
+   */
+  lastUpdate: number | null;
   marketInfo: MarketInfoNode;
 }
 
@@ -82,6 +87,6 @@ export const SecurityNodeSchema = z.looseObject({
   symbol: z.string(),
   type: z.string(),
   currentPrice: z.number(),
-  lastUpdate: z.string(),
+  lastUpdate: z.number().nullable(),
   marketInfo: MarketInfoNodeSchema,
 });
