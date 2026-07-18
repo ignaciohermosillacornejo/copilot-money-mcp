@@ -15,6 +15,7 @@
  * but passes it to the resolver as `securityId: $id`.
  */
 
+import { z } from 'zod';
 import type { GraphQLClient } from '../client.js';
 import { SECURITY_PRICES_HIGH_FREQUENCY } from '../operations.generated.js';
 import type { TimeFrame } from './_shared.js';
@@ -54,3 +55,15 @@ export async function fetchSecurityPricesHighFrequency(
   });
   return data.securityPricesHighFrequency;
 }
+
+/** Zod mirror of `SecurityPricesHighFrequencyResponse` (#537). timestamp is an
+ * opaque numeric ordering key. */
+export const SecurityPricesHighFrequencyResponseSchema = z.looseObject({
+  securityPricesHighFrequency: z.array(
+    z.looseObject({
+      id: z.string(),
+      timestamp: z.number(),
+      price: z.number(),
+    })
+  ),
+});
