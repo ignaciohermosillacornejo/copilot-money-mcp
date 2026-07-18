@@ -25,7 +25,7 @@ const equityHolding = {
     symbol: 'ACME',
     type: 'EQUITY',
     currentPrice: 100,
-    lastUpdate: '2026-05-04',
+    lastUpdate: 1_777_852_800_000,
     marketInfo: { closeTime: null, openTime: null },
   },
   metrics: {
@@ -46,7 +46,7 @@ const mutualFundHolding = {
     symbol: 'IDX',
     type: 'MUTUAL_FUND',
     currentPrice: 200,
-    lastUpdate: '2026-05-04',
+    lastUpdate: 1_777_852_800_000,
     marketInfo: { closeTime: null, openTime: null },
   },
   metrics: {
@@ -67,7 +67,7 @@ const cashHolding = {
     symbol: 'USD',
     type: 'CASH',
     currentPrice: 1,
-    lastUpdate: '2026-05-04',
+    lastUpdate: 1_777_852_800_000,
     marketInfo: { closeTime: null, openTime: null },
   },
   metrics: null,

@@ -19,7 +19,7 @@ const holding = {
     name: 'Acme Corp',
     symbol: 'ACME',
     type: 'EQUITY',
-    lastUpdate: '2026-07-14',
+    lastUpdate: 1_783_987_200_000,
     marketInfo: { closeTime: null, openTime: null },
   },
   value: 12500,

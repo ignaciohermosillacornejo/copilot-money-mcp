@@ -39,7 +39,12 @@ export interface AggregatedSecurityNode {
   name: string;
   symbol: string;
   type: string;
-  lastUpdate: string;
+  /**
+   * Epoch-ms timestamp, or null. Server type drift — mislabeled `string` —
+   * caught by the read-shape smoke on 2026-07-17 (#537); same class as
+   * latestBalanceUpdate (#551).
+   */
+  lastUpdate: number | null;
   marketInfo: MarketInfoNode;
 }
 
@@ -87,7 +92,7 @@ const AggregatedSecurityNodeSchema = z.looseObject({
   name: z.string(),
   symbol: z.string(),
   type: z.string(),
-  lastUpdate: z.string(),
+  lastUpdate: z.number().nullable(),
   marketInfo: MarketInfoNodeSchema,
 });
 

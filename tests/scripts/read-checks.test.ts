@@ -53,7 +53,7 @@ function validResponses(): Record<string, unknown> {
     symbol: 'ACME',
     type: 'EQUITY',
     currentPrice: 10,
-    lastUpdate: '2026-06-11',
+    lastUpdate: 1_781_136_000_000,
     marketInfo: { closeTime: null, openTime: null },
   };
   return {
@@ -151,7 +151,7 @@ describe('READ_SMOKE_CHECKS', () => {
             symbol: '',
             type: 'CASH',
             currentPrice: 1,
-            lastUpdate: '',
+            lastUpdate: null,
             marketInfo: { closeTime: null, openTime: null },
           },
         },
@@ -166,7 +166,7 @@ describe('READ_SMOKE_CHECKS', () => {
             symbol: 'EQ',
             type: 'EQUITY',
             currentPrice: 5,
-            lastUpdate: '',
+            lastUpdate: 1_781_136_000_000,
             marketInfo: { closeTime: null, openTime: null },
           },
         },
