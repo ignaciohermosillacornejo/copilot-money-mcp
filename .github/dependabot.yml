@@ -9,6 +9,12 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
+    # Let a release age before proposing it, so upstream regressions surface
+    # in the wider ecosystem first. 2 weeks for minor/patch; a month for
+    # majors (breaking bumps like typescript 6->7 deserve extra soak time).
+    cooldown:
+      default-days: 14
+      semver-major-days: 30
     # Group all minor/patch updates together
     groups:
       production-dependencies:
@@ -50,6 +56,10 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
+    # Same 2-week stability cooldown as npm (see above).
+    cooldown:
+      default-days: 14
+      semver-major-days: 30
     # Assignees for workflow PRs
     assignees:
       - "ignaciohermosillacornejo"
