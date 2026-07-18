@@ -264,7 +264,7 @@ describe('budgetAmountForMonth', () => {
     expect(budgetAmountForMonth(budget, '2026-05')).toBe(200);
   });
 
-  test('returns undefined for missing budget, missing month, or unparseable amounts', () => {
+  test('returns undefined for missing budget, missing month, or null amounts', () => {
     expect(budgetAmountForMonth(null, '2026-06')).toBeUndefined();
     expect(budgetAmountForMonth(undefined, '2026-06')).toBeUndefined();
     const budget = { current: monthly('2026-06', null, null), histories: [] };
