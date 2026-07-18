@@ -34,9 +34,13 @@ import { AggregatedHoldingsResponseSchema } from './queries/aggregated-holdings.
 import { BalanceHistoryResponseSchema } from './queries/balance-history.js';
 import { HoldingsResponseSchema } from './queries/holdings.js';
 import { InvestmentAllocationResponseSchema } from './queries/investment-allocation.js';
+import { InvestmentBalanceResponseSchema } from './queries/investment-balance.js';
+import { InvestmentLiveBalanceResponseSchema } from './queries/investment-live-balance.js';
 import { MonthlySpendResponseSchema } from './queries/monthly-spend.js';
 import { NetworthResponseSchema } from './queries/networth.js';
 import { RecurringsResponseSchema } from './queries/recurrings.js';
+import { SecurityPricesResponseSchema } from './queries/security-prices.js';
+import { SecurityPricesHighFrequencyResponseSchema } from './queries/security-prices-high-frequency.js';
 import { TagsResponseSchema } from './queries/tags.js';
 import { TopMoversResponseSchema } from './queries/top-movers.js';
 import { UpcomingRecurringsResponseSchema } from './queries/upcoming-recurrings.js';
@@ -83,6 +87,13 @@ export const QUERY_RESPONSE_SCHEMAS: Readonly<Record<string, QueryResponseShapeE
   AggregatedHoldings: entry('aggregatedHoldings', AggregatedHoldingsResponseSchema),
   InvestmentAllocation: entry('investmentAllocation', InvestmentAllocationResponseSchema),
   TopMovers: entry('topMovers', TopMoversResponseSchema),
+  InvestmentBalance: entry('investmentBalance', InvestmentBalanceResponseSchema),
+  InvestmentLiveBalance: entry('investmentLiveBalance', InvestmentLiveBalanceResponseSchema),
+  SecurityPrices: entry('securityPrices', SecurityPricesResponseSchema),
+  SecurityPricesHighFrequency: entry(
+    'securityPricesHighFrequency',
+    SecurityPricesHighFrequencyResponseSchema
+  ),
 };
 
 // ---------------------------------------------------------------------------

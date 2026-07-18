@@ -604,17 +604,17 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   queryOperation('aggregatedHoldings'),
   gatedQueryResponseShape('aggregatedHoldings'),
   queryOperation('investmentBalance'),
-  queryResponseShape('investmentBalance'),
+  gatedQueryResponseShape('investmentBalance'),
   queryOperation('investmentLiveBalance'),
-  queryResponseShape('investmentLiveBalance'),
+  gatedQueryResponseShape('investmentLiveBalance'),
   queryOperation('investmentAllocation'),
   gatedQueryResponseShape('investmentAllocation'),
   queryOperation('topMovers'),
   gatedQueryResponseShape('topMovers'),
   queryOperation('securityPrices'),
-  queryResponseShape('securityPrices'),
+  gatedQueryResponseShape('securityPrices'),
   queryOperation('securityPricesHighFrequency'),
-  queryResponseShape('securityPricesHighFrequency'),
+  gatedQueryResponseShape('securityPricesHighFrequency'),
 ];
 
 // ---------------------------------------------------------------------------

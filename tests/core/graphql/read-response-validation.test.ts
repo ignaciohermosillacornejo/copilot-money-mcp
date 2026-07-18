@@ -164,6 +164,23 @@ const VALID_RESPONSES: Record<string, unknown> = {
       },
     ],
   },
+  InvestmentBalance: {
+    investmentBalance: [{ id: 'iBl111BbB222CcC333Dd', date: '2026-07-01', balance: 5000 }],
+  },
+  InvestmentLiveBalance: {
+    investmentLiveBalance: { id: 'iLb111BbB222CcC333Dd', date: '2026-07-18', balance: 5200 },
+  },
+  SecurityPrices: {
+    securityPrices: [
+      { id: 'sP1111BbB222CcC333Dd', price: 100, date: '2026-07-01' },
+      { id: 'sP2222BbB222CcC333Dd', price: null, date: '2026-06-30' },
+    ],
+  },
+  SecurityPricesHighFrequency: {
+    securityPricesHighFrequency: [
+      { id: 'hF1111BbB222CcC333Dd', timestamp: 1_745_539_200_000, price: 100 },
+    ],
+  },
 };
 
 describe('validateQueryResponse', () => {

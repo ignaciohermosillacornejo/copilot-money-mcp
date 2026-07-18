@@ -13,6 +13,7 @@
  * applies its own default range.
  */
 
+import { z } from 'zod';
 import type { GraphQLClient } from '../client.js';
 import { INVESTMENT_BALANCE } from '../operations.generated.js';
 import type { TimeFrame } from './_shared.js';
@@ -43,3 +44,16 @@ export async function fetchInvestmentBalance(
   );
   return data.investmentBalance;
 }
+
+/** Zod mirror of `InvestmentBalanceNode` (#537). Shared with the
+ * InvestmentLiveBalance query (identical row shape). */
+export const InvestmentBalanceNodeSchema = z.looseObject({
+  id: z.string(),
+  date: z.string(),
+  balance: z.number(),
+});
+
+/** Zod mirror of `InvestmentBalanceResponse` (timeseries). */
+export const InvestmentBalanceResponseSchema = z.looseObject({
+  investmentBalance: z.array(InvestmentBalanceNodeSchema),
+});

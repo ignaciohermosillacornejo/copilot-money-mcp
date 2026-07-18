@@ -13,6 +13,7 @@
  * the user-facing variable name `id` to match the operation signature.
  */
 
+import { z } from 'zod';
 import type { GraphQLClient } from '../client.js';
 import { SECURITY_PRICES } from '../operations.generated.js';
 import type { TimeFrame } from './_shared.js';
@@ -51,3 +52,15 @@ export async function fetchSecurityPrices(
   );
   return data.securityPrices;
 }
+
+/** Zod mirror of `SecurityPricesResponse` (#537). price is null for a day the
+ * security has no close (live-verified). */
+export const SecurityPricesResponseSchema = z.looseObject({
+  securityPrices: z.array(
+    z.looseObject({
+      id: z.string(),
+      price: z.number().nullable(),
+      date: z.string(),
+    })
+  ),
+});

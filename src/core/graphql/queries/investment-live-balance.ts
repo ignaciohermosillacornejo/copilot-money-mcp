@@ -13,9 +13,11 @@
  * type rather than declare a parallel one.
  */
 
+import { z } from 'zod';
 import type { GraphQLClient } from '../client.js';
 import { INVESTMENT_LIVE_BALANCE } from '../operations.generated.js';
 import type { InvestmentBalanceNode } from './investment-balance.js';
+import { InvestmentBalanceNodeSchema } from './investment-balance.js';
 
 export interface InvestmentLiveBalanceResponse {
   investmentLiveBalance: InvestmentBalanceNode;
@@ -31,3 +33,9 @@ export async function fetchInvestmentLiveBalance(
   );
   return data.investmentLiveBalance;
 }
+
+/** Zod mirror of `InvestmentLiveBalanceResponse` — a single "live dot" row,
+ * same shape as InvestmentBalanceNode (#537). */
+export const InvestmentLiveBalanceResponseSchema = z.looseObject({
+  investmentLiveBalance: InvestmentBalanceNodeSchema,
+});
