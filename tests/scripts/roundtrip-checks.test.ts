@@ -237,7 +237,7 @@ describe('residue detection', () => {
 // ---------------------------------------------------------------------------
 
 describe('budgetAmountForMonth', () => {
-  const monthly = (month: string, amount: string | null, resolvedAmount: string | null) => ({
+  const monthly = (month: string, amount: number | null, resolvedAmount: number | null) => ({
     unassignedRolloverAmount: null,
     childRolloverAmount: null,
     unassignedAmount: null,
@@ -251,14 +251,14 @@ describe('budgetAmountForMonth', () => {
   });
 
   test('resolves from current, preferring amount over resolvedAmount', () => {
-    const budget = { current: monthly('2026-06', '200', '150'), histories: [] };
+    const budget = { current: monthly('2026-06', 200, 150), histories: [] };
     expect(budgetAmountForMonth(budget, '2026-06')).toBe(200);
   });
 
   test('falls back to resolvedAmount, then to histories, and tolerates day-suffixed months', () => {
     const budget = {
-      current: monthly('2026-06-01', null, '100'),
-      histories: [monthly('2026-05', '200', null)],
+      current: monthly('2026-06-01', null, 100),
+      histories: [monthly('2026-05', 200, null)],
     };
     expect(budgetAmountForMonth(budget, '2026-06')).toBe(100);
     expect(budgetAmountForMonth(budget, '2026-05')).toBe(200);

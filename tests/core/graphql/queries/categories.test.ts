@@ -98,14 +98,14 @@ describe('fetchCategories', () => {
   test('budget field on parent and children survives flatten', async () => {
     const sampleBudget = {
       current: {
-        unassignedRolloverAmount: '0',
-        childRolloverAmount: '0',
-        unassignedAmount: '50',
-        resolvedAmount: '450',
-        rolloverAmount: '0',
+        unassignedRolloverAmount: 0,
+        childRolloverAmount: 0,
+        unassignedAmount: 50,
+        resolvedAmount: 450,
+        rolloverAmount: 0,
         childAmount: null,
-        goalAmount: '500',
-        amount: '500',
+        goalAmount: 500,
+        amount: 500,
         month: '2026-05',
         id: 'budget-current',
       },
@@ -149,8 +149,8 @@ describe('fetchCategories', () => {
     const rows = await fetchCategories(client, { rollovers: false });
 
     expect(rows).toHaveLength(2);
-    expect(rows[0]?.budget?.current?.amount).toBe('500');
-    expect(rows[1]?.budget?.current?.amount).toBe('500');
+    expect(rows[0]?.budget?.current?.amount).toBe(500);
+    expect(rows[1]?.budget?.current?.amount).toBe(500);
   });
 
   test('regression C3: parentId set to null for parents, parent.id for children', async () => {

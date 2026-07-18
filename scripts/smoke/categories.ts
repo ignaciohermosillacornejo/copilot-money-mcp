@@ -67,7 +67,7 @@ async function main(): Promise<void> {
     user.budgetingConfig?.isEnabled === true &&
     user.budgetingConfig.rolloversConfig?.isEnabled === true;
   const rolloverAmounts = recold.categories
-    .map((c) => parseFloat(c.budget?.current?.rolloverAmount ?? '0'))
+    .map((c) => c.budget?.current?.rolloverAmount ?? 0)
     .filter((n) => Number.isFinite(n));
   const nonZero = rolloverAmounts.filter((n) => n !== 0);
   log('rollover', {
