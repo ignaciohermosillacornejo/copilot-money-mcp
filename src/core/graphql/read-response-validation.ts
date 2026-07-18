@@ -29,6 +29,7 @@
  */
 
 import type { ZodType } from 'zod';
+import { normalizeDriftPath } from './drift-path.js';
 import { AccountResponseSchema, AccountsResponseSchema } from './queries/accounts.js';
 import { AggregatedHoldingsResponseSchema } from './queries/aggregated-holdings.js';
 import { BalanceHistoryResponseSchema } from './queries/balance-history.js';
@@ -107,9 +108,11 @@ export type ReadResponseDriftStats = Record<string, number>;
 
 const driftCounts = new Map<string, number>();
 
-// Dedupe key = `${operationName}::${firstIssue.path}::${issue.code}`. One warn
-// per unique key per process — prevents log flood when every call to the same
-// query drifts the same way.
+// Dedupe key = `${operationName}::${normalizeDriftPath(issue.path)}::${issue.code}`.
+// Array indices in the path normalize to `*` (#552) so one drift across an
+// array's elements warns once, not once per element. One warn per unique key
+// per process — prevents log flood when every call to the same query drifts
+// the same way.
 const warnedKeys = new Set<string>();
 
 /** Snapshot of the per-surface read drift counters (copy, safe to mutate). */
@@ -135,7 +138,7 @@ export function validateQueryResponse(operationName: string, data: unknown): voi
   // — the unique drift inventory is logged in full while repeats stay silent.
   for (const issue of result.error.issues) {
     const pathStr = issue.path.join('.');
-    const key = `${operationName}::${pathStr}::${issue.code}`;
+    const key = `${operationName}::${normalizeDriftPath(issue.path)}::${issue.code}`;
     if (warnedKeys.has(key)) continue;
     warnedKeys.add(key);
     // console.warn writes to stderr in Node/Bun — safe for the MCP stdio
