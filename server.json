@@ -8,13 +8,13 @@
     "source": "github"
   },
   "websiteUrl": "https://github.com/ignaciohermosillacornejo/copilot-money-mcp#readme",
-  "version": "2.2.2",
+  "version": "2.3.0",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "copilot-money-mcp",
-      "version": "2.2.2",
+      "version": "2.3.0",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
