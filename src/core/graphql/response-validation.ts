@@ -31,6 +31,7 @@ import { z, type ZodType } from 'zod';
 import { TRANSACTION_TYPES } from './transactions.js';
 import { TRANSACTIONS_READ_SHAPE_RUNTIME_CHECK } from './read-validation.js';
 import { READ_RESPONSE_SHAPE_RUNTIME_CHECK } from './read-response-validation.js';
+import { normalizeDriftPath } from './drift-path.js';
 
 /**
  * Name of this runtime check as registered in the ledger's
@@ -237,9 +238,11 @@ export type ResponseDriftStats = Record<string, number>;
 
 const driftCounts = new Map<string, number>();
 
-// Dedupe key = `${operationName}::${firstIssue.path}::${firstIssue.code}`.
-// One warn per unique key per process — prevents log flood when every call
-// to the same mutation drifts the same way.
+// Dedupe key = `${operationName}::${normalizeDriftPath(issue.path)}::${issue.code}`.
+// Array indices in the path normalize to `*` (#552) so one drift across an
+// array's elements (e.g. every splitTransaction child) warns once, not once
+// per element. One warn per unique key per process — prevents log flood when
+// every call to the same mutation drifts the same way.
 const warnedKeys = new Set<string>();
 
 /** Snapshot of the per-surface drift counters (copy, safe to mutate). */
@@ -280,7 +283,7 @@ export function validateMutationResponse(operationName: string, data: unknown): 
   // silent. The dedupe set bounds total output regardless of call volume.
   for (const issue of result.error.issues) {
     const pathStr = issue.path.join('.');
-    const key = `${operationName}::${pathStr}::${issue.code}`;
+    const key = `${operationName}::${normalizeDriftPath(issue.path)}::${issue.code}`;
     if (warnedKeys.has(key)) continue;
     warnedKeys.add(key);
     // `message` describes expected/received TYPES (and enum option lists over

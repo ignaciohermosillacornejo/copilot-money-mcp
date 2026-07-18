@@ -210,6 +210,20 @@ describe('validateMutationResponse', () => {
     expect(getResponseDriftStats()).toEqual({ 'Mutation.createTransaction:response': 2 });
   });
 
+  test('a same-field drift across multiple array elements dedupes by normalized path (#552)', () => {
+    const t1 = makeTransaction();
+    delete (t1 as Record<string, unknown>).categoryId;
+    const t2 = makeTransaction();
+    delete (t2 as Record<string, unknown>).categoryId;
+
+    validateMutationResponse('SplitTransaction', {
+      splitTransaction: { parentTransaction: makeTransaction(), splitTransactions: [t1, t2] },
+    });
+
+    expect(warnSpy).toHaveBeenCalledTimes(1); // deduped across both split indices
+    expect(getResponseDriftStats()).toEqual({ 'Mutation.splitTransaction:response': 1 });
+  });
+
   test('drift counters are tracked per surface', () => {
     validateMutationResponse('DeleteTag', { deleteTag: 'yes' }); // not a boolean
     validateMutationResponse('EditBudget', { editCategoryBudget: 1 }); // not a boolean

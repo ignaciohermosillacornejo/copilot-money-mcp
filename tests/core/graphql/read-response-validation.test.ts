@@ -292,6 +292,19 @@ describe('validateQueryResponse', () => {
     expect(getReadResponseDriftStats()).toEqual({ 'Query.accounts:response': 2 }); // counted twice
   });
 
+  test('a same-field drift across multiple array elements dedupes by normalized path (#552)', () => {
+    validateQueryResponse('Accounts', {
+      accounts: [
+        { ...makeAccount(), balance: 'x' },
+        { ...makeAccount(), balance: 'y' },
+        { ...makeAccount(), balance: 'z' },
+      ],
+    });
+
+    expect(warnSpy).toHaveBeenCalledTimes(1); // deduped across all 3 indices
+    expect(getReadResponseDriftStats()).toEqual({ 'Query.accounts:response': 1 });
+  });
+
   test('unregistered operations skip silently — no warn, no drift', () => {
     // Transactions is deliberately absent (its own drop-based check owns it);
     // a totally unknown op must also skip.
