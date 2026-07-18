@@ -233,8 +233,7 @@ export function budgetAmountForMonth(
   const node = nodes.find((candidate) => candidate.month.startsWith(month));
   const raw = node?.amount ?? node?.resolvedAmount;
   if (raw == null) return undefined;
-  const parsed = parseFloat(raw);
-  return Number.isFinite(parsed) ? parsed : undefined;
+  return Number.isFinite(raw) ? raw : undefined;
 }
 
 // --- lazily-created prerequisites (support `--only <domain>` runs) ----------

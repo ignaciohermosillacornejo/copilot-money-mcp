@@ -740,7 +740,6 @@ export class LiveCopilotDatabase {
       return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
     })();
     const monthKey = month ?? todayMonth;
-    const amountStr = String(amount);
 
     const existingBudget = cached.budget ?? { current: null, histories: [] };
 
@@ -754,18 +753,18 @@ export class LiveCopilotDatabase {
     let newHistories = existingBudget.histories;
 
     if (existingBudget.current?.month === monthKey) {
-      newCurrent = { ...existingBudget.current, amount: amountStr };
+      newCurrent = { ...existingBudget.current, amount };
     } else if (monthKey === todayMonth) {
       // Patch targets current month but no `current` existed — synthesize one.
       newCurrent = {
         unassignedRolloverAmount: null,
         childRolloverAmount: null,
         unassignedAmount: null,
-        resolvedAmount: amountStr,
+        resolvedAmount: amount,
         rolloverAmount: null,
         childAmount: null,
-        goalAmount: amountStr,
-        amount: amountStr,
+        goalAmount: amount,
+        amount,
         month: monthKey,
         id: `${categoryId}-${monthKey}-current-synthetic`,
       };
@@ -774,7 +773,7 @@ export class LiveCopilotDatabase {
       const idx = newHistories.findIndex((h) => h.month === monthKey);
       if (idx >= 0) {
         newHistories = [...newHistories];
-        newHistories[idx] = { ...newHistories[idx]!, amount: amountStr };
+        newHistories[idx] = { ...newHistories[idx]!, amount };
       } else {
         // Insert minimal new history entry. Other monthly fields default to null.
         newHistories = [
@@ -783,11 +782,11 @@ export class LiveCopilotDatabase {
             unassignedRolloverAmount: null,
             childRolloverAmount: null,
             unassignedAmount: null,
-            resolvedAmount: amountStr,
+            resolvedAmount: amount,
             rolloverAmount: null,
             childAmount: null,
-            goalAmount: amountStr,
-            amount: amountStr,
+            goalAmount: amount,
+            amount,
             month: monthKey,
             id: `${categoryId}-${monthKey}-synthetic`,
           },

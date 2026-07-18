@@ -25,15 +25,17 @@ export interface CategoryIcon {
   src?: string;
 }
 
+/** Amounts are JSON numbers on the wire (probe-confirmed 2026-07-18); previously
+ * mislabeled `string` — same class as `latestBalanceUpdate` #551 / networth+monthly #555. */
 export interface CategoryBudgetMonthly {
-  unassignedRolloverAmount: string | null;
-  childRolloverAmount: string | null;
-  unassignedAmount: string | null;
-  resolvedAmount: string | null;
-  rolloverAmount: string | null;
-  childAmount: string | null;
-  goalAmount: string | null;
-  amount: string | null;
+  unassignedRolloverAmount: number | null;
+  childRolloverAmount: number | null;
+  unassignedAmount: number | null;
+  resolvedAmount: number | null;
+  rolloverAmount: number | null;
+  childAmount: number | null;
+  goalAmount: number | null;
+  amount: number | null;
   month: string;
   id: string;
 }

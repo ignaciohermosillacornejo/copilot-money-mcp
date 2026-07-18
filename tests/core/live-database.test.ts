@@ -682,7 +682,7 @@ describe('LiveCopilotDatabase.patchLiveCategoryBudget', () => {
 
     const after = await cache.read(() => Promise.resolve([]));
     const cat = after.rows.find((c) => c.id === 'cat-1');
-    expect(cat?.budget?.current?.amount).toBe('250');
+    expect(cat?.budget?.current?.amount).toBe(250);
     expect(cat?.budget?.current?.month).toBe(currentMonth);
     // The patch went to `current`, not `histories` — histories must stay empty.
     expect(cat?.budget?.histories).toEqual([]);
@@ -719,7 +719,7 @@ describe('LiveCopilotDatabase.patchLiveCategoryBudget', () => {
 
     const after = await cache.read(() => Promise.resolve([]));
     const cat = after.rows.find((c) => c.id === 'cat-1');
-    expect(cat?.budget?.current?.amount).toBe('250');
+    expect(cat?.budget?.current?.amount).toBe(250);
     expect(cat?.budget?.current?.month).toBe(todayMonth);
     // Critical: histories should remain empty — current month went to `current`, not `histories`
     expect(cat?.budget?.histories).toEqual([]);
@@ -745,14 +745,14 @@ describe('LiveCopilotDatabase.patchLiveCategoryBudget', () => {
             current: null,
             histories: [
               {
-                unassignedRolloverAmount: '0',
-                childRolloverAmount: '0',
-                unassignedAmount: '0',
-                resolvedAmount: '100',
-                rolloverAmount: '0',
+                unassignedRolloverAmount: 0,
+                childRolloverAmount: 0,
+                unassignedAmount: 0,
+                resolvedAmount: 100,
+                rolloverAmount: 0,
                 childAmount: null,
-                goalAmount: '100',
-                amount: '100',
+                goalAmount: 100,
+                amount: 100,
                 month: '2026-04',
                 id: 'b-existing',
               },
@@ -767,7 +767,7 @@ describe('LiveCopilotDatabase.patchLiveCategoryBudget', () => {
     const after = await cache.read(() => Promise.resolve([]));
     const hist = after.rows.find((c) => c.id === 'cat-1')?.budget?.histories ?? [];
     expect(hist).toHaveLength(1);
-    expect(hist[0]?.amount).toBe('175');
+    expect(hist[0]?.amount).toBe(175);
   });
 
   test('inserts a new history entry when month not present', async () => {
@@ -797,7 +797,7 @@ describe('LiveCopilotDatabase.patchLiveCategoryBudget', () => {
     const hist = after.rows.find((c) => c.id === 'cat-1')?.budget?.histories ?? [];
     expect(hist).toHaveLength(1);
     expect(hist[0]?.month).toBe('2025-12');
-    expect(hist[0]?.amount).toBe('75');
+    expect(hist[0]?.amount).toBe(75);
   });
 
   test('no-op when category not in cache', async () => {
