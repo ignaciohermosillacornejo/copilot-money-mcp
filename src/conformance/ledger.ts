@@ -174,13 +174,6 @@ const ROUNDTRIP_GATED =
   'delete/revert; gated by scripts/smoke/roundtrip.ts (issue #438). ' +
   'tests/scripts/roundtrip-coverage.test.ts ratchets the write-tool ↔ round-trip bijection';
 
-/** Read response shapes: the Tier-0 smoke spot-checks load-bearing fields,
- * but nothing validates the full hand-written interface at runtime. */
-const QUERY_RESPONSE_SHAPE_UNVERIFIED =
-  'Hand-written TS interface mirrors captured responses (src/core/graphql/queries/); ' +
-  'the Tier-0 read smoke spot-checks load-bearing fields but no runtime schema ' +
-  'validation exists — full-shape drift would surface only as downstream undefineds';
-
 /** #537: read response-shape interfaces are mirrored into looseObject Zod
  * schemas and every live read response is validated warn-mode at runtime, so
  * drift surfaces as a structured warning + per-surface counter instead of
@@ -271,12 +264,11 @@ function responseShape(name: string, overrides?: Partial<LedgerEntry>): LedgerEn
 /**
  * A read query whose operation signature is re-fired against production by
  * the Tier-0 read smoke on every run (issues #439/#460). `name` is the root
- * Query field, e.g. 'accounts'. The companion `queryResponseShape` entry
- * tracks the hand-written response interface separately (still unverified:
- * B3's warn-mode Zod validation (#437) covers MUTATION responses only, not
- * the read wrappers — exception: Query.transactions:response is now
- * runtime-gated via the transactions-read-shape check (#512); other read
- * response shapes remain unverified).
+ * Query field, e.g. 'accounts'. The companion `gatedQueryResponseShape` entry
+ * tracks the hand-written response interface separately — every read
+ * response shape is now either runtime-gated via `read-zod-warn` (#537) or,
+ * for Query.transactions:response, via the transactions-read-shape check
+ * (#512).
  */
 function queryOperation(name: string): LedgerEntry {
   return {
@@ -285,16 +277,6 @@ function queryOperation(name: string): LedgerEntry {
     oracle: 'smoke:reads',
     class: 'gated',
     evidence: READ_SMOKE_GATED,
-  };
-}
-
-function queryResponseShape(name: string): LedgerEntry {
-  return {
-    surface: `Query.${name}:response`,
-    kind: 'response-shape',
-    oracle: null,
-    class: 'unverified',
-    evidence: QUERY_RESPONSE_SHAPE_UNVERIFIED,
   };
 }
 
@@ -586,7 +568,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'surfaced via _dropped_invalid_rows + a deduped stderr warning.',
   },
   queryOperation('categories'),
-  queryResponseShape('categories'),
+  gatedQueryResponseShape('categories'),
   queryOperation('tags'),
   gatedQueryResponseShape('tags'),
   queryOperation('recurrings'),
