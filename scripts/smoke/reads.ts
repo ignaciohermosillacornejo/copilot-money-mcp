@@ -18,6 +18,7 @@
 import { FirebaseAuth } from '../../src/core/auth/firebase-auth.js';
 import { extractRefreshTokenCandidates } from '../../src/core/auth/browser-token.js';
 import { GraphQLClient } from '../../src/core/graphql/client.js';
+import { getReadResponseDriftStats } from '../../src/core/graphql/read-response-validation.js';
 import { READ_SMOKE_CHECKS, type ReadSmokeState } from './read-checks.js';
 
 interface ReadSmokeResult {
@@ -76,6 +77,21 @@ async function main(): Promise<void> {
   for (const r of results) {
     const suffix = r.status === 'SKIP' && r.detail ? `  (${r.detail})` : '';
     console.error(`  ${r.operation.padEnd(width)}  ${r.status}${suffix}`);
+  }
+
+  // Read response-shape drift counters accumulated over this run (runtime
+  // read-zod-warn, warn-mode — informational, never a failure by itself).
+  // Parallel to the roundtrip smoke's mutation-drift report (#552): read
+  // drift previously only hit stderr as it happened; this aggregates it.
+  const drift = getReadResponseDriftStats();
+  const driftEntries = Object.entries(drift);
+  if (driftEntries.length > 0) {
+    console.error('\n[smoke] Read response-shape drift counters (read-zod-warn, warn-mode):');
+    for (const [surface, count] of driftEntries) {
+      console.error(`  ${surface}: ${String(count)}`);
+    }
+  } else {
+    console.error('\n[smoke] Read response-shape drift counters (read-zod-warn): none');
   }
 
   const failed = results.filter((r) => r.status === 'FAIL');
