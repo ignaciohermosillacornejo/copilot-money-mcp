@@ -345,3 +345,81 @@ describe('splitTransaction output feeds the meta index', () => {
     }
   });
 });
+
+describe('splitTransaction cache bypass — unresolvable parent, explicit name/date', () => {
+  test('every split carries name+date: mutation dispatched, sum check deferred to server', async () => {
+    // The parent is outside the resolution window (window cache and windowed
+    // fetch both come up empty). No parent-derived defaults are needed and
+    // the amounts deliberately sum to a value no local snapshot could bless —
+    // the server is the enforcer on this path.
+    const client = createMockGraphQLClient(SPLIT_RESPONSE);
+    const { liveDb, getTransactions } = stubLiveDb({});
+    const tools = new CopilotMoneyTools(makeDb(), client, liveDb);
+
+    const result = await tools.splitTransaction({
+      transaction_id: 'parent-1',
+      account_id: 'acct-P',
+      item_id: 'item-P',
+      splits: [
+        { name: 'Hotel', date: '2025-10-05', amount: 70, category_id: 'catA' },
+        { name: 'Car', date: '2025-10-06', amount: 51, category_id: 'catB' },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    // Resolution was still attempted (one windowed fetch) before falling
+    // through to the bypass.
+    expect(getTransactions).toHaveBeenCalledTimes(1);
+    expect(client._calls).toHaveLength(1);
+    expect(client._calls[0].op).toBe('SplitTransaction');
+    expect(client._calls[0].variables).toMatchObject({
+      id: 'parent-1',
+      accountId: 'acct-P',
+      itemId: 'item-P',
+      input: [
+        { name: 'Hotel', date: '2025-10-05', amount: 70, categoryId: 'catA' },
+        { name: 'Car', date: '2025-10-06', amount: 51, categoryId: 'catB' },
+      ],
+    });
+  });
+
+  test('a split without name or date: honest window error names the bypass, no mutation', async () => {
+    const client = createMockGraphQLClient({});
+    const { liveDb } = stubLiveDb({});
+    const tools = new CopilotMoneyTools(makeDb(), client, liveDb);
+
+    await expect(
+      tools.splitTransaction({
+        transaction_id: 'parent-1',
+        account_id: 'acct-P',
+        item_id: 'item-P',
+        splits: [
+          { name: 'Hotel', amount: 70, category_id: 'catA' }, // no date
+          { name: 'Car', date: '2025-10-06', amount: 50, category_id: 'catB' },
+        ],
+      })
+    ).rejects.toThrow(/Transaction not found: parent-1.*explicit name and date on every split/);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('resolved parent keeps the client-side sum check (bypass does not weaken it)', async () => {
+    const client = createMockGraphQLClient(SPLIT_RESPONSE);
+    const { liveDb } = stubLiveDb({
+      cachedNodes: [node('parent-1', 120, '2025-10-05', 'Cached Parent')],
+    });
+    const tools = new CopilotMoneyTools(makeDb(), client, liveDb);
+
+    await expect(
+      tools.splitTransaction({
+        transaction_id: 'parent-1',
+        account_id: 'acct-P',
+        item_id: 'item-P',
+        splits: [
+          { name: 'Hotel', date: '2025-10-05', amount: 70, category_id: 'catA' },
+          { name: 'Car', date: '2025-10-06', amount: 51, category_id: 'catB' },
+        ],
+      })
+    ).rejects.toThrow(/Split amounts must sum to parent amount/);
+    expect(client._calls).toHaveLength(0);
+  });
+});

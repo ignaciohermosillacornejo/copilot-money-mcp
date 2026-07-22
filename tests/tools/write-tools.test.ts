@@ -914,6 +914,30 @@ describe('addTransactionToRecurring', () => {
     (mockDb as any)._allCollectionsLoaded = true;
   });
 
+  test('links a transaction absent from the local cache — ids forwarded verbatim, no lookup', async () => {
+    // Cache-bypass contract for the recurring seed: the caller-supplied
+    // triple is all the mutation needs, so out-of-window transactions work.
+    // Poison the cache accessor to prove no lookup happens.
+    (mockDb as any)._transactions = [];
+    (mockDb as any).getAllTransactions = async () => {
+      throw new Error('local cache must not be consulted');
+    };
+    const client = createMockGraphQLClient({
+      AddTransactionToRecurring: { addTransactionToRecurring: { transaction: linkedTx } },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    const result = await tools.addTransactionToRecurring(validArgs);
+    expect(result.success).toBe(true);
+    expect(client._calls).toHaveLength(1);
+    expect(client._calls[0].variables).toEqual({
+      id: 'tx1',
+      accountId: 'acc1',
+      itemId: 'item1',
+      input: { recurringId: 'rec1' },
+    });
+  });
+
   test('dispatches AddTransactionToRecurring with mapped input and returns the linked transaction', async () => {
     const client = createMockGraphQLClient({
       AddTransactionToRecurring: { addTransactionToRecurring: { transaction: linkedTx } },
@@ -1336,14 +1360,59 @@ describe('splitTransaction', () => {
     ).resolves.toMatchObject({ success: true });
   });
 
-  test('rejects when parent transaction is not in the local cache', async () => {
+  test('rejects when the parent is unresolvable and a split needs a parent-derived default', async () => {
     const client = createMockGraphQLClient({});
     tools = new CopilotMoneyTools(mockDb, client);
 
     await expect(
-      tools.splitTransaction({ ...validArgs, transaction_id: 'nonexistent-tx' })
-    ).rejects.toThrow(/Transaction not found/);
+      tools.splitTransaction({
+        ...validArgs,
+        transaction_id: 'nonexistent-tx',
+        splits: [
+          { amount: 400, category_id: 'cat-lodging' },
+          { name: 'Car', date: '2026-04-15', amount: 200, category_id: 'cat-car-rental' },
+        ],
+      })
+    ).rejects.toThrow(/Transaction not found.*explicit name and date on every split/);
     expect(client._calls).toHaveLength(0);
+  });
+
+  test('unresolvable parent + explicit name/date on every split: dispatches, sum check deferred to server', async () => {
+    // Cache-bypass path: the parent is outside the resolution window, but no
+    // parent-derived defaults are needed and the amount-sum validation is the
+    // server's job — the mutation goes out with the caller-supplied triple.
+    // The split amounts deliberately do NOT sum to any locally-known parent.
+    const client = createMockGraphQLClient({
+      SplitTransaction: {
+        splitTransaction: {
+          parentTransaction: { ...parentServer, id: 'nonexistent-tx' },
+          splitTransactions: [childHotel, childCar],
+        },
+      },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    const result = await tools.splitTransaction({
+      ...validArgs,
+      transaction_id: 'nonexistent-tx',
+      splits: [
+        { name: 'Hotel', date: '2026-04-15', amount: 123, category_id: 'cat-lodging' },
+        { name: 'Car', date: '2026-04-16', amount: 456, category_id: 'cat-car-rental' },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    expect(client._calls).toHaveLength(1);
+    expect(client._calls[0].op).toBe('SplitTransaction');
+    expect(client._calls[0].variables).toMatchObject({
+      id: 'nonexistent-tx',
+      accountId: 'acc1',
+      itemId: 'item1',
+      input: [
+        { name: 'Hotel', date: '2026-04-15', amount: 123, categoryId: 'cat-lodging' },
+        { name: 'Car', date: '2026-04-16', amount: 456, categoryId: 'cat-car-rental' },
+      ],
+    });
   });
 
   test('rejects invalid transaction_id format before any cache lookup', async () => {

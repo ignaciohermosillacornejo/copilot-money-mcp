@@ -380,7 +380,13 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
 
   operation('editTransaction', [
     'update_transaction.transaction_id',
+    'update_transaction.account_id',
+    'update_transaction.item_id',
     'review_transactions.transaction_ids',
+    'review_transactions.rows',
+    'review_transactions.rows[].transaction_id',
+    'review_transactions.rows[].account_id',
+    'review_transactions.rows[].item_id',
   ]),
   gatedInputField('EditTransactionInput.name', ['update_transaction.name']),
   gatedInputField('EditTransactionInput.categoryId', ['update_transaction.category_id']),

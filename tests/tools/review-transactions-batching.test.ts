@@ -252,3 +252,125 @@ describe('review_transactions respects 5-parallel concurrency cap', () => {
     ).rejects.toThrow(/review_transactions failed at id=txn-05 \(\d+\/8 succeeded\)/);
   });
 });
+
+describe('review_transactions rows mode (cache bypass)', () => {
+  const echoClient = () =>
+    createMockGraphQLClient({
+      EditTransaction: (vars: any) => ({
+        editTransaction: {
+          transaction: {
+            id: vars.id,
+            name: 'Old Row',
+            categoryId: 'c',
+            userNotes: null,
+            isReviewed: vars.input.isReviewed,
+            type: 'REGULAR',
+            tags: [],
+          },
+        },
+      }),
+    });
+
+  test('rows dispatch with the caller-supplied routing ids, skipping local resolution', async () => {
+    // Empty cache: id-based resolution would reject both rows. The rows
+    // entries carry the routing ids directly (from a live read), so the
+    // writes go out anyway — the out-of-window bulk path.
+    const db = makeMockDb([]);
+    const client = echoClient();
+    const tools = new CopilotMoneyTools(db, client);
+
+    const result = await tools.reviewTransactions({
+      rows: [
+        { transaction_id: 'old-1', account_id: 'acctA', item_id: 'itemA' },
+        { transaction_id: 'old-2', account_id: 'acctB', item_id: 'itemB' },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.reviewed_count).toBe(2);
+    expect(result.transaction_ids).toEqual(['old-1', 'old-2']);
+
+    expect(client._calls).toHaveLength(2);
+    const byId = new Map(client._calls.map((c) => [(c.variables as any).id, c.variables as any]));
+    expect(byId.get('old-1')).toMatchObject({
+      accountId: 'acctA',
+      itemId: 'itemA',
+      input: { isReviewed: true },
+    });
+    expect(byId.get('old-2')).toMatchObject({
+      accountId: 'acctB',
+      itemId: 'itemB',
+      input: { isReviewed: true },
+    });
+  });
+
+  test('large rows batch issues one call per row through the shared worker loop', async () => {
+    const db = makeMockDb([]);
+    const client = echoClient();
+    const tools = new CopilotMoneyTools(db, client);
+
+    const rows = Array.from({ length: 25 }, (_, i) => ({
+      transaction_id: `old-${String(i).padStart(2, '0')}`,
+      account_id: 'acctA',
+      item_id: 'itemA',
+    }));
+    const result = await tools.reviewTransactions({ rows, reviewed: false });
+
+    expect(result.reviewed_count).toBe(25);
+    expect(result.transaction_ids).toEqual(rows.map((r) => r.transaction_id));
+    expect(client._calls).toHaveLength(25);
+    const calledIds = client._calls.map((c) => (c.variables as any).id).sort();
+    expect(calledIds).toEqual(rows.map((r) => r.transaction_id).sort());
+  });
+
+  test('rows win when both modes are passed', async () => {
+    // 'ghost' is unresolvable, which would reject the transaction_ids path —
+    // proving the rows path took precedence.
+    const db = makeMockDb([]);
+    const client = echoClient();
+    const tools = new CopilotMoneyTools(db, client);
+
+    const result = await tools.reviewTransactions({
+      transaction_ids: ['ghost'],
+      rows: [{ transaction_id: 'old-1', account_id: 'acctA', item_id: 'itemA' }],
+    });
+
+    expect(result.transaction_ids).toEqual(['old-1']);
+    expect(client._calls).toHaveLength(1);
+  });
+
+  test('neither transaction_ids nor rows: mode error names both options, no write', async () => {
+    const db = makeMockDb([]);
+    const client = echoClient();
+    const tools = new CopilotMoneyTools(db, client);
+
+    await expect(tools.reviewTransactions({})).rejects.toThrow(
+      /transaction_ids must be a non-empty array.*rows array of \{transaction_id, account_id, item_id\}/
+    );
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('invalid doc id in a row throws before any write', async () => {
+    const db = makeMockDb([]);
+    const client = echoClient();
+    const tools = new CopilotMoneyTools(db, client);
+
+    await expect(
+      tools.reviewTransactions({
+        rows: [{ transaction_id: 'old-1', account_id: 'bad/acct', item_id: 'itemA' }],
+      })
+    ).rejects.toThrow(/Invalid account_id/);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('cache-only path still resolves locally and its not-found error points at rows', async () => {
+    const db = makeMockDb(['txn-1']);
+    const client = echoClient();
+    const tools = new CopilotMoneyTools(db, client);
+
+    await expect(
+      tools.reviewTransactions({ transaction_ids: ['txn-1', 'gone-1'] })
+    ).rejects.toThrow(/Transaction not found: gone-1.*'rows' array/);
+    expect(client._calls).toHaveLength(0);
+  });
+});
