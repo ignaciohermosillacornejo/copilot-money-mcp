@@ -306,6 +306,86 @@ describe('updateTransaction — validation errors', () => {
   });
 });
 
+describe('updateTransaction — routing bypass (account_id + item_id)', () => {
+  test('cache miss + both ids: dispatches with the caller-supplied routing ids', async () => {
+    // 'txn_out' is nowhere in the local cache — without the bypass this is a
+    // guaranteed "Transaction not found". The caller-supplied pair (from a
+    // live read) routes the mutation directly.
+    const { tools, client } = makeTools({ transactions: [] });
+    const result = await tools.updateTransaction({
+      transaction_id: 'txn_out',
+      account_id: 'acct9',
+      item_id: 'item9',
+      category_id: 'food',
+    });
+    expect(result.success).toBe(true);
+    expect(client._calls).toHaveLength(1);
+    expect(client._calls[0].variables).toEqual({
+      id: 'txn_out',
+      accountId: 'acct9',
+      itemId: 'item9',
+      input: { categoryId: 'food' },
+    });
+  });
+
+  test('caller-supplied ids are forwarded verbatim even when the row is cached', async () => {
+    // Same "no re-resolution of a caller-supplied triple" contract as
+    // delete_transaction: explicit ids win over the cached acct1/item1.
+    const { tools, client } = makeTools();
+    await tools.updateTransaction({
+      transaction_id: 'txn1',
+      account_id: 'acct9',
+      item_id: 'item9',
+      note: 'bypass',
+    });
+    expect(client._calls[0].variables).toMatchObject({
+      id: 'txn1',
+      accountId: 'acct9',
+      itemId: 'item9',
+    });
+  });
+
+  test('cache miss without ids: not-found error points at the bypass', async () => {
+    const { tools, client } = makeTools({ transactions: [] });
+    await expect(
+      tools.updateTransaction({ transaction_id: 'txn_out', category_id: 'food' })
+    ).rejects.toThrow(/Transaction not found.*pass account_id and item_id/i);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('half a pair throws, no write', async () => {
+    const { tools, client } = makeTools();
+    await expect(
+      tools.updateTransaction({ transaction_id: 'txn1', account_id: 'acct9', note: 'x' })
+    ).rejects.toThrow(/account_id and item_id must be passed together/i);
+    await expect(
+      tools.updateTransaction({ transaction_id: 'txn1', item_id: 'item9', note: 'x' })
+    ).rejects.toThrow(/account_id and item_id must be passed together/i);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('malformed bypass ids throw, no write', async () => {
+    const { tools, client } = makeTools();
+    await expect(
+      tools.updateTransaction({
+        transaction_id: 'txn1',
+        account_id: 'bad/acct',
+        item_id: 'item9',
+        note: 'x',
+      })
+    ).rejects.toThrow(/Invalid account_id/i);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('routing ids alone do not count as an edit', async () => {
+    const { tools, client } = makeTools();
+    await expect(
+      tools.updateTransaction({ transaction_id: 'txn1', account_id: 'acct1', item_id: 'item1' })
+    ).rejects.toThrow(/at least one field/i);
+    expect(client._calls).toHaveLength(0);
+  });
+});
+
 describe('updateTransaction — atomicity on validation failure', () => {
   test('valid category_id + invalid tag_id: no GraphQL write', async () => {
     const { tools, client } = makeTools();

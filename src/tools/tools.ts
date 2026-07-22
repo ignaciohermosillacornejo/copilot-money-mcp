@@ -2634,9 +2634,20 @@ export class CopilotMoneyTools {
    * internal_transfer, goal_id) are not writable through the GraphQL
    * EditTransaction mutation and were removed from this tool when the backend
    * was migrated.
+   *
+   * Routing bypass: when the caller supplies BOTH account_id and item_id
+   * (taken from a live read), they are forwarded verbatim and local
+   * resolution is skipped entirely — same defensive "caller-supplied triple"
+   * contract as delete_transaction / split_transaction. This lets writes
+   * reach transactions outside the resolution window; the server still
+   * validates the full (id, accountId, itemId) binding (see the
+   * Mutation.editTransaction:routing ledger entry), so a wrong pair fails
+   * loudly rather than editing a different transaction.
    */
   async updateTransaction(args: {
     transaction_id: string;
+    account_id?: string;
+    item_id?: string;
     name?: string;
     category_id?: string;
     note?: string;
@@ -2656,6 +2667,8 @@ export class CopilotMoneyTools {
     // without going through the MCP dispatch layer).
     const allowedKeys = new Set([
       'transaction_id',
+      'account_id',
+      'item_id',
       'name',
       'category_id',
       'note',
@@ -2669,9 +2682,14 @@ export class CopilotMoneyTools {
       }
     }
 
-    // Require at least one mutable field besides transaction_id.
+    // Require at least one mutable field besides transaction_id. The routing
+    // ids (account_id/item_id) address the write — they are not edits.
     const mutableKeys = Object.keys(args).filter(
-      (k) => k !== 'transaction_id' && (args as Record<string, unknown>)[k] !== undefined
+      (k) =>
+        k !== 'transaction_id' &&
+        k !== 'account_id' &&
+        k !== 'item_id' &&
+        (args as Record<string, unknown>)[k] !== undefined
     );
     if (mutableKeys.length === 0) {
       throw new Error('update_transaction requires at least one field to update');
@@ -2679,18 +2697,39 @@ export class CopilotMoneyTools {
 
     validateDocId(transaction_id, 'transaction_id');
 
-    // Resolve the transaction's accountId/itemId for the GraphQL mutation —
-    // live-first via the meta index / windowed fetch; local cache only in
-    // degraded (no-liveDb) mode. See resolveTransactionMeta().
-    const { meta: metaMap, liveWindowMonths } = await this.resolveTransactionMeta([transaction_id]);
-    const meta = metaMap.get(transaction_id);
-    if (!meta) {
+    // Routing bypass: a caller-supplied account_id + item_id pair (from a
+    // live read) is forwarded verbatim — no local resolution, so writes can
+    // reach transactions outside the resolution window. Half a pair is
+    // always a caller mistake; reject it rather than silently resolving.
+    if ((args.account_id === undefined) !== (args.item_id === undefined)) {
       throw new Error(
-        CopilotMoneyTools.transactionsNotFoundMessage([transaction_id], liveWindowMonths)
+        'update_transaction: account_id and item_id must be passed together (both from a live read) to bypass local resolution'
       );
     }
-    const resolvedAccountId = meta.accountId;
-    const resolvedItemId = meta.itemId;
+    let resolvedAccountId: string;
+    let resolvedItemId: string;
+    if (args.account_id !== undefined && args.item_id !== undefined) {
+      validateDocId(args.account_id, 'account_id');
+      validateDocId(args.item_id, 'item_id');
+      resolvedAccountId = args.account_id;
+      resolvedItemId = args.item_id;
+    } else {
+      // Resolve the transaction's accountId/itemId for the GraphQL mutation —
+      // live-first via the meta index / windowed fetch; local cache only in
+      // degraded (no-liveDb) mode. See resolveTransactionMeta().
+      const { meta: metaMap, liveWindowMonths } = await this.resolveTransactionMeta([
+        transaction_id,
+      ]);
+      const meta = metaMap.get(transaction_id);
+      if (!meta) {
+        throw new Error(
+          CopilotMoneyTools.transactionsNotFoundMessage([transaction_id], liveWindowMonths) +
+            ' Pass account_id and item_id (from a live read) to write anyway.'
+        );
+      }
+      resolvedAccountId = meta.accountId;
+      resolvedItemId = meta.itemId;
+    }
 
     // Per-field validation (runs BEFORE any write for atomicity).
     if ('name' in args && args.name !== undefined) {
@@ -3111,7 +3150,11 @@ export class CopilotMoneyTools {
    * values if omitted by the caller. The sum of all children's `amount`
    * fields must equal the parent's `amount` (server-enforced; we also
    * validate client-side up to a small floating-point epsilon so callers
-   * get a clear local error before a round-trip).
+   * get a clear local error before a round-trip). When the parent cannot
+   * be resolved locally (outside the resolution window) the split still
+   * proceeds if every entry carries an explicit `name` and `date` — no
+   * parent-derived defaults are needed then, and the sum check is deferred
+   * to the server.
    *
    * Contract: all three parent IDs (transaction_id, account_id, item_id)
    * are required and forwarded verbatim. Same defensive stance as
@@ -3200,47 +3243,58 @@ export class CopilotMoneyTools {
     // cache only in degraded (no-liveDb) mode. Routing ids are NOT resolved
     // here: the schema requires the caller-supplied triple. See
     // resolveParentSnapshot().
+    //
+    // An unresolvable parent (outside the resolution window) is only fatal
+    // when a split needs a parent-derived default: with an explicit name and
+    // date on every split, nothing else is read from the snapshot and the
+    // amount-sum check is deferred to the server (which enforces it anyway).
     const { snapshot: parentTxn, liveWindowMonths } =
       await this.resolveParentSnapshot(transaction_id);
-    if (!parentTxn) {
+    if (!parentTxn && splits.some((s) => s.name === undefined || s.date === undefined)) {
       throw new Error(
-        CopilotMoneyTools.transactionsNotFoundMessage([transaction_id], liveWindowMonths)
+        CopilotMoneyTools.transactionsNotFoundMessage([transaction_id], liveWindowMonths) +
+          ' To split anyway, pass an explicit name and date on every split — the amount-sum ' +
+          'check is then deferred to the server.'
       );
     }
 
-    // Client-side sum check. Server also enforces this, but a local error
-    // saves a round-trip and gives the caller more actionable numbers.
-    // 1e-6 epsilon tolerates IEEE-754 drift (0.1 + 0.2 = 0.30000000000000004)
-    // without letting real mismatches through at 2-decimal financial precision.
-    const sum = splits.reduce((acc, s) => acc + s.amount, 0);
-    const parentAmount = parentTxn.amount;
-    const diff = sum - parentAmount;
-    if (Math.abs(diff) > 1e-6) {
-      throw new Error(
-        `Split amounts must sum to parent amount. ` +
-          `Parent=${parentAmount}, sum=${sum}, diff=${diff}`
-      );
+    if (parentTxn) {
+      // Client-side sum check. Server also enforces this, but a local error
+      // saves a round-trip and gives the caller more actionable numbers.
+      // 1e-6 epsilon tolerates IEEE-754 drift (0.1 + 0.2 = 0.30000000000000004)
+      // without letting real mismatches through at 2-decimal financial precision.
+      const sum = splits.reduce((acc, s) => acc + s.amount, 0);
+      const parentAmount = parentTxn.amount;
+      const diff = sum - parentAmount;
+      if (Math.abs(diff) > 1e-6) {
+        throw new Error(
+          `Split amounts must sum to parent amount. ` +
+            `Parent=${parentAmount}, sum=${sum}, diff=${diff}`
+        );
+      }
     }
 
-    // Resolve the default name from the parent. A split without a usable
-    // default can't succeed since the server requires `name: String!` on
-    // every SplitTransactionInput — surface that as a local error rather
-    // than sending an empty string.
-    const parentDefaultName = parentTxn.name;
-    if (splits.some((s) => s.name === undefined) && !parentDefaultName) {
+    // Resolve the default name from the parent (only meaningful when the
+    // parent resolved — otherwise every split carries its own name/date).
+    // A split without a usable default can't succeed since the server
+    // requires `name: String!` on every SplitTransactionInput — surface
+    // that as a local error rather than sending an empty string.
+    const parentDefaultName = parentTxn?.name;
+    if (parentTxn && splits.some((s) => s.name === undefined) && !parentDefaultName) {
       throw new Error(
         `Cannot default split name from parent ${transaction_id}: parent has no usable name. Pass an explicit name on each split.`
       );
     }
 
     // Apply name/date defaults from the parent AFTER validation + sum check.
-    // `parentDefaultName!` is safe here because the guard a few lines above
-    // throws when any split omits `name` and `parentDefaultName` is falsy —
-    // so reaching this line with `s.name === undefined` implies parentDefaultName
-    // is non-empty. TypeScript can't narrow across the `.some` call.
+    // The non-null assertions are safe: with an unresolved parent, the guard
+    // above threw unless every split carries explicit name AND date, so the
+    // fallback arms are unreachable; with a resolved parent, the
+    // `parentDefaultName` guard threw when any split omits `name` and the
+    // default is falsy. TypeScript can't narrow across the `.some` calls.
     const inputs = splits.map((s) => ({
       name: s.name !== undefined ? s.name.trim() : parentDefaultName!,
-      date: s.date !== undefined ? s.date : parentTxn.date,
+      date: s.date !== undefined ? s.date : parentTxn!.date,
       amount: s.amount,
       categoryId: s.category_id,
     }));
@@ -3312,34 +3366,76 @@ export class CopilotMoneyTools {
   /**
    * Mark one or more transactions as reviewed (or unreviewed).
    *
-   * Validates all transaction IDs, sets isReviewed via GraphQL for each; local
-   * cache is refreshed by Copilot's sync process.
+   * Two input modes, normalized to one entries list before dispatch:
+   * - `transaction_ids`: routing ids are resolved locally (live-first meta
+   *   index / windowed fetch; LevelDB in degraded mode) — only works for
+   *   transactions the resolution window can see.
+   * - `rows`: each {transaction_id, account_id, item_id} entry (taken from a
+   *   live read) supplies the mutation's routing ids directly, so
+   *   out-of-window historical/backlog transactions work too. Wins when both
+   *   modes are passed.
+   *
+   * Sets isReviewed via GraphQL for each entry; local cache is refreshed by
+   * Copilot's sync process.
    */
-  async reviewTransactions(args: { transaction_ids: string[]; reviewed?: boolean }): Promise<{
+  async reviewTransactions(args: {
+    transaction_ids?: string[];
+    rows?: Array<{ transaction_id: string; account_id: string; item_id: string }>;
+    reviewed?: boolean;
+  }): Promise<{
     success: boolean;
     reviewed_count: number;
     transaction_ids: string[];
   }> {
     const client = this.getGraphQLClient();
 
-    const { transaction_ids, reviewed = true } = args;
+    const { transaction_ids, rows, reviewed = true } = args;
 
-    if (!Array.isArray(transaction_ids) || transaction_ids.length === 0) {
-      throw new Error('transaction_ids must be a non-empty array');
-    }
+    // Normalize both input modes to one entries list; everything below
+    // (worker loop, error payloads, result) references only this list.
+    let entries: Array<{ id: string; accountId: string; itemId: string }>;
+    if (Array.isArray(rows) && rows.length > 0) {
+      for (const row of rows) {
+        validateDocId(row.transaction_id, 'transaction_id');
+        validateDocId(row.account_id, 'account_id');
+        validateDocId(row.item_id, 'item_id');
+      }
+      entries = rows.map((row) => ({
+        id: row.transaction_id,
+        accountId: row.account_id,
+        itemId: row.item_id,
+      }));
+    } else {
+      if (!Array.isArray(transaction_ids) || transaction_ids.length === 0) {
+        throw new Error(
+          'transaction_ids must be a non-empty array — or pass a rows array of ' +
+            '{transaction_id, account_id, item_id} (from a live read) to bypass local resolution'
+        );
+      }
 
-    for (const id of transaction_ids) {
-      validateDocId(id, 'transaction_id');
-    }
+      for (const id of transaction_ids) {
+        validateDocId(id, 'transaction_id');
+      }
 
-    // Resolve account/item ids for all targets — live-first via the meta
-    // index / windowed fetch; local cache only in degraded (no-liveDb)
-    // mode. See resolveTransactionMeta().
-    const { meta: metaMap, liveWindowMonths } = await this.resolveTransactionMeta(transaction_ids);
-    const missing = transaction_ids.filter((id) => !metaMap.has(id));
-    if (missing.length > 0) {
-      throw new Error(CopilotMoneyTools.transactionsNotFoundMessage(missing, liveWindowMonths));
+      // Resolve account/item ids for all targets — live-first via the meta
+      // index / windowed fetch; local cache only in degraded (no-liveDb)
+      // mode. See resolveTransactionMeta().
+      const { meta: metaMap, liveWindowMonths } =
+        await this.resolveTransactionMeta(transaction_ids);
+      const missing = transaction_ids.filter((id) => !metaMap.has(id));
+      if (missing.length > 0) {
+        throw new Error(
+          CopilotMoneyTools.transactionsNotFoundMessage(missing, liveWindowMonths) +
+            " Pass a 'rows' array of {transaction_id, account_id, item_id} (from a live read) " +
+            'to review out-of-window transactions.'
+        );
+      }
+      entries = transaction_ids.map((id) => {
+        const meta = metaMap.get(id)!;
+        return { id, accountId: meta.accountId, itemId: meta.itemId };
+      });
     }
+    const idList = entries.map((entry) => entry.id);
 
     // Bounded concurrency: never more than CONCURRENCY in flight at once.
     // The user explicitly asked to cap parallel writes at 5 to avoid
@@ -3363,33 +3459,32 @@ export class CopilotMoneyTools {
       while (true) {
         if (firstError) return;
         const idx = cursor++;
-        if (idx >= transaction_ids.length) return;
-        const id = transaction_ids[idx]!;
-        const meta = metaMap.get(id)!;
+        if (idx >= entries.length) return;
+        const entry = entries[idx]!;
         try {
           await editTransaction(client, {
-            id,
-            accountId: meta.accountId,
-            itemId: meta.itemId,
+            id: entry.id,
+            accountId: entry.accountId,
+            itemId: entry.itemId,
             input: { isReviewed: reviewed },
           });
           reviewed_count++;
         } catch (e) {
           // Record the first failure only; other in-flight workers settle.
-          if (!firstError) firstError = { id, error: e };
+          if (!firstError) firstError = { id: entry.id, error: e };
           return;
         }
       }
     };
 
-    const workerCount = Math.min(CONCURRENCY, transaction_ids.length);
+    const workerCount = Math.min(CONCURRENCY, entries.length);
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
     if (firstError) {
       const { id, error } = firstError;
       if (error instanceof GraphQLError) {
         throw new Error(
-          `review_transactions failed at id=${id} (${reviewed_count}/${transaction_ids.length} succeeded): ${graphQLErrorToMcpError(error)}`,
+          `review_transactions failed at id=${id} (${reviewed_count}/${entries.length} succeeded): ${graphQLErrorToMcpError(error)}`,
           { cause: error }
         );
       }
@@ -3398,8 +3493,10 @@ export class CopilotMoneyTools {
 
     // Optimistic cache patch — only for ids that successfully completed.
     // A partial-failure throw above would have bypassed this, so here we
-    // patch every id in the batch.
-    for (const id of transaction_ids) {
+    // patch every id in the batch. For rows-mode entries outside the local
+    // cache both patches are no-ops (same eviction-is-a-no-op contract as
+    // delete_transaction).
+    for (const id of idList) {
       this.db.patchCachedTransaction(id, { user_reviewed: reviewed });
       this.liveDb?.patchLiveTransaction(id, { user_reviewed: reviewed });
     }
@@ -3407,7 +3504,7 @@ export class CopilotMoneyTools {
     return {
       success: true,
       reviewed_count,
-      transaction_ids,
+      transaction_ids: idList,
     };
   }
 

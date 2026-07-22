@@ -332,7 +332,10 @@ export const splitTransactionTool = defineTool({
       'least 2 entries. Each split entry requires `amount` and `category_id`; `name` and ' +
       "`date` default to the parent's values if omitted. The sum of all children's `amount` " +
       "fields must equal the parent's `amount` (server-enforced; this tool also validates " +
-      'client-side before dispatching). After success the parent transaction is hidden but ' +
+      'client-side before dispatching). If the parent cannot be resolved locally (outside the ' +
+      'resolution window), the split can still proceed when every split entry carries an ' +
+      'explicit `name` and `date` — the amount-sum check is then deferred to the server. ' +
+      'After success the parent transaction is hidden but ' +
       'not deleted (children reference it via parent_transaction_id) — there is no reversal ' +
       "mutation; to undo a split delete each child and edit the parent's category back. No " +
       'optional per-split fields exist — tags, notes, and reviewed state must be set via ' +
@@ -416,7 +419,9 @@ export const updateTransactionTool = defineTool({
       'pass the type alone, or use REGULAR to keep/set a category. `reviewed` marks a single ' +
       'transaction reviewed (true) or un-reviewed (false), and can be set inline with other edits ' +
       '— use review_transactions instead for bulk/filter-based review. At least one mutable field ' +
-      'must be provided besides transaction_id. Other fields (excluded, internal_transfer, ' +
+      'must be provided besides transaction_id. If the transaction cannot be resolved locally ' +
+      '(outside the resolution window), pass account_id and item_id (from a live read) to write ' +
+      'anyway. Other fields (excluded, internal_transfer, ' +
       'goal_id) are not writable through the GraphQL API and were removed from this tool when the ' +
       'backend was migrated.',
     inputSchema: {
@@ -426,6 +431,20 @@ export const updateTransactionTool = defineTool({
         transaction_id: {
           type: 'string',
           description: 'Transaction ID to update (from get_transactions results)',
+        },
+        account_id: {
+          type: 'string',
+          description:
+            'Optional. Account ID the transaction belongs to (from a live read). Pass together ' +
+            'with item_id to skip local resolution and write to a transaction outside the ' +
+            'resolution window.',
+        },
+        item_id: {
+          type: 'string',
+          description:
+            "Optional. Item ID the account belongs to (Copilot's Firestore item_id, from a live " +
+            'read). Pass together with account_id to skip local resolution and write to a ' +
+            'transaction outside the resolution window.',
         },
         name: {
           type: 'string',
@@ -474,8 +493,12 @@ export const reviewTransactionsTool = defineTool({
   schema: {
     name: 'review_transactions',
     description:
-      'Mark one or more transactions as reviewed (or unreviewed). ' +
-      'Accepts an array of transaction_ids. Writes are issued via GraphQL in parallel with ' +
+      'Bulk mark transactions as reviewed (or unreviewed). Two modes: pass `transaction_ids` ' +
+      '(ids are resolved locally, so this only works for transactions within the resolution ' +
+      'window), OR pass `rows` — an array of {transaction_id, account_id, item_id} taken from a ' +
+      'live read — to review ANY transactions, including out-of-window historical/backlog rows. ' +
+      'Prefer `rows` for large backlog sweeps: it is the true bulk path. One of the two must be ' +
+      'provided; `rows` wins when both are. Writes are issued via GraphQL in parallel with ' +
       'a cap of 5 in flight at a time. On the first GraphQL error, new writes stop, in-flight ' +
       'writes settle, and the error is thrown with a `reviewed_count` reflecting how many ' +
       'succeeded before the failure (partial success is possible).',
@@ -485,14 +508,40 @@ export const reviewTransactionsTool = defineTool({
         transaction_ids: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Transaction IDs to mark as reviewed',
+          description:
+            'Transaction IDs to mark as reviewed. Resolved locally — fails for transactions ' +
+            'outside the resolution window; use `rows` for those.',
+        },
+        rows: {
+          type: 'array',
+          description:
+            'Bypass path: each entry supplies the IDs the GraphQL mutation needs directly ' +
+            '(from a live read), so out-of-window transactions work without local resolution.',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              transaction_id: {
+                type: 'string',
+                description: 'Transaction ID to mark',
+              },
+              account_id: {
+                type: 'string',
+                description: 'Account ID the transaction belongs to (from the live row)',
+              },
+              item_id: {
+                type: 'string',
+                description: "Item ID the account belongs to (Copilot's Firestore item_id)",
+              },
+            },
+            required: ['transaction_id', 'account_id', 'item_id'],
+          },
         },
         reviewed: {
           type: 'boolean',
           description: 'Set to true to mark as reviewed, false to unmark. Defaults to true.',
         },
       },
-      required: ['transaction_ids'],
     },
     annotations: {
       readOnlyHint: false,
