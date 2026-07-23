@@ -915,7 +915,7 @@ describe('addTransactionToRecurring', () => {
   });
 
   test('links a transaction absent from the local cache — ids forwarded verbatim, no lookup', async () => {
-    // Cache-bypass contract for the recurring seed: the caller-supplied
+    // Out-of-window bypass contract for the recurring seed: the caller-supplied
     // triple is all the mutation needs, so out-of-window transactions work.
     // Poison the cache accessor to prove no lookup happens.
     (mockDb as any)._transactions = [];
@@ -1378,7 +1378,7 @@ describe('splitTransaction', () => {
   });
 
   test('unresolvable parent + explicit name/date on every split: dispatches, sum check deferred to server', async () => {
-    // Cache-bypass path: the parent is outside the resolution window, but no
+    // Out-of-window bypass path: the parent is unresolvable locally, but no
     // parent-derived defaults are needed and the amount-sum validation is the
     // server's job — the mutation goes out with the caller-supplied triple.
     // The split amounts deliberately do NOT sum to any locally-known parent.

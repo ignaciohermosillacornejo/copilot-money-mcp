@@ -346,7 +346,7 @@ describe('splitTransaction output feeds the meta index', () => {
   });
 });
 
-describe('splitTransaction cache bypass — unresolvable parent, explicit name/date', () => {
+describe('splitTransaction out-of-window bypass — unresolvable parent, explicit name/date', () => {
   test('every split carries name+date: mutation dispatched, sum check deferred to server', async () => {
     // The parent is outside the resolution window (window cache and windowed
     // fetch both come up empty). No parent-derived defaults are needed and

@@ -253,7 +253,7 @@ describe('review_transactions respects 5-parallel concurrency cap', () => {
   });
 });
 
-describe('review_transactions rows mode (cache bypass)', () => {
+describe('review_transactions rows mode (out-of-window bypass)', () => {
   const echoClient = () =>
     createMockGraphQLClient({
       EditTransaction: (vars: any) => ({
@@ -337,6 +337,23 @@ describe('review_transactions rows mode (cache bypass)', () => {
 
     expect(result.transaction_ids).toEqual(['old-1']);
     expect(client._calls).toHaveLength(1);
+  });
+
+  test('explicitly-passed empty rows: rows-shaped error, no fall-through to transaction_ids', async () => {
+    // Passing rows selects the bypass mode; an empty array must not silently
+    // degrade into the transaction_ids path (whose error would misleadingly
+    // talk about transaction_ids).
+    const db = makeMockDb(['txn-1']);
+    const client = echoClient();
+    const tools = new CopilotMoneyTools(db, client);
+
+    await expect(
+      tools.reviewTransactions({ rows: [], transaction_ids: ['txn-1'] })
+    ).rejects.toThrow(/rows must be a non-empty array.*omit it to use transaction_ids/);
+    await expect(tools.reviewTransactions({ rows: [] })).rejects.toThrow(
+      /rows must be a non-empty array/
+    );
+    expect(client._calls).toHaveLength(0);
   });
 
   test('neither transaction_ids nor rows: mode error names both options, no write', async () => {

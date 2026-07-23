@@ -409,7 +409,10 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'binding, not mere existence — fabricated accountId → "accountId … Not Found"; ' +
       'real-but-wrong pair → "Transaction not found" (server scopes the txn lookup under ' +
       'account/item); correct pair → edit applied. Routing ids therefore cannot be ' +
-      'defaulted or faked; resolveTransactionMeta must supply the true pair.',
+      'defaulted or faked; the true pair must come from resolveTransactionMeta or, on the ' +
+      'out-of-window bypass paths, from the caller (update_transaction account_id/item_id or ' +
+      'review_transactions rows entries, taken from a live read) — a wrong pair fails loudly ' +
+      'either way.',
   },
 
   operation('deleteTransaction', [
@@ -443,6 +446,18 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   gatedInputField('SplitTransactionInput.categoryId', ['split_transaction.splits[].category_id']),
   responseShape('splitTransaction'),
   appliesSurface('splitTransaction'),
+  {
+    surface: 'Mutation.splitTransaction:sum',
+    kind: 'operation',
+    oracle: null,
+    class: 'verified-once',
+    evidence:
+      'Error-leak recon (docs/graphql-capture/hidden-mutations.md, SplitTransactionInput.amount): ' +
+      '"children must sum to parent.amount (server enforces)". Load-bearing for the ' +
+      'out-of-window split bypass, which skips the client-side sum check and leaves the server ' +
+      'as the sole enforcer on that path. Routine live splits with matching sums succeed ' +
+      '(supporting use only — no wrong-sum rejection transcript has been captured).',
+  },
 
   // ----- Tags ---------------------------------------------------------------
   // No top-level args beyond the input object (covered by CreateTagInput.*).
