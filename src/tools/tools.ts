@@ -3393,8 +3393,17 @@ export class CopilotMoneyTools {
 
     // Normalize both input modes to one entries list; everything below
     // (worker loop, error payloads, result) references only this list.
+    // A caller who passed `rows` chose the bypass mode: an empty/invalid
+    // value gets a rows-shaped error rather than silently falling through
+    // to the transaction_ids path and its misleading message.
     let entries: Array<{ id: string; accountId: string; itemId: string }>;
-    if (Array.isArray(rows) && rows.length > 0) {
+    if (rows !== undefined) {
+      if (!Array.isArray(rows) || rows.length === 0) {
+        throw new Error(
+          'rows must be a non-empty array of {transaction_id, account_id, item_id} when ' +
+            'provided — omit it to use transaction_ids instead'
+        );
+      }
       for (const row of rows) {
         validateDocId(row.transaction_id, 'transaction_id');
         validateDocId(row.account_id, 'account_id');
