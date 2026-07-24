@@ -2655,6 +2655,7 @@ export class CopilotMoneyTools {
     type?: TransactionType;
     reviewed?: boolean;
     date?: string;
+    amount?: number;
   }): Promise<{
     success: true;
     transaction_id: string;
@@ -2677,6 +2678,7 @@ export class CopilotMoneyTools {
       'type',
       'reviewed',
       'date',
+      'amount',
     ]);
     for (const key of Object.keys(args)) {
       if (!allowedKeys.has(key)) {
@@ -2783,6 +2785,16 @@ export class CopilotMoneyTools {
     if ('date' in args && args.date !== undefined) {
       validateDate(args.date, 'date');
     }
+    if ('amount' in args && args.amount !== undefined) {
+      if (typeof args.amount !== 'number' || !Number.isFinite(args.amount)) {
+        throw new Error('update_transaction: amount must be a finite number');
+      }
+      if (Math.abs(args.amount) > MAX_VALID_AMOUNT) {
+        throw new Error(
+          `update_transaction: amount exceeds maximum valid value (${MAX_VALID_AMOUNT}): ${args.amount}`
+        );
+      }
+    }
     // Map MCP fields → EditTransaction input shape.
     const input: {
       name?: string;
@@ -2792,6 +2804,7 @@ export class CopilotMoneyTools {
       isReviewed?: boolean;
       type?: TransactionType;
       date?: string;
+      amount?: number;
     } = {};
     if ('name' in args && args.name !== undefined) input.name = args.name.trim();
     if ('category_id' in args && args.category_id !== undefined)
@@ -2801,6 +2814,7 @@ export class CopilotMoneyTools {
     if ('type' in args && args.type !== undefined) input.type = args.type;
     if ('reviewed' in args && args.reviewed !== undefined) input.isReviewed = args.reviewed;
     if ('date' in args && args.date !== undefined) input.date = args.date;
+    if ('amount' in args && args.amount !== undefined) input.amount = args.amount;
 
     try {
       const result = await editTransaction(client, {
@@ -2818,6 +2832,7 @@ export class CopilotMoneyTools {
         isReviewed: 'reviewed',
         type: 'type',
         date: 'date',
+        amount: 'amount',
       };
       const updated = Object.keys(result.changed).map((k) => graphqlToApiName[k] ?? k);
 
@@ -2831,6 +2846,7 @@ export class CopilotMoneyTools {
       if ('tag_ids' in args && args.tag_ids !== undefined) patch.tag_ids = args.tag_ids;
       if ('reviewed' in args && args.reviewed !== undefined) patch.user_reviewed = args.reviewed;
       if ('date' in args && args.date !== undefined) patch.date = args.date;
+      if ('amount' in args && args.amount !== undefined) patch.amount = args.amount;
       // `type` itself isn't mirrored into the cache: the local Transaction model
       // stores Plaid's `transaction_type`/`plaid_transaction_type`, not Copilot's
       // REGULAR/INCOME/INTERNAL_TRANSFER classification, so there's no field to

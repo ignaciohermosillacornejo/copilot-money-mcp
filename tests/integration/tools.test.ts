@@ -936,6 +936,7 @@ describe('CopilotMoneyTools Integration', () => {
               isReviewed: vars.input.isReviewed ?? false,
               type: 'REGULAR',
               date: vars.input.date ?? '2024-01-15',
+              amount: vars.input.amount ?? 50,
               tags: (vars.input.tagIds ?? []).map((id: string) => ({ id })),
             },
           },

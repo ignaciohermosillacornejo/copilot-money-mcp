@@ -26,6 +26,7 @@ type EditTxnResponse = {
       isReviewed: boolean;
       type: string;
       date: string;
+      amount: number;
       tags: Array<{ id: string }>;
     };
   };
@@ -47,6 +48,7 @@ function makeEchoResponse(): (vars: any) => EditTxnResponse {
         isReviewed: vars.input.isReviewed ?? false,
         type: vars.input.type ?? 'REGULAR',
         date: vars.input.date ?? '2024-01-15',
+        amount: vars.input.amount ?? 50,
         tags: (vars.input.tagIds ?? []).map((id: string) => ({ id })),
       },
     },
@@ -588,5 +590,70 @@ describe('updateTransaction — date (#569)', () => {
     await tools.updateTransaction({ transaction_id: 'txn1', date: '2024-04-10' });
     const cached = (await mockDb.getTransactions()).find((t) => t.transaction_id === 'txn1');
     expect(cached?.date).toBe('2024-04-10');
+  });
+});
+
+describe('updateTransaction — amount (#574)', () => {
+  test('amount: dispatches with amount input, response maps back to "amount"', async () => {
+    const { tools, client } = makeTools();
+    const result = await tools.updateTransaction({ transaction_id: 'txn1', amount: 42.5 });
+    expect(client._calls).toHaveLength(1);
+    const call = client._calls[0] as any;
+    expect(call.op).toBe('EditTransaction');
+    expect(call.variables.input.amount).toBe(42.5);
+    expect(result.updated).toEqual(['amount']);
+  });
+
+  test('amount: negative value is forwarded verbatim (sign pass-through)', async () => {
+    const { tools, client } = makeTools();
+    await tools.updateTransaction({ transaction_id: 'txn1', amount: -100 });
+    expect((client._calls[0] as any).variables.input.amount).toBe(-100);
+  });
+
+  test('amount: non-finite value throws before any write', async () => {
+    const { tools, client } = makeTools();
+    await expect(
+      tools.updateTransaction({ transaction_id: 'txn1', amount: Number.NaN })
+    ).rejects.toThrow(/amount must be a finite number/i);
+    await expect(
+      tools.updateTransaction({ transaction_id: 'txn1', amount: Number.POSITIVE_INFINITY })
+    ).rejects.toThrow(/amount must be a finite number/i);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('amount: over-max value throws before any write', async () => {
+    const { tools, client } = makeTools();
+    await expect(tools.updateTransaction({ transaction_id: 'txn1', amount: 1e15 })).rejects.toThrow(
+      /exceeds maximum valid value/i
+    );
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('amount: alone satisfies the "at least one mutable field" rule', async () => {
+    const { tools, client } = makeTools();
+    const result = await tools.updateTransaction({ transaction_id: 'txn1', amount: 12 });
+    expect(result.success).toBe(true);
+    expect(client._calls).toHaveLength(1);
+  });
+
+  test('amount combined with category_id: one merged EditTransaction call', async () => {
+    const { tools, client } = makeTools();
+    const result = await tools.updateTransaction({
+      transaction_id: 'txn1',
+      amount: 25,
+      category_id: 'groceries',
+    });
+    expect(client._calls).toHaveLength(1);
+    const input = (client._calls[0] as any).variables.input;
+    expect(input.amount).toBe(25);
+    expect(input.categoryId).toBe('groceries');
+    expect(result.updated.sort()).toEqual(['amount', 'category_id']);
+  });
+
+  test('amount: optimistic cache patches the new amount', async () => {
+    const { tools, mockDb } = makeTools();
+    await tools.updateTransaction({ transaction_id: 'txn1', amount: 77 });
+    const cached = (await mockDb.getTransactions()).find((t) => t.transaction_id === 'txn1');
+    expect(cached?.amount).toBe(77);
   });
 });
