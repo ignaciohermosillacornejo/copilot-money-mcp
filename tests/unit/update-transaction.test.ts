@@ -25,6 +25,7 @@ type EditTxnResponse = {
       userNotes: string | null;
       isReviewed: boolean;
       type: string;
+      date: string;
       tags: Array<{ id: string }>;
     };
   };
@@ -45,6 +46,7 @@ function makeEchoResponse(): (vars: any) => EditTxnResponse {
         userNotes: vars.input.userNotes ?? null,
         isReviewed: vars.input.isReviewed ?? false,
         type: vars.input.type ?? 'REGULAR',
+        date: vars.input.date ?? '2024-01-15',
         tags: (vars.input.tagIds ?? []).map((id: string) => ({ id })),
       },
     },
@@ -532,5 +534,59 @@ describe('updateTransaction — reviewed (#416)', () => {
     expect(input.type).toBe('INCOME');
     expect(input.isReviewed).toBe(true);
     expect(result.updated.sort()).toEqual(['reviewed', 'type']);
+  });
+});
+
+describe('updateTransaction — date (#569)', () => {
+  test('date: dispatches with date input, response maps back to "date"', async () => {
+    const { tools, client } = makeTools();
+    const result = await tools.updateTransaction({
+      transaction_id: 'txn1',
+      date: '2024-02-20',
+    });
+    expect(client._calls).toHaveLength(1);
+    const call = client._calls[0] as any;
+    expect(call.op).toBe('EditTransaction');
+    expect(call.variables.input.date).toBe('2024-02-20');
+    expect(result.updated).toEqual(['date']);
+  });
+
+  test('date: invalid format throws before any write', async () => {
+    const { tools, client } = makeTools();
+    await expect(
+      tools.updateTransaction({ transaction_id: 'txn1', date: '2024/02/20' })
+    ).rejects.toThrow(/Expected YYYY-MM-DD/i);
+    await expect(
+      tools.updateTransaction({ transaction_id: 'txn1', date: 'not-a-date' })
+    ).rejects.toThrow(/Expected YYYY-MM-DD/i);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('date: alone satisfies the "at least one mutable field" rule', async () => {
+    const { tools, client } = makeTools();
+    const result = await tools.updateTransaction({ transaction_id: 'txn1', date: '2024-03-01' });
+    expect(result.success).toBe(true);
+    expect(client._calls).toHaveLength(1);
+  });
+
+  test('date combined with category_id: one merged EditTransaction call', async () => {
+    const { tools, client } = makeTools();
+    const result = await tools.updateTransaction({
+      transaction_id: 'txn1',
+      date: '2024-03-05',
+      category_id: 'groceries',
+    });
+    expect(client._calls).toHaveLength(1);
+    const input = (client._calls[0] as any).variables.input;
+    expect(input.date).toBe('2024-03-05');
+    expect(input.categoryId).toBe('groceries');
+    expect(result.updated.sort()).toEqual(['category_id', 'date']);
+  });
+
+  test('date: optimistic cache patches the new date', async () => {
+    const { tools, mockDb } = makeTools();
+    await tools.updateTransaction({ transaction_id: 'txn1', date: '2024-04-10' });
+    const cached = (await mockDb.getTransactions()).find((t) => t.transaction_id === 'txn1');
+    expect(cached?.date).toBe('2024-04-10');
   });
 });

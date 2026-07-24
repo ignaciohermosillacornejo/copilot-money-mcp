@@ -397,6 +397,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
     'update_transaction.reviewed',
   ]),
   gatedInputField('EditTransactionInput.type', ['update_transaction.type']),
+  gatedInputField('EditTransactionInput.date', ['update_transaction.date']),
   responseShape('editTransaction'),
   appliesSurface('editTransaction'),
   {
