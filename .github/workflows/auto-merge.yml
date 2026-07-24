@@ -32,4 +32,4 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           echo "Enabling auto-merge for PR #$PR_NUMBER"
-          gh pr merge "$PR_NUMBER" --auto --squash --delete-branch --repo "${{ github.repository }}"
+          gh pr merge "$PR_NUMBER" --auto --rebase --delete-branch --repo "${{ github.repository }}"
