@@ -236,4 +236,127 @@ describe('createRecurring', () => {
       expect(result.frequency).toBe(freq);
     }
   });
+
+  describe('routing bypass (account_id + item_id)', () => {
+    const okClient = () =>
+      createMockGraphQLClient({
+        CreateRecurring: {
+          createRecurring: {
+            id: 'rec-out',
+            name: 'Old Sub',
+            state: 'ACTIVE',
+            frequency: 'MONTHLY',
+          },
+        },
+      });
+
+    test('cache miss + both ids: dispatches with the caller-supplied routing ids', async () => {
+      // 'txn-out' is nowhere in the local cache — without the bypass this is
+      // a guaranteed "Transaction not found". The caller-supplied pair (from
+      // a live read) routes the nested transaction ref directly.
+      (mockDb as any)._transactions = [];
+      const client = okClient();
+      tools = new CopilotMoneyTools(mockDb, client);
+
+      const result = await tools.createRecurring({
+        transaction_id: 'txn-out',
+        account_id: 'acct9',
+        item_id: 'item9',
+        frequency: 'MONTHLY',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.recurring_id).toBe('rec-out');
+      expect(client._calls).toHaveLength(1);
+      expect(client._calls[0].variables).toEqual({
+        input: {
+          frequency: 'MONTHLY',
+          transaction: { accountId: 'acct9', itemId: 'item9', transactionId: 'txn-out' },
+        },
+      });
+    });
+
+    test('caller-supplied ids are forwarded verbatim even when the row is cached', async () => {
+      // Same "no re-resolution of a caller-supplied triple" contract as
+      // update_transaction: explicit ids win over the cached acc-1/item-1.
+      const client = okClient();
+      tools = new CopilotMoneyTools(mockDb, client);
+
+      await tools.createRecurring({
+        transaction_id: 'txn-abc',
+        account_id: 'acct9',
+        item_id: 'item9',
+        frequency: 'MONTHLY',
+      });
+
+      expect((client._calls[0].variables as any).input.transaction).toEqual({
+        accountId: 'acct9',
+        itemId: 'item9',
+        transactionId: 'txn-abc',
+      });
+    });
+
+    test('cache miss without ids: not-found error points at the bypass', async () => {
+      const client = createMockGraphQLClient({});
+      tools = new CopilotMoneyTools(mockDb, client);
+
+      await expect(
+        tools.createRecurring({ transaction_id: 'txn-missing', frequency: 'MONTHLY' })
+      ).rejects.toThrow(/Transaction not found.*pass account_id and item_id/i);
+      expect(client._calls).toHaveLength(0);
+    });
+
+    test('half a pair throws, no write', async () => {
+      const client = createMockGraphQLClient({});
+      tools = new CopilotMoneyTools(mockDb, client);
+
+      await expect(
+        tools.createRecurring({
+          transaction_id: 'txn-abc',
+          account_id: 'acct9',
+          frequency: 'MONTHLY',
+        })
+      ).rejects.toThrow(/account_id and item_id must be passed together/i);
+      await expect(
+        tools.createRecurring({
+          transaction_id: 'txn-abc',
+          item_id: 'item9',
+          frequency: 'MONTHLY',
+        })
+      ).rejects.toThrow(/account_id and item_id must be passed together/i);
+      expect(client._calls).toHaveLength(0);
+    });
+
+    test('malformed bypass ids throw, no write', async () => {
+      const client = createMockGraphQLClient({});
+      tools = new CopilotMoneyTools(mockDb, client);
+
+      await expect(
+        tools.createRecurring({
+          transaction_id: 'txn-abc',
+          account_id: 'bad/acct',
+          item_id: 'item9',
+          frequency: 'MONTHLY',
+        })
+      ).rejects.toThrow(/Invalid account_id/i);
+      expect(client._calls).toHaveLength(0);
+    });
+
+    test('malformed transaction_id throws before resolution or write', async () => {
+      // The triple is forwarded verbatim on the bypass path, so all three ids
+      // get the same doc-id shape gate update_transaction applies.
+      const client = createMockGraphQLClient({});
+      tools = new CopilotMoneyTools(mockDb, client);
+
+      await expect(
+        tools.createRecurring({
+          transaction_id: 'bad/txn',
+          account_id: 'acct9',
+          item_id: 'item9',
+          frequency: 'MONTHLY',
+        })
+      ).rejects.toThrow(/Invalid transaction_id/i);
+      expect(client._calls).toHaveLength(0);
+    });
+  });
 });

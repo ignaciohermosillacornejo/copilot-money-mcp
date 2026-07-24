@@ -526,9 +526,27 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   // No top-level args beyond the input object (covered by CreateRecurringInput.*).
   operation('createRecurring'),
   gatedInputField('CreateRecurringInput.frequency', ['create_recurring.frequency']),
-  gatedInputField('CreateRecurringInput.transaction', ['create_recurring.transaction_id']),
+  gatedInputField('CreateRecurringInput.transaction', [
+    'create_recurring.transaction_id',
+    'create_recurring.account_id',
+    'create_recurring.item_id',
+  ]),
   responseShape('createRecurring'),
   appliesSurface('createRecurring'),
+  {
+    surface: 'Mutation.createRecurring:routing',
+    kind: 'operation',
+    oracle: null,
+    class: 'verified-once',
+    evidence:
+      'Live probe 2026-07-24 (#571): CreateRecurring validates the full (transactionId, ' +
+      'accountId, itemId) binding on the nested transaction ref, mirroring ' +
+      'Mutation.editTransaction:routing — fabricated pair → "Transaction not found"; ' +
+      'real-but-wrong pair (another real account\'s ids) → "Transaction not found"; correct ' +
+      'pair → recurring created. Load-bearing for the create_recurring routing bypass, which ' +
+      'forwards a caller-supplied pair verbatim: a wrong pair fails loudly rather than ' +
+      'seeding the recurring from a different transaction.',
+  },
 
   operation('editRecurring', ['set_recurring_state.recurring_id', 'update_recurring.recurring_id']),
   gatedInputField('EditRecurringInput.name', ['update_recurring.name']),

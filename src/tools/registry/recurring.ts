@@ -137,7 +137,9 @@ export const createRecurringTool = defineTool({
     description:
       'Create a new recurring/subscription item by seeding it from an existing transaction. ' +
       'The recurring inherits its merchant name, account, and initial amount from that transaction; ' +
-      'you only supply the cadence (frequency). Writes directly to Copilot Money via GraphQL.',
+      'you only supply the cadence (frequency). If the seed transaction cannot be resolved ' +
+      'locally (outside the resolution window), pass account_id and item_id (from a live read) ' +
+      'to create the recurring anyway. Writes directly to Copilot Money via GraphQL.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -145,6 +147,20 @@ export const createRecurringTool = defineTool({
           type: 'string',
           description:
             'ID of an existing transaction to seed the recurring from. The recurring inherits its merchant name, account, and initial amount from this transaction.',
+        },
+        account_id: {
+          type: 'string',
+          description:
+            'Optional. Account ID the seed transaction belongs to (from a live read). Pass ' +
+            'together with item_id to skip local resolution and seed from a transaction ' +
+            'outside the resolution window.',
+        },
+        item_id: {
+          type: 'string',
+          description:
+            "Optional. Item ID the account belongs to (Copilot's Firestore item_id, from a " +
+            'live read). Pass together with account_id to skip local resolution and seed from ' +
+            'a transaction outside the resolution window.',
         },
         frequency: {
           type: 'string',

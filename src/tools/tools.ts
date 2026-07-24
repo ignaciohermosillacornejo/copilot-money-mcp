@@ -3848,8 +3848,21 @@ export class CopilotMoneyTools {
    *
    * Generates a unique recurring_id, writes via GraphQL; local cache is
    * refreshed by Copilot's sync process.
+   *
+   * Routing bypass (#571): when the caller supplies BOTH account_id and
+   * item_id (taken from a live read), the triple is forwarded verbatim and
+   * local resolution is skipped — same contract as update_transaction /
+   * delete_transaction. The server validates the full (id, accountId,
+   * itemId) binding on the nested transaction ref (see the
+   * Mutation.createRecurring:routing ledger entry), so a wrong pair fails
+   * loudly rather than seeding the recurring from a different transaction.
    */
-  async createRecurring(args: { transaction_id: string; frequency: string }): Promise<{
+  async createRecurring(args: {
+    transaction_id: string;
+    account_id?: string;
+    item_id?: string;
+    frequency: string;
+  }): Promise<{
     success: true;
     recurring_id: string;
     name: string;
@@ -3865,16 +3878,34 @@ export class CopilotMoneyTools {
       );
     }
 
-    // Resolve routing ids the same way update_transaction does — live-first
-    // in live mode, local cache only in degraded mode. See
-    // resolveTransactionMeta(). Fixes the class bug where a transaction
-    // older than the local cache window could not be made recurring.
-    const { meta, liveWindowMonths } = await this.resolveTransactionMeta([args.transaction_id]);
-    const txnMeta = meta.get(args.transaction_id);
-    if (!txnMeta) {
+    validateDocId(args.transaction_id, 'transaction_id');
+
+    // Half a pair is always a caller mistake; reject it rather than
+    // silently resolving (same stance as update_transaction).
+    if ((args.account_id === undefined) !== (args.item_id === undefined)) {
       throw new Error(
-        CopilotMoneyTools.transactionsNotFoundMessage([args.transaction_id], liveWindowMonths)
+        'create_recurring: account_id and item_id must be passed together (both from a live read) to bypass local resolution'
       );
+    }
+    let txnMeta: { accountId: string; itemId: string };
+    if (args.account_id !== undefined && args.item_id !== undefined) {
+      validateDocId(args.account_id, 'account_id');
+      validateDocId(args.item_id, 'item_id');
+      txnMeta = { accountId: args.account_id, itemId: args.item_id };
+    } else {
+      // Resolve routing ids the same way update_transaction does — live-first
+      // in live mode, local cache only in degraded mode. See
+      // resolveTransactionMeta(). Fixes the class bug where a transaction
+      // older than the local cache window could not be made recurring.
+      const { meta, liveWindowMonths } = await this.resolveTransactionMeta([args.transaction_id]);
+      const resolved = meta.get(args.transaction_id);
+      if (!resolved) {
+        throw new Error(
+          CopilotMoneyTools.transactionsNotFoundMessage([args.transaction_id], liveWindowMonths) +
+            ' Pass account_id and item_id (from a live read) to create the recurring anyway.'
+        );
+      }
+      txnMeta = resolved;
     }
 
     try {
