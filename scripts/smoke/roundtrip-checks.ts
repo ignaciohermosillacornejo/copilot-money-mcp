@@ -182,6 +182,12 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+function daysAgoIso(days: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
 function currentMonth(): string {
   return new Date().toISOString().slice(0, 7);
 }
@@ -519,7 +525,7 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
   {
     tool: 'update_transaction',
     domain: 'transactions',
-    flow: 'rename + set note + flip type→INTERNAL_TRANSFER and verify category cleared on the run-created transaction → verify via Transactions re-read → revert type/category',
+    flow: 'rename + set note + flip date -3d + flip type→INTERNAL_TRANSFER and verify category cleared on the run-created transaction → verify via Transactions re-read → revert type/category',
     appliesSurfaces: ['Mutation.editTransaction:applies'],
     run: async (ctx) => {
       const txn = ctx.state.txnA;
@@ -541,6 +547,28 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
       check(
         after.userNotes === note,
         `update_transaction: write accepted but re-read userNotes is '${String(after.userNotes)}', expected '${note}'`
+      );
+
+      // date round-trip (#569). The txn was created with today's date; move it
+      // back 3 days and pin the persisted value via an independent re-read (the
+      // mutation echo is not byte-faithful). Manual-account txn, so no sync
+      // revert during the run.
+      const newDate = daysAgoIso(3);
+      const dateEcho = await editTransaction(ctx.client, {
+        id: txn.id,
+        accountId: txn.accountId,
+        itemId: txn.itemId,
+        input: { date: newDate },
+      });
+      check(
+        dateEcho.changed.date === newDate,
+        `update_transaction: date echo is '${String(dateEcho.changed.date)}', expected '${newDate}'`
+      );
+      const afterDate = await readTransactionById(ctx.client, ctx.state.marker, txn.id);
+      check(afterDate, `update_transaction: transaction ${txn.id} missing from date re-read`);
+      check(
+        afterDate.date === newDate,
+        `update_transaction: date write not persisted; re-read date is '${afterDate.date}', expected '${newDate}' (YYYY-MM-DD)`
       );
 
       // type round-trip (#415). INTERNAL_TRANSFER avoids INCOME's net-positive
