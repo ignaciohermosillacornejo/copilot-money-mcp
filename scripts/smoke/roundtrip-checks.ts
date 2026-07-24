@@ -550,9 +550,11 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
       );
 
       // date round-trip (#569). The txn was created with today's date; move it
-      // back 3 days and pin the persisted value via an independent re-read (the
-      // mutation echo is not byte-faithful). Manual-account txn, so no sync
-      // revert during the run.
+      // back 3 days. The echo is checked, but persistence is pinned via an
+      // independent re-read (the echo proves the write was accepted, not that
+      // the value reached storage). This is a run-created transaction — not
+      // sourced from an institution sync, and no sync fires during the run — so
+      // nothing reverts the date mid-run.
       const newDate = daysAgoIso(3);
       const dateEcho = await editTransaction(ctx.client, {
         id: txn.id,
