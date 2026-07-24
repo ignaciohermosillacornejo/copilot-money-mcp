@@ -2654,6 +2654,7 @@ export class CopilotMoneyTools {
     tag_ids?: string[];
     type?: TransactionType;
     reviewed?: boolean;
+    date?: string;
   }): Promise<{
     success: true;
     transaction_id: string;
@@ -2675,6 +2676,7 @@ export class CopilotMoneyTools {
       'tag_ids',
       'type',
       'reviewed',
+      'date',
     ]);
     for (const key of Object.keys(args)) {
       if (!allowedKeys.has(key)) {
@@ -2778,6 +2780,9 @@ export class CopilotMoneyTools {
         );
       }
     }
+    if ('date' in args && args.date !== undefined) {
+      validateDate(args.date, 'date');
+    }
     // Map MCP fields → EditTransaction input shape.
     const input: {
       name?: string;
@@ -2786,6 +2791,7 @@ export class CopilotMoneyTools {
       tagIds?: string[];
       isReviewed?: boolean;
       type?: TransactionType;
+      date?: string;
     } = {};
     if ('name' in args && args.name !== undefined) input.name = args.name.trim();
     if ('category_id' in args && args.category_id !== undefined)
@@ -2794,6 +2800,7 @@ export class CopilotMoneyTools {
     if ('tag_ids' in args && args.tag_ids !== undefined) input.tagIds = args.tag_ids;
     if ('type' in args && args.type !== undefined) input.type = args.type;
     if ('reviewed' in args && args.reviewed !== undefined) input.isReviewed = args.reviewed;
+    if ('date' in args && args.date !== undefined) input.date = args.date;
 
     try {
       const result = await editTransaction(client, {
@@ -2810,6 +2817,7 @@ export class CopilotMoneyTools {
         tagIds: 'tag_ids',
         isReviewed: 'reviewed',
         type: 'type',
+        date: 'date',
       };
       const updated = Object.keys(result.changed).map((k) => graphqlToApiName[k] ?? k);
 
@@ -2822,6 +2830,7 @@ export class CopilotMoneyTools {
       if ('note' in args && args.note !== undefined) patch.user_note = args.note;
       if ('tag_ids' in args && args.tag_ids !== undefined) patch.tag_ids = args.tag_ids;
       if ('reviewed' in args && args.reviewed !== undefined) patch.user_reviewed = args.reviewed;
+      if ('date' in args && args.date !== undefined) patch.date = args.date;
       // `type` itself isn't mirrored into the cache: the local Transaction model
       // stores Plaid's `transaction_type`/`plaid_transaction_type`, not Copilot's
       // REGULAR/INCOME/INTERNAL_TRANSFER classification, so there's no field to

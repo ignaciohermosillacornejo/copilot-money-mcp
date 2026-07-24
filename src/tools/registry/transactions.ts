@@ -421,7 +421,8 @@ export const updateTransactionTool = defineTool({
       '— use review_transactions instead for bulk/filter-based review. At least one mutable field ' +
       'must be provided besides transaction_id. If the transaction cannot be resolved locally ' +
       '(outside the resolution window), pass account_id and item_id (from a live read) to write ' +
-      'anyway. Other fields (excluded, internal_transfer, ' +
+      "anyway. `date` corrects the transaction's date (YYYY-MM-DD); on a synced bank transaction " +
+      'it may be reverted by the next institution sync. Other fields (excluded, internal_transfer, ' +
       'goal_id) are not writable through the GraphQL API and were removed from this tool when the ' +
       'backend was migrated.',
     inputSchema: {
@@ -475,6 +476,13 @@ export const updateTransactionTool = defineTool({
           description:
             'Mark this transaction reviewed (true) or un-reviewed (false). For bulk/filter-based ' +
             'review across many transactions, use review_transactions instead.',
+        },
+        date: {
+          type: 'string',
+          description:
+            'New transaction date in YYYY-MM-DD (corrects the settled/posted date). NOTE: for a ' +
+            'synced (non-manual) bank transaction this may be reverted on the next institution ' +
+            'sync; manual-account transactions persist.',
         },
       },
       required: ['transaction_id'],
