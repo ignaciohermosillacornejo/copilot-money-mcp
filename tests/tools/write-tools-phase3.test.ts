@@ -339,6 +339,14 @@ describe('createRecurring', () => {
           frequency: 'MONTHLY',
         })
       ).rejects.toThrow(/Invalid account_id/i);
+      await expect(
+        tools.createRecurring({
+          transaction_id: 'txn-abc',
+          account_id: 'acct9',
+          item_id: 'bad/item',
+          frequency: 'MONTHLY',
+        })
+      ).rejects.toThrow(/Invalid item_id/i);
       expect(client._calls).toHaveLength(0);
     });
 
