@@ -525,7 +525,7 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
   {
     tool: 'update_transaction',
     domain: 'transactions',
-    flow: 'rename + set note + flip date -3d + flip type→INTERNAL_TRANSFER and verify category cleared on the run-created transaction → verify via Transactions re-read → revert type/category',
+    flow: 'rename + set note + flip date -3d + flip amount + flip type→INTERNAL_TRANSFER and verify category cleared on the run-created transaction → verify via Transactions re-read → revert type/category',
     appliesSurfaces: ['Mutation.editTransaction:applies'],
     run: async (ctx) => {
       const txn = ctx.state.txnA;
@@ -572,6 +572,33 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
         afterDate.date === newDate,
         `update_transaction: date write not persisted; re-read date is '${afterDate.date}', expected '${newDate}' (YYYY-MM-DD)`
       );
+
+      // amount round-trip (#574). Flip the throwaway txn's amount and pin the
+      // persisted MAGNITUDE via independent re-read. The stored sign is
+      // server-owned (Copilot stores income as negative; an expense's sign is
+      // applied server-side), so assert on abs() and surface the observed
+      // signed value + echo for the record. Same run-created txn as above, so
+      // no sync reverts it mid-run.
+      const newAmount = 200;
+      const amountEcho = await editTransaction(ctx.client, {
+        id: txn.id,
+        accountId: txn.accountId,
+        itemId: txn.itemId,
+        input: { amount: newAmount },
+      });
+      const afterAmount = await readTransactionById(ctx.client, ctx.state.marker, txn.id);
+      check(afterAmount, `update_transaction: transaction ${txn.id} missing from amount re-read`);
+      check(
+        Math.abs(afterAmount.amount) === newAmount,
+        `update_transaction: amount write not persisted; re-read |amount| is ` +
+          `'${Math.abs(afterAmount.amount)}', expected ${newAmount}`
+      );
+      ctx.log('update_transaction: amount round-trip (#574)', {
+        wrote: newAmount,
+        echo: amountEcho.changed.amount,
+        persisted: afterAmount.amount,
+        echoEqualsPersisted: amountEcho.changed.amount === afterAmount.amount,
+      });
 
       // type round-trip (#415). INTERNAL_TRANSFER avoids INCOME's net-positive
       // sign rule and exercises the verified behavior: the server applies the
