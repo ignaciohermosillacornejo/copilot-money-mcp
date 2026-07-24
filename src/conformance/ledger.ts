@@ -452,11 +452,12 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
     oracle: null,
     class: 'verified-once',
     evidence:
-      'Error-leak recon (docs/graphql-capture/hidden-mutations.md, SplitTransactionInput.amount): ' +
-      '"children must sum to parent.amount (server enforces)". Load-bearing for the ' +
-      'out-of-window split bypass, which skips the client-side sum check and leaves the server ' +
-      'as the sole enforcer on that path. Routine live splits with matching sums succeed ' +
-      '(supporting use only — no wrong-sum rejection transcript has been captured).',
+      'Live probe 2026-07-23 (PR #570 review): wrong-sum split (5 + 4 on a 10 parent) ' +
+      'rejected — "Split amounts (9) must sum to parent amount (10)"; matching-sum control ' +
+      'on the same parent succeeded, so the rejection is sum-caused, not a formation error. ' +
+      'Confirms the error-leak recon (docs/graphql-capture/hidden-mutations.md, ' +
+      'SplitTransactionInput.amount). Load-bearing for the out-of-window split bypass, which ' +
+      'skips the client-side sum check and leaves the server as the sole enforcer on that path.',
   },
 
   // ----- Tags ---------------------------------------------------------------
