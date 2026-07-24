@@ -10,3 +10,7 @@ coverage:
 
 ignore:
   - tests/
+  # Live-API verification harnesses (round-trip + conformance smokes). They are
+  # exercised by running them against the real Copilot backend, not by `bun test`,
+  # so unit-coverage of these files is not meaningful — treat like test infra.
+  - scripts/smoke/
