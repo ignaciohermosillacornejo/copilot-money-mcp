@@ -422,7 +422,9 @@ export const updateTransactionTool = defineTool({
       'must be provided besides transaction_id. If the transaction cannot be resolved locally ' +
       '(outside the resolution window), pass account_id and item_id (from a live read) to write ' +
       "anyway. `date` corrects the transaction's date (YYYY-MM-DD); on a synced bank transaction " +
-      'it may be reverted by the next institution sync. Other fields (excluded, internal_transfer, ' +
+      'it may be reverted by the next institution sync. `amount` corrects the signed transaction ' +
+      'amount (income is negative); on a synced bank transaction it may be reverted by the next ' +
+      'institution sync. Other fields (excluded, internal_transfer, ' +
       'goal_id) are not writable through the GraphQL API and were removed from this tool when the ' +
       'backend was migrated.',
     inputSchema: {
@@ -483,6 +485,13 @@ export const updateTransactionTool = defineTool({
             'New transaction date in YYYY-MM-DD (corrects the settled/posted date). NOTE: for a ' +
             'synced (non-manual) bank transaction this may be reverted on the next institution ' +
             'sync; manual-account transactions persist.',
+        },
+        amount: {
+          type: 'number',
+          description:
+            "New transaction amount as a signed number, using Copilot's stored sign " +
+            '(income is negative). NOTE: for a synced (non-manual) bank transaction this may ' +
+            'be reverted on the next institution sync; manual-account transactions persist.',
         },
       },
       required: ['transaction_id'],
