@@ -409,8 +409,9 @@ export const updateTransactionTool = defineTool({
   schema: {
     name: 'update_transaction',
     description:
-      "Update a single transaction's name, category, note, tags, type, or reviewed-state. Pass " +
-      'transaction_id plus any combination of name, category_id, note, tag_ids, type, or reviewed ' +
+      "Update a single transaction's name, category, note, tags, type, reviewed-state, date, or " +
+      'amount. Pass transaction_id plus any combination of name, category_id, note, tag_ids, type, ' +
+      'reviewed, date, or amount ' +
       '— only specified fields are changed. Pass note="" to clear the note. Pass tag_ids=[] to ' +
       'clear all tags. `type` sets the high-level classification (REGULAR, INCOME, or ' +
       'INTERNAL_TRANSFER) — use INTERNAL_TRANSFER to exclude internal/transfer mechanics from ' +

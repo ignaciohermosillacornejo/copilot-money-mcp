@@ -610,6 +610,13 @@ describe('updateTransaction — amount (#574)', () => {
     expect((client._calls[0] as any).variables.input.amount).toBe(-100);
   });
 
+  test('amount: zero is valid and forwarded verbatim', async () => {
+    const { tools, client } = makeTools();
+    const result = await tools.updateTransaction({ transaction_id: 'txn1', amount: 0 });
+    expect(result.success).toBe(true);
+    expect((client._calls[0] as any).variables.input.amount).toBe(0);
+  });
+
   test('amount: non-finite value throws before any write', async () => {
     const { tools, client } = makeTools();
     await expect(

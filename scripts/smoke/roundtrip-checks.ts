@@ -586,6 +586,11 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
         itemId: txn.itemId,
         input: { amount: newAmount },
       });
+      check(
+        Math.abs(amountEcho.changed.amount ?? NaN) === newAmount,
+        `update_transaction: amount echo |value| is ` +
+          `'${Math.abs(amountEcho.changed.amount ?? NaN)}', expected ${newAmount}`
+      );
       const afterAmount = await readTransactionById(ctx.client, ctx.state.marker, txn.id);
       check(afterAmount, `update_transaction: transaction ${txn.id} missing from amount re-read`);
       check(
