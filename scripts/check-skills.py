@@ -4,23 +4,36 @@
 Checks:
 1. Frontmatter — every skills/<name>/SKILL.md has YAML frontmatter with
    `name:` matching <name> and `description:` non-empty.
-2. MCP tool references resolve against src/tools/tools.ts.
+2. MCP tool references resolve against the tool definitions under src/tools/.
 3. Profile path is canonical (~/.claude/copilot-money/user-profile.md),
    except for the literal template reference skills/user-profile.template.md.
+
+Before check 2 runs, the parser is validated against manifest.json: every
+tool the manifest declares must be visible to the parser. Without that gate,
+a parser that silently stops seeing tool definitions — because they moved,
+or because the literal format changed — reports every skill reference as an
+unknown tool. That reads as dozens of skill bugs when it is really one
+linter bug.
 
 Exit 1 on any failure with a clear per-check message.
 """
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+# Overridable so tests can point the linter at a synthetic repo tree.
+REPO_ROOT = Path(
+    os.environ.get("CHECK_SKILLS_REPO_ROOT")
+    or Path(__file__).resolve().parent.parent
+).resolve()
 SKILLS_DIR = REPO_ROOT / "skills"
-TOOLS_FILE = REPO_ROOT / "src" / "tools" / "tools.ts"
 TOOLS_DIR = REPO_ROOT / "src" / "tools"
+MANIFEST_FILE = REPO_ROOT / "manifest.json"
 
 # Prefixes that look like MCP tool names in our skills (kept narrow to
 # avoid matching English words that happen to share a prefix).
@@ -55,15 +68,61 @@ def parse_tool_names(tools_src: str) -> set[str]:
 
 
 def collect_all_tool_names() -> set[str]:
-    """Collect tool names from tools.ts and all src/tools/live/*.ts files."""
-    if not TOOLS_FILE.exists():
-        return set()
-    names = parse_tool_names(TOOLS_FILE.read_text())
-    live_dir = TOOLS_DIR / "live"
-    if live_dir.is_dir():
-        for ts_file in live_dir.glob("*.ts"):
-            names |= parse_tool_names(ts_file.read_text())
+    """Collect tool names from every TypeScript file under src/tools/.
+
+    Scanned recursively rather than from a hardcoded list of files, so
+    tool definitions can be reorganised (tools.ts -> registry/, live/,
+    or anything future) without silently blinding this linter.
+    """
+    names: set[str] = set()
+    if not TOOLS_DIR.is_dir():
+        return names
+    for ts_file in sorted(TOOLS_DIR.rglob("*.ts")):
+        names |= parse_tool_names(ts_file.read_text())
     return names
+
+
+def manifest_tool_names() -> set[str]:
+    """Tool names declared in manifest.json (kept current by sync-manifest).
+
+    This is the read-only bundle's surface, not every tool — but it is
+    derived independently of this script, so it is a sound tripwire for
+    "the parser stopped working".
+    """
+    if not MANIFEST_FILE.exists():
+        return set()
+    manifest = json.loads(MANIFEST_FILE.read_text())
+    return {
+        tool["name"]
+        for tool in manifest.get("tools", [])
+        if isinstance(tool, dict) and "name" in tool
+    }
+
+
+def check_parser_health(known_tools: set[str]) -> list[str]:
+    """Fail loudly when the parser cannot see the tools we know exist.
+
+    manifest.json enumerates shipped tools independently of this script, so
+    anything it declares must also be visible to `collect_all_tool_names`.
+    A shortfall means the parser is broken, not that the skills are wrong.
+    """
+    declared = manifest_tool_names()
+    if not declared:
+        return [
+            f"linter self-check: no tools declared in {MANIFEST_FILE.name} — "
+            "cannot validate that the tool parser still works"
+        ]
+    missing = sorted(declared - known_tools)
+    if missing:
+        return [
+            "linter self-check: the tool parser found "
+            f"{len(known_tools)} name(s) under {TOOLS_DIR.relative_to(REPO_ROOT)}/ "
+            f"but cannot see {len(missing)} tool(s) that {MANIFEST_FILE.name} "
+            f"declares (e.g. {', '.join(missing[:3])}). Tool definitions have "
+            "likely moved or changed shape — fix parse_tool_names/"
+            "collect_all_tool_names. Skill references were NOT validated."
+        ]
+    return []
 
 
 def check_frontmatter(skill_dir: Path) -> list[str]:
@@ -134,17 +193,17 @@ def check_profile_path(skill_dir: Path) -> list[str]:
 
 
 def main() -> int:
-    if not TOOLS_FILE.exists():
-        print(
-            f"ERROR: tools.ts not found at {TOOLS_FILE}", file=sys.stderr
-        )
+    if not TOOLS_DIR.is_dir():
+        print(f"ERROR: tools directory not found at {TOOLS_DIR}", file=sys.stderr)
         return 1
     known_tools = collect_all_tool_names()
-    if not known_tools:
-        print(
-            "ERROR: parsed 0 tool names from tools.ts — check the regex",
-            file=sys.stderr,
-        )
+
+    # Gate the whole run: if the parser is blind, every downstream tool-ref
+    # error is a false positive, so report the parser and stop.
+    parser_errors = check_parser_health(known_tools)
+    if parser_errors:
+        for err in parser_errors:
+            print(f"FAIL: {err}", file=sys.stderr)
         return 1
 
     all_errors: list[str] = []
