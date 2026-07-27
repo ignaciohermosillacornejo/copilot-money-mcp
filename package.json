@@ -93,11 +93,11 @@
     "@types/node": "^26.1.1",
     "eslint": "^10.8.0",
     "eslint-config-prettier": "^10.0.0",
-    "globals": "^17.7.0",
+    "globals": "^17.8.0",
     "graphql": "^17.0.2",
     "husky": "^9.1.7",
     "prettier": "^3.9.6",
     "typescript": "^6.0.2",
-    "typescript-eslint": "^8.64.0"
+    "typescript-eslint": "^8.65.0"
   }
 }
