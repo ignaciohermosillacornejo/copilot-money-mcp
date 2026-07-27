@@ -75,12 +75,12 @@ async function makeRepo(opts: { dumpBody?: string; skill?: string }): Promise<st
 const WORKING_DUMP = `console.log(JSON.stringify(['get_transactions', 'update_transaction']));`;
 
 async function withRepo(
-  opts: { dumpBody?: string; skill?: string },
+  opts: { dumpBody?: string; skill?: string; env?: Record<string, string> },
   assertions: (result: { code: number; stderr: string; stdout: string }) => void
 ): Promise<void> {
   const root = await makeRepo(opts);
   try {
-    assertions(await runLinter(root));
+    assertions(await runLinter(root, opts.env));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -125,20 +125,19 @@ describe('tool-lookup gate (class-level detector)', () => {
   // The one lookup failure the table above cannot express: it is about the
   // environment, not the dump script's output, so the dump here is a good one.
   test('fails as a linter fault when bun is not on PATH', async () => {
-    const root = await makeRepo({ dumpBody: WORKING_DUMP });
     const emptyDir = await mkdtemp(join(tmpdir(), 'check-skills-nobun-'));
     try {
       // PATH points at an empty directory so shutil.which('bun') finds nothing.
       // python3 is spawned by absolute path, so stripping PATH cannot break the
       // run itself — the linter reaches the lookup and fails there.
-      const { code, stderr } = await runLinter(root, { PATH: emptyDir });
-      expect(code).toBe(1);
-      expect(stderr).toContain('linter self-check');
-      expect(stderr).toContain('bun is not on PATH');
-      expect(stderr).toContain('Skill references were NOT validated');
-      expect(stderr).not.toContain('references unknown MCP tool');
+      await withRepo({ dumpBody: WORKING_DUMP, env: { PATH: emptyDir } }, ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('linter self-check');
+        expect(stderr).toContain('bun is not on PATH');
+        expect(stderr).toContain('Skill references were NOT validated');
+        expect(stderr).not.toContain('references unknown MCP tool');
+      });
     } finally {
-      await rm(root, { recursive: true, force: true });
       await rm(emptyDir, { recursive: true, force: true });
     }
   });
