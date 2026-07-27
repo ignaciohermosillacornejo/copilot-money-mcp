@@ -29,11 +29,15 @@ import { ALL_TOOL_DEFS } from '../../src/tools/registry/index.js';
 const SCRIPT = fileURLToPath(new URL('../../scripts/check-skills.py', import.meta.url));
 const REAL_REPO = fileURLToPath(new URL('../..', import.meta.url));
 
+// Resolved once, so a test can strip PATH without also losing the interpreter.
+const PYTHON = Bun.which('python3') ?? 'python3';
+
 async function runLinter(
-  repoRoot: string
+  repoRoot: string,
+  envOverrides: Record<string, string> = {}
 ): Promise<{ code: number; stderr: string; stdout: string }> {
-  const proc = Bun.spawn(['python3', SCRIPT], {
-    env: { ...process.env, CHECK_SKILLS_REPO_ROOT: repoRoot },
+  const proc = Bun.spawn([PYTHON, SCRIPT], {
+    env: { ...process.env, CHECK_SKILLS_REPO_ROOT: repoRoot, ...envOverrides },
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -117,6 +121,27 @@ describe('tool-lookup gate (class-level detector)', () => {
       });
     });
   }
+
+  // The one lookup failure the table above cannot express: it is about the
+  // environment, not the dump script's output, so the dump here is a good one.
+  test('fails as a linter fault when bun is not on PATH', async () => {
+    const root = await makeRepo({ dumpBody: WORKING_DUMP });
+    const emptyDir = await mkdtemp(join(tmpdir(), 'check-skills-nobun-'));
+    try {
+      // PATH points at an empty directory so shutil.which('bun') finds nothing.
+      // python3 is spawned by absolute path, so stripping PATH cannot break the
+      // run itself — the linter reaches the lookup and fails there.
+      const { code, stderr } = await runLinter(root, { PATH: emptyDir });
+      expect(code).toBe(1);
+      expect(stderr).toContain('linter self-check');
+      expect(stderr).toContain('bun is not on PATH');
+      expect(stderr).toContain('Skill references were NOT validated');
+      expect(stderr).not.toContain('references unknown MCP tool');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(emptyDir, { recursive: true, force: true });
+    }
+  });
 
   test('reports the failure cleanly rather than as a traceback', async () => {
     await withRepo({ dumpBody: `console.log('not json at all');` }, ({ stderr }) => {

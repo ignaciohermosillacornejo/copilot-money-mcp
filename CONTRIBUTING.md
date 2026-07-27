@@ -40,6 +40,12 @@ bun run sync-manifest  # Verify manifest.json matches code
 bun run check:skills   # Lint skills/ (NOT part of `check` — run separately for skills work)
 ```
 
+`check:skills` resolves the tool names skills reference by running
+`scripts/dump-tool-names.ts` under bun, so it needs `bun` on PATH and a
+completed `bun install` — it is no longer a standalone python3 script. When
+either is missing it reports a linter fault and validates nothing, rather than
+reporting every skill reference as an unknown tool.
+
 #### Writes-enabled bundle (local-only)
 
 `bun run pack:mcpb:write` produces `copilot-money-mcp-write.mcpb`, a variant

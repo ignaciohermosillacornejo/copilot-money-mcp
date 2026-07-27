@@ -15,16 +15,13 @@
  * source the server's dispatch is built from, so it covers read, write, and
  * live tools alike — `manifest.json` covers only the 14 cache-mode reads and
  * would miss every write tool the skills lean on.
+ *
+ * This prints whatever the registry holds, including an empty array. Refusing
+ * the degenerate answer is the caller's job: check-skills.py raises on an empty
+ * list, and that is the path under test.
  */
 import { ALL_TOOL_DEFS } from '../src/tools/registry/index.js';
 
 const names = ALL_TOOL_DEFS.map((def) => def.name).sort();
-
-if (names.length === 0) {
-  // Unreachable in practice; a registry that imports cleanly but enumerates
-  // nothing is exactly the degenerate answer the caller must not trust.
-  console.error('dump-tool-names: ALL_TOOL_DEFS is empty');
-  process.exit(1);
-}
 
 console.log(JSON.stringify(names));
