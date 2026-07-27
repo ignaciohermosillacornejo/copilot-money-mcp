@@ -4,16 +4,18 @@
 Checks:
 1. Frontmatter — every skills/<name>/SKILL.md has YAML frontmatter with
    `name:` matching <name> and `description:` non-empty.
-2. MCP tool references resolve against the tool definitions under src/tools/.
+2. MCP tool references resolve against the server's own tool registry.
 3. Profile path is canonical (~/.claude/copilot-money/user-profile.md),
    except for the literal template reference skills/user-profile.template.md.
 
-Before check 2 runs, the parser is validated against manifest.json: every
-tool the manifest declares must be visible to the parser. Without that gate,
-a parser that silently stops seeing tool definitions — because they moved,
-or because the literal format changed — reports every skill reference as an
-unknown tool. That reads as dozens of skill bugs when it is really one
-linter bug.
+Check 2 gets its tool list from `scripts/dump-tool-names.ts`, which imports
+`ALL_TOOL_DEFS` — the same registry the server builds dispatch from. This
+script used to scrape `name: '...'` literals out of TypeScript instead, which
+failed open: when the schemas moved to `src/tools/registry/`, the parse
+collapsed to one incidental literal and every skill reference was reported as
+an unknown tool. That reads as dozens of skill bugs when it is really one
+linter bug. Asking the registry directly removes the failure mode rather than
+guarding it — a move that breaks the import fails typecheck loudly.
 
 Exit 1 on any failure with a clear per-check message.
 """
@@ -23,6 +25,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -32,8 +36,7 @@ REPO_ROOT = Path(
     or Path(__file__).resolve().parent.parent
 ).resolve()
 SKILLS_DIR = REPO_ROOT / "skills"
-TOOLS_DIR = REPO_ROOT / "src" / "tools"
-MANIFEST_FILE = REPO_ROOT / "manifest.json"
+DUMP_SCRIPT = REPO_ROOT / "scripts" / "dump-tool-names.ts"
 
 # Prefixes that look like MCP tool names in our skills (kept narrow to
 # avoid matching English words that happen to share a prefix).
@@ -58,71 +61,66 @@ ALLOWED_PROFILE_PATHS = (
 )
 
 
-def parse_tool_names(tools_src: str) -> set[str]:
-    """Extract tool names from a TypeScript tools source string.
+class ToolLookupError(Exception):
+    """The tool registry could not be enumerated.
 
-    Tool names appear as `name: 'tool_name'` or `name: "tool_name"` in
-    TypeScript object literals. We extract them by string match.
+    Always a fault in this linter or its environment, never in the skills —
+    callers must report it as such and validate nothing.
     """
-    return set(re.findall(r"""name:\s*['"]([a-z_][a-z0-9_]*)['"]""", tools_src))
 
 
 def collect_all_tool_names() -> set[str]:
-    """Collect tool names from every TypeScript file under src/tools/.
+    """Ask the registry for every dispatchable tool name.
 
-    Scanned recursively rather than from a hardcoded list of files, so
-    tool definitions can be reorganised (tools.ts -> registry/, live/,
-    or anything future) without silently blinding this linter.
+    Runs `scripts/dump-tool-names.ts` under bun and reads back a JSON array.
+    Every failure mode is raised as ToolLookupError so the caller reports one
+    linter fault instead of blaming every skill reference — the whole point of
+    the bug this replaced.
     """
-    names: set[str] = set()
-    if not TOOLS_DIR.is_dir():
-        return names
-    for ts_file in sorted(TOOLS_DIR.rglob("*.ts")):
-        names |= parse_tool_names(ts_file.read_text())
-    return names
+    bun = shutil.which("bun")
+    if bun is None:
+        raise ToolLookupError(
+            "bun is not on PATH, so the tool registry cannot be enumerated"
+        )
+    if not DUMP_SCRIPT.exists():
+        raise ToolLookupError(f"{DUMP_SCRIPT} is missing")
 
+    try:
+        proc = subprocess.run(
+            [bun, "run", str(DUMP_SCRIPT)],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        raise ToolLookupError(f"{DUMP_SCRIPT.name} timed out after 120s") from None
 
-def manifest_tool_names() -> set[str]:
-    """Tool names declared in manifest.json (kept current by sync-manifest).
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout).strip().splitlines()
+        tail = detail[-1] if detail else "no output"
+        raise ToolLookupError(
+            f"{DUMP_SCRIPT.name} exited {proc.returncode}: {tail}"
+        )
 
-    This is the read-only bundle's surface, not every tool — but it is
-    derived independently of this script, so it is a sound tripwire for
-    "the parser stopped working".
-    """
-    if not MANIFEST_FILE.exists():
-        return set()
-    manifest = json.loads(MANIFEST_FILE.read_text())
-    return {
-        tool["name"]
-        for tool in manifest.get("tools", [])
-        if isinstance(tool, dict) and "name" in tool
-    }
+    try:
+        names = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise ToolLookupError(
+            f"{DUMP_SCRIPT.name} did not print valid JSON ({exc})"
+        ) from None
 
+    if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
+        raise ToolLookupError(
+            f"{DUMP_SCRIPT.name} printed {type(names).__name__}, expected a JSON "
+            "array of strings"
+        )
+    if not names:
+        # A registry that enumerates nothing is the degenerate answer that let
+        # the original bug through. Refuse it rather than validating against it.
+        raise ToolLookupError(f"{DUMP_SCRIPT.name} returned an empty tool list")
 
-def check_parser_health(known_tools: set[str]) -> list[str]:
-    """Fail loudly when the parser cannot see the tools we know exist.
-
-    manifest.json enumerates shipped tools independently of this script, so
-    anything it declares must also be visible to `collect_all_tool_names`.
-    A shortfall means the parser is broken, not that the skills are wrong.
-    """
-    declared = manifest_tool_names()
-    if not declared:
-        return [
-            f"linter self-check: no tools declared in {MANIFEST_FILE.name} — "
-            "cannot validate that the tool parser still works"
-        ]
-    missing = sorted(declared - known_tools)
-    if missing:
-        return [
-            "linter self-check: the tool parser found "
-            f"{len(known_tools)} name(s) under {TOOLS_DIR.relative_to(REPO_ROOT)}/ "
-            f"but cannot see {len(missing)} tool(s) that {MANIFEST_FILE.name} "
-            f"declares (e.g. {', '.join(missing[:3])}). Tool definitions have "
-            "likely moved or changed shape — fix parse_tool_names/"
-            "collect_all_tool_names. Skill references were NOT validated."
-        ]
-    return []
+    return set(names)
 
 
 def check_frontmatter(skill_dir: Path) -> list[str]:
@@ -193,17 +191,15 @@ def check_profile_path(skill_dir: Path) -> list[str]:
 
 
 def main() -> int:
-    if not TOOLS_DIR.is_dir():
-        print(f"ERROR: tools directory not found at {TOOLS_DIR}", file=sys.stderr)
-        return 1
-    known_tools = collect_all_tool_names()
-
-    # Gate the whole run: if the parser is blind, every downstream tool-ref
-    # error is a false positive, so report the parser and stop.
-    parser_errors = check_parser_health(known_tools)
-    if parser_errors:
-        for err in parser_errors:
-            print(f"FAIL: {err}", file=sys.stderr)
+    # Gate the whole run: without a trustworthy tool list every downstream
+    # tool-ref error is a false positive, so report the linter and stop.
+    try:
+        known_tools = collect_all_tool_names()
+    except ToolLookupError as exc:
+        print(
+            f"FAIL: linter self-check: {exc}. Skill references were NOT validated.",
+            file=sys.stderr,
+        )
         return 1
 
     all_errors: list[str] = []
