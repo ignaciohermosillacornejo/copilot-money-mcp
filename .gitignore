@@ -76,6 +76,7 @@ scripts/*
 !scripts/check-server-json.ts
 !scripts/check-deps-pinned.ts
 !scripts/check-tool-counts.ts
+!scripts/check-privacy-endpoints.ts
 !scripts/check-skills.py
 !scripts/dump-tool-names.ts
 !scripts/scheduled-smoke.ts
