@@ -7,7 +7,7 @@ This server exposes different tools depending on which CLI flags you enable. The
 | Tool | Status | Notes |
 |---|---|---|
 | `get_transactions` | ✅ | Query transactions with filters (date range, category, merchant, amount, account, text search, etc.) |
-| `get_accounts` | ✅ | List accounts with balances; filter by type |
+| `get_accounts` | ✅ | List accounts with balances; filter by type. Logo images are omitted by default (`include_logos: true` to include) |
 | `get_categories` | ✅ | Category hierarchy with spending totals |
 | `get_budgets` | ✅ | Budgets vs. spending |
 | `get_recurring_transactions` | ✅ | Detected subscriptions + recurring charges |

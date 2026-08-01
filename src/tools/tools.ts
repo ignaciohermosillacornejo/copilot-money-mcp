@@ -973,6 +973,7 @@ export class CopilotMoneyTools {
     options: {
       account_type?: string;
       include_hidden?: boolean;
+      include_logos?: boolean;
     } = {}
   ): Promise<{
     count: number;
@@ -981,7 +982,7 @@ export class CopilotMoneyTools {
     total_liabilities: number;
     accounts: Account[];
   }> {
-    const { account_type, include_hidden = false } = options;
+    const { account_type, include_hidden = false, include_logos = false } = options;
 
     let accounts = await this.db.getAccounts(account_type);
 
@@ -1008,12 +1009,20 @@ export class CopilotMoneyTools {
     }
     const totalBalance = totalAssets - totalLiabilities;
 
+    // `logo` is a base64-encoded PNG (several KB per account) that Firestore
+    // caches alongside every account document. Left in, it dominates the
+    // response (issue: ~20-30x bloat for a handful of accounts) for data an
+    // MCP client has no use for. Strip it by default; include_logos opts back in.
+    const responseAccounts = include_logos
+      ? accounts
+      : accounts.map(({ logo: _logo, logo_content_type: _logoContentType, ...rest }) => rest);
+
     return {
       count: accounts.length,
       total_balance: roundAmount(totalBalance),
       total_assets: roundAmount(totalAssets),
       total_liabilities: roundAmount(totalLiabilities),
-      accounts,
+      accounts: responseAccounts,
     };
   }
 

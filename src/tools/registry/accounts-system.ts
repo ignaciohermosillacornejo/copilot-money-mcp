@@ -57,7 +57,9 @@ export const getAccountsTool = defineTool({
       'total_assets, and total_liabilities. Optionally filter by account type ' +
       '(checking, savings, credit, investment). Checks both account_type ' +
       'and subtype fields for better filtering (e.g., finds checking accounts ' +
-      "even when account_type is 'depository'). By default, hidden accounts are excluded.",
+      "even when account_type is 'depository'). By default, hidden accounts are excluded. " +
+      'Institution logos (base64-encoded images) are omitted by default to keep responses compact; ' +
+      'pass include_logos: true to include them.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -70,6 +72,13 @@ export const getAccountsTool = defineTool({
         include_hidden: {
           type: 'boolean',
           description: 'Include hidden accounts (default: false)',
+          default: false,
+        },
+        include_logos: {
+          type: 'boolean',
+          description:
+            'Include institution logo images (base64-encoded, several KB each). ' +
+            'Omitted by default to keep responses compact (default: false)',
           default: false,
         },
       },

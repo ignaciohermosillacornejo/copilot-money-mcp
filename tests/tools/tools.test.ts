@@ -725,6 +725,29 @@ describe('CopilotMoneyTools', () => {
       expect(result.count).toBe(1);
       expect(result.accounts[0].account_type).toBe('checking');
     });
+
+    test('strips logo fields by default', async () => {
+      (db as any)._accounts = [
+        { ...mockAccounts[0], logo: 'iVBORw0KGgoAAAANSU...', logo_content_type: 'image/png' },
+        mockAccounts[1],
+      ];
+      const result = await tools.getAccounts();
+      expect(result.accounts[0]).not.toHaveProperty('logo');
+      expect(result.accounts[0]).not.toHaveProperty('logo_content_type');
+      // Everything else about the account is preserved.
+      expect(result.accounts[0].account_id).toBe('acc1');
+      expect(result.accounts[0].current_balance).toBe(1500.0);
+    });
+
+    test('includes logo fields when include_logos is true', async () => {
+      (db as any)._accounts = [
+        { ...mockAccounts[0], logo: 'iVBORw0KGgoAAAANSU...', logo_content_type: 'image/png' },
+        mockAccounts[1],
+      ];
+      const result = await tools.getAccounts({ include_logos: true });
+      expect(result.accounts[0].logo).toBe('iVBORw0KGgoAAAANSU...');
+      expect(result.accounts[0].logo_content_type).toBe('image/png');
+    });
   });
 
   describe('getAccounts with hidden accounts', () => {
