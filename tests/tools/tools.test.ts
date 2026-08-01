@@ -9,6 +9,7 @@ import {
   BALANCE_HISTORY_GRANULARITIES,
   CATEGORY_VIEWS,
   TRANSACTION_TYPE_FILTERS,
+  DEFAULT_COMPACT_TRANSACTION_FIELDS,
 } from '../../src/tools/tools.js';
 import { PRICE_TYPES } from '../../src/models/index.js';
 import { CopilotDatabase } from '../../src/core/database.js';
@@ -361,6 +362,61 @@ describe('CopilotMoneyTools', () => {
       const result = await tools.getTransactions({});
       expect(result.count).toBe(4);
       expect(result.transactions).toHaveLength(4);
+    });
+
+    test('returns full-width transactions by default (no fields/compact)', async () => {
+      const result = await tools.getTransactions({});
+      // Enrichment fields plus original document fields are all present.
+      expect(result.transactions[0]).toHaveProperty('category_id');
+      expect(result.transactions[0]).toHaveProperty('normalized_merchant');
+    });
+
+    test('compact: true returns only fields from the curated set', async () => {
+      const result = await tools.getTransactions({ compact: true });
+      for (const txn of result.transactions) {
+        // Every returned key must be one of the compact fields (no leftover
+        // full-document fields like item_id/plaid_category_id/etc.).
+        for (const key of Object.keys(txn)) {
+          expect((DEFAULT_COMPACT_TRANSACTION_FIELDS as readonly string[]).includes(key)).toBe(
+            true
+          );
+        }
+        // Required fields plus the always-synthesized category_name are
+        // present on every transaction regardless of which optional fields
+        // the underlying document happened to set.
+        expect(txn).toHaveProperty('transaction_id');
+        expect(txn).toHaveProperty('amount');
+        expect(txn).toHaveProperty('date');
+        expect(txn).toHaveProperty('category_name');
+      }
+    });
+
+    test('fields: [...] returns only the named fields, ignoring unknown names', async () => {
+      const result = await tools.getTransactions({
+        fields: ['transaction_id', 'amount', 'not_a_real_field'],
+      });
+      for (const txn of result.transactions) {
+        expect(Object.keys(txn).sort()).toEqual(['amount', 'transaction_id']);
+      }
+    });
+
+    test('fields takes priority over compact when both are given', async () => {
+      const result = await tools.getTransactions({ fields: ['transaction_id'], compact: true });
+      for (const txn of result.transactions) {
+        expect(Object.keys(txn)).toEqual(['transaction_id']);
+      }
+    });
+
+    test('single-transaction lookup (transaction_id) also honors compact', async () => {
+      const result = await tools.getTransactions({ transaction_id: 'txn1', compact: true });
+      expect(result.transactions).toHaveLength(1);
+      const txn = result.transactions[0];
+      for (const key of Object.keys(txn)) {
+        expect((DEFAULT_COMPACT_TRANSACTION_FIELDS as readonly string[]).includes(key)).toBe(true);
+      }
+      expect(txn.transaction_id).toBe('txn1');
+      expect(txn).not.toHaveProperty('item_id');
+      expect(txn).not.toHaveProperty('normalized_merchant');
     });
 
     test('filters by start_date and end_date', async () => {

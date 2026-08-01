@@ -6,7 +6,7 @@ This server exposes different tools depending on which CLI flags you enable. The
 
 | Tool | Status | Notes |
 |---|---|---|
-| `get_transactions` | ✅ | Query transactions with filters (date range, category, merchant, amount, account, text search, etc.) |
+| `get_transactions` | ✅ | Query transactions with filters (date range, category, merchant, amount, account, text search, etc.). `compact: true` or `fields: [...]` narrow the ~35-40 field document down to just what you need |
 | `get_accounts` | ✅ | List accounts with balances; filter by type. Logo images are omitted by default (`include_logos: true` to include) |
 | `get_categories` | ✅ | Category hierarchy with spending totals |
 | `get_budgets` | ✅ | Budgets vs. spending |

@@ -59,7 +59,9 @@ const RESPONSE_BUDGETS: Record<string, number> = {
 
 const SCHEMA_BUDGETS: Record<string, number> = {
   // Cache-mode reads
-  get_transactions: 4_145,
+  // Raised from 4_145 (#600-era diet target) — this PR adds real new
+  // capability (fields/compact field selection), not bloat; see PR #593.
+  get_transactions: 5_100,
   get_cache_info: 640,
   refresh_database: 485,
   get_accounts: 1_315,

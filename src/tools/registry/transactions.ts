@@ -19,7 +19,12 @@ export const getTransactionsTool = defineTool({
       `(4) Special types: Use transaction_type for ${TRANSACTION_TYPE_FILTERS.join(', ')}. ` +
       '(5) Location-based: Use city or lat/lon with radius_km. ' +
       '(6) Tag filter: Use tag to find transactions with a specific tag. ' +
-      'Returns human-readable category names and normalized merchant names.',
+      'Returns human-readable category names and normalized merchant names. ' +
+      'Each transaction document carries ~35-40 fields (internal IDs, Plaid metadata, ' +
+      'intelligence-suggestion arrays, flags like is_amazon/from_investment) — most callers ' +
+      'only need a handful. Pass compact: true for a curated 7-field response ' +
+      '(transaction_id, date, name, amount, category_name, account_id, pending), or fields: ' +
+      '[...] to name exactly the fields you want.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -150,6 +155,22 @@ export const getTransactionsTool = defineTool({
           type: 'number',
           description: 'Search radius in kilometers (default: 10)',
           default: 10,
+        },
+        // NEW: Field selection
+        fields: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Return only these fields per transaction (e.g. ["transaction_id", "date", "name", ' +
+            '"amount", "category_name"]). Takes priority over compact when both are given.',
+        },
+        compact: {
+          type: 'boolean',
+          description:
+            'Return a curated 7-field response per transaction (transaction_id, date, name, ' +
+            'amount, category_name, account_id, pending) instead of the full ~35-40 field ' +
+            'document. Ignored if fields is given. Default: false.',
+          default: false,
         },
       },
     },

@@ -165,6 +165,48 @@ const DEFAULT_QUERY_LIMIT = 100;
 /** Minimum allowed limit */
 const MIN_QUERY_LIMIT = 1;
 
+/**
+ * Fields returned per transaction when `compact: true` is passed to
+ * get_transactions, instead of the full ~35-40 field Firestore document.
+ * Covers the common "what did I spend, where, when, in what category" case.
+ */
+export const DEFAULT_COMPACT_TRANSACTION_FIELDS = [
+  'transaction_id',
+  'date',
+  'name',
+  'amount',
+  'category_name',
+  'account_id',
+  'pending',
+] as const;
+
+/**
+ * Project each transaction down to an explicit `fields` allowlist (or the
+ * `compact` preset when no explicit list is given). Applied after
+ * category_name/normalized_merchant enrichment so both are selectable.
+ * A single Firestore transaction document carries ~35-40 fields (internal
+ * IDs, Plaid metadata, intelligence-suggestion arrays, flags like
+ * is_amazon/from_investment) that most callers never need — pulling months
+ * of history at full width both wastes an MCP client's context and can push
+ * a single call over response-size limits.
+ */
+function projectTransactionFields<T extends Record<string, unknown>>(
+  txns: T[],
+  options: { fields?: string[]; compact?: boolean }
+): T[] {
+  const fields =
+    options.fields ?? (options.compact ? [...DEFAULT_COMPACT_TRANSACTION_FIELDS] : undefined);
+  if (!fields || fields.length === 0) return txns;
+  const fieldSet = new Set(fields);
+  return txns.map((txn) => {
+    const projected: Record<string, unknown> = {};
+    for (const key of Object.keys(txn)) {
+      if (fieldSet.has(key)) projected[key] = txn[key];
+    }
+    return projected as T;
+  });
+}
+
 // ============================================
 // Tool Value-Set Constants
 // ============================================
@@ -639,11 +681,17 @@ export class CopilotMoneyTools {
     lat?: number;
     lon?: number;
     radius_km?: number;
+    // NEW: Field selection (issue: cache-mode transactions run ~35-40 fields wide)
+    fields?: string[];
+    compact?: boolean;
   }): Promise<{
     count: number;
     total_count: number;
     offset: number;
     has_more: boolean;
+    // NOTE: when `fields`/`compact` narrow the response, the actual objects
+    // carry fewer keys than this type promises — those are opt-in, and the
+    // caller who requested the subset already knows what they asked for.
     transactions: Array<Transaction & { category_name?: string; normalized_merchant?: string }>;
     // Additional fields for special types
     type_specific_data?: Record<string, unknown>;
@@ -672,6 +720,8 @@ export class CopilotMoneyTools {
       lat,
       lon,
       radius_km = 10,
+      fields,
+      compact,
     } = options;
 
     // Validate inputs
@@ -705,15 +755,18 @@ export class CopilotMoneyTools {
         total_count: 1,
         offset: 0,
         has_more: false,
-        transactions: [
-          {
-            ...found,
-            category_name: found.category_id
-              ? await this.resolveCategoryName(found.category_id)
-              : undefined,
-            normalized_merchant: normalizeMerchantName(getTransactionDisplayName(found)),
-          },
-        ],
+        transactions: projectTransactionFields(
+          [
+            {
+              ...found,
+              category_name: found.category_id
+                ? await this.resolveCategoryName(found.category_id)
+                : undefined,
+              normalized_merchant: normalizeMerchantName(getTransactionDisplayName(found)),
+            },
+          ],
+          { fields, compact }
+        ),
       };
     }
 
@@ -860,7 +913,7 @@ export class CopilotMoneyTools {
       total_count: totalCount,
       offset: validatedOffset,
       has_more: hasMore,
-      transactions: enrichedTransactions,
+      transactions: projectTransactionFields(enrichedTransactions, { fields, compact }),
       ...(typeSpecificData && { type_specific_data: typeSpecificData }),
       ...(cacheWarning && { _cache_warning: cacheWarning }),
     };
