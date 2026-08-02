@@ -59,6 +59,10 @@ Thumbs.db
 # Demo database contains real financial data - do NOT commit
 tests/fixtures/demo_database/
 # Development/debug scripts (except tracked subdirectories)
+# Local scratch/debug scripts belong in scripts/local/ — gitignored AND excluded
+# from the scripts typecheck gate (tsconfig.scripts.json), which otherwise
+# sweeps all of scripts/ and breaks `bun run check` on files CI never sees.
+scripts/local/
 scripts/*
 !scripts/graphql-capture/
 !scripts/launcher.sh

@@ -1,0 +1,437 @@
+/**
+ * Context-budget ratchet (#597 prerequisite).
+ *
+ * Pins two numbers per tool so context bloat fails a test instead of silently
+ * taxing every MCP session:
+ *  1. Response size — every cache-mode read tool is executed against a fixed
+ *     synthetic LevelDB fixture and its response measured as
+ *     `JSON.stringify(result, null, 2).length`, pretty-printed because that is
+ *     exactly what `src/server.ts` sends to callers (if serialization ever
+ *     goes compact, budgets get LOWERED — that's the point).
+ *  2. Schema size — every registered tool's `JSON.stringify(def.schema).length`
+ *     plus an aggregate total (the schemas load into every session).
+ *
+ * Ratchet policy: budgets only move DOWN, via diet PRs that shrink responses
+ * or schemas. Raising a budget requires justifying the increase in the PR
+ * that needs it. Budgets are measured value +~10% headroom; recalibrate with
+ * `CONTEXT_BUDGET_PRINT=1 bun test tests/context-budget.test.ts`.
+ * Part of #597.
+ */
+
+import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
+import path from 'node:path';
+import { ALL_TOOL_DEFS, type ToolContext } from '../src/tools/registry/index.js';
+import { CopilotDatabase } from '../src/core/database.js';
+import { CopilotMoneyTools } from '../src/tools/tools.js';
+import { createCombinedDb, cleanupTestDb } from './helpers/test-db.js';
+
+const DB_PATH = path.join(__dirname, 'fixtures/context-budget-db');
+
+// ---------------------------------------------------------------------------
+// Budgets (chars). Ratchet: only lower these in diet PRs; raising one needs
+// an explicit justification in the PR that grows it.
+// ---------------------------------------------------------------------------
+
+// Note: get_recurring_transactions groups Copilot subscriptions relative to
+// today's date (next_expected_date / this_month buckets), so its size can
+// drift a few chars across month boundaries — the ~10% headroom absorbs that.
+const RESPONSE_BUDGETS: Record<string, number> = {
+  get_transactions: 2_050,
+  get_cache_info: 1_120,
+  refresh_database: 285,
+  get_accounts: 1_025,
+  get_connection_status: 2_505,
+  get_categories: 1_260,
+  get_recurring_transactions: 1_065,
+  get_budgets: 555,
+  get_goals: 485,
+  get_investment_prices: 355,
+  get_investment_splits: 100,
+  get_holdings: 100,
+  get_balance_history: 130,
+  get_goal_history: 1_165,
+};
+
+const SCHEMA_BUDGETS: Record<string, number> = {
+  // Cache-mode reads
+  get_transactions: 4_145,
+  get_cache_info: 640,
+  refresh_database: 485,
+  get_accounts: 1_315,
+  get_connection_status: 850,
+  get_categories: 1_405,
+  get_recurring_transactions: 1_900,
+  get_budgets: 650,
+  get_goals: 835,
+  get_investment_prices: 1_120,
+  get_investment_splits: 1_635,
+  get_holdings: 1_115,
+  get_balance_history: 1_395,
+  get_goal_history: 1_040,
+  // Live (--live-reads) tools
+  get_transactions_live: 4_400,
+  get_accounts_live: 570,
+  get_categories_live: 1_555,
+  get_tags_live: 530,
+  get_budgets_live: 905,
+  get_recurring_live: 755,
+  get_networth_live: 1_955,
+  get_upcoming_recurrings_live: 830,
+  get_monthly_spend_live: 1_235,
+  get_holdings_live: 1_210,
+  get_balance_history_live: 1_800,
+  get_investment_prices_live: 2_255,
+  get_investment_allocation_live: 810,
+  get_top_movers_live: 1_175,
+  get_aggregated_holdings_live: 1_285,
+  get_investment_balance_live: 1_110,
+  refresh_cache: 1_335,
+  // Write (--write) tools
+  create_transaction: 2_270,
+  delete_transaction: 1_205,
+  add_transaction_to_recurring: 1_305,
+  split_transaction: 2_675,
+  update_transaction: 4_265,
+  update_transactions: 4_760,
+  review_transactions: 2_035,
+  bulk_edit_transactions: 3_550,
+  create_tag: 900,
+  delete_tag: 435,
+  create_category: 1_340,
+  update_category: 1_300,
+  delete_category: 440,
+  set_budget: 1_205,
+  set_recurring_state: 795,
+  delete_recurring: 520,
+  update_tag: 845,
+  create_recurring: 1_965,
+  update_recurring: 2_320,
+};
+
+/** Aggregate schema budget across ALL registered tools (measured +~10%). */
+const SCHEMA_TOTAL_BUDGET = 76_000;
+
+// ---------------------------------------------------------------------------
+// Synthetic fixture. Deterministic content, opaque Firestore-shaped IDs
+// (distinct from display names — see fixture-shape.test.ts), synthetic
+// amounts only.
+// ---------------------------------------------------------------------------
+
+const CAT_GROCERIES = 'cat_9fKq2LmXbT7RwZ0pVsN1';
+const CAT_TRANSPORT = 'cat_4tYh8NcJdM3QxA6uEoW2';
+const CAT_COFFEE = 'cat_7bGd5PzKfL1SvC9jHrU3';
+const ACC_CHECKING = 'acc_2mVx7QpLcK9TzR4wNb8Y';
+const ACC_BROKERAGE = 'acc_6dRz1KvMpN4WxT7yQc3U';
+const ITEM_BANK = 'item_5cJn3WfHbD8XqS1kMt6Z';
+const ITEM_BROKER = 'item_8gLp4XdJcF2VzB9sWk5A';
+const GOAL_FUND = 'goal_1sVc8BnMdQ5XzK3wRj9T';
+
+async function seedFixture(): Promise<void> {
+  await createCombinedDb(DB_PATH, {
+    transactions: [
+      {
+        transaction_id: 'txn_3hWq6MzNkP9RvX2cTb7D',
+        account_id: ACC_CHECKING,
+        amount: 82.45,
+        date: '2024-03-02',
+        name: 'Synthetic Grocer',
+        original_name: 'SYNTH GROCER #0001',
+        category_id: CAT_GROCERIES,
+        city: 'Testville',
+        region: 'WA',
+        country: 'US',
+        note: 'weekly shop',
+        tags: ['tag_5jNp8QwKcM2XzV4bRf6H'],
+      },
+      {
+        transaction_id: 'txn_7kDm1PxJfS4WqY9vLc3N',
+        account_id: ACC_CHECKING,
+        amount: 3.75,
+        date: '2024-03-05',
+        name: 'Synthetic Coffee Bar',
+        category_id: CAT_COFFEE,
+        pending: true,
+      },
+      {
+        transaction_id: 'txn_2wRb9TzLmV6KqX1cJd8F',
+        account_id: ACC_CHECKING,
+        amount: 45.0,
+        date: '2024-02-20',
+        name: 'Synthetic Transit',
+        category_id: CAT_TRANSPORT,
+      },
+      {
+        transaction_id: 'txn_8pFc4XvNjR1WzQ7mKt5B',
+        account_id: ACC_CHECKING,
+        amount: -2500.0,
+        date: '2024-02-29',
+        name: 'Synthetic Payroll',
+      },
+      {
+        transaction_id: 'txn_6qJz3MwPdT8XvL2nRb9C',
+        account_id: ACC_BROKERAGE,
+        amount: 15.99,
+        date: '2024-01-15',
+        name: 'Synthetic Streaming',
+        category_id: CAT_TRANSPORT,
+        is_transfer: false,
+      },
+    ],
+    accounts: [
+      {
+        account_id: ACC_CHECKING,
+        name: 'Synthetic Checking',
+        official_name: 'Synthetic Checking Account',
+        mask: '0001',
+        account_type: 'depository',
+        subtype: 'checking',
+        institution_name: 'Synthetic Bank',
+        institution_id: 'ins_000001',
+        current_balance: 1500,
+        available_balance: 1450,
+        iso_currency_code: 'USD',
+        item_id: ITEM_BANK,
+      },
+      {
+        account_id: ACC_BROKERAGE,
+        name: 'Synthetic Brokerage',
+        account_type: 'investment',
+        subtype: 'brokerage',
+        institution_name: 'Synthetic Broker',
+        institution_id: 'ins_000002',
+        current_balance: 5000,
+        iso_currency_code: 'USD',
+        item_id: ITEM_BROKER,
+      },
+    ],
+    recurring: [
+      {
+        recurring_id: 'rec_4nHt7QzKfW2XvC9mPd6J',
+        name: 'Synthetic Streaming',
+        amount: 15.99,
+        frequency: 'monthly',
+        latest_date: '2024-03-15',
+        account_id: ACC_BROKERAGE,
+        category_id: CAT_TRANSPORT,
+        is_active: true,
+        merchant_name: 'Synthetic Streaming',
+      },
+      {
+        recurring_id: 'rec_9sLw2MvJbN5KqT8xFc1R',
+        name: 'Synthetic Gym',
+        amount: 30,
+        frequency: 'monthly',
+        latest_date: '2024-03-01',
+        account_id: ACC_CHECKING,
+        category_id: CAT_TRANSPORT,
+        is_active: false,
+      },
+    ],
+    budgets: [
+      {
+        budget_id: 'bgt_1xVc5BnKdQ8WzJ3mRt7P',
+        category_id: CAT_GROCERIES,
+        amount: 400,
+        month: '2024-03',
+        is_active: true,
+        name: 'Synthetic Groceries Budget',
+        spent: 82.45,
+      },
+      {
+        budget_id: 'bgt_6mQj9TwLfX2VzN4bKc8D',
+        category_id: CAT_TRANSPORT,
+        amount: 120,
+        month: '2024-03',
+        is_active: true,
+        spent: 45,
+      },
+    ],
+    goals: [
+      {
+        goal_id: GOAL_FUND,
+        name: 'Synthetic Emergency Fund',
+        emoji: '🎯',
+        created_date: '2024-01-01',
+        savings: {
+          type: 'savings',
+          status: 'active',
+          target_amount: 10000,
+          tracking_type: 'monthly_contribution',
+          tracking_type_monthly_contribution: 250,
+          start_date: '2024-01-01',
+        },
+      },
+    ],
+    goalHistory: [
+      {
+        goal_id: GOAL_FUND,
+        month: '2024-01',
+        current_amount: 250,
+        target_amount: 10000,
+        total_contribution: 250,
+        daily_data: {
+          '2024-01-10': { balance: 100 },
+          '2024-01-20': { balance: 175 },
+          '2024-01-31': { balance: 250 },
+        },
+      },
+      {
+        goal_id: GOAL_FUND,
+        month: '2024-02',
+        current_amount: 500,
+        target_amount: 10000,
+        total_contribution: 250,
+        daily_data: {
+          '2024-02-15': { balance: 375 },
+          '2024-02-29': { balance: 500 },
+        },
+      },
+    ],
+    investmentPrices: [
+      {
+        investment_id: 'sec_3vBn8KwJcM1XzQ5tLf7H',
+        ticker_symbol: 'SYNQ',
+        close_price: 101.5,
+        date: '2024-03-01',
+        currency: 'USD',
+        price_type: 'hf',
+      },
+      {
+        investment_id: 'sec_3vBn8KwJcM1XzQ5tLf7H',
+        ticker_symbol: 'SYNQ',
+        close_price: 99.25,
+        month: '2024-02',
+        currency: 'USD',
+        price_type: 'daily',
+      },
+    ],
+    items: [
+      {
+        item_id: ITEM_BANK,
+        institution_name: 'Synthetic Bank',
+        institution_id: 'ins_000001',
+        connection_status: 'healthy',
+        needs_update: false,
+        last_successful_update: '2024-03-05T00:00:00Z',
+      },
+      {
+        item_id: ITEM_BROKER,
+        institution_name: 'Synthetic Broker',
+        institution_id: 'ins_000002',
+        connection_status: 'error',
+        needs_update: true,
+        error_code: 'ITEM_LOGIN_REQUIRED',
+        error_message: 'Synthetic reconnect required',
+        last_successful_update: '2024-02-01T00:00:00Z',
+      },
+    ],
+    categories: [
+      { category_id: CAT_GROCERIES, name: 'Synthetic Groceries', icon: '🛒', color: '#00AA55' },
+      { category_id: CAT_TRANSPORT, name: 'Synthetic Transport', icon: '🚌', color: '#3355FF' },
+      {
+        category_id: CAT_COFFEE,
+        name: 'Synthetic Coffee',
+        parent_id: CAT_GROCERIES,
+        icon: '☕',
+        color: '#AA5500',
+      },
+    ],
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Harness
+// ---------------------------------------------------------------------------
+
+/** Cache-mode read tools: the tools a default (read-only, no-flags) session exposes. */
+const eligibleReadDefs = ALL_TOOL_DEFS.filter(
+  (def) => def.schema.annotations?.readOnlyHint === true && !def.requiresLiveReads
+);
+
+/** Extra args for tools that cannot run with `{}`. */
+const EXTRA_ARGS: Record<string, Record<string, unknown>> = {
+  get_balance_history: { granularity: 'monthly' },
+};
+
+let ctx: ToolContext;
+
+beforeAll(async () => {
+  cleanupTestDb(DB_PATH);
+  await seedFixture();
+  const db = new CopilotDatabase(DB_PATH);
+  ctx = { tools: new CopilotMoneyTools(db), live: undefined };
+});
+
+afterAll(() => {
+  cleanupTestDb(DB_PATH);
+});
+
+/** Serialize exactly like `src/server.ts` does for tool responses. */
+function serializedSize(result: unknown): number {
+  return JSON.stringify(result, null, 2).length;
+}
+
+async function runTool(name: string): Promise<unknown> {
+  const def = ALL_TOOL_DEFS.find((d) => d.name === name);
+  if (!def) throw new Error(`Tool not registered: ${name}`);
+  let args = EXTRA_ARGS[name] ?? {};
+  if (name === 'get_goal_history') {
+    // Needs a goal_id; resolve one through the public tool surface.
+    const goals = (await runTool('get_goals')) as { goals: Array<{ goal_id: string }> };
+    expect(goals.goals.length).toBeGreaterThan(0); // fixture seeds one goal
+    args = { goal_id: goals.goals[0]?.goal_id };
+  }
+  return def.handler(ctx, args);
+}
+
+describe('context-budget ratchet (#597)', () => {
+  describe('response-size budgets (cache-mode read tools, synthetic DB)', () => {
+    test('budget table covers exactly the eligible read tools (completeness guard)', () => {
+      const names = eligibleReadDefs.map((def) => def.name).sort();
+      // Guard against a vacuously-empty filter: the table itself is the floor.
+      expect(names.length).toBeGreaterThan(0);
+      // Bidirectional: a new read tool without a budget fails, and so does a
+      // stale budget entry for a removed/renamed tool.
+      expect(Object.keys(RESPONSE_BUDGETS).sort()).toEqual(names);
+    });
+
+    for (const def of eligibleReadDefs) {
+      test(`${def.name} response stays within budget`, async () => {
+        const result = await runTool(def.name);
+        const size = serializedSize(result);
+        if (process.env.CONTEXT_BUDGET_PRINT) {
+          console.log(`[response] ${def.name}: ${size} chars`);
+        }
+        expect(size).toBeGreaterThan(0);
+        expect(size).toBeLessThanOrEqual(RESPONSE_BUDGETS[def.name] ?? 0);
+      });
+    }
+  });
+
+  describe('schema-size budgets (all registered tools)', () => {
+    test('budget table covers exactly the registered tools (completeness guard)', () => {
+      const names = ALL_TOOL_DEFS.map((def) => def.name).sort();
+      expect(names.length).toBeGreaterThan(0);
+      expect(Object.keys(SCHEMA_BUDGETS).sort()).toEqual(names);
+    });
+
+    for (const def of ALL_TOOL_DEFS) {
+      test(`${def.name} schema stays within budget`, () => {
+        const size = JSON.stringify(def.schema).length;
+        if (process.env.CONTEXT_BUDGET_PRINT) {
+          console.log(`[schema] ${def.name}: ${size} chars`);
+        }
+        expect(size).toBeGreaterThan(0);
+        expect(size).toBeLessThanOrEqual(SCHEMA_BUDGETS[def.name] ?? 0);
+      });
+    }
+
+    test('aggregate schema size stays within total budget', () => {
+      const total = ALL_TOOL_DEFS.reduce((sum, def) => sum + JSON.stringify(def.schema).length, 0);
+      if (process.env.CONTEXT_BUDGET_PRINT) {
+        console.log(`[schema] TOTAL: ${total} chars`);
+      }
+      expect(total).toBeLessThanOrEqual(SCHEMA_TOTAL_BUDGET);
+    });
+  });
+});
