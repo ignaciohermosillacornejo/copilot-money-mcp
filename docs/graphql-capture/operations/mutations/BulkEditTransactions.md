@@ -140,13 +140,21 @@ queries use, so it also **structurally** accepts `dates`, `accountIds`,
 | Filter | Effect | Evidence |
 |---|---|---|
 | `{ ids: [...] }` | exactly the listed rows | **verified** live, with an untargeted control row |
-| `{ isReviewed: false }` | presumably every unreviewed row | **inferred from the type — never sent** |
-| `{}` / omitted | unknown, unbounded | **never sent** |
+| `{ matchString: "…" }` | every row matching, no `ids` needed | **verified** live 2026-08-02 (read-gated, reversible edit, control row untouched) |
+| `{ isReviewed: false }`, `{ dates: … }`, … | presumably selects and writes | same argument + resolver as `matchString`; **treat as live**, not individually observed |
+| `{}` / omitted | unknown, unbounded | **never sent — do not** |
 
-Only the first row is observed. We have deliberately never sent a non-`ids`
-filter on this mutation: the failure mode of that experiment is a rewritten
-account, and there is no safe way to run it against live data. Treat the broad
-filters as dangerous, but do not record them as verified.
+The `matchString` row is the load-bearing one: it proves the mutation honours
+filter fields **other than `ids`**, so this is not an ids-only endpoint that
+merely accepts a wider type. One request with a broad filter really can rewrite
+a large slice of the account.
+
+That experiment was bounded by sending the identical filter through the
+`Transactions` **query** first (same input type) and refusing to write unless it
+returned exactly the three throwaway ids, using `addTagIds` so the edit was
+reversible, and untagging by explicit id immediately after. `{}` and an omitted
+filter have no read-verifiable match set, so that gate cannot bound them — they
+remain untested by design.
 
 ## ⚠ Safety: `filter` is nullable
 

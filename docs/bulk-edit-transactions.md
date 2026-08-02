@@ -152,22 +152,43 @@ required, that gives:
 
 ```
   filter: { ids: [a, b, c] }      →  exactly those 3 rows   ← VERIFIED live
-  filter: { isReviewed: false }   →  every unreviewed row?  ← INFERRED from the type
-  filter: { }                     →  ???                    ← unknown
+  filter: { matchString: "foo" }  →  every row matching     ← VERIFIED live (2026-08-02)
+  filter: { isReviewed: false }   →  every unreviewed row   ← same code path; treat as live
+  filter: { }                     →  ???                    ← never sent
   filter omitted entirely         →  ???  and it is VALID GraphQL  ⚠
 ```
 
-**Read that boundary carefully.** Only the first line is verified. We have never
-sent a non-`ids` filter on this mutation, deliberately — the failure mode of that
-experiment is "the account got rewritten," and there is no safe way to run it
-against live data.
+**The second line is the important one, and it is now measured, not guessed.**
+A bounded live experiment sent `filter: { matchString: … }` with **no `ids` at
+all** and `addTagIds` as the (reversible) edit. The server selected and wrote
+exactly the rows matching that string; a control row on the same account and the
+same day, differing only in name, was untouched.
 
-The circumstantial evidence is strong, though. A 2026-04 probe with `input: {}`
-and no filter made the server execute a real
+So the mutation genuinely **does** honour non-`ids` filter fields. It is not an
+ids-only endpoint that happens to accept a wider type. `matchString` is the one
+field proven by experiment; the rest of `TransactionFilter` reaches the same
+resolver through the same argument, so `isReviewed`, `dates`, `categoryIds` and
+friends should be treated as live selectors too.
+
+That makes the nullable `filter` a real hazard rather than a theoretical one:
+one request with `filter: { isReviewed: false }` is a plausible way to rewrite
+every unreviewed transaction on the account.
+
+> **How that was tested safely.** `TransactionFilter` is the *same input type*
+> the read queries take, so the exact filter was first sent through the
+> `Transactions` **query** and required to return precisely the three throwaway
+> ids before any write was allowed. The edit was `addTagIds` with a disposable
+> tag — reversible by construction — and whatever came back in `updated[]` was
+> untagged by explicit id immediately afterwards. `filter: {}` and an omitted
+> filter were **not** tested and should not be: they have no read-verifiable
+> match set, so that gate cannot bound them.
+
+Supporting evidence from earlier: a 2026-04 probe with `input: {}` and no filter
+made the server execute a real
 `select "item_id", "account_id", "transaction_id" from "transactions" where …`
-with ~48 placeholders *before* failing validation. That tells us the server
-**builds the row set before validating the input**, and that a filterless call
-does not short-circuit to zero rows.
+with ~48 placeholders *before* failing validation. The server **builds the row
+set before validating the input**, and a filterless call does not short-circuit
+to zero rows.
 
 ### How the wrapper defends against this
 

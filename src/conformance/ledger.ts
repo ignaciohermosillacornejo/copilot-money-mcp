@@ -475,6 +475,24 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'the set is still five.',
   },
   {
+    surface: 'Mutation.bulkEditTransactions:filter-selects',
+    kind: 'operation',
+    oracle: null,
+    class: 'verified-once',
+    evidence:
+      'Live probe 2026-08-02: sent filter { matchString } with NO ids and addTagIds as the ' +
+      'edit. The server selected and wrote exactly the rows matching that string; a control ' +
+      'row on the same account and date, differing only in name, was untouched. This proves ' +
+      'the mutation honours TransactionFilter fields OTHER than ids — it is not an ids-only ' +
+      'endpoint that merely accepts a wider type — so a broad filter really can rewrite a ' +
+      'large slice of the account, and the nullable `filter` is a live hazard rather than a ' +
+      'theoretical one. Bounded by read-gating the identical filter through the Transactions ' +
+      'query first, a reversible edit, and untagging by explicit id afterwards. `filter: {}` ' +
+      'and an omitted filter remain untested by design: they have no read-verifiable match ' +
+      'set, so that gate cannot bound them. This entry is why bulkEditTransactions() exposes ' +
+      'no `filter` parameter at all and only ever emits `ids`.',
+  },
+  {
     surface: 'Mutation.bulkEditTransactions:silent-skip',
     kind: 'operation',
     oracle: null,
