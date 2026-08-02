@@ -46,6 +46,9 @@ const RESPONSE_BUDGETS: Record<string, number> = {
   get_budgets: 555,
   get_goals: 485,
   get_investment_prices: 355,
+  // The fixture seeds no holdings, splits, or balance history, so these three
+  // budgets pin the empty-response envelope only. If the fixture ever seeds
+  // those collections, remeasure and recalibrate these entries.
   get_investment_splits: 100,
   get_holdings: 100,
   get_balance_history: 130,
@@ -376,10 +379,15 @@ async function runTool(name: string): Promise<unknown> {
   if (!def) throw new Error(`Tool not registered: ${name}`);
   let args = EXTRA_ARGS[name] ?? {};
   if (name === 'get_goal_history') {
-    // Needs a goal_id; resolve one through the public tool surface.
+    // Needs a goal_id; resolve one through the public tool surface. Throw
+    // (not expect) so a fixture/shape problem surfaces as a clear error in
+    // whichever test triggered the lookup.
     const goals = (await runTool('get_goals')) as { goals: Array<{ goal_id: string }> };
-    expect(goals.goals.length).toBeGreaterThan(0); // fixture seeds one goal
-    args = { goal_id: goals.goals[0]?.goal_id };
+    const goalId = goals.goals[0]?.goal_id;
+    if (!goalId) {
+      throw new Error('fixture should seed at least one goal, but get_goals returned none');
+    }
+    args = { goal_id: goalId };
   }
   return def.handler(ctx, args);
 }
@@ -403,6 +411,9 @@ describe('context-budget ratchet (#597)', () => {
           console.log(`[response] ${def.name}: ${size} chars`);
         }
         expect(size).toBeGreaterThan(0);
+        // `?? 0` is belt-and-braces: the completeness guard already fails on a
+        // missing entry; the zero fallback just guarantees this per-tool test
+        // can never pass vacuously against an absent budget.
         expect(size).toBeLessThanOrEqual(RESPONSE_BUDGETS[def.name] ?? 0);
       });
     }
@@ -422,6 +433,8 @@ describe('context-budget ratchet (#597)', () => {
           console.log(`[schema] ${def.name}: ${size} chars`);
         }
         expect(size).toBeGreaterThan(0);
+        // `?? 0`: see the response-budget test — fails (not passes) on a
+        // missing entry, on top of the completeness guard.
         expect(size).toBeLessThanOrEqual(SCHEMA_BUDGETS[def.name] ?? 0);
       });
     }
