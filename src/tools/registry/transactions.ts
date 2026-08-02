@@ -167,14 +167,10 @@ export const createTransactionTool = defineTool({
   schema: {
     name: 'create_transaction',
     description:
-      'Create a brand-new manual transaction on an existing account. Seven ' +
-      'fields are required: account_id, item_id (from get_accounts), name, date ' +
-      '(YYYY-MM-DD), amount (positive = expense, negative = income; Copilot sign ' +
-      'convention), category_id (from get_categories), and type. type is one of ' +
-      'REGULAR, INCOME, or INTERNAL_TRANSFER. Three optional metadata fields may ' +
-      'also be supplied: tag_ids (from get_tags), note (free-text), and ' +
-      'recurring_id (link to an existing recurring series, from ' +
-      'get_recurring_transactions). Returns the newly-created transaction.',
+      'Create a brand-new manual transaction on an existing account. Requires ' +
+      'account_id, item_id, name, date, amount, category_id, and type; optional ' +
+      'tag_ids, note, and recurring_id. Formats, sign convention, and ID sources ' +
+      'are documented per parameter. Returns the newly-created transaction.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -326,20 +322,17 @@ export const splitTransactionTool = defineTool({
   schema: {
     name: 'split_transaction',
     description:
-      'Split one parent transaction into multiple child transactions (e.g., split a single ' +
-      "'Hotel + Car + Meals' charge into three category-specific children). All three parent " +
-      'IDs are required (transaction_id, account_id, item_id) plus a `splits` array with at ' +
-      'least 2 entries. Each split entry requires `amount` and `category_id`; `name` and ' +
-      "`date` default to the parent's values if omitted. The sum of all children's `amount` " +
-      "fields must equal the parent's `amount` (server-enforced; this tool also validates " +
-      'client-side before dispatching). If the parent cannot be resolved locally (outside the ' +
-      'resolution window), the split can still proceed when every split entry carries an ' +
-      'explicit `name` and `date` — the amount-sum check is then deferred to the server. ' +
-      'After success the parent transaction is hidden but ' +
-      'not deleted (children reference it via parent_transaction_id) — there is no reversal ' +
-      "mutation; to undo a split delete each child and edit the parent's category back. No " +
-      'optional per-split fields exist — tags, notes, and reviewed state must be set via ' +
-      'update_transaction on each child after split.',
+      'Split one parent transaction into 2+ child transactions (e.g. a ' +
+      "'Hotel + Car + Meals' charge into three per-category children). Requires the parent " +
+      'transaction_id, account_id, and item_id plus `splits` (min 2 entries; ' +
+      "each needs `amount` and `category_id`; `name`/`date` default to the parent's). Child " +
+      "amounts must sum to the parent's amount — validated client-side and server-enforced. " +
+      'If the parent cannot be resolved locally (outside the resolution window), the split ' +
+      'still proceeds when every entry carries explicit `name` and `date`; the sum check ' +
+      'then defers to the server. On success the parent is hidden but not deleted (children ' +
+      'reference it via parent_transaction_id); there is no reversal mutation — undo means ' +
+      "deleting each child and editing the parent's category back. Splits accept no per-split " +
+      'tags/notes/reviewed — set those via update_transaction on each child afterwards.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -359,8 +352,7 @@ export const splitTransactionTool = defineTool({
         splits: {
           type: 'array',
           minItems: 2,
-          description:
-            'Children to create. Must have at least 2 entries; child amounts must sum to the parent amount.',
+          description: 'Children to create.',
           items: {
             type: 'object',
             additionalProperties: false,
@@ -376,7 +368,7 @@ export const splitTransactionTool = defineTool({
               amount: {
                 type: 'number',
                 description:
-                  'Child amount. Positive = expense, negative = income (Copilot sign convention). All child amounts must sum to the parent amount.',
+                  'Child amount. Positive = expense, negative = income (Copilot sign convention).',
               },
               category_id: {
                 type: 'string',
@@ -409,27 +401,16 @@ export const updateTransactionTool = defineTool({
   schema: {
     name: 'update_transaction',
     description:
-      "Update a single transaction's name, category, note, tags, type, reviewed-state, date, or " +
-      'amount. Pass transaction_id plus any combination of name, category_id, note, tag_ids, type, ' +
-      'reviewed, date, or amount ' +
-      '— only specified fields are changed. Pass note="" to clear the note. Pass tag_ids=[] to ' +
-      'clear all tags. `type` sets the high-level classification (REGULAR, INCOME, or ' +
-      'INTERNAL_TRANSFER) — use INTERNAL_TRANSFER to exclude internal/transfer mechanics from ' +
-      "spending. Setting type to INCOME or INTERNAL_TRANSFER clears the transaction's category " +
-      '(Copilot does this server-side), so category_id cannot be combined with those two types — ' +
-      'pass the type alone, or use REGULAR to keep/set a category. `reviewed` marks a single ' +
-      'transaction reviewed (true) or un-reviewed (false), and can be set inline with other edits ' +
-      '— use review_transactions instead for bulk/filter-based review. To edit MANY transactions, ' +
-      'use update_transactions (plural) — it takes an array of these same edits in one call ' +
-      'instead of one call per row. At least one mutable field ' +
-      'must be provided besides transaction_id. If the transaction cannot be resolved locally ' +
-      '(outside the resolution window), pass account_id and item_id (from a live read) to write ' +
-      "anyway. `date` corrects the transaction's date (YYYY-MM-DD); on a synced bank transaction " +
-      'it may be reverted by the next institution sync. `amount` corrects the signed transaction ' +
-      'amount (income is negative); on a synced bank transaction it may be reverted by the next ' +
-      'institution sync. Other fields (excluded, internal_transfer, ' +
-      'goal_id) are not writable through the GraphQL API and were removed from this tool when the ' +
-      'backend was migrated.',
+      'Update a single transaction. Pass transaction_id plus at least one of name, ' +
+      'category_id, note, tag_ids, type, reviewed, date, or amount — only the fields you ' +
+      'pass change. note="" clears the note; tag_ids=[] clears all tags. category_id cannot ' +
+      'be combined with type INCOME or INTERNAL_TRANSFER (those clear the category ' +
+      'server-side) — pass the type alone, or REGULAR to keep/set a category. If the ' +
+      'transaction cannot be resolved locally (outside the resolution window), also pass ' +
+      'account_id and item_id from a live read. To edit MANY transactions use ' +
+      'update_transactions (an array of these same edits in one call); for bulk review-only ' +
+      'changes use review_transactions. excluded, internal_transfer, and goal_id are not ' +
+      "writable through Copilot's GraphQL API.",
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -441,16 +422,14 @@ export const updateTransactionTool = defineTool({
         account_id: {
           type: 'string',
           description:
-            'Optional. Account ID the transaction belongs to (from a live read). Pass together ' +
-            'with item_id to skip local resolution and write to a transaction outside the ' +
-            'resolution window.',
+            'Optional. Pass with item_id (both from a live read) to skip local resolution and ' +
+            'write to a transaction outside the resolution window.',
         },
         item_id: {
           type: 'string',
           description:
             "Optional. Item ID the account belongs to (Copilot's Firestore item_id, from a live " +
-            'read). Pass together with account_id to skip local resolution and write to a ' +
-            'transaction outside the resolution window.',
+            'read). Pass with account_id.',
         },
         name: {
           type: 'string',
@@ -473,28 +452,24 @@ export const updateTransactionTool = defineTool({
           type: 'string',
           enum: ['REGULAR', 'INCOME', 'INTERNAL_TRANSFER'],
           description:
-            'High-level classification. INTERNAL_TRANSFER excludes the transaction from spending. ' +
-            'INCOME/INTERNAL_TRANSFER clear the category server-side — do not pass category_id with them.',
+            'High-level classification. INTERNAL_TRANSFER excludes the transaction from spending.',
         },
         reviewed: {
           type: 'boolean',
-          description:
-            'Mark this transaction reviewed (true) or un-reviewed (false). For bulk/filter-based ' +
-            'review across many transactions, use review_transactions instead.',
+          description: 'Mark this transaction reviewed (true) or un-reviewed (false).',
         },
         date: {
           type: 'string',
           description:
-            'New transaction date in YYYY-MM-DD (corrects the settled/posted date). NOTE: for a ' +
-            'synced (non-manual) bank transaction this may be reverted on the next institution ' +
-            'sync; manual-account transactions persist.',
+            'New settled/posted date, YYYY-MM-DD. On a synced (non-manual) bank transaction ' +
+            'the next institution sync may revert it; manual-account transactions persist.',
         },
         amount: {
           type: 'number',
           description:
-            "New transaction amount as a signed number, using Copilot's stored sign " +
-            '(income is negative). NOTE: for a synced (non-manual) bank transaction this may ' +
-            'be reverted on the next institution sync; manual-account transactions persist.',
+            "New signed amount, using Copilot's stored sign (income is negative). On a synced " +
+            '(non-manual) bank transaction the next institution sync may revert it; ' +
+            'manual-account transactions persist.',
         },
       },
       required: ['transaction_id'],
@@ -522,14 +497,14 @@ const BULK_EDIT_ITEM_PROPERTIES = {
   account_id: {
     type: 'string',
     description:
-      'Optional. Account ID the transaction belongs to (from a live read). Pass together with ' +
-      'item_id to skip local resolution and edit a transaction outside the resolution window.',
+      'Optional. Pass with item_id (both from a live read) to skip local resolution and edit ' +
+      'a transaction outside the resolution window.',
   },
   item_id: {
     type: 'string',
     description:
-      "Optional. Item ID the account belongs to (Copilot's Firestore item_id, from a live read). " +
-      'Pass together with account_id.',
+      "Optional. Item ID the account belongs to (Copilot's Firestore item_id, from a live " +
+      'read). Pass with account_id.',
   },
   name: { type: 'string', description: 'New display name. Must not be empty.' },
   category_id: {
@@ -546,21 +521,20 @@ const BULK_EDIT_ITEM_PROPERTIES = {
     type: 'string',
     enum: ['REGULAR', 'INCOME', 'INTERNAL_TRANSFER'],
     description:
-      'High-level classification. INCOME/INTERNAL_TRANSFER clear the category server-side — ' +
-      'do not pass category_id with them.',
+      'High-level classification. INCOME/INTERNAL_TRANSFER clear the category server-side.',
   },
   reviewed: { type: 'boolean', description: 'Mark this transaction reviewed/un-reviewed.' },
   date: {
     type: 'string',
     description:
-      'New transaction date in YYYY-MM-DD. May be reverted by the next institution sync on a ' +
-      'synced (non-manual) transaction.',
+      'New date, YYYY-MM-DD. May be reverted by the next institution sync on a synced ' +
+      '(non-manual) transaction.',
   },
   amount: {
     type: 'number',
     description:
-      "New signed amount, using Copilot's stored sign (income is negative). May be reverted by " +
-      'the next institution sync on a synced (non-manual) transaction.',
+      "New signed amount, Copilot's stored sign (income is negative). May be reverted by the " +
+      'next institution sync on a synced (non-manual) transaction.',
   },
 } as const;
 
@@ -569,30 +543,17 @@ export const updateTransactionsTool = defineTool({
     name: 'update_transactions',
     description:
       'Apply many DIFFERENT transaction edits in ONE call — the per-row bulk form of ' +
-      'update_transaction. Use this when the target rows need DIFFERENT values from each ' +
-      'other, or when the edit touches name, note, date or amount (Copilot cannot bulk-edit ' +
-      'those four at all). If every target gets the IDENTICAL change and it only touches ' +
-      'category/type/reviewed, or adds/removes a tag, prefer bulk_edit_transactions — that is ' +
-      "ONE request instead of N. WARNING on tags: an entry's tag_ids REPLACES that row's " +
-      'whole tag list, so using it to add a trip tag silently drops any tags the row already ' +
-      'had; to add or remove a tag across many rows while keeping their existing tags, use ' +
-      'bulk_edit_transactions with add_tag_ids / remove_tag_ids. ' +
-      'Each entry in `edits` takes the same fields as update_transaction ' +
-      '(transaction_id plus any of name, category_id, note, tag_ids, type, reviewed, date, ' +
-      'amount), and each is validated identically — including the rule that category_id cannot ' +
-      'be combined with type INCOME or INTERNAL_TRANSFER. Entries are independent: different ' +
-      'transactions may change different fields. Two entries for the SAME transaction_id are ' +
-      'rejected — combine them into one entry. Max 200 edits per call; split larger jobs. ' +
-      'ALL validation and ID resolution happen before the first write, so a malformed entry ' +
-      'anywhere in the batch fails the call without writing anything. Writes then go out via ' +
-      'GraphQL with a cap of 5 in flight. `continue_on_error` (default false) controls write ' +
-      'failures only: false stops the batch at the first failure and throws with a count of what ' +
-      'succeeded; true attempts every edit and returns the failures in `failures[]`. With ' +
-      'continue_on_error the response`s `updated_count` and `results[]` reflect exactly what ' +
-      'was written, so retry `failures[]` rather than the whole batch; in the default mode the ' +
-      'call throws instead, and since every edit is an absolute assignment it is safe to ' +
-      're-run the whole batch. For marking many transactions reviewed and nothing else, ' +
-      'review_transactions is cheaper.',
+      'update_transaction. Use it when rows need different values, or the edit touches name, ' +
+      'note, date, or amount (Copilot cannot bulk-edit those four); for one IDENTICAL change ' +
+      'to category/type/reviewed or a tag add/remove, prefer bulk_edit_transactions (ONE ' +
+      "request instead of N). WARNING: an entry's tag_ids REPLACES that row's whole tag " +
+      'list, silently dropping existing tags — to add/remove a tag while keeping the rest, ' +
+      'use bulk_edit_transactions add_tag_ids/remove_tag_ids. Entries are independent and ' +
+      "take update_transaction's fields and validation, including: no category_id with type " +
+      'INCOME/INTERNAL_TRANSFER. ALL validation and ID resolution run before the first ' +
+      'write — a malformed entry anywhere fails the call with nothing written; writes then ' +
+      'go via GraphQL, max 5 in flight. Every edit is an absolute assignment, so re-running ' +
+      'a failed batch is safe. For review-only bulk changes, review_transactions is cheaper.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -605,8 +566,9 @@ export const updateTransactionsTool = defineTool({
           minItems: 1,
           maxItems: 200,
           description:
-            'The edits to apply, one entry per transaction. Non-empty, max 200, no duplicate ' +
-            'transaction_ids.',
+            'The edits to apply, one entry per transaction. Non-empty, max 200 per call ' +
+            '(split larger jobs), no duplicate transaction_ids (combine same-row edits into ' +
+            'one entry).',
           items: {
             type: 'object',
             additionalProperties: false,
@@ -617,9 +579,11 @@ export const updateTransactionsTool = defineTool({
         continue_on_error: {
           type: 'boolean',
           description:
-            'When true, attempt every edit and report per-entry write failures in `failures[]` ' +
-            'instead of stopping at the first one. Defaults to false. Does not affect validation ' +
-            'errors, which always fail the whole call before any write.',
+            'Controls write failures only (validation errors always fail the whole call ' +
+            'before any write). false (default): stop at the first failed write and throw ' +
+            'with a count of what succeeded. true: attempt every edit; failures land in ' +
+            '`failures[]` while `updated_count`/`results[]` reflect exactly what was ' +
+            'written — retry `failures[]`, not the whole batch.',
         },
       },
       required: ['edits'],
@@ -639,15 +603,13 @@ export const reviewTransactionsTool = defineTool({
   schema: {
     name: 'review_transactions',
     description:
-      'Bulk mark transactions as reviewed (or unreviewed). Two modes: pass `transaction_ids` ' +
-      '(ids are resolved locally, so this only works for transactions within the resolution ' +
-      'window), OR pass `rows` — an array of {transaction_id, account_id, item_id} taken from a ' +
-      'live read — to review ANY transactions, including out-of-window historical/backlog rows. ' +
-      'Prefer `rows` for large backlog sweeps: it is the true bulk path. One of the two must be ' +
-      'provided; `rows` wins when both are. The whole set is applied in ONE GraphQL request, so ' +
-      'reviewing 200 transactions costs one round trip. If the server rejects or silently skips ' +
-      'any row the call throws, naming the affected ids; `reviewed_count` reflects what actually ' +
-      'landed.',
+      'Bulk mark transactions as reviewed (or unreviewed). Pass `transaction_ids` (resolved ' +
+      'locally — works only within the resolution window) OR `rows` — an array of ' +
+      '{transaction_id, account_id, item_id} from a live read that works for ANY ' +
+      'transactions, including out-of-window backlog; prefer `rows` for large sweeps. One of ' +
+      'the two is required; `rows` wins when both are given. The whole set is applied in ONE ' +
+      'GraphQL request. If the server rejects or silently skips any row the call throws, ' +
+      'naming the affected ids; `reviewed_count` reflects what actually landed.',
     inputSchema: {
       type: 'object',
       // Matches every other write tool (and bulk_edit_transactions); this was
@@ -658,14 +620,14 @@ export const reviewTransactionsTool = defineTool({
           type: 'array',
           items: { type: 'string' },
           description:
-            'Transaction IDs to mark as reviewed. Resolved locally — fails for transactions ' +
-            'outside the resolution window; use `rows` for those.',
+            'Transaction IDs to mark. Resolved locally — fails outside the resolution window; ' +
+            'use `rows` for those.',
         },
         rows: {
           type: 'array',
           description:
             'Bypass path: each entry supplies the IDs the GraphQL mutation needs directly ' +
-            '(from a live read), so out-of-window transactions work without local resolution.',
+            '(from a live read), so no local resolution.',
           items: {
             type: 'object',
             additionalProperties: false,
@@ -676,7 +638,7 @@ export const reviewTransactionsTool = defineTool({
               },
               account_id: {
                 type: 'string',
-                description: 'Account ID the transaction belongs to (from the live row)',
+                description: 'Account ID from the live row',
               },
               item_id: {
                 type: 'string',
@@ -709,14 +671,14 @@ const BULK_TARGET_PROPERTIES = {
     type: 'array',
     items: { type: 'string' },
     description:
-      'Transaction IDs to edit. Resolved locally — fails for transactions outside the ' +
-      'resolution window; use `rows` for those.',
+      'Transaction IDs to edit. Resolved locally — fails outside the resolution window; ' +
+      'use `rows` for those.',
   },
   rows: {
     type: 'array',
     description:
       'Bypass path: each entry supplies the IDs the GraphQL mutation needs directly (from a ' +
-      'live read), so out-of-window transactions work without local resolution.',
+      'live read), so no local resolution.',
     items: {
       type: 'object',
       additionalProperties: false,
@@ -724,7 +686,7 @@ const BULK_TARGET_PROPERTIES = {
         transaction_id: { type: 'string', description: 'Transaction ID to edit' },
         account_id: {
           type: 'string',
-          description: 'Account ID the transaction belongs to (from the live row)',
+          description: 'Account ID from the live row',
         },
         item_id: {
           type: 'string',
@@ -741,21 +703,16 @@ export const bulkEditTransactionsTool = defineTool({
     name: 'bulk_edit_transactions',
     description:
       "Apply the SAME edit to MANY transactions in ONE request — Copilot's native bulk-edit " +
-      'endpoint, the one its own multi-select UI uses. Use this when every target gets the ' +
-      'identical change: recategorizing a merchant across months, tagging a trip, marking a ' +
-      'batch reviewed. Targets come from `transaction_ids` (resolved locally) or `rows` ' +
-      '(from a live read, works for out-of-window transactions); `rows` wins when both are ' +
-      'given. At least one of category_id, type, reviewed, add_tag_ids, remove_tag_ids must ' +
-      'be provided. If rows need DIFFERENT values from each other, or the edit touches ' +
-      'name/note/date/amount, use update_transactions instead. ' +
-      'IMPORTANT LIMITS: (1) One edit for the whole set — to give different ' +
-      'transactions different values, make separate calls. (2) Copilot supports ONLY these ' +
-      'five fields in bulk; `name`, `date`, `amount` and `note` are NOT bulk-editable, use ' +
-      'update_transaction for those. (3) Tags are add/remove, not replace — there is no bulk ' +
-      '"set the tag list" operation; use update_transaction`s tag_ids to replace. ' +
-      'type INCOME or INTERNAL_TRANSFER clears the category server-side, so it cannot be ' +
-      'combined with category_id. Max 500 targets per call. All ids are validated before the ' +
-      'write because Copilot does NOT validate them server-side. If any row is rejected or ' +
+      'endpoint (the one its multi-select UI uses) — e.g. recategorizing a merchant, tagging ' +
+      'a trip, marking a batch reviewed. Targets: `transaction_ids` (resolved locally) or ' +
+      '`rows` (from a live read; works out-of-window); `rows` wins if both are given. ' +
+      'Requires at least one of category_id, type, reviewed, add_tag_ids, remove_tag_ids — ' +
+      'Copilot bulk-edits ONLY these five fields. For different values per target, or ' +
+      'name/note/date/amount edits, use update_transactions instead. Tags are add/remove ' +
+      "only, never replace (to set a row's whole tag list use update_transaction tag_ids). " +
+      'type INCOME/INTERNAL_TRANSFER clears the category server-side — cannot be combined ' +
+      'with category_id. Max 500 targets per call. All ids are validated before the write ' +
+      'because Copilot does NOT validate them server-side; if any row is rejected or ' +
       'silently skipped the call throws and names it.',
     inputSchema: {
       type: 'object',
@@ -764,16 +721,12 @@ export const bulkEditTransactionsTool = defineTool({
         ...BULK_TARGET_PROPERTIES,
         category_id: {
           type: 'string',
-          description:
-            'Category ID to assign to every target (from get_categories results). Cannot be ' +
-            'combined with type INCOME or INTERNAL_TRANSFER.',
+          description: 'Category ID to assign to every target (from get_categories results).',
         },
         type: {
           type: 'string',
           enum: ['REGULAR', 'INCOME', 'INTERNAL_TRANSFER'],
-          description:
-            'Classification to apply to every target. INCOME/INTERNAL_TRANSFER clear the ' +
-            'category server-side.',
+          description: 'Classification to apply to every target.',
         },
         reviewed: {
           type: 'boolean',

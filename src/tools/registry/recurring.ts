@@ -5,6 +5,11 @@
 import { defineTool, type ToolMethodArgs } from './types.js';
 import { RECURRING_FREQUENCIES, RECURRING_STATE_VALUES } from '../../core/graphql/recurrings.js';
 
+/** Shared cadence explanation for the `frequency` enum (create + update). */
+const FREQUENCY_DESCRIPTION =
+  'How often the recurring repeats. BIWEEKLY = every 2 weeks, BIMONTHLY = every 2 months, ' +
+  'QUADMONTHLY = every 4 months, SEMIANNUALLY = every 6 months; the rest are literal.';
+
 export const getRecurringTransactionsTool = defineTool({
   schema: {
     name: 'get_recurring_transactions',
@@ -165,11 +170,7 @@ export const createRecurringTool = defineTool({
         frequency: {
           type: 'string',
           enum: [...RECURRING_FREQUENCIES],
-          description:
-            'How often the recurring repeats. Maps to the Copilot frequency options: ' +
-            'WEEKLY (every week), BIWEEKLY (every 2 weeks), MONTHLY (every month), ' +
-            'BIMONTHLY (every 2 months), QUARTERLY (every 3 months), QUADMONTHLY (every 4 months), ' +
-            'SEMIANNUALLY (every 6 months), ANNUALLY (every year).',
+          description: FREQUENCY_DESCRIPTION,
         },
       },
       required: ['transaction_id', 'frequency'],
@@ -189,10 +190,8 @@ export const updateRecurringTool = defineTool({
   schema: {
     name: 'update_recurring',
     description:
-      'Update an existing recurring transaction. Pass recurring_id plus any combination of ' +
-      'name, category_id, frequency, state, or rule (name_contains, min_amount, max_amount, days). ' +
-      'At least one mutable field must be provided besides recurring_id. ' +
-      'Writes directly to Copilot Money via GraphQL.',
+      'Update an existing recurring transaction. Pass recurring_id plus at least one of ' +
+      'name, category_id, frequency, state, or rule. Writes directly to Copilot Money via GraphQL.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -207,23 +206,18 @@ export const updateRecurringTool = defineTool({
         category_id: {
           type: 'string',
           description:
-            'New category ID to assign (from get_categories results). Changes the default category for future matched transactions.',
+            'New category ID (from get_categories results). Becomes the default category for future matched transactions.',
         },
         frequency: {
           type: 'string',
           enum: [...RECURRING_FREQUENCIES],
-          description:
-            'How often the recurring repeats. Maps to the Copilot frequency options: ' +
-            'WEEKLY (every week), BIWEEKLY (every 2 weeks), MONTHLY (every month), ' +
-            'BIMONTHLY (every 2 months), QUARTERLY (every 3 months), QUADMONTHLY (every 4 months), ' +
-            'SEMIANNUALLY (every 6 months), ANNUALLY (every year).',
+          description: FREQUENCY_DESCRIPTION,
         },
         state: {
           type: 'string',
           enum: [...RECURRING_STATE_VALUES],
           description:
-            'State of the recurring. Use set_recurring_state instead if you only want to ' +
-            'change state — this tool is for broader edits.',
+            'New state. If state is the only change, set_recurring_state is the more specific tool.',
         },
         rule: {
           type: 'object',

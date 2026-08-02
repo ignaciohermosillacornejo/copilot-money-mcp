@@ -412,7 +412,7 @@ export function createLiveTransactionsToolSchema(): ToolSchema {
   return {
     name: 'get_transactions_live',
     description:
-      "Read and filter a user's transactions live from Copilot's GraphQL API — the right tool for questions like 'how much did I spend on <category>' or 'list my <merchant> transactions', and for any spending lookup by category, merchant, date, or amount. Filter by `category` (a category ID from get_categories_live), `merchant`/`query`, date range (`period` or `start_date`/`end_date`), `min_amount`/`max_amount`, `account_id`, `tag`, or `pending`, then sum the returned `amount` values to total spending for a category or period. Requires the --live-reads flag and network connectivity. Unlike get_transactions, the following filters are NOT supported and must not be included: city, lat, lon, radius_km, region, country, transaction_type=foreign, transaction_type=duplicates, exclude_split_parents=false, and exclude_deleted=false — any of these returns an error telling you to retry without the parameter. Single-transaction lookup requires transaction_id + account_id + item_id AND a date range (start_date, end_date, or period) — pass the transaction's date from the prior list result; the server has no single-row-by-id filter so unbounded lookups paginate the whole account. If the backend is unreachable, this tool returns an isError result; it does NOT fall back to the local cache.",
+      "Read and filter transactions live from Copilot's GraphQL API — the right tool for any spending lookup by category, merchant, date, or amount; sum the returned `amount` values to total spending. Filters: `category` (a category ID from get_categories_live), `merchant`/`query`, date range (`period` or `start_date`/`end_date`), `min_amount`/`max_amount`, `account_id`, `tag`, `pending`. Requires --live-reads and network connectivity. NOT supported (each returns an error telling you to retry without it): city, lat, lon, radius_km, region, country, transaction_type foreign/duplicates, exclude_split_parents=false, exclude_deleted=false. Single-transaction lookup requires transaction_id + account_id + item_id AND a date range — the server has no single-row-by-id filter, so pass the transaction's date from the prior list result; unbounded lookups would paginate the whole account. If the backend is unreachable this returns an isError result; it does NOT fall back to the local cache.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -439,8 +439,7 @@ export function createLiveTransactionsToolSchema(): ToolSchema {
         account_id: { type: 'string', description: 'Filter by account ID' },
         item_id: {
           type: 'string',
-          description:
-            'Item ID paired with account_id. Required only when using transaction_id to fetch a single transaction.',
+          description: 'Item ID paired with account_id; required only for transaction_id lookups.',
         },
         min_amount: {
           type: 'number',
@@ -463,25 +462,25 @@ export function createLiveTransactionsToolSchema(): ToolSchema {
         exclude_transfers: {
           type: 'boolean',
           description:
-            'Exclude internal transfers between accounts (default: true). When true, filter types=[REGULAR, INCOME].',
+            'Exclude internal transfers between accounts (default: true; filters types to REGULAR/INCOME).',
           default: true,
         },
         exclude_deleted: {
           type: 'boolean',
           description:
-            'Must be true or omitted — the GraphQL server already excludes deleted transactions. Passing false returns an error.',
+            'Must be true or omitted — the server already excludes deleted transactions; false errors.',
           default: true,
         },
         exclude_excluded: {
           type: 'boolean',
           description:
-            'Exclude transactions in user-excluded categories (default: true). Cross-referenced against Category.isExcluded from the local cache.',
+            'Exclude transactions in user-excluded categories (default: true; checked against Category.isExcluded from the local cache).',
           default: true,
         },
         exclude_split_parents: {
           type: 'boolean',
           description:
-            'Must be true or omitted — the server omits split parents from the transactions query. Passing false returns an error.',
+            'Must be true or omitted — the server already omits split parents; false errors.',
           default: true,
         },
         pending: {
@@ -491,18 +490,17 @@ export function createLiveTransactionsToolSchema(): ToolSchema {
         transaction_id: {
           type: 'string',
           description:
-            'Get one transaction by ID — REQUIRES account_id and item_id alongside (all three come from a previous get_transactions_live result).',
+            'Get one transaction by ID — REQUIRES account_id, item_id, and a date range alongside (all from a previous result).',
         },
         query: {
           type: 'string',
           description:
-            'Free-text merchant search (server-side matchString). Equivalent to passing merchant.',
+            'Free-text merchant search (server-side matchString); equivalent to merchant.',
         },
         transaction_type: {
           type: 'string',
           enum: [...LIVE_TRANSACTION_TYPES],
-          description:
-            'Filter by special type. Note: foreign and duplicates are NOT supported in live mode.',
+          description: 'Filter by special type (foreign/duplicates are cache-only).',
         },
         tag: {
           type: 'string',

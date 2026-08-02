@@ -74,7 +74,7 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   get_balance_history: 1_395,
   get_goal_history: 1_040,
   // Live (--live-reads) tools
-  get_transactions_live: 4_400,
+  get_transactions_live: 3_890,
   get_accounts_live: 570,
   get_categories_live: 1_555,
   get_tags_live: 530,
@@ -85,21 +85,21 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   get_monthly_spend_live: 1_235,
   get_holdings_live: 1_210,
   get_balance_history_live: 1_800,
-  get_investment_prices_live: 2_255,
+  get_investment_prices_live: 1_835,
   get_investment_allocation_live: 810,
   get_top_movers_live: 1_175,
   get_aggregated_holdings_live: 1_285,
   get_investment_balance_live: 1_110,
   refresh_cache: 1_335,
   // Write (--write) tools
-  create_transaction: 2_270,
+  create_transaction: 1_980,
   delete_transaction: 1_205,
   add_transaction_to_recurring: 1_305,
-  split_transaction: 2_675,
-  update_transaction: 4_265,
-  update_transactions: 4_760,
-  review_transactions: 2_035,
-  bulk_edit_transactions: 3_550,
+  split_transaction: 2_300,
+  update_transaction: 2_815,
+  update_transactions: 3_735,
+  review_transactions: 1_760,
+  bulk_edit_transactions: 2_910,
   create_tag: 900,
   delete_tag: 435,
   create_category: 1_340,
@@ -109,12 +109,12 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   set_recurring_state: 795,
   delete_recurring: 520,
   update_tag: 845,
-  create_recurring: 1_965,
-  update_recurring: 2_320,
+  create_recurring: 1_845,
+  update_recurring: 2_020,
 };
 
 /** Aggregate schema budget across ALL registered tools (measured +~10%). */
-const SCHEMA_TOTAL_BUDGET = 76_000;
+const SCHEMA_TOTAL_BUDGET = 71_000;
 
 // ---------------------------------------------------------------------------
 // Synthetic fixture. Deterministic content, opaque Firestore-shaped IDs

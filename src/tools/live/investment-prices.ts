@@ -310,20 +310,17 @@ export function createLiveInvestmentPricesToolSchema(): ToolSchema {
   return {
     name: 'get_investment_prices_live',
     description:
-      'Get price history for a single security (live, GraphQL-backed). One MCP tool routes ' +
-      'to two underlying queries based on time_frame: ONE_DAY and ONE_WEEK return intraday ' +
-      'timestamps (5-minute cache TTL); ONE_MONTH / THREE_MONTHS / YTD / ONE_YEAR / ALL return ' +
-      'daily closes (1-hour cache TTL). The output `granularity` field tells callers which ' +
-      'row field to use (`date` for daily, `timestamp` for intraday). ' +
-      'IMPORTANT — server-side ownership gate: this query is restricted to securities you ' +
-      'currently hold. For any security_id not in your linked-account positions, the tool ' +
-      'returns a clean error ("not currently in your linked accounts"). Use `get_holdings_live` ' +
-      'to enumerate valid security_ids. Long-range responses are paginated via `max_rows` ' +
-      '(default 500, max 5000) and `offset` (counts from the most-recent row); the response ' +
-      'reports `total_rows` and `truncated` so callers can detect when older data was elided. ' +
-      'Daily series omit days the security had no price (the server returns null for those); ' +
-      '`count`/`total_rows` therefore count priced days, not calendar days. ' +
-      'Available when --live-reads is on.',
+      'Get price history for a single security (live, GraphQL-backed). time_frame picks the ' +
+      'query: ONE_DAY and ONE_WEEK return intraday timestamps (5-minute cache TTL); ' +
+      'ONE_MONTH / THREE_MONTHS / YTD / ONE_YEAR / ALL return daily closes (1-hour TTL). The ' +
+      'output `granularity` field says which row field to use (`date` daily, `timestamp` ' +
+      'intraday). Server-side ownership gate: only securities you currently hold work — any ' +
+      'other security_id returns a clean "not currently in your linked accounts" error; ' +
+      'enumerate valid ids via get_holdings_live. Long ranges paginate via `max_rows` and ' +
+      '`offset`; the response reports `total_rows` and `truncated` when older data was ' +
+      'elided. Daily series omit days with no price (the server returns null for those), so ' +
+      '`count`/`total_rows` count priced days, not calendar days. Available when ' +
+      '--live-reads is on.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -334,23 +331,20 @@ export function createLiveInvestmentPricesToolSchema(): ToolSchema {
         time_frame: {
           type: 'string',
           enum: ALL_TIME_FRAMES,
-          description:
-            'Date range. Default: ONE_MONTH. ONE_DAY and ONE_WEEK return intraday timestamps; ' +
-            'larger ranges return daily closes.',
+          description: 'Date range. Default: ONE_MONTH.',
         },
         max_rows: {
           type: 'integer',
           description:
-            'Cap response to the most recent N rows (default 500, max 5000). Helps avoid the ' +
-            'MCP single-tool-result token limit on long-range queries. If hit, response ' +
-            'includes `truncated: true`.',
+            'Cap response to the most recent N rows (default 500, max 5000); avoids the MCP ' +
+            'tool-result token limit on long ranges. If hit, response includes `truncated: true`.',
           default: DEFAULT_MAX_ROWS,
         },
         offset: {
           type: 'integer',
           description:
-            'Number of rows to skip from the most-recent end. Default 0. Set to `max_rows` to ' +
-            'fetch the next-most-recent batch (counts backwards through history).',
+            'Rows to skip from the most-recent end (default 0). Set to `max_rows` for the ' +
+            'next-most-recent batch (counts backwards through history).',
           default: 0,
         },
       },

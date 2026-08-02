@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Largest tool descriptions compressed** ([#597](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/597)). The nine largest tool schemas (plus `create_recurring`, which shared a duplicated frequency blurb) were rewritten for density: redundant restatements, list scaffolding, and facts duplicated between a tool description and its parameter descriptions were collapsed, with every behavioral constraint and footgun warning preserved. Aggregate schema size across all registered tools dropped ~7% (~4.9K chars); the dieted schemas individually shrank 6-34%. Schema budgets in the context-budget ratchet moved down accordingly.
 - **Tool responses are now compact JSON** ([#597](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/597)). The server previously pretty-printed every tool response (`JSON.stringify(result, null, 2)`), a measured 10-20% pure-whitespace tax on every response an MCP client loads into context. Responses are now serialized compact (`JSON.stringify(result)`). No semantic change — the JSON content is identical, only inter-token whitespace is gone.
 
 ### Fixed
