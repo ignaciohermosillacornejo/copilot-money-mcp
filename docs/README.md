@@ -22,6 +22,12 @@ This directory contains additional documentation for the Copilot Money MCP Serve
   - Implementation patterns
   - Trade-offs and rationale
 
+- **[bulk-edit-transactions.md](bulk-edit-transactions.md)** - How bulk transaction edits work
+  - `bulkEditTransactions`: one edit applied to many rows
+  - What can and cannot be bulk-edited, and which tool to reach for
+  - Why the `filter` argument is dangerous, and the verified/inferred boundary
+  - Silent skips: why `failed: []` does not mean success
+
 - **[REVERSE_ENGINEERING_FINDING.md](REVERSE_ENGINEERING_FINDING.md)** - Research notes
   - LevelDB binary format analysis
   - Protocol Buffers decoding

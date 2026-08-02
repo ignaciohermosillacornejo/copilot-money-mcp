@@ -57,7 +57,7 @@ Enabling `--write` automatically turns on `--live-reads`, so the tools below are
 | `split_transaction` | ✅ | |
 | `add_transaction_to_recurring` | ✅ | Link an existing transaction to a recurring series |
 | `review_transactions` | ✅ | Bulk-mark as reviewed/unreviewed |
-| `bulk_edit_transactions` | ✅ | **Same edit, many rows, ONE request** — Copilot's native bulk endpoint. Supports only `category_id`, `type`, `reviewed`, `add_tag_ids`, `remove_tag_ids`; `name`/`date`/`amount`/`note` are not bulk-editable. Tags are add/remove, not replace. Max 500 targets |
+| `bulk_edit_transactions` | ✅ | **Same edit, many rows, ONE request** — Copilot's native bulk endpoint. Supports only `category_id`, `type`, `reviewed`, `add_tag_ids`, `remove_tag_ids`; `name`/`date`/`amount`/`note` are not bulk-editable. Tags are add/remove, not replace. Max 500 targets. See [bulk-edit guide](./bulk-edit-transactions.md) |
 | `create_category` / `update_category` / `delete_category` | ✅ | |
 | `create_tag` / `update_tag` / `delete_tag` | ✅ | |
 | `create_recurring` / `update_recurring` / `delete_recurring` | ✅ | |

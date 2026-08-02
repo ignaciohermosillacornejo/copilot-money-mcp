@@ -6,6 +6,11 @@
 - **Observations:** 2 (2026-07-31 Chrome capture)
 - **Adopted:** ✅ 2026-08-01 — `bulkEditTransactions()` in `src/core/graphql/transactions.ts`, consumed by `review_transactions` and `bulk_edit_transactions`.
 
+> **This page is the wire-format reference.** For how the endpoint works, what can
+> and cannot be bulk-edited, when to use which tool, and why `filter` is
+> dangerous, read [`docs/bulk-edit-transactions.md`](../../../bulk-edit-transactions.md)
+> first.
+
 ## Query
 
 ```graphql
@@ -126,11 +131,22 @@ three required, no other fields (probe-enumerated 2026-08-01). Same routing
 triple `editTransaction` takes per row.
 
 `TransactionFilter` is the type the `Transactions` and `TransactionSummary`
-queries use, so it also accepts `dates`, `accountIds`, `categoryIds`,
-`recurringIds`, `tagIds`, `types` and `isReviewed`
+queries use, so it also **structurally** accepts `dates`, `accountIds`,
+`categoryIds`, `recurringIds`, `tagIds`, `types` and `isReviewed`
 ([shape](../queries/Transactions.md#transactionfilter-shape-captured-2026-04-23-via-chrome-devtools)).
-**That is the danger, not a feature:** `filter: { isReviewed: false }` would
-rewrite every unreviewed transaction on the account in one request.
+
+**That is the danger, not a feature** — but mind the evidence boundary:
+
+| Filter | Effect | Evidence |
+|---|---|---|
+| `{ ids: [...] }` | exactly the listed rows | **verified** live, with an untargeted control row |
+| `{ isReviewed: false }` | presumably every unreviewed row | **inferred from the type — never sent** |
+| `{}` / omitted | unknown, unbounded | **never sent** |
+
+Only the first row is observed. We have deliberately never sent a non-`ids`
+filter on this mutation: the failure mode of that experiment is a rewritten
+account, and there is no safe way to run it against live data. Treat the broad
+filters as dangerous, but do not record them as verified.
 
 ## ⚠ Safety: `filter` is nullable
 
