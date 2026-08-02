@@ -12,7 +12,7 @@ Signatures below reflect only what the server confirmed via validation errors. O
 | [`createTransaction`](#createtransaction) | ✅ PR #320 | medium | Manual-account transactions |
 | [`deleteTransaction`](#deletetransaction) | ✅ PR #321 | high (destructive) | Remove a transaction |
 | [`addTransactionToRecurring`](#addtransactiontorecurring) | ✅ PR #322 | low | Attach one-off to existing recurring |
-| [`bulkEditTransactions`](#bulkedittransactions) | ❌ | **DO NOT PROBE** blindly | Edit many transactions at once |
+| [`bulkEditTransactions`](#bulkedittransactions) | ✅ PR #588 | medium — `filter` is nullable; always send explicit ids | Edit many transactions at once |
 | [`bulkDeleteTransactions`](#bulkdeletetransactions) | ❌ | **high (destructive)** | Delete many transactions |
 | [`createAccount`](#createaccount) | ❌ | medium | Manual account creation |
 | [`deleteAccount`](#deleteaccount) | ❌ | high (cascades to all txns) | Remove a manual account |
@@ -164,19 +164,44 @@ input AddTransactionToRecurringInput {
 
 ## bulkEditTransactions
 
+✅ **Captured 2026-07-31** — full signature, input fields, and output shape are documented
+in [`operations/mutations/BulkEditTransactions.md`](operations/mutations/BulkEditTransactions.md).
+Captured by driving the **web** UI's multi-select bar (so it is not iOS-only, as this page
+previously assumed) and observing the traffic it sent. **Adopted 2026-08-01**: wrapped by
+`bulkEditTransactions()` and consumed by `review_transactions` (one request instead of a
+per-row fan-out) and the new `bulk_edit_transactions` tool.
+
 ```graphql
-mutation BulkEditTransactions($input: BulkEditTransactionInput!) {
-  bulkEditTransactions(input: $input) {
-    # BulkEditTransactionsOutput fields unknown
+mutation BulkEditTransactions($input: BulkEditTransactionInput!, $filter: TransactionFilter) {
+  bulkEditTransactions(filter: $filter, input: $input) {
+    updated { ...TransactionFields }
+    failed { transaction { ...TransactionFields } error errorCode }
   }
 }
 ```
 
-**⚠ Do not probe with empty input.** A probe with `input: {}` caused the server to execute a real SQL query (`select "item_id", "account_id", "transaction_id" from "transactions" where ...`) with ~48 placeholders before failing. The full input shape is unknown and reverse-engineering it via error leak is not safe against a live account.
+The guessed signature previously on this page was wrong in the way that mattered:
+targeting does **not** live in `input`. It lives in a separate, **nullable** `filter`
+argument — `filter.ids` is an array of `{accountId, itemId, id}` triples.
 
-**Intended use:** batch apply the same change (category, tags, reviewed state) to many transactions in one call. Likely what Copilot's iOS "select many → edit" UI uses.
+**⚠ Still do not probe with empty or partial input.** The original finding stands and is
+now explained: a probe with `input: {}` caused the server to execute a real SQL query
+(`select "item_id", "account_id", "transaction_id" from "transactions" where ...`) with
+~48 placeholders before failing. Because `filter` is optional while `input` is required, a
+filterless call is syntactically valid and its row set is unbounded. Any wrapper we build
+must make that state unrepresentable rather than merely discouraged.
 
-**How to reverse-engineer safely:** iOS traffic capture, or set up a disposable test account and probe against it.
+**Closed by error-leak + scoped live probes 2026-08-01:** `BulkEditTransactionInput` is
+exactly `{ categoryId, addTagIds, removeTagIds, type, isReviewed }`; `filter.ids` works
+alone and targets exactly the listed rows; `addTagIds`/`removeTagIds` are additive and
+subtractive. Also found: the server does **no referential validation** (a bogus categoryId
+persists as a dangling reference) and **silently skips unknown ids** rather than reporting
+them in `failed[]`.
+
+**Still unknown:** the `ErrorCode` enum values — `failed[]` stayed empty across every
+probe, including deliberate error cases, so no value has ever been observed. Also unverified:
+the AND/OR relationship between `filter.ids` and `filter.matchString` (we never send
+matchString).
 
 ---
 

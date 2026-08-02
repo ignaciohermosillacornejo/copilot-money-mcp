@@ -348,6 +348,28 @@ describe('review_transactions check (stubbed client)', () => {
     },
   });
 
+  /** review_transactions flips via bulkEditTransactions; restore still uses
+   *  editTransaction (single row, and it keeps the restore path independent of
+   *  the mutation under test). */
+  const bulkEcho = (isReviewed: boolean) => ({
+    bulkEditTransactions: {
+      updated: [
+        {
+          id: 'txn-1',
+          name: '__smoke__1700000000000-txn-a',
+          categoryId: 'cat-1',
+          userNotes: null,
+          isReviewed,
+          type: 'REGULAR' as const,
+          date: '2026-06-11',
+          amount: 100,
+          tags: [],
+        },
+      ],
+      failed: [],
+    },
+  });
+
   function contextWithTxnA(client: GraphQLClient): RoundtripContext {
     const ctx = makeContext(client);
     ctx.state.txnA = { id: 'txn-1', accountId: 'acct-1', itemId: 'item-1' };
@@ -358,6 +380,11 @@ describe('review_transactions check (stubbed client)', () => {
     let serverReviewed = false;
     const { client, calls } = stubClient({
       Transactions: () => transactionsPage([txnNode(serverReviewed)]),
+      BulkEditTransactions: (variables) => {
+        const input = (variables as { input: { isReviewed: boolean } }).input;
+        serverReviewed = input.isReviewed;
+        return bulkEcho(serverReviewed);
+      },
       EditTransaction: (variables) => {
         const input = (variables as { input: { isReviewed: boolean } }).input;
         serverReviewed = input.isReviewed;
@@ -367,11 +394,19 @@ describe('review_transactions check (stubbed client)', () => {
     const ctx = contextWithTxnA(client);
     const outcome = await getCheck('review_transactions').run(ctx);
     expect(outcome).toBeUndefined();
+    // The flip goes through the bulk mutation the tool actually uses...
+    const bulks = calls.filter((call) => call.operationName === 'BulkEditTransactions');
+    expect(bulks.length).toBe(1);
+    // ...and it must name its target rather than leave the row set unbounded.
+    expect((bulks[0]!.variables as { filter: { ids: { id: string }[] } }).filter.ids).toEqual([
+      { id: 'txn-1', accountId: 'acct-1', itemId: 'item-1' },
+    ]);
+    // The restore writes back the value captured BEFORE mutating.
     const edits = calls.filter((call) => call.operationName === 'EditTransaction');
-    expect(edits.length).toBe(2); // flip + restore
-    expect((edits[1]!.variables as { input: { isReviewed: boolean } }).input.isReviewed).toBe(
+    expect(edits.length).toBe(1);
+    expect((edits[0]!.variables as { input: { isReviewed: boolean } }).input.isReviewed).toBe(
       false
-    ); // original captured BEFORE mutating
+    );
     expect(serverReviewed).toBe(false);
   });
 
@@ -379,15 +414,19 @@ describe('review_transactions check (stubbed client)', () => {
     const { client, calls } = stubClient({
       // Server always reports the original value: accepted-but-ignored write.
       Transactions: () => transactionsPage([txnNode(false)]),
+      BulkEditTransactions: () => bulkEcho(true),
       EditTransaction: () => editEcho(true),
     });
     const ctx = contextWithTxnA(client);
     await expect(getCheck('review_transactions').run(ctx)).rejects.toThrow(
       /write accepted but re-read isReviewed/
     );
+    // Flip goes out via the bulk mutation, restore via editTransaction — and
+    // the restore must still happen despite the verification failure.
+    expect(calls.filter((call) => call.operationName === 'BulkEditTransactions').length).toBe(1);
     const edits = calls.filter((call) => call.operationName === 'EditTransaction');
-    expect(edits.length).toBe(2); // flip + restore, despite the failure
-    expect((edits[1]!.variables as { input: { isReviewed: boolean } }).input.isReviewed).toBe(
+    expect(edits.length).toBe(1);
+    expect((edits[0]!.variables as { input: { isReviewed: boolean } }).input.isReviewed).toBe(
       false
     );
   });

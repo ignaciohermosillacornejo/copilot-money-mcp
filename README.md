@@ -23,7 +23,7 @@
 
 An [MCP](https://modelcontextprotocol.io/) server that gives AI assistants access to your Copilot Money personal finance data. It reads from the locally cached Firestore database (LevelDB + Protocol Buffers) on your Mac. **Reads are 100% local with zero network requests.**
 
-**14 cache-mode read tools (or 25 in `--live-reads` mode: 8 surviving cache + 17 live), plus up to 17 write tools** — query and modify transactions, accounts, holdings, balances, categories, recurring charges, budgets, goals, and investment performance. See [Tools by Mode](#tools-by-mode) below.
+**14 cache-mode read tools (or 25 in `--live-reads` mode: 8 surviving cache + 17 live), plus up to 18 write tools** — query and modify transactions, accounts, holdings, balances, categories, recurring charges, budgets, goals, and investment performance. See [Tools by Mode](#tools-by-mode) below.
 
 > Contributors: writes go through an API we don't own. How the repo keeps its model of Copilot's GraphQL surface from silently drifting — the conformance ledger, live smokes, and weekly drift check — is documented in [`docs/CONFORMANCE_ARCHITECTURE.md`](docs/CONFORMANCE_ARCHITECTURE.md).
 
@@ -48,7 +48,7 @@ This server exposes different tools depending on which CLI flags you enable.
 |---|---|---|---|---|---|
 | 🟢 Default | _(none)_ | Reads from your local LevelDB cache | ❌ None | 🔌 Zero (offline) | 14 cache-mode read + utility tools |
 | 🌐 Live reads | `--live-reads` | Real-time reads via Copilot's GraphQL API; swaps out 6 cache tools and adds 11 live-only ones | 🔒 Browser session | 🌐 HTTPS per request | 25 read tools (8 cache + 17 live) |
-| ✍️ Writes | `--write` | Adds mutation tools (transactions, tags, categories, budgets, recurrings, splits) **and turns on `--live-reads` automatically** — writes need server-fresh transaction metadata, so live reads are coupled to write mode | 🔒 Browser session | 🌐 HTTPS per request | +17 write tools, on top of the 25 live read tools |
+| ✍️ Writes | `--write` | Adds mutation tools (transactions, tags, categories, budgets, recurrings, splits) **and turns on `--live-reads` automatically** — writes need server-fresh transaction metadata, so live reads are coupled to write mode | 🔒 Browser session | 🌐 HTTPS per request | +18 write tools, on top of the 25 live read tools |
 
 Passing `--write` implies `--live-reads`; you can still pass `--live-reads` on its own for read-only live access.
 

@@ -46,12 +46,26 @@ TOOL_PREFIXES = (
     "get_",
     "set_",
     "split_",
+    "bulk_",
     "create_",
     "review_",
     "refresh_",
     "update_",
     "delete_",
     "add_",
+)
+
+# Tool PARAMETER names that happen to start with a TOOL_PREFIXES entry.
+# Without this, documenting a parameter in backticks reads as a reference to a
+# nonexistent tool (e.g. `add_tag_ids` matches the "add_" prefix used by
+# add_transaction_to_recurring). Keep this list to real parameter names.
+KNOWN_TOOL_PARAMS = frozenset(
+    {
+        "add_tag_ids",
+        "remove_tag_ids",
+        "split_transactions",
+        "update_existing",
+    }
 )
 
 ALLOWED_PROFILE_PATHS = (
@@ -163,6 +177,8 @@ def check_tool_refs(skill_dir: Path, known_tools: set[str]) -> list[str]:
             continue
         seen.add(tok)
         if not any(tok.startswith(p) for p in TOOL_PREFIXES):
+            continue
+        if tok in KNOWN_TOOL_PARAMS:
             continue
         if tok not in known_tools:
             errors.append(

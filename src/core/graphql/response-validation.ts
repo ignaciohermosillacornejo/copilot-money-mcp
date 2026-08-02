@@ -135,6 +135,43 @@ export const MUTATION_RESPONSE_SCHEMAS: Readonly<Record<string, ResponseShapeEnt
       }),
     })
   ),
+  // Mirrors BulkEditTransactionsResponse. `updated` reuses the same subset
+  // EditTransaction gates, since the wire selection is the same
+  // TransactionFields fragment.
+  //
+  // `failed` is gated but NEVER observed populated: seven live probes
+  // (nonexistent transaction / tag / category ids) all returned `failed: []`,
+  // because the server silently drops unknown ids rather than reporting them.
+  // The element shape below therefore comes from the response TYPE
+  // (TransactionError, confirmed by probe), not from an observed payload — so
+  // the first real failure is exactly when this schema earns its keep. That
+  // also means `errorCode`'s enum values are unknown, hence `z.string()`
+  // rather than a z.enum: a value gate we cannot populate would warn on every
+  // genuine failure. See the `ErrorCode` ledger entry (unverified).
+  BulkEditTransactions: entry(
+    'bulkEditTransactions',
+    z.looseObject({
+      bulkEditTransactions: z.looseObject({
+        updated: z.array(
+          z.looseObject({
+            id: z.string().min(1),
+            name: z.string(),
+            categoryId: z.string(),
+            userNotes: z.string().nullable(),
+            isReviewed: z.boolean(),
+            tags: z.array(z.looseObject({ id: z.string() })),
+          })
+        ),
+        failed: z.array(
+          z.looseObject({
+            transaction: z.looseObject({ id: z.string() }).nullable(),
+            error: z.string().nullable(),
+            errorCode: z.string(),
+          })
+        ),
+      }),
+    })
+  ),
   DeleteTransaction: entry('deleteTransaction', z.looseObject({ deleteTransaction: z.boolean() })),
   AddTransactionToRecurring: entry(
     'addTransactionToRecurring',

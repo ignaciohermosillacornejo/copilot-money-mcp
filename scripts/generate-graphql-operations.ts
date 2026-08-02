@@ -21,6 +21,7 @@ const CLIENT_ONLY_DIRECTIVES = new Set(['connection']);
 const IN_SCOPE_MUTATIONS = [
   'CreateTransaction',
   'EditTransaction',
+  'BulkEditTransactions',
   'DeleteTransaction',
   'AddTransactionToRecurring',
   'SplitTransaction',

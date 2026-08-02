@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`bulk_edit_transactions` — Copilot's native bulk-edit endpoint** ([#588](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/588)). Applies the SAME edit to MANY transactions in ONE GraphQL request, using the `bulkEditTransactions` mutation Copilot's own multi-select UI fires. Supports `category_id`, `type`, `reviewed`, `add_tag_ids` and `remove_tag_ids`; targets come from `transaction_ids` or `rows` (out-of-window bypass), max 500 per call. **Deliberate limits, both imposed by Copilot's schema:** one input applies to the whole set (different rows needing different values means separate calls), and only those five fields are bulk-editable — `name`, `date`, `amount` and `note` remain `update_transaction`-only. Tags are add/remove, never replace.
+- **`review_transactions` now issues one request instead of a fan-out.** Reviewing 200 transactions was 200 `editTransaction` mutations at 5-in-flight; it is now a single `bulkEditTransactions` call.
+
+### Fixed
+
+- **Bulk writes detect silently-skipped rows.** Copilot drops a transaction id it cannot find from the row set without erroring and without listing it in `failed[]`, so a batch could half-apply and still report success. Both bulk consumers now diff the server's `updated[]` against the ids they requested and fail loudly, naming the rows that did not land. Bulk writes also validate category and tag ids client-side, because the server accepts a nonexistent `categoryId` verbatim and persists it as a dangling reference.
+
+
 ### Fixed
 
 - **`get_accounts` no longer embeds base64 institution logos by default.** Each account's cached `logo` (a base64-encoded PNG) was being returned inline on every call, bloating responses roughly 20-30x for no benefit to an MCP client. Logos are now stripped by default; pass `include_logos: true` to opt back in. Fixes [#589](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/589).

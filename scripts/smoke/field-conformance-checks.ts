@@ -116,6 +116,22 @@ export const ALL_FIELD_CONFORMANCE_CHECKS: readonly FieldConformanceCheck[] = [
   }
 }`
   ),
+  // Two independent guarantees this never mutates anything, both needed
+  // because `filter` is nullable on this mutation and a filterless call has an
+  // unbounded row set:
+  //   1. every probed value is `{ z: 1 }`, which is validation-fatal for every
+  //      field of BulkEditTransactionInput, so the resolver never runs;
+  //   2. an explicit `filter.ids` naming a fake triple is sent anyway, so even
+  //      an impossible validation pass would target zero real rows.
+  // Do NOT "simplify" this by dropping the filter.
+  check(
+    'BulkEditTransactionInput',
+    (a) => `mutation FieldProbe {
+  bulkEditTransactions(filter: { ids: [{ id: "x", accountId: "x", itemId: "x" }] }, input: { ${a} }) {
+    __typename
+  }
+}`
+  ),
   check(
     'SplitTransactionInput',
     (a) => `mutation FieldProbe {

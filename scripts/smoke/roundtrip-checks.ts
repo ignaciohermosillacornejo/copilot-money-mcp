@@ -23,8 +23,12 @@
  * - Created objects register a cleanup closure in the CleanupRegistry; the
  *   runner executes it LIFO in a `finally`, then runs a final residue
  *   sweep that fails loudly with the leftover ids.
- * - Copilot's bulk-edit mutation is NEVER used (enforced by a source-scan
- *   unit test in tests/scripts/roundtrip-coverage.test.ts).
+ * - Copilot's bulk-edit mutation is used only with an explicit `filter.ids`
+ *   naming rows this run created. `filter` is nullable server-side, so a
+ *   filterless bulk edit would apply to an unbounded row set; a source-scan
+ *   unit test in tests/scripts/roundtrip-coverage.test.ts enforces that every
+ *   call here names its targets and carries no widening filter key. (This was
+ *   a blanket ban until the mutation was captured and ledgered in 2026-08.)
  *
  * Coverage is ratcheted: tests/scripts/roundtrip-coverage.test.ts enforces
  * a bijection between `WRITE_TOOL_DEFS` (src/tools/registry) and the checks
@@ -38,6 +42,7 @@ import {
   createTransaction,
   deleteTransaction,
   editTransaction,
+  bulkEditTransactions,
   addTransactionToRecurring,
   splitTransaction,
 } from '../../src/core/graphql/transactions.js';
@@ -642,7 +647,7 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
     tool: 'review_transactions',
     domain: 'transactions',
     flow: 'capture isReviewed on the run-created transaction → flip → verify via re-read → restore original in finally',
-    appliesSurfaces: ['Mutation.editTransaction:applies'],
+    appliesSurfaces: ['Mutation.bulkEditTransactions:applies'],
     run: async (ctx) => {
       const txn = ctx.state.txnA;
       if (!txn) return { skipped: 'no run-created transaction (create_transaction did not pass)' };
@@ -651,12 +656,17 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
       const original = before.isReviewed;
       const flipped = !original;
       try {
-        await editTransaction(ctx.client, {
-          id: txn.id,
-          accountId: txn.accountId,
-          itemId: txn.itemId,
+        // Goes through bulkEditTransactions because that is what the tool now
+        // uses — a check that still called editTransaction would pass while
+        // the shipped path was broken.
+        const bulk = await bulkEditTransactions(ctx.client, {
+          ids: [{ id: txn.id, accountId: txn.accountId, itemId: txn.itemId }],
           input: { isReviewed: flipped },
         });
+        check(
+          bulk.skipped.length === 0,
+          `review_transactions: server silently skipped ${String(bulk.skipped.length)} id(s)`
+        );
         const after = await readTransactionById(ctx.client, ctx.state.marker, txn.id);
         check(
           after?.isReviewed === flipped,
@@ -679,6 +689,97 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
           });
         }
       }
+      return undefined;
+    },
+  },
+  {
+    tool: 'bulk_edit_transactions',
+    domain: 'transactions',
+    flow: 'create 2 throwaway transactions → ONE bulk call sets category + adds a tag on both → verify via re-read → remove the tag → verify additive/subtractive tag semantics → verify a bogus id lands in skipped[] (transactions deleted by the cleanup registry)',
+    appliesSurfaces: ['Mutation.bulkEditTransactions:applies'],
+    run: async (ctx) => {
+      const categoryId = await ensureCategory(ctx);
+      const tagId = ctx.state.tagId;
+      if (!tagId) return { skipped: 'no marker tag (create_tag did not pass)' };
+
+      const [t1, t2] = await Promise.all([
+        createSmokeTransaction(ctx, 'bulk-a', 100),
+        createSmokeTransaction(ctx, 'bulk-b', 200),
+      ]);
+      const ids: [
+        { id: string; accountId: string; itemId: string },
+        ...{ id: string; accountId: string; itemId: string }[],
+      ] = [
+        { id: t1.id, accountId: t1.accountId, itemId: t1.itemId },
+        { id: t2.id, accountId: t2.accountId, itemId: t2.itemId },
+      ];
+
+      // One request, both rows, category + tag together.
+      const applied = await bulkEditTransactions(ctx.client, {
+        ids,
+        input: { categoryId, addTagIds: [tagId] },
+      });
+      check(
+        applied.skipped.length === 0,
+        `bulk_edit_transactions: ${String(applied.skipped.length)} id(s) silently skipped`
+      );
+      check(
+        applied.failed.length === 0,
+        `bulk_edit_transactions: server reported ${String(applied.failed.length)} failure(s)`
+      );
+      check(
+        applied.updated.length === 2,
+        `bulk_edit_transactions: updated ${String(applied.updated.length)} rows, expected 2`
+      );
+
+      for (const id of [t1.id, t2.id]) {
+        const after = await readTransactionById(ctx.client, ctx.state.marker, id);
+        check(after, `bulk_edit_transactions: transaction ${id} missing from re-read`);
+        check(
+          after.categoryId === categoryId,
+          `bulk_edit_transactions: re-read categoryId is '${after.categoryId}', expected '${categoryId}'`
+        );
+        check(
+          after.tags.some((t) => t.id === tagId),
+          `bulk_edit_transactions: tag ${tagId} missing from re-read of ${id}`
+        );
+      }
+
+      // removeTagIds is subtractive — the row survives, only the tag goes.
+      const removed = await bulkEditTransactions(ctx.client, {
+        ids: [ids[0]],
+        input: { removeTagIds: [tagId] },
+      });
+      check(
+        removed.updated.length === 1,
+        `bulk_edit_transactions: removeTagIds updated ${String(removed.updated.length)} rows, expected 1`
+      );
+      const afterRemove = await readTransactionById(ctx.client, ctx.state.marker, t1.id);
+      check(
+        afterRemove && !afterRemove.tags.some((t) => t.id === tagId),
+        `bulk_edit_transactions: tag ${tagId} still present after removeTagIds`
+      );
+      // The other row must be untouched — this is the "one input, listed rows
+      // only" guarantee, and the reason we never send a bare filter.
+      const untouched = await readTransactionById(ctx.client, ctx.state.marker, t2.id);
+      check(
+        untouched?.tags.some((t) => t.id === tagId),
+        `bulk_edit_transactions: removeTagIds on one row also stripped the tag from ${t2.id}`
+      );
+
+      // The silent-skip defense, against the real server: a nonexistent id is
+      // dropped from the row set with no error and no failed[] entry. If
+      // Copilot ever starts reporting it instead, this check tells us the
+      // skipped[] diff can be retired.
+      const withGhost = await bulkEditTransactions(ctx.client, {
+        ids: [ids[0], { id: 'zzzzNonExistentDoc0', accountId: t1.accountId, itemId: t1.itemId }],
+        input: { isReviewed: true },
+      });
+      check(
+        withGhost.skipped.includes('zzzzNonExistentDoc0'),
+        'bulk_edit_transactions: a nonexistent id was NOT reported in skipped[] — the server ' +
+          `may have changed its behaviour (failed[] had ${String(withGhost.failed.length)} entries)`
+      );
       return undefined;
     },
   },

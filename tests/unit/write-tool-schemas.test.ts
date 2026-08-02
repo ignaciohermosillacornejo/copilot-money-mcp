@@ -2,7 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import { createWriteToolSchemas } from '../../src/tools/index.js';
 
 describe('createWriteToolSchemas', () => {
-  test('returns exactly 17 write tool schemas', () => {
+  test('returns exactly 18 write tool schemas', () => {
     // Exact count: if a write tool is added or removed, this assertion
     // forces an explicit update, and the server-protocol.test.ts
     // annotation + rejection tables must be extended in lockstep.
@@ -12,7 +12,8 @@ describe('createWriteToolSchemas', () => {
     // 2026-04: delete_transaction added (15 total).
     // 2026-04: add_transaction_to_recurring added (16 total).
     // 2026-04: split_transaction added (17 total).
-    expect(createWriteToolSchemas().length).toBe(17);
+    // 2026-08: bulk_edit_transactions added (18 total).
+    expect(createWriteToolSchemas().length).toBe(18);
   });
 
   test('split_transaction has required shape and annotations', () => {

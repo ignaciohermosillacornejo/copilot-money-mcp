@@ -516,10 +516,10 @@ export const reviewTransactionsTool = defineTool({
       'window), OR pass `rows` — an array of {transaction_id, account_id, item_id} taken from a ' +
       'live read — to review ANY transactions, including out-of-window historical/backlog rows. ' +
       'Prefer `rows` for large backlog sweeps: it is the true bulk path. One of the two must be ' +
-      'provided; `rows` wins when both are. Writes are issued via GraphQL in parallel with ' +
-      'a cap of 5 in flight at a time. On the first GraphQL error, new writes stop, in-flight ' +
-      'writes settle, and the error is thrown with a `reviewed_count` reflecting how many ' +
-      'succeeded before the failure (partial success is possible).',
+      'provided; `rows` wins when both are. The whole set is applied in ONE GraphQL request, so ' +
+      'reviewing 200 transactions costs one round trip. If the server rejects or silently skips ' +
+      'any row the call throws, naming the affected ids; `reviewed_count` reflects what actually ' +
+      'landed.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -570,4 +570,105 @@ export const reviewTransactionsTool = defineTool({
   readOnly: false,
   handler: (ctx, args) =>
     ctx.tools.reviewTransactions(args as ToolMethodArgs<'reviewTransactions'>),
+});
+
+/** Target-selection properties shared by review_transactions and bulk_edit_transactions. */
+const BULK_TARGET_PROPERTIES = {
+  transaction_ids: {
+    type: 'array',
+    items: { type: 'string' },
+    description:
+      'Transaction IDs to edit. Resolved locally — fails for transactions outside the ' +
+      'resolution window; use `rows` for those.',
+  },
+  rows: {
+    type: 'array',
+    description:
+      'Bypass path: each entry supplies the IDs the GraphQL mutation needs directly (from a ' +
+      'live read), so out-of-window transactions work without local resolution.',
+    items: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        transaction_id: { type: 'string', description: 'Transaction ID to edit' },
+        account_id: {
+          type: 'string',
+          description: 'Account ID the transaction belongs to (from the live row)',
+        },
+        item_id: {
+          type: 'string',
+          description: "Item ID the account belongs to (Copilot's Firestore item_id)",
+        },
+      },
+      required: ['transaction_id', 'account_id', 'item_id'],
+    },
+  },
+} as const;
+
+export const bulkEditTransactionsTool = defineTool({
+  schema: {
+    name: 'bulk_edit_transactions',
+    description:
+      "Apply the SAME edit to MANY transactions in ONE request — Copilot's native bulk-edit " +
+      'endpoint, the one its own multi-select UI uses. Use this when every target gets the ' +
+      'identical change: recategorizing a merchant across months, tagging a trip, marking a ' +
+      'batch reviewed. Targets come from `transaction_ids` (resolved locally) or `rows` ' +
+      '(from a live read, works for out-of-window transactions); `rows` wins when both are ' +
+      'given. At least one of category_id, type, reviewed, add_tag_ids, remove_tag_ids must ' +
+      'be provided. IMPORTANT LIMITS: (1) One edit for the whole set — to give different ' +
+      'transactions different values, make separate calls. (2) Copilot supports ONLY these ' +
+      'five fields in bulk; `name`, `date`, `amount` and `note` are NOT bulk-editable, use ' +
+      'update_transaction for those. (3) Tags are add/remove, not replace — there is no bulk ' +
+      '"set the tag list" operation; use update_transaction`s tag_ids to replace. ' +
+      'type INCOME or INTERNAL_TRANSFER clears the category server-side, so it cannot be ' +
+      'combined with category_id. Max 500 targets per call. All ids are validated before the ' +
+      'write because Copilot does NOT validate them server-side. If any row is rejected or ' +
+      'silently skipped the call throws and names it.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        ...BULK_TARGET_PROPERTIES,
+        category_id: {
+          type: 'string',
+          description:
+            'Category ID to assign to every target (from get_categories results). Cannot be ' +
+            'combined with type INCOME or INTERNAL_TRANSFER.',
+        },
+        type: {
+          type: 'string',
+          enum: ['REGULAR', 'INCOME', 'INTERNAL_TRANSFER'],
+          description:
+            'Classification to apply to every target. INCOME/INTERNAL_TRANSFER clear the ' +
+            'category server-side.',
+        },
+        reviewed: {
+          type: 'boolean',
+          description:
+            'Mark every target reviewed (true) or un-reviewed (false). For reviewed-only ' +
+            'changes, review_transactions is the more specific tool.',
+        },
+        add_tag_ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Tag IDs to ADD to every target. Existing tags are preserved. A tag id may not ' +
+            'appear in both add_tag_ids and remove_tag_ids.',
+        },
+        remove_tag_ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Tag IDs to REMOVE from every target. Other tags are preserved.',
+        },
+      },
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+    },
+  },
+  readOnly: false,
+  handler: (ctx, args) =>
+    ctx.tools.bulkEditTransactions(args as ToolMethodArgs<'bulkEditTransactions'>),
 });

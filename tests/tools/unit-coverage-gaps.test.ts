@@ -8,7 +8,7 @@ import { describe, test, expect } from 'bun:test';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import type { Transaction, Account, Category, Tag, Budget } from '../../src/models/index.js';
-import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
+import { createMockGraphQLClient, bulkEditEcho } from '../helpers/mock-graphql.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -346,6 +346,7 @@ describe('cross-tool interactions', () => {
       userCategories: baseCategories,
     });
     const client = createMockGraphQLClient({
+      BulkEditTransactions: bulkEditEcho,
       EditTransaction: (vars: any) => ({
         editTransaction: {
           transaction: {

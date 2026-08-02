@@ -2828,21 +2828,22 @@ describe('reviewTransactions', () => {
 
   test('marks a single transaction as reviewed', async () => {
     const client = createMockGraphQLClient({
-      EditTransaction: {
-        editTransaction: {
-          transaction: {
-            id: 'txn1',
+      BulkEditTransactions: (vars: any) => ({
+        bulkEditTransactions: {
+          updated: vars.filter.ids.map((t: any) => ({
+            id: t.id,
             name: 'Coffee Shop',
-            categoryId: 'food_and_drink_coffee',
+            categoryId: 'c',
             userNotes: null,
-            isReviewed: true,
+            isReviewed: vars.input.isReviewed,
             type: 'REGULAR',
             date: '2024-01-15',
             amount: 50,
             tags: [],
-          },
+          })),
+          failed: [],
         },
-      },
+      }),
     });
     tools = new CopilotMoneyTools(mockDb, client);
 
@@ -2852,30 +2853,29 @@ describe('reviewTransactions', () => {
     expect(result.transaction_ids).toEqual(['txn1']);
 
     expect(client._calls).toHaveLength(1);
-    expect(client._calls[0].op).toBe('EditTransaction');
+    expect(client._calls[0].op).toBe('BulkEditTransactions');
     expect(client._calls[0].variables).toEqual({
-      id: 'txn1',
-      accountId: 'acct1',
-      itemId: 'item1',
       input: { isReviewed: true },
+      filter: { ids: [{ id: 'txn1', accountId: 'acct1', itemId: 'item1' }] },
     });
   });
 
   test('marks multiple transactions as reviewed', async () => {
     const client = createMockGraphQLClient({
-      EditTransaction: (vars: any) => ({
-        editTransaction: {
-          transaction: {
-            id: vars.id,
+      BulkEditTransactions: (vars: any) => ({
+        bulkEditTransactions: {
+          updated: vars.filter.ids.map((t: any) => ({
+            id: t.id,
             name: 'Coffee Shop',
             categoryId: 'c',
             userNotes: null,
-            isReviewed: true,
+            isReviewed: vars.input.isReviewed,
             type: 'REGULAR',
             date: '2024-01-15',
             amount: 50,
             tags: [],
-          },
+          })),
+          failed: [],
         },
       }),
     });
@@ -2884,36 +2884,32 @@ describe('reviewTransactions', () => {
     const result = await tools.reviewTransactions({ transaction_ids: ['txn1', 'txn2'] });
     expect(result.success).toBe(true);
     expect(result.reviewed_count).toBe(2);
-    expect(client._calls).toHaveLength(2);
-    expect(client._calls[0].variables).toMatchObject({
-      id: 'txn1',
-      accountId: 'acct1',
-      itemId: 'item1',
-    });
-    expect(client._calls[1].variables).toMatchObject({
-      id: 'txn2',
-      accountId: 'acct2',
-      itemId: 'item1',
-    });
+    // One request for the whole set, each id carrying its own routing triple.
+    expect(client._calls).toHaveLength(1);
+    expect((client._calls[0].variables as any).filter.ids).toEqual([
+      { id: 'txn1', accountId: 'acct1', itemId: 'item1' },
+      { id: 'txn2', accountId: 'acct2', itemId: 'item1' },
+    ]);
   });
 
   test('supports reviewed=false to unmark transactions', async () => {
     const client = createMockGraphQLClient({
-      EditTransaction: {
-        editTransaction: {
-          transaction: {
-            id: 'txn1',
+      BulkEditTransactions: (vars: any) => ({
+        bulkEditTransactions: {
+          updated: vars.filter.ids.map((t: any) => ({
+            id: t.id,
             name: 'Coffee Shop',
             categoryId: 'c',
             userNotes: null,
-            isReviewed: false,
+            isReviewed: vars.input.isReviewed,
             type: 'REGULAR',
             date: '2024-01-15',
             amount: 50,
             tags: [],
-          },
+          })),
+          failed: [],
         },
-      },
+      }),
     });
     tools = new CopilotMoneyTools(mockDb, client);
 
@@ -2929,21 +2925,22 @@ describe('reviewTransactions', () => {
 
   test('defaults reviewed to true when not specified', async () => {
     const client = createMockGraphQLClient({
-      EditTransaction: {
-        editTransaction: {
-          transaction: {
-            id: 'txn1',
+      BulkEditTransactions: (vars: any) => ({
+        bulkEditTransactions: {
+          updated: vars.filter.ids.map((t: any) => ({
+            id: t.id,
             name: 'Coffee Shop',
             categoryId: 'c',
             userNotes: null,
-            isReviewed: true,
+            isReviewed: vars.input.isReviewed,
             type: 'REGULAR',
             date: '2024-01-15',
             amount: 50,
             tags: [],
-          },
+          })),
+          failed: [],
         },
-      },
+      }),
     });
     tools = new CopilotMoneyTools(mockDb, client);
 
@@ -2989,7 +2986,7 @@ describe('reviewTransactions', () => {
 
   test('throws on GraphQL error', async () => {
     const client = createMockGraphQLClient({
-      EditTransaction: new Error('Boom'),
+      BulkEditTransactions: new Error('Boom'),
     });
     tools = new CopilotMoneyTools(mockDb, client);
     await expect(tools.reviewTransactions({ transaction_ids: ['txn1'] })).rejects.toThrow('Boom');

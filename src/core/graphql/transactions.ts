@@ -1,6 +1,7 @@
 import type { GraphQLClient } from './client.js';
 import {
   ADD_TRANSACTION_TO_RECURRING,
+  BULK_EDIT_TRANSACTIONS,
   CREATE_TRANSACTION,
   DELETE_TRANSACTION,
   EDIT_TRANSACTION,
@@ -123,6 +124,141 @@ export interface EditTransactionChanges {
   type?: TransactionType;
   date?: string;
   amount?: number;
+}
+
+/**
+ * The five fields `BulkEditTransactionInput` actually accepts.
+ *
+ * Enumerated exhaustively by error-leak probe (2026-08-01): every other
+ * candidate — `name`, `date`, `amount`, `userNotes`, `tagIds`, `recurringId`,
+ * `goalId`, `parentId`, `isExcluded` — came back "not defined by type
+ * BulkEditTransactionInput". Those remain `editTransaction`-only, which is why
+ * the per-row fan-out cannot be retired.
+ *
+ * Note `addTagIds`/`removeTagIds`: tags are add/remove here, NOT set. There is
+ * no bulk "replace the tag list" operation, so this is not interchangeable
+ * with `EditTransactionInput.tagIds`.
+ */
+export interface BulkEditTransactionInput {
+  categoryId?: string;
+  addTagIds?: string[];
+  removeTagIds?: string[];
+  type?: TransactionType;
+  isReviewed?: boolean;
+}
+
+/** One row's routing triple. All three are `ID!` server-side. */
+export interface TransactionIdentifierInput {
+  id: string;
+  accountId: string;
+  itemId: string;
+}
+
+/**
+ * Args for {@link bulkEditTransactions}.
+ *
+ * `ids` is a REQUIRED non-empty tuple type, not an optional filter. That is
+ * deliberate and load-bearing: the wire signature is
+ * `bulkEditTransactions(filter: TransactionFilter, input: BulkEditTransactionInput!)`
+ * where **filter is nullable**, so a filterless call is valid GraphQL whose row
+ * set is unbounded — it would apply `input` to every transaction the server
+ * decides to match. `TransactionFilter` also accepts `dates`, `categoryIds`,
+ * `isReviewed`, `types`, … any of which would silently widen the blast radius.
+ *
+ * This wrapper therefore exposes ONLY id-targeting and makes the dangerous
+ * shapes unrepresentable rather than merely discouraged. Do not add a
+ * pass-through `filter` parameter.
+ */
+export interface BulkEditTransactionsArgs {
+  ids: [TransactionIdentifierInput, ...TransactionIdentifierInput[]];
+  input: BulkEditTransactionInput;
+}
+
+export interface BulkEditTransactionsResponse {
+  bulkEditTransactions: {
+    updated: Array<{
+      id: string;
+      name: string;
+      categoryId: string;
+      userNotes: string | null;
+      isReviewed: boolean;
+      type: TransactionType;
+      date: string;
+      amount: number;
+      tags: Array<{ id: string }>;
+    }>;
+    failed: Array<{
+      transaction: { id: string } | null;
+      error: string | null;
+      errorCode: string;
+    }>;
+  };
+}
+
+export interface BulkEditTransactionsResult {
+  /** Rows the server confirmed it wrote, in server order. */
+  updated: BulkEditTransactionsResponse['bulkEditTransactions']['updated'];
+  /** Per-row server rejections. Empty in every probe to date — see `skipped`. */
+  failed: BulkEditTransactionsResponse['bulkEditTransactions']['failed'];
+  /**
+   * Requested ids the server neither updated NOR reported in `failed`.
+   *
+   * This is the load-bearing half of the result. Verified live (2026-08-01):
+   * an id that does not exist is **silently dropped** from the row set — it
+   * does not raise, and it does not appear in `failed[]`. Trusting `failed[]`
+   * alone would report a clean success for a batch that wrote nothing.
+   * Callers must treat a non-empty `skipped` as a partial failure.
+   */
+  skipped: string[];
+}
+
+/**
+ * Apply ONE edit to MANY transactions in a single request.
+ *
+ * Semantics that differ from `editTransaction` and bite if assumed away
+ * (all verified live 2026-08-01 against disposable rows):
+ *
+ * - **One input, many rows.** There is no per-row input. This is "same change
+ *   to this set", not a batch of independent edits.
+ * - **No referential validation.** A `categoryId` that does not exist is
+ *   accepted verbatim and persisted as a dangling reference; a nonexistent tag
+ *   id is silently dropped. The server validates neither, so callers MUST
+ *   validate ids before calling.
+ * - **Unknown ids vanish silently** — see {@link BulkEditTransactionsResult.skipped}.
+ * - **`type: INCOME | INTERNAL_TRANSFER` clears the category** server-side,
+ *   same as `editTransaction`.
+ */
+export async function bulkEditTransactions(
+  client: GraphQLClient,
+  args: BulkEditTransactionsArgs
+): Promise<BulkEditTransactionsResult> {
+  // Defense in depth: the type system already forbids an empty tuple, but this
+  // module is reachable from JS callers and the failure mode is unbounded
+  // writes, so re-check at runtime rather than trusting the cast.
+  if (!Array.isArray(args.ids) || args.ids.length === 0) {
+    throw new Error(
+      'bulkEditTransactions: refusing to send without explicit target ids — ' +
+        'an unfiltered bulk edit applies to an unbounded row set'
+    );
+  }
+  const data = await client.mutate<
+    { input: BulkEditTransactionInput; filter: { ids: TransactionIdentifierInput[] } },
+    BulkEditTransactionsResponse
+  >('BulkEditTransactions', BULK_EDIT_TRANSACTIONS, {
+    input: args.input,
+    // `ids` is the ONLY filter key ever sent. See BulkEditTransactionsArgs.
+    filter: { ids: args.ids.map(({ id, accountId, itemId }) => ({ id, accountId, itemId })) },
+  });
+  const { updated, failed } = data.bulkEditTransactions;
+  const accountedFor = new Set<string>([
+    ...updated.map((t) => t.id),
+    ...failed.map((f) => f.transaction?.id).filter((id): id is string => id !== undefined),
+  ]);
+  return {
+    updated,
+    failed,
+    skipped: args.ids.map((t) => t.id).filter((id) => !accountedFor.has(id)),
+  };
 }
 
 export interface DeleteTransactionArgs {

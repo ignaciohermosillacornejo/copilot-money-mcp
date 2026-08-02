@@ -10,7 +10,7 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
-import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
+import { createMockGraphQLClient, bulkEditEcho } from '../helpers/mock-graphql.js';
 
 const currentMonth = (): string => {
   const d = new Date();
@@ -88,23 +88,7 @@ describe('optimistic cache patching — transactions', () => {
         user_reviewed: false,
       },
     ];
-    const client = createMockGraphQLClient({
-      EditTransaction: {
-        editTransaction: {
-          transaction: {
-            id: 't1',
-            name: 'T1',
-            categoryId: '',
-            userNotes: null,
-            isReviewed: true,
-            type: 'REGULAR',
-            date: '2026-04-01',
-            amount: 50,
-            tags: [],
-          },
-        },
-      },
-    });
+    const client = createMockGraphQLClient({ BulkEditTransactions: bulkEditEcho });
     tools = new CopilotMoneyTools(db, client);
 
     await tools.reviewTransactions({ transaction_ids: ['t1', 't2'], reviewed: true });

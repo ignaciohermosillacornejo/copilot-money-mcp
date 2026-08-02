@@ -7,7 +7,7 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { CopilotMoneyTools, createToolSchemas } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
-import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
+import { createMockGraphQLClient, bulkEditEcho } from '../helpers/mock-graphql.js';
 import type { EditTransactionResponse } from '../../src/core/graphql/transactions.js';
 import type {
   Transaction,
@@ -926,6 +926,7 @@ describe('CopilotMoneyTools Integration', () => {
         goalHistory: [...mockGoalHistory],
       });
       client = createMockGraphQLClient({
+        BulkEditTransactions: bulkEditEcho,
         EditTransaction: (vars: any): EditTransactionResponse => ({
           editTransaction: {
             transaction: {

@@ -26,7 +26,7 @@ import type {
   InvestmentPrice,
   HoldingsHistory,
 } from '../../src/models/index.js';
-import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
+import { createMockGraphQLClient, bulkEditEcho } from '../helpers/mock-graphql.js';
 import type { EditTransactionResponse } from '../../src/core/graphql/transactions.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
@@ -507,6 +507,7 @@ function createMockDb(): CopilotDatabase {
  */
 function createMockWriteClient() {
   return createMockGraphQLClient({
+    BulkEditTransactions: bulkEditEcho,
     EditTransaction: (vars: any): EditTransactionResponse => ({
       editTransaction: {
         transaction: {

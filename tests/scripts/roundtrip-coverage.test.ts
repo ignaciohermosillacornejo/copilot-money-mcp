@@ -12,8 +12,8 @@
  *     ledger as a `kind: 'applies'` entry gated by `smoke:roundtrip`, and
  *     every `:applies` ledger surface is claimed by at least one check
  *     (no paper gates, no untracked verification);
- * (d) safety invariants: the marker convention, the bulkEditTransactions
- *     ban (source scan), and synthetic-only amounts in the checks source.
+ * (d) safety invariants: the marker convention, the "bulk edits must name
+ *     explicit ids" scan (source), and synthetic-only amounts in the source.
  *
  * Together with `tests/conformance/ledger.test.ts` (which verifies the
  * `smoke:roundtrip` oracle script exists), this is the B4 analog of
@@ -122,9 +122,32 @@ describe('round-trip coverage ratchet', () => {
     expect(makeMarker()).toMatch(/^__smoke__\d+$/);
   });
 
-  test('(d) the round-trip suite never references bulkEditTransactions', () => {
-    expect(CHECKS_SOURCE).not.toContain('bulkEditTransactions');
-    expect(CHECKS_SOURCE).not.toContain('bulk_edit');
+  test('(d) the round-trip suite never sends an unfiltered bulk edit', () => {
+    // This ratchet used to ban `bulkEditTransactions` outright, because the
+    // mutation was DO-NOT-PROBE when the suite was written — its input shape
+    // was unknown and a malformed call had already made the server execute a
+    // real SQL query. It is now captured, ledgered and adopted, so the blanket
+    // ban is retired in favour of the invariant that actually protects the
+    // account: `filter` is NULLABLE server-side, so a bulk call without
+    // explicit ids applies to an unbounded row set. Every call in the smoke
+    // suite must name its targets.
+    const bulkCalls = [
+      ...CHECKS_SOURCE.matchAll(
+        /bulkEditTransactions\(\s*ctx\.client,\s*\{([\s\S]{0,600}?)\n {6}\}\)/g
+      ),
+    ];
+    expect(
+      bulkCalls.length,
+      'expected the suite to exercise bulkEditTransactions — if it no longer does, delete this test'
+    ).toBeGreaterThan(0);
+    for (const [, body] of bulkCalls) {
+      // Accepts both `ids: [...]` and the `ids,` shorthand.
+      expect(body, 'every bulkEditTransactions call must pass explicit ids').toMatch(/\bids[,:]/);
+      // Scoped to the bulk call body on purpose: `matchString` is legitimate
+      // in the READ helper that finds this run's rows by marker. Inside a bulk
+      // EDIT it would widen the row set beyond the ids we named.
+      expect(body, 'a bulk edit must not carry a widening filter key').not.toContain('matchString');
+    }
   });
 
   test('(d) all amounts in the checks source are synthetic (100/200 family)', () => {

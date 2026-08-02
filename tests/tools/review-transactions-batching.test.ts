@@ -1,28 +1,57 @@
 /**
- * Tests for review_transactions behavior over the GraphQL path.
+ * Tests for review_transactions over the GraphQL path.
  *
- * The current implementation issues one EditTransaction mutation per
- * transaction with bounded concurrency (max 5 in flight). This file
- * verifies:
- *  - one GraphQL call is issued per transaction ID
- *  - each call carries the right accountId/itemId from the local cache
- *  - result shape matches the input
- *  - at no point are there more than 5 in-flight GraphQL mutations
+ * The tool now issues ONE `bulkEditTransactions` mutation for the whole set
+ * (Copilot's native bulk endpoint) instead of a bounded fan-out of
+ * `editTransaction` calls. The properties that matter:
+ *  - exactly one GraphQL call, whatever the batch size
+ *  - every id reaches the server in `filter.ids` with its routing triple
+ *  - `filter` carries ONLY `ids` — any other TransactionFilter key would widen
+ *    the row set, and `filter` is nullable server-side, so this is the whole
+ *    safety story
+ *  - rows-mode routing is passed through verbatim
+ *  - a silently-skipped id (the server drops unknown ids without erroring)
+ *    fails the call rather than reporting a clean success
+ *  - the optimistic cache patch reflects only rows the server confirmed
  */
 
 import { describe, test, expect } from 'bun:test';
-import { mock } from 'bun:test';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
 import { GraphQLError } from '../../src/core/graphql/client.js';
-import type { GraphQLClient } from '../../src/core/graphql/client.js';
-import type { EditTransactionResponse } from '../../src/core/graphql/transactions.js';
+import type { BulkEditTransactionsResponse } from '../../src/core/graphql/transactions.js';
+
+function txnPayload(id: string, isReviewed = true) {
+  return {
+    id,
+    name: `Txn ${id}`,
+    categoryId: 'c',
+    userNotes: null,
+    isReviewed,
+    type: 'REGULAR' as const,
+    date: '2024-01-01',
+    amount: 50,
+    tags: [],
+  };
+}
+
+/** Echo every requested id back as updated — the all-succeeded server case. */
+function echoBulk(vars: unknown): BulkEditTransactionsResponse {
+  const v = vars as { filter: { ids: { id: string }[] }; input: { isReviewed?: boolean } };
+  return {
+    bulkEditTransactions: {
+      updated: v.filter.ids.map((t) => txnPayload(t.id, v.input.isReviewed ?? true)),
+      failed: [],
+    },
+  };
+}
+
+const echoClient = () => createMockGraphQLClient({ BulkEditTransactions: echoBulk });
 
 function makeMockDb(txnIds: string[]): CopilotDatabase {
   const db = new CopilotDatabase('/nonexistent');
   (db as any)._allCollectionsLoaded = true;
-
   const transactions = txnIds.map((id) => ({
     transaction_id: id,
     item_id: 'item1',
@@ -34,257 +63,147 @@ function makeMockDb(txnIds: string[]): CopilotDatabase {
   }));
   (db as any).getAllTransactions = async () => transactions;
   (db as any).clearCache = () => {};
-
   return db;
 }
 
-describe('review_transactions dispatches one EditTransaction per id', () => {
+describe('review_transactions issues ONE bulk call for the whole set', () => {
   test('single transaction', async () => {
     const db = makeMockDb(['txn-1']);
-    const client = createMockGraphQLClient({
-      EditTransaction: {
-        editTransaction: {
-          transaction: {
-            id: 'txn-1',
-            name: 'Coffee Shop',
-            categoryId: 'c',
-            userNotes: null,
-            isReviewed: true,
-            type: 'REGULAR',
-            date: '2024-01-01',
-            amount: 50,
-            tags: [],
-          },
-        },
-      },
-    });
+    const client = echoClient();
     const tools = new CopilotMoneyTools(db, client);
 
     const result = await tools.reviewTransactions({ transaction_ids: ['txn-1'] });
+
     expect(result.success).toBe(true);
     expect(result.reviewed_count).toBe(1);
+    expect(result.transaction_ids).toEqual(['txn-1']);
     expect(client._calls).toHaveLength(1);
-    expect(client._calls[0].op).toBe('EditTransaction');
-    expect(client._calls[0].variables).toMatchObject({
-      id: 'txn-1',
-      accountId: 'acct1',
-      itemId: 'item1',
+    expect(client._calls[0]!.op).toBe('BulkEditTransactions');
+    expect(client._calls[0]!.variables).toEqual({
       input: { isReviewed: true },
+      filter: { ids: [{ id: 'txn-1', accountId: 'acct1', itemId: 'item1' }] },
     });
   });
 
-  test('batch of 25 issues one call per id', async () => {
+  test('batch of 25 is still exactly one call carrying all 25 ids', async () => {
     const ids = Array.from({ length: 25 }, (_, i) => `txn-${String(i).padStart(2, '0')}`);
     const db = makeMockDb(ids);
-    const client = createMockGraphQLClient({
-      EditTransaction: (vars: any) => ({
-        editTransaction: {
-          transaction: {
-            id: vars.id,
-            name: 'Coffee Shop',
-            categoryId: 'c',
-            userNotes: null,
-            isReviewed: true,
-            type: 'REGULAR',
-            date: '2024-01-01',
-            amount: 50,
-            tags: [],
-          },
-        },
-      }),
-    });
+    const client = echoClient();
     const tools = new CopilotMoneyTools(db, client);
 
     const result = await tools.reviewTransactions({ transaction_ids: ids });
-    expect(result.success).toBe(true);
-    expect(result.reviewed_count).toBe(25);
-    expect(result.transaction_ids).toEqual(ids);
 
-    expect(client._calls).toHaveLength(25);
-    // Every id should have been called exactly once (bounded-concurrency
-    // does not guarantee call-ordering across workers, only that the count
-    // and set of ids match).
-    const calledIds = client._calls.map((c) => (c.variables as any).id).sort();
-    expect(calledIds).toEqual([...ids].sort());
+    expect(result.reviewed_count).toBe(25);
+    // The headline property: turn count and round trips are both 1.
+    expect(client._calls).toHaveLength(1);
+    const vars = client._calls[0]!.variables as { filter: { ids: { id: string }[] } };
+    expect(vars.filter.ids.map((t) => t.id).sort()).toEqual([...ids].sort());
+  });
+
+  test('filter carries ONLY ids — no matchString or other widening key', async () => {
+    const db = makeMockDb(['txn-1', 'txn-2']);
+    const client = echoClient();
+    const tools = new CopilotMoneyTools(db, client);
+
+    await tools.reviewTransactions({ transaction_ids: ['txn-1', 'txn-2'] });
+
+    const vars = client._calls[0]!.variables as { filter: Record<string, unknown> };
+    // `filter` is nullable server-side and TransactionFilter also accepts
+    // dates/categoryIds/isReviewed/types — any of which would silently widen
+    // the row set beyond the ids we asked for.
+    expect(Object.keys(vars.filter)).toEqual(['ids']);
   });
 
   test('passes reviewed=false through as isReviewed=false', async () => {
-    const db = makeMockDb(['a', 'b']);
-    const client = createMockGraphQLClient({
-      EditTransaction: (vars: any) => ({
-        editTransaction: {
-          transaction: {
-            id: vars.id,
-            name: 'Coffee Shop',
-            categoryId: 'c',
-            userNotes: null,
-            isReviewed: vars.input.isReviewed,
-            type: 'REGULAR',
-            date: '2024-01-01',
-            amount: 50,
-            tags: [],
-          },
-        },
-      }),
-    });
+    const db = makeMockDb(['txn-1']);
+    const client = echoClient();
     const tools = new CopilotMoneyTools(db, client);
 
-    await tools.reviewTransactions({ transaction_ids: ['a', 'b'], reviewed: false });
-    expect(client._calls.every((c) => (c.variables as any).input.isReviewed === false)).toBe(true);
+    const result = await tools.reviewTransactions({
+      transaction_ids: ['txn-1'],
+      reviewed: false,
+    });
+
+    expect(result.reviewed_count).toBe(1);
+    const vars = client._calls[0]!.variables as { input: { isReviewed: boolean } };
+    expect(vars.input.isReviewed).toBe(false);
+  });
+
+  test('defaults reviewed to true when not specified', async () => {
+    const db = makeMockDb(['txn-1']);
+    const client = echoClient();
+    const tools = new CopilotMoneyTools(db, client);
+
+    await tools.reviewTransactions({ transaction_ids: ['txn-1'] });
+
+    const vars = client._calls[0]!.variables as { input: { isReviewed: boolean } };
+    expect(vars.input.isReviewed).toBe(true);
   });
 });
 
-describe('review_transactions respects 5-parallel concurrency cap', () => {
-  /**
-   * Build a GraphQL client that delays every mutate() for `delayMs` and
-   * tracks the max number of concurrent in-flight calls.
-   */
-  function makeConcurrencyTrackingClient(delayMs: number): GraphQLClient & {
-    _maxConcurrent: number;
-    _inflightSamples: number[];
-    _totalCalls: number;
-  } {
-    let inflight = 0;
-    let maxConcurrent = 0;
-    const samples: number[] = [];
-    let totalCalls = 0;
-
-    const client = {
-      mutate: mock(async (_op: string, _query: string, vars: unknown): Promise<unknown> => {
-        inflight++;
-        totalCalls++;
-        maxConcurrent = Math.max(maxConcurrent, inflight);
-        samples.push(inflight);
-        try {
-          await new Promise((r) => setTimeout(r, delayMs));
-          const v = vars as { id: string; input: { isReviewed: boolean } };
-          const response: EditTransactionResponse = {
-            editTransaction: {
-              transaction: {
-                id: v.id,
-                name: 'Coffee Shop',
-                categoryId: 'c',
-                userNotes: null,
-                isReviewed: v.input.isReviewed,
-                type: 'REGULAR',
-                date: '2024-01-01',
-                amount: 50,
-                tags: [],
-              },
-            },
-          };
-          return response;
-        } finally {
-          inflight--;
-        }
-      }),
-      get _maxConcurrent(): number {
-        return maxConcurrent;
+describe('review_transactions surfaces server-side partial application', () => {
+  test('a silently-skipped id fails the call instead of reporting success', async () => {
+    // Verified live: the server drops ids it cannot find WITHOUT erroring and
+    // WITHOUT a failed[] entry. If we trusted failed[] alone this batch would
+    // report a clean success having written only half of it.
+    const db = makeMockDb(['txn-1', 'txn-2']);
+    const client = createMockGraphQLClient({
+      BulkEditTransactions: {
+        bulkEditTransactions: { updated: [txnPayload('txn-1')], failed: [] },
       },
-      get _inflightSamples(): number[] {
-        return samples;
-      },
-      get _totalCalls(): number {
-        return totalCalls;
-      },
-    };
-    return client as unknown as GraphQLClient & {
-      _maxConcurrent: number;
-      _inflightSamples: number[];
-      _totalCalls: number;
-    };
-  }
-
-  test('batch of 20 never exceeds 5 concurrent calls', async () => {
-    const ids = Array.from({ length: 20 }, (_, i) => `txn-${String(i).padStart(2, '0')}`);
-    const db = makeMockDb(ids);
-    // Use a delay so multiple workers genuinely run concurrently.
-    const client = makeConcurrencyTrackingClient(25);
+    });
     const tools = new CopilotMoneyTools(db, client);
 
-    const result = await tools.reviewTransactions({ transaction_ids: ids });
-    expect(result.success).toBe(true);
-    expect(result.reviewed_count).toBe(20);
-    expect(client._totalCalls).toBe(20);
-
-    // The cap is 5: we should observe concurrency saturated at 5 but
-    // never strictly greater than 5.
-    expect(client._maxConcurrent).toBeLessThanOrEqual(5);
-    // Sanity: we also want to confirm real parallelism — at least one
-    // sample should be > 1 (otherwise we'd be sequential).
-    expect(client._maxConcurrent).toBeGreaterThan(1);
+    await expect(tools.reviewTransactions({ transaction_ids: ['txn-1', 'txn-2'] })).rejects.toThrow(
+      /did not apply 1 transaction\(s\)[\s\S]*txn-2/
+    );
   });
 
-  test('batch of 3 runs all concurrently (below cap)', async () => {
-    const ids = ['a', 'b', 'c'];
-    const db = makeMockDb(ids);
-    const client = makeConcurrencyTrackingClient(20);
+  test('a failed[] entry throws, naming the row and its errorCode', async () => {
+    const db = makeMockDb(['txn-1', 'txn-2']);
+    const client = createMockGraphQLClient({
+      BulkEditTransactions: {
+        bulkEditTransactions: {
+          updated: [txnPayload('txn-1')],
+          failed: [{ transaction: { id: 'txn-2' }, error: 'nope', errorCode: 'SOME_CODE' }],
+        },
+      },
+    });
     const tools = new CopilotMoneyTools(db, client);
 
-    await tools.reviewTransactions({ transaction_ids: ids });
-    // All 3 should be able to run in parallel (since 3 < 5).
-    expect(client._maxConcurrent).toBeLessThanOrEqual(5);
-    expect(client._maxConcurrent).toBeGreaterThanOrEqual(2);
+    await expect(tools.reviewTransactions({ transaction_ids: ['txn-1', 'txn-2'] })).rejects.toThrow(
+      /rejected 1 of 2[\s\S]*txn-2: SOME_CODE/
+    );
   });
 
-  test('partial failure reports non-zero succeeded count under bounded concurrency', async () => {
-    // Mock 8 transactions; fail on 'txn-05'. Concurrent workers mean txns 1-4
-    // and some of 6-8 may complete before the failure surfaces.
-    const txnIds = Array.from({ length: 8 }, (_, i) => `txn-0${i + 1}`);
-    const db = makeMockDb(txnIds);
-
-    const client = {
-      mutate: mock((_op: string, _q: string, vars: any) => {
-        if (vars.id === 'txn-05') {
-          return Promise.reject(new GraphQLError('USER_ACTION_REQUIRED', 'simulated failure'));
-        }
-        return Promise.resolve({
-          editTransaction: {
-            transaction: {
-              id: vars.id,
-              categoryId: 'c1',
-              userNotes: null,
-              isReviewed: true,
-              type: 'REGULAR',
-              tags: [],
-            },
-          },
-        });
-      }),
-    } as unknown as GraphQLClient;
-
+  test('throws on GraphQL error', async () => {
+    const db = makeMockDb(['txn-1']);
+    const client = createMockGraphQLClient({
+      BulkEditTransactions: new GraphQLError('USER_ACTION_REQUIRED', 'session expired'),
+    });
     const tools = new CopilotMoneyTools(db, client);
 
-    await expect(
-      tools.reviewTransactions({ transaction_ids: txnIds, reviewed: true })
-    ).rejects.toThrow(/review_transactions failed at id=txn-05 \(\d+\/8 succeeded\)/);
+    await expect(tools.reviewTransactions({ transaction_ids: ['txn-1'] })).rejects.toThrow(
+      /review_transactions failed/
+    );
+  });
+
+  test('only server-confirmed rows are patched into the cache', async () => {
+    const db = makeMockDb(['txn-1', 'txn-2']);
+    const patched: string[] = [];
+    (db as any).patchCachedTransaction = (id: string) => patched.push(id);
+    const client = echoClient();
+    const tools = new CopilotMoneyTools(db, client);
+
+    await tools.reviewTransactions({ transaction_ids: ['txn-1', 'txn-2'] });
+
+    expect(patched.sort()).toEqual(['txn-1', 'txn-2']);
   });
 });
 
 describe('review_transactions rows mode (out-of-window bypass)', () => {
-  const echoClient = () =>
-    createMockGraphQLClient({
-      EditTransaction: (vars: any) => ({
-        editTransaction: {
-          transaction: {
-            id: vars.id,
-            name: 'Old Row',
-            categoryId: 'c',
-            userNotes: null,
-            isReviewed: vars.input.isReviewed,
-            type: 'REGULAR',
-            date: '2024-01-01',
-            amount: 50,
-            tags: [],
-          },
-        },
-      }),
-    });
-
   test('rows dispatch with the caller-supplied routing ids, skipping local resolution', async () => {
-    // Empty cache: id-based resolution would reject both rows. The rows
-    // entries carry the routing ids directly (from a live read), so the
-    // writes go out anyway — the out-of-window bulk path.
+    // Empty cache: local resolution would fail for these ids.
     const db = makeMockDb([]);
     const client = echoClient();
     const tools = new CopilotMoneyTools(db, client);
@@ -296,47 +215,35 @@ describe('review_transactions rows mode (out-of-window bypass)', () => {
       ],
     });
 
-    expect(result.success).toBe(true);
     expect(result.reviewed_count).toBe(2);
-    expect(result.transaction_ids).toEqual(['old-1', 'old-2']);
-
-    expect(client._calls).toHaveLength(2);
-    const byId = new Map(client._calls.map((c) => [(c.variables as any).id, c.variables as any]));
-    expect(byId.get('old-1')).toMatchObject({
-      accountId: 'acctA',
-      itemId: 'itemA',
-      input: { isReviewed: true },
-    });
-    expect(byId.get('old-2')).toMatchObject({
-      accountId: 'acctB',
-      itemId: 'itemB',
-      input: { isReviewed: true },
-    });
+    expect(client._calls).toHaveLength(1);
+    const vars = client._calls[0]!.variables as {
+      filter: { ids: { id: string; accountId: string; itemId: string }[] };
+    };
+    expect(vars.filter.ids).toEqual([
+      { id: 'old-1', accountId: 'acctA', itemId: 'itemA' },
+      { id: 'old-2', accountId: 'acctB', itemId: 'itemB' },
+    ]);
   });
 
-  test('large rows batch issues one call per row through the shared worker loop', async () => {
+  test('large rows batch is still one call', async () => {
     const db = makeMockDb([]);
     const client = echoClient();
     const tools = new CopilotMoneyTools(db, client);
 
-    const rows = Array.from({ length: 25 }, (_, i) => ({
-      transaction_id: `old-${String(i).padStart(2, '0')}`,
+    const rows = Array.from({ length: 40 }, (_, i) => ({
+      transaction_id: `row-${String(i).padStart(2, '0')}`,
       account_id: 'acctA',
       item_id: 'itemA',
     }));
-    const result = await tools.reviewTransactions({ rows, reviewed: false });
+    const result = await tools.reviewTransactions({ rows });
 
-    expect(result.reviewed_count).toBe(25);
-    expect(result.transaction_ids).toEqual(rows.map((r) => r.transaction_id));
-    expect(client._calls).toHaveLength(25);
-    const calledIds = client._calls.map((c) => (c.variables as any).id).sort();
-    expect(calledIds).toEqual(rows.map((r) => r.transaction_id).sort());
+    expect(result.reviewed_count).toBe(40);
+    expect(client._calls).toHaveLength(1);
   });
 
   test('rows win when both modes are passed', async () => {
-    // 'ghost' is unresolvable, which would reject the transaction_ids path —
-    // proving the rows path took precedence.
-    const db = makeMockDb([]);
+    const db = makeMockDb(['txn-1']);
     const client = echoClient();
     const tools = new CopilotMoneyTools(db, client);
 

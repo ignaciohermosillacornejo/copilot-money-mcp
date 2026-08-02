@@ -9,7 +9,7 @@ import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import type { LiveCopilotDatabase } from '../../src/core/live-database.js';
-import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
+import { createMockGraphQLClient, bulkEditEcho } from '../helpers/mock-graphql.js';
 
 function echoEdit(vars: any) {
   return {
@@ -164,7 +164,10 @@ describe('resolveTransactionMeta v2 — live mode', () => {
   });
 
   test('bulk review: mixed index/fetch resolution, one fetch total; honest bulk error', async () => {
-    const client = createMockGraphQLClient({ EditTransaction: echoEdit as any });
+    // review_transactions now issues one BulkEditTransactions call, but the
+    // resolution half under test is unchanged: both ids must resolve from a
+    // single windowed fetch before the write goes out.
+    const client = createMockGraphQLClient({ BulkEditTransactions: bulkEditEcho });
     const { liveDb, getTransactions } = stubLiveDb({
       indexed: { tA: { accountId: 'acct-1', itemId: 'item-1' } },
       liveRows: [{ id: 'tB', accountId: 'acct-2', itemId: 'item-2' }],

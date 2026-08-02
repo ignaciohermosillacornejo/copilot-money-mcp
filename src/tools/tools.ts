@@ -24,6 +24,9 @@ import {
   deleteTransaction as gqlDeleteTransaction,
   addTransactionToRecurring as gqlAddTransactionToRecurring,
   splitTransaction as gqlSplitTransaction,
+  bulkEditTransactions as gqlBulkEditTransactions,
+  type BulkEditTransactionInput,
+  type BulkEditTransactionsResult,
   type CreatedTransaction,
   type CreateTransactionInput,
   type TransactionType,
@@ -316,6 +319,16 @@ export interface HoldingEntry {
  * are included alongside their children. Copilot hides parents in its own
  * UI for the same reason.
  */
+/**
+ * Ceiling on targets per bulk_edit_transactions call.
+ *
+ * Unlike a client-side fan-out, the whole batch is ONE server request, so this
+ * bounds the size of the request body and the blast radius of a mistaken call
+ * rather than any concurrency. Copilot's own web UI has no documented cap;
+ * this is ours, chosen to keep a misfire recoverable by hand.
+ */
+const MAX_BULK_EDIT_TARGETS = 500;
+
 function filterSplitParents<T extends { children_transaction_ids?: string[] }>(txns: T[]): T[] {
   return txns.filter((t) => !t.children_transaction_ids || t.children_transaction_ids.length === 0);
 }
@@ -3424,13 +3437,78 @@ export class CopilotMoneyTools {
     const client = this.getGraphQLClient();
 
     const { transaction_ids, rows, reviewed = true } = args;
+    const entries = await this.resolveBulkTargets(
+      { transaction_ids, rows },
+      'review out-of-window transactions'
+    );
+    const idList = entries.map((entry) => entry.id);
 
-    // Normalize both input modes to one entries list; everything below
-    // (worker loop, error payloads, result) references only this list.
-    // A caller who passed `rows` chose the bypass mode: an empty/invalid
-    // value gets a rows-shaped error rather than silently falling through
-    // to the transaction_ids path and its misleading message.
-    let entries: Array<{ id: string; accountId: string; itemId: string }>;
+    // ONE bulkEditTransactions request for the whole set, replacing the former
+    // 5-wide fan-out of editTransaction calls. `isReviewed` is one of the five
+    // fields BulkEditTransactionInput accepts, and every row here takes the
+    // SAME value, so this tool is an exact fit for the bulk mutation's
+    // one-input-many-rows shape. (Tools that need per-row edits, or the
+    // name/date/amount/note fields bulk does not support, still fan out.)
+    const [first, ...rest] = entries;
+    const result = await this.bulkEdit(
+      client,
+      [first!, ...rest],
+      { isReviewed: reviewed },
+      'review_transactions'
+    );
+
+    // Unknown ids are dropped silently by the server rather than reported in
+    // failed[] (verified live). Surfacing them as a hard failure preserves the
+    // pre-bulk contract: a review that didn't land must not report success.
+    if (result.skipped.length > 0) {
+      throw new Error(
+        `review_transactions: ${result.updated.length}/${entries.length} succeeded — ` +
+          `the server did not apply ${String(result.skipped.length)} transaction(s) and reported ` +
+          `no error for them: ${result.skipped.join(', ')}. They may have been deleted, or the ` +
+          'account_id/item_id routing may not match the transaction.'
+      );
+    }
+
+    // Optimistic cache patch — only ids the server confirmed it wrote. A
+    // partial batch must not leave the cache claiming writes that never
+    // landed. For rows-mode entries outside the local cache both patches are
+    // no-ops (same eviction-is-a-no-op contract as delete_transaction).
+    for (const tx of result.updated) {
+      this.db.patchCachedTransaction(tx.id, { user_reviewed: reviewed });
+      this.liveDb?.patchLiveTransaction(tx.id, { user_reviewed: reviewed });
+    }
+
+    return {
+      success: true,
+      reviewed_count: result.updated.length,
+      transaction_ids: idList,
+    };
+  }
+
+  /**
+   * Normalize the two targeting modes shared by every bulk write tool into one
+   * entries list.
+   *
+   * - `transaction_ids`: routing ids resolved locally (live-first meta index /
+   *   windowed fetch; LevelDB in degraded mode) — only reaches transactions the
+   *   resolution window can see.
+   * - `rows`: each {transaction_id, account_id, item_id} (from a live read)
+   *   supplies routing directly, so out-of-window rows work too. Wins when both
+   *   are passed — a caller who passed `rows` chose the bypass mode, so an
+   *   empty/invalid value gets a rows-shaped error rather than silently falling
+   *   through to the transaction_ids path and its misleading message.
+   *
+   * Shared so `review_transactions` and `bulk_edit_transactions` cannot drift
+   * on which ids they accept or how they report unresolvable ones.
+   */
+  private async resolveBulkTargets(
+    args: {
+      transaction_ids?: string[];
+      rows?: Array<{ transaction_id: string; account_id: string; item_id: string }>;
+    },
+    outOfWindowAction: string
+  ): Promise<Array<{ id: string; accountId: string; itemId: string }>> {
+    const { transaction_ids, rows } = args;
     if (rows !== undefined) {
       if (!Array.isArray(rows) || rows.length === 0) {
         throw new Error(
@@ -3443,111 +3521,243 @@ export class CopilotMoneyTools {
         validateDocId(row.account_id, 'account_id');
         validateDocId(row.item_id, 'item_id');
       }
-      entries = rows.map((row) => ({
+      return rows.map((row) => ({
         id: row.transaction_id,
         accountId: row.account_id,
         itemId: row.item_id,
       }));
-    } else {
-      if (!Array.isArray(transaction_ids) || transaction_ids.length === 0) {
-        throw new Error(
-          'transaction_ids must be a non-empty array — or pass a rows array of ' +
-            '{transaction_id, account_id, item_id} (from a live read) to bypass local resolution'
-        );
-      }
-
-      for (const id of transaction_ids) {
-        validateDocId(id, 'transaction_id');
-      }
-
-      // Resolve account/item ids for all targets — live-first via the meta
-      // index / windowed fetch; local cache only in degraded (no-liveDb)
-      // mode. See resolveTransactionMeta().
-      const { meta: metaMap, liveWindowMonths } =
-        await this.resolveTransactionMeta(transaction_ids);
-      const missing = transaction_ids.filter((id) => !metaMap.has(id));
-      if (missing.length > 0) {
-        throw new Error(
-          CopilotMoneyTools.transactionsNotFoundMessage(missing, liveWindowMonths) +
-            " Pass a 'rows' array of {transaction_id, account_id, item_id} (from a live read) " +
-            'to review out-of-window transactions.'
-        );
-      }
-      entries = transaction_ids.map((id) => {
-        const meta = metaMap.get(id)!;
-        return { id, accountId: meta.accountId, itemId: meta.itemId };
-      });
     }
-    const idList = entries.map((entry) => entry.id);
+    if (!Array.isArray(transaction_ids) || transaction_ids.length === 0) {
+      throw new Error(
+        'transaction_ids must be a non-empty array — or pass a rows array of ' +
+          '{transaction_id, account_id, item_id} (from a live read) to bypass local resolution'
+      );
+    }
+    for (const id of transaction_ids) {
+      validateDocId(id, 'transaction_id');
+    }
+    const { meta: metaMap, liveWindowMonths } = await this.resolveTransactionMeta(transaction_ids);
+    const missing = transaction_ids.filter((id) => !metaMap.has(id));
+    if (missing.length > 0) {
+      throw new Error(
+        CopilotMoneyTools.transactionsNotFoundMessage(missing, liveWindowMonths) +
+          " Pass a 'rows' array of {transaction_id, account_id, item_id} (from a live read) " +
+          `to ${outOfWindowAction}.`
+      );
+    }
+    return transaction_ids.map((id) => {
+      const meta = metaMap.get(id)!;
+      return { id, accountId: meta.accountId, itemId: meta.itemId };
+    });
+  }
 
-    // Bounded concurrency: never more than CONCURRENCY in flight at once.
-    // The user explicitly asked to cap parallel writes at 5 to avoid
-    // hammering Copilot's API. We preserve the partial-failure contract:
-    // on the first error we stop starting new writes, wait for in-flight
-    // ones to settle, and surface the error with a success count that
-    // accurately reflects completed writes.
-    const CONCURRENCY = 5;
-    let reviewed_count = 0;
-    // The `null as {...} | null` cast is load-bearing under TS strict: a bare
-    // `= null` lets control-flow analysis narrow the variable to `null` and
-    // forget the annotated wider type, which then breaks the `if (firstError)`
-    // narrow + the `error instanceof GraphQLError` check below. Don't remove.
-    let firstError: { id: string; error: unknown } | null = null as {
-      id: string;
-      error: unknown;
-    } | null;
-    let cursor = 0;
-
-    const worker = async (): Promise<void> => {
-      while (true) {
-        if (firstError) return;
-        const idx = cursor++;
-        if (idx >= entries.length) return;
-        const entry = entries[idx]!;
-        try {
-          await editTransaction(client, {
-            id: entry.id,
-            accountId: entry.accountId,
-            itemId: entry.itemId,
-            input: { isReviewed: reviewed },
-          });
-          reviewed_count++;
-        } catch (e) {
-          // Record the first failure only; other in-flight workers settle.
-          if (!firstError) firstError = { id: entry.id, error: e };
-          return;
-        }
+  /**
+   * Shared bulkEditTransactions call path: validate-then-write, with the
+   * server's per-row rejections normalized into a thrown error.
+   *
+   * Every consumer goes through here so the two non-obvious server behaviours
+   * are handled in exactly one place:
+   *  - `failed[]` entries are a hard error (no partial-success reporting; the
+   *    caller decides what to do with `skipped`).
+   *  - GraphQLError is mapped to the MCP error string, matching every other
+   *    write tool.
+   */
+  private async bulkEdit(
+    client: GraphQLClient,
+    ids: [
+      { id: string; accountId: string; itemId: string },
+      ...{ id: string; accountId: string; itemId: string }[],
+    ],
+    input: BulkEditTransactionInput,
+    label: string
+  ): Promise<BulkEditTransactionsResult> {
+    let result: BulkEditTransactionsResult;
+    try {
+      result = await gqlBulkEditTransactions(client, { ids, input });
+    } catch (e) {
+      if (e instanceof GraphQLError) {
+        throw new Error(`${label} failed: ${graphQLErrorToMcpError(e)}`, { cause: e });
       }
-    };
+      throw e;
+    }
+    if (result.failed.length > 0) {
+      const detail = result.failed
+        .map(
+          (f) =>
+            `${f.transaction?.id ?? '<unknown>'}: ${f.errorCode}${f.error ? ` ${f.error}` : ''}`
+        )
+        .join('; ');
+      throw new Error(
+        `${label}: server rejected ${String(result.failed.length)} of ${String(ids.length)} ` +
+          `transaction(s) (${result.updated.length} succeeded): ${detail}`
+      );
+    }
+    return result;
+  }
 
-    const workerCount = Math.min(CONCURRENCY, entries.length);
-    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  /**
+   * Apply ONE edit to MANY transactions in a single GraphQL request.
+   *
+   * This is a thin, safety-hardened wrapper over Copilot's own
+   * `bulkEditTransactions` mutation — the one its web UI fires from the
+   * multi-select bar. It is deliberately NOT a general batch-edit tool:
+   *
+   * - **Same edit, many rows.** The mutation takes one input applied to the
+   *   whole set. Different edits for different rows require separate calls (or
+   *   `update_transaction` per row).
+   * - **Five fields only.** `BulkEditTransactionInput` accepts exactly
+   *   categoryId / addTagIds / removeTagIds / type / isReviewed (enumerated by
+   *   error-leak probe). `name`, `date`, `amount` and `note` are not bulk-
+   *   editable at all — use `update_transaction`.
+   *
+   * All validation runs BEFORE the write, which matters more here than
+   * anywhere else in the codebase: the server performs NO referential
+   * validation of its own. A nonexistent `category_id` is accepted verbatim
+   * and persisted as a dangling reference (verified live 2026-08-01), so the
+   * only thing standing between a typo and corrupted rows is the check below.
+   */
+  async bulkEditTransactions(args: {
+    transaction_ids?: string[];
+    rows?: Array<{ transaction_id: string; account_id: string; item_id: string }>;
+    category_id?: string;
+    type?: TransactionType;
+    reviewed?: boolean;
+    add_tag_ids?: string[];
+    remove_tag_ids?: string[];
+  }): Promise<{
+    success: true;
+    updated_count: number;
+    transaction_ids: string[];
+    applied: string[];
+  }> {
+    const client = this.getGraphQLClient();
+    const { category_id, type, reviewed, add_tag_ids, remove_tag_ids } = args;
 
-    if (firstError) {
-      const { id, error } = firstError;
-      if (error instanceof GraphQLError) {
-        throw new Error(
-          `review_transactions failed at id=${id} (${reviewed_count}/${entries.length} succeeded): ${graphQLErrorToMcpError(error)}`,
-          { cause: error }
-        );
-      }
-      throw error;
+    // --- Which fields did the caller actually set? ---
+    const applied: string[] = [];
+    if (category_id !== undefined) applied.push('category_id');
+    if (type !== undefined) applied.push('type');
+    if (reviewed !== undefined) applied.push('reviewed');
+    if (add_tag_ids !== undefined) applied.push('add_tag_ids');
+    if (remove_tag_ids !== undefined) applied.push('remove_tag_ids');
+    if (applied.length === 0) {
+      throw new Error(
+        'bulk_edit_transactions requires at least one of: category_id, type, reviewed, ' +
+          'add_tag_ids, remove_tag_ids. Note that name, date, amount and note are NOT ' +
+          'bulk-editable by Copilot — use update_transaction for those.'
+      );
     }
 
-    // Optimistic cache patch — only for ids that successfully completed.
-    // A partial-failure throw above would have bypassed this, so here we
-    // patch every id in the batch. For rows-mode entries outside the local
-    // cache both patches are no-ops (same eviction-is-a-no-op contract as
-    // delete_transaction).
-    for (const id of idList) {
-      this.db.patchCachedTransaction(id, { user_reviewed: reviewed });
-      this.liveDb?.patchLiveTransaction(id, { user_reviewed: reviewed });
+    // --- Per-field validation, all before any write ---
+    if (category_id !== undefined) {
+      validateDocId(category_id, 'category_id');
+      // Load-bearing: the server accepts unknown category ids verbatim and
+      // writes a dangling reference. This is the only guard.
+      await this.validateCategoryId(category_id);
+    }
+    if (type !== undefined && !TRANSACTION_TYPES.includes(type)) {
+      throw new Error(
+        `bulk_edit_transactions: type must be one of ${TRANSACTION_TYPES.join(', ')}. Got: ${type}`
+      );
+    }
+    // Same self-contradiction the singular tool rejects: Copilot clears the
+    // category for INCOME/INTERNAL_TRANSFER, so pairing them silently drops
+    // the category half of the request.
+    if ((type === 'INCOME' || type === 'INTERNAL_TRANSFER') && category_id !== undefined) {
+      throw new Error(
+        `bulk_edit_transactions: category_id cannot be combined with type ${type} — Copilot ` +
+          'clears the category for INCOME/INTERNAL_TRANSFER transactions. Set the type alone, ' +
+          'or use type REGULAR to keep/set a category.'
+      );
+    }
+    if (reviewed !== undefined && typeof reviewed !== 'boolean') {
+      throw new Error(
+        `bulk_edit_transactions: reviewed must be a boolean. Got: ${String(reviewed)}`
+      );
+    }
+    for (const [field, tagIds] of [
+      ['add_tag_ids', add_tag_ids],
+      ['remove_tag_ids', remove_tag_ids],
+    ] as const) {
+      if (tagIds === undefined) continue;
+      if (!Array.isArray(tagIds) || tagIds.length === 0) {
+        throw new Error(`bulk_edit_transactions: ${field} must be a non-empty array when provided`);
+      }
+      for (const tagId of tagIds) validateDocId(tagId, 'tag_id');
+      // The server silently drops unknown tag ids rather than erroring, so an
+      // unvalidated typo would report success having applied nothing.
+      await this.validateTagIds(tagIds);
+    }
+    // Adding and removing the same tag in one call has no defined resolution
+    // order server-side; reject rather than let the outcome be arbitrary.
+    if (add_tag_ids && remove_tag_ids) {
+      const overlap = add_tag_ids.filter((id) => remove_tag_ids.includes(id));
+      if (overlap.length > 0) {
+        throw new Error(
+          `bulk_edit_transactions: tag id(s) ${overlap.join(', ')} appear in both add_tag_ids ` +
+            'and remove_tag_ids — the server does not define which wins'
+        );
+      }
+    }
+
+    const entries = await this.resolveBulkTargets(args, 'edit out-of-window transactions');
+    if (entries.length > MAX_BULK_EDIT_TARGETS) {
+      throw new Error(
+        `bulk_edit_transactions: ${String(entries.length)} targets exceeds the maximum of ` +
+          `${String(MAX_BULK_EDIT_TARGETS)} per call. Split the work into smaller batches.`
+      );
+    }
+    const seen = new Set<string>();
+    for (const entry of entries) {
+      if (seen.has(entry.id)) {
+        throw new Error(`bulk_edit_transactions: duplicate transaction_id ${entry.id}`);
+      }
+      seen.add(entry.id);
+    }
+
+    const input: BulkEditTransactionInput = {};
+    if (category_id !== undefined) input.categoryId = category_id;
+    if (type !== undefined) input.type = type;
+    if (reviewed !== undefined) input.isReviewed = reviewed;
+    if (add_tag_ids !== undefined) input.addTagIds = add_tag_ids;
+    if (remove_tag_ids !== undefined) input.removeTagIds = remove_tag_ids;
+
+    const [first, ...rest] = entries;
+    const result = await this.bulkEdit(client, [first!, ...rest], input, 'bulk_edit_transactions');
+
+    if (result.skipped.length > 0) {
+      throw new Error(
+        `bulk_edit_transactions: ${result.updated.length}/${entries.length} succeeded — the ` +
+          `server did not apply ${String(result.skipped.length)} transaction(s) and reported no ` +
+          `error for them: ${result.skipped.join(', ')}. They may have been deleted, or the ` +
+          'account_id/item_id routing may not match the transaction.'
+      );
+    }
+
+    // Optimistic cache patch, per confirmed row. `type` itself has no local
+    // counterpart (the cache stores Plaid's transaction_type, not Copilot's
+    // classification) — only its category-clearing side effect is patchable.
+    // Tag add/remove is applied against the tag list the SERVER returned, not
+    // recomputed locally, so the cache matches the authoritative result.
+    for (const tx of result.updated) {
+      const patch: Partial<Transaction> = {};
+      if (category_id !== undefined) patch.category_id = category_id;
+      if (reviewed !== undefined) patch.user_reviewed = reviewed;
+      if (type === 'INCOME' || type === 'INTERNAL_TRANSFER') patch.category_id = '';
+      if (add_tag_ids !== undefined || remove_tag_ids !== undefined) {
+        patch.tag_ids = tx.tags.map((t) => t.id);
+      }
+      if (Object.keys(patch).length > 0) {
+        this.db.patchCachedTransaction(tx.id, patch);
+        this.liveDb?.patchLiveTransaction(tx.id, patch);
+      }
     }
 
     return {
       success: true,
-      reviewed_count,
-      transaction_ids: idList,
+      updated_count: result.updated.length,
+      transaction_ids: entries.map((e) => e.id),
+      applied,
     };
   }
 

@@ -145,7 +145,7 @@ After the user approves a batch, apply it in Phase 7.
 
 ## Phase 7 — Write Categorizations and Splits
 
-- **Single category:** `update_transaction(transaction_id, category_id)`, then `review_transactions([id])`.
+- **Single category (the common case):** group the approved orders by target category, then issue **one `bulk_edit_transactions(transaction_ids=[...], category_id=...)` call per category** rather than one `update_transaction` per order — an Amazon reconciliation is routinely 50+ orders. Follow with one `review_transactions([...ids])` for the whole set. Max 500 per call. Use a single `update_transaction` only for a genuine one-off.
 - **Split:** `split_transaction(transaction_id, account_id, item_id, splits=[...])`. All three parent IDs are required — `transaction_id` is the parent transaction, `account_id` is the parent's account ID, `item_id` is Copilot's Firestore `item_id` from the parent transaction row (not the ASIN or any Amazon item identifier). Pull all three from the parent's row in `copilot-amazon-txns.json`. Child amounts must sum to parent amount. Group items by resolved category first — children are one-per-category, not one-per-item. Children inherit the parent's `user_reviewed` state; if the parent was not reviewed, call `review_transactions([child_id_1, child_id_2, ...])` after the split to mark them reviewed (there is no `reviewed` param on `split_transaction`, and `update_transaction` can't set reviewed either — use `review_transactions`).
 
 **Allocation inside a single-shipment split:**

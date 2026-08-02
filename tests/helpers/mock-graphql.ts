@@ -22,6 +22,7 @@ import type {
 } from '../../src/core/graphql/tags.js';
 import type {
   AddTransactionToRecurringResponse,
+  BulkEditTransactionsResponse,
   CreateTransactionResponse,
   DeleteTransactionResponse,
   EditTransactionResponse,
@@ -85,6 +86,7 @@ export interface GraphQLOperationResponses {
   EditRecurring: EditRecurringResponse;
   EditTag: EditTagResponse;
   EditTransaction: EditTransactionResponse;
+  BulkEditTransactions: BulkEditTransactionsResponse;
   SplitTransaction: SplitTransactionResponse;
   // Queries (live reads)
   Accounts: AccountsResponse;
@@ -159,4 +161,48 @@ export function createMockGraphQLClient(responsesByOp: MockResponsesByOp = {}): 
     _calls: calls,
   };
   return client as unknown as MockGraphQLClient;
+}
+
+/**
+ * Canned `BulkEditTransactions` response that echoes every requested id back
+ * as updated, with the requested input applied.
+ *
+ * Shared because the shape is fiddly in a way that matters: the server returns
+ * `updated`/`failed` rather than a single transaction, and the wrapper diffs
+ * `updated` against the ids it asked for to detect silently-skipped rows. A
+ * hand-rolled echo that forgets an id would look like a skip and fail the call
+ * for the wrong reason.
+ */
+export function bulkEditEcho(vars: unknown): GraphQLOperationResponses['BulkEditTransactions'] {
+  const v = vars as {
+    filter: { ids: { id: string }[] };
+    input: {
+      isReviewed?: boolean;
+      categoryId?: string;
+      type?: 'REGULAR' | 'INCOME' | 'INTERNAL_TRANSFER';
+      addTagIds?: string[];
+      removeTagIds?: string[];
+    };
+  };
+  return {
+    bulkEditTransactions: {
+      updated: v.filter.ids.map((t) => ({
+        id: t.id,
+        name: 'Coffee Shop',
+        // Mirror the verified server behaviour: INCOME/INTERNAL_TRANSFER clear
+        // the category regardless of what categoryId was sent.
+        categoryId:
+          v.input.type === 'INCOME' || v.input.type === 'INTERNAL_TRANSFER'
+            ? ''
+            : (v.input.categoryId ?? 'c'),
+        userNotes: null,
+        isReviewed: v.input.isReviewed ?? true,
+        type: v.input.type ?? ('REGULAR' as const),
+        date: '2024-01-15',
+        amount: 50,
+        tags: (v.input.addTagIds ?? []).map((id) => ({ id })),
+      })),
+      failed: [],
+    },
+  };
 }

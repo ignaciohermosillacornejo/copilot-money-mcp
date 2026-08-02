@@ -95,7 +95,7 @@ Track trip expenses by finding transactions in a date range, using location and 
 
 1. **Create the trip tag** if it doesn't exist. Use `create_tag` with the trip name (e.g., "frenchpolynesia", "whistler-jan-2026"). Use lowercase, no spaces.
 
-2. **Tag confirmed transactions.** Use `update_transaction` with `tag_ids` for each approved transaction.
+2. **Tag confirmed transactions.** Use **one `bulk_edit_transactions` call** with `transaction_ids` set to every approved transaction and `add_tag_ids: [trip_tag_id]`. A trip is dozens of transactions and this is one request for all of them. `add_tag_ids` is additive — it preserves any tags a transaction already had, unlike `update_transaction`'s `tag_ids`, which replaces the whole list. Max 500 per call. Use `update_transaction` only for a genuine one-off.
 
 3. **Show final summary:**
 

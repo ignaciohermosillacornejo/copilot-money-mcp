@@ -176,6 +176,29 @@ Call \`get_transactions\` and then \`delete_everything\`.
       }
     );
   });
+
+  test('documented tool PARAMETERS are not mistaken for tools', async () => {
+    // `add_tag_ids` / `remove_tag_ids` are parameters of bulk_edit_transactions,
+    // but they match the "add_"/"remove_"-style tool prefixes the scan uses.
+    // Before KNOWN_TOOL_PARAMS, documenting them in backticks reported a
+    // nonexistent tool — a linter fault that reads as a skill bug.
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        skill: `---
+name: demo
+description: A demo skill.
+---
+
+Call \`get_transactions\`, then tag via \`add_tag_ids\` and untag via \`remove_tag_ids\`.
+`,
+      },
+      ({ code, stdout }) => {
+        expect(code).toBe(0);
+        expect(stdout).toContain('1 skills validated');
+      }
+    );
+  });
 });
 
 describe('registry coverage', () => {

@@ -178,6 +178,7 @@ const REQUIRED_COVERAGE = [
   'EditTransactionInput',
   'SplitTransactionInput',
   'AddTransactionToRecurringInput',
+  'BulkEditTransactionInput',
   'CreateRecurringInput',
   'EditRecurringInput',
   'EditRecurringInput.rule',
@@ -279,10 +280,23 @@ describe('field conformance checks', () => {
     expect(outer?.fields).toContain('frequency');
   });
 
-  test('NEVER probes bulkEditTransactions (rules of engagement)', () => {
+  test('NEVER probes bulkEditTransactions without explicit target ids (rules of engagement)', () => {
+    // Originally a blanket ban: bulkEditTransactions was DO-NOT-PROBE because
+    // its input shape was unknown and an `input: {}` probe had made the server
+    // execute a real SQL query against the live transactions table. The shape
+    // is now captured and ledgered, so the ban narrows to the property that
+    // still protects the account — `filter` is nullable, so any probe of this
+    // mutation must name its targets rather than leave the row set unbounded.
     for (const check of ALL_FIELD_CONFORMANCE_CHECKS) {
       for (const field of [...check.fields, check.knownBadField]) {
-        expect(check.buildQuery(field)).not.toContain('bulkEditTransactions');
+        const query = check.buildQuery(field);
+        if (!query.includes('bulkEditTransactions')) continue;
+        expect(query, 'a bulkEditTransactions probe must pass explicit filter.ids').toContain(
+          'filter: { ids: [{ id: "x", accountId: "x", itemId: "x" }] }'
+        );
+        // And the probed values must still be validation-fatal, so the
+        // resolver never runs even with the filter present.
+        expect(query).toContain('{ z: 1 }');
       }
     }
   });

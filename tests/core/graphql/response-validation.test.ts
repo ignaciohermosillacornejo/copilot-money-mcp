@@ -55,6 +55,23 @@ const VALID_RESPONSES: Record<string, unknown> = {
       transaction: makeTransaction(),
     },
   },
+  // `failed` is populated here even though no live probe has ever produced a
+  // non-empty one — the fixture is the only place the TransactionError shape
+  // gets exercised, so leaving it [] would let the branch rot unnoticed.
+  BulkEditTransactions: {
+    bulkEditTransactions: {
+      __typename: 'BulkEditTransactionsOutput',
+      updated: [makeTransaction(), makeTransaction()],
+      failed: [
+        {
+          __typename: 'TransactionError',
+          transaction: makeTransaction(),
+          error: 'synthetic failure',
+          errorCode: 'SYNTHETIC_ERROR_CODE',
+        },
+      ],
+    },
+  },
   DeleteTransaction: { deleteTransaction: true },
   AddTransactionToRecurring: {
     addTransactionToRecurring: { transaction: makeTransaction() },

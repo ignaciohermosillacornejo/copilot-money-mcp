@@ -311,7 +311,11 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
     evidence:
       'Per-value live probes + invalid-value control; gated by scripts/smoke/conformance.ts (issue #421, PR #422)',
     values: TRANSACTION_TYPES,
-    toolParams: ['create_transaction.type', 'update_transaction.type'],
+    toolParams: [
+      'create_transaction.type',
+      'update_transaction.type',
+      'bulk_edit_transactions.type',
+    ],
   },
   {
     surface: 'RecurringFrequency',
@@ -382,20 +386,12 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
     'update_transaction.transaction_id',
     'update_transaction.account_id',
     'update_transaction.item_id',
-    'review_transactions.transaction_ids',
-    'review_transactions.rows',
-    'review_transactions.rows[].transaction_id',
-    'review_transactions.rows[].account_id',
-    'review_transactions.rows[].item_id',
   ]),
   gatedInputField('EditTransactionInput.name', ['update_transaction.name']),
   gatedInputField('EditTransactionInput.categoryId', ['update_transaction.category_id']),
   gatedInputField('EditTransactionInput.userNotes', ['update_transaction.note']),
   gatedInputField('EditTransactionInput.tagIds', ['update_transaction.tag_ids']),
-  gatedInputField('EditTransactionInput.isReviewed', [
-    'review_transactions.reviewed',
-    'update_transaction.reviewed',
-  ]),
+  gatedInputField('EditTransactionInput.isReviewed', ['update_transaction.reviewed']),
   gatedInputField('EditTransactionInput.type', ['update_transaction.type']),
   gatedInputField('EditTransactionInput.date', ['update_transaction.date']),
   gatedInputField('EditTransactionInput.amount', ['update_transaction.amount']),
@@ -415,6 +411,106 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'out-of-window bypass paths, from the caller (update_transaction account_id/item_id or ' +
       'review_transactions rows entries, taken from a live read) — a wrong pair fails loudly ' +
       'either way.',
+  },
+
+  // --- bulkEditTransactions (captured 2026-07-31, adopted 2026-08-01) ---
+  // Copilot's own multi-select bar fires this; it applies ONE input to MANY
+  // rows. Both consumers (review_transactions, bulk_edit_transactions) send
+  // exactly one filter key — `ids` — because `filter` is nullable server-side
+  // and any other filter field would widen the row set. See
+  // docs/graphql-capture/operations/mutations/BulkEditTransactions.md.
+  operation('bulkEditTransactions', [
+    'bulk_edit_transactions.transaction_ids',
+    'bulk_edit_transactions.rows',
+    'bulk_edit_transactions.rows[].transaction_id',
+    'bulk_edit_transactions.rows[].account_id',
+    'bulk_edit_transactions.rows[].item_id',
+    'review_transactions.transaction_ids',
+    'review_transactions.rows',
+    'review_transactions.rows[].transaction_id',
+    'review_transactions.rows[].account_id',
+    'review_transactions.rows[].item_id',
+  ]),
+  gatedInputField('BulkEditTransactionInput.categoryId', ['bulk_edit_transactions.category_id']),
+  gatedInputField('BulkEditTransactionInput.addTagIds', ['bulk_edit_transactions.add_tag_ids']),
+  gatedInputField('BulkEditTransactionInput.removeTagIds', [
+    'bulk_edit_transactions.remove_tag_ids',
+  ]),
+  gatedInputField('BulkEditTransactionInput.type', ['bulk_edit_transactions.type']),
+  gatedInputField('BulkEditTransactionInput.isReviewed', [
+    'bulk_edit_transactions.reviewed',
+    'review_transactions.reviewed',
+  ]),
+  // The routing triple inside filter.ids. Not smoke:conformance-gated like the
+  // input fields above: the field-probe harness injects into a top-level
+  // `input` object, and these live nested inside `filter.ids[]`. They are
+  // instead exercised end-to-end on every round-trip run — a rename would fail
+  // the bulk_edit_transactions check immediately, because the ids would stop
+  // matching and every row would land in skipped[].
+  ...(['id', 'accountId', 'itemId'] as const).map((field) =>
+    inputField(`TransactionIdentifierInput.${field}`, undefined, {
+      class: 'verified-once',
+      evidence:
+        'Error-leak probe 2026-08-01: an empty `filter: { ids: [{}] }` enumerated the type as ' +
+        'exactly { itemId: ID!, accountId: ID!, id: ID! }, all three required, and a bogus key ' +
+        'returned "not defined by type TransactionIdentifierInput". Re-exercised live on every ' +
+        'round-trip smoke run via the bulk_edit_transactions check.',
+    })
+  ),
+  responseShape('bulkEditTransactions'),
+  appliesSurface('bulkEditTransactions'),
+  {
+    surface: 'BulkEditTransactionInput:closed-field-set',
+    kind: 'input-field',
+    oracle: null,
+    class: 'verified-once',
+    evidence:
+      'Error-leak probe 2026-08-01 enumerated the type exhaustively: categoryId, addTagIds, ' +
+      'removeTagIds, type, isReviewed exist; name, date, amount, userNotes, notes, tagIds, ' +
+      'setTagIds, recurringId, goalId, parentId, isExcluded, isHidden, isPending and tipAmount ' +
+      'all returned "not defined by type BulkEditTransactionInput". Near-miss probes on each ' +
+      'real field surfaced no additional siblings. Consequence: name/date/amount/note are NOT ' +
+      'bulk-editable and the per-row editTransaction path cannot be retired. If a future ' +
+      'Copilot release adds a field, this entry is what goes stale — re-probe before assuming ' +
+      'the set is still five.',
+  },
+  {
+    surface: 'Mutation.bulkEditTransactions:silent-skip',
+    kind: 'operation',
+    oracle: null,
+    class: 'verified-once',
+    evidence:
+      'Live probe 2026-08-01: an id in filter.ids that does not exist is silently omitted from ' +
+      'the row set — it does NOT raise and does NOT appear in failed[]. Likewise an unknown ' +
+      'tag id in addTagIds is dropped without error. Callers therefore cannot trust failed[] ' +
+      'to mean "everything else worked"; both consumers diff updated[] against the requested ' +
+      'ids and throw on any gap (BulkEditTransactionsResult.skipped).',
+  },
+  {
+    surface: 'Mutation.bulkEditTransactions:no-referential-validation',
+    kind: 'operation',
+    oracle: null,
+    class: 'verified-once',
+    evidence:
+      'Live probe 2026-08-01: a categoryId that does not exist is accepted VERBATIM and ' +
+      'persisted, leaving a dangling category reference on every targeted row (confirmed on a ' +
+      'REGULAR transaction, so it is not the INCOME category-clearing path). The server ' +
+      'performs no referential check, so client-side validateCategoryId/validateTagIds before ' +
+      'the write is the only guard against corrupting rows.',
+  },
+  {
+    surface: 'ErrorCode',
+    kind: 'enum',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      'BulkEditTransactionsOutput.failed[] is typed TransactionError { transaction, error, ' +
+      'errorCode: ErrorCode! } (probe-confirmed), but seven live probes — nonexistent ' +
+      'transaction, tag and category ids — all returned failed: [], so no ErrorCode value has ' +
+      'ever been observed and the enum members are unknown. The response schema deliberately ' +
+      'types errorCode as a plain string rather than a z.enum: a value gate we cannot populate ' +
+      'would warn on the first genuine failure, which is exactly when the payload matters. ' +
+      'Close this by capturing a real failure (a permissions or split-parent case may do it).',
   },
 
   operation('deleteTransaction', [

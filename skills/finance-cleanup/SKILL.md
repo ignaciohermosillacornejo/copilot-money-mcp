@@ -175,8 +175,8 @@ Phase 2 built an in-memory list of all findings. Phase 3 presents a batch from t
 
 **Per-batch loop:**
 
-1. **Apply MCP writes.**
-   - Recategorize: `update_transaction` per transaction (set `categoryId` to the user-created category).
+1. **Apply MCP writes — group by target, one bulk call each.**
+   - Recategorize: group the approved transactions by target category and issue **one `bulk_edit_transactions(transaction_ids=[...], category_id=...)` call per category**. A cleanup pass usually moves many transactions to the same few categories, so this collapses dozens of calls into a handful. Fall back to `update_transaction` per row only when each row needs a *different* edit, or when the edit touches `name`, `note`, `date` or `amount` — those are not bulk-editable.
    - New recurrings: `create_recurring` for merchants the user confirms as recurring.
    - Mark reviewed: `review_transactions` for cleaned-up transactions.
    - Transfer fixes: `update_transaction` to change category to/from Internal Transfer.

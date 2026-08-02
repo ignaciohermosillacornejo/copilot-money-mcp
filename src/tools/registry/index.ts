@@ -17,6 +17,7 @@ import {
   splitTransactionTool,
   updateTransactionTool,
   reviewTransactionsTool,
+  bulkEditTransactionsTool,
 } from './transactions.js';
 import {
   getCategoriesTool,
@@ -129,6 +130,7 @@ export const WRITE_TOOL_DEFS: readonly ToolDefinition[] = [
   splitTransactionTool,
   updateTransactionTool,
   reviewTransactionsTool,
+  bulkEditTransactionsTool,
   createTagTool,
   deleteTagTool,
   createCategoryTool,
