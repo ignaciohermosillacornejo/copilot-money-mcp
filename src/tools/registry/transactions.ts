@@ -522,6 +522,9 @@ export const reviewTransactionsTool = defineTool({
       'landed.',
     inputSchema: {
       type: 'object',
+      // Matches every other write tool (and bulk_edit_transactions); this was
+      // the one write schema that accepted unknown keys silently.
+      additionalProperties: false,
       properties: {
         transaction_ids: {
           type: 'array',

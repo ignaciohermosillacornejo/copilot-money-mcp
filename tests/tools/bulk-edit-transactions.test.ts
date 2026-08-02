@@ -22,6 +22,7 @@ import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import { createMockGraphQLClient, bulkEditEcho } from '../helpers/mock-graphql.js';
 import { GraphQLError } from '../../src/core/graphql/client.js';
+import { bulkEditTransactions } from '../../src/core/graphql/transactions.js';
 
 function makeTools(txnIds: string[], responses?: Parameters<typeof createMockGraphQLClient>[0]) {
   const db = new CopilotDatabase('/nonexistent');
@@ -51,6 +52,27 @@ function makeTools(txnIds: string[], responses?: Parameters<typeof createMockGra
   const tools = new CopilotMoneyTools(db, client);
   return { tools, db, client };
 }
+
+describe('bulkEditTransactions() refuses an unbounded write', () => {
+  // The TYPE system already forbids these (ids is a non-empty tuple), so these
+  // callers are deliberately cast through `never`. The runtime guard exists
+  // because this module is reachable from plain JS and from a future caller who
+  // builds `ids` dynamically — and the failure mode is not a bad error message,
+  // it is applying the edit to every transaction the server decides to match.
+  // Codecov caught this guard being the only untested code in the PR.
+  test.each([
+    ['an empty array', []],
+    ['undefined', undefined],
+    ['a non-array', 'not-an-array'],
+  ])('throws on %s rather than sending a filterless request', async (_label, ids) => {
+    const client = createMockGraphQLClient({ BulkEditTransactions: bulkEditEcho });
+    await expect(
+      bulkEditTransactions(client, { ids: ids as never, input: { isReviewed: true } })
+    ).rejects.toThrow(/refusing to send without explicit target ids/);
+    // The point of the guard: nothing reached the wire.
+    expect(client._calls).toHaveLength(0);
+  });
+});
 
 describe('bulk_edit_transactions sends one scoped request', () => {
   test('one call, all ids in filter.ids, one shared input', async () => {
@@ -212,6 +234,27 @@ describe('bulk_edit_transactions validates before writing', () => {
       /exceeds the maximum of 500/
     );
     expect(client._calls).toHaveLength(0);
+  });
+
+  test('the cap short-circuits BEFORE id resolution', async () => {
+    // resolveTransactionMeta fans out over every requested id, so checking the
+    // cap after resolution would pay for a windowed fetch on a batch we were
+    // always going to reject.
+    const { tools } = makeTools([]);
+    let resolveCalls = 0;
+    (tools as any).resolveTransactionMeta = () => {
+      resolveCalls++;
+      return Promise.resolve({ meta: new Map(), liveWindowMonths: 13 });
+    };
+
+    await expect(
+      tools.bulkEditTransactions({
+        transaction_ids: Array.from({ length: 501 }, (_, i) => `t${String(i).padStart(4, '0')}`),
+        reviewed: true,
+      })
+    ).rejects.toThrow(/exceeds the maximum of 500/);
+
+    expect(resolveCalls).toBe(0);
   });
 
   test('an unresolvable id fails the call before any write', async () => {

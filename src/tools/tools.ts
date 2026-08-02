@@ -3691,7 +3691,8 @@ export class CopilotMoneyTools {
     // Adding and removing the same tag in one call has no defined resolution
     // order server-side; reject rather than let the outcome be arbitrary.
     if (add_tag_ids && remove_tag_ids) {
-      const overlap = add_tag_ids.filter((id) => remove_tag_ids.includes(id));
+      const removing = new Set(remove_tag_ids);
+      const overlap = add_tag_ids.filter((id) => removing.has(id));
       if (overlap.length > 0) {
         throw new Error(
           `bulk_edit_transactions: tag id(s) ${overlap.join(', ')} appear in both add_tag_ids ` +
@@ -3700,13 +3701,20 @@ export class CopilotMoneyTools {
       }
     }
 
-    const entries = await this.resolveBulkTargets(args, 'edit out-of-window transactions');
-    if (entries.length > MAX_BULK_EDIT_TARGETS) {
+    // Cap BEFORE resolution: resolveBulkTargets fans out to resolveTransactionMeta
+    // over every requested id, so checking afterwards would pay for a windowed
+    // fetch on a batch we were always going to reject. Counted off the raw args
+    // because that is the caller's ask — resolution only fills in routing, it
+    // never changes how many rows are targeted.
+    const requestedCount = (args.rows ?? args.transaction_ids)?.length ?? 0;
+    if (requestedCount > MAX_BULK_EDIT_TARGETS) {
       throw new Error(
-        `bulk_edit_transactions: ${String(entries.length)} targets exceeds the maximum of ` +
+        `bulk_edit_transactions: ${String(requestedCount)} targets exceeds the maximum of ` +
           `${String(MAX_BULK_EDIT_TARGETS)} per call. Split the work into smaller batches.`
       );
     }
+
+    const entries = await this.resolveBulkTargets(args, 'edit out-of-window transactions');
     const seen = new Set<string>();
     for (const entry of entries) {
       if (seen.has(entry.id)) {
