@@ -769,8 +769,8 @@ describe('handleCallTool — write tools', () => {
       name: 'rename attempt',
     });
     expect(result.isError).toBeUndefined();
-    const text = firstText(result);
-    expect(text).toContain('"success": true');
+    const data = JSON.parse(firstText(result)) as { success: boolean };
+    expect(data.success).toBe(true);
   });
 
   test('update_transaction with legacy field goal_id returns error', async () => {

@@ -5,9 +5,11 @@
  * taxing every MCP session:
  *  1. Response size — every cache-mode read tool is executed against a fixed
  *     synthetic LevelDB fixture and its response measured as
- *     `JSON.stringify(result, null, 2).length`, pretty-printed because that is
- *     exactly what `src/server.ts` sends to callers (if serialization ever
- *     goes compact, budgets get LOWERED — that's the point).
+ *     `JSON.stringify(result).length`, compact because that is exactly what
+ *     `src/server.ts` sends to callers (responses went compact in the #597
+ *     Tier-0 diet — the ratchet's first deliberate downward turn; if the
+ *     server serialization ever changes again, re-derive the budgets to
+ *     stay faithful).
  *  2. Schema size — every registered tool's `JSON.stringify(def.schema).length`
  *     plus an aggregate total (the schemas load into every session).
  *
@@ -36,23 +38,23 @@ const DB_PATH = path.join(__dirname, 'fixtures/context-budget-db');
 // today's date (next_expected_date / this_month buckets), so its size can
 // drift a few chars across month boundaries — the ~10% headroom absorbs that.
 const RESPONSE_BUDGETS: Record<string, number> = {
-  get_transactions: 2_050,
-  get_cache_info: 1_120,
-  refresh_database: 285,
-  get_accounts: 1_025,
-  get_connection_status: 2_505,
-  get_categories: 1_260,
-  get_recurring_transactions: 1_065,
-  get_budgets: 555,
-  get_goals: 485,
-  get_investment_prices: 355,
+  get_transactions: 1_585,
+  get_cache_info: 870,
+  refresh_database: 245,
+  get_accounts: 795,
+  get_connection_status: 1_900,
+  get_categories: 855,
+  get_recurring_transactions: 755,
+  get_budgets: 420,
+  get_goals: 365,
+  get_investment_prices: 250,
   // The fixture seeds no holdings, splits, or balance history, so these three
   // budgets pin the empty-response envelope only. If the fixture ever seeds
   // those collections, remeasure and recalibrate these entries.
-  get_investment_splits: 100,
-  get_holdings: 100,
-  get_balance_history: 130,
-  get_goal_history: 1_165,
+  get_investment_splits: 75,
+  get_holdings: 80,
+  get_balance_history: 100,
+  get_goal_history: 740,
 };
 
 const SCHEMA_BUDGETS: Record<string, number> = {
@@ -371,7 +373,7 @@ afterAll(() => {
 
 /** Serialize exactly like `src/server.ts` does for tool responses. */
 function serializedSize(result: unknown): number {
-  return JSON.stringify(result, null, 2).length;
+  return JSON.stringify(result).length;
 }
 
 async function runTool(name: string): Promise<unknown> {

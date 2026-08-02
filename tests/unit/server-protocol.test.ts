@@ -430,12 +430,13 @@ describe('CopilotMoneyServer.handleCallTool - response format', () => {
     expect(() => JSON.parse(response.content[0].text)).not.toThrow();
   });
 
-  test('response JSON is properly formatted with indentation', async () => {
+  test('response JSON is compact (no pretty-print whitespace)', async () => {
     const response = await server.handleCallTool('get_accounts', {});
     const text = response.content[0].text;
 
-    // Should contain newlines indicating formatting
-    expect(text).toContain('\n');
+    // Compact serialization: no newlines, byte-identical to JSON.stringify(result)
+    expect(text).not.toContain('\n');
+    expect(text).toBe(JSON.stringify(JSON.parse(text)));
     // Parse and verify structure
     const parsed = JSON.parse(text);
     expect(parsed).toBeDefined();
