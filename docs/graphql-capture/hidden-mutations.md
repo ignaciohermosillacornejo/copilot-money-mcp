@@ -166,6 +166,8 @@ input AddTransactionToRecurringInput {
 
 ✅ **Captured 2026-07-31** — full signature, input fields, and output shape are documented
 in [`operations/mutations/BulkEditTransactions.md`](operations/mutations/BulkEditTransactions.md).
+The investigation log, the filter experiment, and why the write path is ids-only are
+recorded in [`docs/bulk-edit-transactions.md` §6](../bulk-edit-transactions.md#6-decision-record-why-the-write-path-accepts-only-transaction-ids).
 Captured by driving the **web** UI's multi-select bar (so it is not iOS-only, as this page
 previously assumed) and observing the traffic it sent. **Adopted 2026-08-01**: wrapped by
 `bulkEditTransactions()` and consumed by `review_transactions` (one request instead of a

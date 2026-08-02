@@ -293,6 +293,144 @@ one.
 
 ---
 
+## 6. Decision record: why the write path accepts only transaction ids
+
+This section is the reasoning behind the design, kept here so nobody has to
+re-derive it (or re-run the experiments) to answer "why can't I just pass a
+filter?"
+
+### 6.1 How the endpoint was mapped
+
+`bulkEditTransactions` was flagged **DO-NOT-PROBE** in
+[`hidden-mutations.md`](graphql-capture/hidden-mutations.md) after a 2026-04
+probe: sending `input: {}` made the server execute a real
+`select "item_id", "account_id", "transaction_id" from "transactions" where …`
+with ~48 placeholders *before* failing validation. That told us the server
+builds its row set **before** validating input — so a malformed call is not
+inert.
+
+It was mapped anyway, in three phases, none of which repeated that mistake:
+
+| Phase | Method | What it answered |
+|---|---|---|
+| 1. Capture (2026-07-31) | Drove Copilot's own **web** multi-select UI and observed the traffic | Real signature, real field selection, real variable shapes. Zero crafted requests. |
+| 2. Error-leak introspection (2026-08-01) | Probes built so the GraphQL document **cannot pass validation** — every selection set carried a field that exists on no type, values were inlined as literals, known-real fields were type-mismatched | The complete type surface: the closed 5-field input, `TransactionIdentifierInput`, `BulkEditTransactionsOutput`, `TransactionError`. The resolver never ran. |
+| 3. Scoped live probes (2026-08-01) | Disposable rows on a manual account, every call targeted by explicit `filter.ids`, with a control row never listed | Runtime semantics: additive/subtractive tags, INCOME clearing the category, and the three silent failure modes. Control row unchanged ⇒ `ids` targeting is exact. |
+
+The phase-2 technique is the reusable part: **validity, not intent, decides
+whether a probe executes.** `input: {}` executed because it was *schema-valid*
+(every input field optional, `filter` nullable). A document that cannot pass
+validation is safe to send at any time.
+
+### 6.2 The filter experiment (2026-08-02)
+
+Open question after phase 3: does the mutation honour filter fields other than
+`ids`, or is it effectively an ids-only endpoint that merely accepts a wider
+type? The answer changes how dangerous the nullable `filter` actually is, and
+it could not be settled from the schema.
+
+**Setup.** Four disposable transactions on the manual account, same date, same
+category. Three named `zzfilterprobe20260802 {alpha,bravo,charlie}`; one control
+named `zzcontrolrow20260802 delta` — same account, same day, differing only in
+name so it would fall outside a `matchString` filter. Plus one disposable tag.
+
+**Bounding, three independent ways:**
+
+1. **Read-first gate.** `TransactionFilter` is the *same input type* the read
+   path takes, so the exact filter went through the `Transactions` **query**
+   first. The script hard-refused to issue any write unless that read returned
+   precisely the three known probe ids — not more, not fewer, and never the
+   control.
+2. **Reversible edit.** `addTagIds` with a throwaway tag. Adding a tag destroys
+   nothing and the inverse operation exists.
+3. **Automatic revert.** Whatever came back in `updated[]` — three rows or three
+   thousand — was untagged by explicit id in a `finally` block.
+
+**Result:**
+
+```
+READ GATE   Transactions(filter:{matchString:"zzfilterprobe20260802"})
+            → 3 rows, exactly the probe ids                        gate PASSED
+
+MUTATION    bulkEditTransactions(filter:{matchString:"zzfilterprobe20260802"},
+                                 input:{addTagIds:[<probe tag>]})   ← NO ids
+            → updated: 3   failed: 0     (alpha, bravo, charlie tagged)
+
+CONTROL     zzcontrolrow20260802 delta → tags: none                UNTOUCHED
+REVERT      removeTagIds by explicit id → 3 reverted               CLEAN
+```
+
+**Conclusion: the mutation genuinely honours non-`ids` filter fields.** It is
+not an ids-only endpoint. `matchString` is the field proven by experiment; the
+rest of `TransactionFilter` reaches the same argument and resolver, so
+`isReviewed`, `dates`, `categoryIds` and friends must be treated as live
+selectors too. One request with `filter: { isReviewed: false }` is a plausible
+way to rewrite every unreviewed transaction on the account.
+
+**Not tested, by design:** `filter: {}` and an omitted filter. They have no
+read-verifiable match set, so gate (1) cannot bound them. Do not test them.
+
+### 6.3 Why the write path is ids-only
+
+Three independent reasons, any one of which is sufficient.
+
+**1. The audit invariant is uncomputable for a filter write.** Every bulk write
+is checked by
+
+```
+skipped = requested_ids − (updated ∪ failed)     → throw if non-empty
+```
+
+which exists because the server silently drops ids it cannot find
+(§4). A filter write has **no `requested_ids`**, so `updated: [A, C]` is
+unauditable — you cannot distinguish "correct" from "half-applied" from "far too
+many". The check does not weaken; it ceases to exist. And the fix is circular:
+any safe design must resolve the filter to concrete ids *before* writing, at
+which point the call is `filter: { ids }` and the filter-based write has
+evaporated.
+
+**2. Blast radius is asymmetric and irreversible.** With ids, a mistake edits the
+wrong handful of rows. With a filter, a mistake edits every row the expression
+matched — and §6.2 proves the server will do exactly that. There is no undo:
+reverting requires knowing the previous values, which we only have for rows
+somebody read first.
+
+**3. A confirmation prompt cannot be relied on.** MCP does offer
+[elicitation](https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation)
+(spec rev 2025-06-18, rearchitected 2026-07-28), and our SDK implements it —
+`server.elicitInput()` throws `"Client does not support form elicitation."`
+rather than proceeding, so a gate *can* fail closed. It still does not work here:
+
+- **Client support is optional**, and Claude Desktop did not support it as of
+  the last check — yet we ship a `.mcpb` bundle specifically for Desktop. The
+  prompt would be invisible on a primary distribution target.
+- **"Accept" is unverifiable attestation.** The server learns that the client
+  returned accept, never that a human read anything — and the client is the same
+  software stack containing the model that built the wrong filter.
+- **It would degrade what the human already sees.** Host permission prompts
+  currently show the explicit id list before a bulk write. A filter argument
+  replaces that with an unbounded expression.
+
+### 6.4 What callers do instead
+
+Resolve the filter client-side, then write by id:
+
+```
+get_transactions_live(merchant: "…", period: "…")   →  read the matching rows
+bulk_edit_transactions(rows: [...])                 →  write those exact rows
+```
+
+The id list appearing in the transcript is a **feature**: the model, the human
+reading along, and the host's permission prompt all see precisely what is about
+to change. The `MAX_BULK_EDIT_TARGETS` cap (500) bounds it.
+
+Stated as policy: **the mutation's non-`ids` filter support is a hazard we route
+around, not a feature we expose.** The wrapper takes a required non-empty `ids`
+tuple, has no `filter` parameter at all, and two source-scan ratchets plus unit
+tests keep it that way.
+
+---
+
 ## See also
 
 - [`graphql-capture/operations/mutations/BulkEditTransactions.md`](graphql-capture/operations/mutations/BulkEditTransactions.md)
