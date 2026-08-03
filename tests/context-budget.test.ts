@@ -132,6 +132,7 @@ const ACC_BROKERAGE = 'acc_6dRz1KvMpN4WxT7yQc3U';
 const ITEM_BANK = 'item_5cJn3WfHbD8XqS1kMt6Z';
 const ITEM_BROKER = 'item_8gLp4XdJcF2VzB9sWk5A';
 const GOAL_FUND = 'goal_1sVc8BnMdQ5XzK3wRj9T';
+const DELETED_TRANSACTION_ID = 'txn_4nYc8LbQwR2VzK7mJd5P';
 
 async function seedFixture(): Promise<void> {
   await createCombinedDb(DB_PATH, {
@@ -182,6 +183,15 @@ async function seedFixture(): Promise<void> {
         name: 'Synthetic Streaming',
         category_id: CAT_TRANSPORT,
         is_transfer: false,
+      },
+      {
+        transaction_id: DELETED_TRANSACTION_ID,
+        account_id: ACC_CHECKING,
+        amount: 27.5,
+        date: '2024-03-06',
+        name: 'Synthetic Deleted Merchant',
+        category_id: CAT_GROCERIES,
+        user_deleted: true,
       },
     ],
     accounts: [
@@ -377,6 +387,19 @@ afterAll(() => {
 function serializedSize(result: unknown): number {
   return JSON.stringify(result).length;
 }
+
+describe('soft-deleted transaction reads (#609)', () => {
+  test('exclude deleted rows from list and transaction_id lookup', async () => {
+    const listed = await ctx.tools.getTransactions({ limit: 100 });
+    expect(listed.transactions.map((transaction) => transaction.transaction_id)).not.toContain(
+      DELETED_TRANSACTION_ID
+    );
+
+    const lookedUp = await ctx.tools.getTransactions({ transaction_id: DELETED_TRANSACTION_ID });
+    expect(lookedUp.count).toBe(0);
+    expect(lookedUp.transactions).toEqual([]);
+  });
+});
 
 async function runTool(name: string): Promise<unknown> {
   const def = ALL_TOOL_DEFS.find((d) => d.name === name);
