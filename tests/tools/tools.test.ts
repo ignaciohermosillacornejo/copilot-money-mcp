@@ -11,7 +11,7 @@ import {
   TRANSACTION_TYPE_FILTERS,
   DEFAULT_COMPACT_TRANSACTION_FIELDS,
 } from '../../src/tools/tools.js';
-import { PRICE_TYPES } from '../../src/models/index.js';
+import { PRICE_TYPES, TransactionSchema } from '../../src/models/index.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import type { Transaction, Account, Security, HoldingsHistory } from '../../src/models/index.js';
 import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
@@ -433,6 +433,39 @@ describe('CopilotMoneyTools', () => {
       expect(txn.transaction_id).toBe('txn1');
       expect(txn).not.toHaveProperty('item_id');
       expect(txn).not.toHaveProperty('normalized_merchant');
+    });
+
+    test('single-transaction lookup also reports _field_warning on unknown names', async () => {
+      const result = await tools.getTransactions({
+        transaction_id: 'txn1',
+        fields: ['transaction_id', 'not_a_real_field'],
+      });
+      expect(result.transactions).toHaveLength(1);
+      expect(Object.keys(result.transactions[0])).toEqual(['transaction_id']);
+      expect(result._field_warning).toBeDefined();
+      expect(result._field_warning).toContain('not_a_real_field');
+    });
+
+    test('every full-width row key is a known selectable field (drift ratchet)', async () => {
+      // TransactionSchema is .passthrough(), so a decoder emitting a key the
+      // schema does not declare would make _field_warning claim the field
+      // was "ignored" while the rows actually carry it — a self-contradicting
+      // response. Pin today's verified-clean state: full-width rows only
+      // carry schema-declared keys plus the two enrichment keys.
+      const known = new Set([
+        ...Object.keys(TransactionSchema.shape),
+        'category_name',
+        'normalized_merchant',
+      ]);
+      const result = await tools.getTransactions({});
+      expect(result.transactions.length).toBeGreaterThan(0);
+      const unknownKeys = new Set<string>();
+      for (const txn of result.transactions) {
+        for (const key of Object.keys(txn)) {
+          if (!known.has(key)) unknownKeys.add(key);
+        }
+      }
+      expect([...unknownKeys]).toEqual([]);
     });
 
     test('filters by start_date and end_date', async () => {

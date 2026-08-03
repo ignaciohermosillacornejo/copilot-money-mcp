@@ -113,6 +113,13 @@ describe('expandFieldSelection', () => {
     expect(() => expandFieldSelection('date' as unknown as string[], preset)).toThrow(/array/i);
     expect(() => expandFieldSelection({} as unknown as string[], preset)).toThrow(/array/i);
   });
+
+  test('"default" with an empty preset throws instead of expanding to nothing', () => {
+    // Silent `[]` here would make projectRows return all-empty rows for a
+    // mis-wired consumer that forgot to pass its preset.
+    expect(() => expandFieldSelection(['default'], [])).toThrow(/preset/i);
+    expect(() => expandFieldSelection(['default', 'default'], [])).toThrow(/preset/i);
+  });
 });
 
 describe('projectRows', () => {
@@ -167,12 +174,33 @@ describe('projectRows', () => {
     expect(() => projectRows(txnRows, 'transaction_id' as unknown as string[])).toThrow(/array/i);
   });
 
+  test('"default" without opts.preset throws instead of returning all-empty rows', () => {
+    expect(() => projectRows(txnRows, ['default'])).toThrow(/preset/i);
+  });
+
+  test('a hostile own __proto__ key cannot pollute projected rows', () => {
+    // JSON.parse creates __proto__ as an OWN key; a naive `out[key] = value`
+    // copy would assign through the inherited setter instead.
+    const hostile = JSON.parse(
+      '{"transaction_id":"Jm5xT8wQz2NvK4rBpL7c","__proto__":{"polluted":true}}'
+    ) as Record<string, unknown>;
+    const { rows } = projectRows([hostile], ['transaction_id', '__proto__']);
+    expect(Object.keys(rows[0])).toEqual(['transaction_id']);
+    expect((rows[0] as { polluted?: boolean }).polluted).toBeUndefined();
+    expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
+  });
+
   describe('unknown-name detection with knownFields', () => {
+    // 'item_id' is deliberately in knownFields but on NO fixture row, and
+    // 'plaid_category_id' is on a fixture row but NOT in knownFields — the
+    // tests below use them to prove knownFields (not row keys) is the
+    // authority, so a mutation that disables this branch cannot pass.
     const knownFields: ReadonlySet<string> = new Set([
       'transaction_id',
       'date',
       'amount',
       'category_name',
+      'item_id',
     ]);
 
     test('unknown requested names produce a warning listing them', () => {
@@ -198,13 +226,34 @@ describe('projectRows', () => {
       expect(warning).toBeUndefined();
     });
 
-    test('a field in knownFields but absent from every row does not warn', () => {
+    test('a field in knownFields but absent from EVERY row does not warn', () => {
       // knownFields is the authority when provided: optional document fields
-      // legitimately absent from a given result page must not warn.
-      const { warning } = projectRows(txnRows, ['category_name', 'date'], {
+      // legitimately absent from a given result page must not warn. The
+      // row-key fallback WOULD warn here, so this discriminates the modes.
+      const { warning } = projectRows(txnRows, ['item_id', 'date'], {
         knownFields,
       });
       expect(warning).toBeUndefined();
+    });
+
+    test('zero rows with knownFields still warns on a bogus name', () => {
+      // The authority set works without any rows to compare against; only
+      // the row-key fallback stays silent on zero rows.
+      const { rows, warning } = projectRows([], ['item_id', 'bogus_name'], { knownFields });
+      expect(rows).toEqual([]);
+      expect(warning).toBeDefined();
+      expect(warning).toContain('bogus_name');
+      expect(warning).not.toContain('item_id');
+    });
+
+    test('a name present on a row but NOT in knownFields warns', () => {
+      // plaid_category_id exists on the first fixture row, but the authority
+      // set does not list it — knownFields wins over row keys.
+      const { warning } = projectRows(txnRows, ['transaction_id', 'plaid_category_id'], {
+        knownFields,
+      });
+      expect(warning).toBeDefined();
+      expect(warning).toContain('plaid_category_id');
     });
 
     test('custom valid-fields hint appears in the warning', () => {
@@ -234,6 +283,17 @@ describe('projectRows', () => {
       const { rows, warning } = projectRows([], ['anything_at_all']);
       expect(rows).toEqual([]);
       expect(warning).toBeUndefined();
+    });
+
+    test('inherited prototype properties do not mask the warning', () => {
+      // `'toString' in row` is true via the prototype chain, but no row OWNS
+      // it — the projection would yield empty rows, so it must warn.
+      const { rows, warning } = projectRows(txnRows, ['toString']);
+      expect(warning).toBeDefined();
+      expect(warning).toContain('toString');
+      for (const row of rows) {
+        expect(Object.keys(row)).toEqual([]);
+      }
     });
   });
 

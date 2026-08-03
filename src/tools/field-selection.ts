@@ -86,6 +86,15 @@ export function expandFieldSelection(
       push(name);
     }
   }
+  // A non-empty input can only expand to nothing when it consisted solely of
+  // "default" tokens and no preset was supplied. Silently projecting every
+  // row to `{}` would be a data-loss footgun for a mis-wired consumer, so
+  // fail loudly instead.
+  if (expanded.length === 0) {
+    throw new Error(
+      'fields requested the "default" preset, but no default preset is configured for this tool'
+    );
+  }
   return expanded;
 }
 
@@ -131,6 +140,11 @@ export function projectRows<T extends Record<string, unknown>>(
   const projected = rows.map((row) => {
     const out: Record<string, unknown> = {};
     for (const key of Object.keys(row)) {
+      // A hostile own '__proto__' key (e.g. from JSON.parse'd input) would
+      // assign through the inherited setter and mutate the projected
+      // object's prototype instead of copying data — skip it. The engine is
+      // generic; future consumers' rows are not guaranteed decoder-shaped.
+      if (key === '__proto__') continue;
       if (fieldSet.has(key)) out[key] = row[key];
     }
     // Deliberate widening: projected rows keep type T even though they carry
@@ -158,11 +172,13 @@ function detectUnknownFields(
     const known = opts.knownFields;
     unknown = requested.filter((name) => !known.has(name));
   } else {
-    // Fallback: a name is unknown only if no row carries it. With zero rows
-    // there is nothing to compare against, so stay silent rather than flag
-    // every requested name.
+    // Fallback: a name is unknown only if no row carries it as an OWN key —
+    // `in` would also match inherited prototype properties like `toString`,
+    // masking the warning while the projection still yields empty rows. With
+    // zero rows there is nothing to compare against, so stay silent rather
+    // than flag every requested name.
     if (rows.length === 0) return undefined;
-    unknown = requested.filter((name) => rows.every((row) => !(name in row)));
+    unknown = requested.filter((name) => rows.every((row) => !Object.hasOwn(row, name)));
   }
   if (unknown.length === 0) return undefined;
   const hint = opts.validFieldsHint ?? 'the fields of the returned documents';
