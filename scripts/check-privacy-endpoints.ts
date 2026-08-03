@@ -18,7 +18,7 @@
  *
  * So this compares two sets rather than asserting any particular endpoint:
  *
- *   code — every https:// host reachable at runtime in src/ (comments and
+ *   code — every http(s):// host reachable at runtime in src/ (comments and
  *          @see links excluded; they document Plaid/protobuf/GitHub and are not
  *          requests)
  *   doc  — every host named in PRIVACY.md
@@ -26,6 +26,20 @@
  * A host in code but not the doc is undisclosed traffic. A host in the doc but
  * not the code is a stale claim. Both fail. Adding a genuinely new destination
  * means saying so in the privacy policy, in the same PR, which is the point.
+ *
+ * Known limits — this matches URL *literals*, so it cannot see:
+ *
+ *   - a host assembled at runtime (`` `https://${region}.example.com` ``, a base
+ *     URL from config or an environment variable, string concatenation). Only the
+ *     literal prefix is visible, and a fully dynamic URL is invisible.
+ *   - a request whose destination comes from fetched data rather than source.
+ *
+ * So a green run means "no new destination was hardcoded in src/", not "the
+ * server contacts nothing else". That is the drift class actually observed here
+ * (a literal endpoint changed and the doc did not follow); closing the dynamic
+ * case needs runtime interception, not a source scan. Any future change that
+ * builds a URL dynamically must be disclosed by hand — this checker will not
+ * catch it, and reviewers should treat a constructed URL as a doc change.
  */
 
 import { readFileSync, readdirSync, statSync } from 'fs';
@@ -33,17 +47,23 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(__dirname, '..');
+// CHECK_PRIVACY_ENDPOINTS_ROOT lets tests point the checker at a synthetic
+// src/ + PRIVACY.md tree (same pattern as CHECK_TOOL_COUNTS_ROOT and
+// CHECK_DEPS_PINNED_PACKAGE_JSON in the sibling gates).
+const ROOT = process.env.CHECK_PRIVACY_ENDPOINTS_ROOT ?? join(__dirname, '..');
 
 /**
  * Hosts that appear in src/ as documentation rather than as requests. Keep this
  * list short and justify additions: every entry is a host the checker will stop
  * noticing.
+ *
+ * Deliberately only one entry. `plaid.com` and `protobuf.dev` were here too,
+ * but both occur exclusively inside block comments that stripComments() already
+ * removes, so they never reached this set — they were blind spots that bought
+ * nothing. Add a host here only after confirming it survives stripComments().
  */
 const DOC_ONLY_HOSTS = new Set([
-  'plaid.com', // @see links to Plaid's category taxonomy docs
-  'protobuf.dev', // wire-format reference in the decoder
-  'github.com', // issue-filing URL in an error message
+  'github.com', // issue-filing URL in an error message (src/core/database.ts)
 ]);
 
 function sourceFiles(dir: string): string[] {
@@ -61,7 +81,11 @@ function stripComments(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 }
 
-const HOST_RE = /https:\/\/([a-zA-Z0-9.-]+)/g;
+// Matches http:// as well as https://. Nothing in src/ uses plain http today,
+// so this catches nothing now — it exists so that a future cleartext endpoint
+// (the case most worth disclosing) cannot slip past a scanner that only looked
+// for TLS URLs.
+const HOST_RE = /https?:\/\/([a-zA-Z0-9.-]+)/g;
 
 const codeHosts = new Set<string>();
 for (const file of sourceFiles(join(ROOT, 'src'))) {
