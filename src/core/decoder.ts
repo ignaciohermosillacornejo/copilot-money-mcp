@@ -1910,7 +1910,13 @@ function processTag(fields: Map<string, FirestoreValue>, docId: string): Tag | n
     fields,
     {
       consumed: [...stringFields],
-      ignored: [],
+      ignored: [
+        // Server-side migration marker (#608). Raw-cache inspection
+        // 2026-08-02: boolean, always `true` when present, on 10 of 11
+        // non-tombstone tag docs. Underscore-prefixed bookkeeping flag with
+        // no user-meaningful content — acknowledged, not exposed.
+        '_migration_backfill',
+      ],
     },
     { collection: 'tags', docId }
   );

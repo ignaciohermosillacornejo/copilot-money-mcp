@@ -1816,6 +1816,47 @@ describe('decoder coverage', () => {
       expect(result.tags[0]?.hex_color).toBe('#0000FF');
     });
 
+    test('tags._migration_backfill is acknowledged but a future unknown field still warns', async () => {
+      // #608: Copilot ships a server-side `_migration_backfill: true` marker
+      // on tag docs. It is on the processor's `ignored` list, so it must not
+      // warn — but the warn system must stay armed for the NEXT drift, so an
+      // unknown sibling field on the same collection must still fire.
+      const dbPath = path.join(FIXTURES_DIR, 'tags-migration-backfill-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'users/user1/tags',
+          id: 'tag-ack',
+          fields: {
+            name: 'Travel',
+            hex_color: '#0000FF',
+            _migration_backfill: true,
+          },
+        },
+        {
+          collection: 'users/user1/tags',
+          id: 'tag-drift',
+          fields: {
+            name: 'Trips',
+            hex_color: '#00FF00',
+            _some_future_field: true,
+          },
+        },
+      ]);
+
+      const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        __resetWarnedKeys();
+        await decodeAllCollections(dbPath);
+        const unreadTagWarns = warnSpy.mock.calls
+          .map((call) => String(call[0] ?? ''))
+          .filter((msg) => msg.includes('collection=tags') && msg.includes('unread field'));
+        expect(unreadTagWarns.some((msg) => msg.includes('field=_migration_backfill'))).toBe(false);
+        expect(unreadTagWarns.some((msg) => msg.includes('field=_some_future_field'))).toBe(true);
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
     test('decodes balance history via decodeAllCollections', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'balance-hist-db');
       await createDeepTestDatabase(dbPath, [
