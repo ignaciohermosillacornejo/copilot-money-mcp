@@ -85,7 +85,7 @@
     "prepare": "husky"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.2.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "classic-level": "^3.0.0",
     "zod": "^4.3.5"
   },
