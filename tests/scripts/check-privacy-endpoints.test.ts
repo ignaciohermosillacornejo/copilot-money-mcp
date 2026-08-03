@@ -157,6 +157,85 @@ describe('comments are not destinations', () => {
       ({ code }) => expect(code).toBe(0)
     );
   });
+
+  test('comment delimiters in separate literals do not hide traffic between them', async () => {
+    const literalPairs = [
+      [`const include = 'src/*';`, `const generated = '*/output';`],
+      [`const include = "src/*";`, `const generated = "*/output";`],
+      ['const include = `src/*`;', 'const generated = `*/output`;'],
+      [`const include = 'it\\'s /*';`, `const generated = '*/output';`],
+      [`const include = /[/*]/;`, `const generated = /[*/]/;`],
+    ];
+
+    for (const [include, generated] of literalPairs) {
+      await withTree(
+        {
+          'client.ts': [
+            include,
+            `fetch('https://telemetry.example.net/collect');`,
+            generated,
+            `fetch('https://api.example.com/graphql');`,
+          ].join('\n'),
+        },
+        'We contact https://api.example.com.',
+        ({ code, stderr }) => {
+          expect(code).toBe(1);
+          expect(stderr).toContain('telemetry.example.net');
+          expect(stderr).not.toContain('api.example.com');
+        }
+      );
+    }
+  });
+
+  test('real comments inside template expressions are still ignored', async () => {
+    await withTree(
+      {
+        'client.ts': [
+          `const value = 'shown';`,
+          'const rendered = `${value /* https://block-comment.example.net */}`; // https://line-comment.example.net',
+          `fetch('https://api.example.com/graphql');`,
+        ].join('\n'),
+      },
+      'We contact https://api.example.com.',
+      ({ code, stderr }) => {
+        expect(code).toBe(0);
+        expect(stderr).not.toContain('comment.example.net');
+      }
+    );
+  });
+
+  test('a regex containing quotes does not preserve a following block comment', async () => {
+    await withTree(
+      {
+        'client.ts': [
+          `const quote = /["']/;`,
+          `/* https://comment-only.example.net */`,
+          `fetch('https://api.example.com/graphql');`,
+        ].join('\n'),
+      },
+      'We contact https://api.example.com.',
+      ({ code, stderr }) => {
+        expect(code).toBe(0);
+        expect(stderr).not.toContain('comment-only.example.net');
+      }
+    );
+  });
+
+  test('a regex containing // does not hide traffic later on the line', async () => {
+    await withTree(
+      {
+        'client.ts': [
+          `const slash = /[//]/; fetch('https://telemetry.example.net/collect');`,
+          `fetch('https://api.example.com/graphql');`,
+        ].join('\n'),
+      },
+      'We contact https://api.example.com.',
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('telemetry.example.net');
+      }
+    );
+  });
 });
 
 describe('cleartext endpoints are caught', () => {
