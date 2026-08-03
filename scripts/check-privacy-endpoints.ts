@@ -45,6 +45,7 @@
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import ts from 'typescript';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // CHECK_PRIVACY_ENDPOINTS_ROOT lets tests point the checker at a synthetic
@@ -76,9 +77,43 @@ function sourceFiles(dir: string): string[] {
   return out;
 }
 
-/** Strip // and block comments so @see links don't read as live destinations. */
+/**
+ * Strip actual TypeScript comments so @see links do not read as destinations.
+ * Parser-owned ranges keep comment-like text in strings, templates, and regexes.
+ */
 function stripComments(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const sourceFile = ts.createSourceFile(
+    'privacy-endpoints.ts',
+    src,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS
+  );
+  const comments = new Map<string, ts.CommentRange>();
+  const collect = (ranges: readonly ts.CommentRange[] | undefined): void => {
+    for (const range of ranges ?? []) comments.set(`${range.pos}:${range.end}`, range);
+  };
+
+  const nodes: ts.Node[] = [sourceFile];
+  while (nodes.length > 0) {
+    const node = nodes.pop();
+    if (node === undefined) continue;
+    collect(ts.getLeadingCommentRanges(src, node.getFullStart()));
+    collect(ts.getTrailingCommentRanges(src, node.getEnd()));
+    for (const child of node.getChildren(sourceFile)) nodes.push(child);
+  }
+
+  const out: string[] = [];
+  let cursor = 0;
+  const ranges = [...comments.values()].sort((a, b) => a.pos - b.pos || a.end - b.end);
+  for (const range of ranges) {
+    if (range.pos < cursor) continue;
+    out.push(src.slice(cursor, range.pos));
+    out.push(src.slice(range.pos, range.end).replace(/[^\r\n]/g, ' '));
+    cursor = range.end;
+  }
+  out.push(src.slice(cursor));
+  return out.join('');
 }
 
 // Matches http:// as well as https://. Nothing in src/ uses plain http today,
