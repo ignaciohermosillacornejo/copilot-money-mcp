@@ -160,6 +160,17 @@ describe('projectRows', () => {
     expect(projectRows(txnRows, ['*']).rows).toEqual(txnRows);
   });
 
+  test('"all" plus a typo returns full rows AND still reports the typo', () => {
+    // Detection is deliberately independent of projection: an unknown name
+    // is surfaced even when the "all" token made it inconsequential.
+    const { rows, warning } = projectRows(txnRows, ['all', 'not_a_real_field'], {
+      knownFields: new Set(['transaction_id']),
+    });
+    expect(rows).toEqual(txnRows);
+    expect(warning).toBeDefined();
+    expect(warning).toContain('not_a_real_field');
+  });
+
   test('"default" expands via opts.preset', () => {
     const { rows, warning } = projectRows(txnRows, ['default'], {
       preset: ['transaction_id', 'date'],

@@ -47,7 +47,7 @@ function isToken(name: string): boolean {
  * non-array `fields`. Iterating a string with `new Set(...)` would silently
  * project on single characters, so fail loudly instead.
  */
-function assertFieldsArray(fields: unknown): asserts fields is readonly string[] {
+function assertFieldsArray(fields: unknown): asserts fields is readonly string[] | undefined {
   if (fields !== undefined && !Array.isArray(fields)) {
     throw new Error(`fields must be an array of field-name strings; got ${typeof fields}`);
   }
@@ -132,6 +132,10 @@ export function projectRows<T extends Record<string, unknown>>(
   // expandFieldSelection runs first: its non-array guard also protects
   // detectUnknownFields below (single guard, no double validation).
   const expanded = expandFieldSelection(fields, opts.preset ?? []);
+  // Deliberate: detection runs on the ORIGINAL list even when a token like
+  // "all" disables projection, so `["all", "a_typo"]` still reports the typo
+  // — every unknown requested name is surfaced, whether or not projection
+  // made it consequential.
   const warning = detectUnknownFields(rows, fields, opts);
   if (!expanded) {
     return { rows: [...rows], ...(warning && { warning }) };
