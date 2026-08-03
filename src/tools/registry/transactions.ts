@@ -5,6 +5,7 @@
 import { defineTool, type ToolMethodArgs } from './types.js';
 import { TRANSACTION_TYPE_FILTERS } from '../constants.js';
 import { TRANSACTION_TYPES } from '../../core/graphql/transactions.js';
+import { TRANSACTION_FIELDS_PARAM_SCHEMA } from '../field-selection.js';
 
 export const getTransactionsTool = defineTool({
   schema: {
@@ -156,16 +157,10 @@ export const getTransactionsTool = defineTool({
           description: 'Search radius in kilometers (default: 10)',
           default: 10,
         },
-        // NEW: Field selection
-        fields: {
-          type: 'array',
-          items: { type: 'string' },
-          description:
-            'Return only these fields per transaction (e.g. ["transaction_id", "date", "name", ' +
-            '"amount", "category_name"]). Takes priority over compact when both are given. ' +
-            'Tokens: "default" expands to a curated 10-field baseline; "all" or "*" returns ' +
-            'the full document. Unknown names are omitted and reported via _field_warning.',
-        },
+        // NEW: Field selection. Shared verbatim with get_transactions_live —
+        // parity pinned by tests. Priority over compact is documented on the
+        // compact param below ("Ignored if fields is given").
+        fields: TRANSACTION_FIELDS_PARAM_SCHEMA,
         compact: {
           type: 'boolean',
           description:
