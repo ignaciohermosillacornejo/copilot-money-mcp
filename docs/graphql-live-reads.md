@@ -30,6 +30,7 @@ If auth fails at boot, the server logs a diagnostic line to stderr and exits non
 | `transaction_type: foreign \| duplicates` | Supported | **Not supported** |
 | `exclude_split_parents: false` | Supported | **Not supported** (server omits parents) |
 | `transaction_id` single lookup | Requires only the ID | Requires `transaction_id` + `account_id` + `item_id` |
+| Field selection (`fields`) | Supported; `compact` preset too | Supported — but `excluded` and `internal_transfer` are cache-document-only, so `fields: ["default"]` yields 8 of the 10 baseline names and requesting either explicitly warns; **no `compact`** (retired in v3, use the `"default"` token) |
 | Auth required | No | Yes |
 
 Every unsupported filter produces an error message telling the LLM to retry without that parameter — it doesn't silently drop.

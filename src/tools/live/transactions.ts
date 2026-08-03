@@ -170,7 +170,8 @@ function projectLiveTransactionFields(
     preset: DEFAULT_TRANSACTION_FIELDS,
     knownFields: LIVE_TRANSACTION_KNOWN_FIELDS,
     validFieldsHint:
-      'the get_transactions_live row fields (including the enrichment fields category_name and normalized_merchant)',
+      'the get_transactions_live row fields (including the enrichment fields category_name and ' +
+      'normalized_merchant); excluded and internal_transfer exist only in cache-mode get_transactions',
   });
 }
 
@@ -502,7 +503,7 @@ export function createLiveTransactionsToolSchema(): ToolSchema {
   return {
     name: 'get_transactions_live',
     description:
-      "Read and filter transactions live from Copilot's GraphQL API — the right tool for any spending lookup by category, merchant, date, or amount; sum the returned `amount` values to total spending. Filters: `category` (a category ID from get_categories_live), `merchant`/`query`, date range (`period` or `start_date`/`end_date`), `min_amount`/`max_amount`, `account_id`, `tag`, `pending`. Requires --live-reads and network connectivity. NOT supported (each returns an error telling you to retry without it): city, lat, lon, radius_km, region, country, transaction_type foreign/duplicates, exclude_split_parents=false, exclude_deleted=false. Single-transaction lookup requires transaction_id + account_id + item_id AND a date range — the server has no single-row-by-id filter, so pass the transaction's date from the prior list result; unbounded lookups would paginate the whole account. Rows are ~20 fields wide; pass fields: [...] to trim each row to just the named fields. If the backend is unreachable this returns an isError result; it does NOT fall back to the local cache.",
+      'Read and filter transactions live from Copilot\'s GraphQL API — the right tool for any spending lookup by category, merchant, date, or amount; sum the returned `amount` values to total spending. Filters: `category` (a category ID from get_categories_live), `merchant`/`query`, date range (`period` or `start_date`/`end_date`), `min_amount`/`max_amount`, `account_id`, `tag`, `pending`. Requires --live-reads and network connectivity. NOT supported (each returns an error telling you to retry without it): city, lat, lon, radius_km, region, country, transaction_type foreign/duplicates, exclude_split_parents=false, exclude_deleted=false. Single-transaction lookup requires transaction_id + account_id + item_id AND a date range — the server has no single-row-by-id filter, so pass the transaction\'s date from the prior list result; unbounded lookups would paginate the whole account. Rows are ~20 fields wide; pass fields: [...] to trim each row to just the named fields — note excluded and internal_transfer exist only in cache mode, so the "default" baseline yields 8 fields here. If the backend is unreachable this returns an isError result; it does NOT fall back to the local cache.',
     inputSchema: {
       type: 'object',
       properties: {

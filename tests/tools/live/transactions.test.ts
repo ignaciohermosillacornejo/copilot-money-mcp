@@ -978,8 +978,15 @@ describe('LiveTransactionsTools — field selection (fields param)', () => {
       ...range,
       fields: ['transaction_id', 'excluded', 'internal_transfer'],
     });
-    expect(result._field_warning).toContain('excluded');
-    expect(result._field_warning).toContain('internal_transfer');
+    // Assert the ignored-list itself (not just substring presence — the hint
+    // below also mentions both names) AND the cache-mode redirect, so a
+    // mode-switching caller is told these are real fields elsewhere.
+    expect(result._field_warning).toContain(
+      'Unknown field name(s) ignored: excluded, internal_transfer'
+    );
+    expect(result._field_warning).toContain(
+      'excluded and internal_transfer exist only in cache-mode get_transactions'
+    );
     expect(Object.keys(result.transactions[0]!)).toEqual(['transaction_id']);
   });
 
