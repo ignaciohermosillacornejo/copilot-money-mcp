@@ -15,6 +15,7 @@ import {
 // pure projections of its ordered definition lists.
 import { READ_TOOL_DEFS, WRITE_TOOL_DEFS } from './registry/index.js';
 import { normalizeMerchantName } from '../utils/merchant.js';
+import { DEFAULT_TRANSACTION_FIELDS, projectRows } from './field-selection.js';
 import type { LiveCopilotDatabase } from '../core/live-database.js';
 import type { GraphQLClient } from '../core/graphql/client.js';
 import { GraphQLError } from '../core/graphql/client.js';
@@ -87,6 +88,7 @@ import {
   getTransactionDisplayName,
   getRecurringDisplayName,
   formatSplitRatio,
+  TransactionSchema,
 } from '../models/index.js';
 import type { GoalHistory } from '../models/goal-history.js';
 import { isItemHealthy, itemNeedsAttention, getItemDisplayName } from '../models/item.js';
@@ -181,29 +183,35 @@ export const DEFAULT_COMPACT_TRANSACTION_FIELDS = [
 ] as const;
 
 /**
+ * Every selectable field name on a get_transactions row: the Transaction
+ * document schema keys plus the two enrichment fields synthesized at read
+ * time. Derived from the zod schema so model drift cannot desync this set.
+ */
+const TRANSACTION_KNOWN_FIELDS: ReadonlySet<string> = new Set([
+  ...Object.keys(TransactionSchema.shape),
+  'category_name',
+  'normalized_merchant',
+]);
+
+/**
  * Project each transaction down to an explicit `fields` allowlist (or the
- * `compact` preset when no explicit list is given). Applied after
- * category_name/normalized_merchant enrichment so both are selectable.
- * A single Firestore transaction document carries ~35-40 fields (internal
- * IDs, Plaid metadata, intelligence-suggestion arrays, flags like
- * is_amazon/from_investment) that most callers never need — pulling months
- * of history at full width both wastes an MCP client's context and can push
- * a single call over response-size limits.
+ * `compact` preset when no explicit list is given; `fields` wins when both
+ * are set). Applied after category_name/normalized_merchant enrichment so
+ * both are selectable. Delegates to the shared field-selection engine
+ * (src/tools/field-selection.ts), which also reports requested names that
+ * match nothing — surfaced to callers as `_field_warning`.
  */
 function projectTransactionFields<T extends Record<string, unknown>>(
   txns: T[],
   options: { fields?: string[]; compact?: boolean }
-): T[] {
+): { rows: T[]; warning?: string } {
   const fields =
     options.fields ?? (options.compact ? [...DEFAULT_COMPACT_TRANSACTION_FIELDS] : undefined);
-  if (!fields || fields.length === 0) return txns;
-  const fieldSet = new Set(fields);
-  return txns.map((txn) => {
-    const projected: Record<string, unknown> = {};
-    for (const key of Object.keys(txn)) {
-      if (fieldSet.has(key)) projected[key] = txn[key];
-    }
-    return projected as T;
+  return projectRows(txns, fields, {
+    preset: DEFAULT_TRANSACTION_FIELDS,
+    knownFields: TRANSACTION_KNOWN_FIELDS,
+    validFieldsHint:
+      'the transaction document fields plus the enrichment fields category_name and normalized_merchant',
   });
 }
 
@@ -697,6 +705,8 @@ export class CopilotMoneyTools {
     type_specific_data?: Record<string, unknown>;
     // Cache limitation warning
     _cache_warning?: string;
+    // Requested `fields` names that matched nothing (typos), when any
+    _field_warning?: string;
   }> {
     const {
       period,
@@ -750,23 +760,25 @@ export class CopilotMoneyTools {
           transactions: [],
         };
       }
+      const projected = projectTransactionFields(
+        [
+          {
+            ...found,
+            category_name: found.category_id
+              ? await this.resolveCategoryName(found.category_id)
+              : undefined,
+            normalized_merchant: normalizeMerchantName(getTransactionDisplayName(found)),
+          },
+        ],
+        { fields, compact }
+      );
       return {
         count: 1,
         total_count: 1,
         offset: 0,
         has_more: false,
-        transactions: projectTransactionFields(
-          [
-            {
-              ...found,
-              category_name: found.category_id
-                ? await this.resolveCategoryName(found.category_id)
-                : undefined,
-              normalized_merchant: normalizeMerchantName(getTransactionDisplayName(found)),
-            },
-          ],
-          { fields, compact }
-        ),
+        transactions: projected.rows,
+        ...(projected.warning && { _field_warning: projected.warning }),
       };
     }
 
@@ -908,14 +920,17 @@ export class CopilotMoneyTools {
     // Check if query may be limited by cache
     const cacheWarning = await this.db.checkCacheLimitation(start_date, end_date);
 
+    const projected = projectTransactionFields(enrichedTransactions, { fields, compact });
+
     return {
       count: enrichedTransactions.length,
       total_count: totalCount,
       offset: validatedOffset,
       has_more: hasMore,
-      transactions: projectTransactionFields(enrichedTransactions, { fields, compact }),
+      transactions: projected.rows,
       ...(typeSpecificData && { type_specific_data: typeSpecificData }),
       ...(cacheWarning && { _cache_warning: cacheWarning }),
+      ...(projected.warning && { _field_warning: projected.warning }),
     };
   }
 

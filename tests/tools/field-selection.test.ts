@@ -1,0 +1,245 @@
+/**
+ * Unit tests for the shared field-selection engine (#597 v3 base).
+ *
+ * The engine is generic over row shape: fixtures below deliberately mix
+ * transaction-shaped and account-shaped rows with Firestore-shaped opaque
+ * IDs (repo convention — no id-equals-name fixtures).
+ */
+
+import { describe, test, expect } from 'bun:test';
+import {
+  DEFAULT_TRANSACTION_FIELDS,
+  expandFieldSelection,
+  projectRows,
+} from '../../src/tools/field-selection.js';
+
+// Firestore-shaped opaque IDs (synthetic).
+const TXN_ID_1 = 'Zx9kQ2mVp3LqR8sTuW1y';
+const TXN_ID_2 = 'Bf4nH7jKw2PdX5cYvA8e';
+const ACCOUNT_ID = 'aQ3mZ8kL1xNv6RtE9pWs';
+
+const txnRows = [
+  {
+    transaction_id: TXN_ID_1,
+    date: '2024-02-01',
+    amount: 100,
+    name: 'Merchant One',
+    category_name: 'Groceries',
+    account_id: ACCOUNT_ID,
+    pending: false,
+    plaid_category_id: 'food_groceries',
+    is_amazon: false,
+  },
+  {
+    transaction_id: TXN_ID_2,
+    date: '2024-02-02',
+    amount: 200,
+    name: 'Merchant Two',
+    category_name: 'Shopping',
+    account_id: ACCOUNT_ID,
+    pending: true,
+    normalized_merchant: 'merchant two',
+  },
+];
+
+describe('DEFAULT_TRANSACTION_FIELDS', () => {
+  test('is exactly the 10-field v3 default preset', () => {
+    expect([...DEFAULT_TRANSACTION_FIELDS]).toEqual([
+      'transaction_id',
+      'date',
+      'amount',
+      'name',
+      'category_name',
+      'account_id',
+      'item_id',
+      'pending',
+      'excluded',
+      'internal_transfer',
+    ]);
+  });
+});
+
+describe('expandFieldSelection', () => {
+  const preset = ['id', 'date', 'amount'] as const;
+
+  test('undefined -> undefined (caller decides the default)', () => {
+    expect(expandFieldSelection(undefined, preset)).toBeUndefined();
+  });
+
+  test('empty array -> undefined (caller decides the default)', () => {
+    expect(expandFieldSelection([], preset)).toBeUndefined();
+  });
+
+  test('plain list passes through in order', () => {
+    expect(expandFieldSelection(['amount', 'id'], preset)).toEqual(['amount', 'id']);
+  });
+
+  test('dedupes repeated names, keeping the first occurrence', () => {
+    expect(expandFieldSelection(['amount', 'id', 'amount'], preset)).toEqual(['amount', 'id']);
+  });
+
+  test('"default" expands to the preset in preset order', () => {
+    expect(expandFieldSelection(['default'], preset)).toEqual(['id', 'date', 'amount']);
+  });
+
+  test('"default" plus extras appends without duplication', () => {
+    expect(expandFieldSelection(['default', 'plaid_category_id'], preset)).toEqual([
+      'id',
+      'date',
+      'amount',
+      'plaid_category_id',
+    ]);
+  });
+
+  test('explicit name before "default" keeps its position (order-preserving dedupe)', () => {
+    expect(expandFieldSelection(['date', 'default'], preset)).toEqual(['date', 'id', 'amount']);
+  });
+
+  test('repeated "default" tokens expand once', () => {
+    expect(expandFieldSelection(['default', 'default'], preset)).toEqual(['id', 'date', 'amount']);
+  });
+
+  test('"all" anywhere -> undefined (no projection)', () => {
+    expect(expandFieldSelection(['all'], preset)).toBeUndefined();
+    expect(expandFieldSelection(['date', 'all', 'amount'], preset)).toBeUndefined();
+  });
+
+  test('"*" anywhere -> undefined (no projection)', () => {
+    expect(expandFieldSelection(['*'], preset)).toBeUndefined();
+    expect(expandFieldSelection(['default', '*'], preset)).toBeUndefined();
+  });
+
+  test('non-array input throws a clear Error naming the expected type', () => {
+    expect(() => expandFieldSelection('date' as unknown as string[], preset)).toThrow(/array/i);
+    expect(() => expandFieldSelection({} as unknown as string[], preset)).toThrow(/array/i);
+  });
+});
+
+describe('projectRows', () => {
+  test('projects each row to the requested allowlist', () => {
+    const { rows, warning } = projectRows(txnRows, ['transaction_id', 'amount']);
+    expect(warning).toBeUndefined();
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(Object.keys(row).sort()).toEqual(['amount', 'transaction_id']);
+    }
+    expect(rows[0].transaction_id).toBe(TXN_ID_1);
+    expect(rows[1].amount).toBe(200);
+  });
+
+  test('is generic over row shape (works on non-transaction rows)', () => {
+    const accountRows = [
+      { account_id: ACCOUNT_ID, balance: 5000, type: 'depository', logo: 'aGVsbG8=' },
+    ];
+    const { rows, warning } = projectRows(accountRows, ['account_id', 'balance']);
+    expect(warning).toBeUndefined();
+    expect(rows).toEqual([{ account_id: ACCOUNT_ID, balance: 5000 }]);
+  });
+
+  test('undefined fields -> rows unchanged, no warning', () => {
+    const { rows, warning } = projectRows(txnRows, undefined);
+    expect(warning).toBeUndefined();
+    expect(rows).toEqual(txnRows);
+  });
+
+  test('empty fields array -> rows unchanged, no warning', () => {
+    const { rows, warning } = projectRows(txnRows, []);
+    expect(warning).toBeUndefined();
+    expect(rows).toEqual(txnRows);
+  });
+
+  test('"all" / "*" -> full rows, no projection', () => {
+    expect(projectRows(txnRows, ['all']).rows).toEqual(txnRows);
+    expect(projectRows(txnRows, ['*']).rows).toEqual(txnRows);
+  });
+
+  test('"default" expands via opts.preset', () => {
+    const { rows, warning } = projectRows(txnRows, ['default'], {
+      preset: ['transaction_id', 'date'],
+    });
+    expect(warning).toBeUndefined();
+    for (const row of rows) {
+      expect(Object.keys(row).sort()).toEqual(['date', 'transaction_id']);
+    }
+  });
+
+  test('non-array fields throws a clear Error naming the expected type', () => {
+    expect(() => projectRows(txnRows, 'transaction_id' as unknown as string[])).toThrow(/array/i);
+  });
+
+  describe('unknown-name detection with knownFields', () => {
+    const knownFields: ReadonlySet<string> = new Set([
+      'transaction_id',
+      'date',
+      'amount',
+      'category_name',
+    ]);
+
+    test('unknown requested names produce a warning listing them', () => {
+      const { rows, warning } = projectRows(
+        txnRows,
+        ['transaction_id', 'not_a_real_field', 'also_bogus'],
+        { knownFields }
+      );
+      expect(warning).toBeDefined();
+      expect(warning).toContain('not_a_real_field');
+      expect(warning).toContain('also_bogus');
+      // Unknown names never leak into projected rows.
+      for (const row of rows) {
+        expect(Object.keys(row)).toEqual(['transaction_id']);
+      }
+    });
+
+    test('known names and tokens never warn', () => {
+      const { warning } = projectRows(txnRows, ['default', 'transaction_id', 'amount'], {
+        knownFields,
+        preset: ['transaction_id'],
+      });
+      expect(warning).toBeUndefined();
+    });
+
+    test('a field in knownFields but absent from every row does not warn', () => {
+      // knownFields is the authority when provided: optional document fields
+      // legitimately absent from a given result page must not warn.
+      const { warning } = projectRows(txnRows, ['category_name', 'date'], {
+        knownFields,
+      });
+      expect(warning).toBeUndefined();
+    });
+
+    test('custom valid-fields hint appears in the warning', () => {
+      const { warning } = projectRows(txnRows, ['bogus_field'], {
+        knownFields,
+        validFieldsHint: 'the transaction document fields plus enrichment fields',
+      });
+      expect(warning).toContain('bogus_field');
+      expect(warning).toContain('the transaction document fields plus enrichment fields');
+    });
+  });
+
+  describe('unknown-name detection without knownFields (row-key fallback)', () => {
+    test('names absent from every row produce a warning', () => {
+      const { warning } = projectRows(txnRows, ['transaction_id', 'not_a_real_field']);
+      expect(warning).toBeDefined();
+      expect(warning).toContain('not_a_real_field');
+    });
+
+    test('a name present on at least one row does not warn', () => {
+      // normalized_merchant is only on the second fixture row.
+      const { warning } = projectRows(txnRows, ['transaction_id', 'normalized_merchant']);
+      expect(warning).toBeUndefined();
+    });
+
+    test('empty rows -> no warning (nothing to compare against)', () => {
+      const { rows, warning } = projectRows([], ['anything_at_all']);
+      expect(rows).toEqual([]);
+      expect(warning).toBeUndefined();
+    });
+  });
+
+  test('does not mutate input rows', () => {
+    const before = JSON.stringify(txnRows);
+    projectRows(txnRows, ['transaction_id'], { knownFields: new Set(['transaction_id']) });
+    expect(JSON.stringify(txnRows)).toBe(before);
+  });
+});

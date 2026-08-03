@@ -391,13 +391,21 @@ describe('CopilotMoneyTools', () => {
       }
     });
 
-    test('fields: [...] returns only the named fields, ignoring unknown names', async () => {
+    test('fields: [...] returns only the named fields; unknown names are omitted and reported via _field_warning', async () => {
       const result = await tools.getTransactions({
         fields: ['transaction_id', 'amount', 'not_a_real_field'],
       });
       for (const txn of result.transactions) {
         expect(Object.keys(txn).sort()).toEqual(['amount', 'transaction_id']);
       }
+      expect(result._field_warning).toBeDefined();
+      expect(result._field_warning).toContain('not_a_real_field');
+
+      // No warning when every requested field is a valid transaction/enrichment name.
+      const clean = await tools.getTransactions({
+        fields: ['transaction_id', 'amount', 'normalized_merchant'],
+      });
+      expect(clean._field_warning).toBeUndefined();
     });
 
     test('fields takes priority over compact when both are given', async () => {
