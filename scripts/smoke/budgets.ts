@@ -8,6 +8,7 @@
  *   2. Warm call (within TTL) returns _cache_hit=true with sub-50ms latency
  *   3. refresh_cache --scope budgets invalidates categoriesCache (the alias)
  *      and triggers a refetch on the next get_budgets_live call
+ *   4. months_window=1 anchors to the current month, not future projection rows
  *
  * Exits non-zero on any assertion failure. Output is intended to be pasted
  * into the PR description.
@@ -33,6 +34,19 @@ async function main(): Promise<void> {
   log('cold', { rows: cold.count, total: cold.total_budgeted, hit: cold._cache_hit, ms: coldMs });
   if (cold._cache_hit !== false) throw new Error(`expected cold _cache_hit=false`);
   if (cold.count === 0) throw new Error('expected at least one budget');
+
+  const now = new Date();
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const currentWindow = await tools.getBudgets({ months_window: 1 });
+  const offAnchor = currentWindow.budgets
+    .flatMap((budget) => Object.keys(budget.amounts ?? {}))
+    .filter((month) => month !== currentMonth);
+  log('months_window=1', { currentMonth, offAnchor: offAnchor.length });
+  if (offAnchor.length > 0) {
+    throw new Error(
+      `months_window=1 returned non-current budget months: ${[...new Set(offAnchor)].join(', ')}`
+    );
+  }
 
   // 2. Warm
   const t1 = Date.now();

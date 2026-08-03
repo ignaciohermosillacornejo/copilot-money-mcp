@@ -4,6 +4,33 @@ import { CopilotDatabase } from '../../../src/core/database.js';
 import { LiveCopilotDatabase } from '../../../src/core/live-database.js';
 import { LiveBudgetsTools } from '../../../src/tools/live/budgets.js';
 
+async function withMockedDate<T>(dateString: string, run: () => Promise<T>): Promise<T> {
+  const originalDate = Date;
+  const fixedDate = new originalDate(dateString);
+
+  // @ts-expect-error - Mocking global Date in a narrow test scope.
+  globalThis.Date = class extends originalDate {
+    constructor(...args: any[]) {
+      if (args.length === 0) {
+        super(fixedDate.getTime());
+      } else {
+        // @ts-expect-error - Date constructor overloads are preserved at runtime.
+        super(...args);
+      }
+    }
+
+    static now() {
+      return fixedDate.getTime();
+    }
+  };
+
+  try {
+    return await run();
+  } finally {
+    globalThis.Date = originalDate;
+  }
+}
+
 function makeClient(categoriesResponse: unknown[]): GraphQLClient {
   return {
     query: mock(() => Promise.resolve({ categories: categoriesResponse })),
@@ -185,17 +212,19 @@ describe('LiveBudgetsTools.getBudgets', () => {
   });
 
   test('regression C4: default months_window=12 trims amounts to exactly 12 entries', async () => {
-    // 24-month fixture; default trim should return exactly the trailing 12.
-    const client = makeClient([makeRestaurantsCategory(24)]);
-    const live = makeLive(client);
-    await prewarmUserCacheRolloversOff(live);
-    const tools = new LiveBudgetsTools(live);
+    await withMockedDate('2026-05-15T12:00:00Z', async () => {
+      // 24-month fixture; default trim should return exactly the trailing 12.
+      const client = makeClient([makeRestaurantsCategory(24)]);
+      const live = makeLive(client);
+      await prewarmUserCacheRolloversOff(live);
+      const tools = new LiveBudgetsTools(live);
 
-    const result = await tools.getBudgets({});
+      const result = await tools.getBudgets({});
 
-    const restaurants = result.budgets.find((b) => b.category_id === 'cat-restaurants');
-    expect(restaurants?.amounts).toBeDefined();
-    expect(Object.keys(restaurants?.amounts ?? {}).length).toBe(12);
+      const restaurants = result.budgets.find((b) => b.category_id === 'cat-restaurants');
+      expect(restaurants?.amounts).toBeDefined();
+      expect(Object.keys(restaurants?.amounts ?? {}).length).toBe(12);
+    });
   });
 
   test('regression C4: months_window=0 returns all amounts', async () => {
@@ -212,20 +241,65 @@ describe('LiveBudgetsTools.getBudgets', () => {
   });
 
   test('regression C4: explicit months_window trims to that exact count', async () => {
-    // 24-month fixture, custom window of 3 — covers a non-boundary value
-    // (neither the default 12 nor the opt-out sentinel 0).
-    const client = makeClient([makeRestaurantsCategory(24)]);
-    const live = makeLive(client);
-    await prewarmUserCacheRolloversOff(live);
-    const tools = new LiveBudgetsTools(live);
+    await withMockedDate('2026-05-15T12:00:00Z', async () => {
+      // 24-month fixture, custom window of 3 — covers a non-boundary value
+      // (neither the default 12 nor the opt-out sentinel 0).
+      const client = makeClient([makeRestaurantsCategory(24)]);
+      const live = makeLive(client);
+      await prewarmUserCacheRolloversOff(live);
+      const tools = new LiveBudgetsTools(live);
 
-    const result = await tools.getBudgets({ months_window: 3 });
+      const result = await tools.getBudgets({ months_window: 3 });
 
-    const restaurants = result.budgets.find((b) => b.category_id === 'cat-restaurants');
-    const keys = Object.keys(restaurants?.amounts ?? {}).sort();
-    expect(keys.length).toBe(3);
-    // The trailing 3 months ending at 2026-05 are 2026-03, 2026-04, 2026-05.
-    expect(keys).toEqual(['2026-03', '2026-04', '2026-05']);
+      const restaurants = result.budgets.find((b) => b.category_id === 'cat-restaurants');
+      const keys = Object.keys(restaurants?.amounts ?? {}).sort();
+      expect(keys.length).toBe(3);
+      // The trailing 3 months ending at 2026-05 are 2026-03, 2026-04, 2026-05.
+      expect(keys).toEqual(['2026-03', '2026-04', '2026-05']);
+    });
+  });
+
+  test('regression #598: months_window=1 anchors to current month, not future payload tail', async () => {
+    await withMockedDate('2026-05-15T12:00:00Z', async () => {
+      const cat = {
+        ...sampleCategoryWithBudget,
+        budget: {
+          current: {
+            ...sampleCategoryWithBudget.budget.current,
+            amount: 500,
+            month: '2026-05',
+          },
+          histories: [
+            {
+              ...sampleCategoryWithBudget.budget.histories[0],
+              amount: 400,
+              month: '2026-04',
+              id: 'budget-food-2026-04',
+            },
+            {
+              ...sampleCategoryWithBudget.budget.histories[0],
+              amount: 600,
+              month: '2026-06',
+              id: 'budget-food-2026-06',
+            },
+            {
+              ...sampleCategoryWithBudget.budget.histories[0],
+              amount: 700,
+              month: '2026-07',
+              id: 'budget-food-2026-07',
+            },
+          ],
+        },
+      };
+      const client = makeClient([cat]);
+      const live = makeLive(client);
+      await prewarmUserCacheRolloversOff(live);
+      const tools = new LiveBudgetsTools(live);
+
+      const result = await tools.getBudgets({ months_window: 1 });
+
+      expect(result.budgets[0]?.amounts).toEqual({ '2026-05': 500 });
+    });
   });
 
   test('handles category with budget.current present but current.amount=null', async () => {
