@@ -507,6 +507,7 @@ export async function createCombinedDb(
           is_transfer: t.is_transfer,
           note: t.note,
           tags: t.tags,
+          user_deleted: t.user_deleted,
         },
       });
     }
