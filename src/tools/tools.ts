@@ -205,6 +205,9 @@ function projectTransactionFields<T extends Record<string, unknown>>(
   txns: T[],
   options: { fields?: string[]; compact?: boolean }
 ): { rows: T[]; warning?: string } {
+  // `??` is deliberate: only an *omitted/null* fields falls back to compact.
+  // An explicit `fields: []` wins over compact and, per the engine's
+  // empty -> undefined rule, means no projection (unchanged from #593).
   const fields =
     options.fields ?? (options.compact ? [...DEFAULT_COMPACT_TRANSACTION_FIELDS] : undefined);
   return projectRows(txns, fields, {

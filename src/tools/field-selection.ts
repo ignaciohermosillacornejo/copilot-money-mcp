@@ -120,9 +120,10 @@ export function projectRows<T extends Record<string, unknown>>(
   fields: readonly string[] | undefined,
   opts: ProjectRowsOptions = {}
 ): { rows: T[]; warning?: string } {
-  assertFieldsArray(fields);
-  const warning = detectUnknownFields(rows, fields, opts);
+  // expandFieldSelection runs first: its non-array guard also protects
+  // detectUnknownFields below (single guard, no double validation).
   const expanded = expandFieldSelection(fields, opts.preset ?? []);
+  const warning = detectUnknownFields(rows, fields, opts);
   if (!expanded) {
     return { rows: [...rows], ...(warning && { warning }) };
   }
@@ -132,6 +133,9 @@ export function projectRows<T extends Record<string, unknown>>(
     for (const key of Object.keys(row)) {
       if (fieldSet.has(key)) out[key] = row[key];
     }
+    // Deliberate widening: projected rows keep type T even though they carry
+    // only the selected keys — `Partial<T>` would force every caller (who
+    // already knows exactly what it asked for) to null-check each field.
     return out as T;
   });
   return { rows: projected, ...(warning && { warning }) };

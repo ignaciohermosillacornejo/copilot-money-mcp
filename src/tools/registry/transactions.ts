@@ -163,7 +163,8 @@ export const getTransactionsTool = defineTool({
           description:
             'Return only these fields per transaction (e.g. ["transaction_id", "date", "name", ' +
             '"amount", "category_name"]). Takes priority over compact when both are given. ' +
-            'Unknown names are omitted and reported via _field_warning on the response.',
+            'Tokens: "default" expands to a curated 10-field baseline; "all" or "*" returns ' +
+            'the full document. Unknown names are omitted and reported via _field_warning.',
         },
         compact: {
           type: 'boolean',

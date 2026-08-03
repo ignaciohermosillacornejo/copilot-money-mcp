@@ -415,6 +415,14 @@ describe('CopilotMoneyTools', () => {
       }
     });
 
+    test('fields: [] (explicit empty) beats compact and returns full documents', async () => {
+      // Pins the #593 edge: `??` only falls back to compact on omitted/null
+      // fields, and the engine treats an empty list as "no projection".
+      const result = await tools.getTransactions({ fields: [], compact: true });
+      expect(result.transactions[0]).toHaveProperty('category_id');
+      expect(result.transactions[0]).toHaveProperty('normalized_merchant');
+    });
+
     test('single-transaction lookup (transaction_id) also honors compact', async () => {
       const result = await tools.getTransactions({ transaction_id: 'txn1', compact: true });
       expect(result.transactions).toHaveLength(1);
