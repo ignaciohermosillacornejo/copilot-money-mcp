@@ -17,6 +17,11 @@ import type {
 import { fetchCategories } from '../../core/graphql/queries/categories.js';
 import { fetchTags } from '../../core/graphql/queries/tags.js';
 import type { ToolSchema, TransactionTypeFilter } from '../tools.js';
+import {
+  DEFAULT_TRANSACTION_FIELDS,
+  TRANSACTION_FIELDS_PARAM_SCHEMA,
+  projectRows,
+} from '../field-selection.js';
 import { normalizeMerchantName } from '../../utils/merchant.js';
 import { parsePeriod } from '../../utils/date.js';
 
@@ -54,9 +59,13 @@ export interface GetTransactionsLiveOptions {
   query?: string;
   transaction_type?: LiveTransactionType;
   tag?: string;
+  fields?: string[];
 }
 
-export interface EnrichedTransaction {
+// A `type` alias (not an interface) on purpose: type aliases carry an
+// implicit index signature, so rows assign to the field-selection engine's
+// `Record<string, unknown>` constraint without casts.
+export type EnrichedTransaction = {
   transaction_id: string;
   account_id: string;
   item_id: string;
@@ -77,14 +86,21 @@ export interface EnrichedTransaction {
   iso_currency_code: string | null;
   tag_ids: string[];
   created_timestamp: number;
-}
+};
 
 interface PageResult {
   count: number;
   total_count: number;
   offset: number;
   has_more: boolean;
+  // NOTE: when `fields` narrows the response, the actual objects carry fewer
+  // keys than this type promises — that narrowing is opt-in, and the caller
+  // who requested the subset already knows what they asked for (same
+  // deliberate widening as cache-mode get_transactions).
   transactions: EnrichedTransaction[];
+  // Requested `fields` names that matched nothing (typos, or cache-only
+  // names like `excluded` that live rows don't carry), when any.
+  _field_warning?: string;
 }
 
 export interface GetTransactionsLiveResult extends PageResult {
@@ -92,6 +108,70 @@ export interface GetTransactionsLiveResult extends PageResult {
   _cache_newest_fetched_at: string;
   _cache_hit: boolean;
   _dropped_invalid_rows?: number;
+}
+
+/**
+ * How each enriched (tool-facing, snake_case) field is computed from a raw
+ * GraphQL TransactionNode. Single source of truth for the live row shape:
+ * `enrich()` builds rows from it and {@link LIVE_TRANSACTION_KNOWN_FIELDS}
+ * is `Object.keys()` of it, while the mapped type pins it 1:1 to the
+ * `EnrichedTransaction` interface — adding, removing, or renaming a row
+ * field here cannot desync projection's known-field set.
+ */
+const ENRICHED_FIELD_MAPPERS: {
+  [K in keyof EnrichedTransaction]-?: (
+    n: TransactionNode,
+    catMap: Map<string, string>
+  ) => EnrichedTransaction[K];
+} = {
+  transaction_id: (n) => n.id,
+  account_id: (n) => n.accountId,
+  item_id: (n) => n.itemId,
+  category_id: (n) => n.categoryId,
+  category_name: (n, catMap) => (n.categoryId ? catMap.get(n.categoryId) : undefined),
+  recurring_id: (n) => n.recurringId,
+  parent_transaction_id: (n) => n.parentId,
+  amount: (n) => n.amount,
+  date: (n) => n.date,
+  name: (n) => n.name,
+  normalized_merchant: (n) => normalizeMerchantName(n.name),
+  type: (n) => n.type,
+  user_reviewed: (n) => n.isReviewed,
+  pending: (n) => n.isPending,
+  user_notes: (n) => n.userNotes,
+  tip_amount: (n) => n.tipAmount,
+  suggested_category_ids: (n) => n.suggestedCategoryIds,
+  iso_currency_code: (n) => n.isoCurrencyCode,
+  tag_ids: (n) => n.tags.map((t) => t.id),
+  created_timestamp: (n) => n.createdAt,
+};
+
+/**
+ * Every selectable field name on a get_transactions_live row, derived from
+ * the enrichment mapper record above (never hand-copied). 8 of the 10
+ * {@link DEFAULT_TRANSACTION_FIELDS} preset names are present; `excluded`
+ * and `internal_transfer` are cache-document-only (live models transfers
+ * via `type === 'INTERNAL_TRANSFER'` and exclusion via Category.isExcluded).
+ */
+export const LIVE_TRANSACTION_KNOWN_FIELDS: ReadonlySet<string> = new Set(
+  Object.keys(ENRICHED_FIELD_MAPPERS)
+);
+
+/**
+ * Mirror of the cache tool's projectTransactionFields: same engine, same
+ * tokens, same `_field_warning`. No `compact` — it is being retired in v3;
+ * the `"default"` token covers the need.
+ */
+function projectLiveTransactionFields(
+  rows: EnrichedTransaction[],
+  fields: string[] | undefined
+): { rows: EnrichedTransaction[]; warning?: string } {
+  return projectRows(rows, fields, {
+    preset: DEFAULT_TRANSACTION_FIELDS,
+    knownFields: LIVE_TRANSACTION_KNOWN_FIELDS,
+    validFieldsHint:
+      'the get_transactions_live row fields (including the enrichment fields category_name and normalized_merchant)',
+  });
 }
 
 const UNSUPPORTED_KEYS = ['city', 'lat', 'lon', 'radius_km', 'region', 'country'] as const;
@@ -147,6 +227,20 @@ export class LiveTransactionsTools {
     };
   }
 
+  /**
+   * Apply the opt-in `fields` projection to an enriched page. Runs AFTER
+   * enrichment (the live analogue of cache mode's post-enrichment
+   * projection) so category_name and normalized_merchant are selectable.
+   */
+  private static projectPage(page: PageResult, fields: string[] | undefined): PageResult {
+    const projected = projectLiveTransactionFields(page.transactions, fields);
+    return {
+      ...page,
+      transactions: projected.rows,
+      ...(projected.warning && { _field_warning: projected.warning }),
+    };
+  }
+
   private async singleTransactionLookup(
     opts: GetTransactionsLiveOptions
   ): Promise<GetTransactionsLiveResult> {
@@ -188,11 +282,16 @@ export class LiveTransactionsTools {
     }
     const enriched = await this.enrich([match]);
     return {
-      count: 1,
-      total_count: 1,
-      offset: 0,
-      has_more: false,
-      transactions: enriched,
+      ...LiveTransactionsTools.projectPage(
+        {
+          count: 1,
+          total_count: 1,
+          offset: 0,
+          has_more: false,
+          transactions: enriched,
+        },
+        opts.fields
+      ),
       _cache_oldest_fetched_at: fetchedAtIso,
       _cache_newest_fetched_at: newestIso,
       _cache_hit: hit,
@@ -310,39 +409,27 @@ export class LiveTransactionsTools {
     const total = rows.length;
     const sliced = rows.slice(offset, offset + limit);
     const enriched = await this.enrich(sliced);
-    return {
-      count: enriched.length,
-      total_count: total,
-      offset,
-      has_more: offset + limit < total,
-      transactions: enriched,
-    };
+    return LiveTransactionsTools.projectPage(
+      {
+        count: enriched.length,
+        total_count: total,
+        offset,
+        has_more: offset + limit < total,
+        transactions: enriched,
+      },
+      opts.fields
+    );
   }
 
   private async enrich(rows: TransactionNode[]): Promise<EnrichedTransaction[]> {
     const catMap = await this.getCategoryNameMap();
-    return rows.map((n) => ({
-      transaction_id: n.id,
-      account_id: n.accountId,
-      item_id: n.itemId,
-      category_id: n.categoryId,
-      category_name: n.categoryId ? catMap.get(n.categoryId) : undefined,
-      recurring_id: n.recurringId,
-      parent_transaction_id: n.parentId,
-      amount: n.amount,
-      date: n.date,
-      name: n.name,
-      normalized_merchant: normalizeMerchantName(n.name),
-      type: n.type,
-      user_reviewed: n.isReviewed,
-      pending: n.isPending,
-      user_notes: n.userNotes,
-      tip_amount: n.tipAmount,
-      suggested_category_ids: n.suggestedCategoryIds,
-      iso_currency_code: n.isoCurrencyCode,
-      tag_ids: n.tags.map((t) => t.id),
-      created_timestamp: n.createdAt,
-    }));
+    return rows.map((n) => {
+      const row: Record<string, unknown> = {};
+      for (const [key, map] of Object.entries(ENRICHED_FIELD_MAPPERS)) {
+        row[key] = map(n, catMap);
+      }
+      return row as EnrichedTransaction;
+    });
   }
 
   private validate(opts: GetTransactionsLiveOptions): void {
@@ -412,7 +499,7 @@ export function createLiveTransactionsToolSchema(): ToolSchema {
   return {
     name: 'get_transactions_live',
     description:
-      "Read and filter transactions live from Copilot's GraphQL API — the right tool for any spending lookup by category, merchant, date, or amount; sum the returned `amount` values to total spending. Filters: `category` (a category ID from get_categories_live), `merchant`/`query`, date range (`period` or `start_date`/`end_date`), `min_amount`/`max_amount`, `account_id`, `tag`, `pending`. Requires --live-reads and network connectivity. NOT supported (each returns an error telling you to retry without it): city, lat, lon, radius_km, region, country, transaction_type foreign/duplicates, exclude_split_parents=false, exclude_deleted=false. Single-transaction lookup requires transaction_id + account_id + item_id AND a date range — the server has no single-row-by-id filter, so pass the transaction's date from the prior list result; unbounded lookups would paginate the whole account. If the backend is unreachable this returns an isError result; it does NOT fall back to the local cache.",
+      "Read and filter transactions live from Copilot's GraphQL API — the right tool for any spending lookup by category, merchant, date, or amount; sum the returned `amount` values to total spending. Filters: `category` (a category ID from get_categories_live), `merchant`/`query`, date range (`period` or `start_date`/`end_date`), `min_amount`/`max_amount`, `account_id`, `tag`, `pending`. Requires --live-reads and network connectivity. NOT supported (each returns an error telling you to retry without it): city, lat, lon, radius_km, region, country, transaction_type foreign/duplicates, exclude_split_parents=false, exclude_deleted=false. Single-transaction lookup requires transaction_id + account_id + item_id AND a date range — the server has no single-row-by-id filter, so pass the transaction's date from the prior list result; unbounded lookups would paginate the whole account. Rows are ~20 fields wide; pass fields: [...] to trim each row to just the named fields. If the backend is unreachable this returns an isError result; it does NOT fall back to the local cache.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -506,6 +593,10 @@ export function createLiveTransactionsToolSchema(): ToolSchema {
           type: 'string',
           description: 'Filter by tag name (resolved to tagId via local cache)',
         },
+        // Shared verbatim with cache-mode get_transactions — parity pinned by
+        // tests. Note: the baseline names `excluded` and `internal_transfer`
+        // are cache-document-only and absent from live rows.
+        fields: TRANSACTION_FIELDS_PARAM_SCHEMA,
       },
     },
     annotations: { readOnlyHint: true },

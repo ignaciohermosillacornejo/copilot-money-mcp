@@ -76,7 +76,10 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   get_balance_history: 1_395,
   get_goal_history: 1_040,
   // Live (--live-reads) tools
-  get_transactions_live: 3_890,
+  // Raised from 3_890 by the live field-selection parity PR (#597): adds the
+  // `fields` param (fragment shared verbatim with get_transactions) plus one
+  // description sentence — real new capability, not bloat. Measured 3_971 +10%.
+  get_transactions_live: 4_370,
   get_accounts_live: 570,
   get_categories_live: 1_555,
   get_tags_live: 530,

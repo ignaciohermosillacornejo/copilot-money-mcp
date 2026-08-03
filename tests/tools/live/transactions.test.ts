@@ -3,7 +3,10 @@ import {
   LiveTransactionsTools,
   createLiveToolSchemas,
   LIVE_TRANSACTION_TYPES,
+  LIVE_TRANSACTION_KNOWN_FIELDS,
 } from '../../../src/tools/live/transactions.js';
+import { getTransactionsTool } from '../../../src/tools/registry/transactions.js';
+import { getTransactionsLiveTool } from '../../../src/tools/registry/live.js';
 import { LiveCopilotDatabase } from '../../../src/core/live-database.js';
 import type { GraphQLClient } from '../../../src/core/graphql/client.js';
 import type { CopilotDatabase } from '../../../src/core/database.js';
@@ -849,6 +852,279 @@ describe('LiveTransactionsTools — _dropped_invalid_rows field', () => {
       end_date: '2025-02-28',
     });
     expect('_dropped_invalid_rows' in cleanResult).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Field selection (#597 live parity). Firestore-shaped opaque IDs on purpose —
+// trivial id-equals-name fixtures mask resolution bugs.
+// ---------------------------------------------------------------------------
+
+const FS_TXN = 'txn_3hWq6MzNkP9RvX2cTb7D';
+const FS_ACC = 'acc_2mVx7QpLcK9TzR4wNb8Y';
+const FS_ITEM = 'item_5cJn3WfHbD8XqS1kMt6Z';
+const FS_CAT = 'cat_9fKq2LmXbT7RwZ0pVsN1';
+
+function mkFsNode(partial: Partial<TransactionNode> = {}): TransactionNode {
+  return mkNode({
+    id: FS_TXN,
+    accountId: FS_ACC,
+    itemId: FS_ITEM,
+    categoryId: FS_CAT,
+    amount: 100,
+    name: 'Synthetic Grocer',
+    ...partial,
+  });
+}
+
+/** The 8 cache-preset names live rows actually carry (excluded and
+ *  internal_transfer are cache-document-only — the v3 parity gap). */
+const LIVE_PRESET_INTERSECTION = [
+  'transaction_id',
+  'date',
+  'amount',
+  'name',
+  'category_name',
+  'account_id',
+  'item_id',
+  'pending',
+];
+
+describe('LiveTransactionsTools — field selection (fields param)', () => {
+  const range = { start_date: '2025-01-01', end_date: '2025-12-31' };
+
+  test('fields omitted → full-width rows, no _field_warning key', async () => {
+    const live = await mkLiveReturning([mkFsNode()]);
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({ ...range });
+    expect(result.count).toBe(1);
+    expect(new Set(Object.keys(result.transactions[0]!))).toEqual(
+      new Set([...LIVE_TRANSACTION_KNOWN_FIELDS])
+    );
+    expect('_field_warning' in result).toBe(false);
+  });
+
+  test('explicit fields list → only those keys, in original row-key order', async () => {
+    const live = await mkLiveReturning([mkFsNode()]);
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({
+      ...range,
+      fields: ['date', 'transaction_id', 'amount'],
+    });
+    // Engine preserves ORIGINAL row key order, not request order.
+    expect(Object.keys(result.transactions[0]!)).toEqual(['transaction_id', 'amount', 'date']);
+    expect(result.transactions[0]).toEqual({
+      transaction_id: FS_TXN,
+      amount: 100,
+      date: '2025-06-01',
+    } as never);
+    expect('_field_warning' in result).toBe(false);
+  });
+
+  test('"default" token → the 8 preset names live rows carry, no warning for the 2 cache-only ones', async () => {
+    const live = await mkLiveReturning([mkFsNode()]);
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({ ...range, fields: ['default'] });
+    expect(Object.keys(result.transactions[0]!).sort()).toEqual(
+      [...LIVE_PRESET_INTERSECTION].sort()
+    );
+    // excluded/internal_transfer come from the preset (token expansion), not
+    // an explicit request — their absence must NOT warn.
+    expect('_field_warning' in result).toBe(false);
+  });
+
+  test('"default" plus an extra name → preset intersection + the extra', async () => {
+    const live = await mkLiveReturning([mkFsNode()]);
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({
+      ...range,
+      fields: ['default', 'user_notes'],
+    });
+    expect(Object.keys(result.transactions[0]!).sort()).toEqual(
+      [...LIVE_PRESET_INTERSECTION, 'user_notes'].sort()
+    );
+  });
+
+  test('"all" and "*" tokens → full rows (projection disabled)', async () => {
+    const live = await mkLiveReturning([mkFsNode()]);
+    const tools = new LiveTransactionsTools(live);
+    for (const token of ['all', '*']) {
+      const result = await tools.getTransactions({ ...range, fields: [token] });
+      expect(new Set(Object.keys(result.transactions[0]!))).toEqual(
+        new Set([...LIVE_TRANSACTION_KNOWN_FIELDS])
+      );
+      expect('_field_warning' in result).toBe(false);
+    }
+  });
+
+  test('unknown name → _field_warning names it, rows omit it', async () => {
+    const live = await mkLiveReturning([mkFsNode()]);
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({
+      ...range,
+      fields: ['transaction_id', 'not_a_real_field'],
+    });
+    expect(result._field_warning).toContain('not_a_real_field');
+    expect(Object.keys(result.transactions[0]!)).toEqual(['transaction_id']);
+  });
+
+  test('explicitly requesting cache-only preset names (excluded/internal_transfer) warns', async () => {
+    // Pins the v3 parity gap: these 2 of the 10 DEFAULT_TRANSACTION_FIELDS
+    // names are cache-document fields with no live-row equivalent, so an
+    // EXPLICIT request for them is honestly reported as unknown here.
+    const live = await mkLiveReturning([mkFsNode()]);
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({
+      ...range,
+      fields: ['transaction_id', 'excluded', 'internal_transfer'],
+    });
+    expect(result._field_warning).toContain('excluded');
+    expect(result._field_warning).toContain('internal_transfer');
+    expect(Object.keys(result.transactions[0]!)).toEqual(['transaction_id']);
+  });
+
+  test('empty fields array → no projection (engine semantics, matches cache mode)', async () => {
+    const live = await mkLiveReturning([mkFsNode()]);
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({ ...range, fields: [] });
+    expect(new Set(Object.keys(result.transactions[0]!))).toEqual(
+      new Set([...LIVE_TRANSACTION_KNOWN_FIELDS])
+    );
+  });
+
+  test('category_name is selectable and resolves through the category map', async () => {
+    const live = await mkLiveReturning([mkFsNode()]);
+    live.getCategoriesCache().invalidate();
+    await live.getCategoriesCache().read(() =>
+      Promise.resolve([
+        {
+          id: FS_CAT,
+          name: 'Groceries',
+          templateId: 'Groceries',
+          colorName: null,
+          icon: null,
+          isExcluded: false,
+          isRolloverDisabled: false,
+          canBeDeleted: true,
+          budget: null,
+        },
+      ])
+    );
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({
+      ...range,
+      fields: ['transaction_id', 'category_name'],
+    });
+    expect(result.transactions[0]).toEqual({
+      transaction_id: FS_TXN,
+      category_name: 'Groceries',
+    } as never);
+  });
+
+  test('transaction_id lookup path applies projection', async () => {
+    const live = await mkLiveReturning([mkFsNode()]);
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({
+      transaction_id: FS_TXN,
+      account_id: FS_ACC,
+      item_id: FS_ITEM,
+      ...range,
+      fields: ['transaction_id', 'amount'],
+    });
+    expect(result.count).toBe(1);
+    expect(Object.keys(result.transactions[0]!)).toEqual(['transaction_id', 'amount']);
+  });
+
+  test('transaction_id lookup path surfaces _field_warning on unknown names', async () => {
+    const live = await mkLiveReturning([mkFsNode()]);
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({
+      transaction_id: FS_TXN,
+      account_id: FS_ACC,
+      item_id: FS_ITEM,
+      ...range,
+      fields: ['transaction_id', 'zzz_typo'],
+    });
+    expect(result._field_warning).toContain('zzz_typo');
+    expect(Object.keys(result.transactions[0]!)).toEqual(['transaction_id']);
+  });
+
+  test('transaction_id lookup not-found → empty result, no _field_warning (matches cache mode)', async () => {
+    const live = await mkLiveReturning([mkFsNode()]);
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({
+      transaction_id: 'txn_0MissingMissingMiss0',
+      account_id: FS_ACC,
+      item_id: FS_ITEM,
+      ...range,
+      fields: ['transaction_id', 'zzz_typo'],
+    });
+    expect(result.count).toBe(0);
+    expect('_field_warning' in result).toBe(false);
+  });
+});
+
+describe('LIVE_TRANSACTION_KNOWN_FIELDS — derived from the enrichment mapper', () => {
+  test('exactly matches the keys of a full enriched row', async () => {
+    const live = await mkLiveReturning([mkFsNode()]);
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({
+      start_date: '2025-01-01',
+      end_date: '2025-12-31',
+    });
+    expect(new Set(Object.keys(result.transactions[0]!))).toEqual(
+      new Set([...LIVE_TRANSACTION_KNOWN_FIELDS])
+    );
+  });
+
+  test('covers 8 of the 10 DEFAULT_TRANSACTION_FIELDS preset names (the v3 parity gap)', () => {
+    for (const name of LIVE_PRESET_INTERSECTION) {
+      expect(LIVE_TRANSACTION_KNOWN_FIELDS.has(name)).toBe(true);
+    }
+    // Cache-document-only flags — live rows model transfers via type ===
+    // 'INTERNAL_TRANSFER' and exclusion via Category.isExcluded instead.
+    expect(LIVE_TRANSACTION_KNOWN_FIELDS.has('excluded')).toBe(false);
+    expect(LIVE_TRANSACTION_KNOWN_FIELDS.has('internal_transfer')).toBe(false);
+  });
+});
+
+describe('get_transactions_live fields param — parity with get_transactions', () => {
+  // Compare through the REGISTRY defs (what the server actually lists), not
+  // the shared constant, so forking either side back to a private copy that
+  // then drifts fails here.
+  const cacheFragment = getTransactionsTool.schema.inputSchema.properties.fields as {
+    type: string;
+    items: { type: string };
+    description: string;
+  };
+  const liveFragment = getTransactionsLiveTool.schema.inputSchema.properties.fields as {
+    type: string;
+    items: { type: string };
+    description: string;
+  };
+
+  test('both tools expose a fields param', () => {
+    expect(cacheFragment).toBeDefined();
+    expect(liveFragment).toBeDefined();
+  });
+
+  test('fields param fragment (type + items + description) is IDENTICAL across modes', () => {
+    expect(JSON.parse(JSON.stringify(liveFragment))).toEqual(
+      JSON.parse(JSON.stringify(cacheFragment))
+    );
+  });
+
+  test('fragment is non-vacuous: array of strings, description covers tokens and _field_warning', () => {
+    expect(cacheFragment.type).toBe('array');
+    expect(cacheFragment.items).toEqual({ type: 'string' });
+    expect(cacheFragment.description).toContain('"default"');
+    expect(cacheFragment.description).toContain('"all"');
+    expect(cacheFragment.description).toContain('"*"');
+    expect(cacheFragment.description).toContain('_field_warning');
+  });
+
+  test('live tool does NOT grow a compact param (retired in v3; tokens cover it)', () => {
+    expect(getTransactionsLiveTool.schema.inputSchema.properties.compact).toBeUndefined();
   });
 });
 
