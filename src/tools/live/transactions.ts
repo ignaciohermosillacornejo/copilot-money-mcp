@@ -425,6 +425,9 @@ export class LiveTransactionsTools {
     const catMap = await this.getCategoryNameMap();
     return rows.map((n) => {
       const row: Record<string, unknown> = {};
+      // Object.entries widens per-key types, so the cast below leans on the
+      // mapped-type constraint at ENRICHED_FIELD_MAPPERS' declaration, which
+      // already proved the record covers every EnrichedTransaction key.
       for (const [key, map] of Object.entries(ENRICHED_FIELD_MAPPERS)) {
         row[key] = map(n, catMap);
       }
@@ -434,7 +437,7 @@ export class LiveTransactionsTools {
 
   private validate(opts: GetTransactionsLiveOptions): void {
     const o = opts as Record<string, unknown>;
-    const supported = `start_date, end_date, period, account_id (+ item_id), category, merchant, query, tag, min_amount, max_amount, limit, offset, pending, exclude_transfers, exclude_deleted, exclude_excluded, transaction_type (${LIVE_TRANSACTION_TYPES.join(', ')}), transaction_id (+ account_id + item_id)`;
+    const supported = `start_date, end_date, period, account_id (+ item_id), category, merchant, query, tag, min_amount, max_amount, limit, offset, pending, exclude_transfers, exclude_deleted, exclude_excluded, transaction_type (${LIVE_TRANSACTION_TYPES.join(', ')}), transaction_id (+ account_id + item_id), fields`;
 
     for (const key of UNSUPPORTED_KEYS) {
       if (o[key] !== undefined) {

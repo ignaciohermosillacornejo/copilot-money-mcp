@@ -44,8 +44,9 @@ export const TRANSACTION_FIELDS_PARAM_SCHEMA = {
   items: { type: 'string' },
   description:
     'Return only these fields per transaction (e.g. ["transaction_id", "date", "name", ' +
-    '"amount", "category_name"]). Tokens: "default" expands to a curated 10-field baseline; ' +
-    '"all" or "*" returns the full row. Unknown names are omitted and reported via _field_warning.',
+    '"amount", "category_name"]). Tokens: "default" expands to a curated baseline of core ' +
+    'fields; "all" or "*" returns the full row. Unknown names are omitted and reported via ' +
+    '_field_warning.',
 } as const;
 
 /** Token that expands to the caller-supplied preset. */
