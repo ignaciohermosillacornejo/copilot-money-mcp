@@ -77,6 +77,28 @@ export function isTotalDecodeLoss(rawNonEmpty: number, decodedRows: number): boo
 }
 
 /**
+ * Which of the collections a caller depends on have no real documents.
+ *
+ * "Real" excludes Firestore's fieldless parent pointers, which exist for any
+ * path with subcollections and say nothing about whether the collection itself
+ * holds data — counting them would make an extinct collection look alive.
+ *
+ * Extracted and tested separately because `DEPENDED_ON` is currently empty
+ * (#624 removed its only entry), so the check cannot exercise itself against
+ * the real cache. Without this the gate would be documentation-only until
+ * someone adds a new entry, and a bug in it would surface only then.
+ */
+export function findExtinctDependencies(
+  dependedOn: readonly string[],
+  raw: ReadonlyMap<string, { total: number; empty: number }>
+): string[] {
+  return dependedOn.filter((pattern) => {
+    const counts = raw.get(pattern);
+    return !counts || counts.total - counts.empty === 0;
+  });
+}
+
+/**
  * How many references resolve against a target id set.
  *
  * Returns counts as well as the rate so callers never have to divide and
@@ -223,10 +245,7 @@ async function main(): Promise<void> {
   // puts those customizations. The collection is still decoded, so the data is
   // there if it ever comes back, but no behaviour depends on it.
   const DEPENDED_ON: string[] = [];
-  const extinct = DEPENDED_ON.filter((p) => {
-    const counts = raw.get(p);
-    return !counts || counts.total - counts.empty === 0;
-  });
+  const extinct = findExtinctDependencies(DEPENDED_ON, raw);
 
   if (extinct.length > 0) {
     record(

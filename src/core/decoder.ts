@@ -1588,6 +1588,16 @@ function processInvestmentPrice(
  * Internal helper to process an item document.
  */
 function processItem(fields: Map<string, FirestoreValue>, docId: string): Item | null {
+  // A document with no fields is a Firestore parent pointer, not an item.
+  // Without this guard the function below always returns at least
+  // `{ item_id: docId }`, so any caller that routes a parent pointer here gets
+  // a phantom row (#627). Guarding at the processor rather than only at the
+  // call site makes the invariant hold for every caller, present and future —
+  // `processUserProfile` already does the same.
+  if (fields.size === 0) {
+    return null;
+  }
+
   const itemId = getString(fields, 'item_id') ?? docId;
 
   const itemData: Record<string, unknown> = {

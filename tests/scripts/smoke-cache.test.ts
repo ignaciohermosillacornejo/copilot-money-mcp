@@ -7,7 +7,12 @@
  */
 
 import { describe, test, expect } from 'bun:test';
-import { normalizeCollection, isTotalDecodeLoss, joinStats } from '../../scripts/smoke/cache.js';
+import {
+  normalizeCollection,
+  isTotalDecodeLoss,
+  joinStats,
+  findExtinctDependencies,
+} from '../../scripts/smoke/cache.js';
 
 describe('normalizeCollection', () => {
   test('wildcards document ids at odd path depths', () => {
@@ -100,5 +105,43 @@ describe('joinStats', () => {
 
   test('the empty-reference short-circuit does not consult the target', () => {
     expect(joinStats([], new Set(['sec_a'])).rate).toBe(1);
+  });
+});
+
+describe('findExtinctDependencies', () => {
+  // DEPENDED_ON is empty right now (#624 removed its only entry), so the check
+  // cannot exercise itself against a real cache. These keep it honest anyway —
+  // otherwise a gate nobody can currently trip is indistinguishable from a
+  // gate that is broken.
+  const raw = new Map([
+    ['transactions', { total: 100, empty: 0 }],
+    // A collection consisting ENTIRELY of Firestore parent pointers: documents
+    // exist, but none carries a field. This is what an extinct collection with
+    // surviving subcollections looks like, and it must read as extinct.
+    ['users/*/accounts', { total: 438, empty: 438 }],
+    ['items', { total: 20, empty: 8 }],
+  ]);
+
+  test('flags a collection whose documents are all parent pointers', () => {
+    expect(findExtinctDependencies(['users/*/accounts'], raw)).toEqual(['users/*/accounts']);
+  });
+
+  test('flags a collection absent from the cache entirely', () => {
+    expect(findExtinctDependencies(['never/*/existed'], raw)).toEqual(['never/*/existed']);
+  });
+
+  test('does not flag a collection with real documents', () => {
+    expect(findExtinctDependencies(['transactions'], raw)).toEqual([]);
+  });
+
+  test('does not flag a collection that merely has SOME parent pointers', () => {
+    // items has 8 empty of 20 — normal, not extinct. Counting raw totals
+    // instead of non-empty ones would miss the real case; counting any empty
+    // document as fatal would flag every healthy collection.
+    expect(findExtinctDependencies(['items'], raw)).toEqual([]);
+  });
+
+  test('returns nothing for an empty dependency list', () => {
+    expect(findExtinctDependencies([], raw)).toEqual([]);
   });
 });
