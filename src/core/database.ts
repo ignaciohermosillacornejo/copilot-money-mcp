@@ -1329,12 +1329,20 @@ export class CopilotDatabase {
   }
 
   /**
-   * Build a map of account ID to user-defined account name.
+   * Build a map of account ID to the name a user would recognize.
    *
-   * This map can be used to look up user-friendly account names.
+   * Sourced from the account documents themselves, preferring a user-set
+   * `nickname` over the institution-supplied `name`.
+   *
+   * This previously read the `users/{uid}/accounts` customization collection,
+   * which Copilot no longer populates — so the map came back EMPTY on every
+   * real cache and its one consumer (`get_balance_history`'s `account_name`)
+   * silently returned `undefined` for every row. Same root cause as the hidden
+   * filter in #624: those customizations moved onto the account records.
+   *
    * The map is cached after the first call.
    *
-   * @returns Map from account_id to user-defined account name
+   * @returns Map from account_id to display name
    */
   async getAccountNameMap(): Promise<Map<string, string>> {
     // Return cached map if available
@@ -1342,12 +1350,13 @@ export class CopilotDatabase {
       return this._accountNameMap;
     }
 
-    const userAccounts = await this.loadUserAccounts();
+    const accounts = await this.loadAccounts();
     const nameMap = new Map<string, string>();
 
-    for (const userAccount of userAccounts) {
-      if (userAccount.name) {
-        nameMap.set(userAccount.account_id, userAccount.name);
+    for (const account of accounts) {
+      const displayName = account.nickname ?? account.name;
+      if (displayName) {
+        nameMap.set(account.account_id, displayName);
       }
     }
 

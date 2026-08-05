@@ -43,6 +43,10 @@ export interface TestAccount {
   available_balance?: number;
   iso_currency_code?: string;
   item_id?: string;
+  /** User customizations now live on the account document itself (#624). */
+  nickname?: string;
+  user_hidden?: boolean;
+  user_deleted?: boolean;
 }
 
 export interface TestRecurring {
@@ -330,6 +334,9 @@ export async function createAccountDb(dbPath: string, accounts: TestAccount[]): 
       official_name: a.official_name,
       mask: a.mask,
       account_type: a.account_type,
+      nickname: a.nickname,
+      user_hidden: a.user_hidden,
+      user_deleted: a.user_deleted,
       subtype: a.subtype,
       institution_name: a.institution_name,
       institution_id: a.institution_id,
@@ -551,6 +558,9 @@ export async function createCombinedDb(
           official_name: a.official_name,
           mask: a.mask,
           account_type: a.account_type,
+          nickname: a.nickname,
+          user_hidden: a.user_hidden,
+          user_deleted: a.user_deleted,
           subtype: a.subtype,
           institution_name: a.institution_name,
           institution_id: a.institution_id,

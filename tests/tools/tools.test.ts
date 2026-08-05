@@ -140,6 +140,10 @@ const mockTransactionsWithFilters: Transaction[] = [
   },
 ];
 
+// Hidden-ness lives on the account document itself (#624). It used to be
+// modelled here via a `users/{uid}/accounts` customization collection, which
+// Copilot no longer populates — so the fixture described a world in which the
+// filter worked while real caches got no filtering at all.
 const mockAccountsWithHidden: Account[] = [
   {
     account_id: 'acc_visible',
@@ -152,14 +156,7 @@ const mockAccountsWithHidden: Account[] = [
     current_balance: 5000.0,
     name: 'Hidden Account',
     account_type: 'investment',
-  },
-];
-
-// UserAccountCustomization for hidden accounts
-const mockUserAccounts = [
-  {
-    account_id: 'acc_hidden',
-    hidden: true,
+    user_hidden: true,
   },
 ];
 
@@ -857,9 +854,10 @@ describe('CopilotMoneyTools', () => {
 
   describe('getAccounts with hidden accounts', () => {
     beforeEach(() => {
-      // Override with mock data that includes hidden accounts
+      // Deliberately seed the customization collection EMPTY, the way a real
+      // cache has it since Copilot moved these flags onto the account records.
       (db as any)._accounts = [...mockAccountsWithHidden];
-      (db as any)._userAccounts = [...mockUserAccounts];
+      (db as any)._userAccounts = [];
     });
 
     test('excludes hidden accounts by default', async () => {
@@ -873,6 +871,35 @@ describe('CopilotMoneyTools', () => {
       const result = await tools.getAccounts({ include_hidden: true });
       expect(result.count).toBe(2);
       expect(result.total_balance).toBe(6000.0);
+    });
+
+    test('does not rely on the users/{uid}/accounts customization collection (#624)', async () => {
+      // The whole bug: the filter consulted a collection that is always empty,
+      // so it silently did nothing. Populating that collection must not change
+      // the answer — if it does, the dead path has been reintroduced.
+      (db as any)._userAccounts = [{ account_id: 'acc_visible', hidden: true }];
+
+      const result = await tools.getAccounts();
+
+      expect(result.count).toBe(1);
+      expect(result.accounts[0].account_id).toBe('acc_visible');
+    });
+
+    test('excludes user_deleted accounts alongside user_hidden ones', async () => {
+      (db as any)._accounts = [
+        ...mockAccountsWithHidden,
+        {
+          account_id: 'acc_deleted',
+          current_balance: 250.0,
+          name: 'Merged Account',
+          account_type: 'checking',
+          user_deleted: true,
+        },
+      ];
+
+      const result = await tools.getAccounts();
+
+      expect(result.accounts.map((a) => a.account_id)).toEqual(['acc_visible']);
     });
   });
 

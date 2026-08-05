@@ -215,8 +215,14 @@ async function main(): Promise<void> {
   // collection loud instead of silent, and nothing derives it automatically —
   // a new decoder that reads a collection Copilot has since retired will pass
   // every other check in this file. The mirror gap (fields a processor
-  // declares that no real document has) is the follow-up noted in the PR.
-  const DEPENDED_ON = ['users/*/accounts'];
+  // declares that no real document has) is a separate follow-up.
+  //
+  // `users/*/accounts` was the founding entry and has been removed: #624
+  // resolved by moving the two things that read it — the hidden-account filter
+  // and the account name map — onto the account documents, where Copilot now
+  // puts those customizations. The collection is still decoded, so the data is
+  // there if it ever comes back, but no behaviour depends on it.
+  const DEPENDED_ON: string[] = [];
   const extinct = DEPENDED_ON.filter((p) => {
     const counts = raw.get(p);
     return !counts || counts.total - counts.empty === 0;
