@@ -17,6 +17,7 @@ import {
   decodeGoals,
   decodeGoalHistory,
   decodeInvestmentPrices,
+  periodInRange,
   decodeItems,
   decodeCategories,
   decodeUserAccounts,
@@ -1475,18 +1476,12 @@ export class CopilotDatabase {
       result = result.filter((p) => p.ticker_symbol?.toLowerCase() === lower);
     }
 
-    // Apply date range filters (check both p.date for hf and p.month for daily)
-    if (startDate) {
+    // Apply period filters. Uses the same predicate as the decoder so the two
+    // cannot disagree about what a range means across granularities (#622).
+    if (startDate || endDate) {
       result = result.filter((p) => {
         const d = p.date ?? p.month;
-        return d && d >= startDate;
-      });
-    }
-    if (endDate) {
-      result = result.filter((p) => {
-        const d = p.date ?? p.month;
-        // A YYYY-MM endDate must still admit hf rows dated YYYY-MM-DD within it.
-        return d && d.slice(0, endDate.length) <= endDate;
+        return d !== undefined && periodInRange(d, startDate, endDate);
       });
     }
 

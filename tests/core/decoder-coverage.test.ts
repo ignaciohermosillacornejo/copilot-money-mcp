@@ -221,7 +221,12 @@ describe('decoder coverage', () => {
       expect(prices.length).toBe(2);
     });
 
-    test('filters by ticker symbol', async () => {
+    // Ticker filtering is deliberately NOT a decoder capability (#622/#623): a
+    // ticker exists only in `securities`, so a single-collection decoder cannot
+    // filter by one, and offering the option would silently return zero rows.
+    // The filter lives in CopilotDatabase.getInvestmentPrices, after the join —
+    // covered in tests/core/database.test.ts.
+    test('surfaces a denormalized ticker_symbol when one is present on the document', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'investment-prices-filter-db');
       await createTestDatabase(dbPath, [
         {
@@ -237,16 +242,18 @@ describe('decoder coverage', () => {
           collection: 'investment_prices/sec_inv2/hf',
           id: '2024-01-15',
           fields: {
-            ticker_symbol: 'GOOGL',
             price: 140.0,
             date: '2024-01-15',
           },
         },
       ]);
 
-      const prices = await decodeInvestmentPrices(dbPath, { tickerSymbol: 'AAPL' });
+      const prices = await decodeInvestmentPrices(dbPath);
 
-      expect(prices.every((p) => p.ticker_symbol === 'AAPL')).toBe(true);
+      // Real documents carry no ticker (the second row models that); the
+      // decoder still passes one through if Copilot ever denormalizes it.
+      expect(prices.find((p) => p.security_id === 'sec_inv1')?.ticker_symbol).toBe('AAPL');
+      expect(prices.find((p) => p.security_id === 'sec_inv2')?.ticker_symbol).toBeUndefined();
     });
 
     test('filters by date range', async () => {
