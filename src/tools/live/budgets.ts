@@ -43,23 +43,36 @@ export interface GetBudgetsLiveResult {
   _cache_hit: boolean;
 }
 
+function currentMonthKey(now = new Date()): string {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function monthIndex(month: string): number {
+  const parts = month.split('-');
+  const year = Number(parts[0]);
+  const monthNumber = Number(parts[1]);
+  return year * 12 + monthNumber - 1;
+}
+
 /**
- * Return a trimmed amounts map containing only the most recent N months
- * by lexicographic key order. `YYYY-MM` keys sort chronologically, so this
- * is equivalent to "trailing N months" for normal data. The function does
- * NOT consult the current date; if the input contains future-dated keys
- * (e.g., projected budgets), they win the trailing-N selection. If the
- * input has fewer than N months, returns the input unchanged.
+ * Return a trimmed amounts map containing only the current month plus the
+ * preceding N-1 calendar months. Copilot can return future budget months
+ * (scheduled/rollover projections), so anchoring to the last payload key would
+ * return future amounts for callers asking for the current budget window.
  */
 function trimAmountsToWindow(
   amounts: Record<string, number>,
   windowMonths: number
 ): Record<string, number> {
+  const maxMonth = monthIndex(currentMonthKey());
+  const minMonth = maxMonth - windowMonths + 1;
   const keys = Object.keys(amounts).sort();
-  if (keys.length <= windowMonths) return amounts;
-  const kept = keys.slice(-windowMonths);
   const trimmed: Record<string, number> = {};
-  for (const k of kept) trimmed[k] = amounts[k]!;
+  for (const k of keys) {
+    const idx = monthIndex(k);
+    const amount = amounts[k];
+    if (amount !== undefined && idx >= minMonth && idx <= maxMonth) trimmed[k] = amount;
+  }
   return trimmed;
 }
 
@@ -167,7 +180,7 @@ export function createLiveBudgetsToolSchema(): ToolSchema {
           type: 'integer',
           minimum: 0,
           description:
-            "Number of trailing months to include in each budget's `amounts` map. " +
+            "Number of trailing months, anchored to the current month, to include in each budget's `amounts` map. " +
             'Default: 12. Set to 0 to return the full multi-year history (large response).',
           default: 12,
         },

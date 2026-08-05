@@ -287,13 +287,14 @@ function queryOperation(name: string): LedgerEntry {
  * passed here MUST have a matching QUERY_RESPONSE_SCHEMAS entry — enforced
  * bidirectionally by tests/conformance/ledger.test.ts.
  */
-function gatedQueryResponseShape(name: string): LedgerEntry {
+function gatedQueryResponseShape(name: string, overrides?: Partial<LedgerEntry>): LedgerEntry {
   return {
     surface: `Query.${name}:response`,
     kind: 'response-shape',
     oracle: `runtime:${READ_RESPONSE_SHAPE_RUNTIME_CHECK}`,
     class: 'gated',
     evidence: READ_RESPONSE_SHAPE_GATED,
+    ...overrides,
   };
 }
 
@@ -766,7 +767,13 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'surfaced via _dropped_invalid_rows + a deduped stderr warning.',
   },
   queryOperation('categories'),
-  gatedQueryResponseShape('categories'),
+  gatedQueryResponseShape('categories', {
+    evidence:
+      READ_RESPONSE_SHAPE_GATED +
+      '; budget.month ordering/anchoring is guarded by get_budgets_live synthetic tests ' +
+      '(tests/tools/live/budgets.test.ts, issue #598) and the budgets live smoke ' +
+      '(scripts/smoke/budgets.ts).',
+  }),
   queryOperation('tags'),
   gatedQueryResponseShape('tags'),
   queryOperation('recurrings'),
