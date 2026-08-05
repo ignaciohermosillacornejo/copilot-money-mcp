@@ -83,15 +83,27 @@ describe('every parent-pointer dispatch clause guards its processor (#627)', () 
   test('each processor reachable from a parent-pointer clause checks fields.size === 0', () => {
     const src = fs.readFileSync(path.join(import.meta.dir, '../../src/core/decoder.ts'), 'utf8');
 
-    const clause = /\/\^(\w+)\\\/\[\^\/\]\+\$\/\.test\(collection\)\)\s*\{([\s\S]{0,400}?)\n\s*\}/g;
+    // `[-\w]+` not `\w+`: a hyphenated collection name would otherwise not
+    // match the clause at all, and an unmatched clause is an unchecked one.
+    const clause =
+      /\/\^([-\w]+)\\\/\[\^\/\]\+\$\/\.test\(collection\)\)\s*\{([\s\S]{0,400}?)\n\s*\}/g;
     const checked: string[] = [];
     const unguarded: string[] = [];
+    const unresolved: string[] = [];
 
     let m: RegExpExecArray | null;
     while ((m = clause.exec(src)) !== null) {
+      const collectionName = m[1] ?? '?';
       const body = m[2] ?? '';
       const call = /\b(process\w+)\(/.exec(body);
-      if (!call) continue;
+      if (!call) {
+        // A clause whose processor we could not identify is NOT a pass. The
+        // body window is capped, so a long comment or nested logic before the
+        // call would land here — and skipping silently is exactly the failure
+        // this ratchet exists to prevent, one level up.
+        unresolved.push(collectionName);
+        continue;
+      }
       const processor = call[1]!;
       checked.push(processor);
 
@@ -105,6 +117,7 @@ describe('every parent-pointer dispatch clause guards its processor (#627)', () 
     // Vacuity guard: if the clause pattern stops matching (a refactor, a
     // rename), this test would silently pass while checking nothing.
     expect(checked.length).toBeGreaterThanOrEqual(2);
+    expect(unresolved).toEqual([]);
     expect(unguarded).toEqual([]);
   });
 });
