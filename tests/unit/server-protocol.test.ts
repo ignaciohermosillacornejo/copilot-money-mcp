@@ -436,10 +436,9 @@ describe('CopilotMoneyServer.handleCallTool - response format', () => {
 
     // Compact serialization: no newlines, byte-identical to JSON.stringify(result)
     expect(text).not.toContain('\n');
+    // Round-tripping through JSON.parse already proves the payload parses —
+    // a separate parse + toBeDefined() adds no detection power (#601).
     expect(text).toBe(JSON.stringify(JSON.parse(text)));
-    // Parse and verify structure
-    const parsed = JSON.parse(text);
-    expect(parsed).toBeDefined();
   });
 });
 
