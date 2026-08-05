@@ -459,19 +459,23 @@ export async function decodeGoalHistory(dbPath: string, goalId?: string): Promis
  *     investment_prices/{securityId}/hf/{YYYY-MM-DD}
  *
  * Documents carry neither `investment_id` nor `ticker_symbol`; the prices live
- * in a nested `prices` map. `ticker_symbol` is joined on afterwards from the
- * `securities` collection by whoever needs it — the decoder stays single-collection.
+ * in a nested `prices` map.
+ *
+ * There is deliberately NO `tickerSymbol` option. A ticker is not on the price
+ * document — it only exists in `securities` — so a single-collection decoder
+ * cannot filter by one. Offering the parameter would be a false affordance that
+ * silently returned zero rows. Ticker filtering belongs to
+ * `CopilotDatabase.getInvestmentPrices`, which performs the join first.
  */
 export async function decodeInvestmentPrices(
   dbPath: string,
   options: {
-    tickerSymbol?: string;
     startDate?: string;
     endDate?: string;
     priceType?: PriceType;
   } = {}
 ): Promise<InvestmentPrice[]> {
-  const { tickerSymbol, startDate, endDate, priceType } = options;
+  const { startDate, endDate, priceType } = options;
   const prices: InvestmentPrice[] = [];
 
   // `collectionRoot`, not `collection`: the leaf segment here is `daily`/`hf`,
@@ -480,31 +484,45 @@ export async function decodeInvestmentPrices(
     const parsed = parseInvestmentPriceCollection(doc.collection);
     if (!parsed) continue;
 
-    // Pre-filter by ticker. Real documents have no ticker_symbol field, so this
-    // only matches when Copilot starts denormalizing one onto the document;
-    // ticker filtering for real data happens after the securities join.
-    if (tickerSymbol) {
-      const ticker = getString(doc.fields, 'ticker_symbol');
-      if (ticker !== tickerSymbol) continue;
-    }
-
     // Pre-filter by price type, from the parsed subcollection.
     if (priceType && parsed.priceType !== priceType) continue;
 
-    // Pre-filter by date range. The period is the document id.
-    if (startDate || endDate) {
-      const recordDate = doc.documentId;
-      if (startDate && recordDate < startDate) continue;
-      // An `endDate` of "2025-06" must still admit hf docs like "2025-06-14",
-      // so compare on the shared prefix length.
-      if (endDate && recordDate.slice(0, endDate.length) > endDate) continue;
-    }
+    // Pre-filter by period. The period is the document id.
+    if (!periodInRange(doc.documentId, startDate, endDate)) continue;
 
     const price = processInvestmentPrice(doc.fields, doc.documentId, parsed);
     if (price) prices.push(price);
   }
 
   return dedupeAndSortInvestmentPrices(prices);
+}
+
+/**
+ * Is a price document's period within [startDate, endDate]?
+ *
+ * Periods come in two granularities — `YYYY-MM` for daily documents and
+ * `YYYY-MM-DD` for hf ones — and callers may bound with either. Comparing them
+ * as raw strings gets month-vs-day pairs wrong in both directions: a June daily
+ * document (`"2025-06"`) sorts BEFORE `startDate: "2025-06-01"` and would be
+ * dropped, and an hf document (`"2025-06-14"`) sorts AFTER `endDate: "2025-06"`
+ * and would be dropped too.
+ *
+ * Both sides are therefore compared at the COARSER of the two granularities, so
+ * a monthly document is included whenever its month overlaps the requested
+ * range. Shared by the decoder and `CopilotDatabase.getInvestmentPrices` so the
+ * two cannot disagree about what a range means (#622 was, in part, exactly such
+ * a divergence).
+ */
+export function periodInRange(period: string, startDate?: string, endDate?: string): boolean {
+  if (startDate) {
+    const n = Math.min(period.length, startDate.length);
+    if (period.slice(0, n) < startDate.slice(0, n)) return false;
+  }
+  if (endDate) {
+    const n = Math.min(period.length, endDate.length);
+    if (period.slice(0, n) > endDate.slice(0, n)) return false;
+  }
+  return true;
 }
 
 /**

@@ -200,6 +200,64 @@ describe('decodeInvestmentPrices — real nested layout (#622)', () => {
     expect(hf[0]?.price_type).toBe('hf');
   });
 
+  // Periods come in two granularities, and callers may bound with either.
+  // Raw string comparison gets month-vs-day pairs wrong in BOTH directions, so
+  // both bounds are compared at the coarser granularity.
+  describe('period filtering across granularities', () => {
+    async function rangeDb(dbPath: string) {
+      await createNestedPriceDb(dbPath, [
+        { securityId: SEC_A, subcollection: 'daily', docId: '2025-05', prices: { '1': 1 } },
+        { securityId: SEC_A, subcollection: 'daily', docId: '2025-06', prices: { '1': 1 } },
+        { securityId: SEC_A, subcollection: 'daily', docId: '2025-07', prices: { '1': 1 } },
+        { securityId: SEC_B, subcollection: 'hf', docId: '2025-06-14', prices: { '1': 1 } },
+        { securityId: SEC_B, subcollection: 'hf', docId: '2025-07-02', prices: { '1': 1 } },
+      ]);
+    }
+
+    test('a day-granularity startDate still admits that month’s daily document', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'range-start');
+      await rangeDb(dbPath);
+
+      const prices = await decodeInvestmentPrices(dbPath, { startDate: '2025-06-01' });
+
+      // '2025-06' < '2025-06-01' as raw strings, so the June daily document
+      // would be wrongly dropped by a naive comparison.
+      expect(prices.map((p) => p.month ?? p.date).sort()).toEqual([
+        '2025-06',
+        '2025-06-14',
+        '2025-07',
+        '2025-07-02',
+      ]);
+    });
+
+    test('a month-granularity endDate still admits that month’s hf documents', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'range-end');
+      await rangeDb(dbPath);
+
+      const prices = await decodeInvestmentPrices(dbPath, { endDate: '2025-06' });
+
+      // '2025-06-14' > '2025-06' as raw strings, so the mid-June hf document
+      // would be wrongly dropped by a naive comparison.
+      expect(prices.map((p) => p.month ?? p.date).sort()).toEqual([
+        '2025-05',
+        '2025-06',
+        '2025-06-14',
+      ]);
+    });
+
+    test('excludes periods genuinely outside the range', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'range-both');
+      await rangeDb(dbPath);
+
+      const prices = await decodeInvestmentPrices(dbPath, {
+        startDate: '2025-06',
+        endDate: '2025-06',
+      });
+
+      expect(prices.map((p) => p.month ?? p.date).sort()).toEqual(['2025-06', '2025-06-14']);
+    });
+  });
+
   test('keeps every document across many securities and periods', async () => {
     const dbPath = path.join(FIXTURES_DIR, 'no-loss');
     const docs = [];

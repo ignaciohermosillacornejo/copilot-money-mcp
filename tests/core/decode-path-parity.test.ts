@@ -62,7 +62,13 @@ beforeAll(async () => {
     ],
     categories: [{ category_id: 'cat_9dTr4XmPqW2LbY6nJv8K', name: 'Food' }],
     items: [{ item_id: 'itm_5pQw8ZnRvL3MxK7cHt2J', institution_name: 'Synthetic Bank' }],
-    budgets: [{ category_id: 'cat_9dTr4XmPqW2LbY6nJv8K', amount: 100 }],
+    budgets: [
+      {
+        budget_id: 'bgt_2xKf7VnQdR9WzM4pLc6T',
+        category_id: 'cat_9dTr4XmPqW2LbY6nJv8K',
+        amount: 100,
+      },
+    ],
     goals: [{ goal_id: 'gol_6bXs2VmNqT9LzR4kWd8P', name: 'Trip', target_amount: 1000 }],
     goalHistory: [
       { goal_id: 'gol_6bXs2VmNqT9LzR4kWd8P', month: '2024-02', total_contribution: 100 },
@@ -110,17 +116,42 @@ describe('processors must not parse the raw LevelDB key (#622)', () => {
   test('no process* helper accepts a raw `key` parameter', () => {
     const src = fs.readFileSync(path.join(import.meta.dir, '../../src/core/decoder.ts'), 'utf8');
 
-    const offenders: string[] = [];
-    const signature = /function (process\w+)\(([^)]*)\)/g;
-    let m: RegExpExecArray | null;
-    while ((m = signature.exec(src)) !== null) {
-      const [, name, params] = m;
-      if (/\bkey\s*:/.test(params ?? '')) offenders.push(name!);
+    // Extract each parameter list by counting balanced parens rather than
+    // matching `[^)]*` — a param typed `cb: () => void` closes the naive
+    // pattern early, truncating everything after it and letting a later
+    // `key: string` slip through unseen. The ratchet would then be silently
+    // weaker than it looks, which is the failure mode it exists to prevent.
+    function paramsOf(startIndex: number): string {
+      let depth = 0;
+      for (let i = startIndex; i < src.length; i++) {
+        const ch = src[i];
+        if (ch === '(') depth++;
+        else if (ch === ')') {
+          depth--;
+          if (depth === 0) return src.slice(startIndex + 1, i);
+        }
+      }
+      return '';
     }
 
-    // Guard against the regex silently matching nothing (a rename would make
-    // this test vacuously green while the invariant went unchecked).
+    const offenders: string[] = [];
+    const declaration = /function (process\w+)\(/g;
+    let found = 0;
+    let m: RegExpExecArray | null;
+    while ((m = declaration.exec(src)) !== null) {
+      found++;
+      const params = paramsOf(m.index + m[0].length - 1);
+      // Top-level `key:` only — a nested object type like
+      // `opts: { key: string }` is not a raw-key parameter.
+      const topLevel = params.replace(/\{[^}]*\}/g, '');
+      if (/\bkey\s*:/.test(topLevel)) offenders.push(m[1]!);
+    }
+
+    // Guard against the scan silently matching nothing: a rename or a refactor
+    // to arrow functions would leave this vacuously green while the invariant
+    // went unchecked.
     expect(src).toContain('function processInvestmentPrice(');
+    expect(found).toBeGreaterThan(10);
     expect(offenders).toEqual([]);
   });
 });
