@@ -1,0 +1,76 @@
+/**
+ * Unit tests for the pure predicates behind `bun run smoke:cache`.
+ *
+ * The smoke itself needs a real Copilot cache, so it cannot run in CI. These
+ * cover the logic that decides PASS/FAIL, which is where a silently-wrong
+ * threshold would make the whole gate decorative.
+ */
+
+import { describe, test, expect } from 'bun:test';
+import { normalizeCollection, isTotalDecodeLoss, joinRate } from '../../scripts/smoke/cache.js';
+
+describe('normalizeCollection', () => {
+  test('wildcards document ids at odd path depths', () => {
+    expect(normalizeCollection('items/abc123/accounts')).toBe('items/*/accounts');
+    expect(normalizeCollection('investment_prices/deadbeef/daily')).toBe(
+      'investment_prices/*/daily'
+    );
+  });
+
+  test('leaves a top-level collection untouched', () => {
+    expect(normalizeCollection('transactions')).toBe('transactions');
+  });
+
+  test('wildcards every id in a deep path', () => {
+    expect(normalizeCollection('items/i1/accounts/a1/holdings_history/h1/history')).toBe(
+      'items/*/accounts/*/holdings_history/*/history'
+    );
+  });
+
+  test('never lets a real document id through', () => {
+    // This is the PII guarantee, not a formatting nicety: the smoke prints
+    // collection patterns, so an id surviving normalization would be a leak.
+    const normalized = normalizeCollection(
+      'items/SECRET_ITEM_ID/accounts/SECRET_ACCT/transactions'
+    );
+    expect(normalized).not.toContain('SECRET_ITEM_ID');
+    expect(normalized).not.toContain('SECRET_ACCT');
+  });
+});
+
+describe('isTotalDecodeLoss', () => {
+  test('fires when documents exist but nothing decoded (the #622 signature)', () => {
+    expect(isTotalDecodeLoss(863, 0)).toBe(true);
+  });
+
+  test('does not fire on a genuinely empty collection', () => {
+    // That case belongs to the extinct-dependency check; conflating the two
+    // would make an absent collection look like a decoder bug.
+    expect(isTotalDecodeLoss(0, 0)).toBe(false);
+  });
+
+  test('does not fire on partial loss', () => {
+    expect(isTotalDecodeLoss(863, 78)).toBe(false);
+  });
+});
+
+describe('joinRate', () => {
+  test('reports 0 when no reference resolves (the #622 join failure)', () => {
+    // Rows keyed by a period instead of a security id: every value is a
+    // perfectly valid string, and none of them joins.
+    expect(joinRate(['2025-06', '2025-07'], new Set(['sec_a', 'sec_b']))).toBe(0);
+  });
+
+  test('reports 1 when every reference resolves', () => {
+    expect(joinRate(['sec_a', 'sec_b'], new Set(['sec_a', 'sec_b', 'sec_c']))).toBe(1);
+  });
+
+  test('reports the fraction on partial resolution', () => {
+    expect(joinRate(['sec_a', 'missing'], new Set(['sec_a']))).toBe(0.5);
+  });
+
+  test('treats an empty reference list as vacuously fine', () => {
+    // No rows to check is not a failure — the runner reports SKIP for this.
+    expect(joinRate([], new Set())).toBe(1);
+  });
+});
