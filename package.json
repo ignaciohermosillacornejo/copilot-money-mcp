@@ -69,6 +69,7 @@
     "check:skills": "python3 scripts/check-skills.py",
     "fix": "bun run lint:fix && bun run format",
     "smoke": "bun run scripts/smoke/conformance.ts && bun run scripts/smoke/reads.ts && bun run smoke:refresh",
+    "smoke:cache": "bun run scripts/smoke/cache.ts",
     "smoke:conformance": "bun run scripts/smoke/conformance.ts",
     "smoke:roundtrip": "bun run scripts/smoke/roundtrip.ts",
     "smoke:reads": "bun run scripts/smoke/reads.ts",
