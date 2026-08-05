@@ -2508,6 +2508,13 @@ function processAmazonIntegration(
   fields: Map<string, FirestoreValue>,
   docId: string
 ): AmazonIntegration | null {
+  // Fieldless documents are Firestore parent pointers, not integrations.
+  // Without this the function seeds `{ amazon_id: docId }` and would emit a
+  // stub for every pointer its dispatch clause matches — the #627 shape.
+  if (fields.size === 0) {
+    return null;
+  }
+
   const data: Record<string, unknown> = { amazon_id: docId };
 
   // Extract any fields generically
