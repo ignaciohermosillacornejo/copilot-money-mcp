@@ -1,5 +1,7 @@
 # Copilot Money MCP Server
 
+[![MCP Toplist](https://mcptoplist.com/badge/io.github.ignaciohermosillacornejo%2Fcopilot-money-mcp.svg)](https://mcptoplist.com/server/io.github.ignaciohermosillacornejo%2Fcopilot-money-mcp)
+
 > Query and manage your personal finances with AI using local Copilot Money data
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
