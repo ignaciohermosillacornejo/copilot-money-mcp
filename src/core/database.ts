@@ -1457,7 +1457,17 @@ export class CopilotDatabase {
 
     // Load investment prices with caching
     const allPrices = await this.loadInvestmentPrices();
-    let result = [...allPrices];
+
+    // Join the ticker on from `securities`. Price documents carry no
+    // ticker_symbol of their own (#622) — the only identity they have is the
+    // security_id recovered from their collection path — so without this join
+    // every row is anonymous and the ticker filter below matches nothing.
+    const securityMap = await this.getSecurityMap();
+    let result = allPrices.map((p) => {
+      if (p.ticker_symbol) return p;
+      const ticker = securityMap.get(p.security_id)?.ticker_symbol;
+      return ticker ? { ...p, ticker_symbol: ticker } : p;
+    });
 
     // Apply ticker symbol filter (case-insensitive)
     if (tickerSymbol) {
@@ -1475,7 +1485,8 @@ export class CopilotDatabase {
     if (endDate) {
       result = result.filter((p) => {
         const d = p.date ?? p.month;
-        return d && d <= endDate;
+        // A YYYY-MM endDate must still admit hf rows dated YYYY-MM-DD within it.
+        return d && d.slice(0, endDate.length) <= endDate;
       });
     }
 

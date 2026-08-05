@@ -47,7 +47,12 @@ const RESPONSE_BUDGETS: Record<string, number> = {
   get_recurring_transactions: 755,
   get_budgets: 420,
   get_goals: 365,
-  get_investment_prices: 250,
+  // Raised from 250 by the #622 fix. Not a regression: the old number was
+  // measured against a fixture with no nested `prices` map, a shape real price
+  // documents never have — the series IS the payload. The fixture now models
+  // reality, so this budget finally reflects what callers actually pay.
+  // #605 (latest-price-by-default) is the item that brings it back down.
+  get_investment_prices: 1_265,
   // The fixture seeds no holdings, splits, or balance history, so these three
   // budgets pin the empty-response envelope only. If the fixture ever seeds
   // those collections, remeasure and recalibrate these entries.
@@ -308,22 +313,34 @@ async function seedFixture(): Promise<void> {
         },
       },
     ],
+    // Real price documents (#622) carry their numbers in a nested `prices` map
+    // keyed by epoch-millis — roughly one entry per trading day for a `daily`
+    // month document. Modelling that here is what makes this budget meaningful:
+    // the nested series is the dominant term, and #605 exists to cut it.
     investmentPrices: [
       {
-        investment_id: 'sec_3vBn8KwJcM1XzQ5tLf7H',
-        ticker_symbol: 'SYNQ',
-        close_price: 101.5,
-        date: '2024-03-01',
-        currency: 'USD',
+        security_id: 'sec_3vBn8KwJcM1XzQ5tLf7H',
         price_type: 'hf',
+        period: '2024-03-01',
+        currency: 'USD',
+        prices: Object.fromEntries(
+          Array.from({ length: 20 }, (_, i) => [
+            String(1709251200000 + i * 300_000),
+            100 + i * 0.25,
+          ])
+        ),
       },
       {
-        investment_id: 'sec_3vBn8KwJcM1XzQ5tLf7H',
-        ticker_symbol: 'SYNQ',
-        close_price: 99.25,
-        month: '2024-02',
-        currency: 'USD',
+        security_id: 'sec_3vBn8KwJcM1XzQ5tLf7H',
         price_type: 'daily',
+        period: '2024-02',
+        currency: 'USD',
+        prices: Object.fromEntries(
+          Array.from({ length: 20 }, (_, i) => [
+            String(1706745600000 + i * 86_400_000),
+            95 + i * 0.5,
+          ])
+        ),
       },
     ],
     items: [

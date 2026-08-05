@@ -191,10 +191,9 @@ describe('decoder coverage', () => {
       const dbPath = path.join(FIXTURES_DIR, 'investment-prices-db');
       await createTestDatabase(dbPath, [
         {
-          collection: 'investment_prices',
-          id: 'price1',
+          collection: 'investment_prices/sec_inv1/hf',
+          id: '2024-01-15',
           fields: {
-            investment_id: 'inv1',
             ticker_symbol: 'AAPL',
             price: 150.5,
             close_price: 149.0,
@@ -207,10 +206,9 @@ describe('decoder coverage', () => {
           },
         },
         {
-          collection: 'investment_prices',
-          id: 'price2',
+          collection: 'investment_prices/sec_inv2/daily',
+          id: '2024-01',
           fields: {
-            investment_id: 'inv2',
             ticker_symbol: 'GOOGL',
             current_price: 140.0,
             month: '2024-01',
@@ -227,20 +225,18 @@ describe('decoder coverage', () => {
       const dbPath = path.join(FIXTURES_DIR, 'investment-prices-filter-db');
       await createTestDatabase(dbPath, [
         {
-          collection: 'investment_prices',
-          id: 'price1',
+          collection: 'investment_prices/sec_inv1/hf',
+          id: '2024-01-15',
           fields: {
-            investment_id: 'inv1',
             ticker_symbol: 'AAPL',
             price: 150.0,
             date: '2024-01-15',
           },
         },
         {
-          collection: 'investment_prices',
-          id: 'price2',
+          collection: 'investment_prices/sec_inv2/hf',
+          id: '2024-01-15',
           fields: {
-            investment_id: 'inv2',
             ticker_symbol: 'GOOGL',
             price: 140.0,
             date: '2024-01-15',
@@ -257,28 +253,25 @@ describe('decoder coverage', () => {
       const dbPath = path.join(FIXTURES_DIR, 'investment-prices-date-db');
       await createTestDatabase(dbPath, [
         {
-          collection: 'investment_prices',
-          id: 'price1',
+          collection: 'investment_prices/sec_inv1/hf',
+          id: '2024-01-10',
           fields: {
-            investment_id: 'inv1',
             price: 150.0,
             date: '2024-01-10',
           },
         },
         {
-          collection: 'investment_prices',
-          id: 'price2',
+          collection: 'investment_prices/sec_inv2/hf',
+          id: '2024-01-20',
           fields: {
-            investment_id: 'inv2',
             price: 155.0,
             date: '2024-01-20',
           },
         },
         {
-          collection: 'investment_prices',
-          id: 'price3',
+          collection: 'investment_prices/sec_inv3/hf',
+          id: '2024-01-30',
           fields: {
-            investment_id: 'inv3',
             price: 160.0,
             date: '2024-01-30',
           },
@@ -874,10 +867,9 @@ describe('decoder coverage', () => {
         },
         // investment_prices: the `prices` payload map
         {
-          collection: 'investment_prices',
-          id: 'inv-cov',
+          collection: 'investment_prices/sec_inv-cov/hf',
+          id: '2026-04-20',
           fields: {
-            investment_id: 'inv-cov',
             ticker_symbol: 'COV',
             date: '2026-04-20',
             currency: 'USD',
@@ -916,7 +908,7 @@ describe('decoder coverage', () => {
       });
       expect(item.oauth).toEqual({ state: 'connected', last_refresh: '2026-04-20' });
 
-      const price = investmentPrices.find((p) => p.investment_id === 'inv-cov')!;
+      const price = investmentPrices.find((p) => p.security_id === 'sec_inv-cov')!;
       expect(price).toBeDefined();
       expect(price.prices).toEqual({
         '2026-04-20': { price: 150.5, source: 'plaid' },
@@ -1038,10 +1030,9 @@ describe('decoder coverage', () => {
         },
         // Investment price
         {
-          collection: 'investment_prices',
-          id: 'price1',
+          collection: 'investment_prices/sec_inv1/hf',
+          id: '2024-01-15',
           fields: {
-            investment_id: 'inv1',
             ticker_symbol: 'AAPL',
             price: 150.0,
             date: '2024-01-15',
@@ -1669,30 +1660,27 @@ describe('decoder coverage', () => {
       const dbPath = path.join(FIXTURES_DIR, 'investment-prices-sort-db');
       await createTestDatabase(dbPath, [
         {
-          collection: 'investment_prices',
-          id: 'price1',
+          collection: 'investment_prices/sec_inv1/hf',
+          id: '2024-01-10',
           fields: {
-            investment_id: 'inv1',
             ticker_symbol: 'AAPL',
             price: 150.0,
             date: '2024-01-10',
           },
         },
         {
-          collection: 'investment_prices',
-          id: 'price2',
+          collection: 'investment_prices/sec_inv1/hf',
+          id: '2024-01-20',
           fields: {
-            investment_id: 'inv1',
             ticker_symbol: 'AAPL',
             price: 155.0,
             date: '2024-01-20',
           },
         },
         {
-          collection: 'investment_prices',
-          id: 'price3',
+          collection: 'investment_prices/sec_inv2/hf',
+          id: '2024-01-15',
           fields: {
-            investment_id: 'inv2',
             ticker_symbol: 'GOOGL',
             price: 140.0,
             date: '2024-01-15',
@@ -1702,15 +1690,15 @@ describe('decoder coverage', () => {
 
       const result = await decodeAllCollections(dbPath);
 
-      // Should be sorted by investment_id, then by date (newest first)
+      // Should be sorted by security_id, then by date (newest first)
       expect(result.investmentPrices.length).toBe(3);
       // First investment sorted by date desc
-      expect(result.investmentPrices[0]?.investment_id).toBe('inv1');
+      expect(result.investmentPrices[0]?.security_id).toBe('sec_inv1');
       expect(result.investmentPrices[0]?.date).toBe('2024-01-20');
-      expect(result.investmentPrices[1]?.investment_id).toBe('inv1');
+      expect(result.investmentPrices[1]?.security_id).toBe('sec_inv1');
       expect(result.investmentPrices[1]?.date).toBe('2024-01-10');
       // Then second investment
-      expect(result.investmentPrices[2]?.investment_id).toBe('inv2');
+      expect(result.investmentPrices[2]?.security_id).toBe('sec_inv2');
     });
 
     test('decodes investment_splits docs with date-keyed adjustment factors', async () => {
@@ -3063,18 +3051,18 @@ describe('decoder coverage', () => {
   });
 
   describe('sort comparators with equal primary keys', () => {
-    test('investment prices sort by date when investment_id matches', async () => {
+    test('investment prices sort by date when security_id matches', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'sort-prices-db');
       await createTestDatabase(dbPath, [
         {
-          collection: 'investment_prices',
-          id: 'p1',
-          fields: { investment_id: 'inv1', price: 100, date: '2024-01-10' },
+          collection: 'investment_prices/sec_inv1/hf',
+          id: '2024-01-10',
+          fields: { price: 100 },
         },
         {
-          collection: 'investment_prices',
-          id: 'p2',
-          fields: { investment_id: 'inv1', price: 110, date: '2024-01-20' },
+          collection: 'investment_prices/sec_inv1/hf',
+          id: '2024-01-20',
+          fields: { price: 110 },
         },
       ]);
 

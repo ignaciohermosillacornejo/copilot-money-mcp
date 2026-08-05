@@ -19,7 +19,7 @@ import {
 describe('InvestmentPriceSchema', () => {
   test('validates valid investment price with date (hf data)', () => {
     const validPrice = {
-      investment_id: 'hash_123',
+      security_id: 'hash_123',
       ticker_symbol: 'AAPL',
       close_price: 150.25,
       date: '2024-01-15',
@@ -33,7 +33,7 @@ describe('InvestmentPriceSchema', () => {
 
   test('validates valid investment price with month (daily data)', () => {
     const validPrice = {
-      investment_id: 'hash_456',
+      security_id: 'hash_456',
       ticker_symbol: 'BTC-USD',
       price: 45000.0,
       month: '2024-01',
@@ -47,7 +47,7 @@ describe('InvestmentPriceSchema', () => {
 
   test('validates investment price with OHLCV data', () => {
     const priceWithOHLCV = {
-      investment_id: 'hash_789',
+      security_id: 'hash_789',
       ticker_symbol: 'VTSAX',
       close_price: 110.5,
       open: 109.8,
@@ -64,7 +64,7 @@ describe('InvestmentPriceSchema', () => {
 
   test('validates investment price with multiple price fields', () => {
     const priceMultiple = {
-      investment_id: 'hash_999',
+      security_id: 'hash_999',
       ticker_symbol: 'TSLA',
       price: 200.0,
       close_price: 199.5,
@@ -79,7 +79,7 @@ describe('InvestmentPriceSchema', () => {
 
   test('rejects invalid date format', () => {
     const invalid = {
-      investment_id: 'hash_123',
+      security_id: 'hash_123',
       date: '2024-1-15', // Should be 2024-01-15
     };
 
@@ -89,7 +89,7 @@ describe('InvestmentPriceSchema', () => {
 
   test('rejects invalid month format', () => {
     const invalid = {
-      investment_id: 'hash_123',
+      security_id: 'hash_123',
       month: '2024-1', // Should be 2024-01
     };
 
@@ -99,7 +99,7 @@ describe('InvestmentPriceSchema', () => {
 
   test('allows price record with no ticker_symbol', () => {
     const noTicker = {
-      investment_id: 'hash_abc',
+      security_id: 'hash_abc',
       price: 50.0,
       date: '2024-01-15',
     };
@@ -110,7 +110,7 @@ describe('InvestmentPriceSchema', () => {
 
   test('passes through unknown fields', () => {
     const withExtra = {
-      investment_id: 'hash_xyz',
+      security_id: 'hash_xyz',
       price: 100.0,
       date: '2024-01-15',
       custom_field: 'extra_data',
@@ -127,7 +127,7 @@ describe('InvestmentPriceSchema', () => {
 describe('getBestPrice', () => {
   test('returns current_price when available (highest priority)', () => {
     const price: InvestmentPrice = {
-      investment_id: 'hash_1',
+      security_id: 'hash_1',
       current_price: 100.0,
       close_price: 99.0,
       price: 98.0,
@@ -139,7 +139,7 @@ describe('getBestPrice', () => {
 
   test('returns close_price when current_price unavailable', () => {
     const price: InvestmentPrice = {
-      investment_id: 'hash_1',
+      security_id: 'hash_1',
       close_price: 99.0,
       price: 98.0,
       institution_price: 97.0,
@@ -150,7 +150,7 @@ describe('getBestPrice', () => {
 
   test('returns price when current_price and close_price unavailable', () => {
     const price: InvestmentPrice = {
-      investment_id: 'hash_1',
+      security_id: 'hash_1',
       price: 98.0,
       institution_price: 97.0,
     };
@@ -160,7 +160,7 @@ describe('getBestPrice', () => {
 
   test('returns institution_price as last fallback', () => {
     const price: InvestmentPrice = {
-      investment_id: 'hash_1',
+      security_id: 'hash_1',
       institution_price: 97.0,
     };
 
@@ -169,7 +169,7 @@ describe('getBestPrice', () => {
 
   test('returns undefined when no price fields available', () => {
     const price: InvestmentPrice = {
-      investment_id: 'hash_1',
+      security_id: 'hash_1',
       ticker_symbol: 'TEST',
     };
 
@@ -180,7 +180,7 @@ describe('getBestPrice', () => {
 describe('getPriceDate', () => {
   test('returns date when available (hf data)', () => {
     const price: InvestmentPrice = {
-      investment_id: 'hash_1',
+      security_id: 'hash_1',
       date: '2024-01-15',
     };
 
@@ -189,7 +189,7 @@ describe('getPriceDate', () => {
 
   test('returns month when date unavailable (daily data)', () => {
     const price: InvestmentPrice = {
-      investment_id: 'hash_1',
+      security_id: 'hash_1',
       month: '2024-01',
     };
 
@@ -198,7 +198,7 @@ describe('getPriceDate', () => {
 
   test('prefers date over month when both available', () => {
     const price: InvestmentPrice = {
-      investment_id: 'hash_1',
+      security_id: 'hash_1',
       date: '2024-01-15',
       month: '2024-01',
     };
@@ -208,7 +208,7 @@ describe('getPriceDate', () => {
 
   test('returns undefined when neither date nor month available', () => {
     const price: InvestmentPrice = {
-      investment_id: 'hash_1',
+      security_id: 'hash_1',
     };
 
     expect(getPriceDate(price)).toBeUndefined();
@@ -218,7 +218,7 @@ describe('getPriceDate', () => {
 describe('isHighFrequencyPrice', () => {
   test('returns true when price_type is hf', () => {
     const price: InvestmentPrice = {
-      investment_id: 'hash_1',
+      security_id: 'hash_1',
       price_type: 'hf',
     };
 
@@ -227,7 +227,7 @@ describe('isHighFrequencyPrice', () => {
 
   test('returns true when date is present but month is not', () => {
     const price: InvestmentPrice = {
-      investment_id: 'hash_1',
+      security_id: 'hash_1',
       date: '2024-01-15',
     };
 
@@ -236,7 +236,7 @@ describe('isHighFrequencyPrice', () => {
 
   test('returns false when price_type is daily even with date', () => {
     const price: InvestmentPrice = {
-      investment_id: 'hash_1',
+      security_id: 'hash_1',
       price_type: 'daily',
       month: '2024-01',
     };
@@ -246,7 +246,7 @@ describe('isHighFrequencyPrice', () => {
 
   test('returns false when month is present', () => {
     const price: InvestmentPrice = {
-      investment_id: 'hash_1',
+      security_id: 'hash_1',
       month: '2024-01',
     };
 
@@ -255,7 +255,7 @@ describe('isHighFrequencyPrice', () => {
 
   test('returns false when both date and month are present', () => {
     const price: InvestmentPrice = {
-      investment_id: 'hash_1',
+      security_id: 'hash_1',
       date: '2024-01-15',
       month: '2024-01',
     };
@@ -267,7 +267,7 @@ describe('isHighFrequencyPrice', () => {
 describe('isDailyPrice', () => {
   test('returns true when price_type is daily', () => {
     const price: InvestmentPrice = {
-      investment_id: 'hash_1',
+      security_id: 'hash_1',
       price_type: 'daily',
     };
 
@@ -276,7 +276,7 @@ describe('isDailyPrice', () => {
 
   test('returns true when month is present but date is not', () => {
     const price: InvestmentPrice = {
-      investment_id: 'hash_1',
+      security_id: 'hash_1',
       month: '2024-01',
     };
 
@@ -285,7 +285,7 @@ describe('isDailyPrice', () => {
 
   test('returns false when price_type is hf even with month', () => {
     const price: InvestmentPrice = {
-      investment_id: 'hash_1',
+      security_id: 'hash_1',
       price_type: 'hf',
       date: '2024-01-15',
     };
@@ -295,7 +295,7 @@ describe('isDailyPrice', () => {
 
   test('returns false when date is present', () => {
     const price: InvestmentPrice = {
-      investment_id: 'hash_1',
+      security_id: 'hash_1',
       date: '2024-01-15',
     };
 
@@ -304,7 +304,7 @@ describe('isDailyPrice', () => {
 
   test('returns false when both date and month are present', () => {
     const price: InvestmentPrice = {
-      investment_id: 'hash_1',
+      security_id: 'hash_1',
       date: '2024-01-15',
       month: '2024-01',
     };
@@ -316,24 +316,24 @@ describe('isDailyPrice', () => {
 describe('getInvestmentDisplayName', () => {
   test('returns ticker_symbol when available', () => {
     const price: InvestmentPrice = {
-      investment_id: 'hash_abc123',
+      security_id: 'hash_abc123',
       ticker_symbol: 'AAPL',
     };
 
     expect(getInvestmentDisplayName(price)).toBe('AAPL');
   });
 
-  test('returns investment_id when ticker_symbol unavailable', () => {
+  test('returns security_id when ticker_symbol unavailable', () => {
     const price: InvestmentPrice = {
-      investment_id: 'hash_abc123',
+      security_id: 'hash_abc123',
     };
 
     expect(getInvestmentDisplayName(price)).toBe('hash_abc123');
   });
 
-  test('prefers ticker_symbol over investment_id', () => {
+  test('prefers ticker_symbol over security_id', () => {
     const price: InvestmentPrice = {
-      investment_id: 'hash_long_id_here',
+      security_id: 'hash_long_id_here',
       ticker_symbol: 'BTC-USD',
     };
 
@@ -382,7 +382,7 @@ describe('formatPrice', () => {
 describe('InvestmentPrice helper functions integration', () => {
   test('getBestPrice and formatPrice work together', () => {
     const price: InvestmentPrice = {
-      investment_id: 'hash_1',
+      security_id: 'hash_1',
       ticker_symbol: 'AAPL',
       current_price: 175.5,
       currency: 'USD',
@@ -399,7 +399,7 @@ describe('InvestmentPrice helper functions integration', () => {
   test('type detection functions are mutually exclusive for pure data', () => {
     // Pure hf data
     const hfPrice: InvestmentPrice = {
-      investment_id: 'hash_1',
+      security_id: 'hash_1',
       date: '2024-01-15',
       price_type: 'hf',
     };
@@ -408,7 +408,7 @@ describe('InvestmentPrice helper functions integration', () => {
 
     // Pure daily data
     const dailyPrice: InvestmentPrice = {
-      investment_id: 'hash_2',
+      security_id: 'hash_2',
       month: '2024-01',
       price_type: 'daily',
     };
@@ -418,7 +418,7 @@ describe('InvestmentPrice helper functions integration', () => {
 
   test('complete investment price record has all fields accessible', () => {
     const completePrice: InvestmentPrice = {
-      investment_id: 'hash_complete',
+      security_id: 'hash_complete',
       ticker_symbol: 'TSLA',
       price: 200.0,
       close_price: 199.5,
