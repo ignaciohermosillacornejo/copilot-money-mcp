@@ -76,10 +76,23 @@ export function isTotalDecodeLoss(rawNonEmpty: number, decodedRows: number): boo
   return rawNonEmpty > 0 && decodedRows === 0;
 }
 
-/** Fraction of references that resolve against a target id set, 0..1. */
-export function joinRate(refs: readonly string[], target: ReadonlySet<string>): number {
-  if (refs.length === 0) return 1;
-  return refs.filter((id) => target.has(id)).length / refs.length;
+/**
+ * How many references resolve against a target id set.
+ *
+ * Returns counts as well as the rate so callers never have to divide and
+ * re-multiply to recover the orphan count — that roundtrip leans on rounding to
+ * absorb float error, which is a poor foundation for a number the gate reports.
+ *
+ * An empty reference list is vacuously fine (rate 1) regardless of the target;
+ * the runner reports SKIP for it rather than a suspicious 100%.
+ */
+export function joinStats(
+  refs: readonly string[],
+  target: ReadonlySet<string>
+): { total: number; matched: number; orphans: number; rate: number } {
+  const total = refs.length;
+  const matched = refs.filter((id) => target.has(id)).length;
+  return { total, matched, orphans: total - matched, rate: total === 0 ? 1 : matched / total };
 }
 
 const normalize = normalizeCollection;
@@ -154,13 +167,14 @@ async function main(): Promise<void> {
     { root: 'tags', rows: all.tags.length },
   ];
 
-  const blackHoles = decoded.filter((d) => isTotalDecodeLoss(rawRows(d.root), d.rows));
+  const withRaw = decoded.map((d) => ({ ...d, raw: rawRows(d.root) }));
+  const blackHoles = withRaw.filter((d) => isTotalDecodeLoss(d.raw, d.rows));
   if (blackHoles.length > 0) {
     record(
       'total decode loss',
       'FAIL',
       `collections with documents on disk but ZERO decoded rows: ` +
-        blackHoles.map((d) => `${d.root} (${rawRows(d.root)} docs)`).join(', ')
+        blackHoles.map((d) => `${d.root} (${d.raw} docs)`).join(', ')
     );
   } else {
     record('total decode loss', 'PASS', 'every collection with documents decoded at least one row');
@@ -174,9 +188,7 @@ async function main(): Promise<void> {
   // fails; #622 discarded 91% of investment_prices and would have shown here
   // long before anyone read the output.
   // ---------------------------------------------------------------------
-  const lossy = decoded
-    .map((d) => ({ ...d, raw: rawRows(d.root) }))
-    .filter((d) => d.raw > 10 && d.rows > 0 && d.rows / d.raw < 0.5);
+  const lossy = withRaw.filter((d) => d.raw > 10 && d.rows > 0 && d.rows / d.raw < 0.5);
 
   if (lossy.length > 0) {
     record(
@@ -198,6 +210,12 @@ async function main(): Promise<void> {
   // silently a no-op. Both decode paths agree there is nothing there, so
   // parity testing cannot see it.
   // ---------------------------------------------------------------------
+  // MAINTENANCE CONTRACT: add a normalized path here whenever code starts
+  // depending on a collection existing. This list is what makes an extinct
+  // collection loud instead of silent, and nothing derives it automatically —
+  // a new decoder that reads a collection Copilot has since retired will pass
+  // every other check in this file. The mirror gap (fields a processor
+  // declares that no real document has) is the follow-up noted in the PR.
   const DEPENDED_ON = ['users/*/accounts'];
   const extinct = DEPENDED_ON.filter((p) => {
     const counts = raw.get(p);
@@ -253,16 +271,16 @@ async function main(): Promise<void> {
       record(`join: ${join.name}`, 'SKIP', 'target collection empty');
       continue;
     }
-    const rate = joinRate(join.refs, join.target) * 100;
-    const orphans = join.refs.length - Math.round((rate / 100) * join.refs.length);
+    const { total, orphans, rate } = joinStats(join.refs, join.target);
+    const pct = rate * 100;
     if (orphans > 0) {
       record(
         `join: ${join.name}`,
-        rate < 50 ? 'FAIL' : 'WARN',
-        `${orphans}/${join.refs.length} references do not resolve (${rate.toFixed(1)}% join rate)`
+        pct < 50 ? 'FAIL' : 'WARN',
+        `${orphans}/${total} references do not resolve (${pct.toFixed(1)}% join rate)`
       );
     } else {
-      record(`join: ${join.name}`, 'PASS', `all ${join.refs.length} references resolve`);
+      record(`join: ${join.name}`, 'PASS', `all ${total} references resolve`);
     }
   }
 

@@ -68,6 +68,7 @@
     "check:privacy-endpoints": "bun run scripts/check-privacy-endpoints.ts",
     "check:skills": "python3 scripts/check-skills.py",
     "fix": "bun run lint:fix && bun run format",
+    "_comment_smoke": "smoke:cache is deliberately NOT in this composite yet — it needs a real local cache, and the scheduled drift check that would host it has its own reporting gap to sort first (see PR #628). Wire it in when that lands.",
     "smoke": "bun run scripts/smoke/conformance.ts && bun run scripts/smoke/reads.ts && bun run smoke:refresh",
     "smoke:cache": "bun run scripts/smoke/cache.ts",
     "smoke:conformance": "bun run scripts/smoke/conformance.ts",
