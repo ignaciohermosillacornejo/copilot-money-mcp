@@ -70,3 +70,41 @@ describe('fieldless documents never become rows (#627)', () => {
     expect(items).toEqual([]);
   });
 });
+
+describe('every parent-pointer dispatch clause guards its processor (#627)', () => {
+  // The class-level ratchet. Three dispatch clauses in decodeAllCollections
+  // deliberately match Firestore's parent-pointer paths with a
+  // `/^name\/[^/]+$/` regex. Each is only safe because the processor it calls
+  // returns null for a fieldless document — an invariant that lived nowhere
+  // enforceable, which is how `items` shipped without it.
+  //
+  // This pins the pairing: add a parent-pointer clause, and the processor it
+  // dispatches to must carry the guard.
+  test('each processor reachable from a parent-pointer clause checks fields.size === 0', () => {
+    const src = fs.readFileSync(path.join(import.meta.dir, '../../src/core/decoder.ts'), 'utf8');
+
+    const clause = /\/\^(\w+)\\\/\[\^\/\]\+\$\/\.test\(collection\)\)\s*\{([\s\S]{0,400}?)\n\s*\}/g;
+    const checked: string[] = [];
+    const unguarded: string[] = [];
+
+    let m: RegExpExecArray | null;
+    while ((m = clause.exec(src)) !== null) {
+      const body = m[2] ?? '';
+      const call = /\b(process\w+)\(/.exec(body);
+      if (!call) continue;
+      const processor = call[1]!;
+      checked.push(processor);
+
+      // Pull the processor's own body and look for the guard.
+      const declIdx = src.indexOf(`function ${processor}(`);
+      expect(declIdx).toBeGreaterThan(-1);
+      const decl = src.slice(declIdx, declIdx + 900);
+      if (!/fields\.size === 0/.test(decl)) unguarded.push(processor);
+    }
+
+    // Vacuity guard: if the clause pattern stops matching (a refactor, a
+    // rename), this test would silently pass while checking nothing.
+    expect(checked.length).toBeGreaterThanOrEqual(2);
+    expect(unguarded).toEqual([]);
+  });
+});
