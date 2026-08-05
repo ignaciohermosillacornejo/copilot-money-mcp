@@ -278,14 +278,14 @@ const mockSecurities: Security[] = [
 
 const mockInvestmentPrices: InvestmentPrice[] = [
   {
-    investment_id: 'price1',
+    security_id: 'sec_9f3a1c7b2e5d',
     ticker_symbol: 'AAPL',
     close_price: 185.5,
     month: '2025-01',
     price_type: 'daily',
   },
   {
-    investment_id: 'price2',
+    security_id: 'sec_4d8e6b0a1f27',
     ticker_symbol: 'VTI',
     close_price: 240.0,
     month: '2025-01',

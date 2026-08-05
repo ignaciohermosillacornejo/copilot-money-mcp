@@ -266,12 +266,58 @@ export interface OpenOptions {
  * Options for iterating documents.
  */
 export interface IterateOptions {
-  /** Only include documents from this collection */
+  /**
+   * Only include documents from this collection.
+   *
+   * Matches the LEAF segment: a document's collection qualifies when it equals
+   * this value or ends with `/{collection}`. Use this for collections that sit
+   * at the end of the path (`transactions`, `accounts`, `financial_goals`, ...).
+   *
+   * NOT suitable for a collection that is a PARENT segment of the real path —
+   * e.g. `investment_prices/{securityId}/daily`, whose leaf is `daily`. Use
+   * `collectionRoot` for those (issue #622).
+   */
   collection?: string;
+  /**
+   * Only include documents whose collection path STARTS with this segment.
+   *
+   * The counterpart to `collection`, for collections whose real documents live
+   * in per-entity subcollections and whose identity therefore lives in a middle
+   * path segment rather than the leaf.
+   */
+  collectionRoot?: string;
   /** Only include documents matching this key prefix */
   keyPrefix?: string;
   /** Limit the number of documents returned */
   limit?: number;
+}
+
+/**
+ * Decide whether a parsed collection path satisfies an iteration filter.
+ *
+ * Shared by both iteration entry points so the two can never drift — a
+ * divergence of exactly this kind is what hid issue #622 (the standalone
+ * decoder matched nothing while the aggregate loader matched 165 documents).
+ */
+export function collectionFilterMatches(
+  parsedCollection: string,
+  options: Pick<IterateOptions, 'collection' | 'collectionRoot'>
+): boolean {
+  const { collection, collectionRoot } = options;
+
+  if (collectionRoot !== undefined) {
+    if (parsedCollection !== collectionRoot && !parsedCollection.startsWith(`${collectionRoot}/`)) {
+      return false;
+    }
+  }
+
+  if (collection !== undefined) {
+    if (parsedCollection !== collection && !parsedCollection.endsWith(`/${collection}`)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 /**
@@ -460,7 +506,7 @@ export async function* iterateDocuments(
   dbPath: string,
   options: IterateOptions = {}
 ): AsyncGenerator<LevelDBDocument> {
-  const { collection: filterCollection, keyPrefix, limit } = options;
+  const { collection: filterCollection, collectionRoot, keyPrefix, limit } = options;
 
   // Validate path exists
   if (!fs.existsSync(dbPath)) {
@@ -511,14 +557,13 @@ export async function* iterateDocuments(
       }
 
       // Check collection filter
-      if (filterCollection) {
-        // Match either exact collection or subcollection ending with the filter
-        const isMatch =
-          parsed.collection === filterCollection ||
-          parsed.collection.endsWith(`/${filterCollection}`);
-        if (!isMatch) {
-          continue;
-        }
+      if (
+        !collectionFilterMatches(parsed.collection, {
+          collection: filterCollection,
+          collectionRoot,
+        })
+      ) {
+        continue;
       }
 
       // Parse the protobuf value.
@@ -653,7 +698,7 @@ export class LevelDBReader {
       throw new Error('Database not open. Call open() first.');
     }
 
-    const { collection: filterCollection, keyPrefix, limit } = options;
+    const { collection: filterCollection, collectionRoot, keyPrefix, limit } = options;
     let count = 0;
 
     for await (const [key, value] of this.db.iterator()) {
@@ -674,13 +719,13 @@ export class LevelDBReader {
         continue;
       }
 
-      if (filterCollection) {
-        const isMatch =
-          parsed.collection === filterCollection ||
-          parsed.collection.endsWith(`/${filterCollection}`);
-        if (!isMatch) {
-          continue;
-        }
+      if (
+        !collectionFilterMatches(parsed.collection, {
+          collection: filterCollection,
+          collectionRoot,
+        })
+      ) {
+        continue;
       }
 
       try {

@@ -102,8 +102,30 @@ export interface TestGoalHistory {
   daily_data?: Record<string, { balance: number }>;
 }
 
+/**
+ * A price document in Copilot's REAL layout (issue #622):
+ *
+ *     investment_prices/{security_id}/{daily|hf}/{period}
+ *
+ * The security identity lives in a middle path segment, and the document id is
+ * the period — `YYYY-MM` for `daily`, `YYYY-MM-DD` for `hf`. Real documents
+ * carry neither `investment_id` nor `ticker_symbol`; the numbers live in a
+ * nested `prices` map keyed by epoch-millis.
+ *
+ * The scalar price/OHLCV fields below have never been observed on real
+ * documents. They stay supported because the decoder reads them when present,
+ * but a fixture that sets ONLY those is not representative — set `prices` for
+ * anything meant to model production.
+ */
 export interface TestInvestmentPrice {
-  investment_id: string;
+  /** Security hash — becomes the middle path segment, joins `securities.security_id`. */
+  security_id: string;
+  /** Subcollection. Defaults to 'daily'. */
+  price_type?: 'daily' | 'hf';
+  /** Document id: YYYY-MM for daily, YYYY-MM-DD for hf. */
+  period: string;
+  /** Nested price payload, keyed by epoch-millis. This is where real prices live. */
+  prices?: Record<string, number>;
   ticker_symbol?: string;
   price?: number;
   close_price?: number;
@@ -116,7 +138,33 @@ export interface TestInvestmentPrice {
   low?: number;
   open?: number;
   volume?: number;
-  price_type?: string;
+}
+
+/** Build the document a TestInvestmentPrice describes, in the real nested layout. */
+function investmentPriceDocument(p: TestInvestmentPrice): {
+  collection: string;
+  id: string;
+  fields: Record<string, unknown>;
+} {
+  return {
+    collection: `investment_prices/${p.security_id}/${p.price_type ?? 'daily'}`,
+    id: p.period,
+    fields: {
+      prices: p.prices,
+      ticker_symbol: p.ticker_symbol,
+      price: p.price,
+      close_price: p.close_price,
+      current_price: p.current_price,
+      institution_price: p.institution_price,
+      date: p.date,
+      month: p.month,
+      currency: p.currency,
+      high: p.high,
+      low: p.low,
+      open: p.open,
+      volume: p.volume,
+    },
+  };
 }
 
 export interface TestItem {
@@ -394,28 +442,7 @@ export async function createInvestmentPriceDb(
   dbPath: string,
   prices: TestInvestmentPrice[]
 ): Promise<void> {
-  const documents = prices.map((p) => ({
-    collection: 'investment_prices',
-    id: p.investment_id,
-    fields: {
-      investment_id: p.investment_id,
-      ticker_symbol: p.ticker_symbol,
-      price: p.price,
-      close_price: p.close_price,
-      current_price: p.current_price,
-      institution_price: p.institution_price,
-      date: p.date,
-      month: p.month,
-      currency: p.currency,
-      high: p.high,
-      low: p.low,
-      open: p.open,
-      volume: p.volume,
-      price_type: p.price_type,
-    },
-  }));
-
-  await createTestDb(dbPath, documents);
+  await createTestDb(dbPath, prices.map(investmentPriceDocument));
 }
 
 /**
@@ -614,26 +641,7 @@ export async function createCombinedDb(
 
   if (data.investmentPrices) {
     for (const p of data.investmentPrices) {
-      documents.push({
-        collection: 'investment_prices',
-        id: p.investment_id,
-        fields: {
-          investment_id: p.investment_id,
-          ticker_symbol: p.ticker_symbol,
-          price: p.price,
-          close_price: p.close_price,
-          current_price: p.current_price,
-          institution_price: p.institution_price,
-          date: p.date,
-          month: p.month,
-          currency: p.currency,
-          high: p.high,
-          low: p.low,
-          open: p.open,
-          volume: p.volume,
-          price_type: p.price_type,
-        },
-      });
+      documents.push(investmentPriceDocument(p));
     }
   }
 

@@ -38,9 +38,14 @@ const MONTH_REGEX = /^\d{4}-\d{2}$/;
  */
 export const InvestmentPriceSchema = z
   .object({
-    // Identification
-    investment_id: z.string(), // SHA-256 hash or document ID
-    ticker_symbol: z.string().optional(), // e.g., "AAPL", "BTC-USD", "VTSAX"
+    // Identification.
+    // `security_id` is recovered from the collection path
+    // (investment_prices/{security_id}/{daily|hf}) and joins to
+    // `securities.security_id`. It is the only reliable identity a price
+    // document has — see issue #622.
+    security_id: z.string(),
+    investment_id: z.string().optional(), // only when denormalized onto the doc (not observed in real data)
+    ticker_symbol: z.string().optional(), // joined from `securities`; absent on the raw document
 
     // Price data (multiple fields for different price types)
     price: z.number().optional(),
@@ -107,7 +112,7 @@ export function isDailyPrice(price: InvestmentPrice): boolean {
  * Get a display name for the investment.
  */
 export function getInvestmentDisplayName(price: InvestmentPrice): string {
-  return price.ticker_symbol ?? price.investment_id;
+  return price.ticker_symbol ?? price.security_id;
 }
 
 /**

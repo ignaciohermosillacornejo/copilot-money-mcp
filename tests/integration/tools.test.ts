@@ -188,21 +188,21 @@ const mockGoalHistory: GoalHistory[] = [
 
 const mockInvestmentPrices: InvestmentPrice[] = [
   {
-    investment_id: 'inv1',
+    security_id: 'sec_9f3a1c7b2e5d',
     ticker_symbol: 'AAPL',
     price: 185.5,
     date: '2025-01-15',
     price_type: 'daily',
   },
   {
-    investment_id: 'inv2',
+    security_id: 'sec_2b7c5f9d3a81',
     ticker_symbol: 'GOOG',
     price: 140.25,
     date: '2025-01-15',
     price_type: 'daily',
   },
   {
-    investment_id: 'inv3',
+    security_id: 'sec_9f3a1c7b2e5d',
     ticker_symbol: 'AAPL',
     price: 183.0,
     date: '2025-01-14',

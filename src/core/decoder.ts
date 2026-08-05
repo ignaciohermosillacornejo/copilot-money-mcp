@@ -451,6 +451,16 @@ export async function decodeGoalHistory(dbPath: string, goalId?: string): Promis
 
 /**
  * Decode investment prices from LevelDB database.
+ *
+ * Real layout (issue #622) — one subcollection per security, so the security
+ * identity lives in a MIDDLE path segment and the document id is the period:
+ *
+ *     investment_prices/{securityId}/daily/{YYYY-MM}
+ *     investment_prices/{securityId}/hf/{YYYY-MM-DD}
+ *
+ * Documents carry neither `investment_id` nor `ticker_symbol`; the prices live
+ * in a nested `prices` map. `ticker_symbol` is joined on afterwards from the
+ * `securities` collection by whoever needs it — the decoder stays single-collection.
  */
 export async function decodeInvestmentPrices(
   dbPath: string,
@@ -464,48 +474,66 @@ export async function decodeInvestmentPrices(
   const { tickerSymbol, startDate, endDate, priceType } = options;
   const prices: InvestmentPrice[] = [];
 
-  for await (const doc of iterateDocuments(dbPath, { collection: 'investment_prices' })) {
-    // Pre-filter by ticker
+  // `collectionRoot`, not `collection`: the leaf segment here is `daily`/`hf`,
+  // so a leaf match would find nothing at all.
+  for await (const doc of iterateDocuments(dbPath, { collectionRoot: 'investment_prices' })) {
+    const parsed = parseInvestmentPriceCollection(doc.collection);
+    if (!parsed) continue;
+
+    // Pre-filter by ticker. Real documents have no ticker_symbol field, so this
+    // only matches when Copilot starts denormalizing one onto the document;
+    // ticker filtering for real data happens after the securities join.
     if (tickerSymbol) {
       const ticker = getString(doc.fields, 'ticker_symbol');
       if (ticker !== tickerSymbol) continue;
     }
 
-    // Pre-filter by price type
-    if (priceType === 'daily' && !doc.key.includes('/daily/')) continue;
-    if (priceType === 'hf' && !doc.key.includes('/hf/')) continue;
+    // Pre-filter by price type, from the parsed subcollection.
+    if (priceType && parsed.priceType !== priceType) continue;
 
-    // Pre-filter by date range
+    // Pre-filter by date range. The period is the document id.
     if (startDate || endDate) {
-      const date = getString(doc.fields, 'date');
-      const month = getString(doc.fields, 'month');
-      const recordDate = date ?? month;
-      if (recordDate) {
-        if (startDate && recordDate < startDate) continue;
-        if (endDate && recordDate > endDate) continue;
-      }
+      const recordDate = doc.documentId;
+      if (startDate && recordDate < startDate) continue;
+      // An `endDate` of "2025-06" must still admit hf docs like "2025-06-14",
+      // so compare on the shared prefix length.
+      if (endDate && recordDate.slice(0, endDate.length) > endDate) continue;
     }
 
-    const price = processInvestmentPrice(doc.fields, doc.documentId, doc.key);
+    const price = processInvestmentPrice(doc.fields, doc.documentId, parsed);
     if (price) prices.push(price);
   }
 
-  // Deduplicate by investment_id + date/month
+  return dedupeAndSortInvestmentPrices(prices);
+}
+
+/**
+ * Deduplicate and order decoded price documents.
+ *
+ * Shared by the standalone and aggregate decode paths so they cannot disagree —
+ * they previously carried separate copies of this logic, and the standalone one
+ * silently returned nothing on real data (#622).
+ *
+ * The identity of a price document is the (security, price_type, period) tuple.
+ * The pre-fix key was `investment_id + date/month`, which on real data evaluated
+ * to the same string for every security sharing a period and dropped all but one.
+ */
+export function dedupeAndSortInvestmentPrices(prices: InvestmentPrice[]): InvestmentPrice[] {
   const seen = new Set<string>();
   const unique: InvestmentPrice[] = [];
 
   for (const price of prices) {
-    const key = `${price.investment_id}-${price.date || price.month || 'unknown'}`;
+    const key = `${price.security_id}/${price.price_type}/${price.date ?? price.month ?? 'unknown'}`;
     if (!seen.has(key)) {
       seen.add(key);
       unique.push(price);
     }
   }
 
-  // Sort by investment_id, then by date/month (newest first)
+  // Sort by security_id, then by period (newest first)
   unique.sort((a, b) => {
-    if (a.investment_id !== b.investment_id) {
-      return a.investment_id.localeCompare(b.investment_id);
+    if (a.security_id !== b.security_id) {
+      return a.security_id.localeCompare(b.security_id);
     }
     const dateA = a.date || a.month || '';
     const dateB = b.date || b.month || '';
@@ -513,6 +541,23 @@ export async function decodeInvestmentPrices(
   });
 
   return unique;
+}
+
+/**
+ * Split `investment_prices/{securityId}/{daily|hf}` into its parts.
+ *
+ * Returns null for anything that is not a recognized price subcollection —
+ * including the bare `investment_prices` parent, which holds no price documents.
+ */
+export function parseInvestmentPriceCollection(
+  collection: string
+): { securityId: string; priceType: PriceType } | null {
+  const segments = collection.split('/');
+  if (segments.length !== 3) return null;
+  const [root, securityId, leaf] = segments;
+  if (root !== 'investment_prices' || !securityId) return null;
+  if (leaf !== 'daily' && leaf !== 'hf') return null;
+  return { securityId, priceType: leaf };
 }
 
 /**
@@ -1446,23 +1491,30 @@ function processGoalHistory(
 
 /**
  * Internal helper to process an investment price document.
+ *
+ * `parsed` carries the security id and price type recovered from the collection
+ * PATH. Neither is present in the document body for real data (#622), so they
+ * must be passed in rather than read from `fields`.
  */
 function processInvestmentPrice(
   fields: Map<string, FirestoreValue>,
   docId: string,
-  key: string
+  parsed: { securityId: string; priceType: PriceType }
 ): InvestmentPrice | null {
-  const investmentId = getString(fields, 'investment_id') ?? docId;
   const ticker = getString(fields, 'ticker_symbol');
-  const isDailyData = key.includes('/daily/');
-  const date = getString(fields, 'date');
-  const month = getString(fields, 'month');
+  // The document id IS the period: YYYY-MM for daily, YYYY-MM-DD for hf.
+  // Fall back to the document body for the (unobserved) case where Copilot
+  // starts denormalizing an explicit date/month onto the document.
+  const date = getString(fields, 'date') ?? (parsed.priceType === 'hf' ? docId : undefined);
+  const month = getString(fields, 'month') ?? (parsed.priceType === 'daily' ? docId : undefined);
 
   const priceData: Record<string, unknown> = {
-    investment_id: investmentId,
-    price_type: isDailyData ? 'daily' : 'hf',
+    security_id: parsed.securityId,
+    price_type: parsed.priceType,
   };
 
+  const investmentId = getString(fields, 'investment_id');
+  if (investmentId) priceData.investment_id = investmentId;
   if (ticker) priceData.ticker_symbol = ticker;
   if (date) priceData.date = date;
   if (month) priceData.month = month;
@@ -2753,7 +2805,7 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
 
   // Single pass through the database
   for await (const doc of iterateDocuments(dbPath)) {
-    const { fields, documentId, collection, key } = doc;
+    const { fields, documentId, collection } = doc;
 
     // Route document to appropriate processor based on collection
     // Note: User accounts (users/{user_id}/accounts) must be checked before regular accounts
@@ -2800,12 +2852,12 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     } else if (collection.endsWith('/financial_goal_history')) {
       const history = processGoalHistory(fields, documentId, collection);
       if (history) rawGoalHistory.push(history);
-    } else if (
-      collectionMatches(collection, 'investment_prices') ||
-      collection.includes('investment_prices/')
-    ) {
-      const price = processInvestmentPrice(fields, documentId, key);
-      if (price) rawInvestmentPrices.push(price);
+    } else if (collection === 'investment_prices' || collection.startsWith('investment_prices/')) {
+      const parsedPriceCollection = parseInvestmentPriceCollection(collection);
+      if (parsedPriceCollection) {
+        const price = processInvestmentPrice(fields, documentId, parsedPriceCollection);
+        if (price) rawInvestmentPrices.push(price);
+      }
     } else if (collectionMatches(collection, 'investment_splits')) {
       const split = processInvestmentSplit(fields, documentId);
       if (split) rawInvestmentSplits.push(split);
@@ -2933,24 +2985,9 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     return b.month.localeCompare(a.month);
   });
 
-  // Investment prices: dedupe by investment_id + date/month
-  const priceSeen = new Set<string>();
-  const investmentPrices: InvestmentPrice[] = [];
-  for (const price of rawInvestmentPrices) {
-    const key = `${price.investment_id}-${price.date || price.month || 'unknown'}`;
-    if (!priceSeen.has(key)) {
-      priceSeen.add(key);
-      investmentPrices.push(price);
-    }
-  }
-  investmentPrices.sort((a, b) => {
-    if (a.investment_id !== b.investment_id) {
-      return a.investment_id.localeCompare(b.investment_id);
-    }
-    const dateA = a.date || a.month || '';
-    const dateB = b.date || b.month || '';
-    return dateB.localeCompare(dateA);
-  });
+  // Investment prices: dedupe by (security, price_type, period) — shared with
+  // the standalone decoder so the two paths cannot drift (#622).
+  const investmentPrices = dedupeAndSortInvestmentPrices(rawInvestmentPrices);
 
   // Investment splits: dedupe by security_id (one doc per security)
   const splitSeen = new Set<string>();
