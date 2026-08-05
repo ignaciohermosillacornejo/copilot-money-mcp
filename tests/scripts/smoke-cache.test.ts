@@ -7,7 +7,7 @@
  */
 
 import { describe, test, expect } from 'bun:test';
-import { normalizeCollection, isTotalDecodeLoss, joinRate } from '../../scripts/smoke/cache.js';
+import { normalizeCollection, isTotalDecodeLoss, joinStats } from '../../scripts/smoke/cache.js';
 
 describe('normalizeCollection', () => {
   test('wildcards document ids at odd path depths', () => {
@@ -54,23 +54,51 @@ describe('isTotalDecodeLoss', () => {
   });
 });
 
-describe('joinRate', () => {
-  test('reports 0 when no reference resolves (the #622 join failure)', () => {
+describe('joinStats', () => {
+  test('reports every reference orphaned when none resolves (the #622 join failure)', () => {
     // Rows keyed by a period instead of a security id: every value is a
     // perfectly valid string, and none of them joins.
-    expect(joinRate(['2025-06', '2025-07'], new Set(['sec_a', 'sec_b']))).toBe(0);
+    expect(joinStats(['2025-06', '2025-07'], new Set(['sec_a', 'sec_b']))).toEqual({
+      total: 2,
+      matched: 0,
+      orphans: 2,
+      rate: 0,
+    });
   });
 
-  test('reports 1 when every reference resolves', () => {
-    expect(joinRate(['sec_a', 'sec_b'], new Set(['sec_a', 'sec_b', 'sec_c']))).toBe(1);
+  test('reports no orphans when every reference resolves', () => {
+    expect(joinStats(['sec_a', 'sec_b'], new Set(['sec_a', 'sec_b', 'sec_c']))).toEqual({
+      total: 2,
+      matched: 2,
+      orphans: 0,
+      rate: 1,
+    });
   });
 
-  test('reports the fraction on partial resolution', () => {
-    expect(joinRate(['sec_a', 'missing'], new Set(['sec_a']))).toBe(0.5);
+  test('reports exact counts on partial resolution', () => {
+    // orphans must come from a subtraction of integers, never from
+    // round(rate * total) — the gate reports this number to a human.
+    expect(joinStats(['sec_a', 'missing'], new Set(['sec_a']))).toEqual({
+      total: 2,
+      matched: 1,
+      orphans: 1,
+      rate: 0.5,
+    });
+  });
+
+  test('keeps the orphan count exact where a rate roundtrip would not', () => {
+    // 1/3 is not representable; deriving orphans from the rate invites
+    // rounding to decide how many rows are broken.
+    const refs = ['a', 'missing1', 'missing2'];
+    expect(joinStats(refs, new Set(['a'])).orphans).toBe(2);
   });
 
   test('treats an empty reference list as vacuously fine', () => {
     // No rows to check is not a failure — the runner reports SKIP for this.
-    expect(joinRate([], new Set())).toBe(1);
+    expect(joinStats([], new Set()).rate).toBe(1);
+  });
+
+  test('the empty-reference short-circuit does not consult the target', () => {
+    expect(joinStats([], new Set(['sec_a'])).rate).toBe(1);
   });
 });
