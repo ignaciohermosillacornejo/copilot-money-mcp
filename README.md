@@ -19,6 +19,9 @@
 >
 > This project remains useful if you need write tools (categorize transactions, manage budgets, edit recurrings, etc.), fully offline cache-mode reads with zero network requests, or simply want access today without waiting for the official rollout.
 
+> [!WARNING]
+> **The official MCP beta currently does not surface Plaid-connected accounts.** Copilot's team has [confirmed the limitation](https://www.reddit.com/r/copilotmoney/comments/1ueh4lv/) and says they're working on a path forward, but there's no timeline. If most of your institutions connect through Plaid, the official MCP will give you an incomplete picture of your finances. This community server is not affected: it reads the app's full local cache (and, in live mode, the same GraphQL API the app uses), so Plaid-connected accounts are included.
+
 ## Overview
 
 An [MCP](https://modelcontextprotocol.io/) server that gives AI assistants access to your Copilot Money personal finance data. It reads from the locally cached Firestore database (LevelDB + Protocol Buffers) on your Mac. **Reads are 100% local with zero network requests.**
