@@ -226,6 +226,16 @@ A regression test for the instance alone does not satisfy "Detector added" — t
 detector must cover the class. Canonical example: the #419→#424 arc (one bad enum
 value → a conformance harness that gates every enum, plus sibling coverage).
 
+**Then write the post-mortem.** [`docs/bugs/`](docs/bugs/README.md) is the accumulated
+record: one entry per user-visible bug, filed under its class, recording how it was
+found and whether the class has a detector yet. Copy
+[`docs/bugs/TEMPLATE.md`](docs/bugs/TEMPLATE.md).
+
+Check [the class list](docs/bugs/README.md#bug-classes) **before** naming a class in the
+ritual above — if your bug already has a class, that tells you the class recurred, which
+is a stronger finding than the bug itself. The index also shows which classes still have
+no detector, which is usually where the next worthwhile gate is.
+
 ## Publishing to the MCP Registry
 
 The server is listed in the official [MCP Registry](https://registry.modelcontextprotocol.io) as `io.github.ignaciohermosillacornejo/copilot-money-mcp`. The registry stores metadata only — the actual artifact lives on npm.
