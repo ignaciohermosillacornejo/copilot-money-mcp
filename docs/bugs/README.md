@@ -24,7 +24,16 @@ Every bug-fix PR that fixes a **user-visible wrong behaviour** gets one. Copy
 the issue if there is one, otherwise the PR.
 
 Skip entries for chores, refactors, dependency bumps, docs, and new features. A missing
-guard that let bad data through **does** count.
+guard that let bad data through **does** count. Bugs too small to justify a post-mortem —
+CI plumbing, packaging, latent defects fixed before anyone hit them — go as one-line rows
+in [`MINOR.md`](MINOR.md) instead.
+
+**Known gap in the seeded entries:** the template asks for a `## Why the tests didn't
+catch it` section, and only [#622](622-investment-prices-nested-layout.md) has one. The 42
+historical entries were reconstructed from diffs and PR bodies, which rarely record why a
+defence was blind — inferring it after the fact would have produced plausible fiction, and
+this corpus is only worth keeping if every claim in it is substantiated. New entries are
+written at fix time, when the answer is actually known, so they should include it.
 
 **No PII.** This project handles personal financial data. Never put real balances,
 amounts, account names, institution names, or ticker symbols in an entry — use
@@ -61,7 +70,7 @@ a class yet.
 |---|---|---|
 | `external-api-drift` | An assumption about Copilot's API — an enum value, an input field, an operation signature — was wrong when written, or became wrong. | conformance ledger + Tier-1 smokes (`bun run smoke`); see [`CONFORMANCE_ARCHITECTURE.md`](../CONFORMANCE_ARCHITECTURE.md) |
 | `wire-type-drift` | The API returns a different primitive type than the schema declared — typically a number where a string was expected, or null where non-null was assumed. | runtime warn-mode validation on all read shapes |
-| `referential-integrity-gap` | A write accepts ids without existence checks, producing silent no-ops or dangling references. | none — client-side validation on bulk writes only |
+| `referential-integrity-gap` | A write accepts ids without existence checks, producing silent no-ops or dangling references. | none — client-side validation on bulk writes only. No full entry yet; instance in [`MINOR.md`](MINOR.md) (#213), and Copilot's own `bulkEditTransactions` has the same gap server-side |
 | `ambiguous-candidate-selection` | Committing to one candidate from a noisy source before the only authority that can validate it runs, with no fallback; the benign rejection is then misreported as a system error. | none |
 
 ### Computing the answer
