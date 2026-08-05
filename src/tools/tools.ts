@@ -1215,15 +1215,17 @@ export class CopilotMoneyTools {
 
     let accounts = await this.db.getAccounts(account_type);
 
-    // Filter hidden/deleted accounts if needed (same pattern as getNetWorth)
     if (!include_hidden) {
-      // Filter out accounts marked as user_deleted (merged or removed accounts)
-      accounts = accounts.filter((acc) => acc.user_deleted !== true);
-
-      // Also filter by hidden flag from user account customizations
-      const userAccounts = await this.db.getUserAccounts();
-      const hiddenIds = new Set(userAccounts.filter((ua) => ua.hidden).map((ua) => ua.account_id));
-      accounts = accounts.filter((acc) => !hiddenIds.has(acc.account_id));
+      // Both flags live on the account document itself:
+      //   user_deleted — merged or removed accounts
+      //   user_hidden  — hidden by the user in the Copilot app
+      //
+      // This previously read `user_hidden` from a `users/{uid}/accounts`
+      // customization collection, which no longer has any documents — Copilot
+      // moved these flags onto the account records. So the hidden filter was a
+      // silent no-op: the collection was always empty, and the flag that IS
+      // present was decoded into the model and then never read (#624).
+      accounts = accounts.filter((acc) => acc.user_deleted !== true && acc.user_hidden !== true);
     }
 
     // Calculate totals by asset/liability classification

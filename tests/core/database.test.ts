@@ -671,6 +671,57 @@ describe('CopilotDatabase', () => {
     });
   });
 
+  describe('getAccountNameMap (#624)', () => {
+    beforeEach(() => {
+      // The account documents themselves are the source of truth. The
+      // customization collection this map used to read is deliberately left
+      // EMPTY, the way every real cache has it.
+      (db as any)._accounts = [
+        { account_id: 'acc_plain', current_balance: 100, name: 'Bank Checking' },
+        {
+          account_id: 'acc_renamed',
+          current_balance: 200,
+          name: 'BANK PERSONAL CHECKING 1234',
+          nickname: 'Everyday',
+        },
+        { account_id: 'acc_nameless', current_balance: 300 },
+      ];
+      (db as any)._userAccounts = [];
+      (db as any)._accountNameMap = null;
+      (db as any)._allCollectionsLoaded = true;
+    });
+
+    test('is populated from account documents, not the extinct customization collection', async () => {
+      const map = await db.getAccountNameMap();
+
+      // Before the fix this map was always empty on a real cache, so
+      // get_balance_history reported account_name: undefined for every row.
+      expect(map.size).toBe(2);
+      expect(map.get('acc_plain')).toBe('Bank Checking');
+    });
+
+    test('prefers a user-set nickname over the institution name', async () => {
+      const map = await db.getAccountNameMap();
+      expect(map.get('acc_renamed')).toBe('Everyday');
+    });
+
+    test('omits accounts with no name at all rather than mapping undefined', async () => {
+      const map = await db.getAccountNameMap();
+      expect(map.has('acc_nameless')).toBe(false);
+    });
+
+    test('ignores the users/{uid}/accounts collection entirely', async () => {
+      // Populating the dead collection must not change the answer; if it does,
+      // the path that made this a silent no-op has been reintroduced.
+      (db as any)._userAccounts = [{ account_id: 'acc_plain', name: 'Ghost Name' }];
+      (db as any)._accountNameMap = null;
+
+      const map = await db.getAccountNameMap();
+
+      expect(map.get('acc_plain')).toBe('Bank Checking');
+    });
+  });
+
   describe('getSecurityMap', () => {
     const mockSecurities: Security[] = [
       {

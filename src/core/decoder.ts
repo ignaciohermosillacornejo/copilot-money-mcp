@@ -2879,9 +2879,18 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     } else if (collectionMatches(collection, 'investment_splits')) {
       const split = processInvestmentSplit(fields, documentId);
       if (split) rawInvestmentSplits.push(split);
-    } else if (collectionMatches(collection, 'items') || /^items\/[^/]+$/.test(collection)) {
-      // Match both top-level items and items/{item_id} parent-pointer docs.
-      // Parent-pointer docs (items/{item_id}) have empty fields and processItem returns null.
+    } else if (collectionMatches(collection, 'items')) {
+      // Only the real `items` collection. A previous version also matched
+      // `items/{item_id}` — Firestore's fieldless parent-pointer entries —
+      // on the stated assumption that "parent-pointer docs have empty fields
+      // and processItem returns null". That assumption was wrong in both
+      // halves: processItem always returns at least `{ item_id }`, so every
+      // such entry became a phantom row carrying nothing else (#627).
+      //
+      // A real cache holds hundreds of those pointers against a dozen real
+      // items, and none of them has a single field, so the clause could only
+      // ever manufacture rows. Dedup by item_id hid the scale, collapsing them
+      // to the handful whose ids matched no real item.
       const item = processItem(fields, documentId);
       if (item) rawItems.push(item);
     } else if (collectionMatches(collection, 'tags')) {
