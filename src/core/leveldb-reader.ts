@@ -45,6 +45,9 @@ const tempDbCache = new Map<string, TempDbCacheEntry>();
 // Cleanup interval (5 minutes)
 const TEMP_DB_CACHE_TTL = 5 * 60 * 1000;
 
+/** Prefix every temp copy is created with. */
+const TEMP_DB_PREFIX = 'copilot-leveldb-';
+
 /**
  * Predicate for files that make up a LevelDB database state. Matches the set
  * `copyDatabaseToTemp` actually copies (LOCK is intentionally excluded — we
@@ -87,6 +90,23 @@ function sourceFingerprint(srcPath: string): number {
 }
 
 /**
+ * Mark a temp copy as still in use.
+ *
+ * The orphan sweep decides what to delete from a copy's mtime, which otherwise
+ * only reflects when it was created. Refreshing it on every reuse makes "not
+ * touched in an hour" mean genuinely idle rather than merely old, so a
+ * long-lived process reusing one copy can never have it swept out from under it.
+ */
+function touchTempCopy(tempPath: string): void {
+  try {
+    const now = new Date();
+    fs.utimesSync(tempPath, now, now);
+  } catch {
+    // Best effort only: a failure here costs nothing but sweep precision.
+  }
+}
+
+/**
  * Copy a LevelDB database to a temporary directory.
  * This allows reading while another process has the database locked.
  *
@@ -106,6 +126,7 @@ function copyDatabaseToTemp(srcPath: string): string {
     if (currentFingerprint <= cached.sourceFingerprint) {
       cached.refCount++;
       cached.lastAccess = Date.now();
+      touchTempCopy(cached.tempPath);
       return cached.tempPath;
     }
     // Source has changed since the cached copy was made. If nothing is
@@ -122,6 +143,7 @@ function copyDatabaseToTemp(srcPath: string): string {
     } else {
       cached.refCount++;
       cached.lastAccess = Date.now();
+      touchTempCopy(cached.tempPath);
       return cached.tempPath;
     }
   }
@@ -135,9 +157,11 @@ function copyDatabaseToTemp(srcPath: string): string {
   // to the copy start as possible.
   const fingerprint = sourceFingerprint(srcPath);
 
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'copilot-leveldb-'));
-  // A copy now exists on disk. Guarantee it cannot outlive this process.
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), TEMP_DB_PREFIX));
+  // A copy now exists on disk. Guarantee it cannot outlive this process, and
+  // (once per process) reclaim any copies stranded by an earlier version.
   registerTempDbExitSweep();
+  startOrphanSweep();
   const files = fs.readdirSync(srcPath);
   for (const file of files) {
     if (!isLevelDBFile(file)) continue;
@@ -254,6 +278,78 @@ function registerTempDbExitSweep(): void {
       process.kill(process.pid, signal);
     });
   }
+}
+
+/**
+ * How long a temp copy must sit untouched before the sweep treats it as
+ * abandoned. 12x TEMP_DB_CACHE_TTL: comfortably longer than any read, and
+ * `touchTempCopy` keeps an actively reused copy well under it.
+ */
+const ORPHAN_SWEEP_MIN_AGE_MS = 60 * 60 * 1000;
+
+let orphanSweepStarted = false;
+
+/**
+ * Reclaim temp copies stranded on disk by an earlier version of this module.
+ *
+ * `registerTempDbExitSweep` stops new leaks but cannot help anyone who already
+ * has hundreds of orphans (one reporter had ~33 GB). This removes any
+ * `copilot-leveldb-*` directory that has gone untouched for
+ * ORPHAN_SWEEP_MIN_AGE_MS, including copies left by other processes.
+ *
+ * Deleting another process's copy is safe by construction:
+ *   - copies this process still has cached are skipped explicitly;
+ *   - `copyDatabaseToTemp` guards every reuse with `fs.existsSync` and simply
+ *     re-copies when the directory is gone, so the worst case for another
+ *     process is one extra copy, never a failed read;
+ *   - `touchTempCopy` refreshes mtime on reuse, so a copy old enough to sweep
+ *     is one nobody has read from in an hour.
+ *
+ * Best effort by design: it runs on an unref'd timer with async removal, so it
+ * never delays startup, blocks a read, or keeps a short-lived process alive. A
+ * per-request process may exit mid-sweep and simply finish the job next run.
+ * Set COPILOT_MCP_NO_TEMP_SWEEP=1 to disable.
+ */
+function startOrphanSweep(): void {
+  if (orphanSweepStarted) return;
+  orphanSweepStarted = true;
+  if (process.env.COPILOT_MCP_NO_TEMP_SWEEP) return;
+
+  const timer = setTimeout(() => {
+    void runOrphanSweep();
+  }, 0);
+  timer.unref();
+}
+
+/** @internal exported for tests */
+export async function runOrphanSweep(): Promise<number> {
+  const tmpRoot = os.tmpdir();
+  let entries: string[];
+  try {
+    entries = await fs.promises.readdir(tmpRoot);
+  } catch {
+    return 0;
+  }
+
+  const cutoff = Date.now() - ORPHAN_SWEEP_MIN_AGE_MS;
+  const inUse = new Set([...tempDbCache.values()].map((entry) => entry.tempPath));
+  let removed = 0;
+
+  for (const name of entries) {
+    if (!name.startsWith(TEMP_DB_PREFIX)) continue;
+    const full = path.join(tmpRoot, name);
+    if (inUse.has(full)) continue;
+    try {
+      const stat = await fs.promises.stat(full);
+      if (!stat.isDirectory() || stat.mtimeMs > cutoff) continue;
+      await fs.promises.rm(full, { recursive: true, force: true });
+      removed++;
+    } catch {
+      // Raced with the owning process or another sweeper; nothing to do.
+    }
+  }
+
+  return removed;
 }
 
 /**

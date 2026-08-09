@@ -59,6 +59,26 @@ function whenReady(child: ReturnType<typeof spawn>): Promise<void> {
   });
 }
 
+/** Poll until `predicate` holds, so the async sweep needs no fixed sleep. */
+async function waitUntil(predicate: () => boolean, timeoutMs = 20000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return predicate();
+}
+
+/** Create a directory that looks like a temp copy, aged `ageMs` into the past. */
+function makeFakeCopy(tmpdir: string, name: string, ageMs: number): string {
+  const dir = path.join(tmpdir, name);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'CURRENT'), 'MANIFEST-000001\n');
+  const stamp = new Date(Date.now() - ageMs);
+  fs.utimesSync(dir, stamp, stamp);
+  return dir;
+}
+
 describe('temp database copies do not outlive the reading process (issue #631)', () => {
   beforeEach(() => {
     fs.mkdirSync(FIXTURES_DIR, { recursive: true });
@@ -116,5 +136,75 @@ describe('temp database copies do not outlive the reading process (issue #631)',
     await new Promise<void>((resolve) => child.on('exit', () => resolve()));
 
     expect(tempCopies(tmpdir)).toEqual([]);
+  }, 60000);
+});
+
+describe('orphan sweep reclaims copies stranded by earlier versions (issue #631)', () => {
+  beforeEach(() => {
+    fs.mkdirSync(FIXTURES_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(FIXTURES_DIR, { recursive: true, force: true });
+  });
+
+  test('sweeps idle orphans, keeps recent copies and unrelated directories', async () => {
+    const dbPath = path.join(FIXTURES_DIR, 'sweep-db');
+    await createTestDatabase(dbPath, [{ collection: 'test', id: 'doc1', fields: { x: 1 } }]);
+
+    const tmpdir = path.join(FIXTURES_DIR, 'tmp-sweep');
+    fs.mkdirSync(tmpdir, { recursive: true });
+
+    // Two hours idle: what a process killed before the fix leaves behind.
+    const staleA = makeFakeCopy(tmpdir, 'copilot-leveldb-staleA', 2 * 60 * 60 * 1000);
+    const staleB = makeFakeCopy(tmpdir, 'copilot-leveldb-staleB', 2 * 60 * 60 * 1000);
+    // Recently touched: another live process may still be reading it.
+    const recent = makeFakeCopy(tmpdir, 'copilot-leveldb-recent', 0);
+    // Not ours: must never be touched, however old.
+    const foreign = makeFakeCopy(tmpdir, 'some-other-tool-cache', 2 * 60 * 60 * 1000);
+
+    const script = path.join(FIXTURES_DIR, 'read-and-wait-sweep.ts');
+    writeChildScript(script, true);
+
+    const child = spawn(process.execPath, [script, dbPath], {
+      env: { ...process.env, TMPDIR: tmpdir },
+      stdio: ['ignore', 'pipe', 'inherit'],
+    });
+
+    await whenReady(child);
+    const swept = await waitUntil(() => !fs.existsSync(staleA) && !fs.existsSync(staleB));
+
+    const recentSurvived = fs.existsSync(recent);
+    const foreignSurvived = fs.existsSync(foreign);
+
+    child.kill('SIGTERM');
+    await new Promise<void>((resolve) => child.on('exit', () => resolve()));
+
+    expect(swept).toBe(true);
+    expect(recentSurvived).toBe(true);
+    expect(foreignSurvived).toBe(true);
+
+    // And the child's own copy is still cleaned up on exit.
+    expect(tempCopies(tmpdir)).toEqual(['copilot-leveldb-recent']);
+  }, 60000);
+
+  test('sweep is disabled by COPILOT_MCP_NO_TEMP_SWEEP', async () => {
+    const dbPath = path.join(FIXTURES_DIR, 'no-sweep-db');
+    await createTestDatabase(dbPath, [{ collection: 'test', id: 'doc1', fields: { x: 1 } }]);
+
+    const tmpdir = path.join(FIXTURES_DIR, 'tmp-no-sweep');
+    fs.mkdirSync(tmpdir, { recursive: true });
+    const stale = makeFakeCopy(tmpdir, 'copilot-leveldb-staleA', 2 * 60 * 60 * 1000);
+
+    const script = path.join(FIXTURES_DIR, 'read-once-no-sweep.ts');
+    writeChildScript(script, false);
+
+    const child = spawn(process.execPath, [script, dbPath], {
+      env: { ...process.env, TMPDIR: tmpdir, COPILOT_MCP_NO_TEMP_SWEEP: '1' },
+      stdio: ['ignore', 'pipe', 'inherit'],
+    });
+    await new Promise<void>((resolve) => child.on('exit', () => resolve()));
+
+    expect(fs.existsSync(stale)).toBe(true);
   }, 60000);
 });
