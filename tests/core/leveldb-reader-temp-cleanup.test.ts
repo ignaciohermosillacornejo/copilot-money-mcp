@@ -196,15 +196,25 @@ describe('orphan sweep reclaims copies stranded by earlier versions (issue #631)
     fs.mkdirSync(tmpdir, { recursive: true });
     const stale = makeFakeCopy(tmpdir, 'copilot-leveldb-staleA', 2 * 60 * 60 * 1000);
 
-    const script = path.join(FIXTURES_DIR, 'read-once-no-sweep.ts');
-    writeChildScript(script, false);
+    // Keep the child alive well past the point where the enabled sweep has
+    // demonstrably finished (previous test), otherwise a fast-exiting child
+    // would leave the orphan behind regardless of the env var and this would
+    // pass without proving anything.
+    const script = path.join(FIXTURES_DIR, 'read-and-wait-no-sweep.ts');
+    writeChildScript(script, true);
 
     const child = spawn(process.execPath, [script, dbPath], {
       env: { ...process.env, TMPDIR: tmpdir, COPILOT_MCP_NO_TEMP_SWEEP: '1' },
       stdio: ['ignore', 'pipe', 'inherit'],
     });
+
+    await whenReady(child);
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+    const stillThere = fs.existsSync(stale);
+
+    child.kill('SIGTERM');
     await new Promise<void>((resolve) => child.on('exit', () => resolve()));
 
-    expect(fs.existsSync(stale)).toBe(true);
+    expect(stillThere).toBe(true);
   }, 60000);
 });
