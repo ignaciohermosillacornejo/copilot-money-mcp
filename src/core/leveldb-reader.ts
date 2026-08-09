@@ -136,6 +136,8 @@ function copyDatabaseToTemp(srcPath: string): string {
   const fingerprint = sourceFingerprint(srcPath);
 
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'copilot-leveldb-'));
+  // A copy now exists on disk. Guarantee it cannot outlive this process.
+  registerTempDbExitSweep();
   const files = fs.readdirSync(srcPath);
   for (const file of files) {
     if (!isLevelDBFile(file)) continue;
@@ -174,7 +176,14 @@ function scheduledCleanupCallback(srcPath: string, scheduledTime: number): void 
 
 /**
  * Release a reference to a temporary database copy.
- * When refCount reaches 0, schedule cleanup after TTL.
+ *
+ * When refCount reaches 0 the copy is deliberately KEPT and its cleanup is
+ * scheduled after the TTL, so a subsequent read of the same database reuses it
+ * instead of re-copying (~120 MB). The timer is unref'd: a pending cleanup must
+ * never be the reason a finished server or worker stays alive for the full TTL,
+ * and — since an unref'd timer will usually never fire at all — it must never be
+ * the only thing standing between a temp copy and deletion. That guarantee comes
+ * from `registerTempDbExitSweep`.
  */
 function releaseTempDatabase(srcPath: string): void {
   const cached = tempDbCache.get(srcPath);
@@ -186,7 +195,11 @@ function releaseTempDatabase(srcPath: string): void {
   // Schedule cleanup if no more references
   if (cached.refCount <= 0) {
     const scheduledTime = cached.lastAccess;
-    setTimeout(() => scheduledCleanupCallback(srcPath, scheduledTime), TEMP_DB_CACHE_TTL);
+    const timer = setTimeout(
+      () => scheduledCleanupCallback(srcPath, scheduledTime),
+      TEMP_DB_CACHE_TTL
+    );
+    timer.unref();
   }
 }
 
@@ -201,6 +214,45 @@ function cleanupTempDatabase(tempPath: string): void {
     console.error(
       `[WARN] Failed to clean up temp database at ${tempPath}: ${error instanceof Error ? error.message : String(error)}`
     );
+  }
+}
+
+/** Signals an MCP client may use to stop the server. */
+const SWEEP_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
+
+let exitSweepRegistered = false;
+
+/**
+ * Guarantee that temp copies never outlive the process that created them.
+ *
+ * The TTL timer in `releaseTempDatabase` cannot be relied on to do the actual
+ * deleting: this server usually runs as a short-lived, per-request process, and
+ * decoding runs in a worker thread that exits as soon as it posts its result.
+ * Both are gone long before a 5-minute timer could fire, and pending timers are
+ * simply dropped on exit — so every temp copy was orphaned. In the wild this
+ * accumulated to 366 stale `copilot-leveldb-*` directories (~33 GB) and filled
+ * the disk (issue #631).
+ *
+ * Registered lazily, the first time a copy is actually made, so merely importing
+ * this module never installs process listeners.
+ */
+function registerTempDbExitSweep(): void {
+  if (exitSweepRegistered) return;
+  exitSweepRegistered = true;
+
+  // Normal termination: a worker finishing, stdin closing, an explicit
+  // process.exit(). 'exit' listeners must be synchronous, which rmSync is.
+  process.on('exit', () => cleanupAllTempDatabases());
+
+  // A signal terminates the process WITHOUT emitting 'exit'. Sweep, then
+  // re-raise: the listener is registered with `once`, so by the time we
+  // re-raise it has already been removed and the default disposition applies,
+  // preserving the conventional 128+n exit code.
+  for (const signal of SWEEP_SIGNALS) {
+    process.once(signal, () => {
+      cleanupAllTempDatabases();
+      process.kill(process.pid, signal);
+    });
   }
 }
 
