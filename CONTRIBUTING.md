@@ -6,7 +6,8 @@ Contributions welcome! This guide covers development setup, architecture, and ho
 
 ### Prerequisites
 
-- **Bun** (latest) or **Node.js 18+**
+- **Bun** (latest; required for development and tests)
+- **Node.js 18+** (optional; only needed to run the built server)
 - **Copilot Money** installed on macOS (for integration testing)
 
 ### Getting Started
@@ -148,7 +149,7 @@ Same as read tools, plus:
 bun test                                    # Run all tests
 bun test --watch                            # Watch mode
 bun test tests/tools/tools.test.ts          # Specific file
-bun test --filter "getBalanceHistory"        # Pattern match
+bun test -t "getBalanceHistory"               # Test name pattern
 ```
 
 Tests mirror the `src/` structure in `tests/`. The synthetic test DB is generated at runtime by `tests/helpers/test-db.ts` (no checked-in DB fixtures).
@@ -187,7 +188,7 @@ entry with a comment.
 
 - TypeScript strict mode
 - Zod for runtime validation of all data models
-- ESLint + Prettier enforced via pre-commit hooks
+- ESLint + Prettier enforced via a pre-push hook (`bun run check`)
 - Read tools: `readOnlyHint: true`, and `readOnly: true` on the `ToolDefinition`
 - Write tools: `readOnlyHint: false`, and `readOnly: false` on the `ToolDefinition` — that field is the `--write` gate, and the two must agree
 - Conventional commits (`feat:`, `fix:`, `docs:`, `test:`, `chore:`)
