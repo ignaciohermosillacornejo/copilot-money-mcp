@@ -32,6 +32,47 @@ export const DEFAULT_TRANSACTION_FIELDS = [
 ] as const;
 
 /**
+ * The default field set for investment-price rows (#605).
+ *
+ * Deliberately excludes `prices` — the nested epoch-millis series that is
+ * ~98% of the response — and carries the derived `latest_price`/`latest_at`
+ * instead, so a terse row still answers "what is this security worth".
+ * `date` and `month` are both listed because a row has exactly one of them
+ * (`hf` and `daily` respectively); projection simply omits the absent key.
+ */
+export const DEFAULT_INVESTMENT_PRICE_FIELDS = [
+  'security_id',
+  'ticker_symbol',
+  'price_type',
+  'date',
+  'month',
+  'latest_price',
+  'latest_at',
+] as const;
+
+/**
+ * JSON-schema fragment for `get_investment_prices`' `fields` param.
+ *
+ * The description NAMES the expensive token (`prices`) on purpose. A generic
+ * selection parameter is otherwise undiscoverable: unlike a boolean called
+ * `include_series`, nothing about `fields` tells a caller that a series exists
+ * at all, so omitting it from `"default"` would hide the data rather than
+ * defer it. Naming what `"default"` leaves out is part of the convention —
+ * see the decision note on issue #597.
+ */
+export const INVESTMENT_PRICE_FIELDS_PARAM_SCHEMA = {
+  type: 'array',
+  items: { type: 'string' },
+  description:
+    'Return only these fields per row. Default when omitted: a terse row ' +
+    '(security_id, ticker_symbol, price_type, date/month, latest_price, latest_at). ' +
+    'The full intraday/daily series lives in `prices`, which is EXCLUDED by default ' +
+    'because it is ~98% of the response — request it explicitly with ' +
+    'fields: ["default", "prices"], or use "all" / "*" for full rows. ' +
+    'Unknown names are omitted and reported via _field_warning.',
+} as const;
+
+/**
  * JSON-schema fragment for the `fields` input param, shared verbatim by
  * get_transactions (cache) and get_transactions_live so the two modes cannot
  * drift — parity is pinned by tests/tools/live/transactions.test.ts, which

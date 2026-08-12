@@ -982,7 +982,10 @@ describe('handleCallTool — read tools (extended)', () => {
     expect(data.tickers).toBeArray();
     expect(data.tickers).toContain('AAPL');
     expect(data.tickers).toContain('VTI');
-    expect(data.prices[0].close_price).toBeDefined();
+    // v3 (#605): rows are terse by default — the scalar close_price on this
+    // mock surfaces through the derived latest_price, which is the one field
+    // that means "current price" regardless of where the document kept it.
+    expect(data.prices[0].latest_price).toBeDefined();
   });
 
   test('get_investment_prices filters by ticker_symbol', async () => {
@@ -993,7 +996,7 @@ describe('handleCallTool — read tools (extended)', () => {
     const data = parseToolResult(result) as any;
     expect(data.count).toBe(1);
     expect(data.prices[0].ticker_symbol).toBe('AAPL');
-    expect(data.prices[0].close_price).toBe(185.5);
+    expect(data.prices[0].latest_price).toBe(185.5);
   });
 
   test('get_balance_history with offset skips entries', async () => {

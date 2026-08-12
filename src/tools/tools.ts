@@ -15,7 +15,11 @@ import {
 // pure projections of its ordered definition lists.
 import { READ_TOOL_DEFS, WRITE_TOOL_DEFS } from './registry/index.js';
 import { normalizeMerchantName } from '../utils/merchant.js';
-import { DEFAULT_TRANSACTION_FIELDS, projectRows } from './field-selection.js';
+import {
+  DEFAULT_TRANSACTION_FIELDS,
+  DEFAULT_INVESTMENT_PRICE_FIELDS,
+  projectRows,
+} from './field-selection.js';
 import type { LiveCopilotDatabase } from '../core/live-database.js';
 import type { GraphQLClient } from '../core/graphql/client.js';
 import { GraphQLError } from '../core/graphql/client.js';
@@ -89,6 +93,8 @@ import {
   getRecurringDisplayName,
   formatSplitRatio,
   TransactionSchema,
+  InvestmentPriceSchema,
+  getLatestPricePoint,
 } from '../models/index.js';
 import type { GoalHistory } from '../models/goal-history.js';
 import { isItemHealthy, itemNeedsAttention, getItemDisplayName } from '../models/item.js';
@@ -187,6 +193,17 @@ export const DEFAULT_COMPACT_TRANSACTION_FIELDS = [
  * document schema keys plus the two enrichment fields synthesized at read
  * time. Derived from the zod schema so model drift cannot desync this set.
  */
+/**
+ * Valid field names for investment-price rows: the document's own fields plus
+ * the two derived by getInvestmentPrices. Without the derived names here, a
+ * caller asking for `latest_price` would be told it does not exist.
+ */
+const INVESTMENT_PRICE_KNOWN_FIELDS: ReadonlySet<string> = new Set([
+  ...Object.keys(InvestmentPriceSchema.shape),
+  'latest_price',
+  'latest_at',
+]);
+
 const TRANSACTION_KNOWN_FIELDS: ReadonlySet<string> = new Set([
   ...Object.keys(TransactionSchema.shape),
   'category_name',
@@ -2316,6 +2333,7 @@ export class CopilotMoneyTools {
       start_date?: string;
       end_date?: string;
       price_type?: PriceType;
+      fields?: string[];
       limit?: number;
       offset?: number;
     } = {}
@@ -2326,6 +2344,7 @@ export class CopilotMoneyTools {
     has_more: boolean;
     tickers: string[];
     prices: InvestmentPrice[];
+    _field_warning?: string;
   }> {
     const { ticker_symbol, start_date, end_date, price_type } = options;
     const validatedLimit = validateLimit(options.limit, DEFAULT_QUERY_LIMIT);
@@ -2350,13 +2369,32 @@ export class CopilotMoneyTools {
     const hasMore = validatedOffset + validatedLimit < totalCount;
     const paged = prices.slice(validatedOffset, validatedOffset + validatedLimit);
 
+    // Derive the latest point BEFORE projecting: the terse default drops the
+    // `prices` series, and real documents have no scalar price field, so
+    // without this a default row would carry no price at all (#605/#622).
+    const enriched = paged.map((row) => {
+      const latest = getLatestPricePoint(row);
+      return latest ? { ...row, ...latest } : row;
+    });
+
+    // v3: omitting `fields` yields the terse preset, not full rows. Callers
+    // wanting the series ask for it — `fields: ["default", "prices"]` — or
+    // take everything with "all"/"*".
+    const { rows, warning } = projectRows(enriched, options.fields ?? ['default'], {
+      preset: DEFAULT_INVESTMENT_PRICE_FIELDS,
+      knownFields: INVESTMENT_PRICE_KNOWN_FIELDS,
+      validFieldsHint:
+        'the investment-price document fields plus the derived latest_price and latest_at',
+    });
+
     return {
-      count: paged.length,
+      count: rows.length,
       total_count: totalCount,
       offset: validatedOffset,
       has_more: hasMore,
       tickers: [...tickerSet].sort(),
-      prices: paged,
+      prices: rows,
+      ...(warning && { _field_warning: warning }),
     };
   }
 

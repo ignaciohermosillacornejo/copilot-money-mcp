@@ -47,12 +47,13 @@ const RESPONSE_BUDGETS: Record<string, number> = {
   get_recurring_transactions: 755,
   get_budgets: 420,
   get_goals: 365,
-  // Raised from 250 by the #622 fix. Not a regression: the old number was
-  // measured against a fixture with no nested `prices` map, a shape real price
-  // documents never have — the series IS the payload. The fixture now models
-  // reality, so this budget finally reflects what callers actually pay.
-  // #605 (latest-price-by-default) is the item that brings it back down.
-  get_investment_prices: 1_265,
+  // 1_265 -> 400 by #605: rows are terse by default and the nested `prices`
+  // series is opt-in. This is the ratchet turning the right way — the #622 fix
+  // had raised it to 1_265 by making the fixture model reality (the series IS
+  // the payload), and the diet takes it back below where it started.
+  // Measured 363 on the synthetic fixture; real calls return up to 100 rows,
+  // so the saving scales while the schema cost below does not.
+  get_investment_prices: 400,
   // The fixture seeds no holdings, splits, or balance history, so these three
   // budgets pin the empty-response envelope only. If the fixture ever seeds
   // those collections, remeasure and recalibrate these entries.
@@ -75,7 +76,13 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   get_recurring_transactions: 1_900,
   get_budgets: 650,
   get_goals: 835,
-  get_investment_prices: 1_120,
+  // Raised from 1_120 by #605: adds the `fields` param plus a description that
+  // NAMES the excluded `prices` token. That naming is deliberate and is why the
+  // increase is worth it — a generic selection param is undiscoverable unless
+  // the tool says what "default" leaves out (see the convention note on #597).
+  // Schema cost is paid every session; response cost only when called. That
+  // trade only pays at scale, which is exactly the usage this tool has.
+  get_investment_prices: 1_900,
   get_investment_splits: 1_635,
   get_holdings: 1_115,
   get_balance_history: 1_395,

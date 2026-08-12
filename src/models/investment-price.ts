@@ -80,6 +80,53 @@ export const InvestmentPriceSchema = z
 export type InvestmentPrice = z.infer<typeof InvestmentPriceSchema>;
 
 /**
+ * The latest point in a document's nested `prices` map.
+ *
+ * Real price documents carry their numbers ONLY in that map (#622) — there is
+ * no scalar price field — so dropping the map by default (#605) would leave a
+ * row with no price at all. The latest point is derived up front instead, which
+ * is what a caller asking "what is this worth" actually wants, at ~2% of the
+ * bytes.
+ *
+ * Keys are epoch-millis. `latest_at` is an ISO-8601 UTC instant rather than a
+ * calendar date on purpose: for `hf` documents the key is an intraday
+ * timestamp, and rendering that as a bare date would silently assert a market
+ * timezone this project does not know.
+ */
+export function getLatestPricePoint(
+  price: InvestmentPrice
+): { latest_price: number; latest_at?: string } | undefined {
+  // No early return when the series is absent: the scalar fallback below is
+  // the whole point of this function for documents that never had one.
+  let bestKey: number | undefined;
+  let bestValue: number | undefined;
+  for (const [key, value] of Object.entries(price.prices ?? {})) {
+    if (typeof value !== 'number') continue;
+    const ms = Number(key);
+    if (!Number.isFinite(ms)) continue;
+    if (bestKey === undefined || ms > bestKey) {
+      bestKey = ms;
+      bestValue = value;
+    }
+  }
+
+  if (bestKey !== undefined && bestValue !== undefined) {
+    return { latest_price: bestValue, latest_at: new Date(bestKey).toISOString() };
+  }
+
+  // No usable series. Fall back to a scalar price if the document carries one.
+  // Real documents never have (#622), but the decoder reads them when present,
+  // and this keeps `latest_price` meaning "the current price for this row"
+  // rather than silently vanishing if Copilot ever denormalizes one — which is
+  // what padding the default preset with `close_price`/`current_price` would
+  // have been working around.
+  const scalar = getBestPrice(price);
+  if (scalar === undefined) return undefined;
+  const period = getPriceDate(price);
+  return { latest_price: scalar, ...(period && { latest_at: period }) };
+}
+
+/**
  * Get the best available price from an investment price record.
  * Tries fields in order of preference: current_price, close_price, price, institution_price.
  */
