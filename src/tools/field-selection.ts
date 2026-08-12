@@ -35,7 +35,8 @@ export const DEFAULT_TRANSACTION_FIELDS = [
  * The default field set for investment-price rows (#605).
  *
  * Deliberately excludes `prices` — the nested epoch-millis series that is
- * ~98% of the response — and carries the derived `latest_price`/`latest_at`
+ * most of a row (~75-90%, depending on how many points the period carries) —
+ * and carries the derived `latest_price`/`latest_at`
  * instead, so a terse row still answers "what is this security worth".
  * `date` and `month` are both listed because a row has exactly one of them
  * (`hf` and `daily` respectively); projection simply omits the absent key.
@@ -67,7 +68,8 @@ export const INVESTMENT_PRICE_FIELDS_PARAM_SCHEMA = {
     'Return only these fields per row. Default when omitted: a terse row ' +
     '(security_id, ticker_symbol, price_type, date/month, latest_price, latest_at). ' +
     'The full intraday/daily series lives in `prices`, which is EXCLUDED by default ' +
-    'because it is ~98% of the response — request it explicitly with ' +
+    'because it is most of a row and multiplies response size several-fold — ' +
+    'request it explicitly with ' +
     'fields: ["default", "prices"], or use "all" / "*" for full rows. ' +
     'Unknown names are omitted and reported via _field_warning.',
 } as const;
