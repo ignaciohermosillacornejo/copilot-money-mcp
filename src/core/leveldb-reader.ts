@@ -280,8 +280,12 @@ function registerTempDbExitSweep(): void {
 
   // A signal terminates the process WITHOUT emitting 'exit'. Sweep, then
   // re-raise: the listener is registered with `once`, so by the time we
-  // re-raise it has already been removed and the default disposition applies,
-  // preserving the conventional 128+n exit code.
+  // re-raise it has already been removed and the default disposition applies.
+  // That restores the conventional 128+n exit code as long as this is the only
+  // listener for the signal — true for every caller today, since the reader
+  // runs in the decode worker and standalone scripts, never in the server
+  // process that installs its own SIGINT/SIGTERM handlers. A host that does
+  // install its own keeps its handling, not ours; the sweep still runs.
   for (const signal of SWEEP_SIGNALS) {
     process.once(signal, () => {
       cleanupAllTempDatabases();
@@ -316,14 +320,21 @@ let orphanSweepStarted = false;
  *     is one nobody has read from in an hour.
  *
  * Best effort by design: it runs on an unref'd timer with async removal, so it
- * never delays startup, blocks a read, or keeps a short-lived process alive. A
- * per-request process may exit mid-sweep and simply finish the job next run.
- * Set COPILOT_MCP_NO_TEMP_SWEEP=1 to disable.
+ * never delays startup and never blocks a read. The unref'd timer also means a
+ * process that finishes first simply exits without sweeping at all. Once the
+ * pass has started, though, its awaited fs promises do hold the event loop
+ * until it finishes — so the first run after upgrading, with a large backlog to
+ * delete, can briefly delay exit. That is the intended trade-off: the backlog
+ * is the whole reason this exists, and a per-request process interrupted
+ * mid-pass just finishes the job on the next run.
+ *
+ * Set COPILOT_MCP_NO_TEMP_SWEEP=1 to disable (`1` exactly, matching
+ * COPILOT_DISABLE_PERSISTENT_INDEX).
  */
 function startOrphanSweep(): void {
   if (orphanSweepStarted) return;
   orphanSweepStarted = true;
-  if (process.env.COPILOT_MCP_NO_TEMP_SWEEP) return;
+  if (process.env.COPILOT_MCP_NO_TEMP_SWEEP === '1') return;
 
   const timer = setTimeout(() => {
     void runOrphanSweep();
@@ -331,8 +342,8 @@ function startOrphanSweep(): void {
   timer.unref();
 }
 
-/** @internal exported for tests */
-export async function runOrphanSweep(): Promise<number> {
+/** Body of the sweep described by `startOrphanSweep`. Returns dirs removed. */
+async function runOrphanSweep(): Promise<number> {
   const tmpRoot = os.tmpdir();
   let entries: string[];
   try {
