@@ -3,9 +3,16 @@ name: Audit PR Reviews
 # Runs after a PR is merged (or via manual dispatch) and asks Claude to identify
 # review suggestions that were NOT applied in the final merged code. Produces
 # at most one follow-up issue per PR, or none if everything was addressed.
+#
+# Trigger is pull_request_target, not pull_request: plain pull_request runs from
+# fork PRs get no repo secrets, so OP_SERVICE_ACCOUNT_TOKEN arrived empty and
+# every fork-PR audit failed at the 1Password step. pull_request_target is safe
+# here because the job is gated on merged == true (or manual dispatch), the
+# workflow definition executes from the base branch, and checkout pulls the base
+# repo's main — no unmerged fork code ever runs with secrets in scope.
 
 on:
-  pull_request:
+  pull_request_target:
     types: [closed]
   workflow_dispatch:
     inputs:
