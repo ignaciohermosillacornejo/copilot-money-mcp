@@ -31,6 +31,12 @@ const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const MONTH_REGEX = /^\d{4}-\d{2}$/;
 
 /**
+ * Largest absolute epoch-millis the ECMA Date range represents (±100,000,000
+ * days). Beyond it `new Date(ms).toISOString()` throws a RangeError.
+ */
+const MAX_EPOCH_MS = 8.64e15;
+
+/**
  * Investment Price schema with validation.
  *
  * Represents price data for stocks, cryptocurrencies, and other investments.
@@ -69,10 +75,18 @@ export const InvestmentPriceSchema = z
     source: z.string().optional(), // Data source identifier
     price_type: z.enum(PRICE_TYPES).optional(), // always decoder-assigned from the subcollection path
 
-    // Nested price payload. For daily docs this is keyed by day-of-month (`01`–`31`);
-    // for hf docs it's keyed by intraday timestamp. Values carry the numeric price
-    // plus source metadata. The schema stays loose because the key space varies by
-    // price_type — consumers should inspect `prices` alongside `date`/`month`.
+    // Nested price payload — where real documents keep their numbers (#622).
+    // Keys are epoch-millis strings and values are plain numbers, on BOTH
+    // daily and hf documents; the only difference is spacing (one point per
+    // trading day vs intraday). Verified across the whole local corpus: every
+    // key matched a 12-13 digit epoch and every value was a number.
+    //
+    // (An earlier version of this comment claimed daily docs were keyed by
+    // day-of-month `01`-`31` with values carrying source metadata. Both were
+    // wrong, and wrong in a way that would have made `latest_at` garbage.)
+    //
+    // The schema stays loose because the value type is not guaranteed by
+    // anything we control — consumers should tolerate non-numeric entries.
     prices: z.record(z.string(), z.unknown()).optional(),
   })
   .passthrough(); // Allow additional fields we haven't discovered yet
@@ -85,13 +99,20 @@ export type InvestmentPrice = z.infer<typeof InvestmentPriceSchema>;
  * Real price documents carry their numbers ONLY in that map (#622) — there is
  * no scalar price field — so dropping the map by default (#605) would leave a
  * row with no price at all. The latest point is derived up front instead, which
- * is what a caller asking "what is this worth" actually wants, at ~2% of the
- * bytes.
+ * is what a caller asking "what is this worth" actually wants, at a small
+ * fraction of the bytes.
  *
- * Keys are epoch-millis. `latest_at` is an ISO-8601 UTC instant rather than a
- * calendar date on purpose: for `hf` documents the key is an intraday
- * timestamp, and rendering that as a bare date would silently assert a market
- * timezone this project does not know.
+ * Keys are epoch-millis. On the series path `latest_at` is an ISO-8601 UTC
+ * instant rather than a calendar date on purpose: for `hf` documents the key
+ * is an intraday timestamp, and rendering that as a bare date would silently
+ * assert a market timezone this project does not know.
+ *
+ * On the scalar fallback path `latest_at` is weaker — the document's own
+ * period (`YYYY-MM-DD` or `YYYY-MM`), which is when the price *applies* rather
+ * than when it was observed. The two are not the same notion and callers
+ * should not assume instant precision. No real document takes that path
+ * (0 of 941 in the local corpus carry a scalar price), so this is a
+ * forward-compatibility branch, not a live one.
  */
 export function getLatestPricePoint(
   price: InvestmentPrice
@@ -103,7 +124,10 @@ export function getLatestPricePoint(
   for (const [key, value] of Object.entries(price.prices ?? {})) {
     if (typeof value !== 'number') continue;
     const ms = Number(key);
-    if (!Number.isFinite(ms)) continue;
+    // `Number.isFinite` alone is not enough: a finite value outside the ECMA
+    // Date range makes `new Date(ms).toISOString()` throw a RangeError, which
+    // would fail the whole tool call rather than degrade this one row.
+    if (!Number.isFinite(ms) || Math.abs(ms) > MAX_EPOCH_MS) continue;
     if (bestKey === undefined || ms > bestKey) {
       bestKey = ms;
       bestValue = value;

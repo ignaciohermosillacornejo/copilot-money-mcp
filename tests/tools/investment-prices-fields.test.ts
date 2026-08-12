@@ -1,7 +1,7 @@
 /**
  * Terse-by-default investment prices (#605, v3).
  *
- * The nested `prices` series is ~98% of this tool's response. Dropping it is
+ * The nested `prices` series is most of this tool's response. Dropping it is
  * only safe because real documents carry their numbers ONLY in that map
  * (#622) — there is no scalar price field — so the terse row derives
  * `latest_price`/`latest_at` instead. A default row that dropped the series
@@ -15,6 +15,7 @@ import os from 'node:os';
 import { CopilotDatabase } from '../../src/core/database.js';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { createCombinedDb } from '../helpers/test-db.js';
+import { DEFAULT_INVESTMENT_PRICE_FIELDS } from '../../src/tools/field-selection.js';
 
 const FIXTURES_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-prices-fields-'));
 const DB_PATH = path.join(FIXTURES_DIR, 'db');
@@ -33,10 +34,17 @@ const SERIES = {
 let db: CopilotDatabase;
 let tools: CopilotMoneyTools;
 
+const SEC_HF = 'f0e1d2c3b4a59687756433221100ffeeddccbbaa99887766554433221100abcd';
+
 beforeAll(async () => {
   await createCombinedDb(DB_PATH, {
     investmentPrices: [
       { security_id: SEC, price_type: 'daily', period: '2024-02', prices: SERIES },
+      // An `hf` row is load-bearing, not decoration. `daily` rows carry `month`
+      // and `hf` rows carry `date`; with a daily-only fixture, deleting `date`
+      // from the default preset passed the ENTIRE suite (found by mutation —
+      // the #596 class: a guard that executes but cannot fail on its deletion).
+      { security_id: SEC_HF, price_type: 'hf', period: '2024-02-05', prices: SERIES },
     ],
   });
   db = new CopilotDatabase(DB_PATH);
@@ -51,12 +59,12 @@ describe('get_investment_prices terse default (#605)', () => {
   test('omits the price series by default', async () => {
     const result = await tools.getInvestmentPrices({});
 
-    expect(result.prices).toHaveLength(1);
-    expect(result.prices[0]).not.toHaveProperty('prices');
+    expect(result.prices.length).toBeGreaterThan(0);
+    for (const row of result.prices) expect(row).not.toHaveProperty('prices');
   });
 
   test('still answers "what is this worth" — derives the latest point', async () => {
-    const result = await tools.getInvestmentPrices({});
+    const result = await tools.getInvestmentPrices({ price_type: 'daily' });
 
     const row = result.prices[0]!;
     expect(row.latest_price).toBe(104.75);
@@ -65,7 +73,7 @@ describe('get_investment_prices terse default (#605)', () => {
   });
 
   test('keeps the identity fields a caller needs to join', async () => {
-    const result = await tools.getInvestmentPrices({});
+    const result = await tools.getInvestmentPrices({ price_type: 'daily' });
 
     const row = result.prices[0]!;
     expect(row.security_id).toBe(SEC);
@@ -73,8 +81,46 @@ describe('get_investment_prices terse default (#605)', () => {
     expect(row.month).toBe('2024-02');
   });
 
+  test('an hf row keeps `date`, the period field daily rows do not have', async () => {
+    // Every field in the preset needs a fixture row that actually carries it,
+    // or its removal is undetectable. `date` had no such row until now.
+    const result = await tools.getInvestmentPrices({ price_type: 'hf' });
+
+    const row = result.prices[0]!;
+    expect(row.price_type).toBe('hf');
+    expect(row.date).toBe('2024-02-05');
+    expect(row.month).toBeUndefined();
+  });
+
+  test('every preset field appears on at least one default row', async () => {
+    // Class-level guard for the gap above: if a name is added to the preset
+    // without a fixture row carrying it, deleting that name again would go
+    // unnoticed. `ticker_symbol` is exempt — it is joined from `securities`,
+    // which this fixture deliberately does not seed.
+    const result = await tools.getInvestmentPrices({});
+    const seen = new Set(result.prices.flatMap((row) => Object.keys(row)));
+
+    const unexercised = DEFAULT_INVESTMENT_PRICE_FIELDS.filter(
+      (name) => name !== 'ticker_symbol' && !seen.has(name)
+    );
+    expect(unexercised).toEqual([]);
+  });
+
+  test('fields: [] returns full rows — the documented no-projection escape', async () => {
+    // Consistent with get_transactions (#593): an explicit empty array means
+    // "no projection", distinct from omitting the param (which now means the
+    // preset). Pinned because in a terse-by-default tool this is the one
+    // spelling that silently restores the fat series without saying "all".
+    const result = await tools.getInvestmentPrices({ price_type: 'daily', fields: [] });
+
+    expect(result.prices[0]).toHaveProperty('prices');
+  });
+
   test('fields: ["default", "prices"] restores the series alongside the terse row', async () => {
-    const result = await tools.getInvestmentPrices({ fields: ['default', 'prices'] });
+    const result = await tools.getInvestmentPrices({
+      price_type: 'daily',
+      fields: ['default', 'prices'],
+    });
 
     const row = result.prices[0]!;
     expect(row.prices).toEqual(SERIES);
@@ -82,7 +128,7 @@ describe('get_investment_prices terse default (#605)', () => {
   });
 
   test('fields: ["all"] returns full rows', async () => {
-    const result = await tools.getInvestmentPrices({ fields: ['all'] });
+    const result = await tools.getInvestmentPrices({ price_type: 'daily', fields: ['all'] });
 
     expect(result.prices[0]!.prices).toEqual(SERIES);
   });
@@ -97,7 +143,10 @@ describe('get_investment_prices terse default (#605)', () => {
   });
 
   test('reports a typo without failing the call', async () => {
-    const result = await tools.getInvestmentPrices({ fields: ['default', 'latest_pryce'] });
+    const result = await tools.getInvestmentPrices({
+      price_type: 'daily',
+      fields: ['default', 'latest_pryce'],
+    });
 
     expect(result._field_warning).toContain('latest_pryce');
     expect(result.prices[0]!.latest_price).toBe(104.75);

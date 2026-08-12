@@ -16,9 +16,9 @@ export const getInvestmentPricesTool = defineTool({
       'date range, or price type (daily/hf). ' +
       'By default each row is TERSE: the security, the period, and its latest price ' +
       '(`latest_price` / `latest_at`) — enough to answer "what is this worth". ' +
-      'The full price series (`prices`, an epoch-millis map) is ~98% of the raw response and is ' +
-      'omitted unless requested via `fields`; ask for it only when you need the time series ' +
-      'itself, not a current value.',
+      'The full price series (`prices`, an epoch-millis map) is most of a full row and ' +
+      'roughly quadruples response size, so it is omitted unless requested via `fields`; ' +
+      'ask for it only when you need the time series itself, not a current value.',
     inputSchema: {
       type: 'object',
       properties: {
