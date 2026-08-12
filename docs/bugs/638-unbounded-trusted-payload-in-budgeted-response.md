@@ -4,7 +4,7 @@ title: A context-budget assertion counted bytes it did not own, and the field th
 class: unbounded-trusted-payload
 status: fixed
 detected: incidental  # surfaced while working #631; `bun run check` failed on a dev machine and passed in CI
-fixed_in: not yet
+fixed_in: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/639
 issue: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/638
 date: 2026-08-12
 ---
