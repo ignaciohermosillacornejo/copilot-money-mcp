@@ -162,15 +162,25 @@ function copyDatabaseToTemp(srcPath: string): string {
   // (once per process) reclaim any copies stranded by an earlier version.
   registerTempDbExitSweep();
   startOrphanSweep();
-  const files = fs.readdirSync(srcPath);
-  for (const file of files) {
-    if (!isLevelDBFile(file)) continue;
-    try {
-      fs.copyFileSync(path.join(srcPath, file), path.join(tempDir, file));
-    } catch (err) {
-      // TOCTOU: compaction may delete .ldb between readdir and copyFile; MANIFEST already dropped it, so omitting is correct, others propagate.
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  try {
+    const files = fs.readdirSync(srcPath);
+    for (const file of files) {
+      if (!isLevelDBFile(file)) continue;
+      try {
+        fs.copyFileSync(path.join(srcPath, file), path.join(tempDir, file));
+      } catch (err) {
+        // TOCTOU: compaction may delete .ldb between readdir and copyFile; MANIFEST already dropped it, so omitting is correct, others propagate.
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      }
     }
+  } catch (err) {
+    // A real read/copy failure (EACCES, EIO) aborts before the entry reaches
+    // `tempDbCache`, so from here on nothing in the process can name this
+    // directory: the exit sweep and `cleanupAllTempDatabases` both iterate the
+    // cache, and only the orphan sweep would ever reclaim it, an hour later.
+    // This is the last place that still holds the path — delete it here.
+    cleanupTempDatabase(tempDir);
+    throw err;
   }
 
   tempDbCache.set(srcPath, {
