@@ -59,6 +59,7 @@ export {
 
 export {
   InvestmentPriceSchema,
+  getLatestPricePoint,
   type InvestmentPrice,
   PRICE_TYPES,
   type PriceType,

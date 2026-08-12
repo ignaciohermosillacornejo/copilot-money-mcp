@@ -5,14 +5,20 @@
 import { defineTool, type ToolMethodArgs } from './types.js';
 import { BALANCE_HISTORY_GRANULARITIES } from '../constants.js';
 import { PRICE_TYPES } from '../../models/index.js';
+import { INVESTMENT_PRICE_FIELDS_PARAM_SCHEMA } from '../field-selection.js';
 
 export const getInvestmentPricesTool = defineTool({
   schema: {
     name: 'get_investment_prices',
     description:
-      'Get investment price history for portfolio tracking. Returns daily and high-frequency ' +
-      'price data for stocks, ETFs, mutual funds, and crypto. Filter by ticker symbol, date range, ' +
-      'or price type (daily/hf). Includes OHLCV data when available.',
+      'Get investment price history for portfolio tracking. Returns one row per ' +
+      '(security, period) for stocks, ETFs, mutual funds, and crypto. Filter by ticker symbol, ' +
+      'date range, or price type (daily/hf). ' +
+      'By default each row is TERSE: the security, the period, and its latest price ' +
+      '(`latest_price` / `latest_at`) — enough to answer "what is this worth". ' +
+      'The full price series (`prices`, an epoch-millis map) is ~98% of the raw response and is ' +
+      'omitted unless requested via `fields`; ask for it only when you need the time series ' +
+      'itself, not a current value.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -28,6 +34,7 @@ export const getInvestmentPricesTool = defineTool({
           description:
             'Filter by price type: daily (monthly aggregates) or hf (high-frequency intraday)',
         },
+        fields: INVESTMENT_PRICE_FIELDS_PARAM_SCHEMA,
         limit: {
           type: 'integer',
           description: 'Maximum number of results (default: 100, max: 10000)',
