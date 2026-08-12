@@ -189,11 +189,6 @@ export const DEFAULT_COMPACT_TRANSACTION_FIELDS = [
 ] as const;
 
 /**
- * Every selectable field name on a get_transactions row: the Transaction
- * document schema keys plus the two enrichment fields synthesized at read
- * time. Derived from the zod schema so model drift cannot desync this set.
- */
-/**
  * Valid field names for investment-price rows: the document's own fields plus
  * the two derived by getInvestmentPrices. Without the derived names here, a
  * caller asking for `latest_price` would be told it does not exist.
@@ -204,6 +199,11 @@ const INVESTMENT_PRICE_KNOWN_FIELDS: ReadonlySet<string> = new Set([
   'latest_at',
 ]);
 
+/**
+ * Every selectable field name on a get_transactions row: the Transaction
+ * document schema keys plus the two enrichment fields synthesized at read
+ * time. Derived from the zod schema so model drift cannot desync this set.
+ */
 const TRANSACTION_KNOWN_FIELDS: ReadonlySet<string> = new Set([
   ...Object.keys(TransactionSchema.shape),
   'category_name',
