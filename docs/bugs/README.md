@@ -94,11 +94,12 @@ a class yet.
 | `stale-kill-switch` | A temporary disablement outlives the condition it guarded and silently disables a restored feature. | none |
 | `packaging-environment-mismatch` | The shipped artifact works in dev but fails in the target runtime — missing bundled deps, hardened-runtime constraints, GUI PATH. | `tests/integration/mcpb-bundle.test.ts` (extract-and-boot outside the repo) |
 | `unsettled-promise` | An async operation has a completion path where neither resolve nor reject fires, hanging callers forever. | none |
+| `deferred-cleanup-never-runs` | Releasing a resource is deferred to a timer or callback that only fires if the process outlives it — in a process that routinely exits first. The resource is acquired eagerly and released never, while every same-process test still observes correct bookkeeping. | none — instance-only; the class is a deployment property (does this process outlive its own timers?) that no static check here can evaluate |
 
 ## How we find bugs
 
 Recorded per entry, using a fixed vocabulary so the corpus stays countable. Here is what
-this corpus actually says, across all 43 entries:
+this corpus actually says, across all 44 entries:
 
 | Found by | Count | |
 |---|---|---|
@@ -106,7 +107,7 @@ this corpus actually says, across all 43 entries:
 | `live-probe` — a probe or smoke against the real backend | 7 | ██████ |
 | `audit-sweep` — a deliberate cross-cutting audit | 7 | ██████ |
 | `incidental` — found while working on something else | 6 | █████ |
-| `user-report` | 5 | ████ |
+| `user-report` | 6 | █████ |
 | `adversarial-review` — a reviewer tried to refute a claim or mutation-tested a guard | 2 | █ |
 | `detector-first` — a detector was built, and then found bugs | 1 | ▌ |
 | `code-review` | 1 | ▌ |
@@ -287,3 +288,9 @@ record near-misses.
 | | Bug | Found by | Date |
 |---|---|---|---|
 | #129 | [Decode-worker promise hangs forever if the worker exits without sending a result](129-worker-exit-promise-hang.md) | `code-review` | 2026-03-12 |
+
+**`deferred-cleanup-never-runs`** — 1
+
+| | Bug | Found by | Date |
+|---|---|---|---|
+| #631 | [Every LevelDB read left its ~120 MB temp copy on disk — 366 stale directories (~33 GB) filled a user's disk](631-temp-copy-deferred-cleanup.md) | `user-report` | 2026-08-12 |
