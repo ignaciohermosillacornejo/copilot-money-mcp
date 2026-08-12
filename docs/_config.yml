@@ -1,0 +1,9 @@
+# GitHub Pages (Jekyll) configuration for the docs/ site.
+theme: jekyll-theme-primer
+
+# TEMPLATE.md carries placeholder front matter (e.g. `date: <YYYY-MM-DD the fix
+# landed>`), which Jekyll coerces to a datetime and aborts the whole site build
+# on. The template is meant to be copied, not published — keep it out of the
+# build entirely.
+exclude:
+  - bugs/TEMPLATE.md
