@@ -95,18 +95,19 @@ a class yet.
 | `packaging-environment-mismatch` | The shipped artifact works in dev but fails in the target runtime — missing bundled deps, hardened-runtime constraints, GUI PATH. | `tests/integration/mcpb-bundle.test.ts` (extract-and-boot outside the repo) |
 | `unsettled-promise` | An async operation has a completion path where neither resolve nor reject fires, hanging callers forever. | none |
 | `deferred-cleanup-never-runs` | Releasing a resource is deferred to a timer or callback that only fires if the process outlives it — in a process that routinely exits first. The resource is acquired eagerly and released never, while every same-process test still observes correct bookkeeping. | none — instance-only; the class is a deployment property (does this process outlive its own timers?) that no static check here can evaluate |
+| `unbounded-trusted-payload` | A budgeted or validated surface embeds a value whose size or shape is guaranteed only by convention, because the only writer it has met is well-behaved. The guarantee holds until something else writes the file. | partial — `tests/context-budget.test.ts` measures the populated branch against a maximal legitimate input, for this surface only; no sweep across budgeted responses that embed external files |
 
 ## How we find bugs
 
 Recorded per entry, using a fixed vocabulary so the corpus stays countable. Here is what
-this corpus actually says, across all 44 entries:
+this corpus actually says, across all 45 entries:
 
 | Found by | Count | |
 |---|---|---|
 | `dogfooding` — used the tool, noticed the answer disagreed with the Copilot app | 14 | ████████████ |
 | `live-probe` — a probe or smoke against the real backend | 7 | ██████ |
 | `audit-sweep` — a deliberate cross-cutting audit | 7 | ██████ |
-| `incidental` — found while working on something else | 6 | █████ |
+| `incidental` — found while working on something else | 7 | ██████ |
 | `user-report` | 6 | █████ |
 | `adversarial-review` — a reviewer tried to refute a claim or mutation-tested a guard | 2 | █ |
 | `detector-first` — a detector was built, and then found bugs | 1 | ▌ |
@@ -294,3 +295,7 @@ record near-misses.
 | | Bug | Found by | Date |
 |---|---|---|---|
 | #631 | [Every LevelDB read left its ~120 MB temp copy on disk — 366 stale directories (~33 GB) filled a user's disk](631-temp-copy-deferred-cleanup.md) | `user-report` | 2026-08-12 |
+**`unbounded-trusted-payload`** — 1
+
+- [#638 — a context-budget assertion counted bytes it did not own](638-unbounded-trusted-payload-in-budgeted-response.md)
+

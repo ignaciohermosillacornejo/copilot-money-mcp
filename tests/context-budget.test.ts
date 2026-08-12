@@ -21,11 +21,14 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { ALL_TOOL_DEFS, type ToolContext } from '../src/tools/registry/index.js';
 import { CopilotDatabase } from '../src/core/database.js';
 import { CopilotMoneyTools } from '../src/tools/tools.js';
 import { createCombinedDb, cleanupTestDb } from './helpers/test-db.js';
+import { SCHEDULED_SMOKE_REPORT_MAX_CHARS } from '../src/utils/scheduled-smoke-status.js';
 
 const DB_PATH = path.join(__dirname, 'fixtures/context-budget-db');
 
@@ -400,7 +403,32 @@ const EXTRA_ARGS: Record<string, Record<string, unknown>> = {
 
 let ctx: ToolContext;
 
+/**
+ * Scheduled-smoke status seam (#638).
+ *
+ * `get_connection_status` embeds the scheduled drift-check status, which is
+ * read from a well-known path under `$HOME`. Before this seam existed the
+ * budget below measured whatever the developer's machine happened to contain:
+ * loose in CI, where the file never exists, and able to fail spuriously in dev.
+ * A test that asserts a byte count has to own every byte it is counting.
+ */
+let smokeStatusDir: string | null = null;
+let previousSmokeStatusPath: string | undefined;
+
+function writeSmokeStatus(contents: unknown): string {
+  smokeStatusDir ??= mkdtempSync(path.join(tmpdir(), 'ctx-budget-smoke-'));
+  const file = path.join(smokeStatusDir, 'scheduled-smoke.json');
+  writeFileSync(file, JSON.stringify(contents));
+  return file;
+}
+
 beforeAll(async () => {
+  previousSmokeStatusPath = process.env.COPILOT_MCP_SMOKE_STATUS_PATH;
+  // Point the reader at a path that does not exist, so the generic budget loop
+  // below measures the `scheduled_smoke: null` envelope deterministically.
+  smokeStatusDir = mkdtempSync(path.join(tmpdir(), 'ctx-budget-smoke-'));
+  process.env.COPILOT_MCP_SMOKE_STATUS_PATH = path.join(smokeStatusDir, 'absent.json');
+
   cleanupTestDb(DB_PATH);
   await seedFixture();
   const db = new CopilotDatabase(DB_PATH);
@@ -409,6 +437,10 @@ beforeAll(async () => {
 
 afterAll(() => {
   cleanupTestDb(DB_PATH);
+  if (previousSmokeStatusPath === undefined) delete process.env.COPILOT_MCP_SMOKE_STATUS_PATH;
+  else process.env.COPILOT_MCP_SMOKE_STATUS_PATH = previousSmokeStatusPath;
+  if (smokeStatusDir) rmSync(smokeStatusDir, { recursive: true, force: true });
+  smokeStatusDir = null;
 });
 
 /** Serialize exactly like `src/server.ts` does for tool responses. */
@@ -472,6 +504,47 @@ describe('context-budget ratchet (#597)', () => {
         expect(size).toBeLessThanOrEqual(RESPONSE_BUDGETS[def.name] ?? 0);
       });
     }
+
+    /**
+     * The loop above only ever measures `scheduled_smoke: null`, because CI has
+     * no status file — so before #638 the populated branch of
+     * `get_connection_status` had never been inside a budget at all. This pins
+     * it against a maximal *legitimate* status: worst-case summary, and a
+     * `report` at the truncation ceiling, which is the largest value the reader
+     * can now emit no matter what wrote the file.
+     */
+    test('get_connection_status stays within budget with a maximal populated smoke status', async () => {
+      const file = writeSmokeStatus({
+        last_run: '2026-12-31T23:59:59.999Z',
+        result: 'fail',
+        // Worst-case one-line summary the writer can produce.
+        summary: `${'surface failed: '.repeat(8)}see report`,
+        // Deliberately over the ceiling: asserts the budget holds against the
+        // truncated value, not against a conveniently short path.
+        report: `/Users/${'x'.repeat(64)}/.claude/copilot-money/smoke-reports/${'9'.repeat(SCHEDULED_SMOKE_REPORT_MAX_CHARS)}-smoke-failure.txt`,
+      });
+      const previous = process.env.COPILOT_MCP_SMOKE_STATUS_PATH;
+      process.env.COPILOT_MCP_SMOKE_STATUS_PATH = file;
+      try {
+        const result = (await runTool('get_connection_status')) as {
+          scheduled_smoke: { report: string } | null;
+        };
+        // Guard against a vacuous pass: if the seam broke and this read null,
+        // the size assertion below would trivially hold.
+        expect(result.scheduled_smoke).not.toBeNull();
+        expect(result.scheduled_smoke?.report.length).toBeLessThanOrEqual(
+          SCHEDULED_SMOKE_REPORT_MAX_CHARS
+        );
+        const size = serializedSize(result);
+        if (process.env.CONTEXT_BUDGET_PRINT) {
+          console.log(`[response] get_connection_status (populated): ${size} chars`);
+        }
+        expect(size).toBeLessThanOrEqual(RESPONSE_BUDGETS.get_connection_status ?? 0);
+      } finally {
+        if (previous === undefined) delete process.env.COPILOT_MCP_SMOKE_STATUS_PATH;
+        else process.env.COPILOT_MCP_SMOKE_STATUS_PATH = previous;
+      }
+    });
   });
 
   describe('schema-size budgets (all registered tools)', () => {

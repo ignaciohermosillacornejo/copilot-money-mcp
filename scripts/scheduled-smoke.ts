@@ -60,7 +60,9 @@ function notify(title: string, message: string): void {
  * tests can execute the full flow in-process, where coverage is visible). */
 export function runScheduledSmoke(): number {
   const repoDir = process.env.COPILOT_MCP_REPO ?? join(import.meta.dir, '..');
-  const statusPath = process.env.COPILOT_MCP_SMOKE_STATUS_PATH ?? defaultScheduledSmokeStatusPath();
+  // The override now lives in defaultScheduledSmokeStatusPath(), so reader and
+  // writer resolve the same path from the same variable (#638).
+  const statusPath = defaultScheduledSmokeStatusPath();
   const reportsDir = join(dirname(statusPath), 'smoke-reports');
   mkdirSync(dirname(statusPath), { recursive: true });
 

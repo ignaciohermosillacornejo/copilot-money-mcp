@@ -8,7 +8,11 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { readScheduledSmokeStatus } from '../../src/utils/scheduled-smoke-status.js';
+import {
+  SCHEDULED_SMOKE_REPORT_MAX_CHARS,
+  defaultScheduledSmokeStatusPath,
+  readScheduledSmokeStatus,
+} from '../../src/utils/scheduled-smoke-status.js';
 
 let dir: string | null = null;
 afterEach(() => {
@@ -84,5 +88,70 @@ describe('readScheduledSmokeStatus', () => {
       JSON.stringify({ last_run: '2026-06-11T10:00:00Z', result: 'unknown', summary: 'x' })
     );
     expect(readScheduledSmokeStatus(file)).toBeNull();
+  });
+});
+
+describe('report bounding (#638)', () => {
+  test('leaves a realistic report path untouched', () => {
+    const report = '/Users/x/.claude/copilot-money/smoke-reports/2026-06-11-smoke-failure.txt';
+    const file = statusFile(
+      JSON.stringify({ last_run: '2026-06-11T10:00:00Z', result: 'fail', summary: 's', report })
+    );
+    expect(readScheduledSmokeStatus(file)?.report).toBe(report);
+  });
+
+  test('truncates an oversized report rather than rejecting the status', () => {
+    const file = statusFile(
+      JSON.stringify({
+        last_run: '2026-06-11T10:00:00Z',
+        result: 'fail',
+        summary: 's',
+        report: 'x'.repeat(SCHEDULED_SMOKE_REPORT_MAX_CHARS * 4),
+      })
+    );
+    const status = readScheduledSmokeStatus(file);
+    // Rejecting would drop the whole status, degrading get_connection_status on
+    // exactly the machines whose state is most worth reporting.
+    expect(status).not.toBeNull();
+    expect(status?.report?.length).toBe(SCHEDULED_SMOKE_REPORT_MAX_CHARS);
+    expect(status?.report?.endsWith('…')).toBe(true);
+  });
+
+  test('keeps a report of exactly the ceiling intact', () => {
+    const report = 'x'.repeat(SCHEDULED_SMOKE_REPORT_MAX_CHARS);
+    const file = statusFile(
+      JSON.stringify({ last_run: '2026-06-11T10:00:00Z', result: 'fail', summary: 's', report })
+    );
+    expect(readScheduledSmokeStatus(file)?.report).toBe(report);
+  });
+});
+
+describe('status path resolution (#638)', () => {
+  const VAR = 'COPILOT_MCP_SMOKE_STATUS_PATH';
+
+  test('reader and writer resolve the same override', () => {
+    const previous = process.env[VAR];
+    process.env[VAR] = '/tmp/some-explicit-smoke-status.json';
+    try {
+      // The writer in scripts/scheduled-smoke.ts calls this same function, so
+      // agreement here is agreement on both sides — the asymmetry that left the
+      // context-budget ratchet reading real $HOME state.
+      expect(defaultScheduledSmokeStatusPath()).toBe('/tmp/some-explicit-smoke-status.json');
+    } finally {
+      if (previous === undefined) delete process.env[VAR];
+      else process.env[VAR] = previous;
+    }
+  });
+
+  test('falls back to the home-directory path when unset', () => {
+    const previous = process.env[VAR];
+    delete process.env[VAR];
+    try {
+      expect(defaultScheduledSmokeStatusPath()).toContain(
+        join('.claude', 'copilot-money', 'scheduled-smoke.json')
+      );
+    } finally {
+      if (previous !== undefined) process.env[VAR] = previous;
+    }
   });
 });
