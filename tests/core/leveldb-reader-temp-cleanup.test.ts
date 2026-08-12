@@ -18,7 +18,8 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
-import { createTestDatabase } from '../../src/core/leveldb-reader.js';
+import os from 'node:os';
+import { createTestDatabase, iterateDocuments } from '../../src/core/leveldb-reader.js';
 
 const FIXTURES_DIR = path.join(__dirname, '../fixtures/leveldb-temp-cleanup');
 const READER_MODULE = path.resolve(__dirname, '../../src/core/leveldb-reader.ts');
@@ -103,9 +104,7 @@ describe('temp database copies do not outlive the reading process (issue #631)',
       stdio: ['ignore', 'pipe', 'inherit'],
     });
 
-    const code = await new Promise<number>((resolve) =>
-      child.on('exit', (c) => resolve(c ?? 0))
-    );
+    const code = await new Promise<number>((resolve) => child.on('exit', (c) => resolve(c ?? 0)));
 
     // The read must have succeeded — otherwise "no temp copy" is vacuously true.
     expect(code).toBe(0);
@@ -216,5 +215,63 @@ describe('orphan sweep reclaims copies stranded by earlier versions (issue #631)
     await new Promise<void>((resolve) => child.on('exit', () => resolve()));
 
     expect(stillThere).toBe(true);
+  }, 60000);
+});
+
+describe('a failed copy does not strand its temp directory (issue #631)', () => {
+  beforeEach(() => {
+    fs.mkdirSync(FIXTURES_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(FIXTURES_DIR, { recursive: true, force: true });
+  });
+
+  /**
+   * `mkdtempSync` creates the directory before the copy loop runs, and the
+   * cache entry is only written after the loop succeeds. A mid-copy failure
+   * therefore used to leave a directory on disk that nothing in the process
+   * could name: both the exit sweep and `cleanupAllTempDatabases` iterate
+   * `tempDbCache`, so only the orphan sweep would reclaim it, an hour later.
+   * Same class as the leak this PR fixes — an uninterceptable copy — reached
+   * by a different path, so it gets its own assertion.
+   *
+   * This one is observable in-process: `os.tmpdir()` re-reads TMPDIR on every
+   * call, so pointing it at an empty directory makes "nothing was left behind"
+   * exact rather than a needle-in-the-haystack search of the real temp dir.
+   */
+  test('a mid-copy failure removes the directory it already created', async () => {
+    const dbPath = path.join(FIXTURES_DIR, 'copy-fail-db');
+    await createTestDatabase(dbPath, [{ collection: 'test', id: 'doc1', fields: { x: 1 } }]);
+
+    const tmpdir = path.join(FIXTURES_DIR, 'tmp-copy-fail');
+    fs.mkdirSync(tmpdir, { recursive: true });
+
+    const originalTmpdir = process.env.TMPDIR;
+    const originalCopy = fs.copyFileSync;
+    process.env.TMPDIR = tmpdir;
+    expect(os.tmpdir()).toBe(tmpdir);
+
+    // A real EACCES/EIO mid-copy — not the ENOENT the loop deliberately skips.
+    (fs as { copyFileSync: typeof fs.copyFileSync }).copyFileSync = ((src: fs.PathLike) => {
+      if (typeof src === 'string' && src.startsWith(dbPath + path.sep)) {
+        const err: NodeJS.ErrnoException = new Error('permission denied');
+        err.code = 'EACCES';
+        throw err;
+      }
+      throw new Error(`unexpected copy of ${String(src)}`);
+    }) as typeof fs.copyFileSync;
+
+    try {
+      const gen = iterateDocuments(dbPath);
+      // The failure must still propagate — silently returning a half-copied
+      // database would be a far worse bug than the stranded directory.
+      await expect(gen.next()).rejects.toThrow('permission denied');
+      expect(tempCopies(tmpdir)).toEqual([]);
+    } finally {
+      (fs as { copyFileSync: typeof fs.copyFileSync }).copyFileSync = originalCopy;
+      if (originalTmpdir === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = originalTmpdir;
+    }
   }, 60000);
 });
