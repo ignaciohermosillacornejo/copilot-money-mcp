@@ -5,7 +5,7 @@ release plumbing, packaging, and latent defects fixed before anyone hit them.
 
 They are here for two reasons: a class with only minor instances still shows up in the
 [class list](README.md#bug-classes), and a run of minor bugs in one area is often the
-early signal for a major one. `silent-failure-masking` appears **seven** times below and
+early signal for a major one. `silent-failure-masking` appears **eight** times below and
 has no full entry — a class that has never once produced a bug worth a post-mortem, yet
 keeps costing us release and audit incidents, is exactly the pattern this ledger exists to
 make visible.
@@ -54,3 +54,4 @@ Promote a row to a full entry if a later instance turns out to be user-visible.
 | #588 | Stale tool-count figures in `package.json` and two docs | `doc-reality-drift` | #588 |
 | #612 | Decoder unread-field drift: the server added a `_migration_backfill` marker | `external-api-drift` | #612 |
 | #619 | The privacy-endpoint scanner's comment stripper could be blinded by delimiters inside string literals — a false negative in a brand-new detector | `vacuous-assertion` | #619 |
+| #645 | The db-unavailable dispatch refusal omitted `isError`, so MCP clients saw a successful call carrying an error message — the one green guard among four | `silent-failure-masking` | #646 |

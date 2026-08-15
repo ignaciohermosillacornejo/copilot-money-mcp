@@ -807,16 +807,16 @@ describe('handleCallTool — error handling', () => {
     expect(firstText(result)).toContain('--write');
   });
 
-  test('database unavailable returns informative message', async () => {
+  test('database unavailable returns informative message with isError', async () => {
     const badDb = new CopilotDatabase('/nonexistent/path');
     const server = new CopilotMoneyServer(FAKE_DB_DIR);
     server._injectForTesting(badDb, new CopilotMoneyTools(badDb));
 
     const result = await server.handleCallTool('get_cache_info');
     expect(firstText(result)).toContain('Database not available');
-    // Server intentionally omits isError for unavailable DB (server.ts:134-145)
-    // so the LLM receives the message as guidance rather than a hard error.
-    expect(result.isError).toBeUndefined();
+    // The guidance text reaches the model either way; isError additionally
+    // tells the MCP client the call failed (#645).
+    expect(result.isError).toBe(true);
   });
 
   test('malformed args to write tool returns isError', async () => {
