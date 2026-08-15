@@ -206,20 +206,6 @@ export class CopilotMoneyServer {
       };
     }
 
-    // Check if database is available
-    if (!this.db.isAvailable()) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text:
-              'Database not available. Please ensure Copilot Money is installed ' +
-              'and has created local data, or provide a custom database path.',
-          },
-        ],
-      };
-    }
-
     if (!toolDef) {
       return {
         content: [
@@ -229,6 +215,27 @@ export class CopilotMoneyServer {
           },
         ],
         isError: true,
+      };
+    }
+
+    // The local-cache gate is scoped to tools whose dispatch actually reads
+    // the LevelDB cache (#640): live tools run entirely on GraphQL, and
+    // live-mode writes resolve live-first — they touch the cache only via
+    // null-guarded patchCached* write-through, which no-ops when the cache
+    // never loaded. Cache-mode reads and degraded-mode writes (write tools
+    // with no live layer — test-only, since --write implies --live-reads)
+    // still need the cache present.
+    const needsLocalCache = !toolDef.requiresLiveReads && (toolDef.readOnly || !this.live);
+    if (needsLocalCache && !this.db.isAvailable()) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text:
+              'Database not available. Please ensure Copilot Money is installed ' +
+              'and has created local data, or provide a custom database path.',
+          },
+        ],
       };
     }
 
