@@ -241,6 +241,7 @@ export class CopilotMoneyServer {
               'and has created local data, or provide a custom database path.',
           },
         ],
+        isError: true,
       };
     }
 

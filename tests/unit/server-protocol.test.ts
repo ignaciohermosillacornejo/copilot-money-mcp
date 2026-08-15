@@ -206,6 +206,27 @@ describe('CopilotMoneyServer.handleCallTool - database unavailable', () => {
       expect(response.content[0].text).toContain('Database not available');
     }
   });
+
+  // #645 class detector: a dispatch guard that refuses a call must say so via
+  // isError — a green result carrying an error message is silent-failure
+  // masking. One case per guard in handleCallTool; a new guard added without
+  // isError shows up here as a missing case, and removing isError from any
+  // existing guard goes red.
+  test('every dispatch-guard refusal sets isError: true', async () => {
+    const server = setupServerWithUnavailableDb();
+
+    const guardCases: Array<{ guard: string; tool: string }> = [
+      { guard: 'write tools without --write', tool: 'update_transaction' },
+      { guard: 'live tools without --live-reads', tool: 'get_transactions_live' },
+      { guard: 'unknown tool', tool: 'no_such_tool' },
+      { guard: 'database unavailable', tool: 'get_transactions' },
+    ];
+
+    for (const { guard, tool } of guardCases) {
+      const response = await server.handleCallTool(tool, {});
+      expect({ guard, isError: response.isError }).toEqual({ guard, isError: true });
+    }
+  });
 });
 
 describe('CopilotMoneyServer.handleCallTool - basic tools', () => {
