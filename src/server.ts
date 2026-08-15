@@ -224,7 +224,12 @@ export class CopilotMoneyServer {
     // null-guarded patchCached* write-through, which no-ops when the cache
     // never loaded. Cache-mode reads and degraded-mode writes (write tools
     // with no live layer — test-only, since --write implies --live-reads)
-    // still need the cache present.
+    // still need the cache present. `this.live` rather than
+    // `this.liveReadsEnabled` on purpose: the skip is justified by the live
+    // resolution layer existing (the object handlers and the write path
+    // actually use), not by the flag that requests it — the constructor
+    // makes them equivalent today, but if that ever drifts, the object is
+    // the one that degrades safely.
     const needsLocalCache = !toolDef.requiresLiveReads && (toolDef.readOnly || !this.live);
     if (needsLocalCache && !this.db.isAvailable()) {
       return {
