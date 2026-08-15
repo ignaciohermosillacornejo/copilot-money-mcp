@@ -81,6 +81,8 @@ describe('db gate scoping without local cache (#640)', () => {
     const server = liveServer();
     for (const def of WRITE_TOOL_DEFS) {
       const result = await server.handleCallTool(def.name, {});
+      // As above: handlers erroring on empty args or the stub client's
+      // response shape is fine — only the db gate firing is a failure.
       expect(firstText(result)).not.toContain(DB_GATE_MESSAGE);
     }
   });
