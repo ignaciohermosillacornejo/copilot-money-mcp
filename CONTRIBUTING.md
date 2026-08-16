@@ -210,6 +210,46 @@ Response Ritual field below. The matching logic lives in
 `scripts/check-pr-sections.sh` and is covered by
 `tests/scripts/check-pr-sections.test.ts`.
 
+## Reviewing a Contributor Branch (maintainers)
+
+**Checking out a fork branch and running it is arbitrary code execution as you.**
+`bun install` runs dependency lifecycle scripts, `bun test` runs the branch's own
+code, and a build config executes during any build. This machine holds the live
+Copilot Money cache, a Firebase session for a bank-linked account, a 1Password
+service account, a `gh` token and npm publish rights — which is a better prize
+than the package itself.
+
+Merging is not the risky step. In better-auth PR #6003 the payload was reverted
+before merge and the PR was closed unmerged; the attack still worked, because it
+only had to survive on the branch long enough to be built once. CI is not the
+exposure either — fork PRs there get no secrets and a read-only token. The
+exposure is the maintainer's laptop.
+
+So, for any branch you did not write:
+
+1. **Read before you run.** The diff is cheap; execution is not. Reading it
+   inside a container is not required — `gh pr diff` never executes anything.
+2. **Review the file list first.** Nearly every case in this campaign lands the
+   payload in a build or config file — `*.config.*`, `package.json`, a workflow,
+   a git hook — because those execute during install or build without anyone
+   importing them. A PR about an OAuth provider that touches a postcss config is
+   the whole tell, and it is visible before you read a line of code.
+3. **Read the commits, not just the combined diff.** The "Files changed" tab
+   shows the net result. Content added by one commit and removed by another
+   never appears there, but it was on the branch and it ran. `git log -p
+   origin/main..<branch>` shows everything.
+4. **Run it somewhere disposable** — a container, a VM, or a separate macOS user
+   with none of the credentials above. If you must install locally:
+
+   ```bash
+   bun install --frozen-lockfile --ignore-scripts
+   ```
+
+`bun run check` includes `check:concealment`, which fails on the shapes this
+class of attack needs — off-screen payloads, invisible characters, dynamic
+execution, install-time scripts. It runs on every PR including forks. Treat it
+as a floor, not a clearance: it checks shape, not intent.
+
 ## Bug Response Ritual
 
 Every bug-fix PR ratchets the system: fix the **class**, not just the instance.
