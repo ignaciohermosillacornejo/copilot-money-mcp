@@ -48,6 +48,18 @@ jobs:
       - name: Concealed-content check
         run: bun run check:concealment
 
+      # Fork PRs only — a same-repo branch already required push access, so
+      # there is no identity to forge. Reads public commit metadata with the
+      # read-only fork token.
+      - name: Commit authorship check
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          gh api "repos/${{ github.repository }}/pulls/$PR/commits?per_page=100" \
+            --paginate --jq '.[]' | jq -s '.' | bun run scripts/check-commit-authorship.ts
+
       - name: License check (production deps)
         # Stages package.json only (NOT package-lock.json) and runs
         # npm install --omit=dev to mirror scripts/pack-mcpb.ts exactly, so

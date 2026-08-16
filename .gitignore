@@ -78,6 +78,7 @@ scripts/*
 !scripts/check-tool-counts.ts
 !scripts/check-privacy-endpoints.ts
 !scripts/check-concealment.ts
+!scripts/check-commit-authorship.ts
 !scripts/check-skills.py
 !scripts/dump-tool-names.ts
 !scripts/scheduled-smoke.ts

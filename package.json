@@ -67,6 +67,7 @@
     "check:tool-counts": "bun run scripts/check-tool-counts.ts",
     "check:privacy-endpoints": "bun run scripts/check-privacy-endpoints.ts",
     "check:concealment": "bun run scripts/check-concealment.ts",
+    "check:authorship": "bun run scripts/check-commit-authorship.ts",
     "check:skills": "python3 scripts/check-skills.py",
     "fix": "bun run lint:fix && bun run format",
     "_comment_smoke": "smoke:cache is deliberately NOT in this composite yet — it needs a real local cache, and the scheduled drift check that would host it has its own reporting gap to sort first (see PR #628). Wire it in when that lands.",
