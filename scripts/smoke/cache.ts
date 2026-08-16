@@ -55,7 +55,7 @@ function record(name: string, status: Status, detail: string): void {
 }
 
 /**
- * Collapse `items/{id}/accounts` to `items/*​/accounts` so paths group.
+ * Collapse `items/{id}/accounts` to a wildcarded `items/<id>/accounts` so paths group.
  *
  * Firestore paths alternate collection/document, so odd-indexed segments are
  * document ids. Wildcarding them is also what keeps this PII-safe: real

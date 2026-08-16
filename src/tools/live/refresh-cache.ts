@@ -265,7 +265,11 @@ export function createRefreshCacheToolSchema(): ToolSchema {
           type: 'string',
           enum: VALID_SCOPES,
           description:
-            'Which slice of the live cache to flush. Default: all. Note: "budgets" is an alias for "categories" — budget data is a projection of the categories cache. "user" refreshes the cached user record AND cascades to categories (the rollover flag is read inside the categories fetch closure, so flushing user alone wouldn\'t surface new rollover data until categories also expires); use after toggling rollover or budgeting in the web app.',
+            'Which slice of the live cache to flush. Default: all. Note: "budgets" is an alias for ' +
+            '"categories" — budget data is a projection of the categories cache. "user" refreshes the ' +
+            'cached user record AND cascades to categories (the rollover flag is read inside the ' +
+            "categories fetch closure, so flushing user alone wouldn't surface new rollover data " +
+            'until categories also expires); use after toggling rollover or budgeting in the web app.',
           default: 'all',
         },
         months: {
