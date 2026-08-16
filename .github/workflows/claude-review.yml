@@ -15,12 +15,12 @@ jobs:
       issues: write
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
       - name: Load secrets from 1Password
-        uses: 1password/load-secrets-action@v4
+        uses: 1password/load-secrets-action@eb2efd0703da22a93c467f2d1ffbb6826c11e19c # v4
         with:
           export-env: true
         env:
@@ -28,7 +28,7 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: op://Dev/CLAUDE_CODE_OAUTH_TOKEN/credential
 
       - name: AI Code Review
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@9d7150bc8a3dae8149739a88019d192b579ad90c # v1
         with:
           claude_code_oauth_token: ${{ env.CLAUDE_CODE_OAUTH_TOKEN }}
           # Pass GitHub token explicitly to bypass OIDC token exchange,
@@ -64,7 +64,7 @@ jobs:
       # Fork PRs are excluded by the job-level `if` condition above.
       - name: Auto-approve owner PRs
         if: github.event.pull_request.user.login == github.repository_owner
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
             await github.rest.pulls.createReview({

@@ -34,6 +34,11 @@ jobs:
       PR_NUMBER: ${{ github.event.inputs.pr_number || github.event.pull_request.number }}
 
     steps:
+      # DO NOT add `ref:` here. Under pull_request_target this checks out the
+      # BASE branch, which is what makes the trigger safe: no unmerged fork code
+      # is ever on disk while repo secrets are in scope. Checking out
+      # `github.event.pull_request.head.sha` instead would turn this workflow
+      # into the critical variant of the pull_request_target misconfiguration.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
         with:
           fetch-depth: 0
@@ -142,10 +147,15 @@ jobs:
 
             Do NOT create issues. Do NOT comment on the PR. Only write the JSON file.
 
+          # This step reads contributor-controlled text (the PR diff and review
+          # comments) while holding issues:write and pull-requests:write, so it
+          # is a prompt-injection target. `Bash(gh api*)` alone would allow
+          # `gh api -X POST`, which reaches every endpoint the deny list below
+          # is trying to block — so the write forms of gh api are denied too.
           claude_args: |
             --model claude-sonnet-4-6
             --allowedTools "Bash(gh api*),Bash(gh pr view*),Bash(gh pr diff*),Bash(git log*),Bash(git show*),Read,Grep,Glob,Write"
-            --disallowedTools "Bash(gh pr review*),Bash(gh pr merge*),Bash(gh pr close*),Bash(gh issue*),Bash(gh pr comment*)"
+            --disallowedTools "Bash(gh pr review*),Bash(gh pr merge*),Bash(gh pr close*),Bash(gh issue*),Bash(gh pr comment*),Bash(gh api -X*),Bash(gh api --method*),Bash(gh api -f*),Bash(gh api --field*),Bash(gh api --input*)"
 
       - name: Upload audit artifact
         if: always() && steps.check.outputs.skip != 'true'
