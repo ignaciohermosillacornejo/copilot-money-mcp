@@ -42,6 +42,12 @@ jobs:
       - name: Privacy endpoints drift check
         run: bun run check:privacy-endpoints
 
+      # Runs on every PR, including forks, because the payload class this
+      # catches does not need to be merged to do damage — it only needs to be
+      # built once. See scripts/check-concealment.ts.
+      - name: Concealed-content check
+        run: bun run check:concealment
+
       - name: License check (production deps)
         # Stages package.json only (NOT package-lock.json) and runs
         # npm install --omit=dev to mirror scripts/pack-mcpb.ts exactly, so
