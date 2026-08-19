@@ -1245,6 +1245,10 @@ export class CopilotMoneyTools {
       accounts = accounts.filter((acc) => acc.user_deleted !== true && acc.user_hidden !== true);
     }
 
+    accounts = accounts.map((account) =>
+      account.nickname ? { ...account, name: account.nickname } : account
+    );
+
     // Calculate totals by asset/liability classification
     let totalAssets = 0;
     let totalLiabilities = 0;

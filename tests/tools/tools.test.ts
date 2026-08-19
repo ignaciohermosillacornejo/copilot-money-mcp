@@ -822,6 +822,22 @@ describe('CopilotMoneyTools', () => {
       expect(result.accounts).toHaveLength(2);
     });
 
+    test('uses the Copilot nickname as the account display name', async () => {
+      db._injectDataForTesting({
+        accounts: [
+          {
+            ...mockAccounts[0],
+            name: 'Provider Checking',
+            nickname: 'Household Checking',
+          },
+        ],
+      });
+
+      const result = await tools.getAccounts();
+
+      expect(result.accounts[0].name).toBe('Household Checking');
+    });
+
     test('filters by account type', async () => {
       const result = await tools.getAccounts({ account_type: 'checking' });
       expect(result.count).toBe(1);
