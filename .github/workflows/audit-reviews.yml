@@ -75,6 +75,24 @@ jobs:
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
           CLAUDE_CODE_OAUTH_TOKEN: op://Dev/CLAUDE_CODE_OAUTH_TOKEN/credential
 
+      # Pre-fetch every API payload the audit needs, so the agent never needs
+      # `gh api` at all. This is the whole reason the allow list below can be
+      # read-only: --disallowedTools matches command PREFIXES, so denying
+      # `gh api -X*` does nothing against `gh api repos/... -X POST`, which is
+      # ordinary gh usage and still matches the `gh api*` allow pattern. There
+      # is no prefix pattern that reliably separates reads from writes, so the
+      # capability is removed instead of filtered.
+      - name: Fetch PR review data
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/audit"
+          gh api "repos/${{ github.repository }}/issues/$PR_NUMBER/comments" \
+            --paginate --jq '.[]' | jq -s '.' > "$RUNNER_TEMP/audit/issue-comments.json"
+          gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/comments" \
+            --paginate --jq '.[]' | jq -s '.' > "$RUNNER_TEMP/audit/pr-comments.json"
+          gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" \
+            --paginate --jq '.[]' | jq -s '.' > "$RUNNER_TEMP/audit/pr-reviews.json"
+
       - name: Audit PR reviews with Claude
         if: steps.check.outputs.skip != 'true'
         uses: anthropics/claude-code-action@e30d45253b1abcc29a121ab35b8bf156061582bd # v1
@@ -88,10 +106,10 @@ jobs:
 
             ## Steps
 
-            1. Fetch every Claude review body for this PR:
-               - `gh api repos/${{ github.repository }}/issues/${{ env.PR_NUMBER }}/comments --paginate`
-               - `gh api repos/${{ github.repository }}/pulls/${{ env.PR_NUMBER }}/comments --paginate`
-               - `gh api repos/${{ github.repository }}/pulls/${{ env.PR_NUMBER }}/reviews --paginate`
+            1. Read every Claude review body for this PR. They are already fetched:
+               - `${{ runner.temp }}/audit/issue-comments.json`
+               - `${{ runner.temp }}/audit/pr-comments.json`
+               - `${{ runner.temp }}/audit/pr-reviews.json`
                Keep only entries by `github-actions[bot]` whose body contains both "PR Review"
                or "Claude finished" AND "actions/runs/". Ignore everything else.
 
@@ -149,13 +167,14 @@ jobs:
 
           # This step reads contributor-controlled text (the PR diff and review
           # comments) while holding issues:write and pull-requests:write, so it
-          # is a prompt-injection target. `Bash(gh api*)` alone would allow
-          # `gh api -X POST`, which reaches every endpoint the deny list below
-          # is trying to block — so the write forms of gh api are denied too.
+          # is a prompt-injection target. Every remaining allowed command is
+          # read-only by construction: `gh pr view` and `gh pr diff` cannot
+          # write, and `gh api` — which can — is denied outright now that the
+          # data it was fetching arrives via the pre-fetch step above.
           claude_args: |
             --model claude-sonnet-4-6
-            --allowedTools "Bash(gh api*),Bash(gh pr view*),Bash(gh pr diff*),Bash(git log*),Bash(git show*),Read,Grep,Glob,Write"
-            --disallowedTools "Bash(gh pr review*),Bash(gh pr merge*),Bash(gh pr close*),Bash(gh issue*),Bash(gh pr comment*),Bash(gh api -X*),Bash(gh api --method*),Bash(gh api -f*),Bash(gh api --field*),Bash(gh api --input*)"
+            --allowedTools "Bash(gh pr view*),Bash(gh pr diff*),Bash(git log*),Bash(git show*),Read,Grep,Glob,Write"
+            --disallowedTools "Bash(gh api*),Bash(gh pr review*),Bash(gh pr merge*),Bash(gh pr close*),Bash(gh issue*),Bash(gh pr comment*)"
 
       - name: Upload audit artifact
         if: always() && steps.check.outputs.skip != 'true'
