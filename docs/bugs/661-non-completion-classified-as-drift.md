@@ -130,7 +130,11 @@ already applied to auth, extended: absence of completion is not presence of drif
   `incomplete`, not `fail`, because the class-level fix already removed the drift claim.
 - `summarizeSmokeOutput` describes how an incomplete run ended (`killed by SIGTERM after
   the 10m timeout`) instead of quoting the last log line, which for a truncated run is
-  debris.
+  debris. Running the fixed runner for real then showed the same defect on the *pass*
+  path — a clean run summarized itself as `[smoke] done {`, because the composite smoke
+  ends with the refresh scripts and the heuristic took the last prefixed line rather
+  than the last verdict. Fixed in the same PR; found only by reading real output, which
+  is this corpus's most reliable mechanism and was the point of the exercise.
 - `runScheduledSmoke` retries once on `incomplete`. The observed kill fires just after
   the machine wakes, so the retry runs on an awake laptop and passes in ~20s — turning
   the common false alarm into a silent pass rather than into better-worded noise. It is

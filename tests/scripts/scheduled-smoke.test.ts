@@ -213,6 +213,44 @@ describe('summarizeSmokeOutput', () => {
     );
   });
 
+  /**
+   * Captured from a real full `bun run smoke`: the composite ends with the
+   * refresh smokes, whose last line is an object-open brace. Picking "the last
+   * [smoke] line" therefore summarized a clean run as `[smoke] done {`. The
+   * summary must track the last *verdict*, not the last line that happens to
+   * carry the prefix.
+   */
+  test('a clean full run summarizes to its last verdict, not its last log line', () => {
+    const out = [
+      '[smoke] PASS — all 5 enums and 15 input types match the server.',
+      '[smoke] accounts {',
+      '[smoke] PASS — 19/19 read operations verified against the server.',
+      '[smoke] cold {',
+      '[smoke] recold {',
+      '[smoke] done {',
+    ].join('\n');
+    expect(summarizeSmokeOutput('pass', completed(0, out))).toBe(
+      '[smoke] PASS — 19/19 read operations verified against the server.'
+    );
+  });
+
+  test('a drift verdict wins over later log lines too', () => {
+    const out = [
+      '[smoke] PASS — all 5 enums and 15 input types match the server.',
+      '[smoke] FAIL — read-surface drift detected:',
+      '[smoke] trailing debris {',
+    ].join('\n');
+    expect(summarizeSmokeOutput('fail', completed(1, out))).toBe(
+      '[smoke] FAIL — read-surface drift detected:'
+    );
+  });
+
+  test('falls back to the last [smoke] line when no verdict was printed', () => {
+    expect(summarizeSmokeOutput('pass', completed(0, '[smoke] something unusual'))).toBe(
+      '[smoke] something unusual'
+    );
+  });
+
   test('truncates summaries to 300 chars', () => {
     const out = `[smoke] ${'x'.repeat(500)}`;
     expect(summarizeSmokeOutput('fail', completed(1, out)).length).toBe(300);
