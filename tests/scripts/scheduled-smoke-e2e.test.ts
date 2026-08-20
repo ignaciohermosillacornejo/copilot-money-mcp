@@ -67,15 +67,59 @@ describe('scheduled-smoke runner (full flow, stub smoke)', () => {
     expect(typeof status.last_run).toBe('string');
   });
 
-  test('failing smoke → result fail, dated report with full output, exit 1', () => {
+  // The stub must print a marker the real smoke actually prints. An invented
+  // one ("[smoke] FAIL — synthetic drift detected") is how the original suite
+  // convinced itself the fail path worked while the wordings the smoke really
+  // emits went unmatched — the same mistake as the bug this file guards.
+  test('drift verdict → result fail, dated report with full output, exit 1', () => {
     const { exitCode, status } = runWithStubSmoke(
-      "echo '[smoke] FAIL — synthetic drift detected' && exit 1"
+      "echo '[smoke] FAIL — conformance drift detected:' && exit 1"
     );
     expect(exitCode).toBe(1);
     expect(status.result).toBe('fail');
     expect(typeof status.report).toBe('string');
     expect(existsSync(status.report as string)).toBe(true);
-    expect(readFileSync(status.report as string, 'utf-8')).toContain('synthetic drift detected');
+    expect(readFileSync(status.report as string, 'utf-8')).toContain('conformance drift detected');
+  });
+
+  test('read-surface drift verdict → result fail, exit 1', () => {
+    const { exitCode, status } = runWithStubSmoke(
+      "echo '[smoke] FAIL — read-surface drift detected:' && exit 1"
+    );
+    expect(exitCode).toBe(1);
+    expect(status.result).toBe('fail');
+  });
+
+  test('a nonzero exit with no verdict → result incomplete, not fail', () => {
+    const { exitCode, status } = runWithStubSmoke("echo 'error: unmodelled explosion' && exit 1");
+    expect(exitCode).toBe(1);
+    expect(status.result).toBe('incomplete');
+    expect(status.summary).toContain('drift NOT checked');
+    // The report is still written — an unexplained non-completion is worth
+    // keeping; what changed is that it no longer claims the API drifted.
+    expect(existsSync(status.report as string)).toBe(true);
+  });
+
+  test('a run killed by a signal → result incomplete, and the runner retried', () => {
+    // Each attempt appends a line, so the file length counts real spawns.
+    dir = mkdtempSync(join(tmpdir(), 'sched-smoke-e2e-'));
+    const attempts = join(dir, 'attempts.log');
+    const statusPath = join(dir, 'status.json');
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({ scripts: { smoke: `echo x >> ${attempts} && kill -TERM $$` } })
+    );
+    process.env.COPILOT_MCP_REPO = dir;
+    process.env.COPILOT_MCP_SMOKE_STATUS_PATH = statusPath;
+    process.env.COPILOT_MCP_SMOKE_QUIET = '1';
+
+    const exitCode = runScheduledSmoke();
+    const status = JSON.parse(readFileSync(statusPath, 'utf-8')) as Record<string, unknown>;
+
+    expect(readFileSync(attempts, 'utf-8').trim().split('\n')).toHaveLength(2);
+    expect(exitCode).toBe(1);
+    expect(status.result).toBe('incomplete');
+    expect(status.summary).toContain('drift NOT checked');
   });
 
   test('auth failure → result auth-missing, no report, exit 0', () => {

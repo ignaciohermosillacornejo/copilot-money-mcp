@@ -96,16 +96,17 @@ a class yet.
 | `unsettled-promise` | An async operation has a completion path where neither resolve nor reject fires, hanging callers forever. | none |
 | `deferred-cleanup-never-runs` | Releasing a resource is deferred to a timer or callback that only fires if the process outlives it — in a process that routinely exits first. The resource is acquired eagerly and released never, while every same-process test still observes correct bookkeeping. | none — instance-only; the class is a deployment property (does this process outlive its own timers?) that no static check here can evaluate |
 | `unbounded-trusted-payload` | A budgeted or validated surface embeds a value whose size or shape is guaranteed only by convention, because the only writer it has met is well-behaved. The guarantee holds until something else writes the file. | partial — `tests/context-budget.test.ts` measures the populated branch against a maximal legitimate input, for this surface only; no sweep across budgeted responses that embed external files |
+| `alarm-by-fallthrough` | A classifier recognizes a few signatures and routes *everything else* into its most alarming state, so any unmodelled failure is reported as the specific serious condition the detector exists to find. The inverse of `silent-failure-masking`: unknown becomes red rather than green, and the alarm stops correlating with the condition it names. | `tests/scripts/scheduled-smoke.test.ts` (mutation-verified): `fail` is reachable only when the output carries a drift-verdict marker, asserted over a corpus of every real non-drift failure mode |
 | `overbroad-precondition-gate` | A precondition for one resource is checked at a shared chokepoint (dispatch, startup) for all requests, including those whose handling never uses the resource — so any configuration where the resource is legitimately absent is fully locked out. | registry-walk sweep in `tests/integration/live-reads.test.ts` (mutation-verified): every live tool and live-mode write must dispatch past the local-cache gate with the cache absent |
 
 ## How we find bugs
 
 Recorded per entry, using a fixed vocabulary so the corpus stays countable. Here is what
-this corpus actually says, across all 46 entries:
+this corpus actually says, across all 47 entries:
 
 | Found by | Count | |
 |---|---|---|
-| `dogfooding` — used the tool, noticed the answer disagreed with the Copilot app | 14 | ████████████ |
+| `dogfooding` — used the tool, noticed the answer disagreed with the Copilot app | 15 | █████████████ |
 | `live-probe` — a probe or smoke against the real backend | 7 | ██████ |
 | `audit-sweep` — a deliberate cross-cutting audit | 7 | ██████ |
 | `incidental` — found while working on something else | 7 | ██████ |

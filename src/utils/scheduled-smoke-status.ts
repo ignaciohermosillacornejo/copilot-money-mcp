@@ -16,7 +16,14 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { z } from 'zod';
 
-export const SCHEDULED_SMOKE_RESULTS = ['pass', 'fail', 'auth-missing'] as const;
+/**
+ * `fail` is reserved for a drift verdict the smoke actually printed;
+ * `incomplete` covers every run that never reached a verdict (killed, timed
+ * out, crashed unmodelled). Keeping them distinct is what stops a frozen
+ * laptop from reading as an API change — see
+ * `docs/bugs/661-non-completion-classified-as-drift.md`.
+ */
+export const SCHEDULED_SMOKE_RESULTS = ['pass', 'fail', 'auth-missing', 'incomplete'] as const;
 export type ScheduledSmokeResult = (typeof SCHEDULED_SMOKE_RESULTS)[number];
 
 /**
