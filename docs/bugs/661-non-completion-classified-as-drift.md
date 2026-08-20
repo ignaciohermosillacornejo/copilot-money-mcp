@@ -6,7 +6,7 @@ status: fixed
 detected: dogfooding # the macOS notification fired; reading the report it pointed at showed every gate inside it had passed
 fixed_in: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/661
 issue: none — found and fixed directly
-date: 2026-08-19
+date: 2026-08-20
 ---
 
 ## Symptom
