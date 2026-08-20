@@ -115,8 +115,13 @@ export function summarizeSmokeOutput(result: ScheduledSmokeResult, run: SmokeRun
       300
     );
   }
+  // Track the last *verdict*, not the last prefixed line. The composite smoke
+  // ends with the refresh scripts, whose final line is an object-open brace —
+  // which is how a clean run once summarized itself as `[smoke] done {`.
   const lines = run.output.trim().split('\n');
-  const marker = [...lines].reverse().find((l) => l.startsWith('[smoke]'));
+  const reversed = [...lines].reverse();
+  const verdict = reversed.find((l) => /^\[smoke\] (PASS|FAIL) —/.test(l));
+  const marker = verdict ?? reversed.find((l) => l.startsWith('[smoke]'));
   return (marker ?? lines[0] ?? '').slice(0, 300);
 }
 
