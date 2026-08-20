@@ -102,8 +102,9 @@ export const getConnectionStatusTool = defineTool({
       'Use this to check when accounts were last synced or to identify connections needing attention. ' +
       'Also reports decode_health: per-collection counts of cached documents dropped on schema ' +
       'validation failure (a "degraded" status means some documents are missing from results). ' +
-      'Also reports scheduled_smoke: the last scheduled API-drift check (pass / fail / ' +
-      'auth-missing with timestamp), or null if the weekly job is not installed.',
+      'Also reports scheduled_smoke: the last scheduled API-drift check with timestamp, or null ' +
+      'if the weekly job is not installed. Only "fail" means the API drifted; "auth-missing" ' +
+      'and "incomplete" mean drift is unknown.',
     inputSchema: {
       type: 'object',
       properties: {},

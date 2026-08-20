@@ -73,6 +73,20 @@ describe('readScheduledSmokeStatus', () => {
     expect(readScheduledSmokeStatus(file)?.result).toBe('auth-missing');
   });
 
+  test('incomplete is a distinct result, not a fail', () => {
+    // A run that was killed before reaching a verdict must be readable as its
+    // own state; collapsing it into `fail` is what sent a dev session hunting
+    // for API drift that had never been observed.
+    const file = statusFile(
+      JSON.stringify({
+        last_run: '2026-08-17T17:41:30Z',
+        result: 'incomplete',
+        summary: 'drift check did not complete — killed by SIGTERM after the 10m timeout',
+      })
+    );
+    expect(readScheduledSmokeStatus(file)?.result).toBe('incomplete');
+  });
+
   test('returns null on malformed JSON instead of throwing', () => {
     const file = statusFile('not json {');
     expect(readScheduledSmokeStatus(file)).toBeNull();
