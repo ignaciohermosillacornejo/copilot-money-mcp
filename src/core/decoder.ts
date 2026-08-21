@@ -22,7 +22,7 @@ import {
 // Re-export for potential use by other modules
 export { toPlainObject } from './protobuf-parser.js';
 import { Transaction, TransactionSchema } from '../models/transaction.js';
-import { Account, AccountSchema, getAccountDisplayName } from '../models/account.js';
+import { Account, AccountSchema } from '../models/account.js';
 import { Recurring, RecurringSchema } from '../models/recurring.js';
 import { Budget, BudgetSchema } from '../models/budget.js';
 import { Goal, GoalSchema } from '../models/goal.js';
@@ -259,6 +259,32 @@ function deduplicateTransactions(transactions: Transaction[]): Transaction[] {
 }
 
 /**
+ * Deduplicate accounts by account_id.
+ *
+ * LevelDB may store the same Firestore document multiple times; this collapses
+ * true duplicates without dropping distinct accounts that happen to share a
+ * name and mask.
+ *
+ * Keyed on account_id rather than a name/mask tuple because two accounts at one
+ * institution routinely share a provider name and carry no mask — the old
+ * content key silently discarded the collisions. See
+ * `docs/bugs/662-account-dedup-drops-documents.md`.
+ */
+function deduplicateAccounts(accounts: Account[]): Account[] {
+  const seen = new Set<string>();
+  const unique: Account[] = [];
+
+  for (const acc of accounts) {
+    if (!seen.has(acc.account_id)) {
+      seen.add(acc.account_id);
+      unique.push(acc);
+    }
+  }
+
+  return unique;
+}
+
+/**
  * Reconcile pending and posted versions of the same transaction.
  * When a charge posts, two versions can coexist in LevelDB:
  * - A pending version (pending=true)
@@ -318,20 +344,7 @@ export async function decodeAccounts(dbPath: string): Promise<Account[]> {
     if (acc) accounts.push(acc);
   }
 
-  // Deduplicate by (name, mask)
-  const seen = new Set<string>();
-  const unique: Account[] = [];
-
-  for (const acc of accounts) {
-    const displayName = getAccountDisplayName(acc);
-    const key = `${displayName}|${acc.mask ?? ''}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      unique.push(acc);
-    }
-  }
-
-  return unique;
+  return deduplicateAccounts(accounts);
 }
 
 /**
@@ -2970,17 +2983,8 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
   const transactions = reconcilePendingTransactions(deduplicateTransactions(rawTransactions));
   transactions.sort((a, b) => (a.date > b.date ? -1 : a.date < b.date ? 1 : 0));
 
-  // Accounts: dedupe by (name, mask)
-  const accSeen = new Set<string>();
-  const accounts: Account[] = [];
-  for (const acc of rawAccounts) {
-    const displayName = getAccountDisplayName(acc);
-    const key = `${displayName}|${acc.mask ?? ''}`;
-    if (!accSeen.has(key)) {
-      accSeen.add(key);
-      accounts.push(acc);
-    }
-  }
+  // Accounts: dedupe by account_id (see deduplicateAccounts — #662)
+  const accounts = deduplicateAccounts(rawAccounts);
 
   // Recurring: dedupe by recurring_id
   const recSeen = new Set<string>();
