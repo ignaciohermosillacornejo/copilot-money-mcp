@@ -265,17 +265,10 @@ function deduplicateTransactions(transactions: Transaction[]): Transaction[] {
  * true duplicates without dropping distinct accounts that happen to share a
  * name and mask.
  *
- * This previously keyed on `${name ?? official_name}|${mask ?? ''}` — a content
- * heuristic, not an identity. Two accounts at the same institution can carry
- * identical provider names and no mask at all, and one of them was silently
- * discarded before any caller could see it (#662): a real cache decoded two
- * fewer accounts than the live GraphQL surface returned. `account_id` is unique
- * by construction — `processAccount` falls back to the Firestore documentId —
- * so it is the only safe key, and it is what every other collection here uses.
- *
- * Note this runs before anything consults `nickname`, so a user renaming two
- * identically-named accounts to tell them apart could not work around the old
- * key either.
+ * Keyed on account_id rather than a name/mask tuple because two accounts at one
+ * institution routinely share a provider name and carry no mask — the old
+ * content key silently discarded the collisions. See
+ * `docs/bugs/662-account-dedup-drops-documents.md`.
  */
 function deduplicateAccounts(accounts: Account[]): Account[] {
   const seen = new Set<string>();
