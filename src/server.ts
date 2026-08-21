@@ -36,6 +36,7 @@ import { LiveTopMoversTools } from './tools/live/top-movers.js';
 import { LiveAggregatedHoldingsTools } from './tools/live/aggregated-holdings.js';
 import { LiveInvestmentBalanceTools } from './tools/live/investment-balance.js';
 import { RefreshCacheTool } from './tools/live/refresh-cache.js';
+import { stripTypename } from './tools/strip-typename.js';
 
 // Read version from package.json
 import { createRequire } from 'module';
@@ -248,12 +249,14 @@ export class CopilotMoneyServer {
     try {
       const result = await toolDef.handler({ tools: this.tools, live: this.live }, typedArgs);
 
-      // Format response
+      // Format response. stripTypename drops GraphQL `__typename` keys here
+      // (#597 Tier 0) — the single serialization site covers every live tool
+      // and write-tool echo without touching per-tool mappers.
       return {
         content: [
           {
             type: 'text' as const,
-            text: JSON.stringify(result),
+            text: JSON.stringify(stripTypename(result)),
           },
         ],
       };
