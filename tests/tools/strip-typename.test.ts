@@ -23,9 +23,16 @@ describe('stripTypename', () => {
   });
 
   test('does not copy a hostile __proto__ key', () => {
+    // JSON.parse creates __proto__ as an OWN key; a naive `out[key] = value`
+    // copy would assign through the inherited setter and repoint `out`'s own
+    // prototype instead of copying data (same guard, and same regression
+    // shape, as projectRows — see field-selection.test.ts).
     const hostile = JSON.parse('{"__proto__": {"polluted": true}, "id": "a"}');
     const out = stripTypename(hostile) as Record<string, unknown>;
-    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    // Property access (not Object.keys) so an inherited `polluted` from a
+    // repointed prototype is caught via the lookup chain.
+    expect(out.polluted).toBeUndefined();
+    expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
     expect(out.id).toBe('a');
   });
 });

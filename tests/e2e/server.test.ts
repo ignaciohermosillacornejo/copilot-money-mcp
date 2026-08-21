@@ -2155,11 +2155,16 @@ describe('--live-reads categories wiring', () => {
     const db = createMockDb();
     server._injectForTesting(db, new CopilotMoneyTools(db));
 
-    // Inject a stub LiveCategoriesTools via private field access
+    // Inject a stub LiveCategoriesTools via private field access. __typename
+    // on the row itself (not just the icon) models the real wire shape:
+    // addTypenameToSelectionSets injects it into every non-root selection
+    // set, so a real Category row carries it too (#597 Tier 0 regression
+    // coverage — see the __typename assertions below).
     const stubResult = {
       count: 1,
       categories: [
         {
+          __typename: 'Category',
           id: 'cat-1',
           name: 'Food',
           templateId: 'Food',
@@ -2184,6 +2189,10 @@ describe('--live-reads categories wiring', () => {
     const data = JSON.parse(firstText(result)) as typeof stubResult;
     expect(data.count).toBe(1);
     expect(data._cache_hit).toBe(false);
+    // #597 Tier 0: __typename is stripped at the server.handleCallTool
+    // serialization boundary, at both the row level and a nested object.
+    expect(data.categories[0]).not.toHaveProperty('__typename');
+    expect(data.categories[0]?.icon).not.toHaveProperty('__typename');
   });
 });
 
@@ -2387,6 +2396,8 @@ describe('--live-reads recurring wiring', () => {
     expect(data.count).toBe(1);
     expect(data.recurring[0]?.name).toBe('Netflix');
     expect(data._cache_hit).toBe(false);
+    // #597 Tier 0: __typename is stripped from the nested icon object too.
+    expect(data.recurring[0]?.icon).not.toHaveProperty('__typename');
   });
 });
 
@@ -2516,6 +2527,8 @@ describe('--live-reads upcoming-recurrings wiring', () => {
     expect(data.count).toBe(1);
     expect(data.upcoming[0]?.name).toBe('Subscription A');
     expect(data._cache_hit).toBe(false);
+    // #597 Tier 0: __typename is stripped from the nested icon object too.
+    expect(data.upcoming[0]?.icon).not.toHaveProperty('__typename');
   });
 });
 
