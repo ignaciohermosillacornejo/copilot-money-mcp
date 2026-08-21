@@ -30,4 +30,11 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           echo "Enabling auto-merge for PR #$PR_NUMBER"
-          gh pr merge "$PR_NUMBER" --auto --rebase --delete-branch --repo "${{ github.repository }}"
+          # No --delete-branch. On a merge that GitHub refuses, gh falls back to
+          # closing the PR and deleting the branch, so a blocked merge silently
+          # becomes a closed, branch-deleted PR. Branch cleanup is already
+          # handled by the repository's delete_branch_on_merge setting, which
+          # only fires on an actual merge — so the flag bought nothing and cost
+          # the PR. This matters more now that enforce_admins is on and merges
+          # are refused more often.
+          gh pr merge "$PR_NUMBER" --auto --rebase --repo "${{ github.repository }}"
