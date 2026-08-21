@@ -33,6 +33,7 @@ import {
 } from '../../core/graphql/queries/investment-balance.js';
 import { fetchInvestmentLiveBalance } from '../../core/graphql/queries/investment-live-balance.js';
 import { ALL_TIME_FRAMES, type TimeFrame } from '../../core/graphql/queries/_shared.js';
+import { paginate, clampMaxRows } from '../../utils/pagination.js';
 import type { ToolSchema } from '../tools.js';
 
 const DEFAULT_TIME_FRAME: TimeFrame = 'YTD';
@@ -77,35 +78,33 @@ function toPoint(n: InvestmentBalanceNode): InvestmentBalancePoint {
 /**
  * Cap an ascending-by-date series to its newest `limit` points.
  *
- * `limit` of `undefined` falls back to {@link DEFAULT_HISTORY_LIMIT}; `0`
- * means unlimited (the full series, untruncated) — distinct from `undefined`
- * so a caller can explicitly opt out of the cap. A non-finite value (NaN,
- * Infinity — a host that skipped JSON-schema validation could hand us one)
- * also falls back to the default. Any other value is floored and clamped to
- * >= 1, matching `clampMaxRows`'s convention (src/utils/pagination.ts): a
- * negative or fractional `history_limit` degrades to "as few as possible"
- * rather than producing a nonsensical negative-length slice.
+ * Thin adapter over the shared `paginate()`/`clampMaxRows()` pair
+ * (src/utils/pagination.ts — "Uniform pagination + truncation shape for
+ * time-series live tools", already used by balance-history.ts,
+ * investment-prices.ts, networth.ts and holdings.ts for the identical
+ * tail-of-ascending-series concept). Reusing it here instead of a local
+ * clamp/slice avoids a second, independently-maintained truncation
+ * algorithm for one concept (the `path-divergence` bug class).
+ *
+ * Only `0` is handled locally: it means unlimited (the full series,
+ * untruncated) — a caller-facing convention from the #597 brief that
+ * `clampMaxRows` has no equivalent for (it always clamps to >= `MIN_MAX_ROWS`
+ * = 1, never "no limit"). Every other value — including `undefined`, which
+ * falls back to {@link DEFAULT_HISTORY_LIMIT} — delegates entirely to
+ * `clampMaxRows` (floor/clamp) and `paginate` (tail slice + total/truncated
+ * reporting), remapping `paginate`'s `total_rows`/`truncated` to the brief's
+ * external `history_total_count`/`history_truncated` names.
  */
 function limitHistory(
   history: readonly InvestmentBalancePoint[],
   limit: number | undefined
 ): { history: InvestmentBalancePoint[]; total_count: number; truncated: boolean } {
-  const total_count = history.length;
-  const requested = limit ?? DEFAULT_HISTORY_LIMIT;
-  if (requested === 0) {
-    return { history: [...history], total_count, truncated: false };
+  if (limit === 0) {
+    return { history: [...history], total_count: history.length, truncated: false };
   }
-  const effective = Number.isFinite(requested)
-    ? Math.max(1, Math.floor(requested))
-    : DEFAULT_HISTORY_LIMIT;
-  if (effective >= total_count) {
-    return { history: [...history], total_count, truncated: false };
-  }
-  return {
-    history: history.slice(total_count - effective),
-    total_count,
-    truncated: true,
-  };
+  const max_rows = clampMaxRows(limit, { defaultValue: DEFAULT_HISTORY_LIMIT });
+  const page = paginate(history, { max_rows });
+  return { history: page.rows, total_count: page.total_rows, truncated: page.truncated };
 }
 
 export class LiveInvestmentBalanceTools {
@@ -202,8 +201,9 @@ export function createLiveInvestmentBalanceToolSchema(): ToolSchema {
           type: 'integer',
           description:
             'How many of the most recent history points to return. Default 30; the full series ' +
-            'can run to hundreds of daily rows and is ~87% of the response. Pass 0 for the full ' +
-            'series. history_total_count and history_truncated always report what was dropped.',
+            'can run to hundreds of daily rows — measured at ~98% of the response on a 365-day ' +
+            'series. Pass 0 for the full series. history_total_count and history_truncated ' +
+            'always report what was dropped.',
           default: DEFAULT_HISTORY_LIMIT,
         },
       },
