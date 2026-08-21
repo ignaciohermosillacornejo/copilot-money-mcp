@@ -581,3 +581,108 @@ describe('validateOrWarn — non-finite repair', () => {
     expect(input.price).toBe(Infinity);
   });
 });
+
+/**
+ * Warn dedupe across documents whose paths differ only by position.
+ *
+ * Flood control keys on the failing path, and array indices / epoch-ms map
+ * keys vary per document — so before this, 18 dropped months at
+ * `history.<distinct epoch>.price` emitted 18 warns that all said the same
+ * thing, which is what #659's reporter saw. Numeric segments collapse in the
+ * KEY only; the logged path stays exact so the warn is still actionable.
+ *
+ * Non-numeric dynamic keys (a `YYYY-MM-DD` in `daily_data`) still key
+ * separately — pre-existing behaviour, not something this repair changed.
+ */
+describe('validateOrWarn — warn dedupe collapses positional paths', () => {
+  let warnSpy: ReturnType<typeof spyOn>;
+
+  const HoldingsSchema = z.object({
+    account_id: z.string(),
+    holdings: z.array(z.object({ institution_price: z.number().optional() })).optional(),
+  });
+
+  const HistorySchema = z.object({
+    history_id: z.string(),
+    history: z.record(z.string(), z.object({ price: z.number().optional() })).optional(),
+  });
+
+  beforeEach(() => {
+    __resetWarnedKeys();
+    warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  test('one non-finite warn for the same field at different array indices', () => {
+    validateOrWarn(
+      HoldingsSchema,
+      { account_id: 'acc_1', holdings: [{ institution_price: Infinity }, {}] },
+      { collection: 'accounts', docId: 'doc1' }
+    );
+    validateOrWarn(
+      HoldingsSchema,
+      { account_id: 'acc_2', holdings: [{}, { institution_price: Infinity }] },
+      { collection: 'accounts', docId: 'doc2' }
+    );
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    // The logged path keeps the real index — the key is what collapses.
+    expect(warnSpy.mock.calls[0]?.[0]).toContain('paths=holdings.0.institution_price');
+    expect(getDecodeStats().accounts?.repaired).toBe(2);
+  });
+
+  test('one non-finite warn for the same field under different epoch-ms keys', () => {
+    validateOrWarn(
+      HistorySchema,
+      { history_id: 'hh:2026-07', history: { '1785124800000': { price: Infinity } } },
+      { collection: 'holdings_history', docId: '2026-07' }
+    );
+    validateOrWarn(
+      HistorySchema,
+      { history_id: 'hh:2026-08', history: { '1787025600000': { price: NaN } } },
+      { collection: 'holdings_history', docId: '2026-08' }
+    );
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(getDecodeStats().holdings_history?.repaired).toBe(2);
+  });
+
+  test('schema drops dedupe the same way', () => {
+    const Strict = z.object({
+      history: z.record(z.string(), z.object({ price: z.number() })),
+    });
+
+    validateOrWarn(
+      Strict,
+      { history: { '1785124800000': { price: 'not-a-number' } } },
+      { collection: 'holdings_history', docId: '2026-07' }
+    );
+    validateOrWarn(
+      Strict,
+      { history: { '1787025600000': { price: 'not-a-number' } } },
+      { collection: 'holdings_history', docId: '2026-08' }
+    );
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    // Both drops are still counted — only the stderr line is deduped.
+    expect(getDecodeStats().holdings_history?.dropped).toBe(2);
+  });
+
+  test('genuinely different fields still warn separately', () => {
+    validateOrWarn(
+      HoldingsSchema,
+      { account_id: 42, holdings: [] },
+      { collection: 'accounts', docId: 'doc1' }
+    );
+    validateOrWarn(
+      HoldingsSchema,
+      { account_id: 'acc_1', holdings: 'not-an-array' },
+      { collection: 'accounts', docId: 'doc2' }
+    );
+
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+  });
+});

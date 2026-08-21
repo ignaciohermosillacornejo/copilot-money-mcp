@@ -54,7 +54,7 @@ function walk(value: unknown, prefix: string, paths: string[]): unknown {
   if (Array.isArray(value)) {
     const out: unknown[] = [];
     let changed = false;
-    value.forEach((element, index) => {
+    for (const [index, element] of value.entries()) {
       const path = join(prefix, String(index));
       if (isNonFinite(element)) {
         // Dropping the element shifts later indices. No model declares an
@@ -63,12 +63,12 @@ function walk(value: unknown, prefix: string, paths: string[]): unknown {
         // worth more than the index.
         paths.push(path);
         changed = true;
-        return;
+        continue;
       }
       const repaired = walk(element, path, paths);
       if (repaired !== element) changed = true;
       out.push(repaired);
-    });
+    }
     return changed ? out : value;
   }
 

@@ -155,6 +155,12 @@ export function nonFiniteLeafPaths(fields: Map<string, FirestoreValue>): string[
 /**
  * Field names in this cache are lowercase snake_case. Anything else — an epoch
  * timestamp, a `YYYY-MM-DD`, a Firestore id — is a dynamic key and is redacted.
+ *
+ * The 40-char ceiling is a backstop, not a spec: the longest declared field
+ * name in the decoder is well under it, while Firestore ids are 20+ chars of
+ * mixed case, so a key that is both long and lowercase is far more likely to
+ * be user data than a field nobody has seen. Raise it only alongside a real
+ * field name that needs the room.
  */
 function safeKey(key: string): string {
   return /^[a-z][a-z0-9_]{0,39}$/.test(key) ? key : '<key>';
