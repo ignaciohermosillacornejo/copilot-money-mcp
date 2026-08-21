@@ -4,7 +4,7 @@ title: An Infinity price in the cache silently removed a whole investment accoun
 class: wire-type-drift
 status: fixed
 detected: user-report # reporter read decode_health, saw 19 dropped documents, and filed the stderr warnings
-fixed_in: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/660
+fixed_in: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/667
 issue: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/659
 date: 2026-08-21
 ---
@@ -73,7 +73,7 @@ Two details worth recording:
 
 ## The fix
 
-Root-cause fix ([#660](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/660)):
+Root-cause fix ([#667](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/667)):
 `validateOrWarn` now attempts one repair before giving up on a document — strip non-finite
 numeric leaves (`src/core/non-finite.ts`) and re-validate. Documents that become valid are
 kept, with the stripped paths logged and counted; documents that fail for any other reason
