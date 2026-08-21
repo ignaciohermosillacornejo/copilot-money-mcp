@@ -11,7 +11,13 @@
  * commit list, and only the committer field separates them.
  */
 import { describe, expect, test } from 'bun:test';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { findForgedAuthorship } from '../../scripts/check-commit-authorship.js';
+
+const SCRIPT = fileURLToPath(new URL('../../scripts/check-commit-authorship.ts', import.meta.url));
 
 const MAINTAINER_EMAIL = 'hermosillaignacio@gmail.com';
 const MAINTAINER_LOGIN = 'ignaciohermosillacornejo';
@@ -195,5 +201,78 @@ describe('forged authorship', () => {
       }),
     ]);
     expect(found).toHaveLength(1);
+  });
+});
+
+/**
+ * End-to-end tests for the CLI itself, driven through the same
+ * CHECK_AUTHORSHIP_COMMITS seam CI uses. The exported predicate is covered
+ * above; this covers what actually runs in the workflow — argument handling,
+ * JSON parsing, exit codes, and the operator-facing output. A security gate
+ * whose entry point is untested can fail open without anything noticing.
+ */
+describe('CLI', () => {
+  async function runCli(
+    payload: string
+  ): Promise<{ code: number; stdout: string; stderr: string }> {
+    const dir = await mkdtemp(join(tmpdir(), 'authorship-cli-'));
+    try {
+      const file = join(dir, 'commits.json');
+      await writeFile(file, payload);
+      const proc = Bun.spawn(['bun', 'run', SCRIPT], {
+        env: { ...process.env, CHECK_AUTHORSHIP_COMMITS: file },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ]);
+      return { code: await proc.exited, stdout, stderr };
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  test('exits 0 and reports the count on clean input', async () => {
+    const { code, stdout } = await runCli(
+      JSON.stringify([MAINTAINER_OWN_PUSH, CONTRIBUTOR_OWN, CONTRIBUTOR_REBASED_BY_MAINTAINER])
+    );
+    expect(code).toBe(0);
+    expect(stdout).toContain('3 commits');
+    expect(stdout).toContain('no forged authorship');
+  });
+
+  test('exits 1 and names the sha, author and committer on a forgery', async () => {
+    const { code, stderr } = await runCli(JSON.stringify([CONTRIBUTOR_OWN, FORGED]));
+    expect(code).toBe(1);
+    expect(stderr).toContain(FORGED.sha.slice(0, 10));
+    expect(stderr).toContain('attacker');
+    expect(stderr).toContain(MAINTAINER_EMAIL);
+  });
+
+  test('surfaces the copied subject, which is how the commit passes as routine', async () => {
+    const { stderr } = await runCli(JSON.stringify([FORGED]));
+    expect(stderr).toContain('Certain parameters not showing in client types');
+  });
+
+  test('exits 2 on malformed JSON rather than passing silently', async () => {
+    // Distinct from exit 1: a parse failure means the gate did not run, and
+    // must not be mistaken for "no findings".
+    const { code, stderr } = await runCli('{not json');
+    expect(code).toBe(2);
+    expect(stderr).toContain('not valid JSON');
+  });
+
+  test('exits 2 when the payload is not an array', async () => {
+    const { code, stderr } = await runCli(JSON.stringify({ message: 'Not Found' }));
+    expect(code).toBe(2);
+    expect(stderr).toContain('expected a JSON array');
+  });
+
+  test('exits 0 on an empty array', async () => {
+    const { code, stdout } = await runCli('[]');
+    expect(code).toBe(0);
+    expect(stdout).toContain('0 commits');
   });
 });
