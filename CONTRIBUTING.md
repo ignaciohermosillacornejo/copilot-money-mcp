@@ -242,8 +242,19 @@ So, for any branch you did not write:
    with none of the credentials above. If you must install locally:
 
    ```bash
-   bun install --frozen-lockfile --ignore-scripts
+   bun install --ignore-scripts
    ```
+
+   `--ignore-scripts` is the security-relevant flag: it stops dependency
+   lifecycle scripts from running during install. Note that
+   `--frozen-lockfile` is *not* available here — `bun.lock` is gitignored by
+   design and regenerated on every install (see Troubleshooting), so there is
+   nothing to freeze against on a fresh checkout.
+
+   `package-lock.json` **is** tracked, though, and it is the lockfile the
+   published bundle is built from. A contributor PR that touches it deserves
+   the same scrutiny as one touching a build config: read what changed and why
+   before installing anything.
 
 `bun run check` includes `check:concealment`, which fails on the shapes this
 class of attack needs — off-screen payloads, invisible characters, dynamic
