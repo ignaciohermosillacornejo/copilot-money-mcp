@@ -4,7 +4,7 @@ title: Content-based dedup key silently dropped real accounts — the same defec
 class: identity-resolution
 status: fixed
 detected: code-review  # reviewing a contributor PR (#660) that touched account naming; the dedup was adjacent, not the subject
-fixed_in: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/667
+fixed_in: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/668
 issue: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/662
 date: 2026-08-21
 ---
@@ -29,7 +29,7 @@ contributor had no reason to look at it.
 
 Worth being precise about the mechanism, because it was nearly luck: verifying #660 meant
 comparing cache output against live output account-by-account, and that comparison — run
-for a different reason — put an 18-vs-20 count discrepancy on screen. The confirmation
+for a different reason — put a count discrepancy between the two modes on screen. The confirmation
 came from an artifact already sitting in the terminal: the decoder had logged an
 `unread field: collection=accounts docId=…` warning for a document that was **absent from
 its own return value**, proving the document was read and then thrown away rather than
@@ -81,7 +81,7 @@ Two aggravating details:
 
 ## The fix
 
-PR #667. Root-cause fix: extract `deduplicateAccounts()` keyed on `account_id`, mirroring
+PR #668. Root-cause fix: extract `deduplicateAccounts()` keyed on `account_id`, mirroring
 `deduplicateTransactions()`, and call it from both decode paths — removing the second copy
 of the key rather than correcting it in place.
 
