@@ -4,10 +4,11 @@
  *
  * We deliberately keep REQUESTING `__typename` — scripts/generate-graphql-operations.ts
  * injects it so our operation documents match what the web app's Apollo Client
- * sends. It is response-side noise only: ~22% of a tag row, ~36% of a networth
- * row. Icon unions discriminate on it internally, but by the time a result
- * reaches serialization all such branching has already run, and the payload
- * shapes ({unicode} vs {id, src}) distinguish themselves for consumers.
+ * sends. It is response-side noise only: the #597 audit measured it at ~22%
+ * of a tag row and ~36% of a networth row. Icon unions discriminate on it
+ * internally, but by the time a result reaches serialization all such
+ * branching has already run, and the payload shapes ({unicode} vs {id, src})
+ * distinguish themselves for consumers.
  */
 export function stripTypename<T>(value: T): T {
   if (Array.isArray(value)) {
