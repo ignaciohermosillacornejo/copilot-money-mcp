@@ -82,7 +82,10 @@ Fields are removed rather than nulled because the schemas declare them `z.number
 which accepts absence and rejects `null`.
 
 Downstream: `decode_health` gained a `repaired` counter per collection and a note that says
-plainly which documents lost a field, so partial loss is reported rather than swallowed.
+plainly which documents lost a field, so partial loss is reported rather than swallowed. Warn
+dedupe keys now collapse positional path segments — the reporter got one warn per dropped
+month because each carried a different epoch-ms map key, which is flood control keying on the
+document instead of on the failure shape.
 `get_holdings` needed no change — it already skips holdings with no price, so the repaired
 account returns with its balance and its other lots intact.
 

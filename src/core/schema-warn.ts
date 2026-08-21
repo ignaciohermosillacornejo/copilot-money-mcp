@@ -77,7 +77,25 @@ export function resetDecodeStats(): void {
   countedUnreadKeys.clear();
 }
 
-// Dedupe key = `${collection}::${firstIssue.path.join('.')}::${firstIssue.code}`.
+/**
+ * Collapse positional path segments so a dedupe key describes the SHAPE of a
+ * failure rather than the document it happened in.
+ *
+ * Array indices and epoch-ms map keys differ per document, so keying on the
+ * raw path defeats flood control: 18 dropped months at
+ * `history.<distinct epoch>.price` emit 18 warns that all say the same thing,
+ * which is what #659's reporter saw. Only the KEY collapses — the logged path
+ * keeps its real indices, because a warn naming `<n>` is not actionable.
+ *
+ * Non-numeric dynamic keys (a `YYYY-MM-DD` under `daily_data`) still key
+ * separately. Collapsing those would need a heuristic for "is this a field
+ * name", and no collection has flooded on one yet.
+ */
+function dedupeShape(path: string): string {
+  return path.replace(/(^|\.)\d+(?=\.|$)/g, '$1<n>');
+}
+
+// Dedupe key = `${collection}::${shape(firstIssue.path)}::${firstIssue.code}`.
 // One warn per unique key per process. Prevents log flood when Copilot ships
 // a new field shape that affects every doc in a collection. Note: only the
 // first docId that hits a given key is logged — all subsequent docs with the
@@ -121,7 +139,7 @@ export function validateOrWarn<T>(schema: ZodType<T>, data: unknown, ctx: Decode
       stats.repaired++;
 
       const pathList = stripped.paths.join(',');
-      const key = `${ctx.collection}::${pathList}`;
+      const key = `${ctx.collection}::${stripped.paths.map(dedupeShape).join(',')}`;
       if (!warnedNonFiniteKeys.has(key)) {
         warnedNonFiniteKeys.add(key);
         console.warn(
@@ -140,7 +158,7 @@ export function validateOrWarn<T>(schema: ZodType<T>, data: unknown, ctx: Decode
   const first = result.error.issues[0];
   if (first) {
     const pathStr = first.path.join('.');
-    const key = `${ctx.collection}::${pathStr}::${first.code}`;
+    const key = `${ctx.collection}::${dedupeShape(pathStr)}::${first.code}`;
     if (!warnedKeys.has(key)) {
       warnedKeys.add(key);
       // console.warn writes to stderr in Node, safe for MCP stdio transport.
