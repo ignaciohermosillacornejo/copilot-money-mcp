@@ -29,7 +29,8 @@ CI plumbing, packaging, latent defects fixed before anyone hit them — go as on
 in [`MINOR.md`](MINOR.md) instead.
 
 **Known gap in the seeded entries:** the template asks for a `## Why the tests didn't
-catch it` section, and only [#622](622-investment-prices-nested-layout.md) has one. The 42
+catch it` section, and only entries written at fix time since
+[#622](622-investment-prices-nested-layout.md) have one. The 42
 historical entries were reconstructed from diffs and PR bodies, which rarely record why a
 defence was blind — inferring it after the fact would have produced plausible fiction, and
 this corpus is only worth keeping if every claim in it is substantiated. New entries are
@@ -77,7 +78,7 @@ a class yet.
 
 | Class | Definition | Detector |
 |---|---|---|
-| `identity-resolution` | Comparing values across id spaces — matching a display name against an id, or an id belonging to a different entity. | `assertOpaqueIds` fixture invariant (#461) |
+| `identity-resolution` | Comparing values across id spaces — matching a display name against an id, or an id belonging to a different entity. Includes treating content as identity, e.g. a dedup key built from a display name. | `assertOpaqueIds` fixture invariant (#461); `tests/core/dedup-identity.test.ts` — every decoder dedup must preserve two documents identical in content and differing only by id (#662) |
 | `aggregation-double-count` | Summing across a parent/child hierarchy without excluding parents, so the same money is counted twice. | none |
 | `sign-convention` | Ignoring the domain's sign/direction convention, so the stored sign is not the semantic sign and naive sums are wrong. | none |
 | `ui-parity` | A reimplementation of an app-side computation uses different semantics — time window, enumeration set, exclusion rules — and disagrees with the Copilot app. | none |
@@ -114,7 +115,7 @@ this corpus actually says, across all 48 entries:
 | `user-report` | 8 | ███████ |
 | `adversarial-review` — a reviewer tried to refute a claim or mutation-tested a guard | 2 | █ |
 | `detector-first` — a detector was built, and then found bugs | 1 | ▌ |
-| `code-review` | 1 | ▌ |
+| `code-review` | 2 | █ |
 | **`ci-gate`** — **a checked-in invariant failed** | **0** | |
 
 **No bug in this corpus was first caught by a CI gate.** That is the single most useful
@@ -215,13 +216,14 @@ record near-misses.
 
 ### Computing the answer
 
-**`identity-resolution`** — 3
+**`identity-resolution`** — 4
 
 | | Bug | Found by | Date |
 |---|---|---|---|
 | #69 | [User-defined category IDs displayed as raw Firestore IDs instead of names](69-category-id-leaks-as-name.md) | `dogfooding` | 2026-01-14 |
 | #122 | [Content-based dedup key silently dropped real transactions](122-dedup-drops-real-transactions.md) | `user-report` | 2026-03-11 |
 | #394 | [Cache-mode tag filter compared tag names against opaque tag IDs — always zero results](394-tag-filter-name-vs-id.md) | `dogfooding` | 2026-05-12 |
+| #662 | [Content-based dedup key silently dropped real accounts — the same defect as #122, in the collection nobody swept](662-account-dedup-drops-documents.md) | `code-review` | 2026-08-21 |
 
 **`aggregation-double-count`** — 2
 

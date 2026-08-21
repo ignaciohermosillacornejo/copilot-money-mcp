@@ -317,6 +317,36 @@ describe('LevelDB Decoder', () => {
 
       expect(result.length).toBe(3);
     });
+
+    // #662: dedup used to key on `${name ?? official_name}|${mask ?? ''}`, so two
+    // genuinely distinct account documents that happened to share a name — and had
+    // no mask to tell them apart — collapsed into one. Verified on a real cache:
+    // cache mode returned two fewer accounts than live mode did.
+    test('keeps distinct account documents that share a name and a missing mask', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'same-name-acc-db');
+      const accounts: TestAccount[] = [
+        {
+          account_id: 'kPZ8nRvqLm3TdWxYb6Ac',
+          name: 'Stock Plan',
+          account_type: 'investment',
+          current_balance: 100.0,
+        },
+        {
+          account_id: 'wQ4mBtXjS9fHeNzUr2Kd',
+          name: 'Stock Plan',
+          account_type: 'investment',
+          current_balance: 250.0,
+        },
+      ];
+
+      await createAccountDb(dbPath, accounts);
+      const result = await decodeAccounts(dbPath);
+
+      expect(result.length).toBe(2);
+      expect(new Set(result.map((a) => a.account_id))).toEqual(
+        new Set(['kPZ8nRvqLm3TdWxYb6Ac', 'wQ4mBtXjS9fHeNzUr2Kd'])
+      );
+    });
   });
 
   describe('decodeRecurring', () => {
