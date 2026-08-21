@@ -9,7 +9,14 @@
  *     `src/server.ts` sends to callers (responses went compact in the #597
  *     Tier-0 diet — the ratchet's first deliberate downward turn; if the
  *     server serialization ever changes again, re-derive the budgets to
- *     stay faithful).
+ *     stay faithful). This harness calls `def.handler()` directly rather
+ *     than going through `server.handleCallTool`, and RESPONSE_BUDGETS only
+ *     covers cache-mode reads — so the `__typename`-stripping Tier-0 item
+ *     (#597, the recursive scrub at the `JSON.stringify` call site in
+ *     `src/server.ts`) does not move any number in this file: cache-mode
+ *     responses come straight from the local LevelDB decode and never
+ *     carried GraphQL `__typename` keys to begin with. Measured before/after
+ *     landing that scrub — byte-for-byte identical, so no budget moved.
  *  2. Schema size — every registered tool's `JSON.stringify(def.schema).length`
  *     plus an aggregate total (the schemas load into every session).
  *
