@@ -8,9 +8,15 @@
  * reads (e.g. a new field Copilot adds upstream). Schema-drop logging can't
  * catch those because they never reach Zod — the decoder's allow-list filters
  * them out first.
+ *
+ * `validateOrWarn` also performs one repair before it gives up on a document:
+ * non-finite numeric leaves (`NaN` / `±Infinity`) are stripped and the parse
+ * retried, so a value Firestore can hold but Zod cannot costs one field
+ * instead of the whole document (#659). See `./non-finite.ts`.
  */
 
 import type { ZodType } from 'zod';
+import { stripNonFiniteNumbers } from './non-finite.js';
 import type { FirestoreValue } from './protobuf-parser.js';
 
 export type DecodeContext = {
@@ -24,15 +30,20 @@ export type DecodeContext = {
  * Unlike the warn dedupe sets (which persist for the process lifetime so a
  * refresh doesn't re-flood stderr), these counters are reset at the start of
  * every `decodeAllCollections` pass so they always describe the latest load:
- *   - `decoded`: docs that passed Zod validation (raw, pre-dedup).
+ *   - `decoded`: docs that passed Zod validation (raw, pre-dedup). Includes
+ *     repaired docs — they are in the results, so they decoded.
  *   - `dropped`: docs that failed Zod validation and were silently omitted
  *     from results. Counted per document, NOT deduped like the warnings.
+ *   - `repaired`: docs that only failed because of a non-finite numeric leaf
+ *     (`NaN` / `±Infinity`) and were kept with that field removed (#659).
+ *     A subset of `decoded`: the document is present, one field is not.
  *   - `unread_field_warnings`: unique `(collection, field)` pairs present in
  *     raw docs but neither consumed nor explicitly ignored by the processor.
  */
 export type CollectionDecodeStats = {
   decoded: number;
   dropped: number;
+  repaired: number;
   unread_field_warnings: number;
 };
 
@@ -49,7 +60,7 @@ const countedUnreadKeys = new Set<string>();
 function statsFor(collection: string): CollectionDecodeStats {
   let stats = decodeStats.get(collection);
   if (!stats) {
-    stats = { decoded: 0, dropped: 0, unread_field_warnings: 0 };
+    stats = { decoded: 0, dropped: 0, repaired: 0, unread_field_warnings: 0 };
     decodeStats.set(collection, stats);
   }
   return stats;
@@ -79,11 +90,46 @@ const warnedKeys = new Set<string>();
 // same `(X, Y)` don't collide. Reset by __resetWarnedKeys.
 const warnedUnreadKeys = new Set<string>();
 
+// Dedupe set for the non-finite repair warn, keyed by `(collection, paths)`.
+// Same namespace rules as the two sets above.
+const warnedNonFiniteKeys = new Set<string>();
+
 export function validateOrWarn<T>(schema: ZodType<T>, data: unknown, ctx: DecodeContext): T | null {
   const result = schema.safeParse(data);
   if (result.success) {
     statsFor(ctx.collection).decoded++;
     return result.data;
+  }
+
+  // Before giving up on the document, try the one repair that is always safe:
+  // remove non-finite numeric leaves (#659). Firestore stores IEEE-754
+  // doubles, so `NaN` / `±Infinity` are legal on the wire and reach us
+  // verbatim — Copilot writes an `Infinity` price for a holding whose
+  // quantity is 0 — but Zod v4 rejects all three from `z.number()`. Dropping
+  // the whole document over one unusable price is the failure mode of #302
+  // all over again: an entire investment account disappeared from
+  // `get_accounts`, and 18 months of holdings history from `get_holdings`.
+  //
+  // Only documents that become VALID once the leaf is gone are kept, so this
+  // cannot mask an unrelated schema mismatch — those still drop and warn below.
+  const stripped = stripNonFiniteNumbers(data);
+  if (stripped.paths.length > 0) {
+    const retry = schema.safeParse(stripped.value);
+    if (retry.success) {
+      const stats = statsFor(ctx.collection);
+      stats.decoded++;
+      stats.repaired++;
+
+      const pathList = stripped.paths.join(',');
+      const key = `${ctx.collection}::${pathList}`;
+      if (!warnedNonFiniteKeys.has(key)) {
+        warnedNonFiniteKeys.add(key);
+        console.warn(
+          `[copilot-money-mcp] non-finite field: collection=${ctx.collection} docId=${ctx.docId} paths=${pathList} — value was NaN or ±Infinity in the cache; field dropped, document kept`
+        );
+      }
+      return retry.data;
+    }
   }
 
   // Count every dropped doc — drops are NOT deduped like the warnings below,
@@ -154,5 +200,6 @@ export function warnUnreadFields(
 export function __resetWarnedKeys(): void {
   warnedKeys.clear();
   warnedUnreadKeys.clear();
+  warnedNonFiniteKeys.clear();
   resetDecodeStats();
 }

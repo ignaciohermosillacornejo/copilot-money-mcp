@@ -97,6 +97,7 @@ describe('decodeAllCollections decodeStats', () => {
     expect(result.decodeStats.transactions).toEqual({
       decoded: 1,
       dropped: 1,
+      repaired: 0,
       unread_field_warnings: 0,
     });
   });
@@ -110,6 +111,7 @@ describe('decodeAllCollections decodeStats', () => {
     expect(result.decodeStats.transactions).toEqual({
       decoded: 1,
       dropped: 0,
+      repaired: 0,
       unread_field_warnings: 0,
     });
   });
@@ -132,7 +134,7 @@ describe('decode_health on the tool surface', () => {
     expect(info.decode_health.note).toContain('issue');
     // Per-collection breakdown only includes flagged collections.
     expect(info.decode_health.collections).toEqual({
-      transactions: { decoded: 1, dropped: 1, unread_field_warnings: 0 },
+      transactions: { decoded: 1, dropped: 1, repaired: 0, unread_field_warnings: 0 },
     });
   }, 30_000);
 
@@ -182,7 +184,7 @@ describe('decode_health on the tool surface', () => {
     // Per-collection breakdown is present (unlike the terse zero-warning case)
     // and includes only the flagged collection with dropped === 0.
     expect(info.decode_health.collections).toEqual({
-      transactions: { decoded: 2, dropped: 0, unread_field_warnings: 1 },
+      transactions: { decoded: 2, dropped: 0, repaired: 0, unread_field_warnings: 1 },
     });
 
     const status = await tools.getConnectionStatus();

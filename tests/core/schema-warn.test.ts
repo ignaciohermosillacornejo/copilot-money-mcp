@@ -309,7 +309,7 @@ describe('decode stats counters', () => {
     validateOrWarn(Schema, { id: 'c', amount: 'bad' }, { collection: 'accounts', docId: 'doc3' });
 
     expect(getDecodeStats()).toEqual({
-      accounts: { decoded: 2, dropped: 1, unread_field_warnings: 0 },
+      accounts: { decoded: 2, dropped: 1, repaired: 0, unread_field_warnings: 0 },
     });
   });
 
@@ -331,8 +331,8 @@ describe('decode stats counters', () => {
     validateOrWarn(Schema, { id: 'b', amount: 'bad' }, { collection: 'transactions', docId: 'd2' });
 
     expect(getDecodeStats()).toEqual({
-      accounts: { decoded: 1, dropped: 0, unread_field_warnings: 0 },
-      transactions: { decoded: 0, dropped: 1, unread_field_warnings: 0 },
+      accounts: { decoded: 1, dropped: 0, repaired: 0, unread_field_warnings: 0 },
+      transactions: { decoded: 0, dropped: 1, repaired: 0, unread_field_warnings: 0 },
     });
   });
 
@@ -362,6 +362,7 @@ describe('decode stats counters', () => {
     expect(getDecodeStats().accounts).toEqual({
       decoded: 0,
       dropped: 1,
+      repaired: 0,
       unread_field_warnings: 1,
     });
     expect(warnSpy).toHaveBeenCalledTimes(2);
@@ -380,6 +381,7 @@ describe('decode stats counters', () => {
     expect(getDecodeStats().accounts).toEqual({
       decoded: 0,
       dropped: 1,
+      repaired: 0,
       unread_field_warnings: 1,
     });
     // No new stderr output: both the schema-drop and unread-field warns dedupe
@@ -393,5 +395,189 @@ describe('decode stats counters', () => {
     snapshot.accounts.decoded = 999;
 
     expect(getDecodeStats().accounts?.decoded).toBe(1);
+  });
+});
+
+/**
+ * Non-finite repair (issue #659).
+ *
+ * Firestore stores IEEE-754 doubles, so `NaN` / `±Infinity` reach Zod, which
+ * rejects all three. Before this repair a single such leaf discarded the whole
+ * document: one holding priced `Infinity` (quantity 0 upstream) removed an
+ * entire investment account from `get_accounts` and 18 months of holdings
+ * history from `get_holdings`.
+ *
+ * The sweep below is the class-level detector. It is deliberately indexed by
+ * WHERE the leaf sits rather than by which schema declared it: the field that
+ * happened to be hit is an accident of one user's brokerage, while the walk's
+ * branches (object, object-in-array, dynamically keyed record) are what can
+ * actually be wrong. Delete the repair from `validateOrWarn` and every row
+ * fails.
+ */
+describe('validateOrWarn — non-finite repair', () => {
+  let warnSpy: ReturnType<typeof spyOn>;
+
+  const HoldingsSchema = z.object({
+    account_id: z.string(),
+    current_balance: z.number(),
+    holdings: z
+      .array(z.object({ security_id: z.string(), institution_price: z.number().optional() }))
+      .optional(),
+  });
+
+  const HistorySchema = z.object({
+    history_id: z.string(),
+    history: z.record(z.string(), z.object({ price: z.number().optional() })).optional(),
+  });
+
+  const OptionalPriceSchema = z.object({ id: z.string(), price: z.number().optional() });
+
+  beforeEach(() => {
+    __resetWarnedKeys();
+    warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  test.each([
+    ['top-level field', OptionalPriceSchema, { id: 'x', price: Infinity }, { id: 'x' }, 'price'],
+    [
+      'object nested in an array',
+      HoldingsSchema,
+      {
+        account_id: 'acc_1',
+        current_balance: 5000,
+        holdings: [{ security_id: 'sec_1', institution_price: -Infinity }],
+      },
+      {
+        account_id: 'acc_1',
+        current_balance: 5000,
+        holdings: [{ security_id: 'sec_1' }],
+      },
+      'holdings.0.institution_price',
+    ],
+    [
+      'dynamically keyed record',
+      HistorySchema,
+      { history_id: 'hh:2026-08', history: { '1787025600000': { price: NaN } } },
+      { history_id: 'hh:2026-08', history: { '1787025600000': {} } },
+      'history.1787025600000.price',
+    ],
+  ])(
+    'keeps the document when a non-finite value sits in a %s',
+    (_placement, schema, input, expected, path) => {
+      const result = validateOrWarn(schema, input, { collection: 'accounts', docId: 'doc1' });
+
+      expect(result).toEqual(expected);
+      expect(getDecodeStats().accounts).toEqual({
+        decoded: 1,
+        dropped: 0,
+        repaired: 1,
+        unread_field_warnings: 0,
+      });
+
+      const message = warnSpy.mock.calls[0]?.[0] as string;
+      expect(message).toContain('non-finite field');
+      expect(message).toContain('collection=accounts');
+      expect(message).toContain('docId=doc1');
+      expect(message).toContain(`paths=${path}`);
+    }
+  );
+
+  test('reports every stripped path in one warn', () => {
+    validateOrWarn(
+      HoldingsSchema,
+      {
+        account_id: 'acc_1',
+        current_balance: 5000,
+        holdings: [
+          { security_id: 'sec_1', institution_price: Infinity },
+          { security_id: 'sec_2', institution_price: NaN },
+        ],
+      },
+      { collection: 'accounts', docId: 'doc1' }
+    );
+
+    const message = warnSpy.mock.calls[0]?.[0] as string;
+    expect(message).toContain('holdings.0.institution_price');
+    expect(message).toContain('holdings.1.institution_price');
+  });
+
+  test('still drops the document when the non-finite value was required', () => {
+    // Stripping a required field cannot rescue the document — it is now
+    // missing rather than non-finite — so the drop is reported as before.
+    const result = validateOrWarn(
+      HoldingsSchema,
+      { account_id: 'acc_1', current_balance: Infinity },
+      { collection: 'accounts', docId: 'doc1' }
+    );
+
+    expect(result).toBeNull();
+    expect(getDecodeStats().accounts).toEqual({
+      decoded: 0,
+      dropped: 1,
+      repaired: 0,
+      unread_field_warnings: 0,
+    });
+    expect(warnSpy.mock.calls[0]?.[0]).toContain('schema drop');
+  });
+
+  test('leaves unrelated validation failures alone', () => {
+    const result = validateOrWarn(
+      OptionalPriceSchema,
+      { id: 42, price: 1 },
+      { collection: 'accounts', docId: 'doc1' }
+    );
+
+    expect(result).toBeNull();
+    expect(getDecodeStats().accounts?.repaired).toBe(0);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0]?.[0]).toContain('schema drop');
+  });
+
+  test('a non-finite value alongside a real failure still drops', () => {
+    const result = validateOrWarn(
+      OptionalPriceSchema,
+      { id: 42, price: Infinity },
+      { collection: 'accounts', docId: 'doc1' }
+    );
+
+    expect(result).toBeNull();
+    expect(getDecodeStats().accounts).toEqual({
+      decoded: 0,
+      dropped: 1,
+      repaired: 0,
+      unread_field_warnings: 0,
+    });
+  });
+
+  test('counts every repaired document even though the warn dedupes', () => {
+    validateOrWarn(
+      OptionalPriceSchema,
+      { id: 'a', price: Infinity },
+      { collection: 'accounts', docId: 'doc1' }
+    );
+    validateOrWarn(
+      OptionalPriceSchema,
+      { id: 'b', price: NaN },
+      { collection: 'accounts', docId: 'doc2' }
+    );
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(getDecodeStats().accounts).toEqual({
+      decoded: 2,
+      dropped: 0,
+      repaired: 2,
+      unread_field_warnings: 0,
+    });
+  });
+
+  test('does not mutate the input document', () => {
+    const input = { id: 'x', price: Infinity };
+    validateOrWarn(OptionalPriceSchema, input, { collection: 'accounts', docId: 'doc1' });
+
+    expect(input.price).toBe(Infinity);
   });
 });
