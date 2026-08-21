@@ -12,7 +12,9 @@ import {
   isTotalDecodeLoss,
   joinStats,
   findExtinctDependencies,
+  nonFiniteLeafPaths,
 } from '../../scripts/smoke/cache.js';
+import type { FirestoreValue } from '../../src/core/protobuf-parser.js';
 
 describe('normalizeCollection', () => {
   test('wildcards document ids at odd path depths', () => {
@@ -143,5 +145,75 @@ describe('findExtinctDependencies', () => {
 
   test('returns nothing for an empty dependency list', () => {
     expect(findExtinctDependencies([], raw)).toEqual([]);
+  });
+});
+
+describe('nonFiniteLeafPaths', () => {
+  const num = (value: number): FirestoreValue => ({ type: 'double', value });
+
+  test('finds nothing in a document of finite numbers', () => {
+    expect(nonFiniteLeafPaths(new Map([['current_balance', num(5000)]]))).toEqual([]);
+  });
+
+  test.each([
+    ['Infinity', Infinity],
+    ['-Infinity', -Infinity],
+    ['NaN', NaN],
+  ])('reports a top-level %s', (_label, bad) => {
+    expect(nonFiniteLeafPaths(new Map([['price', num(bad)]]))).toEqual(['price']);
+  });
+
+  test('walks into arrays and maps (the reported #659 shapes)', () => {
+    const holdings: FirestoreValue = {
+      type: 'array',
+      value: [
+        { type: 'map', value: new Map([['institution_price', num(Infinity)]]) },
+        { type: 'map', value: new Map([['institution_price', num(25)]]) },
+      ],
+    };
+    const history: FirestoreValue = {
+      type: 'map',
+      value: new Map<string, FirestoreValue>([
+        ['1787025600000', { type: 'map', value: new Map([['price', num(NaN)]]) }],
+      ]),
+    };
+
+    expect(nonFiniteLeafPaths(new Map([['holdings', holdings]]))).toEqual([
+      'holdings.<n>.institution_price',
+    ]);
+    // The epoch-ms map key is dynamic, so it is redacted rather than logged.
+    expect(nonFiniteLeafPaths(new Map([['history', history]]))).toEqual(['history.<key>.price']);
+  });
+
+  test('never lets a dynamic map key through', () => {
+    // Same PII guarantee as normalizeCollection: these paths get logged, and
+    // map keys in some collections are user data.
+    const doc = new Map<string, FirestoreValue>([
+      ['by_merchant', { type: 'map', value: new Map([['SECRET_MERCHANT_ID', num(Infinity)]]) }],
+    ]);
+
+    const paths = nonFiniteLeafPaths(doc);
+    expect(paths).toEqual(['by_merchant.<key>']);
+    expect(paths.join()).not.toContain('SECRET_MERCHANT_ID');
+  });
+
+  test('reports every offending leaf, not just the first', () => {
+    const doc = new Map<string, FirestoreValue>([
+      ['a', num(Infinity)],
+      ['b', num(1)],
+      ['c', num(NaN)],
+    ]);
+
+    expect(nonFiniteLeafPaths(doc)).toEqual(['a', 'c']);
+  });
+
+  test('ignores non-numeric leaves', () => {
+    const doc = new Map<string, FirestoreValue>([
+      ['name', { type: 'string', value: 'Synthetic' }],
+      ['missing', { type: 'null', value: null }],
+      ['flag', { type: 'boolean', value: true }],
+    ]);
+
+    expect(nonFiniteLeafPaths(doc)).toEqual([]);
   });
 });

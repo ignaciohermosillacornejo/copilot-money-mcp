@@ -148,10 +148,13 @@ function getCacheTTLMs(): number {
  *   validation failure), or 'unknown' (no decode pass has run, e.g. cache was
  *   injected or never loaded).
  * - `note`: human-readable health line. Terse in the zero-drop case; when
- *   drops exist it explains what happened and what to do.
- * - `collections`: per-collection `{ decoded, dropped, unread_field_warnings }`
- *   counters, present only when at least one collection has drops or
- *   unread-field warnings (so clean output stays terse).
+ *   drops exist it explains what happened and what to do. Repaired documents
+ *   (#659 — a non-finite numeric field removed so the rest of the document
+ *   survives) are reported here too: they are partial data loss, not silent.
+ * - `collections`: per-collection `{ decoded, dropped, repaired,
+ *   unread_field_warnings }` counters, present only when at least one
+ *   collection has drops, repairs, or unread-field warnings (so clean output
+ *   stays terse).
  */
 export interface DecodeHealth {
   status: 'ok' | 'degraded' | 'unknown';
@@ -573,13 +576,15 @@ export class CopilotDatabase {
 
     let totalDecoded = 0;
     let totalDropped = 0;
+    let totalRepaired = 0;
     let totalUnread = 0;
     const flagged: DecodeStatsByCollection = {};
     for (const [collection, s] of Object.entries(stats)) {
       totalDecoded += s.decoded;
       totalDropped += s.dropped;
+      totalRepaired += s.repaired;
       totalUnread += s.unread_field_warnings;
-      if (s.dropped > 0 || s.unread_field_warnings > 0) {
+      if (s.dropped > 0 || s.repaired > 0 || s.unread_field_warnings > 0) {
         flagged[collection] = { ...s };
       }
     }
@@ -595,6 +600,24 @@ export class CopilotDatabase {
           `${phrase} — likely a Copilot app update changed the data shape. ` +
           'File an issue at https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues ' +
           "and include the 'schema drop' warnings from the MCP server's stderr log.",
+        collections: flagged,
+      };
+    }
+
+    // Repairs are partial data loss — the document survived, one field did
+    // not — so they are reported even though nothing was dropped (#659).
+    if (totalRepaired > 0) {
+      const docs = totalRepaired === 1 ? 'document' : 'documents';
+      const unreadClause =
+        totalUnread > 0
+          ? ` ${totalUnread} raw ${totalUnread === 1 ? 'field is' : 'fields are'} also not yet read by the decoder.`
+          : '';
+      return {
+        status: 'ok',
+        note:
+          `All ${totalDecoded} validated documents are present, but ${totalRepaired} ${docs} held a ` +
+          'non-finite number (NaN or ±Infinity) the schema cannot represent — that field was dropped ' +
+          `and the rest of the document kept. See 'non-finite field' warnings on stderr for the paths.${unreadClause}`,
         collections: flagged,
       };
     }

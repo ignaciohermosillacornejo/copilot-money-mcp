@@ -25,80 +25,11 @@ import {
   LevelDBReader,
 } from '../../src/core/leveldb-reader.js';
 import type { FirestoreValue } from '../../src/core/protobuf-parser.js';
-import { encodeFirestoreDocument } from '../../src/core/protobuf-parser.js';
+import { createDeepTestDb } from '../helpers/test-db.js';
 import path from 'node:path';
 import fs from 'node:fs';
 
 const FIXTURES_DIR = path.join(__dirname, '../fixtures/decoder-coverage-tests');
-
-/**
- * Create a binary-encoded Firestore LevelDB key.
- * Format: \x85remote_document\x00\x01[\xBE{segment}\x00\x01]...\x80
- *
- * This is needed for deep subcollection paths (5+ segments after documents/)
- * that the string-format regex can't parse.
- */
-function encodeBinaryKey(collectionPath: string, documentId: string): Buffer {
-  const fullPath = `${collectionPath}/${documentId}`;
-  const segments = fullPath.split('/');
-
-  const parts: Buffer[] = [];
-  // Start marker + "remote_document" + separator
-  parts.push(Buffer.from([0x85]));
-  parts.push(Buffer.from('remote_document', 'utf8'));
-  parts.push(Buffer.from([0x00, 0x01]));
-
-  for (const segment of segments) {
-    parts.push(Buffer.from([0xbe]));
-    parts.push(Buffer.from(segment, 'utf8'));
-    parts.push(Buffer.from([0x00, 0x01]));
-  }
-
-  // End marker
-  parts.push(Buffer.from([0x80]));
-
-  return Buffer.concat(parts);
-}
-
-/**
- * Create a test database with binary-encoded keys for deep subcollection paths.
- * Falls back to string keys for paths with 4 or fewer segments.
- */
-async function createDeepTestDatabase(
-  dbPath: string,
-  documents: Array<{ collection: string; id: string; fields: Record<string, unknown> }>
-): Promise<void> {
-  // Use classic-level directly since LevelDBReader.putDocument uses string keys
-  const { ClassicLevel } = await import('classic-level');
-  const db = new ClassicLevel<Buffer, Buffer>(dbPath, {
-    keyEncoding: 'buffer',
-    valueEncoding: 'buffer',
-    createIfMissing: true,
-  });
-  await db.open();
-
-  try {
-    for (const doc of documents) {
-      const totalSegments = doc.collection.split('/').length + 1; // +1 for doc ID
-      if (totalSegments > 4) {
-        // Deep path - use binary key format
-        const key = encodeBinaryKey(doc.collection, doc.id);
-        const value = encodeFirestoreDocument(doc.fields);
-        await db.put(key, value);
-      } else {
-        // Shallow path - use string key format
-        const key = Buffer.from(
-          `remote_document/projects/copilot-production-22904/databases/(default)/documents/${doc.collection}/${doc.id}`,
-          'utf8'
-        );
-        const value = encodeFirestoreDocument(doc.fields);
-        await db.put(key, value);
-      }
-    }
-  } finally {
-    await db.close();
-  }
-}
 
 afterEach(() => {
   cleanupAllTempDatabases();
@@ -1745,7 +1676,7 @@ describe('decoder coverage', () => {
       // Plaid account docs sit at items/{item_id}/accounts/{account_id} in Firestore.
       // The routing requires collection.includes('/accounts/') which needs the full path.
       // Using binary keys so the parser reconstructs the full collection path.
-      await createDeepTestDatabase(dbPath, [
+      await createDeepTestDb(dbPath, [
         {
           collection: 'items/item1/accounts/pacc1',
           id: 'data',
@@ -1854,7 +1785,7 @@ describe('decoder coverage', () => {
 
     test('decodes balance history via decodeAllCollections', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'balance-hist-db');
-      await createDeepTestDatabase(dbPath, [
+      await createDeepTestDb(dbPath, [
         {
           collection: 'items/item1/accounts/acc1/balance_history',
           id: '2024-01-15',
@@ -1905,7 +1836,7 @@ describe('decoder coverage', () => {
 
     test('decodes holdings history meta via decodeAllCollections', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'hh-meta-db');
-      await createDeepTestDatabase(dbPath, [
+      await createDeepTestDb(dbPath, [
         {
           collection: 'items/item1/accounts/acc1/holdings_history',
           id: 'sechash1',
@@ -1926,7 +1857,7 @@ describe('decoder coverage', () => {
 
     test('decodes holdings history via decodeAllCollections', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'hh-history-db');
-      await createDeepTestDatabase(dbPath, [
+      await createDeepTestDb(dbPath, [
         {
           collection: 'items/item1/accounts/acc1/holdings_history/sechash1/history',
           id: '2024-01',
@@ -2343,7 +2274,7 @@ describe('decoder coverage', () => {
       // parent-pointer docs that anchor the financial_goal_history subcollection.
       // The collection path includes '/financial_goals/' and does NOT end with
       // '/financial_goal_history', so they match the sentinel routing branch.
-      await createDeepTestDatabase(dbPath, [
+      await createDeepTestDb(dbPath, [
         // Sentinel doc: collection is users/user1/financial_goals/goal1, doc is a leaf
         {
           collection: 'users/user1/financial_goals/goal1',
@@ -2417,7 +2348,7 @@ describe('decoder coverage', () => {
 
     test('goal history sorting with multiple goals and months', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'goal-hist-sort-db');
-      await createDeepTestDatabase(dbPath, [
+      await createDeepTestDb(dbPath, [
         {
           collection: 'users/user1/financial_goals/goalB/financial_goal_history',
           id: '2024-01',
@@ -3119,7 +3050,7 @@ describe('decoder coverage', () => {
       const dbPath = path.join(FIXTURES_DIR, 'bad-bh-path-db');
       // Path ends with /balance_history but has no items/{id}/accounts/{id} structure
       // Must use deep (binary) encoding so the full path is preserved
-      await createDeepTestDatabase(dbPath, [
+      await createDeepTestDb(dbPath, [
         {
           collection: 'something/other/balance_history',
           id: '2024-01-15',
@@ -3357,7 +3288,7 @@ describe('decoder coverage', () => {
   describe('plaid account extended fields', () => {
     test('extracts all new plaid account fields', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'plaid-acc-full-db');
-      await createDeepTestDatabase(dbPath, [
+      await createDeepTestDb(dbPath, [
         {
           collection: 'items/item2/accounts/pacc2',
           id: 'data',
@@ -3439,7 +3370,7 @@ describe('decoder coverage', () => {
   describe('balance history _origin field', () => {
     test('extracts _origin from balance history documents', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'bh-origin-db');
-      await createDeepTestDatabase(dbPath, [
+      await createDeepTestDb(dbPath, [
         {
           collection: 'items/item1/accounts/acc1/balance_history',
           id: '2024-03-15',
@@ -3603,7 +3534,7 @@ describe('decoder coverage', () => {
 
     test('processGoalHistory catch: invalid created_date format fails schema regex', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'goal-hist-schema-fail-db');
-      await createDeepTestDatabase(dbPath, [
+      await createDeepTestDb(dbPath, [
         {
           collection: 'financial_goals/goal1/financial_goal_history',
           id: '2024-01',
@@ -3660,7 +3591,7 @@ describe('decoder coverage', () => {
     test('plaid account with numeric limit and string verification_status', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'plaid-acc-fields-db');
       // Use 5-segment path so binary key routing picks up /accounts/ in the middle
-      await createDeepTestDatabase(dbPath, [
+      await createDeepTestDb(dbPath, [
         {
           collection: 'items/item1/accounts/pacc1',
           id: 'data',

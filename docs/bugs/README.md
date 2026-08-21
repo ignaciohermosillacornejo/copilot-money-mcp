@@ -69,7 +69,7 @@ a class yet.
 | Class | Definition | Detector |
 |---|---|---|
 | `external-api-drift` | An assumption about Copilot's API — an enum value, an input field, an operation signature — was wrong when written, or became wrong. | conformance ledger + Tier-1 smokes (`bun run smoke`); see [`CONFORMANCE_ARCHITECTURE.md`](../CONFORMANCE_ARCHITECTURE.md) |
-| `wire-type-drift` | The API returns a different primitive type than the schema declared — typically a number where a string was expected, or null where non-null was assumed. | runtime warn-mode validation on all read shapes |
+| `wire-type-drift` | The API or the cache holds a value the schema cannot represent — a number where a string was expected, a null where non-null was assumed, an IEEE-754 `NaN`/`±Infinity` where JSON has no such value. | runtime warn-mode validation on all read shapes; non-finite leaves are stripped at the decode boundary instead of costing the document (#659), and `smoke:cache` reports any that exist in the real cache |
 | `referential-integrity-gap` | A write accepts ids without existence checks, producing silent no-ops or dangling references. | none — client-side validation on bulk writes only. No full entry yet; instance in [`MINOR.md`](MINOR.md) (#213), and Copilot's own `bulkEditTransactions` has the same gap server-side |
 | `ambiguous-candidate-selection` | Committing to one candidate from a noisy source before the only authority that can validate it runs, with no fallback; the benign rejection is then misreported as a system error. | none |
 
@@ -102,7 +102,7 @@ a class yet.
 ## How we find bugs
 
 Recorded per entry, using a fixed vocabulary so the corpus stays countable. Here is what
-this corpus actually says, across all 47 entries:
+this corpus actually says, across all 48 entries:
 
 | Found by | Count | |
 |---|---|---|
@@ -110,7 +110,7 @@ this corpus actually says, across all 47 entries:
 | `live-probe` — a probe or smoke against the real backend | 7 | ██████ |
 | `audit-sweep` — a deliberate cross-cutting audit | 7 | ██████ |
 | `incidental` — found while working on something else | 7 | ██████ |
-| `user-report` | 7 | ██████ |
+| `user-report` | 8 | ███████ |
 | `adversarial-review` — a reviewer tried to refute a claim or mutation-tested a guard | 2 | █ |
 | `detector-first` — a detector was built, and then found bugs | 1 | ▌ |
 | `code-review` | 1 | ▌ |
@@ -197,12 +197,13 @@ record near-misses.
 | #419 | [create_recurring rejected 5 valid cadences and accepted invalid YEARLY, blaming the server](419-create-recurring-frequency-enum.md) | `live-probe` | 2026-06-08 |
 | #495 | [get_networth_live advertised time_frame values that the server rejects with a hard 400](495-networth-timeframe-enum-drift.md) | `dogfooding` | 2026-06-15 |
 
-**`wire-type-drift`** — 2
+**`wire-type-drift`** — 3
 
 | | Bug | Found by | Date |
 |---|---|---|---|
 | #302 | [Null vested_* fields in holdings made Zod throw, silently dropping whole accounts](302-null-vested-fields-drop-accounts.md) | `dogfooding` | 2026-04-18 |
 | #537 | [Read-query interfaces systematically declared the wrong wire types (string amounts that are numbers, non-null prices that are null)](537-read-shape-string-number-drift.md) | `detector-first` | 2026-07-18 |
+| #659 | [An Infinity price in the cache silently removed a whole investment account and 18 months of holdings history](659-non-finite-price-drops-documents.md) | `user-report` | 2026-08-21 |
 
 **`ambiguous-candidate-selection`** — 1
 

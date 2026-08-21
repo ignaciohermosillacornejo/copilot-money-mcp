@@ -6,6 +6,7 @@
  */
 
 import { LevelDBReader, createTestDatabase } from '../../src/core/leveldb-reader.js';
+import { encodeFirestoreDocument } from '../../src/core/protobuf-parser.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -701,5 +702,68 @@ export async function createCombinedDb(
 export function cleanupTestDb(dbPath: string): void {
   if (fs.existsSync(dbPath)) {
     fs.rmSync(dbPath, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Create a binary-encoded Firestore LevelDB key.
+ * Format: \x85remote_document\x00\x01[\xBE{segment}\x00\x01]...\x80
+ *
+ * Needed for deep subcollection paths (5+ segments after documents/), which
+ * the string-format regex in `parseBinaryKey` cannot parse — real caches store
+ * `items/{id}/accounts/{id}/holdings_history/{hash}/history/{month}` this way.
+ */
+export function encodeBinaryKey(collectionPath: string, documentId: string): Buffer {
+  const segments = `${collectionPath}/${documentId}`.split('/');
+
+  const parts: Buffer[] = [];
+  // Start marker + "remote_document" + separator
+  parts.push(Buffer.from([0x85]));
+  parts.push(Buffer.from('remote_document', 'utf8'));
+  parts.push(Buffer.from([0x00, 0x01]));
+
+  for (const segment of segments) {
+    parts.push(Buffer.from([0xbe]));
+    parts.push(Buffer.from(segment, 'utf8'));
+    parts.push(Buffer.from([0x00, 0x01]));
+  }
+
+  // End marker
+  parts.push(Buffer.from([0x80]));
+
+  return Buffer.concat(parts);
+}
+
+/**
+ * Create a test database with binary-encoded keys for deep subcollection paths.
+ * Falls back to string keys for paths with 4 or fewer segments.
+ */
+export async function createDeepTestDb(
+  dbPath: string,
+  documents: Array<{ collection: string; id: string; fields: Record<string, unknown> }>
+): Promise<void> {
+  // Use classic-level directly since LevelDBReader.putDocument uses string keys
+  const { ClassicLevel } = await import('classic-level');
+  const db = new ClassicLevel<Buffer, Buffer>(dbPath, {
+    keyEncoding: 'buffer',
+    valueEncoding: 'buffer',
+    createIfMissing: true,
+  });
+  await db.open();
+
+  try {
+    for (const doc of documents) {
+      const totalSegments = doc.collection.split('/').length + 1; // +1 for doc ID
+      const key =
+        totalSegments > 4
+          ? encodeBinaryKey(doc.collection, doc.id)
+          : Buffer.from(
+              `remote_document/projects/copilot-production-22904/databases/(default)/documents/${doc.collection}/${doc.id}`,
+              'utf8'
+            );
+      await db.put(key, encodeFirestoreDocument(doc.fields));
+    }
+  } finally {
+    await db.close();
   }
 }

@@ -38,6 +38,7 @@ import {
   decodeCategories,
 } from '../../src/core/decoder.js';
 import { CopilotDatabase } from '../../src/core/database.js';
+import type { FirestoreValue } from '../../src/core/protobuf-parser.js';
 
 type Status = 'PASS' | 'FAIL' | 'WARN' | 'SKIP';
 
@@ -117,6 +118,48 @@ export function joinStats(
   return { total, matched, orphans: total - matched, rate: total === 0 ? 1 : matched / total };
 }
 
+/**
+ * Dotted paths of every non-finite numeric leaf in a raw document (#659).
+ *
+ * Firestore stores IEEE-754 doubles, so `NaN` / `±Infinity` are legal on the
+ * wire; Zod cannot represent any of them. The decoder now strips such leaves
+ * and keeps the document, but only the real cache can answer whether the class
+ * occurs at all — and where.
+ *
+ * PII: map keys are user data in several collections (dates, ids, epoch-ms
+ * timestamps), and these paths get logged. Only keys shaped like a declared
+ * Firestore field name survive; everything else collapses to `<key>`, and
+ * array indices to `<n>`, which also makes paths group across documents.
+ */
+export function nonFiniteLeafPaths(fields: Map<string, FirestoreValue>): string[] {
+  const found: string[] = [];
+
+  function walk(value: FirestoreValue, path: string): void {
+    if (value.type === 'double' || value.type === 'integer') {
+      if (!Number.isFinite(value.value)) found.push(path);
+      return;
+    }
+    if (value.type === 'map') {
+      for (const [key, child] of value.value) walk(child, `${path}.${safeKey(key)}`);
+      return;
+    }
+    if (value.type === 'array') {
+      for (const child of value.value) walk(child, `${path}.<n>`);
+    }
+  }
+
+  for (const [key, value] of fields) walk(value, safeKey(key));
+  return found;
+}
+
+/**
+ * Field names in this cache are lowercase snake_case. Anything else — an epoch
+ * timestamp, a `YYYY-MM-DD`, a Firestore id — is a dynamic key and is redacted.
+ */
+function safeKey(key: string): string {
+  return /^[a-z][a-z0-9_]{0,39}$/.test(key) ? key : '<key>';
+}
+
 const normalize = normalizeCollection;
 
 async function main(): Promise<void> {
@@ -135,6 +178,8 @@ async function main(): Promise<void> {
   // Raw scan: what is actually on disk, by normalized collection path.
   // ---------------------------------------------------------------------
   const raw = new Map<string, { total: number; empty: number }>();
+  // `${collection}:${path}` → how many documents carry a non-finite value there.
+  const nonFinite = new Map<string, number>();
   let scanned = 0;
   const started = Date.now();
 
@@ -150,6 +195,11 @@ async function main(): Promise<void> {
     // Firestore parent-pointer documents carry no fields. They are structural,
     // not data, and must not be counted as decodable rows.
     if (doc.fields.size === 0) entry.empty++;
+
+    for (const leafPath of nonFiniteLeafPaths(doc.fields)) {
+      const key = `${pattern}:${leafPath}`;
+      nonFinite.set(key, (nonFinite.get(key) ?? 0) + 1);
+    }
   }
 
   const elapsed = ((Date.now() - started) / 1000).toFixed(1);
@@ -350,6 +400,29 @@ async function main(): Promise<void> {
     );
   } else {
     record('decode-path parity', 'PASS', `all ${parity.length} collections agree across both paths`);
+  }
+
+  // ---------------------------------------------------------------------
+  // Check 6 — non-finite numeric leaves (#659).
+  //
+  // A `NaN` / `±Infinity` double is legal in Firestore and illegal in Zod, and
+  // before the repair in `validateOrWarn` one of them discarded the whole
+  // document. The repair means these no longer cost data, so this WARNS: it
+  // exists to say the class is live in reality and where, which is the part no
+  // synthetic fixture can establish.
+  // ---------------------------------------------------------------------
+  if (nonFinite.size > 0) {
+    const docs = [...nonFinite.values()].reduce((a, b) => a + b, 0);
+    const repaired = Object.values(all.decodeStats).reduce((a, s) => a + s.repaired, 0);
+    record(
+      'non-finite values',
+      'WARN',
+      `${docs} document(s) carry a NaN/±Infinity number at: ` +
+        [...nonFinite].map(([k, n]) => `${k} (${n})`).join(', ') +
+        ` — decoder repaired ${repaired} document(s), field dropped, document kept`
+    );
+  } else {
+    record('non-finite values', 'PASS', 'no NaN/±Infinity numbers anywhere in the cache');
   }
 
   // ---------------------------------------------------------------------

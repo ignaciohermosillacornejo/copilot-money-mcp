@@ -45,7 +45,11 @@ const RESPONSE_BUDGETS: Record<string, number> = {
   get_cache_info: 870,
   refresh_database: 245,
   get_accounts: 795,
-  get_connection_status: 1_900,
+  // 1_900 -> 2_100 by #659: `decode_health.collections` gained a `repaired`
+  // counter (documents kept after a non-finite numeric field was stripped),
+  // which adds 13 chars per flagged collection. The populated worst case
+  // measures 1_909; this is that plus the usual ~10% headroom.
+  get_connection_status: 2_100,
   get_categories: 855,
   get_recurring_transactions: 755,
   get_budgets: 420,
