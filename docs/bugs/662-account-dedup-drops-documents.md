@@ -4,7 +4,7 @@ title: Content-based dedup key silently dropped real accounts — the same defec
 class: identity-resolution
 status: fixed
 detected: code-review  # reviewing a contributor PR (#660) that touched account naming; the dedup was adjacent, not the subject
-fixed_in: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/667
+fixed_in: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/668
 issue: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/662
 date: 2026-08-21
 ---
@@ -81,7 +81,7 @@ Two aggravating details:
 
 ## The fix
 
-PR #667. Root-cause fix: extract `deduplicateAccounts()` keyed on `account_id`, mirroring
+PR #668. Root-cause fix: extract `deduplicateAccounts()` keyed on `account_id`, mirroring
 `deduplicateTransactions()`, and call it from both decode paths — removing the second copy
 of the key rather than correcting it in place.
 
