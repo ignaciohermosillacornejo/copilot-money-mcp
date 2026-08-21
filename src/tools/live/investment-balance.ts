@@ -14,6 +14,16 @@
  * reflects the older/newer of the two fetches, so
  * `_cache_oldest_fetched_at` may differ from `_cache_newest_fetched_at` here
  * (unlike the single-snapshot live tools). Assumes serial callers.
+ *
+ * v3 (#597 Tier 1): `history` can run to hundreds of daily rows and is the
+ * dominant cost of a response, but unlike get_top_movers_live's
+ * `price_points`, the series IS this tool's purpose — excluding it entirely
+ * would be the "smaller by being useless" failure mode. So `history` is
+ * CAPPED (`history_limit`, default 30, 0 = unlimited) rather than excluded,
+ * and the response reports `history_total_count` / `history_truncated` so a
+ * caller knows what was dropped. `current` (the live dot) is resolved from
+ * the separate InvestmentLiveBalance query, never from `history`, so it
+ * cannot be lost to truncation regardless of `history_limit`.
  */
 
 import type { LiveCopilotDatabase } from '../../core/live-database.js';
@@ -27,8 +37,15 @@ import type { ToolSchema } from '../tools.js';
 
 const DEFAULT_TIME_FRAME: TimeFrame = 'YTD';
 
+/**
+ * Default cap on `history` points returned (#597 Tier 1). `0` means
+ * unlimited — see {@link limitHistory}.
+ */
+const DEFAULT_HISTORY_LIMIT = 30;
+
 export interface GetInvestmentBalanceLiveArgs {
   time_frame?: TimeFrame;
+  history_limit?: number;
 }
 
 export interface InvestmentBalancePoint {
@@ -41,8 +58,12 @@ export interface InvestmentBalancePoint {
 export interface GetInvestmentBalanceLiveResult {
   /** Current-moment combined investment balance (the "live dot"), or null if unavailable. */
   current: InvestmentBalancePoint | null;
-  /** Daily timeseries over the requested time_frame, ascending by date. */
+  /** Daily timeseries over the requested time_frame, ascending by date, capped by history_limit. */
   history: InvestmentBalancePoint[];
+  /** Pre-truncation length of `history`. */
+  history_total_count: number;
+  /** True iff `history` is shorter than `history_total_count`. */
+  history_truncated: boolean;
   time_frame: TimeFrame;
   _cache_oldest_fetched_at: string;
   _cache_newest_fetched_at: string;
@@ -51,6 +72,40 @@ export interface GetInvestmentBalanceLiveResult {
 
 function toPoint(n: InvestmentBalanceNode): InvestmentBalancePoint {
   return { date: n.date, balance: n.balance };
+}
+
+/**
+ * Cap an ascending-by-date series to its newest `limit` points.
+ *
+ * `limit` of `undefined` falls back to {@link DEFAULT_HISTORY_LIMIT}; `0`
+ * means unlimited (the full series, untruncated) — distinct from `undefined`
+ * so a caller can explicitly opt out of the cap. A non-finite value (NaN,
+ * Infinity — a host that skipped JSON-schema validation could hand us one)
+ * also falls back to the default. Any other value is floored and clamped to
+ * >= 1, matching `clampMaxRows`'s convention (src/utils/pagination.ts): a
+ * negative or fractional `history_limit` degrades to "as few as possible"
+ * rather than producing a nonsensical negative-length slice.
+ */
+function limitHistory(
+  history: readonly InvestmentBalancePoint[],
+  limit: number | undefined
+): { history: InvestmentBalancePoint[]; total_count: number; truncated: boolean } {
+  const total_count = history.length;
+  const requested = limit ?? DEFAULT_HISTORY_LIMIT;
+  if (requested === 0) {
+    return { history: [...history], total_count, truncated: false };
+  }
+  const effective = Number.isFinite(requested)
+    ? Math.max(1, Math.floor(requested))
+    : DEFAULT_HISTORY_LIMIT;
+  if (effective >= total_count) {
+    return { history: [...history], total_count, truncated: false };
+  }
+  return {
+    history: history.slice(total_count - effective),
+    total_count,
+    truncated: true,
+  };
 }
 
 export class LiveInvestmentBalanceTools {
@@ -80,9 +135,20 @@ export class LiveInvestmentBalanceTools {
       liveCache.read(() => fetchInvestmentLiveBalance(this.live.getClient()).then((n) => [n])),
     ]);
 
-    const history = [...historyRes.rows].sort((a, b) => a.date.localeCompare(b.date)).map(toPoint);
+    const fullHistory = [...historyRes.rows]
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map(toPoint);
+    // `current` is resolved from the separate InvestmentLiveBalance query,
+    // never from `history` — so capping `history` below can never lose the
+    // live dot, no matter what `history_limit` is.
     const currentNode = liveRes.rows[0];
     const current = currentNode ? toPoint(currentNode) : null;
+
+    const {
+      history,
+      total_count: historyTotalCount,
+      truncated: historyTruncated,
+    } = limitHistory(fullHistory, args.history_limit);
 
     const hit = historyRes.hit && liveRes.hit;
     this.live.logReadCall({
@@ -98,6 +164,8 @@ export class LiveInvestmentBalanceTools {
     return {
       current,
       history,
+      history_total_count: historyTotalCount,
+      history_truncated: historyTruncated,
       time_frame: timeFrame,
       _cache_oldest_fetched_at: new Date(oldest).toISOString(),
       _cache_newest_fetched_at: new Date(newest).toISOString(),
@@ -116,7 +184,8 @@ export function createLiveInvestmentBalanceToolSchema(): ToolSchema {
       '`{date, balance}` in dollars). Investments-only — distinct from get_networth_live ' +
       '(whole net worth) and get_balance_history_live (per-account). The history cache holds ' +
       'the most-recently-requested time_frame; requesting a different value refetches it. ' +
-      'Available when --live-reads is on.',
+      '`history` is capped to the most recent `history_limit` points (default 30) — see that ' +
+      'param to fetch more of the series. Available when --live-reads is on.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -128,6 +197,14 @@ export function createLiveInvestmentBalanceToolSchema(): ToolSchema {
             'TimeFrame values ("ONE_DAY", "ONE_WEEK", "ONE_MONTH", "THREE_MONTHS", "YTD", ' +
             '"ONE_YEAR", "ALL").',
           default: DEFAULT_TIME_FRAME,
+        },
+        history_limit: {
+          type: 'integer',
+          description:
+            'How many of the most recent history points to return. Default 30; the full series ' +
+            'can run to hundreds of daily rows and is ~87% of the response. Pass 0 for the full ' +
+            'series. history_total_count and history_truncated always report what was dropped.',
+          default: DEFAULT_HISTORY_LIMIT,
         },
       },
     },

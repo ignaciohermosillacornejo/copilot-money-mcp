@@ -119,9 +119,18 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   get_balance_history_live: 1_800,
   get_investment_prices_live: 1_835,
   get_investment_allocation_live: 810,
-  get_top_movers_live: 1_175,
+  // Raised from 1_175 by #597 Tier 1: adds the `fields` param (excludes
+  // `price_points` — the intraday tick series — from the default row) plus a
+  // description sentence naming it, per the #597 convention that a generic
+  // selection param must say what "default" leaves out. Measured 1_610
+  // (~10% headroom). Real new capability, not bloat.
+  get_top_movers_live: 1_775,
   get_aggregated_holdings_live: 1_285,
-  get_investment_balance_live: 1_110,
+  // Raised from 1_110 by #597 Tier 1: adds `history_limit` (caps, not
+  // excludes, the `history` series — the tool's whole purpose) plus a
+  // description sentence naming the ~87% cost it caps. Measured 1_439
+  // (~10% headroom).
+  get_investment_balance_live: 1_585,
   refresh_cache: 1_335,
   // Write (--write) tools
   create_transaction: 1_980,
