@@ -128,9 +128,10 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   get_aggregated_holdings_live: 1_285,
   // Raised from 1_110 by #597 Tier 1: adds `history_limit` (caps, not
   // excludes, the `history` series — the tool's whole purpose) plus a
-  // description sentence naming the ~87% cost it caps. Measured 1_439
-  // (~10% headroom).
-  get_investment_balance_live: 1_585,
+  // description sentence naming the ~98% cost it caps (measured on a
+  // 365-day series; see src/tools/live/investment-balance.ts). Measured
+  // 1_466 (~10% headroom).
+  get_investment_balance_live: 1_615,
   refresh_cache: 1_335,
   // Write (--write) tools
   create_transaction: 1_980,

@@ -164,6 +164,19 @@ describe('LiveInvestmentBalanceTools.getInvestmentBalance', () => {
       expect(result.history_truncated).toBe(false);
     });
 
+    test('history_limit exactly equal to the series length returns everything, untruncated', async () => {
+      // Boundary distinct from strictly-less and strictly-greater: if the
+      // `>=` comparison inside paginate() regressed to `>`, this exact-match
+      // case would still return correct data but silently mis-report
+      // truncated: true.
+      const client = makeClient(make214DailyPoints(), liveDot);
+      const tools = new LiveInvestmentBalanceTools(makeLive(client));
+      const result = await tools.getInvestmentBalance({ history_limit: 214 });
+      expect(result.history).toHaveLength(214);
+      expect(result.history_total_count).toBe(214);
+      expect(result.history_truncated).toBe(false);
+    });
+
     test('a negative history_limit clamps to 1 rather than throwing or slicing backwards', async () => {
       // Mirrors clampMaxRows' convention (src/utils/pagination.ts): a
       // malformed value degrades to "as few as possible", not to unlimited.
@@ -172,6 +185,24 @@ describe('LiveInvestmentBalanceTools.getInvestmentBalance', () => {
       const result = await tools.getInvestmentBalance({ history_limit: -5 });
       expect(result.history).toHaveLength(1);
       expect(result.history[0]?.date).toBe('2024-08-15');
+      expect(result.history_truncated).toBe(true);
+    });
+
+    test("a non-finite history_limit falls back to the 30-point default, not paginate()'s own 500-row default", async () => {
+      // Distinct from the negative-limit case above: paginate()'s internal
+      // clampMaxRows() would ALSO floor a defined negative/fractional value
+      // to the same result even if this tool's own clamp were removed, so
+      // that test alone cannot prove this outer clamp does anything. NaN is
+      // the one input where it matters: `NaN ?? 30` is still NaN (`??` only
+      // replaces null/undefined), so without this tool's own
+      // Number.isFinite check, NaN would reach paginate() as `max_rows`,
+      // which falls back to ITS default of 500 — not this tool's 30. With a
+      // 214-point fixture, 500 would return everything untruncated; 30
+      // truncates. That's what this test tells apart.
+      const client = makeClient(make214DailyPoints(), liveDot);
+      const tools = new LiveInvestmentBalanceTools(makeLive(client));
+      const result = await tools.getInvestmentBalance({ history_limit: NaN });
+      expect(result.history).toHaveLength(30);
       expect(result.history_truncated).toBe(true);
     });
 
