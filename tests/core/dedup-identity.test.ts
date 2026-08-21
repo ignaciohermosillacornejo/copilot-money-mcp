@@ -51,6 +51,12 @@ const FIXTURES_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'dedup-identity-'));
 const DB_PATH = path.join(FIXTURES_DIR, 'combined');
 
 /**
+ * `decodeAllCollections` reads every collection in one pass, so it is decoded
+ * once here rather than per assertion.
+ */
+let aggregate: Awaited<ReturnType<typeof decodeAllCollections>>;
+
+/**
  * Each pair is identical in every content field a dedup might reach for and
  * differs only by id. Ids are Firestore-shaped so a dedup can't accidentally
  * succeed by pattern-matching a test-only `_001` suffix.
@@ -98,6 +104,8 @@ beforeAll(async () => {
       target_amount: 5000,
     })),
   });
+
+  aggregate = await decodeAllCollections(DB_PATH);
 });
 
 afterAll(() => {
@@ -160,10 +168,10 @@ describe('dedup keys on identity, not content (#662)', () => {
   }
 
   for (const collection of COLLECTIONS) {
-    test(`${collection.name}: aggregate decode keeps both identical-content documents`, async () => {
-      const all = await decodeAllCollections(DB_PATH);
-
-      expect(idsOf(collection.aggregate(all), collection.idField)).toEqual(new Set(collection.ids));
+    test(`${collection.name}: aggregate decode keeps both identical-content documents`, () => {
+      expect(idsOf(collection.aggregate(aggregate), collection.idField)).toEqual(
+        new Set(collection.ids)
+      );
     });
   }
 });
