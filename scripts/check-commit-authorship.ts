@@ -76,7 +76,12 @@ function isMaintainer(login: string | undefined, email: string | undefined): boo
   return email !== undefined && MAINTAINERS.emails.has(email);
 }
 
-/** Same human, whichever field GitHub managed to resolve. */
+/**
+ * Same human by email. If either address is missing, this returns false and the
+ * committer-is-maintainer check below still catches the legitimate cases,
+ * including login-only matches — so an absent email cannot produce a finding on
+ * its own.
+ */
 function sameIdentity(a: Commit['commit']['author'], b: Commit['commit']['author']): boolean {
   return a.email !== undefined && b.email !== undefined && a.email === b.email;
 }

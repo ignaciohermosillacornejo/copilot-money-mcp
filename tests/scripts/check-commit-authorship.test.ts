@@ -117,6 +117,28 @@ describe('legitimate authorship', () => {
   });
 });
 
+describe('known limits', () => {
+  test('a contributor rebasing a genuine maintainer commit IS flagged, by design', () => {
+    // Rebasing rewrites the committer, so a genuine maintainer commit carried
+    // through a contributor's rebase is indistinguishable from a forgery on the
+    // wire. This pins that as intended rather than as an oversight: the obvious
+    // "fix" — treating a maintainer author with any committer as legitimate —
+    // deletes the detection entirely, which is exactly what an attacker would
+    // want someone to do after hitting this false positive once.
+    const rebasedByContributor = commit({
+      sha: 'ffffffffffffffffffffffffffffffffffffffff',
+      authorName: 'ignaciohermosillacornejo',
+      authorEmail: MAINTAINER_EMAIL,
+      authorLogin: MAINTAINER_LOGIN,
+      committerName: 'gmhoward9289-ops',
+      committerEmail: CONTRIBUTOR_EMAIL,
+      committerLogin: CONTRIBUTOR_LOGIN,
+      subject: 'fix: a genuine maintainer commit, rebased by the contributor',
+    });
+    expect(findForgedAuthorship([rebasedByContributor])).toHaveLength(1);
+  });
+});
+
 describe('forged authorship', () => {
   test('flags a maintainer-authored commit committed by someone else', () => {
     const found = findForgedAuthorship([FORGED]);
