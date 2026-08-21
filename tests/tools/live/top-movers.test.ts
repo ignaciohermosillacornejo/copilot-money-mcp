@@ -30,11 +30,31 @@ const mover = {
   change: 2.5,
 };
 
+// A row with a wider price_points series, used by the terse-default tests
+// (#597 Tier 1) — the point is that the series dominates the row.
+const fatMoverRow = {
+  security: {
+    id: 'sec-2',
+    name: 'Test Corp',
+    symbol: 'TESTX',
+    type: 'EQUITY',
+    currentPrice: 200,
+    lastUpdate: 1_783_900_800_000,
+    marketInfo: { closeTime: null, openTime: null },
+  },
+  values: [
+    { id: 'p1', timestamp: 1752000000000, price: 195 },
+    { id: 'p2', timestamp: 1752086400000, price: 198 },
+    { id: 'p3', timestamp: 1752172800000, price: 200 },
+  ],
+  change: 12.5,
+};
+
 describe('LiveTopMoversTools.getTopMovers', () => {
-  test('projects rows to {security_id, ticker_symbol, name, type, change, price_points}', async () => {
+  test('fields: ["all"] returns the full mapped row, including price_points', async () => {
     const client = makeClient([mover]);
     const tools = new LiveTopMoversTools(makeLive(client));
-    const result = await tools.getTopMovers({});
+    const result = await tools.getTopMovers({ fields: ['all'] });
     expect(result.count).toBe(1);
     expect(result.filter).toBe('MY_EQUITY_CHANGE');
     expect(result.movers[0]).toEqual({
@@ -48,6 +68,20 @@ describe('LiveTopMoversTools.getTopMovers', () => {
         { timestamp: 1752086400000, price: 100 },
       ],
     });
+  });
+
+  test('default movers exclude price_points but keep change (#597 Tier 1)', async () => {
+    const tools = new LiveTopMoversTools(makeLive(makeClient([fatMoverRow])));
+    const result = await tools.getTopMovers({});
+    expect(result.movers[0]).not.toHaveProperty('price_points');
+    expect(result.movers[0]!.change).toBe(12.5);
+    expect(result.movers[0]!.ticker_symbol).toBe('TESTX');
+  });
+
+  test('fields: ["default", "price_points"] restores the series', async () => {
+    const tools = new LiveTopMoversTools(makeLive(makeClient([fatMoverRow])));
+    const result = await tools.getTopMovers({ fields: ['default', 'price_points'] });
+    expect(result.movers[0]!.price_points).toHaveLength(3);
   });
 
   test('empty result returns count=0 without throwing', async () => {
@@ -102,6 +136,17 @@ describe('LiveTopMoversTools.getTopMovers', () => {
     expect(result._cache_oldest_fetched_at).toBe(result._cache_newest_fetched_at);
     expect(result._cache_oldest_fetched_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
+
+  test('the terse default is smaller than the full row (#597 Tier 1)', async () => {
+    const tools = new LiveTopMoversTools(makeLive(makeClient([fatMoverRow])));
+    const terse = await tools.getTopMovers({});
+    const tools2 = new LiveTopMoversTools(makeLive(makeClient([fatMoverRow])));
+    const full = await tools2.getTopMovers({ fields: ['all'] });
+
+    const terseSize = JSON.stringify(terse).length;
+    const fullSize = JSON.stringify(full).length;
+    expect(terseSize).toBeLessThan(fullSize);
+  });
 });
 
 describe('createLiveTopMoversToolSchema', () => {
@@ -113,5 +158,14 @@ describe('createLiveTopMoversToolSchema', () => {
     const props = schema.inputSchema.properties as Record<string, { enum?: string[] }>;
     expect(props.filter?.enum).toEqual(['PRICE_CHANGE', 'MY_EQUITY_CHANGE']);
     expect((schema.inputSchema as { required?: string[] }).required ?? []).toEqual([]);
+  });
+
+  test('fields param schema matches TOP_MOVER_FIELDS_PARAM_SCHEMA and names price_points', async () => {
+    const { createLiveTopMoversToolSchema } = await import('../../../src/tools/live/top-movers.js');
+    const { TOP_MOVER_FIELDS_PARAM_SCHEMA } = await import('../../../src/tools/field-selection.js');
+    const schema = createLiveTopMoversToolSchema();
+    const props = schema.inputSchema.properties as Record<string, unknown>;
+    expect(props.fields).toEqual(TOP_MOVER_FIELDS_PARAM_SCHEMA);
+    expect(TOP_MOVER_FIELDS_PARAM_SCHEMA.description).toContain('price_points');
   });
 });

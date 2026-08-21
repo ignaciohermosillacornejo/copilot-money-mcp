@@ -92,6 +92,33 @@ export const TRANSACTION_FIELDS_PARAM_SCHEMA = {
     '_field_warning.',
 } as const;
 
+/**
+ * Default fields for top-mover rows (#597 Tier 1).
+ *
+ * Excludes `price_points` — the intraday {timestamp, price} series that is
+ * ~95% of a row. A caller asking "what moved today" wants the name and the
+ * change, not the tick data. Unlike get_investment_prices there is nothing to
+ * derive: `change` is already the answer and is a top-level field.
+ */
+export const DEFAULT_TOP_MOVER_FIELDS = [
+  'security_id',
+  'ticker_symbol',
+  'name',
+  'type',
+  'change',
+] as const;
+
+export const TOP_MOVER_FIELDS_PARAM_SCHEMA = {
+  type: 'array',
+  items: { type: 'string' },
+  description:
+    'Return only these fields per mover. Default when omitted: security_id, ticker_symbol, ' +
+    'name, type, change. The intraday tick series (`price_points`: {timestamp, price}) is ' +
+    'EXCLUDED by default because it is roughly 95% of a full row — request it with ' +
+    'fields: ["default", "price_points"], or "all" / "*" for full rows. ' +
+    'Unknown names are omitted and reported via _field_warning.',
+} as const;
+
 /** Token that expands to the caller-supplied preset. */
 const TOKEN_DEFAULT = 'default';
 

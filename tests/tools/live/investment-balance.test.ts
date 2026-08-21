@@ -24,6 +24,19 @@ const hist = [
 ];
 const liveDot = { id: 'live-1', date: '2026-07-15', balance: 10500 };
 
+// 214 ascending daily points ending 2024-08-15, used by the history-capping
+// tests (#597 Tier 1) — the point is that the series dominates the row and
+// the fixture needs to be wide enough for the default 30-point cap to bite.
+function make214DailyPoints(): { id: string; date: string; balance: number }[] {
+  const end = Date.UTC(2024, 7, 15); // 2024-08-15 (month is 0-indexed)
+  const points: { id: string; date: string; balance: number }[] = [];
+  for (let i = 0; i < 214; i++) {
+    const d = new Date(end - (213 - i) * 86_400_000);
+    points.push({ id: `bal_${i}`, date: d.toISOString().slice(0, 10), balance: 10000 + i });
+  }
+  return points;
+}
+
 describe('LiveInvestmentBalanceTools.getInvestmentBalance', () => {
   test('combines current (live dot) + history (sorted ascending by date)', async () => {
     const client = makeClient(hist, liveDot);
@@ -106,6 +119,75 @@ describe('LiveInvestmentBalanceTools.getInvestmentBalance', () => {
     expect(result._cache_oldest_fetched_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(result._cache_newest_fetched_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
+
+  describe('history capping (#597 Tier 1)', () => {
+    test('history defaults to the last 30 points and reports truncation', async () => {
+      const client = makeClient(make214DailyPoints(), liveDot);
+      const tools = new LiveInvestmentBalanceTools(makeLive(client));
+      const result = await tools.getInvestmentBalance({});
+      expect(result.history).toHaveLength(30);
+      expect(result.history.at(-1)?.date).toBe('2024-08-15'); // newest retained
+      expect(result.history_total_count).toBe(214);
+      expect(result.history_truncated).toBe(true);
+    });
+
+    test('history_limit: 0 returns the full series untruncated', async () => {
+      const client = makeClient(make214DailyPoints(), liveDot);
+      const tools = new LiveInvestmentBalanceTools(makeLive(client));
+      const result = await tools.getInvestmentBalance({ history_limit: 0 });
+      expect(result.history).toHaveLength(214);
+      expect(result.history_truncated).toBe(false);
+    });
+
+    test('current (the live dot) survives truncation — resolved from a separate query, not history', async () => {
+      const client = makeClient(make214DailyPoints(), liveDot);
+      const tools = new LiveInvestmentBalanceTools(makeLive(client));
+      const result = await tools.getInvestmentBalance({});
+      expect(result.current).toEqual({ date: '2026-07-15', balance: 10500 });
+    });
+
+    test('an explicit history_limit smaller than the series caps at that count', async () => {
+      const client = makeClient(make214DailyPoints(), liveDot);
+      const tools = new LiveInvestmentBalanceTools(makeLive(client));
+      const result = await tools.getInvestmentBalance({ history_limit: 5 });
+      expect(result.history).toHaveLength(5);
+      expect(result.history.at(-1)?.date).toBe('2024-08-15');
+      expect(result.history_truncated).toBe(true);
+    });
+
+    test('history_limit larger than the series returns everything, untruncated', async () => {
+      const client = makeClient(hist, liveDot); // only 2 points
+      const tools = new LiveInvestmentBalanceTools(makeLive(client));
+      const result = await tools.getInvestmentBalance({ history_limit: 30 });
+      expect(result.history).toHaveLength(2);
+      expect(result.history_total_count).toBe(2);
+      expect(result.history_truncated).toBe(false);
+    });
+
+    test('a negative history_limit clamps to 1 rather than throwing or slicing backwards', async () => {
+      // Mirrors clampMaxRows' convention (src/utils/pagination.ts): a
+      // malformed value degrades to "as few as possible", not to unlimited.
+      const client = makeClient(make214DailyPoints(), liveDot);
+      const tools = new LiveInvestmentBalanceTools(makeLive(client));
+      const result = await tools.getInvestmentBalance({ history_limit: -5 });
+      expect(result.history).toHaveLength(1);
+      expect(result.history[0]?.date).toBe('2024-08-15');
+      expect(result.history_truncated).toBe(true);
+    });
+
+    test('the capped default is smaller than the full series', async () => {
+      const client = makeClient(make214DailyPoints(), liveDot);
+      const tools = new LiveInvestmentBalanceTools(makeLive(client));
+      const capped = await tools.getInvestmentBalance({});
+      const client2 = makeClient(make214DailyPoints(), liveDot);
+      const tools2 = new LiveInvestmentBalanceTools(makeLive(client2));
+      const full = await tools2.getInvestmentBalance({ history_limit: 0 });
+
+      const cappedSize = JSON.stringify(capped).length;
+      const fullSize = JSON.stringify(full).length;
+      expect(cappedSize).toBeLessThan(fullSize);
+    });
+  });
 });
 
 describe('createLiveInvestmentBalanceToolSchema', () => {
@@ -119,5 +201,18 @@ describe('createLiveInvestmentBalanceToolSchema', () => {
     const props = schema.inputSchema.properties as Record<string, { enum?: string[] }>;
     expect(props.time_frame?.enum).toEqual([...ALL_TIME_FRAMES]);
     expect((schema.inputSchema as { required?: string[] }).required ?? []).toEqual([]);
+  });
+
+  test('history_limit param: integer, default 30, names `history` as the excluded/capped token', async () => {
+    const { createLiveInvestmentBalanceToolSchema } =
+      await import('../../../src/tools/live/investment-balance.js');
+    const schema = createLiveInvestmentBalanceToolSchema();
+    const props = schema.inputSchema.properties as Record<
+      string,
+      { type?: string; default?: unknown; description?: string }
+    >;
+    expect(props.history_limit?.type).toBe('integer');
+    expect(props.history_limit?.default).toBe(30);
+    expect(props.history_limit?.description).toContain('history');
   });
 });
