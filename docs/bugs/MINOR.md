@@ -54,4 +54,5 @@ Promote a row to a full entry if a later instance turns out to be user-visible.
 | #588 | Stale tool-count figures in `package.json` and two docs | `doc-reality-drift` | #588 |
 | #612 | Decoder unread-field drift: the server added a `_migration_backfill` marker | `external-api-drift` | #612 |
 | #619 | The privacy-endpoint scanner's comment stripper could be blinded by delimiters inside string literals — a false negative in a brand-new detector | `vacuous-assertion` | #619 |
+| #641 | Meta-index cap valve stranded its `.pid.tmp` when the rename threw after a successful write — latent, no report | `stranded-artifact` | #670 |
 | #645 | The db-unavailable dispatch refusal omitted `isError`, so MCP clients saw a successful call carrying an error message — the one green guard among four | `silent-failure-masking` | #646 |

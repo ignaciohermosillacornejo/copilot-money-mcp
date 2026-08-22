@@ -95,6 +95,7 @@ a class yet.
 | `packaging-environment-mismatch` | The shipped artifact works in dev but fails in the target runtime — missing bundled deps, hardened-runtime constraints, GUI PATH. | `tests/integration/mcpb-bundle.test.ts` (extract-and-boot outside the repo) |
 | `unsettled-promise` | An async operation has a completion path where neither resolve nor reject fires, hanging callers forever. | none |
 | `deferred-cleanup-never-runs` | Releasing a resource is deferred to a timer or callback that only fires if the process outlives it — in a process that routinely exits first. The resource is acquired eagerly and released never, while every same-process test still observes correct bookkeeping. | none — instance-only; the class is a deployment property (does this process outlive its own timers?) that no static check here can evaluate |
+| `stranded-artifact` | An artifact created as a step toward a durable operation — a temp copy, a `.tmp` awaiting rename — outlives a failure that lands between its creation and the operation completing, because the failure path handles the error but not the artifact. Sibling of `deferred-cleanup-never-runs`: same litter, reached through a failure branch rather than a timer that never fires. | write-then-rename sweep (`tests/core/write-then-rename-sweep.test.ts`): the idiom is structurally confined to `writeFileAtomic`, whose failure-path cleanup is unit-tested through an ops seam |
 | `unbounded-trusted-payload` | A budgeted or validated surface embeds a value whose size or shape is guaranteed only by convention, because the only writer it has met is well-behaved. The guarantee holds until something else writes the file. | partial — `tests/context-budget.test.ts` measures the populated branch against a maximal legitimate input, for this surface only; no sweep across budgeted responses that embed external files |
 | `alarm-by-fallthrough` | A classifier recognizes a few signatures and routes *everything else* into its most alarming state, so any unmodelled failure is reported as the specific serious condition the detector exists to find. The inverse of `silent-failure-masking`: unknown becomes red rather than green, and the alarm stops correlating with the condition it names. | `tests/scripts/scheduled-smoke.test.ts` (mutation-verified): `fail` is reachable only when the output carries a drift-verdict marker, asserted over a corpus of every real non-drift failure mode |
 | `overbroad-precondition-gate` | A precondition for one resource is checked at a shared chokepoint (dispatch, startup) for all requests, including those whose handling never uses the resource — so any configuration where the resource is legitimately absent is fully locked out. | registry-walk sweep in `tests/integration/live-reads.test.ts` (mutation-verified): every live tool and live-mode write must dispatch past the local-cache gate with the cache absent |
@@ -298,9 +299,12 @@ record near-misses.
 | | Bug | Found by | Date |
 |---|---|---|---|
 | #631 | [Every LevelDB read left its ~120 MB temp copy on disk — 366 stale directories (~33 GB) filled a user's disk](631-temp-copy-deferred-cleanup.md) | `user-report` | 2026-08-12 |
+
 **`unbounded-trusted-payload`** — 1
 
-- [#638 — a context-budget assertion counted bytes it did not own](638-unbounded-trusted-payload-in-budgeted-response.md)
+| | Bug | Found by | Date |
+|---|---|---|---|
+| #638 | [A context-budget assertion counted bytes it did not own](638-unbounded-trusted-payload-in-budgeted-response.md) | `incidental` | 2026-08-12 |
 
 **`overbroad-precondition-gate`** — 1
 

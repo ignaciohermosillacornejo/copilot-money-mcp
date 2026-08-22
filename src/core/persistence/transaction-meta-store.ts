@@ -16,16 +16,9 @@
  * Opt-out: COPILOT_DISABLE_PERSISTENT_INDEX=1.
  */
 
-import {
-  appendFileSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  statSync,
-  writeFileSync,
-} from 'fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'fs';
 import { join } from 'path';
+import { writeFileAtomic } from '../../utils/atomic-write.js';
 
 type Meta = { accountId: string; itemId: string };
 
@@ -154,9 +147,7 @@ export class TransactionMetaStore {
       // past its logical content; rewrite deduped once, atomically.
       if (statSync(file).size > this.maxBytes) {
         try {
-          const tmp = `${file}.${process.pid}.tmp`;
-          writeFileSync(tmp, this.serialize(out));
-          renameSync(tmp, file);
+          writeFileAtomic(file, this.serialize(out));
         } catch (e) {
           if (!this.warnedCapValveUids.has(uid)) {
             this.warnedCapValveUids.add(uid);
