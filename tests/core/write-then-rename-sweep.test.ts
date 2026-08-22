@@ -34,9 +34,18 @@ describe('write-then-rename sweep (#641)', () => {
       const rel = file.slice(SRC_ROOT.length + 1);
       if (ALLOWED.has(rel)) continue;
       const text = readFileSync(file, 'utf8');
-      if (/\brenameSync\b|\brename\s*\(/.test(text)) offenders.push(rel);
+      // Three real spellings: the named import (aliased imports still trip on
+      // the import line), fs.promises.rename, and fs/fsp-namespaced rename.
+      // Deliberately NOT a bare `rename(` — prose comments and unrelated
+      // domain functions named rename() must not fail CI (review on #670).
+      if (/\brenameSync\b|\bpromises\s*\.\s*rename\b|\bfsp?\s*\.\s*rename\s*\(/.test(text)) {
+        offenders.push(rel);
+      }
     }
-    expect(offenders).toEqual([]);
+    expect(
+      offenders,
+      'write-then-rename must go through writeFileAtomic (src/utils/atomic-write.ts) — see #641'
+    ).toEqual([]);
   });
 
   test('the allowed file still exists and still owns the idiom', () => {

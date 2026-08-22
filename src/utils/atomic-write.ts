@@ -26,6 +26,11 @@ const REAL_OPS: AtomicWriteOps = { writeFileSync, renameSync, rmSync };
  * Write `data` to `${file}.${pid}.tmp`, then rename over `file`. If either
  * step throws, the tmp is best-effort removed before the error propagates —
  * the caller owns the failure policy, this helper owns not littering.
+ *
+ * Scope of the guarantee: atomic against concurrent READERS, not durable
+ * across a crash (no fsync on the tmp or its directory), and the target's
+ * mode is NOT preserved — the tmp's default-umask mode replaces it. A
+ * mode-sensitive caller (e.g. a 0o600 token file) must chmod afterwards.
  */
 export function writeFileAtomic(file: string, data: string, ops: AtomicWriteOps = REAL_OPS): void {
   const tmp = `${file}.${process.pid}.tmp`;
