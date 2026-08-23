@@ -9,9 +9,9 @@
  * categories) plus the freshness-envelope fields.
  *
  * v3 (#597 Tier 1): the embedded `budget` object ({current, histories} — a
- * full monthly series per category) is ~62% of a row and duplicates
- * get_budgets_live. It is EXCLUDED from the default row via the shared
- * field-selection engine (DEFAULT_CATEGORY_LIVE_FIELDS in
+ * full monthly series per category) is, per the #597 audit's estimate, ~62%
+ * of a row, and duplicates get_budgets_live. It is EXCLUDED from the default
+ * row via the shared field-selection engine (DEFAULT_CATEGORY_LIVE_FIELDS in
  * src/tools/field-selection.ts); the one number callers actually read,
  * `budget.current.amount`, is derived onto the row as `budget_amount` before
  * projection runs. `include_history` (unchanged) governs a separate

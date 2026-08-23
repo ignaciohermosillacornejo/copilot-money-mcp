@@ -35,7 +35,8 @@ export const DEFAULT_TRANSACTION_FIELDS = [
  * The default field set for investment-price rows (#605).
  *
  * Deliberately excludes `prices` — the nested epoch-millis series that is
- * most of a row (~75-90%, depending on how many points the period carries) —
+ * most of a row (measured at ~75% on a 100-row page against a real cache;
+ * proportionally larger for securities whose period carries more points) —
  * and carries the derived `latest_price`/`latest_at`
  * instead, so a terse row still answers "what is this security worth".
  * `date` and `month` are both listed because a row has exactly one of them
@@ -95,10 +96,12 @@ export const TRANSACTION_FIELDS_PARAM_SCHEMA = {
 /**
  * Default fields for top-mover rows (#597 Tier 1).
  *
- * Excludes `price_points` — the intraday {timestamp, price} series that is
- * ~95% of a row. A caller asking "what moved today" wants the name and the
- * change, not the tick data. Unlike get_investment_prices there is nothing to
- * derive: `change` is already the answer and is a top-level field.
+ * Excludes `price_points` — the intraday {timestamp, price} series measured
+ * at ~94.7% of the response on a synthetic fixture (20 movers x 50 price
+ * points each; see CHANGELOG). A caller asking "what moved today" wants the
+ * name and the change, not the tick data. Unlike get_investment_prices there
+ * is nothing to derive: `change` is already the answer and is a top-level
+ * field.
  */
 export const DEFAULT_TOP_MOVER_FIELDS = [
   'security_id',
@@ -114,7 +117,8 @@ export const TOP_MOVER_FIELDS_PARAM_SCHEMA = {
   description:
     'Return only these fields per mover. Default when omitted: security_id, ticker_symbol, ' +
     'name, type, change. The intraday tick series (`price_points`: {timestamp, price}) is ' +
-    'EXCLUDED by default because it is roughly 95% of a full row — request it with ' +
+    'EXCLUDED by default — measured at ~94.7% of the response on a synthetic fixture (20 ' +
+    'movers x 50 price points each) — request it with ' +
     'fields: ["default", "price_points"], or "all" / "*" for full rows. ' +
     'Unknown names are omitted and reported via _field_warning.',
 } as const;
@@ -123,10 +127,11 @@ export const TOP_MOVER_FIELDS_PARAM_SCHEMA = {
  * Default fields for live category rows (#597 Tier 1).
  *
  * Excludes the embedded `budget` object ({current, histories} — a full
- * monthly series per category, ~62% of a row and a duplicate of what
- * get_budgets_live returns). The one number callers actually read,
- * `budget.current.amount`, is derived onto the row as `budget_amount` so the
- * terse row still answers "what is this category budgeted at".
+ * monthly series per category, the #597 audit estimated ~62% of a row, and a
+ * duplicate of what get_budgets_live returns). The one number callers
+ * actually read, `budget.current.amount`, is derived onto the row as
+ * `budget_amount` so the terse row still answers "what is this category
+ * budgeted at".
  */
 export const DEFAULT_CATEGORY_LIVE_FIELDS = [
   'id',
@@ -143,10 +148,10 @@ export const CATEGORY_LIVE_FIELDS_PARAM_SCHEMA = {
   description:
     'Return only these fields per category. Default when omitted: id, parentId, name, ' +
     'colorName, isExcluded, budget_amount. The embedded `budget` object (`{current, ' +
-    'histories}` — a full monthly series) is EXCLUDED by default because it is ~62% of a row ' +
-    'and duplicates get_budgets_live — the single number most callers want, ' +
-    '`budget.current.amount`, is already on the row as `budget_amount`. Request the full ' +
-    'object with fields: ["default", "budget"], or "all" / "*" for full rows. ' +
+    'histories}` — a full monthly series) is EXCLUDED by default because the #597 audit ' +
+    'estimated it at ~62% of a row, and it duplicates get_budgets_live — the single number ' +
+    'most callers want, `budget.current.amount`, is already on the row as `budget_amount`. ' +
+    'Request the full object with fields: ["default", "budget"], or "all" / "*" for full rows. ' +
     'Unknown names are omitted and reported via _field_warning.',
 } as const;
 

@@ -347,7 +347,11 @@ describe('LiveCategoriesTools.getCategories — v3 budget diet (#597 T1)', () =>
 
     const terseSize = JSON.stringify(terse).length;
     const fullSize = JSON.stringify(full).length;
-    expect(terseSize).toBeLessThan(fullSize);
+    // Meaningful ratio, not just any smaller: on this fixture terse/full is
+    // ~275/726 (~2.6x), so `fullSize / 2` leaves ample margin while still
+    // failing a one-character-smaller regression. The verbatim-preset test
+    // above is the real shape guard; this one guards the size claim itself.
+    expect(terseSize).toBeLessThan(fullSize / 2);
   });
 });
 
@@ -490,6 +494,12 @@ describe('createLiveCategoriesToolSchema', () => {
     const schema = createLiveCategoriesToolSchema();
     const props = schema.inputSchema.properties as Record<string, unknown>;
     expect(props.fields).toEqual(CATEGORY_LIVE_FIELDS_PARAM_SCHEMA);
-    expect(CATEGORY_LIVE_FIELDS_PARAM_SCHEMA.description).toContain('budget');
+    // Distinctive phrases only present in the exclusion sentence itself —
+    // 'budget' alone is a substring of 'budget_amount' (default field list)
+    // and of the literal `"budget"` token (opt-back-in example), both of
+    // which survive deleting the exclusion sentence, so a bare
+    // toContain('budget') guards nothing.
+    expect(CATEGORY_LIVE_FIELDS_PARAM_SCHEMA.description).toContain('EXCLUDED by default');
+    expect(CATEGORY_LIVE_FIELDS_PARAM_SCHEMA.description).toContain('`budget` object');
   });
 });
