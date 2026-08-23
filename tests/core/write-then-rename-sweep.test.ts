@@ -34,11 +34,23 @@ describe('write-then-rename sweep (#641)', () => {
       const rel = file.slice(SRC_ROOT.length + 1);
       if (ALLOWED.has(rel)) continue;
       const text = readFileSync(file, 'utf8');
-      // Three real spellings: the named import (aliased imports still trip on
-      // the import line), fs.promises.rename, and fs/fsp-namespaced rename.
+      // Four spellings, all real: the named import (aliased imports still
+      // trip on the import line), fs.promises.rename, fs/fsp-namespaced
+      // rename, and a destructured `import { rename } from 'fs/promises'`
+      // — which carries no renameSync token at all, so it needs the
+      // import-shape alternative to be seen.
+      //
       // Deliberately NOT a bare `rename(` — prose comments and unrelated
-      // domain functions named rename() must not fail CI (review on #670).
-      if (/\brenameSync\b|\bpromises\s*\.\s*rename\b|\bfsp?\s*\.\s*rename\s*\(/.test(text)) {
+      // domain functions named rename() must not fail CI. The import shape
+      // is safe from that: `\brename\b` inside the brace list cannot match
+      // `renameSync` (the S blocks the trailing boundary), and the required
+      // `from 'fs…'` tail means prose cannot trip it. (Both rounds of the
+      // #670 review.)
+      if (
+        /\brenameSync\b|\bpromises\s*\.\s*rename\b|\bfsp?\s*\.\s*rename\s*\(|import\s*\{[^}]*\brename\b[^}]*\}\s*from\s*['"](?:node:)?fs(?:\/promises)?['"]/.test(
+          text
+        )
+      ) {
         offenders.push(rel);
       }
     }
