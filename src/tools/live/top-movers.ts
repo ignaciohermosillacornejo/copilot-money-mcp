@@ -19,12 +19,13 @@
  * Live-verified (#540 Task 4, live round-trip against a real session):
  * `timestamp` is epoch milliseconds.
  *
- * v3 (#597 Tier 1): `price_points` is ~95% of a row and is EXCLUDED by
- * default via the shared field-selection engine (DEFAULT_TOP_MOVER_FIELDS in
- * src/tools/field-selection.ts). `change` is already top-level and needs no
- * derivation, so this is a straight `projectRows` application — unlike
- * get_investment_prices there is no "what does this row mean without the
- * series" problem to solve.
+ * v3 (#597 Tier 1): `price_points` (measured at ~94.7% of the response on a
+ * synthetic fixture — 20 movers x 50 price points each; see CHANGELOG) is
+ * EXCLUDED by default via the shared field-selection engine
+ * (DEFAULT_TOP_MOVER_FIELDS in src/tools/field-selection.ts). `change` is
+ * already top-level and needs no derivation, so this is a straight
+ * `projectRows` application — unlike get_investment_prices there is no "what
+ * does this row mean without the series" problem to solve.
  */
 
 import type { LiveCopilotDatabase } from '../../core/live-database.js';
