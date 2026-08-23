@@ -108,7 +108,14 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // not bloat. Measured 4_090 after review amendments (~7% headroom).
   get_transactions_live: 4_370,
   get_accounts_live: 570,
-  get_categories_live: 1_555,
+  // Raised from 1_555 by #597 Tier 1: adds the `fields` param (excludes the
+  // embedded `budget` object — {current, histories}, ~62% of a row and a
+  // duplicate of get_budgets_live — from the default row, replacing it with
+  // a derived `budget_amount`) plus a description sentence naming the
+  // excluded token, per the #597 convention that a generic selection param
+  // must say what "default" leaves out. Measured 2_123 (~10% headroom).
+  // Real new capability, not bloat.
+  get_categories_live: 2_335,
   get_tags_live: 530,
   get_budgets_live: 905,
   get_recurring_live: 755,

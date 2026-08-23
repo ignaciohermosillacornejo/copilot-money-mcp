@@ -3,7 +3,10 @@ import type { GraphQLClient } from '../../../src/core/graphql/client.js';
 import { CopilotDatabase } from '../../../src/core/database.js';
 import { LiveCopilotDatabase } from '../../../src/core/live-database.js';
 import { LiveCategoriesTools } from '../../../src/tools/live/categories.js';
-import type { CategoryNode } from '../../../src/core/graphql/queries/categories.js';
+import type {
+  CategoryNode,
+  CategoryBudgetMonthly,
+} from '../../../src/core/graphql/queries/categories.js';
 
 function makeClient(rows: unknown[]): GraphQLClient {
   // Single-shape mock: every query (User, Categories, ...) returns the same
@@ -177,13 +180,18 @@ describe('LiveCategoriesTools.getCategories', () => {
     const live = makeLive(makeClient([fixture]));
     const tools = new LiveCategoriesTools(live);
 
-    const result = await tools.getCategories({});
+    // v3 (#597 Tier 1): `budget` is no longer on the row at all unless
+    // `fields` asks for it — request it explicitly here so this test can
+    // still exercise the include_history stripping behavior it's named for.
+    const result = await tools.getCategories({ fields: ['default', 'budget'] });
 
     expect(result.count).toBe(1);
     // Default behavior: histories must be stripped to keep response small.
     expect(result.categories[0]?.budget?.histories).toEqual([]);
     // Current month is preserved.
     expect(result.categories[0]?.budget?.current?.amount).toBe(500);
+    // budget_amount is derived regardless of the histories strip.
+    expect(result.categories[0]?.budget_amount).toBe(500);
 
     // Cache must NOT be mutated — second read should still see histories
     // (verifies the projection clones rather than mutates).
@@ -223,10 +231,123 @@ describe('LiveCategoriesTools.getCategories', () => {
     const live = makeLive(makeClient([fixture]));
     const tools = new LiveCategoriesTools(live);
 
-    const result = await tools.getCategories({ include_history: true });
+    // v3 (#597 Tier 1): `budget` is no longer on the row at all unless
+    // `fields` asks for it — request it explicitly alongside include_history.
+    const result = await tools.getCategories({
+      include_history: true,
+      fields: ['default', 'budget'],
+    });
 
     expect(result.categories[0]?.budget?.histories).toHaveLength(1);
     expect(result.categories[0]?.budget?.histories[0]?.month).toBe('2026-04');
+  });
+});
+
+// v3 (#597 Tier 1): the `budget` object ({current, histories}) is ~62% of a
+// row and duplicates get_budgets_live. Default rows now carry a derived
+// `budget_amount` instead; the full object is opt-in via `fields`.
+describe('LiveCategoriesTools.getCategories — v3 budget diet (#597 T1)', () => {
+  function budgetMonth(
+    overrides: Partial<{ month: string; id: string; amount: number | null }>
+  ): CategoryBudgetMonthly {
+    return {
+      unassignedRolloverAmount: null,
+      childRolloverAmount: null,
+      unassignedAmount: null,
+      resolvedAmount: overrides.amount ?? 400,
+      rolloverAmount: 0,
+      childAmount: null,
+      goalAmount: 0,
+      amount: overrides.amount ?? 400,
+      month: overrides.month ?? '2026-05',
+      id: overrides.id ?? 'budget-current-id',
+    };
+  }
+
+  const categoryWithBudget: CategoryNode = {
+    id: 'cat-budget-1',
+    parentId: null,
+    name: 'Test Category',
+    templateId: 'TestCategory',
+    colorName: 'ORANGE2',
+    icon: { __typename: 'EmojiUnicode', unicode: '📦' },
+    isExcluded: false,
+    isRolloverDisabled: false,
+    canBeDeleted: true,
+    budget: {
+      current: budgetMonth({ amount: 400 }),
+      histories: [
+        budgetMonth({ month: '2026-04', id: 'budget-history-1', amount: 400 }),
+        budgetMonth({ month: '2026-03', id: 'budget-history-2', amount: 400 }),
+        budgetMonth({ month: '2026-02', id: 'budget-history-3', amount: 400 }),
+      ],
+    },
+  };
+
+  const categoryWithoutBudget: CategoryNode = {
+    id: 'cat-no-budget-1',
+    parentId: null,
+    name: 'No Budget Category',
+    templateId: null,
+    colorName: 'BLUE2',
+    icon: null,
+    isExcluded: false,
+    isRolloverDisabled: false,
+    canBeDeleted: true,
+    budget: null,
+  };
+
+  // NOTE: the task brief's Step 2 test snippets call these with
+  // `{ include_budget: true }`, which is not a real GetCategoriesLiveArgs
+  // field — the toggle that actually exists is `include_history` (controls
+  // whether budget.histories survives when `budget` ends up in the response
+  // at all; orthogonal to whether it's in the response, which the new
+  // `fields` default below controls). Substituted 1:1 below; the assertions
+  // are verbatim from the brief.
+  test('default rows carry derived budget_amount, not the budget object', async () => {
+    const tools = new LiveCategoriesTools(makeLive(makeClient([categoryWithBudget])));
+    const result = await tools.getCategories({ include_history: true });
+    expect(result.categories[0]).not.toHaveProperty('budget');
+    expect(result.categories[0]?.budget_amount).toBe(400);
+  });
+
+  test('budget_amount is null when the category has no budget', async () => {
+    const tools = new LiveCategoriesTools(makeLive(makeClient([categoryWithoutBudget])));
+    const result = await tools.getCategories({ include_history: true });
+    expect(result.categories[0]?.budget_amount).toBeNull();
+  });
+
+  test('fields: ["default", "budget"] restores the full object', async () => {
+    const tools = new LiveCategoriesTools(makeLive(makeClient([categoryWithBudget])));
+    const result = await tools.getCategories({
+      include_history: true,
+      fields: ['default', 'budget'],
+    });
+    expect(result.categories[0]?.budget?.histories).toHaveLength(3);
+  });
+
+  test('default rows omit templateId/icon/isRolloverDisabled/canBeDeleted (verbatim preset)', async () => {
+    const tools = new LiveCategoriesTools(makeLive(makeClient([categoryWithBudget])));
+    const result = await tools.getCategories({});
+    expect(result.categories[0]).toEqual({
+      id: 'cat-budget-1',
+      parentId: null,
+      name: 'Test Category',
+      colorName: 'ORANGE2',
+      isExcluded: false,
+      budget_amount: 400,
+    });
+  });
+
+  test('the terse default is smaller than the full row (#597 Tier 1)', async () => {
+    const terseTools = new LiveCategoriesTools(makeLive(makeClient([categoryWithBudget])));
+    const terse = await terseTools.getCategories({ include_history: true });
+    const fullTools = new LiveCategoriesTools(makeLive(makeClient([categoryWithBudget])));
+    const full = await fullTools.getCategories({ include_history: true, fields: ['all'] });
+
+    const terseSize = JSON.stringify(terse).length;
+    const fullSize = JSON.stringify(full).length;
+    expect(terseSize).toBeLessThan(fullSize);
   });
 });
 
@@ -355,5 +476,20 @@ describe('createLiveCategoriesToolSchema', () => {
     const schema = createLiveCategoriesToolSchema();
     expect(schema.name).toBe('get_categories_live');
     expect(schema.annotations?.readOnlyHint).toBe(true);
+  });
+
+  // v3 (#597 Tier 1): pins the fields param fragment to the shared preset and
+  // guards that the description names the excluded `budget` token — a
+  // generic `fields` param is otherwise undiscoverable (see the convention
+  // note on #597).
+  test('fields param schema matches CATEGORY_LIVE_FIELDS_PARAM_SCHEMA and names budget', async () => {
+    const { createLiveCategoriesToolSchema } =
+      await import('../../../src/tools/live/categories.js');
+    const { CATEGORY_LIVE_FIELDS_PARAM_SCHEMA } =
+      await import('../../../src/tools/field-selection.js');
+    const schema = createLiveCategoriesToolSchema();
+    const props = schema.inputSchema.properties as Record<string, unknown>;
+    expect(props.fields).toEqual(CATEGORY_LIVE_FIELDS_PARAM_SCHEMA);
+    expect(CATEGORY_LIVE_FIELDS_PARAM_SCHEMA.description).toContain('budget');
   });
 });
