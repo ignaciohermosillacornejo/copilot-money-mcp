@@ -119,6 +119,37 @@ export const TOP_MOVER_FIELDS_PARAM_SCHEMA = {
     'Unknown names are omitted and reported via _field_warning.',
 } as const;
 
+/**
+ * Default fields for live category rows (#597 Tier 1).
+ *
+ * Excludes the embedded `budget` object ({current, histories} — a full
+ * monthly series per category, ~62% of a row and a duplicate of what
+ * get_budgets_live returns). The one number callers actually read,
+ * `budget.current.amount`, is derived onto the row as `budget_amount` so the
+ * terse row still answers "what is this category budgeted at".
+ */
+export const DEFAULT_CATEGORY_LIVE_FIELDS = [
+  'id',
+  'parentId',
+  'name',
+  'colorName',
+  'isExcluded',
+  'budget_amount',
+] as const;
+
+export const CATEGORY_LIVE_FIELDS_PARAM_SCHEMA = {
+  type: 'array',
+  items: { type: 'string' },
+  description:
+    'Return only these fields per category. Default when omitted: id, parentId, name, ' +
+    'colorName, isExcluded, budget_amount. The embedded `budget` object (`{current, ' +
+    'histories}` — a full monthly series) is EXCLUDED by default because it is ~62% of a row ' +
+    'and duplicates get_budgets_live — the single number most callers want, ' +
+    '`budget.current.amount`, is already on the row as `budget_amount`. Request the full ' +
+    'object with fields: ["default", "budget"], or "all" / "*" for full rows. ' +
+    'Unknown names are omitted and reported via _field_warning.',
+} as const;
+
 /** Token that expands to the caller-supplied preset. */
 const TOKEN_DEFAULT = 'default';
 
