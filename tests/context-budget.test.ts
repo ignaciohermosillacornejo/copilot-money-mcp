@@ -542,7 +542,26 @@ async function runTool(name: string): Promise<unknown> {
   // inverses for the plain JSON-safe values every tool returns (stable
   // number formatting, stable key order), so `JSON.stringify(JSON.parse(text)).length
   // === text.length` — the round trip is length-faithful to the wire text.
-  return JSON.parse(firstText(result));
+  const text = firstText(result);
+  const parsed = JSON.parse(text) as unknown;
+  // That equality only holds while src/server.ts serializes compact
+  // (JSON.stringify with no indent). If the serialization site ever grows
+  // pretty-printing or any other pure-formatting change, re-stringifying the
+  // parsed value here would silently measure the OLD (compact) size while
+  // callers receive the NEW (larger) one — exactly the "server transformation
+  // invisible to the harness" blindness this task exists to close, reopened
+  // for whitespace. Assert the round trip in code, not just in this comment,
+  // so that drift fails loudly instead of quietly under-counting.
+  if (JSON.stringify(parsed).length !== text.length) {
+    throw new Error(
+      `handleCallTool('${name}') response is no longer compact round-trip faithful ` +
+        '(JSON.stringify(JSON.parse(text)).length !== text.length). This usually means ' +
+        'src/server.ts changed how it serializes tool results (e.g. added pretty-printing). ' +
+        'Re-derive this measurement to read text.length directly instead of relying on the ' +
+        'round trip, and re-baseline every budget in this file against the new byte counts.'
+    );
+  }
+  return parsed;
 }
 
 describe('context-budget ratchet (#597)', () => {

@@ -8,9 +8,12 @@
  *
  * `registerContextBudgetChecks` is deliberately generic over the tool list,
  * the budget table, and how a measurable result is obtained for one tool:
- * cache-mode reads call `def.handler(ctx, args)` directly; a live suite is
- * expected to go through a stubbed server call instead. Neither case is
- * hard-coded here.
+ * both the cache-mode suite (tests/context-budget.test.ts) and the live-tool
+ * suite (tests/context-budget-live.test.ts) route their `getResult` through
+ * `server.handleCallTool(...)` against a stubbed/fixture-backed server, so
+ * the measured size reflects every src/server.ts transformation, not just a
+ * handler's bare return value. Neither case is hard-coded here — this
+ * helper only takes a tool list, a budget table, and a result-getter.
  */
 
 import { test, expect } from 'bun:test';
