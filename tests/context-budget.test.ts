@@ -35,6 +35,7 @@ import { ALL_TOOL_DEFS, type ToolContext } from '../src/tools/registry/index.js'
 import { CopilotDatabase } from '../src/core/database.js';
 import { CopilotMoneyTools } from '../src/tools/tools.js';
 import { createCombinedDb, cleanupTestDb } from './helpers/test-db.js';
+import { serializedSize, registerContextBudgetChecks } from './helpers/context-budget.js';
 import { SCHEDULED_SMOKE_REPORT_MAX_CHARS } from '../src/utils/scheduled-smoke-status.js';
 
 const DB_PATH = path.join(__dirname, 'fixtures/context-budget-db');
@@ -471,11 +472,6 @@ afterAll(() => {
   smokeStatusDir = null;
 });
 
-/** Serialize exactly like `src/server.ts` does for tool responses. */
-function serializedSize(result: unknown): number {
-  return JSON.stringify(result).length;
-}
-
 describe('soft-deleted transaction reads (#609)', () => {
   test('exclude deleted rows from list and transaction_id lookup', async () => {
     const listed = await ctx.tools.getTransactions({ limit: 100 });
@@ -509,29 +505,13 @@ async function runTool(name: string): Promise<unknown> {
 
 describe('context-budget ratchet (#597)', () => {
   describe('response-size budgets (cache-mode read tools, synthetic DB)', () => {
-    test('budget table covers exactly the eligible read tools (completeness guard)', () => {
-      const names = eligibleReadDefs.map((def) => def.name).sort();
-      // Guard against a vacuously-empty filter: the table itself is the floor.
-      expect(names.length).toBeGreaterThan(0);
-      // Bidirectional: a new read tool without a budget fails, and so does a
-      // stale budget entry for a removed/renamed tool.
-      expect(Object.keys(RESPONSE_BUDGETS).sort()).toEqual(names);
+    registerContextBudgetChecks({
+      defs: eligibleReadDefs,
+      budgets: RESPONSE_BUDGETS,
+      getResult: (def) => runTool(def.name),
+      subject: 'eligible read tools',
+      kind: 'response',
     });
-
-    for (const def of eligibleReadDefs) {
-      test(`${def.name} response stays within budget`, async () => {
-        const result = await runTool(def.name);
-        const size = serializedSize(result);
-        if (process.env.CONTEXT_BUDGET_PRINT) {
-          console.log(`[response] ${def.name}: ${size} chars`);
-        }
-        expect(size).toBeGreaterThan(0);
-        // `?? 0` is belt-and-braces: the completeness guard already fails on a
-        // missing entry; the zero fallback just guarantees this per-tool test
-        // can never pass vacuously against an absent budget.
-        expect(size).toBeLessThanOrEqual(RESPONSE_BUDGETS[def.name] ?? 0);
-      });
-    }
 
     /**
      * The loop above only ever measures `scheduled_smoke: null`, because CI has
@@ -576,24 +556,13 @@ describe('context-budget ratchet (#597)', () => {
   });
 
   describe('schema-size budgets (all registered tools)', () => {
-    test('budget table covers exactly the registered tools (completeness guard)', () => {
-      const names = ALL_TOOL_DEFS.map((def) => def.name).sort();
-      expect(names.length).toBeGreaterThan(0);
-      expect(Object.keys(SCHEMA_BUDGETS).sort()).toEqual(names);
+    registerContextBudgetChecks({
+      defs: ALL_TOOL_DEFS,
+      budgets: SCHEMA_BUDGETS,
+      getResult: (def) => def.schema,
+      subject: 'registered tools',
+      kind: 'schema',
     });
-
-    for (const def of ALL_TOOL_DEFS) {
-      test(`${def.name} schema stays within budget`, () => {
-        const size = JSON.stringify(def.schema).length;
-        if (process.env.CONTEXT_BUDGET_PRINT) {
-          console.log(`[schema] ${def.name}: ${size} chars`);
-        }
-        expect(size).toBeGreaterThan(0);
-        // `?? 0`: see the response-budget test — fails (not passes) on a
-        // missing entry, on top of the completeness guard.
-        expect(size).toBeLessThanOrEqual(SCHEMA_BUDGETS[def.name] ?? 0);
-      });
-    }
 
     test('aggregate schema size stays within total budget', () => {
       const total = ALL_TOOL_DEFS.reduce((sum, def) => sum + JSON.stringify(def.schema).length, 0);
