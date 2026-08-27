@@ -20,6 +20,7 @@
   },
   "include": [
     "tests/helpers/mock-graphql.ts",
+    "tests/context-budget-live.test.ts",
     "tests/e2e/server.test.ts",
     "tests/integration/tools.test.ts",
     "tests/tools/bulk-edit-transactions.test.ts",
