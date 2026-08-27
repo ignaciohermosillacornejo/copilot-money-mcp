@@ -3,20 +3,23 @@
  *
  * Pins two numbers per tool so context bloat fails a test instead of silently
  * taxing every MCP session:
- *  1. Response size — every cache-mode read tool is executed against a fixed
- *     synthetic LevelDB fixture and its response measured as
- *     `JSON.stringify(result).length`, compact because that is exactly what
- *     `src/server.ts` sends to callers (responses went compact in the #597
- *     Tier-0 diet — the ratchet's first deliberate downward turn; if the
- *     server serialization ever changes again, re-derive the budgets to
- *     stay faithful). This harness calls `def.handler()` directly rather
- *     than going through `server.handleCallTool`, and RESPONSE_BUDGETS only
- *     covers cache-mode reads — so the `__typename`-stripping Tier-0 item
- *     (#597, the recursive scrub at the `JSON.stringify` call site in
- *     `src/server.ts`) does not move any number in this file: cache-mode
- *     responses come straight from the local LevelDB decode and never
- *     carried GraphQL `__typename` keys to begin with. Measured before/after
- *     landing that scrub — byte-for-byte identical, so no budget moved.
+ *  1. Response size — every cache-mode read tool is executed through
+ *     `server.handleCallTool(name, args)` against a fixed synthetic LevelDB
+ *     fixture, and the measured value is `JSON.parse(result.content[0].text)`
+ *     — i.e. the exact object the wire text decodes to, fed back through
+ *     `serializedSize`'s `JSON.stringify`. That round-trip is length-faithful
+ *     to the emitted text (stable number formatting, stable key order —
+ *     `JSON.stringify`/`JSON.parse` are mutual inverses for the plain
+ *     JSON-safe values every tool returns), and going through
+ *     `handleCallTool` means every `src/server.ts` transformation — the
+ *     `__typename` scrub included — is inside what gets measured, not just
+ *     the handler's raw return value (#597 Task 4b; previously this harness
+ *     called `def.handler()` directly, so a server-side change could shrink
+ *     or grow what callers receive without moving a single number here).
+ *     Cache-mode responses never carried GraphQL `__typename` keys to begin
+ *     with, so rerouting through the real serialization path did not move
+ *     any RESPONSE_BUDGETS entry — verified by rerunning with
+ *     `CONTEXT_BUDGET_PRINT=1` before/after and diffing every printed size.
  *  2. Schema size — every registered tool's `JSON.stringify(def.schema).length`
  *     plus an aggregate total (the schemas load into every session).
  *
@@ -31,9 +34,11 @@ import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { ALL_TOOL_DEFS, type ToolContext } from '../src/tools/registry/index.js';
 import { CopilotDatabase } from '../src/core/database.js';
 import { CopilotMoneyTools } from '../src/tools/tools.js';
+import { CopilotMoneyServer } from '../src/server.js';
 import { createCombinedDb, cleanupTestDb } from './helpers/test-db.js';
 import { serializedSize, registerContextBudgetChecks } from './helpers/context-budget.js';
 import { SCHEDULED_SMOKE_REPORT_MAX_CHARS } from '../src/utils/scheduled-smoke-status.js';
@@ -431,6 +436,17 @@ const EXTRA_ARGS: Record<string, Record<string, unknown>> = {
 };
 
 let ctx: ToolContext;
+/**
+ * Real server instance for RESPONSE_BUDGETS (#597 Task 4b): routes every
+ * measured call through `handleCallTool`, the same dispatch a real MCP
+ * client hits, so the budget covers `src/server.ts`'s own transformations
+ * (the `__typename` scrub, error formatting, etc.) and not just a handler's
+ * bare return value. `_injectForTesting` swaps in the shared fixture db/tools
+ * so this server sees exactly the data `ctx.tools` sees; it is constructed
+ * with no write/live flags, matching `eligibleReadDefs` (read-only,
+ * cache-mode tools only).
+ */
+let server: CopilotMoneyServer;
 
 /**
  * Scheduled-smoke status seam (#638).
@@ -462,6 +478,8 @@ beforeAll(async () => {
   await seedFixture();
   const db = new CopilotDatabase(DB_PATH);
   ctx = { tools: new CopilotMoneyTools(db), live: undefined };
+  server = new CopilotMoneyServer(DB_PATH);
+  server._injectForTesting(db, ctx.tools);
 });
 
 afterAll(() => {
@@ -485,6 +503,15 @@ describe('soft-deleted transaction reads (#609)', () => {
   });
 });
 
+/** Extract the first content block's text, asserting it IS a text block. */
+function firstText(result: CallToolResult): string {
+  const first = result.content[0];
+  if (!first || first.type !== 'text') {
+    throw new Error(`Expected first content block to be text, got: ${first?.type ?? 'none'}`);
+  }
+  return first.text;
+}
+
 async function runTool(name: string): Promise<unknown> {
   const def = ALL_TOOL_DEFS.find((d) => d.name === name);
   if (!def) throw new Error(`Tool not registered: ${name}`);
@@ -500,7 +527,22 @@ async function runTool(name: string): Promise<unknown> {
     }
     args = { goal_id: goalId };
   }
-  return def.handler(ctx, args);
+  // Route through the real dispatch (#597 Task 4b) rather than calling
+  // def.handler(ctx, args) directly, so the measured value is what a caller
+  // actually receives — every src/server.ts transformation included.
+  const result = await server.handleCallTool(name, args);
+  if (result.isError) {
+    throw new Error(`handleCallTool('${name}') returned an error: ${firstText(result)}`);
+  }
+  // JSON.parse(text) rather than reading the raw string directly: the shared
+  // registerContextBudgetChecks helper measures via serializedSize(value) =
+  // JSON.stringify(value).length, so getResult must hand back a value, not a
+  // pre-serialized string (stringifying a string would add quotes/escapes
+  // and measure the wrong thing). JSON.stringify/JSON.parse are mutual
+  // inverses for the plain JSON-safe values every tool returns (stable
+  // number formatting, stable key order), so `JSON.stringify(JSON.parse(text)).length
+  // === text.length` — the round trip is length-faithful to the wire text.
+  return JSON.parse(firstText(result));
 }
 
 describe('context-budget ratchet (#597)', () => {
