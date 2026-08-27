@@ -279,7 +279,25 @@ async function runLiveTool(name: string): Promise<unknown> {
   if (result.isError) {
     throw new Error(`handleCallTool('${name}') returned an error: ${firstText(result)}`);
   }
-  return JSON.parse(firstText(result));
+  const text = firstText(result);
+  const parsed = JSON.parse(text) as unknown;
+  // Measuring serializedSize(parsed) = JSON.stringify(parsed).length is only
+  // faithful to `text.length` while src/server.ts serializes compact. If that
+  // ever changes (pretty-printing, or any other pure-formatting transform),
+  // this suite would otherwise keep reporting the old (smaller) size while
+  // callers receive the new (larger) one — the exact "server transformation
+  // invisible to the harness" blindness Task 4b exists to close, reopened for
+  // whitespace. Assert the round trip in code so drift fails loudly.
+  if (JSON.stringify(parsed).length !== text.length) {
+    throw new Error(
+      `handleCallTool('${name}') response is no longer compact round-trip faithful ` +
+        '(JSON.stringify(JSON.parse(text)).length !== text.length). This usually means ' +
+        'src/server.ts changed how it serializes tool results (e.g. added pretty-printing). ' +
+        'Re-derive this measurement to read text.length directly instead of relying on the ' +
+        'round trip, and re-baseline every budget in this file against the new byte counts.'
+    );
+  }
+  return parsed;
 }
 
 // ---------------------------------------------------------------------------
