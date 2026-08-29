@@ -8,13 +8,13 @@
 
 import { describe, test, expect } from 'bun:test';
 import {
-  DEFAULT_CATEGORY_LIVE_FIELDS,
-  DEFAULT_INVESTMENT_PRICE_FIELDS,
-  DEFAULT_TOP_MOVER_FIELDS,
   DEFAULT_TRANSACTION_FIELDS,
   expandFieldSelection,
   projectRows,
 } from '../../src/tools/field-selection.js';
+// Namespace import so the preset detector below can DISCOVER presets by shape
+// rather than importing a hand-maintained list of them — see its header.
+import * as fieldSelection from '../../src/tools/field-selection.js';
 
 // Firestore-shaped opaque IDs (synthetic).
 const TXN_ID_1 = 'Zx9kQ2mVp3LqR8sTuW1y';
@@ -311,27 +311,46 @@ describe('projectRows', () => {
     });
   });
 
-  // CLASS-LEVEL DETECTOR for the #635 bug class: "deleting a field from a
-  // preset survived all 2,679 tests because no fixture carried it."
+  // ===================================================================
+  // CLASS-LEVEL DETECTOR for the #635 bug class:
+  // "deleting a field from a preset survived all 2,679 tests."
   //
-  // The `satisfies readonly (keyof Row)[]` clauses on the presets catch a
-  // TYPO at compile time, but say nothing about a DELETION — a shorter list
-  // still satisfies the constraint. Before this block, removing
-  // 'security_id', 'name' and 'type' from DEFAULT_TOP_MOVER_FIELDS left the
-  // entire suite green (verified by mutation on PR #673); only
-  // get_categories_live happened to be covered, by a per-tool verbatim row
-  // test. Pinning every preset here means no future diet tool depends on
-  // someone remembering to write that per-tool test.
+  // That class has now bitten twice. The second time (PR #673) three of the
+  // five DEFAULT_TOP_MOVER_FIELDS entries could be deleted with the whole
+  // suite still green. Nothing else in the repo can catch it:
   //
-  // The context-budget ratchet cannot substitute: budgets are upper bounds,
-  // so a preset that loses fields gets SMALLER and sails through.
+  //   - The context-budget ratchet measures an UPPER bound. A preset that
+  //     loses fields produces a SMALLER response, so it sails through.
+  //   - The `satisfies readonly (keyof Row)[]` clauses on the presets catch a
+  //     TYPO, not a DELETION — a shorter list still satisfies the constraint.
+  //   - Line coverage is useless here: the preset is executed by every test
+  //     that calls the tool. Executing is not detecting.
+  //   - The type system never sees "a complete row"; a preset is just strings.
   //
-  // If you are changing a preset deliberately, update the expected list here
-  // and re-baseline the response budgets — that is the intended workflow,
-  // not an obstacle.
-  describe('preset contents are pinned verbatim (#635 class detector)', () => {
-    test('DEFAULT_TRANSACTION_FIELDS', () => {
-      expect([...DEFAULT_TRANSACTION_FIELDS]).toEqual([
+  // The first fix attempt was a per-preset verbatim test, hand-written one at
+  // a time. That is the SAME failure shape one level up: it protects the four
+  // presets someone remembered, and silently protects nothing for the fifth.
+  // PR B adds an accounts preset; PR C reshapes the transactions one.
+  //
+  // So this block DISCOVERS presets instead of listing them, and is
+  // bidirectional — the two directions fail for different reasons:
+  //   forward:  a preset the engine exports with no pinned expectation
+  //             (i.e. someone added a preset and no test came with it)
+  //   backward: a pinned expectation naming a preset that no longer exists
+  //             (i.e. stale expectation quietly protecting nothing)
+  //
+  // Discovery is by SHAPE (an exported array of strings), not by name, so a
+  // preset that breaks the DEFAULT_*_FIELDS naming convention is still
+  // caught. Every other export of this module is an object or a function.
+  //
+  // If you are changing a preset deliberately: update PINNED_PRESETS here and
+  // re-baseline the response budgets in tests/context-budget.test.ts. That is
+  // the intended workflow, not an obstacle — the point is that the change
+  // cannot happen SILENTLY.
+  // ===================================================================
+  describe('every field preset is pinned (#635 class detector)', () => {
+    const PINNED_PRESETS: Record<string, readonly string[]> = {
+      DEFAULT_TRANSACTION_FIELDS: [
         'transaction_id',
         'date',
         'amount',
@@ -342,11 +361,8 @@ describe('projectRows', () => {
         'pending',
         'excluded',
         'internal_transfer',
-      ]);
-    });
-
-    test('DEFAULT_INVESTMENT_PRICE_FIELDS', () => {
-      expect([...DEFAULT_INVESTMENT_PRICE_FIELDS]).toEqual([
+      ],
+      DEFAULT_INVESTMENT_PRICE_FIELDS: [
         'security_id',
         'ticker_symbol',
         'price_type',
@@ -354,29 +370,50 @@ describe('projectRows', () => {
         'month',
         'latest_price',
         'latest_at',
-      ]);
-    });
-
-    test('DEFAULT_TOP_MOVER_FIELDS', () => {
-      expect([...DEFAULT_TOP_MOVER_FIELDS]).toEqual([
-        'security_id',
-        'ticker_symbol',
-        'name',
-        'type',
-        'change',
-      ]);
-    });
-
-    test('DEFAULT_CATEGORY_LIVE_FIELDS', () => {
-      expect([...DEFAULT_CATEGORY_LIVE_FIELDS]).toEqual([
+      ],
+      DEFAULT_TOP_MOVER_FIELDS: ['security_id', 'ticker_symbol', 'name', 'type', 'change'],
+      DEFAULT_CATEGORY_LIVE_FIELDS: [
         'id',
         'parentId',
         'name',
         'colorName',
         'isExcluded',
         'budget_amount',
-      ]);
+      ],
+    };
+
+    const discovered = Object.entries(fieldSelection)
+      .filter(
+        ([, value]) => Array.isArray(value) && value.every((item) => typeof item === 'string')
+      )
+      .map(([name, value]) => [name, value as readonly string[]] as const)
+      .sort(([a], [b]) => a.localeCompare(b));
+
+    // Without this, an import-shape change that makes `discovered` empty would
+    // leave the forward check passing vacuously over an empty list — the exact
+    // "guard that cannot fail" trap this block exists to prevent, reappearing
+    // one level up. (The backward check would also fail in that case, but this
+    // gives the failure an unambiguous message.)
+    test('discovery finds the presets at all', () => {
+      expect(discovered.length).toBeGreaterThan(0);
     });
+
+    test('forward: every preset the engine exports has a pinned expectation', () => {
+      const unpinned = discovered.map(([name]) => name).filter((name) => !(name in PINNED_PRESETS));
+      expect(unpinned).toEqual([]);
+    });
+
+    test('backward: every pinned expectation still names a live preset', () => {
+      const live = new Set(discovered.map(([name]) => name));
+      const stale = Object.keys(PINNED_PRESETS).filter((name) => !live.has(name));
+      expect(stale).toEqual([]);
+    });
+
+    for (const [name, value] of discovered) {
+      test(`${name} contents are unchanged`, () => {
+        expect([...value]).toEqual([...(PINNED_PRESETS[name] ?? [])]);
+      });
+    }
   });
 
   test('does not mutate input rows', () => {
