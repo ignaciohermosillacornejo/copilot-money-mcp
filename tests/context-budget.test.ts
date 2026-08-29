@@ -142,8 +142,13 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // Raised from 1_110 by #597 Tier 1: adds `history_limit` (caps, not
   // excludes, the `history` series — the tool's whole purpose) plus a
   // description sentence naming the ~98% cost it caps (measured on a
-  // 365-day series; see src/tools/live/investment-balance.ts). Measured
-  // 1_466 (~10% headroom).
+  // 365-day series; see src/tools/live/investment-balance.ts), plus a
+  // sentence spelling out that non-integer limits floor and sub-1 values
+  // clamp (the schema says `integer`, but nothing validates read-tool args
+  // server-side, so the coercion is caller-visible behaviour). Measured
+  // 1_529 (~5.6% headroom) — deliberately left below this file's usual
+  // measured-plus-10% sizing rather than raised: a tighter ceiling is a
+  // stronger ratchet, and this tool's schema should not be growing again.
   get_investment_balance_live: 1_615,
   refresh_cache: 1_335,
   // Write (--write) tools

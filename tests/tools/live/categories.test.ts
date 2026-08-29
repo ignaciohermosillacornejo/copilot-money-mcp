@@ -113,6 +113,34 @@ describe('LiveCategoriesTools.getCategories', () => {
   // when there are zero rows to check keys against. get_categories_live now
   // passes CATEGORY_LIVE_KNOWN_FIELDS, so this must warn like get_transactions
   // and get_investment_prices do on the same shape of request.
+  // The hint is built from CATEGORY_LIVE_KNOWN_FIELDS rather than hand-listed
+  // so it cannot go stale when a row field is added. This is the detector for
+  // that wiring: replacing the derived constant with a hand-written string
+  // drops whichever name the author forgot, and this fails. The list below is
+  // deliberately hand-written — if it ever disagrees with the row type, that
+  // disagreement is the signal.
+  test('the invalid-field hint names every selectable field (derived, not hand-listed)', async () => {
+    const tools = new LiveCategoriesTools(makeLive(makeClient([])));
+    await prewarmUserCacheRolloversOff(makeLive(makeClient([])));
+    const result = await tools.getCategories({ fields: ['nope'] });
+    const hint = result._field_warning ?? '';
+    for (const name of [
+      'id',
+      'parentId',
+      'name',
+      'templateId',
+      'colorName',
+      'icon',
+      'isExcluded',
+      'isRolloverDisabled',
+      'canBeDeleted',
+      'budget',
+      'budget_amount',
+    ]) {
+      expect(hint).toContain(name);
+    }
+  });
+
   test('a typo in fields warns even on an empty result set (knownFields)', async () => {
     const client = makeClient([]);
     const live = makeLive(client);
@@ -338,6 +366,24 @@ describe('LiveCategoriesTools.getCategories — v3 budget diet (#597 T1)', () =>
     const tools = new LiveCategoriesTools(makeLive(makeClient([categoryWithoutBudget])));
     const result = await tools.getCategories({ include_history: true });
     expect(result.categories[0]?.budget_amount).toBeNull();
+  });
+
+  // A budget object that exists but carries no current-month row. Distinct
+  // from categoryWithoutBudget (no budget at all): here `budget` IS an own
+  // key, so this pins the second `?.` in `c.budget?.current?.amount` rather
+  // than the first. The existing `current: null` fixture in the C1 regression
+  // block exercises history preservation, not this derivation.
+  const categoryWithBudgetButNoCurrent: CategoryNode = {
+    ...categoryWithBudget,
+    id: 'cat-budget-no-current-1',
+    budget: { current: null, histories: [] },
+  };
+
+  test('budget_amount is null when budget exists but current is null', async () => {
+    const tools = new LiveCategoriesTools(makeLive(makeClient([categoryWithBudgetButNoCurrent])));
+    const result = await tools.getCategories({});
+    expect(result.categories[0]?.budget_amount).toBeNull();
+    expect(result._field_warning).toBeUndefined();
   });
 
   test('fields: ["default", "budget"] restores the full object', async () => {

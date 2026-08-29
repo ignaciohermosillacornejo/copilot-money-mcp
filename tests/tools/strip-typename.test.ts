@@ -33,6 +33,20 @@ describe('stripTypename', () => {
     expect(JSON.stringify(out)).toBe(JSON.stringify({ fetched_at: '2026-01-15T00:00:00.000Z' }));
   });
 
+  test('strips inside a null-prototype dict rather than passing it through', () => {
+    // Pins the `proto !== null` half of the plain-object guard. Deleting just
+    // that clause (leaving `proto !== Object.prototype`) left the entire suite
+    // green before this test existed — an Object.create(null) dict would have
+    // been returned untouched with its __typename intact.
+    const dict = Object.assign(Object.create(null), { __typename: 'Category', id: 'a' }) as {
+      __typename?: string;
+      id: string;
+    };
+    const out = stripTypename(dict);
+    expect(out.__typename).toBeUndefined();
+    expect(out.id).toBe('a');
+  });
+
   test('does not copy a hostile __proto__ key', () => {
     // JSON.parse creates __proto__ as an OWN key; a naive `out[key] = value`
     // copy would assign through the inherited setter and repoint `out`'s own

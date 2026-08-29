@@ -206,6 +206,29 @@ describe('LiveInvestmentBalanceTools.getInvestmentBalance', () => {
       expect(result.history_truncated).toBe(true);
     });
 
+    test('a non-integer history_limit is floored, not rejected', async () => {
+      // The schema says `type: 'integer'`, but no server-side validator
+      // enforces read-tool arg types, so 1.7 reaches limitHistory and is
+      // floored by clampMaxRows. Pins the documented behaviour.
+      const client = makeClient(make214DailyPoints(), liveDot);
+      const tools = new LiveInvestmentBalanceTools(makeLive(client));
+      const result = await tools.getInvestmentBalance({ history_limit: 1.7 });
+      expect(result.history).toHaveLength(1);
+      expect(result.history_total_count).toBe(214);
+      expect(result.history_truncated).toBe(true);
+    });
+
+    test('history_limit: -0 takes the unlimited path, like 0', async () => {
+      // JSON.parse("-0") really does yield -0, so this is reachable over the
+      // wire. `-0 === 0` is true, so it hits the unlimited branch rather than
+      // clamping to 1 the way other non-positive values do.
+      const client = makeClient(make214DailyPoints(), liveDot);
+      const tools = new LiveInvestmentBalanceTools(makeLive(client));
+      const result = await tools.getInvestmentBalance({ history_limit: -0 });
+      expect(result.history).toHaveLength(214);
+      expect(result.history_truncated).toBe(false);
+    });
+
     test('the capped default is smaller than the full series', async () => {
       const client = makeClient(make214DailyPoints(), liveDot);
       const tools = new LiveInvestmentBalanceTools(makeLive(client));
