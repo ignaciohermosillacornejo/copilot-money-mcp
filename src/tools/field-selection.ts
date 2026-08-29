@@ -9,7 +9,22 @@
  * detection. The core functions are generic over row shape — per-tool
  * presets (like {@link DEFAULT_TRANSACTION_FIELDS}) are plain constants the
  * callers pass in.
+ *
+ * Presets carry a `satisfies readonly (keyof Row)[]` clause where the row type
+ * is available. That makes a TYPO in a preset a compile error, which it
+ * otherwise would not be: `detectUnknownFields` runs before `'default'`
+ * expands, so preset members are exempt from the _field_warning path a
+ * caller-supplied name goes through — a misspelled entry would silently drop
+ * its field with nothing reported anywhere. It does NOT catch a DELETED
+ * entry; that is what the verbatim preset-shape tests in
+ * tests/tools/field-selection.test.ts are for. Both halves are required.
+ *
+ * The row-type imports below are `import type` on purpose: the live tool
+ * modules import their presets from here, so a value import would close a
+ * runtime cycle. Type imports are erased.
  */
+import type { GetTopMoversLiveEntry } from './live/top-movers.js';
+import type { CategoryLiveRow } from './live/categories.js';
 
 /**
  * The default field set for transaction rows: the v3 baseline that
@@ -109,7 +124,7 @@ export const DEFAULT_TOP_MOVER_FIELDS = [
   'name',
   'type',
   'change',
-] as const;
+] as const satisfies readonly (keyof GetTopMoversLiveEntry)[];
 
 export const TOP_MOVER_FIELDS_PARAM_SCHEMA = {
   type: 'array',
@@ -140,7 +155,7 @@ export const DEFAULT_CATEGORY_LIVE_FIELDS = [
   'colorName',
   'isExcluded',
   'budget_amount',
-] as const;
+] as const satisfies readonly (keyof CategoryLiveRow)[];
 
 export const CATEGORY_LIVE_FIELDS_PARAM_SCHEMA = {
   type: 'array',

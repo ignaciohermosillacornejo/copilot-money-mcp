@@ -8,6 +8,9 @@
 
 import { describe, test, expect } from 'bun:test';
 import {
+  DEFAULT_CATEGORY_LIVE_FIELDS,
+  DEFAULT_INVESTMENT_PRICE_FIELDS,
+  DEFAULT_TOP_MOVER_FIELDS,
   DEFAULT_TRANSACTION_FIELDS,
   expandFieldSelection,
   projectRows,
@@ -305,6 +308,74 @@ describe('projectRows', () => {
       for (const row of rows) {
         expect(Object.keys(row)).toEqual([]);
       }
+    });
+  });
+
+  // CLASS-LEVEL DETECTOR for the #635 bug class: "deleting a field from a
+  // preset survived all 2,679 tests because no fixture carried it."
+  //
+  // The `satisfies readonly (keyof Row)[]` clauses on the presets catch a
+  // TYPO at compile time, but say nothing about a DELETION — a shorter list
+  // still satisfies the constraint. Before this block, removing
+  // 'security_id', 'name' and 'type' from DEFAULT_TOP_MOVER_FIELDS left the
+  // entire suite green (verified by mutation on PR #673); only
+  // get_categories_live happened to be covered, by a per-tool verbatim row
+  // test. Pinning every preset here means no future diet tool depends on
+  // someone remembering to write that per-tool test.
+  //
+  // The context-budget ratchet cannot substitute: budgets are upper bounds,
+  // so a preset that loses fields gets SMALLER and sails through.
+  //
+  // If you are changing a preset deliberately, update the expected list here
+  // and re-baseline the response budgets — that is the intended workflow,
+  // not an obstacle.
+  describe('preset contents are pinned verbatim (#635 class detector)', () => {
+    test('DEFAULT_TRANSACTION_FIELDS', () => {
+      expect([...DEFAULT_TRANSACTION_FIELDS]).toEqual([
+        'transaction_id',
+        'date',
+        'amount',
+        'name',
+        'category_name',
+        'account_id',
+        'item_id',
+        'pending',
+        'excluded',
+        'internal_transfer',
+      ]);
+    });
+
+    test('DEFAULT_INVESTMENT_PRICE_FIELDS', () => {
+      expect([...DEFAULT_INVESTMENT_PRICE_FIELDS]).toEqual([
+        'security_id',
+        'ticker_symbol',
+        'price_type',
+        'date',
+        'month',
+        'latest_price',
+        'latest_at',
+      ]);
+    });
+
+    test('DEFAULT_TOP_MOVER_FIELDS', () => {
+      expect([...DEFAULT_TOP_MOVER_FIELDS]).toEqual([
+        'security_id',
+        'ticker_symbol',
+        'name',
+        'type',
+        'change',
+      ]);
+    });
+
+    test('DEFAULT_CATEGORY_LIVE_FIELDS', () => {
+      expect([...DEFAULT_CATEGORY_LIVE_FIELDS]).toEqual([
+        'id',
+        'parentId',
+        'name',
+        'colorName',
+        'isExcluded',
+        'budget_amount',
+      ]);
     });
   });
 

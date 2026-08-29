@@ -386,6 +386,16 @@ describe('LiveCategoriesTools.getCategories — v3 budget diet (#597 T1)', () =>
     expect(result._field_warning).toBeUndefined();
   });
 
+  // See the sibling test in top-movers.test.ts: `fields: []` is the
+  // engine-wide no-projection escape and must yield FULL rows, not empty ones.
+  test('fields: [] returns full rows, including the budget object', async () => {
+    const tools = new LiveCategoriesTools(makeLive(makeClient([categoryWithBudget])));
+    const result = await tools.getCategories({ fields: [] });
+    expect(result.categories[0]?.budget).toBeDefined();
+    expect(result.categories[0]?.templateId).toBeDefined();
+    expect(result._field_warning).toBeUndefined();
+  });
+
   test('fields: ["default", "budget"] restores the full object', async () => {
     const tools = new LiveCategoriesTools(makeLive(makeClient([categoryWithBudget])));
     const result = await tools.getCategories({
