@@ -92,6 +92,20 @@ describe('LiveTopMoversTools.getTopMovers', () => {
     expect(result.movers).toEqual([]);
   });
 
+  // Important 2 (#597 final review): without an explicit knownFields set,
+  // projectRows falls back to row-key detection, which cannot flag a typo
+  // when there are zero rows to check keys against. get_top_movers_live now
+  // passes TOP_MOVER_KNOWN_FIELDS, so this must warn like get_transactions
+  // and get_investment_prices do on the same shape of request.
+  test('a typo in fields warns even on an empty result set (knownFields)', async () => {
+    const client = makeClient([]);
+    const tools = new LiveTopMoversTools(makeLive(client));
+    const result = await tools.getTopMovers({ fields: ['default', 'not_a_real_field'] });
+    expect(result.count).toBe(0);
+    expect(result._field_warning).toBeDefined();
+    expect(result._field_warning).toContain('not_a_real_field');
+  });
+
   test('default filter is MY_EQUITY_CHANGE; passed as the query variable', async () => {
     const client = makeClient([mover]);
     const tools = new LiveTopMoversTools(makeLive(client));
@@ -167,5 +181,13 @@ describe('createLiveTopMoversToolSchema', () => {
     const props = schema.inputSchema.properties as Record<string, unknown>;
     expect(props.fields).toEqual(TOP_MOVER_FIELDS_PARAM_SCHEMA);
     expect(TOP_MOVER_FIELDS_PARAM_SCHEMA.description).toContain('price_points');
+    // Minor 7 (#597 final review): a bare toContain('price_points') alone
+    // survives a mutation that deletes just the "EXCLUDED by default —
+    // measured at ~94.7%…" fragment while leaving the `fields: ["default",
+    // "price_points"]` opt-back-in example intact — 'price_points' still
+    // appears in what's left. Pin the exclusion sentence itself too, same
+    // strength as the categories sibling guard (tests/tools/live/categories.test.ts,
+    // 'fields param schema matches CATEGORY_LIVE_FIELDS_PARAM_SCHEMA and names budget').
+    expect(TOP_MOVER_FIELDS_PARAM_SCHEMA.description).toContain('EXCLUDED by default');
   });
 });

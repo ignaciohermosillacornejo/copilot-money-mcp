@@ -69,6 +69,39 @@ export type CategoryLiveRow = {
   budget_amount: number | null;
 };
 
+/**
+ * Every selectable field name on a category row, derived from
+ * {@link CategoryLiveRow} itself (not a sample row) via a mapped-type record:
+ * the `[K in keyof ...]-?: true` shape forces this object literal to carry
+ * exactly the interface's keys — including optional ones, since `-?` strips
+ * optionality for the purpose of the mapped type — so a forgotten or renamed
+ * field is a compile error instead of a silent runtime desync.
+ *
+ * Critical: `budget` is `budget?:` on the interface (legitimately absent from
+ * a row when the caller didn't opt in), but it MUST be in this set anyway.
+ * Without an explicit knownFields set, projectRows falls back to row-key
+ * detection, which would false-warn "budget does not exist" on
+ * `fields: ["default", "budget"]` whenever no returned row happens to carry a
+ * budget object — trading a false-negative (Important 2's typo-detection
+ * gap) for a false-positive against a perfectly valid request.
+ */
+const CATEGORY_LIVE_FIELD_NAMES: { [K in keyof CategoryLiveRow]-?: true } = {
+  id: true,
+  parentId: true,
+  name: true,
+  templateId: true,
+  colorName: true,
+  icon: true,
+  isExcluded: true,
+  isRolloverDisabled: true,
+  canBeDeleted: true,
+  budget: true,
+  budget_amount: true,
+};
+const CATEGORY_LIVE_KNOWN_FIELDS: ReadonlySet<string> = new Set(
+  Object.keys(CATEGORY_LIVE_FIELD_NAMES)
+);
+
 export interface GetCategoriesLiveResult {
   count: number;
   categories: CategoryLiveRow[];
@@ -151,6 +184,7 @@ export class LiveCategoriesTools {
       args.fields ?? ['default'],
       {
         preset: DEFAULT_CATEGORY_LIVE_FIELDS,
+        knownFields: CATEGORY_LIVE_KNOWN_FIELDS,
         validFieldsHint:
           'the category row fields (id, parentId, name, templateId, colorName, icon, ' +
           'isExcluded, isRolloverDisabled, canBeDeleted, budget) plus the derived budget_amount',

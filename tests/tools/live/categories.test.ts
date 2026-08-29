@@ -108,6 +108,24 @@ describe('LiveCategoriesTools.getCategories', () => {
     expect(result.categories).toEqual([]);
   });
 
+  // Important 2 (#597 final review): without an explicit knownFields set,
+  // projectRows falls back to row-key detection, which cannot flag a typo
+  // when there are zero rows to check keys against. get_categories_live now
+  // passes CATEGORY_LIVE_KNOWN_FIELDS, so this must warn like get_transactions
+  // and get_investment_prices do on the same shape of request.
+  test('a typo in fields warns even on an empty result set (knownFields)', async () => {
+    const client = makeClient([]);
+    const live = makeLive(client);
+    await prewarmUserCacheRolloversOff(live);
+    const tools = new LiveCategoriesTools(live);
+
+    const result = await tools.getCategories({ fields: ['default', 'not_a_real_field'] });
+
+    expect(result.count).toBe(0);
+    expect(result._field_warning).toBeDefined();
+    expect(result._field_warning).toContain('not_a_real_field');
+  });
+
   test('output sorted by templateId then name; null templateId sorts last', async () => {
     const client = makeClient([
       { ...sampleRow, id: 'a', name: 'Zebra', templateId: 'Food' },
@@ -284,6 +302,12 @@ describe('LiveCategoriesTools.getCategories — v3 budget diet (#597 T1)', () =>
     },
   };
 
+  // `budget` is omitted entirely (not set to `null`) — CategoryNode's
+  // `budget?:` is genuinely optional (see CategoryRawFieldsSchema in
+  // src/core/graphql/queries/categories.ts: `.nullable().optional()`), and
+  // the own-key-absent case is the one that actually exercises row-key
+  // fallback detection: a `budget: null` row still carries `budget` as an
+  // own key, so it would NOT reproduce Important 2's false-positive bug.
   const categoryWithoutBudget: CategoryNode = {
     id: 'cat-no-budget-1',
     parentId: null,
@@ -294,7 +318,6 @@ describe('LiveCategoriesTools.getCategories — v3 budget diet (#597 T1)', () =>
     isExcluded: false,
     isRolloverDisabled: false,
     canBeDeleted: true,
-    budget: null,
   };
 
   // NOTE: the task brief's Step 2 test snippets call these with
@@ -324,6 +347,20 @@ describe('LiveCategoriesTools.getCategories — v3 budget diet (#597 T1)', () =>
       fields: ['default', 'budget'],
     });
     expect(result.categories[0]?.budget?.histories).toHaveLength(3);
+  });
+
+  // Important 2 (#597 final review): `budget` is `budget?:` on CategoryLiveRow
+  // — legitimately absent from a row when the category has none. Without
+  // `budget` in CATEGORY_LIVE_KNOWN_FIELDS, row-key fallback detection would
+  // see zero rows carrying the key and false-warn "budget does not exist"
+  // even though the caller's request is exactly correct.
+  test('fields: ["default", "budget"] against a row with no budget does not false-warn', async () => {
+    const tools = new LiveCategoriesTools(makeLive(makeClient([categoryWithoutBudget])));
+    const result = await tools.getCategories({
+      fields: ['default', 'budget'],
+    });
+    expect(result.categories[0]?.budget_amount).toBeNull();
+    expect(result._field_warning).toBeUndefined();
   });
 
   test('default rows omit templateId/icon/isRolloverDisabled/canBeDeleted (verbatim preset)', async () => {

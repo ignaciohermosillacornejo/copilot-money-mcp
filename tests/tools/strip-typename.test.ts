@@ -22,6 +22,17 @@ describe('stripTypename', () => {
     expect(stripTypename([])).toEqual([]);
   });
 
+  test('passes a Date through unchanged instead of flattening it to {}', () => {
+    // A Date's fields live on its prototype, not as own keys, so rebuilding
+    // it via Object.keys() (like a plain object) would silently produce {}
+    // and lose the timestamp before JSON.stringify ever runs.
+    const when = new Date('2026-01-15T00:00:00.000Z');
+    const input = { fetched_at: when };
+    const out = stripTypename(input);
+    expect(out.fetched_at).toBe(when);
+    expect(JSON.stringify(out)).toBe(JSON.stringify({ fetched_at: '2026-01-15T00:00:00.000Z' }));
+  });
+
   test('does not copy a hostile __proto__ key', () => {
     // JSON.parse creates __proto__ as an OWN key; a naive `out[key] = value`
     // copy would assign through the inherited setter and repoint `out`'s own
