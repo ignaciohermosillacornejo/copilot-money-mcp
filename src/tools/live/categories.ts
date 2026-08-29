@@ -65,7 +65,16 @@ export type CategoryLiveRow = {
   isRolloverDisabled: boolean;
   canBeDeleted: boolean;
   budget?: CategoryBudget | null;
-  /** Derived from budget?.current?.amount before projection (#597 Tier 1). */
+  /**
+   * Derived from budget?.current?.amount before projection (#597 Tier 1).
+   *
+   * The snake_case name amid this type's camelCase is deliberate and is part
+   * of the published API: on live rows, camelCase means "carried verbatim
+   * from the GraphQL wire" and snake_case means "computed by this server."
+   * Same split as get_investment_prices (`latest_price`, `latest_at`) and the
+   * top-mover mapper's `ticker_symbol`. Do NOT normalize it to camelCase for
+   * consistency — that is a breaking rename for every caller.
+   */
   budget_amount: number | null;
 };
 
@@ -84,6 +93,15 @@ export type CategoryLiveRow = {
  * `fields: ["default", "budget"]` whenever no returned row happens to carry a
  * budget object — trading a false-negative (Important 2's typo-detection
  * gap) for a false-positive against a perfectly valid request.
+ *
+ * Note this set is the DECLARED row shape, not the WIRE row shape. fetchCategories
+ * spreads the raw response node, so a runtime row can carry own keys this type
+ * does not list (today only `__typename`, which the server strips at the
+ * serialization boundary anyway). The asymmetry is benign but real: a name that
+ * is absent here yet present as an own key is still projected, while the warning
+ * says it was ignored. If a field is ever added to the CATEGORIES operation and
+ * CategoryNode, add it here too — otherwise callers get a warning claiming a
+ * value was dropped while they are in fact receiving it.
  */
 const CATEGORY_LIVE_FIELD_NAMES: { [K in keyof CategoryLiveRow]-?: true } = {
   id: true,
@@ -101,6 +119,17 @@ const CATEGORY_LIVE_FIELD_NAMES: { [K in keyof CategoryLiveRow]-?: true } = {
 const CATEGORY_LIVE_KNOWN_FIELDS: ReadonlySet<string> = new Set(
   Object.keys(CATEGORY_LIVE_FIELD_NAMES)
 );
+
+/**
+ * Built FROM the known-field set rather than hand-listed, so it cannot drift
+ * out of sync with it. A hand-written hint is the one surface the mapped-type
+ * guard above does not cover: adding a row field forces the literal to be
+ * updated (compile error) but would silently leave a hand-listed hint stale,
+ * telling the caller a legal field name is invalid.
+ */
+const CATEGORY_LIVE_VALID_FIELDS_HINT =
+  `the category row fields (${[...CATEGORY_LIVE_KNOWN_FIELDS].join(', ')}) — ` +
+  '`budget_amount` is derived from `budget.current.amount`; the rest come from the wire';
 
 export interface GetCategoriesLiveResult {
   count: number;
@@ -185,9 +214,7 @@ export class LiveCategoriesTools {
       {
         preset: DEFAULT_CATEGORY_LIVE_FIELDS,
         knownFields: CATEGORY_LIVE_KNOWN_FIELDS,
-        validFieldsHint:
-          'the category row fields (id, parentId, name, templateId, colorName, icon, ' +
-          'isExcluded, isRolloverDisabled, canBeDeleted, budget) plus the derived budget_amount',
+        validFieldsHint: CATEGORY_LIVE_VALID_FIELDS_HINT,
       }
     );
 

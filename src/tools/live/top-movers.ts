@@ -83,6 +83,12 @@ const TOP_MOVER_FIELD_NAMES: { [K in keyof GetTopMoversLiveEntry]-?: true } = {
 };
 const TOP_MOVER_KNOWN_FIELDS: ReadonlySet<string> = new Set(Object.keys(TOP_MOVER_FIELD_NAMES));
 
+/**
+ * Built FROM the known-field set rather than hand-listed — see the identical
+ * reasoning on CATEGORY_LIVE_VALID_FIELDS_HINT in src/tools/live/categories.ts.
+ */
+const TOP_MOVER_VALID_FIELDS_HINT = `the top-mover row fields (${[...TOP_MOVER_KNOWN_FIELDS].join(', ')})`;
+
 export interface GetTopMoversLiveResult {
   count: number;
   filter: TopMoversFilter;
@@ -131,8 +137,7 @@ export class LiveTopMoversTools {
     const { rows: movers, warning } = projectRows(mapped, args.fields ?? ['default'], {
       preset: DEFAULT_TOP_MOVER_FIELDS,
       knownFields: TOP_MOVER_KNOWN_FIELDS,
-      validFieldsHint:
-        'the top-mover row fields (security_id, ticker_symbol, name, type, change, price_points)',
+      validFieldsHint: TOP_MOVER_VALID_FIELDS_HINT,
     });
 
     this.live.logReadCall({

@@ -97,6 +97,17 @@ describe('LiveTopMoversTools.getTopMovers', () => {
   // when there are zero rows to check keys against. get_top_movers_live now
   // passes TOP_MOVER_KNOWN_FIELDS, so this must warn like get_transactions
   // and get_investment_prices do on the same shape of request.
+  // Detector for the derived hint — see the identical test in
+  // tests/tools/live/categories.test.ts for the reasoning.
+  test('the invalid-field hint names every selectable field (derived, not hand-listed)', async () => {
+    const tools = new LiveTopMoversTools(makeLive(makeClient([])));
+    const result = await tools.getTopMovers({ fields: ['nope'] });
+    const hint = result._field_warning ?? '';
+    for (const name of ['security_id', 'ticker_symbol', 'name', 'type', 'change', 'price_points']) {
+      expect(hint).toContain(name);
+    }
+  });
+
   test('a typo in fields warns even on an empty result set (knownFields)', async () => {
     const client = makeClient([]);
     const tools = new LiveTopMoversTools(makeLive(client));

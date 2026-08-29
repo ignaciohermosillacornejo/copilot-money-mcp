@@ -99,9 +99,17 @@ function limitHistory(
   history: readonly InvestmentBalancePoint[],
   limit: number | undefined
 ): { history: InvestmentBalancePoint[]; total_count: number; truncated: boolean } {
+  // `limit === 0` is also true for `-0`, which JSON.parse("-0") really does
+  // produce — so a wire `-0` takes the unlimited path rather than clamping to
+  // 1 like other non-positive values. Deliberate: `-0` is indistinguishable
+  // from `0` under every comparison JS offers short of Object.is, and
+  // "unlimited" is the safer reading of a caller who wrote a zero.
   if (limit === 0) {
     return { history: [...history], total_count: history.length, truncated: false };
   }
+  // Non-integer limits reach here despite the schema's `type: 'integer'`
+  // (nothing validates read-tool args server-side — see CLAUDE.md). They are
+  // floored by clampMaxRows, so 1.7 caps at 1 rather than throwing.
   const max_rows = clampMaxRows(limit, { defaultValue: DEFAULT_HISTORY_LIMIT });
   const page = paginate(history, { max_rows });
   return { history: page.rows, total_count: page.total_rows, truncated: page.truncated };
@@ -202,8 +210,9 @@ export function createLiveInvestmentBalanceToolSchema(): ToolSchema {
           description:
             'How many of the most recent history points to return. Default 30; the full series ' +
             'can run to hundreds of daily rows — measured at ~98% of the response on a 365-day ' +
-            'series. Pass 0 for the full series. history_total_count and history_truncated ' +
-            'always report what was dropped.',
+            'series. Pass 0 for the full series. Non-integer values are floored, and values ' +
+            'below 1 clamp to 1. history_total_count and history_truncated always report what ' +
+            'was dropped.',
           default: DEFAULT_HISTORY_LIMIT,
         },
       },
