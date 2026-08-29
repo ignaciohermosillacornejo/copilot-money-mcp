@@ -210,8 +210,9 @@ export function createLiveInvestmentBalanceToolSchema(): ToolSchema {
           description:
             'How many of the most recent history points to return. Default 30; the full series ' +
             'can run to hundreds of daily rows — measured at ~98% of the response on a 365-day ' +
-            'series. Pass 0 for the full series. Non-integer values are floored, and values ' +
-            'below 1 clamp to 1. history_total_count and history_truncated always report what ' +
+            'series. Pass 0 for the full series. Non-integer values are floored, values below ' +
+            '1 clamp to 1, and values above 5000 clamp to 5000 (use 0, not a huge number, to ' +
+            'defeat the cap). history_total_count and history_truncated always report what ' +
             'was dropped.',
           default: DEFAULT_HISTORY_LIMIT,
         },

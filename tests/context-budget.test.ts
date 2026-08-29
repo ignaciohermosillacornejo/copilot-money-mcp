@@ -119,9 +119,14 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // duplicate of get_budgets_live — from the default row, replacing it with
   // a derived `budget_amount`) plus a description sentence naming the
   // excluded token, per the #597 convention that a generic selection param
-  // must say what "default" leaves out. Measured 2_152 (~8.5% headroom).
-  // Real new capability, not bloat.
-  get_categories_live: 2_335,
+  // must say what "default" leaves out. Grown again by PR #673 review: the
+  // description now names the FULL default set (id, parentId, name,
+  // colorName, isExcluded, budget_amount) and the four smaller fields the
+  // preset drops besides `budget` — templateId, icon, isRolloverDisabled,
+  // canBeDeleted. Without that, the description implied `budget` was the only
+  // exclusion, which understated a breaking change. Measured 2_322 (~10%
+  // headroom). Disclosure required by the #597 convention, not bloat.
+  get_categories_live: 2_555,
   get_tags_live: 530,
   get_budgets_live: 905,
   get_recurring_live: 755,
@@ -143,13 +148,17 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // excludes, the `history` series — the tool's whole purpose) plus a
   // description sentence naming the ~98% cost it caps (measured on a
   // 365-day series; see src/tools/live/investment-balance.ts), plus a
-  // sentence spelling out that non-integer limits floor and sub-1 values
-  // clamp (the schema says `integer`, but nothing validates read-tool args
-  // server-side, so the coercion is caller-visible behaviour). Measured
-  // 1_529 (~5.6% headroom) — deliberately left below this file's usual
-  // measured-plus-10% sizing rather than raised: a tighter ceiling is a
-  // stronger ratchet, and this tool's schema should not be growing again.
-  get_investment_balance_live: 1_615,
+  // sentence spelling out the caller-visible coercions: non-integer limits
+  // floor, sub-1 values clamp to 1, and values above 5000 clamp to 5000 (so
+  // `0`, not a huge number, is how you defeat the cap). The schema says
+  // `integer`, but nothing validates read-tool args server-side, so all three
+  // are reachable over the wire. Measured 1_608 (~10% headroom).
+  //
+  // Sized at measured-plus-10% per this file's convention. An earlier
+  // revision of this comment pinned the ceiling at 1_615 and argued a tighter
+  // bound was a stronger ratchet; that left 0.4% headroom, which is a trap
+  // for the next legitimate wording fix rather than a ratchet.
+  get_investment_balance_live: 1_770,
   refresh_cache: 1_335,
   // Write (--write) tools
   create_transaction: 1_980,

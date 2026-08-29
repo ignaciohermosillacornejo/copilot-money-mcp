@@ -242,8 +242,10 @@ export function createLiveCategoriesToolSchema(): ToolSchema {
       'reads from. Each row carries a `parentId` field: `null` for top-level categories ' +
       '(parents AND standalones), or the parent category id for children. To detect a parent ' +
       'specifically: build a Set of parent ids from the rows where `parentId !== null`. ' +
-      'Default rows exclude the full `budget` object ({current, histories}) — see `fields` ' +
-      'for how to get it back, and `include_history` for what it contains once you do. ' +
+      'Default rows are terse: id, parentId, name, colorName, isExcluded, budget_amount. ' +
+      'That excludes the full `budget` object ({current, histories}) AND four smaller row ' +
+      'fields — templateId, icon, isRolloverDisabled, canBeDeleted. See `fields` for how to ' +
+      'get any of them back, and `include_history` for what `budget` contains once you do. ' +
       'Replaces get_categories when --live-reads is on.',
     inputSchema: {
       type: 'object' as const,
