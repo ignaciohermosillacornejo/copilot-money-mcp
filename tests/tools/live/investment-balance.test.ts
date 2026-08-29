@@ -166,7 +166,7 @@ describe('LiveInvestmentBalanceTools.getInvestmentBalance', () => {
 
     test('history_limit exactly equal to the series length returns everything, untruncated', async () => {
       // Boundary distinct from strictly-less and strictly-greater: if the
-      // `>=` comparison inside paginate() regressed to `>`, this exact-match
+      // `>` comparison inside paginate() regressed to `>=`, this exact-match
       // case would still return correct data but silently mis-report
       // truncated: true.
       const client = makeClient(make214DailyPoints(), liveDot);

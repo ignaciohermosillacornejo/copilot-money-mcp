@@ -119,7 +119,7 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // duplicate of get_budgets_live — from the default row, replacing it with
   // a derived `budget_amount`) plus a description sentence naming the
   // excluded token, per the #597 convention that a generic selection param
-  // must say what "default" leaves out. Measured 2_123 (~10% headroom).
+  // must say what "default" leaves out. Measured 2_152 (~8.5% headroom).
   // Real new capability, not bloat.
   get_categories_live: 2_335,
   get_tags_live: 530,
@@ -135,8 +135,8 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // Raised from 1_175 by #597 Tier 1: adds the `fields` param (excludes
   // `price_points` — the intraday tick series — from the default row) plus a
   // description sentence naming it, per the #597 convention that a generic
-  // selection param must say what "default" leaves out. Measured 1_610
-  // (~10% headroom). Real new capability, not bloat.
+  // selection param must say what "default" leaves out. Measured 1_665
+  // (~6.6% headroom). Real new capability, not bloat.
   get_top_movers_live: 1_775,
   get_aggregated_holdings_live: 1_285,
   // Raised from 1_110 by #597 Tier 1: adds `history_limit` (caps, not

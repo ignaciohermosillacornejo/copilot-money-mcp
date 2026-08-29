@@ -63,6 +63,26 @@ export type GetTopMoversLiveEntry = {
   price_points: TopMoverPricePoint[];
 };
 
+/**
+ * Every selectable field name on a top-mover row, derived from
+ * {@link GetTopMoversLiveEntry} itself (not a sample row) via a mapped-type
+ * record: the `[K in keyof ...]-?: true` shape forces this object literal to
+ * carry exactly the interface's keys, so a forgotten or renamed field is a
+ * compile error instead of a silent runtime desync. Without an explicit
+ * knownFields set, projectRows falls back to row-key detection, which cannot
+ * warn on a typo'd field name when the result set is empty (CHANGELOG.md
+ * promises the same _field_warning behavior as get_transactions).
+ */
+const TOP_MOVER_FIELD_NAMES: { [K in keyof GetTopMoversLiveEntry]-?: true } = {
+  security_id: true,
+  ticker_symbol: true,
+  name: true,
+  type: true,
+  change: true,
+  price_points: true,
+};
+const TOP_MOVER_KNOWN_FIELDS: ReadonlySet<string> = new Set(Object.keys(TOP_MOVER_FIELD_NAMES));
+
 export interface GetTopMoversLiveResult {
   count: number;
   filter: TopMoversFilter;
@@ -110,6 +130,7 @@ export class LiveTopMoversTools {
     // get_investment_prices there is nothing to derive before projecting.
     const { rows: movers, warning } = projectRows(mapped, args.fields ?? ['default'], {
       preset: DEFAULT_TOP_MOVER_FIELDS,
+      knownFields: TOP_MOVER_KNOWN_FIELDS,
       validFieldsHint:
         'the top-mover row fields (security_id, ticker_symbol, name, type, change, price_points)',
     });
