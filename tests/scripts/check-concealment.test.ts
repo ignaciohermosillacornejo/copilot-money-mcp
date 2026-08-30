@@ -47,7 +47,12 @@ interface Result {
 
 async function runCheck(root: string, args: string[] = []): Promise<Result> {
   const proc = Bun.spawn(['bun', 'run', SCRIPT, ...args], {
-    env: { ...process.env, CHECK_CONCEALMENT_ROOT: root },
+    // Same reason as withGitTree's cleanEnv: a pre-push run sets GIT_DIR, and
+    // leaking it makes the gate resolve to the ambient repo instead of `root`.
+    env: Object.fromEntries([
+      ...Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')),
+      ['CHECK_CONCEALMENT_ROOT', root],
+    ]) as Record<string, string>,
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -222,8 +227,18 @@ describe('file list comes from git when available (review follow-up)', () => {
         await mkdir(join(path, '..'), { recursive: true });
         await writeFile(path, contents);
       }
+      // Clear inherited git plumbing vars for the same reason the gate does:
+      // under a pre-push hook GIT_DIR is set, and `git -C <dir>` does NOT
+      // override it — `git init` here would operate on the ambient repo
+      // instead of this scratch tree, and the tests would silently describe
+      // the wrong repository.
+      const cleanEnv: Record<string, string> = {};
+      for (const [k, v] of Object.entries(process.env)) {
+        if (k.startsWith('GIT_')) continue;
+        if (v !== undefined) cleanEnv[k] = v;
+      }
       const git = (...args: string[]): void => {
-        const r = Bun.spawnSync(['git', '-C', dir, ...args]);
+        const r = Bun.spawnSync(['git', '-C', dir, ...args], { env: cleanEnv });
         if (r.exitCode !== 0) throw new Error(`git ${args.join(' ')} failed`);
       };
       git('init', '-q');
