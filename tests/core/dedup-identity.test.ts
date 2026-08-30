@@ -13,15 +13,26 @@
  * live GraphQL surface returned. Accounts were the only content-keyed dedup in
  * the decoder; every sibling already keyed on its id.
  *
- * This test makes each dedup prove it. For every collection it seeds TWO
- * documents that are byte-for-byte identical in content and differ only by id,
- * then asserts both survive — on the standalone decoder AND on the single-pass
- * aggregate, since #662 shipped two independent copies of the same bad key.
+ * This test makes each COVERED dedup prove it. For those collections it seeds
+ * TWO documents that are byte-for-byte identical in content and differ only by
+ * id, then asserts both survive — on the standalone decoder AND on the
+ * single-pass aggregate, since #662 shipped two independent copies of the same
+ * bad key.
  *
- * Any future dedup that reaches for a content heuristic instead of an identity
- * fails here, whatever the field it picks.
+ * SCOPE, stated precisely because an overclaiming detector is worse than an
+ * honestly-scoped one: this exercises the FIVE primary collections listed in
+ * COLLECTIONS below, not all ~26 dedup sites in decodeAllCollections. The rest
+ * all key on a document id today, so there is no live bug — but a future
+ * content-keyed dedup in, say, `categories` would NOT fail this test.
  *
- * Two deliberate omissions, so they don't read as oversights:
+ * What is enforced instead of that claim: `dedupSiteCoverage` below discovers
+ * every `dedupe by` site in the decoder source and requires each one to be
+ * either covered here or listed in OMITTED with a reason. So the coverage gap
+ * cannot widen silently, and a new dedup site added tomorrow fails until
+ * someone makes a decision about it. That is the checkable version of the
+ * claim this comment used to make.
+ *
+ * Two of the omissions are structural rather than "not done yet":
  *
  * - `goal_history` (keyed on goal_id + month) and `investment_prices` (keyed on
  *   security + price_type + period) are excluded because their keys ARE their
@@ -155,8 +166,97 @@ const COLLECTIONS = [
 ] as const;
 
 function idsOf(rows: readonly unknown[], idField: string): Set<string> {
-  return new Set(rows.map((row) => (row as Record<string, string>)[idField]));
+  return new Set(
+    rows.map((row, i) => {
+      const value = (row as Record<string, unknown>)[idField];
+      // Without this a renamed id field yields `Set { undefined }` and the
+      // failure reads as "the document vanished" rather than "the field moved".
+      if (typeof value !== 'string') {
+        throw new Error(
+          `row ${i} has no string "${idField}" (got ${typeof value}) — did the field get renamed?`
+        );
+      }
+      return value;
+    })
+  );
 }
+
+// ---------------------------------------------------------------------------
+// Coverage guard (review follow-up on #668)
+// ---------------------------------------------------------------------------
+
+/**
+ * Dedup sites in decodeAllCollections that this file does NOT exercise, each
+ * with the reason. Checked in BOTH directions below, so an entry naming a site
+ * that no longer exists fails too — otherwise this becomes one more
+ * hand-maintained list quietly protecting nothing.
+ */
+const OMITTED: Record<string, string> = {
+  // Structural — the key IS the identity, so "two documents identical in
+  // content differing only by id" is not expressible for these.
+  'goal history': 'keyed on goal_id + month — the tuple IS the identity, one doc per tuple',
+  'investment prices':
+    'keyed on security + price_type + period — the tuple IS the identity, per the Firestore path',
+
+  // Not yet exercised. Every one keys on a document id today, so there is no
+  // live bug; they are listed rather than silently uncovered so the gap is a
+  // decision on the record instead of an accident. Seeding them needs
+  // createCombinedDb support, which is follow-up work.
+  'amazon integrations': 'not seeded by createCombinedDb; keys on amazon_id today',
+  'amazon orders': 'not seeded by createCombinedDb; keys on order_id today',
+  'balance history': 'not seeded by createCombinedDb; keys on balance_id today',
+  categories: 'not seeded by createCombinedDb; keys on category_id today',
+  changes: 'not seeded by createCombinedDb; keys on change_id today',
+  'feature tracking': 'not seeded by createCombinedDb; keys on its document id today',
+  'holdings history': 'not seeded by createCombinedDb; keys on history_id today',
+  'holdings history meta': 'not seeded by createCombinedDb; keys on holdings_history_id today',
+  'investment splits': 'not seeded by createCombinedDb; keys on security_id today',
+  invites: 'not seeded by createCombinedDb; keys on invite_id today',
+  items: 'not seeded by createCombinedDb; keys on item_id today',
+  'plaid accounts': 'not seeded by createCombinedDb; keys on plaid_account_id today',
+  securities: 'not seeded by createCombinedDb; keys on security_id today',
+  subscriptions: 'not seeded by createCombinedDb; keys on subscription_id today',
+  'support docs': 'not seeded by createCombinedDb; keys on its document id today',
+  tags: 'not seeded by createCombinedDb; keys on tag_id today',
+  'user accounts': 'not seeded by createCombinedDb; keys on account_id today',
+  'user items': 'not seeded by createCombinedDb; keys on its document id today',
+  'user profiles': 'not seeded by createCombinedDb; keys on user_id today',
+};
+
+/** Every `<Label>: dedupe by ...` site the decoder documents, lowercased. */
+function discoverDedupSites(): string[] {
+  const src = fs.readFileSync(
+    path.join(import.meta.dir, '..', '..', 'src', 'core', 'decoder.ts'),
+    'utf-8'
+  );
+  return [...src.matchAll(/\/\/\s*([A-Z][\w ]*?):\s*dedupe by/g)]
+    .map((m) => (m[1] as string).trim().toLowerCase())
+    .filter((name, i, all) => all.indexOf(name) === i)
+    .sort();
+}
+
+describe('dedup coverage is declared, not assumed (#668 review)', () => {
+  const sites = discoverDedupSites();
+  const covered = new Set(COLLECTIONS.map((c) => c.name.toLowerCase()));
+
+  // Without this, a regex that stopped matching would make the forward check
+  // below pass over an empty list — the failure shape this whole file is about.
+  test('discovery finds the dedup sites at all', () => {
+    expect(sites.length).toBeGreaterThanOrEqual(20);
+  });
+
+  test('forward: every dedup site is either exercised here or listed as omitted', () => {
+    expect(sites.filter((site) => !covered.has(site) && !(site in OMITTED))).toEqual([]);
+  });
+
+  test('backward: every omission still names a live dedup site', () => {
+    expect(
+      Object.keys(OMITTED)
+        .filter((site) => !sites.includes(site))
+        .sort()
+    ).toEqual([]);
+  });
+});
 
 describe('dedup keys on identity, not content (#662)', () => {
   for (const collection of COLLECTIONS) {
