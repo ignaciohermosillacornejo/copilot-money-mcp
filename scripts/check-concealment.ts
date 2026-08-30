@@ -488,14 +488,25 @@ function checkGitAttributes(contents: string, rel: string): void {
     // parsed down to `src/pay`, matched nothing, and still marked the real
     // file binary for every reviewer. A parser in this gate must not discard
     // more than the grammar it models.
-    // git's parse_attr_line skips ONLY spaces and tabs before the `#` test
-    // (`strspn(line, blank)`, `blank[] = " \t"`). JS .trim() also strips NBSP,
-    // \f, \v, the unicode space separators and U+FEFF — so `<NBSP># p.ts binary`
-    // is a real pattern to git and was dropped here as a comment. That is the
-    // mirror of the bug this function just fixed: the old code discarded
-    // content AFTER a `#`, this discarded a whole line that is not a comment.
-    // Trailing \s is still stripped, for CRLF checkouts.
-    const stripped = line.replace(/^[ \t]+/, '').replace(/\s+$/, '');
+    // git's parse_attr_line skips its blank set before the `#` test
+    // (`strspn(line, blank)`), and that set is SPACE, TAB and CR — not the two
+    // this comment used to claim. Probed on git 2.50.1 one character at a time,
+    // in both positions, rather than recalled: space, tab and CR are skipped
+    // before `#` and separate the pattern from its attributes; form feed,
+    // vertical tab and NBSP do neither. JS `.trim()` would have been wrong in
+    // the other direction — it strips NBSP, \f, \v, the unicode space
+    // separators and U+FEFF, so `<NBSP># p.ts binary` is a real pattern to git
+    // and was dropped here as a comment.
+    //
+    // Getting this set wrong is variation seven of this function's one bug, and
+    // the first that came from asserting a set instead of measuring it: with CR
+    // missing, `\r# p.ts binary` was reported though git reads it as a comment,
+    // and — the direction that matters — the tokenizer below ran past a CR. Say
+    // what was measured, not what was remembered.
+    //
+    // Trailing \s is still stripped, which is wider than git's set on purpose:
+    // it normalises CRLF checkouts.
+    const stripped = line.replace(/^[ \t\r]+/, '').replace(/\s+$/, '');
     if (stripped === '' || stripped.startsWith('#')) return;
     // `*.png binary` targets something with no readable diff to suppress.
     //
@@ -505,11 +516,17 @@ function checkGitAttributes(contents: string, rel: string): void {
     // execute. Auto-approving `*.wasm binary` would bless diff suppression on
     // exactly the formats that run. An author who genuinely needs it writes
     // the exemption, which is what this gate's failure message asks for.
-    // git separates the pattern from its attributes on spaces and tabs only,
-    // the same blank set as the leading-comment test above. `\s` here would
-    // split on NBSP and friends, so a pattern containing one would tokenize
-    // short and could land in the allowance below — the blank-set mismatch
-    // surviving one statement past its own fix, and this one fails OPEN.
+    // git separates the pattern from its attributes on the SAME blank set as
+    // the leading-comment test above — space, tab, CR — and this must stay
+    // literally the same set, because the two diverging is how variation seven
+    // happened. `\s` here would be too wide: it splits on NBSP and friends, so
+    // a pattern containing one would tokenize short and land in the allowance
+    // below. `[ \t]` was too narrow: `src/payload.ts<CR>cover.png -diff` is a
+    // .ts file with `-diff` to git (check-attr: `diff: unset`), while the
+    // tokenizer read one token ending in `.png` and the allowance returned
+    // before the attribute loop. A CR renders as nothing in a GitHub diff and
+    // INVISIBLE carries no C0 controls, so that had no second line of defence.
+    // Both mismatches fail OPEN; only the widths differ.
     // gitattributes patterns may be QUOTED to contain blanks — verified:
     // `"evil run.ts" binary` really does set binary on `evil run.ts`. Naive
     // tokenizing gives `"cover.png` for `"cover.png run.ts" binary`, whose
@@ -519,7 +536,7 @@ function checkGitAttributes(contents: string, rel: string): void {
     // fail the gate on `"my docs/logo.png" binary`, which is legitimate, and
     // this rule already learned that lesson with *.png.
     const quoted = /^"((?:[^"\\]|\\.)*)"/.exec(stripped);
-    const pattern = quoted ? (quoted[1] as string) : (stripped.split(/[ \t]+/)[0] ?? '');
+    const pattern = quoted ? (quoted[1] as string) : (stripped.split(/[ \t\r]+/)[0] ?? '');
     // A quoted pattern containing a backslash is NOT unquoted before the inert
     // check. git resolves the escapes with unquote_c_style before matching, and
     // stripping them here only ever SHORTENS the string, so a backslash after
@@ -707,10 +724,20 @@ function gitFiles(root: string): { tracked: string[]; untracked: string[] } | un
   //
   // Dropping HOME has one non-obvious consequence worth naming: it also hides a
   // global `safe.directory`, so scanning a repo owned by another user makes
-  // `ls-files` refuse and the gate falls back to the filesystem walk. That is
-  // fail-SAFE — the walk ignores .gitignore, so it scans more than the git
-  // listing would, never less — and since the summary line now names the
-  // strategy, it announces itself rather than looking like a normal run.
+  // `ls-files` refuse and the gate falls back to the filesystem walk.
+  //
+  // That fallback is NOT strictly safer, and an earlier version of this comment
+  // claimed it was. The walk scans MORE in one direction — it ignores
+  // .gitignore — and LESS in another: it applies SKIP_DIRS to everything, while
+  // the git listing applies it to the untracked half only. Probed on an
+  // identical tree holding a tracked, concealed `build/loader.ts`: the git
+  // strategy reports it, the walk prints `0 files scanned (walk), nothing
+  // hidden`. Latent here, since nothing tracked lives under a SKIP_DIRS name,
+  // but the honest statement is that the two strategies differ rather than
+  // that one dominates. See listFiles below, which has always said this
+  // correctly. What makes the fallback survivable is that the summary line
+  // names the strategy, so a swap announces itself instead of reading as a
+  // normal run.
   const env = { ...process.env };
   for (const key of Object.keys(env)) if (key.startsWith('GIT_')) delete env[key];
   delete env.HOME;
@@ -820,12 +847,25 @@ for (const file of files) {
   // Any package.json, not just the root one: workspace installs run
   // sub-package lifecycle scripts too, so `packages/x/package.json` with a
   // postinstall is the same exposure with a longer path.
-  if (rel === 'package.json' || rel.endsWith(`${sep}package.json`)) {
-    checkLifecycleScripts(contents, rel);
-  }
-  if (rel === '.gitattributes' || rel.endsWith(`${sep}.gitattributes`)) {
-    checkGitAttributes(contents, rel);
-  }
+  //
+  // Matched case-INSENSITIVELY, which is a deliberate trade rather than an
+  // oversight. This repo is developed on macOS and consumed on Windows, both
+  // case-insensitive by default, and there the lookup resolves whatever the
+  // file is actually called: probed on this filesystem, `git check-attr diff
+  // src/payload.ts` reports `diff: unset` from a file named `.GITATTRIBUTES`,
+  // and `npm pkg get scripts` returns the postinstall from a file named
+  // `PACKAGE.JSON`. Exact-case routing sent neither to its checker and the gate
+  // exited 0 on both — variation eight, and the cheapest one yet to exploit.
+  //
+  // The cost: on a case-sensitive filesystem `.GITATTRIBUTES` is a different
+  // file that git ignores, so this reports a finding git would not honour. That
+  // is a false positive, and it is the right way round for this gate — a human
+  // spends a minute and writes an exemption, where the other error ships a
+  // suppressed diff. It is also the direction every other allowance here
+  // already fails in: omission must fail toward suspicion.
+  const basename = rel.slice(rel.lastIndexOf(sep) + 1).toLowerCase();
+  if (basename === 'package.json') checkLifecycleScripts(contents, rel);
+  if (basename === '.gitattributes') checkGitAttributes(contents, rel);
 }
 
 if (findings.length === 0) {
