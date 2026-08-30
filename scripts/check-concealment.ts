@@ -87,7 +87,10 @@ const SKIP_DIRS = new Set([
  * this replaced (F2), where forgetting an extension meant no scrutiny at all.
  * An allowlist is only safe when omission fails toward suspicion.
  */
-const PROSE_EXTENSIONS = new Set(['.md', '.mdx', '.txt', '.rst']);
+// `.mdx` is deliberately NOT here: it compiles to JS/JSX and can carry
+// executable expressions, so it must keep the code-shaped rules. No MDX
+// pipeline exists today; listing it would have been a hole waiting for one.
+const PROSE_EXTENSIONS = new Set(['.md', '.txt', '.rst']);
 
 function isProse(rel: string): boolean {
   const dot = rel.lastIndexOf('.');
@@ -112,6 +115,35 @@ function isProse(rel: string): boolean {
 
 /** Generated, enormous, and not human-reviewed; a different gate covers them. */
 const SKIP_FILES = new Set(['package-lock.json', 'bun.lock', 'bun.lockb', 'yarn.lock']);
+
+/**
+ * Extensions where a NUL byte is expected, because the file genuinely is
+ * binary. Everything else containing a NUL is REPORTED rather than skipped.
+ *
+ * A NUL used to be an unconditional free pass: the main loop skipped any file
+ * containing one as "binary". But a module with a NUL byte tucked inside a
+ * comment or string literal still runs under bun and node — NUL-containing is
+ * not the same as non-executable —
+ * while git renders the whole file as `Binary files ... differ`, so the
+ * reviewer sees nothing at all. That is strictly better concealment than the
+ * off-screen trick this gate was built for.
+ *
+ * Note the direction: forgetting an extension here means a real binary gets
+ * reported and a human adds it. The reverse — the old behaviour — meant a
+ * payload ran with nobody looking.
+ */
+const BINARY_EXTENSIONS = new Set([
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.icns', '.bmp', '.tiff',
+  '.pdf', '.zip', '.gz', '.tgz', '.bz2', '.xz', '.7z', '.tar',
+  '.woff', '.woff2', '.ttf', '.otf', '.eot',
+  '.mp3', '.mp4', '.wav', '.mov', '.webm', '.ogg',
+  '.mcpb', '.node', '.wasm', '.ldb', '.sst', '.dylib', '.so', '.dll', '.exe',
+]);
+
+function isExpectedBinary(rel: string): boolean {
+  const dot = rel.lastIndexOf('.');
+  return dot > 0 && BINARY_EXTENSIONS.has(rel.slice(dot).toLowerCase());
+}
 
 /**
  * Built from a char code rather than written literally: an actual NUL byte in
@@ -216,7 +248,15 @@ const INVISIBLE: Record<number, string> = {
   0xfeff: 'ZERO WIDTH NO-BREAK SPACE',
 };
 
-const WHITESPACE_RUN_RE = new RegExp(`\\S[ \\t]{${WHITESPACE_RUN},}\\S`);
+/**
+ * The gap characters. `[ \t]` alone was defeatable: U+00A0 NBSP, U+202F narrow
+ * NBSP, U+2003 em space and U+3000 ideographic space are all valid ECMAScript
+ * whitespace, all render as blank horizontal space, and none were matched — so
+ * a payload could be pushed off the right edge without tripping this rule.
+ * Unicode Zs plus the format-ish spaces that behave the same way.
+ */
+const GAP_CHARS = ' \\t\\u00a0\\u1680\\u2000-\\u200a\\u202f\\u205f\\u3000';
+const WHITESPACE_RUN_RE = new RegExp(`\\S[${GAP_CHARS}]{${WHITESPACE_RUN},}\\S`);
 
 const DYNAMIC_EXEC: Array<[RegExp, string]> = [
   [/(?<![\w$.])eval\s*\(/, 'eval() call'],
@@ -462,14 +502,33 @@ for (const file of files) {
   } catch {
     continue;
   }
-  if (contents.includes(NUL)) continue; // binary
+  if (contents.includes(NUL)) {
+    // Not "binary, therefore safe" — see BINARY_EXTENSIONS. A NUL in a file
+    // that is not an expected binary is itself the concealment: it makes git
+    // show the reviewer nothing while the module still executes.
+    if (!isExpectedBinary(rel)) {
+      report(
+        rel,
+        1,
+        'NUL byte in a non-binary file',
+        'a NUL makes git render the whole file as binary — no diff for a reviewer to read — ' +
+          'while the module still executes'
+      );
+    }
+    continue;
+  }
 
   const exempt = SELF_EXEMPT.has(rel);
   const prose = isProse(rel);
   const lines = contents.split('\n');
   for (let i = 0; i < lines.length; i++) checkLine(rel, i + 1, lines[i], exempt, prose);
 
-  if (rel === 'package.json') checkLifecycleScripts(contents, rel);
+  // Any package.json, not just the root one: workspace installs run
+  // sub-package lifecycle scripts too, so `packages/x/package.json` with a
+  // postinstall is the same exposure with a longer path.
+  if (rel === 'package.json' || rel.endsWith(`${sep}package.json`)) {
+    checkLifecycleScripts(contents, rel);
+  }
 }
 
 if (findings.length === 0) {
