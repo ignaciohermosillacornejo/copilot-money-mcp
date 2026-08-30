@@ -32,6 +32,14 @@
  * Dropping a member changes what we accept from or send to Copilot, and no
  * ratchet elsewhere catches a list getting SHORTER.
  *
+ * SCOPE: the grammar below is `export const NAME = [...] as const`, so all of
+ * that covers as-const ARRAYS only. A string-literal allowlist declared as
+ * `new Set([...])` is invisible to it — TRANSFER_CATEGORIES and
+ * INCOME_CATEGORIES (src/utils/categories.ts) are unpinned today for exactly
+ * that reason. Known gap, tracked separately. Said out loud because "no ratchet
+ * catches a list getting shorter" must not be read as "every list in src/ is
+ * ratcheted": a reader who believes the wider claim stops looking.
+ *
  * HOW IT FAILS (all three directions are mutation-tested in this file's PR)
  *
  *   forward   a constant exists in src/ with no pinned expectation
@@ -45,7 +53,7 @@
  * different declaration style), the constants it can no longer see read as
  * "vanished" and the backward check goes red. A partial under-match cannot
  * pass quietly. The explicit non-vacuity test makes the total-failure case
- * report an unambiguous reason rather than 23 confusing ones.
+ * report an unambiguous reason rather than 25 confusing ones.
  *
  * MAINTENANCE: changing one of these deliberately means updating the entry
  * below. That is the intended workflow — the point is that it cannot happen
@@ -303,10 +311,13 @@ describe('exported string constants are pinned (#635 class detector)', () => {
 
   test('discovery finds constants at all (guards the guard)', () => {
     expect(discoveredNames.length).toBeGreaterThan(0);
-    // Coverage floor, deliberately not an exact count: an exact one would churn
-    // on every constant added, while a floor still catches discovery collapsing
-    // to a handful — the failure this file exists to make loud.
-    expect(discovered.size).toBeGreaterThanOrEqual(25);
+    // Coverage floor, deliberately loose in BOTH directions. An exact count
+    // churns on every constant added; a floor flush against today's 25 churns
+    // on every legitimate deletion, where a constant leaves src/ and its pin
+    // together. The slack is what keeps this test about its one job —
+    // discovery collapsing to a handful, which is the failure that would make
+    // every other test in this file vacuous at once.
+    expect(discovered.size).toBeGreaterThanOrEqual(20);
   });
 
   test('comment-carrying arrays survive stripping', () => {
@@ -329,7 +340,7 @@ describe('exported string constants are pinned (#635 class detector)', () => {
     expect(discovered.has('IGNORED_ITEM_FIELDS')).toBe(true);
   });
 
-  test('a non-as-const array does not swallow the as-const arrays after it', () => {
+  test('a non-as-const array is not itself discovered', () => {
     // CONFORMANCE_LEDGER (src/conformance/ledger.ts) is `readonly LedgerEntry[]`
     // with no `as const`; it must not consume the declarations that follow it.
     // A shape pin only — the detector for the rule is the synthetic test below.
