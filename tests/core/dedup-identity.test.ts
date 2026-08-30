@@ -44,7 +44,10 @@
  *      RESOLVED expression can still pin nothing (`key = keyFor(row)` is not
  *      a bare word, yet names no field)
  *   6. resolved expressions required to contain a property access, not just
- *      be non-bare
+ *      be non-bare — but the check is on the call SITE's text: `key =
+ *      keyFor(row.id)` contains `.id` and passes, though `keyFor` could
+ *      compute anything from that argument; narrows the opaque-call class
+ *      rather than closing it
  *
  * Revision 2 could not see `dedupeAndSortInvestmentPrices`, which carries no
  * comment — the site that shipped #622, the previous instance of this exact
@@ -335,14 +338,28 @@ const UNTESTED_BY_CHOICE = new Set([
 ]);
 
 /**
+ * ASSUMPTION: no string literal in a scanned region contains `//` or a block
+ * comment opener. Mirrors the identically-named helper in
+ * decoder-field-completeness.test.ts. Applied to the WINDOW below before
+ * `balanced()` ever sees it — an unstripped comment containing an unbalanced
+ * `{` or `}` would otherwise shift where `balanced()` thinks the guard body
+ * ends, in either direction.
+ */
+function stripComments(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+}
+
+/**
  * Slice out `open`..`close` starting at `openIdx`, counting nesting depth.
- * Mirrors the identically-named helper in decoder-field-completeness.test.ts.
- * Kept local rather than shared — the two discovery scripts read the source
- * independently by design (see discoverAggregatePushTargets's own doc) — but
- * the same bounding requirement applies here: without it, a scan can walk
- * past the guarded block's own closing brace and misattribute a LATER,
- * unrelated `.push(` call, which is exactly the #685 Step 1 defect in the
- * sibling file. Bounding here is what keeps this file from shipping that
+ * Mirrors the identically-named helper in decoder-field-completeness.test.ts,
+ * including running only on already-stripped text (see stripComments above) —
+ * an earlier revision of this copy ran on raw source, which the sibling file
+ * never does. Kept local rather than shared — the two discovery scripts read
+ * the source independently by design (see discoverAggregatePushTargets's own
+ * doc) — but the same bounding requirement applies here: without it, a scan
+ * can walk past the guarded block's own closing brace and misattribute a
+ * LATER, unrelated `.push(` call, which is exactly the #685 Step 1 defect in
+ * the sibling file. Bounding here is what keeps this file from shipping that
  * same class of bug next door to its own fix.
  */
 function balanced(text: string, openIdx: number, open: string, close: string): [string, number] {
@@ -372,19 +389,24 @@ function balanced(text: string, openIdx: number, open: string, close: string): [
  * The `.push(` search is bounded to the guard's OWN braced body via
  * `balanced()`, not a forward scan across the whole window — a forward scan
  * for the next `.push(` anywhere ahead can cross the guard's closing brace
- * and credit an unrelated later block's push to this Set variable.
+ * and credit an unrelated later block's push to this Set variable. `source`
+ * defaults to the real decoder so the one production call site below is
+ * unaffected; the override exists so a regression fixture (a synthetic
+ * source snippet reproducing exactly this hazard) can be run through the
+ * SAME discovery logic, the way Step 1's `discoverProcessors(src)` does in
+ * the sibling file.
  */
-function discoverAggregatePushTargets(): Record<string, string> {
-  const source = fs.readFileSync(
+function discoverAggregatePushTargets(
+  source: string = fs.readFileSync(
     path.join(import.meta.dir, '..', '..', 'src', 'core', 'decoder.ts'),
     'utf-8'
-  );
+  )
+): Record<string, string> {
   const found: Record<string, string> = {};
   for (const m of source.matchAll(/const (\w+) = new Set<string>\(\)/g)) {
     const setVar = m[1] as string;
-    const window = source.slice(
-      (m.index as number) + m[0].length,
-      (m.index as number) + m[0].length + 3000
+    const window = stripComments(
+      source.slice((m.index as number) + m[0].length, (m.index as number) + m[0].length + 3000)
     );
     const guard = new RegExp(`if \\(!${setVar}\\.has\\([^)]*\\)\\)\\s*\\{`).exec(window);
     if (!guard) continue;
@@ -552,4 +574,30 @@ describe('dedup keys on identity, not content (#662)', () => {
       );
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// Regression: the aggregate push-target scan must not cross the guard's brace
+// ---------------------------------------------------------------------------
+
+describe('aggregate push-target scan does not cross the guard boundary (#688 review)', () => {
+  // A guard whose OWN braced body has no `.push(` call at all, immediately
+  // followed by an UNRELATED `.push(` outside it. The pre-bound scanner
+  // searched forward for the next `.push(` anywhere in the window and would
+  // credit `unrelatedArray` to `xSeen` even though `xSeen`'s own guard never
+  // pushes anything.
+  const FIXTURE_SRC = `
+const xSeen = new Set<string>();
+const unrelatedArray: string[] = [];
+for (const item of rawItems) {
+  if (!xSeen.has(item.id)) {
+    xSeen.add(item.id);
+  }
+}
+unrelatedArray.push(item);
+`;
+
+  test('the unrelated later push is not credited to the bounded guard', () => {
+    expect(discoverAggregatePushTargets(FIXTURE_SRC)).toEqual({});
+  });
 });
