@@ -451,6 +451,40 @@ describe('nested manifests and .mdx (Fable review)', () => {
   });
 });
 
+describe('diff-suppressing gitattributes (Fable review, item 1)', () => {
+  test.each([
+    ['binary', 'src/payload.ts binary'],
+    ['-diff', 'src/payload.ts -diff'],
+    ['linguist-generated', 'src/payload.ts linguist-generated=true'],
+  ])('flags %s', async (_label, line) => {
+    // The same class as the NUL bypass reached without a NUL: one tracked
+    // .gitattributes line makes git and GitHub print "Binary files differ" (or
+    // fold the diff), so the payload file itself can be plain, valid,
+    // NUL-free TypeScript and every other rule in this gate passes.
+    await withTree(
+      { '.gitattributes': `${line}\n`, 'src/payload.ts': 'const a = 1;\n' },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('gitattribute');
+      }
+    );
+  });
+
+  test('leaves the legitimate attributes alone', async () => {
+    // text=auto / eol=lf / linguist-language do not hide content, which is why
+    // the rule refuses the suppressing attributes rather than allow-listing
+    // the safe ones.
+    const attrs = '* text=auto eol=lf\n*.ts linguist-language=TypeScript\n# a comment\n';
+    await withTree({ '.gitattributes': attrs }, ({ code }) => expect(code).toBe(0));
+  });
+
+  test('checks a nested .gitattributes too', async () => {
+    await withTree({ 'src/.gitattributes': 'payload.ts binary\n' }, ({ code }) =>
+      expect(code).toBe(1)
+    );
+  });
+});
+
 describe('invisible characters', () => {
   test('flags a zero-width space', async () => {
     await withTree({ 'src/a.ts': `const a${ZWSP} = 1;\n` }, ({ code, stderr }) => {
