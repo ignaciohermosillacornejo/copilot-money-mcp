@@ -85,6 +85,51 @@ async function withTree(
 
 const CLEAN = 'export const answer = 42;\n';
 
+async function withGitTree(
+  files: Record<string, string>,
+  assertions: (result: Result) => void | Promise<void>,
+  // Written AFTER the commit. `git add -A` honours .gitignore, so a file
+  // listed in it at seed time is never tracked at all — which is a different
+  // scenario from "tracked, then later ignored".
+  afterCommit: Record<string, string> = {}
+): Promise<void> {
+  const dir = await mkdtemp(join(tmpdir(), 'concealment-git-'));
+  try {
+    for (const [name, contents] of Object.entries(files)) {
+      const path = join(dir, name);
+      await mkdir(join(path, '..'), { recursive: true });
+      await writeFile(path, contents);
+    }
+    // Clear inherited git plumbing vars for the same reason the gate does:
+    // under a pre-push hook GIT_DIR is set, and `git -C <dir>` does NOT
+    // override it — `git init` here would operate on the ambient repo
+    // instead of this scratch tree, and the tests would silently describe
+    // the wrong repository.
+    const cleanEnv: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) {
+      if (k.startsWith('GIT_')) continue;
+      if (v !== undefined) cleanEnv[k] = v;
+    }
+    const git = (...args: string[]): void => {
+      const r = Bun.spawnSync(['git', '-C', dir, ...args], { env: cleanEnv });
+      if (r.exitCode !== 0) throw new Error(`git ${args.join(' ')} failed`);
+    };
+    git('init', '-q');
+    git('config', 'user.email', 'test@example.com');
+    git('config', 'user.name', 'test');
+    git('add', '-A');
+    git('commit', '-qm', 'seed', '--no-gpg-sign');
+    for (const [name, contents] of Object.entries(afterCommit)) {
+      const path = join(dir, name);
+      await mkdir(join(path, '..'), { recursive: true });
+      await writeFile(path, contents);
+    }
+    await assertions(await runCheck(dir));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
 describe('clean input', () => {
   test('passes on an ordinary source tree', async () => {
     await withTree({ 'src/a.ts': CLEAN, 'src/nested/b.ts': CLEAN }, ({ code, stdout }) => {
@@ -217,51 +262,6 @@ describe('scope', () => {
  */
 describe('file list comes from git when available (review follow-up)', () => {
   const concealed = `echo ok${' '.repeat(60)}eval("x")${' # '}${'x'.repeat(80)}\n`;
-
-  async function withGitTree(
-    files: Record<string, string>,
-    assertions: (result: Result) => void | Promise<void>,
-    // Written AFTER the commit. `git add -A` honours .gitignore, so a file
-    // listed in it at seed time is never tracked at all — which is a different
-    // scenario from "tracked, then later ignored".
-    afterCommit: Record<string, string> = {}
-  ): Promise<void> {
-    const dir = await mkdtemp(join(tmpdir(), 'concealment-git-'));
-    try {
-      for (const [name, contents] of Object.entries(files)) {
-        const path = join(dir, name);
-        await mkdir(join(path, '..'), { recursive: true });
-        await writeFile(path, contents);
-      }
-      // Clear inherited git plumbing vars for the same reason the gate does:
-      // under a pre-push hook GIT_DIR is set, and `git -C <dir>` does NOT
-      // override it — `git init` here would operate on the ambient repo
-      // instead of this scratch tree, and the tests would silently describe
-      // the wrong repository.
-      const cleanEnv: Record<string, string> = {};
-      for (const [k, v] of Object.entries(process.env)) {
-        if (k.startsWith('GIT_')) continue;
-        if (v !== undefined) cleanEnv[k] = v;
-      }
-      const git = (...args: string[]): void => {
-        const r = Bun.spawnSync(['git', '-C', dir, ...args], { env: cleanEnv });
-        if (r.exitCode !== 0) throw new Error(`git ${args.join(' ')} failed`);
-      };
-      git('init', '-q');
-      git('config', 'user.email', 'test@example.com');
-      git('config', 'user.name', 'test');
-      git('add', '-A');
-      git('commit', '-qm', 'seed', '--no-gpg-sign');
-      for (const [name, contents] of Object.entries(afterCommit)) {
-        const path = join(dir, name);
-        await mkdir(join(path, '..'), { recursive: true });
-        await writeFile(path, contents);
-      }
-      await assertions(await runCheck(dir));
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  }
 
   test('a gitignored tree is not scanned', async () => {
     // The real exposure: removing the extension allowlist put snapshots/,
@@ -481,6 +481,76 @@ describe('diff-suppressing gitattributes (Fable review, item 1)', () => {
   test('checks a nested .gitattributes too', async () => {
     await withTree({ 'src/.gitattributes': 'payload.ts binary\n' }, ({ code }) =>
       expect(code).toBe(1)
+    );
+  });
+});
+
+describe('scoping follow-ups (review of #679)', () => {
+  const concealed = `echo ok${' '.repeat(60)}eval("x")${' # '}${'x'.repeat(80)}\n`;
+
+  test('a tracked file under a SKIP_DIRS name is still scanned', async () => {
+    // SKIP_DIRS is for UNREVIEWED LOCAL ARTIFACTS. A tracked file is in a diff
+    // by definition — excluding build/loader.ts by directory name would turn a
+    // list of vendored-output names into a list of places a payload can sit
+    // unwatched, which is the shape this gate argues against.
+    await withGitTree({ 'build/loader.ts': concealed }, ({ code, stderr }) => {
+      expect(code).toBe(1);
+      expect(stderr).toContain('build/loader.ts');
+    });
+  });
+
+  test('an untracked file under a SKIP_DIRS name is skipped', async () => {
+    // The other half: local build output must not produce findings nobody can fix.
+    await withGitTree({ 'src/a.ts': 'const a = 1;\n' }, ({ code }) => expect(code).toBe(0), {
+      'build/generated.ts': concealed,
+    });
+  });
+
+  test('a FILE named like a skipped directory is scanned', async () => {
+    // An extensionless `scripts/build` is a shell script — the same shape as
+    // .husky/pre-push. Matching SKIP_DIRS against the basename dropped it.
+    await withTree({ 'scripts/build': concealed }, ({ code, stderr }) => {
+      expect(code).toBe(1);
+      expect(stderr).toContain('scripts/build');
+    });
+  });
+
+  test('an untracked FILE named like a skipped directory is scanned (git path)', async () => {
+    // The sibling test above covers the walk. This covers the git path's own
+    // segment test, which must also mean "directory segment" — `scripts/build`
+    // is a shell script, not a build directory.
+    await withGitTree(
+      { 'src/a.ts': 'const a = 1;\n' },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('scripts/build');
+      },
+      { 'scripts/build': concealed }
+    );
+  });
+
+  test('a mid-line # in a gitattributes path is not a comment', async () => {
+    // gitattributes(5): only lines BEGINNING with # are ignored. Stripping
+    // from any # parsed `src/pay#load.ts binary` down to `src/pay`, matched
+    // nothing, and left the real file diff-suppressed.
+    await withTree({ '.gitattributes': 'src/pay#load.ts binary\n' }, ({ code, stderr }) => {
+      expect(code).toBe(1);
+      expect(stderr).toContain('gitattribute');
+    });
+  });
+
+  test('a leading # in gitattributes is still a comment', async () => {
+    await withTree({ '.gitattributes': '# src/payload.ts binary\n' }, ({ code }) =>
+      expect(code).toBe(0)
+    );
+  });
+
+  test('marking a genuinely binary type is allowed', async () => {
+    // *.png binary is standard boilerplate and suppresses a diff nobody could
+    // read anyway. Refusing it would fail the gate with advice the author
+    // cannot act on.
+    await withTree({ '.gitattributes': '*.png binary\n*.pdf binary\n' }, ({ code }) =>
+      expect(code).toBe(0)
     );
   });
 });
