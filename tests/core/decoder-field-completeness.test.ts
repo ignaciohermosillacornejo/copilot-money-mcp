@@ -57,7 +57,15 @@
  *               -> a stale pin quietly protecting nothing
  *   contents    a pinned list or call spec changed -> the six mutations above
  *   surfacing   a name the processor claims to consume never reaches the
- *               decoded row (see NOT_SURFACED)
+ *               decoded row (see NOT_SURFACED). NOTE this direction is
+ *               near-tautological for list-driven fields: a member of e.g.
+ *               `stringFields` enters `consumedFields` by spread resolution
+ *               AND `surfaced` via the write loop over the SAME array, so it
+ *               cannot fail for those names. It has real teeth only for the
+ *               individually-quoted entries in `consumed`. Do not read a
+ *               green surfacing check as proof a field reaches the row —
+ *               `contents` is the load-bearing direction, and it is what
+ *               catches deleting 'excluded'.
  *   non-vacuity discovery matching nothing reports one unambiguous reason
  *               instead of 27 confusing ones
  *
@@ -67,6 +75,13 @@
  * as "vanished" and backward goes red. A partial under-match cannot pass
  * quietly, and `discovery resolved every reference` catches the case where a
  * spread or a write-loop points at something discovery cannot see.
+ *
+ * That argument covers processors already pinned. It does NOT cover a
+ * processor discovery never saw in the first place — an arrow function, or a
+ * different name prefix — for which forward has nothing to compare. The
+ * `warnUnreadFields` census test is what closes that: D2 requires every
+ * processor to call it, so the call sites are an independent count of the
+ * processor set that never passes through the declaration regex.
  *
  * WHAT THIS DOES NOT CHECK, deliberately
  *
@@ -98,14 +113,14 @@ const SRC = readFileSync(DECODER_PATH, 'utf-8');
  * ONE unambiguous failure rather than 27 downstream ones. Raise it only if the
  * decoder genuinely shrinks below it, and think hard first.
  */
-const MIN_PROCESSORS = 25;
+const MIN_PROCESSORS = 27;
 
 /**
  * Same idea one level down, over the field names inside those processors
  * (307 today). Without this, a broken array regex would leave every `lists`
  * entry empty and the failure would read as "the decoder lost 307 fields".
  */
-const MIN_FIELD_NAMES = 250;
+const MIN_FIELD_NAMES = 300;
 
 // ---------------------------------------------------------------------------
 // Discovery
@@ -135,7 +150,13 @@ type DiscoveredProcessor = ProcessorPin & {
   unresolved: string[];
 };
 
-/** Slice out `open`..`close` starting at `openIdx`, counting nesting depth. */
+/**
+ * Slice out `open`..`close` starting at `openIdx`, counting nesting depth.
+ *
+ * ASSUMPTION: no string literal inside the region contains an unbalanced
+ * bracket or brace. True for field-name lists; a literal like `'a[b'` would
+ * break the depth count. Same class of assumption as stripComments above.
+ */
 function balanced(text: string, openIdx: number, open: string, close: string): [string, number] {
   let depth = 0;
   for (let i = openIdx; i < text.length; i++) {
@@ -149,6 +170,14 @@ function balanced(text: string, openIdx: number, open: string, close: string): [
   return ['', text.length];
 }
 
+/**
+ * ASSUMPTION: no string literal in a scanned region contains `//` or a block
+ * comment opener. True for the decoder, whose scanned regions hold field names
+ * only. If it were ever false the effect is a SILENT one — the residue check in
+ * stringLiteralMembers would reject the mangled array and drop that list from
+ * the pin — which is this file's own failure mode, so it is stated rather than
+ * left implicit. Making it string-aware is the fix if a URL ever lands in one.
+ */
 function stripComments(text: string): string {
   return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
 }
@@ -229,9 +258,29 @@ function discoverProcessors(): DiscoveredProcessor[] {
       const [args] = balanced(body, m.index + m[0].length - 1, '(', ')');
       const spec = (key: 'consumed' | 'ignored'): string[] => {
         const keyMatch = args.match(new RegExp(`${key}:\\s*`));
-        if (!keyMatch?.index) return ['@MISSING'];
+        // `=== undefined`, not falsy: offset 0 is a valid match position, and
+        // this is a file whose whole premise is not silently under-checking.
+        if (keyMatch?.index === undefined) return ['@MISSING'];
         const at = keyMatch.index + keyMatch[0].length;
-        if (args[at] !== '[') return [`@${args.slice(at, args.indexOf(',', at)).trim()}`];
+        if (args[at] !== '[') {
+          // A computed value (`Array.from(fields.keys())`). Scan to the next
+          // TOP-LEVEL comma rather than the first one, so an expression that
+          // contains commas inside its own parens/brackets is recorded whole,
+          // and fall back to the end of args when there is no trailing comma
+          // (`indexOf` returning -1 would otherwise drop the last character).
+          let depth = 0;
+          let end = args.length;
+          for (let i = at; i < args.length; i++) {
+            const ch = args[i];
+            if (ch === '(' || ch === '[' || ch === '{') depth++;
+            else if (ch === ')' || ch === ']' || ch === '}') depth--;
+            else if (ch === ',' && depth === 0) {
+              end = i;
+              break;
+            }
+          }
+          return [`@${args.slice(at, end).trim()}`];
+        }
         const [raw] = balanced(args, at, '[', ']');
         const text = stripComments(raw);
         const tokens: Array<[number, string]> = [];
@@ -1097,6 +1146,26 @@ describe('decoder field completeness (silent-drop class detector)', () => {
       expect(names.length).toBeGreaterThanOrEqual(MIN_PROCESSORS);
     });
 
+    test('discovery accounted for every warnUnreadFields call site', () => {
+      // The floors above catch discovery matching NOTHING. This catches the
+      // likelier failure: discovery matching only MOST of the processors.
+      //
+      // The declaration regex only sees `function process*`. A 28th processor
+      // written as `const processFoo = (fields) => {...}`, or named parseFoo,
+      // is invisible to it — the forward check then has nothing to compare and
+      // passes, and the backward check only guards names already pinned. That
+      // is this file's own bug class, one level up.
+      //
+      // D2 requires EVERY processor to call warnUnreadFields, so the call
+      // sites are an independent census of the processor set that does not go
+      // through the declaration regex at all. If discovery cannot see a
+      // processor, its calls go missing from this total and this fails —
+      // no maintenance, no list.
+      const inSource = [...stripComments(SRC).matchAll(/\bwarnUnreadFields\(/g)].length;
+      const inDiscovered = discovered.reduce((n, proc) => n + proc.calls.length, 0);
+      expect({ callSites: inDiscovered }).toEqual({ callSites: inSource });
+    });
+
     test('finds the known-load-bearing processors by name', () => {
       expect(names).toContain('processTransaction');
       expect(names).toContain('processAccount');
@@ -1155,7 +1224,15 @@ describe('decoder field completeness (silent-drop class detector)', () => {
     // copies every raw key by construction — there is no allow-list to check.
     if (found.consumedFields.length > 0) {
       test(`${name}: every consumed field reaches the decoded row`, () => {
-        if (found.passthrough) return;
+        if (found.passthrough) {
+          // Skipping is correct — a passthrough loop copies every raw key, so
+          // there is no allow-list to check. But assert the reason still holds
+          // rather than returning silently: if this processor later loses its
+          // passthrough loop, that is a real behaviour change and the test
+          // must stop being a no-op. ("No silent caps", as elsewhere here.)
+          expect(found.passthrough).toBe(true);
+          return;
+        }
         const allowed = NOT_SURFACED[name] ?? {};
         expect(
           found.consumedFields.filter((field) => !found.surfaced.has(field) && !(field in allowed))
