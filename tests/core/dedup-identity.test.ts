@@ -130,6 +130,7 @@ afterAll(() => {
 const COLLECTIONS = [
   {
     name: 'transactions',
+    standaloneName: 'decodeTransactions',
     ids: TWINS.transactions,
     idField: 'transaction_id',
     standalone: () => decodeTransactions(DB_PATH),
@@ -137,6 +138,7 @@ const COLLECTIONS = [
   },
   {
     name: 'accounts',
+    standaloneName: 'decodeAccounts',
     ids: TWINS.accounts,
     idField: 'account_id',
     standalone: () => decodeAccounts(DB_PATH),
@@ -144,6 +146,7 @@ const COLLECTIONS = [
   },
   {
     name: 'recurring',
+    standaloneName: 'decodeRecurring',
     ids: TWINS.recurring,
     idField: 'recurring_id',
     standalone: () => decodeRecurring(DB_PATH),
@@ -151,6 +154,7 @@ const COLLECTIONS = [
   },
   {
     name: 'budgets',
+    standaloneName: 'decodeBudgets',
     ids: TWINS.budgets,
     idField: 'budget_id',
     standalone: () => decodeBudgets(DB_PATH),
@@ -158,6 +162,7 @@ const COLLECTIONS = [
   },
   {
     name: 'goals',
+    standaloneName: 'decodeGoals',
     ids: TWINS.goals,
     idField: 'goal_id',
     standalone: () => decodeGoals(DB_PATH),
@@ -186,85 +191,177 @@ function idsOf(rows: readonly unknown[], idField: string): Set<string> {
 // ---------------------------------------------------------------------------
 
 /**
- * Dedup sites in decodeAllCollections that this file does NOT exercise, each
- * with the reason. Checked in BOTH directions below, so an entry naming a site
- * that no longer exists fails too — otherwise this becomes one more
- * hand-maintained list quietly protecting nothing.
+ * Every dedup site in the decoder, as `enclosingFunction|label` -> dedup key.
+ *
+ * Three earlier revisions of this guard were each narrower than they claimed,
+ * and each narrowing was the bug this file exists to catch:
+ *
+ *   1. It matched only `// <Label>: dedupe by`, the convention
+ *      decodeAllCollections uses. The NINE standalone decoders write
+ *      `// Deduplicate by <field>` and were invisible — including
+ *      decodeItems, decodeCategories and decodeUserAccounts, which are
+ *      exported, called directly by database.ts, and hold dedup blocks
+ *      INDEPENDENT of their aggregate twins. One collection, two
+ *      implementations, a guard watching one of them: #662's exact shape.
+ *   2. Identity was the label alone, so adding a second
+ *      `// Changes: dedupe by name + date` beside the existing one kept the
+ *      count at 26 and passed every check — a content-keyed dedup landing
+ *      green.
+ *   3. The dedup KEY lived only in OMITTED's prose ("keys on category_id
+ *      today"), which nothing verified.
+ *
+ * Pinning function+label -> key closes all three: a new site anywhere fails
+ * forward, a removed one fails backward, and changing a key from an id to a
+ * content field is a visible diff here rather than a claim in a comment.
  */
-const OMITTED: Record<string, string> = {
-  // Structural — the key IS the identity, so "two documents identical in
-  // content differing only by id" is not expressible for these.
-  'goal history': 'keyed on goal_id + month — the tuple IS the identity, one doc per tuple',
-  'investment prices':
-    'keyed on security + price_type + period — the tuple IS the identity, per the Firestore path',
+const DEDUP_SITES: string[] = [
+  'decodeTransactions||transaction_id (Firestore document ID)',
+  'decodeRecurring||recurring_id',
+  'decodeBudgets||budget_id',
+  'decodeGoals||goal_id',
+  'decodeGoalHistory||goal_id + month',
+  'decodeItems||item_id',
+  'decodeCategories||category_id',
+  'decodeUserAccounts||account_id',
+  'decodeAllCollections|transactions|transaction_id, reconcile pending',
+  'decodeAllCollections|accounts|account_id (see deduplicateAccounts',
+  'decodeAllCollections|recurring|recurring_id',
+  'decodeAllCollections|budgets|budget_id',
+  'decodeAllCollections|goals|goal_id',
+  'decodeAllCollections|goal history|goal_id + month, sort by goal_id then month desc',
+  'decodeAllCollections|investment prices|(security, price_type, period)',
+  'decodeAllCollections|investment splits|security_id (one doc per security)',
+  'decodeAllCollections|items|item_id',
+  'decodeAllCollections|categories|category_id',
+  'decodeAllCollections|user accounts|account_id',
+  'decodeAllCollections|plaid accounts|plaid_account_id',
+  'decodeAllCollections|balance history|balance_id, sort by account then date desc',
+  'decodeAllCollections|holdings history meta|holdings_history_id',
+  'decodeAllCollections|holdings history|history_id',
+  'decodeAllCollections|changes|change_id',
+  'decodeAllCollections|securities|security_id',
+  'decodeAllCollections|user profiles|user_id',
+  'decodeAllCollections|tags|tag_id',
+  'decodeAllCollections|amazon integrations|amazon_id',
+  'decodeAllCollections|amazon orders|order_id, sort by date descending',
+  'decodeAllCollections|subscriptions|subscription_id',
+  'decodeAllCollections|invites|invite_id',
+  'decodeAllCollections|user items|user_items_id',
+  'decodeAllCollections|feature tracking|feature_tracking_id',
+  'decodeAllCollections|support docs|support_id',
+];
 
-  // Not yet exercised. Every one keys on a document id today, so there is no
-  // live bug; they are listed rather than silently uncovered so the gap is a
-  // decision on the record instead of an accident. Seeding them needs
-  // createCombinedDb support, which is follow-up work.
-  'amazon integrations': 'not seeded by createCombinedDb; keys on amazon_id today',
-  'amazon orders': 'not seeded by createCombinedDb; keys on order_id today',
-  'balance history': 'not seeded by createCombinedDb; keys on balance_id today',
-  categories:
-    'seedable today (createCombinedDb accepts it) — uncovered by choice, not by blocker; keys on category_id',
-  changes: 'not seeded by createCombinedDb; keys on change_id today',
-  'feature tracking': 'not seeded by createCombinedDb; keys on its document id today',
-  'holdings history': 'not seeded by createCombinedDb; keys on history_id today',
-  'holdings history meta': 'not seeded by createCombinedDb; keys on holdings_history_id today',
-  'investment splits': 'not seeded by createCombinedDb; keys on security_id today',
-  invites: 'not seeded by createCombinedDb; keys on invite_id today',
-  items:
-    'seedable today (createItemDb exists) — uncovered by choice, not by blocker; keys on item_id',
-  'plaid accounts': 'not seeded by createCombinedDb; keys on plaid_account_id today',
-  securities: 'not seeded by createCombinedDb; keys on security_id today',
-  subscriptions: 'not seeded by createCombinedDb; keys on subscription_id today',
-  'support docs': 'not seeded by createCombinedDb; keys on its document id today',
-  tags: 'not seeded by createCombinedDb; keys on tag_id today',
-  'user accounts': 'not seeded by createCombinedDb; keys on account_id today',
-  'user items': 'not seeded by createCombinedDb; keys on its document id today',
-  'user profiles': 'not seeded by createCombinedDb; keys on user_id today',
+/**
+ * Sites with no twin test and no structural excuse — uncovered by CHOICE.
+ *
+ * Every one keys on a document id today (see DEDUP_SITES, which pins that), so
+ * there is no live bug. They are listed rather than silently uncovered so the
+ * gap is a decision on the record. Note decodeItems / decodeCategories /
+ * decodeUserAccounts are the standalone twins the earlier revision of this
+ * guard could not even see.
+ */
+const UNTESTED_BY_CHOICE = new Set([
+  'decodeAllCollections|amazon integrations',
+  'decodeAllCollections|amazon orders',
+  'decodeAllCollections|balance history',
+  'decodeAllCollections|categories',
+  'decodeAllCollections|changes',
+  'decodeAllCollections|feature tracking',
+  'decodeAllCollections|holdings history',
+  'decodeAllCollections|holdings history meta',
+  'decodeAllCollections|investment splits',
+  'decodeAllCollections|invites',
+  'decodeAllCollections|items',
+  'decodeAllCollections|plaid accounts',
+  'decodeAllCollections|securities',
+  'decodeAllCollections|subscriptions',
+  'decodeAllCollections|support docs',
+  'decodeAllCollections|tags',
+  'decodeAllCollections|user accounts',
+  'decodeAllCollections|user items',
+  'decodeAllCollections|user profiles',
+  'decodeCategories|',
+  'decodeItems|',
+  'decodeUserAccounts|',
+]);
+
+/** Sites NOT exercised by the twin tests below, each with a reason. */
+const OMITTED_REASON: Record<string, string> = {
+  'decodeAllCollections|goal history':
+    'structural — keyed on goal_id + month, and the tuple IS the identity (one doc per tuple)',
+  'decodeGoalHistory|': 'structural — same tuple identity as its aggregate twin',
+  'decodeAllCollections|investment prices':
+    'structural — keyed on security + price_type + period, the tuple IS the identity',
 };
 
-/** Every `<Label>: dedupe by ...` site the decoder documents, lowercased. */
+/**
+ * Discover every dedup site as an ORDERED LIST of `function|label|key`.
+ *
+ * A list, not a map. Keying by `function|label` let a SECOND
+ * `// Changes: dedupe by name + date` overwrite the first entry instead of
+ * adding one — so a content-keyed dedup could be added beside an existing
+ * site and every check stayed green. Order and multiplicity are part of the
+ * identity here.
+ */
 function discoverDedupSites(): string[] {
-  const src = fs.readFileSync(
+  const source = fs.readFileSync(
     path.join(import.meta.dir, '..', '..', 'src', 'core', 'decoder.ts'),
     'utf-8'
   );
-  return [...src.matchAll(/\/\/\s*([A-Z][\w ]*?):\s*dedupe by/g)]
-    .map((m) => (m[1] as string).trim().toLowerCase())
-    .filter((name, i, all) => all.indexOf(name) === i)
-    .sort();
+  const declarations = [...source.matchAll(/^(?:export )?(?:async )?function (\w+)/gm)].map(
+    (m) => [m.index, m[1] as string] as const
+  );
+  const found: string[] = [];
+  // Both phrasings: decodeAllCollections writes `// Label: dedupe by x`, the
+  // standalone decoders write `// Deduplicate by x`. Matching only the first
+  // is what hid nine sites. The key charset must allow parens and commas —
+  // one key is `(security, price_type, period)`, and a narrower charset made
+  // that whole site invisible rather than merely mis-parsing its key.
+  for (const m of source.matchAll(
+    /\/\/\s*(?:([A-Z][\w ]*?):\s*)?dedup(?:e|licate) by\s+([\w +(),]+)/gi
+  )) {
+    const enclosing = declarations.filter(([at]) => at < (m.index as number)).pop();
+    const fnName = enclosing ? enclosing[1] : '?';
+    found.push(`${fnName}|${(m[1] ?? '').trim().toLowerCase()}|${(m[2] ?? '').trim()}`);
+  }
+  return found;
 }
 
 describe('dedup coverage is declared, not assumed (#668 review)', () => {
-  const sites = discoverDedupSites();
-  const covered = new Set(COLLECTIONS.map((c) => c.name.toLowerCase()));
+  const discovered = discoverDedupSites();
+  const covered = new Set(
+    COLLECTIONS.flatMap((c) => [
+      `decodeAllCollections|${c.name.toLowerCase()}`,
+      `${c.standaloneName}|`,
+    ])
+  );
 
-  // Without this, a regex that stopped matching would make the forward check
-  // below pass over an empty list — the failure shape this whole file is about.
-  test('discovery finds every dedup site (exact, not a floor)', () => {
-    // EXACT, deliberately. Discovery is anchored on the `// Label: dedupe by`
-    // comments, so deleting a comment while reintroducing a content key would
-    // drop that site from the ledger — a floor of 20 would not notice. Pinning
-    // the count means removing a comment fails here and someone has to look.
-    //
-    // If you legitimately add or remove a dedup site, update this number and
-    // the OMITTED table in the same commit. That is the intended workflow: the
-    // point is that coverage cannot change silently.
-    expect(sites.length).toBe(26);
+  test('discovery finds the dedup sites at all', () => {
+    // Non-vacuity. The exact comparison below would pass over an empty list.
+    expect(discovered.length).toBeGreaterThanOrEqual(30);
   });
 
-  test('forward: every dedup site is either exercised here or listed as omitted', () => {
-    expect(sites.filter((site) => !covered.has(site) && !(site in OMITTED))).toEqual([]);
+  test('every dedup site and its key are unchanged', () => {
+    // Exact, both directions at once: a new site, a removed site, or a key
+    // changing from an id to a content field all fail here. Update
+    // DEDUP_SITES in the same commit as any deliberate change.
+    expect(discovered).toEqual(DEDUP_SITES);
   });
 
-  test('backward: every omission still names a live dedup site', () => {
-    expect(
-      Object.keys(OMITTED)
-        .filter((site) => !sites.includes(site))
-        .sort()
-    ).toEqual([]);
+  test('every site is either twin-tested or has a stated reason', () => {
+    const siteKeys = [...new Set(discovered.map((d) => d.split('|').slice(0, 2).join('|')))];
+    const unexplained = siteKeys.filter(
+      (site) => !covered.has(site) && !(site in OMITTED_REASON) && !UNTESTED_BY_CHOICE.has(site)
+    );
+    expect(unexplained).toEqual([]);
+  });
+
+  test('every stated reason still names a live site', () => {
+    const siteKeys = new Set(discovered.map((d) => d.split('|').slice(0, 2).join('|')));
+    const stale = [...Object.keys(OMITTED_REASON), ...UNTESTED_BY_CHOICE].filter(
+      (site) => !siteKeys.has(site)
+    );
+    expect(stale.sort()).toEqual([]);
   });
 });
 
