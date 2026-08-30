@@ -9,7 +9,11 @@ Method: four parallel auditors, each in an isolated worktree off `main` at
 `18ec7d6c`. **Every finding below was proven by mutation**: break the thing
 the guard claims to protect, run the suite or the gate, and record that it
 stayed green. Suspicions were discarded. Baseline for "green" is
-2853 pass / 0 fail.
+**2853 pass / 20 skip / 0 fail at `18ec7d6c`**.
+
+Quote that triple, not a bare pass count: this baseline predates #676, which added
+`tests/exported-constants.test.ts`, so a reader reproducing these mutations on a later
+commit will see a higher number and must not read the difference as drift.
 
 **Coverage of this pass.** Four slices, all complete: the ratchet /
 conformance / e2e infrastructure; the tool surface and registry; the non-test
@@ -235,6 +239,15 @@ the live budget file stayed green. Adding the one line the *schema* guard
 demanded made both budget files green with the fat row entirely unratcheted.
 
 **Consequence today: 10 of 17 live tools have no response budget.**
+
+In fairness to the code — and on the same principle that credits
+`check-concealment.ts` in F1 for arguing the right way in its own comment —
+`tests/context-budget-live.test.ts:26-29` already states plainly that this is
+*"an explicit allowlist, not a filter over `LIVE_TOOL_DEFS`, so covering the
+remaining live tools later is purely additive."* So this is a **documented
+limitation with no ratchet**, not an unseen gap. The finding stands, because
+nothing forces the additive step and 10 of 17 is the proof — but it is a
+weaker indictment than F3 or F5, where nobody had noticed at all.
 
 **Fix.** Derive from `LIVE_TOOL_DEFS`; keep the allowlist only as an explicit
 `UNBUDGETED_LIVE_TOOLS` exclusion, so a new live tool must be budgeted or

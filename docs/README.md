@@ -50,15 +50,25 @@ which mode.
   by topic (transactions, spending analysis, income, travel, investments, subscriptions,
   healthcare, comparisons), plus example conversation flows and phrasing tips.
 
-## `audits/` — dated boundary audits
+## `audits/` — dated audits
 
-Output of the `/boundary-audit` ritual (`skills/boundary-audit/SKILL.md`): a periodic
-inventory of the repo's external assumptions against `src/conformance/ledger.ts`, with the
-verification-class trend, retro-checks of recent bugs for missing class-level detectors,
-and docs-freshness spot checks.
+Dated, one-off sweeps of a single concern across the whole repo. Two rituals file here,
+with different scopes:
+
+*Boundary audits* — output of `/boundary-audit` (`skills/boundary-audit/SKILL.md`): a
+periodic inventory of the repo's external assumptions against `src/conformance/ledger.ts`,
+with the verification-class trend, retro-checks of recent bugs for missing class-level
+detectors, and docs-freshness spot checks.
+
+*Bug-class audits* — a sweep triggered by one defect class recurring, examining every
+guard in the repo for that class and proving each finding by mutation.
 
 - **[audits/2026-06-10-boundary-audit.md](audits/2026-06-10-boundary-audit.md)** — First
-  run (issue #445), covering the 2026-03-12 → 2026-06-10 window.
+  boundary-audit run (issue #445), covering the 2026-03-12 → 2026-06-10 window.
+- **[audits/2026-08-29-completeness-guard-audit.md](audits/2026-08-29-completeness-guard-audit.md)**
+  — Completeness-guard audit, triggered by the #635 bug class recurring in #673/#676.
+  25 findings (F1–F18 across tests, `scripts/` gates and CI; D1–D7 in the data layer),
+  every one mutation-proven. Two security-relevant, and D1 silently corrupts spend totals.
 
 ## `graphql-capture/` — Copilot's GraphQL API, as observed
 
