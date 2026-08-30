@@ -25,6 +25,7 @@ jobs:
   audit:
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       pull-requests: write
@@ -179,8 +180,9 @@ jobs:
           # This job is narrow by comparison — re-read a merged PR's review
           # comments, check the final code against each suggestion, emit JSON
           # against a fixed schema — and its output is schema-checked downstream
-          # (see the `jq -e` gate below), so a weaker result fails loudly rather
-          # than silently. Sonnet is the right tier for that shape of work.
+          # (see the `jq -e` gate in the "Create follow-up issue if
+          # suggestions remain" step below), so a weaker result fails loudly
+          # rather than silently. Sonnet is the right tier for that shape of work.
           #
           # If you are here to change this line: the question is not "which is
           # the best model" but "does this job still have a checked output
