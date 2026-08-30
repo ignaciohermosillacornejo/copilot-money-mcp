@@ -36,7 +36,7 @@
  * that covers as-const ARRAYS only. A string-literal allowlist declared as
  * `new Set([...])` is invisible to it — TRANSFER_CATEGORIES and
  * INCOME_CATEGORIES (src/utils/categories.ts) are unpinned today for exactly
- * that reason. Known gap, tracked separately. Said out loud because "no ratchet
+ * that reason. Known gap, tracked in #695. Said out loud because "no ratchet
  * catches a list getting shorter" must not be read as "every list in src/ is
  * ratcheted": a reader who believes the wider claim stops looking.
  *
@@ -76,8 +76,24 @@ const SRC_ROOT = join(import.meta.dir, '..', 'src');
  * that is NOT `as const` scan forward to the next `] as const` anywhere later
  * in the file and swallow every declaration in between, which drops them from
  * the pin silently. Bounding the body to bracket-free text stops the match at
- * its own declaration. Costs nothing here — a pure string-literal array holds
- * no brackets by construction.
+ * its own declaration.
+ *
+ * ASSUMPTION, same class as stripComments' below and silent in the same way:
+ * no member of an `as const` array CONTAINS a bracket character. The array
+ * holds no SYNTACTIC brackets by construction — that part is free — but a
+ * literal that carries one, say a `fields: ["default"]` hint string, stops the
+ * bounded body short of its own `] as const`. The declaration is then never
+ * matched, the forward check has nothing to complain about, and the constant
+ * leaves the pin without a word. Note the shape: that is #677's own failure,
+ * reintroduced by the bound that fixes the swallowing one, so the bound trades
+ * a multi-declaration silent drop for a single-declaration silent drop rather
+ * than eliminating the class.
+ *
+ * No such literal sits in an `as const` array in src/ today. The two shapes
+ * already coexist in one file though — src/tools/field-selection.ts has
+ * `as const` arrays at :47 and :68 and bracket-carrying hint literals at :89,
+ * :137 and :169 — so a `fields:`-hint list landing in one is a plausible next
+ * commit rather than a hypothetical.
  */
 const EXPORTED_ARRAY =
   /^export const ([A-Z][A-Z0-9_]*)\s*(?::[^=]+)?=\s*\[([^[\]]*?)\]\s*as const/gms;
@@ -108,7 +124,7 @@ function tsFilesUnder(dir: string): string[] {
  * BEFORE line comments, so a line comment that contains a block-comment opener
  * lets the block regex run forward to the next closer and delete the real
  * declarations in between. Neither case occurs in `src/` today; both are
- * tracked separately.
+ * tracked in #691.
  *
  * Same helper and same caveat as tests/core/decoder-field-completeness.test.ts,
  * duplicated on purpose rather than shared, so neither file's parsing rules can
