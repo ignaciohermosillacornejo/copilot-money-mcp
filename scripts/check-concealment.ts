@@ -147,6 +147,15 @@ const INERT_BINARY_EXTENSIONS = new Set([
   '.mp3', '.mp4', '.wav', '.mov', '.webm', '.ogg',
 ]);
 
+/**
+ * Extensions where a NUL byte is EXPECTED, so a NUL there is not a finding.
+ * This is a superset of the inert set: it also covers executable binaries,
+ * which legitimately contain NULs but must never have their diffs suppressed
+ * by an attribute — see DIFF_SUPPRESSING_ATTRS, which checks the inert set.
+ *
+ * Note the direction: forgetting an extension here means a real binary gets
+ * reported and a human adds it, rather than a payload running unwatched.
+ */
 const BINARY_EXTENSIONS = new Set([
   ...INERT_BINARY_EXTENSIONS,
   // Executable formats. These belong in the NUL-expected set but NOT in the
@@ -161,7 +170,6 @@ function extensionOf(rel: string): string {
   const dot = name.lastIndexOf('.');
   return dot > 0 ? name.slice(dot).toLowerCase() : '';
 }
-
 
 function isExpectedBinary(rel: string): boolean {
   return BINARY_EXTENSIONS.has(extensionOf(rel));
@@ -441,7 +449,15 @@ function checkGitAttributes(contents: string, rel: string): void {
     // split on NBSP and friends, so a pattern containing one would tokenize
     // short and could land in the allowance below — the blank-set mismatch
     // surviving one statement past its own fix, and this one fails OPEN.
-    const pattern = stripped.split(/[ \t]+/)[0] ?? '';
+    // gitattributes patterns may be QUOTED to contain blanks — verified:
+    // `"evil run.ts" binary` really does set binary on `evil run.ts`. Naive
+    // tokenizing gives `"cover.png` for `"cover.png run.ts" binary`, whose
+    // extension reads as inert, so the allowance would pass a .ts file. That
+    // is the third variation of this same mismatch, and like the last it fails
+    // OPEN — so anything that is not an unambiguous bare pattern gets no
+    // allowance at all.
+    const quoted = /^"((?:[^"\\]|\\.)*)"/.exec(stripped);
+    const pattern = quoted ? (quoted[1] as string) : (stripped.split(/[ \t]+/)[0] ?? '');
     if (INERT_BINARY_EXTENSIONS.has(extensionOf(pattern))) return;
     for (const re of DIFF_SUPPRESSING_ATTRS) {
       if (!re.test(stripped)) continue;
