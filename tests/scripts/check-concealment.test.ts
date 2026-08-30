@@ -466,6 +466,16 @@ describe('scope is not an extension allowlist (audit F2)', () => {
     );
   });
 
+  test('a deep LEADING gap on a short line is allowed', async () => {
+    // Axis 2 of the conjunction, pinned directly rather than inferred from the
+    // mid-line case. The repo's real worst case on this axis is a 20-character
+    // leading gap on a 95-column line (docs/REVERSE_ENGINEERING_FINDING.md);
+    // this fixture is deeper and still short, so the rule has to stay quiet.
+    await withTree({ 'docs/indented.md': `${' '.repeat(30)}a short indented line\n` }, ({ code }) =>
+      expect(code).toBe(0)
+    );
+  });
+
   test('a wide gap in markdown that still ends on screen is allowed', async () => {
     // The other half of the conjunction, kept honest: an aligned two-column
     // list in a README is legible precisely because the line ends where you
@@ -788,6 +798,35 @@ describe('scoping follow-ups (review of #679)', () => {
         expect(stderr).toContain('gitattribute');
       }
     );
+  });
+
+  test.each([
+    ['binary', '"[attr]a.png" binary', 'src/payload.ts a.png'],
+    ['-diff', '"[attr]b.pdf" -diff', 'src/payload.ts b.pdf'],
+    ['linguist-generated', '"[attr]c.zip" linguist-generated', 'src/payload.ts c.zip'],
+  ])('a QUOTED macro definition carrying %s is caught too', async (_l, def, use) => {
+    // The same hole one quote-mark to the left. git unquotes BEFORE testing for
+    // the macro prefix, so a quoted `[attr]` really does define a macro —
+    // verified on git 2.50.1: `"[attr]a.png" -diff` + `src/payload.ts a.png`
+    // gives `src/payload.ts: diff: unset`, and git diff prints
+    // `Binary files a/src/payload.ts and b/src/payload.ts differ`.
+    //
+    // So the macro test cannot read the raw line; it has to read the same
+    // unquoted token the extension check reads, which is the only arrangement
+    // where one form cannot be handled and the other missed.
+    await withTree(
+      { '.gitattributes': `${def}\n${use}\n`, 'src/payload.ts': 'const a = 1;\n' },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('gitattribute');
+      }
+    );
+  });
+
+  test('a quoted macro whose name is not extension-shaped was always reported', async () => {
+    // The control for the quoted form, and the same tell as its unquoted twin:
+    // the escape depended entirely on the name ending in an inert extension.
+    await withTree({ '.gitattributes': '"[attr]zz" binary\n' }, ({ code }) => expect(code).toBe(1));
   });
 
   test('a macro whose name is not extension-shaped was always reported', async () => {
