@@ -639,7 +639,10 @@ function gitFiles(root: string): { tracked: string[]; untracked: string[] } | un
   // they are in scope too. Ignored files are not.
   const untracked = run(['ls-files', '-z', '--others', '--exclude-standard']) ?? [];
   const abs = (list: string[]): string[] => list.map((rel) => join(root, rel));
-  return { tracked: abs(tracked), untracked: abs(untracked.filter((f) => !tracked.includes(f))) };
+  // Set rather than Array#includes: both listings are whole-repo sized, so the
+  // linear scan made the de-duplication quadratic in the file count.
+  const trackedSet = new Set(tracked);
+  return { tracked: abs(tracked), untracked: abs(untracked.filter((f) => !trackedSet.has(f))) };
 }
 
 /**
