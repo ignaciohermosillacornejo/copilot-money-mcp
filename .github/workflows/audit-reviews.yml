@@ -171,6 +171,19 @@ jobs:
           # read-only by construction: `gh pr view` and `gh pr diff` cannot
           # write, and `gh api` — which can — is denied outright now that the
           # data it was fetching arrives via the pre-fetch step above.
+          # MODEL TIERING, deliberately different from claude-review.yml.
+          #
+          # That workflow reviews an open PR and is usually the ONLY reviewer
+          # one gets, so it runs on Opus: open-ended judgement, and a miss ships.
+          # This job is narrow by comparison — re-read a merged PR's review
+          # comments, check the final code against each suggestion, emit JSON
+          # against a fixed schema — and its output is schema-checked downstream
+          # (see the `jq -e` gate below), so a weaker result fails loudly rather
+          # than silently. Sonnet is the right tier for that shape of work.
+          #
+          # If you are here to change this line: the question is not "which is
+          # the best model" but "does this job still have a checked output
+          # contract". If that contract ever goes away, revisit the tier too.
           claude_args: |
             --model claude-sonnet-5
             --allowedTools "Bash(gh pr view*),Bash(gh pr diff*),Bash(git log*),Bash(git show*),Read,Grep,Glob,Write"
