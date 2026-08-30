@@ -55,10 +55,10 @@
  * different declaration style), the constants it can no longer see read as
  * "vanished" and the backward check goes red. A partial under-match cannot
  * pass quietly. Total failure is the case worth naming: discovery returns
- * nothing, so the forward check passes vacuously, no contents tests are
- * generated at all, and the only signal is a 25-name diff on the backward
- * check. The explicit non-vacuity test exists to report that as one
- * unambiguous reason instead.
+ * nothing, so the forward check passes vacuously and no contents tests are
+ * generated at all, leaving the backward check to report it as a 25-name diff.
+ * The explicit non-vacuity test exists so that case names one unambiguous
+ * reason instead.
  *
  * MAINTENANCE: changing one of these deliberately means updating the entry
  * below. That is the intended workflow — the point is that it cannot happen
@@ -128,9 +128,13 @@ const SRC_ROOT = join(import.meta.dir, '..', 'src');
  * top: a double-quoted string IS a string literal, so a reader checking whether
  * their new constant is covered concludes that it is. Same shape as #677 — not
  * "the pin rejects this" but "the pin never saw it." Unlikely against today's
- * members: no member of any of the 25 arrays contains a quote character of any
- * kind — checked, and the claim that matters, since the members are field names
- * and enum values (a few kebab-cased, none prose). Likely against the first
+ * members — but the check has to be run over something other than the 25, since
+ * a member holding an apostrophe cannot appear among them BY CONSTRUCTION: that
+ * is the hazard itself, not evidence against it. The falsifiable form is to
+ * bracket-match every as-const array in src/, discoverable or not, and compare
+ * counts: 25 of them, the same 25 the pin holds, none written with a
+ * double-quoted or backtick member. Nothing is hidden today. Likely against the
+ * first
  * human-readable list anyone adds. Tracked as #696 with the rest of the family.
  */
 const EXPORTED_ARRAY =
@@ -158,8 +162,13 @@ function tsFilesUnder(dir: string): string[] {
  * (src/core/graphql/client.ts, src/core/auth/browser-token.ts,
  * src/core/database.ts) and this helper mangles all three. They are harmless
  * only because none sits in an `as const` array, which is the sole text the
- * matcher reads. Checked that way: zero of the 25 array bodies contain `//`,
- * and zero string literals anywhere in src/ contain a block-comment opener.
+ * matcher reads. Note WHAT was checked, because the distinction is the whole
+ * point of this helper: the count is over extracted member VALUES, after
+ * stripping. Two of the 25 raw bodies — IGNORED_ITEM_FIELDS and
+ * KNOWN_FREQUENCIES — do contain `//`, as the line comments this helper exists
+ * to remove and the live hole #677 fixed. Post-strip, zero of the 25 have a
+ * member whose CONTENT holds `//`, and zero string literals anywhere in src/
+ * hold a block-comment opener.
  *
  * Stated rather than left implicit because the failure is SILENT in exactly
  * this file's own direction: mangling a literal makes the residue check reject
