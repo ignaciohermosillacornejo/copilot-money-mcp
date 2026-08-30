@@ -20,23 +20,32 @@
  * bad key.
  *
  * SCOPE, stated precisely because an overclaiming detector is worse than an
- * honestly-scoped one: the twin tests below exercise the FIVE primary
- * collections in COLLECTIONS, on both their standalone and aggregate paths.
- * They do not exercise the other two dozen dedup blocks in the decoder. Those
- * all key on a document id today, so there is no live bug — but a green run
- * here is not evidence about them.
+ * honestly-scoped one: the twin tests exercise the FIVE collections in
+ * COLLECTIONS, on both their standalone and aggregate paths — 8 of the
+ * decoder's 36 dedup blocks. A green run here says nothing about the other 28.
  *
- * What IS enforced across all of them: the coverage guard below discovers every
- * dedup BLOCK in the decoder — each `new Set<string>()` allocation — and pins
- * the key expression it tests. A block that is new, removed, or whose key
- * changes from an id to a content field fails there, and every block must be
- * twin-tested, structural, or explicitly listed as untested-by-choice.
+ * What IS enforced across all 36: the coverage guard discovers every dedup
+ * BLOCK — each `new Set<string>()` allocation — and pins the KEY EXPRESSION it
+ * tests. A block that is new, removed, or whose key changes from an id to a
+ * content field fails there, and every block must be twin-tested, structural,
+ * or explicitly listed as untested-by-choice.
  *
- * Note "block", not "comment". An earlier revision discovered `// dedupe by`
- * comments, which missed a block that had none — the site that shipped #622,
- * the previous instance of this exact bug class — and could not tell three
- * blocks sharing one comment apart. See the guard's own header for that
- * history.
+ * Note "block", not "comment", and "expression", not "name". Both distinctions
+ * were bought the hard way — five revisions, each one narrower than its own
+ * comment claimed, each narrowing found by review rather than by the suite:
+ *
+ *   1. five hand-written tests, claiming "every collection"
+ *   2. `// Label: dedupe by` comments — missed the nine standalone decoders
+ *   3. both comment forms keyed by label — three blocks share one comment, so
+ *      a duplicate label overwrote rather than added
+ *   4. blocks, pinning the key — but three pinned the local name `key`, which
+ *      pins nothing
+ *   5. bare identifiers resolved, and asserted never to appear
+ *
+ * Revision 2 could not see `dedupeAndSortInvestmentPrices`, which carries no
+ * comment — the site that shipped #622, the previous instance of this exact
+ * bug class, invisible to the detector written for it. That is the sharpest
+ * argument for why this guard reads code and not prose.
  *
  * Two of the omissions are structural rather than "not done yet":
  *
@@ -136,7 +145,7 @@ afterAll(() => {
 const COLLECTIONS = [
   {
     name: 'transactions',
-    standaloneName: 'decodeTransactions',
+    standaloneName: 'deduplicateTransactions',
     ids: TWINS.transactions,
     idField: 'transaction_id',
     standalone: () => decodeTransactions(DB_PATH),
@@ -144,7 +153,7 @@ const COLLECTIONS = [
   },
   {
     name: 'accounts',
-    standaloneName: 'decodeAccounts',
+    standaloneName: 'deduplicateAccounts',
     ids: TWINS.accounts,
     idField: 'account_id',
     standalone: () => decodeAccounts(DB_PATH),
@@ -259,7 +268,15 @@ const DEDUP_BLOCKS: Record<string, string> = {
   'decodeAllCollections|supSeen': 'sup.support_id',
 };
 
-/** Blocks whose key legitimately is not a bare document id, with the reason. */
+/**
+ * Blocks excluded from the twin tests for a STRUCTURAL reason, not for lack of
+ * effort. Three key on a tuple that IS the identity, so "two documents
+ * identical in content differing only by id" cannot be expressed for them. The
+ * fourth, `reconcilePendingTransactions|supersededPendingIds`, is not a dedup
+ * at all — it tracks pending rows superseded by a posted twin, and is listed
+ * here because the discovery regex finds every `new Set<string>()` and this one
+ * has to be accounted for somewhere.
+ */
 const STRUCTURAL_KEYS: Record<string, string> = {
   'decodeGoalHistory|seen':
     'keyed on goal_id + month — the tuple IS the identity, one doc per tuple',
@@ -302,17 +319,35 @@ const UNTESTED_BY_CHOICE = new Set([
   'decodeAllCollections|supSeen',
 ]);
 
-/** Blocks the twin tests below actually exercise. */
-const TWIN_TESTED = new Set([
-  'decodeAllCollections|budgetSeen',
-  'decodeAllCollections|goalSeen',
-  'decodeAllCollections|recSeen',
-  'decodeBudgets|seen',
-  'decodeGoals|seen',
-  'decodeRecurring|seen',
-  'deduplicateAccounts|seen',
-  'deduplicateTransactions|seen',
-]);
+/**
+ * Blocks the twin tests exercise, DERIVED from COLLECTIONS rather than listed.
+ *
+ * `standaloneName` existed on each entry and nothing read it — the vestige of
+ * the join this was always meant to be. A hand-written set here would be one
+ * more coverage claim nobody checks: add a collection to COLLECTIONS and
+ * forget the set, and its blocks read as untested-by-choice while actually
+ * being tested; remove one and the set silently over-claims.
+ *
+ * The aggregate half is keyed by the `<name>Seen` variable in
+ * decodeAllCollections. Transactions and accounts route through the shared
+ * helpers instead of their own Set, so their aggregate coverage IS the helper
+ * block — which is why AGGREGATE_SET_VAR has no entry for them.
+ */
+const AGGREGATE_SET_VAR: Record<string, string> = {
+  recurring: 'recSeen',
+  budgets: 'budgetSeen',
+  goals: 'goalSeen',
+};
+
+const TWIN_TESTED = new Set(
+  COLLECTIONS.flatMap((c) => {
+    const standalone = `${c.standaloneName}|seen`;
+    const aggregateVar = AGGREGATE_SET_VAR[c.name];
+    return aggregateVar === undefined
+      ? [standalone]
+      : [standalone, `decodeAllCollections|${aggregateVar}`];
+  })
+);
 
 /** Discover dedup blocks and their key expressions from the decoder source. */
 function discoverDedupBlocks(): Record<string, string> {
@@ -347,6 +382,18 @@ function discoverDedupBlocks(): Record<string, string> {
 
 describe('dedup coverage is declared, not assumed (#668 review)', () => {
   const discovered = discoverDedupBlocks();
+
+  test('no block is pinned to a bare identifier', () => {
+    // The `key` resolution repaired three instances, but both of its fallbacks
+    // land on a bare word — and a bare word is the "pins nothing" state that
+    // repair removed. Recording it as an invariant turns a state a maintainer
+    // could accidentally re-enter into one the suite rejects, which is the
+    // ritual this repo runs on its own bugs.
+    const unpinned = Object.entries(DEDUP_BLOCKS)
+      .filter(([, key]) => key === 'NONE' || /^\w+$/.test(key))
+      .map(([block]) => block);
+    expect(unpinned).toEqual([]);
+  });
 
   test('discovery finds the dedup blocks at all', () => {
     // Non-vacuity: the exact comparison below would pass over an empty object.
