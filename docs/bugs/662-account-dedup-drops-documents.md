@@ -100,7 +100,7 @@ content heuristic instead of an identity fails here, whatever field it picks.
 
 **Mutation-verified.** Reintroducing the old key in `deduplicateAccounts` turns three tests
 red — the instance regression test plus both account paths in the detector — while the
-nine sibling-collection assertions stay green, confirming the detector is specific to the
+eight sibling-collection assertions stay green, confirming the detector is specific to the
 defect rather than sensitive to any change. Per the #596 discipline, executing a guard is
 not the same as detecting its deletion.
 

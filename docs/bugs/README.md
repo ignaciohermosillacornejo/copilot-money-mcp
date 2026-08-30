@@ -78,7 +78,7 @@ a class yet.
 
 | Class | Definition | Detector |
 |---|---|---|
-| `identity-resolution` | Comparing values across id spaces — matching a display name against an id, or an id belonging to a different entity. Includes treating content as identity, e.g. a dedup key built from a display name. | `assertOpaqueIds` fixture invariant (#461); `tests/core/dedup-identity.test.ts` — every decoder dedup must preserve two documents identical in content and differing only by id (#662) |
+| `identity-resolution` | Comparing values across id spaces — matching a display name against an id, or an id belonging to a different entity. Includes treating content as identity, e.g. a dedup key built from a display name. | `assertOpaqueIds` fixture invariant (#461); `tests/core/dedup-identity.test.ts` — the five primary decoder dedups must preserve two documents identical in content and differing only by id, and every other dedup site must be explicitly listed as omitted (#662) |
 | `aggregation-double-count` | Summing across a parent/child hierarchy without excluding parents, so the same money is counted twice. | none |
 | `sign-convention` | Ignoring the domain's sign/direction convention, so the stored sign is not the semantic sign and naive sums are wrong. | none |
 | `ui-parity` | A reimplementation of an app-side computation uses different semantics — time window, enumeration set, exclusion rules — and disagrees with the Copilot app. | none |
@@ -104,7 +104,7 @@ a class yet.
 ## How we find bugs
 
 Recorded per entry, using a fixed vocabulary so the corpus stays countable. Here is what
-this corpus actually says, across all 48 entries:
+this corpus actually says, across all 49 entries:
 
 | Found by | Count | |
 |---|---|---|

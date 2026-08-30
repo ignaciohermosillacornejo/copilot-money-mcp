@@ -205,14 +205,16 @@ const OMITTED: Record<string, string> = {
   'amazon integrations': 'not seeded by createCombinedDb; keys on amazon_id today',
   'amazon orders': 'not seeded by createCombinedDb; keys on order_id today',
   'balance history': 'not seeded by createCombinedDb; keys on balance_id today',
-  categories: 'not seeded by createCombinedDb; keys on category_id today',
+  categories:
+    'seedable today (createCombinedDb accepts it) — uncovered by choice, not by blocker; keys on category_id',
   changes: 'not seeded by createCombinedDb; keys on change_id today',
   'feature tracking': 'not seeded by createCombinedDb; keys on its document id today',
   'holdings history': 'not seeded by createCombinedDb; keys on history_id today',
   'holdings history meta': 'not seeded by createCombinedDb; keys on holdings_history_id today',
   'investment splits': 'not seeded by createCombinedDb; keys on security_id today',
   invites: 'not seeded by createCombinedDb; keys on invite_id today',
-  items: 'not seeded by createCombinedDb; keys on item_id today',
+  items:
+    'seedable today (createItemDb exists) — uncovered by choice, not by blocker; keys on item_id',
   'plaid accounts': 'not seeded by createCombinedDb; keys on plaid_account_id today',
   securities: 'not seeded by createCombinedDb; keys on security_id today',
   subscriptions: 'not seeded by createCombinedDb; keys on subscription_id today',
@@ -241,8 +243,16 @@ describe('dedup coverage is declared, not assumed (#668 review)', () => {
 
   // Without this, a regex that stopped matching would make the forward check
   // below pass over an empty list — the failure shape this whole file is about.
-  test('discovery finds the dedup sites at all', () => {
-    expect(sites.length).toBeGreaterThanOrEqual(20);
+  test('discovery finds every dedup site (exact, not a floor)', () => {
+    // EXACT, deliberately. Discovery is anchored on the `// Label: dedupe by`
+    // comments, so deleting a comment while reintroducing a content key would
+    // drop that site from the ledger — a floor of 20 would not notice. Pinning
+    // the count means removing a comment fails here and someone has to look.
+    //
+    // If you legitimately add or remove a dedup site, update this number and
+    // the OMITTED table in the same commit. That is the intended workflow: the
+    // point is that coverage cannot change silently.
+    expect(sites.length).toBe(26);
   });
 
   test('forward: every dedup site is either exercised here or listed as omitted', () => {
