@@ -76,18 +76,35 @@ function tsFilesUnder(dir: string): string[] {
   return out;
 }
 
+/**
+ * Collect every exported string-literal `as const` array in ONE file's source
+ * text.
+ *
+ * Split out from the tree walk on purpose: a discovery mechanism whose only
+ * input is the real source tree can only be mutation-tested by the accidents
+ * of what that tree happens to contain today. Feeding it a synthetic snippet
+ * lets the tests below pin the parsing rules themselves.
+ */
+function collectStringConstants(source: string): Map<string, readonly string[]> {
+  const found = new Map<string, readonly string[]>();
+  const text = source;
+  for (const match of text.matchAll(EXPORTED_ARRAY)) {
+    const [, name, rawBody] = match;
+    if (name === undefined || rawBody === undefined) continue;
+    const items = [...rawBody.matchAll(/'([^']*)'/g)].map((m) => m[1] as string);
+    // Everything that is not a string literal, comma or whitespace: if
+    // anything remains, the array is not purely string literals.
+    const residue = rawBody.replace(/'[^']*'|,|\s/g, '');
+    if (items.length > 0 && residue === '') found.set(name, items);
+  }
+  return found;
+}
+
 function discoverStringConstants(): Map<string, readonly string[]> {
   const found = new Map<string, readonly string[]>();
   for (const file of tsFilesUnder(SRC_ROOT)) {
-    const text = readFileSync(file, 'utf-8');
-    for (const match of text.matchAll(EXPORTED_ARRAY)) {
-      const [, name, rawBody] = match;
-      if (name === undefined || rawBody === undefined) continue;
-      const items = [...rawBody.matchAll(/'([^']*)'/g)].map((m) => m[1] as string);
-      // Everything that is not a string literal, comma or whitespace: if
-      // anything remains, the array is not purely string literals.
-      const residue = rawBody.replace(/'[^']*'|,|\s/g, '');
-      if (items.length > 0 && residue === '') found.set(name, items);
+    for (const [name, items] of collectStringConstants(readFileSync(file, 'utf-8'))) {
+      found.set(name, items);
     }
   }
   return found;
@@ -226,6 +243,39 @@ describe('exported string constants are pinned (#635 class detector)', () => {
 
   test('discovery finds constants at all (guards the guard)', () => {
     expect(discoveredNames.length).toBeGreaterThan(0);
+  });
+
+  test('discovery sees arrays containing inline comments', () => {
+    const found = discoverStringConstants();
+    // Both carry inline `//` comments inside the array literal.
+    expect(found.has('KNOWN_FREQUENCIES')).toBe(true);
+    expect(found.has('IGNORED_ITEM_FIELDS')).toBe(true);
+  });
+
+  test('a non-as-const array does not swallow the as-const arrays after it', () => {
+    const found = discoverStringConstants();
+    // CONFORMANCE_LEDGER (src/conformance/ledger.ts) is `readonly LedgerEntry[]`
+    // with no `as const`; it must not consume the declarations that follow it.
+    expect(found.has('CONFORMANCE_LEDGER')).toBe(false);
+    expect(found.size).toBeGreaterThanOrEqual(25);
+  });
+
+  test('declaration boundaries: a non-as-const array cannot reach a later `] as const`', () => {
+    // The tree-level assertion above can only catch this by accident — today no
+    // `as const` array happens to sit after a non-`as const` one in the same
+    // file, so the tree cannot tell a correct matcher from a greedy one. This
+    // snippet can, which is what makes the boundary rule mutation-detectable.
+    const snippet = [
+      'export const NOT_A_PIN: readonly Thing[] = [',
+      '  { field: 1 },',
+      '];',
+      '',
+      "export const AFTER_THE_LEDGER = ['alpha', 'beta'] as const;",
+      '',
+    ].join('\n');
+    const found = collectStringConstants(snippet);
+    expect(found.has('NOT_A_PIN')).toBe(false);
+    expect([...(found.get('AFTER_THE_LEDGER') ?? [])]).toEqual(['alpha', 'beta']);
   });
 
   test('forward: every exported string constant in src/ is pinned', () => {
