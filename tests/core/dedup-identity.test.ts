@@ -226,15 +226,16 @@ const DEDUP_BLOCKS: Record<string, string> = {
   'decodeRecurring|seen': 'rec.recurring_id',
   'decodeBudgets|seen': 'budget.budget_id',
   'decodeGoals|seen': 'goal.goal_id',
-  'decodeGoalHistory|seen': 'key',
-  'dedupeAndSortInvestmentPrices|seen': 'key',
+  'decodeGoalHistory|seen': 'key = `${history.goal_id}:${history.month}`',
+  'dedupeAndSortInvestmentPrices|seen':
+    "key = `${price.security_id}/${price.price_type}/${price.date ?? price.month ?? 'unknown'}`",
   'decodeItems|seen': 'item.item_id',
   'decodeCategories|seen': 'category.category_id',
   'decodeUserAccounts|seen': 'userAccount.account_id',
   'decodeAllCollections|recSeen': 'rec.recurring_id',
   'decodeAllCollections|budgetSeen': 'budget.budget_id',
   'decodeAllCollections|goalSeen': 'goal.goal_id',
-  'decodeAllCollections|histSeen': 'key',
+  'decodeAllCollections|histSeen': 'key = `${history.goal_id}:${history.month}`',
   'decodeAllCollections|splitSeen': 'split.security_id',
   'decodeAllCollections|itemSeen': 'item.item_id',
   'decodeAllCollections|catSeen': 'category.category_id',
@@ -327,10 +328,19 @@ function discoverDedupBlocks(): Record<string, string> {
     const variable = m[1] as string;
     const enclosing = declarations.filter(([at]) => at < (m.index as number)).pop();
     const after = source.slice((m.index as number) + m[0].length);
-    const use = new RegExp(`${variable}\\.has\\(([^;]*?)\\)\\s*\\)`).exec(after.slice(0, 3000));
-    found[`${enclosing ? enclosing[1] : '?'}|${variable}`] = use
-      ? (use[1] as string).replace(/\s+/g, ' ').trim()
-      : 'NONE';
+    const window = after.slice(0, 3000);
+    const use = new RegExp(`${variable}\\.has\\(([^;]*?)\\)\\s*\\)`).exec(window);
+    let key = use ? (use[1] as string).replace(/\s+/g, ' ').trim() : 'NONE';
+    // Resolve a bare identifier to the expression it is assigned from. Three
+    // blocks dedup on `const key = \`${a}:${b}\``, and pinning the string
+    // "key" pins NOTHING — changing what key is built from would not move it.
+    // That is this file's own bug class yet again: a guard recording a name
+    // where it means a value.
+    if (/^\w+$/.test(key)) {
+      const assigned = new RegExp(`const ${key} = ([^;]+);`).exec(window);
+      if (assigned) key = `${key} = ${(assigned[1] as string).replace(/\s+/g, ' ').trim()}`;
+    }
+    found[`${enclosing ? enclosing[1] : '?'}|${variable}`] = key;
   }
   return found;
 }

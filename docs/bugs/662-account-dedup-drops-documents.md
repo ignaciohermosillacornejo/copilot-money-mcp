@@ -92,17 +92,40 @@ accounts, and the class detector below.
 
 `tests/core/dedup-identity.test.ts` — new, and the class-level gate #122 never got.
 
-For every collection the decoder dedups (transactions, accounts, recurring, budgets,
-goals) it seeds **two documents identical in every content field, differing only by id**,
-then asserts both survive — on the standalone decoder *and* on the single-pass aggregate,
-since this defect shipped two independent copies. Any future dedup that reaches for a
-content heuristic instead of an identity fails here, whatever field it picks.
+It has two halves, and the split matters — the first version of this detector had only
+the first half and overclaimed about the second.
 
-**Mutation-verified.** Reintroducing the old key in `deduplicateAccounts` turns three tests
-red — the instance regression test plus both account paths in the detector — while the
-eight sibling-collection assertions stay green, confirming the detector is specific to the
-defect rather than sensitive to any change. Per the #596 discipline, executing a guard is
-not the same as detecting its deletion.
+**Twin tests.** For the five primary collections (transactions, accounts, recurring,
+budgets, goals) it seeds **two documents identical in every content field, differing only
+by id**, then asserts both survive — on the standalone decoder *and* on the single-pass
+aggregate, since this defect shipped two independent copies.
+
+**Coverage guard.** The twin tests cover 8 of the decoder's 36 dedup blocks. Rather than
+claim more than that, the guard discovers every dedup block — each `new Set<string>()`
+allocation — and pins the **key expression** it tests. A block that is new, removed, or
+whose key changes from an id to a content field fails there, and every block must be
+twin-tested, structural, or explicitly listed as untested-by-choice.
+
+That shape was reached over four revisions, each of which review showed was narrower than
+its own comment claimed:
+
+| Revision | Discovered by | What it missed |
+|---|---|---|
+| 1 | nothing — five hand-written tests | claimed "every collection"; covered five |
+| 2 | `// Label: dedupe by` comments | the nine standalone decoders, which write `// Deduplicate by` |
+| 3 | both comment forms, keyed by label | three blocks share one comment; a duplicate label overwrote rather than added |
+| 4 | dedup blocks, pinning the key expression | — |
+
+The revision-3 gap is worth recording because it is this bug's own shape: one comment
+above three blocks meant `acSeen.has(ac.change_id)` could become `acSeen.has(ac.description)`
+with the whole suite green. And revision 2 could not see
+`dedupeAndSortInvestmentPrices`, which carries no comment — **the site that shipped #622**,
+the previous instance of this exact class, invisible to the detector written for it.
+
+**Mutation-verified** at each revision, and the mutations are the record of what each one
+actually caught. At revision 4: reintroducing the old account key turns three tests red;
+changing the investment-prices key, the `acSeen` key, or adding an uncommented dedup block
+each fail the coverage guard. All three of those passed before revision 4.
 
 Note what this detector still cannot see: it proves distinct documents survive, not that
 true storage duplicates are collapsed. `createTestDb` writes one row per id, so a genuine
