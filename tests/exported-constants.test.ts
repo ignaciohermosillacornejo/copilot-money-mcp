@@ -96,7 +96,11 @@ function tsFilesUnder(dir: string): string[] {
  * reject the array and drop it from the pin. That is a known limitation, not
  * something to work around here — a URL inside an exported `as const` array is
  * the realistic case, and making this string-aware is the fix if one ever
- * lands. Tracked separately.
+ * lands. A sibling hazard of the same shape: block comments are stripped
+ * BEFORE line comments, so a line comment that contains a block-comment opener
+ * lets the block regex run forward to the next closer and delete the real
+ * declarations in between. Neither case occurs in `src/` today; both are
+ * tracked separately.
  *
  * Same helper and same caveat as tests/core/decoder-field-completeness.test.ts,
  * duplicated on purpose rather than shared, so neither file's parsing rules can
@@ -299,28 +303,49 @@ describe('exported string constants are pinned (#635 class detector)', () => {
 
   test('discovery finds constants at all (guards the guard)', () => {
     expect(discoveredNames.length).toBeGreaterThan(0);
+    // Coverage floor, deliberately not an exact count: an exact one would churn
+    // on every constant added, while a floor still catches discovery collapsing
+    // to a handful — the failure this file exists to make loud.
+    expect(discovered.size).toBeGreaterThanOrEqual(25);
   });
 
-  test('discovery sees arrays containing inline comments', () => {
-    const found = discoverStringConstants();
-    // Both carry inline `//` comments inside the array literal.
-    expect(found.has('KNOWN_FREQUENCIES')).toBe(true);
-    expect(found.has('IGNORED_ITEM_FIELDS')).toBe(true);
+  test('comment-carrying arrays survive stripping', () => {
+    // Synthetic rather than tree-derived, for the same reason
+    // collectStringConstants is split out at all: a routine cleanup that
+    // dropped the `// Every 2 weeks`-style comments from src/models/recurring.ts
+    // would leave a tree-based version of this test green while it exercised
+    // nothing.
+    const found = collectStringConstants(
+      ['export const WITH_NOTES = [', "  'a', // note", "  'b',", '] as const;'].join('\n')
+    );
+    expect([...(found.get('WITH_NOTES') ?? [])]).toEqual(['a', 'b']);
+  });
+
+  test('the constants whose literals carry inline comments are in the pin', () => {
+    // These two were outside the pin until #677, for exactly that reason. This
+    // is a membership check on the real tree, not a test of the stripping rule
+    // — that is the synthetic test above.
+    expect(discovered.has('KNOWN_FREQUENCIES')).toBe(true);
+    expect(discovered.has('IGNORED_ITEM_FIELDS')).toBe(true);
   });
 
   test('a non-as-const array does not swallow the as-const arrays after it', () => {
-    const found = discoverStringConstants();
     // CONFORMANCE_LEDGER (src/conformance/ledger.ts) is `readonly LedgerEntry[]`
     // with no `as const`; it must not consume the declarations that follow it.
-    expect(found.has('CONFORMANCE_LEDGER')).toBe(false);
-    expect(found.size).toBeGreaterThanOrEqual(25);
+    // A shape pin only — the detector for the rule is the synthetic test below.
+    expect(discovered.has('CONFORMANCE_LEDGER')).toBe(false);
   });
 
   test('declaration boundaries: a non-as-const array cannot reach a later `] as const`', () => {
-    // The tree-level assertion above can only catch this by accident — today no
-    // `as const` array happens to sit after a non-`as const` one in the same
-    // file, so the tree cannot tell a correct matcher from a greedy one. This
-    // snippet can, which is what makes the boundary rule mutation-detectable.
+    // The tree cannot detect this, and NOT because the greedy match fails to
+    // happen — it happens. In src/conformance/ledger.ts, CONFORMANCE_LEDGER at
+    // :305 is not `as const`, and the first `] as const` ahead of it is the
+    // INLINE `(['id', 'accountId', 'itemId'] as const)` at :493, so the old
+    // lazy body matched 305 -> 493 and the sweep resumed past the whole span.
+    // Nothing is lost from the pin only because that span happens to contain no
+    // exported string-literal declaration — an accident of today's tree, not a
+    // property of it. This snippet puts a declaration inside such a span, which
+    // is what makes the boundary rule mutation-detectable at all.
     const snippet = [
       'export const NOT_A_PIN: readonly Thing[] = [',
       '  { field: 1 },',
