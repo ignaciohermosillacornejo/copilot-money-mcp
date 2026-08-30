@@ -48,13 +48,20 @@ interface Result {
   stderr: string;
 }
 
-async function runCheck(root: string, args: string[] = []): Promise<Result> {
+async function runCheck(
+  root: string,
+  args: string[] = [],
+  // Deliberately applied AFTER the GIT_ filter below, so a test can put a
+  // plumbing variable back to prove the gate strips it for itself.
+  extraEnv: Record<string, string> = {}
+): Promise<Result> {
   const proc = Bun.spawn(['bun', 'run', SCRIPT, ...args], {
     // Same reason as withGitTree's cleanEnv: a pre-push run sets GIT_DIR, and
     // leaking it makes the gate resolve to the ambient repo instead of `root`.
     env: Object.fromEntries([
       ...Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')),
       ['CHECK_CONCEALMENT_ROOT', root],
+      ...Object.entries(extraEnv),
     ]) as Record<string, string>,
     stdout: 'pipe',
     stderr: 'pipe',
@@ -94,7 +101,10 @@ async function withGitTree(
   // Written AFTER the commit. `git add -A` honours .gitignore, so a file
   // listed in it at seed time is never tracked at all — which is a different
   // scenario from "tracked, then later ignored".
-  afterCommit: Record<string, string> = {}
+  afterCommit: Record<string, string> = {},
+  // Built from the temp dir, because anything pointing at a file inside the
+  // tree needs its absolute path.
+  extraEnv: (dir: string) => Promise<Record<string, string>> | Record<string, string> = () => ({})
 ): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), 'concealment-git-'));
   try {
@@ -127,7 +137,7 @@ async function withGitTree(
       await mkdir(join(path, '..'), { recursive: true });
       await writeFile(path, contents);
     }
-    await assertions(await runCheck(dir));
+    await assertions(await runCheck(dir, [], await extraEnv(dir)));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -279,6 +289,31 @@ describe('file list comes from git when available (review follow-up)', () => {
       expect(code).toBe(0);
       expect(stdout).toContain('(git)');
     });
+  });
+
+  test('an inherited GIT_CONFIG_GLOBAL cannot shrink the scanned set', async () => {
+    // GIT_DIR is not the only plumbing variable that reaches into the listing.
+    // GIT_CONFIG_GLOBAL (and GIT_CONFIG_COUNT/KEY/VALUE) can set
+    // core.excludesFile, which `ls-files --others --exclude-standard` honours —
+    // so an ambient value silently drops files from the scan while the gate
+    // still prints a green line. Stripping seven variables BY NAME was the same
+    // shape of bug this gate exists to catch: an enumeration of what to handle,
+    // with everything unlisted falling through.
+    await withGitTree(
+      { 'src/a.ts': CLEAN },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('added-later');
+      },
+      { 'src/added-later.ts': concealed },
+      async (dir) => {
+        const excludes = join(dir, 'excludes');
+        const config = join(dir, 'gitconfig');
+        await writeFile(excludes, '*.ts\n');
+        await writeFile(config, `[core]\n\texcludesFile = ${excludes}\n`);
+        return { GIT_CONFIG_GLOBAL: config };
+      }
+    );
   });
 
   test('a gitignored tree is not scanned', async () => {
