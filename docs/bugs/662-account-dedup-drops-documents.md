@@ -106,7 +106,7 @@ allocation — and pins the **key expression** it tests. A block that is new, re
 whose key changes from an id to a content field fails there, and every block must be
 twin-tested, structural, or explicitly listed as untested-by-choice.
 
-That shape was reached over five revisions, each of which review showed was narrower than
+That shape was reached over six revisions, each of which review showed was narrower than
 its own comment claimed:
 
 | Revision | Discovered by | What it missed |
@@ -115,7 +115,8 @@ its own comment claimed:
 | 2 | `// Label: dedupe by` comments | the nine standalone decoders, which write `// Deduplicate by` |
 | 3 | both comment forms, keyed by label | three blocks share one comment; a duplicate label overwrote rather than added |
 | 4 | dedup blocks, pinning the key expression | three blocks pinned the local name `key` rather than what it resolves to — a bare identifier that pins nothing, since changing what `key` is built from would not move it |
-| 5 | bare identifiers resolved to their assigned expression, and asserted never to appear | — |
+| 5 | bare identifiers resolved to their assigned expression, and asserted never to appear | a RESOLVED expression can still pin nothing: `key = keyFor(row)` is not a bare word, so it passed, but reimplementing `keyFor` to hash a different property leaves that exact string unchanged — the resolution closed the literal-bare-word case, not the opaque-call case |
+| 6 | resolved expressions required to contain a property access (`.someField`), not just be non-bare | — |
 
 The revision-3 gap is worth recording because it is this bug's own shape: one comment
 above three blocks meant `acSeen.has(ac.change_id)` could become `acSeen.has(ac.description)`
@@ -124,12 +125,15 @@ with the whole suite green. And revision 2 could not see
 the previous instance of this exact class, invisible to the detector written for it.
 
 **Mutation-verified** at each revision, and the mutations are the record of what each one
-actually caught. At revision 5: reintroducing the old account key turns three tests red;
+actually caught. At revision 6: reintroducing the old account key turns three tests red;
 changing the investment-prices key, the `acSeen` key, or adding an uncommented dedup block
-each fail the coverage guard; a new block keyed on an unresolvable identifier now fails
-too. All of those passed before revision 5 — the last is the gap revision 4 itself left
-open, closed by resolving bare identifiers to their assignment and asserting one never
-survives unresolved.
+each fail the coverage guard; a new block keyed on an unresolvable identifier fails too;
+and a new block keyed on a RESOLVED but field-free expression (`key = keyFor(row)`) now
+fails as well. All of those passed before revision 6 — the last is the gap revision 5
+itself left open: resolving a bare identifier to its assignment closed the "pins nothing"
+case for a literal bare word, but a resolved call with no property access pins nothing
+just as surely, and nothing caught that until revision 6 required the resolved expression
+to name a field.
 
 Note what this detector still cannot see: it proves distinct documents survive, not that
 true storage duplicates are collapsed. `createTestDb` writes one row per id, so a genuine

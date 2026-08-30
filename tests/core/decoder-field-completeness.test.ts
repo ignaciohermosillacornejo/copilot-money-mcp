@@ -308,13 +308,16 @@ function discoverProcessors(src: string = SRC): DiscoveredProcessor[] {
           }
           return [`@${args.slice(at, end).trim()}`];
         }
+        // `args` (and therefore `raw`, sliced from it) is already stripped —
+        // `body` is stripped once at the top of discoverProcessors and every
+        // downstream slice inherits that, so re-stripping here would be a
+        // redundant no-op leftover from before that single-convention fix.
         const [raw] = balanced(args, at, '[', ']');
-        const text = stripComments(raw);
         const tokens: Array<[number, string]> = [];
-        for (const lit of text.matchAll(/'([^']*)'/g)) tokens.push([lit.index, lit[1] as string]);
-        for (const sp of text.matchAll(/\.\.\.(\w+)/g))
+        for (const lit of raw.matchAll(/'([^']*)'/g)) tokens.push([lit.index, lit[1] as string]);
+        for (const sp of raw.matchAll(/\.\.\.(\w+)/g))
           tokens.push([sp.index, `...${sp[1] as string}`]);
-        const residue = text.replace(/'[^']*'|\.\.\.\w+|,|\s/g, '');
+        const residue = raw.replace(/'[^']*'|\.\.\.\w+|,|\s/g, '');
         if (residue !== '') unresolved.push(`${name}: ${key} residue ${JSON.stringify(residue)}`);
         return tokens.sort((a, b) => a[0] - b[0]).map(([, token]) => token);
       };

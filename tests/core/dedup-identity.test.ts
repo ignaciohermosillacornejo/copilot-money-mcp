@@ -31,7 +31,7 @@
  * or explicitly listed as untested-by-choice.
  *
  * Note "block", not "comment", and "expression", not "name". Both distinctions
- * were bought the hard way — five revisions, each one narrower than its own
+ * were bought the hard way — six revisions, each one narrower than its own
  * comment claimed, each narrowing found by review rather than by the suite:
  *
  *   1. five hand-written tests, claiming "every collection"
@@ -40,7 +40,11 @@
  *      a duplicate label overwrote rather than added
  *   4. blocks, pinning the key — but three pinned the local name `key`, which
  *      pins nothing
- *   5. bare identifiers resolved, and asserted never to appear
+ *   5. bare identifiers resolved, and asserted never to appear — but a
+ *      RESOLVED expression can still pin nothing (`key = keyFor(row)` is not
+ *      a bare word, yet names no field)
+ *   6. resolved expressions required to contain a property access, not just
+ *      be non-bare
  *
  * Revision 2 could not see `dedupeAndSortInvestmentPrices`, which carries no
  * comment — the site that shipped #622, the previous instance of this exact
@@ -331,6 +335,30 @@ const UNTESTED_BY_CHOICE = new Set([
 ]);
 
 /**
+ * Slice out `open`..`close` starting at `openIdx`, counting nesting depth.
+ * Mirrors the identically-named helper in decoder-field-completeness.test.ts.
+ * Kept local rather than shared — the two discovery scripts read the source
+ * independently by design (see discoverAggregatePushTargets's own doc) — but
+ * the same bounding requirement applies here: without it, a scan can walk
+ * past the guarded block's own closing brace and misattribute a LATER,
+ * unrelated `.push(` call, which is exactly the #685 Step 1 defect in the
+ * sibling file. Bounding here is what keeps this file from shipping that
+ * same class of bug next door to its own fix.
+ */
+function balanced(text: string, openIdx: number, open: string, close: string): [string, number] {
+  let depth = 0;
+  for (let i = openIdx; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === open) depth++;
+    else if (ch === close) {
+      depth--;
+      if (depth === 0) return [text.slice(openIdx + 1, i), i];
+    }
+  }
+  return ['', text.length];
+}
+
+/**
  * For each dedup block, the name of the array its guarded `.push()` feeds.
  * `decodeAllCollections` builds every inline-block collection with the
  * identical shape — `if (!XSeen.has(id)) { XSeen.add(id); arr.push(item); }`
@@ -340,6 +368,11 @@ const UNTESTED_BY_CHOICE = new Set([
  * function. Read independently of `discoverDedupBlocks`, on its own pass over
  * the source, so a bug in one discovery function cannot mask a bug in the
  * other.
+ *
+ * The `.push(` search is bounded to the guard's OWN braced body via
+ * `balanced()`, not a forward scan across the whole window — a forward scan
+ * for the next `.push(` anywhere ahead can cross the guard's closing brace
+ * and credit an unrelated later block's push to this Set variable.
  */
 function discoverAggregatePushTargets(): Record<string, string> {
   const source = fs.readFileSync(
@@ -353,9 +386,11 @@ function discoverAggregatePushTargets(): Record<string, string> {
       (m.index as number) + m[0].length,
       (m.index as number) + m[0].length + 3000
     );
-    const push = new RegExp(
-      `if \\(!${setVar}\\.has\\([^)]*\\)\\)\\s*\\{[\\s\\S]*?(\\w+)\\.push\\(`
-    ).exec(window);
+    const guard = new RegExp(`if \\(!${setVar}\\.has\\([^)]*\\)\\)\\s*\\{`).exec(window);
+    if (!guard) continue;
+    const braceIdx = guard.index + guard[0].length - 1;
+    const [guardBody] = balanced(window, braceIdx, '{', '}');
+    const push = /(\w+)\.push\(/.exec(guardBody);
     if (push) found[push[1] as string] = setVar;
   }
   return found;
