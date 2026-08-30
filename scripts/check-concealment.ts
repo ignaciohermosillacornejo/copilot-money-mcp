@@ -674,17 +674,17 @@ function gitFiles(root: string): { tracked: string[]; untracked: string[] } | un
   // repo and reports the scratch tree as untracked, bypassing SKIP_DIRS entirely.
   // That is how this gate started reporting node_modules under husky while
   // passing when run by hand. Caught by the pre-push hook it broke.
+  //
+  // Stripped as a NAMESPACE rather than as a list of seven names. The list was
+  // the same shape as every other bug in this file: an enumeration of the cases
+  // someone thought of, with everything unlisted falling straight through. It
+  // did not include GIT_CONFIG_GLOBAL or GIT_CONFIG_COUNT, either of which can
+  // set core.excludesFile — which `ls-files --exclude-standard` honours, so an
+  // ambient value drops files out of the scan and the gate still prints a green
+  // "nothing hidden". Every GIT_* variable is git's to interpret, none of them
+  // is ours to inherit, and the test helper already used this exact form.
   const env = { ...process.env };
-  for (const key of [
-    'GIT_DIR',
-    'GIT_WORK_TREE',
-    'GIT_INDEX_FILE',
-    'GIT_COMMON_DIR',
-    'GIT_OBJECT_DIRECTORY',
-    'GIT_ALTERNATE_OBJECT_DIRECTORIES',
-    'GIT_PREFIX',
-  ])
-    delete env[key];
+  for (const key of Object.keys(env)) if (key.startsWith('GIT_')) delete env[key];
 
   const run = (args: string[]): string[] | undefined => {
     const r = spawnSync('git', ['-C', root, ...args], { encoding: 'utf-8', env });
