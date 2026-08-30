@@ -573,6 +573,14 @@ describe('scoping follow-ups (review of #679)', () => {
     );
   });
 
+  test('a legitimately quoted binary path is still allowed', async () => {
+    // The quoted form is parsed, not refused: `"my docs/logo.png" binary` is
+    // legitimate, and refusing every quoted pattern would fail the gate on it.
+    await withTree({ '.gitattributes': '"my docs/logo.png" binary\n' }, ({ code }) =>
+      expect(code).toBe(0)
+    );
+  });
+
   test('an executable binary format is NOT auto-approved', async () => {
     // BINARY_EXTENSIONS answers "where is a NUL expected"; it includes .wasm,
     // .node, .so, .exe. Reusing it here would bless diff suppression on the
