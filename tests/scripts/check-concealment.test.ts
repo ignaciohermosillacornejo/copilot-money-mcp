@@ -134,10 +134,14 @@ async function withGitTree(
 }
 
 describe('clean input', () => {
-  test('passes on an ordinary source tree', async () => {
+  test('passes on an ordinary source tree, and says it fell back to the walk', async () => {
+    // withTree builds a plain temp directory, so the git listing declines and
+    // the walk runs. Asserting the label here and `(git)` in the git block
+    // below is what stops the two paths being confused for one another.
     await withTree({ 'src/a.ts': CLEAN, 'src/nested/b.ts': CLEAN }, ({ code, stdout }) => {
       expect(code).toBe(0);
       expect(stdout).toContain('check-concealment');
+      expect(stdout).toContain('(walk)');
     });
   });
 
@@ -264,6 +268,19 @@ describe('scope', () => {
  * hole the audit that prompted these tests was about.
  */
 describe('file list comes from git when available (review follow-up)', () => {
+  test('the summary line says which strategy listed the files', async () => {
+    // The fallback was silent: git missing, a dubious-ownership refusal or a
+    // toplevel mismatch all dropped the gate onto the walk, which does not
+    // honour .gitignore and does honour SKIP_DIRS for tracked files — a
+    // materially different scanned set, reported with the same green line.
+    // Every withGitTree test used to infer the git path indirectly, from
+    // behaviour that only differs on the git path.
+    await withGitTree({ 'src/a.ts': CLEAN }, ({ code, stdout }) => {
+      expect(code).toBe(0);
+      expect(stdout).toContain('(git)');
+    });
+  });
+
   test('a gitignored tree is not scanned', async () => {
     // The real exposure: removing the extension allowlist put snapshots/,
     // local fixture databases and .env.local in scope on developer machines.

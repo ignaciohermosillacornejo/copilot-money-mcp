@@ -156,10 +156,34 @@ const SKIP_FILES = new Set(['package-lock.json', 'bun.lock', 'bun.lockb', 'yarn.
  * executable formats in BINARY_EXTENSIONS.
  */
 const INERT_BINARY_EXTENSIONS = new Set([
-  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.icns', '.bmp', '.tiff',
-  '.pdf', '.zip', '.gz', '.tgz', '.bz2', '.xz', '.7z', '.tar',
-  '.woff', '.woff2', '.ttf', '.otf', '.eot',
-  '.mp3', '.mp4', '.wav', '.mov', '.webm', '.ogg',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.ico',
+  '.icns',
+  '.bmp',
+  '.tiff',
+  '.pdf',
+  '.zip',
+  '.gz',
+  '.tgz',
+  '.bz2',
+  '.xz',
+  '.7z',
+  '.tar',
+  '.woff',
+  '.woff2',
+  '.ttf',
+  '.otf',
+  '.eot',
+  '.mp3',
+  '.mp4',
+  '.wav',
+  '.mov',
+  '.webm',
+  '.ogg',
 ]);
 
 /**
@@ -179,7 +203,15 @@ const BINARY_EXTENSIONS = new Set([
   //   - they are containers whose contents a reviewer might genuinely need to
   //     see, and which can carry code: .mcpb bundles this server, .ldb/.sst
   //     are LevelDB tables holding cached user data
-  '.mcpb', '.node', '.wasm', '.ldb', '.sst', '.dylib', '.so', '.dll', '.exe',
+  '.mcpb',
+  '.node',
+  '.wasm',
+  '.ldb',
+  '.sst',
+  '.dylib',
+  '.so',
+  '.dll',
+  '.exe',
 ]);
 
 /** Extension of the BASENAME — `docs/v1.2/README` has no extension, not `.2/README`. */
@@ -251,22 +283,40 @@ const GENERATED_RE = /\.generated\.[cm]?[jt]sx?$/;
  */
 const AUTO_LIFECYCLE = new Set([
   // install
-  'preinstall', 'install', 'postinstall', 'dependencies',
+  'preinstall',
+  'install',
+  'postinstall',
+  'dependencies',
   // publish + pack
-  'prepublish', 'prepublishOnly', 'prepack', 'postpack', 'publish', 'postpublish',
+  'prepublish',
+  'prepublishOnly',
+  'prepack',
+  'postpack',
+  'publish',
+  'postpublish',
   // prepare runs on install AND publish
   'prepare',
   // version
-  'preversion', 'version', 'postversion',
+  'preversion',
+  'version',
+  'postversion',
   // uninstall
-  'preuninstall', 'uninstall', 'postuninstall',
+  'preuninstall',
+  'uninstall',
+  'postuninstall',
   // shrinkwrap
-  'preshrinkwrap', 'shrinkwrap', 'postshrinkwrap',
+  'preshrinkwrap',
+  'shrinkwrap',
+  'postshrinkwrap',
   // wrappers around the explicitly-invoked commands
-  'pretest', 'posttest',
-  'prestart', 'poststart',
-  'prestop', 'poststop',
-  'prerestart', 'postrestart',
+  'pretest',
+  'posttest',
+  'prestart',
+  'poststart',
+  'prestop',
+  'poststop',
+  'prerestart',
+  'postrestart',
 ]);
 const PINNED_LIFECYCLE: Record<string, string> = {
   prepare: 'husky',
@@ -367,7 +417,11 @@ function walk(dir: string, out: string[]): string[] {
  * an attacker would want to join — ASCII identifier characters, Latin-1 — is
  * below 0x2000, so the floor separates the two without enumerating emoji.
  */
-function invisibleIsBenign(cp: number, prev: number | undefined, next: number | undefined): boolean {
+function invisibleIsBenign(
+  cp: number,
+  prev: number | undefined,
+  next: number | undefined
+): boolean {
   if (cp !== 0x200d) return false;
   return prev !== undefined && next !== undefined && prev >= 0x2000 && next >= 0x2000;
 }
@@ -563,7 +617,11 @@ function checkLifecycleScripts(contents: string, rel: string): void {
   // script X, so a wrapper around an existing script fires implicitly too.
   for (const hook of Object.keys(scripts)) {
     if (AUTO_LIFECYCLE.has(hook) || PINNED_NAMES.includes(hook)) continue;
-    const base = hook.startsWith('pre') ? hook.slice(3) : hook.startsWith('post') ? hook.slice(4) : '';
+    const base = hook.startsWith('pre')
+      ? hook.slice(3)
+      : hook.startsWith('post')
+        ? hook.slice(4)
+        : '';
     if (base === '' || scripts[base] === undefined) continue;
     report(
       rel,
@@ -655,16 +713,30 @@ function gitFiles(root: string): { tracked: string[]; untracked: string[] } | un
   return { tracked: abs(tracked), untracked: abs(untracked.filter((f) => !tracked.includes(f))) };
 }
 
-function listFiles(root: string): string[] {
+/**
+ * Returns the strategy alongside the list, and the summary line prints it.
+ *
+ * The fallback used to be silent, and the two strategies do not scan the same
+ * set: the walk ignores .gitignore and applies SKIP_DIRS to everything, the git
+ * listing honours .gitignore and applies SKIP_DIRS to untracked files only. Any
+ * of `git` missing from PATH, a dubious-ownership refusal, or a toplevel
+ * mismatch silently swaps one for the other, and both report the same green
+ * `nothing hidden`. Naming the strategy makes a shrunken scan visible in the
+ * output instead of only in a diff of this file.
+ */
+function listFiles(root: string): { files: string[]; strategy: 'git' | 'walk' } {
   const fromGit = gitFiles(root);
-  if (fromGit === undefined) return walk(root, []);
+  if (fromGit === undefined) return { files: walk(root, []), strategy: 'walk' };
   // SKIP_DIRS exists for UNREVIEWED LOCAL ARTIFACTS, so it applies to the
   // untracked half only. A tracked file is in a diff by definition, which is
   // this gate's entire threat model — excluding `build/loader.ts` because of
   // its directory name would turn a list of vendored-output names into a list
   // of places a payload may sit unwatched. A previous revision did exactly
   // that, in a PR arguing against that shape.
-  return [...fromGit.tracked, ...fromGit.untracked.filter((f) => !underSkippedDir(root, f))];
+  return {
+    files: [...fromGit.tracked, ...fromGit.untracked.filter((f) => !underSkippedDir(root, f))],
+    strategy: 'git',
+  };
 }
 
 /**
@@ -675,10 +747,14 @@ function listFiles(root: string): string[] {
  * inside its own fix.
  */
 function underSkippedDir(root: string, file: string): boolean {
-  return relative(root, file).split(sep).slice(0, -1).some((seg) => SKIP_DIRS.has(seg));
+  return relative(root, file)
+    .split(sep)
+    .slice(0, -1)
+    .some((seg) => SKIP_DIRS.has(seg));
 }
 
-const files = listFiles(ROOT).filter((f) => inScope(f));
+const listing = listFiles(ROOT);
+const files = listing.files.filter((f) => inScope(f));
 for (const file of files) {
   const rel = relative(ROOT, file);
   let contents: string;
@@ -720,7 +796,9 @@ for (const file of files) {
 }
 
 if (findings.length === 0) {
-  console.log(`check-concealment: ${files.length} files scanned, nothing hidden`);
+  console.log(
+    `check-concealment: ${files.length} files scanned (${listing.strategy}), nothing hidden`
+  );
   process.exit(0);
 }
 
