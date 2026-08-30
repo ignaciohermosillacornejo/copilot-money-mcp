@@ -22,6 +22,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,6 +39,30 @@ const MALE_SIGN = String.fromCharCode(0x2642);
 const VS16 = String.fromCharCode(0xfe0f);
 const SOFT_HYPHEN = String.fromCharCode(0x00ad);
 const NUL = String.fromCharCode(0);
+/** LATIN SMALL LETTER LONG S. Folds to `s` on APFS and NTFS; JS toLowerCase leaves it alone. */
+const LONG_S = String.fromCharCode(0x017f);
+
+/**
+ * Does THIS filesystem fold U+017F to `s`? APFS and NTFS do, ext4 does not.
+ *
+ * The routing tests below only mean anything where the fold happens: on a
+ * case-sensitive filesystem `.gitattribute<U+017F>` is a genuinely different
+ * file that git never reads, so asserting a finding there would assert the
+ * opposite of what git does. Detected rather than assumed from the platform
+ * name — a macOS user can format a case-sensitive volume, and CI is Linux.
+ */
+const FS_FOLDS_LONG_S = ((): boolean => {
+  const probe = mkdtempSync(join(tmpdir(), 'concealment-fold-'));
+  try {
+    writeFileSync(join(probe, `probe${LONG_S}`), 'x');
+    statSync(join(probe, 'probes'));
+    return true;
+  } catch {
+    return false;
+  } finally {
+    rmSync(probe, { recursive: true, force: true });
+  }
+})();
 
 /** A line carrying both a 60-space gap and an eval() — trips two rules at once. */
 const concealed = `echo ok${' '.repeat(60)}eval("x")${' # '}${'x'.repeat(80)}\n`;
@@ -792,6 +817,30 @@ describe('scoping follow-ups (review of #679)', () => {
       expect(code).toBe(1)
     );
   });
+
+  describe.skipIf(!FS_FOLDS_LONG_S)(
+    'unicode-folded filenames (case-insensitive filesystems)',
+    () => {
+      test.each([
+        ['.gitattributes', `.gitattribute${LONG_S}`, 'src/payload.ts binary\n'],
+        ['package.json', `package.j${LONG_S}on`, '{"scripts":{"postinstall":"echo pwned"}}\n'],
+      ])('a U+017F fold of %s is still routed to its checker', async (_l, name, contents) => {
+        // Variation ten, and it was introduced by the fix for eight and nine.
+        // Lowercasing the basename is a fold function written in JS standing in
+        // for the filesystem's, and they disagree: APFS folds U+017F to `s`,
+        // String.prototype.toLowerCase does not. Verified end-to-end on this
+        // filesystem — `git check-attr` reports `binary: set` from a file named
+        // `.gitattribute<U+017F>`, and `npm pkg get scripts` returns the
+        // postinstall from `package.j<U+017F>on`, while the gate exited 0.
+        //
+        // The gate no longer holds an opinion about folding: it asks the OS which
+        // file the name `.gitattributes` opens to in that directory.
+        await withTree({ [name]: contents, 'src/payload.ts': 'const a = 1;\n' }, ({ code }) =>
+          expect(code).toBe(1)
+        );
+      });
+    }
+  );
 
   test('an NBSP in the pattern does not tokenize it into the allowance', async () => {
     // git splits pattern from attributes on spaces and tabs ONLY, so the real
