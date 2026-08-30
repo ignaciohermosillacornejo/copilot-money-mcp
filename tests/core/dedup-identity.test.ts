@@ -351,15 +351,38 @@ function stripComments(text: string): string {
 
 /**
  * Slice out `open`..`close` starting at `openIdx`, counting nesting depth.
+ *
+ * ASSUMPTION: no string literal inside the region contains an unbalanced
+ * bracket or brace. True for guard bodies today — zero of the 36 real dedup
+ * blocks contain one — but unlike the comment half of this same risk (closed
+ * outright by stripComments above, applied to the window before balanced()
+ * ever sees it), the string half is not fixed here, only unexercised so far.
+ * The failure direction is NOT symmetric: a stray `{` inside a string FAILS
+ * OPEN — depth never returns to 0 where the real guard closes, the boundary
+ * shifts outward, and a later unrelated `.push(` can be mis-credited to this
+ * Set variable, the exact class Step 1 fixed in the sibling file (and that
+ * this file's own fixture above pins for the comment-free case). A stray `}`
+ * FAILS CLOSED — depth reaches 0 early, the guard body truncates, and a real
+ * push inside it goes missing, which is loud rather than silent: the dropped
+ * block fails the `discoverAggregatePushTargets` non-vacuity floor and the
+ * pinned-equality test below. Same class of assumption as stripComments
+ * above.
+ *
  * Mirrors the identically-named helper in decoder-field-completeness.test.ts,
- * including running only on already-stripped text (see stripComments above) —
- * an earlier revision of this copy ran on raw source, which the sibling file
- * never does. Kept local rather than shared — the two discovery scripts read
- * the source independently by design (see discoverAggregatePushTargets's own
- * doc) — but the same bounding requirement applies here: without it, a scan
- * can walk past the guarded block's own closing brace and misattribute a
- * LATER, unrelated `.push(` call, which is exactly the #685 Step 1 defect in
- * the sibling file. Bounding here is what keeps this file from shipping that
+ * including this same ASSUMPTION, carried here rather than left to diverge
+ * from it. One place the two DO differ: the sibling's own `functionBody()`
+ * calls `balanced()` on raw, UNSTRIPPED `src` to find a `process*` function's
+ * outer body extent, stripping only the RESULT afterward — so "the sibling
+ * never runs balanced() on raw source" is not true of it in general. This
+ * copy is narrower: `discoverAggregatePushTargets` strips the window before
+ * `balanced()` ever runs on it, so THIS copy never sees raw text at all.
+ *
+ * Kept local rather than shared — the two discovery scripts read the source
+ * independently by design (see discoverAggregatePushTargets's own doc) — but
+ * the same bounding requirement applies here: without it, a scan can walk
+ * past the guarded block's own closing brace and misattribute a LATER,
+ * unrelated `.push(` call, which is exactly the #685 Step 1 defect in the
+ * sibling file. Bounding here is what keeps this file from shipping that
  * same class of bug next door to its own fix.
  */
 function balanced(text: string, openIdx: number, open: string, close: string): [string, number] {
@@ -598,6 +621,50 @@ unrelatedArray.push(item);
 `;
 
   test('the unrelated later push is not credited to the bounded guard', () => {
+    expect(discoverAggregatePushTargets(FIXTURE_SRC)).toEqual({});
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Documented, accepted residual: string-literal braces (not comments) in a
+// guard body are still unhandled — see balanced()'s ASSUMPTION above. These
+// are NOT regression guards for a bug this PR fixes; they are a permanent,
+// executable record of the two failure directions that ASSUMPTION names,
+// verified against the real scanner rather than left as prose alone.
+// ---------------------------------------------------------------------------
+
+describe('string-literal braces in a guard body are an accepted, open residual (#688 review)', () => {
+  test('a stray { inside a string literal fails OPEN: the boundary can shift past the guard and mis-credit a later push', () => {
+    // The extra unmatched `{` inside `'{'` leaves balanced() one level of
+    // depth short when it reaches the guard's real closing `}`, so it keeps
+    // scanning — and the next `}` in the source (here, an enclosing block's)
+    // closes it one level too late, sweeping in the unrelated push between.
+    const FIXTURE_SRC = `
+const ySeen = new Set<string>();
+const unrelatedY: string[] = [];
+{
+  if (!ySeen.has(item.id)) {
+    const legacyShape = '{';
+    ySeen.add(item.id);
+  }
+  unrelatedY.push(item);
+}
+`;
+    expect(discoverAggregatePushTargets(FIXTURE_SRC)).toEqual({ unrelatedY: 'ySeen' });
+  });
+
+  test('a stray } inside a string literal fails CLOSED: the guard body truncates and a real push goes missing rather than misattributed', () => {
+    // The extra unmatched `}` inside `'}'` satisfies balanced()'s depth
+    // check early, before the guard's own real close — the returned body is
+    // truncated mid-string, and the genuine push after it is never seen.
+    const FIXTURE_SRC = `
+const zSeen = new Set<string>();
+if (!zSeen.has(item.id)) {
+  const legacyShape = '}';
+  zSeen.add(item.id);
+  zArray.push(item);
+}
+`;
     expect(discoverAggregatePushTargets(FIXTURE_SRC)).toEqual({});
   });
 });
