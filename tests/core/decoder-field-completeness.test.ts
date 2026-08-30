@@ -220,27 +220,42 @@ function topLevelKeys(literal: string): string[] {
  * catches loudly, so it is safe rather than silent. Verified: no processor has
  * one today. Same class of assumption as `balanced` and `stripComments` above.
  */
-function functionBody(parenIdx: number): string {
+function functionBody(src: string, parenIdx: number): string {
   let i = parenIdx;
   let depth = 0;
-  while (i < SRC.length) {
-    const ch = SRC[i];
+  while (i < src.length) {
+    const ch = src[i];
     if (ch === '(') depth++;
     else if (ch === ')') depth--;
     else if (ch === '{' && depth === 0) break;
     i++;
   }
-  return balanced(SRC, i, '{', '}')[0];
+  return balanced(src, i, '{', '}')[0];
 }
 
-function discoverProcessors(): DiscoveredProcessor[] {
+/**
+ * `src` defaults to the real decoder so every call site in this file scans
+ * production code unless it deliberately overrides it. The override exists
+ * so a regression fixture (a synthetic source snippet reproducing exactly
+ * one discovery hazard) can be run through the SAME discovery logic the real
+ * pin uses, rather than a hand-duplicated copy that could drift from it.
+ */
+function discoverProcessors(src: string = SRC): DiscoveredProcessor[] {
   const found: DiscoveredProcessor[] = [];
   const declaration = /function (process\w+)(?:<[^>]*>)?\s*\(/g;
   let match: RegExpExecArray | null;
 
-  while ((match = declaration.exec(SRC)) !== null) {
+  while ((match = declaration.exec(src)) !== null) {
     const name = match[1] as string;
-    const body = functionBody(match.index + match[0].length - 1);
+    // Stripped ONCE, here, and used for every scan below — the list/rowIdent/
+    // surfacing scans and the warnUnreadFields census used to run on two
+    // different texts (raw body vs. a separately-stripped copy only the
+    // census used), so a commented-out line was invisible to one half and
+    // load-bearing to the other. `balanced()`'s bracket/brace counting is
+    // safe against the shift stripping introduces because every index this
+    // function computes downstream is relative to THIS `body`, never to raw
+    // source positions.
+    const body = stripComments(functionBody(src, match.index + match[0].length - 1));
     const unresolved: string[] = [];
 
     // --- every string-literal field list in the body ---------------------
@@ -262,12 +277,12 @@ function discoverProcessors(): DiscoveredProcessor[] {
     // --- every warnUnreadFields call -------------------------------------
     const calls: WarnCallSpec[] = [];
     const consumedFields = new Set<string>();
-    // Stripped, so the two sides of the census agree: the census counts on
-    // stripComments(SRC), and counting here on the RAW body would let a
-    // commented-out call inflate this processor's pin AND the census total.
-    const scanBody = stripComments(body);
-    for (const m of scanBody.matchAll(/warnUnreadFields\(/g)) {
-      const [args] = balanced(scanBody, m.index + m[0].length - 1, '(', ')');
+    // `body` is already stripped (see above), so this agrees with the census
+    // total below, which counts on stripComments(SRC) — counting a RAW body
+    // here would let a commented-out call inflate this processor's pin AND
+    // the census total.
+    for (const m of body.matchAll(/warnUnreadFields\(/g)) {
+      const [args] = balanced(body, m.index + m[0].length - 1, '(', ')');
       const spec = (key: 'consumed' | 'ignored'): string[] => {
         const keyMatch = args.match(new RegExp(`${key}:\\s*`));
         // `=== undefined`, not falsy: offset 0 is a valid match position, and
@@ -381,8 +396,16 @@ function discoverProcessors(): DiscoveredProcessor[] {
         // `surfaced`, and the surfacing check went red for a reason having
         // nothing to do with the decoder. Loud, but misleading — and this file
         // exists to make coverage bounds explicit.
-        const brace = body.indexOf('{', end);
-        if (brace === -1) continue;
+        //
+        // The `{` must be ADJACENT to the `)` that closes this for-of header —
+        // `body.indexOf('{', end)` used to search forward for the next `{`
+        // ANYWHERE in the body, which can latch onto an unrelated later
+        // block's brace (a bare-statement loop with no braces of its own,
+        // followed later by an unconnected `if (...) { ... }`) and silently
+        // scan the wrong loop's body for this array's members.
+        const after = /^\s*\)\s*\{/.exec(body.slice(end + 1));
+        if (after === null) continue;
+        const brace = end + 1 + after[0].length - 1;
         const [loopBody] = balanced(body, brace, '{', '}');
         if (!new RegExp(`\\b${ident}\\[${m[1] as string}\\]\\s*=`).test(loopBody)) continue;
         for (const member of members) surfaced.add(member);
@@ -1153,6 +1176,24 @@ const NOT_SURFACED: Record<string, Record<string, string>> = {
  * Processors whose surfacing check is skipped because a passthrough loop
  * copies every raw key, so there is no allow-list to compare against.
  *
+ * Not a complete inventory of passthrough-shaped loops in the decoder — only
+ * of the ones the `passthrough` flag can SEE. Detection requires the loop to
+ * write `row[key] = ...` onto an identifier `rowIdents` already tracks, which
+ * in turn requires that identifier to be a NAMED `const row = {...}` later
+ * passed to `validateOrWarn` or returned. `processInvestmentSplit` has an
+ * equivalent loop (`for (const [key, value] of fields.entries())`), but
+ * writes into a local `adjustments` object that is embedded directly in an
+ * INLINE return literal (`validateOrWarn(Schema, { security_id: docId,
+ * adjustments }, ...)`) — there is no named row variable for `rowIdents` to
+ * capture, so this processor's copy loop is invisible to `passthrough`
+ * detection and it never enters this set. Its surfacing check is still
+ * skipped, but for an unrelated reason: its `consumed` spec is computed
+ * (`@Object.keys(adjustments)`), so `consumedFields` stays empty and no
+ * surfacing test is generated for it at all (see the
+ * `consumedFields.length > 0` guard below). Eleven processors in the decoder
+ * copy raw keys through a loop with no allow-list to check them against; this
+ * set names the ten `passthrough` can actually see.
+ *
  * Pinned as a SET rather than asserted inside the skip. A previous revision
  * did `if (found.passthrough) { expect(found.passthrough).toBe(true); return; }`
  * — which is `expect(true).toBe(true)` inside a branch that already guarantees
@@ -1351,5 +1392,45 @@ describe('decoder field completeness (silent-drop class detector)', () => {
       }
       expect(unreasoned).toEqual([]);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: the `for (const key of [...])` scanner's brace must be adjacent
+// ---------------------------------------------------------------------------
+
+describe('surfacing scan for a bare for-of loop requires an adjacent brace (#685)', () => {
+  // A `for (const key of ['ghost_field']) consume(key);` header with NO
+  // braces of its own — a legal single-statement for-of — immediately
+  // followed by an UNRELATED `for (const key of ['real_field']) { ... }`
+  // block that reuses the same loop-variable name and does write `row[key] =`.
+  // The pre-fix scanner searched forward for the next `{` from ANYWHERE in
+  // the body, found the second loop's brace, and credited 'ghost_field' as
+  // surfaced because the SECOND loop's body happens to satisfy the
+  // `row[key] =` check — even though 'ghost_field' is never written to row.
+  const FIXTURE_SRC = `
+function processFixture(fields: Map<string, unknown>): unknown {
+  const row: Record<string, unknown> = {};
+  for (const key of ['ghost_field'])
+    consume(key);
+  for (const key of ['real_field']) {
+    row[key] = fields.get(key);
+  }
+  return row;
+}
+`;
+
+  const [fixture] = discoverProcessors(FIXTURE_SRC);
+
+  test('fixture is discovered at all (non-vacuity)', () => {
+    expect(fixture?.name).toBe('processFixture');
+  });
+
+  test('the unrelated later block is not credited to the bare loop', () => {
+    expect(fixture?.surfaced.has('ghost_field')).toBe(false);
+  });
+
+  test('the real, adjacent loop still surfaces its own field', () => {
+    expect(fixture?.surfaced.has('real_field')).toBe(true);
   });
 });
