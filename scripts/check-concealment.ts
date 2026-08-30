@@ -134,21 +134,6 @@ const SKIP_FILES = new Set(['package-lock.json', 'bun.lock', 'bun.lockb', 'yarn.
  * reported and a human adds it. The reverse — the old behaviour — meant a
  * payload ran with nobody looking.
  */
-const BINARY_EXTENSIONS = new Set([
-  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.icns', '.bmp', '.tiff',
-  '.pdf', '.zip', '.gz', '.tgz', '.bz2', '.xz', '.7z', '.tar',
-  '.woff', '.woff2', '.ttf', '.otf', '.eot',
-  '.mp3', '.mp4', '.wav', '.mov', '.webm', '.ogg',
-  '.mcpb', '.node', '.wasm', '.ldb', '.sst', '.dylib', '.so', '.dll', '.exe',
-]);
-
-/** Extension of the BASENAME — `docs/v1.2/README` has no extension, not `.2/README`. */
-function extensionOf(rel: string): string {
-  const name = rel.slice(rel.lastIndexOf(sep) + 1);
-  const dot = name.lastIndexOf('.');
-  return dot > 0 ? name.slice(dot).toLowerCase() : '';
-}
-
 /**
  * Binary formats that are inert: media, fonts, archives, documents. A diff of
  * one of these was never readable, so suppressing it hides nothing — which is
@@ -161,6 +146,22 @@ const INERT_BINARY_EXTENSIONS = new Set([
   '.woff', '.woff2', '.ttf', '.otf', '.eot',
   '.mp3', '.mp4', '.wav', '.mov', '.webm', '.ogg',
 ]);
+
+const BINARY_EXTENSIONS = new Set([
+  ...INERT_BINARY_EXTENSIONS,
+  // Executable formats. These belong in the NUL-expected set but NOT in the
+  // inert one: `*.wasm binary` must not be auto-approved, because suppressing
+  // the diff of something that runs is the concealment this gate exists for.
+  '.mcpb', '.node', '.wasm', '.ldb', '.sst', '.dylib', '.so', '.dll', '.exe',
+]);
+
+/** Extension of the BASENAME — `docs/v1.2/README` has no extension, not `.2/README`. */
+function extensionOf(rel: string): string {
+  const name = rel.slice(rel.lastIndexOf(sep) + 1);
+  const dot = name.lastIndexOf('.');
+  return dot > 0 ? name.slice(dot).toLowerCase() : '';
+}
+
 
 function isExpectedBinary(rel: string): boolean {
   return BINARY_EXTENSIONS.has(extensionOf(rel));
@@ -403,7 +404,8 @@ function checkLine(
  * `*.pdf binary` are the standard boilerplate for marking real binaries, and
  * this repo tracks .png and .mp4 files. Suppressing the diff of a file that is
  * genuinely binary hides nothing a reviewer could have read anyway, so a
- * pattern whose extension is in BINARY_EXTENSIONS is allowed. Everything else
+ * pattern whose extension is in INERT_BINARY_EXTENSIONS is allowed — NOT
+ * BINARY_EXTENSIONS, which also covers executable formats. Everything else
  * is refused rather than allow-listed — `text=auto`, `eol=lf` and
  * `linguist-language=...` do not hide content, so they need no exemption.
  */
@@ -434,7 +436,12 @@ function checkGitAttributes(contents: string, rel: string): void {
     // execute. Auto-approving `*.wasm binary` would bless diff suppression on
     // exactly the formats that run. An author who genuinely needs it writes
     // the exemption, which is what this gate's failure message asks for.
-    const pattern = stripped.split(/\s+/)[0] ?? '';
+    // git separates the pattern from its attributes on spaces and tabs only,
+    // the same blank set as the leading-comment test above. `\s` here would
+    // split on NBSP and friends, so a pattern containing one would tokenize
+    // short and could land in the allowance below — the blank-set mismatch
+    // surviving one statement past its own fix, and this one fails OPEN.
+    const pattern = stripped.split(/[ \t]+/)[0] ?? '';
     if (INERT_BINARY_EXTENSIONS.has(extensionOf(pattern))) return;
     for (const re of DIFF_SUPPRESSING_ATTRS) {
       if (!re.test(stripped)) continue;
