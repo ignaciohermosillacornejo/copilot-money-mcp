@@ -212,6 +212,14 @@ function topLevelKeys(literal: string): string[] {
 }
 
 /** Body of the function whose parameter list opens at `parenIdx`. */
+/**
+ * ASSUMPTION: no `process*` has an inline object return type. This walks to the
+ * first `{` at paren-depth 0, which is the body for `): Account | null {` but
+ * would be the RETURN TYPE for `): { securityId: string } {`. In that case the
+ * processor's pinned `lists` quietly become `{}` — which the contents pin then
+ * catches loudly, so it is safe rather than silent. Verified: no processor has
+ * one today. Same class of assumption as `balanced` and `stripComments` above.
+ */
 function functionBody(parenIdx: number): string {
   let i = parenIdx;
   let depth = 0;
@@ -254,8 +262,12 @@ function discoverProcessors(): DiscoveredProcessor[] {
     // --- every warnUnreadFields call -------------------------------------
     const calls: WarnCallSpec[] = [];
     const consumedFields = new Set<string>();
-    for (const m of body.matchAll(/warnUnreadFields\(/g)) {
-      const [args] = balanced(body, m.index + m[0].length - 1, '(', ')');
+    // Stripped, so the two sides of the census agree: the census counts on
+    // stripComments(SRC), and counting here on the RAW body would let a
+    // commented-out call inflate this processor's pin AND the census total.
+    const scanBody = stripComments(body);
+    for (const m of scanBody.matchAll(/warnUnreadFields\(/g)) {
+      const [args] = balanced(scanBody, m.index + m[0].length - 1, '(', ')');
       const spec = (key: 'consumed' | 'ignored'): string[] => {
         const keyMatch = args.match(new RegExp(`${key}:\\s*`));
         // `=== undefined`, not falsy: offset 0 is a valid match position, and
@@ -363,8 +375,16 @@ function discoverProcessors(): DiscoveredProcessor[] {
         const [raw, end] = balanced(body, m.index + m[0].length - 1, '[', ']');
         const members = stringLiteralMembers(raw);
         if (!members) continue;
-        if (!new RegExp(`\\b${ident}\\[${m[1] as string}\\]\\s*=`).test(body.slice(end, end + 500)))
-          continue;
+        // Scan the ACTUAL loop body, like the sibling scanner above, not a
+        // fixed window. A 500-char slice was an unannounced cap: a long loop
+        // body stopped registering its writes, those fields dropped out of
+        // `surfaced`, and the surfacing check went red for a reason having
+        // nothing to do with the decoder. Loud, but misleading — and this file
+        // exists to make coverage bounds explicit.
+        const brace = body.indexOf('{', end);
+        if (brace === -1) continue;
+        const [loopBody] = balanced(body, brace, '{', '}');
+        if (!new RegExp(`\\b${ident}\\[${m[1] as string}\\]\\s*=`).test(loopBody)) continue;
         for (const member of members) surfaced.add(member);
       }
     }
@@ -1129,6 +1149,30 @@ const NOT_SURFACED: Record<string, Record<string, string>> = {
   },
 };
 
+/**
+ * Processors whose surfacing check is skipped because a passthrough loop
+ * copies every raw key, so there is no allow-list to compare against.
+ *
+ * Pinned as a SET rather than asserted inside the skip. A previous revision
+ * did `if (found.passthrough) { expect(found.passthrough).toBe(true); return; }`
+ * — which is `expect(true).toBe(true)` inside a branch that already guarantees
+ * it. That was a vacuous assertion added in response to a review ABOUT vacuous
+ * assertions. Pinning the set means a processor entering or leaving the skip
+ * list is a visible diff, which is the property the assertion was reaching for.
+ */
+const PASSTHROUGH_PROCESSORS = [
+  'processAmazonIntegration',
+  'processChange',
+  'processFeatureTracking',
+  'processHoldingsHistory',
+  'processHoldingsHistoryMeta',
+  'processInvite',
+  'processSubChange',
+  'processSubscription',
+  'processSupport',
+  'processUserItems',
+];
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -1142,8 +1186,24 @@ describe('decoder field completeness (silent-drop class detector)', () => {
     test(`finds at least ${MIN_PROCESSORS} process* functions`, () => {
       // A discovery regex that stops matching would otherwise turn every
       // check below green-by-emptiness. This is the one unambiguous message.
-      expect({ processorsFound: names.length }).toEqual({ processorsFound: discovered.length });
       expect(names.length).toBeGreaterThanOrEqual(MIN_PROCESSORS);
+    });
+
+    test('no two processors share a name', () => {
+      // `names` comes from a Map, so this can only differ when two `process*`
+      // functions collide — one would silently shadow the other's pin. It was
+      // previously written as a count check under the floor's comment, which
+      // described something it does not do.
+      expect({ uniqueNames: names.length }).toEqual({ uniqueNames: discovered.length });
+    });
+
+    test('the passthrough skip list is unchanged', () => {
+      expect(
+        discovered
+          .filter((p) => p.passthrough)
+          .map((p) => p.name)
+          .sort()
+      ).toEqual([...PASSTHROUGH_PROCESSORS].sort());
     });
 
     test('discovery accounted for every warnUnreadFields call site', () => {
@@ -1163,7 +1223,24 @@ describe('decoder field completeness (silent-drop class detector)', () => {
       // no maintenance, no list.
       const inSource = [...stripComments(SRC).matchAll(/\bwarnUnreadFields\(/g)].length;
       const inDiscovered = discovered.reduce((n, proc) => n + proc.calls.length, 0);
-      expect({ callSites: inDiscovered }).toEqual({ callSites: inSource });
+      // Three distinct causes land here, and the test name only names one.
+      // Spell them out so the next reader does not go straight to the
+      // declaration regex when the real cause is elsewhere:
+      //   1. a processor discovery cannot see (arrow function, renamed) —
+      //      inDiscovered too LOW
+      //   2. a warnUnreadFields call in a NON-processor helper — inSource too
+      //      HIGH, nothing wrong with discovery at all
+      //   3. a `function process*` nested inside another processor —
+      //      functionBody returns the outer body including the inner one, so
+      //      the inner's calls are counted twice — inDiscovered too HIGH
+      expect(
+        inDiscovered === inSource
+          ? 'census balanced'
+          : `census mismatch: ${inDiscovered} calls inside discovered processors vs ${inSource} ` +
+              `in the source. Causes: (1) a processor discovery cannot see — arrow function or a ` +
+              `name that is not process*; (2) a warnUnreadFields call outside any processor; ` +
+              `(3) a nested process* whose calls are counted twice.`
+      ).toBe('census balanced');
     });
 
     test('finds the known-load-bearing processors by name', () => {
@@ -1224,15 +1301,10 @@ describe('decoder field completeness (silent-drop class detector)', () => {
     // copies every raw key by construction — there is no allow-list to check.
     if (found.consumedFields.length > 0) {
       test(`${name}: every consumed field reaches the decoded row`, () => {
-        if (found.passthrough) {
-          // Skipping is correct — a passthrough loop copies every raw key, so
-          // there is no allow-list to check. But assert the reason still holds
-          // rather than returning silently: if this processor later loses its
-          // passthrough loop, that is a real behaviour change and the test
-          // must stop being a no-op. ("No silent caps", as elsewhere here.)
-          expect(found.passthrough).toBe(true);
-          return;
-        }
+        // Skipping is correct for a passthrough processor; which processors
+        // those are is pinned by PASSTHROUGH_PROCESSORS below, so entering or
+        // leaving the skip list cannot happen silently.
+        if (found.passthrough) return;
         const allowed = NOT_SURFACED[name] ?? {};
         expect(
           found.consumedFields.filter((field) => !found.surfaced.has(field) && !(field in allowed))
