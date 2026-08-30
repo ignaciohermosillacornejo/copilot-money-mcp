@@ -50,7 +50,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // same pattern as CHECK_PRIVACY_ENDPOINTS_ROOT and CHECK_TOOL_COUNTS_ROOT.
 const ROOT = process.env.CHECK_CONCEALMENT_ROOT ?? join(__dirname, '..');
 
-/** A run of this many spaces or tabs mid-line is the concealment gap. */
+/** A run of this many space characters (ASCII or unicode) mid-line is the gap. */
 const WHITESPACE_RUN = 20;
 /**
  * ...but only when the line is longer than a viewport, because that is what
@@ -93,8 +93,7 @@ const SKIP_DIRS = new Set([
 const PROSE_EXTENSIONS = new Set(['.md', '.txt', '.rst']);
 
 function isProse(rel: string): boolean {
-  const dot = rel.lastIndexOf('.');
-  return dot > 0 && PROSE_EXTENSIONS.has(rel.slice(dot));
+  return PROSE_EXTENSIONS.has(extensionOf(rel));
 }
 
 /**
@@ -109,8 +108,11 @@ function isProse(rel: string): boolean {
  * failed. The live exposure was `.husky/pre-push`, which has no extension at
  * all and runs on every developer push.
  *
- * Every text file is now in scope. Binaries need no extension rule: the main
- * loop already skips anything containing a NUL byte.
+ * Every text file is now in scope. Binaries are handled by BINARY_EXTENSIONS
+ * below plus a NUL check — note that combination carefully: a NUL is NOT on its
+ * own a reason to skip, because a NUL-bearing module still executes while git
+ * shows the reviewer nothing. Only a NUL in a file whose extension says it
+ * should be binary is skipped quietly; anywhere else it is reported.
  */
 
 /** Generated, enormous, and not human-reviewed; a different gate covers them. */
@@ -140,9 +142,15 @@ const BINARY_EXTENSIONS = new Set([
   '.mcpb', '.node', '.wasm', '.ldb', '.sst', '.dylib', '.so', '.dll', '.exe',
 ]);
 
+/** Extension of the BASENAME — `docs/v1.2/README` has no extension, not `.2/README`. */
+function extensionOf(rel: string): string {
+  const name = rel.slice(rel.lastIndexOf(sep) + 1);
+  const dot = name.lastIndexOf('.');
+  return dot > 0 ? name.slice(dot).toLowerCase() : '';
+}
+
 function isExpectedBinary(rel: string): boolean {
-  const dot = rel.lastIndexOf('.');
-  return dot > 0 && BINARY_EXTENSIONS.has(rel.slice(dot).toLowerCase());
+  return BINARY_EXTENSIONS.has(extensionOf(rel));
 }
 
 /**
@@ -334,8 +342,10 @@ function checkLine(
       rel,
       lineNo,
       'whitespace run',
-      `${WHITESPACE_RUN}+ spaces or tabs mid-line on a ${line.length}-column line — ` +
-        `the tail is off-screen in a diff`
+      `${WHITESPACE_RUN}+ consecutive space characters mid-line on a ${line.length}-column ` +
+        `line — the tail is off-screen in a diff. Unicode spaces (NBSP, U+2003, U+3000, ...) ` +
+        `count as well as ASCII space and tab: they render identically and are valid ` +
+        `ECMAScript whitespace`
     );
   }
 
@@ -360,6 +370,42 @@ function checkLine(
   for (const [re, label] of DYNAMIC_EXEC) {
     if (re.test(line)) report(rel, lineNo, 'dynamic execution', label);
   }
+}
+
+/**
+ * Attributes that make git or GitHub show a reviewer less than the content.
+ * Same class as the NUL bypass — "ways to make git render nothing" — reached
+ * with no NUL, no long line, no whitespace run, no dynamic-execution
+ * construct. One tracked line does it:
+ *
+ *     src/payload.ts binary
+ *
+ * `binary` implies `-diff`, so git and GitHub print "Binary files ... differ"
+ * instead of the content. `linguist-generated=true` collapses the file behind a
+ * "Load diff" fold in the Files-changed view — the view maintainers review from.
+ *
+ * Refused rather than allow-listed, for the reason this gate keeps relearning:
+ * the legitimate entries (`text=auto`, `eol=lf`, `linguist-language=...`) do
+ * not hide content, so none of them needs an exemption.
+ */
+const DIFF_SUPPRESSING_ATTRS = [/(^|\s)binary(\s|$)/, /(^|\s)-diff(\s|$)/, /linguist-generated/];
+
+function checkGitAttributes(contents: string, rel: string): void {
+  contents.split('\n').forEach((line, i) => {
+    const stripped = line.replace(/#.*$/, '').trim();
+    if (stripped === '') return;
+    for (const re of DIFF_SUPPRESSING_ATTRS) {
+      if (!re.test(stripped)) continue;
+      report(
+        rel,
+        i + 1,
+        'diff-suppressing gitattribute',
+        `"${stripped}" stops git or GitHub showing this path's content in a diff, so a payload ` +
+          `in it reaches main without a reviewer ever seeing the lines`
+      );
+      return;
+    }
+  });
 }
 
 function checkLifecycleScripts(contents: string, rel: string): void {
@@ -490,7 +536,15 @@ function gitFiles(root: string): string[] | undefined {
 }
 
 function listFiles(root: string): string[] {
-  return gitFiles(root) ?? walk(root, []);
+  const fromGit = gitFiles(root);
+  if (fromGit === undefined) return walk(root, []);
+  // `git ls-files` does not traverse directories, so SKIP_DIRS never applied on
+  // this path — a tracked file under a vendored directory would be scanned here
+  // but skipped by the walk. Apply the same exclusions to both, so behaviour
+  // does not depend on which path ran.
+  return fromGit.filter(
+    (file) => !relative(root, file).split(sep).some((segment) => SKIP_DIRS.has(segment))
+  );
 }
 
 const files = listFiles(ROOT).filter((f) => inScope(f));
@@ -528,6 +582,9 @@ for (const file of files) {
   // postinstall is the same exposure with a longer path.
   if (rel === 'package.json' || rel.endsWith(`${sep}package.json`)) {
     checkLifecycleScripts(contents, rel);
+  }
+  if (rel === '.gitattributes' || rel.endsWith(`${sep}.gitattributes`)) {
+    checkGitAttributes(contents, rel);
   }
 }
 
