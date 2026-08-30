@@ -73,11 +73,14 @@ const SRC_ROOT = join(import.meta.dir, '..', 'src');
  * whose members are all SINGLE-QUOTED string literals, so a constant built from
  * spreads, identifiers or numbers is not swept in.
  *
- * FLAGS: `m` is load-bearing — `^` anchors every attempt to a line start, which
- * is what stops a failed match from restarting mid-line. `s` is vestigial: no
- * `.` remains in the pattern, and `[^[\]]` / `[^=]` cross newlines by
- * themselves. The character class below is explained in enough detail to
- * suggest every flag was chosen; this one was not.
+ * FLAGS: `m` is load-bearing. Without it `^` matches only at index 0, so each
+ * file yields at most its first declaration and discovery collapses — measured,
+ * not assumed: dropping `m` takes the sweep from 25 constants to 0. With it,
+ * `^` also anchors every attempt to a line start, so a failed match cannot
+ * restart mid-line. `s` is vestigial: no `.` remains in the pattern, and
+ * `[^[\]]` / `[^=]` cross newlines by themselves. The character class below is
+ * explained in enough detail to suggest every flag was chosen; this one was
+ * not.
  *
  * The body is `[^[\]]*?`, not `.*?`: a lazy dotall body lets a declaration
  * that is NOT `as const` scan forward to the next `] as const` anywhere later
@@ -103,9 +106,8 @@ const SRC_ROOT = join(import.meta.dir, '..', 'src');
  * :169 — so a `fields:`-hint list landing in one is a plausible next commit
  * rather than a hypothetical. Tracked as #696.
  *
- * ASSUMPTION, the fifth silent-drop mode this file has had to name and the
- * likeliest of them to actually happen: every member is written with SINGLE
- * quotes. `.prettierrc.json` sets `singleQuote: true`, but Prettier's
+ * ASSUMPTION, another silent-drop mode and the likeliest of them to actually
+ * happen: every member is written with SINGLE quotes. `.prettierrc.json` sets `singleQuote: true`, but Prettier's
  * fewer-escapes rule flips any string whose content holds an apostrophe to
  * double quotes, so `bun run format` itself produces:
  *
@@ -189,7 +191,20 @@ function collectStringConstants(source: string): Map<string, readonly string[]> 
   return found;
 }
 
-/** The tree-wide sweep: collectStringConstants applied to every .ts under src/. */
+/**
+ * The tree-wide sweep: collectStringConstants applied to every .ts under src/.
+ *
+ * ASSUMPTION, and the one member of the family with teeth: constant names are
+ * unique across src/. The map is keyed by name alone, so two files exporting
+ * the same name collapse last-write-wins. All 25 are unique today.
+ *
+ * Worse than its siblings in kind, not just degree. They DROP a constant, which
+ * the backward check catches the moment it is pinned. This one SUBSTITUTES one:
+ * the name stays present, the members silently become the other file's, and the
+ * winner is decided by readdirSync order. So the contents test can be green on
+ * one machine and red on another, with nothing in this file to explain why.
+ * Tracked as #694.
+ */
 function discoverStringConstants(): Map<string, readonly string[]> {
   const found = new Map<string, readonly string[]>();
   for (const file of tsFilesUnder(SRC_ROOT)) {
