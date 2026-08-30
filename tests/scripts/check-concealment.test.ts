@@ -536,6 +536,18 @@ describe('diff-suppressing gitattributes (Fable review, item 1)', () => {
     await withTree({ '.gitattributes': attrs }, ({ code }) => expect(code).toBe(0));
   });
 
+  test('the finding names the remedy, so it is actionable without reading the gate', async () => {
+    // The allowance's own comment says an author who genuinely needs diff
+    // suppression "writes the exemption, which is what this gate's failure
+    // message asks for" — and the message did not mention an exemption at all.
+    // A reviewer hitting this had to go read scripts/check-concealment.ts to
+    // find out what to do about it.
+    await withTree({ '.gitattributes': '*.wasm binary\n' }, ({ code, stderr }) => {
+      expect(code).toBe(1);
+      expect(stderr).toContain('INERT_BINARY_EXTENSIONS');
+    });
+  });
+
   test('checks a nested .gitattributes too', async () => {
     await withTree({ 'src/.gitattributes': 'payload.ts binary\n' }, ({ code }) =>
       expect(code).toBe(1)
