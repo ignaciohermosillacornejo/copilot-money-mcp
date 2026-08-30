@@ -85,6 +85,28 @@ function tsFilesUnder(dir: string): string[] {
 }
 
 /**
+ * Strip line and block comments so the matcher can see the array literal
+ * underneath. Without this an inline `//` leaves residue, the purity check in
+ * collectStringConstants rejects the array, and the constant drops out of the
+ * pin without a word.
+ *
+ * ASSUMPTION: no string literal in `src/` contains `//` or a block-comment
+ * opener. Stated rather than left implicit because the failure is SILENT in
+ * exactly this file's own direction: mangling a literal makes the residue check
+ * reject the array and drop it from the pin. That is a known limitation, not
+ * something to work around here — a URL inside an exported `as const` array is
+ * the realistic case, and making this string-aware is the fix if one ever
+ * lands. Tracked separately.
+ *
+ * Same helper and same caveat as tests/core/decoder-field-completeness.test.ts,
+ * duplicated on purpose rather than shared, so neither file's parsing rules can
+ * be changed out from under the other.
+ */
+function stripComments(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+}
+
+/**
  * Collect every exported string-literal `as const` array in ONE file's source
  * text.
  *
@@ -93,20 +115,6 @@ function tsFilesUnder(dir: string): string[] {
  * of what that tree happens to contain today. Feeding it a synthetic snippet
  * lets the tests below pin the parsing rules themselves.
  */
-/**
- * ASSUMPTION: no string literal in `src/` contains `//` or a block-comment
- * opener. Stated rather than left implicit because the failure is SILENT in
- * exactly this file's own direction: mangling a literal makes the residue
- * check reject the array and drop it from the pin. Making this string-aware is
- * the fix if a URL ever lands in an exported `as const` array. Same helper and
- * same caveat as tests/core/decoder-field-completeness.test.ts; duplicated on
- * purpose rather than shared, so neither file's parsing rules can be changed
- * out from under the other.
- */
-function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
-}
-
 function collectStringConstants(source: string): Map<string, readonly string[]> {
   const found = new Map<string, readonly string[]>();
   // Strip comments before matching: an inline `//` inside an array literal
@@ -126,6 +134,7 @@ function collectStringConstants(source: string): Map<string, readonly string[]> 
   return found;
 }
 
+/** The tree-wide sweep: collectStringConstants applied to every .ts under src/. */
 function discoverStringConstants(): Map<string, readonly string[]> {
   const found = new Map<string, readonly string[]>();
   for (const file of tsFilesUnder(SRC_ROOT)) {
