@@ -813,6 +813,58 @@ function underSkippedDir(root: string, file: string): boolean {
   return relative(root, file).split(sep).slice(0, -1).some((seg) => SKIP_DIRS.has(seg));
 }
 
+/**
+ * Does `file` answer to `name` in its own directory — is it the file that git
+ * or npm opens when it asks for `.gitattributes` or `package.json`?
+ *
+ * This exists because the previous answer to that question was a fold function
+ * written here. Matching a lower-cased basename closed the `.GITATTRIBUTES`
+ * hole and opened a smaller one: APFS folds U+017F (LATIN SMALL LETTER LONG S)
+ * to `s`, and `String.prototype.toLowerCase` does not, so a file committed as
+ * `.gitattributeſ` is read by git — `check-attr` reports `binary: set` — and was
+ * skipped here. A full sweep of 0x80-0x10FFFF against the actual filesystem
+ * turned up exactly one such codepoint, so special-casing it would have worked,
+ * and that is precisely the move this file keeps being punished for: a parser
+ * standing in for a real system. Every one of these has been a fold, a blank
+ * set, an unquote or a grammar approximated in JS instead of measured.
+ *
+ * So the gate no longer holds an opinion about folding. It asks the filesystem
+ * to resolve the name and compares what comes back. Verified in the runtime
+ * that actually ships rather than assumed: Bun's realpathSync canonicalizes to
+ * the on-disk spelling, so both sides resolve to the same string. (Worth
+ * knowing that not every realpath does — Python's is lexical and answers with
+ * the name it was handed, which would silently defeat this.)
+ *
+ * Kept as an OR with the basename test at the call site, never as a
+ * replacement, for two reasons. It preserves the deliberate posture from the
+ * case-sensitivity trade: on a case-sensitive filesystem `.GITATTRIBUTES` is a
+ * different file, so this probe correctly says no and the name test still
+ * routes it, which is the false positive that was chosen on purpose. And it
+ * makes the probe purely ADDITIVE — a broken symlink, a permissions error or
+ * any other failure resolves to `undefined` and simply falls back to the name
+ * test, so a failure here can only ever scan more, never skip something that
+ * was already being checked.
+ */
+const routeTargetCache = new Map<string, string | undefined>();
+
+function realOrUndefined(path: string): string | undefined {
+  try {
+    return realpathSync(path);
+  } catch {
+    return undefined;
+  }
+}
+
+function answersToName(file: string, name: string): boolean {
+  const dir = dirname(file);
+  const key = `${dir}\0${name}`;
+  if (!routeTargetCache.has(key)) routeTargetCache.set(key, realOrUndefined(join(dir, name)));
+  const target = routeTargetCache.get(key);
+  if (target === undefined) return false;
+  const self = realOrUndefined(file);
+  return self !== undefined && self === target;
+}
+
 const listing = listFiles(ROOT);
 const files = listing.files.filter((f) => inScope(f));
 for (const file of files) {
@@ -863,9 +915,20 @@ for (const file of files) {
   // spends a minute and writes an exemption, where the other error ships a
   // suppressed diff. It is also the direction every other allowance here
   // already fails in: omission must fail toward suspicion.
+  //
+  // The lower-cased name is only the FLOOR, though, not the mechanism.
+  // toLowerCase is a fold function written in JS, and the filesystem's fold is
+  // wider than it — U+017F, variation ten, which arrived inside the fix for
+  // eight and nine. answersToName asks the OS which file the name actually
+  // opens; the name test stays OR'd beside it to keep the deliberate false
+  // positive above and to make the probe purely additive. See answersToName.
   const basename = rel.slice(rel.lastIndexOf(sep) + 1).toLowerCase();
-  if (basename === 'package.json') checkLifecycleScripts(contents, rel);
-  if (basename === '.gitattributes') checkGitAttributes(contents, rel);
+  if (basename === 'package.json' || answersToName(file, 'package.json')) {
+    checkLifecycleScripts(contents, rel);
+  }
+  if (basename === '.gitattributes' || answersToName(file, '.gitattributes')) {
+    checkGitAttributes(contents, rel);
+  }
 }
 
 if (findings.length === 0) {
