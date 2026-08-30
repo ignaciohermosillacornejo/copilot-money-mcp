@@ -134,56 +134,16 @@ function isProse(rel: string): boolean {
 const SKIP_FILES = new Set(['package-lock.json', 'bun.lock', 'bun.lockb', 'yarn.lock']);
 
 /**
- * Extensions where a NUL byte is expected, because the file genuinely is
- * binary. Everything else containing a NUL is REPORTED rather than skipped.
- *
- * A NUL used to be an unconditional free pass: the main loop skipped any file
- * containing one as "binary". But a module with a NUL byte tucked inside a
- * comment or string literal still runs under bun and node — NUL-containing is
- * not the same as non-executable —
- * while git renders the whole file as `Binary files ... differ`, so the
- * reviewer sees nothing at all. That is strictly better concealment than the
- * off-screen trick this gate was built for.
- *
- * Note the direction: forgetting an extension here means a real binary gets
- * reported and a human adds it. The reverse — the old behaviour — meant a
- * payload ran with nobody looking.
- */
-/**
  * Binary formats that are inert: media, fonts, archives, documents. A diff of
  * one of these was never readable, so suppressing it hides nothing — which is
  * what makes `*.png binary` legitimate boilerplate. Deliberately excludes the
  * executable formats in BINARY_EXTENSIONS.
  */
 const INERT_BINARY_EXTENSIONS = new Set([
-  '.png',
-  '.jpg',
-  '.jpeg',
-  '.gif',
-  '.webp',
-  '.ico',
-  '.icns',
-  '.bmp',
-  '.tiff',
-  '.pdf',
-  '.zip',
-  '.gz',
-  '.tgz',
-  '.bz2',
-  '.xz',
-  '.7z',
-  '.tar',
-  '.woff',
-  '.woff2',
-  '.ttf',
-  '.otf',
-  '.eot',
-  '.mp3',
-  '.mp4',
-  '.wav',
-  '.mov',
-  '.webm',
-  '.ogg',
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.icns', '.bmp', '.tiff',
+  '.pdf', '.zip', '.gz', '.tgz', '.bz2', '.xz', '.7z', '.tar',
+  '.woff', '.woff2', '.ttf', '.otf', '.eot',
+  '.mp3', '.mp4', '.wav', '.mov', '.webm', '.ogg',
 ]);
 
 /**
@@ -191,6 +151,15 @@ const INERT_BINARY_EXTENSIONS = new Set([
  * This is a superset of the inert set: it also covers executable binaries,
  * which legitimately contain NULs but must never have their diffs suppressed
  * by an attribute — see DIFF_SUPPRESSING_ATTRS, which checks the inert set.
+ *
+ * Why the NUL check is scoped to a set at all: a NUL used to be an
+ * unconditional free pass, and the main loop skipped any file containing one as
+ * "binary". But a module with a NUL tucked inside a comment or a string literal
+ * still runs under bun and node — NUL-containing is not the same as
+ * non-executable — while git renders the whole file as `Binary files ... differ`
+ * and the reviewer sees nothing at all. That is strictly better concealment than
+ * the off-screen trick this gate was built for, so a NUL outside this set is now
+ * reported rather than skipped.
  *
  * Note the direction: forgetting an extension here means a real binary gets
  * reported and a human adds it, rather than a payload running unwatched.
@@ -203,15 +172,7 @@ const BINARY_EXTENSIONS = new Set([
   //   - they are containers whose contents a reviewer might genuinely need to
   //     see, and which can carry code: .mcpb bundles this server, .ldb/.sst
   //     are LevelDB tables holding cached user data
-  '.mcpb',
-  '.node',
-  '.wasm',
-  '.ldb',
-  '.sst',
-  '.dylib',
-  '.so',
-  '.dll',
-  '.exe',
+  '.mcpb', '.node', '.wasm', '.ldb', '.sst', '.dylib', '.so', '.dll', '.exe',
 ]);
 
 /** Extension of the BASENAME — `docs/v1.2/README` has no extension, not `.2/README`. */
@@ -250,22 +211,6 @@ const SELF_EXEMPT = new Set([
 const GENERATED_RE = /\.generated\.[cm]?[jt]sx?$/;
 
 /**
- * Install hooks split by who runs them.
- *
- * `preinstall` / `install` / `postinstall` execute on every machine that installs
- * the published package, including consumers. `prepublish` is the deprecated npm
- * hook that also ran on plain `npm install`, so it belongs with them. Nothing in
- * this repo needs any of the four, so they are refused outright rather than
- * allow-listed — an allowlist entry here is indistinguishable from the attack.
- *
- * `prepare` and `prepublishOnly` run on contributor and publisher machines. Those
- * are still execution vectors (a contributor's `bun install` runs `prepare`), so
- * each is pinned to its exact reviewed value: changing what runs at install time
- * means changing this file, in the same PR, where a reviewer will see it. The
- * pinned names are derived from the map so a hook can never be listed as pinned
- * without a value to pin it to.
- */
-/**
  * Every npm hook that fires WITHOUT being named on the command line. npm runs
  * these as a side effect of install, publish, pack, version, uninstall or
  * shrinkwrap, so a payload in any of them executes before anyone reads it.
@@ -283,41 +228,33 @@ const GENERATED_RE = /\.generated\.[cm]?[jt]sx?$/;
  */
 const AUTO_LIFECYCLE = new Set([
   // install
-  'preinstall',
-  'install',
-  'postinstall',
-  'dependencies',
+  'preinstall', 'install', 'postinstall', 'dependencies',
   // publish + pack
-  'prepublish',
-  'prepublishOnly',
-  'prepack',
-  'postpack',
-  'publish',
-  'postpublish',
+  'prepublish', 'prepublishOnly', 'prepack', 'postpack', 'publish', 'postpublish',
   // prepare runs on install AND publish
   'prepare',
   // version
-  'preversion',
-  'version',
-  'postversion',
+  'preversion', 'version', 'postversion',
   // uninstall
-  'preuninstall',
-  'uninstall',
-  'postuninstall',
+  'preuninstall', 'uninstall', 'postuninstall',
   // shrinkwrap
-  'preshrinkwrap',
-  'shrinkwrap',
-  'postshrinkwrap',
+  'preshrinkwrap', 'shrinkwrap', 'postshrinkwrap',
   // wrappers around the explicitly-invoked commands
-  'pretest',
-  'posttest',
-  'prestart',
-  'poststart',
-  'prestop',
-  'poststop',
-  'prerestart',
-  'postrestart',
+  'pretest', 'posttest',
+  'prestart', 'poststart',
+  'prestop', 'poststop',
+  'prerestart', 'postrestart',
 ]);
+/**
+ * `prepare` and `prepublishOnly` run on contributor and publisher machines.
+ * Those are still execution vectors — a contributor's `bun install` runs
+ * `prepare` — so each is pinned to its exact reviewed value instead of being
+ * allow-listed by name: changing what runs at install time then means changing
+ * this file, in the same PR, where a reviewer will see it.
+ *
+ * PINNED_NAMES is derived from this map rather than written out, so a hook can
+ * never be listed as pinned without a value to pin it to.
+ */
 const PINNED_LIFECYCLE: Record<string, string> = {
   prepare: 'husky',
   prepublishOnly: 'bun run clean && bun run build && bun test',
@@ -417,11 +354,7 @@ function walk(dir: string, out: string[]): string[] {
  * an attacker would want to join — ASCII identifier characters, Latin-1 — is
  * below 0x2000, so the floor separates the two without enumerating emoji.
  */
-function invisibleIsBenign(
-  cp: number,
-  prev: number | undefined,
-  next: number | undefined
-): boolean {
+function invisibleIsBenign(cp: number, prev: number | undefined, next: number | undefined): boolean {
   if (cp !== 0x200d) return false;
   return prev !== undefined && next !== undefined && prev >= 0x2000 && next >= 0x2000;
 }
@@ -617,11 +550,7 @@ function checkLifecycleScripts(contents: string, rel: string): void {
   // script X, so a wrapper around an existing script fires implicitly too.
   for (const hook of Object.keys(scripts)) {
     if (AUTO_LIFECYCLE.has(hook) || PINNED_NAMES.includes(hook)) continue;
-    const base = hook.startsWith('pre')
-      ? hook.slice(3)
-      : hook.startsWith('post')
-        ? hook.slice(4)
-        : '';
+    const base = hook.startsWith('pre') ? hook.slice(3) : hook.startsWith('post') ? hook.slice(4) : '';
     if (base === '' || scripts[base] === undefined) continue;
     report(
       rel,
@@ -747,10 +676,7 @@ function listFiles(root: string): { files: string[]; strategy: 'git' | 'walk' } 
  * inside its own fix.
  */
 function underSkippedDir(root: string, file: string): boolean {
-  return relative(root, file)
-    .split(sep)
-    .slice(0, -1)
-    .some((seg) => SKIP_DIRS.has(seg));
+  return relative(root, file).split(sep).slice(0, -1).some((seg) => SKIP_DIRS.has(seg));
 }
 
 const listing = listFiles(ROOT);
@@ -796,9 +722,7 @@ for (const file of files) {
 }
 
 if (findings.length === 0) {
-  console.log(
-    `check-concealment: ${files.length} files scanned (${listing.strategy}), nothing hidden`
-  );
+  console.log(`check-concealment: ${files.length} files scanned (${listing.strategy}), nothing hidden`);
   process.exit(0);
 }
 
