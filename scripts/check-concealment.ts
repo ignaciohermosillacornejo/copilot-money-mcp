@@ -73,12 +73,41 @@ const SKIP_DIRS = new Set([
   '.turbo',
 ]);
 
-/** Executed or interpreted at some point: install, build, test, CI, or runtime. */
-const SCOPED_EXTENSIONS = new Set([
-  '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
-  '.json', '.yml', '.yaml', '.toml',
-  '.sh', '.bash', '.zsh', '.py',
-]);
+/**
+ * Prose. These are never executed, so the rules about hiding CODE off the right
+ * edge of a diff (long line, whitespace run) and about dynamic execution do not
+ * apply — a 900-column paragraph in a CHANGELOG is a paragraph, and a doc that
+ * quotes `execSync` is documentation. Invisible characters are still flagged
+ * here, since a zero-width character in prose is never benign.
+ *
+ * Note which way this allowlist fails. Forgetting to list a prose extension
+ * means that file gets the FULL rule set — more scrutiny, and at worst a false
+ * positive a human resolves. That is the opposite of the extension allowlist
+ * this replaced (F2), where forgetting an extension meant no scrutiny at all.
+ * An allowlist is only safe when omission fails toward suspicion.
+ */
+const PROSE_EXTENSIONS = new Set(['.md', '.mdx', '.txt', '.rst']);
+
+function isProse(rel: string): boolean {
+  const dot = rel.lastIndexOf('.');
+  return dot > 0 && PROSE_EXTENSIONS.has(rel.slice(dot));
+}
+
+/**
+ * NOTE: there is deliberately no extension allowlist here any more.
+ *
+ * There was one — 14 entries, "executed or interpreted at some point". An
+ * audit (docs/audits/2026-08-29-completeness-guard-audit.md, F2) showed it
+ * was the same bug this gate exists to catch: it enumerated what to CHECK
+ * rather than what to SKIP, so anything it forgot was invisible. A concealed
+ * payload (long line, whitespace run, execSync of a piped curl) written to
+ * `scripts/probe-hook` passed; the identical bytes in `scripts/probe.ts`
+ * failed. The live exposure was `.husky/pre-push`, which has no extension at
+ * all and runs on every developer push.
+ *
+ * Every text file is now in scope. Binaries need no extension rule: the main
+ * loop already skips anything containing a NUL byte.
+ */
 
 /** Generated, enormous, and not human-reviewed; a different gate covers them. */
 const SKIP_FILES = new Set(['package-lock.json', 'bun.lock', 'bun.lockb', 'yarn.lock']);
@@ -123,7 +152,41 @@ const GENERATED_RE = /\.generated\.[cm]?[jt]sx?$/;
  * pinned names are derived from the map so a hook can never be listed as pinned
  * without a value to pin it to.
  */
-const FORBIDDEN_LIFECYCLE = ['preinstall', 'install', 'postinstall', 'prepublish'];
+/**
+ * Every npm hook that fires WITHOUT being named on the command line. npm runs
+ * these as a side effect of install, publish, pack, version, uninstall or
+ * shrinkwrap, so a payload in any of them executes before anyone reads it.
+ *
+ * This list is the inversion of what used to be here. The old constant named
+ * four hooks to refuse; the audit (F1) added `prepack` — which npm runs during
+ * `npm publish`, inside the job that holds `id-token: write` — and the gate
+ * reported "nothing hidden". Enumerating the attack was the bug. The rule is
+ * now: any auto-fired hook is refused unless it is pinned to an exact reviewed
+ * value in PINNED_LIFECYCLE.
+ *
+ * Deliberately excluded: `test`, `start`, `stop`, `restart`. npm gives those
+ * names meaning only when you invoke them directly (`npm test`), and this repo
+ * defines `test`. Their pre/post wrappers ARE auto-fired and are listed.
+ */
+const AUTO_LIFECYCLE = new Set([
+  // install
+  'preinstall', 'install', 'postinstall', 'dependencies',
+  // publish + pack
+  'prepublish', 'prepublishOnly', 'prepack', 'postpack', 'publish', 'postpublish',
+  // prepare runs on install AND publish
+  'prepare',
+  // version
+  'preversion', 'version', 'postversion',
+  // uninstall
+  'preuninstall', 'uninstall', 'postuninstall',
+  // shrinkwrap
+  'preshrinkwrap', 'shrinkwrap', 'postshrinkwrap',
+  // wrappers around the explicitly-invoked commands
+  'pretest', 'posttest',
+  'prestart', 'poststart',
+  'prestop', 'poststop',
+  'prerestart', 'postrestart',
+]);
 const PINNED_LIFECYCLE: Record<string, string> = {
   prepare: 'husky',
   prepublishOnly: 'bun run clean && bun run build && bun test',
@@ -176,9 +239,7 @@ function report(file: string, line: number, rule: string, detail: string): void 
 
 function inScope(path: string): boolean {
   const name = path.slice(path.lastIndexOf(sep) + 1);
-  if (SKIP_FILES.has(name)) return false;
-  const dot = name.lastIndexOf('.');
-  return dot > 0 && SCOPED_EXTENSIONS.has(name.slice(dot));
+  return !SKIP_FILES.has(name);
 }
 
 function walk(dir: string, out: string[]): string[] {
@@ -221,7 +282,9 @@ function invisibleIsBenign(cp: number, prev: number | undefined, next: number | 
 }
 
 function checkLine(rel: string, lineNo: number, line: string, exempt: boolean): void {
-  if (line.length > CONCEALED_LINE && WHITESPACE_RUN_RE.test(line)) {
+  const prose = isProse(rel);
+
+  if (!prose && line.length > CONCEALED_LINE && WHITESPACE_RUN_RE.test(line)) {
     report(
       rel,
       lineNo,
@@ -231,7 +294,7 @@ function checkLine(rel: string, lineNo: number, line: string, exempt: boolean): 
     );
   }
 
-  if (line.length > MAX_LINE && !GENERATED_RE.test(rel)) {
+  if (!prose && line.length > MAX_LINE && !GENERATED_RE.test(rel)) {
     report(rel, lineNo, 'long line', `${line.length} columns (limit ${MAX_LINE})`);
   }
 
@@ -248,7 +311,7 @@ function checkLine(rel: string, lineNo: number, line: string, exempt: boolean): 
     );
   }
 
-  if (exempt) return;
+  if (exempt || prose) return;
   for (const [re, label] of DYNAMIC_EXEC) {
     if (re.test(line)) report(rel, lineNo, 'dynamic execution', label);
   }
@@ -268,15 +331,36 @@ function checkLifecycleScripts(contents: string, rel: string): void {
     return idx >= 0 ? idx + 1 : 1;
   };
 
-  for (const hook of FORBIDDEN_LIFECYCLE) {
+  // Discover, do not enumerate: walk the scripts that actually exist and refuse
+  // any that npm fires on its own. A hook nobody thought of is caught by being
+  // auto-fired, not by having been predicted.
+  for (const hook of Object.keys(scripts)) {
+    if (!AUTO_LIFECYCLE.has(hook)) continue;
+    if (PINNED_NAMES.includes(hook)) continue; // checked against its pinned value below
     const value = scripts[hook];
     if (value === undefined) continue;
     report(
       rel,
       lineOf(hook),
-      'install-time script',
-      `"${hook}": ${JSON.stringify(value)} runs on every machine that installs this ` +
-        `package, consumers included, before anyone reads the code`
+      'auto-fired lifecycle script',
+      `"${hook}": ${JSON.stringify(value)} is run by npm without being named on the ` +
+        `command line (install, publish, pack, version, uninstall or shrinkwrap), so it ` +
+        `executes before anyone reads the code`
+    );
+  }
+
+  // The general form of the same hole: npm auto-runs `preX`/`postX` around any
+  // script X, so a wrapper around an existing script fires implicitly too.
+  for (const hook of Object.keys(scripts)) {
+    if (AUTO_LIFECYCLE.has(hook) || PINNED_NAMES.includes(hook)) continue;
+    const base = hook.startsWith('pre') ? hook.slice(3) : hook.startsWith('post') ? hook.slice(4) : '';
+    if (base === '' || scripts[base] === undefined) continue;
+    report(
+      rel,
+      lineOf(hook),
+      'auto-fired lifecycle script',
+      `"${hook}": ${JSON.stringify(scripts[hook])} is run automatically by npm around ` +
+        `"${base}", so it executes whenever that script does`
     );
   }
 
