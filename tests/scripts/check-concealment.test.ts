@@ -552,6 +552,18 @@ describe('scoping follow-ups (review of #679)', () => {
     );
   });
 
+  test('an NBSP in the pattern does not tokenize it into the allowance', async () => {
+    // git splits pattern from attributes on spaces and tabs ONLY, so the real
+    // pattern here is `evil.png<NBSP>run.ts` — a .ts file, not inert, and its
+    // diff must not be suppressed. Splitting on JS \s truncated it to
+    // `evil.png`, which IS inert, and the allowance let it through. Fails
+    // open, which is why it is pinned.
+    const nbsp = String.fromCharCode(0x00a0);
+    await withTree({ '.gitattributes': `evil.png${nbsp}run.ts binary\n` }, ({ code }) =>
+      expect(code).toBe(1)
+    );
+  });
+
   test('an executable binary format is NOT auto-approved', async () => {
     // BINARY_EXTENSIONS answers "where is a NUL expected"; it includes .wasm,
     // .node, .so, .exe. Reusing it here would bless diff suppression on the
