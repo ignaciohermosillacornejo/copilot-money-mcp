@@ -366,7 +366,7 @@ not reached — treat it as unexamined, not as cleared.
 - `tests/unit/tool-registry.test.ts:33-55` — `readOnly` ↔ `readOnlyHint`
   agreement and `requiresLiveReads` are quantified over `ALL_TOOL_DEFS`.
 - Reclassifying an existing write tool as a read is well defended: moving
-  `create_tag` to `READ_TOOL_DEFS` *with both counts bumped* still fails 26
+  `create_tag` to `READ_TOOL_DEFS` *with both counts bumped* still fails 22
   tests, including semantic ones (roundtrip coverage, stale ledger
   `toolParams`, manifest sync).
 - `tests/scripts/read-smoke-coverage.test.ts`,
@@ -401,7 +401,7 @@ the only CI gap is F18, on the release path.
 | 3 | F4, F6, F7 | Conformance ledger, one coherent surface |
 | 4 | F5, F9, F10, F15 | Docs + skills rot |
 | 5 | F8, F12, F14 | Test-infrastructure completeness |
-| 6 | F11, F13, F16, F17, F18 | Low-severity gate cleanups |
+| 6 | F11, F13, F17, F18 | Low-severity gate cleanups |
 | 0 | **D1, D2** | **Ahead of everything: silent financial-data loss** |
 | 7 | D3, D4, D5, D6 | Decoder routing, parity, mutation ratchet, Zod mirrors |
 | 8 | D7 | Model/decoder mirror gap |
