@@ -532,8 +532,8 @@ function checkGitAttributes(contents: string, rel: string): void {
     // spells its extension with an escape does not get waved through, which is
     // not.
     //
-    // The fifth variation, and the reason the count above is not a closed list:
-    // gitattributes has a SECOND line form this parser had no concept of.
+    // The fifth and sixth variations, and the reason the count is not a closed
+    // list: gitattributes has a SECOND line form this parser had no concept of.
     // `[attr]<name> <attrs...>` defines a MACRO, and git's attr_name_valid
     // permits dots in the name, so the first token can be extension-shaped
     // without ever being a path:
@@ -543,14 +543,29 @@ function checkGitAttributes(contents: string, rel: string): void {
     //
     // The first line reached the allowance as a `.png` and returned; the second
     // carries no suppressing attribute of its own, only the macro's name. git
-    // renders payload.ts as `Binary files ... differ` and the gate said nothing
-    // hidden — verified against real `git check-attr`. That a macro named
-    // `[attr]zz` WAS reported is what makes this accidental rather than
-    // designed. An extension check answers "would a reviewer have been able to
-    // read this file's diff", which is a question about a path; asking it of a
-    // macro name is meaningless, so macros skip the allowance outright and are
-    // judged on the attributes they carry.
-    const isMacroDefinition = stripped.startsWith('[attr]');
+    // renders payload.ts as `Binary files ... differ` while the gate said
+    // nothing hidden. That a macro named `[attr]zz` WAS reported is what makes
+    // that accidental rather than designed.
+    //
+    // The macro test therefore runs on `pattern` — AFTER the quoted form has
+    // been opened — and not on the raw line, because git parses in that order
+    // too. Verified on git 2.50.1: `"[attr]a.png" -diff` with
+    // `src/payload.ts a.png` reports `src/payload.ts: diff: unset` from
+    // check-attr, and git diff prints `Binary files ... differ`. A first
+    // attempt tested the raw line and argued a quoted `[attr]` stays a literal
+    // path; that was simply false, and it recreated the same hole one quote to
+    // the left. Testing one spelling and not the other IS this function's bug,
+    // so there is exactly one test, on the one string the extension check also
+    // reads.
+    //
+    // An extension check answers "could a reviewer have read this file's diff",
+    // which is a question about a path; asking it of a macro name is
+    // meaningless, so macros skip the allowance outright and are judged on the
+    // attributes they carry. Note this errs safely in the one place it diverges
+    // from git: git requires a non-empty name after the prefix, so a bare
+    // `[attr]` is a path pattern to git and a macro to us — and being wrong
+    // that way only ever REMOVES an allowance.
+    const isMacroDefinition = pattern.startsWith('[attr]');
     if (
       !isMacroDefinition &&
       !pattern.includes('\\') &&
@@ -689,6 +704,13 @@ function gitFiles(root: string): { tracked: string[]; untracked: string[] } | un
   // None of this affects the repo's own .git/config, .gitignore or
   // .git/info/exclude: those are the tree's, and ignored files being out of
   // scope is the design.
+  //
+  // Dropping HOME has one non-obvious consequence worth naming: it also hides a
+  // global `safe.directory`, so scanning a repo owned by another user makes
+  // `ls-files` refuse and the gate falls back to the filesystem walk. That is
+  // fail-SAFE — the walk ignores .gitignore, so it scans more than the git
+  // listing would, never less — and since the summary line now names the
+  // strategy, it announces itself rather than looking like a normal run.
   const env = { ...process.env };
   for (const key of Object.keys(env)) if (key.startsWith('GIT_')) delete env[key];
   delete env.HOME;
