@@ -564,6 +564,15 @@ describe('scoping follow-ups (review of #679)', () => {
     );
   });
 
+  test('a quoted pattern does not tokenize into the allowance', async () => {
+    // Verified against real git: `"evil run.ts" binary` sets binary on
+    // `evil run.ts`. Naive tokenizing yields `"cover.png`, whose extension
+    // reads as inert, so the allowance would wave through a .ts file.
+    await withTree({ '.gitattributes': '"cover.png run.ts" binary\n' }, ({ code }) =>
+      expect(code).toBe(1)
+    );
+  });
+
   test('an executable binary format is NOT auto-approved', async () => {
     // BINARY_EXTENSIONS answers "where is a NUL expected"; it includes .wasm,
     // .node, .so, .exe. Reusing it here would bless diff suppression on the
