@@ -33,8 +33,10 @@
  *     paragraph is a paragraph, and a doc that quotes `eval` is documentation.
  *     They keep the invisible-character rule and the whitespace-run rule, the
  *     latter because markdown here is read by agents as well as by people (see
- *     PROSE_EXTENSIONS). So a bidi trick in docs IS caught; a payload hidden by
- *     a paragraph's sheer length is not.
+ *     PROSE_EXTENSIONS). So a bidi trick in docs IS caught, and so is a
+ *     gap-based payload whether the gap opens the line or sits mid-line. The
+ *     bound that remains is length alone: prose has no MAX_LINE, so text pushed
+ *     off-screen by nothing but a very long paragraph passes.
  *   - This gate sees what git would show in a diff — tracked files plus
  *     untracked-but-unignored ones, from `git ls-files` — and NOT the working
  *     tree as such: ignored files are out of scope. Outside a repo, or when git
@@ -64,7 +66,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // same pattern as CHECK_PRIVACY_ENDPOINTS_ROOT and CHECK_TOOL_COUNTS_ROOT.
 const ROOT = process.env.CHECK_CONCEALMENT_ROOT ?? join(__dirname, '..');
 
-/** A run of this many space characters (ASCII or unicode) mid-line is the gap. */
+/** A run of this many space characters (ASCII or unicode), leading or mid-line, is the gap. */
 const WHITESPACE_RUN = 20;
 /**
  * ...but only when the line is longer than a viewport, because that is what
@@ -259,6 +261,7 @@ const AUTO_LIFECYCLE = new Set([
   'prestop', 'poststop',
   'prerestart', 'postrestart',
 ]);
+
 /**
  * `prepare` and `prepublishOnly` run on contributor and publisher machines.
  * Those are still execution vectors — a contributor's `bun install` runs
@@ -305,7 +308,25 @@ const INVISIBLE: Record<number, string> = {
  * Unicode Zs plus the format-ish spaces that behave the same way.
  */
 const GAP_CHARS = ' \\t\\u00a0\\u1680\\u2000-\\u200a\\u202f\\u205f\\u3000';
-const WHITESPACE_RUN_RE = new RegExp(`\\S[${GAP_CHARS}]{${WHITESPACE_RUN},}\\S`);
+/**
+ * `(^|\S)`, not `\S`, on the left. Requiring a non-space before the gap left a
+ * whole form uncovered: a line that OPENS with the run. 200 spaces then an
+ * instruction is a blank line to a reviewer scrolling a diff and an instruction
+ * to a model reading the file, and prose is exempt from MAX_LINE, so nothing
+ * else caught it either.
+ *
+ * Both halves of the conjunction were measured against this repo before the
+ * left anchor was widened, because a rule with no margin becomes an exemption
+ * list on its first false positive. Across every scanned file: of the 2125
+ * lines over 120 columns, the deepest leading whitespace is 14 characters; of
+ * the 46 lines carrying 20 or more leading gap characters, the longest is 95
+ * columns. Neither axis is close to its threshold, and the whole-repo run
+ * produced zero hits.
+ *
+ * The trailing `\S` matters too: a line of nothing but whitespace is trailing
+ * junk, not a payload, and does not match.
+ */
+const WHITESPACE_RUN_RE = new RegExp(`(^|\\S)[${GAP_CHARS}]{${WHITESPACE_RUN},}\\S`);
 
 const DYNAMIC_EXEC: Array<[RegExp, string]> = [
   [/(?<![\w$.])eval\s*\(/, 'eval() call'],
@@ -389,8 +410,9 @@ function checkLine(
       rel,
       lineNo,
       'whitespace run',
-      `${WHITESPACE_RUN}+ consecutive space characters mid-line on a ${line.length}-column ` +
-        `line — the tail is off-screen in a diff. Unicode spaces (NBSP, U+2003, U+3000, ...) ` +
+      `${WHITESPACE_RUN}+ consecutive space characters, leading or mid-line, on a ` +
+        `${line.length}-column line — the text after the gap is off-screen in a diff. ` +
+        `Unicode spaces (NBSP, U+2003, U+3000, ...) ` +
         `count as well as ASCII space and tab: they render identically and are valid ` +
         `ECMAScript whitespace`
     );
@@ -509,7 +531,32 @@ function checkGitAttributes(contents: string, rel: string): void {
     // escaped binary path writes the exemption, which is cheap; a payload that
     // spells its extension with an escape does not get waved through, which is
     // not.
-    if (!pattern.includes('\\') && INERT_BINARY_EXTENSIONS.has(extensionOf(pattern))) return;
+    //
+    // The fifth variation, and the reason the count above is not a closed list:
+    // gitattributes has a SECOND line form this parser had no concept of.
+    // `[attr]<name> <attrs...>` defines a MACRO, and git's attr_name_valid
+    // permits dots in the name, so the first token can be extension-shaped
+    // without ever being a path:
+    //
+    //     [attr]a.png binary
+    //     src/payload.ts a.png
+    //
+    // The first line reached the allowance as a `.png` and returned; the second
+    // carries no suppressing attribute of its own, only the macro's name. git
+    // renders payload.ts as `Binary files ... differ` and the gate said nothing
+    // hidden — verified against real `git check-attr`. That a macro named
+    // `[attr]zz` WAS reported is what makes this accidental rather than
+    // designed. An extension check answers "would a reviewer have been able to
+    // read this file's diff", which is a question about a path; asking it of a
+    // macro name is meaningless, so macros skip the allowance outright and are
+    // judged on the attributes they carry.
+    const isMacroDefinition = stripped.startsWith('[attr]');
+    if (
+      !isMacroDefinition &&
+      !pattern.includes('\\') &&
+      INERT_BINARY_EXTENSIONS.has(extensionOf(pattern))
+    )
+      return;
     for (const re of DIFF_SUPPRESSING_ATTRS) {
       if (!re.test(stripped)) continue;
       report(
@@ -624,10 +671,31 @@ function gitFiles(root: string): { tracked: string[]; untracked: string[] } | un
   // did not include GIT_CONFIG_GLOBAL or GIT_CONFIG_COUNT, either of which can
   // set core.excludesFile — which `ls-files --exclude-standard` honours, so an
   // ambient value drops files out of the scan and the gate still prints a green
-  // "nothing hidden". Every GIT_* variable is git's to interpret, none of them
-  // is ours to inherit, and the test helper already used this exact form.
+  // "nothing hidden". Every GIT_* variable is git's to interpret and none of
+  // them is ours to inherit.
+  //
+  // Stripping that namespace closes only half the vector, though, because the
+  // same setting reaches git without any GIT_ variable at all: core.excludesFile
+  // in the GLOBAL config, which git finds through HOME (or XDG_CONFIG_HOME), and
+  // in the SYSTEM config at /etc/gitconfig. Probed: a concealed untracked .ts
+  // under a HOME whose .gitconfig excludes `*.ts` produced `files scanned (git),
+  // nothing hidden` and exit 0. So the ambient environment is not sanitised
+  // variable by variable — git is told to read NO config files, which is the
+  // only form of this that does not need a list of the ways config arrives.
+  //
+  // GIT_CONFIG_GLOBAL/SYSTEM=/dev/null is git's own documented way to say that
+  // (2.32+). HOME and XDG_CONFIG_HOME are dropped as well so an older git,
+  // which would ignore those two variables, still cannot find a global config.
+  // None of this affects the repo's own .git/config, .gitignore or
+  // .git/info/exclude: those are the tree's, and ignored files being out of
+  // scope is the design.
   const env = { ...process.env };
   for (const key of Object.keys(env)) if (key.startsWith('GIT_')) delete env[key];
+  delete env.HOME;
+  delete env.XDG_CONFIG_HOME;
+  env.GIT_CONFIG_NOSYSTEM = '1';
+  env.GIT_CONFIG_GLOBAL = '/dev/null';
+  env.GIT_CONFIG_SYSTEM = '/dev/null';
 
   const run = (args: string[]): string[] | undefined => {
     const r = spawnSync('git', ['-C', root, ...args], { encoding: 'utf-8', env });
@@ -743,7 +811,10 @@ if (findings.length === 0) {
   process.exit(0);
 }
 
-console.error('check-concealment: found content engineered to be invisible in review.\n');
+console.error(
+  `check-concealment: found content engineered to be invisible in review ` +
+    `(${files.length} files scanned, listed by ${listing.strategy}).\n`
+);
 const byRule = new Map<string, Finding[]>();
 for (const f of findings) {
   const list = byRule.get(f.rule) ?? [];
