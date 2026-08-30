@@ -63,8 +63,16 @@ const SRC_ROOT = join(import.meta.dir, '..', 'src');
  * optional type annotation. Deliberately narrow: it requires the `as const`
  * suffix and rejects any array containing a non-string-literal member, so a
  * constant built from spreads, identifiers or numbers is not swept in.
+ *
+ * The body is `[^[\]]*?`, not `.*?`: a lazy dotall body lets a declaration
+ * that is NOT `as const` scan forward to the next `] as const` anywhere later
+ * in the file and swallow every declaration in between, which drops them from
+ * the pin silently. Bounding the body to bracket-free text stops the match at
+ * its own declaration. Costs nothing here — a pure string-literal array holds
+ * no brackets by construction.
  */
-const EXPORTED_ARRAY = /^export const ([A-Z][A-Z0-9_]*)\s*(?::[^=]+)?=\s*\[(.*?)\]\s*as const/gms;
+const EXPORTED_ARRAY =
+  /^export const ([A-Z][A-Z0-9_]*)\s*(?::[^=]+)?=\s*\[([^[\]]*?)\]\s*as const/gms;
 
 function tsFilesUnder(dir: string): string[] {
   const out: string[] = [];
@@ -85,9 +93,27 @@ function tsFilesUnder(dir: string): string[] {
  * of what that tree happens to contain today. Feeding it a synthetic snippet
  * lets the tests below pin the parsing rules themselves.
  */
+/**
+ * ASSUMPTION: no string literal in `src/` contains `//` or a block-comment
+ * opener. Stated rather than left implicit because the failure is SILENT in
+ * exactly this file's own direction: mangling a literal makes the residue
+ * check reject the array and drop it from the pin. Making this string-aware is
+ * the fix if a URL ever lands in an exported `as const` array. Same helper and
+ * same caveat as tests/core/decoder-field-completeness.test.ts; duplicated on
+ * purpose rather than shared, so neither file's parsing rules can be changed
+ * out from under the other.
+ */
+function stripComments(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+}
+
 function collectStringConstants(source: string): Map<string, readonly string[]> {
   const found = new Map<string, readonly string[]>();
-  const text = source;
+  // Strip comments before matching: an inline `//` inside an array literal
+  // leaves residue that the purity check below rejects, so a commented array
+  // is dropped from the pin without a word. An under-reporting pin is
+  // indistinguishable from a passing one.
+  const text = stripComments(source);
   for (const match of text.matchAll(EXPORTED_ARRAY)) {
     const [, name, rawBody] = match;
     if (name === undefined || rawBody === undefined) continue;
@@ -185,6 +211,15 @@ const PINNED: Record<string, readonly string[]> = {
     'internal_transfer',
   ],
   // src/models/item.ts
+  IGNORED_ITEM_FIELDS: [
+    'access_token',
+    'deleted_access_token',
+    'akoya',
+    'available_products',
+    'billed_products',
+    'optional_products',
+  ],
+  // src/models/item.ts
   KNOWN_ERROR_CODES: [
     'ITEM_LOGIN_REQUIRED',
     'INVALID_CREDENTIALS',
@@ -196,6 +231,18 @@ const PINNED: Record<string, readonly string[]> = {
     'INSTITUTION_DOWN',
     'INSTITUTION_NOT_RESPONDING',
     'INSTITUTION_NO_LONGER_SUPPORTED',
+  ],
+  // src/models/recurring.ts
+  KNOWN_FREQUENCIES: [
+    'daily',
+    'weekly',
+    'biweekly',
+    'monthly',
+    'bimonthly',
+    'quarterly',
+    'quadmonthly',
+    'semiannually',
+    'yearly',
   ],
   // src/models/budget.ts
   KNOWN_PERIODS: ['monthly', 'yearly', 'weekly', 'daily'],
