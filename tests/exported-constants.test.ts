@@ -69,8 +69,15 @@ const SRC_ROOT = join(import.meta.dir, '..', 'src');
 /**
  * Matches `export const NAME = [ ...string literals... ] as const`, with an
  * optional type annotation. Deliberately narrow: it requires the `as const`
- * suffix and rejects any array containing a non-string-literal member, so a
- * constant built from spreads, identifiers or numbers is not swept in.
+ * suffix, and the purity check in collectStringConstants keeps only arrays
+ * whose members are all SINGLE-QUOTED string literals, so a constant built from
+ * spreads, identifiers or numbers is not swept in.
+ *
+ * FLAGS: `m` is load-bearing — `^` anchors every attempt to a line start, which
+ * is what stops a failed match from restarting mid-line. `s` is vestigial: no
+ * `.` remains in the pattern, and `[^[\]]` / `[^=]` cross newlines by
+ * themselves. The character class below is explained in enough detail to
+ * suggest every flag was chosen; this one was not.
  *
  * The body is `[^[\]]*?`, not `.*?`: a lazy dotall body lets a declaration
  * that is NOT `as const` scan forward to the next `] as const` anywhere later
@@ -90,10 +97,30 @@ const SRC_ROOT = join(import.meta.dir, '..', 'src');
  * than eliminating the class.
  *
  * No such literal sits in an `as const` array in src/ today. The two shapes
- * already coexist in one file though — src/tools/field-selection.ts has
- * `as const` arrays at :47 and :68 and bracket-carrying hint literals at :89,
- * :137 and :169 — so a `fields:`-hint list landing in one is a plausible next
- * commit rather than a hypothetical. Tracked as #696.
+ * already coexist in one file though — src/tools/field-selection.ts declares
+ * `as const` arrays at :36, :60, :121 and :151 (closing at :47, :68, :127 and
+ * :158) and carries bracket-bearing hint literals at :89, :105-106, :137 and
+ * :169 — so a `fields:`-hint list landing in one is a plausible next commit
+ * rather than a hypothetical. Tracked as #696.
+ *
+ * ASSUMPTION, the fifth silent-drop mode this file has had to name and the
+ * likeliest of them to actually happen: every member is written with SINGLE
+ * quotes. `.prettierrc.json` sets `singleQuote: true`, but Prettier's
+ * fewer-escapes rule flips any string whose content holds an apostrophe to
+ * double quotes, so `bun run format` itself produces:
+ *
+ *     export const MSGS = ["can't", 'ok'] as const;
+ *
+ * The item extractor then pairs the apostrophe in `can't` with the quote that
+ * opens `ok` — items come back as `["t\", "]`, residue as `"canok'` — the
+ * purity check fails, and the constant is dropped. Backtick members behave the
+ * same way. This is NOT the "not a string literal" rejection described at the
+ * top: a double-quoted string IS a string literal, so a reader checking whether
+ * their new constant is covered concludes that it is. Same shape as #677 — not
+ * "the pin rejects this" but "the pin never saw it." Unlikely against today's
+ * members, which are snake_case field names and SCREAMING_CASE enum values;
+ * likely against the first human-readable list anyone adds. Tracked as #696
+ * with the rest of the family.
  */
 const EXPORTED_ARRAY =
   /^export const ([A-Z][A-Z0-9_]*)\s*(?::[^=]+)?=\s*\[([^[\]]*?)\]\s*as const/gms;
