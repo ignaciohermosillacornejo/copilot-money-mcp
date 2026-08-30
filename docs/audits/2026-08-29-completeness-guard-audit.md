@@ -11,13 +11,12 @@ the guard claims to protect, run the suite or the gate, and record that it
 stayed green. Suspicions were discarded. Baseline for "green" is
 2853 pass / 0 fail.
 
-**Coverage of this pass.** Three slices are complete: the ratchet /
-conformance / e2e infrastructure, the tool surface and registry, and the
-non-test gates (`scripts/`, CI workflows, skills). A fourth slice — the data
-layer (`src/core/decoder.ts` and its per-collection processors,
-`src/core/graphql/**`, `src/models/**`) — was still running when this
-document was written and is **not** represented below. Its highest-value open
-questions are recorded in §6 so the gap is visible rather than implied.
+**Coverage of this pass.** Four slices, all complete: the ratchet /
+conformance / e2e infrastructure; the tool surface and registry; the non-test
+gates (`scripts/`, CI workflows, skills); and the data layer (`decoder.ts`,
+`src/core/graphql/**`, `src/models/**`). Findings F1–F18 cover the first
+three; **D1–D7 in §6 cover the data layer, and D1 has the highest blast
+radius in the document** — it silently corrupts spend totals.
 
 ---
 
@@ -364,6 +363,9 @@ the only CI gap is F18, on the release path.
 | 4 | F5, F9, F10, F15 | Docs + skills rot |
 | 5 | F8, F12, F14 | Test-infrastructure completeness |
 | 6 | F11, F13, F16, F17, F18 | Low-severity gate cleanups |
+| 0 | **D1, D2** | **Ahead of everything: silent financial-data loss** |
+| 7 | D3, D4, D5, D6 | Decoder routing, parity, mutation ratchet, Zod mirrors |
+| 8 | D7 | Model/decoder mirror gap |
 
 Each batch should fix the **class**, not the instance: derive from the
 authoritative source, fail in both directions, and assert non-vacuity. An
@@ -373,24 +375,140 @@ repo's Bug Response Ritual.
 
 ---
 
-## 6. Not covered by this pass — the data layer
+## 6. Data layer (D1–D7)
 
-The fourth auditor's slice is outstanding. Recording the questions here so a
-reader does not mistake this document for full coverage:
+Separately numbered because this slice landed after F1–F18 were written. D1
+outranks everything above it.
 
-- The decoder has ~29-30 per-collection processors and a `warnUnreadFields`
-  mechanism. If a new Firestore collection appears, or a field is added to an
-  existing collection's protobuf, does any **test** fail — or does it go
-  undecoded with only a runtime warning?
-- `MUTATION_RESPONSE_SCHEMAS` warns at runtime when an operation has no
-  registered schema. F4 shows the ledger side of this is unguarded; the
-  question of whether a *newly added* operation is caught at all is open.
-- `operations.generated.ts` is generated. What enforces that a new operation
-  gets a wrapper, a response schema, and a ledger entry? F6 answers this for
-  mutations (nothing does); the query side is guarded by #460.
-- Zod models: if a field is added to a model, does anything check the decoder
-  populates it or that a fixture carries it?
+### D1 — Decoder extraction lists are unpinned; deleting one silently drops user financial data (highest blast radius in this audit)
 
-Blast radius here is the highest in the repo — silently dropping decoded
-financial data is worse than any gate gap above. This slice should be
-finished before the audit is considered closed.
+Every `process*` function in `src/core/decoder.ts` decides what reaches users
+through literal arrays — `stringFields`, `booleanFields`, `numericFields`,
+`stringArrayFields`. Nothing pins them. This is the #635 shape applied to the
+data itself rather than to a response preset.
+
+Confirmed green deletions, each run individually against the full suite:
+
+| Mutation | Line | Consequence if shipped |
+|---|---|---|
+| `'excluded'` from `processTransaction` booleanFields | `decoder.ts:831` | the `exclude_excluded` filter (`src/tools/tools.ts:884`) becomes a **no-op — excluded transactions counted in every spend total** |
+| `'excluded'` from `processCategory` | `decoder.ts:1736` | excluded-category filter (`tools.ts:614`) no-ops |
+| `'category_id'` from `processBudget` | `decoder.ts:1267` | budget → category link gone |
+| `'category_id'` from `processRecurring` | `decoder.ts:1132` | recurring → category link gone |
+| `'mask'`, `'institution_name'` from `processAccount` | `decoder.ts:946` | account identifiers vanish |
+| `'plaid_category_id'` from `processTransaction` | `decoder.ts:~787` | Plaid taxonomy gone |
+
+The `'excluded'` deletion was run through the **full `bun run check`**: 2853
+pass / 0 fail, lint and typecheck clean. A user asking "how much did I spend"
+would get a wrong number, silently.
+
+Some fields (`logo`, `user_hidden`, `tag_ids`, `user_note`,
+`internal_transfer`, `pending`) *do* fail on deletion — but only because
+`tests/core/decoder-coverage.test.ts:2690` and siblings happen to name them by
+hand. Protection covers the N fields someone listed.
+
+**Fix.** Per processor, take its own `consumed:` list (already spread from the
+extraction arrays), synthesize a doc carrying every name, decode, and assert
+each name is a key on the decoded row. Explicit `NOT_SURFACED` allowlist for
+legitimate drops; non-vacuity floor on processor count.
+
+### D2 — `warnUnreadFields` is per-processor opt-in with no registry
+
+Deleting the `warnUnreadFields(...)` call from `processAccount`
+(`decoder.ts:1080`) **and** `processHoldingsHistory` (`decoder.ts:2184`):
+2853 pass / 0 fail. The only new-upstream-field detector for those collections
+disappears, and `unread_field_warnings` in `get_cache_info` silently reads 0.
+All 27 processors call it today; nothing keeps the 28th honest.
+
+**Fix.** A source-scan ratchet in the style already used one file over —
+`tests/core/decode-path-parity.test.ts:117` scans `function process*(` bodies
+with a `found > 10` floor. Same scan, assert each body contains
+`warnUnreadFields(`.
+
+### D3 — Unrouted collections are dropped with no counter
+
+A test DB with docs in `credit_score_history` and
+`items/*/accounts/*/rewards` produced `decodeStats` keys of `["transactions"]`
+only — no warning, no drop counter, nothing in `get_cache_info`.
+`decodeAllCollections` (`decoder.ts:2806`) has no terminal `else`.
+
+The real-cache backstop is also a hand list: `scripts/smoke/cache.ts:236`
+names **9** roots out of the **28** arrays in `AllCollectionsResult`
+(`decoder.ts:713`). Deleting `securities` and `tags` from it: 2853 pass / 0
+fail. `balanceHistory`, `holdingsHistory`, `investmentSplits`,
+`plaidAccounts` and 15 others were never in it.
+
+### D4 — The parity `cases` list is #622's own class detector, as a 9-element hand list
+
+`tests/core/decode-path-parity.test.ts:160`.
+
+- **Forward:** added a `decodeSecurities()` export carrying the exact #622
+  predicate bug (leaf-segment match that never occurs → 0 rows while the
+  aggregate path returns all): **2853 pass / 0 fail.**
+- **Backward:** deleted the `categories` case: 2852 pass / 0 fail. Nothing
+  pins `cases.length`.
+- **Live instance:** `decodeUserAccounts` (`decoder.ts:682`) is an exported
+  standalone decoder with no parity case, here or in `scripts/smoke/cache.ts`.
+
+### D5 — A new GraphQL mutation gets no response schema, no ledger entry, no smoke
+
+Added `'EditUser'` to `IN_SCOPE_MUTATIONS`, regenerated, and shipped a wrapper
+calling `client.mutate('EditUser', …)`: **2853 pass / 0 fail.**
+
+Cause: `tests/scripts/read-smoke-coverage.test.ts:38` does
+`if (typeof value !== 'string' || !value.startsWith('query ')) continue;` —
+the entire ratchet is query-only. This is the same asymmetry as F6, reached
+from the other side. The only signal is a runtime `console.warn` that fires
+the first time the mutation runs against Copilot.
+
+### D6 — Response-shape Zod mirrors are unpinned field lists
+
+Each schema hand-mirrors a hand-written interface with nothing forcing
+agreement.
+
+- `response-validation.ts:73` `CreatedTransactionSchema` — deleting
+  `isPending`, `createdAt`, `tipAmount`, `suggestedCategoryIds`,
+  `recurringId`, `userNotes`, `tags`, `isReviewed`, or
+  **`type: z.enum(TRANSACTION_TYPES)`** each left 0 fail. The `type` one is
+  worst: lines 64–70 promise a new server `TransactionType` warns; deleting
+  the line retires that promise silently.
+- `read-validation.ts:39` `transactionNodeSchema` — **drop-based, and it feeds
+  writes.** Deleting `categoryId`, `isPending`, `isoCurrencyCode`,
+  `createdAt`, `suggestedCategoryIds` each → 0 fail. Only `parentId` is
+  pinned.
+- `queries/accounts.ts:73` `AccountNodeSchema` — deleting `mask`,
+  `isUserClosed`, `latestBalanceUpdate` each → 0 fail. `latestBalanceUpdate`
+  is precisely the field whose string→number drift #537 caught.
+
+**Fix.** Iterate the schema registries and pin `Object.keys(schema.shape)`
+verbatim per entry — the same block shape as the #635 class detector, so a new
+registry entry with no pinned key set fails forward.
+
+### D7 (low) — Zod model fields are declarations with no populate check
+
+Adding `overdraft_limit` to `AccountSchema` and `merchant_confidence` to
+`TransactionSchema`: suite green. Neither is extracted by any processor, so
+both are pure documentation that reads as coverage. All model schemas are
+`.passthrough()`, so the reverse loses type validation but not data.
+
+### Incidental, but it will cost someone an afternoon
+
+`tests/integration/mcpb-bundle.test.ts:144` runs `bun run pack:mcpb` →
+`build` → `generate:graphql`, which **overwrites
+`src/core/graphql/operations.generated.ts` mid-suite**. A mutation to that
+file is silently reverted mid-run, producing nondeterministic pass counts
+(2853 / 2870 / 1984 across three runs of the same tree). Anyone
+mutation-testing that file must go through the capture + `IN_SCOPE_*` path.
+
+### Data-layer guards already correct
+
+- `tests/scripts/read-smoke-coverage.test.ts` — bidirectional over query
+  operations, non-vacuity floor, plus an activation check that the registry
+  key is a real operation name. The model D5 should be extended to.
+- `tests/core/decode-path-parity.test.ts:117` — textbook discovery pattern
+  (balanced-paren scan, floor, anchor).
+- Decoder **routing branches** are well covered: deleting the securities /
+  investment_splits / balance_history / plaid-account / holdings_history arms
+  each fails 1–4 tests.
+- Processor `consumed:` lists are spread from the same arrays used for
+  extraction, so `consumed` cannot drift from what is read.
