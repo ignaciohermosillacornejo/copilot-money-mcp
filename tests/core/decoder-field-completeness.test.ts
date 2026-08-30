@@ -186,17 +186,24 @@ function stripComments(text: string): string {
  * Members of a pure string-literal array, or null if the array holds anything
  * else. Deliberately narrow, same rationale as tests/exported-constants.test.ts:
  * an array built from identifiers or numbers is not a field allow-list.
+ *
+ * `raw` is always a slice of `body` (see discoverProcessors), which is
+ * stripped once at the top of that function — no `stripComments()` call
+ * needed here, the same leftover this file's own `spec()` fix removed.
  */
 function stringLiteralMembers(raw: string): string[] | null {
-  const text = stripComments(raw);
-  const items = [...text.matchAll(/'([^']*)'/g)].map((m) => m[1] as string);
-  const residue = text.replace(/'[^']*'|,|\s/g, '');
+  const items = [...raw.matchAll(/'([^']*)'/g)].map((m) => m[1] as string);
+  const residue = raw.replace(/'[^']*'|,|\s/g, '');
   return residue === '' && items.length > 0 ? items : null;
 }
 
-/** Top-level keys of an object literal body, ignoring nested groups. */
+/**
+ * Top-level keys of an object literal body, ignoring nested groups. `literal`
+ * is always a slice of `body` (see discoverProcessors), already stripped —
+ * no `stripComments()` call needed here either.
+ */
 function topLevelKeys(literal: string): string[] {
-  let text = stripComments(literal);
+  let text = literal;
   let previous: string;
   do {
     previous = text;
