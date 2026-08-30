@@ -75,11 +75,26 @@ const SKIP_DIRS = new Set([
 ]);
 
 /**
- * Prose. These are never executed, so the rules about hiding CODE off the right
- * edge of a diff (long line, whitespace run) and about dynamic execution do not
- * apply — a 900-column paragraph in a CHANGELOG is a paragraph, and a doc that
- * quotes `execSync` is documentation. Invisible characters are still flagged
- * here, since a zero-width character in prose is never benign.
+ * Prose. These are never executed, so exactly TWO rules are dropped: the
+ * long-line rule and the dynamic-execution rule. A 900-column paragraph in a
+ * CHANGELOG is a paragraph, and a doc that quotes `execSync` is documentation.
+ *
+ * Everything else still applies, and the list of what survives is the point:
+ *
+ *   - Invisible characters, because a zero-width character in prose is never
+ *     benign.
+ *   - The whitespace run. This one used to be dropped with the other two, on
+ *     the reasoning that prose is only read by humans. It is not: `CLAUDE.md`
+ *     and the instruction files under `skills/` are read in full by an agent,
+ *     so a sentence parked past a 40-space gap is invisible to the reviewer
+ *     and load-bearing to the model — the better-auth shape with the payload
+ *     swapped for an instruction. Markdown's one legitimate whitespace idiom,
+ *     the trailing double space that forces a line break, sits at end-of-line and
+ *     cannot match `\S[gap]{n,}\S`. Extending the rule to prose produced one
+ *     hit across the whole repo: an aligned ASCII file-tree at 147 columns in
+ *     a design doc. That was reflowed rather than exempted, because the rule's
+ *     own criterion — alignment is legible when the line ends where you can
+ *     see it — says a 147-column line does not.
  *
  * Note which way this allowlist fails. Forgetting to list a prose extension
  * means that file gets the FULL rule set — more scrutiny, and at worst a false
@@ -364,7 +379,11 @@ function checkLine(
   exempt: boolean,
   prose: boolean
 ): void {
-  if (!prose && line.length > CONCEALED_LINE && WHITESPACE_RUN_RE.test(line)) {
+  // Deliberately NOT gated on `!prose`, unlike the two rules below it. See
+  // PROSE_EXTENSIONS: markdown in this repo is read by agents as well as by
+  // people, and a gap wide enough to push text off-screen conceals it from
+  // exactly one of those two readers.
+  if (line.length > CONCEALED_LINE && WHITESPACE_RUN_RE.test(line)) {
     report(
       rel,
       lineNo,

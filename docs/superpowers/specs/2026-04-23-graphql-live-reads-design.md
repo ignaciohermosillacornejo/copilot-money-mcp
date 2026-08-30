@@ -94,7 +94,7 @@ src/
 ├── cli.ts                                  # + --live-reads flag parsing
 ├── server.ts                               # + conditional live-mode registration and preflight
 ├── core/
-│   ├── database.ts                         # unchanged (cache-backed, used by cache tools AND by live tools for account→item lookup until phase 2)
+│   ├── database.ts                         # unchanged; live tools use it for account→item lookup
 │   ├── live-database.ts                    # NEW — LiveCopilotDatabase class
 │   └── graphql/
 │       ├── client.ts                       # unchanged

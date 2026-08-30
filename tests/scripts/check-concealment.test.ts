@@ -337,9 +337,40 @@ describe('scope is not an extension allowlist (audit F2)', () => {
     });
   });
 
-  test('prose is exempt from the code-shaped rules', async () => {
+  test('a whitespace-run payload in markdown is reported', async () => {
+    // Prose loses the long-line and dynamic-execution rules, not this one.
+    // Markdown here is not only read by humans: CLAUDE.md and skills/**/*.md
+    // are instruction files an agent reads in full, so a gap that pushes an
+    // instruction off the right edge of the diff is concealment in exactly the
+    // sense this gate means — invisible to the reviewer, load-bearing to the
+    // reader. Markdown's one legitimate whitespace idiom, the trailing double
+    // space that forces a line break, sits at end-of-line and cannot match
+    // \S[gap]{20,}\S.
+    //
+    // The fixture must clear CONCEALED_LINE (120) as well as carry the gap:
+    // the rule is a conjunction, so a short line with a wide gap passes both
+    // before and after this change and would pin nothing.
+    const line = `${'real prose. '.repeat(8)}${' '.repeat(40)}then a hidden instruction`;
+    await withTree({ 'CLAUDE.md': `${line}\n` }, ({ code, stderr }) => {
+      expect(code).toBe(1);
+      expect(stderr).toContain('CLAUDE.md');
+    });
+  });
+
+  test('a wide gap in markdown that still ends on screen is allowed', async () => {
+    // The other half of the conjunction, kept honest: an aligned two-column
+    // list in a README is legible precisely because the line ends where you
+    // can see it. Without this, someone could "fix" a false positive by
+    // dropping CONCEALED_LINE and no test would notice.
+    await withTree({ 'docs/table.md': `col${' '.repeat(30)}value\n` }, ({ code }) =>
+      expect(code).toBe(0)
+    );
+  });
+
+  test('prose is exempt from the long-line and dynamic-execution rules', async () => {
     // A long paragraph in a CHANGELOG is a paragraph, and a doc that quotes
-    // eval() is documentation. Markdown is not executed.
+    // eval() is documentation. Markdown is not executed. Exactly two rules are
+    // dropped for prose — the whitespace run is NOT one of them, see above.
     await withTree({ 'CHANGELOG.md': `${'word '.repeat(200)}eval(x)\n` }, ({ code }) =>
       expect(code).toBe(0)
     );
