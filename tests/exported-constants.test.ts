@@ -93,7 +93,7 @@ const SRC_ROOT = join(import.meta.dir, '..', 'src');
  * already coexist in one file though — src/tools/field-selection.ts has
  * `as const` arrays at :47 and :68 and bracket-carrying hint literals at :89,
  * :137 and :169 — so a `fields:`-hint list landing in one is a plausible next
- * commit rather than a hypothetical.
+ * commit rather than a hypothetical. Tracked as #696.
  */
 const EXPORTED_ARRAY =
   /^export const ([A-Z][A-Z0-9_]*)\s*(?::[^=]+)?=\s*\[([^[\]]*?)\]\s*as const/gms;
