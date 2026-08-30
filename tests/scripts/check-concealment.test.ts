@@ -197,6 +197,94 @@ describe('scope', () => {
 // F1 and F2). Both were the same defect this gate exists to catch: the gate
 // enumerated what to CHECK instead of what to SKIP, so anything it had not
 // predicted was invisible.
+/**
+ * The gate lists files from git when it can, falling back to a filesystem walk
+ * outside a repo. Every other test in this file drives the FALLBACK, because
+ * withTree builds a plain temp directory — so without this block the path that
+ * actually runs in production would be untested, which is the same shape of
+ * hole the audit that prompted these tests was about.
+ */
+describe('file list comes from git when available (review follow-up)', () => {
+  const concealed = `echo ok${' '.repeat(60)}eval("x")${' # '}${'x'.repeat(80)}\n`;
+
+  async function withGitTree(
+    files: Record<string, string>,
+    assertions: (result: Result) => void | Promise<void>,
+    // Written AFTER the commit. `git add -A` honours .gitignore, so a file
+    // listed in it at seed time is never tracked at all — which is a different
+    // scenario from "tracked, then later ignored".
+    afterCommit: Record<string, string> = {}
+  ): Promise<void> {
+    const dir = await mkdtemp(join(tmpdir(), 'concealment-git-'));
+    try {
+      for (const [name, contents] of Object.entries(files)) {
+        const path = join(dir, name);
+        await mkdir(join(path, '..'), { recursive: true });
+        await writeFile(path, contents);
+      }
+      const git = (...args: string[]): void => {
+        const r = Bun.spawnSync(['git', '-C', dir, ...args]);
+        if (r.exitCode !== 0) throw new Error(`git ${args.join(' ')} failed`);
+      };
+      git('init', '-q');
+      git('config', 'user.email', 'test@example.com');
+      git('config', 'user.name', 'test');
+      git('add', '-A');
+      git('commit', '-qm', 'seed', '--no-gpg-sign');
+      for (const [name, contents] of Object.entries(afterCommit)) {
+        const path = join(dir, name);
+        await mkdir(join(path, '..'), { recursive: true });
+        await writeFile(path, contents);
+      }
+      await assertions(await runCheck(dir));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  test('a gitignored tree is not scanned', async () => {
+    // The real exposure: removing the extension allowlist put snapshots/,
+    // local fixture databases and .env.local in scope on developer machines.
+    // Decoding a multi-hundred-MB LevelDB blob to a string before the NUL
+    // check discards it is wasteful, and a long JWT line in .env.local would
+    // fail the gate with a finding no PR could resolve.
+    await withGitTree(
+      { '.gitignore': 'secrets/\n', 'src/a.ts': 'const a = 1;\n', 'secrets/blob.ts': concealed },
+      ({ code }) => expect(code).toBe(0)
+    );
+  });
+
+  test('a tracked file is still scanned', async () => {
+    await withGitTree({ 'src/a.ts': concealed }, ({ code, stderr }) => {
+      expect(code).toBe(1);
+      expect(stderr).toContain('src/a.ts');
+    });
+  });
+
+  test('an untracked but unignored file is scanned — it can still reach a diff', async () => {
+    await withGitTree(
+      { 'src/a.ts': 'const a = 1;\n', 'src/added-later.ts': concealed },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('added-later');
+      }
+    );
+  });
+
+  test('gitignoring an already-tracked file does not hide it', async () => {
+    // The property that makes this not an allowlist: .gitignore cannot be used
+    // to evade the gate, because ignoring a committed file does not untrack it.
+    await withGitTree(
+      { 'src/a.ts': concealed },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('src/a.ts');
+      },
+      { '.gitignore': 'src/a.ts\n' }
+    );
+  });
+});
+
 describe('scope is not an extension allowlist (audit F2)', () => {
   const concealed = `echo ok${' '.repeat(60)}eval("x")${' # '}${'x'.repeat(80)}\n`;
 

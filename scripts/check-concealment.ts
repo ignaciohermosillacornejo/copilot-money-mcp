@@ -40,6 +40,7 @@
  *     quote the patterns they look for.
  */
 
+import { spawnSync } from 'child_process';
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { dirname, join, relative, sep } from 'path';
 import { fileURLToPath } from 'url';
@@ -281,9 +282,13 @@ function invisibleIsBenign(cp: number, prev: number | undefined, next: number | 
   return prev !== undefined && next !== undefined && prev >= 0x2000 && next >= 0x2000;
 }
 
-function checkLine(rel: string, lineNo: number, line: string, exempt: boolean): void {
-  const prose = isProse(rel);
-
+function checkLine(
+  rel: string,
+  lineNo: number,
+  line: string,
+  exempt: boolean,
+  prose: boolean
+): void {
   if (!prose && line.length > CONCEALED_LINE && WHITESPACE_RUN_RE.test(line)) {
     report(
       rel,
@@ -378,7 +383,46 @@ function checkLifecycleScripts(contents: string, rel: string): void {
   }
 }
 
-const files = walk(ROOT, []);
+/**
+ * The set of files this gate inspects: everything git would show in a diff.
+ *
+ * Removing the extension allowlist (F2) put the whole working tree in scope,
+ * including trees git is told to ignore — `snapshots/`, a local
+ * `tests/fixtures/demo_database/`, `docs/graphql-capture/raw/`, `.env.local`.
+ * Two problems, both landing only on developer machines (CI is a clean
+ * checkout, which is why this was invisible in the PR run): a
+ * multi-hundred-MB LevelDB snapshot gets fully UTF-8-decoded into a JS string
+ * before the NUL check discards it, and a Firebase JWT in `.env.local` runs
+ * past MAX_LINE, failing the gate locally with a finding no PR can resolve.
+ *
+ * This is NOT a re-introduced allowlist. It is exactly the gate's threat
+ * model: content that can reach a reviewer's diff. And it cannot be used to
+ * evade the gate — adding a `.gitignore` entry does not untrack a file that
+ * is already committed, so anything in the repo stays in scope.
+ *
+ * Falls back to the filesystem walk outside a git repo, which is how the
+ * tests drive it (synthetic trees under CHECK_CONCEALMENT_ROOT). Both paths
+ * are covered: see 'file list' in tests/scripts/check-concealment.test.ts.
+ */
+function gitFiles(root: string): string[] | undefined {
+  const run = (args: string[]): string[] | undefined => {
+    const r = spawnSync('git', ['-C', root, ...args], { encoding: 'utf-8' });
+    if (r.status !== 0 || typeof r.stdout !== 'string') return undefined;
+    return r.stdout.split('\0').filter((line) => line !== '');
+  };
+  const tracked = run(['ls-files', '-z']);
+  if (tracked === undefined) return undefined;
+  // Untracked-but-not-ignored files can be `git add`ed into the next diff, so
+  // they are in scope too. Ignored files are not.
+  const untracked = run(['ls-files', '-z', '--others', '--exclude-standard']) ?? [];
+  return [...new Set([...tracked, ...untracked])].map((rel) => join(root, rel));
+}
+
+function listFiles(root: string): string[] {
+  return gitFiles(root) ?? walk(root, []);
+}
+
+const files = listFiles(ROOT).filter((f) => inScope(f));
 for (const file of files) {
   const rel = relative(ROOT, file);
   let contents: string;
@@ -390,8 +434,9 @@ for (const file of files) {
   if (contents.includes(NUL)) continue; // binary
 
   const exempt = SELF_EXEMPT.has(rel);
+  const prose = isProse(rel);
   const lines = contents.split('\n');
-  for (let i = 0; i < lines.length; i++) checkLine(rel, i + 1, lines[i], exempt);
+  for (let i = 0; i < lines.length; i++) checkLine(rel, i + 1, lines[i], exempt, prose);
 
   if (rel === 'package.json') checkLifecycleScripts(contents, rel);
 }
