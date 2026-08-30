@@ -516,7 +516,11 @@ function checkGitAttributes(contents: string, rel: string): void {
         i + 1,
         'diff-suppressing gitattribute',
         `"${stripped}" stops git or GitHub showing this path's content in a diff, so a payload ` +
-          `in it reaches main without a reviewer ever seeing the lines`
+          `in it reaches main without a reviewer ever seeing the lines. If this path really is ` +
+          `an inert binary — media, font, archive, document — add its extension to ` +
+          `INERT_BINARY_EXTENSIONS in scripts/check-concealment.ts in the same PR and this ` +
+          `attribute becomes legitimate boilerplate. Otherwise drop the attribute: a file that ` +
+          `executes has to keep a diff a reviewer can read`
       );
       return;
     }
