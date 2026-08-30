@@ -28,12 +28,26 @@
  *
  *   - Lockfiles are skipped. A malicious transitive dependency with its own
  *     install script is a different class, covered by `check:deps-pinned`.
- *   - Markdown is skipped: it is prose, it is not executed, and its long lines
- *     are load-bearing. A reviewer-facing bidi trick in docs would pass here.
- *   - This gate sees the working tree. The cross-commit half of #6003 — content
- *     added by one commit and removed by another, so it never appears in the
- *     combined diff — cannot be seen from a tree at all. That needs the PR's
- *     commit range; see `--range`.
+ *   - Prose is not skipped — it is checked less. `.md`, `.txt` and `.rst` lose
+ *     exactly two rules, long line and dynamic execution: a 900-column
+ *     paragraph is a paragraph, and a doc that quotes `eval` is documentation.
+ *     They keep the invisible-character rule and the whitespace-run rule, the
+ *     latter because markdown here is read by agents as well as by people (see
+ *     PROSE_EXTENSIONS). So a bidi trick in docs IS caught; a payload hidden by
+ *     a paragraph's sheer length is not.
+ *   - This gate sees what git would show in a diff — tracked files plus
+ *     untracked-but-unignored ones, from `git ls-files` — and NOT the working
+ *     tree as such: ignored files are out of scope. Outside a repo, or when git
+ *     declines, it falls back to a filesystem walk, which scans a materially
+ *     different set (no .gitignore, SKIP_DIRS applied to everything). The
+ *     summary line names which strategy ran, because that fallback used to be
+ *     silent and both endings read `nothing hidden`.
+ *   - It sees one tree, never a range of commits. The cross-commit half of
+ *     #6003 — content added by one commit and removed by another, so it never
+ *     appears in the combined diff — cannot be seen from a tree at all. That
+ *     needs the PR's commit range, which this gate does not read: there is no
+ *     flag for it and nothing passes one. Open work, not an option somebody
+ *     forgot to switch on.
  *   - The dynamic-execution rule is regex-based, so it reads a construct inside
  *     a string literal the same as a real one. That is why this file and its
  *     test are exempt from that rule alone (see SELF_EXEMPT) — they necessarily
