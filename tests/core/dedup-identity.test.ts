@@ -399,15 +399,61 @@ function balanced(text: string, openIdx: number, open: string, close: string): [
 }
 
 /**
- * For each dedup block, the name of the array its guarded `.push()` feeds.
- * `decodeAllCollections` builds every inline-block collection with the
- * identical shape — `if (!XSeen.has(id)) { XSeen.add(id); arr.push(item); }`
- * — and returns `arr` under the field name that shape's own
- * `const arr: T[] = []` declares, so the push target names the collection as
- * reliably as `standaloneName` (below) names the standalone decoder's
- * function. Read independently of `discoverDedupBlocks`, on its own pass over
- * the source, so a bug in one discovery function cannot mask a bug in the
- * other.
+ * How far past a `new Set<string>()` declaration a discovery scan looks for
+ * its `.has(` guard (and, below, the guarded block's `.push(`). Shared by
+ * both discovery functions in this file so the assumption is stated once
+ * instead of twice: a guard further than this from its Set declaration is
+ * skipped in silence, not reported. Every real block today sits within a
+ * few dozen characters of its Set — this is a generous margin, not a tight
+ * one.
+ */
+const DISCOVERY_WINDOW = 3000;
+
+/**
+ * The body of `decodeAllCollections`, sliced out of `source` so
+ * `discoverAggregatePushTargets` only ever scans that one function — not the
+ * whole file, which an earlier revision did despite documenting itself as
+ * scoped to `decodeAllCollections`. That mismatch was not just inaccurate
+ * prose: the file-wide scan already collides today. Ten standalone
+ * decode-prefixed/dedupe-prefixed functions each build their own local
+ * `seen` guard pushing into a locally-scoped array every one of them names
+ * `unique` — ten functions, one shared array name, silently overwriting
+ * `found['unique']` nine times over (harmless only because no `COLLECTIONS`
+ * name is `'unique'`). Scoping to `decodeAllCollections` removes that
+ * collision class outright rather than merely tolerating it.
+ */
+function decodeAllCollectionsBody(source: string): string {
+  const decl = /^export async function decodeAllCollections\([^)]*\)[^{]*\{/m.exec(source);
+  if (!decl) {
+    throw new Error(
+      'discoverAggregatePushTargets: could not locate `decodeAllCollections` in the given source — the scan is scoped to its body and cannot run without it'
+    );
+  }
+  const braceIdx = (decl.index as number) + decl[0].length - 1;
+  return balanced(source, braceIdx, '{', '}')[0];
+}
+
+/**
+ * For each dedup block INSIDE `decodeAllCollections`, the name of the array
+ * its guarded `.push()` feeds. `decodeAllCollections` builds every
+ * inline-block collection with the identical shape — `if (!XSeen.has(id)) {
+ * XSeen.add(id); arr.push(item); }` — and returns `arr` under the field name
+ * that shape's own `const arr: T[] = []` declares, so the push target names
+ * the collection as reliably as `standaloneName` (below) names the
+ * standalone decoder's function. Read independently of `discoverDedupBlocks`,
+ * on its own pass over the source, so a bug in one discovery function cannot
+ * mask a bug in the other.
+ *
+ * Scoped via `decodeAllCollectionsBody` above (review follow-up: an earlier
+ * revision scanned the whole file, which both misdescribed itself and
+ * depended on no two blocks anywhere in decoder.ts ever sharing a push-target
+ * name — untrue today, see that function's doc). A push target seen twice
+ * WITHIN the scoped body still throws rather than silently overwriting —
+ * belt and suspenders against a future block inside `decodeAllCollections`
+ * colliding with another, the way `deduplicateAccounts` and
+ * `deduplicateTransactions` already route their standalone dedup logic in
+ * from outside; if a collection's dedup were ever inlined the same way,
+ * a name collision here should fail the run, not the wrong test pass.
  *
  * The `.push(` search is bounded to the guard's OWN braced body via
  * `balanced()`, not a forward scan across the whole window — a forward scan
@@ -417,7 +463,9 @@ function balanced(text: string, openIdx: number, open: string, close: string): [
  * unaffected; the override exists so a regression fixture (a synthetic
  * source snippet reproducing exactly this hazard) can be run through the
  * SAME discovery logic, the way Step 1's `discoverProcessors(src)` does in
- * the sibling file.
+ * the sibling file. A fixture's synthetic source must wrap its guard in a
+ * `decodeAllCollections`-shaped declaration, the same way real source is
+ * scoped — see the fixtures below.
  */
 function discoverAggregatePushTargets(
   source: string = fs.readFileSync(
@@ -425,18 +473,29 @@ function discoverAggregatePushTargets(
     'utf-8'
   )
 ): Record<string, string> {
+  const scoped = decodeAllCollectionsBody(source);
   const found: Record<string, string> = {};
-  for (const m of source.matchAll(/const (\w+) = new Set<string>\(\)/g)) {
+  for (const m of scoped.matchAll(/const (\w+) = new Set<string>\(\)/g)) {
     const setVar = m[1] as string;
     const window = stripComments(
-      source.slice((m.index as number) + m[0].length, (m.index as number) + m[0].length + 3000)
+      scoped.slice(
+        (m.index as number) + m[0].length,
+        (m.index as number) + m[0].length + DISCOVERY_WINDOW
+      )
     );
-    const guard = new RegExp(`if \\(!${setVar}\\.has\\([^)]*\\)\\)\\s*\\{`).exec(window);
+    const guard = new RegExp(`if \\(!${setVar}\\.has\\([^;]*?\\)\\)\\s*\\{`).exec(window);
     if (!guard) continue;
     const braceIdx = guard.index + guard[0].length - 1;
     const [guardBody] = balanced(window, braceIdx, '{', '}');
     const push = /(\w+)\.push\(/.exec(guardBody);
-    if (push) found[push[1] as string] = setVar;
+    if (!push) continue;
+    const pushTarget = push[1] as string;
+    if (pushTarget in found) {
+      throw new Error(
+        `discoverAggregatePushTargets: push target "${pushTarget}" already attributed to Set variable "${found[pushTarget]}"; also matched by "${setVar}" — cannot tell which one owns it`
+      );
+    }
+    found[pushTarget] = setVar;
   }
   return found;
 }
@@ -494,7 +553,7 @@ function discoverDedupBlocks(): Record<string, string> {
     const variable = m[1] as string;
     const enclosing = declarations.filter(([at]) => at < (m.index as number)).pop();
     const after = source.slice((m.index as number) + m[0].length);
-    const window = after.slice(0, 3000);
+    const window = after.slice(0, DISCOVERY_WINDOW);
     const use = new RegExp(`${variable}\\.has\\(([^;]*?)\\)\\s*\\)`).exec(window);
     let key = use ? (use[1] as string).replace(/\s+/g, ' ').trim() : 'NONE';
     // Resolve a bare identifier to the expression it is assigned from. Three
@@ -522,14 +581,24 @@ describe('dedup coverage is declared, not assumed (#668 review)', () => {
     // ritual this repo runs on its own bugs.
     //
     // A resolved-but-opaque call is the same failure one layer down: `const
-    // key = keyFor(row);` is not a bare word, so it survived the check above,
-    // but pins the literal STRING "key = keyFor(row)" rather than any field —
-    // reimplementing `keyFor` to hash `row.name` instead of `row.account_id`
-    // changes what gets deduped without moving this string at all. Require at
-    // least one property access (`.someField`) in the resolved expression, so
-    // a pin has to name the field it claims to key on.
-    const unpinned = Object.entries(DEDUP_BLOCKS)
-      .filter(([, key]) => key === 'NONE' || /^\w+$/.test(key) || !/\.\w+/.test(key))
+    // key = keyFor(row);` is not a bare word, but pins the literal STRING
+    // "key = keyFor(row)" rather than any field — reimplementing `keyFor` to
+    // hash `row.name` instead of `row.account_id` changes what gets deduped
+    // without moving this string at all. Requiring a property access
+    // (`.someField`) in the resolved expression subsumes the two earlier,
+    // narrower checks this test used to spell out as separate disjuncts —
+    // `key === 'NONE'` and a bare `/^\w+$/` word — since neither ever
+    // contains a dot; a single check now covers all three revisions' worth
+    // of "pins nothing" shapes.
+    //
+    // Filters `discovered`, the LIVE scan, not `DEDUP_BLOCKS`, the pin: on a
+    // genuinely new field-free block, `DEDUP_BLOCKS` hasn't been told about
+    // it yet, so filtering the pin would pass here and fail only in the
+    // separate sync test below — a two-step ratchet a maintainer could stop
+    // partway through. Filtering `discovered` makes it fail here directly,
+    // in the test whose name actually describes the invariant.
+    const unpinned = Object.entries(discovered)
+      .filter(([, key]) => !/\.\w+/.test(key))
       .map(([block]) => block);
     expect(unpinned).toEqual([]);
   });
@@ -540,13 +609,19 @@ describe('dedup coverage is declared, not assumed (#668 review)', () => {
   });
 
   test('aggregate push-target discovery finds blocks at all', () => {
-    // Same non-vacuity concern one level down: if the push-target regex ever
-    // stops matching, AGGREGATE_PUSH_TARGETS silently becomes `{}`,
-    // AGGREGATE_SET_VAR silently becomes `{}` too, and the aggregate half of
-    // TWIN_TESTED silently drops to nothing — the exact "hand-written and
-    // unverified" state this derivation exists to close, just reintroduced
-    // one layer down instead of fixed.
-    expect(Object.keys(AGGREGATE_PUSH_TARGETS).length).toBeGreaterThanOrEqual(3);
+    // Non-vacuity, raised to the real count rather than a loose margin
+    // (review follow-up): `decodeAllCollections` has 25 inline dedup blocks
+    // today, and a floor of 3 — this test's original value, chosen only to
+    // cover the 3 collections AGGREGATE_SET_VAR filters down to — would stay
+    // green even if the scan regressed to finding just those three, silently
+    // dropping visibility into the other 22 the duplicate-push-target check
+    // in discoverAggregatePushTargets also depends on seeing. If the
+    // push-target regex ever stops matching at all, AGGREGATE_PUSH_TARGETS
+    // silently becomes `{}`, AGGREGATE_SET_VAR silently becomes `{}` too, and
+    // the aggregate half of TWIN_TESTED silently drops to nothing — the
+    // exact "hand-written and unverified" state this derivation exists to
+    // close, just reintroduced one layer down instead of fixed.
+    expect(Object.keys(AGGREGATE_PUSH_TARGETS).length).toBeGreaterThanOrEqual(25);
   });
 
   test('derived AGGREGATE_SET_VAR is unchanged', () => {
@@ -608,16 +683,20 @@ describe('aggregate push-target scan does not cross the guard boundary (#688 rev
   // followed by an UNRELATED `.push(` outside it. The pre-bound scanner
   // searched forward for the next `.push(` anywhere in the window and would
   // credit `unrelatedArray` to `xSeen` even though `xSeen`'s own guard never
-  // pushes anything.
+  // pushes anything. Wrapped in a synthetic decodeAllCollections — the real
+  // scan is scoped to it (see decodeAllCollectionsBody), so a fixture must
+  // supply one too.
   const FIXTURE_SRC = `
-const xSeen = new Set<string>();
-const unrelatedArray: string[] = [];
-for (const item of rawItems) {
-  if (!xSeen.has(item.id)) {
-    xSeen.add(item.id);
+export async function decodeAllCollections(dbPath: string): Promise<unknown> {
+  const xSeen = new Set<string>();
+  const unrelatedArray: string[] = [];
+  for (const item of rawItems) {
+    if (!xSeen.has(item.id)) {
+      xSeen.add(item.id);
+    }
   }
+  unrelatedArray.push(item);
 }
-unrelatedArray.push(item);
 `;
 
   test('the unrelated later push is not credited to the bounded guard', () => {
@@ -639,15 +718,23 @@ describe('string-literal braces in a guard body are an accepted, open residual (
     // depth short when it reaches the guard's real closing `}`, so it keeps
     // scanning — and the next `}` in the source (here, an enclosing block's)
     // closes it one level too late, sweeping in the unrelated push between.
+    // Wrapped in a synthetic decodeAllCollections (same reason as above),
+    // with one further trailing `}`: decodeAllCollectionsBody's OWN scan
+    // starts even further back, at the function's own brace, so IT also
+    // needs one extra close to reach depth 0 before running off the fixture
+    // — the same shift, one level further out, and the same fix.
     const FIXTURE_SRC = `
-const ySeen = new Set<string>();
-const unrelatedY: string[] = [];
-{
-  if (!ySeen.has(item.id)) {
-    const legacyShape = '{';
-    ySeen.add(item.id);
+export async function decodeAllCollections(dbPath: string): Promise<unknown> {
+  const ySeen = new Set<string>();
+  const unrelatedY: string[] = [];
+  {
+    if (!ySeen.has(item.id)) {
+      const legacyShape = '{';
+      ySeen.add(item.id);
+    }
+    unrelatedY.push(item);
   }
-  unrelatedY.push(item);
+}
 }
 `;
     expect(discoverAggregatePushTargets(FIXTURE_SRC)).toEqual({ unrelatedY: 'ySeen' });
@@ -657,14 +744,86 @@ const unrelatedY: string[] = [];
     // The extra unmatched `}` inside `'}'` satisfies balanced()'s depth
     // check early, before the guard's own real close — the returned body is
     // truncated mid-string, and the genuine push after it is never seen.
+    // Wrapped in a synthetic decodeAllCollections, same reason as above.
     const FIXTURE_SRC = `
-const zSeen = new Set<string>();
-if (!zSeen.has(item.id)) {
-  const legacyShape = '}';
-  zSeen.add(item.id);
-  zArray.push(item);
+export async function decodeAllCollections(dbPath: string): Promise<unknown> {
+  const zSeen = new Set<string>();
+  if (!zSeen.has(item.id)) {
+    const legacyShape = '}';
+    zSeen.add(item.id);
+    zArray.push(item);
+  }
 }
 `;
     expect(discoverAggregatePushTargets(FIXTURE_SRC)).toEqual({});
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: scope and collision safety (review follow-up on #688 review)
+// ---------------------------------------------------------------------------
+
+describe('discoverAggregatePushTargets fails loudly rather than silently (#688 review)', () => {
+  test('a push target seen twice in the scoped body throws instead of overwriting', () => {
+    // Two independent guards, both feeding an array named `shared`. Before
+    // scoping + this check, `found['shared']` would just silently end up
+    // pointing at whichever Set variable came last in file order.
+    const FIXTURE_SRC = `
+export async function decodeAllCollections(dbPath: string): Promise<unknown> {
+  const aSeen = new Set<string>();
+  const shared: string[] = [];
+  if (!aSeen.has(item.id)) {
+    aSeen.add(item.id);
+    shared.push(item);
+  }
+  const bSeen = new Set<string>();
+  if (!bSeen.has(item.id)) {
+    bSeen.add(item.id);
+    shared.push(item);
+  }
+}
+`;
+    expect(() => discoverAggregatePushTargets(FIXTURE_SRC)).toThrow(/push target "shared"/);
+  });
+
+  test('a source with no decodeAllCollections throws rather than silently scanning nothing (or everything)', () => {
+    const FIXTURE_SRC = `
+export async function someOtherFunction(): Promise<unknown> {
+  const aSeen = new Set<string>();
+  const arr: string[] = [];
+  if (!aSeen.has(item.id)) {
+    aSeen.add(item.id);
+    arr.push(item);
+  }
+}
+`;
+    expect(() => discoverAggregatePushTargets(FIXTURE_SRC)).toThrow(
+      /could not locate `decodeAllCollections`/
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: the guard regex must survive a nested paren in `.has(...)`
+// (review follow-up on #688 review — aligning the two `.has(` patterns)
+// ---------------------------------------------------------------------------
+
+describe('guard regex handles a nested paren in .has(...) (#688 review)', () => {
+  test('if (!seen.has(String(x))) is still matched, not silently skipped', () => {
+    // Before aligning with discoverDedupBlocks's `[^;]*?` shape, the guard
+    // regex used `[^)]*`, which cannot consume the inner `)` of `String(x)`
+    // at all — the whole guard match failed, and the block was skipped in
+    // silence rather than reported.
+    const FIXTURE_SRC = `
+export async function decodeAllCollections(dbPath: string): Promise<unknown> {
+  const nestedSeen = new Set<string>();
+  const nestedArr: string[] = [];
+  if (!nestedSeen.has(String(x))) {
+    nestedSeen.add(String(x));
+    nestedArr.push(x);
+  }
+}
+`;
+    expect(discoverAggregatePushTargets(FIXTURE_SRC)).toEqual({ nestedArr: 'nestedSeen' });
   });
 });
