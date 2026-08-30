@@ -468,12 +468,15 @@ describe('scope is not an extension allowlist (audit F2)', () => {
 
   test('a deep LEADING gap on a short line is allowed', async () => {
     // Axis 2 of the conjunction, pinned directly rather than inferred from the
-    // mid-line case. The repo's real worst case on this axis is a 20-character
-    // leading gap on a 95-column line (docs/REVERSE_ENGINEERING_FINDING.md);
-    // this fixture is deeper and still short, so the rule has to stay quiet.
-    await withTree({ 'docs/indented.md': `${' '.repeat(30)}a short indented line\n` }, ({ code }) =>
-      expect(code).toBe(0)
-    );
+    // mid-line case, and pinned ABOVE both of the repo's real extremes rather
+    // than between them: the deepest leading gap is 37 characters
+    // (docs/bulk-edit-transactions.md:235) and the longest line carrying a 20+
+    // gap is 95 columns (docs/REVERSE_ENGINEERING_FINDING.md:611). This fixture
+    // is 45 characters of gap on a 115-column line — deeper AND longer than
+    // anything real — and must still be quiet, because it is the line-length
+    // half of the conjunction that makes it safe, not the shallowness.
+    const line = `${' '.repeat(45)}${'x'.repeat(70)}`;
+    await withTree({ 'docs/indented.md': `${line}\n` }, ({ code }) => expect(code).toBe(0));
   });
 
   test('a wide gap in markdown that still ends on screen is allowed', async () => {
@@ -731,10 +734,61 @@ describe('scoping follow-ups (review of #679)', () => {
     ['form feed', '\f'],
     ['vertical tab', '\v'],
   ])('a line starting with %s then # is NOT a comment to git', async (_label, lead) => {
-    // git skips only spaces and tabs before the `#` test, so this is a real
-    // pattern to git. JS .trim() stripped these and read it as a comment —
-    // the mirror image of the mid-line-# bug fixed alongside it.
+    // git's blank set is space, tab and CR — probed one character at a time on
+    // 2.50.1 — so none of these is skipped before the `#` test and each line is
+    // a real pattern to git. JS .trim() stripped them and read the line as a
+    // comment, the mirror image of the mid-line-# bug fixed alongside it.
     await withTree({ '.gitattributes': `${lead}# payload.ts binary\n` }, ({ code }) =>
+      expect(code).toBe(1)
+    );
+  });
+
+  test('a CR separates the pattern from its attributes, as it does for git', async () => {
+    // Variation seven of the blank-set mismatch, and the first that came from
+    // this file asserting the WRONG SET rather than using JS's. Probed on git
+    // 2.50.1, one character at a time: space, tab and CR are blanks to git;
+    // form feed, vertical tab and NBSP are not.
+    //
+    // So `src/payload.ts<CR>cover.png -diff` is `src/payload.ts` + the
+    // attributes `cover.png` and `-diff` to git, which unsets diff on a .ts
+    // file — confirmed with `git check-attr diff src/payload.ts`. Splitting on
+    // `[ \t]+` alone swallowed the CR and read the first token as
+    // `src/payload.ts<CR>cover.png`, whose extension is `.png`, so the inert
+    // allowance returned before the attribute loop ever ran. A CR is invisible
+    // in a GitHub diff and INVISIBLE has no C0 controls, so nothing else
+    // caught it.
+    await withTree(
+      { '.gitattributes': 'src/payload.ts\rcover.png -diff\n' },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('gitattribute');
+      }
+    );
+  });
+
+  test('a CR before a # IS a comment to git, so it is one here', async () => {
+    // The other side of the same set: git's leading-blank skip takes CR too, so
+    // this line is a comment and reporting it would be a false positive. The
+    // gate used to report it. Kept next to the NBSP/form-feed/vertical-tab
+    // cases below, which are NOT blanks and so must still be reported — the
+    // pair is what pins the set to exactly what git uses.
+    await withTree({ '.gitattributes': '\r# payload.ts binary\n' }, ({ code }) =>
+      expect(code).toBe(0)
+    );
+  });
+
+  test.each([
+    ['.GITATTRIBUTES', '.GITATTRIBUTES', 'src/payload.ts binary\n'],
+    ['PACKAGE.JSON', 'PACKAGE.JSON', '{"scripts":{"postinstall":"echo pwned"}}\n'],
+  ])('a case-variant %s is still routed to its checker', async (_l, name, contents) => {
+    // Variation eight. The routing matched the filename exact-case, but this
+    // repo is developed on macOS and consumers run Windows — both
+    // case-insensitive — where the lookup resolves regardless of case. Probed
+    // on this filesystem: `git check-attr diff src/payload.ts` reports
+    // `diff: unset` from a file named `.GITATTRIBUTES`, and `npm pkg get
+    // scripts` returns the postinstall from a file named `PACKAGE.JSON`. The
+    // gate exited 0 on both.
+    await withTree({ [name]: contents, 'src/payload.ts': 'const a = 1;\n' }, ({ code }) =>
       expect(code).toBe(1)
     );
   });
