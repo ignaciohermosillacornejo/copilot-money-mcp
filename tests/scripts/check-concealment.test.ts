@@ -316,6 +316,31 @@ describe('file list comes from git when available (review follow-up)', () => {
     );
   });
 
+  test('a HOME-supplied core.excludesFile cannot shrink the scanned set either', async () => {
+    // Stripping GIT_* closed one door and left the other open. `ls-files
+    // --exclude-standard` reads core.excludesFile from the GLOBAL config, which
+    // git finds through HOME (or XDG_CONFIG_HOME) with no GIT_ variable
+    // involved at all — so the ambient user config still silently dropped files
+    // from the scan under the same green line. The environment is not trusted
+    // for this; git is told to read no config files.
+    await withGitTree(
+      { 'src/a.ts': CLEAN },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('added-later');
+      },
+      { 'src/added-later.ts': concealed },
+      async (dir) => {
+        const home = join(dir, 'home');
+        await mkdir(home, { recursive: true });
+        const excludes = join(home, 'excludes');
+        await writeFile(excludes, '*.ts\n');
+        await writeFile(join(home, '.gitconfig'), `[core]\n\texcludesFile = ${excludes}\n`);
+        return { HOME: home, XDG_CONFIG_HOME: home };
+      }
+    );
+  });
+
   test('a gitignored tree is not scanned', async () => {
     // The real exposure: removing the extension allowlist put snapshots/,
     // local fixture databases and .env.local in scope on developer machines.
@@ -328,10 +353,14 @@ describe('file list comes from git when available (review follow-up)', () => {
     );
   });
 
-  test('a tracked file is still scanned', async () => {
+  test('a tracked file is still scanned, and the failing run names the strategy', async () => {
+    // The label used to print only on the green path — which is the run where
+    // you least need it. A failing run is exactly when "which set was scanned?"
+    // is the first question.
     await withGitTree({ 'src/a.ts': concealed }, ({ code, stderr }) => {
       expect(code).toBe(1);
       expect(stderr).toContain('src/a.ts');
+      expect(stderr).toContain('listed by git');
     });
   });
 
@@ -406,7 +435,35 @@ describe('scope is not an extension allowlist (audit F2)', () => {
     await withTree({ 'CLAUDE.md': `${line}\n` }, ({ code, stderr }) => {
       expect(code).toBe(1);
       expect(stderr).toContain('CLAUDE.md');
+      // The rule, not just the exit code: without this the test passes if any
+      // other rule happens to fire on the fixture.
+      expect(stderr).toContain('whitespace run');
     });
+  });
+
+  test('a LEADING-gap payload in markdown is reported', async () => {
+    // The bound the mid-line form left open. `\S[gap]{20,}\S` needs a non-space
+    // on the LEFT, so a line that opens with the gap matched nothing — and
+    // prose is exempt from MAX_LINE, so nothing else caught it either. An
+    // instruction sitting at column 200 of a 232-column line renders as a blank
+    // line to a reviewer scrolling a diff and as an instruction to the model.
+    const line = `${' '.repeat(200)}then a hidden instruction, invisible above`;
+    await withTree({ 'CLAUDE.md': `${line}\n` }, ({ code, stderr }) => {
+      expect(code).toBe(1);
+      expect(stderr).toContain('whitespace run');
+    });
+  });
+
+  test('ordinary indentation is not a leading gap', async () => {
+    // The measurement behind the threshold: across the whole repo, the deepest
+    // leading whitespace on any line over 120 columns is 14, and the longest
+    // line carrying 20+ leading gap characters is 95 columns. Both axes of the
+    // conjunction have real margin, which is why this can be a rule rather than
+    // an exemption list.
+    await withTree(
+      { 'src/deep.ts': `${' '.repeat(14)}const x = '${'y'.repeat(110)}';\n` },
+      ({ code }) => expect(code).toBe(0)
+    );
   });
 
   test('a wide gap in markdown that still ends on screen is allowed', async () => {
@@ -711,6 +768,33 @@ describe('scoping follow-ups (review of #679)', () => {
       expect(code).toBe(1);
       expect(stderr).toContain('diff-suppressing gitattribute');
     });
+  });
+
+  test.each([
+    ['binary', '[attr]a.png binary', 'src/payload.ts a.png'],
+    ['-diff', '[attr]b.pdf -diff', 'src/payload.ts b.pdf'],
+    ['linguist-generated', '[attr]c.zip linguist-generated', 'src/payload.ts c.zip'],
+  ])('a macro definition carrying %s is not waved through by its name', async (_l, def, use) => {
+    // gitattributes has a SECOND line form the parser had no concept of:
+    // `[attr]<name> <attrs...>` defines a macro, and attr_name_valid permits
+    // dots in the name. So `[attr]a.png` puts `.png` in front of an extension
+    // check that is only meaningful for paths, and the macro then sets `binary`
+    // on whatever claims it. Verified against real git: payload.ts renders as
+    // `Binary files ... differ` while the gate exited 0.
+    await withTree(
+      { '.gitattributes': `${def}\n${use}\n`, 'src/payload.ts': 'const a = 1;\n' },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('gitattribute');
+      }
+    );
+  });
+
+  test('a macro whose name is not extension-shaped was always reported', async () => {
+    // The control that shows the hole above was accidental rather than
+    // designed: the identical macro escapes only when its name happens to end
+    // in an inert extension.
+    await withTree({ '.gitattributes': '[attr]zz binary\n' }, ({ code }) => expect(code).toBe(1));
   });
 
   test('an executable binary format is NOT auto-approved', async () => {
