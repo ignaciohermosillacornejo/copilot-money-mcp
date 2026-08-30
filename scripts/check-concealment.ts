@@ -149,6 +149,19 @@ function extensionOf(rel: string): string {
   return dot > 0 ? name.slice(dot).toLowerCase() : '';
 }
 
+/**
+ * Binary formats that are inert: media, fonts, archives, documents. A diff of
+ * one of these was never readable, so suppressing it hides nothing — which is
+ * what makes `*.png binary` legitimate boilerplate. Deliberately excludes the
+ * executable formats in BINARY_EXTENSIONS.
+ */
+const INERT_BINARY_EXTENSIONS = new Set([
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.icns', '.bmp', '.tiff',
+  '.pdf', '.zip', '.gz', '.tgz', '.bz2', '.xz', '.7z', '.tar',
+  '.woff', '.woff2', '.ttf', '.otf', '.eot',
+  '.mp3', '.mp4', '.wav', '.mov', '.webm', '.ogg',
+]);
+
 function isExpectedBinary(rel: string): boolean {
   return BINARY_EXTENSIONS.has(extensionOf(rel));
 }
@@ -404,11 +417,25 @@ function checkGitAttributes(contents: string, rel: string): void {
     // parsed down to `src/pay`, matched nothing, and still marked the real
     // file binary for every reviewer. A parser in this gate must not discard
     // more than the grammar it models.
-    const stripped = line.trim();
+    // git's parse_attr_line skips ONLY spaces and tabs before the `#` test
+    // (`strspn(line, blank)`, `blank[] = " \t"`). JS .trim() also strips NBSP,
+    // \f, \v, the unicode space separators and U+FEFF — so `<NBSP># p.ts binary`
+    // is a real pattern to git and was dropped here as a comment. That is the
+    // mirror of the bug this function just fixed: the old code discarded
+    // content AFTER a `#`, this discarded a whole line that is not a comment.
+    // Trailing \s is still stripped, for CRLF checkouts.
+    const stripped = line.replace(/^[ \t]+/, '').replace(/\s+$/, '');
     if (stripped === '' || stripped.startsWith('#')) return;
     // `*.png binary` targets something with no readable diff to suppress.
+    //
+    // Checked against INERT_BINARY_EXTENSIONS, NOT BINARY_EXTENSIONS. The
+    // latter answers a different question — where a NUL byte is expected — and
+    // includes .node/.wasm/.so/.dll/.exe, whose whole point is that they
+    // execute. Auto-approving `*.wasm binary` would bless diff suppression on
+    // exactly the formats that run. An author who genuinely needs it writes
+    // the exemption, which is what this gate's failure message asks for.
     const pattern = stripped.split(/\s+/)[0] ?? '';
-    if (isExpectedBinary(pattern)) return;
+    if (INERT_BINARY_EXTENSIONS.has(extensionOf(pattern))) return;
     for (const re of DIFF_SUPPRESSING_ATTRS) {
       if (!re.test(stripped)) continue;
       report(

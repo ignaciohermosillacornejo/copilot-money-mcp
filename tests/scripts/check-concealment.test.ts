@@ -39,6 +39,9 @@ const VS16 = String.fromCharCode(0xfe0f);
 const SOFT_HYPHEN = String.fromCharCode(0x00ad);
 const NUL = String.fromCharCode(0);
 
+/** A line carrying both a 60-space gap and an eval() — trips two rules at once. */
+const concealed = `echo ok${' '.repeat(60)}eval("x")${' # '}${'x'.repeat(80)}\n`;
+
 interface Result {
   code: number;
   stdout: string;
@@ -261,8 +264,6 @@ describe('scope', () => {
  * hole the audit that prompted these tests was about.
  */
 describe('file list comes from git when available (review follow-up)', () => {
-  const concealed = `echo ok${' '.repeat(60)}eval("x")${' # '}${'x'.repeat(80)}\n`;
-
   test('a gitignored tree is not scanned', async () => {
     // The real exposure: removing the extension allowlist put snapshots/,
     // local fixture databases and .env.local in scope on developer machines.
@@ -313,8 +314,6 @@ describe('file list comes from git when available (review follow-up)', () => {
 });
 
 describe('scope is not an extension allowlist (audit F2)', () => {
-  const concealed = `echo ok${' '.repeat(60)}eval("x")${' # '}${'x'.repeat(80)}\n`;
-
   test('scans a file with no extension at all', async () => {
     // The live exposure was .husky/pre-push, which runs on every developer
     // push. Under the old SCOPED_EXTENSIONS allowlist, inScope() required a
@@ -456,6 +455,9 @@ describe('diff-suppressing gitattributes (Fable review, item 1)', () => {
     ['binary', 'src/payload.ts binary'],
     ['-diff', 'src/payload.ts -diff'],
     ['linguist-generated', 'src/payload.ts linguist-generated=true'],
+    // A glob, since the binary allowance operates on globs — this is the shape
+    // the rule actually has to keep rejecting.
+    ['a glob pattern', '*.ts binary'],
   ])('flags %s', async (_label, line) => {
     // The same class as the NUL bypass reached without a NUL: one tracked
     // .gitattributes line makes git and GitHub print "Binary files differ" (or
@@ -486,8 +488,6 @@ describe('diff-suppressing gitattributes (Fable review, item 1)', () => {
 });
 
 describe('scoping follow-ups (review of #679)', () => {
-  const concealed = `echo ok${' '.repeat(60)}eval("x")${' # '}${'x'.repeat(80)}\n`;
-
   test('a tracked file under a SKIP_DIRS name is still scanned', async () => {
     // SKIP_DIRS is for UNREVIEWED LOCAL ARTIFACTS. A tracked file is in a diff
     // by definition — excluding build/loader.ts by directory name would turn a
@@ -537,6 +537,26 @@ describe('scoping follow-ups (review of #679)', () => {
       expect(code).toBe(1);
       expect(stderr).toContain('gitattribute');
     });
+  });
+
+  test.each([
+    ['NBSP', String.fromCharCode(0x00a0)],
+    ['form feed', '\f'],
+    ['vertical tab', '\v'],
+  ])('a line starting with %s then # is NOT a comment to git', async (_label, lead) => {
+    // git skips only spaces and tabs before the `#` test, so this is a real
+    // pattern to git. JS .trim() stripped these and read it as a comment —
+    // the mirror image of the mid-line-# bug fixed alongside it.
+    await withTree({ '.gitattributes': `${lead}# payload.ts binary\n` }, ({ code }) =>
+      expect(code).toBe(1)
+    );
+  });
+
+  test('an executable binary format is NOT auto-approved', async () => {
+    // BINARY_EXTENSIONS answers "where is a NUL expected"; it includes .wasm,
+    // .node, .so, .exe. Reusing it here would bless diff suppression on the
+    // formats whose whole point is that they execute.
+    await withTree({ '.gitattributes': '*.wasm binary\n' }, ({ code }) => expect(code).toBe(1));
   });
 
   test('a leading # in gitattributes is still a comment', async () => {
