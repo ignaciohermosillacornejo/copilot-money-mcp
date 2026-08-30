@@ -116,7 +116,7 @@ its own comment claimed:
 | 3 | both comment forms, keyed by label | three blocks share one comment; a duplicate label overwrote rather than added |
 | 4 | dedup blocks, pinning the key expression | three blocks pinned the local name `key` rather than what it resolves to — a bare identifier that pins nothing, since changing what `key` is built from would not move it |
 | 5 | bare identifiers resolved to their assigned expression, and asserted never to appear | a RESOLVED expression can still pin nothing: `key = keyFor(row)` is not a bare word, so it passed, but reimplementing `keyFor` to hash a different property leaves that exact string unchanged — the resolution closed the literal-bare-word case, not the opaque-call case |
-| 6 | resolved expressions required to contain a property access (`.someField`), not just be non-bare | — |
+| 6 | resolved expressions required to contain a property access (`.someField`), not just be non-bare | the check is on the call SITE's text, not on what the call actually returns: `key = keyFor(row.id)` contains `.id`, so it passes, even though `keyFor` could compute anything from that argument — narrows the opaque-call class rather than closing it |
 
 The revision-3 gap is worth recording because it is this bug's own shape: one comment
 above three blocks meant `acSeen.has(ac.change_id)` could become `acSeen.has(ac.description)`
