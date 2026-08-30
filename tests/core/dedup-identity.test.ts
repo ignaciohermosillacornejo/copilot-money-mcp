@@ -47,16 +47,27 @@
  * bug class, invisible to the detector written for it. That is the sharpest
  * argument for why this guard reads code and not prose.
  *
- * Two of the omissions are structural rather than "not done yet":
+ * Four of the coverage guard's blocks are excluded from the twin tests for a
+ * structural reason rather than "not done yet" — two distinct reasons,
+ * spanning those four blocks (see STRUCTURAL_KEYS below):
  *
- * - `goal_history` (keyed on goal_id + month) and `investment_prices` (keyed on
- *   security + price_type + period) are excluded because their keys ARE their
- *   identities — those collections store one document per tuple, and the tuple
- *   is what the Firestore path encodes. "Two documents identical in content but
- *   differing by id" is not expressible for them.
- * - This proves distinct documents survive, not that true storage duplicates are
- *   collapsed. `createTestDb` writes one row per id, so a genuinely double-stored
- *   document cannot be built in a fixture — the same limitation #122 had.
+ * - `goal_history` (keyed on goal_id + month, both its standalone
+ *   `decodeGoalHistory|seen` block and its aggregate `histSeen` twin) and
+ *   `investment_prices` (keyed on security + price_type + period) are
+ *   excluded because their keys ARE their identities — those collections
+ *   store one document per tuple, and the tuple is what the Firestore path
+ *   encodes. "Two documents identical in content but differing by id" is not
+ *   expressible for them. Three blocks.
+ * - `reconcilePendingTransactions|supersededPendingIds` is not a dedup at
+ *   all — it tracks pending rows superseded by a posted twin, not document
+ *   identity, and is listed only because the discovery regex finds every
+ *   `new Set<string>()` and this one has to be accounted for somewhere. One
+ *   block.
+ *
+ * Separately: the twin tests that DO run prove distinct documents survive,
+ * not that true storage duplicates are collapsed. `createTestDb` writes one
+ * row per id, so a genuinely double-stored document cannot be built in a
+ * fixture — the same limitation #122 had.
  */
 
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
@@ -320,6 +331,37 @@ const UNTESTED_BY_CHOICE = new Set([
 ]);
 
 /**
+ * For each dedup block, the name of the array its guarded `.push()` feeds.
+ * `decodeAllCollections` builds every inline-block collection with the
+ * identical shape — `if (!XSeen.has(id)) { XSeen.add(id); arr.push(item); }`
+ * — and returns `arr` under the field name that shape's own
+ * `const arr: T[] = []` declares, so the push target names the collection as
+ * reliably as `standaloneName` (below) names the standalone decoder's
+ * function. Read independently of `discoverDedupBlocks`, on its own pass over
+ * the source, so a bug in one discovery function cannot mask a bug in the
+ * other.
+ */
+function discoverAggregatePushTargets(): Record<string, string> {
+  const source = fs.readFileSync(
+    path.join(import.meta.dir, '..', '..', 'src', 'core', 'decoder.ts'),
+    'utf-8'
+  );
+  const found: Record<string, string> = {};
+  for (const m of source.matchAll(/const (\w+) = new Set<string>\(\)/g)) {
+    const setVar = m[1] as string;
+    const window = source.slice(
+      (m.index as number) + m[0].length,
+      (m.index as number) + m[0].length + 3000
+    );
+    const push = new RegExp(
+      `if \\(!${setVar}\\.has\\([^)]*\\)\\)\\s*\\{[\\s\\S]*?(\\w+)\\.push\\(`
+    ).exec(window);
+    if (push) found[push[1] as string] = setVar;
+  }
+  return found;
+}
+
+/**
  * Blocks the twin tests exercise, DERIVED from COLLECTIONS rather than listed.
  *
  * `standaloneName` existed on each entry and nothing read it — the vestige of
@@ -329,15 +371,24 @@ const UNTESTED_BY_CHOICE = new Set([
  * being tested; remove one and the set silently over-claims.
  *
  * The aggregate half is keyed by the `<name>Seen` variable in
- * decodeAllCollections. Transactions and accounts route through the shared
- * helpers instead of their own Set, so their aggregate coverage IS the helper
- * block — which is why AGGREGATE_SET_VAR has no entry for them.
+ * decodeAllCollections, DERIVED via discoverAggregatePushTargets rather than
+ * hand-written (review follow-up on #688) — a hand-written map here could
+ * only ever be checked for EXISTENCE downstream (a wrong-but-real variable
+ * name still "names a live block" in the staleness test below); it could
+ * never be checked for whether it names the RIGHT variable, and swapping two
+ * entries (`goals: 'budgetSeen'`, `budgets: 'goalSeen'`) produces the exact
+ * same TWIN_TESTED set either way, so nothing would have noticed. Transactions
+ * and accounts route through the shared helpers instead of their own Set, so
+ * their aggregate coverage IS the helper block, and they never appear as a
+ * push target here — which is why AGGREGATE_SET_VAR has no entry for them.
  */
-const AGGREGATE_SET_VAR: Record<string, string> = {
-  recurring: 'recSeen',
-  budgets: 'budgetSeen',
-  goals: 'goalSeen',
-};
+const AGGREGATE_PUSH_TARGETS = discoverAggregatePushTargets();
+const AGGREGATE_SET_VAR: Record<string, string> = Object.fromEntries(
+  COLLECTIONS.filter((c) => c.name in AGGREGATE_PUSH_TARGETS).map((c) => [
+    c.name,
+    AGGREGATE_PUSH_TARGETS[c.name] as string,
+  ])
+);
 
 const TWIN_TESTED = new Set(
   COLLECTIONS.flatMap((c) => {
@@ -383,14 +434,22 @@ function discoverDedupBlocks(): Record<string, string> {
 describe('dedup coverage is declared, not assumed (#668 review)', () => {
   const discovered = discoverDedupBlocks();
 
-  test('no block is pinned to a bare identifier', () => {
+  test('no block is pinned to a bare identifier or a field-free expression', () => {
     // The `key` resolution repaired three instances, but both of its fallbacks
     // land on a bare word — and a bare word is the "pins nothing" state that
     // repair removed. Recording it as an invariant turns a state a maintainer
     // could accidentally re-enter into one the suite rejects, which is the
     // ritual this repo runs on its own bugs.
+    //
+    // A resolved-but-opaque call is the same failure one layer down: `const
+    // key = keyFor(row);` is not a bare word, so it survived the check above,
+    // but pins the literal STRING "key = keyFor(row)" rather than any field —
+    // reimplementing `keyFor` to hash `row.name` instead of `row.account_id`
+    // changes what gets deduped without moving this string at all. Require at
+    // least one property access (`.someField`) in the resolved expression, so
+    // a pin has to name the field it claims to key on.
     const unpinned = Object.entries(DEDUP_BLOCKS)
-      .filter(([, key]) => key === 'NONE' || /^\w+$/.test(key))
+      .filter(([, key]) => key === 'NONE' || /^\w+$/.test(key) || !/\.\w+/.test(key))
       .map(([block]) => block);
     expect(unpinned).toEqual([]);
   });
@@ -398,6 +457,27 @@ describe('dedup coverage is declared, not assumed (#668 review)', () => {
   test('discovery finds the dedup blocks at all', () => {
     // Non-vacuity: the exact comparison below would pass over an empty object.
     expect(Object.keys(discovered).length).toBeGreaterThanOrEqual(30);
+  });
+
+  test('aggregate push-target discovery finds blocks at all', () => {
+    // Same non-vacuity concern one level down: if the push-target regex ever
+    // stops matching, AGGREGATE_PUSH_TARGETS silently becomes `{}`,
+    // AGGREGATE_SET_VAR silently becomes `{}` too, and the aggregate half of
+    // TWIN_TESTED silently drops to nothing — the exact "hand-written and
+    // unverified" state this derivation exists to close, just reintroduced
+    // one layer down instead of fixed.
+    expect(Object.keys(AGGREGATE_PUSH_TARGETS).length).toBeGreaterThanOrEqual(3);
+  });
+
+  test('derived AGGREGATE_SET_VAR is unchanged', () => {
+    // Pinned like PASSTHROUGH_PROCESSORS in the sibling file: a collection's
+    // aggregate dedup block entering or leaving derivation's view is a
+    // visible diff, not a silent one.
+    expect(AGGREGATE_SET_VAR).toEqual({
+      recurring: 'recSeen',
+      budgets: 'budgetSeen',
+      goals: 'goalSeen',
+    });
   });
 
   test('every dedup block and its key expression are unchanged', () => {
