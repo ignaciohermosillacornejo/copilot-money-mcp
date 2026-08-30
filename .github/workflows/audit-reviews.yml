@@ -172,7 +172,7 @@ jobs:
           # write, and `gh api` — which can — is denied outright now that the
           # data it was fetching arrives via the pre-fetch step above.
           claude_args: |
-            --model claude-sonnet-4-6
+            --model claude-sonnet-5
             --allowedTools "Bash(gh pr view*),Bash(gh pr diff*),Bash(git log*),Bash(git show*),Read,Grep,Glob,Write"
             --disallowedTools "Bash(gh api*),Bash(gh pr review*),Bash(gh pr merge*),Bash(gh pr close*),Bash(gh issue*),Bash(gh pr comment*)"
 
