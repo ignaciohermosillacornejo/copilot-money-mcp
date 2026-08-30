@@ -421,16 +421,54 @@ const DISCOVERY_WINDOW = 3000;
  * `found['unique']` nine times over (harmless only because no `COLLECTIONS`
  * name is `'unique'`). Scoping to `decodeAllCollections` removes that
  * collision class outright rather than merely tolerating it.
+ *
+ * Two failure modes, both closed HERE rather than left for the floor test or
+ * the AGGREGATE_SET_VAR pin two layers downstream to catch by accident
+ * (review follow-up — mutation-verified both were only caught that far away
+ * before this fix):
+ *
+ *   - The anchor requires a `:` before the first `{`, so it needs an actual
+ *     return type annotation — but that alone does NOT rule out a return
+ *     type whose own annotation contains a brace, e.g.
+ *     `Promise<{ ok: boolean } & AllCollectionsResult>`. The anchor would
+ *     then match early, on the TYPE LITERAL's own `{`, and `balanced()`
+ *     would faithfully return that bracket's contents: short, non-empty,
+ *     structurally plausible-looking text containing none of
+ *     `decodeAllCollections`'s real dedup blocks.
+ *   - A `balanced()` run-off (no matching close found before the source
+ *     ends) fails the same way one level further: an EMPTY string.
+ *
+ * Both are "a parser silently returns an empty or partial slice" — the exact
+ * construct the sibling PR (#685/#688 test-guard cleanup) has spent several
+ * revisions closing elsewhere in this repo. The regex tightening narrows
+ * WHICH shapes can trigger this; the length assertion is what actually
+ * closes it, because it does not depend on anticipating every shape that
+ * can go wrong — only on the fact that a real function body this large does
+ * not shrink to a sliver. The real body is ~18,000 characters; the floor
+ * below is set with a wide margin under that, wide enough to never trip on
+ * a legitimate edit, tight enough that no degenerate slice can sneak under
+ * it undetected.
  */
-function decodeAllCollectionsBody(source: string): string {
-  const decl = /^export async function decodeAllCollections\([^)]*\)[^{]*\{/m.exec(source);
+const MIN_PLAUSIBLE_BODY_LENGTH = 5000;
+
+function decodeAllCollectionsBody(
+  source: string,
+  minPlausibleLength: number = MIN_PLAUSIBLE_BODY_LENGTH
+): string {
+  const decl = /^export async function decodeAllCollections\([^)]*\)\s*:[^{]*\{/m.exec(source);
   if (!decl) {
     throw new Error(
       'discoverAggregatePushTargets: could not locate `decodeAllCollections` in the given source — the scan is scoped to its body and cannot run without it'
     );
   }
   const braceIdx = (decl.index as number) + decl[0].length - 1;
-  return balanced(source, braceIdx, '{', '}')[0];
+  const [body] = balanced(source, braceIdx, '{', '}');
+  if (body.length < minPlausibleLength) {
+    throw new Error(
+      `discoverAggregatePushTargets: decodeAllCollectionsBody extracted an implausibly short body (${body.length} chars, expected at least ${minPlausibleLength}) — the anchor likely matched a brace embedded in the return type instead of the function's own opening brace, or balanced() ran off the end of the source without finding a match`
+    );
+  }
+  return body;
 }
 
 /**
@@ -471,9 +509,15 @@ function discoverAggregatePushTargets(
   source: string = fs.readFileSync(
     path.join(import.meta.dir, '..', '..', 'src', 'core', 'decoder.ts'),
     'utf-8'
-  )
+  ),
+  // Passed through to decodeAllCollectionsBody. Defaults to the real
+  // production floor; fixtures below that are testing something OTHER than
+  // the length assertion itself override it down, since a synthetic snippet
+  // a few hundred characters long is not — and should not have to
+  // pretend to be — a plausible decodeAllCollections body.
+  minPlausibleLength: number = MIN_PLAUSIBLE_BODY_LENGTH
 ): Record<string, string> {
-  const scoped = decodeAllCollectionsBody(source);
+  const scoped = decodeAllCollectionsBody(source, minPlausibleLength);
   const found: Record<string, string> = {};
   for (const m of scoped.matchAll(/const (\w+) = new Set<string>\(\)/g)) {
     const setVar = m[1] as string;
@@ -521,6 +565,14 @@ function discoverAggregatePushTargets(
  * their aggregate coverage IS the helper block, and they never appear as a
  * push target here — which is why AGGREGATE_SET_VAR has no entry for them.
  */
+// Runs at MODULE SCOPE, not inside a test — so any of the throws inside
+// discoverAggregatePushTargets / decodeAllCollectionsBody (missing
+// declaration, implausibly short slice, duplicate push target) fails to
+// even LOAD this file, taking down every test in it, not just the
+// aggregate-specific ones below. That is the intended behavior — a throw
+// here means the guard cannot do its job at all, and a module that fails to
+// load is about as loud as a failure can get — but it should not surprise
+// whoever hits it and sees the whole file red instead of one test.
 const AGGREGATE_PUSH_TARGETS = discoverAggregatePushTargets();
 const AGGREGATE_SET_VAR: Record<string, string> = Object.fromEntries(
   COLLECTIONS.filter((c) => c.name in AGGREGATE_PUSH_TARGETS).map((c) => [
@@ -608,19 +660,26 @@ describe('dedup coverage is declared, not assumed (#668 review)', () => {
     expect(Object.keys(discovered).length).toBeGreaterThanOrEqual(30);
   });
 
-  test('aggregate push-target discovery finds blocks at all', () => {
-    // Non-vacuity, raised to the real count rather than a loose margin
-    // (review follow-up): `decodeAllCollections` has 25 inline dedup blocks
-    // today, and a floor of 3 — this test's original value, chosen only to
-    // cover the 3 collections AGGREGATE_SET_VAR filters down to — would stay
-    // green even if the scan regressed to finding just those three, silently
-    // dropping visibility into the other 22 the duplicate-push-target check
-    // in discoverAggregatePushTargets also depends on seeing. If the
-    // push-target regex ever stops matching at all, AGGREGATE_PUSH_TARGETS
-    // silently becomes `{}`, AGGREGATE_SET_VAR silently becomes `{}` too, and
-    // the aggregate half of TWIN_TESTED silently drops to nothing — the
-    // exact "hand-written and unverified" state this derivation exists to
-    // close, just reintroduced one layer down instead of fixed.
+  test('aggregate push-target discovery finds exactly 25 blocks (count pin, not a loose floor)', () => {
+    // Renamed from "...finds blocks at all" (review follow-up): that name
+    // described a non-vacuity check, but the value — 25, the real count —
+    // behaves as an exact-count PIN with zero headroom. Removing one
+    // legitimate collection from decodeAllCollections turns this red at
+    // "Expected >= 25, Received 24", not just at total collapse. That is
+    // deliberate, not an oversight — do not "fix" the apparent tightness by
+    // loosening it back toward a wide margin (contrast the sibling
+    // `discovered` floor at `>= 30` against 36 real, which genuinely IS a
+    // margin, chosen because that scan covers blocks this file does not
+    // otherwise pin one by one). The tightness here is what turns
+    // decodeAllCollectionsBody's two silent-partial-slice failure modes —
+    // an anchor matching an embedded brace in the return type, or a
+    // balanced() run-off — into loud ones: both now throw before this test
+    // even runs (see decodeAllCollectionsBody's own assertion), but if that
+    // assertion were ever removed, THIS floor is the last line of defense,
+    // and a floor of 3 (this test's original value, sized only to cover the
+    // 3 collections AGGREGATE_SET_VAR filters down to) would not have
+    // caught a scan that regressed to finding just those three, silently
+    // losing visibility into the other 22.
     expect(Object.keys(AGGREGATE_PUSH_TARGETS).length).toBeGreaterThanOrEqual(25);
   });
 
@@ -700,7 +759,7 @@ export async function decodeAllCollections(dbPath: string): Promise<unknown> {
 `;
 
   test('the unrelated later push is not credited to the bounded guard', () => {
-    expect(discoverAggregatePushTargets(FIXTURE_SRC)).toEqual({});
+    expect(discoverAggregatePushTargets(FIXTURE_SRC, 0)).toEqual({});
   });
 });
 
@@ -737,7 +796,7 @@ export async function decodeAllCollections(dbPath: string): Promise<unknown> {
 }
 }
 `;
-    expect(discoverAggregatePushTargets(FIXTURE_SRC)).toEqual({ unrelatedY: 'ySeen' });
+    expect(discoverAggregatePushTargets(FIXTURE_SRC, 0)).toEqual({ unrelatedY: 'ySeen' });
   });
 
   test('a stray } inside a string literal fails CLOSED: the guard body truncates and a real push goes missing rather than misattributed', () => {
@@ -755,7 +814,7 @@ export async function decodeAllCollections(dbPath: string): Promise<unknown> {
   }
 }
 `;
-    expect(discoverAggregatePushTargets(FIXTURE_SRC)).toEqual({});
+    expect(discoverAggregatePushTargets(FIXTURE_SRC, 0)).toEqual({});
   });
 });
 
@@ -783,7 +842,7 @@ export async function decodeAllCollections(dbPath: string): Promise<unknown> {
   }
 }
 `;
-    expect(() => discoverAggregatePushTargets(FIXTURE_SRC)).toThrow(/push target "shared"/);
+    expect(() => discoverAggregatePushTargets(FIXTURE_SRC, 0)).toThrow(/push target "shared"/);
   });
 
   test('a source with no decodeAllCollections throws rather than silently scanning nothing (or everything)', () => {
@@ -824,6 +883,36 @@ export async function decodeAllCollections(dbPath: string): Promise<unknown> {
   }
 }
 `;
-    expect(discoverAggregatePushTargets(FIXTURE_SRC)).toEqual({ nestedArr: 'nestedSeen' });
+    expect(discoverAggregatePushTargets(FIXTURE_SRC, 0)).toEqual({ nestedArr: 'nestedSeen' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: an embedded brace in the return type must not silently
+// produce a partial slice (review follow-up on #688 review)
+// ---------------------------------------------------------------------------
+
+describe('decodeAllCollectionsBody rejects an implausibly short slice (#688 review)', () => {
+  test('a return type containing a brace makes the anchor match early — caught by the length assertion, not silently returning zero targets', () => {
+    // `Promise<{ ok: boolean } & AllCollectionsResult>` — the anchor's
+    // `[^{]*` stops at the type literal's OWN `{`, not the function body's,
+    // so balanced() faithfully extracts just the few characters of ` ok:
+    // boolean ` as `scoped` if nothing catches it. Before the length
+    // assertion, this returned `{}` silently, detected only two layers
+    // downstream by the non-vacuity floor and the AGGREGATE_SET_VAR pin.
+    // No override on the call below — this fixture exercises the REAL
+    // production default (5000), not a relaxed one, since the whole point
+    // is proving that default actually protects the real call site.
+    const FIXTURE_SRC = `
+export async function decodeAllCollections(dbPath: string): Promise<{ ok: boolean } & AllCollectionsResult> {
+  const xSeen = new Set<string>();
+  const arr: string[] = [];
+  if (!xSeen.has(item.id)) {
+    xSeen.add(item.id);
+    arr.push(item);
+  }
+}
+`;
+    expect(() => discoverAggregatePushTargets(FIXTURE_SRC)).toThrow(/implausibly short body/);
   });
 });
