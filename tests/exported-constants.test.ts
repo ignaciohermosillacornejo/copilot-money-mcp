@@ -1,5 +1,7 @@
 /**
- * Bidirectional pin over EVERY exported string-literal constant in `src/`.
+ * Bidirectional pin over the exported string-literal `as const` arrays in
+ * `src/` — 25 of them across 15 files today. Deliberately not "every constant":
+ * SCOPE below names what this grammar cannot see.
  *
  * WHY THIS FILE EXISTS
  *
@@ -24,7 +26,7 @@
  *   - cross-module: a preset anywhere under src/ is found
  *   - name-agnostic: a constant that ignores the DEFAULT_*_FIELDS convention
  *     is still found, because the filter is SHAPE (an exported `as const`
- *     array whose members are all string literals)
+ *     array whose members are all SINGLE-QUOTED string literals)
  *
  * That shape also sweeps in wire-visible enums and allowlists —
  * RECURRING_FREQUENCIES, KNOWN_ERROR_CODES, COLOR_NAMES, TOP_MOVERS_FILTERS.
@@ -34,9 +36,9 @@
  *
  * SCOPE: the grammar below is `export const NAME = [...] as const`, so all of
  * that covers as-const ARRAYS only. A string-literal allowlist declared as
- * `new Set([...])` is invisible to it — TRANSFER_CATEGORIES and
- * INCOME_CATEGORIES (src/utils/categories.ts) are unpinned today for exactly
- * that reason. Known gap, tracked in #695. Said out loud because "no ratchet
+ * `new Set([...])` is invisible to it — TRANSFER_CATEGORIES
+ * (src/utils/categories.ts:837) and INCOME_CATEGORIES (:886) are unpinned today
+ * for exactly that reason. Known gap, tracked in #695. Said out loud because "no ratchet
  * catches a list getting shorter" must not be read as "every list in src/ is
  * ratcheted": a reader who believes the wider claim stops looking.
  *
@@ -52,8 +54,11 @@
  * regex below silently stops matching (a formatting change, a refactor to a
  * different declaration style), the constants it can no longer see read as
  * "vanished" and the backward check goes red. A partial under-match cannot
- * pass quietly. The explicit non-vacuity test makes the total-failure case
- * report an unambiguous reason rather than 25 confusing ones.
+ * pass quietly. Total failure is the case worth naming: discovery returns
+ * nothing, so the forward check passes vacuously, no contents tests are
+ * generated at all, and the only signal is a 25-name diff on the backward
+ * check. The explicit non-vacuity test exists to report that as one
+ * unambiguous reason instead.
  *
  * MAINTENANCE: changing one of these deliberately means updating the entry
  * below. That is the intended workflow — the point is that it cannot happen
@@ -99,7 +104,9 @@ const SRC_ROOT = join(import.meta.dir, '..', 'src');
  * a multi-declaration silent drop for a single-declaration silent drop rather
  * than eliminating the class.
  *
- * No such literal sits in an `as const` array in src/ today. The two shapes
+ * No such literal sits in an `as const` array in src/ today — checked by
+ * bracket-matching each `export const NAME = [ ... ] as const` body and
+ * scanning its literals: zero of 25. The two shapes
  * already coexist in one file though — src/tools/field-selection.ts declares
  * `as const` arrays at :36, :60, :121 and :151 (closing at :47, :68, :127 and
  * :158) and carries bracket-bearing hint literals at :89, :105-106, :137 and
@@ -107,9 +114,10 @@ const SRC_ROOT = join(import.meta.dir, '..', 'src');
  * rather than a hypothetical. Tracked as #696.
  *
  * ASSUMPTION, another silent-drop mode and the likeliest of them to actually
- * happen: every member is written with SINGLE quotes. `.prettierrc.json` sets `singleQuote: true`, but Prettier's
- * fewer-escapes rule flips any string whose content holds an apostrophe to
- * double quotes, so `bun run format` itself produces:
+ * happen: every member is written with SINGLE quotes. `.prettierrc.json` sets
+ * `singleQuote: true`, but Prettier's fewer-escapes rule flips any string whose
+ * content holds an apostrophe to double quotes, so `bun run format` itself
+ * produces:
  *
  *     export const MSGS = ["can't", 'ok'] as const;
  *
@@ -120,9 +128,10 @@ const SRC_ROOT = join(import.meta.dir, '..', 'src');
  * top: a double-quoted string IS a string literal, so a reader checking whether
  * their new constant is covered concludes that it is. Same shape as #677 — not
  * "the pin rejects this" but "the pin never saw it." Unlikely against today's
- * members, which are snake_case field names and SCREAMING_CASE enum values;
- * likely against the first human-readable list anyone adds. Tracked as #696
- * with the rest of the family.
+ * members: no member of any of the 25 arrays contains a quote character of any
+ * kind — checked, and the claim that matters, since the members are field names
+ * and enum values (a few kebab-cased, none prose). Likely against the first
+ * human-readable list anyone adds. Tracked as #696 with the rest of the family.
  */
 const EXPORTED_ARRAY =
   /^export const ([A-Z][A-Z0-9_]*)\s*(?::[^=]+)?=\s*\[([^[\]]*?)\]\s*as const/gms;
@@ -143,17 +152,22 @@ function tsFilesUnder(dir: string): string[] {
  * collectStringConstants rejects the array, and the constant drops out of the
  * pin without a word.
  *
- * ASSUMPTION: no string literal in `src/` contains `//` or a block-comment
- * opener. Stated rather than left implicit because the failure is SILENT in
- * exactly this file's own direction: mangling a literal makes the residue check
- * reject the array and drop it from the pin. That is a known limitation, not
- * something to work around here — a URL inside an exported `as const` array is
- * the realistic case, and making this string-aware is the fix if one ever
- * lands. A sibling hazard of the same shape: block comments are stripped
- * BEFORE line comments, so a line comment that contains a block-comment opener
- * lets the block regex run forward to the next closer and delete the real
- * declarations in between. Neither case occurs in `src/` today; both are
- * tracked in #691.
+ * ASSUMPTION: no string literal INSIDE an exported `as const` array contains
+ * `//` or a block-comment opener. Scoped on purpose, because the unscoped
+ * version is false — three URL literals in src/ do contain `//`
+ * (src/core/graphql/client.ts, src/core/auth/browser-token.ts,
+ * src/core/database.ts) and this helper mangles all three. They are harmless
+ * only because none sits in an `as const` array, which is the sole text the
+ * matcher reads. Checked that way: zero of the 25 array bodies contain `//`,
+ * and zero string literals anywhere in src/ contain a block-comment opener.
+ *
+ * Stated rather than left implicit because the failure is SILENT in exactly
+ * this file's own direction: mangling a literal makes the residue check reject
+ * the array and drop it from the pin. Making this string-aware is the fix when
+ * a URL eventually lands in one. A sibling hazard of the same shape: block
+ * comments are stripped BEFORE line comments, so a line comment containing a
+ * block-comment opener lets the block regex run to the next closer and delete
+ * the declarations in between. Both tracked in #691.
  *
  * Same helper and same caveat as tests/core/decoder-field-completeness.test.ts,
  * duplicated on purpose rather than shared, so neither file's parsing rules can
@@ -196,14 +210,20 @@ function collectStringConstants(source: string): Map<string, readonly string[]> 
  *
  * ASSUMPTION, and the one member of the family with teeth: constant names are
  * unique across src/. The map is keyed by name alone, so two files exporting
- * the same name collapse last-write-wins. All 25 are unique today.
+ * the same name collapse last-write-wins. Checked as two independently derived
+ * numbers: the grammar matches 25 declarations in src/, and they reduce to 25
+ * distinct map keys. Counting the map alone could never show this — collisions
+ * are precisely what the map hides, so `discovered.size === 25` would hold
+ * either way.
  *
- * Worse than its siblings in kind, not just degree. They DROP a constant, which
- * the backward check catches the moment it is pinned. This one SUBSTITUTES one:
- * the name stays present, the members silently become the other file's, and the
- * winner is decided by readdirSync order. So the contents test can be green on
- * one machine and red on another, with nothing in this file to explain why.
- * Tracked as #694.
+ * Two forms, and the likelier one is the quiet one. Usually the loser is simply
+ * never seen: the winner's members get pinned, the NAME is present either way so
+ * forward and backward are both satisfied, and the second declaration receives
+ * no coverage at all — stably, on every machine. Only when the two arrays DIFFER
+ * does readdirSync order start to decide anything, and then the contents test
+ * can be red on one machine and green on another. That form is at least loud
+ * where it fires. Unlike its siblings, neither form drops a NAME the backward
+ * check could notice: this one substitutes rather than drops. Tracked as #694.
  */
 function discoverStringConstants(): Map<string, readonly string[]> {
   const found = new Map<string, readonly string[]>();
