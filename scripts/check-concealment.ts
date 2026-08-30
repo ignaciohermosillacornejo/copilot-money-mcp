@@ -439,7 +439,23 @@ function checkLine(
  * is refused rather than allow-listed — `text=auto`, `eol=lf` and
  * `linguist-language=...` do not hide content, so they need no exemption.
  */
-const DIFF_SUPPRESSING_ATTRS = [/(^|\s)binary(\s|$)/, /(^|\s)-diff(\s|$)/, /linguist-generated/];
+const DIFF_SUPPRESSING_ATTRS = [
+  /(^|\s)binary(\s|$)/,
+  /(^|\s)-diff(\s|$)/,
+  // Anchored on both sides, like its two neighbours, and with the un-setting
+  // forms carved out. Bare `/linguist-generated/` also matched
+  // `linguist-generated=false` and `-linguist-generated`, which take a file OUT
+  // of the "Load diff" fold — the opposite of concealment. The gate reported
+  // them and told the author to delete the thing making their file reviewable.
+  //
+  // The carve-out is `=false` specifically, not "anything but =true". Linguist
+  // reads these with `boolean_attribute(attr) => attr != "false"`, so
+  // `linguist-generated=1` and `=yes` collapse the diff exactly like `=true`
+  // does. Narrowing to `(=true)?` would have been this file's recurring bug one
+  // more time: a pattern here approximating a grammar defined elsewhere, and
+  // failing OPEN on every value the approximation did not anticipate.
+  /(^|\s)linguist-generated(=(?!false(\s|$))\S*)?(\s|$)/,
+];
 
 function checkGitAttributes(contents: string, rel: string): void {
   contents.split('\n').forEach((line, i) => {

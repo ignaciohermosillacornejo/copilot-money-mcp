@@ -503,6 +503,31 @@ describe('diff-suppressing gitattributes (Fable review, item 1)', () => {
     );
   });
 
+  test.each([
+    ['a bare linguist-generated, which git reads as set', 'src/payload.ts linguist-generated'],
+    ['linguist-generated=true', 'src/payload.ts linguist-generated=true'],
+    // Linguist's own boolean_attribute is `attribute != "false"`, so every
+    // value other than that literal collapses the diff. Anchoring on `=true`
+    // alone would have waved this through.
+    ['a non-true value linguist still treats as set', 'src/payload.ts linguist-generated=1'],
+  ])('flags %s', async (_label, line) => {
+    await withTree({ '.gitattributes': `${line}\n` }, ({ code, stderr }) => {
+      expect(code).toBe(1);
+      expect(stderr).toContain('gitattribute');
+    });
+  });
+
+  test.each([
+    ['linguist-generated=false', 'src/payload.ts linguist-generated=false'],
+    ['-linguist-generated, the unset form', 'src/payload.ts -linguist-generated'],
+  ])('does not flag %s, which UN-collapses the diff', async (_label, line) => {
+    // The unanchored /linguist-generated/ matched these too, and they are the
+    // opposite of concealment: they take a file OUT of the "Load diff" fold.
+    // Reporting them told an author to remove the thing making their file
+    // reviewable.
+    await withTree({ '.gitattributes': `${line}\n` }, ({ code }) => expect(code).toBe(0));
+  });
+
   test('leaves the legitimate attributes alone', async () => {
     // text=auto / eol=lf / linguist-language do not hide content, which is why
     // the rule refuses the suppressing attributes rather than allow-listing
