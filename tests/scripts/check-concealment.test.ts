@@ -186,8 +186,14 @@ describe('scope', () => {
   test('skips binary files rather than reporting noise from them', async () => {
     // A NUL byte marks it binary; the soft hyphens after it would otherwise be
     // reported as invisible characters on every line.
+    //
+    // The path changed from src/blob.json to an actual binary extension when
+    // the NUL free-pass was closed (Fable review): a NUL in a .json is no
+    // longer "binary, therefore skip" — it is now a finding, because such a
+    // file still parses and executes while git shows the reviewer nothing.
+    // Quiet-skipping is now scoped to extensions where a NUL is expected.
     const binary = `PK${NUL}${NUL}${SOFT_HYPHEN.repeat(50)}`;
-    await withTree({ 'src/blob.json': binary }, ({ code }) => expect(code).toBe(0));
+    await withTree({ 'docs/blob.png': binary }, ({ code }) => expect(code).toBe(0));
   });
 
   test('skips lockfiles, which are generated and covered by check:deps-pinned', async () => {
@@ -277,12 +283,18 @@ describe('file list comes from git when available (review follow-up)', () => {
   });
 
   test('an untracked but unignored file is scanned — it can still reach a diff', async () => {
+    // `added-later.ts` MUST go through afterCommit. Writing it in the `files`
+    // map put it in the seed commit, so it was tracked — and the test passed
+    // even with the untracked listing removed entirely. It executed the guard
+    // without detecting anything, which is the vacuous-assertion class this
+    // repo names explicitly. Caught in review, not by the suite.
     await withGitTree(
-      { 'src/a.ts': 'const a = 1;\n', 'src/added-later.ts': concealed },
+      { 'src/a.ts': 'const a = 1;\n' },
       ({ code, stderr }) => {
         expect(code).toBe(1);
         expect(stderr).toContain('added-later');
-      }
+      },
+      { 'src/added-later.ts': concealed }
     );
   });
 
@@ -371,6 +383,71 @@ describe('auto-fired lifecycle scripts (audit F1)', () => {
     // would make the gate unusable, which is how allowlists get widened.
     const pkg = JSON.stringify({ scripts: { test: 'bun test', build: 'tsc' } });
     await withTree({ 'package.json': pkg }, ({ code }) => expect(code).toBe(0));
+  });
+});
+
+describe('a NUL byte is not a free pass (Fable review)', () => {
+  test('a NUL in a source file is reported, not skipped as binary', async () => {
+    // The bypass: `contents.includes(NUL) -> continue` treated NUL-containing
+    // as binary-and-therefore-safe. But such a module still runs under bun and
+    // node, while git renders it as "Binary files differ" so the reviewer sees
+    // nothing at all — strictly better concealment than the off-screen trick.
+    const withNul = `export const V = '1.0.0';${NUL} export function init() {}\n`;
+    await withTree({ 'src/mod.ts': withNul }, ({ code, stderr }) => {
+      expect(code).toBe(1);
+      expect(stderr).toContain('NUL byte');
+    });
+  });
+
+  test('a NUL in a real binary is still skipped quietly', async () => {
+    await withTree({ 'docs/logo.png': `PK${NUL}${NUL}payload` }, ({ code }) =>
+      expect(code).toBe(0)
+    );
+  });
+
+  test('an extensionless file with a NUL is reported', async () => {
+    // No extension means no binary claim, so it must not get the free pass.
+    await withTree({ 'scripts/hook': `#!/bin/sh${NUL}\n` }, ({ code }) => expect(code).toBe(1));
+  });
+});
+
+describe('unicode spaces cannot hide the gap (Fable review)', () => {
+  const NBSP = String.fromCharCode(0x00a0);
+  const NARROW_NBSP = String.fromCharCode(0x202f);
+  const IDEOGRAPHIC = String.fromCharCode(0x3000);
+
+  test.each([
+    ['NBSP', NBSP],
+    ['narrow NBSP', NARROW_NBSP],
+    ['ideographic space', IDEOGRAPHIC],
+  ])('a %s run pushes a payload off-screen and is caught', async (_label, gap) => {
+    // All are valid ECMAScript whitespace and render as blank horizontal
+    // space, so they push a payload off the right edge exactly like spaces —
+    // but the old `[ \t]`-only rule never matched them.
+    const line = `const a = 1;${gap.repeat(45)}require('child_process').execSync('x');${'y'.repeat(60)}\n`;
+    await withTree({ 'src/a.ts': line }, ({ code, stderr }) => {
+      expect(code).toBe(1);
+      expect(stderr).toContain('whitespace run');
+    });
+  });
+});
+
+describe('nested manifests and .mdx (Fable review)', () => {
+  test('a lifecycle script in a workspace package.json is caught', async () => {
+    // Workspace installs run sub-package lifecycle scripts; only the root
+    // manifest was being checked.
+    const pkg = JSON.stringify({ scripts: { postinstall: 'node evil.js' } });
+    await withTree({ 'packages/sub/package.json': pkg }, ({ code, stderr }) => {
+      expect(code).toBe(1);
+      expect(stderr).toContain('postinstall');
+    });
+  });
+
+  test('.mdx keeps the code rules — it compiles to JS', async () => {
+    await withTree(
+      { 'docs/page.mdx': `export const x = 1;${' '.repeat(60)}eval(y);${'z'.repeat(80)}\n` },
+      ({ code }) => expect(code).toBe(1)
+    );
   });
 });
 
