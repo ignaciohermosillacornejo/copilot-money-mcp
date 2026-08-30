@@ -158,9 +158,12 @@ const INERT_BINARY_EXTENSIONS = new Set([
  */
 const BINARY_EXTENSIONS = new Set([
   ...INERT_BINARY_EXTENSIONS,
-  // Executable formats. These belong in the NUL-expected set but NOT in the
-  // inert one: `*.wasm binary` must not be auto-approved, because suppressing
-  // the diff of something that runs is the concealment this gate exists for.
+  // Formats that carry NULs but are NOT inert, so they stay out of the
+  // allowance above. Two disqualifying reasons:
+  //   - they execute: .node, .wasm, .dylib, .so, .dll, .exe
+  //   - they are containers whose contents a reviewer might genuinely need to
+  //     see, and which can carry code: .mcpb bundles this server, .ldb/.sst
+  //     are LevelDB tables holding cached user data
   '.mcpb', '.node', '.wasm', '.ldb', '.sst', '.dylib', '.so', '.dll', '.exe',
 ]);
 
@@ -454,10 +457,27 @@ function checkGitAttributes(contents: string, rel: string): void {
     // tokenizing gives `"cover.png` for `"cover.png run.ts" binary`, whose
     // extension reads as inert, so the allowance would pass a .ts file. That
     // is the third variation of this same mismatch, and like the last it fails
-    // OPEN — so anything that is not an unambiguous bare pattern gets no
-    // allowance at all.
+    // OPEN. So the quoted form is PARSED rather than refused: refusing it would
+    // fail the gate on `"my docs/logo.png" binary`, which is legitimate, and
+    // this rule already learned that lesson with *.png.
+    //
+    // git unquotes the pattern before matching (unquote_c_style), so the
+    // backslash strip below moves the extension we read toward the one git
+    // resolves. It is an APPROXIMATION of that function, not a port: it does
+    // not decode \n, \t or \xNN. Called out rather than left implied, because
+    // this rule's failures so far have all been a parser quietly diverging
+    // from the grammar it models. The divergence that remains is narrow and
+    // fails CLOSED — an undecoded escape leaves a stranger-looking extension,
+    // which misses the inert allowance and gets reported.
+    //
+    // No test pins the strip: every payload I could construct resolves to the
+    // same extension with or without it, so a test would execute the line
+    // without detecting its removal. Left unpinned and said so, rather than
+    // shipping an assertion that cannot fail.
     const quoted = /^"((?:[^"\\]|\\.)*)"/.exec(stripped);
-    const pattern = quoted ? (quoted[1] as string) : (stripped.split(/[ \t]+/)[0] ?? '');
+    const pattern = quoted
+      ? (quoted[1] as string).replace(/\\(.)/g, '$1')
+      : (stripped.split(/[ \t]+/)[0] ?? '');
     if (INERT_BINARY_EXTENSIONS.has(extensionOf(pattern))) return;
     for (const re of DIFF_SUPPRESSING_ATTRS) {
       if (!re.test(stripped)) continue;
