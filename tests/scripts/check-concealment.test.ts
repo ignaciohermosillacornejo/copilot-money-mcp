@@ -581,6 +581,18 @@ describe('scoping follow-ups (review of #679)', () => {
     );
   });
 
+  test('a quoted gitattributes pattern with a backslash does not reach the inert allowance', async () => {
+    // Stripping backslashes can only SHORTEN the string, so an escape after the
+    // last dot manufactures an inert-looking extension git never resolves to:
+    // `"evil.p\ng"` reads as `.png` to a naive strip and as a literal newline to
+    // git's unquote_c_style. The strip was an approximation of that function and
+    // it failed OPEN, so the escape form now misses the allowance entirely.
+    await withTree({ '.gitattributes': '"evil.p\\ng" binary\n' }, ({ code, stderr }) => {
+      expect(code).toBe(1);
+      expect(stderr).toContain('diff-suppressing gitattribute');
+    });
+  });
+
   test('an executable binary format is NOT auto-approved', async () => {
     // BINARY_EXTENSIONS answers "where is a NUL expected"; it includes .wasm,
     // .node, .so, .exe. Reusing it here would bless diff suppression on the

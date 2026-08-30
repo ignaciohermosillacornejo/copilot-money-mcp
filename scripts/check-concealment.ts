@@ -460,25 +460,20 @@ function checkGitAttributes(contents: string, rel: string): void {
     // OPEN. So the quoted form is PARSED rather than refused: refusing it would
     // fail the gate on `"my docs/logo.png" binary`, which is legitimate, and
     // this rule already learned that lesson with *.png.
-    //
-    // git unquotes the pattern before matching (unquote_c_style), so the
-    // backslash strip below moves the extension we read toward the one git
-    // resolves. It is an APPROXIMATION of that function, not a port: it does
-    // not decode \n, \t or \xNN. Called out rather than left implied, because
-    // this rule's failures so far have all been a parser quietly diverging
-    // from the grammar it models. The divergence that remains is narrow and
-    // fails CLOSED — an undecoded escape leaves a stranger-looking extension,
-    // which misses the inert allowance and gets reported.
-    //
-    // No test pins the strip: every payload I could construct resolves to the
-    // same extension with or without it, so a test would execute the line
-    // without detecting its removal. Left unpinned and said so, rather than
-    // shipping an assertion that cannot fail.
     const quoted = /^"((?:[^"\\]|\\.)*)"/.exec(stripped);
-    const pattern = quoted
-      ? (quoted[1] as string).replace(/\\(.)/g, '$1')
-      : (stripped.split(/[ \t]+/)[0] ?? '');
-    if (INERT_BINARY_EXTENSIONS.has(extensionOf(pattern))) return;
+    const pattern = quoted ? (quoted[1] as string) : (stripped.split(/[ \t]+/)[0] ?? '');
+    // A quoted pattern containing a backslash is NOT unquoted before the inert
+    // check. git resolves the escapes with unquote_c_style before matching, and
+    // stripping them here only ever SHORTENS the string, so a backslash after
+    // the last dot manufactures an inert-looking extension that git never
+    // resolves to: `"evil.p\ng"` reads as `.png` here and as a newline to
+    // unquote_c_style. Approximating the grammar failed OPEN — the fourth
+    // variation of the same mismatch in this one function — so the escape form
+    // simply misses the allowance and gets reported. An author with a genuinely
+    // escaped binary path writes the exemption, which is cheap; a payload that
+    // spells its extension with an escape does not get waved through, which is
+    // not.
+    if (!pattern.includes('\\') && INERT_BINARY_EXTENSIONS.has(extensionOf(pattern))) return;
     for (const re of DIFF_SUPPRESSING_ATTRS) {
       if (!re.test(stripped)) continue;
       report(
