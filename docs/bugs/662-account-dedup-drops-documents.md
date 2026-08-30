@@ -106,7 +106,7 @@ allocation — and pins the **key expression** it tests. A block that is new, re
 whose key changes from an id to a content field fails there, and every block must be
 twin-tested, structural, or explicitly listed as untested-by-choice.
 
-That shape was reached over four revisions, each of which review showed was narrower than
+That shape was reached over five revisions, each of which review showed was narrower than
 its own comment claimed:
 
 | Revision | Discovered by | What it missed |
@@ -114,7 +114,8 @@ its own comment claimed:
 | 1 | nothing — five hand-written tests | claimed "every collection"; covered five |
 | 2 | `// Label: dedupe by` comments | the nine standalone decoders, which write `// Deduplicate by` |
 | 3 | both comment forms, keyed by label | three blocks share one comment; a duplicate label overwrote rather than added |
-| 4 | dedup blocks, pinning the key expression | — |
+| 4 | dedup blocks, pinning the key expression | three blocks pinned the local name `key` rather than what it resolves to — a bare identifier that pins nothing, since changing what `key` is built from would not move it |
+| 5 | bare identifiers resolved to their assigned expression, and asserted never to appear | — |
 
 The revision-3 gap is worth recording because it is this bug's own shape: one comment
 above three blocks meant `acSeen.has(ac.change_id)` could become `acSeen.has(ac.description)`
@@ -123,9 +124,12 @@ with the whole suite green. And revision 2 could not see
 the previous instance of this exact class, invisible to the detector written for it.
 
 **Mutation-verified** at each revision, and the mutations are the record of what each one
-actually caught. At revision 4: reintroducing the old account key turns three tests red;
+actually caught. At revision 5: reintroducing the old account key turns three tests red;
 changing the investment-prices key, the `acSeen` key, or adding an uncommented dedup block
-each fail the coverage guard. All three of those passed before revision 4.
+each fail the coverage guard; a new block keyed on an unresolvable identifier now fails
+too. All of those passed before revision 5 — the last is the gap revision 4 itself left
+open, closed by resolving bare identifiers to their assignment and asserting one never
+survives unresolved.
 
 Note what this detector still cannot see: it proves distinct documents survive, not that
 true storage duplicates are collapsed. `createTestDb` writes one row per id, so a genuine
