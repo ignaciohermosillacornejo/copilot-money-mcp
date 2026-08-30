@@ -299,7 +299,6 @@ function walk(dir: string, out: string[]): string[] {
     return out;
   }
   for (const entry of entries) {
-    if (SKIP_DIRS.has(entry)) continue;
     const p = join(dir, entry);
     let isDir: boolean;
     try {
@@ -307,6 +306,9 @@ function walk(dir: string, out: string[]): string[] {
     } catch {
       continue;
     }
+    // Tested AFTER isDirectory, so a FILE named `build` or `dist` is scanned.
+    // Testing the entry name first dropped extensionless executables by name.
+    if (isDir && SKIP_DIRS.has(entry)) continue;
     if (isDir) walk(p, out);
     else if (inScope(p)) out.push(p);
   }
@@ -384,16 +386,29 @@ function checkLine(
  * instead of the content. `linguist-generated=true` collapses the file behind a
  * "Load diff" fold in the Files-changed view — the view maintainers review from.
  *
- * Refused rather than allow-listed, for the reason this gate keeps relearning:
- * the legitimate entries (`text=auto`, `eol=lf`, `linguist-language=...`) do
- * not hide content, so none of them needs an exemption.
+ * One legitimate use is refused-by-default and must not be: `*.png binary` and
+ * `*.pdf binary` are the standard boilerplate for marking real binaries, and
+ * this repo tracks .png and .mp4 files. Suppressing the diff of a file that is
+ * genuinely binary hides nothing a reviewer could have read anyway, so a
+ * pattern whose extension is in BINARY_EXTENSIONS is allowed. Everything else
+ * is refused rather than allow-listed — `text=auto`, `eol=lf` and
+ * `linguist-language=...` do not hide content, so they need no exemption.
  */
 const DIFF_SUPPRESSING_ATTRS = [/(^|\s)binary(\s|$)/, /(^|\s)-diff(\s|$)/, /linguist-generated/];
 
 function checkGitAttributes(contents: string, rel: string): void {
   contents.split('\n').forEach((line, i) => {
-    const stripped = line.replace(/#.*$/, '').trim();
-    if (stripped === '') return;
+    // gitattributes(5): "Lines that begin with # are ignored." ONLY at line
+    // start — a mid-line `#` is literal and part of the pattern. Stripping
+    // from any `#` discarded content git honours, so `src/pay#load.ts binary`
+    // parsed down to `src/pay`, matched nothing, and still marked the real
+    // file binary for every reviewer. A parser in this gate must not discard
+    // more than the grammar it models.
+    const stripped = line.trim();
+    if (stripped === '' || stripped.startsWith('#')) return;
+    // `*.png binary` targets something with no readable diff to suppress.
+    const pattern = stripped.split(/\s+/)[0] ?? '';
+    if (isExpectedBinary(pattern)) return;
     for (const re of DIFF_SUPPRESSING_ATTRS) {
       if (!re.test(stripped)) continue;
       report(
@@ -490,7 +505,7 @@ function checkLifecycleScripts(contents: string, rel: string): void {
  * tests drive it (synthetic trees under CHECK_CONCEALMENT_ROOT). Both paths
  * are covered: see 'file list' in tests/scripts/check-concealment.test.ts.
  */
-function gitFiles(root: string): string[] | undefined {
+function gitFiles(root: string): { tracked: string[]; untracked: string[] } | undefined {
   // Strip inherited git plumbing vars before shelling out. A pre-push hook runs
   // with GIT_DIR set, and `git -C <dir>` does NOT override it — so without this,
   // `git ls-files` inside a scratch directory silently answers about the AMBIENT
@@ -532,19 +547,31 @@ function gitFiles(root: string): string[] | undefined {
   // Untracked-but-not-ignored files can be `git add`ed into the next diff, so
   // they are in scope too. Ignored files are not.
   const untracked = run(['ls-files', '-z', '--others', '--exclude-standard']) ?? [];
-  return [...new Set([...tracked, ...untracked])].map((rel) => join(root, rel));
+  const abs = (list: string[]): string[] => list.map((rel) => join(root, rel));
+  return { tracked: abs(tracked), untracked: abs(untracked.filter((f) => !tracked.includes(f))) };
 }
 
 function listFiles(root: string): string[] {
   const fromGit = gitFiles(root);
   if (fromGit === undefined) return walk(root, []);
-  // `git ls-files` does not traverse directories, so SKIP_DIRS never applied on
-  // this path — a tracked file under a vendored directory would be scanned here
-  // but skipped by the walk. Apply the same exclusions to both, so behaviour
-  // does not depend on which path ran.
-  return fromGit.filter(
-    (file) => !relative(root, file).split(sep).some((segment) => SKIP_DIRS.has(segment))
-  );
+  // SKIP_DIRS exists for UNREVIEWED LOCAL ARTIFACTS, so it applies to the
+  // untracked half only. A tracked file is in a diff by definition, which is
+  // this gate's entire threat model — excluding `build/loader.ts` because of
+  // its directory name would turn a list of vendored-output names into a list
+  // of places a payload may sit unwatched. A previous revision did exactly
+  // that, in a PR arguing against that shape.
+  return [...fromGit.tracked, ...fromGit.untracked.filter((f) => !underSkippedDir(root, f))];
+}
+
+/**
+ * True when a DIRECTORY segment of the path is in SKIP_DIRS. The final segment
+ * is the filename and is excluded: an extensionless `scripts/build` is a shell
+ * script — the exact shape of `.husky/pre-push` that this gate's scoping fix
+ * was written about — and dropping it for its name would be that bug surviving
+ * inside its own fix.
+ */
+function underSkippedDir(root: string, file: string): boolean {
+  return relative(root, file).split(sep).slice(0, -1).some((seg) => SKIP_DIRS.has(seg));
 }
 
 const files = listFiles(ROOT).filter((f) => inScope(f));
