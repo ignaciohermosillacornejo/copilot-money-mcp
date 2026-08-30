@@ -3,6 +3,16 @@
  * `src/` — 25 of them across 15 files today. Deliberately not "every constant":
  * SCOPE below names what this grammar cannot see.
  *
+ * On the number 25, which these comments quote in several places: it is a
+ * SNAPSHOT as of this PR, not an invariant. No test enforces it — the floor is
+ * `>= 20` on purpose (see the guards-the-guard test), so adding the 26th
+ * constant makes every "25" here stale at once and nothing goes red. The
+ * workflow gives no prompt either: forward fails, you add a `PINNED` entry,
+ * forward passes, and no comment is touched. Treat the counts as "true when
+ * written" and the CHECKS beside them as the evidence; where a count is
+ * load-bearing it is stated as a comparison between two numbers derived
+ * separately, which stays meaningful whatever the totals become.
+ *
  * WHY THIS FILE EXISTS
  *
  * The repo's #635 bug class: "deleting a field from a preset survived all
@@ -84,8 +94,7 @@ const SRC_ROOT = join(import.meta.dir, '..', 'src');
  * `^` also anchors every attempt to a line start, so a failed match cannot
  * restart mid-line. `s` is vestigial: no `.` remains in the pattern, and
  * `[^[\]]` / `[^=]` cross newlines by themselves. The character class below is
- * explained in enough detail to suggest every flag was chosen; this one was
- * not.
+ * explained in enough detail to suggest every flag was chosen; this one was not.
  *
  * The body is `[^[\]]*?`, not `.*?`: a lazy dotall body lets a declaration
  * that is NOT `as const` scan forward to the next `] as const` anywhere later
@@ -104,12 +113,18 @@ const SRC_ROOT = join(import.meta.dir, '..', 'src');
  * a multi-declaration silent drop for a single-declaration silent drop rather
  * than eliminating the class.
  *
- * No such literal sits in an `as const` array in src/ today — checked by
- * bracket-matching each `export const NAME = [ ... ] as const` body and
- * scanning its literals: zero of 25. The two shapes
- * already coexist in one file though — src/tools/field-selection.ts declares
- * `as const` arrays at :36, :60, :121 and :151 (closing at :47, :68, :127 and
- * :158) and carries bracket-bearing hint literals at :89, :105-106, :137 and
+ * No such literal sits in an `as const` array in src/ today. The denominator is
+ * the load-bearing part: the scan bracket-matches EVERY
+ * `export const NAME = [ ... ] as const` in src/, discoverable by this grammar
+ * or not — a balanced walk pairs an inner `[` with its inner `]` and still
+ * reaches the real closer, so a bracket-carrying array cannot hide from it the
+ * way it hides from the matcher above. That population is 25, the same 25 the
+ * pin holds, and none of their literals carries a bracket. Counting only the
+ * pin's 25 would prove nothing, for the reason spelled out below. The two
+ * shapes already coexist in one file though — src/tools/field-selection.ts
+ * declares `as const` arrays at :36, :60, :121 and :151 (closing at :47, :68,
+ * :127 and :158) and carries bracket-bearing hint literals at :89, :105-106,
+ * :137 and
  * :169 — so a `fields:`-hint list landing in one is a plausible next commit
  * rather than a hypothetical. Tracked as #696.
  *
@@ -133,9 +148,9 @@ const SRC_ROOT = join(import.meta.dir, '..', 'src');
  * is the hazard itself, not evidence against it. The falsifiable form is to
  * bracket-match every as-const array in src/, discoverable or not, and compare
  * counts: 25 of them, the same 25 the pin holds, none written with a
- * double-quoted or backtick member. Nothing is hidden today. Likely against the
- * first
- * human-readable list anyone adds. Tracked as #696 with the rest of the family.
+ * double-quoted or backtick member. Nothing is hidden today. Likely against
+ * the first human-readable list anyone adds. Tracked as #696 with the rest of
+ * the family.
  */
 const EXPORTED_ARRAY =
   /^export const ([A-Z][A-Z0-9_]*)\s*(?::[^=]+)?=\s*\[([^[\]]*?)\]\s*as const/gms;
@@ -225,14 +240,22 @@ function collectStringConstants(source: string): Map<string, readonly string[]> 
  * are precisely what the map hides, so `discovered.size === 25` would hold
  * either way.
  *
- * Two forms, and the likelier one is the quiet one. Usually the loser is simply
- * never seen: the winner's members get pinned, the NAME is present either way so
- * forward and backward are both satisfied, and the second declaration receives
- * no coverage at all — stably, on every machine. Only when the two arrays DIFFER
- * does readdirSync order start to decide anything, and then the contents test
- * can be red on one machine and green on another. That form is at least loud
- * where it fires. Unlike its siblings, neither form drops a NAME the backward
- * check could notice: this one substitutes rather than drops. Tracked as #694.
+ * The branch that decides how bad it gets is WHICH FILE WINS RELATIVE TO WHAT
+ * THE PIN HOLDS — not whether the two arrays agree. The name is present either
+ * way, so forward and backward are satisfied in every case and only the contents
+ * test can move:
+ *
+ *   arrays differ, pin matches the WINNER -> all three green, and the loser is a
+ *     live declaration in src/ that no test touches. Silent, stable, indefinite.
+ *     This is the dangerous one, and the likeliest: a real collision is two
+ *     unrelated lists sharing a name far more often than two copies of one list.
+ *   arrays differ, pin matches the LOSER  -> contents red, but only on machines
+ *     whose readdirSync order produces that winner. Loud where it fires.
+ *   arrays identical                      -> quiet and stable; the loser is
+ *     uncovered but currently says the same thing, until it drifts.
+ *
+ * Unlike its siblings, no branch drops a NAME the backward check could notice:
+ * this one substitutes rather than drops. Tracked as #694.
  */
 function discoverStringConstants(): Map<string, readonly string[]> {
   const found = new Map<string, readonly string[]>();
