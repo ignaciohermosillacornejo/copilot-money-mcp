@@ -171,6 +171,7 @@ jobs:
           # read-only by construction: `gh pr view` and `gh pr diff` cannot
           # write, and `gh api` — which can — is denied outright now that the
           # data it was fetching arrives via the pre-fetch step above.
+          #
           # MODEL TIERING, deliberately different from claude-review.yml.
           #
           # That workflow reviews an open PR and is usually the ONLY reviewer
