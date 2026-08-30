@@ -100,7 +100,7 @@ Severity is blast radius: what silently ships if the gap is hit.
 | F13 | Low | `check-pr-sections` | Ritual-field deletions invisible |
 | F14 | Low | e2e | `'all tool responses can be serialized'` covers 2 of 33 tools |
 | F15 | Low | Skills linter | `KNOWN_TOOL_PARAMS` has dead entries; one masks a typo of a real tool |
-| F16 | Low | `check-version-sync` | Reads only the first `packages[]` entry |
+| ~~F16~~ | — | ~~`check-version-sync`~~ | **WITHDRAWN — the finding was wrong.** See below. |
 | F17 | Low | `check-deps-pinned` | Misses `overrides` / `resolutions` |
 | F18 | Low | CI | `auto-release.yml` has no `needs:` on Tests; release path re-runs no gates |
 
@@ -135,6 +135,9 @@ extension. The walker descends into `.husky` — dot-dirs are not in
 `SKIP_DIRS` — but `inScope()` (lines 180-182) drops it because
 `lastIndexOf('.')` is `-1`.
 
+**Verification pass note:** this is if anything understated. `.mts` — a live
+TypeScript extension — was also unscanned, alongside `.rb` and `.ps1`.
+
 **Fix.** Scan every non-`SKIP_FILES` file, sniffing for NUL to skip binaries,
 instead of allowlisting extensions.
 
@@ -145,8 +148,9 @@ Four independent hand-maintained name lists:
 and `tests/unit/server-write-dispatch.test.ts:16` (`WRITE_TOOL_SPECS`).
 Nothing compares any of them to `WRITE_TOOL_DEFS`.
 
-**They have already drifted.** The rejection list at `:614` holds 17 of 19
-write tools. `update_transactions` and `bulk_edit_transactions` were added to
+**One of the four has already drifted** — the rejection list at `:614` holds
+17 of 19 write tools. (The other three each hold all 19; the original
+write-up said "they have drifted", which overstated it.) `update_transactions` and `bulk_edit_transactions` were added to
 the registry and never got a "refuses without `--write`" test.
 
 **Mutation (exploitable).** In `src/server.ts:182`, changed
@@ -223,7 +227,7 @@ green. **Control:** the identical property on `delete_tag` fails immediately.
 (`src/tools/live/top-movers.ts:40`) is sent as `$filter: TopMoversFilter`, a
 real external GraphQL enum, with **zero occurrences in the ledger**. Contrast
 `TimeFrame`, ledgered by hand precisely because the walk cannot see it —
-there is even a comment at `ledger.ts:341` admitting the read side is manual.
+there is even a comment at `ledger.ts:351` admitting the read side is manual.
 
 ### F8 — `COVERED_LIVE_TOOLS` is self-referential (Medium)
 
@@ -265,6 +269,13 @@ reads "14 read-only tools".
 list. It omits `manifest.json`, `docs/tools-by-mode.md`,
 `docs/TESTING_GUIDE.md`, `docs/EXAMPLE_QUERIES.md`.
 
+**There is a second gate of the same shape next door**, which the original
+write-up missed: `tests/unit/doc-sync.test.ts` maintains its own hand list
+(`CLAUDE.md`, `CONTRIBUTING.md`, `README.md`) and omits all four files above
+too. That does not change this finding's conclusion, but it does change the
+remediation: a Batch 4 that fixes only `check-tool-counts.ts` leaves the
+identical class alive one file over.
+
 **Already realized on `main`, all gates green:** `docs/TESTING_GUIDE.md:102`
 says "You should see 8 tools listed"; `docs/EXAMPLE_QUERIES.md:541` says
 "these 12 tools".
@@ -300,7 +311,9 @@ names. Removing a flag goes red; **adding** a new `{x}_live` whose cache twin
 exists but is unflagged cannot.
 
 **Mutation.** Registered `get_goals_live` without the flag, bumping counts as
-a developer would: only four prose/count failures. Verified the real defect
+a developer would: only seven failures, all bookkeeping (2 context-budget,
+2 doc-sync, 1 count pin, 2 `check:tool-counts`) — the first write-up said
+four. None detects the missing flag. Verified the real defect
 directly — in `--live-reads` mode the server then lists both `get_goals` and
 `get_goals_live`, two tools for one semantic read, one serving the stale
 cache. That is exactly what the invariant at `src/server.ts:150-157` promises
@@ -321,7 +334,16 @@ never happens.
   `split_transactions` and `update_existing`, which appear nowhere else in
   the repo. The first permanently whitelists the plural misspelling of the
   real tool `split_transaction`.
-- **F16** `scripts/check-version-sync.ts:30` reads only `packages[0]`.
+- **F16 — WITHDRAWN.** The audit claimed `check-version-sync.ts:30` reads
+  only `packages[0]`. It does not. The line is
+  `(server.packages ?? []).find((p) => p.registryType === 'npm')`, and
+  `git diff 18ec7d6c HEAD -- scripts/check-version-sync.ts` is empty, so this
+  is a misread rather than line drift. There is no weaker adjacent defect
+  either: when the `.find()` misses, `npmPackageVersion` is `undefined` and
+  `undefined !== pkgVersion` still records a mismatch, so it cannot pass
+  vacuously. Struck by an independent verification pass. With it gone, §4's
+  "covers all six version occurrences that exist" is simply correct rather
+  than in tension with a finding.
 - **F17** `scripts/check-deps-pinned.ts:31` omits `overrides` /
   `resolutions`.
 - **F18** `.github/workflows/auto-release.yml` has no `needs:` on the Tests
@@ -332,6 +354,10 @@ never happens.
 ---
 
 ## 4. Verified correct — do not re-audit
+
+**This list is not exhaustive.** It records the guards this pass actually
+examined and found sound. A guard absent from both §3 and this section was
+not reached — treat it as unexamined, not as cleared.
 
 - `tests/helpers/context-budget.ts:48-74` — bidirectional plus a non-vacuity
   floor. The *helper* is the good pattern; F8 is about one call site.
@@ -525,3 +551,38 @@ mutation-testing that file must go through the capture + `IN_SCOPE_*` path.
   each fails 1–4 tests.
 - Processor `consumed:` lists are spread from the same arrays used for
   extraction, so `consumed` cannot drift from what is read.
+
+
+---
+
+## 7. Independent verification pass
+
+This document was fact-checked by a separate reviewer that re-ran the
+mutations rather than reading the write-up. Coverage: 16 of the 18 F-findings
+mutation-reproduced, plus 4 of §4's claims; F9 and F16 were checked by reading
+and git history.
+
+Result: **one finding withdrawn (F16, wrong), one line reference corrected
+(F7: 341 → 351), and three claims tightened** (F3's "they have drifted" applied
+to one list, not four; F12's failure count 4 → 7; F2 noted as understated).
+Everything else reproduced as written, including both Security findings and
+the F3 exploit — which the verifier took further than this document did, by
+probing a read-only server directly:
+
+```
+bulk_edit_transactions LISTED on read-only server? false
+handler EXECUTED? true
+```
+
+That is the finding's central claim demonstrated end to end: the listing gate
+holds, the dispatch gate does not.
+
+**Caveat on absolute numbers.** The verifier's worktree was three commits past
+`18ec7d6c` and baselined at 2875, not 2853. Every mutation *delta* matched;
+only the absolutes differ. When reproducing anything here, compare deltas
+against your own baseline rather than against the recorded absolute.
+
+A second §4 correction from the same pass: reclassifying `create_tag` fails
+**22** tests, not the 26 first recorded — the exact number depends which counts
+you bump. All three named semantic guards are among them, so "well defended"
+stands.

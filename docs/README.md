@@ -67,8 +67,9 @@ guard in the repo for that class and proving each finding by mutation.
   boundary-audit run (issue #445), covering the 2026-03-12 → 2026-06-10 window.
 - **[audits/2026-08-29-completeness-guard-audit.md](audits/2026-08-29-completeness-guard-audit.md)**
   — Completeness-guard audit, triggered by the #635 bug class recurring in #673/#676.
-  25 findings (F1–F18 across tests, `scripts/` gates and CI; D1–D7 in the data layer),
-  every one mutation-proven. Two security-relevant, and D1 silently corrupts spend totals.
+  24 findings (F1–F18 across tests, `scripts/` gates and CI, one since withdrawn;
+  D1–D7 in the data layer), mutation-proven and independently fact-checked. Two
+  security-relevant, and D1 silently corrupts spend totals.
 
 ## `graphql-capture/` — Copilot's GraphQL API, as observed
 
