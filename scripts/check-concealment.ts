@@ -41,7 +41,7 @@
  */
 
 import { spawnSync } from 'child_process';
-import { readFileSync, readdirSync, statSync } from 'fs';
+import { readFileSync, readdirSync, realpathSync, statSync } from 'fs';
 import { dirname, join, relative, sep } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -405,11 +405,42 @@ function checkLifecycleScripts(contents: string, rel: string): void {
  * are covered: see 'file list' in tests/scripts/check-concealment.test.ts.
  */
 function gitFiles(root: string): string[] | undefined {
+  // Strip inherited git plumbing vars before shelling out. A pre-push hook runs
+  // with GIT_DIR set, and `git -C <dir>` does NOT override it — so without this,
+  // `git ls-files` inside a scratch directory silently answers about the AMBIENT
+  // repo and reports the scratch tree as untracked, bypassing SKIP_DIRS entirely.
+  // That is how this gate started reporting node_modules under husky while
+  // passing when run by hand. Caught by the pre-push hook it broke.
+  const env = { ...process.env };
+  for (const key of [
+    'GIT_DIR',
+    'GIT_WORK_TREE',
+    'GIT_INDEX_FILE',
+    'GIT_COMMON_DIR',
+    'GIT_OBJECT_DIRECTORY',
+    'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+    'GIT_PREFIX',
+  ])
+    delete env[key];
+
   const run = (args: string[]): string[] | undefined => {
-    const r = spawnSync('git', ['-C', root, ...args], { encoding: 'utf-8' });
+    const r = spawnSync('git', ['-C', root, ...args], { encoding: 'utf-8', env });
     if (r.status !== 0 || typeof r.stdout !== 'string') return undefined;
     return r.stdout.split('\0').filter((line) => line !== '');
   };
+
+  // Belt to that braces: only trust git listing when `root` is itself the repo
+  // root. If root is a subdirectory of some unrelated repo, its answer would be
+  // scoped to that repo's rules rather than to the tree we were asked to scan.
+  const top = run(['rev-parse', '--show-toplevel']);
+  if (top === undefined || top.length === 0) return undefined;
+  try {
+    const topReal = realpathSync((top[0] ?? '').trim());
+    if (topReal !== realpathSync(root)) return undefined;
+  } catch {
+    return undefined;
+  }
+
   const tracked = run(['ls-files', '-z']);
   if (tracked === undefined) return undefined;
   // Untracked-but-not-ignored files can be `git add`ed into the next diff, so
