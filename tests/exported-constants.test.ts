@@ -552,22 +552,32 @@ describe('exported string constants are pinned (#635 class detector)', () => {
     // any bound whose stop character does not appear between these two
     // declarations. A dotall is not in it — loosening to `[\s\S]+?` already
     // turns the boundary snippet, forward and one contents test red — but a
-    // bound that merely stops SOMEWHERE ELSE is. Sweeping 31 bounds (29
-    // `(?::[^X]+)?` variants plus both dotall forms) against the previous
-    // version of this snippet, whose decoy body was `{ field: 1 },`, left
-    // `[^{]+`, `[^}]+` and `[^,]+` green: one survivor per punctuation
-    // character the decoy happened to carry, exactly as `[^;]+` survived the
-    // boundary snippet's `;`.
+    // bound that merely stops SOMEWHERE ELSE is. The rule generates its own
+    // survivors, so whatever the decoy carries is a hole: with the previous
+    // decoy body `{ field: 1 },`, each of `[^{]+`, `[^}]+`, `[^,]+` and
+    // `[^:]+` cleared the whole file. Four characters it did not need, four
+    // holes.
     //
-    // Hence an empty decoy and a bare blank line. The rule is stronger than
-    // "no semicolon": this snippet must carry NO character a plausible bound
-    // would stop at. Do not restore `{ field: 1 },` to make it match the
-    // boundary snippet — that reopens the family. The same sweep now detects
-    // all 31 but `[^\n]+`, which is not in the class: a declaration starts at
-    // a line start, so a bound that cannot cross a newline cannot reach one.
-    // It narrows discovery rather than swallowing a neighbour.
+    // Hence a decoy with no punctuation in it at all. Sweeping 35 bounds — 33
+    // negated-class variants over ASCII punctuation, digits and newline, plus
+    // both dotall forms — mutated one at a time into the grammar and run
+    // against this file, this snippet detects 32. Of the rest, `[^ ]+` is
+    // caught by the accepting test above rather than here, and `[^_]+` and
+    // `[^\n]+` are caught by nothing: the first halts on the `_` in the
+    // constant NAMES, the second cannot cross a line start, which is where
+    // every declaration begins, so it narrows discovery instead of swallowing
+    // a neighbour. None of the three is a bound anyone would write — spaces,
+    // underscores and newlines are what a declaration is made of.
+    //
+    // The rule to preserve is that the decoy carries no character a plausible
+    // bound would stop at, beyond the `=` such a bound stops at by definition
+    // and the letters and spaces every declaration has. It is easy to lose:
+    // annotating it `readonly Thing[]` was enough to hand `[^[]+`, `[^\]]+`
+    // and `[^[\]]+` — the body bound copied up one line — to the accepting
+    // test rather than this one. Measured, and why the type here is bare. Do
+    // not give the decoy a body to make it match the boundary snippet.
     const snippet = [
-      'export const ANNOTATED_NOT_A_PIN: readonly Thing[] = []',
+      'export const ANNOTATED_NOT_A_PIN: Thing = x',
       '',
       "export const AFTER_IT = ['alpha'] as const;",
     ].join('\n');
