@@ -31,7 +31,7 @@
  * or explicitly listed as untested-by-choice.
  *
  * Note "block", not "comment", and "expression", not "name". Both distinctions
- * were bought the hard way — seven revisions, each one narrower than its own
+ * were bought the hard way — eight revisions, each one narrower than its own
  * comment claimed, each narrowing found by review rather than by the suite:
  *
  *   1. five hand-written tests, claiming "every collection"
@@ -52,9 +52,18 @@
  *      comment-stripped window, so a dead `seen.has(...)` line above a live
  *      block can no longer win the match, and takes a `source` seam, so
  *      revisions 5 and 6 are pinned by committed fixtures instead of a
- *      mutation described in a PR body — but the enclosing-function scan
- *      still reads raw source, and stripComments's own string-literal
- *      ASSUMPTION (below) is unchanged
+ *      mutation described in a PR body — but the window it scans was still
+ *      bounded only by a character count, so it ran off the end of its own
+ *      function, and the collision message it added named a cause the
+ *      scanner cannot distinguish
+ *   8. the window bounded at the next top-level declaration as well as by
+ *      DISCOVERY_WINDOW (18 of 36 real windows overran their function), and
+ *      two claims corrected to match what the code can tell: the collision
+ *      message, and the non-vacuity floor's stated reason — but attribution
+ *      is still top-level-`function`-only, so a Set in an arrow function or
+ *      a method is credited to the preceding declaration and bounded by the
+ *      following one, and stripComments's string-literal ASSUMPTION (below)
+ *      is unchanged
  *
  * Revision 2 could not see `dedupeAndSortInvestmentPrices`, which carries no
  * comment — the site that shipped #622, the previous instance of this exact
@@ -575,7 +584,12 @@ function discoverAggregatePushTargets(
   minPlausibleLength: number = MIN_PLAUSIBLE_BODY_LENGTH
 ): Record<string, string> {
   const scoped = decodeAllCollectionsBody(source, minPlausibleLength);
-  const found: Record<string, string> = {};
+  // `Object.create(null)` for the same reason as in discoverDedupBlocks below:
+  // on a plain `{}`, `found['__proto__'] = setVar` creates no own property at
+  // all, so `Object.hasOwn` never sees it and the target is dropped in silence
+  // instead of throwing — the half of the `in` nit that `Object.hasOwn` alone
+  // does not close.
+  const found: Record<string, string> = Object.create(null);
   for (const m of scoped.matchAll(/const (\w+) = new Set<string>\(\)/g)) {
     const setVar = m[1] as string;
     const window = stripComments(
@@ -592,10 +606,11 @@ function discoverAggregatePushTargets(
     if (!push) continue;
     const pushTarget = push[1] as string;
     // `Object.hasOwn`, not `in` (review nit): `in` walks the prototype chain,
-    // so a push target named `constructor`/`toString` would throw spuriously
-    // and `__proto__` would not register as an own property at all. Not
-    // reachable with real collection names — same reason the identical swap
-    // below is a nit and not a bug — but the check costs the same either way.
+    // so a push target named `constructor`/`toString` would throw spuriously.
+    // The `__proto__` half of that nit needed the null-prototype `found`
+    // above, not this call — `Object.hasOwn` reports the truth there, and the
+    // truth on a plain `{}` was that the write never landed. Not reachable
+    // with real collection names, but the two lines now agree with each other.
     if (Object.hasOwn(found, pushTarget)) {
       throw new Error(
         `discoverAggregatePushTargets: push target "${pushTarget}" already attributed to Set variable "${found[pushTarget]}"; also matched by "${setVar}" — cannot tell which one owns it`
@@ -680,6 +695,31 @@ const TWIN_TESTED = new Set(
  * the sibling exactly, only the window is stripped, keeping stripComments's
  * own string-literal ASSUMPTION scoped to a few hundred characters rather
  * than the whole 3 000-line decoder.
+ *
+ * The window is bounded by the NEXT function declaration as well as by
+ * DISCOVERY_WINDOW (second review follow-up on #688 review). A character
+ * count is not a syntactic boundary, and 18 of the decoder's 36 blocks have
+ * a 3 000-character window that reaches past the end of their own function
+ * today — so a Set whose own guard is removed or refactored away would be
+ * pinned from the NEXT function's guard instead of reported as unguarded.
+ * That is a plausible-looking wrong answer, and it is the same unbounded
+ * forward scan this file's sibling closed with `balanced()` and
+ * `decodeAllCollectionsBody()`; this was the last instance of it left in
+ * either file. Bounding it changed no pin: comparing the char-bounded and
+ * declaration-bounded resolution across all 36 real blocks yields 0
+ * differences, so it closes a hole rather than moving a pin.
+ *
+ * ATTRIBUTION LIMIT, shared by `enclosing` and by the bound above, since
+ * both read the same `declarations` list: that list comes from
+ * `/^(?:export )?(?:async )?function (\w+)/gm`, which matches only
+ * TOP-LEVEL `function` declarations. A Set inside an arrow function, a
+ * class or object method, or an indented nested `function` is attributed to
+ * whichever top-level function precedes it, and its window would extend to
+ * the next top-level declaration rather than to the end of its real
+ * enclosing scope. Not reachable in the decoder today — all 36 blocks sit
+ * at one indent level directly inside a top-level `function` — but it is
+ * why the duplicate-block throw below says "the same enclosing declaration"
+ * rather than "the same function": the scanner cannot tell the difference.
  */
 function discoverDedupBlocks(
   source: string = fs.readFileSync(
@@ -688,14 +728,28 @@ function discoverDedupBlocks(
   )
 ): Record<string, string> {
   const declarations = [...source.matchAll(/^(?:export )?(?:async )?function (\w+)/gm)].map(
-    (m) => [m.index, m[1] as string] as const
+    (m) => [m.index as number, m[1] as string] as const
   );
-  const found: Record<string, string> = {};
+  // `Object.create(null)` for symmetry with discoverAggregatePushTargets —
+  // but NOT, unlike there, because it closes anything reachable here, and
+  // saying otherwise would be this file's own defect. The `__proto__`
+  // silent-drop needs the literal key `__proto__`, and every key this
+  // function writes is `${enclosing}|${variable}`, so it always contains a
+  // `|` and can never be that string. Mutation-checked: reverting this one
+  // line to `{}` leaves all tests green, which is why the pinned fixture for
+  // the drop lives on the sibling scanner (whose keys ARE bare identifiers)
+  // and not here. Kept so the two scanners read the same way; recorded as
+  // unreachable so nobody later mistakes it for a live guard.
+  const found: Record<string, string> = Object.create(null);
   for (const m of source.matchAll(/const (\w+) = new Set<string>\(\)/g)) {
     const variable = m[1] as string;
     const enclosing = declarations.filter(([at]) => at < (m.index as number)).pop();
-    const after = source.slice((m.index as number) + m[0].length);
-    const window = stripComments(after.slice(0, DISCOVERY_WINDOW));
+    // Bounded by the next declaration as well as by DISCOVERY_WINDOW — see
+    // the docblock above for why a character count alone is not enough.
+    const start = (m.index as number) + m[0].length;
+    const nextDecl = declarations.find(([at]) => at > (m.index as number));
+    const end = Math.min(start + DISCOVERY_WINDOW, nextDecl ? nextDecl[0] : source.length);
+    const window = stripComments(source.slice(start, end));
     const use = new RegExp(`${variable}\\.has\\(([^;]*?)\\)\\s*\\)`).exec(window);
     let key = use ? (use[1] as string).replace(/\s+/g, ' ').trim() : 'NONE';
     // Resolve a bare identifier to the expression it is assigned from. Three
@@ -716,9 +770,17 @@ function discoverDedupBlocks(
     // the pinned-equality test fails — but a scanner that silently discards
     // half its own input should say so where the discarding happens, not
     // leave a maintainer to infer it from a diff two tests away.
+    //
+    // The message says "the same enclosing declaration", not "the same
+    // function" (second review follow-up): `enclosing` resolves only
+    // top-level `function` declarations, so two Sets in two different arrow
+    // functions would collide here too, and calling that "one function" would
+    // claim more than the scanner can tell — see the ATTRIBUTION LIMIT in the
+    // docblock. That matters more now the collision is fatal rather than a
+    // silent overwrite: a throw's text is the only thing whoever hits it has.
     if (Object.hasOwn(found, block)) {
       throw new Error(
-        `discoverDedupBlocks: block "${block}" discovered twice (keys "${found[block]}" and "${key}") — two same-named Sets in one function; cannot tell which one the pin refers to`
+        `discoverDedupBlocks: block "${block}" discovered twice (keys "${found[block]}" and "${key}") — two same-named Sets under the same enclosing declaration; cannot tell which one the pin refers to`
       );
     }
     found[block] = key;
@@ -773,7 +835,25 @@ describe('dedup coverage is declared, not assumed (#668 review)', () => {
   });
 
   test('discovery finds the dedup blocks at all', () => {
-    // Non-vacuity: the exact comparison below would pass over an empty object.
+    // The justification here used to read "the exact comparison below would
+    // pass over an empty object." That is false, and saying so was the same
+    // defect this file exists to remove: `expect(discovered).toEqual(
+    // DEDUP_BLOCKS)` compares against a populated 36-entry literal, so `{}`
+    // fails it loudly. Corrected rather than deleted, because the floor does
+    // earn its place — for a different reason (second review follow-up).
+    //
+    // What it actually catches is the two-step workflow: discovery breaks,
+    // AND a maintainer regenerates DEDUP_BLOCKS from the broken output to get
+    // green again. The pinned comparison cannot see that — the pin and the
+    // scan agree, both on nothing — and every downstream test that reads
+    // `discovered` (the field-free invariant, the twin-tested check) is
+    // vacuously satisfied by an empty map. A floor is the one assertion in
+    // this describe that survives regenerating the pin, which is the same
+    // argument the `toBe(25)` count pin makes two tests down.
+    //
+    // `>= 30` against 36 real IS a margin here, unlike that pin: this scan
+    // covers blocks the file does not otherwise enumerate one by one, and the
+    // exact count is already pinned by DEDUP_BLOCKS itself.
     expect(Object.keys(discovered).length).toBeGreaterThanOrEqual(30);
   });
 
@@ -982,6 +1062,33 @@ export async function someOtherFunction(): Promise<unknown> {
     expect(() => discoverAggregatePushTargets(FIXTURE_SRC)).toThrow(
       /could not locate `decodeAllCollections`/
     );
+  });
+
+  test('a push target named __proto__ collides loudly rather than vanishing', () => {
+    // Pins the `Object.create(null)` half of the `in` -> `Object.hasOwn` nit.
+    // On a plain `{}` both writes to `found['__proto__']` are silent no-ops:
+    // no own property is created, `Object.hasOwn` stays false, nothing
+    // throws, and the block is simply absent from the result — the same
+    // silence the nit was raised about, one step later. Unreachable with real
+    // collection names; pinned anyway, because an unreachable fix that no
+    // test can detect being reverted is exactly what this PR exists to stop
+    // shipping.
+    const FIXTURE_SRC = `
+export async function decodeAllCollections(dbPath: string): Promise<unknown> {
+  const aSeen = new Set<string>();
+  const __proto__: string[] = [];
+  if (!aSeen.has(item.id)) {
+    aSeen.add(item.id);
+    __proto__.push(item);
+  }
+  const bSeen = new Set<string>();
+  if (!bSeen.has(item.id)) {
+    bSeen.add(item.id);
+    __proto__.push(item);
+  }
+}
+`;
+    expect(() => discoverAggregatePushTargets(FIXTURE_SRC, 0)).toThrow(/push target "__proto__"/);
   });
 });
 
@@ -1228,5 +1335,65 @@ export function decodeTwoScopes(): unknown {
 }
 `;
     expect(() => discoverDedupBlocks(FIXTURE_SRC)).toThrow(/block "decodeTwoScopes\|seen"/);
+    // And the message says only what the scanner can tell: `enclosing`
+    // resolves top-level `function` declarations only, so two Sets in two
+    // different arrow functions collide here as well, and calling that "two
+    // same-named Sets in one function" — as this message did — would claim
+    // more than the code knows. Pinned, because a message that overclaims is
+    // the same defect as a test name that overclaims, and this one is fatal.
+    expect(() => discoverDedupBlocks(FIXTURE_SRC)).toThrow(/same enclosing declaration/);
+  });
+});
+
+describe('discoverDedupBlocks bounds its window at the next declaration (#688 review)', () => {
+  test('a Set whose own guard is gone reports NONE, not a key from the next function', () => {
+    // DISCOVERY_WINDOW is a character count, not a syntactic boundary, and 18
+    // of the decoder's 36 real blocks have a 3 000-character window that
+    // reaches past the end of their own function. So a Set whose guard was
+    // removed or refactored away does not come back as unguarded — the scan
+    // walks into the NEXT function and pins it to a guard that belongs to
+    // something else. `decodeUnguarded|seen` would be pinned to `row.row_id`,
+    // which looks like a perfectly good answer and is the wrong one; the
+    // field-free invariant would pass it, and the maintainer who regenerates
+    // DEDUP_BLOCKS from it bakes in a claim about code that does not exist.
+    // Same unbounded-forward-scan class `balanced()` and
+    // decodeAllCollectionsBody() close for the sibling scanner.
+    const FIXTURE_SRC = `
+export function decodeUnguarded(): unknown {
+  const seen = new Set<string>();
+  const ids = raw.map((r) => r.thing_id);
+}
+
+export function decodeGuarded(): unknown {
+  const seen = new Set<string>();
+  if (!seen.has(row.row_id)) {
+    seen.add(row.row_id);
+  }
+}
+`;
+    expect(discoverDedupBlocks(FIXTURE_SRC)).toEqual({
+      'decodeUnguarded|seen': 'NONE',
+      'decodeGuarded|seen': 'row.row_id',
+    });
+  });
+
+  test('an unguarded Set is then reported by the field-free invariant', () => {
+    // The bound is only useful because `NONE` is a state the live invariant
+    // rejects: bounding the window turns a plausible wrong key into a loud
+    // one rather than into a different kind of silence.
+    const FIXTURE_SRC = `
+export function decodeUnguarded(): unknown {
+  const seen = new Set<string>();
+  const ids = raw.map((r) => r.thing_id);
+}
+
+export function decodeGuarded(): unknown {
+  const seen = new Set<string>();
+  if (!seen.has(row.row_id)) {
+    seen.add(row.row_id);
+  }
+}
+`;
+    expect(fieldFreeBlocks(discoverDedupBlocks(FIXTURE_SRC))).toEqual(['decodeUnguarded|seen']);
   });
 });
