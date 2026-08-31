@@ -548,17 +548,26 @@ describe('exported string constants are pinned (#635 class detector)', () => {
     // annotated NON-as-const declaration cannot reach a later string-literal
     // `as const` declaration and take its members under the wrong name.
     //
-    // The absent `;` is deliberate, and is why this is not the boundary
-    // snippet above. Loosening the bound to `[\s\S]+?` already turns that one
-    // red — checked, along with forward and one contents test — so what it
-    // leaves undetected is a bound that stops at a DIFFERENT character.
-    // `[^;]+` is the representative: it clears every other test in this file.
-    // With no `;` between these two declarations a `;`-bounded annotation
-    // crosses exactly like a dotall one, so this snippet is red for both.
+    // What survives the rest of the file is not one mutation but a family:
+    // any bound whose stop character does not appear between these two
+    // declarations. A dotall is not in it — loosening to `[\s\S]+?` already
+    // turns the boundary snippet, forward and one contents test red — but a
+    // bound that merely stops SOMEWHERE ELSE is. Sweeping 31 bounds (29
+    // `(?::[^X]+)?` variants plus both dotall forms) against the previous
+    // version of this snippet, whose decoy body was `{ field: 1 },`, left
+    // `[^{]+`, `[^}]+` and `[^,]+` green: one survivor per punctuation
+    // character the decoy happened to carry, exactly as `[^;]+` survived the
+    // boundary snippet's `;`.
+    //
+    // Hence an empty decoy and a bare blank line. The rule is stronger than
+    // "no semicolon": this snippet must carry NO character a plausible bound
+    // would stop at. Do not restore `{ field: 1 },` to make it match the
+    // boundary snippet — that reopens the family. The same sweep now detects
+    // all 31 but `[^\n]+`, which is not in the class: a declaration starts at
+    // a line start, so a bound that cannot cross a newline cannot reach one.
+    // It narrows discovery rather than swallowing a neighbour.
     const snippet = [
-      'export const ANNOTATED_NOT_A_PIN: readonly Thing[] = [',
-      '  { field: 1 },',
-      ']',
+      'export const ANNOTATED_NOT_A_PIN: readonly Thing[] = []',
       '',
       "export const AFTER_IT = ['alpha'] as const;",
     ].join('\n');
