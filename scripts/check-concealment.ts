@@ -39,11 +39,13 @@
  *     off-screen by nothing but a very long paragraph passes.
  *   - This gate sees what git would show in a diff — tracked files plus
  *     untracked-but-unignored ones, from `git ls-files` — and NOT the working
- *     tree as such: ignored files are out of scope. Outside a repo, or when git
- *     declines, it falls back to a filesystem walk, which scans a materially
- *     different set (no .gitignore, SKIP_DIRS applied to everything). The
- *     summary line names which strategy ran, because that fallback used to be
- *     silent and both endings read `nothing hidden`.
+ *     tree as such: ignored files are out of scope. Outside a repo it falls
+ *     back to a filesystem walk, which scans a materially different set (no
+ *     .gitignore, SKIP_DIRS applied to everything); the summary line names
+ *     which strategy ran, because that fallback used to be silent and both
+ *     endings read `nothing hidden`. INSIDE a repo — a `.git` at the root —
+ *     git declining is a failure rather than a fallback: see the strategy
+ *     check at the bottom of this file. The swap only ever scans less.
  *   - It sees one tree, never a range of commits. The cross-commit half of
  *     #6003 — content added by one commit and removed by another, so it never
  *     appears in the combined diff — cannot be seen from a tree at all. That
@@ -57,7 +59,7 @@
  */
 
 import { spawnSync } from 'child_process';
-import { readFileSync, readdirSync, realpathSync, statSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'fs';
 import { dirname, join, relative, sep } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -461,6 +463,35 @@ function checkLine(
  * BINARY_EXTENSIONS, which also covers executable formats. Everything else
  * is refused rather than allow-listed — `text=auto`, `eol=lf` and
  * `linguist-language=...` do not hide content, so they need no exemption.
+ *
+ * `linguist-vendored` was checked as the obvious sibling and is deliberately
+ * NOT here (2026-08-30). Three current primary sources agree that only
+ * `linguist-generated` suppresses a diff:
+ *
+ *   - GitHub Docs, "Customizing how changed files appear on GitHub", names one
+ *     attribute: "Use the `linguist-generated` attribute to mark or unmark
+ *     paths that you would like to be ignored for the repository's language
+ *     statistics and hidden by default in diffs."
+ *   - linguist's docs/overrides.md, under Generated code: "As an added bonus,
+ *     unlike vendored and documentation files, these files are suppressed in
+ *     diffs." The contrast is explicit.
+ *   - linguist's README describes its own job as "ignore binary or vendored
+ *     files, suppress generated files in diffs" — again, generated only.
+ *
+ * Read the counter-evidence before trusting that, because there is some:
+ * linguist issues #2206 and #2705 both quote "Vendored files are also hidden by
+ * default in diffs on github.com" from the README OF THEIR DAY (2015/2016).
+ * That sentence is gone from the README linked above; #2206 is a report that
+ * the behaviour it promised did not happen. So the claim is stale rather than
+ * contested.
+ *
+ * Note the evidence class, because it is weaker than this file's usual. This is
+ * documentation, not a probe: `binary` and `-diff` are git-side and were pinned
+ * with `git check-attr`, while both linguist attributes are rendered by
+ * github.com and no local command can measure them. If anyone ever SEES a
+ * vendored path folded in a Files-changed view, add it beside its neighbour
+ * with the same `=false` carve-out — linguist's rule is `attr != "false"`, so
+ * `=1` and `=yes` must still fire.
  */
 const DIFF_SUPPRESSING_ATTRS = [
   /(^|\s)binary(\s|$)/,
@@ -537,6 +568,26 @@ function checkGitAttributes(contents: string, rel: string): void {
     // this rule already learned that lesson with *.png.
     const quoted = /^"((?:[^"\\]|\\.)*)"/.exec(stripped);
     const pattern = quoted ? (quoted[1] as string) : (stripped.split(/[ \t\r]+/)[0] ?? '');
+    // An opening quote with no closing one. git's parse_attr_line calls
+    // unquote_c_style, and on failure falls to its else-branch and reads the
+    // raw token — quote mark included — as a LITERAL path. Probed on git
+    // 2.50.1 with `.gitattributes` holding `"cover.png binary`:
+    //
+    //   git check-attr binary -- 'cover.png' '"cover.png'
+    //   cover.png: binary: unspecified
+    //   "\"cover.png": binary: set
+    //
+    // So nothing that executes gets its diff suppressed and there is no live
+    // divergence here. The allowance still must not be the thing that says so.
+    // It would answer `.png` — from `extensionOf('"cover.png')` — and be right
+    // for a reason that has nothing to do with why git is harmless, which is
+    // the coincidental agreement every earlier variation in this function was
+    // built on. A pattern this parser REFUSED to parse does not get to reach an
+    // allowance; it is reported and a human reads the line. Cheap here: the
+    // repo tracks no .gitattributes at all (`git ls-files | grep -i
+    // gitattributes` is empty), and an unterminated quote is a typo in every
+    // case that is not an attack.
+    const unterminatedQuote = quoted === null && stripped.startsWith('"');
     // A quoted pattern containing a backslash is NOT unquoted before the inert
     // check. git resolves the escapes with unquote_c_style before matching, and
     // stripping them here only ever SHORTENS the string, so a backslash after
@@ -585,6 +636,7 @@ function checkGitAttributes(contents: string, rel: string): void {
     const isMacroDefinition = pattern.startsWith('[attr]');
     if (
       !isMacroDefinition &&
+      !unterminatedQuote &&
       !pattern.includes('\\') &&
       INERT_BINARY_EXTENSIONS.has(extensionOf(pattern))
     )
@@ -735,9 +787,11 @@ function gitFiles(root: string): { tracked: string[]; untracked: string[] } | un
   // hidden`. Latent here, since nothing tracked lives under a SKIP_DIRS name,
   // but the honest statement is that the two strategies differ rather than
   // that one dominates. See listFiles below, which has always said this
-  // correctly. What makes the fallback survivable is that the summary line
-  // names the strategy, so a swap announces itself instead of reading as a
-  // normal run.
+  // correctly. The summary line names the strategy so a swap announces itself,
+  // and — because a green step is not read — the strategy check at the bottom
+  // of this file turns the announcement into a refusal whenever the tree has a
+  // .git at all. Returning undefined from here is therefore only a fallback
+  // outside a repository.
   const env = { ...process.env };
   for (const key of Object.keys(env)) if (key.startsWith('GIT_')) delete env[key];
   delete env.HOME;
@@ -791,6 +845,10 @@ function gitFiles(root: string): { tracked: string[]; untracked: string[] } | un
  * mismatch silently swaps one for the other, and both report the same green
  * `nothing hidden`. Naming the strategy makes a shrunken scan visible in the
  * output instead of only in a diff of this file.
+ *
+ * The caller does not settle for visible. When the tree has a `.git`, a walk
+ * listing means git refused a repository it could have listed, and that run is
+ * failed outright — see the strategy check after this function's only call.
  */
 function listFiles(root: string): { files: string[]; strategy: 'git' | 'walk' } {
   const fromGit = gitFiles(root);
@@ -885,6 +943,58 @@ function answersToName(file: string, name: string): boolean {
 }
 
 const listing = listFiles(ROOT);
+
+// The strategy is an INVARIANT here, not only a label.
+//
+// gitFiles drops HOME and XDG_CONFIG_HOME, so a global `safe.directory` is
+// invisible to it and a repo owned by another uid makes git refuse — plausible
+// in a container job whose checkout uid differs from the runner's. Every way
+// git can decline lands on the same `run() === undefined` path and falls back
+// to the walk, which applies SKIP_DIRS to TRACKED files and so scans a
+// strictly different, smaller set.
+//
+// Naming the strategy in the summary made that visible. Visible is not
+// enforced: both endings are exit 0 and nobody reads a green step. Measured on
+// git 2.50.1 against one tree — a tracked, concealed `build/loader.ts` beside a
+// clean `src/a.ts` — copied twice, run with the version of this file that had
+// only the label:
+//
+//   as a real repo:          `(2 files scanned, listed by git)`, exit 1
+//   after `chmod 000 .git`:  `1 files scanned (walk), nothing hidden`, exit 0
+//
+// Reproduce: `git init` such a tree and commit it, run the gate with
+// CHECK_CONCEALMENT_ROOT pointed at it, then `chmod 000 .git` and run it again.
+// The payload vanishes and the run stays green. A `.git` that is not a repo at
+// all (`printf garbage > .git/config`) prints the same two lines — both were
+// run; the ownership refusal was NOT, because it needs a second uid. It reaches
+// this branch identically, as a non-zero status from `run()`.
+//
+// So a tree that HAS a .git and that git nevertheless would not list is
+// refused. The remedy is never "accept the walk": the swap only ever scans
+// less.
+//
+// The test is `.git` AT ROOT, which is where this gate runs and what a worktree
+// has too (there it is a file, and existsSync answers for both). One case it
+// does NOT cover, stated rather than left to be discovered: pointing
+// CHECK_CONCEALMENT_ROOT at a SUBDIRECTORY of a repo. gitFiles already declines
+// that on the toplevel mismatch, and there is no `.git` in a subdirectory, so
+// it walks silently — the tests' own path.
+if (listing.strategy === 'walk' && existsSync(join(ROOT, '.git'))) {
+  console.error(
+    `check-concealment: ${ROOT} has a .git, but git declined to list it, so the scan fell ` +
+      `back to the filesystem walk — a different and smaller set, since SKIP_DIRS applies to ` +
+      `tracked files there. Refusing rather than reporting a green run over a shrunken scan.\n`
+  );
+  console.error(
+    `  Run \`git -C ${ROOT} ls-files\` to see the refusal. If it is dubious ownership, note ` +
+      `that this gate runs git with no HOME and GIT_CONFIG_GLOBAL/SYSTEM=/dev/null, and that ` +
+      `safe.directory is "only respected in protected configuration" (git help config) — ` +
+      `which the repository's own .git/config is not. Run the gate as the checkout's owner ` +
+      `rather than trying to allow-list the path.`
+  );
+  process.exit(1);
+}
+
 const files = listing.files.filter((f) => inScope(f));
 for (const file of files) {
   const rel = relative(ROOT, file);
