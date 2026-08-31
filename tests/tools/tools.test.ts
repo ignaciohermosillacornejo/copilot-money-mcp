@@ -2006,6 +2006,27 @@ describe('CopilotMoneyTools - getRecurringTransactions field selection (#606)', 
     expect(result._field_warning).toContain('not_a_real_field');
   });
 
+  // Important 2 (task-2 review): the fixture above always yields one
+  // detected row, so a typo warns identically whether or not knownFields is
+  // wired — projectRows' row-key fallback finds the same absence and
+  // produces the same message. Raising min_occurrences above the fixture's
+  // 3 occurrences empties `recurring`, which is the one condition
+  // (mirroring get_top_movers_live/get_recurring_live's own knownFields
+  // tests) where the fallback goes silent ("stay silent rather than flag
+  // every requested name" — src/tools/field-selection.ts) and only an
+  // explicit knownFields set still warns.
+  test('a typo in fields warns even on an empty result set (knownFields)', async () => {
+    const result = await tools.getRecurringTransactions({
+      start_date: '2024-01-01',
+      end_date: '2024-04-01',
+      min_occurrences: 99,
+      fields: ['default', 'not_a_real_field'],
+    });
+    expect(result.recurring).toEqual([]);
+    expect(result._field_warning).toBeDefined();
+    expect(result._field_warning).toContain('not_a_real_field');
+  });
+
   test('the terse default is smaller than the full row (#606)', async () => {
     const terse = await call();
     const full = await call(['all']);

@@ -201,7 +201,8 @@ const SCHEMA_BUDGETS: Record<string, number> = {
 };
 
 /**
- * Aggregate schema budget across ALL registered tools (measured +~10%).
+ * Aggregate schema budget across ALL registered tools (measured +~3.3%,
+ * matching the headroom this ratchet used pre-#606 — see below).
  *
  * Raised from 71_000 by #606: the recurring group's three `fields` params
  * (shared verbatim between the two live tools, plus the cache-mode
@@ -211,8 +212,21 @@ const SCHEMA_BUDGETS: Record<string, number> = {
  * larger per-call response saving (measured ~42-53% per row across the
  * three tools; see the recurring tools' field-selection tests). Not
  * prose bloat — every added sentence names the token it excludes.
+ *
+ * MUST stay below the sum of every entry in SCHEMA_BUDGETS above (78_590 as
+ * of #606 — recompute if that table changes): the completeness guard in
+ * registerContextBudgetChecks requires SCHEMA_BUDGETS to have exactly one
+ * entry per registered tool, so once every per-tool assertion passes the
+ * actual total is bounded by that sum regardless of what this constant
+ * says. A value at or above it (79_100, briefly, in an earlier revision of
+ * this PR) can never fire — a per-tool assertion always fails first — which
+ * silently drops the one check that catches every tool creeping a little
+ * without individually breaching its own ceiling. 74_300 keeps this the
+ * *tighter* constraint, the same relationship it had pre-#606 (71_000 over
+ * a measured 68_724, ~3.3% headroom, vs. that era's per-tool sum of
+ * 75_445 — the aggregate was already the binding check then too).
  */
-const SCHEMA_TOTAL_BUDGET = 79_100;
+const SCHEMA_TOTAL_BUDGET = 74_300;
 
 // ---------------------------------------------------------------------------
 // Synthetic fixture. Deterministic content, opaque Firestore-shaped IDs
