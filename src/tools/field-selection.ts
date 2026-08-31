@@ -25,6 +25,7 @@
  */
 import type { GetTopMoversLiveEntry } from './live/top-movers.js';
 import type { CategoryLiveRow } from './live/categories.js';
+import type { GetRecurringLiveRow } from './live/recurring.js';
 
 /**
  * The default field set for transaction rows: the v3 baseline that
@@ -167,6 +168,81 @@ export const CATEGORY_LIVE_FIELDS_PARAM_SCHEMA = {
     'estimated it at ~62% of a row, and it duplicates get_budgets_live — the single number ' +
     'most callers want, `budget.current.amount`, is already on the row as `budget_amount`. ' +
     'Request the full object with fields: ["default", "budget"], or "all" / "*" for full rows. ' +
+    'Unknown names are omitted and reported via _field_warning.',
+} as const;
+
+/**
+ * Default fields for live recurring rows (#597 Tier 1).
+ *
+ * Excludes `rule` (the server-side matcher config: min/max amount, match
+ * strings — operational detail no caller reasons about) and `payments` (the
+ * full payment history, which duplicates what get_transactions returns).
+ * Together they are ~45% of a row. `icon` goes too: `emoji` already carries
+ * the display character without the union wrapper.
+ */
+export const DEFAULT_RECURRING_LIVE_FIELDS = [
+  'id',
+  'name',
+  'state',
+  'frequency',
+  'nextPaymentAmount',
+  'nextPaymentDate',
+  'categoryId',
+  'category_name',
+  'emoji',
+] as const satisfies readonly (keyof GetRecurringLiveRow)[];
+
+/**
+ * Default fields for cache-mode get_recurring_transactions rows (#606).
+ *
+ * Excludes the embedded `transactions` array (date/amount pairs already
+ * reachable via get_transactions, ~29% of a row) and `confidence_reason`
+ * (explanatory prose, ~15%). `confidence` itself stays: it is the part a
+ * caller acts on.
+ */
+export const DEFAULT_RECURRING_CACHE_FIELDS = [
+  'merchant',
+  'normalized_merchant',
+  'occurrences',
+  'average_amount',
+  'total_amount',
+  'frequency',
+  'confidence',
+  'category_name',
+  'last_date',
+  'next_expected_date',
+] as const;
+
+/**
+ * JSON-schema fragment for `get_recurring_live` and `get_upcoming_recurrings_live`'s
+ * `fields` param — shared verbatim by both so their two `fields` descriptions
+ * cannot drift (same row shape, same excluded tokens).
+ */
+export const RECURRING_FIELDS_PARAM_SCHEMA = {
+  type: 'array',
+  items: { type: 'string' },
+  description:
+    'Return only these fields per recurring row. Default when omitted: id, name, state, ' +
+    'frequency, nextPaymentAmount, nextPaymentDate, categoryId, category_name, emoji. ' +
+    'EXCLUDED by default because together they are roughly half of a full row: `rule` ' +
+    "(Copilot's server-side matcher config) and `payments` (full payment history — the same " +
+    'charges are queryable via get_transactions). Request them with ' +
+    'fields: ["default", "rule", "payments"], or use "all" / "*" for full rows. ' +
+    'Unknown names are omitted and reported via _field_warning.',
+} as const;
+
+/**
+ * JSON-schema fragment for cache-mode `get_recurring_transactions`' `fields` param.
+ */
+export const RECURRING_CACHE_FIELDS_PARAM_SCHEMA = {
+  type: 'array',
+  items: { type: 'string' },
+  description:
+    'Return only these fields per detected recurring merchant. Default when omitted omits ' +
+    'two expensive fields: `transactions` (the matched date/amount pairs, ~29% of a row) and ' +
+    '`confidence_reason` (prose explaining the confidence score, ~15%). `confidence` itself ' +
+    'is always in the default. Request the rest with ' +
+    'fields: ["default", "transactions", "confidence_reason"], or "all" / "*" for full rows. ' +
     'Unknown names are omitted and reported via _field_warning.',
 } as const;
 

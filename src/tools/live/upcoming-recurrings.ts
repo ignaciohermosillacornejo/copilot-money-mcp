@@ -11,21 +11,52 @@
  * user-confirmed recurrings (configured/historical view). Use this tool to
  * answer "what's about to bill", and use get_recurring_live to answer
  * "what subscriptions do I have".
+ *
+ * v3 (#597 Tier 1): same row shape as get_recurring_live, and the same
+ * `rule`/`payments`/`icon` exclusions apply — see the rationale in
+ * src/tools/live/recurring.ts. The `fields` schema fragment
+ * (RECURRING_FIELDS_PARAM_SCHEMA) is shared verbatim with that tool so the
+ * two descriptions cannot drift.
  */
 
 import type { LiveCopilotDatabase } from '../../core/live-database.js';
-import {
-  fetchUpcomingRecurrings,
-  type UpcomingRecurringNode,
-} from '../../core/graphql/queries/upcoming-recurrings.js';
+import { fetchUpcomingRecurrings } from '../../core/graphql/queries/upcoming-recurrings.js';
+import type {
+  RecurringIcon,
+  RecurringRuleNode,
+  RecurringPaymentNode,
+} from '../../core/graphql/queries/recurrings.js';
 import type { ToolSchema } from '../tools.js';
+import {
+  DEFAULT_RECURRING_LIVE_FIELDS,
+  RECURRING_FIELDS_PARAM_SCHEMA,
+  projectRows,
+} from '../field-selection.js';
 
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface GetUpcomingRecurringsLiveArgs {
   // No filters yet; reserved for future args.
+  fields?: string[];
 }
 
-export interface GetUpcomingRecurringsLiveRow extends UpcomingRecurringNode {
+// A `type` alias written as a flat object literal (not `UpcomingRecurringNode
+// & {...}`, and not an interface) on purpose — an intersection with an
+// interface does NOT carry an implicit index signature, so rows would fail
+// to assign to the field-selection engine's `Record<string, unknown>`
+// constraint. Same reasoning as GetRecurringLiveRow in
+// src/tools/live/recurring.ts (structurally identical row shape — kept as a
+// separate type so each tool's known-field set stays self-contained).
+export type GetUpcomingRecurringsLiveRow = {
+  id: string;
+  name: string;
+  state: string;
+  frequency: string;
+  nextPaymentAmount: number | null;
+  nextPaymentDate: string | null;
+  categoryId: string | null;
+  emoji: string | null;
+  icon: RecurringIcon | null;
+  rule: RecurringRuleNode | null;
+  payments: RecurringPaymentNode[];
   /**
    * Joined from `categoriesCache.peek()` by `categoryId`. `null` if the
    * categories cache is cold (no fetch is triggered to populate it) or
@@ -33,7 +64,40 @@ export interface GetUpcomingRecurringsLiveRow extends UpcomingRecurringNode {
    * (e.g., deleted upstream). Mirrors `get_recurring_live`'s same join.
    */
   category_name: string | null;
-}
+};
+
+/**
+ * Every selectable field name on an upcoming-recurring row, derived from
+ * {@link GetUpcomingRecurringsLiveRow} itself via a mapped-type record — same
+ * reasoning as RECURRING_LIVE_FIELD_NAMES in src/tools/live/recurring.ts.
+ */
+const UPCOMING_RECURRING_LIVE_FIELD_NAMES: {
+  [K in keyof GetUpcomingRecurringsLiveRow]-?: true;
+} = {
+  id: true,
+  name: true,
+  state: true,
+  frequency: true,
+  nextPaymentAmount: true,
+  nextPaymentDate: true,
+  categoryId: true,
+  emoji: true,
+  icon: true,
+  rule: true,
+  payments: true,
+  category_name: true,
+};
+const UPCOMING_RECURRING_LIVE_KNOWN_FIELDS: ReadonlySet<string> = new Set(
+  Object.keys(UPCOMING_RECURRING_LIVE_FIELD_NAMES)
+);
+
+/**
+ * Built FROM the known-field set rather than hand-listed — see the identical
+ * reasoning on CATEGORY_LIVE_VALID_FIELDS_HINT in src/tools/live/categories.ts.
+ */
+const UPCOMING_RECURRING_LIVE_VALID_FIELDS_HINT =
+  `the upcoming-recurring row fields (${[...UPCOMING_RECURRING_LIVE_KNOWN_FIELDS].join(', ')}) — ` +
+  'category_name is derived from a categoriesCache join; the rest come from the wire';
 
 export interface GetUpcomingRecurringsLiveResult {
   count: number;
@@ -41,13 +105,15 @@ export interface GetUpcomingRecurringsLiveResult {
   _cache_oldest_fetched_at: string;
   _cache_newest_fetched_at: string;
   _cache_hit: boolean;
+  // Requested `fields` names that matched nothing (typos), when any.
+  _field_warning?: string;
 }
 
 export class LiveUpcomingRecurringsTools {
   constructor(private readonly live: LiveCopilotDatabase) {}
 
   async getUpcomingRecurrings(
-    _args: GetUpcomingRecurringsLiveArgs
+    args: GetUpcomingRecurringsLiveArgs
   ): Promise<GetUpcomingRecurringsLiveResult> {
     const cache = this.live.getUpcomingRecurringsCache();
     const startedAt = Date.now();
@@ -80,13 +146,23 @@ export class LiveUpcomingRecurringsTools {
       cache_hit: hit,
     });
 
+    // v3: omitting `fields` yields the terse preset (no `rule`/`payments`) —
+    // request them explicitly with fields: ["default", "rule", "payments"],
+    // or take everything with "all"/"*".
+    const { rows: upcoming, warning } = projectRows(rows, args.fields ?? ['default'], {
+      preset: DEFAULT_RECURRING_LIVE_FIELDS,
+      knownFields: UPCOMING_RECURRING_LIVE_KNOWN_FIELDS,
+      validFieldsHint: UPCOMING_RECURRING_LIVE_VALID_FIELDS_HINT,
+    });
+
     const fetchedAtIso = new Date(fetched_at).toISOString();
     return {
-      count: rows.length,
-      upcoming: rows,
+      count: upcoming.length,
+      upcoming,
       _cache_oldest_fetched_at: fetchedAtIso,
       _cache_newest_fetched_at: fetchedAtIso,
       _cache_hit: hit,
+      ...(warning && { _field_warning: warning }),
     };
   }
 }
@@ -103,10 +179,17 @@ export function createLiveUpcomingRecurringsToolSchema(): ToolSchema {
       'Each row carries a `category_name` field joined from the categories cache; ' +
       '`null` if the cache is cold or the category was deleted upstream. ' +
       'To guarantee `category_name` is populated, call `get_categories_live` first ' +
-      'in the same session to warm the cache.',
+      'in the same session to warm the cache. ' +
+      'Default rows are terse: id, name, state, frequency, nextPaymentAmount, ' +
+      'nextPaymentDate, categoryId, category_name, emoji. That excludes `rule` (the ' +
+      'server-side matcher config) and `payments` (full payment history — the same charges ' +
+      'are queryable via get_transactions_live), plus `icon` (redundant with `emoji`). ' +
+      'See `fields` for how to get any of them back.',
     inputSchema: {
       type: 'object' as const,
-      properties: {},
+      properties: {
+        fields: RECURRING_FIELDS_PARAM_SCHEMA,
+      },
     },
     annotations: {
       readOnlyHint: true,

@@ -1793,8 +1793,17 @@ describe('CopilotMoneyTools - Recurring Transactions Detail View', () => {
     expect(planetFitness).toBeDefined();
     expect(planetFitness?.occurrences).toBe(3);
     expect(planetFitness?.average_amount).toBe(50);
-    expect(planetFitness?.transactions).toBeDefined();
-    expect(planetFitness?.transactions?.length).toBeLessThanOrEqual(5);
+    // v3 (#606): `transactions` is excluded from the default row.
+    expect(planetFitness).not.toHaveProperty('transactions');
+
+    const fullResult = await tools.getRecurringTransactions({
+      start_date: '2024-01-01',
+      end_date: '2024-04-01',
+      fields: ['default', 'transactions'],
+    });
+    const planetFitnessFull = fullResult.recurring.find((r) => r.merchant === 'Planet Fitness');
+    expect(planetFitnessFull?.transactions).toBeDefined();
+    expect(planetFitnessFull?.transactions?.length).toBeLessThanOrEqual(5);
   });
 
   test('does not count split parents as recurring occurrences', async () => {
@@ -1897,6 +1906,112 @@ describe('CopilotMoneyTools - Recurring Transactions Detail View', () => {
     expect(result.copilot_subscriptions?.summary?.total_archived).toBe(1);
     expect(result.copilot_subscriptions?.paused?.length).toBe(1);
     expect(result.copilot_subscriptions?.archived?.length).toBe(1);
+  });
+});
+
+describe('CopilotMoneyTools - getRecurringTransactions field selection (#606)', () => {
+  let db: CopilotDatabase;
+  let tools: CopilotMoneyTools;
+
+  // Three monthly-spaced, same-amount transactions from one merchant: high
+  // confidence, a resolvable category, and a defined next_expected_date, so
+  // every DEFAULT_RECURRING_CACHE_FIELDS entry carries a real value on the
+  // detected row (mutation-check requires each preset field to be provable).
+  const fatRecurringTransactions: Transaction[] = [
+    {
+      transaction_id: 'rec_gym1',
+      amount: 50.0,
+      date: '2024-01-15',
+      name: 'Synthetic Gym',
+      category_id: 'personal_care_gyms_and_fitness_centers',
+      account_id: 'acc1',
+    },
+    {
+      transaction_id: 'rec_gym2',
+      amount: 50.0,
+      date: '2024-02-15',
+      name: 'Synthetic Gym',
+      category_id: 'personal_care_gyms_and_fitness_centers',
+      account_id: 'acc1',
+    },
+    {
+      transaction_id: 'rec_gym3',
+      amount: 50.0,
+      date: '2024-03-15',
+      name: 'Synthetic Gym',
+      category_id: 'personal_care_gyms_and_fitness_centers',
+      account_id: 'acc1',
+    },
+  ];
+
+  beforeEach(() => {
+    db = new CopilotDatabase('/fake/path');
+    tools = new CopilotMoneyTools(db);
+    (db as any)._allCollectionsLoaded = true;
+    (db as any)._accounts = mockAccounts;
+    (db as any)._userCategories = [];
+    (db as any)._userAccounts = [];
+    (db as any)._recurring = []; // Isolate pattern-detection from Copilot subscriptions
+    (db as any)._transactions = fatRecurringTransactions;
+  });
+
+  const call = (fields?: string[]) =>
+    tools.getRecurringTransactions({
+      start_date: '2024-01-01',
+      end_date: '2024-04-01',
+      ...(fields ? { fields } : {}),
+    });
+
+  test('default rows exclude transactions and confidence_reason but keep every other preset field', async () => {
+    const result = await call();
+    const row = result.recurring.find((r) => r.merchant === 'Synthetic Gym');
+    expect(row).toBeDefined();
+    expect(row).not.toHaveProperty('transactions');
+    expect(row).not.toHaveProperty('confidence_reason');
+    // Every DEFAULT_RECURRING_CACHE_FIELDS entry, proven present with a
+    // real value (not just `undefined` surviving key deletion).
+    expect(row?.merchant).toBe('Synthetic Gym');
+    expect(row?.normalized_merchant).toBeTruthy();
+    expect(row?.occurrences).toBe(3);
+    expect(row?.average_amount).toBe(50);
+    expect(row?.total_amount).toBe(150);
+    expect(row?.frequency).toBe('monthly');
+    expect(row?.confidence).toBe('high');
+    expect(row?.category_name).toBeTruthy();
+    expect(row?.category_name).not.toBe('Unknown');
+    expect(row?.last_date).toBe('2024-03-15');
+    expect(row?.next_expected_date).toBeTruthy();
+  });
+
+  test('fields: ["default", "transactions"] restores transactions but not confidence_reason', async () => {
+    const result = await call(['default', 'transactions']);
+    const row = result.recurring.find((r) => r.merchant === 'Synthetic Gym');
+    expect(row?.transactions).toBeDefined();
+    expect(row?.transactions?.length).toBeGreaterThan(0);
+    expect(row).not.toHaveProperty('confidence_reason');
+  });
+
+  test('fields: ["all"] returns full rows', async () => {
+    const result = await call(['all']);
+    const row = result.recurring.find((r) => r.merchant === 'Synthetic Gym');
+    expect(row?.transactions).toBeDefined();
+    expect(row?.confidence_reason).toBeDefined();
+    expect(typeof row?.confidence_reason).toBe('string');
+    expect(row?.confidence_reason?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  test('a typo in fields warns even when nothing matches (knownFields)', async () => {
+    const result = await call(['default', 'not_a_real_field']);
+    expect(result._field_warning).toBeDefined();
+    expect(result._field_warning).toContain('not_a_real_field');
+  });
+
+  test('the terse default is smaller than the full row (#606)', async () => {
+    const terse = await call();
+    const full = await call(['all']);
+    const terseSize = JSON.stringify(terse).length;
+    const fullSize = JSON.stringify(full).length;
+    expect(terseSize).toBeLessThan(fullSize);
   });
 });
 

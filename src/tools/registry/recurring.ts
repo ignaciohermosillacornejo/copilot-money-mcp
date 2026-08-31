@@ -4,6 +4,7 @@
 
 import { defineTool, type ToolMethodArgs } from './types.js';
 import { RECURRING_FREQUENCIES, RECURRING_STATE_VALUES } from '../../core/graphql/recurrings.js';
+import { RECURRING_CACHE_FIELDS_PARAM_SCHEMA } from '../field-selection.js';
 
 /** Shared cadence explanation for the `frequency` enum (create + update). */
 const FREQUENCY_DESCRIPTION =
@@ -18,7 +19,12 @@ export const getRecurringTransactionsTool = defineTool({
       '(1) Pattern analysis - finds transactions from same merchant with similar amounts, ' +
       'returns estimated frequency, confidence score, and next expected date. ' +
       "(2) Copilot's native subscription tracking - returns user-confirmed subscriptions " +
-      'stored in the app. Both sources are included by default for comprehensive coverage.',
+      'stored in the app. Both sources are included by default for comprehensive coverage. ' +
+      'Rows in the pattern-analysis `recurring` array are terse by default: merchant, ' +
+      'normalized_merchant, occurrences, average_amount, total_amount, frequency, ' +
+      'confidence, category_name, last_date, next_expected_date. That excludes the matched ' +
+      '`transactions` array (already reachable via get_transactions) and `confidence_reason` ' +
+      '(prose explaining the score) — see `fields` for how to get either back.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -64,6 +70,7 @@ export const getRecurringTransactionsTool = defineTool({
             'Filter by exact recurring ID. When filtering, returns detailed view with additional ' +
             'fields like min_amount, max_amount, match_string, account info, and transaction history.',
         },
+        fields: RECURRING_CACHE_FIELDS_PARAM_SCHEMA,
       },
     },
     annotations: {

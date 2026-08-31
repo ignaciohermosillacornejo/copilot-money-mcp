@@ -48,6 +48,26 @@ function mkLiveReturning(rows: UpcomingRecurringNode[]): {
   return { live, client };
 }
 
+// A row carrying `rule` AND `payments` — used by the terse-default tests
+// (#597 Tier 1) — both populated (not just absent zeros/nulls) so a preset
+// that silently stopped excluding one would fail a mutation check instead
+// of passing by coincidence.
+const fatUpcomingRow: UpcomingRecurringNode = mkUpcoming({
+  id: 'r1',
+  name: 'Fat Sub',
+  state: 'ACTIVE',
+  frequency: 'MONTHLY',
+  nextPaymentAmount: 200,
+  nextPaymentDate: '2024-03-01',
+  categoryId: 'cat-utils',
+  emoji: '💰',
+  rule: { nameContains: 'FAT SUB', minAmount: 190, maxAmount: 210, days: [1] },
+  payments: [
+    { amount: 200, isPaid: true, date: '2024-02-01' },
+    { amount: 200, isPaid: false, date: '2024-03-01' },
+  ],
+});
+
 describe('LiveUpcomingRecurringsTools.getUpcomingRecurrings', () => {
   test('cold call returns rows sorted by nextPaymentDate ascending with _cache_hit=false', async () => {
     const { live } = mkLiveReturning([
@@ -201,6 +221,88 @@ describe('LiveUpcomingRecurringsTools.getUpcomingRecurrings', () => {
     expect(result._cache_oldest_fetched_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(result._cache_newest_fetched_at).toBe(result._cache_oldest_fetched_at);
   });
+
+  test('default rows exclude rule and payments but keep the payment schedule', async () => {
+    const { live } = mkLiveReturning([fatUpcomingRow]);
+    const { LiveUpcomingRecurringsTools } =
+      await import('../../../src/tools/live/upcoming-recurrings.js');
+    const tools = new LiveUpcomingRecurringsTools(live);
+
+    const result = await tools.getUpcomingRecurrings({});
+
+    expect(result.upcoming[0]).not.toHaveProperty('rule');
+    expect(result.upcoming[0]).not.toHaveProperty('payments');
+    expect(result.upcoming[0]).not.toHaveProperty('icon');
+    expect(result.upcoming[0]!.nextPaymentDate).toBe('2024-03-01');
+    expect(result.upcoming[0]!.nextPaymentAmount).toBe(200);
+    // Every DEFAULT_RECURRING_LIVE_FIELDS entry, proven present with a real
+    // value (not just `undefined` surviving key deletion).
+    expect(result.upcoming[0]!.id).toBe('r1');
+    expect(result.upcoming[0]!.state).toBe('ACTIVE');
+    expect(result.upcoming[0]!.frequency).toBe('MONTHLY');
+    expect(result.upcoming[0]!.categoryId).toBe('cat-utils');
+    expect(result.upcoming[0]!.emoji).toBe('💰');
+  });
+
+  test('fields: ["default", "rule"] restores the matcher config', async () => {
+    const { live } = mkLiveReturning([fatUpcomingRow]);
+    const { LiveUpcomingRecurringsTools } =
+      await import('../../../src/tools/live/upcoming-recurrings.js');
+    const tools = new LiveUpcomingRecurringsTools(live);
+
+    const result = await tools.getUpcomingRecurrings({ fields: ['default', 'rule'] });
+
+    expect(result.upcoming[0]!.rule).toBeDefined();
+    expect(result.upcoming[0]).not.toHaveProperty('payments');
+  });
+
+  test('fields: ["all"] returns full rows', async () => {
+    const { live } = mkLiveReturning([fatUpcomingRow]);
+    const { LiveUpcomingRecurringsTools } =
+      await import('../../../src/tools/live/upcoming-recurrings.js');
+    const tools = new LiveUpcomingRecurringsTools(live);
+
+    const result = await tools.getUpcomingRecurrings({ fields: ['all'] });
+
+    expect(result.upcoming[0]!.rule).toBeDefined();
+    expect(result.upcoming[0]!.payments).toHaveLength(2);
+  });
+
+  // Without an explicit knownFields set, projectRows falls back to row-key
+  // detection, which cannot flag a typo when there are zero rows to check
+  // keys against — get_upcoming_recurrings_live passes
+  // UPCOMING_RECURRING_LIVE_KNOWN_FIELDS so this must warn like
+  // get_top_movers_live/get_transactions.
+  test('a typo in fields warns even on an empty result set (knownFields)', async () => {
+    const { live } = mkLiveReturning([]);
+    const { LiveUpcomingRecurringsTools } =
+      await import('../../../src/tools/live/upcoming-recurrings.js');
+    const tools = new LiveUpcomingRecurringsTools(live);
+
+    const result = await tools.getUpcomingRecurrings({
+      fields: ['default', 'not_a_real_field'],
+    });
+
+    expect(result.count).toBe(0);
+    expect(result._field_warning).toBeDefined();
+    expect(result._field_warning).toContain('not_a_real_field');
+  });
+
+  test('the terse default is smaller than the full row (#597 Tier 1)', async () => {
+    const { live: liveTerse } = mkLiveReturning([fatUpcomingRow]);
+    const { LiveUpcomingRecurringsTools } =
+      await import('../../../src/tools/live/upcoming-recurrings.js');
+    const terse = await new LiveUpcomingRecurringsTools(liveTerse).getUpcomingRecurrings({});
+
+    const { live: liveFull } = mkLiveReturning([fatUpcomingRow]);
+    const full = await new LiveUpcomingRecurringsTools(liveFull).getUpcomingRecurrings({
+      fields: ['all'],
+    });
+
+    const terseSize = JSON.stringify(terse).length;
+    const fullSize = JSON.stringify(full).length;
+    expect(terseSize).toBeLessThan(fullSize);
+  });
 });
 
 describe('createLiveUpcomingRecurringsToolSchema', () => {
@@ -224,5 +326,14 @@ describe('createLiveUpcomingRecurringsToolSchema', () => {
     const schema = createLiveUpcomingRecurringsToolSchema();
     expect(schema.description).toMatch(/get_recurring_live/);
     expect(schema.description.toLowerCase()).toMatch(/about.to.bill|upcoming|next.due/);
+  });
+
+  test('schema exposes the fields param naming the excluded tokens', async () => {
+    const { createLiveUpcomingRecurringsToolSchema } =
+      await import('../../../src/tools/live/upcoming-recurrings.js');
+    const schema = createLiveUpcomingRecurringsToolSchema();
+    expect(schema.inputSchema.properties?.fields).toBeDefined();
+    expect(schema.description).toContain('rule');
+    expect(schema.description).toContain('payments');
   });
 });
