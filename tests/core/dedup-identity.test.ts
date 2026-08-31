@@ -441,13 +441,49 @@ const DISCOVERY_WINDOW = 3000;
  * Both are "a parser silently returns an empty or partial slice" — the exact
  * construct the sibling PR (#685/#688 test-guard cleanup) has spent several
  * revisions closing elsewhere in this repo. The regex tightening narrows
- * WHICH shapes can trigger this; the length assertion is what actually
- * closes it, because it does not depend on anticipating every shape that
- * can go wrong — only on the fact that a real function body this large does
- * not shrink to a sliver. The real body is ~18,000 characters; the floor
- * below is set with a wide margin under that, wide enough to never trip on
- * a legitimate edit, tight enough that no degenerate slice can sneak under
- * it undetected.
+ * WHICH shapes can trigger this; the two assertions below are what actually
+ * close it — one on SIZE, one on CONTENT — because neither depends on
+ * anticipating every shape that can go wrong.
+ *
+ * SIZE (`minPlausibleLength`): a real body this large does not shrink to a
+ * sliver. The real body is ~18,000 characters; the floor is set with a wide
+ * margin under that. But size alone is a HEURISTIC, not a content check
+ * (review follow-up, round 2 of this exact finding) — it is defeated by
+ * padding: `Promise<{ field0: boolean; ...400 more... } & AllCollectionsResult>`
+ * produces a slice north of 7,000 characters, clearing the floor, while
+ * still being the wrong slice (the type literal's padding, not the
+ * function body).
+ *
+ * CONTENT (below): the slice must contain `const \w+ = new Set<string>\(\)`
+ * — the exact construct the scan exists to find. Its absence means the scan
+ * cannot possibly do its job, so this assertion fails for the same reason
+ * the scan would; its presence is necessary, though (see next paragraph)
+ * NOT sufficient, for the slice to be genuine.
+ *
+ * TRIED TO DEFEAT THIS, both attempts against the padded-type-literal shape
+ * above: (1) a bare `marker: 'new Set<string>()'` field embeds the literal
+ * SUBSTRING and defeats a naive `.includes()` check — closed by requiring
+ * the full `const \w+ = new Set<string>\(\)` shape, not just the bare
+ * text. (2) a `marker: 'const attackerVar = new Set<string>();'` field
+ * embeds that FULL shape too, as string content, and DOES defeat the
+ * content check — confirmed by running it through this exact regex. This
+ * is not a tuning gap: a regex has no notion of "inside a string literal,"
+ * so any text-based marker, however specific, can be reproduced inside a
+ * string-literal-typed field by a sufficiently deliberate payload — the
+ * same categorical limit `balanced()`'s own ASSUMPTION documents for
+ * unbalanced brackets inside strings. Closing it fully needs a real
+ * TypeScript parser, not a bigger regex; out of scope for a test-guard file
+ * whose actual adversary is an accidental refactor, not a hostile input.
+ * What the content check DOES close: every REALISTIC reshape (an
+ * accidental brace in a return type is never accompanied by a hand-forged
+ * fake dedup-block string deliberately designed to fool this exact
+ * function). And even the maximally-adversarial payload above does not
+ * pass silently end to end — the per-block scan in
+ * `discoverAggregatePushTargets` still finds no genuine guard for the fake
+ * declaration and returns `{}`, so the count-pin and the `AGGREGATE_SET_VAR`
+ * pin still catch it, exactly as they did before this fix — only the
+ * DIAGNOSTIC quality regresses (caught two layers downstream instead of
+ * named here), not correctness.
  */
 const MIN_PLAUSIBLE_BODY_LENGTH = 5000;
 
@@ -455,6 +491,15 @@ function decodeAllCollectionsBody(
   source: string,
   minPlausibleLength: number = MIN_PLAUSIBLE_BODY_LENGTH
 ): string {
+  // Pre-existing brittleness, not introduced by the checks below and not
+  // worth fixing: the anchor is literal about the single spaces between
+  // `export`/`async`/`function`. A reformatted `export  async  function` (or
+  // a linter regression that stops collapsing them) fails to match at all —
+  // but that already fails LOUD, via the "could not locate" throw right
+  // below, which is the failure mode every check in this function is built
+  // to produce. Left as-is rather than generalized to `\s+`, since a
+  // silent-partial-slice bug is what this function exists to prevent, and a
+  // silent-empty-match bug is not that.
   const decl = /^export async function decodeAllCollections\([^)]*\)\s*:[^{]*\{/m.exec(source);
   if (!decl) {
     throw new Error(
@@ -466,6 +511,11 @@ function decodeAllCollectionsBody(
   if (body.length < minPlausibleLength) {
     throw new Error(
       `discoverAggregatePushTargets: decodeAllCollectionsBody extracted an implausibly short body (${body.length} chars, expected at least ${minPlausibleLength}) — the anchor likely matched a brace embedded in the return type instead of the function's own opening brace, or balanced() ran off the end of the source without finding a match`
+    );
+  }
+  if (!/const \w+ = new Set<string>\(\)/.test(body)) {
+    throw new Error(
+      "discoverAggregatePushTargets: decodeAllCollectionsBody extracted a body containing no `const X = new Set<string>()` declaration — it cannot be decodeAllCollections's real body, since that construct is what the scan exists to find; the anchor likely matched a brace embedded in the return type instead of the function's own opening brace"
     );
   }
   return body;
@@ -914,5 +964,63 @@ export async function decodeAllCollections(dbPath: string): Promise<{ ok: boolea
 }
 `;
     expect(() => discoverAggregatePushTargets(FIXTURE_SRC)).toThrow(/implausibly short body/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: padding a type literal past the length floor must still not
+// pass silently — the content marker is the second, independent check
+// (review follow-up, round 2 of the #688 review)
+// ---------------------------------------------------------------------------
+
+describe('decodeAllCollectionsBody rejects a padded-but-content-free slice (#688 review)', () => {
+  test('400 fake fields clear the length floor but contain no Set declaration — caught by the content marker', () => {
+    // The demonstrated attack: pad the same brace-in-return-type shape with
+    // enough harmless fields to clear MIN_PLAUSIBLE_BODY_LENGTH. The slice
+    // is now long enough to pass the size check, and is STILL the wrong
+    // slice — the type literal's padding, not the function body. Real
+    // decodeAllCollections's own body always contains at least one
+    // `const X = new Set<string>()`; this padding, by construction, never
+    // does.
+    const fields = Array.from({ length: 400 }, (_, i) => `field${i}: boolean`).join('; ');
+    const FIXTURE_SRC = `
+export async function decodeAllCollections(dbPath: string): Promise<{ ${fields} } & AllCollectionsResult> {
+  const xSeen = new Set<string>();
+}
+`;
+    expect(() => discoverAggregatePushTargets(FIXTURE_SRC)).toThrow(
+      /no `const X = new Set<string>\(\)` declaration/
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Documented, accepted residual: a payload that embeds the content marker
+// ITSELF inside a string-literal-typed field defeats decodeAllCollectionsBody's
+// checks — the same categorical limit balanced()'s own ASSUMPTION already
+// documents for unbalanced brackets inside strings. Not a regression guard
+// for a bug this PR fixes; a permanent, executable record that even the
+// worst case does not pass silently END TO END, because the downstream
+// per-block scan still finds nothing to attribute.
+// ---------------------------------------------------------------------------
+
+describe('a maximally-adversarial payload defeats the slicer but not the downstream pins (#688 review)', () => {
+  test('embedding the exact marker text as string content clears both slicer checks, yet the scan still finds nothing', () => {
+    const fields = Array.from({ length: 400 }, (_, i) => `field${i}: boolean`).join('; ');
+    const FIXTURE_SRC = `
+export async function decodeAllCollections(dbPath: string): Promise<{ marker: 'const attackerVar = new Set<string>();'; ${fields} } & AllCollectionsResult> {
+  const xSeen = new Set<string>();
+}
+`;
+    // decodeAllCollectionsBody does NOT throw — both its checks pass on the
+    // wrong slice, exactly as documented above.
+    const found = discoverAggregatePushTargets(FIXTURE_SRC);
+    // But the per-block scan, run on that wrong slice, finds no genuine
+    // `.has(...)`-guarded `.push(` for the fake declaration — the STRING
+    // content has the shape of a Set declaration but not of a real guard —
+    // so the overall result is still the empty map the count-pin and the
+    // AGGREGATE_SET_VAR pin would both catch downstream. Silently WRONG
+    // slice, but not silently PASSING.
+    expect(found).toEqual({});
   });
 });
