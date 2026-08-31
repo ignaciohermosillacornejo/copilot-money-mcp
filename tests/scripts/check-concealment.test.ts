@@ -334,14 +334,51 @@ describe('file list comes from git when available (review follow-up)', () => {
     // `.git` here holds a garbage config, which is a real refusal from real
     // git: `git -C <dir> rev-parse --show-toplevel` answers `fatal: not a git
     // repository` with status 128. `chmod 000 .git` on a valid repo does the
-    // same thing; both were run against git 2.50.1. The ownership case is the
-    // motivating one and was NOT run, because it needs a second uid — it
-    // reaches this branch identically, through a non-zero git status.
+    // same thing; both were run against git 2.50.1. The motivating refusal —
+    // dubious ownership — gets its own test below, which does not need the
+    // second uid an earlier round assumed it did.
     await withTree(
       { '.git/config': 'garbage\n', 'build/loader.ts': concealed, 'src/a.ts': CLEAN },
       ({ code, stderr }) => {
         expect(code).toBe(1);
         expect(stderr).toContain('git declined');
+      }
+    );
+  });
+
+  test('a real dubious-ownership refusal is refused, not walked', async () => {
+    // The scenario the guard exists for, driven end-to-end at last. An earlier
+    // round recorded it as unrunnable without a second uid; that was wrong.
+    // git ships GIT_TEST_ASSUME_DIFFERENT_OWNER, which makes
+    // ensure_valid_ownership take the failing branch and emit the genuine
+    // `fatal: detected dubious ownership in repository at '<path>'`, status 128
+    // — no chown, no sudo, no container.
+    //
+    // It has to arrive on a PATH shim rather than in the environment, because
+    // gitFiles strips the whole GIT_ namespace before spawning — the same
+    // stripping that makes this failure mode terminal in the first place.
+    //
+    // Non-vacuous, measured on this tree against the pre-guard file: it printed
+    // `1 files scanned (walk), nothing hidden` and exited 0, the tracked
+    // concealed build/loader.ts having been dropped by SKIP_DIRS on the walk.
+    const realGit = Bun.which('git');
+    expect(realGit).toBeTruthy();
+    await withGitTree(
+      { 'build/loader.ts': concealed, 'src/a.ts': CLEAN },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('git declined');
+      },
+      {},
+      async (dir) => {
+        const shim = join(dir, 'shim');
+        await mkdir(shim, { recursive: true });
+        await writeFile(
+          join(shim, 'git'),
+          `#!/bin/sh\nGIT_TEST_ASSUME_DIFFERENT_OWNER=1 export GIT_TEST_ASSUME_DIFFERENT_OWNER\nexec ${realGit as string} "$@"\n`,
+          { mode: 0o755 }
+        );
+        return { PATH: `${shim}:${process.env.PATH ?? ''}` };
       }
     );
   });
@@ -361,6 +398,58 @@ describe('file list comes from git when available (review follow-up)', () => {
     await withTree({ 'build/loader.ts': concealed, 'src/a.ts': CLEAN }, ({ code, stdout }) => {
       expect(code).toBe(0);
       expect(stdout).toContain('(walk)');
+      expect(stdout).toContain('1 files scanned');
+    });
+  });
+
+  test('a failed untracked listing refuses, instead of scanning the tracked half', async () => {
+    // The last silent scan-shrink, and the one the strategy guard above cannot
+    // see: `?? []` on the untracked listing kept `strategy` at 'git', so a
+    // failure printed `N files scanned (git), nothing hidden` over a scope that
+    // had lost its whole untracked half.
+    //
+    // No tree state makes `ls-files --others` exit non-zero — looked for, on
+    // git 2.50.1: an unreadable subdirectory warns and exits 0, an unreadable
+    // .git/info/exclude warns and exits 0, a .gitignore that is a DIRECTORY is
+    // silent and exits 0. So the failure is injected where run() actually
+    // observes it, at the process boundary: a `git` earlier on PATH that exits
+    // 1 on `--others` and execs the real git for everything else. run() cannot
+    // tell why git failed, only that it did, which is the whole point.
+    //
+    // Measured against the pre-fix code over this tree: real git reports
+    // `(3 files scanned, listed by git)` and exits 1; the shim reports
+    // `1 files scanned (git), nothing hidden` and exits 0.
+    const realGit = Bun.which('git');
+    expect(realGit).toBeTruthy();
+    await withGitTree(
+      { 'src/a.ts': 'const a = 1;\n' },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('git declined');
+      },
+      { 'src/added-later.ts': concealed },
+      async (dir) => {
+        const shim = join(dir, 'shim');
+        await mkdir(shim, { recursive: true });
+        await writeFile(
+          join(shim, 'git'),
+          `#!/bin/sh\nfor a in "$@"; do\n  if [ "$a" = "--others" ]; then exit 1; fi\ndone\nexec ${realGit as string} "$@"\n`,
+          { mode: 0o755 }
+        );
+        return { PATH: `${shim}:${process.env.PATH ?? ''}` };
+      }
+    );
+  });
+
+  test('a repo with nothing untracked still scans, and still reports (git)', async () => {
+    // The other half of the same distinction, and the regression the fix above
+    // could have introduced. Empty is not failure: probed on git 2.50.1, a
+    // clean tree gives `ls-files --others --exclude-standard` status 0 with
+    // zero bytes of stdout, which run() turns into `[]`. Treating a falsy or
+    // empty listing as a refusal would fail this gate on every clean checkout.
+    await withGitTree({ 'src/a.ts': CLEAN }, ({ code, stdout }) => {
+      expect(code).toBe(0);
+      expect(stdout).toContain('(git)');
       expect(stdout).toContain('1 files scanned');
     });
   });
