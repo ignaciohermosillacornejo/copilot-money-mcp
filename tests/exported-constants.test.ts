@@ -127,12 +127,17 @@ const SRC_ROOT = join(import.meta.dir, '..', 'src');
  * goes uncounted — the same class of blind spot as the matcher it is meant to
  * outperform. A balanced pair split across concatenated literals is fine, since
  * the walk never needed them to be in the same literal. Today the net holds: 33
- * declarations match `export const NAME = [`, 25 land on `as const` and 8
- * correctly do not, and src/'s only two unbalanced-bracket literals
- * (src/tools/field-selection.ts:105 and :106, which balance each other) sit
- * inside an object literal the array walk never enters. That 25 is the same 25
- * the pin holds, and none of their literals carries a bracket. Counting only
- * the pin's 25 would prove nothing, for the reason spelled out below.
+ * declarations match `export const NAME = [` — run WITH the optional type
+ * annotation the grammar allows (`NAME: readonly T[] =`, the shape
+ * CONFORMANCE_LEDGER uses), which is not a detail: run without it the same
+ * opener returns 25, the grammar's own population exactly, and the check cannot
+ * fail, because the 8 that miss `as const` ARE the 8 annotated declarations.
+ * Of the 33, 25 land on `as const` and 8 correctly do not, and src/'s only two
+ * unbalanced-bracket literals (src/tools/field-selection.ts:105 and :106, which
+ * balance each other) sit inside an object literal the array walk never enters.
+ * That 25 is the same 25 the pin holds, and none of their literals carries a
+ * bracket. Counting only the pin's 25 would prove nothing, for the reason
+ * spelled out below.
  *
  * The two shapes already coexist in one file though — src/tools/field-selection.ts
  * declares `as const` arrays at :36, :60, :121 and :151 (closing at :47, :68,
@@ -267,8 +272,8 @@ function collectStringConstants(source: string): Map<string, readonly string[]> 
  *     indefinite on machines whose readdirSync order produces that winner;
  *     elsewhere the same pin matches the LOSER instead. The dangerous one, and
  *     the one the workflow RATCHETS TOWARDS — see below.
- *   arrays differ, pin matches the LOSER  -> contents red, but only on machines
- *     whose readdirSync order produces that winner. Loud where it fires.
+ *   arrays differ, pin matches the LOSER  -> contents red, but only where
+ *     readdirSync order makes the OTHER file win. Loud where it fires.
  *   arrays identical                      -> quiet and stable; the loser is
  *     uncovered but currently says the same thing, until it drifts.
  *
@@ -506,6 +511,24 @@ describe('exported string constants are pinned (#635 class detector)', () => {
     const found = collectStringConstants(snippet);
     expect(found.has('NOT_A_PIN')).toBe(false);
     expect([...(found.get('AFTER_THE_LEDGER') ?? [])]).toEqual(['alpha', 'beta']);
+  });
+
+  test('an annotated declaration is still discovered', () => {
+    // The complement of the boundary snippet above, and the reason it is
+    // needed: an annotation appears nowhere else in this file except on a
+    // declaration asserted ABSENT (NOT_A_PIN there, CONFORMANCE_LEDGER above),
+    // and nothing in the tree exercises it either — the 8 annotated
+    // declarations in src/ are exactly the 8 the grammar excludes for missing
+    // `as const`, so no input from the tree reaches the accepting branch
+    // today. Delete `(?::[^=]+)?` from the grammar and every other test in this
+    // file stays green; that was checked by deleting it, not assumed. Not a
+    // hypothetical shape: src/ writes it eight times today, and one of them
+    // acquiring `as const` is a plausible next commit — which would then leave
+    // discovery without a word, the #677 failure again.
+    const found = collectStringConstants(
+      "export const ANNOTATED: readonly string[] = ['a', 'b'] as const;"
+    );
+    expect([...(found.get('ANNOTATED') ?? [])]).toEqual(['a', 'b']);
   });
 
   test('forward: every exported string constant in src/ is pinned', () => {
