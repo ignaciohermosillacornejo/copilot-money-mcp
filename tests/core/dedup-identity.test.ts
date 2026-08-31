@@ -31,7 +31,7 @@
  * or explicitly listed as untested-by-choice.
  *
  * Note "block", not "comment", and "expression", not "name". Both distinctions
- * were bought the hard way — eight revisions, each one narrower than its own
+ * were bought the hard way — nine revisions, each one narrower than its own
  * comment claimed, each narrowing found by review rather than by the suite:
  *
  *   1. five hand-written tests, claiming "every collection"
@@ -63,7 +63,17 @@
  *      is still top-level-`function`-only, so a Set in an arrow function or
  *      a method is credited to the preceding declaration and bounded by the
  *      following one, and stripComments's string-literal ASSUMPTION (below)
- *      is unchanged
+ *      is unchanged — and the name it matched was still un-anchored, so a
+ *      Set could borrow a longer identifier's guard inside the one function
+ *      the bound cannot split
+ *   9. the matched name anchored to an identifier boundary, so `catSeen` no
+ *      longer matches `subcatSeen.has(`, and the 'NONE' sentinel taken out
+ *      of band so a `const NONE = row.id` can no longer rewrite "unguarded"
+ *      into a field-bearing key that passes fieldFreeBlocks — but revision
+ *      6's opaque-call class (`keyFor(row.id)`) is still open, attribution
+ *      is still top-level-`function`-only, and the sibling scanner's
+ *      per-Set window is still a bare slice, safe because its `if (!`
+ *      anchor makes a run-off loud rather than because it is bounded
  *
  * Revision 2 could not see `dedupeAndSortInvestmentPrices`, which carries no
  * comment — the site that shipped #622, the previous instance of this exact
@@ -589,6 +599,14 @@ function discoverAggregatePushTargets(
   // all, so `Object.hasOwn` never sees it and the target is dropped in silence
   // instead of throwing — the half of the `in` nit that `Object.hasOwn` alone
   // does not close.
+  //
+  // DEPENDS ON `toEqual`, NOT `toStrictEqual`: both scanners now return
+  // null-prototype objects, and four assertions in this file compare one
+  // against a plain object literal. `toEqual` ignores the prototype;
+  // `toStrictEqual` compares it and would fail with the famously unhelpful
+  // "serializes to the same string". There is no `toStrictEqual` in this file
+  // today — if a future review suggests tightening one of those comparisons,
+  // this is why it does not apply here.
   const found: Record<string, string> = Object.create(null);
   for (const m of scoped.matchAll(/const (\w+) = new Set<string>\(\)/g)) {
     const setVar = m[1] as string;
@@ -704,10 +722,20 @@ const TWIN_TESTED = new Set(
  * pinned from the NEXT function's guard instead of reported as unguarded.
  * That is a plausible-looking wrong answer, and it is the same unbounded
  * forward scan this file's sibling closed with `balanced()` and
- * `decodeAllCollectionsBody()`; this was the last instance of it left in
- * either file. Bounding it changed no pin: comparing the char-bounded and
- * declaration-bounded resolution across all 36 real blocks yields 0
- * differences, so it closes a hole rather than moving a pin.
+ * `decodeAllCollectionsBody()`; this was the last FUNCTION-level instance of
+ * it left in either file. Bounding it changed no pin: comparing the
+ * char-bounded and declaration-bounded resolution across all 36 real blocks
+ * yields 0 differences, so it closes a hole rather than moving a pin.
+ *
+ * "Function-level" is the qualifier that makes that claim true (third review
+ * follow-up): `discoverAggregatePushTargets`'s own per-Set window is still a
+ * bare DISCOVERY_WINDOW slice inside the already-scoped
+ * decodeAllCollectionsBody. It is safe for a reason rather than by
+ * construction — its guard regex is `if (!`-anchored, so a window that runs
+ * off can only find a guard belonging to another Set, and that yields either
+ * a duplicate push target (throws) or none (fails the `toBe(25)` pin). Both
+ * are loud. Left as-is rather than bounded, because the reason is real and
+ * bounding it would be a change with no failing case behind it.
  *
  * ATTRIBUTION LIMIT, shared by `enclosing` and by the bound above, since
  * both read the same `declarations` list: that list comes from
@@ -739,7 +767,8 @@ function discoverDedupBlocks(
   // line to `{}` leaves all tests green, which is why the pinned fixture for
   // the drop lives on the sibling scanner (whose keys ARE bare identifiers)
   // and not here. Kept so the two scanners read the same way; recorded as
-  // unreachable so nobody later mistakes it for a live guard.
+  // unreachable so nobody later mistakes it for a live guard. Carries the same
+  // `toEqual`-not-`toStrictEqual` dependency documented on the sibling above.
   const found: Record<string, string> = Object.create(null);
   for (const m of source.matchAll(/const (\w+) = new Set<string>\(\)/g)) {
     const variable = m[1] as string;
@@ -750,14 +779,37 @@ function discoverDedupBlocks(
     const nextDecl = declarations.find(([at]) => at > (m.index as number));
     const end = Math.min(start + DISCOVERY_WINDOW, nextDecl ? nextDecl[0] : source.length);
     const window = stripComments(source.slice(start, end));
-    const use = new RegExp(`${variable}\\.has\\(([^;]*?)\\)\\s*\\)`).exec(window);
+    // `(?<![\w$])` anchors the Set name to an identifier boundary (third
+    // review follow-up on #688 review). Without it `${variable}` matches as a
+    // SUFFIX of any longer identifier, so a Set named `catSeen` picks up
+    // `subcatSeen.has(...)` — someone else's guard, yielding a key that is
+    // wrong and well-formed at the same time. The declaration bound above does
+    // not help: it separates functions, and 25 of the decoder's 36 Sets share
+    // decodeAllCollections, so their windows overlap freely. The sibling
+    // scanner never had this because its `if (!` prefix pins the name to the
+    // character after the `!`; this is the last place in either file where a
+    // scan could latch onto something that is not its target. Verified before
+    // tightening: no Set name in the decoder is a proper suffix of another
+    // (36 Sets, 27 distinct names, 0 suffix pairs), and anchoring changes 0 of
+    // the 36 resolved keys — a hole closed, not a pin moved.
+    const use = new RegExp(`(?<![\\w$])${variable}\\.has\\(([^;]*?)\\)\\s*\\)`).exec(window);
     let key = use ? (use[1] as string).replace(/\s+/g, ' ').trim() : 'NONE';
     // Resolve a bare identifier to the expression it is assigned from. Three
     // blocks dedup on `const key = \`${a}:${b}\``, and pinning the string
     // "key" pins NOTHING — changing what key is built from would not move it.
     // That is this file's own bug class yet again: a guard recording a name
     // where it means a value.
-    if (/^\w+$/.test(key)) {
+    //
+    // Gated on `use` so the 'NONE' sentinel never enters this step. 'NONE'
+    // matches /^\w+$/ like any identifier, so without the gate a
+    // `const NONE = row.id;` in the window rewrote the sentinel into
+    // "NONE = row.id" — which contains a property access and therefore PASSES
+    // fieldFreeBlocks, reporting an unguarded block as guarded. A fail-open in
+    // this file's headline invariant, reached through the sentinel rather than
+    // through the scan. `const NONE` appears nowhere in the repo today
+    // (checked), which is precisely the kind of guarantee that should not be
+    // load-bearing: `use &&` makes the sentinel out-of-band by construction.
+    if (use && /^\w+$/.test(key)) {
       const assigned = new RegExp(`const ${key} = ([^;]+);`).exec(window);
       if (assigned) key = `${key} = ${(assigned[1] as string).replace(/\s+/g, ' ').trim()}`;
     }
@@ -1346,19 +1398,22 @@ export function decodeTwoScopes(): unknown {
 });
 
 describe('discoverDedupBlocks bounds its window at the next declaration (#688 review)', () => {
-  test('a Set whose own guard is gone reports NONE, not a key from the next function', () => {
-    // DISCOVERY_WINDOW is a character count, not a syntactic boundary, and 18
-    // of the decoder's 36 real blocks have a 3 000-character window that
-    // reaches past the end of their own function. So a Set whose guard was
-    // removed or refactored away does not come back as unguarded — the scan
-    // walks into the NEXT function and pins it to a guard that belongs to
-    // something else. `decodeUnguarded|seen` would be pinned to `row.row_id`,
-    // which looks like a perfectly good answer and is the wrong one; the
-    // field-free invariant would pass it, and the maintainer who regenerates
-    // DEDUP_BLOCKS from it bakes in a claim about code that does not exist.
-    // Same unbounded-forward-scan class `balanced()` and
-    // decodeAllCollectionsBody() close for the sibling scanner.
-    const FIXTURE_SRC = `
+  // DISCOVERY_WINDOW is a character count, not a syntactic boundary, and 18 of
+  // the decoder's 36 real blocks have a 3 000-character window that reaches
+  // past the end of their own function. So a Set whose guard was removed or
+  // refactored away does not come back as unguarded — the scan walks into the
+  // NEXT function and pins it to a guard that belongs to something else.
+  // `decodeUnguarded|seen` would be pinned to `row.row_id`, which looks like a
+  // perfectly good answer and is the wrong one; the field-free invariant would
+  // pass it, and the maintainer who regenerates DEDUP_BLOCKS from it bakes in
+  // a claim about code that does not exist. Same unbounded-forward-scan class
+  // `balanced()` and decodeAllCollectionsBody() close for the sibling scanner.
+  //
+  // One fixture, two tests, deliberately shared (third review follow-up): the
+  // second test's whole point is that it is the SAME scenario seen through the
+  // live invariant, and two byte-identical copies left that composition for
+  // the reader to discover by diffing.
+  const FIXTURE_SRC = `
 export function decodeUnguarded(): unknown {
   const seen = new Set<string>();
   const ids = raw.map((r) => r.thing_id);
@@ -1371,6 +1426,8 @@ export function decodeGuarded(): unknown {
   }
 }
 `;
+
+  test('a Set whose own guard is gone reports NONE, not a key from the next function', () => {
     expect(discoverDedupBlocks(FIXTURE_SRC)).toEqual({
       'decodeUnguarded|seen': 'NONE',
       'decodeGuarded|seen': 'row.row_id',
@@ -1381,19 +1438,69 @@ export function decodeGuarded(): unknown {
     // The bound is only useful because `NONE` is a state the live invariant
     // rejects: bounding the window turns a plausible wrong key into a loud
     // one rather than into a different kind of silence.
-    const FIXTURE_SRC = `
-export function decodeUnguarded(): unknown {
-  const seen = new Set<string>();
-  const ids = raw.map((r) => r.thing_id);
-}
+    expect(fieldFreeBlocks(discoverDedupBlocks(FIXTURE_SRC))).toEqual(['decodeUnguarded|seen']);
+  });
+});
 
-export function decodeGuarded(): unknown {
-  const seen = new Set<string>();
-  if (!seen.has(row.row_id)) {
-    seen.add(row.row_id);
+describe('discoverDedupBlocks anchors the Set name it matches (#688 review)', () => {
+  // `catSeen` is a suffix of `subcatSeen`, so an un-anchored
+  // `${variable}\.has\(` matches the LONGER identifier's guard. The
+  // declaration bound does not help here: both Sets live in one function, and
+  // inside decodeAllCollections 25 of the decoder's 36 Sets do exactly that,
+  // so their windows overlap freely. The sibling scanner is immune for free —
+  // its `if (!` prefix forces the name to start right after the `!` — and this
+  // is the last place in either file where a scan could latch onto something
+  // that is not its target.
+  const FIXTURE_SRC = `
+export function decodeSuffix(): unknown {
+  const catSeen = new Set<string>();
+  const subcatSeen = new Set<string>();
+  if (!subcatSeen.has(sub.subcategory_id)) {
+    subcatSeen.add(sub.subcategory_id);
   }
 }
 `;
-    expect(fieldFreeBlocks(discoverDedupBlocks(FIXTURE_SRC))).toEqual(['decodeUnguarded|seen']);
+
+  test('a Set whose name is a suffix of another does not borrow the longer guard', () => {
+    expect(discoverDedupBlocks(FIXTURE_SRC)).toEqual({
+      'decodeSuffix|catSeen': 'NONE',
+      'decodeSuffix|subcatSeen': 'sub.subcategory_id',
+    });
+  });
+
+  test('the borrowed guard would otherwise pass the live field-free invariant', () => {
+    // Why the anchor matters rather than merely tidying: the borrowed key
+    // `sub.subcategory_id` contains a property access, so fieldFreeBlocks
+    // accepts it. The wrong answer is not just wrong, it is well-formed —
+    // and a maintainer regenerating DEDUP_BLOCKS from it would pin a claim
+    // about a guard that belongs to a different Set.
+    expect(fieldFreeBlocks(discoverDedupBlocks(FIXTURE_SRC))).toEqual(['decodeSuffix|catSeen']);
+  });
+});
+
+describe('discoverDedupBlocks keeps its NONE sentinel out of band (#688 review)', () => {
+  // `NONE` matches /^\w+$/, so before the `use &&` guard the sentinel was fed
+  // into the bare-identifier resolution exactly like a real identifier. A
+  // `const NONE = ...` in the window then rewrote "no guard found" into a
+  // resolved-looking key — and because that key contains a property access it
+  // passes fieldFreeBlocks, so an UNGUARDED block reports as guarded. A
+  // fail-open in this file's headline invariant, reached through the sentinel
+  // rather than through the scan. `const NONE` appears nowhere in the repo
+  // today, which is exactly the kind of guarantee that should not be load
+  // bearing.
+  const FIXTURE_SRC = `
+export function decodeSentinel(): unknown {
+  const seen = new Set<string>();
+  const NONE = row.id;
+  const ids = raw.map((r) => r.thing_id);
+}
+`;
+
+  test('an unguarded Set stays NONE even when a const NONE is in scope', () => {
+    expect(discoverDedupBlocks(FIXTURE_SRC)).toEqual({ 'decodeSentinel|seen': 'NONE' });
+  });
+
+  test('and is therefore still reported by the live field-free invariant', () => {
+    expect(fieldFreeBlocks(discoverDedupBlocks(FIXTURE_SRC))).toEqual(['decodeSentinel|seen']);
   });
 });
