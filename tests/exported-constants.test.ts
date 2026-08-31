@@ -116,14 +116,19 @@ const SRC_ROOT = join(import.meta.dir, '..', 'src');
  * No such literal sits in an `as const` array in src/ today. The denominator is
  * the load-bearing part: the scan bracket-matches EVERY
  * `export const NAME = [ ... ] as const` in src/, discoverable by this grammar
- * or not, which is a wider net than the matcher above casts. It is a CHECK, not
- * a proof: the walk counts brackets in raw text, so an UNBALANCED one inside a
- * literal (`['a]', 'b']`) closes it early and that declaration goes uncounted —
- * the same class of blind spot as the matcher it is meant to outperform. A
- * balanced pair split across concatenated literals is fine, since the walk never
- * needed them to be in the same literal. Today the net holds: 33 declarations
- * match `export const NAME = [`, 25 land on `as const` and 8 correctly do not,
- * and src/'s only two unbalanced-bracket literals
+ * or not, which is a wider net than the matcher above casts. Wider but for one
+ * direction: that opener is matched line by line where the grammar's `=\s*\[`
+ * crosses newlines, so a declaration wrapped after its `=` falls outside the
+ * census while staying inside the grammar — a hole only if it ALSO carries
+ * what the grammar rejects: a bracket literal here, a double-quoted member
+ * below. Run both ways over src/, the opener returns the same set today. It is
+ * a CHECK, not a proof: the walk counts brackets in raw text, so an UNBALANCED
+ * one inside a literal (`['a]', 'b']`) closes it early and that declaration
+ * goes uncounted — the same class of blind spot as the matcher it is meant to
+ * outperform. A balanced pair split across concatenated literals is fine, since
+ * the walk never needed them to be in the same literal. Today the net holds: 33
+ * declarations match `export const NAME = [`, 25 land on `as const` and 8
+ * correctly do not, and src/'s only two unbalanced-bracket literals
  * (src/tools/field-selection.ts:105 and :106, which balance each other) sit
  * inside an object literal the array walk never enters. That 25 is the same 25
  * the pin holds, and none of their literals carries a bracket. Counting only
@@ -189,14 +194,13 @@ function tsFilesUnder(dir: string): string[] {
  * line wherever it occurs. They are harmless because none of those three LINES
  * carries an `as const` declaration, so the text destroyed is text the matcher
  * would not have matched. Put a URL inside a member and the constant is gone:
- * `export const U = ['https://x'] as const` does not survive stripping.
- * Note WHAT was checked, because the distinction is the whole
- * point of this helper: the count is over extracted member VALUES, after
- * stripping. Two of the 25 raw bodies — IGNORED_ITEM_FIELDS and
- * KNOWN_FREQUENCIES — do contain `//`, as the line comments this helper exists
- * to remove and the live hole #677 fixed. Post-strip, zero of the 25 have a
- * member whose CONTENT holds `//`, and zero string literals anywhere in src/
- * hold a block-comment opener.
+ * `export const U = ['https://x'] as const` does not survive stripping. Note
+ * WHAT was checked, because the distinction is the whole point of this helper:
+ * the count is over extracted member VALUES, after stripping. Two of the 25 raw
+ * bodies — IGNORED_ITEM_FIELDS and KNOWN_FREQUENCIES — do contain `//`, as the
+ * line comments this helper exists to remove and the live hole #677 fixed.
+ * Post-strip, zero of the 25 have a member whose CONTENT holds `//`, and zero
+ * string literals anywhere in src/ hold a block-comment opener.
  *
  * Stated rather than left implicit because the failure is SILENT in exactly
  * this file's own direction: mangling a literal makes the residue check reject
@@ -259,20 +263,23 @@ function collectStringConstants(source: string): Map<string, readonly string[]> 
  * test can move:
  *
  *   arrays differ, pin matches the WINNER -> all three green, and the loser is a
- *     live declaration in src/ that no test touches. Silent, stable, indefinite.
- *     The dangerous one, and the one the workflow RATCHETS TOWARDS — see below.
+ *     live declaration in src/ that no test touches. Silent, stable and
+ *     indefinite on machines whose readdirSync order produces that winner;
+ *     elsewhere the same pin matches the LOSER instead. The dangerous one, and
+ *     the one the workflow RATCHETS TOWARDS — see below.
  *   arrays differ, pin matches the LOSER  -> contents red, but only on machines
  *     whose readdirSync order produces that winner. Loud where it fires.
  *   arrays identical                      -> quiet and stable; the loser is
  *     uncovered but currently says the same thing, until it drifts.
  *
- * The ratchet, which is why row 2 is not merely one outcome in three: `PINNED`
- * entries are authored from what discovery REPORTS. So row 3 does not persist —
- * the author sees contents red, reconciles the pin against the actual output,
- * i.e. against the winner, and lands in row 2. Row 3 decays into row 2 on
- * whichever machine last edited the pin, and that is also why row 2 presents as
- * a CROSS-MACHINE symptom: the same pin matches the winner here and the loser
- * on a machine whose readdirSync order differs. Not a probability argument — a
+ * The ratchet, which is why the pin-matches-WINNER branch is not merely one
+ * outcome in three: `PINNED` entries are authored from what discovery REPORTS.
+ * So pin-matches-LOSER does not persist — the author sees contents red,
+ * reconciles the pin against the actual output, i.e. against the winner, and
+ * lands in pin-matches-WINNER. The decay happens on whichever machine last
+ * edited the pin, which is also why pin-matches-LOSER presents as a
+ * CROSS-MACHINE symptom: the same pin matches the winner here and the loser on
+ * a machine whose readdirSync order differs. Not a probability argument — a
  * property of how the pin gets written.
  *
  * Unlike its siblings, no branch drops a NAME the backward check could notice:
