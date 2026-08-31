@@ -758,8 +758,13 @@ function gitFiles(root: string): { tracked: string[]; untracked: string[] } | un
   const top = run(['rev-parse', '--show-toplevel']);
   if (top === undefined || top.length === 0) return undefined;
   try {
-    const topReal = realpathSync((top[0] ?? '').trim());
-    if (topReal !== realpathSync(root)) return undefined;
+    // .native for the same reason as answersToName below: the JS realpathSync
+    // does not canonicalize the final path component, so under node a root
+    // spelled differently from its on-disk name would compare unequal and drop
+    // the gate onto the walk — a different scanned set, and not a safer
+    // one.
+    const topReal = realpathSync.native((top[0] ?? '').trim());
+    if (topReal !== realpathSync.native(root)) return undefined;
   } catch {
     return undefined;
   }
@@ -822,18 +827,32 @@ function underSkippedDir(root: string, file: string): boolean {
  * hole and opened a smaller one: APFS folds U+017F (LATIN SMALL LETTER LONG S)
  * to `s`, and `String.prototype.toLowerCase` does not, so a file committed as
  * `.gitattributeſ` is read by git — `check-attr` reports `binary: set` — and was
- * skipped here. A full sweep of 0x80-0x10FFFF against the actual filesystem
- * turned up exactly one such codepoint, so special-casing it would have worked,
- * and that is precisely the move this file keeps being punished for: a parser
- * standing in for a real system. Every one of these has been a fold, a blank
- * set, an unquote or a grammar approximated in JS instead of measured.
+ * skipped here. Sweeping 0x80-0x10FFFF against the actual filesystem found TWO
+ * codepoints that fold into a letter these filenames contain: U+017F to `s` and
+ * U+212A KELVIN SIGN to `k`. Only U+017F DIVERGED, because toLowerCase happens
+ * to map U+212A — so the divergent set was one codepoint and a special case
+ * would have worked. That is precisely the move this file keeps being punished
+ * for: a parser standing in for a real system. Every one of these has been a
+ * fold, a blank set, an unquote or a grammar approximated in JS instead of
+ * measured, and each looked like a set of one until it wasn't.
  *
  * So the gate no longer holds an opinion about folding. It asks the filesystem
- * to resolve the name and compares what comes back. Verified in the runtime
- * that actually ships rather than assumed: Bun's realpathSync canonicalizes to
- * the on-disk spelling, so both sides resolve to the same string. (Worth
- * knowing that not every realpath does — Python's is lexical and answers with
- * the name it was handed, which would silently defeat this.)
+ * to resolve the name and compares what comes back.
+ *
+ * `realpathSync.NATIVE`, not `realpathSync`, and that distinction is the whole
+ * oracle: this depends on realpath canonicalizing the FINAL component, and the
+ * JS-implemented `fs.realpathSync` does not do that. Measured, both runtimes,
+ * against the same file on disk (a package.json spelled with U+017F):
+ *
+ *   node v25.2.1   realpathSync -> "package.json"   .native -> the on-disk name
+ *   bun  1.3.5     realpathSync -> the on-disk name  .native -> the on-disk name
+ *
+ * Bun's happens to canonicalize, so the plain form worked here and would have
+ * gone on working until someone ran this under node — one `tsx` away — where
+ * the probe silently returns false and variation ten walks back in through the
+ * basename fallback. `.native` calls the OS in both, so the oracle stops
+ * depending on which runtime invokes it. An unstated assumption about a system
+ * that happens to hold today is the shape of every bug in this file.
  *
  * Kept as an OR with the basename test at the call site, never as a
  * replacement, for two reasons. It preserves the deliberate posture from the
@@ -849,7 +868,7 @@ const routeTargetCache = new Map<string, string | undefined>();
 
 function realOrUndefined(path: string): string | undefined {
   try {
-    return realpathSync(path);
+    return realpathSync.native(path);
   } catch {
     return undefined;
   }
