@@ -31,7 +31,7 @@
  * or explicitly listed as untested-by-choice.
  *
  * Note "block", not "comment", and "expression", not "name". Both distinctions
- * were bought the hard way — six revisions, each one narrower than its own
+ * were bought the hard way — seven revisions, each one narrower than its own
  * comment claimed, each narrowing found by review rather than by the suite:
  *
  *   1. five hand-written tests, claiming "every collection"
@@ -48,6 +48,13 @@
  *      keyFor(row.id)` contains `.id` and passes, though `keyFor` could
  *      compute anything from that argument; narrows the opaque-call class
  *      rather than closing it
+ *   7. the SCANNER made checkable: `discoverDedupBlocks` reads a
+ *      comment-stripped window, so a dead `seen.has(...)` line above a live
+ *      block can no longer win the match, and takes a `source` seam, so
+ *      revisions 5 and 6 are pinned by committed fixtures instead of a
+ *      mutation described in a PR body — but the enclosing-function scan
+ *      still reads raw source, and stripComments's own string-literal
+ *      ASSUMPTION (below) is unchanged
  *
  * Revision 2 could not see `dedupeAndSortInvestmentPrices`, which carries no
  * comment — the site that shipped #622, the previous instance of this exact
@@ -584,7 +591,12 @@ function discoverAggregatePushTargets(
     const push = /(\w+)\.push\(/.exec(guardBody);
     if (!push) continue;
     const pushTarget = push[1] as string;
-    if (pushTarget in found) {
+    // `Object.hasOwn`, not `in` (review nit): `in` walks the prototype chain,
+    // so a push target named `constructor`/`toString` would throw spuriously
+    // and `__proto__` would not register as an own property at all. Not
+    // reachable with real collection names — same reason the identical swap
+    // below is a nit and not a bug — but the check costs the same either way.
+    if (Object.hasOwn(found, pushTarget)) {
       throw new Error(
         `discoverAggregatePushTargets: push target "${pushTarget}" already attributed to Set variable "${found[pushTarget]}"; also matched by "${setVar}" — cannot tell which one owns it`
       );
@@ -625,7 +637,7 @@ function discoverAggregatePushTargets(
 // whoever hits it and sees the whole file red instead of one test.
 const AGGREGATE_PUSH_TARGETS = discoverAggregatePushTargets();
 const AGGREGATE_SET_VAR: Record<string, string> = Object.fromEntries(
-  COLLECTIONS.filter((c) => c.name in AGGREGATE_PUSH_TARGETS).map((c) => [
+  COLLECTIONS.filter((c) => Object.hasOwn(AGGREGATE_PUSH_TARGETS, c.name)).map((c) => [
     c.name,
     AGGREGATE_PUSH_TARGETS[c.name] as string,
   ])
@@ -641,12 +653,40 @@ const TWIN_TESTED = new Set(
   })
 );
 
-/** Discover dedup blocks and their key expressions from the decoder source. */
-function discoverDedupBlocks(): Record<string, string> {
-  const source = fs.readFileSync(
+/**
+ * Discover dedup blocks and their key expressions from the decoder source.
+ *
+ * `source` defaults to the real decoder so the one production call site below
+ * is unaffected; the override exists so a regression fixture can be run
+ * through the SAME discovery logic, the way `discoverAggregatePushTargets`
+ * above and Step 1's `discoverProcessors(src)` in the sibling file already
+ * are. Without the seam, the two narrowings this file is named after —
+ * revision 5's `const key = ...` resolution and revision 6's `.field`
+ * requirement — could only ever run against real decoder source, which by
+ * construction contains no violation, so neither could be shown to fail
+ * (review follow-up on #688 review).
+ *
+ * The window is passed through `stripComments` for the same reason the
+ * sibling's is: without it, a commented-out `seen.has(...)` or `const key =`
+ * line sitting between the Set declaration and the live guard is matched in
+ * preference to the live one — the regexes take the FIRST match in the
+ * window, and a dead line above a live block is a normal thing to write. The
+ * result is a key pinned to code that no longer runs, which is this file's
+ * own documented bug class (revision 3: "prose about a key can go stale")
+ * with a comment standing in for the label. No live instance today — none of
+ * the comments above the real blocks contain `.has(` — but this function
+ * feeds every other test in the file, so it is the worst place to leave it
+ * open. Note the enclosing-function scan still reads raw `source`: matching
+ * the sibling exactly, only the window is stripped, keeping stripComments's
+ * own string-literal ASSUMPTION scoped to a few hundred characters rather
+ * than the whole 3 000-line decoder.
+ */
+function discoverDedupBlocks(
+  source: string = fs.readFileSync(
     path.join(import.meta.dir, '..', '..', 'src', 'core', 'decoder.ts'),
     'utf-8'
-  );
+  )
+): Record<string, string> {
   const declarations = [...source.matchAll(/^(?:export )?(?:async )?function (\w+)/gm)].map(
     (m) => [m.index, m[1] as string] as const
   );
@@ -655,7 +695,7 @@ function discoverDedupBlocks(): Record<string, string> {
     const variable = m[1] as string;
     const enclosing = declarations.filter(([at]) => at < (m.index as number)).pop();
     const after = source.slice((m.index as number) + m[0].length);
-    const window = after.slice(0, DISCOVERY_WINDOW);
+    const window = stripComments(after.slice(0, DISCOVERY_WINDOW));
     const use = new RegExp(`${variable}\\.has\\(([^;]*?)\\)\\s*\\)`).exec(window);
     let key = use ? (use[1] as string).replace(/\s+/g, ' ').trim() : 'NONE';
     // Resolve a bare identifier to the expression it is assigned from. Three
@@ -667,9 +707,39 @@ function discoverDedupBlocks(): Record<string, string> {
       const assigned = new RegExp(`const ${key} = ([^;]+);`).exec(window);
       if (assigned) key = `${key} = ${(assigned[1] as string).replace(/\s+/g, ' ').trim()}`;
     }
-    found[`${enclosing ? enclosing[1] : '?'}|${variable}`] = key;
+    const block = `${enclosing ? enclosing[1] : '?'}|${variable}`;
+    // Same collision class discoverAggregatePushTargets now throws on, and
+    // for the same reason (review follow-up on #688 review). Two
+    // `new Set<string>()` with the same name in two different block scopes of
+    // one function is legal TS, and last-write-wins would make one of them
+    // invisible here. It IS caught downstream — `discovered` drops a key and
+    // the pinned-equality test fails — but a scanner that silently discards
+    // half its own input should say so where the discarding happens, not
+    // leave a maintainer to infer it from a diff two tests away.
+    if (Object.hasOwn(found, block)) {
+      throw new Error(
+        `discoverDedupBlocks: block "${block}" discovered twice (keys "${found[block]}" and "${key}") — two same-named Sets in one function; cannot tell which one the pin refers to`
+      );
+    }
+    found[block] = key;
   }
   return found;
+}
+
+/**
+ * Blocks whose pinned key expression names no field at all — the "pins
+ * nothing" states revisions 4-6 successively narrowed (see the test below for
+ * what each of them was and why one dot-check now covers all three).
+ *
+ * A function rather than an inline filter in the test so the fixture below
+ * asserts against the SAME implementation the live invariant runs, instead of
+ * a copy of it that could drift from it silently — which is the failure this
+ * whole file is a detector for.
+ */
+function fieldFreeBlocks(blocks: Record<string, string>): string[] {
+  return Object.entries(blocks)
+    .filter(([, key]) => !/\.\w+/.test(key))
+    .map(([block]) => block);
 }
 
 describe('dedup coverage is declared, not assumed (#668 review)', () => {
@@ -699,10 +769,7 @@ describe('dedup coverage is declared, not assumed (#668 review)', () => {
     // separate sync test below — a two-step ratchet a maintainer could stop
     // partway through. Filtering `discovered` makes it fail here directly,
     // in the test whose name actually describes the invariant.
-    const unpinned = Object.entries(discovered)
-      .filter(([, key]) => !/\.\w+/.test(key))
-      .map(([block]) => block);
-    expect(unpinned).toEqual([]);
+    expect(fieldFreeBlocks(discovered)).toEqual([]);
   });
 
   test('discovery finds the dedup blocks at all', () => {
@@ -713,24 +780,30 @@ describe('dedup coverage is declared, not assumed (#668 review)', () => {
   test('aggregate push-target discovery finds exactly 25 blocks (count pin, not a loose floor)', () => {
     // Renamed from "...finds blocks at all" (review follow-up): that name
     // described a non-vacuity check, but the value — 25, the real count —
-    // behaves as an exact-count PIN with zero headroom. Removing one
-    // legitimate collection from decodeAllCollections turns this red at
-    // "Expected >= 25, Received 24", not just at total collapse. That is
-    // deliberate, not an oversight — do not "fix" the apparent tightness by
-    // loosening it back toward a wide margin (contrast the sibling
-    // `discovered` floor at `>= 30` against 36 real, which genuinely IS a
-    // margin, chosen because that scan covers blocks this file does not
-    // otherwise pin one by one). The tightness here is what turns
-    // decodeAllCollectionsBody's two silent-partial-slice failure modes —
-    // an anchor matching an embedded brace in the return type, or a
-    // balanced() run-off — into loud ones: both now throw before this test
-    // even runs (see decodeAllCollectionsBody's own assertion), but if that
-    // assertion were ever removed, THIS floor is the last line of defense,
-    // and a floor of 3 (this test's original value, sized only to cover the
-    // 3 collections AGGREGATE_SET_VAR filters down to) would not have
-    // caught a scan that regressed to finding just those three, silently
-    // losing visibility into the other 22.
-    expect(Object.keys(AGGREGATE_PUSH_TARGETS).length).toBeGreaterThanOrEqual(25);
+    // behaves as an exact-count PIN with zero headroom.
+    //
+    // Asserted with `toBe`, not `toBeGreaterThanOrEqual` (second review
+    // follow-up): "exactly 25" is a TWO-sided claim and a floor is one-sided,
+    // so a 26th aggregate dedup block used to pass this test in silence — a
+    // test whose name asserted more than its expression did, which is the
+    // exact defect this file exists to remove. Now removing a legitimate
+    // collection from decodeAllCollections turns this red at "Expected: 25,
+    // Received: 24" and adding one at "Received: 26". That tightness is
+    // deliberate, not an oversight — do not "fix" it by loosening back toward
+    // a wide margin (contrast the sibling `discovered` floor at `>= 30`
+    // against 36 real, which genuinely IS a margin, chosen because that scan
+    // covers blocks this file does not otherwise pin one by one). The
+    // tightness here is what turns decodeAllCollectionsBody's two
+    // silent-partial-slice failure modes — an anchor matching an embedded
+    // brace in the return type, or a balanced() run-off — into loud ones:
+    // both now throw before this test even runs (see
+    // decodeAllCollectionsBody's own assertion), but if that assertion were
+    // ever removed, THIS count is the last line of defense, and the floor of
+    // 3 this test originally carried (sized only to cover the 3 collections
+    // AGGREGATE_SET_VAR filters down to) would not have caught a scan that
+    // regressed to finding just those three, silently losing visibility into
+    // the other 22.
+    expect(Object.keys(AGGREGATE_PUSH_TARGETS).length).toBe(25);
   });
 
   test('derived AGGREGATE_SET_VAR is unchanged', () => {
@@ -1022,5 +1095,138 @@ export async function decodeAllCollections(dbPath: string): Promise<{ marker: 'c
     // AGGREGATE_SET_VAR pin would both catch downstream. Silently WRONG
     // slice, but not silently PASSING.
     expect(found).toEqual({});
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: discoverDedupBlocks' OWN scan (review follow-up on #688 review)
+//
+// Until this round it was the one scanner in either file with no `source`
+// seam and no stripComments on its window — so the two narrowings this file
+// is named after, revision 5's `const key = ...` resolution and revision 6's
+// `.field` requirement, could only ever run against real decoder source,
+// which by construction violates neither. Their non-vacuity rested on a
+// manual mutation described in a PR body, which is a coverage claim that is
+// not in the repo and cannot survive the next refactor. These fixtures make
+// both narrowings, and the comment strip they depend on, fail on demand.
+// ---------------------------------------------------------------------------
+
+describe('discoverDedupBlocks strips comments before matching (#688 review)', () => {
+  test('a commented-out guard above the live one does not win the key', () => {
+    // Both regexes take the FIRST match in the window, and a dead line kept
+    // above a live block is a normal thing to write. Unstripped, the `.has(`
+    // match lands on the comment and the block is pinned to `thing.name` — a
+    // key nothing dedups on. A maintainer then updates DEDUP_BLOCKS to match
+    // "what the scan found", bakes the dead key in, and from then on changing
+    // the LIVE key never moves the pin: revision 3's stale-prose defect with
+    // a comment standing in for the label.
+    const FIXTURE_SRC = `
+export function decodeThings(): unknown {
+  const seen = new Set<string>();
+  // superseded, kept for context: if (!seen.has(thing.name)) {
+  for (const thing of raw) {
+    if (!seen.has(thing.thing_id)) {
+      seen.add(thing.thing_id);
+    }
+  }
+}
+`;
+    expect(discoverDedupBlocks(FIXTURE_SRC)).toEqual({ 'decodeThings|seen': 'thing.thing_id' });
+  });
+
+  test('a commented-out const key above the live one does not win the resolution', () => {
+    // The other half of the same exposure, one layer down: the guard here is
+    // unambiguous (`seen.has(key)` appears once), but resolving the bare
+    // identifier `key` re-scans the window for `const key = ...;` and,
+    // unstripped, finds the superseded line first — resolving to a field the
+    // live code never reads.
+    const FIXTURE_SRC = `
+export function decodeKeyed(): unknown {
+  const seen = new Set<string>();
+  for (const row of raw) {
+    // superseded, kept for context: const key = \`\${row.legacy_name}\`;
+    const key = \`\${row.owner_id}:\${row.month}\`;
+    if (!seen.has(key)) {
+      seen.add(key);
+    }
+  }
+}
+`;
+    expect(discoverDedupBlocks(FIXTURE_SRC)).toEqual({
+      'decodeKeyed|seen': 'key = `${row.owner_id}:${row.month}`',
+    });
+  });
+});
+
+describe('discoverDedupBlocks resolves and grades a bare key (#688 review)', () => {
+  // Two blocks whose guards both read a bare `key`, differing only in what
+  // that key is built from: one from an opaque call, one from two fields.
+  // Between them they exercise revision 5 (resolve the identifier at all) and
+  // revision 6 (the resolved text must still name a field) on source that
+  // actually contains a violation, which the real decoder never does.
+  const FIXTURE_SRC = `
+export function decodeOpaque(): unknown {
+  const seen = new Set<string>();
+  for (const row of raw) {
+    const key = keyFor(row);
+    if (!seen.has(key)) {
+      seen.add(key);
+    }
+  }
+}
+
+export function decodeComposite(): unknown {
+  const seen = new Set<string>();
+  for (const row of raw) {
+    const key = \`\${row.owner_id}:\${row.month}\`;
+    if (!seen.has(key)) {
+      seen.add(key);
+    }
+  }
+}
+`;
+
+  test('a bare identifier is resolved to the expression it is assigned from', () => {
+    // Revision 5. Without the resolution both blocks would pin the string
+    // "key", and rewriting what the key is built from would not move either.
+    expect(discoverDedupBlocks(FIXTURE_SRC)).toEqual({
+      'decodeOpaque|seen': 'key = keyFor(row)',
+      'decodeComposite|seen': 'key = `${row.owner_id}:${row.month}`',
+    });
+  });
+
+  test('a resolved-but-field-free key is reported; a field-bearing one is not', () => {
+    // Revision 6, run through the SAME fieldFreeBlocks the live invariant
+    // above uses. `key = keyFor(row)` is not a bare word, so revision 5's
+    // check passed it, yet it names no field: reimplementing `keyFor` to hash
+    // a different column changes what gets deduped without moving the pin.
+    expect(fieldFreeBlocks(discoverDedupBlocks(FIXTURE_SRC))).toEqual(['decodeOpaque|seen']);
+  });
+});
+
+describe('discoverDedupBlocks fails loudly on a duplicate block key (#688 review)', () => {
+  test('two same-named Sets in one function throw instead of overwriting', () => {
+    // Legal TS, and before the check the second simply overwrote the first in
+    // `found` — one real dedup block invisible to every test in this file.
+    // It was caught downstream (the pinned-equality test would show a missing
+    // key), but the collision belongs where the collision happens, which is
+    // the standard discoverAggregatePushTargets already holds.
+    const FIXTURE_SRC = `
+export function decodeTwoScopes(): unknown {
+  {
+    const seen = new Set<string>();
+    if (!seen.has(a.a_id)) {
+      seen.add(a.a_id);
+    }
+  }
+  {
+    const seen = new Set<string>();
+    if (!seen.has(b.b_id)) {
+      seen.add(b.b_id);
+    }
+  }
+}
+`;
+    expect(() => discoverDedupBlocks(FIXTURE_SRC)).toThrow(/block "decodeTwoScopes\|seen"/);
   });
 });

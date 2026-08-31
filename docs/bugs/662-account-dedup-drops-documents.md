@@ -106,7 +106,7 @@ allocation — and pins the **key expression** it tests. A block that is new, re
 whose key changes from an id to a content field fails there, and every block must be
 twin-tested, structural, or explicitly listed as untested-by-choice.
 
-That shape was reached over six revisions, each of which review showed was narrower than
+That shape was reached over seven revisions, each of which review showed was narrower than
 its own comment claimed:
 
 | Revision | Discovered by | What it missed |
@@ -117,6 +117,7 @@ its own comment claimed:
 | 4 | dedup blocks, pinning the key expression | three blocks pinned the local name `key` rather than what it resolves to — a bare identifier that pins nothing, since changing what `key` is built from would not move it |
 | 5 | bare identifiers resolved to their assigned expression, and asserted never to appear | a RESOLVED expression can still pin nothing: `key = keyFor(row)` is not a bare word, so it passed, but reimplementing `keyFor` to hash a different property leaves that exact string unchanged — the resolution closed the literal-bare-word case, not the opaque-call case |
 | 6 | resolved expressions required to contain a property access (`.someField`), not just be non-bare | the check is on the call SITE's text, not on what the call actually returns: `key = keyFor(row.id)` contains `.id`, so it passes, even though `keyFor` could compute anything from that argument — narrows the opaque-call class rather than closing it |
+| 7 | the scanner itself: `discoverDedupBlocks` matches against a comment-stripped window and takes a `source` seam, so revisions 5 and 6 are pinned by committed fixtures | the enclosing-function scan still reads raw source, and `stripComments`'s own string-literal assumption is unchanged — a string containing `//` inside a scanned window would still eat the rest of that line |
 
 The revision-3 gap is worth recording because it is this bug's own shape: one comment
 above three blocks meant `acSeen.has(ac.change_id)` could become `acSeen.has(ac.description)`
@@ -134,6 +135,18 @@ itself left open: resolving a bare identifier to its assignment closed the "pins
 case for a literal bare word, but a resolved call with no property access pins nothing
 just as surely, and nothing caught that until revision 6 required the resolved expression
 to name a field.
+
+Revision 7's mutations, each run as `bun test tests/core/dedup-identity.test.ts` with the
+mutation applied and then restored: dropping `stripComments` from `discoverDedupBlocks`'s
+window turns 2 tests red; deleting its duplicate-block throw, 1; deleting its bare-identifier
+resolution, 5; adding a 26th dedup block to `decodeAllCollections` in the real decoder, 3.
+The one worth recording is gutting `fieldFreeBlocks` to `return []` — the live "no block is
+pinned to a bare identifier or a field-free expression" test **stays green**, because real
+decoder source contains no violation for it to find, and only the new fixture goes red. That
+is this PR's whole subject in one line: a test can execute a guard and still not detect the
+guard's deletion. The 26th-block mutation also shows why the count pin was tightened from
+`>= 25` to `toBe(25)`: run against the same mutated decoder, the old one-sided assertion
+stayed green while the new one fails at `Expected: 25, Received: 26`.
 
 Note what this detector still cannot see: it proves distinct documents survive, not that
 true storage duplicates are collapsed. `createTestDb` writes one row per id, so a genuine
