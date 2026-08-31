@@ -82,6 +82,16 @@ const CONCEALED_LINE = 120;
 /** A line this long hides its tail with or without a gap. */
 const MAX_LINE = 400;
 
+/**
+ * How much output the gate will take from one `git` invocation.
+ *
+ * Named rather than inline because the failure message quotes it, and a limit
+ * whose diagnostic can drift from its value is the shape this file exists to
+ * remove. 64 MiB against a 20,240-byte tracked listing on this repo — the bound
+ * is headroom, not a threshold anything is near.
+ */
+const MAX_GIT_OUTPUT = 64 * 1024 * 1024;
+
 const SKIP_DIRS = new Set([
   'node_modules',
   '.git',
@@ -741,6 +751,16 @@ function checkLifecycleScripts(contents: string, rel: string): void {
  * tests drive it (synthetic trees under CHECK_CONCEALMENT_ROOT). Both paths
  * are covered: see 'file list' in tests/scripts/check-concealment.test.ts.
  */
+/**
+ * Why the git listing declined, set by whichever branch of gitFiles declined.
+ *
+ * The strategy check at the bottom of this file turns a decline into a hard
+ * failure, so the operator is entitled to the cause that was actually observed
+ * rather than the most likely one. Every `return undefined` in gitFiles sets
+ * this first; there is no path that declines silently.
+ */
+let gitDecline: string | undefined;
+
 function gitFiles(root: string): { tracked: string[]; untracked: string[] } | undefined {
   // Strip inherited git plumbing vars before shelling out. A pre-push hook runs
   // with GIT_DIR set, and `git -C <dir>` does NOT override it — so without this,
@@ -801,8 +821,58 @@ function gitFiles(root: string): { tracked: string[]; untracked: string[] } | un
   env.GIT_CONFIG_SYSTEM = '/dev/null';
 
   const run = (args: string[]): string[] | undefined => {
-    const r = spawnSync('git', ['-C', root, ...args], { encoding: 'utf-8', env });
-    if (r.status !== 0 || typeof r.stdout !== 'string') return undefined;
+    const shown = `git -C ${root} ${args.join(' ')}`;
+    const r = spawnSync('git', ['-C', root, ...args], {
+      encoding: 'utf-8',
+      env,
+      // Explicit, because the inherited default is 1 MiB and this listing is
+      // not bounded by anything the gate controls — a big monorepo's `ls-files
+      // -z` passes it. On this repo the tracked listing is 20,240 bytes, ~52x
+      // under that default, so the bound is headroom rather than a fix.
+      //
+      // spawnSync does not TRUNCATE at the limit, it KILLS the child: measured
+      // on node v25.2.1 and bun 1.3.5, both answer status=null, signal=SIGTERM,
+      // error.code=ENOBUFS. Without a cause in the message that arrives as
+      // "git declined", which would be this file's own recurring shape — a
+      // limit inside the gate standing in for the real tool's.
+      //
+      // Bun does enforce it, checked rather than assumed, because that was an
+      // open question: `spawnSync(self, ['-e', 'process.stdout.write("x"
+      // .repeat(2*1024*1024))'])` dies on both runtimes at the default and
+      // succeeds on both at 64 MiB. The runtimes differ only in where they
+      // stop reading — node kept 1,114,112 bytes, bun 1,375,181 — which is
+      // why the value is set here instead of reasoned about from the default.
+      maxBuffer: MAX_GIT_OUTPUT,
+    });
+    // Three materially different things make `status !== 0`, and r.error is
+    // what tells them apart. Collapsing them was survivable while this was a
+    // silent fallback; the strategy check at the bottom of the file made the
+    // message load-bearing, and it named only the first.
+    // spawnSync types `error` as plain Error, but the spawn failures this
+    // needs to tell apart are carried on `code` at runtime (ENOENT, ENOBUFS).
+    // Narrowed rather than asserted non-null, so an error without a code falls
+    // through to the status branch below instead of reading as `undefined`.
+    const code = (r.error as (Error & { code?: string }) | undefined)?.code;
+    if (code !== undefined) {
+      gitDecline =
+        code === 'ENOENT'
+          ? `git is not on PATH — spawning \`${shown}\` failed with ENOENT`
+          : code === 'ENOBUFS'
+            ? `\`${shown}\` produced more than the ${MAX_GIT_OUTPUT} bytes this gate allows ` +
+              `and was cut off — raise MAX_GIT_OUTPUT in scripts/check-concealment.ts`
+            : `spawning \`${shown}\` failed with ${code}`;
+      return undefined;
+    }
+    if (r.status !== 0 || typeof r.stdout !== 'string') {
+      // git's own first line of stderr is the single most useful thing here:
+      // for the motivating case it is `fatal: detected dubious ownership in
+      // repository at '<path>'`, which names the cause exactly.
+      const said = (typeof r.stderr === 'string' ? r.stderr : '').split('\n')[0]?.trim() ?? '';
+      gitDecline =
+        `\`${shown}\` exited ${r.status === null ? 'without a status' : String(r.status)}` +
+        (said === '' ? '' : ` — ${said}`);
+      return undefined;
+    }
     return r.stdout.split('\0').filter((line) => line !== '');
   };
 
@@ -810,7 +880,11 @@ function gitFiles(root: string): { tracked: string[]; untracked: string[] } | un
   // root. If root is a subdirectory of some unrelated repo, its answer would be
   // scoped to that repo's rules rather than to the tree we were asked to scan.
   const top = run(['rev-parse', '--show-toplevel']);
-  if (top === undefined || top.length === 0) return undefined;
+  if (top === undefined) return undefined; // run() already said why
+  if (top.length === 0) {
+    gitDecline = `\`git -C ${root} rev-parse --show-toplevel\` printed nothing`;
+    return undefined;
+  }
   try {
     // .native for the same reason as answersToName below: the JS realpathSync
     // does not canonicalize the final path component, so under node a root
@@ -818,8 +892,12 @@ function gitFiles(root: string): { tracked: string[]; untracked: string[] } | un
     // the gate onto the walk — a different scanned set, and not a safer
     // one.
     const topReal = realpathSync.native((top[0] ?? '').trim());
-    if (topReal !== realpathSync.native(root)) return undefined;
+    if (topReal !== realpathSync.native(root)) {
+      gitDecline = `${root} is not the toplevel of the repository git found (${topReal})`;
+      return undefined;
+    }
   } catch {
+    gitDecline = `could not resolve ${root} or git's reported toplevel on disk`;
     return undefined;
   }
 
@@ -838,7 +916,7 @@ function gitFiles(root: string): { tracked: string[]; untracked: string[] } | un
   // over a tree with a tracked src/a.ts and an untracked, concealed
   // src/added-later.ts:
   //
-  //   real git:      `found content ... (3 files scanned, listed by git)`, exit 1
+  //   real git:      `found content ... (2 files scanned, listed by git)`, exit 1
   //   shimmed git:   `1 files scanned (git), nothing hidden`,              exit 0
   //
   // Empty and failed are distinguishable, which is what makes returning
@@ -1042,16 +1120,21 @@ const listing = listFiles(ROOT);
 // it walks silently — the tests' own path.
 if (listing.strategy === 'walk' && existsSync(join(ROOT, '.git'))) {
   console.error(
-    `check-concealment: ${ROOT} has a .git, but git declined to list it, so the scan fell ` +
+    `check-concealment: ${ROOT} has a .git, but the git listing declined, so the scan fell ` +
       `back to the filesystem walk — a different and smaller set, since SKIP_DIRS applies to ` +
       `tracked files there. Refusing rather than reporting a green run over a shrunken scan.\n`
   );
+  // The measured cause, not the likely one. `git declined` covers git refusing
+  // (status 128), git not being on PATH at all, and git being killed for
+  // exceeding maxBuffer — and the remedy differs for each, so guessing here
+  // would send the operator to a command that reproduces nothing.
+  console.error(`  Cause: ${gitDecline ?? 'not recorded'}\n`);
   console.error(
-    `  Run \`git -C ${ROOT} ls-files\` to see the refusal. If it is dubious ownership, note ` +
-      `that this gate runs git with no HOME and GIT_CONFIG_GLOBAL/SYSTEM=/dev/null, and that ` +
-      `safe.directory is "only respected in protected configuration" (git help config) — ` +
-      `which the repository's own .git/config is not. Run the gate as the checkout's owner ` +
-      `rather than trying to allow-list the path.`
+    `  If that is a dubious-ownership refusal, note that this gate runs git with no HOME and ` +
+      `GIT_CONFIG_GLOBAL/SYSTEM=/dev/null, and that safe.directory is "only respected in ` +
+      `protected configuration" (git help config) — which the repository's own .git/config is ` +
+      `not, verified with GIT_TEST_ASSUME_DIFFERENT_OWNER. Run the gate as the checkout's ` +
+      `owner rather than trying to allow-list the path.`
   );
   process.exit(1);
 }
