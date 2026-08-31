@@ -177,6 +177,43 @@ async function withGitTree(
   }
 }
 
+/**
+ * Put a `git` shim on PATH for one gate run, in its own temp dir OUTSIDE the
+ * tree being scanned.
+ *
+ * Outside matters: `extraEnv` runs after the commit, so a shim written into the
+ * scanned root is an untracked file inside the scope — it was the third file in
+ * the untracked test's `(3 files scanned)` baseline, which is evidence quoted
+ * in a docstring. Both shim tests exit at the strategy guard before the listing
+ * is scanned, so it was inert, but scaffolding must not sit in the thing under
+ * measurement.
+ *
+ * `export VAR=1` rather than an assignment prefixed to `export`: the prefixed
+ * form persists only because POSIX says assignments preceding a SPECIAL
+ * built-in survive it, which is true in dash and in bash-as-sh but is a
+ * shell-grammar subtlety, and this suite's whole thesis is that those are where
+ * bugs live. The real git path is quoted, so a path containing a space works.
+ */
+async function withGitShim(
+  script: string,
+  body: (env: Record<string, string>) => Promise<void>
+): Promise<void> {
+  const dir = await mkdtemp(join(tmpdir(), 'concealment-shim-'));
+  try {
+    await writeFile(join(dir, 'git'), script, { mode: 0o755 });
+    await body({ PATH: `${dir}:${process.env.PATH ?? ''}` });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+/** A shim that forwards to the real git, with `pre` inserted before the exec. */
+function gitShimScript(pre: string): string {
+  const realGit = Bun.which('git');
+  if (realGit === null) throw new Error('git not found on PATH');
+  return `#!/bin/sh\n${pre}exec "${realGit}" "$@"\n`;
+}
+
 describe('clean input', () => {
   test('passes on an ordinary source tree, and says it fell back to the walk', async () => {
     // withTree builds a plain temp directory, so the git listing declines and
@@ -341,9 +378,45 @@ describe('file list comes from git when available (review follow-up)', () => {
       { '.git/config': 'garbage\n', 'build/loader.ts': concealed, 'src/a.ts': CLEAN },
       ({ code, stderr }) => {
         expect(code).toBe(1);
-        expect(stderr).toContain('git declined');
+        expect(stderr).toContain('the git listing declined');
+        // git's own words again, not the gate's guess about them.
+        expect(stderr).toContain('not a git repository');
       }
     );
+  });
+
+  test('git missing from PATH is reported as ENOENT, not as a refusal', async () => {
+    // The third cause folded into one `undefined`, and the one where guessing
+    // does most harm: the old message told the operator to run a git command to
+    // see the refusal, and here git does not exist to be run.
+    //
+    // It reaches the guard through r.error rather than r.status, which is a
+    // branch nothing else in this suite executes — and the two runtimes
+    // disagree on the rest of the result, which is why the branch keys on
+    // error.code. Measured: for a missing binary node answers status=null with
+    // stdout undefined, bun answers status=undefined with stdout an object.
+    // Both answer error.code === 'ENOENT'.
+    // A PATH holding bun and nothing else. Not an EMPTY PATH: runCheck spawns
+    // the gate with `bun`, so emptying PATH breaks the harness rather than the
+    // thing under test — which it did, on the first attempt.
+    const onlyBun = await mkdtemp(join(tmpdir(), 'concealment-nogit-'));
+    try {
+      await symlink(process.execPath, join(onlyBun, 'bun'));
+      expect(Bun.which('git', { PATH: onlyBun })).toBeNull();
+      await withGitTree(
+        { 'build/loader.ts': concealed, 'src/a.ts': CLEAN },
+        ({ code, stderr }) => {
+          expect(code).toBe(1);
+          expect(stderr).toContain('the git listing declined');
+          expect(stderr).toContain('ENOENT');
+          expect(stderr).toContain('not on PATH');
+        },
+        {},
+        () => ({ PATH: onlyBun })
+      );
+    } finally {
+      await rm(onlyBun, { recursive: true, force: true });
+    }
   });
 
   test('a real dubious-ownership refusal is refused, not walked', async () => {
@@ -361,26 +434,23 @@ describe('file list comes from git when available (review follow-up)', () => {
     // Non-vacuous, measured on this tree against the pre-guard file: it printed
     // `1 files scanned (walk), nothing hidden` and exited 0, the tracked
     // concealed build/loader.ts having been dropped by SKIP_DIRS on the walk.
-    const realGit = Bun.which('git');
-    expect(realGit).toBeTruthy();
-    await withGitTree(
-      { 'build/loader.ts': concealed, 'src/a.ts': CLEAN },
-      ({ code, stderr }) => {
-        expect(code).toBe(1);
-        expect(stderr).toContain('git declined');
-      },
-      {},
-      async (dir) => {
-        const shim = join(dir, 'shim');
-        await mkdir(shim, { recursive: true });
-        await writeFile(
-          join(shim, 'git'),
-          `#!/bin/sh\nGIT_TEST_ASSUME_DIFFERENT_OWNER=1 export GIT_TEST_ASSUME_DIFFERENT_OWNER\nexec ${realGit as string} "$@"\n`,
-          { mode: 0o755 }
-        );
-        return { PATH: `${shim}:${process.env.PATH ?? ''}` };
-      }
-    );
+    // The assertion is on git's OWN words. `dubious ownership` is a string this
+    // suite never writes: it can only appear in the output by having been
+    // captured from the failing git's stderr and threaded out of gitFiles, so
+    // it pins both the guard and the cause reporting at once.
+    const script = gitShimScript('export GIT_TEST_ASSUME_DIFFERENT_OWNER=1\n');
+    await withGitShim(script, async (env) => {
+      await withGitTree(
+        { 'build/loader.ts': concealed, 'src/a.ts': CLEAN },
+        ({ code, stderr }) => {
+          expect(code).toBe(1);
+          expect(stderr).toContain('the git listing declined');
+          expect(stderr).toContain('dubious ownership');
+        },
+        {},
+        () => env
+      );
+    });
   });
 
   test('the control: without the .git the walk runs, and it misses the payload', async () => {
@@ -417,28 +487,75 @@ describe('file list comes from git when available (review follow-up)', () => {
     // tell why git failed, only that it did, which is the whole point.
     //
     // Measured against the pre-fix code over this tree: real git reports
-    // `(3 files scanned, listed by git)` and exits 1; the shim reports
+    // `(2 files scanned, listed by git)` and exits 1; the shim reports
     // `1 files scanned (git), nothing hidden` and exits 0.
-    const realGit = Bun.which('git');
-    expect(realGit).toBeTruthy();
-    await withGitTree(
-      { 'src/a.ts': 'const a = 1;\n' },
-      ({ code, stderr }) => {
-        expect(code).toBe(1);
-        expect(stderr).toContain('git declined');
-      },
-      { 'src/added-later.ts': concealed },
-      async (dir) => {
-        const shim = join(dir, 'shim');
-        await mkdir(shim, { recursive: true });
-        await writeFile(
-          join(shim, 'git'),
-          `#!/bin/sh\nfor a in "$@"; do\n  if [ "$a" = "--others" ]; then exit 1; fi\ndone\nexec ${realGit as string} "$@"\n`,
-          { mode: 0o755 }
-        );
-        return { PATH: `${shim}:${process.env.PATH ?? ''}` };
-      }
+    //
+    // The assertion names the failing argv, which is the point of threading the
+    // cause out of gitFiles: `--others` is the invocation that actually died,
+    // and the operator gets that rather than a guess.
+    const script = gitShimScript(
+      'for a in "$@"; do\n  if [ "$a" = "--others" ]; then exit 1; fi\ndone\n'
     );
+    await withGitShim(script, async (env) => {
+      await withGitTree(
+        { 'src/a.ts': 'const a = 1;\n' },
+        ({ code, stderr }) => {
+          expect(code).toBe(1);
+          expect(stderr).toContain('the git listing declined');
+          expect(stderr).toContain('Cause:');
+          expect(stderr).toContain('--others');
+        },
+        { 'src/added-later.ts': concealed },
+        () => env
+      );
+    });
+  });
+
+  test('a listing past the spawnSync default is scanned, not declined', async () => {
+    // spawnSync's maxBuffer defaults to 1 MiB and is not a truncation — it
+    // KILLS the child. Unset, a large enough repo makes every `git` call in
+    // this gate fail, and since #698 a failed call is a hard exit 1: the gate
+    // would refuse to run on exactly the repositories most worth scanning.
+    //
+    // 2,500 deeply-nested paths give a ~2.3 MiB listing, which is past the
+    // point where the child is actually signalled. Measured on bun 1.3.5, and
+    // the shape depends on the size: at ~1.05 MiB git exits first, so status is
+    // 0 with error ENOBUFS and the output happened to be complete; at ~2.3 MiB
+    // and ~4.6 MiB the child is SIGTERMed with status null. run() keys on
+    // r.error rather than r.status precisely because the first shape is a race
+    // whose outcome is incidental — not a case of accepted truncation I was
+    // able to produce, but not one worth depending on either.
+    //
+    // Non-vacuous: with `maxBuffer` removed this same tree makes the gate print
+    // `Cause: ... produced more than the ... bytes this gate allows` and exit 1.
+    const dir = await mkdtemp(join(tmpdir(), 'concealment-big-'));
+    try {
+      const deep = join(dir, ...Array.from({ length: 9 }, (_, i) => `d${i}`.padEnd(100, 'x')));
+      await mkdir(deep, { recursive: true });
+      await Promise.all(
+        Array.from({ length: 2500 }, (_, i) =>
+          writeFile(join(deep, `f${String(i).padStart(5, '0')}.ts`), CLEAN)
+        )
+      );
+      const cleanEnv: Record<string, string> = {};
+      for (const [k, v] of Object.entries(process.env)) {
+        if (!k.startsWith('GIT_') && v !== undefined) cleanEnv[k] = v;
+      }
+      for (const args of [
+        ['init', '-q'],
+        ['add', '-A'],
+        ['-c', 'user.email=t@e.com', '-c', 'user.name=t', 'commit', '-qm', 'seed', '--no-gpg-sign'],
+      ]) {
+        const r = Bun.spawnSync(['git', '-C', dir, ...args], { env: cleanEnv });
+        if (r.exitCode !== 0) throw new Error(`git ${args.join(' ')} failed`);
+      }
+      const { code, stdout } = await runCheck(dir);
+      expect(code).toBe(0);
+      expect(stdout).toContain('(git)');
+      expect(stdout).toContain('2500 files scanned');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   test('a repo with nothing untracked still scans, and still reports (git)', async () => {
