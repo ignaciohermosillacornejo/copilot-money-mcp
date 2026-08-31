@@ -93,7 +93,14 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   get_accounts: 1_315,
   get_connection_status: 850,
   get_categories: 1_405,
-  get_recurring_transactions: 1_900,
+  // Raised from 1_900 by #606: adds the `fields` param (excludes the
+  // pattern-detected row's embedded `transactions` array — the matched
+  // date/amount pairs, already reachable via get_transactions — and the
+  // prose `confidence_reason`) plus a description sentence naming both
+  // excluded tokens, per the #597 convention that a generic selection param
+  // must say what "default" leaves out. Measured 2_656 (~10% headroom).
+  // Real new capability, not bloat.
+  get_recurring_transactions: 2_925,
   get_budgets: 650,
   get_goals: 835,
   // Raised from 1_120 by #605: adds the `fields` param plus a description that
@@ -129,9 +136,20 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   get_categories_live: 2_555,
   get_tags_live: 530,
   get_budgets_live: 905,
-  get_recurring_live: 755,
+  // Raised from 755 by #606: adds the `fields` param (excludes `rule` — the
+  // server-side matcher config — and `payments` — the full payment history,
+  // which duplicates get_transactions_live — together ~45% of a row, plus
+  // `icon` since `emoji` already carries the display character) plus a
+  // description sentence naming the excluded tokens, per the #597
+  // convention. Measured 1_649 (~10% headroom). Real new capability, not
+  // bloat.
+  get_recurring_live: 1_815,
   get_networth_live: 1_955,
-  get_upcoming_recurrings_live: 830,
+  // Raised from 830 by #606: same row shape and the same `rule`/`payments`/
+  // `icon` exclusions as get_recurring_live (see that entry) — the `fields`
+  // schema fragment is shared verbatim between the two tools so their
+  // descriptions cannot drift. Measured 1_718 (~10% headroom).
+  get_upcoming_recurrings_live: 1_890,
   get_monthly_spend_live: 1_235,
   get_holdings_live: 1_210,
   get_balance_history_live: 1_800,
@@ -182,8 +200,19 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   update_recurring: 2_020,
 };
 
-/** Aggregate schema budget across ALL registered tools (measured +~10%). */
-const SCHEMA_TOTAL_BUDGET = 71_000;
+/**
+ * Aggregate schema budget across ALL registered tools (measured +~10%).
+ *
+ * Raised from 71_000 by #606: the recurring group's three `fields` params
+ * (shared verbatim between the two live tools, plus the cache-mode
+ * fragment) push the real total from 68_724 to 71_893 — over the previous
+ * ceiling by itself. This is the case the #597 convention anticipates: the
+ * schema budget rises as a diet PR trades upfront schema cost for a much
+ * larger per-call response saving (measured ~42-53% per row across the
+ * three tools; see the recurring tools' field-selection tests). Not
+ * prose bloat — every added sentence names the token it excludes.
+ */
+const SCHEMA_TOTAL_BUDGET = 79_100;
 
 // ---------------------------------------------------------------------------
 // Synthetic fixture. Deterministic content, opaque Firestore-shaped IDs

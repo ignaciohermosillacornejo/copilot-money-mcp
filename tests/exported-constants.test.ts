@@ -360,6 +360,31 @@ const PINNED: Record<string, readonly string[]> = {
     'latest_at',
   ],
   // src/tools/field-selection.ts
+  DEFAULT_RECURRING_CACHE_FIELDS: [
+    'merchant',
+    'normalized_merchant',
+    'occurrences',
+    'average_amount',
+    'total_amount',
+    'frequency',
+    'confidence',
+    'category_name',
+    'last_date',
+    'next_expected_date',
+  ],
+  // src/tools/field-selection.ts
+  DEFAULT_RECURRING_LIVE_FIELDS: [
+    'id',
+    'name',
+    'state',
+    'frequency',
+    'nextPaymentAmount',
+    'nextPaymentDate',
+    'categoryId',
+    'category_name',
+    'emoji',
+  ],
+  // src/tools/field-selection.ts
   DEFAULT_TOP_MOVER_FIELDS: ['security_id', 'ticker_symbol', 'name', 'type', 'change'],
   // src/tools/field-selection.ts
   DEFAULT_TRANSACTION_FIELDS: [

@@ -18,6 +18,7 @@ import { normalizeMerchantName } from '../utils/merchant.js';
 import {
   DEFAULT_TRANSACTION_FIELDS,
   DEFAULT_INVESTMENT_PRICE_FIELDS,
+  DEFAULT_RECURRING_CACHE_FIELDS,
   projectRows,
 } from './field-selection.js';
 import type { LiveCopilotDatabase } from '../core/live-database.js';
@@ -209,6 +210,55 @@ const TRANSACTION_KNOWN_FIELDS: ReadonlySet<string> = new Set([
   'category_name',
   'normalized_merchant',
 ]);
+
+/**
+ * One pattern-detected recurring merchant row, as built by
+ * `getRecurringTransactions`'s pattern-analysis pass (#606). Named — rather
+ * than left as the inline object literal repeated in that method's return
+ * type and local variable declaration — so `RECURRING_CACHE_FIELD_NAMES`
+ * below can derive the known-field set from the type itself via
+ * `[K in keyof ...]-?: true`, the same self-maintaining trick as
+ * CATEGORY_LIVE_FIELD_NAMES in src/tools/live/categories.ts: a forgotten or
+ * renamed field is a compile error instead of a silent runtime desync.
+ */
+type DetectedRecurringRow = {
+  merchant: string;
+  normalized_merchant: string;
+  occurrences: number;
+  average_amount: number;
+  total_amount: number;
+  frequency: string;
+  confidence: 'high' | 'medium' | 'low';
+  confidence_reason: string;
+  category_name?: string;
+  last_date: string;
+  next_expected_date?: string;
+  transactions: Array<{ date: string; amount: number }>;
+};
+
+const RECURRING_CACHE_FIELD_NAMES: { [K in keyof DetectedRecurringRow]-?: true } = {
+  merchant: true,
+  normalized_merchant: true,
+  occurrences: true,
+  average_amount: true,
+  total_amount: true,
+  frequency: true,
+  confidence: true,
+  confidence_reason: true,
+  category_name: true,
+  last_date: true,
+  next_expected_date: true,
+  transactions: true,
+};
+const RECURRING_CACHE_KNOWN_FIELDS: ReadonlySet<string> = new Set(
+  Object.keys(RECURRING_CACHE_FIELD_NAMES)
+);
+
+/**
+ * Built FROM the known-field set rather than hand-listed — see the identical
+ * reasoning on CATEGORY_LIVE_VALID_FIELDS_HINT in src/tools/live/categories.ts.
+ */
+const RECURRING_CACHE_VALID_FIELDS_HINT = `the pattern-detected recurring row fields (${[...RECURRING_CACHE_KNOWN_FIELDS].join(', ')})`;
 
 /**
  * Project each transaction down to an explicit `fields` allowlist (or the
@@ -1584,24 +1634,13 @@ export class CopilotMoneyTools {
     include_copilot_subscriptions?: boolean;
     name?: string;
     recurring_id?: string;
+    fields?: string[];
   }): Promise<{
     period: { start_date?: string; end_date?: string };
     count: number;
     total_monthly_cost: number;
-    recurring: Array<{
-      merchant: string;
-      normalized_merchant: string;
-      occurrences: number;
-      average_amount: number;
-      total_amount: number;
-      frequency: string;
-      confidence: 'high' | 'medium' | 'low';
-      confidence_reason: string;
-      category_name?: string;
-      last_date: string;
-      next_expected_date?: string;
-      transactions: Array<{ date: string; amount: number }>;
-    }>;
+    recurring: DetectedRecurringRow[];
+    _field_warning?: string;
     copilot_subscriptions?: {
       summary: {
         total_active: number;
@@ -1728,20 +1767,7 @@ export class CopilotMoneyTools {
     }
 
     // Analyze each merchant for recurring patterns
-    const recurring: Array<{
-      merchant: string;
-      normalized_merchant: string;
-      occurrences: number;
-      average_amount: number;
-      total_amount: number;
-      frequency: string;
-      confidence: 'high' | 'medium' | 'low';
-      confidence_reason: string;
-      category_name?: string;
-      last_date: string;
-      next_expected_date?: string;
-      transactions: Array<{ date: string; amount: number }>;
-    }> = [];
+    const recurring: DetectedRecurringRow[] = [];
 
     for (const [merchant, data] of merchantTransactions) {
       if (data.transactions.length < min_occurrences) continue;
@@ -2137,12 +2163,27 @@ export class CopilotMoneyTools {
       }
     }
 
+    // v3: omitting `fields` yields the terse preset (no `transactions`/
+    // `confidence_reason`) — request them explicitly with
+    // fields: ["default", "transactions", "confidence_reason"], or take
+    // everything with "all"/"*".
+    const { rows: projectedRecurring, warning } = projectRows(
+      recurring,
+      options.fields ?? ['default'],
+      {
+        preset: DEFAULT_RECURRING_CACHE_FIELDS,
+        knownFields: RECURRING_CACHE_KNOWN_FIELDS,
+        validFieldsHint: RECURRING_CACHE_VALID_FIELDS_HINT,
+      }
+    );
+
     return {
       period: { start_date, end_date },
       count: recurring.length,
       total_monthly_cost: roundAmount(totalMonthlyCost),
-      recurring,
+      recurring: projectedRecurring,
       ...(copilotSubscriptions ? { copilot_subscriptions: copilotSubscriptions } : {}),
+      ...(warning && { _field_warning: warning }),
     };
   }
 
