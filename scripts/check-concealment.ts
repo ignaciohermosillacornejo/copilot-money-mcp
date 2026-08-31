@@ -827,7 +827,35 @@ function gitFiles(root: string): { tracked: string[]; untracked: string[] } | un
   if (tracked === undefined) return undefined;
   // Untracked-but-not-ignored files can be `git add`ed into the next diff, so
   // they are in scope too. Ignored files are not.
-  const untracked = run(['ls-files', '-z', '--others', '--exclude-standard']) ?? [];
+  //
+  // A failure here returns undefined like every other run() in this function,
+  // rather than defaulting to `[]`. The default was the one silent scan-shrink
+  // the strategy check at the bottom of this file structurally CANNOT see: it
+  // left `strategy` as 'git', so the summary read `N files scanned (git),
+  // nothing hidden` over a scope that had lost its whole untracked half.
+  // Measured, on this repo's own gate, by putting a `git` shim earlier on PATH
+  // that exits 1 when it sees `--others` and execs the real git otherwise —
+  // over a tree with a tracked src/a.ts and an untracked, concealed
+  // src/added-later.ts:
+  //
+  //   real git:      `found content ... (3 files scanned, listed by git)`, exit 1
+  //   shimmed git:   `1 files scanned (git), nothing hidden`,              exit 0
+  //
+  // Empty and failed are distinguishable, which is what makes returning
+  // undefined exact rather than paranoid: probed on git 2.50.1, a clean tree
+  // gives `ls-files --others --exclude-standard` status 0 with ZERO bytes of
+  // stdout, which run() turns into `[]`. Only a non-zero status yields
+  // undefined. So a repo with nothing untracked still scans, and still reports
+  // (git).
+  //
+  // No tree state that makes `--others` exit non-zero was found, and it was
+  // looked for: an unreadable subdirectory, an unreadable .git/info/exclude and
+  // a .gitignore that is a directory all warn — or say nothing — and exit 0.
+  // The failure is injected at the process boundary in the test for the same
+  // reason it is guarded here: run() cannot tell why git failed, only that it
+  // did, and a fail-open default in this file has never once stayed theoretical.
+  const untracked = run(['ls-files', '-z', '--others', '--exclude-standard']);
+  if (untracked === undefined) return undefined;
   const abs = (list: string[]): string[] => list.map((rel) => join(root, rel));
   // Set rather than Array#includes: both listings are whole-repo sized, so the
   // linear scan made the de-duplication quadratic in the file count.
@@ -922,6 +950,29 @@ function underSkippedDir(root: string, file: string): boolean {
  * test, so a failure here can only ever scan more, never skip something that
  * was already being checked.
  */
+/**
+ * Only the route TARGET is memoized, and the asymmetry is a decision rather
+ * than an oversight — it has been read as one, so here is the measurement.
+ *
+ * Counted by instrumenting a copy of this file with a counter around
+ * `realOrUndefined` and running it over this repo (535 files):
+ *
+ *   realpath total=140  targetMisses=120  selfCalls=20  distinctSelfFiles=20
+ *
+ * Two things fall out. The cache that exists is on the hot side: 120 of the 140
+ * calls are target lookups, and without it they would be roughly two per
+ * scanned file. And a second cache keyed on `file` would save exactly ZERO of
+ * the remaining 20, because every one of those 20 calls is already for a
+ * distinct file.
+ *
+ * That is structural, not luck. `realOrUndefined(file)` sits after the
+ * `target === undefined` early return, so it is reached only for a file whose
+ * OWN directory contains the routed name — and reached twice only for a file
+ * whose directory contains BOTH `package.json` and `.gitattributes`. The bound
+ * on what a second Map could ever save is therefore one call per file sitting
+ * beside both, which is not a number worth a second piece of mutable state in
+ * the routing path.
+ */
 const routeTargetCache = new Map<string, string | undefined>();
 
 function realOrUndefined(path: string): string | undefined {
@@ -965,9 +1016,19 @@ const listing = listFiles(ROOT);
 // Reproduce: `git init` such a tree and commit it, run the gate with
 // CHECK_CONCEALMENT_ROOT pointed at it, then `chmod 000 .git` and run it again.
 // The payload vanishes and the run stays green. A `.git` that is not a repo at
-// all (`printf garbage > .git/config`) prints the same two lines — both were
-// run; the ownership refusal was NOT, because it needs a second uid. It reaches
-// this branch identically, as a non-zero status from `run()`.
+// all (`printf garbage > .git/config`) prints the same two lines.
+//
+// The MOTIVATING refusal — dubious ownership — has now been run too, on that
+// same tree, and it does not need a second uid: git ships
+// GIT_TEST_ASSUME_DIFFERENT_OWNER, which drives the real
+// `fatal: detected dubious ownership ...` (status 128) from
+// ensure_valid_ownership. Put it on a `git` shim earlier in PATH, since this
+// function strips the whole GIT_ namespace before spawning:
+//
+//   pre-guard:  `1 files scanned (walk), nothing hidden`, exit 0
+//   with this:  the refusal below,                        exit 1
+//
+// Pinned end-to-end in tests/scripts/check-concealment.test.ts.
 //
 // So a tree that HAS a .git and that git nevertheless would not list is
 // refused. The remedy is never "accept the walk": the swap only ever scans
