@@ -106,7 +106,7 @@ allocation — and pins the **key expression** it tests. A block that is new, re
 whose key changes from an id to a content field fails there, and every block must be
 twin-tested, structural, or explicitly listed as untested-by-choice.
 
-That shape was reached over nine revisions, each of which review showed was narrower than
+That shape was reached over ten revisions, each of which review showed was narrower than
 its own comment claimed:
 
 | Revision | Discovered by | What it missed |
@@ -120,6 +120,7 @@ its own comment claimed:
 | 7 | the scanner itself: `discoverDedupBlocks` matches against a comment-stripped window and takes a `source` seam, so revisions 5 and 6 are pinned by committed fixtures | the window was still bounded only by a character count, so it ran off the end of its own function and could pin a Set from the *next* function's guard; and the collision message it added named a cause (`two same-named Sets in one function`) the scanner cannot actually distinguish |
 | 8 | the window bounded at the next top-level declaration as well as by `DISCOVERY_WINDOW` — 18 of the 36 real windows overran their own function — plus two prose claims corrected to match what the code can tell | the *name* the window then matched was still un-anchored, so a Set could borrow a longer identifier's guard — and the bound cannot help inside `decodeAllCollections`, where 25 of the 36 Sets share one function and the windows overlap freely |
 | 9 | the matched name anchored to an identifier boundary (`(?<![\w$])`), so `catSeen` no longer matches `subcatSeen.has(`; and the `'NONE'` sentinel taken out of band, so a `const NONE = row.id` can no longer rewrite "unguarded" into a field-bearing key that passes the field-free invariant | revision 6's opaque-call class (`keyFor(row.id)`) is still open; attribution is still top-level-`function`-only; and `discoverAggregatePushTargets`'s per-Set window is still a bare slice — safe because its `if (!`-anchored regex makes a run-off either throw or fail the `toBe(25)` pin, which is a reason rather than a construction |
+| 10 | the anchor widened to `(?<![\w$.])`, closing the member-expression half (`ctx.seen.has(...)` no longer credited to a local `seen`); and `stripComments` given a third pass, so a window truncating inside a block comment can no longer leave that comment's text being scanned as code | the lazy `[^;]*?` capture still truncates on a nested paren, pinning unparseable text such as `String(row.id` — documented at the regex rather than fixed, because capturing with `balanced()` is a behaviour change with no failing case behind it. Everything revision 9 left is also still open |
 
 The revision-3 gap is worth recording because it is this bug's own shape: one comment
 above three blocks meant `acSeen.has(ac.change_id)` could become `acSeen.has(ac.description)`
@@ -174,6 +175,20 @@ fail-**open**, where an unguarded block reports as guarded and therefore satisfi
 invariant this detector is named for — reached through the sentinel rather than through the
 scan, which is why "no source declares `const NONE`" was a guarantee worth removing from the
 load path rather than documenting.
+
+Revision 10 is the first one in this table whose defect had a **live instance** rather than
+being latent. Checking every window before tightening — the habit established four revisions
+earlier — turned up `decodeAllCollections|tagSeen`, whose `DISCOVERY_WINDOW` ends inside the
+docblock above `getDecodeTimeoutMs`: `stripComments`' block-comment pass needs the closing
+`*/`, the window does not contain one, and that prose was therefore sitting in the scanned
+string as if it were code. Harmless only because it happens to contain no `.has(` and no
+`const x = ...;`. The review that raised the shape had recorded "no live instance"; the
+check is what found otherwise, which is the argument for running it rather than reasoning
+about it. Both revision-10 fixes were again confirmed to move nothing: 0 of 36 resolved keys
+change from excluding `.` in the anchor, 0 change from the new strip pass, and 0 windows
+still hold an unterminated opener afterwards. Its three fixtures were written before either
+fix and all three went red; with the fixes in, narrowing the anchor back turns 2 red and
+dropping the strip pass turns 1 red.
 
 Note what this detector still cannot see: it proves distinct documents survive, not that
 true storage duplicates are collapsed. `createTestDb` writes one row per id, so a genuine
