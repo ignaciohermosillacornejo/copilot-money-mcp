@@ -486,7 +486,9 @@ describe('exported string constants are pinned (#635 class detector)', () => {
   test('a non-as-const array is not itself discovered', () => {
     // CONFORMANCE_LEDGER (src/conformance/ledger.ts) is `readonly LedgerEntry[]`
     // with no `as const`; it must not consume the declarations that follow it.
-    // A shape pin only — the detector for the rule is the synthetic test below.
+    // A shape pin only. The detectors are the synthetic snippets below: the
+    // boundary one for the body bound, and the semicolon-free one for the
+    // annotation bound.
     expect(discovered.has('CONFORMANCE_LEDGER')).toBe(false);
   });
 
@@ -521,14 +523,48 @@ describe('exported string constants are pinned (#635 class detector)', () => {
     // declarations in src/ are exactly the 8 the grammar excludes for missing
     // `as const`, so no input from the tree reaches the accepting branch
     // today. Delete `(?::[^=]+)?` from the grammar and every other test in this
-    // file stays green; that was checked by deleting it, not assumed. Not a
-    // hypothetical shape: src/ writes it eight times today, and one of them
-    // acquiring `as const` is a plausible next commit — which would then leave
-    // discovery without a word, the #677 failure again.
+    // file stays green; that was checked by deleting it, not assumed.
+    //
+    // The shape is not hypothetical, though not for the obvious reason:
+    // adding `as const` to one of those 8 would change nothing either way,
+    // since none of them is a pure single-quoted string array — numbers,
+    // identifiers, object literals, spreads — so the purity check rejects
+    // them with or without this group. Checked by extracting all 8 bodies and
+    // applying the residue rule: zero pure. What the group is load-bearing
+    // for is the COMPOSITION of two shapes src/ already writes separately,
+    // the annotation (8 times) and the pure string-literal `as const` array
+    // (25 times), meeting in one declaration — `export const FOO: readonly
+    // string[] = ['a', 'b'] as const`. That is the commit that would
+    // otherwise leave discovery without a word, the #677 failure again.
     const found = collectStringConstants(
       "export const ANNOTATED: readonly string[] = ['a', 'b'] as const;"
     );
     expect([...(found.get('ANNOTATED') ?? [])]).toEqual(['a', 'b']);
+  });
+
+  test('an annotation cannot reach past its own declaration', () => {
+    // The other half of `(?::[^=]+)?`. The accepting half is pinned above;
+    // this is the bound: `[^=]+` cannot cross the declaration's own `=`, so an
+    // annotated NON-as-const declaration cannot reach a later string-literal
+    // `as const` declaration and take its members under the wrong name.
+    //
+    // The absent `;` is deliberate, and is why this is not the boundary
+    // snippet above. Loosening the bound to `[\s\S]+?` already turns that one
+    // red — checked, along with forward and one contents test — so what it
+    // leaves undetected is a bound that stops at a DIFFERENT character.
+    // `[^;]+` is the representative: it clears every other test in this file.
+    // With no `;` between these two declarations a `;`-bounded annotation
+    // crosses exactly like a dotall one, so this snippet is red for both.
+    const snippet = [
+      'export const ANNOTATED_NOT_A_PIN: readonly Thing[] = [',
+      '  { field: 1 },',
+      ']',
+      '',
+      "export const AFTER_IT = ['alpha'] as const;",
+    ].join('\n');
+    const found = collectStringConstants(snippet);
+    expect(found.has('ANNOTATED_NOT_A_PIN')).toBe(false);
+    expect([...(found.get('AFTER_IT') ?? [])]).toEqual(['alpha']);
   });
 
   test('forward: every exported string constant in src/ is pinned', () => {
