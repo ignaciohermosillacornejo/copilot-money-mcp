@@ -21,7 +21,7 @@
  * whole checker commented out.
  */
 import { describe, expect, test } from 'bun:test';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -103,7 +103,11 @@ async function withTree(
   files: Record<string, string>,
   // `void` alone would silently accept an async callback and drop its
   // assertions — the test would pass no matter what it asserted.
-  assertions: (result: Result) => void | Promise<void>
+  assertions: (result: Result) => void | Promise<void>,
+  // link path -> target, written after the files so the targets exist. Used by
+  // the routing test: a symlink is the only way to ask "which file does this
+  // name open?" on a filesystem that does not fold case.
+  links: Record<string, string> = {}
 ): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), 'concealment-'));
   try {
@@ -111,6 +115,11 @@ async function withTree(
       const path = join(dir, name);
       await mkdir(join(path, '..'), { recursive: true });
       await writeFile(path, contents);
+    }
+    for (const [name, target] of Object.entries(links)) {
+      const path = join(dir, name);
+      await mkdir(join(path, '..'), { recursive: true });
+      await symlink(target, path);
     }
     await assertions(await runCheck(dir));
   } finally {
@@ -313,6 +322,46 @@ describe('file list comes from git when available (review follow-up)', () => {
     await withGitTree({ 'src/a.ts': CLEAN }, ({ code, stdout }) => {
       expect(code).toBe(0);
       expect(stdout).toContain('(git)');
+    });
+  });
+
+  test('a tree with a .git that git will not list is refused, not quietly walked', async () => {
+    // The label made the swap visible; nobody reads a green step. gitFiles
+    // drops HOME, so a global safe.directory is invisible to it and a repo
+    // owned by another uid makes git refuse — plausible in a container job.
+    // Every refusal lands on the same `run() === undefined` path.
+    //
+    // `.git` here holds a garbage config, which is a real refusal from real
+    // git: `git -C <dir> rev-parse --show-toplevel` answers `fatal: not a git
+    // repository` with status 128. `chmod 000 .git` on a valid repo does the
+    // same thing; both were run against git 2.50.1. The ownership case is the
+    // motivating one and was NOT run, because it needs a second uid — it
+    // reaches this branch identically, through a non-zero git status.
+    await withTree(
+      { '.git/config': 'garbage\n', 'build/loader.ts': concealed, 'src/a.ts': CLEAN },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('git declined');
+      }
+    );
+  });
+
+  test('the control: without the .git the walk runs, and it misses the payload', async () => {
+    // What the guard above is worth, and why it is not simply noise. The
+    // identical tree minus `.git` is a legitimate non-repo, the walk is the
+    // right listing for it — and the walk applies SKIP_DIRS to `build/`, so the
+    // concealed file is not scanned at all and the run is green over ONE file.
+    //
+    // That is the shrink, measured on this exact pair of trees with the
+    // label-only version of the gate: committed to a real repo it reports
+    // `(2 files scanned, listed by git)` and exits 1; after `chmod 000 .git` it
+    // reports `1 files scanned (walk), nothing hidden` and exits 0. A `.git`
+    // present alongside a walk listing means that difference is being taken
+    // silently, which is what the test above now refuses.
+    await withTree({ 'build/loader.ts': concealed, 'src/a.ts': CLEAN }, ({ code, stdout }) => {
+      expect(code).toBe(0);
+      expect(stdout).toContain('(walk)');
+      expect(stdout).toContain('1 files scanned');
     });
   });
 
@@ -841,6 +890,64 @@ describe('scoping follow-ups (review of #679)', () => {
       });
     }
   );
+
+  test('routing follows what the name RESOLVES to, not what the name folds to', async () => {
+    // The U+017F cases above are skipped wherever the filesystem does not fold,
+    // and CI is ubuntu/ext4 — so the detector for the headline fix runs only on
+    // a contributor's Mac. This pins the same property on any filesystem.
+    //
+    // A symlink asks the same question a case-fold asks: `manifest.json` is a
+    // real file whose own name no fold function turns into `package.json`, and
+    // `package.json` in that directory opens it. npm agrees — `npm pkg get
+    // scripts` in exactly this tree returns `{"postinstall": "echo pwned"}`,
+    // run against real npm rather than assumed.
+    //
+    // The assertion is on `manifest.json` and NOT on the exit code, and that
+    // distinction is the whole test. The symlink is itself listed by the walk,
+    // and its own basename routes it, so the gate exits 1 either way:
+    // `expect(code).toBe(1)` alone passes against the pre-fix basename fold —
+    // measured by running scripts/check-concealment.ts from commit 28cd61ad
+    // over this tree, which reported one finding, at package.json. Only the
+    // realpath oracle reports the TARGET's path, so only that assertion goes
+    // red if routing reverts to folding a basename.
+    //
+    // It does not pin `realpathSync.native` over plain `realpathSync`: both
+    // resolve a symlink, and the case-fold divergence between them cannot be
+    // reproduced on a case-sensitive filesystem. Checked, not assumed — the
+    // gate with `.native` sed'd out still reports manifest.json here. That
+    // choice rests on the runtime table in answersToName's docstring.
+    await withTree(
+      {
+        'manifest.json': '{"scripts":{"postinstall":"echo pwned"}}\n',
+        'src/a.ts': 'const a = 1;\n',
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('manifest.json');
+        expect(stderr).toContain('postinstall');
+      },
+      { 'package.json': 'manifest.json' }
+    );
+  });
+
+  test('an unterminated quote does not reach the inert allowance', async () => {
+    // git's parse_attr_line falls to its else-branch when unquote_c_style
+    // fails, and reads the raw token — quote mark included — as a literal path.
+    // Probed on git 2.50.1 with `"cover.png binary`: `git check-attr binary --
+    // 'cover.png' '"cover.png'` answers `unspecified` for the first and `set`
+    // for the second, so nothing that executes is concealed and the gate and
+    // git agree on the outcome.
+    //
+    // They agreed for unrelated reasons, though: git because the unquote
+    // failed, the gate because the token it fell back to happens to end in an
+    // inert extension. That is the coincidence every earlier variation in this
+    // function was built on, so the allowance no longer answers for a pattern
+    // the parser refused to parse.
+    await withTree({ '.gitattributes': '"cover.png binary\n' }, ({ code, stderr }) => {
+      expect(code).toBe(1);
+      expect(stderr).toContain('diff-suppressing gitattribute');
+    });
+  });
 
   test('an NBSP in the pattern does not tokenize it into the allowance', async () => {
     // git splits pattern from attributes on spaces and tabs ONLY, so the real
