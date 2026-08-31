@@ -106,7 +106,7 @@ allocation — and pins the **key expression** it tests. A block that is new, re
 whose key changes from an id to a content field fails there, and every block must be
 twin-tested, structural, or explicitly listed as untested-by-choice.
 
-That shape was reached over eight revisions, each of which review showed was narrower than
+That shape was reached over nine revisions, each of which review showed was narrower than
 its own comment claimed:
 
 | Revision | Discovered by | What it missed |
@@ -118,7 +118,8 @@ its own comment claimed:
 | 5 | bare identifiers resolved to their assigned expression, and asserted never to appear | a RESOLVED expression can still pin nothing: `key = keyFor(row)` is not a bare word, so it passed, but reimplementing `keyFor` to hash a different property leaves that exact string unchanged — the resolution closed the literal-bare-word case, not the opaque-call case |
 | 6 | resolved expressions required to contain a property access (`.someField`), not just be non-bare | the check is on the call SITE's text, not on what the call actually returns: `key = keyFor(row.id)` contains `.id`, so it passes, even though `keyFor` could compute anything from that argument — narrows the opaque-call class rather than closing it |
 | 7 | the scanner itself: `discoverDedupBlocks` matches against a comment-stripped window and takes a `source` seam, so revisions 5 and 6 are pinned by committed fixtures | the window was still bounded only by a character count, so it ran off the end of its own function and could pin a Set from the *next* function's guard; and the collision message it added named a cause (`two same-named Sets in one function`) the scanner cannot actually distinguish |
-| 8 | the window bounded at the next top-level declaration as well as by `DISCOVERY_WINDOW` — 18 of the 36 real windows overran their own function — plus two prose claims corrected to match what the code can tell | attribution is still top-level-`function`-only: a Set inside an arrow function, method, or nested `function` is credited to the preceding top-level declaration and bounded by the following one. And `stripComments`'s own string-literal assumption is unchanged — a string containing `//` inside a scanned window would still eat the rest of that line |
+| 8 | the window bounded at the next top-level declaration as well as by `DISCOVERY_WINDOW` — 18 of the 36 real windows overran their own function — plus two prose claims corrected to match what the code can tell | the *name* the window then matched was still un-anchored, so a Set could borrow a longer identifier's guard — and the bound cannot help inside `decodeAllCollections`, where 25 of the 36 Sets share one function and the windows overlap freely |
+| 9 | the matched name anchored to an identifier boundary (`(?<![\w$])`), so `catSeen` no longer matches `subcatSeen.has(`; and the `'NONE'` sentinel taken out of band, so a `const NONE = row.id` can no longer rewrite "unguarded" into a field-bearing key that passes the field-free invariant | revision 6's opaque-call class (`keyFor(row.id)`) is still open; attribution is still top-level-`function`-only; and `discoverAggregatePushTargets`'s per-Set window is still a bare slice — safe because its `if (!`-anchored regex makes a run-off either throw or fail the `toBe(25)` pin, which is a reason rather than a construction |
 
 The revision-3 gap is worth recording because it is this bug's own shape: one comment
 above three blocks meant `acSeen.has(ac.change_id)` could become `acSeen.has(ac.description)`
@@ -161,6 +162,18 @@ and can never be the literal `__proto__` that the drop requires. That one is kep
 symmetry between the two scanners and labelled unreachable in place, rather than left
 carrying a comment describing a guard that cannot fire: the mutation is what showed the
 comment was overclaiming, which is the same test the rest of this file is built to apply.
+
+Revision 9's two fixtures were written **before** either fix, and all four assertions went
+red against the shipped scanner — the defects reproduce rather than being argued for. The
+verify-before-tighten check ran first here too, and came back stronger than expected: of the
+36 Sets (27 distinct names), **no name is a proper suffix of another**, so the un-anchored
+match had no live collision available to it, and anchoring changes 0 of the 36 resolved
+keys. With the fixes in, removing the `(?<![\w$])` anchor turns 2 tests red and removing the
+`use &&` sentinel gate turns 2 red. The sentinel one is the more interesting failure: it is a
+fail-**open**, where an unguarded block reports as guarded and therefore satisfies the very
+invariant this detector is named for — reached through the sentinel rather than through the
+scan, which is why "no source declares `const NONE`" was a guarantee worth removing from the
+load path rather than documenting.
 
 Note what this detector still cannot see: it proves distinct documents survive, not that
 true storage duplicates are collapsed. `createTestDb` writes one row per id, so a genuine
