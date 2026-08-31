@@ -48,9 +48,9 @@
  * that covers as-const ARRAYS only. A string-literal allowlist declared as
  * `new Set([...])` is invisible to it — TRANSFER_CATEGORIES
  * (src/utils/categories.ts:837) and INCOME_CATEGORIES (:886) are unpinned today
- * for exactly that reason. Known gap, tracked in #695. Said out loud because "no ratchet
- * catches a list getting shorter" must not be read as "every list in src/ is
- * ratcheted": a reader who believes the wider claim stops looking.
+ * for exactly that reason. Known gap, tracked in #695. Said out loud because
+ * "no ratchet catches a list getting shorter" must not be read as "every list
+ * in src/ is ratcheted": a reader who believes the wider claim stops looking.
  *
  * HOW IT FAILS (all three directions are mutation-tested in this file's PR)
  *
@@ -116,17 +116,24 @@ const SRC_ROOT = join(import.meta.dir, '..', 'src');
  * No such literal sits in an `as const` array in src/ today. The denominator is
  * the load-bearing part: the scan bracket-matches EVERY
  * `export const NAME = [ ... ] as const` in src/, discoverable by this grammar
- * or not — a balanced walk pairs an inner `[` with its inner `]` and still
- * reaches the real closer, so a bracket-carrying array cannot hide from it the
- * way it hides from the matcher above. That population is 25, the same 25 the
- * pin holds, and none of their literals carries a bracket. Counting only the
- * pin's 25 would prove nothing, for the reason spelled out below. The two
- * shapes already coexist in one file though — src/tools/field-selection.ts
+ * or not, which is a wider net than the matcher above casts. It is a CHECK, not
+ * a proof: the walk counts brackets in raw text, so an UNBALANCED one inside a
+ * literal (`['a]', 'b']`) closes it early and that declaration goes uncounted —
+ * the same class of blind spot as the matcher it is meant to outperform. A
+ * balanced pair split across concatenated literals is fine, since the walk never
+ * needed them to be in the same literal. Today the net holds: 33 declarations
+ * match `export const NAME = [`, 25 land on `as const` and 8 correctly do not,
+ * and src/'s only two unbalanced-bracket literals
+ * (src/tools/field-selection.ts:105 and :106, which balance each other) sit
+ * inside an object literal the array walk never enters. That 25 is the same 25
+ * the pin holds, and none of their literals carries a bracket. Counting only
+ * the pin's 25 would prove nothing, for the reason spelled out below.
+ *
+ * The two shapes already coexist in one file though — src/tools/field-selection.ts
  * declares `as const` arrays at :36, :60, :121 and :151 (closing at :47, :68,
  * :127 and :158) and carries bracket-bearing hint literals at :89, :105-106,
- * :137 and
- * :169 — so a `fields:`-hint list landing in one is a plausible next commit
- * rather than a hypothetical. Tracked as #696.
+ * :137 and :169 — so a `fields:`-hint list landing in one is a plausible next
+ * commit rather than a hypothetical. Tracked as #696.
  *
  * ASSUMPTION, another silent-drop mode and the likeliest of them to actually
  * happen: every member is written with SINGLE quotes. `.prettierrc.json` sets
@@ -148,7 +155,8 @@ const SRC_ROOT = join(import.meta.dir, '..', 'src');
  * is the hazard itself, not evidence against it. The falsifiable form is to
  * bracket-match every as-const array in src/, discoverable or not, and compare
  * counts: 25 of them, the same 25 the pin holds, none written with a
- * double-quoted or backtick member. Nothing is hidden today. Likely against
+ * double-quoted or backtick member. Nothing is hidden today — subject to the
+ * same caveat as that scan above: it is a check, not a proof. Likely against
  * the first human-readable list anyone adds. Tracked as #696 with the rest of
  * the family.
  */
@@ -175,9 +183,14 @@ function tsFilesUnder(dir: string): string[] {
  * `//` or a block-comment opener. Scoped on purpose, because the unscoped
  * version is false — three URL literals in src/ do contain `//`
  * (src/core/graphql/client.ts, src/core/auth/browser-token.ts,
- * src/core/database.ts) and this helper mangles all three. They are harmless
- * only because none sits in an `as const` array, which is the sole text the
- * matcher reads. Note WHAT was checked, because the distinction is the whole
+ * src/core/database.ts) and this helper mangles all three. Note that the reason
+ * they are harmless is narrower than "they are not in an array": this helper is
+ * applied to the WHOLE file, so stripping deletes from each `//` to end of
+ * line wherever it occurs. They are harmless because none of those three LINES
+ * carries an `as const` declaration, so the text destroyed is text the matcher
+ * would not have matched. Put a URL inside a member and the constant is gone:
+ * `export const U = ['https://x'] as const` does not survive stripping.
+ * Note WHAT was checked, because the distinction is the whole
  * point of this helper: the count is over extracted member VALUES, after
  * stripping. Two of the 25 raw bodies — IGNORED_ITEM_FIELDS and
  * KNOWN_FREQUENCIES — do contain `//`, as the line comments this helper exists
@@ -247,12 +260,20 @@ function collectStringConstants(source: string): Map<string, readonly string[]> 
  *
  *   arrays differ, pin matches the WINNER -> all three green, and the loser is a
  *     live declaration in src/ that no test touches. Silent, stable, indefinite.
- *     This is the dangerous one, and the likeliest: a real collision is two
- *     unrelated lists sharing a name far more often than two copies of one list.
+ *     The dangerous one, and the one the workflow RATCHETS TOWARDS — see below.
  *   arrays differ, pin matches the LOSER  -> contents red, but only on machines
  *     whose readdirSync order produces that winner. Loud where it fires.
  *   arrays identical                      -> quiet and stable; the loser is
  *     uncovered but currently says the same thing, until it drifts.
+ *
+ * The ratchet, which is why row 2 is not merely one outcome in three: `PINNED`
+ * entries are authored from what discovery REPORTS. So row 3 does not persist —
+ * the author sees contents red, reconciles the pin against the actual output,
+ * i.e. against the winner, and lands in row 2. Row 3 decays into row 2 on
+ * whichever machine last edited the pin, and that is also why row 2 presents as
+ * a CROSS-MACHINE symptom: the same pin matches the winner here and the loser
+ * on a machine whose readdirSync order differs. Not a probability argument — a
+ * property of how the pin gets written.
  *
  * Unlike its siblings, no branch drops a NAME the backward check could notice:
  * this one substitutes rather than drops. Tracked as #694.
