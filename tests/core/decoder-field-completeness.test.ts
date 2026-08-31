@@ -413,6 +413,18 @@ function discoverProcessors(src: string = SRC): DiscoveredProcessor[] {
         // block's brace (a bare-statement loop with no braces of its own,
         // followed later by an unconnected `if (...) { ... }`) and silently
         // scan the wrong loop's body for this array's members.
+        // KNOWN BOUND, stated rather than left to be rediscovered (review nit
+        // on #688): `^\s*\)\s*\{` allows only whitespace between the array's
+        // `]` and the header's `)`, so `for (const k of ['a', 'b'] as const)`
+        // does not match and its members never enter `surfaced`. That is the
+        // same "loud but misleading" shape the paragraph above criticises in
+        // the old 500-char cap — recorded here so it is a known bound rather
+        // than a surprise. It fails CLOSED (members go unsurfaced, the check
+        // goes red) rather than open, and no live instance exists: none of the
+        // decoder's five array-literal for-ofs (2571, 2634, 2650, 2684, 2689)
+        // uses `as const`. Left as a documented bound rather than widened,
+        // since widening a matcher with no failing case behind it is how the
+        // sibling file's residuals got recorded too.
         const after = /^\s*\)\s*\{/.exec(body.slice(end + 1));
         if (after === null) continue;
         const brace = end + 1 + after[0].length - 1;

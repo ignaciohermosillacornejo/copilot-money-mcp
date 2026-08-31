@@ -31,7 +31,7 @@
  * or explicitly listed as untested-by-choice.
  *
  * Note "block", not "comment", and "expression", not "name". Both distinctions
- * were bought the hard way — nine revisions, each one narrower than its own
+ * were bought the hard way — ten revisions, each one narrower than its own
  * comment claimed, each narrowing found by review rather than by the suite:
  *
  *   1. five hand-written tests, claiming "every collection"
@@ -73,7 +73,19 @@
  *      6's opaque-call class (`keyFor(row.id)`) is still open, attribution
  *      is still top-level-`function`-only, and the sibling scanner's
  *      per-Set window is still a bare slice, safe because its `if (!`
- *      anchor makes a run-off loud rather than because it is bounded
+ *      anchor makes a run-off loud rather than because it is bounded — and
+ *      the anchor it added excluded `\w` and `$` but not `.`, so a member
+ *      expression still got through
+ *  10. the anchor widened to `(?<![\w$.])`, closing the member-expression
+ *      half (`ctx.seen.has(...)` no longer credited to a local `seen`), and
+ *      stripComments given a third pass so a window that truncates inside a
+ *      block comment cannot leave that comment's text being scanned as code
+ *      — the one residual in this list with a LIVE instance, not a
+ *      hypothetical: `decodeAllCollections|tagSeen`'s window ends inside the
+ *      docblock above `getDecodeTimeoutMs`. Still open afterwards: the lazy
+ *      `[^;]*?` capture truncates on a nested paren and pins unparseable
+ *      text (documented at the regex, no live instance, deliberately not
+ *      changed), plus everything revision 9 left
  *
  * Revision 2 could not see `dedupeAndSortInvestmentPrices`, which carries no
  * comment — the site that shipped #622, the previous instance of this exact
@@ -370,9 +382,37 @@ const UNTESTED_BY_CHOICE = new Set([
  * `balanced()` ever sees it — an unstripped comment containing an unbalanced
  * `{` or `}` would otherwise shift where `balanced()` thinks the guard body
  * ends, in either direction.
+ *
+ * The THIRD pass is what makes that safe on a windowed input, and is why this
+ * copy has diverged from the sibling's (fourth review follow-up on the #688
+ * review). The block-comment pass needs the closing `*\/`; both scanners here
+ * slice a DISCOVERY_WINDOW first and strip second, so a window whose end lands
+ * inside a block comment leaves that comment's text in the scanned string,
+ * where it can match the guard regex or the `const key = ...;` resolution
+ * exactly like live code. That is precisely the failure revision 7's strip was
+ * added to prevent, reached through the window boundary rather than through a
+ * `//` line. Since the first pass has already removed every TERMINATED block
+ * comment, any `/*` still present is unterminated within this text, so
+ * dropping from it to the end is exact rather than heuristic. It runs after
+ * the line pass so that a `/*` appearing inside a `//` comment is already gone
+ * and cannot trigger it.
+ *
+ * This was not theoretical: `decodeAllCollections|tagSeen`'s window ends
+ * inside the docblock above `getDecodeTimeoutMs`, so that prose was being
+ * scanned as code — harmless only because it happens to contain no `.has(`
+ * and no `const x = ...;`. Adding the pass changes 0 of the 36 resolved keys
+ * and leaves 0 windows holding an unterminated opener.
+ *
+ * The sibling file's copy does NOT need this pass and deliberately does not
+ * have it: there `stripComments` is applied to a `balanced()` function body or
+ * to the whole source, never to a truncated character window, so its block
+ * comments always arrive with their closers.
  */
 function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  return text
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/[^\n]*/g, '')
+    .replace(/\/\*[\s\S]*$/, '');
 }
 
 /**
@@ -779,20 +819,52 @@ function discoverDedupBlocks(
     const nextDecl = declarations.find(([at]) => at > (m.index as number));
     const end = Math.min(start + DISCOVERY_WINDOW, nextDecl ? nextDecl[0] : source.length);
     const window = stripComments(source.slice(start, end));
-    // `(?<![\w$])` anchors the Set name to an identifier boundary (third
-    // review follow-up on #688 review). Without it `${variable}` matches as a
-    // SUFFIX of any longer identifier, so a Set named `catSeen` picks up
-    // `subcatSeen.has(...)` — someone else's guard, yielding a key that is
-    // wrong and well-formed at the same time. The declaration bound above does
-    // not help: it separates functions, and 25 of the decoder's 36 Sets share
-    // decodeAllCollections, so their windows overlap freely. The sibling
-    // scanner never had this because its `if (!` prefix pins the name to the
-    // character after the `!`; this is the last place in either file where a
-    // scan could latch onto something that is not its target. Verified before
-    // tightening: no Set name in the decoder is a proper suffix of another
-    // (36 Sets, 27 distinct names, 0 suffix pairs), and anchoring changes 0 of
-    // the 36 resolved keys — a hole closed, not a pin moved.
-    const use = new RegExp(`(?<![\\w$])${variable}\\.has\\(([^;]*?)\\)\\s*\\)`).exec(window);
+    // `(?<![\w$.])` anchors the Set name to an identifier boundary (third and
+    // fourth review follow-ups on #688 review). Two shapes, one class — the
+    // scan latching onto a `.has(` that is not its target:
+    //
+    //   - SUFFIX: without the lookbehind at all, `${variable}` matches as the
+    //     tail of any longer identifier, so a Set named `catSeen` picks up
+    //     `subcatSeen.has(...)`.
+    //   - MEMBER EXPRESSION: `.` is not in `[\w$]`, so the first version of
+    //     this anchor still let a local `const seen` match `ctx.seen.has(...)`
+    //     — a different Set entirely, a property on some object.
+    //
+    // Both produce a key that is wrong and well-formed at the same time, which
+    // then passes fieldFreeBlocks and looks like a good answer to whoever
+    // regenerates DEDUP_BLOCKS from it. The declaration bound above does not
+    // help with either: it separates functions, and 25 of the decoder's 36
+    // Sets share decodeAllCollections, so their windows overlap freely.
+    //
+    // The sibling scanner is immune to both for free, because its `if (!`
+    // prefix pins the name to the character after the `!`. With `.` excluded,
+    // the two scanners finally agree on what counts as "this Set's guard".
+    //
+    // Verified before tightening, both times: no Set name in the decoder is a
+    // proper suffix of another (36 Sets, 27 distinct names, 0 suffix pairs),
+    // and all 36 `.has(` receivers are bare identifiers (0 preceded by a dot).
+    // Neither tightening changes any of the 36 resolved keys — holes closed,
+    // no pins moved.
+    //
+    // The `\)\s*\)` tail is load-bearing and is NOT an `if (!` remnant: it is
+    // what lets this pattern match `decoder.ts`'s one non-`if` guard,
+    // `!(txn.pending && supersededPendingIds.has(txn.transaction_id))`.
+    // Requiring `if (!` here — the obvious "make it match the sibling" move —
+    // silently drops that block (checked: an `if \(!`-prefixed pattern does
+    // not match that line).
+    //
+    // RESIDUAL, recorded rather than fixed: the capture is lazy and stops at
+    // the first `)` that is followed by another, so a guard nesting a call —
+    // `if (!seen.has(String(row.id)))` — pins the truncated text
+    // "String(row.id". Not a detection hole (the string still moves when the
+    // field does, so the pin and fieldFreeBlocks both stay honest), but a
+    // maintainer regenerating the pin would get an entry that does not parse.
+    // No live instance: 0 of the decoder's 36 `.has(` sites nest a call.
+    // Capturing with `balanced()` would fix it, and is deliberately not done
+    // here — that is a behaviour change to a scanner with no failing case
+    // behind it, which is the same reason the sibling's per-Set window was
+    // left unbounded two revisions ago.
+    const use = new RegExp(`(?<![\\w$.])${variable}\\.has\\(([^;]*?)\\)\\s*\\)`).exec(window);
     let key = use ? (use[1] as string).replace(/\s+/g, ' ').trim() : 'NONE';
     // Resolve a bare identifier to the expression it is assigned from. Three
     // blocks dedup on `const key = \`${a}:${b}\``, and pinning the string
@@ -957,7 +1029,13 @@ describe('dedup coverage is declared, not assumed (#668 review)', () => {
 
   test('every block is twin-tested, structural, or listed as untested', () => {
     const unexplained = Object.keys(discovered).filter(
-      (b) => !TWIN_TESTED.has(b) && !(b in STRUCTURAL_KEYS) && !UNTESTED_BY_CHOICE.has(b)
+      // `Object.hasOwn`, not `in` (review nit): the two scanners above were
+      // switched off `in` for prototype-chain reasons and this site was left
+      // behind, so the same construct read two different ways in one file.
+      // Unreachable here for the same reason it is unreachable there — every
+      // block key contains a `|` — but "unreachable and documented" and
+      // "unreachable and not mentioned" are different states to leave code in.
+      (b) => !TWIN_TESTED.has(b) && !Object.hasOwn(STRUCTURAL_KEYS, b) && !UNTESTED_BY_CHOICE.has(b)
     );
     expect(unexplained).toEqual([]);
   });
@@ -1448,9 +1526,15 @@ describe('discoverDedupBlocks anchors the Set name it matches (#688 review)', ()
   // declaration bound does not help here: both Sets live in one function, and
   // inside decodeAllCollections 25 of the decoder's 36 Sets do exactly that,
   // so their windows overlap freely. The sibling scanner is immune for free —
-  // its `if (!` prefix forces the name to start right after the `!` — and this
-  // is the last place in either file where a scan could latch onto something
-  // that is not its target.
+  // its `if (!` prefix forces the name to start right after the `!`.
+  //
+  // This closes the identifier-SUFFIX half only. When it was written it
+  // claimed to be "the last place in either file where a scan could latch onto
+  // something that is not its target", and the next review round found the
+  // other half one character away: `.` is not in `[\w$]`, so a member
+  // expression still got through. See the member-expression describe below —
+  // the two fixtures are halves of one class, kept apart because they fail for
+  // different reasons and each has to be able to fail on its own.
   const FIXTURE_SRC = `
 export function decodeSuffix(): unknown {
   const catSeen = new Set<string>();
@@ -1502,5 +1586,70 @@ export function decodeSentinel(): unknown {
 
   test('and is therefore still reported by the live field-free invariant', () => {
     expect(fieldFreeBlocks(discoverDedupBlocks(FIXTURE_SRC))).toEqual(['decodeSentinel|seen']);
+  });
+});
+
+describe('discoverDedupBlocks anchors past a member expression too (#688 review)', () => {
+  // `(?<![\w$])` excludes word characters and `$` but NOT `.`, so a local
+  // `const seen` still matched `ctx.seen.has(...)` — a DIFFERENT Set, a
+  // property on some object, whose guard got credited to the local one. Same
+  // consequence as the suffix case closed one round earlier, one character
+  // away: a key that is wrong and well-formed at once, and one that passes
+  // fieldFreeBlocks for the same reason. The sibling scanner is immune to this
+  // half too, since `if (!` forces the name to begin right after the `!`.
+  const FIXTURE_SRC = `
+export function decodeMember(): unknown {
+  const seen = new Set<string>();
+  const ids = raw.map((r) => r.thing_id);
+  if (!ctx.seen.has(row.row_id)) {
+    ctx.seen.add(row.row_id);
+  }
+}
+`;
+
+  test('a local Set does not borrow a member-expression Set of the same name', () => {
+    expect(discoverDedupBlocks(FIXTURE_SRC)).toEqual({ 'decodeMember|seen': 'NONE' });
+  });
+
+  test('the borrowed member-expression guard would otherwise pass the live invariant', () => {
+    expect(fieldFreeBlocks(discoverDedupBlocks(FIXTURE_SRC))).toEqual(['decodeMember|seen']);
+  });
+});
+
+describe('stripComments drops a block comment the window cut in half (#688 review)', () => {
+  test('a decoy guard inside a truncated block comment does not win the key', () => {
+    // stripComments removes block comments with `/\*[\s\S]*?\*\//`, which needs
+    // the CLOSING `*/`. Both scanners slice a window and strip second, so a
+    // window whose end lands inside a block comment leaves that comment's text
+    // in the scanned string, eligible to match the guard regex exactly like
+    // live code — the failure revision 7's strip was added to prevent, reached
+    // through the window boundary instead of through a `//` line.
+    //
+    // This one had a LIVE instance, unlike most residuals recorded here:
+    // `decodeAllCollections|tagSeen`'s window ends inside the docblock above
+    // `getDecodeTimeoutMs`, and that prose sits in the scanned window today.
+    // Harmless only because it contains no `.has(` and no `const x = ...;`.
+    //
+    // The filler puts the DISCOVERY_WINDOW boundary inside the comment below,
+    // so the decoy guard is inside the window and the comment's closer is not.
+    const filler = 'x'.repeat(DISCOVERY_WINDOW - 200);
+    const FIXTURE_SRC = `
+export function decodeTruncated(): unknown {
+  const seen = new Set<string>();
+  const pad = '${filler}';
+  /* decoy guard, sliced in half by the window boundary:
+     if (!seen.has(decoy.decoy_id)) {
+     ${'y'.repeat(400)}
+   */
+  if (!seen.has(real.real_id)) {
+    seen.add(real.real_id);
+  }
+}
+`;
+    // NONE, not `decoy.decoy_id`: the real guard sits past the window, so the
+    // honest answer is "no guard found here" — and NONE is a state the live
+    // field-free invariant rejects, where `decoy.decoy_id` would have sailed
+    // through it.
+    expect(discoverDedupBlocks(FIXTURE_SRC)).toEqual({ 'decodeTruncated|seen': 'NONE' });
   });
 });
