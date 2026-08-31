@@ -106,7 +106,7 @@ allocation — and pins the **key expression** it tests. A block that is new, re
 whose key changes from an id to a content field fails there, and every block must be
 twin-tested, structural, or explicitly listed as untested-by-choice.
 
-That shape was reached over seven revisions, each of which review showed was narrower than
+That shape was reached over eight revisions, each of which review showed was narrower than
 its own comment claimed:
 
 | Revision | Discovered by | What it missed |
@@ -117,7 +117,8 @@ its own comment claimed:
 | 4 | dedup blocks, pinning the key expression | three blocks pinned the local name `key` rather than what it resolves to — a bare identifier that pins nothing, since changing what `key` is built from would not move it |
 | 5 | bare identifiers resolved to their assigned expression, and asserted never to appear | a RESOLVED expression can still pin nothing: `key = keyFor(row)` is not a bare word, so it passed, but reimplementing `keyFor` to hash a different property leaves that exact string unchanged — the resolution closed the literal-bare-word case, not the opaque-call case |
 | 6 | resolved expressions required to contain a property access (`.someField`), not just be non-bare | the check is on the call SITE's text, not on what the call actually returns: `key = keyFor(row.id)` contains `.id`, so it passes, even though `keyFor` could compute anything from that argument — narrows the opaque-call class rather than closing it |
-| 7 | the scanner itself: `discoverDedupBlocks` matches against a comment-stripped window and takes a `source` seam, so revisions 5 and 6 are pinned by committed fixtures | the enclosing-function scan still reads raw source, and `stripComments`'s own string-literal assumption is unchanged — a string containing `//` inside a scanned window would still eat the rest of that line |
+| 7 | the scanner itself: `discoverDedupBlocks` matches against a comment-stripped window and takes a `source` seam, so revisions 5 and 6 are pinned by committed fixtures | the window was still bounded only by a character count, so it ran off the end of its own function and could pin a Set from the *next* function's guard; and the collision message it added named a cause (`two same-named Sets in one function`) the scanner cannot actually distinguish |
+| 8 | the window bounded at the next top-level declaration as well as by `DISCOVERY_WINDOW` — 18 of the 36 real windows overran their own function — plus two prose claims corrected to match what the code can tell | attribution is still top-level-`function`-only: a Set inside an arrow function, method, or nested `function` is credited to the preceding top-level declaration and bounded by the following one. And `stripComments`'s own string-literal assumption is unchanged — a string containing `//` inside a scanned window would still eat the rest of that line |
 
 The revision-3 gap is worth recording because it is this bug's own shape: one comment
 above three blocks meant `acSeen.has(ac.change_id)` could become `acSeen.has(ac.description)`
@@ -147,6 +148,19 @@ is this PR's whole subject in one line: a test can execute a guard and still not
 guard's deletion. The 26th-block mutation also shows why the count pin was tightened from
 `>= 25` to `toBe(25)`: run against the same mutated decoder, the old one-sided assertion
 stayed green while the new one fails at `Expected: 25, Received: 26`.
+
+Revision 8 was verified the same way, and twice in the other direction first. Before
+tightening the window bound, the char-bounded and declaration-bounded resolutions were
+compared across all 36 real blocks: **18 windows overrun their own function, and 0 resolved
+keys differ** — so the bound closes a hole without moving a single pin. Then, with the
+bound in place: reverting it to a bare character count turns 2 tests red; reverting the
+softened collision message, 1; reverting `Object.create(null)` to `{}` in
+`discoverAggregatePushTargets`, 1. Reverting that same line in `discoverDedupBlocks` turns
+**nothing** red — its keys are always `enclosing|variable`, so they always contain a `|`
+and can never be the literal `__proto__` that the drop requires. That one is kept for
+symmetry between the two scanners and labelled unreachable in place, rather than left
+carrying a comment describing a guard that cannot fire: the mutation is what showed the
+comment was overclaiming, which is the same test the rest of this file is built to apply.
 
 Note what this detector still cannot see: it proves distinct documents survive, not that
 true storage duplicates are collapsed. `createTestDb` writes one row per id, so a genuine
