@@ -30,10 +30,12 @@ import type { GetAccountsLiveRow } from './live/accounts.js';
 
 /**
  * The default field set for transaction rows: the v3 baseline that
- * `fields: ["default"]` expands to. Covers "what did I spend, where, when,
- * in what category, on which account" plus the flags needed to reason about
- * exclusions and transfers. (Distinct from the 7-field `compact` preset in
- * tools.ts, which predates this engine and is unchanged.)
+ * `fields: ["default"]` expands to, and — since #604 — what BOTH
+ * get_transactions and get_transactions_live return when `fields` is
+ * omitted. Covers "what did I spend, where, when, in what category, on which
+ * account" plus the flags needed to reason about exclusions and transfers.
+ * (The 7-field `compact` preset this superseded was deleted in #604 along
+ * with the boolean that selected it.)
  */
 export const DEFAULT_TRANSACTION_FIELDS = [
   'transaction_id',
@@ -96,18 +98,30 @@ export const INVESTMENT_PRICE_FIELDS_PARAM_SCHEMA = {
  * JSON-schema fragment for the `fields` input param, shared verbatim by
  * get_transactions (cache) and get_transactions_live so the two modes cannot
  * drift — parity is pinned by tests/tools/live/transactions.test.ts, which
- * compares the fragments through the registry defs. Note for live rows: 2 of
- * the 10 `"default"` baseline names (`excluded`, `internal_transfer`) are
- * cache-document-only and are simply absent from live rows.
+ * compares the fragments through the registry defs.
+ *
+ * Rewritten for #604, when the default flipped from full documents to
+ * `["default"]`: only then did "EXCLUDED by default" become true of this
+ * parameter, so the wording that names the exclusions had to wait for the
+ * flip rather than ship ahead of it.
  */
 export const TRANSACTION_FIELDS_PARAM_SCHEMA = {
   type: 'array',
   items: { type: 'string' },
   description:
-    'Return only these fields per transaction (e.g. ["transaction_id", "date", "name", ' +
-    '"amount", "category_name"]). Tokens: "default" expands to a curated baseline of core ' +
-    'fields; "all" or "*" returns the full row. Unknown names are omitted and reported via ' +
-    '_field_warning.',
+    'Return only these fields per transaction. Default when omitted: a terse row ' +
+    '(transaction_id, date, amount, name, category_name, account_id, item_id, pending, ' +
+    'excluded, internal_transfer). That drops ~50 other fields of a cache document. ' +
+    'PARTIAL list of what goes, not exhaustive: Plaid metadata (plaid_category_id, ' +
+    'plaid_category_strings, plaid_transaction_type, plaid_deleted), internal IDs ' +
+    '(category_id, recurring_id, goal_id, parent_transaction_id, children_transaction_ids, ' +
+    'pending_transaction_id, user_id), enrichment and intelligence fields ' +
+    '(normalized_merchant, intelligence_suggested_category_ids, suggestion_ids, ' +
+    'original_name, name_override), tagging (tag_ids), review state (user_reviewed, ' +
+    'user_note), location (city, region, country, lat, lon), and flags like is_amazon / ' +
+    'from_investment / is_manual. Any of them is requestable by name: ' +
+    'fields: ["default", "tag_ids", "user_note"], or "all" / "*" for the full row. ' +
+    'Unknown names are omitted and reported via _field_warning.',
 } as const;
 
 /**
@@ -336,14 +350,15 @@ function isToken(name: string): boolean {
  *
  * Why this cannot live in {@link projectRows}: by the time the engine is
  * called, each handler has already folded "omitted" into its own default —
- * `args.fields ?? ['default']` for a terse-by-default tool, `undefined` (or
- * the `compact` preset) for `get_transactions`, which v3 has not flipped yet.
- * An explicit `[]` survives `??` untouched, so the engine receives `[]` from
- * both kinds of tool and has no way to tell which default it should stand in
- * for. Deleting `fields` BEFORE the handler's `??` runs reuses each tool's own
- * omitted-path instead of guessing one: terse tools project their preset,
- * `get_transactions` returns full rows (or `compact` rows when `compact: true`
- * is also set — which is what omitting `fields` does there too).
+ * `args.fields ?? ['default']` for a terse-by-default tool, `undefined` for a
+ * tool that still returns full rows when `fields` is omitted. An explicit
+ * `[]` survives `??` untouched, so the engine receives `[]` from both kinds
+ * of tool and has no way to tell which default it should stand in for.
+ * Deleting `fields` BEFORE the handler's `??` runs reuses each tool's own
+ * omitted-path instead of guessing one. Since #604 every field-selecting read
+ * tool is terse-by-default, so `fields: []` now projects the preset
+ * everywhere — but the normalization stays where it is: it is what keeps
+ * `[] == omitted` true for whatever the next tool's default turns out to be.
  *
  * Applied once, in `defineTool` (src/tools/registry/types.ts), so every tool
  * inherits it and no call site changes — in particular the literal

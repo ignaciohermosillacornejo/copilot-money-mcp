@@ -183,7 +183,19 @@ describe('LiveTransactionsTools — happy path', () => {
     });
 
     expect(result.count).toBe(1);
+    // #604: rows are terse by default, so normalized_merchant — an
+    // enrichment field outside the preset — has to be asked for.
     expect(result.transactions[0]).toMatchObject({
+      transaction_id: 't1',
+      category_name: 'Shopping',
+    });
+    const withMerchant = await tools.getTransactions({
+      query: 'amazon',
+      start_date: '2025-01-01',
+      end_date: '2025-12-31',
+      fields: ['default', 'normalized_merchant'],
+    });
+    expect(withMerchant.transactions[0]).toMatchObject({
       transaction_id: 't1',
       category_name: 'Shopping',
       normalized_merchant: 'AMAZON',
@@ -893,11 +905,21 @@ const LIVE_PRESET_INTERSECTION = [
 describe('LiveTransactionsTools — field selection (fields param)', () => {
   const range = { start_date: '2025-01-01', end_date: '2025-12-31' };
 
-  test('fields omitted → full-width rows, no _field_warning key', async () => {
+  test('fields omitted → the terse preset row, no _field_warning key (#604)', async () => {
     const live = await mkLiveReturning([mkFsNode()]);
     const tools = new LiveTransactionsTools(live);
     const result = await tools.getTransactions({ ...range });
     expect(result.count).toBe(1);
+    expect(Object.keys(result.transactions[0]!).sort()).toEqual(
+      [...LIVE_PRESET_INTERSECTION].sort()
+    );
+    expect('_field_warning' in result).toBe(false);
+  });
+
+  test('fields: ["all"] → the full-width row (#604)', async () => {
+    const live = await mkLiveReturning([mkFsNode()]);
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({ ...range, fields: ['all'] });
     expect(new Set(Object.keys(result.transactions[0]!))).toEqual(
       new Set([...LIVE_TRANSACTION_KNOWN_FIELDS])
     );
@@ -1081,6 +1103,9 @@ describe('LIVE_TRANSACTION_KNOWN_FIELDS — derived from the enrichment mapper',
     const result = await tools.getTransactions({
       start_date: '2025-01-01',
       end_date: '2025-12-31',
+      // #604: a default call is projected to the preset, so the full row —
+      // which is what this set is derived from — needs "all".
+      fields: ['all'],
     });
     expect(new Set(Object.keys(result.transactions[0]!))).toEqual(
       new Set([...LIVE_TRANSACTION_KNOWN_FIELDS])

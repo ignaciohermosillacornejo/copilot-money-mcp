@@ -6,7 +6,7 @@ This server exposes different tools depending on which CLI flags you enable. The
 
 | Tool | Status | Notes |
 |---|---|---|
-| `get_transactions` | ✅ | Query transactions with filters (date range, category, merchant, amount, account, text search, etc.). `compact: true` or `fields: [...]` narrow the ~35-40 field document down to just what you need |
+| `get_transactions` | ✅ | Query transactions with filters (date range, category, merchant, amount, account, text search, etc.). Rows are terse by default as of v3.0.0 (10 fields); `fields: ["all"]` returns the full ~60-field document and `fields: ["default", "tag_ids"]` adds named fields. The `compact` boolean was removed |
 | `get_accounts` | ✅ | List accounts with balances; filter by type. Rows are terse by default (`fields: [...]` opts into `holdings`, `official_name`, `logo`, etc.) |
 | `get_categories` | ✅ | Category hierarchy with spending totals |
 | `get_budgets` | ✅ | Budgets vs. spending |

@@ -24,8 +24,10 @@
  *              all 2,847 tests green.
  *   3. #676  — the fix for (2) discovered presets by importing ONE module,
  *              so DEFAULT_COMPACT_TRANSACTION_FIELDS in src/tools/tools.ts
- *              (7 entries, decides the `compact: true` row) stayed exposed:
- *              three of its seven could be deleted, suite still green.
+ *              (7 entries, decided the `compact: true` row) stayed exposed:
+ *              three of its seven could be deleted, suite still green. That
+ *              preset and its boolean were deleted outright in #604, when
+ *              DEFAULT_TRANSACTION_FIELDS became the default row.
  *
  * Each fix reproduced the bug it was fixing, one level up: assert the field →
  * forget a field; pin the preset → forget a preset; discover in a module →
@@ -363,16 +365,6 @@ const PINNED: Record<string, readonly string[]> = {
     'colorName',
     'isExcluded',
     'budget_amount',
-  ],
-  // src/tools/tools.ts
-  DEFAULT_COMPACT_TRANSACTION_FIELDS: [
-    'transaction_id',
-    'date',
-    'name',
-    'amount',
-    'category_name',
-    'account_id',
-    'pending',
   ],
   // src/tools/field-selection.ts
   DEFAULT_INVESTMENT_PRICE_FIELDS: [

@@ -362,7 +362,10 @@ describe('CopilotMoneyTools Integration', () => {
       });
 
       for (const txn of result.transactions) {
-        expect(txn.date >= '2025-01-01' && txn.date <= '2025-01-31').toBe(true);
+        // `!` since #604: rows are Partial<Transaction> because everything
+        // outside the default preset is projected away. `date` IS in the
+        // preset, so it is always present here.
+        expect(txn.date! >= '2025-01-01' && txn.date! <= '2025-01-31').toBe(true);
       }
     });
 
@@ -382,6 +385,9 @@ describe('CopilotMoneyTools Integration', () => {
       const result = await tools.getTransactions({
         category: 'food',
         limit: 20,
+        // #604: category_id is outside the default preset — the filter still
+        // runs on it, but reading it back has to be asked for.
+        fields: ['default', 'category_id'],
       });
 
       for (const txn of result.transactions) {
@@ -398,7 +404,7 @@ describe('CopilotMoneyTools Integration', () => {
       });
 
       for (const txn of result.transactions) {
-        expect(Math.abs(txn.amount) >= 10.0 && Math.abs(txn.amount) <= 100.0).toBe(true);
+        expect(Math.abs(txn.amount!) >= 10.0 && Math.abs(txn.amount!) <= 100.0).toBe(true);
       }
     });
   });
