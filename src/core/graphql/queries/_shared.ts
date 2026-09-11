@@ -1,5 +1,10 @@
 /**
- * Shared types used across multiple investments query wrappers.
+ * Shared types for the GraphQL query wrappers.
+ *
+ * Started as investments-only and still mostly is, but it also holds
+ * {@link ExactKeys}, the interface-to-mirror pin helper used repo-wide (by
+ * accounts.ts and recurrings.ts among others, neither an investments wrapper).
+ * Hoisted here rather than copy-pasted per module.
  *
  * Kept in a single module to avoid duplicating the TimeFrame string union
  * across the five wrappers that take it. SecurityNode and MarketInfoNode
@@ -23,6 +28,15 @@ import { z } from 'zod';
  * Resolves to `false` rather than `never` on a mismatch on purpose: `never` is
  * assignable to everything, so a `never`-based pin satisfies any annotation
  * and detects nothing.
+ *
+ * KEYS ONLY — and the distinction matters here more than usual. This compares
+ * `keyof` unions, so `lastUpdate: number | null` on an interface against
+ * `z.string()` in its mirror passes the pin untouched. That is not a
+ * hypothetical: SecurityNode.lastUpdate below is annotated with exactly that
+ * drift (server type mislabeled `string`, #537), caught by the read-shape
+ * smoke against the mirror — NOT by anything here. Type drift between the
+ * twins remains the smokes' job; this closes only the add/remove KEY hop that
+ * z.looseObject lets through silently.
  *
  * Usage — one line per interface/mirror twin, assigned `true`:
  *
@@ -118,11 +132,13 @@ export const SecurityNodeSchema = z.looseObject({
   marketInfo: MarketInfoNodeSchema,
 });
 
-/** See {@link ExactKeys}. Pins the two shared investments nodes. */
+/** See {@link ExactKeys}. Pinned by tests/core/graphql/mirror-pin-coverage.test.ts. */
 export const MARKET_INFO_NODE_MIRROR_IS_EXACT: ExactKeys<
   keyof MarketInfoNode,
   keyof typeof MarketInfoNodeSchema.shape
 > = true;
+
+/** See {@link ExactKeys}. Pinned by tests/core/graphql/mirror-pin-coverage.test.ts. */
 export const SECURITY_NODE_MIRROR_IS_EXACT: ExactKeys<
   keyof SecurityNode,
   keyof typeof SecurityNodeSchema.shape
