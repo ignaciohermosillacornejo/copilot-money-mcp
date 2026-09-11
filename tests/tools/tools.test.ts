@@ -870,7 +870,7 @@ describe('CopilotMoneyTools', () => {
       expect(result.accounts[0].current_balance).toBe(1500.0);
     });
 
-    test('logo fields are reachable via fields: ["default", "logo"] (include_logos replacement)', async () => {
+    test('logo fields are reachable via fields: ["default", "logo", "logo_content_type"] (include_logos replacement)', async () => {
       (db as any)._accounts = [
         { ...mockAccounts[0], logo: 'iVBORw0KGgoAAAANSU...', logo_content_type: 'image/png' },
         mockAccounts[1],

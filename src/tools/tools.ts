@@ -1354,7 +1354,7 @@ export class CopilotMoneyTools {
     // explicitly with fields: ["default", "holdings", ...], or take
     // everything with "all"/"*". Institution logos — previously gated by the
     // now-removed `include_logos` boolean — are reachable the same way:
-    // fields: ["default", "logo"].
+    // fields: ["default", "logo", "logo_content_type"].
     const { rows: responseAccounts, warning } = projectRows(
       accounts,
       options.fields ?? ['default'],
