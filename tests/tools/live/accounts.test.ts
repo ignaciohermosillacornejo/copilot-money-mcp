@@ -81,6 +81,26 @@ describe('LiveAccountsTools.getAccounts', () => {
     expect(result.count).toBe(2);
   });
 
+  test('include_hidden=true: default rows still discriminate hidden/closed from active', async () => {
+    // The flags `include_hidden` toggles must survive projection, or opting in
+    // returns rows a caller cannot tell apart. `isUserClosed` was the gap: a
+    // closed account came back shape-identical to an active one while the
+    // totals counted it.
+    const live = mkLive([
+      A('active'),
+      A('hidden', { isUserHidden: true }),
+      A('closed', { isUserClosed: true }),
+    ]);
+    const tools = new LiveAccountsTools(live);
+
+    const result = await tools.getAccounts({ include_hidden: true });
+    const byId = new Map(result.accounts.map((a) => [a.id, a]));
+
+    expect(byId.get('active')).toMatchObject({ isUserHidden: false, isUserClosed: false });
+    expect(byId.get('hidden')).toMatchObject({ isUserHidden: true, isUserClosed: false });
+    expect(byId.get('closed')).toMatchObject({ isUserHidden: false, isUserClosed: true });
+  });
+
   test('account_type filter applied', async () => {
     const live = mkLive([A('a', { type: 'DEPOSITORY' }), A('b', { type: 'CREDIT' })]);
     const tools = new LiveAccountsTools(live);
@@ -138,10 +158,10 @@ describe('LiveAccountsTools.getAccounts', () => {
   });
 
   test('regression A2: limit:0 mapped to null for charge cards', async () => {
-    // Charge cards (e.g., AmEx Platinum) have no preset limit; server returns 0, project null to prevent /0.
+    // Charge cards have no preset limit; server returns 0, project null to prevent /0.
     // `limit` isn't in the v3 default preset (DEFAULT_ACCOUNT_LIVE_FIELDS), so
-    // this test opts in explicitly — the normalization itself must still run
-    // even for a non-default field, per the derive-before-project rule.
+    // this test opts in explicitly — the normalization must still apply to a
+    // field a caller has to ask for.
     const live = mkLive([
       A('chk', { type: 'DEPOSITORY', balance: 5000, limit: null }),
       A('cc-with-limit', { type: 'CREDIT', balance: 100, limit: 5000 }),
@@ -161,10 +181,13 @@ describe('LiveAccountsTools.getAccounts', () => {
     expect(chk?.limit).toBeNull();
   });
 
-  test('regression A2: the limit:0 normalization survives even when limit is excluded by default', async () => {
-    // Same fixture as above but WITHOUT opting into `limit` — this only
-    // proves the normalization runs before projection, not that it's
-    // visible; `limit` itself is legitimately absent from a default row.
+  test('`limit` is absent from a default row', async () => {
+    // Retitled: this used to claim it proved the limit:0 normalization
+    // "survives" projection. It cannot — the normalization rewrites the key it
+    // reads, so it is order-invariant w.r.t. projectRows, and this test stays
+    // green with the normalization deleted outright (see the call-site
+    // comment). What it does pin is that `limit` stays OUT of the default
+    // preset; the opt-in test above covers the normalization itself.
     const live = mkLive([A('charge', { type: 'CREDIT', balance: 1500, limit: 0 })]);
     const tools = new LiveAccountsTools(live);
     const result = await tools.getAccounts({});

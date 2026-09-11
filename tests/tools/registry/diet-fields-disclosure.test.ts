@@ -50,6 +50,22 @@ const SRC_TOOLS = join(import.meta.dir, '..', '..', '..', 'src', 'tools');
 /** `x.fields ?? ['default']` / `x.fields ?? ["default"]`, whitespace-tolerant. */
 const DEFAULT_FALLBACK_IDIOM = /\.fields\s*\?\?\s*\[['"]default['"]\]/g;
 
+/**
+ * Deliberately wider than {@link DEFAULT_FALLBACK_IDIOM}: `||` as well as
+ * `??`, and tolerant of whitespace inside the array. The narrow idiom above
+ * is what this repo writes, and the sweep keys on it; this one exists only
+ * for the preset cross-check below, whose job is to notice a site that has
+ * drifted to an equivalent spelling and thereby dropped out of the sweep
+ * with nothing failing.
+ */
+const WIDE_FALLBACK_IDIOM = /\.fields\s*(?:\?\?|\|\|)\s*\[\s*['"]default['"]\s*\]/g;
+
+/** `preset: DEFAULT_X_FIELDS` — how a handler hands its preset to projectRows. */
+const PRESET_USE = /preset:\s*(DEFAULT_[A-Z0-9_]+_FIELDS)/g;
+
+/** `export const DEFAULT_X_FIELDS` in src/tools/field-selection.ts. */
+const PRESET_EXPORT = /^export const (DEFAULT_[A-Z0-9_]+_FIELDS)\b/gm;
+
 /** An `async methodName(` declaration — every handler here is async. */
 const ASYNC_METHOD_HEADER = /\basync\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
 
@@ -153,6 +169,30 @@ function discoverDietTools(): Map<string, string> {
 
 const DIET_TOOLS = discoverDietTools();
 
+/** Every source file the discovery above reads, labelled as DIET_TOOLS labels them. */
+function scannedToolFiles(): { label: string; text: string }[] {
+  const files = [
+    { label: 'src/tools/tools.ts', text: readFileSync(join(SRC_TOOLS, 'tools.ts'), 'utf-8') },
+  ];
+  const liveDir = join(SRC_TOOLS, 'live');
+  for (const entry of readdirSync(liveDir)) {
+    if (!entry.endsWith('.ts')) continue;
+    files.push({
+      label: `src/tools/live/${entry}`,
+      text: readFileSync(join(liveDir, entry), 'utf-8'),
+    });
+  }
+  return files;
+}
+
+/** Every `DEFAULT_*_FIELDS` exported by src/tools/field-selection.ts. */
+function exportedPresets(): string[] {
+  const text = readFileSync(join(SRC_TOOLS, 'field-selection.ts'), 'utf-8');
+  return [...text.matchAll(PRESET_EXPORT)].map((m) => m[1]!);
+}
+
+const TOOL_FILES = scannedToolFiles();
+
 /** A backtick-quoted identifier, e.g. the `` `rule` `` in a description. */
 const BACKTICK_TOKEN = /`[A-Za-z_][A-Za-z0-9_]*`/;
 /** Disclosure language this repo's diet-tool descriptions actually use (see file header). */
@@ -160,11 +200,13 @@ const DISCLOSURE_LANGUAGE = /\b(exclud\w*|omit\w*|opt-in)\b/i;
 
 describe('terse-by-default tools disclose their fields param (#606 review, class detector)', () => {
   test('guards the gate: discovery finds at least one terse-by-default tool', () => {
-    // As of #606: get_investment_prices, get_top_movers_live,
-    // get_categories_live (PR A) plus get_recurring_transactions,
-    // get_recurring_live, get_upcoming_recurrings_live (this PR) — 6 total.
+    // As of #597 Tier 2: 3 cache tools (get_investment_prices,
+    // get_recurring_transactions, get_accounts) and 5 live ones
+    // (get_top_movers_live, get_categories_live, get_recurring_live,
+    // get_upcoming_recurrings_live, get_accounts_live) — 8 total.
     // Not asserted as an exact count on purpose: a future diet PR growing
-    // this set should not have to touch this file.
+    // this set should not have to touch this file. The preset cross-check
+    // below is what keeps the set from silently SHRINKING.
     expect(DIET_TOOLS.size).toBeGreaterThan(0);
   });
 
@@ -178,6 +220,54 @@ describe('terse-by-default tools disclose their fields param (#606 review, class
       const description = def!.schema.description;
       expect(description).toMatch(BACKTICK_TOKEN);
       expect(description).toMatch(DISCLOSURE_LANGUAGE);
+    });
+  }
+});
+
+/**
+ * The sweep above discovers tools by the literal `x.fields ?? ['default']`
+ * idiom, which leaves two ways for a tool to fall out of it with nothing
+ * failing (both raised in the PR B whole-branch review):
+ *
+ *  1. A new preset lands in field-selection.ts and its tool is wired by a
+ *     spelling the discovery cannot see — or never wired at all.
+ *  2. An existing site is rewritten to an equivalent spelling (`||` for
+ *     `??`), which the narrow idiom stops matching.
+ *
+ * These two checks close both without hand-listing anything: they read the
+ * preset exports and the call sites themselves, so a preset added tomorrow is
+ * covered the day it lands. A preset that is NOT terse-by-default is still
+ * legitimate — get_transactions / get_transactions_live pass
+ * DEFAULT_TRANSACTION_FIELDS as an opt-in preset with no `"default"` fallback
+ * until #604 flips them — so the gate is "every preset is wired to a handler",
+ * not "every preset defaults".
+ */
+describe('every field-selection preset stays reachable by the sweep (PR B review, M3)', () => {
+  const presets = exportedPresets();
+
+  test('guards the gate: field-selection.ts exports presets to cross-check', () => {
+    expect(presets.length).toBeGreaterThan(0);
+  });
+
+  for (const preset of presets) {
+    test(`${preset} is wired into a handler as a projectRows preset`, () => {
+      const users = TOOL_FILES.filter((f) =>
+        [...f.text.matchAll(PRESET_USE)].some((m) => m[1] === preset)
+      ).map((f) => f.label);
+      // An exported preset nothing passes to projectRows is either dead or
+      // wired by a spelling this file cannot see — in the second case the
+      // owning tool is also invisible to the sweep above.
+      expect(users).not.toHaveLength(0);
+    });
+  }
+
+  for (const { label, text } of TOOL_FILES) {
+    const wide = [...text.matchAll(WIDE_FALLBACK_IDIOM)].length;
+    if (wide === 0) continue;
+    test(`${label} spells its default fallback the way the sweep reads it`, () => {
+      // Same count both ways, or a site has drifted to `||` (or otherwise out
+      // of the narrow idiom) and quietly left the sweep.
+      expect([...text.matchAll(DEFAULT_FALLBACK_IDIOM)].length).toBe(wide);
     });
   }
 });

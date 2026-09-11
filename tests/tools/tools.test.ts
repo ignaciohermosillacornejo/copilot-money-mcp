@@ -967,6 +967,33 @@ describe('CopilotMoneyTools', () => {
       expect(result.accounts[0].account_id).toBe('acc_visible');
     });
 
+    test('include_hidden=true: default rows still discriminate hidden/deleted from active', async () => {
+      // The flags `include_hidden` toggles must survive projection, or opting
+      // in returns rows a caller cannot tell apart: before `user_hidden` /
+      // `user_deleted` joined the preset, a merged (user_deleted) account came
+      // back shape-identical to a live one while total_balance counted it.
+      (db as any)._accounts = [
+        ...mockAccountsWithHidden,
+        {
+          account_id: 'acc_deleted',
+          current_balance: 250.0,
+          name: 'Merged Account',
+          account_type: 'checking',
+          user_deleted: true,
+        },
+      ];
+
+      const result = await tools.getAccounts({ include_hidden: true });
+      const byId = new Map(result.accounts.map((a) => [a.account_id, a]));
+
+      expect(byId.get('acc_hidden')?.user_hidden).toBe(true);
+      expect(byId.get('acc_deleted')?.user_deleted).toBe(true);
+      // Both flags are optional on the document, so an ordinary active row is
+      // distinguishable precisely by carrying neither — and pays nothing.
+      expect(byId.get('acc_visible')).not.toHaveProperty('user_hidden');
+      expect(byId.get('acc_visible')).not.toHaveProperty('user_deleted');
+    });
+
     test('excludes user_deleted accounts alongside user_hidden ones', async () => {
       (db as any)._accounts = [
         ...mockAccountsWithHidden,

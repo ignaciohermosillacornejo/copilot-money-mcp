@@ -215,12 +215,20 @@ const TRANSACTION_KNOWN_FIELDS: ReadonlySet<string> = new Set([
 
 /**
  * Every selectable field name on a get_accounts row: the Account document
- * schema keys. Derived from the zod shape — not a `{ [K in keyof Account]-?:
- * true }` mapped type, unlike the live-mode row types in src/tools/live/ —
- * because `Account`'s z.infer type carries an implicit passthrough index
- * signature (AccountSchema is `.passthrough()`), which collapses `keyof
- * Account` to plain `string` and would give a mapped type zero typo
- * protection. Same reasoning as TRANSACTION_KNOWN_FIELDS above.
+ * schema keys, read off the zod shape at runtime. Derived rather than
+ * hand-listed as a `{ [K in keyof Account]-?: true }` mapped type (the shape
+ * the live-mode row types in src/tools/live/ use) because a derived set needs
+ * no maintenance at all: it can neither forget a field nor misspell one, and a
+ * schema rename propagates on its own. Same reasoning as
+ * TRANSACTION_KNOWN_FIELDS above.
+ *
+ * The mapped type would also be weaker here — but not in the way an earlier
+ * revision of this comment claimed. `AccountSchema` is `.passthrough()`
+ * (src/models/account.ts), so `Account` carries an implicit string index
+ * signature; under `--strict` that still rejects a typo
+ * (`{ totally_bogus: true }` fails TS2740, every real key missing) and only
+ * stops rejecting an EXTRA key — i.e. a stale entry for a field the schema no
+ * longer has would typecheck.
  */
 const ACCOUNT_KNOWN_FIELDS: ReadonlySet<string> = new Set(Object.keys(AccountSchema.shape));
 

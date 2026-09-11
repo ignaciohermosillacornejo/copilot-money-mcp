@@ -340,6 +340,8 @@ const PINNED: Record<string, readonly string[]> = {
     'institution_name',
     'iso_currency_code',
     'item_id',
+    'user_hidden',
+    'user_deleted',
   ],
   // src/tools/field-selection.ts
   DEFAULT_ACCOUNT_LIVE_FIELDS: [
@@ -351,6 +353,7 @@ const PINNED: Record<string, readonly string[]> = {
     'institutionId',
     'itemId',
     'isUserHidden',
+    'isUserClosed',
   ],
   // src/tools/field-selection.ts
   DEFAULT_CATEGORY_LIVE_FIELDS: [
