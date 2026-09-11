@@ -42,10 +42,15 @@ bun run check:skills   # Lint skills/ (NOT part of `check` — run separately fo
 ```
 
 `check:skills` resolves the tool names skills reference by running
-`scripts/dump-tool-names.ts` under bun, so it needs `bun` on PATH and a
-completed `bun install` — it is no longer a standalone python3 script. When
-either is missing it reports a linter fault and validates nothing, rather than
-reporting every skill reference as an unknown tool.
+`scripts/dump-tool-names.ts` under bun (and their argument names via
+`scripts/dump-tool-args.ts`), so it needs `bun` on PATH and a completed
+`bun install` — it is no longer a standalone python3 script. When either is
+missing it reports a linter fault and validates nothing, rather than reporting
+every skill reference as an unknown tool. It also reads the terse-by-default
+field presets out of `src/tools/field-selection.ts` and reports any field a
+skill tells its agent to read that the tool no longer returns by default
+(#704) — add the explicit `fields: ["default", "<name>"]` argument to that
+instruction, or drop the backticks when the line is prose about the field.
 
 #### Writes-enabled bundle (local-only)
 

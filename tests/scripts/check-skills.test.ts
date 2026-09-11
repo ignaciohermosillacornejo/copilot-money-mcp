@@ -57,15 +57,65 @@ Call \`get_transactions\` and then \`update_transaction\`.
 `;
 
 /**
+ * The source files check 4 (#704) reads to work out what each tool returns by
+ * default. Kept minimal but SHAPED like the real thing — the terse-default
+ * discovery resolves a preset through the same three hops it uses in the real
+ * repo: `preset:` inside a method, the method wired to a tool name in
+ * registry/, and the `fields ?? ['default']` fallback that makes the preset
+ * the default rather than an opt-in.
+ */
+const SOURCE_TREE: Record<string, string> = {
+  'src/tools/field-selection.ts': `export const DEFAULT_TRANSACTION_FIELDS = [
+  'transaction_id',
+  'date',
+  'amount',
+] as const;
+`,
+  'src/tools/tools.ts': `export class CopilotMoneyTools {
+  async getTransactions(options: { fields?: string[] }) {
+    return projectRows([], options.fields ?? ['default'], {
+      preset: DEFAULT_TRANSACTION_FIELDS,
+    });
+  }
+}
+`,
+  'src/tools/registry/transactions.ts': `export const getTransactionsTool = defineTool({
+  schema: { name: 'get_transactions' },
+  handler: (ctx, args) => ctx.tools.getTransactions(args),
+});
+`,
+  'src/models/transaction.ts': `export const TransactionSchema = z.object({
+  transaction_id: z.string(),
+  date: z.string(),
+  amount: z.number(),
+  tag_ids: z.array(z.string()),
+});
+`,
+};
+
+/**
  * Build a minimal repo tree. `dumpBody` is the entire body of the synthetic
  * scripts/dump-tool-names.ts — varying it simulates the tool lookup succeeding,
  * failing, or answering degenerately, without needing the real registry.
+ * `sourceFiles` overrides SOURCE_TREE entry by entry; a `null` value omits
+ * that file, which is how the check-4 discovery failures are provoked.
  */
-async function makeRepo(opts: { dumpBody?: string; skill?: string }): Promise<string> {
+async function makeRepo(opts: {
+  dumpBody?: string;
+  argsBody?: string;
+  skill?: string;
+  sourceFiles?: Record<string, string | null>;
+}): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'check-skills-'));
   if (opts.dumpBody !== undefined) {
     await mkdir(join(root, 'scripts'), { recursive: true });
     await writeFile(join(root, 'scripts', 'dump-tool-names.ts'), opts.dumpBody);
+    await writeFile(join(root, 'scripts', 'dump-tool-args.ts'), opts.argsBody ?? WORKING_ARGS_DUMP);
+  }
+  for (const [path, body] of Object.entries({ ...SOURCE_TREE, ...opts.sourceFiles })) {
+    if (body === null) continue;
+    await mkdir(join(root, path, '..'), { recursive: true });
+    await writeFile(join(root, path), body);
   }
   await mkdir(join(root, 'skills', 'demo'), { recursive: true });
   await writeFile(join(root, 'skills', 'demo', 'SKILL.md'), opts.skill ?? SKILL_BODY);
@@ -73,9 +123,16 @@ async function makeRepo(opts: { dumpBody?: string; skill?: string }): Promise<st
 }
 
 const WORKING_DUMP = `console.log(JSON.stringify(['get_transactions', 'update_transaction']));`;
+const WORKING_ARGS_DUMP = `console.log(JSON.stringify({ get_transactions: ['fields', 'period'], update_transaction: ['transaction_id'] }));`;
 
 async function withRepo(
-  opts: { dumpBody?: string; skill?: string; env?: Record<string, string> },
+  opts: {
+    dumpBody?: string;
+    argsBody?: string;
+    skill?: string;
+    sourceFiles?: Record<string, string | null>;
+    env?: Record<string, string>;
+  },
   assertions: (result: { code: number; stderr: string; stdout: string }) => void
 ): Promise<void> {
   const root = await makeRepo(opts);
@@ -84,6 +141,16 @@ async function withRepo(
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+}
+
+function skillWith(body: string): string {
+  return `---
+name: demo
+description: A demo skill.
+---
+
+${body}
+`;
 }
 
 describe('tool-lookup gate (class-level detector)', () => {
@@ -196,6 +263,131 @@ Call \`get_transactions\`, then tag via \`add_tag_ids\` and untag via \`remove_t
       ({ code, stdout }) => {
         expect(code).toBe(0);
         expect(stdout).toContain('1 skills validated');
+      }
+    );
+  });
+});
+
+/**
+ * Check 4 (#704): a skill that tells its agent to read a field the tool's
+ * `"default"` preset no longer returns is not an error anywhere — the row just
+ * arrives without the key — so it fails silently at use time. PR #703 shipped
+ * three such instructions and hand-auditing missed all three.
+ *
+ * Both directions are covered on purpose: a guard that rejects everything is
+ * as useless as one that accepts everything, and the four "stays quiet" cases
+ * below are what stop this check from being disabled the first week it ships.
+ */
+describe('terse-default field references (#704)', () => {
+  test('reports a field the default row no longer carries', async () => {
+    await withRepo(
+      { dumpBody: WORKING_DUMP, skill: skillWith('Use `get_transactions`, then read `tag_ids`.') },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('`tag_ids` is a row field');
+        expect(stderr).toContain('get_transactions does not return it by default');
+        // The message must carry the remedy, not just the complaint.
+        expect(stderr).toContain('fields: ["default", "tag_ids"]');
+      }
+    );
+  });
+
+  test('stays quiet when the same instruction passes an explicit fields: argument', async () => {
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        skill: skillWith(
+          'Use `get_transactions` with `fields: ["default", "tag_ids"]`, then read `tag_ids`.'
+        ),
+      },
+      ({ code, stdout }) => {
+        expect(code).toBe(0);
+        expect(stdout).toContain('1 terse-by-default tools cross-checked');
+      }
+    );
+  });
+
+  test('stays quiet on preset fields and on documented parameters', async () => {
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        skill: skillWith('Use `get_transactions` with `period`; sum `amount` per `date`.'),
+      },
+      ({ code }) => expect(code).toBe(0)
+    );
+  });
+
+  test('stays quiet on backticked prose that names no field at all', async () => {
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        skill: skillWith('Pipe the `get_transactions` response through `jq`.'),
+      },
+      ({ code }) => expect(code).toBe(0)
+    );
+  });
+
+  // The three ways the discovery can quietly stop discovering. Each must be a
+  // LINTER fault (validate nothing, blame no skill), never a silent pass — a
+  // check that validates every field against an empty world reports OK for a
+  // skill riddled with dropped fields.
+  const discoveryFaults: Array<{
+    name: string;
+    sourceFiles: Record<string, string | null>;
+    expect: string;
+  }> = [
+    {
+      name: 'the preset file is gone',
+      sourceFiles: { 'src/tools/field-selection.ts': null },
+      expect: 'field-selection.ts is missing',
+    },
+    {
+      name: 'the presets are written in a shape the parser cannot read',
+      sourceFiles: {
+        'src/tools/field-selection.ts': `export const DEFAULT_TRANSACTION_FIELDS = new Set(['date']);\n`,
+      },
+      expect: 'declares no DEFAULT_*_FIELDS presets',
+    },
+    {
+      name: 'the handler is no longer wired to any tool name',
+      sourceFiles: { 'src/tools/registry/transactions.ts': null },
+      expect: 'cannot attribute to any registered tool',
+    },
+  ];
+
+  for (const { name, sourceFiles, expect: needle } of discoveryFaults) {
+    test(`fails as a linter fault when ${name}`, async () => {
+      await withRepo({ dumpBody: WORKING_DUMP, sourceFiles }, ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('linter self-check');
+        expect(stderr).toContain(needle);
+        expect(stderr).toContain('Skill references were NOT validated');
+      });
+    });
+  }
+
+  test('fails as a linter fault when no tool defaults to its preset any more', async () => {
+    // The tool keeps its preset but takes `fields` as a pure opt-in, which is
+    // what every diet tool looked like before v3 flipped it. Nothing is
+    // terse-by-default, so there is nothing to cross-check — and reporting
+    // "OK" there is the vacuous pass this whole check exists to prevent.
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        sourceFiles: {
+          'src/tools/tools.ts': `export class CopilotMoneyTools {
+  async getTransactions(options: { fields?: string[] }) {
+    return projectRows([], options.fields, { preset: DEFAULT_TRANSACTION_FIELDS });
+  }
+}
+`,
+        },
+        skill: skillWith('Use `get_transactions`, then read `tag_ids`.'),
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('no tool was found to be terse-by-default');
+        expect(stderr).not.toContain('`tag_ids` is a row field');
       }
     );
   });

@@ -15,8 +15,12 @@ bun run fix          # Run lint:fix + format
 
 > `bun run check` does NOT run `check:skills` (the `skills/` linter). Run
 > `bun run check:skills` separately when touching anything under `skills/`.
-> It shells out to `scripts/dump-tool-names.ts` under bun to get the real tool
-> list, so it needs `bun` on PATH and a completed `bun install`.
+> It shells out to `scripts/dump-tool-names.ts` and `scripts/dump-tool-args.ts`
+> under bun to get the real tool list and each tool's argument names, so it
+> needs `bun` on PATH and a completed `bun install`. It also cross-checks the
+> field names skills reference against each terse-by-default tool's
+> `DEFAULT_*_FIELDS` preset (#704), so a skill that reads a field the v3 diet
+> dropped fails the lint instead of failing silently at use time.
 
 ## Architecture
 
