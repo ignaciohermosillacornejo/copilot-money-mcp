@@ -143,12 +143,28 @@ describe('rejectRemovedArgs', () => {
     );
   });
 
-  test('throws even when the removed argument is explicitly false/undefined (presence, not truthiness)', () => {
+  test('throws even when the removed argument is explicitly false or undefined (presence, not truthiness)', () => {
     // A caller migrating from `include_logos: false` (the old default) should
-    // still be told to switch to `fields` — the key being PRESENT is the
-    // signal, not whatever value it holds.
+    // still be told what to do — the key being PRESENT is the signal, not
+    // whatever value it holds. `undefined` is the sharper half of that claim:
+    // `in` sees a key whose value is undefined, so it throws too, and an
+    // earlier revision of this test asserted only the `false` case while its
+    // title promised both.
     expect(() => rejectRemovedArgs({ include_logos: false }, REMOVED_ACCOUNT_ARGS)).toThrow(
       /include_logos/
     );
+    expect(() => rejectRemovedArgs({ include_logos: undefined }, REMOVED_ACCOUNT_ARGS)).toThrow(
+      /include_logos/
+    );
+  });
+
+  test('the migration hint speaks to the caller who wanted logos OFF as well as ON', () => {
+    // The guard fires on presence, so `include_logos: false` — the pre-v3
+    // default, and the common case — hits it too. That caller already has
+    // what it wants, so the hint must tell it to DROP the argument, not only
+    // how to turn logos back on.
+    const hint = REMOVED_ACCOUNT_ARGS.include_logos;
+    expect(hint).toMatch(/drop the argument/i);
+    expect(hint).toContain('fields: ["default", "logo"]');
   });
 });

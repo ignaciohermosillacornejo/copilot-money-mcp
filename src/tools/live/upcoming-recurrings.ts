@@ -87,7 +87,7 @@ const UPCOMING_RECURRING_LIVE_FIELD_NAMES: {
   payments: true,
   category_name: true,
 };
-const UPCOMING_RECURRING_LIVE_KNOWN_FIELDS: ReadonlySet<string> = new Set(
+export const UPCOMING_RECURRING_LIVE_KNOWN_FIELDS: ReadonlySet<string> = new Set(
   Object.keys(UPCOMING_RECURRING_LIVE_FIELD_NAMES)
 );
 

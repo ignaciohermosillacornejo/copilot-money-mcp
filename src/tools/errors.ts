@@ -60,7 +60,14 @@ export function graphQLErrorToMcpError(e: GraphQLError): string {
  * `get_transactions`' `compact`) are expected to join it.
  */
 export const REMOVED_ACCOUNT_ARGS = {
-  include_logos: 'pass fields: ["default", "logo"] instead',
+  // Covers BOTH audiences, because the guard fires on PRESENCE: a caller
+  // passing `include_logos: false` (the pre-v3 default — "keep logos out")
+  // already has what it wants and needs to hear "drop the argument", not
+  // "turn logos on". An earlier revision said only the latter, which
+  // misadvised the larger half of the callers it fires on.
+  include_logos:
+    'logos are excluded by default now, so drop the argument; ' +
+    'pass fields: ["default", "logo"] to include them',
 } as const;
 
 /**

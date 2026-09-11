@@ -8,10 +8,13 @@
 
 import { describe, test, expect } from 'bun:test';
 import {
+  DEFAULT_ACCOUNT_FIELDS,
+  DEFAULT_RECURRING_CACHE_FIELDS,
   DEFAULT_TRANSACTION_FIELDS,
   expandFieldSelection,
   projectRows,
 } from '../../src/tools/field-selection.js';
+import { ACCOUNT_KNOWN_FIELDS, RECURRING_CACHE_KNOWN_FIELDS } from '../../src/tools/tools.js';
 
 // Firestore-shaped opaque IDs (synthetic).
 const TXN_ID_1 = 'Zx9kQ2mVp3LqR8sTuW1y';
@@ -57,6 +60,54 @@ describe('DEFAULT_TRANSACTION_FIELDS', () => {
       'internal_transfer',
     ]);
   });
+});
+
+/**
+ * Typo cover for the two CACHE presets (PR B review).
+ *
+ * A misspelled preset entry is invisible at runtime: `detectUnknownFields`
+ * filters the `"default"` token out BEFORE unknown-name detection, so a
+ * preset member never goes through the `_field_warning` path a caller-supplied
+ * name does — the field it meant to keep just silently stops appearing in
+ * every response. The live presets are covered at COMPILE time by their
+ * `satisfies readonly (keyof Row)[]` clause; these two cannot use it
+ * (`keyof Account` collapses to `string` under `AccountSchema.passthrough()`,
+ * and the detected-recurring row type lives in tools.ts, which field-selection.ts
+ * must not import at runtime), so the cover is this direct assertion instead.
+ *
+ * Deliberately NOT fixture-based, and deliberately redundant TODAY: a
+ * mutation sweep over all 20 entries of these two presets (typo one, run the
+ * behaviour suites) showed every one of them already failing at least one
+ * test in tests/tools/tools.test.ts or tests/context-budget.test.ts. But each
+ * of those failures depends on a fixture setting that field and a test
+ * asserting its value — cover that a future fixture trim or test rewrite can
+ * remove without anything saying so. This assertion depends on neither.
+ */
+describe('cache presets contain only real field names (PR B review)', () => {
+  const CASES = [
+    {
+      preset: 'DEFAULT_ACCOUNT_FIELDS',
+      entries: DEFAULT_ACCOUNT_FIELDS as readonly string[],
+      known: ACCOUNT_KNOWN_FIELDS,
+    },
+    {
+      preset: 'DEFAULT_RECURRING_CACHE_FIELDS',
+      entries: DEFAULT_RECURRING_CACHE_FIELDS as readonly string[],
+      known: RECURRING_CACHE_KNOWN_FIELDS,
+    },
+  ];
+
+  test('guards the gate: both presets and both known-field sets are non-empty', () => {
+    for (const { preset, entries, known } of CASES) {
+      expect(`${preset}:${entries.length > 0 && known.size > 0}`).toBe(`${preset}:true`);
+    }
+  });
+
+  for (const { preset, entries, known } of CASES) {
+    test(`${preset} entries are all in the tool's known-field set`, () => {
+      expect(entries.filter((name) => !known.has(name))).toEqual([]);
+    });
+  }
 });
 
 describe('expandFieldSelection', () => {

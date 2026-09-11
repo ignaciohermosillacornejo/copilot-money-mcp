@@ -990,6 +990,9 @@ describe('LiveTransactionsTools — field selection (fields param)', () => {
     expect(Object.keys(result.transactions[0]!)).toEqual(['transaction_id']);
   });
 
+  // Engine-layer semantics again: through dispatch `defineTool` drops the
+  // empty array, and get_transactions_live's omitted path is also "full rows",
+  // so both layers agree for THIS tool (PR B review, Minor 4).
   test('empty fields array → no projection (engine semantics, matches cache mode)', async () => {
     const live = await mkLiveReturning([mkFsNode()]);
     const tools = new LiveTransactionsTools(live);

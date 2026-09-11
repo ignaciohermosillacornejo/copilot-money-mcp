@@ -108,12 +108,13 @@ describe('LiveTopMoversTools.getTopMovers', () => {
     }
   });
 
-  // `fields: []` is the engine-wide "no projection" escape (see
-  // field-selection.test.ts) — an empty selection means full rows, NOT empty
-  // rows. Pinned per-tool because the diet makes the difference load-bearing:
-  // a regression to "empty selection projects nothing" would return rows with
+  // Engine-layer semantics: an empty selection means "no projection" — full
+  // rows, NOT empty ones. A dispatched call never arrives here with `[]`
+  // (`defineTool` drops it, so `fields: []` == omitted == the terse preset —
+  // PR B review, Minor 4); this pins the direct-call contract, because a
+  // regression to "empty selection projects nothing" would return rows with
   // no keys rather than the full mover.
-  test('fields: [] returns full rows, including price_points', async () => {
+  test('fields: [] returns full rows at the engine layer, including price_points', async () => {
     const tools = new LiveTopMoversTools(makeLive(makeClient([mover])));
     const result = await tools.getTopMovers({ fields: [] });
     expect(result.movers[0]?.price_points).toBeDefined();

@@ -331,6 +331,39 @@ function isToken(name: string): boolean {
 }
 
 /**
+ * Drop an EMPTY `fields` array from a tool call's arguments, so `fields: []`
+ * means exactly what OMITTING `fields` means — for whichever tool was called.
+ *
+ * Why this cannot live in {@link projectRows}: by the time the engine is
+ * called, each handler has already folded "omitted" into its own default —
+ * `args.fields ?? ['default']` for a terse-by-default tool, `undefined` (or
+ * the `compact` preset) for `get_transactions`, which v3 has not flipped yet.
+ * An explicit `[]` survives `??` untouched, so the engine receives `[]` from
+ * both kinds of tool and has no way to tell which default it should stand in
+ * for. Deleting `fields` BEFORE the handler's `??` runs reuses each tool's own
+ * omitted-path instead of guessing one: terse tools project their preset,
+ * `get_transactions` returns full rows (or `compact` rows when `compact: true`
+ * is also set — which is what omitting `fields` does there too).
+ *
+ * Applied once, in `defineTool` (src/tools/registry/types.ts), so every tool
+ * inherits it and no call site changes — in particular the literal
+ * `x.fields ?? ['default']` idiom stays intact, which
+ * tests/tools/registry/diet-fields-disclosure.test.ts discovers diet tools by.
+ *
+ * Non-mutating: returns a copy without the key, never edits the caller's
+ * object. A non-array `fields` is passed through untouched so
+ * {@link assertFieldsArray} still throws on it downstream.
+ */
+export function dropEmptyFieldSelection(
+  args: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  if (!args || !Array.isArray(args.fields) || args.fields.length > 0) return args;
+  const rest = { ...args };
+  delete rest.fields;
+  return rest;
+}
+
+/**
  * Guard against a host that skipped JSON-schema validation and handed us a
  * non-array `fields`. Iterating a string with `new Set(...)` would silently
  * project on single characters, so fail loudly instead.
@@ -349,7 +382,10 @@ function assertFieldsArray(fields: unknown): asserts fields is readonly string[]
  * - `"all"` or `"*"` anywhere in the list disables projection entirely:
  *   returns `undefined` (full documents).
  * - Empty array or `undefined` returns `undefined` — the caller decides the
- *   default (in 2.x that means no projection).
+ *   default (in 2.x that means no projection). Note that a dispatched tool
+ *   call never arrives with an empty array: {@link dropEmptyFieldSelection}
+ *   removes it in `defineTool` so `fields: []` takes the same path as an
+ *   omitted `fields` for whichever tool was called.
  */
 export function expandFieldSelection(
   fields: readonly string[] | undefined,

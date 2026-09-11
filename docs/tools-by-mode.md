@@ -10,7 +10,7 @@ This server exposes different tools depending on which CLI flags you enable. The
 | `get_accounts` | ✅ | List accounts with balances; filter by type. Rows are terse by default (`fields: [...]` opts into `holdings`, `official_name`, `logo`, etc.) |
 | `get_categories` | ✅ | Category hierarchy with spending totals |
 | `get_budgets` | ✅ | Budgets vs. spending |
-| `get_recurring_transactions` | ✅ | Detected subscriptions + recurring charges |
+| `get_recurring_transactions` | ✅ | Detected subscriptions + recurring charges. Pattern-detected rows are terse by default (`fields: [...]` opts into the matched `transactions` array and `confidence_reason`) |
 | `get_holdings` | ✅ | Investment positions with cost basis (cached) |
 | `get_balance_history` | ✅ | Daily balance history; supports cross-account + daily/weekly/monthly granularity |
 | `get_investment_prices` | ✅ | Historical price data |
@@ -31,11 +31,11 @@ When enabled, 6 cache-mode read tools are replaced with GraphQL-backed equivalen
 | `get_accounts_live` | `get_accounts` | ✅ | 1h cache |
 | `get_categories_live` | `get_categories` | ✅ | 24h cache; reflects rollovers per user setting |
 | `get_budgets_live` | `get_budgets` | ✅ | Projection over `categories_live` data |
-| `get_recurring_live` | `get_recurring_transactions` | ✅ | ⚠️ Pattern-based detection from transactions is NOT in live mode — use cache mode if you need that |
+| `get_recurring_live` | `get_recurring_transactions` | ✅ | ⚠️ Pattern-based detection from transactions is NOT in live mode — use cache mode if you need that. Rows are terse by default (`fields: [...]` opts into `rule`, `payments`, `icon`) |
 | `get_holdings_live` | `get_holdings` | ✅ | Includes cost basis via `metrics`; `metrics: null` for CASH and some 401(k) mutual fund positions (Copilot doesn't compute basis for those) |
 | `get_tags_live` | _(additive)_ | ✅ | No cache-mode counterpart |
 | `get_networth_live` | _(additive)_ | ✅ | Net worth over time |
-| `get_upcoming_recurrings_live` | _(additive)_ | ✅ | Next-due unpaid recurrings (distinct from `get_recurring_live`'s historical view) |
+| `get_upcoming_recurrings_live` | _(additive)_ | ✅ | Next-due unpaid recurrings (distinct from `get_recurring_live`'s historical view). Rows are terse by default (`fields: [...]` opts into `rule`, `payments`, `icon`) |
 | `get_monthly_spend_live` | _(additive)_ | ✅ | Daily-series spending for the current month with prior-period comparison |
 | `get_balance_history_live` | _(additive)_ | ✅ | ⚠️ Single-account only (server constraint — requires `item_id` + `account_id`); use cache-mode `get_balance_history` for cross-account or weekly/monthly granularity |
 | `get_investment_prices_live` | _(additive)_ | ✅ | ⚠️ Server-side ownership-gated: only works for securities currently in your linked accounts |
