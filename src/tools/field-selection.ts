@@ -252,7 +252,17 @@ export const RECURRING_CACHE_FIELDS_PARAM_SCHEMA = {
  * get_accounts_live (#597 Tier 2). Field NAMES differ between the two
  * surfaces (cache documents are snake_case, live nodes are camelCase), so
  * each tool passes its own preset built from this intent: identity, name,
- * type, balance, institution, currency, item.
+ * type, balance, institution, currency, item, plus the visibility flags.
+ *
+ * The visibility flags are in the preset on purpose, and they are the one
+ * part of this intent that is not "what a caller reads every time". Both
+ * tools hide these rows by default and both take `include_hidden: true` to
+ * bring them back — so a caller who opts in is asking to see exactly the
+ * rows the flags discriminate. Projecting the flags away left the opt-in
+ * caller with hidden/closed/merged rows shape-identical to live ones, with
+ * `total_balance` counting them and nothing on the row to tell them apart.
+ * Cost is near zero: all three are optional on the cache document, so an
+ * ordinary active row still projects without them.
  *
  * Cut from the cache row: the embedded `holdings` array (~20%, and
  * get_holdings covers it), `official_name` / `original_*` denormalized dupes
@@ -272,6 +282,8 @@ export const DEFAULT_ACCOUNT_FIELDS = [
   'institution_name',
   'iso_currency_code',
   'item_id',
+  'user_hidden',
+  'user_deleted',
 ] as const;
 
 export const DEFAULT_ACCOUNT_LIVE_FIELDS = [
@@ -283,6 +295,7 @@ export const DEFAULT_ACCOUNT_LIVE_FIELDS = [
   'institutionId',
   'itemId',
   'isUserHidden',
+  'isUserClosed',
 ] as const satisfies readonly (keyof GetAccountsLiveRow)[];
 
 /**

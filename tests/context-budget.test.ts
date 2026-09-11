@@ -62,6 +62,15 @@ const RESPONSE_BUDGETS: Record<string, number> = {
   // dupes, and `user_id`). The fixture's checking account carries an
   // `official_name`, so the saving shows up even on this small a fixture.
   // Measured 575 (~10% headroom).
+  //
+  // Re-measured after the PR B review added `user_hidden` / `user_deleted` to
+  // the preset (the flags `include_hidden` toggles, which an opting-in caller
+  // needs to tell rows apart): still 575, so this budget does NOT move. Both
+  // are optional on the account document and neither fixture account sets
+  // one, so projection simply omits them — which is also what a real cache's
+  // ordinary active rows do. The cost only lands on the hidden/merged rows
+  // that a caller had to ask for; the behaviour tests in
+  // tests/tools/tools.test.ts cover that path.
   get_accounts: 635,
   // 1_900 -> 2_100 by #659: `decode_health.collections` gained a `repaired`
   // counter (documents kept after a non-finite numeric field was stripped),
@@ -101,7 +110,17 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // `official_name`/`original_*` name dupes, `user_id`, and `logo` — the
   // last of these replacing the retired `include_logos` boolean. Measured
   // 2_046 (~10% headroom). Real new capability, not bloat.
-  get_accounts: 2_255,
+  //
+  // Raised again from 2_255 by the PR B review: the preset keeps 10 of the
+  // Account document's 45 fields, so the old "That EXCLUDES ..." sentence
+  // named ~8 of 35 dropped fields while reading as a closed list — the same
+  // understatement #673 fixed on get_categories_live. It now says it is
+  // PARTIAL and names the consequential omissions (`mask`, `available_balance`,
+  // `limit`, `institution_id`) plus the two visibility flags the preset
+  // gained. Measured 2_305 (~10% headroom). Disclosure required by the #597
+  // convention; compressing the prose to fit the old ceiling would trade the
+  // disclosure for ~250 chars, which is the wrong trade (ruling 2026-08-30).
+  get_accounts: 2_535,
   get_connection_status: 850,
   get_categories: 1_405,
   // Raised from 1_900 by #606: adds the `fields` param (excludes the
@@ -135,8 +154,10 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // with get_accounts — see ACCOUNT_FIELDS_PARAM_SCHEMA) plus a description
   // sentence naming the excluded sync/plumbing fields (`hasHistoricalUpdates`,
   // `hasLiveBalance`, `liveBalance`, `latestBalanceUpdate`, `isManual`) and
-  // the `mask`/`color`/`limit` display detail. Measured 1_629 (~10% headroom).
-  // Real new capability, not bloat.
+  // the `mask`/`color`/`limit` display detail. Real new capability, not bloat.
+  // Re-measured at 1_696 after the PR B review added `isUserClosed` to the
+  // preset and to that sentence's default-field list (measured 1_629 before);
+  // 1_795 still holds it with ~5.8% headroom, so the ceiling does not move.
   get_accounts_live: 1_795,
   // Raised from 1_555 by #597 Tier 1: adds the `fields` param (excludes the
   // embedded `budget` object — {current, histories}, ~62% of a row and a
@@ -242,8 +263,17 @@ const SCHEMA_BUDGETS: Record<string, number> = {
  * restores the ~3.3% ratio (73_858 * 1.033 ≈ 76_296) this ratchet has held
  * since #606.
  *
- * MUST stay below the sum of every entry in SCHEMA_BUDGETS above (80_755 as
- * of #597 Tier 2 — recompute if that table changes): the completeness guard
+ * Unmoved by the PR B review round, which grew both accounts descriptions
+ * (disclosure fixes: the cache tool's exclusion sentence now says it is
+ * partial and names `mask`/`available_balance`/`limit`; both list the
+ * visibility flags the presets gained). Real total 73_858 -> 74_184, still
+ * inside 76_300 at ~2.9% headroom — close to the ~3.3% this ratchet has held
+ * since #606, so raising it would buy a few hundred chars at the cost of the
+ * one check that catches every tool creeping a little.
+ *
+ * MUST stay below the sum of every entry in SCHEMA_BUDGETS above (81_035 over
+ * 50 entries after this round's get_accounts raise, 2_255 -> 2_535; 80_755
+ * before it — recompute if that table changes): the completeness guard
  * in registerContextBudgetChecks requires SCHEMA_BUDGETS to have exactly one
  * entry per registered tool, so once every per-tool assertion passes the
  * actual total is bounded by that sum regardless of what this constant

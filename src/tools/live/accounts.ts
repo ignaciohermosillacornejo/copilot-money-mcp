@@ -160,11 +160,15 @@ export class LiveAccountsTools {
     }
 
     // A2: server returns limit:0 for charge cards (no preset limit); project
-    // null to prevent /0 in utilization. Runs BEFORE projectRows below so
-    // the normalization survives even though `limit` isn't in the default
-    // preset — a caller who explicitly asks for it
-    // (fields: ["default", "limit"]) still sees the corrected value, never
-    // the raw wire 0.
+    // null to prevent /0 in utilization. `limit` is not in the default preset,
+    // so this is only visible to a caller who asks for it
+    // (fields: ["default", "limit"]) — who then sees null, never the raw wire
+    // 0. Its position relative to projectRows below is NOT load-bearing: this
+    // rewrites the same key it reads, so a kept `limit` is normalized either
+    // way and a projected-away one is absent either way. (Contrast the
+    // cache-mode nickname resolution in tools.ts, which writes a DIFFERENT key
+    // — `nickname` into `name` — and therefore must run before projection or
+    // the projected row silently reverts to the provider label.)
     const normalizedAccounts = rows.map((a) => (a.limit === 0 ? { ...a, limit: null } : a));
 
     // v3: omitting `fields` yields the terse preset (no sync/plumbing
@@ -203,7 +207,8 @@ export function createLiveAccountsToolSchema(): ToolSchema {
     description:
       'Get all linked financial accounts (live, GraphQL-backed). Returns balances and metadata. ' +
       'Replaces get_accounts when --live-reads is on. Default rows are terse: id, name, type, ' +
-      'subType, balance, institutionId, itemId, isUserHidden. That EXCLUDES sync/plumbing fields — ' +
+      'subType, balance, institutionId, itemId, isUserHidden, isUserClosed (the last two are the ' +
+      'flags include_hidden controls). That EXCLUDES sync/plumbing fields — ' +
       '`hasHistoricalUpdates`, `hasLiveBalance`, `liveBalance`, `latestBalanceUpdate`, `isManual` ' +
       '— which describe Plaid sync state rather than the account, plus `mask` and `color` ' +
       '(display detail) and `limit` (credit-line detail; charge-card 0 is normalized to null ' +

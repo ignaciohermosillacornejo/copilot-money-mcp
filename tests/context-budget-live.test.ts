@@ -311,7 +311,14 @@ const LIVE_BUDGETS: Record<string, number> = {
   get_categories_live: 290,
   get_recurring_live: 560,
   get_upcoming_recurrings_live: 545,
-  get_accounts_live: 615,
+  // 615 -> 430 by #597 Tier 2 (ratcheted in the PR B review round, which is
+  // also where the CHANGELOG's live accounts figure is measured): default rows
+  // now project through DEFAULT_ACCOUNT_LIVE_FIELDS, dropping the Plaid
+  // sync/plumbing fields and the mask/color/limit display detail. Measured 390
+  // against the stub row above (557 before the diet); 430 is that +~10%. The
+  // Tier-2 commit lowered the cache-side budget in tests/context-budget.test.ts
+  // but left this one at its pre-diet ceiling, so the live saving was ungated.
+  get_accounts_live: 430,
   get_transactions_live: 715,
 };
 
