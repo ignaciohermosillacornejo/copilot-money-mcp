@@ -90,6 +90,28 @@ export const AccountNodeSchema = z.looseObject({
   latestBalanceUpdate: z.number().nullable(),
 });
 
+/**
+ * Compile-time pin: the TS interface above and the zod mirror below are
+ * hand-maintained twins, and a row type in src/tools/live/ spreads the
+ * INTERFACE while the wire-parity tests compare against the MIRROR. Nothing
+ * else links them — read validation uses `z.looseObject` precisely so new
+ * server fields flow through without warnings, so the read smokes keep the
+ * mirror honest in the remove and type-change directions but not the add one.
+ * Without this pin, adding a field to the operation document and the interface
+ * while forgetting the mirror drifts silently into every caller's row (#537
+ * was exactly that, one hop earlier).
+ *
+ * Resolves to `false` rather than `never` on a mismatch on purpose: `never` is
+ * assignable to everything, so a `never`-based pin satisfies any annotation
+ * and detects nothing.
+ */
+type ExactKeys<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+
+export const ACCOUNT_NODE_MIRROR_IS_EXACT: ExactKeys<
+  keyof AccountNode,
+  keyof typeof AccountNodeSchema.shape
+> = true;
+
 /** Zod mirror of `AccountsResponse` (the list query). */
 export const AccountsResponseSchema = z.looseObject({
   accounts: z.array(AccountNodeSchema),

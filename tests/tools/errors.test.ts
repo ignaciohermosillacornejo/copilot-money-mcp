@@ -140,8 +140,12 @@ describe('rejectRemovedArgs', () => {
   });
 
   test('throws naming the removed argument and its migration hint', () => {
+    // The hint must name BOTH keys the retired boolean gated. include_logos
+    // stripped `logo` AND `logo_content_type` together, so a caller migrating
+    // from include_logos: true who follows a `["default", "logo"]` hint
+    // verbatim gets base64 with no content type and no warning.
     expect(() => rejectRemovedArgs({ include_logos: true }, REMOVED_ACCOUNT_ARGS)).toThrow(
-      /include_logos.*removed in v3\.0\.0.*fields: \["default", "logo"\]/s
+      /include_logos.*removed in v3\.0\.0.*fields: \["default", "logo", "logo_content_type"\]/s
     );
   });
 
@@ -167,6 +171,8 @@ describe('rejectRemovedArgs', () => {
     // how to turn logos back on.
     const hint = REMOVED_ACCOUNT_ARGS.include_logos;
     expect(hint).toMatch(/drop the argument/i);
-    expect(hint).toContain('fields: ["default", "logo"]');
+    // Both keys: the retired boolean gated `logo` and `logo_content_type`
+    // together, so a hint naming only the first under-restores what it took.
+    expect(hint).toContain('fields: ["default", "logo", "logo_content_type"]');
   });
 });

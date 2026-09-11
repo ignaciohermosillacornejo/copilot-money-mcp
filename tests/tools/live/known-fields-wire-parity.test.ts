@@ -18,9 +18,23 @@
  *
  * `latestBalanceUpdate` drifted exactly this way once (#537). These tests
  * close the add direction by pinning each known-field set against the zod
- * mirror of its wire node — the same mirrors warn-mode read validation uses,
- * so the mirror is itself kept honest against the live server by the read
- * smokes rather than by hand.
+ * mirror of its wire node.
+ *
+ * The mirror is one link short of the thing the row actually copies, so the
+ * chain needs a second pin. A row spreads the TS INTERFACE (`AccountNode`),
+ * while these tests compare against the zod MIRROR (`AccountNodeSchema`), and
+ * the two are hand-maintained twins with nothing linking them. Read validation
+ * cannot supply the link either: `src/core/graphql/read-response-validation.ts`
+ * uses `z.looseObject` precisely so NEW server fields flow through without
+ * warnings, so the read smokes keep the mirror honest in the remove and
+ * type-change directions but not in the add direction these tests exist for.
+ * The realistic drift is therefore: extend the operation document, add the
+ * field to the interface (the natural place — it is what `fetchAccounts`
+ * returns), forget the separate mirror edit, and every assertion below still
+ * passes. The `MIRROR_IS_EXACT` pins in the two query modules close that hop
+ * at compile time — they live in src/ because THIS FILE IS NOT TYPECHECKED:
+ * tsconfig.tests.json is an explicit 17-file allowlist and this is not on it,
+ * so a type-level pin placed here would compile-check nothing.
  *
  * Scope: the three row types PR B touches. The other live tools' known-field
  * sets are module-private and shaped by per-tool derivation/renaming, so they
@@ -69,6 +83,11 @@ const CASES: ParityCase[] = [
     derived: ['category_name'],
   },
 ];
+
+const RECURRING_NODE_MIRROR_IS_EXACT: ExactKeys<
+  keyof RecurringNode,
+  keyof typeof RecurringNodeSchema.shape
+> = true;
 
 describe('live known-field sets stay in parity with their wire node (PR B review, I2)', () => {
   test('guards the gate: every case has a non-empty wire shape to compare against', () => {

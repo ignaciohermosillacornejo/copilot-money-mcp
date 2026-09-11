@@ -63,8 +63,9 @@ export const getAccountsTool = defineTool({
       'institution_name, iso_currency_code, item_id, plus user_hidden / user_deleted when set ' +
       '(the flags include_hidden controls). That drops the other ~35 document fields. PARTIAL ' +
       'list of what goes, not exhaustive: the embedded `holdings` array (get_holdings covers ' +
-      'it), institution `logo` images (base64-encoded, several KB each — this is where the ' +
-      'removed include_logos flag went), `mask` (the last-4 digits humans identify an account ' +
+      'it), institution `logo` images plus their `logo_content_type` (base64-encoded, several KB ' +
+      'each — this PAIR is where the removed include_logos flag went, and the flag gated both, ' +
+      'so request them together), `mask` (the last-4 digits humans identify an account ' +
       'by), `available_balance`, `limit`, `institution_id`, the denormalized `official_name` / ' +
       '`original_*` name dupes, and `user_id`. Any document field is requestable by name: ' +
       'fields: ["default", "mask", "available_balance"], or "all" / "*" for full rows. ' +
