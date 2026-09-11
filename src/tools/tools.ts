@@ -68,7 +68,12 @@ import {
   type RecurringStateValue,
 } from '../core/graphql/recurrings.js';
 import { setBudget as gqlSetBudget } from '../core/graphql/budgets.js';
-import { graphQLErrorToMcpError, rejectRemovedArgs, REMOVED_ACCOUNT_ARGS } from './errors.js';
+import {
+  graphQLErrorToMcpError,
+  rejectRemovedArgs,
+  REMOVED_ACCOUNT_ARGS,
+  REMOVED_TRANSACTION_ARGS,
+} from './errors.js';
 import { parsePeriod } from '../utils/date.js';
 import {
   readScheduledSmokeStatus,
@@ -177,21 +182,6 @@ const DEFAULT_QUERY_LIMIT = 100;
 const MIN_QUERY_LIMIT = 1;
 
 /**
- * Fields returned per transaction when `compact: true` is passed to
- * get_transactions, instead of the full ~35-40 field Firestore document.
- * Covers the common "what did I spend, where, when, in what category" case.
- */
-export const DEFAULT_COMPACT_TRANSACTION_FIELDS = [
-  'transaction_id',
-  'date',
-  'name',
-  'amount',
-  'category_name',
-  'account_id',
-  'pending',
-] as const;
-
-/**
  * Valid field names for investment-price rows: the document's own fields plus
  * the two derived by getInvestmentPrices. Without the derived names here, a
  * caller asking for `latest_price` would be told it does not exist.
@@ -282,26 +272,20 @@ export const RECURRING_CACHE_KNOWN_FIELDS: ReadonlySet<string> = new Set(
 const RECURRING_CACHE_VALID_FIELDS_HINT = `the pattern-detected recurring row fields (${[...RECURRING_CACHE_KNOWN_FIELDS].join(', ')})`;
 
 /**
- * Project each transaction down to an explicit `fields` allowlist (or the
- * `compact` preset when no explicit list is given; `fields` wins when both
- * are set). Applied after category_name/normalized_merchant enrichment so
- * both are selectable. Delegates to the shared field-selection engine
+ * Project each transaction down to a `fields` allowlist. Applied after
+ * category_name/normalized_merchant enrichment so both are selectable.
+ * Delegates to the shared field-selection engine
  * (src/tools/field-selection.ts), which also reports requested names that
  * match nothing — surfaced to callers as `_field_warning`.
+ *
+ * The caller decides what an omitted `fields` means; since #604 both call
+ * sites in getTransactions pass `options.fields ?? ['default']`, so a
+ * dispatched call with no `fields` gets the terse preset.
  */
 function projectTransactionFields<T extends Record<string, unknown>>(
   txns: T[],
-  options: { fields?: string[]; compact?: boolean }
+  fields: string[] | undefined
 ): { rows: T[]; warning?: string } {
-  // `??` is deliberate: only an *omitted/null* fields falls back to compact.
-  // An explicit `fields: []` would reach the engine's empty -> undefined rule
-  // and mean "no projection" — but a DISPATCHED call never gets here with one:
-  // `defineTool` drops an empty `fields` so that `fields: []` means exactly
-  // what omitting it means for this tool, i.e. compact rows when
-  // `compact: true` is set and full rows otherwise (PR B review, Minor 4).
-  // The engine rule still governs direct method calls.
-  const fields =
-    options.fields ?? (options.compact ? [...DEFAULT_COMPACT_TRANSACTION_FIELDS] : undefined);
   return projectRows(txns, fields, {
     preset: DEFAULT_TRANSACTION_FIELDS,
     knownFields: TRANSACTION_KNOWN_FIELDS,
@@ -786,16 +770,19 @@ export class CopilotMoneyTools {
     radius_km?: number;
     // NEW: Field selection (issue: cache-mode transactions run ~35-40 fields wide)
     fields?: string[];
-    compact?: boolean;
   }): Promise<{
     count: number;
     total_count: number;
     offset: number;
     has_more: boolean;
-    // NOTE: when `fields`/`compact` narrow the response, the actual objects
-    // carry fewer keys than this type promises — those are opt-in, and the
-    // caller who requested the subset already knows what they asked for.
-    transactions: Array<Transaction & { category_name?: string; normalized_merchant?: string }>;
+    // Partial since #604: rows are projected to DEFAULT_TRANSACTION_FIELDS
+    // unless the caller asks for more, so every key outside that preset is
+    // absent by default. Declaring the truth here is what stops the next
+    // reader from assuming a full document is available off this method
+    // (same call as getAccounts made in #597 Tier 2).
+    transactions: Array<
+      Partial<Transaction & { category_name?: string; normalized_merchant?: string }>
+    >;
     // Additional fields for special types
     type_specific_data?: Record<string, unknown>;
     // Cache limitation warning
@@ -825,9 +812,12 @@ export class CopilotMoneyTools {
       lat,
       lon,
       radius_km = 10,
-      fields,
-      compact,
     } = options;
+
+    // v3: `compact` was retired in favor of `fields` (#604). Without this a
+    // caller still passing it would silently get the terse default rows —
+    // close to what compact: true meant, and the opposite of compact: false.
+    rejectRemovedArgs(options, REMOVED_TRANSACTION_ARGS);
 
     // Validate inputs
     const validatedLimit = validateLimit(options.limit, DEFAULT_QUERY_LIMIT);
@@ -865,7 +855,9 @@ export class CopilotMoneyTools {
             normalized_merchant: normalizeMerchantName(getTransactionDisplayName(found)),
           },
         ],
-        { fields, compact }
+        // #604: omitting `fields` yields the terse preset, not the full
+        // ~35-40 field document. `fields: ["all"]` restores it.
+        options.fields ?? ['default']
       );
       return {
         count: 1,
@@ -1015,7 +1007,9 @@ export class CopilotMoneyTools {
     // Check if query may be limited by cache
     const cacheWarning = await this.db.checkCacheLimitation(start_date, end_date);
 
-    const projected = projectTransactionFields(enrichedTransactions, { fields, compact });
+    // #604: omitting `fields` yields the terse preset (10 fields), not the
+    // full ~35-40 field document — `fields: ["all"]` restores it.
+    const projected = projectTransactionFields(enrichedTransactions, options.fields ?? ['default']);
 
     return {
       count: enrichedTransactions.length,

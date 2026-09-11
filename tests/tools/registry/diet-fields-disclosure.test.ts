@@ -16,11 +16,11 @@
  * documents ("Every version left a list someone had to remember") — this
  * file DISCOVERS them by reading the source tree for the idiom itself. A
  * future tool adopting the same terse-by-default pattern is covered
- * automatically; a tool that merely accepts an opt-in `fields` param
- * without defaulting to a preset (get_transactions, get_transactions_live —
- * neither uses the `?? ['default']` fallback, so omitting `fields` there
- * returns full rows) is correctly NOT swept in, since there is nothing
- * "excluded by default" for it to disclose.
+ * automatically — get_transactions and get_transactions_live joined the
+ * sweep the moment #604 flipped them, with no edit here. A tool that merely
+ * accepts an opt-in `fields` param without defaulting to a preset would
+ * correctly NOT be swept in, since there is nothing "excluded by default"
+ * for it to disclose; as of #604 no such tool remains.
  *
  * Two-step discovery, deliberately scoped to how this repo's two tool
  * shapes differ:
@@ -200,10 +200,11 @@ const DISCLOSURE_LANGUAGE = /\b(exclud\w*|omit\w*|opt-in)\b/i;
 
 describe('terse-by-default tools disclose their fields param (#606 review, class detector)', () => {
   test('guards the gate: discovery finds at least one terse-by-default tool', () => {
-    // As of #597 Tier 2: 3 cache tools (get_investment_prices,
-    // get_recurring_transactions, get_accounts) and 5 live ones
-    // (get_top_movers_live, get_categories_live, get_recurring_live,
-    // get_upcoming_recurrings_live, get_accounts_live) — 8 total.
+    // As of #604: 4 cache tools (get_transactions, get_investment_prices,
+    // get_recurring_transactions, get_accounts) and 6 live ones
+    // (get_transactions_live, get_top_movers_live, get_categories_live,
+    // get_recurring_live, get_upcoming_recurrings_live, get_accounts_live)
+    // — 10 total.
     // Not asserted as an exact count on purpose: a future diet PR growing
     // this set should not have to touch this file. The preset cross-check
     // below is what keeps the set from silently SHRINKING.
@@ -239,8 +240,8 @@ describe('terse-by-default tools disclose their fields param (#606 review, class
  * covered the day it lands. A preset that is NOT terse-by-default is still
  * legitimate — get_transactions / get_transactions_live pass
  * DEFAULT_TRANSACTION_FIELDS as an opt-in preset with no `"default"` fallback
- * until #604 flips them — so the gate is "every preset is wired to a handler",
- * not "every preset defaults".
+ * — so the gate is "every preset is wired to a handler", not "every preset
+ * defaults".
  */
 describe('every field-selection preset stays reachable by the sweep (PR B review, M3)', () => {
   const presets = exportedPresets();

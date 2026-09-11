@@ -9,8 +9,8 @@ import {
   BALANCE_HISTORY_GRANULARITIES,
   CATEGORY_VIEWS,
   TRANSACTION_TYPE_FILTERS,
-  DEFAULT_COMPACT_TRANSACTION_FIELDS,
 } from '../../src/tools/tools.js';
+import { DEFAULT_TRANSACTION_FIELDS } from '../../src/tools/field-selection.js';
 import { PRICE_TYPES, TransactionSchema } from '../../src/models/index.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import type { Transaction, Account, Security, HoldingsHistory } from '../../src/models/index.js';
@@ -370,30 +370,48 @@ describe('CopilotMoneyTools', () => {
       expect(result.transactions).toHaveLength(4);
     });
 
-    test('returns full-width transactions by default (no fields/compact)', async () => {
+    test('omitting fields yields the terse default preset, not the full document (#604)', async () => {
       const result = await tools.getTransactions({});
-      // Enrichment fields plus original document fields are all present.
-      expect(result.transactions[0]).toHaveProperty('category_id');
-      expect(result.transactions[0]).toHaveProperty('normalized_merchant');
-    });
-
-    test('compact: true returns only fields from the curated set', async () => {
-      const result = await tools.getTransactions({ compact: true });
       for (const txn of result.transactions) {
-        // Every returned key must be one of the compact fields (no leftover
-        // full-document fields like item_id/plaid_category_id/etc.).
+        // Every returned key must be a preset name — no leftover document
+        // fields like category_id/plaid_category_id/normalized_merchant.
         for (const key of Object.keys(txn)) {
-          expect((DEFAULT_COMPACT_TRANSACTION_FIELDS as readonly string[]).includes(key)).toBe(
-            true
-          );
+          expect((DEFAULT_TRANSACTION_FIELDS as readonly string[]).includes(key)).toBe(true);
         }
-        // Required fields plus the always-synthesized category_name are
-        // present on every transaction regardless of which optional fields
-        // the underlying document happened to set.
+        // The always-present half of the preset: required document fields
+        // plus the synthesized category_name.
         expect(txn).toHaveProperty('transaction_id');
         expect(txn).toHaveProperty('amount');
         expect(txn).toHaveProperty('date');
         expect(txn).toHaveProperty('category_name');
+      }
+      expect(result.transactions[0]).not.toHaveProperty('category_id');
+      expect(result.transactions[0]).not.toHaveProperty('normalized_merchant');
+      expect(result.transactions[0]).not.toHaveProperty('plaid_category_id');
+    });
+
+    test('fields: ["all"] still returns the full document (#604)', async () => {
+      const all = await tools.getTransactions({ fields: ['all'] });
+      const terse = await tools.getTransactions({});
+      // Widths are fixture-relative on purpose: these mock documents carry a
+      // handful of keys, not the ~60 a real cache row does, so pinning an
+      // absolute count here would measure the fixture, not the behaviour.
+      expect(Object.keys(all.transactions[0]!).length).toBeGreaterThan(
+        Object.keys(terse.transactions[0]!).length
+      );
+      expect(all.transactions[0]).toHaveProperty('category_id');
+      expect(all.transactions[0]).toHaveProperty('normalized_merchant');
+    });
+
+    test('compact is rejected with a migration hint (#604)', async () => {
+      // Fires on PRESENCE, so the caller who passed the old default gets the
+      // same migration — and the hint has to serve them too, since
+      // compact: false meant FULL rows, which is exactly what omitting
+      // `fields` no longer gives.
+      for (const compact of [true, false]) {
+        await expect(tools.getTransactions({ compact } as never)).rejects.toThrow(
+          /`compact` was removed in v3\.0\.0.*fields: \["all"\]/s
+        );
       }
     });
 
@@ -414,34 +432,27 @@ describe('CopilotMoneyTools', () => {
       expect(clean._field_warning).toBeUndefined();
     });
 
-    test('fields takes priority over compact when both are given', async () => {
-      const result = await tools.getTransactions({ fields: ['transaction_id'], compact: true });
-      for (const txn of result.transactions) {
-        expect(Object.keys(txn)).toEqual(['transaction_id']);
-      }
-    });
-
-    test('fields: [] beats compact at the engine layer and returns full documents', async () => {
-      // Pins the #593 edge AT THE METHOD LAYER: `??` only falls back to
-      // compact on omitted/null fields, and the engine treats an empty list
-      // as "no projection". A dispatched call resolves differently and is
-      // pinned in tests/e2e/server.test.ts — `defineTool` drops the empty
-      // array, so `{fields: [], compact: true}` becomes `{compact: true}` and
-      // returns COMPACT rows, which is what omitting `fields` does there.
-      const result = await tools.getTransactions({ fields: [], compact: true });
+    test('fields: [] returns full documents at the METHOD layer', async () => {
+      // Pins the #593 edge AT THE METHOD LAYER: the engine treats an empty
+      // list as "no projection", and a direct method call never passes
+      // through `defineTool`. A DISPATCHED call resolves differently and is
+      // pinned in tests/tools/registry/empty-fields-normalization.test.ts —
+      // defineTool drops the empty array, so `fields: []` takes the same
+      // omitted path as everything else and yields the terse preset.
+      const result = await tools.getTransactions({ fields: [] });
       expect(result.transactions[0]).toHaveProperty('category_id');
       expect(result.transactions[0]).toHaveProperty('normalized_merchant');
     });
 
-    test('single-transaction lookup (transaction_id) also honors compact', async () => {
-      const result = await tools.getTransactions({ transaction_id: 'txn1', compact: true });
+    test('single-transaction lookup is terse by default too (#604)', async () => {
+      const result = await tools.getTransactions({ transaction_id: 'txn1' });
       expect(result.transactions).toHaveLength(1);
-      const txn = result.transactions[0];
+      const txn = result.transactions[0]!;
       for (const key of Object.keys(txn)) {
-        expect((DEFAULT_COMPACT_TRANSACTION_FIELDS as readonly string[]).includes(key)).toBe(true);
+        expect((DEFAULT_TRANSACTION_FIELDS as readonly string[]).includes(key)).toBe(true);
       }
       expect(txn.transaction_id).toBe('txn1');
-      expect(txn).not.toHaveProperty('item_id');
+      expect(txn).not.toHaveProperty('category_id');
       expect(txn).not.toHaveProperty('normalized_merchant');
     });
 
@@ -549,9 +560,14 @@ describe('CopilotMoneyTools', () => {
       };
       (db as any)._transactions = [...mockTransactions, txnWithRegion];
 
-      const result = await tools.getTransactions({ region: 'california' });
+      // #604: `region` is outside the default preset, so the row only
+      // carries it when the caller names it — the filter itself is unchanged.
+      const result = await tools.getTransactions({
+        region: 'california',
+        fields: ['default', 'region'],
+      });
       expect(result.count).toBe(1);
-      expect(result.transactions[0].region).toBe('California');
+      expect(result.transactions[0]!.region).toBe('California');
     });
 
     test('filters by region matching city', async () => {
@@ -566,9 +582,12 @@ describe('CopilotMoneyTools', () => {
       };
       (db as any)._transactions = [...mockTransactions, txnWithCity];
 
-      const result = await tools.getTransactions({ region: 'los angeles' });
+      const result = await tools.getTransactions({
+        region: 'los angeles',
+        fields: ['default', 'city'],
+      });
       expect(result.count).toBe(1);
-      expect(result.transactions[0].city).toBe('Los Angeles');
+      expect(result.transactions[0]!.city).toBe('Los Angeles');
     });
 
     test('filters by country exact match', async () => {
@@ -583,9 +602,9 @@ describe('CopilotMoneyTools', () => {
       };
       (db as any)._transactions = [...mockTransactions, txnWithCountry];
 
-      const result = await tools.getTransactions({ country: 'us' });
+      const result = await tools.getTransactions({ country: 'us', fields: ['default', 'country'] });
       expect(result.count).toBe(1);
-      expect(result.transactions[0].country).toBe('US');
+      expect(result.transactions[0]!.country).toBe('US');
     });
 
     test('filters by country partial match', async () => {
@@ -600,9 +619,12 @@ describe('CopilotMoneyTools', () => {
       };
       (db as any)._transactions = [...mockTransactions, txnWithCountry];
 
-      const result = await tools.getTransactions({ country: 'united' });
+      const result = await tools.getTransactions({
+        country: 'united',
+        fields: ['default', 'country'],
+      });
       expect(result.count).toBe(1);
-      expect(result.transactions[0].country).toBe('United States');
+      expect(result.transactions[0]!.country).toBe('United States');
     });
 
     test('filters by pending status', async () => {
@@ -787,9 +809,12 @@ describe('CopilotMoneyTools', () => {
       };
       (db as any)._transactions = [...mockTransactions, taggedTxn];
 
-      const result = await tools.getTransactions({ transaction_type: 'tagged' });
+      const result = await tools.getTransactions({
+        transaction_type: 'tagged',
+        fields: ['default', 'tag_ids'],
+      });
       expect(result.count).toBe(1);
-      expect(result.transactions[0].tag_ids).toContain('team');
+      expect(result.transactions[0]!.tag_ids).toContain('team');
       expect(result.type_specific_data?.tags).toBeDefined();
       expect(Array.isArray(result.type_specific_data?.tags)).toBe(true);
     });

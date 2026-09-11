@@ -356,8 +356,11 @@ describe('CopilotMoneyServer E2E', () => {
       });
 
       for (const txn of result.transactions) {
-        expect(txn.date >= '2025-01-01' && txn.date <= '2025-01-31').toBe(true);
-        expect(Math.abs(txn.amount) >= 5.0 && Math.abs(txn.amount) <= 100.0).toBe(true);
+        // `!` since #604: rows are Partial<Transaction> because everything
+        // outside the default preset is projected away. `date` and `amount`
+        // ARE in the preset, so both are always present here.
+        expect(txn.date! >= '2025-01-01' && txn.date! <= '2025-01-31').toBe(true);
+        expect(Math.abs(txn.amount!) >= 5.0 && Math.abs(txn.amount!) <= 100.0).toBe(true);
       }
     });
 
@@ -449,7 +452,7 @@ describe('CopilotMoneyServer E2E', () => {
       for (const txn of result.transactions) {
         // With absolute value filtering, exact match means |amount| = 10.0
         // So the actual amount could be -10.0 or 10.0
-        expect(Math.abs(txn.amount)).toBe(10.0);
+        expect(Math.abs(txn.amount!)).toBe(10.0);
       }
     });
   });
@@ -748,18 +751,24 @@ describe('handleCallTool — fields: [] equals omitting fields', () => {
     expect(all).not.toBe(empty);
   });
 
-  test('get_transactions (not flipped in v3 yet): [] still returns full rows', async () => {
+  test('get_transactions (terse since #604): [] returns the preset row, not the full row', async () => {
     const empty = await call('get_transactions', { fields: [] });
     expect(empty).toBe(await call('get_transactions', {}));
-    // "Omitted" means full documents for this tool until #604 flips it, so
-    // the normalization must NOT drag it onto the transaction preset.
-    expect(empty).toBe(await call('get_transactions', { fields: ['all'] }));
+    // Proves which side of the fork it took: category_id is a document field
+    // the preset drops and "all" keeps.
+    expect(empty).not.toContain('category_id');
+    const all = await call('get_transactions', { fields: ['all'] });
+    expect(all).toContain('category_id');
+    expect(all).not.toBe(empty);
   });
 
-  test('get_transactions: [] with compact: true means what omitting fields means — compact rows', async () => {
-    const empty = await call('get_transactions', { fields: [], compact: true });
-    expect(empty).toBe(await call('get_transactions', { compact: true }));
-    expect(empty).not.toBe(await call('get_transactions', {}));
+  test('get_transactions: the retired compact argument is rejected, not ignored', async () => {
+    // Dispatched, not a direct method call: the rejection has to survive the
+    // registry path a real client takes (PR B pinned the same for
+    // include_logos).
+    const result = await server.handleCallTool('get_transactions', { compact: true });
+    expect(result.isError).toBe(true);
+    expect(firstText(result)).toContain('`compact` was removed in v3.0.0');
   });
 });
 

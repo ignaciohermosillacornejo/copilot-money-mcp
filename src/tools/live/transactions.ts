@@ -22,6 +22,7 @@ import {
   TRANSACTION_FIELDS_PARAM_SCHEMA,
   projectRows,
 } from '../field-selection.js';
+import { rejectRemovedArgs, REMOVED_TRANSACTION_ARGS } from '../errors.js';
 import { normalizeMerchantName } from '../../utils/merchant.js';
 import { parsePeriod } from '../../utils/date.js';
 
@@ -93,11 +94,10 @@ interface PageResult {
   total_count: number;
   offset: number;
   has_more: boolean;
-  // NOTE: when `fields` narrows the response, the actual objects carry fewer
-  // keys than this type promises — that narrowing is opt-in, and the caller
-  // who requested the subset already knows what they asked for (same
-  // deliberate widening as cache-mode get_transactions).
-  transactions: EnrichedTransaction[];
+  // Partial since #604: rows are projected to DEFAULT_TRANSACTION_FIELDS
+  // unless the caller names more, so every other key is absent by default —
+  // same honest widening cache-mode get_transactions took.
+  transactions: Partial<EnrichedTransaction>[];
   // Requested `fields` names that matched nothing (typos, or cache-only
   // names like `excluded` that live rows don't carry), when any.
   _field_warning?: string;
@@ -159,13 +159,13 @@ export const LIVE_TRANSACTION_KNOWN_FIELDS: ReadonlySet<string> = new Set(
 
 /**
  * Mirror of the cache tool's projectTransactionFields: same engine, same
- * tokens, same `_field_warning`. No `compact` — it is being retired in v3;
- * the `"default"` token covers the need.
+ * preset, same tokens, same `_field_warning`. There is no `compact` here and
+ * none in cache mode either since #604 — the `"default"` token covers it.
  */
 function projectLiveTransactionFields(
-  rows: EnrichedTransaction[],
+  rows: Partial<EnrichedTransaction>[],
   fields: string[] | undefined
-): { rows: EnrichedTransaction[]; warning?: string } {
+): { rows: Partial<EnrichedTransaction>[]; warning?: string } {
   return projectRows(rows, fields, {
     preset: DEFAULT_TRANSACTION_FIELDS,
     knownFields: LIVE_TRANSACTION_KNOWN_FIELDS,
@@ -195,6 +195,9 @@ export class LiveTransactionsTools {
   }
 
   async getTransactions(opts: GetTransactionsLiveOptions): Promise<GetTransactionsLiveResult> {
+    // v3: `compact` was retired in favor of `fields` (#604) — same guard, same
+    // map as cache-mode get_transactions, so the two modes reject it alike.
+    rejectRemovedArgs(opts as Record<string, unknown>, REMOVED_TRANSACTION_ARGS);
     this.validate(opts);
 
     if (opts.transaction_id) {
@@ -291,7 +294,8 @@ export class LiveTransactionsTools {
           has_more: false,
           transactions: enriched,
         },
-        opts.fields
+        // #604: omitting `fields` yields the terse preset, not a full row.
+        opts.fields ?? ['default']
       ),
       _cache_oldest_fetched_at: fetchedAtIso,
       _cache_newest_fetched_at: newestIso,
@@ -418,7 +422,8 @@ export class LiveTransactionsTools {
         has_more: offset + limit < total,
         transactions: enriched,
       },
-      opts.fields
+      // #604: omitting `fields` yields the terse preset, not a full row.
+      opts.fields ?? ['default']
     );
   }
 
@@ -513,10 +518,15 @@ export function createLiveTransactionsToolSchema(): ToolSchema {
       'exclude_split_parents=false, exclude_deleted=false. Single-transaction lookup requires ' +
       'transaction_id + account_id + item_id AND a date range — the server has no ' +
       "single-row-by-id filter, so pass the transaction's date from the prior list result; " +
-      'unbounded lookups would paginate the whole account. Rows are ~20 fields wide; pass ' +
-      'fields: [...] to trim each row to just the named fields — note excluded and ' +
-      'internal_transfer exist only in cache mode, so the "default" baseline yields 8 fields ' +
-      'here. If the backend is unreachable this returns an isError result; it does NOT fall ' +
+      'unbounded lookups would paginate the whole account. Rows are TERSE by default: ' +
+      'transaction_id, date, amount, name, category_name, account_id, item_id, pending ' +
+      '(8 of the 10 "default" names — `excluded` and `internal_transfer` are ' +
+      'cache-document-only and absent here). PARTIAL list of what that drops, not ' +
+      'exhaustive: category_id, recurring_id, parent_transaction_id, tag_ids, user_reviewed, ' +
+      'user_notes, tip_amount, suggested_category_ids, iso_currency_code, ' +
+      'normalized_merchant, type, created_timestamp. Ask for any of them by name with ' +
+      'fields: ["default", "tag_ids"], or take the full row with fields: ["all"] (or "*"). ' +
+      'If the backend is unreachable this returns an isError result; it does NOT fall ' +
       'back to the local cache.',
     inputSchema: {
       type: 'object',

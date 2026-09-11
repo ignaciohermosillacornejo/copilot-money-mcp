@@ -56,7 +56,16 @@ const DB_PATH = path.join(__dirname, 'fixtures/context-budget-db');
 // Its pattern-analysis half is measured over a fixed 2024 window (see
 // EXTRA_ARGS) and does not move with the clock.
 const RESPONSE_BUDGETS: Record<string, number> = {
-  get_transactions: 1_585,
+  // 1_585 -> 1_080 by #604: rows are terse by default now
+  // (DEFAULT_TRANSACTION_FIELDS, 10 of a document's ~64 schema fields), so a
+  // page carries identity, date, amount, name, category_name, account/item ids
+  // and the two flags — and nothing else unless the caller names it. Measured
+  // 981 against 1_446 for the same call at `fields: ["all"]`, i.e. what this
+  // fixture returned before the flip: -32.2%, ~10% headroom. The saving is far
+  // bigger on real documents, which carry the Plaid metadata and intelligence
+  // arrays this fixture does not — see the CHANGELOG for the real-cache
+  // measurement.
+  get_transactions: 1_080,
   get_cache_info: 870,
   refresh_database: 245,
   // 795 -> 635 by #597 Tier 2: rows are terse by default (DEFAULT_ACCOUNT_FIELDS
@@ -114,9 +123,19 @@ const RESPONSE_BUDGETS: Record<string, number> = {
 
 const SCHEMA_BUDGETS: Record<string, number> = {
   // Cache-mode reads
-  // Raised from 4_145 (#600-era diet target) — this PR adds real new
+  // Raised from 4_145 (#600-era diet target) — that PR added real new
   // capability (fields/compact field selection), not bloat; see PR #593.
-  get_transactions: 5_100,
+  //
+  // Raised again from 5_100 by #604, which flipped the default to terse and
+  // deleted the `compact` boolean (-1 param). The description now has to say
+  // what a default row contains AND, per the #597 convention, name what it
+  // drops — Plaid metadata, internal IDs, enrichment/intelligence fields,
+  // tag_ids, review state, location, flags — explicitly as a PARTIAL list, the
+  // disclosure fix the PR B review required on get_accounts. Measured 5_833
+  // (~10% headroom). Paying ~700 schema chars once per session to stop
+  // shipping ~50 unwanted fields on every page is the trade #597 exists to
+  // make.
+  get_transactions: 6_425,
   get_cache_info: 640,
   refresh_database: 485,
   // Raised from 1_315 by #597 Tier 2: adds the `fields` param (shared
@@ -164,7 +183,12 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // `fields` param (fragment shared verbatim with get_transactions) plus a
   // description sentence naming the 8-vs-10 preset gap — real new capability,
   // not bloat. Measured 4_090 after review amendments (~7% headroom).
-  get_transactions_live: 4_370,
+  //
+  // Raised again from 4_370 by #604 for the same reason as its cache twin:
+  // the shared `fields` fragment now enumerates the default row and names the
+  // excluded categories, and this tool's own description lists what a live
+  // row drops. Measured 5_178 (~10% headroom).
+  get_transactions_live: 5_700,
   // Raised from 570 by #597 Tier 2: adds the `fields` param (shared verbatim
   // with get_accounts — see ACCOUNT_FIELDS_PARAM_SCHEMA) plus a description
   // sentence naming the excluded sync/plumbing fields (`hasHistoricalUpdates`,
@@ -286,9 +310,15 @@ const SCHEMA_BUDGETS: Record<string, number> = {
  * since #606, so raising it would buy a few hundred chars at the cost of the
  * one check that catches every tool creeping a little.
  *
- * MUST stay below the sum of every entry in SCHEMA_BUDGETS above (81_035 over
- * 50 entries after this round's get_accounts raise, 2_255 -> 2_535; 80_755
- * before it — recompute if that table changes): the completeness guard
+ * Raised from 76_300 to 78_800 by #604: the two transaction schemas grew by
+ * ~1_540 chars between them, because terse-by-default rows are only usable if
+ * the schema says what they contain and what they leave out. Real total
+ * 76_441 at that commit, ~3.0% headroom — the same band this ratchet has held
+ * since #606, so it stays the binding check rather than a formality.
+ *
+ * MUST stay below the sum of every entry in SCHEMA_BUDGETS above (83_690 over
+ * 50 entries after #604's two raises, 5_100 -> 6_425 and 4_370 -> 5_700;
+ * 81_035 before them — recompute if that table changes): the completeness guard
  * in registerContextBudgetChecks requires SCHEMA_BUDGETS to have exactly one
  * entry per registered tool, so once every per-tool assertion passes the
  * actual total is bounded by that sum regardless of what this constant
@@ -301,7 +331,7 @@ const SCHEMA_BUDGETS: Record<string, number> = {
  * per-tool sum of 78_590 — the aggregate was already the binding check
  * then too).
  */
-const SCHEMA_TOTAL_BUDGET = 76_300;
+const SCHEMA_TOTAL_BUDGET = 78_800;
 
 // ---------------------------------------------------------------------------
 // Synthetic fixture. Deterministic content, opaque Firestore-shaped IDs

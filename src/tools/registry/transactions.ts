@@ -20,12 +20,21 @@ export const getTransactionsTool = defineTool({
       `(4) Special types: Use transaction_type for ${TRANSACTION_TYPE_FILTERS.join(', ')}. ` +
       '(5) Location-based: Use city or lat/lon with radius_km. ' +
       '(6) Tag filter: Use tag to find transactions with a specific tag. ' +
-      'Returns human-readable category names and normalized merchant names. ' +
-      'Each transaction document carries ~35-40 fields (internal IDs, Plaid metadata, ' +
-      'intelligence-suggestion arrays, flags like is_amazon/from_investment) — most callers ' +
-      'only need a handful. Pass compact: true for a curated 7-field response ' +
-      '(transaction_id, date, name, amount, category_name, account_id, pending), or fields: ' +
-      '[...] to name exactly the fields you want.',
+      'Rows are TERSE by default: transaction_id, date, amount, name, category_name, ' +
+      'account_id, item_id, pending, excluded, internal_transfer. A cache document carries ' +
+      '~60 fields and most callers need a handful, so the rest are excluded unless asked ' +
+      'for. PARTIAL list of what that drops, not exhaustive: Plaid metadata ' +
+      '(plaid_category_id, plaid_category_strings, plaid_deleted), internal IDs ' +
+      '(category_id, recurring_id, goal_id, parent_transaction_id, ' +
+      'children_transaction_ids, user_id), enrichment and intelligence fields ' +
+      '(normalized_merchant — still the normalized merchant name when requested — ' +
+      'intelligence_suggested_category_ids, suggestion_ids, original_name), tag_ids, ' +
+      'review state (user_reviewed, user_note), location (city, region, country, lat/lon), ' +
+      'and flags like is_amazon/from_investment. Ask for any of them by name with ' +
+      'fields: ["default", "tag_ids"], or take the whole document with fields: ["all"] ' +
+      '(or "*"). category_name is always resolved to a human-readable name. ' +
+      '`compact` was removed in v3.0.0 — passing it now raises an error naming this ' +
+      'migration.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -158,17 +167,10 @@ export const getTransactionsTool = defineTool({
           default: 10,
         },
         // NEW: Field selection. Shared verbatim with get_transactions_live —
-        // parity pinned by tests. Priority over compact is documented on the
-        // compact param below ("Ignored if fields is given").
+        // parity pinned by tests. The retired `compact` boolean lived here
+        // until #604; rejectRemovedArgs in the handler is what a caller still
+        // passing it now hits.
         fields: TRANSACTION_FIELDS_PARAM_SCHEMA,
-        compact: {
-          type: 'boolean',
-          description:
-            'Return a curated 7-field response per transaction (transaction_id, date, name, ' +
-            'amount, category_name, account_id, pending) instead of the full ~35-40 field ' +
-            'document. Ignored if fields is given. Default: false.',
-          default: false,
-        },
       },
     },
     annotations: {

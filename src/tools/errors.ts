@@ -56,11 +56,11 @@ export function graphQLErrorToMcpError(e: GraphQLError): string {
 /**
  * Arguments removed in v3, mapped to the migration hint for each. Consumed
  * by {@link rejectRemovedArgs}; `get_accounts`' retired `include_logos` is
- * the only entry (#597 Tier 2). Tool-scoped on purpose: what Task 6 reuses
- * for `get_transactions`' retired `compact` is {@link rejectRemovedArgs},
- * the generic half — it should add a sibling `REMOVED_TRANSACTION_ARGS`
- * rather than widen this map, whose name would then be a lie about what a
- * caller of `get_accounts` can trip over.
+ * the only entry (#597 Tier 2). Tool-scoped on purpose: `get_transactions`'
+ * retired `compact` reuses {@link rejectRemovedArgs}, the generic half, and
+ * carries its own {@link REMOVED_TRANSACTION_ARGS} rather than widening this
+ * map, whose name would then be a lie about what a caller of `get_accounts`
+ * can trip over.
  */
 export const REMOVED_ACCOUNT_ARGS = {
   // Covers BOTH audiences, because the guard fires on PRESENCE: a caller
@@ -71,6 +71,25 @@ export const REMOVED_ACCOUNT_ARGS = {
   include_logos:
     'logos are excluded by default now, so drop the argument; ' +
     'pass fields: ["default", "logo", "logo_content_type"] to include them',
+} as const;
+
+/**
+ * Arguments removed from `get_transactions` in v3 (#604). Sibling of
+ * {@link REMOVED_ACCOUNT_ARGS} rather than an entry in it: the two tools
+ * retire different arguments, and a `compact` key inside a map named
+ * `..._ACCOUNT_ARGS` would make that name a lie. {@link rejectRemovedArgs} is
+ * the half that is shared.
+ */
+export const REMOVED_TRANSACTION_ARGS = {
+  // Both audiences again (see REMOVED_ACCOUNT_ARGS): the guard fires on
+  // PRESENCE, so `compact: false` throws too — and that caller was asking for
+  // FULL rows, which is now the one shape omitting `fields` does not give.
+  // Hence the hint leads with the token that restores what each caller had:
+  // "all" for the compact:false caller, the default preset for compact:true.
+  compact:
+    'rows are terse by default now, so a caller that passed compact: true can just drop ' +
+    'the argument; pass fields: ["all"] for the full document, or name the fields you want ' +
+    'with fields: ["default", "user_note", ...]',
 } as const;
 
 /**
