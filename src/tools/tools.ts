@@ -1686,7 +1686,12 @@ export class CopilotMoneyTools {
     period: { start_date?: string; end_date?: string };
     count: number;
     total_monthly_cost: number;
-    recurring: DetectedRecurringRow[];
+    // Partial, for the same reason getAccounts returns Partial<Account>[]:
+    // these rows come out of the field-selection engine, which widens back to
+    // T while carrying only the selected keys. Declared as full rows, the type
+    // would promise `transactions` and `confidence_reason` that the default
+    // preset never returns.
+    recurring: Partial<DetectedRecurringRow>[];
     _field_warning?: string;
     copilot_subscriptions?: {
       summary: {
