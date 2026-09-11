@@ -331,6 +331,28 @@ const PINNED: Record<string, readonly string[]> = {
   // src/models/item.ts
   CONNECTION_STATUSES: ['active', 'error', 'disconnected', 'pending'],
   // src/tools/field-selection.ts
+  DEFAULT_ACCOUNT_FIELDS: [
+    'account_id',
+    'name',
+    'account_type',
+    'subtype',
+    'current_balance',
+    'institution_name',
+    'iso_currency_code',
+    'item_id',
+  ],
+  // src/tools/field-selection.ts
+  DEFAULT_ACCOUNT_LIVE_FIELDS: [
+    'id',
+    'name',
+    'type',
+    'subType',
+    'balance',
+    'institutionId',
+    'itemId',
+    'isUserHidden',
+  ],
+  // src/tools/field-selection.ts
   DEFAULT_CATEGORY_LIVE_FIELDS: [
     'id',
     'parentId',

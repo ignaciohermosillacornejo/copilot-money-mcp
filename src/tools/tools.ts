@@ -19,6 +19,7 @@ import {
   DEFAULT_TRANSACTION_FIELDS,
   DEFAULT_INVESTMENT_PRICE_FIELDS,
   DEFAULT_RECURRING_CACHE_FIELDS,
+  DEFAULT_ACCOUNT_FIELDS,
   projectRows,
 } from './field-selection.js';
 import type { LiveCopilotDatabase } from '../core/live-database.js';
@@ -67,7 +68,7 @@ import {
   type RecurringStateValue,
 } from '../core/graphql/recurrings.js';
 import { setBudget as gqlSetBudget } from '../core/graphql/budgets.js';
-import { graphQLErrorToMcpError } from './errors.js';
+import { graphQLErrorToMcpError, rejectRemovedArgs, REMOVED_ACCOUNT_ARGS } from './errors.js';
 import { parsePeriod } from '../utils/date.js';
 import {
   readScheduledSmokeStatus,
@@ -96,6 +97,7 @@ import {
   TransactionSchema,
   InvestmentPriceSchema,
   getLatestPricePoint,
+  AccountSchema,
 } from '../models/index.js';
 import type { GoalHistory } from '../models/goal-history.js';
 import { isItemHealthy, itemNeedsAttention, getItemDisplayName } from '../models/item.js';
@@ -210,6 +212,17 @@ const TRANSACTION_KNOWN_FIELDS: ReadonlySet<string> = new Set([
   'category_name',
   'normalized_merchant',
 ]);
+
+/**
+ * Every selectable field name on a get_accounts row: the Account document
+ * schema keys. Derived from the zod shape — not a `{ [K in keyof Account]-?:
+ * true }` mapped type, unlike the live-mode row types in src/tools/live/ —
+ * because `Account`'s z.infer type carries an implicit passthrough index
+ * signature (AccountSchema is `.passthrough()`), which collapses `keyof
+ * Account` to plain `string` and would give a mapped type zero typo
+ * protection. Same reasoning as TRANSACTION_KNOWN_FIELDS above.
+ */
+const ACCOUNT_KNOWN_FIELDS: ReadonlySet<string> = new Set(Object.keys(AccountSchema.shape));
 
 /**
  * One pattern-detected recurring merchant row, as built by
@@ -1269,7 +1282,7 @@ export class CopilotMoneyTools {
     options: {
       account_type?: string;
       include_hidden?: boolean;
-      include_logos?: boolean;
+      fields?: string[];
     } = {}
   ): Promise<{
     count: number;
@@ -1277,8 +1290,12 @@ export class CopilotMoneyTools {
     total_assets: number;
     total_liabilities: number;
     accounts: Account[];
+    _field_warning?: string;
   }> {
-    const { account_type, include_hidden = false, include_logos = false } = options;
+    // v3: `include_logos` was retired in favor of `fields` — a caller still
+    // passing it would otherwise silently get terse rows with no explanation.
+    rejectRemovedArgs(options, REMOVED_ACCOUNT_ARGS);
+    const { account_type, include_hidden = false } = options;
 
     let accounts = await this.db.getAccounts(account_type);
 
@@ -1295,6 +1312,11 @@ export class CopilotMoneyTools {
       accounts = accounts.filter((acc) => acc.user_deleted !== true && acc.user_hidden !== true);
     }
 
+    // #660: prefer the Copilot nickname over the provider `name`. This MUST
+    // run before projectRows below — projecting to the preset's `name` key
+    // after this resolution is what makes the preferred name selectable at
+    // all; doing it in the other order would silently reinstate the
+    // provider label for a projected row.
     accounts = accounts.map((account) =>
       account.nickname ? { ...account, name: account.nickname } : account
     );
@@ -1311,13 +1333,21 @@ export class CopilotMoneyTools {
     }
     const totalBalance = totalAssets - totalLiabilities;
 
-    // `logo` is a base64-encoded PNG (several KB per account) that Firestore
-    // caches alongside every account document. Left in, it dominates the
-    // response (issue: ~20-30x bloat for a handful of accounts) for data an
-    // MCP client has no use for. Strip it by default; include_logos opts back in.
-    const responseAccounts = include_logos
-      ? accounts
-      : accounts.map(({ logo: _logo, logo_content_type: _logoContentType, ...rest }) => rest);
+    // v3: omitting `fields` yields the terse preset (no `holdings`, no
+    // `official_name`/`original_*` name dupes, no `user_id`) — request them
+    // explicitly with fields: ["default", "holdings", ...], or take
+    // everything with "all"/"*". Institution logos — previously gated by the
+    // now-removed `include_logos` boolean — are reachable the same way:
+    // fields: ["default", "logo"].
+    const { rows: responseAccounts, warning } = projectRows(
+      accounts,
+      options.fields ?? ['default'],
+      {
+        preset: DEFAULT_ACCOUNT_FIELDS,
+        knownFields: ACCOUNT_KNOWN_FIELDS,
+        validFieldsHint: 'the account document fields',
+      }
+    );
 
     return {
       count: accounts.length,
@@ -1325,6 +1355,7 @@ export class CopilotMoneyTools {
       total_assets: roundAmount(totalAssets),
       total_liabilities: roundAmount(totalLiabilities),
       accounts: responseAccounts,
+      ...(warning && { _field_warning: warning }),
     };
   }
 
