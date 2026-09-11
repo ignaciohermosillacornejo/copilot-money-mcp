@@ -103,7 +103,10 @@ export const INVESTMENT_PRICE_FIELDS_PARAM_SCHEMA = {
  * Rewritten for #604, when the default flipped from full documents to
  * `["default"]`: only then did "EXCLUDED by default" become true of this
  * parameter, so the wording that names the exclusions had to wait for the
- * flip rather than ship ahead of it.
+ * flip rather than ship ahead of it. The same #604 closed the old 10-vs-8
+ * gap by synthesizing `excluded` and `internal_transfer` on live rows, so
+ * this fragment can now describe one default row for both modes — with the
+ * fidelity caveat on the live tool's own description, where it belongs.
  */
 export const TRANSACTION_FIELDS_PARAM_SCHEMA = {
   type: 'array',

@@ -766,6 +766,46 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'invalid nodes are dropped from rows and all cache/index feeds, counted, and ' +
       'surfaced via _dropped_invalid_rows + a deduped stderr warning.',
   },
+  // ----- Synthesized transaction row fields (#604) ---------------------------
+  // Not fields Copilot returns: fields this repo INVENTS on live rows so
+  // `fields: ["default"]` means the same 10 keys in cache mode and live mode.
+  // Each one is an assumption about Copilot's data model, so each gets its own
+  // entry — they are not equally strong, and collapsing them into one would
+  // launder the weaker of the two.
+  {
+    surface: 'Transaction.internalTransfer:synthesized',
+    kind: 'response-shape',
+    oracle: null,
+    class: 'verified-once',
+    evidence:
+      'Probe 2026-09-11: `internalTransfer` / `isInternalTransfer` and 9 further spellings ' +
+      'all return `Cannot query field "<name>" on type "Transaction"` with no did-you-mean ' +
+      "suggestions, and the web app's own TransactionFields fragment selects none of them — " +
+      'live models a transfer as `type === INTERNAL_TRANSFER`. Derivation measured against ' +
+      'real data the same day: 600 live rows paginated, 506 joined to cache documents by id, ' +
+      '506/506 agreement including all 46 rows that are transfers on either side, zero ' +
+      'deviations. DERIVED BUT EXACT; nothing re-checks it, so a server-side change to how ' +
+      'transfers are typed would drift silently.',
+  },
+  {
+    surface: 'Transaction.excluded:synthesized',
+    kind: 'response-shape',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      'Probe 2026-09-11: `excluded` / `isExcluded` / `userExcluded` and 8 further spellings ' +
+      'all return `Cannot query field "<name>" on type "Transaction"`; `isExcluded` exists ' +
+      'ONLY on CreateCategoryInput/EditCategoryInput, so there is no per-transaction ' +
+      'exclusion anywhere on the GraphQL surface — the app writes the flag straight to ' +
+      'Firestore, where src/core/decoder.ts reads it. Live therefore synthesizes ' +
+      "`excluded` from the row's category being user-excluded, the same predicate the " +
+      "tool's own exclude_excluded filter uses. This is an APPROXIMATION and is classed " +
+      'unverified deliberately: the 2026-09-11 parity probe could not exercise the ' +
+      'divergence, because 0 of 521 cache rows had `excluded === true`, so its agreement on ' +
+      'this field is trivially false === false. A transaction excluded individually in the ' +
+      'app reads `excluded: true` in cache mode and `false` in live mode.',
+  },
+
   queryOperation('categories'),
   gatedQueryResponseShape('categories', {
     evidence:

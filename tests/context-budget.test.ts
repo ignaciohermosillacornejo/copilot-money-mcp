@@ -187,8 +187,12 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // Raised again from 4_370 by #604 for the same reason as its cache twin:
   // the shared `fields` fragment now enumerates the default row and names the
   // excluded categories, and this tool's own description lists what a live
-  // row drops. Measured 5_178 (~10% headroom).
-  get_transactions_live: 5_700,
+  // row drops. It then also has to disclose what the other half of #604 cost:
+  // `excluded` and `internal_transfer` are SYNTHESIZED here (no GraphQL
+  // equivalent), one exactly and one by approximation, and the description
+  // says which is which and when the approximation can mislead. Measured
+  // 5_779 (~10% headroom).
+  get_transactions_live: 6_360,
   // Raised from 570 by #597 Tier 2: adds the `fields` param (shared verbatim
   // with get_accounts — see ACCOUNT_FIELDS_PARAM_SCHEMA) plus a description
   // sentence naming the excluded sync/plumbing fields (`hasHistoricalUpdates`,
@@ -310,14 +314,15 @@ const SCHEMA_BUDGETS: Record<string, number> = {
  * since #606, so raising it would buy a few hundred chars at the cost of the
  * one check that catches every tool creeping a little.
  *
- * Raised from 76_300 to 78_800 by #604: the two transaction schemas grew by
- * ~1_540 chars between them, because terse-by-default rows are only usable if
- * the schema says what they contain and what they leave out. Real total
- * 76_441 at that commit, ~3.0% headroom — the same band this ratchet has held
- * since #606, so it stays the binding check rather than a formality.
+ * Raised from 76_300 to 79_400 by #604: the two transaction schemas grew by
+ * ~2_140 chars between them, because terse-by-default rows are only usable if
+ * the schema says what they contain and what they leave out — and, on the live
+ * tool, that two of those fields are synthesized rather than returned. Real
+ * total 77_042, ~3.0% headroom — the same band this ratchet has held since
+ * #606, so it stays the binding check rather than a formality.
  *
- * MUST stay below the sum of every entry in SCHEMA_BUDGETS above (83_690 over
- * 50 entries after #604's two raises, 5_100 -> 6_425 and 4_370 -> 5_700;
+ * MUST stay below the sum of every entry in SCHEMA_BUDGETS above (84_350 over
+ * 50 entries after #604's two raises, 5_100 -> 6_425 and 4_370 -> 6_360;
  * 81_035 before them — recompute if that table changes): the completeness guard
  * in registerContextBudgetChecks requires SCHEMA_BUDGETS to have exactly one
  * entry per registered tool, so once every per-tool assertion passes the
@@ -331,7 +336,7 @@ const SCHEMA_BUDGETS: Record<string, number> = {
  * per-tool sum of 78_590 — the aggregate was already the binding check
  * then too).
  */
-const SCHEMA_TOTAL_BUDGET = 78_800;
+const SCHEMA_TOTAL_BUDGET = 79_400;
 
 // ---------------------------------------------------------------------------
 // Synthetic fixture. Deterministic content, opaque Firestore-shaped IDs

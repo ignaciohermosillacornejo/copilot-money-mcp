@@ -81,6 +81,8 @@ export type EnrichedTransaction = {
   type: ReadTransactionType;
   user_reviewed: boolean;
   pending: boolean;
+  excluded: boolean;
+  internal_transfer: boolean;
   user_notes: string | null;
   tip_amount: number | null;
   suggested_category_ids: string[];
@@ -111,6 +113,52 @@ export interface GetTransactionsLiveResult extends PageResult {
 }
 
 /**
+ * The two category-derived lookups a live row needs, read once per request
+ * from the shared categories cache: id -> name, and the set of ids the user
+ * marked excluded. Bundled so `excluded` is computed from the SAME set that
+ * `exclude_excluded` filters on, rather than a second copy that could drift.
+ */
+export interface CategoryIndex {
+  names: Map<string, string>;
+  excludedIds: ReadonlySet<string>;
+}
+
+/**
+ * SYNTHESIZED FIELDS (#604 live/cache parity).
+ *
+ * Two of the 10 DEFAULT_TRANSACTION_FIELDS names do not exist on Copilot's
+ * GraphQL `Transaction` type at all, so `fields: ["default"]` would mean 10
+ * keys in cache mode and 8 in live mode. Both are synthesized here instead,
+ * so `"default"` means the same row in both modes. They are NOT the same
+ * case, and the difference matters to a caller:
+ *
+ *  - `internal_transfer` := `type === 'INTERNAL_TRANSFER'` is DERIVED BUT
+ *    EXACT. Measured against real data: 600 live rows paginated and joined to
+ *    cache documents by id (506 joined), 506/506 agreement including all 46
+ *    rows that are transfers on either side, zero deviations. The same
+ *    expression is what this repo's write-echo paths already use.
+ *
+ *  - `excluded` := `categoryId ∈ excludedCategoryIds` is a CATEGORY-LEVEL
+ *    APPROXIMATION that can genuinely disagree with cache mode. The cache
+ *    document carries a PER-TRANSACTION `excluded` boolean (decoded at
+ *    src/core/decoder.ts), which GraphQL does not expose in any form: the
+ *    probe below found no field spelling that resolves, and there is no
+ *    Transaction-level mutation input for it either (`isExcluded` exists only
+ *    on CreateCategoryInput/EditCategoryInput), so the app writes it straight
+ *    to Firestore the way it does goals. The parity probe could NOT exercise
+ *    that divergence — 0 of 521 cache rows had `excluded === true`, so its
+ *    506/506 agreement on this field is trivially `false === false` and is
+ *    NOT evidence. Treat it as what it is: the tool's own exclusion predicate,
+ *    surfaced on the row.
+ *
+ * Probe transcript (2026-09-11): `excluded`, `isExcluded`, `userExcluded`,
+ * `internalTransfer`, `isInternalTransfer` and 6 further spellings all return
+ * `Cannot query field "<name>" on type "Transaction"` with no "did you mean"
+ * suggestions, and the web app's own `TransactionFields` fragment selects
+ * neither. Ledger entries: `Transaction.internalTransfer:synthesized` (class
+ * verified-once) and `Transaction.excluded:synthesized` (class unverified,
+ * for the reason above) in src/conformance/ledger.ts.
+ *
  * How each enriched (tool-facing, snake_case) field is computed from a raw
  * GraphQL TransactionNode. Single source of truth for the live row shape:
  * `enrich()` builds rows from it and {@link LIVE_TRANSACTION_KNOWN_FIELDS}
@@ -121,14 +169,14 @@ export interface GetTransactionsLiveResult extends PageResult {
 const ENRICHED_FIELD_MAPPERS: {
   [K in keyof EnrichedTransaction]-?: (
     n: TransactionNode,
-    catMap: Map<string, string>
+    categories: CategoryIndex
   ) => EnrichedTransaction[K];
 } = {
   transaction_id: (n) => n.id,
   account_id: (n) => n.accountId,
   item_id: (n) => n.itemId,
   category_id: (n) => n.categoryId,
-  category_name: (n, catMap) => (n.categoryId ? catMap.get(n.categoryId) : undefined),
+  category_name: (n, cats) => (n.categoryId ? cats.names.get(n.categoryId) : undefined),
   recurring_id: (n) => n.recurringId,
   parent_transaction_id: (n) => n.parentId,
   amount: (n) => n.amount,
@@ -138,6 +186,9 @@ const ENRICHED_FIELD_MAPPERS: {
   type: (n) => n.type,
   user_reviewed: (n) => n.isReviewed,
   pending: (n) => n.isPending,
+  // Synthesized, not on the wire — see SYNTHESIZED FIELDS above.
+  excluded: (n, cats) => n.categoryId !== null && cats.excludedIds.has(n.categoryId),
+  internal_transfer: (n) => n.type === 'INTERNAL_TRANSFER',
   user_notes: (n) => n.userNotes,
   tip_amount: (n) => n.tipAmount,
   suggested_category_ids: (n) => n.suggestedCategoryIds,
@@ -148,10 +199,10 @@ const ENRICHED_FIELD_MAPPERS: {
 
 /**
  * Every selectable field name on a get_transactions_live row, derived from
- * the enrichment mapper record above (never hand-copied). 8 of the 10
- * {@link DEFAULT_TRANSACTION_FIELDS} preset names are present; `excluded`
- * and `internal_transfer` are cache-document-only (live models transfers
- * via `type === 'INTERNAL_TRANSFER'` and exclusion via Category.isExcluded).
+ * the enrichment mapper record above (never hand-copied) — so the two
+ * synthesized names join it automatically, which is the point of deriving it.
+ * All 10 {@link DEFAULT_TRANSACTION_FIELDS} preset names are present since
+ * #604.
  */
 export const LIVE_TRANSACTION_KNOWN_FIELDS: ReadonlySet<string> = new Set(
   Object.keys(ENRICHED_FIELD_MAPPERS)
@@ -171,7 +222,10 @@ function projectLiveTransactionFields(
     knownFields: LIVE_TRANSACTION_KNOWN_FIELDS,
     validFieldsHint:
       'the get_transactions_live row fields (including the enrichment fields category_name and ' +
-      'normalized_merchant); excluded and internal_transfer exist only in cache-mode get_transactions',
+      'normalized_merchant, and the synthesized excluded and internal_transfer — the latter is ' +
+      "exactly type === INTERNAL_TRANSFER, while excluded is DERIVED from the row's category " +
+      'being user-excluded and can disagree with cache mode, which stores a per-transaction flag ' +
+      'GraphQL does not expose)',
   });
 }
 
@@ -180,18 +234,27 @@ const UNSUPPORTED_KEYS = ['city', 'lat', 'lon', 'radius_km', 'region', 'country'
 export class LiveTransactionsTools {
   constructor(private readonly live: LiveCopilotDatabase) {}
 
-  private async getCategoryNameMap(): Promise<Map<string, string>> {
+  /**
+   * The one category read this tool makes per request: names for enrichment
+   * AND the excluded-id set. Both the `exclude_excluded` filter and the
+   * synthesized `excluded` row field go through this, so the flag on a row
+   * can never disagree with the filter that hid its siblings — the agreement
+   * is structural, not a copied expression.
+   */
+  private async getCategoryIndex(): Promise<CategoryIndex> {
     const { rows } = await this.live.getCategoriesCache().read(async () => {
       // Same closure as LiveCategoriesTools — see resolveRolloversFlag()
       // and audit finding C6.
       const rollovers = await this.live.resolveRolloversFlag();
       return fetchCategories(this.live.getClient(), { rollovers });
     });
-    const map = new Map<string, string>();
+    const names = new Map<string, string>();
+    const excludedIds = new Set<string>();
     for (const c of rows) {
-      if (c.name) map.set(c.id, c.name);
+      if (c.name) names.set(c.id, c.name);
+      if (c.isExcluded === true) excludedIds.add(c.id);
     }
-    return map;
+    return { names, excludedIds };
   }
 
   async getTransactions(opts: GetTransactionsLiveOptions): Promise<GetTransactionsLiveResult> {
@@ -371,19 +434,12 @@ export class LiveTransactionsTools {
       result = result.filter((n) => n.tags.some((t) => resolvedTagIds.has(t.id)));
     }
 
-    // 8. exclude_excluded — reads categoriesCache directly rather than going
-    // through getCategoryNameMap() because we need the `isExcluded` boolean,
-    // not a name lookup. The cache hit shared with getCategoryNameMap() (when
-    // both are called in the same request) keeps the cost minimal.
+    // 8. exclude_excluded — category-level, since GraphQL exposes no
+    // per-transaction exclusion flag. Same index the synthesized `excluded`
+    // row field is built from (#604), so filter and flag cannot disagree.
     if (opts.exclude_excluded !== false) {
-      const { rows: cats } = await this.live.getCategoriesCache().read(async () => {
-        // Same closure as LiveCategoriesTools — see resolveRolloversFlag()
-        // and audit finding C6.
-        const rollovers = await this.live.resolveRolloversFlag();
-        return fetchCategories(this.live.getClient(), { rollovers });
-      });
-      const excludedCatIds = new Set(cats.filter((c) => c.isExcluded === true).map((c) => c.id));
-      result = result.filter((n) => !n.categoryId || !excludedCatIds.has(n.categoryId));
+      const { excludedIds } = await this.getCategoryIndex();
+      result = result.filter((n) => !n.categoryId || !excludedIds.has(n.categoryId));
     }
 
     // 9. transaction_type variants
@@ -394,10 +450,10 @@ export class LiveTransactionsTools {
     } else if (opts.transaction_type === 'credits') {
       result = result.filter((n) => n.amount < 0 && n.type === 'INCOME');
     } else if (opts.transaction_type === 'hsa_eligible') {
-      const map = await this.getCategoryNameMap();
+      const { names } = await this.getCategoryIndex();
       result = result.filter((n) => {
         if (!n.categoryId) return false;
-        const name = (map.get(n.categoryId) ?? '').toLowerCase();
+        const name = (names.get(n.categoryId) ?? '').toLowerCase();
         return name.includes('health') || name.includes('medical');
       });
     }
@@ -428,14 +484,14 @@ export class LiveTransactionsTools {
   }
 
   private async enrich(rows: TransactionNode[]): Promise<EnrichedTransaction[]> {
-    const catMap = await this.getCategoryNameMap();
+    const categories = await this.getCategoryIndex();
     return rows.map((n) => {
       const row: Record<string, unknown> = {};
       // Object.entries widens per-key types, so the cast below leans on the
       // mapped-type constraint at ENRICHED_FIELD_MAPPERS' declaration, which
       // already proved the record covers every EnrichedTransaction key.
       for (const [key, map] of Object.entries(ENRICHED_FIELD_MAPPERS)) {
-        row[key] = map(n, catMap);
+        row[key] = map(n, categories);
       }
       return row as EnrichedTransaction;
     });
@@ -518,10 +574,17 @@ export function createLiveTransactionsToolSchema(): ToolSchema {
       'exclude_split_parents=false, exclude_deleted=false. Single-transaction lookup requires ' +
       'transaction_id + account_id + item_id AND a date range — the server has no ' +
       "single-row-by-id filter, so pass the transaction's date from the prior list result; " +
-      'unbounded lookups would paginate the whole account. Rows are TERSE by default: ' +
-      'transaction_id, date, amount, name, category_name, account_id, item_id, pending ' +
-      '(8 of the 10 "default" names — `excluded` and `internal_transfer` are ' +
-      'cache-document-only and absent here). PARTIAL list of what that drops, not ' +
+      'unbounded lookups would paginate the whole account. Rows are TERSE by default — the ' +
+      'same 10 "default" names cache-mode get_transactions returns: transaction_id, date, ' +
+      'amount, name, category_name, account_id, item_id, pending, excluded, ' +
+      "internal_transfer. The last two are SYNTHESIZED, because Copilot's GraphQL API has " +
+      'no such fields: `internal_transfer` is exactly type === "INTERNAL_TRANSFER" (derived ' +
+      "but exact), while `excluded` is DERIVED from the row's category being user-excluded " +
+      'and CAN DISAGREE with cache mode, which reads a per-transaction flag the API does not ' +
+      'expose. Both modes filter excluded rows and transfers out by default, so these ' +
+      'booleans are nearly always false in a default response and only carry information ' +
+      'when you pass exclude_excluded: false / exclude_transfers: false — which is exactly ' +
+      'when the approximation can mislead you. PARTIAL list of what a terse row drops, not ' +
       'exhaustive: category_id, recurring_id, parent_transaction_id, tag_ids, user_reviewed, ' +
       'user_notes, tip_amount, suggested_category_ids, iso_currency_code, ' +
       'normalized_merchant, type, created_timestamp. Ask for any of them by name with ' +
@@ -622,8 +685,10 @@ export function createLiveTransactionsToolSchema(): ToolSchema {
           description: 'Filter by tag name (resolved to tagId via local cache)',
         },
         // Shared verbatim with cache-mode get_transactions — parity pinned by
-        // tests. Note: the baseline names `excluded` and `internal_transfer`
-        // are cache-document-only and absent from live rows.
+        // tests. Since #604 the two modes return the same 10 "default" names:
+        // `excluded` and `internal_transfer` have no GraphQL equivalent and
+        // are synthesized here (see SYNTHESIZED FIELDS at the top of this
+        // file for what that costs in fidelity).
         fields: TRANSACTION_FIELDS_PARAM_SCHEMA,
       },
     },
