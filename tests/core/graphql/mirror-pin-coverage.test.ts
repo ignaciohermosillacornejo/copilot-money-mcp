@@ -14,7 +14,14 @@
  * them still left nothing detecting the NEXT one. This walks the query modules
  * and fails when a named `*NodeSchema` has no matching pin in the same file.
  *
- * SCOPE — deliberately the NAMED mirrors only. Of the `export interface *Node`
+ * SCOPE — deliberately the EXPORTED `*NodeSchema` mirrors only, which is
+ * narrower than "named": `RecurringIconSchema` (queries/recurrings.ts) is a
+ * named mirror of an exported interface, but it is module-private and not
+ * `Node`-suffixed, so it escapes on both counts. Out of scope on the merits —
+ * the field-selection engine projects only top-level keys, so a nested twin's
+ * drift cannot produce the false `Unknown field name(s) ignored` warning this
+ * class exists to prevent (same reasoning that excuses RecurringRuleNode and
+ * RecurringPaymentNode). Of the `export interface *Node`
  * declarations under queries/, most are twinned with an ANONYMOUS
  * `z.looseObject` literal nested inside their `*ResponseSchema` (see
  * `tags.ts`), which has no name to pin against and is out of scope until
@@ -31,8 +38,20 @@ const QUERIES_DIR = join(import.meta.dir, '../../../src/core/graphql/queries');
 
 /** `export const FooNodeSchema = ...` — the named zod mirrors. */
 const NAMED_MIRROR = /export const (\w+NodeSchema)\b/g;
-/** `export const FOO_NODE_MIRROR_IS_EXACT: ExactKeys<...>` — the pins. */
-const PIN = /export const (\w+_MIRROR_IS_EXACT)\b/g;
+/**
+ * `export const FOO_NODE_MIRROR_IS_EXACT: ExactKeys<...>` — the pins.
+ *
+ * The `: ExactKeys<` is part of the pattern on purpose. Matching the NAME
+ * alone would make this ratchet's own remedy fakeable: when it fails, the
+ * shortest edit that silences it is a bare `export const X_MIRROR_IS_EXACT =
+ * true;`, which satisfies the regex while pinning nothing — the vacuous-guard
+ * shape this PR has already removed four times elsewhere. Requiring the
+ * annotation is where a regex's reach ends: it cannot check that the two type
+ * arguments name the right interface/mirror pair, and it does not need to —
+ * typechecking a correct annotation is what does the real work. This only
+ * guarantees the annotation is there to typecheck.
+ */
+const PIN = /export const (\w+_MIRROR_IS_EXACT):\s*ExactKeys</g;
 
 /** SecurityNodeSchema -> SECURITY_NODE_MIRROR_IS_EXACT */
 function expectedPinName(mirror: string): string {
@@ -73,6 +92,17 @@ describe('every named zod mirror has a compile-time pin to its interface', () =>
     expect(allMirrors).toContain('AccountNodeSchema');
     expect(allMirrors).toContain('RecurringNodeSchema');
     expect(allMirrors).toContain('SecurityNodeSchema');
+  });
+
+  test('a bare `= true` const is NOT counted as a pin', () => {
+    // The remedy for a failure here must not be fakeable. Discovery requires
+    // the ExactKeys annotation, so the lazy edit that silences the message
+    // does not satisfy the ratchet.
+    const bare = 'export const TAG_NODE_MIRROR_IS_EXACT = true;';
+    const annotated =
+      'export const TAG_NODE_MIRROR_IS_EXACT: ExactKeys<keyof TagNode, keyof typeof TagNodeSchema.shape> = true;';
+    expect([...bare.matchAll(new RegExp(PIN.source, 'g'))]).toHaveLength(0);
+    expect([...annotated.matchAll(new RegExp(PIN.source, 'g'))]).toHaveLength(1);
   });
 
   test('the name mapping is what the pins actually use', () => {
