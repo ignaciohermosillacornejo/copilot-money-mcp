@@ -35,7 +35,7 @@ Give the user a 30-second financial check-in. One number, a few flags, prospecti
    - `get_transactions` with `period: "last_90_days"`, `exclude_transfers: true` — for rolling averages
    - `get_categories` with `view: "list"`, `period: "this_month"` — category spending this month
    - `get_categories` with `view: "list"`, `period: "last_90_days"` — category spending for 90-day baseline
-   - `get_recurring_transactions` with `period: "last_90_days"` — subscriptions and recurrings
+   - `get_recurring_transactions` with `period: "last_90_days"` and `fields: ["default", "transactions"]` — subscriptions and recurrings. The `fields` argument is required for the price-drift check in Phase 2.4: as of v3.0.0 the matched per-charge `transactions` array is excluded from the default row, and `average_amount` / `total_amount` alone cannot show a change over time.
    - `get_budgets` with `active_only: true` — any budgets the user set
    - `get_goals` with `active_only: true` — savings goals
 
@@ -153,7 +153,7 @@ Use Python to compare this month's spending by category against 90-day rolling m
 From `get_recurring_transactions`:
 - Sort by cost (highest first)
 - Flag any that missed their expected date by 7+ days (possible cancellation or billing issue)
-- Flag price drift: amount changed >5% for charges <$50, >3% for $50-200, >2% for >$200
+- Flag price drift: amount changed >5% for charges <$50, >3% for $50-200, >2% for >$200. Compare the per-charge amounts in each row's `transactions` array (requested via the `fields` argument in Phase 1) — if that array is absent the check cannot run, so say so rather than inferring drift from a single average.
 - Flag any new recurring detected that isn't in the Copilot subscriptions list
 
 ### 2.5 Anomaly Scan
