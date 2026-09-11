@@ -10,6 +10,33 @@
 import { z } from 'zod';
 
 /**
+ * Compile-time pin for a wire node's two hand-maintained declarations: the TS
+ * interface, and its zod mirror. A row type in src/tools/live/ spreads the
+ * INTERFACE, while the wire-parity tests compare against the MIRROR, and
+ * nothing else links the pair — read validation uses `z.looseObject` precisely
+ * so new server fields flow through without warnings, so the read smokes keep
+ * a mirror honest in the remove and type-change directions but not the add
+ * one. Without a pin, adding a field to the operation document and the
+ * interface while forgetting the mirror drifts silently into every caller's
+ * row (#537 was exactly that, one hop earlier).
+ *
+ * Resolves to `false` rather than `never` on a mismatch on purpose: `never` is
+ * assignable to everything, so a `never`-based pin satisfies any annotation
+ * and detects nothing.
+ *
+ * Usage — one line per interface/mirror twin, assigned `true`:
+ *
+ *   export const FOO_NODE_MIRROR_IS_EXACT: ExactKeys<
+ *     keyof FooNode,
+ *     keyof typeof FooNodeSchema.shape
+ *   > = true;
+ *
+ * Export the const rather than declaring it locally: an unused local would be
+ * deleted by a future no-unused-vars sweep, taking the pin with it.
+ */
+export type ExactKeys<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+
+/**
  * Server-recognized timeframe enum values for investments queries.
  *
  * Not all values are accepted by every query — for example, the
@@ -90,3 +117,13 @@ export const SecurityNodeSchema = z.looseObject({
   lastUpdate: z.number().nullable(),
   marketInfo: MarketInfoNodeSchema,
 });
+
+/** See {@link ExactKeys}. Pins the two shared investments nodes. */
+export const MARKET_INFO_NODE_MIRROR_IS_EXACT: ExactKeys<
+  keyof MarketInfoNode,
+  keyof typeof MarketInfoNodeSchema.shape
+> = true;
+export const SECURITY_NODE_MIRROR_IS_EXACT: ExactKeys<
+  keyof SecurityNode,
+  keyof typeof SecurityNodeSchema.shape
+> = true;

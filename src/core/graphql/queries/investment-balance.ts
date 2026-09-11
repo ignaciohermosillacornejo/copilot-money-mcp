@@ -16,7 +16,7 @@
 import { z } from 'zod';
 import type { GraphQLClient } from '../client.js';
 import { INVESTMENT_BALANCE } from '../operations.generated.js';
-import type { TimeFrame } from './_shared.js';
+import type { TimeFrame, ExactKeys } from './_shared.js';
 
 export interface InvestmentBalanceNode {
   id: string;
@@ -57,3 +57,9 @@ export const InvestmentBalanceNodeSchema = z.looseObject({
 export const InvestmentBalanceResponseSchema = z.looseObject({
   investmentBalance: z.array(InvestmentBalanceNodeSchema),
 });
+
+/** See {@link ExactKeys}. */
+export const INVESTMENT_BALANCE_NODE_MIRROR_IS_EXACT: ExactKeys<
+  keyof InvestmentBalanceNode,
+  keyof typeof InvestmentBalanceNodeSchema.shape
+> = true;

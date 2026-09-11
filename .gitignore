@@ -106,8 +106,12 @@ LOCK
 *.log
 # LevelDB writes BOTH a numbered `000003.log` (caught by *.log above) and a
 # bare uppercase `LOG`, which no rule here matched — so a killed test run left
-# one behind and `git add -A` swept it into a commit.
+# one behind and `git add -A` swept it into a commit. The artifact is always a
+# FILE; the negation keeps a legitimately-named source directory trackable,
+# since a bare pattern would otherwise swallow it whole (same case-insensitive
+# over-match the manifest-utils.ts whitelist below documents).
 LOG
+!LOG/
 
 # Whitelist scripts whose names happen to match earlier ignore patterns
 # (the MANIFEST-* LevelDB rule above matches "manifest-utils.ts" on case-

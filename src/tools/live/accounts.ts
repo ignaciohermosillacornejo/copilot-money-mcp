@@ -101,7 +101,11 @@ export interface GetAccountsLiveResult {
   total_balance: number;
   total_assets: number;
   total_liabilities: number;
-  accounts: GetAccountsLiveRow[];
+  // Partial: these come out of projectRows, which widens back to T while
+  // carrying only the selected keys — same reason getAccounts returns
+  // Partial<Account>[]. Declared as full rows the type would promise the
+  // sync/plumbing fields the default preset never returns.
+  accounts: Partial<GetAccountsLiveRow>[];
   _cache_oldest_fetched_at: string;
   _cache_newest_fetched_at: string;
   _cache_hit: boolean;
