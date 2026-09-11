@@ -53,6 +53,46 @@ const mockTransactions: Transaction[] = [
   },
 ];
 
+/**
+ * One transaction carrying EVERY field the v3 default preset keeps (#604), so
+ * deleting any entry from DEFAULT_TRANSACTION_FIELDS has a fixture row that
+ * can actually catch it. Both flags are `true`, which is also why the test
+ * using this row turns both default filters off — a row that is excluded AND
+ * an internal transfer is invisible to a default call, which is exactly the
+ * case where the flags carry information.
+ */
+const fullyPopulatedTransaction: Transaction = {
+  transaction_id: 'txn_full',
+  amount: 42.0,
+  date: '2024-03-01',
+  name: 'Synthetic Full Row',
+  category_id: 'food_dining',
+  account_id: 'acc1',
+  item_id: 'item_acc1',
+  pending: true,
+  excluded: true,
+  internal_transfer: true,
+};
+
+/**
+ * The 10 keys a default cache row carries. Written out LITERALLY rather than
+ * derived from DEFAULT_TRANSACTION_FIELDS on purpose: an expectation derived
+ * from the preset moves with it, so deleting a preset entry would still pass
+ * — the vacuous-guard shape #635 shipped. Written out, a deletion fails here.
+ */
+const CACHE_PRESET_NAMES = [
+  'transaction_id',
+  'date',
+  'amount',
+  'name',
+  'category_name',
+  'account_id',
+  'item_id',
+  'pending',
+  'excluded',
+  'internal_transfer',
+];
+
 const mockAccounts: Account[] = [
   {
     account_id: 'acc1',
@@ -388,6 +428,23 @@ describe('CopilotMoneyTools', () => {
       expect(result.transactions[0]).not.toHaveProperty('category_id');
       expect(result.transactions[0]).not.toHaveProperty('normalized_merchant');
       expect(result.transactions[0]).not.toHaveProperty('plaid_category_id');
+    });
+
+    test('a document carrying every preset field yields exactly those 10 keys (#604)', async () => {
+      // Both flags are true on this row, so a DEFAULT call filters it out —
+      // turn both filters off to see it, the same caller who is the only one
+      // the two booleans inform.
+      (db as any)._transactions = [fullyPopulatedTransaction];
+      const result = await tools.getTransactions({
+        exclude_excluded: false,
+        exclude_transfers: false,
+      });
+      expect(result.transactions).toHaveLength(1);
+      expect(Object.keys(result.transactions[0]!).sort()).toEqual([...CACHE_PRESET_NAMES].sort());
+      expect(result.transactions[0]!.excluded).toBe(true);
+      expect(result.transactions[0]!.internal_transfer).toBe(true);
+      expect(result.transactions[0]!.item_id).toBe('item_acc1');
+      expect(result.transactions[0]!.pending).toBe(true);
     });
 
     test('fields: ["all"] still returns the full document (#604)', async () => {

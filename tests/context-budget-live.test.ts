@@ -329,7 +329,14 @@ const LIVE_BUDGETS: Record<string, number> = {
   // Tier-2 commit lowered the cache-side budget in tests/context-budget.test.ts
   // but left this one at its pre-diet ceiling, so the live saving was ungated.
   get_accounts_live: 430,
-  get_transactions_live: 715,
+  // 715 -> 455 by #604: default rows project through DEFAULT_TRANSACTION_FIELDS
+  // (10 names, 2 of them synthesized here), instead of the ~20-field full row.
+  // Measured 410 against the stub rows above; 695 with the projection taken
+  // back to `fields: ["all"]`, i.e. what this tool returned before the flip —
+  // so the 715 ceiling could never have caught a regression putting the full
+  // row back. Same gap the get_accounts_live and recurring entries above
+  // closed, on the tool the flip was actually about. 455 is measured +~11%.
+  get_transactions_live: 455,
 };
 
 const coveredDefs: ToolDefinition[] = COVERED_LIVE_TOOLS.map((name) => {

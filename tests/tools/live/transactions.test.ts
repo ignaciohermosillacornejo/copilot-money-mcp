@@ -944,13 +944,13 @@ describe('LiveTransactionsTools — field selection (fields param)', () => {
     expect('_field_warning' in result).toBe(false);
   });
 
-  test('"default" token → the 8 preset names live rows carry, no warning for the 2 cache-only ones', async () => {
+  test('"default" token → the 10 preset names, both synthesized ones included (#604)', async () => {
     const live = await mkLiveReturning([mkFsNode()]);
     const tools = new LiveTransactionsTools(live);
     const result = await tools.getTransactions({ ...range, fields: ['default'] });
     expect(Object.keys(result.transactions[0]!).sort()).toEqual([...LIVE_PRESET_NAMES].sort());
-    // excluded/internal_transfer come from the preset (token expansion), not
-    // an explicit request — their absence must NOT warn.
+    // Both synthesized names come from the preset (token expansion) and are
+    // real row fields since #604, so nothing here can warn.
     expect('_field_warning' in result).toBe(false);
   });
 

@@ -30,7 +30,7 @@ Give the user a 30-second financial check-in. One number, a few flags, prospecti
 
 2. **Pull data.** Use these MCP tools in parallel:
    - `get_accounts` — all accounts with balances (for net worth and available cash)
-   - `get_transactions` with `period: "this_month"`, `exclude_transfers: true` — current month spending
+   - `get_transactions` with `period: "this_month"`, `exclude_transfers: true` — current month spending. No `fields` argument needed anywhere in this skill: everything it computes (sums, per-category totals, merchant names, dates) is in the v3.0.0 default row
    - `get_transactions` with `period: "last_month"`, `exclude_transfers: true` — last month for comparison
    - `get_transactions` with `period: "last_90_days"`, `exclude_transfers: true` — for rolling averages
    - `get_categories` with `view: "list"`, `period: "this_month"` — category spending this month
@@ -244,5 +244,5 @@ After presenting, silently check if any profile sections should be updated:
 5. **First run is special.** If profile is mostly empty, spend time bootstrapping — ask the user to confirm detected income, obligations, and account roles before computing Free Money. This is a one-time cost for accuracy.
 6. **Scheduled runs are silent.** When triggered by a schedule (not interactive), output the pulse as a report without asking questions. Use whatever profile data is available. Note any profile gaps as "could not compute X — profile missing Y."
 7. **Income is intentionally uncategorized.** Income transactions (negative amounts) have no category on purpose. Never flag them as uncategorized or missing a category.
-8. **Large datasets go to disk.** MCP tool responses >100KB are saved to temp files instead of returned inline. Use Python via Bash to process these files. This happens routinely with `get_transactions`; `get_accounts` and `get_recurring_transactions` went terse by default in v3.0.0 and are much smaller now, though a request that opts fat fields back in via `fields` can still cross the threshold.
+8. **Large datasets go to disk.** MCP tool responses >100KB are saved to temp files instead of returned inline. Use Python via Bash to process these files. `get_transactions`, `get_accounts` and `get_recurring_transactions` all went terse by default in v3.0.0 and are much smaller now (a 100-row transaction page measures ~28KB), so this is no longer routine — but a wide window, or a request that opts fat fields back in via `fields`, can still cross the threshold.
 9. **Reference existing budgets.** The user has budgets set up in Copilot Money (`get_budgets`). Use these to inform spending flags — if a category has a budget, flag when spending exceeds or approaches the budget amount, not just when it exceeds the 90-day average.
