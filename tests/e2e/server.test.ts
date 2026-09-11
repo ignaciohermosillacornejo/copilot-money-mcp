@@ -391,7 +391,14 @@ describe('CopilotMoneyServer E2E', () => {
     test('account balance totals are correct', async () => {
       const result = await tools.getAccounts();
 
-      const calculatedTotal = result.accounts.reduce((sum, acc) => sum + acc.current_balance, 0);
+      // Rows are projected partials as of v3, so `current_balance` is typed
+      // optional even though the default preset includes it. Assert presence
+      // rather than coalescing: a projection regression that drops the field
+      // should name itself here, not surface as an arithmetic mismatch.
+      const calculatedTotal = result.accounts.reduce((sum, acc) => {
+        expect(acc.current_balance).toBeDefined();
+        return sum + (acc.current_balance ?? 0);
+      }, 0);
 
       expect(Math.abs(result.total_balance - calculatedTotal)).toBeLessThan(0.01);
     });
