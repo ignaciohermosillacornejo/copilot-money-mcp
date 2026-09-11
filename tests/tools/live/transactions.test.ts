@@ -889,9 +889,10 @@ function mkFsNode(partial: Partial<TransactionNode> = {}): TransactionNode {
   });
 }
 
-/** The 8 cache-preset names live rows actually carry (excluded and
- *  internal_transfer are cache-document-only — the v3 parity gap). */
-const LIVE_PRESET_INTERSECTION = [
+/** All 10 cache-preset names a live row carries since #604 — the last two
+ *  are synthesized here because Copilot's GraphQL Transaction type has no
+ *  equivalent (see SYNTHESIZED FIELDS in src/tools/live/transactions.ts). */
+const LIVE_PRESET_NAMES = [
   'transaction_id',
   'date',
   'amount',
@@ -900,6 +901,8 @@ const LIVE_PRESET_INTERSECTION = [
   'account_id',
   'item_id',
   'pending',
+  'excluded',
+  'internal_transfer',
 ];
 
 describe('LiveTransactionsTools — field selection (fields param)', () => {
@@ -910,9 +913,7 @@ describe('LiveTransactionsTools — field selection (fields param)', () => {
     const tools = new LiveTransactionsTools(live);
     const result = await tools.getTransactions({ ...range });
     expect(result.count).toBe(1);
-    expect(Object.keys(result.transactions[0]!).sort()).toEqual(
-      [...LIVE_PRESET_INTERSECTION].sort()
-    );
+    expect(Object.keys(result.transactions[0]!).sort()).toEqual([...LIVE_PRESET_NAMES].sort());
     expect('_field_warning' in result).toBe(false);
   });
 
@@ -947,9 +948,7 @@ describe('LiveTransactionsTools — field selection (fields param)', () => {
     const live = await mkLiveReturning([mkFsNode()]);
     const tools = new LiveTransactionsTools(live);
     const result = await tools.getTransactions({ ...range, fields: ['default'] });
-    expect(Object.keys(result.transactions[0]!).sort()).toEqual(
-      [...LIVE_PRESET_INTERSECTION].sort()
-    );
+    expect(Object.keys(result.transactions[0]!).sort()).toEqual([...LIVE_PRESET_NAMES].sort());
     // excluded/internal_transfer come from the preset (token expansion), not
     // an explicit request — their absence must NOT warn.
     expect('_field_warning' in result).toBe(false);
@@ -963,7 +962,7 @@ describe('LiveTransactionsTools — field selection (fields param)', () => {
       fields: ['default', 'user_notes'],
     });
     expect(Object.keys(result.transactions[0]!).sort()).toEqual(
-      [...LIVE_PRESET_INTERSECTION, 'user_notes'].sort()
+      [...LIVE_PRESET_NAMES, 'user_notes'].sort()
     );
   });
 
@@ -990,31 +989,30 @@ describe('LiveTransactionsTools — field selection (fields param)', () => {
     expect(Object.keys(result.transactions[0]!)).toEqual(['transaction_id']);
   });
 
-  test('explicitly requesting cache-only preset names (excluded/internal_transfer) warns', async () => {
-    // Pins the v3 parity gap: these 2 of the 10 DEFAULT_TRANSACTION_FIELDS
-    // names are cache-document fields with no live-row equivalent, so an
-    // EXPLICIT request for them is honestly reported as unknown here.
+  test('explicitly requesting the two synthesized names no longer warns (#604)', async () => {
+    // This test used to pin the opposite: before #604 these 2 of the 10
+    // DEFAULT_TRANSACTION_FIELDS names had no live-row equivalent, so an
+    // explicit request was honestly reported as unknown. Both are synthesized
+    // now, so reporting them would be a lie — the parity gap is closed, and
+    // this is where its closure is visible to a caller.
     const live = await mkLiveReturning([mkFsNode()]);
     const tools = new LiveTransactionsTools(live);
     const result = await tools.getTransactions({
       ...range,
       fields: ['transaction_id', 'excluded', 'internal_transfer'],
     });
-    // Assert the ignored-list itself (not just substring presence — the hint
-    // below also mentions both names) AND the cache-mode redirect, so a
-    // mode-switching caller is told these are real fields elsewhere.
-    expect(result._field_warning).toContain(
-      'Unknown field name(s) ignored: excluded, internal_transfer'
-    );
-    expect(result._field_warning).toContain(
-      'excluded and internal_transfer exist only in cache-mode get_transactions'
-    );
-    expect(Object.keys(result.transactions[0]!)).toEqual(['transaction_id']);
+    expect('_field_warning' in result).toBe(false);
+    expect(Object.keys(result.transactions[0]!)).toEqual([
+      'transaction_id',
+      'excluded',
+      'internal_transfer',
+    ]);
   });
 
-  // Engine-layer semantics again: through dispatch `defineTool` drops the
-  // empty array, and get_transactions_live's omitted path is also "full rows",
-  // so both layers agree for THIS tool (PR B review, Minor 4).
+  // Engine-layer semantics: a DIRECT method call with `fields: []` reaches
+  // the engine's "no projection" rule, while a dispatched call never does —
+  // `defineTool` drops the empty array first, so it takes the omitted path,
+  // which since #604 is the terse preset (PR B review, Minor 4).
   test('empty fields array → no projection (engine semantics, matches cache mode)', async () => {
     const live = await mkLiveReturning([mkFsNode()]);
     const tools = new LiveTransactionsTools(live);
@@ -1112,14 +1110,15 @@ describe('LIVE_TRANSACTION_KNOWN_FIELDS — derived from the enrichment mapper',
     );
   });
 
-  test('covers 8 of the 10 DEFAULT_TRANSACTION_FIELDS preset names (the v3 parity gap)', () => {
-    for (const name of LIVE_PRESET_INTERSECTION) {
+  test('covers all 10 DEFAULT_TRANSACTION_FIELDS preset names (#604 parity)', () => {
+    for (const name of LIVE_PRESET_NAMES) {
       expect(LIVE_TRANSACTION_KNOWN_FIELDS.has(name)).toBe(true);
     }
-    // Cache-document-only flags — live rows model transfers via type ===
-    // 'INTERNAL_TRANSFER' and exclusion via Category.isExcluded instead.
-    expect(LIVE_TRANSACTION_KNOWN_FIELDS.has('excluded')).toBe(false);
-    expect(LIVE_TRANSACTION_KNOWN_FIELDS.has('internal_transfer')).toBe(false);
+    // The two synthesized names are in the set because it is DERIVED from
+    // ENRICHED_FIELD_MAPPERS — adding a mapper is the only way to add a
+    // selectable name, so the set cannot desync from the row.
+    expect(LIVE_TRANSACTION_KNOWN_FIELDS.has('excluded')).toBe(true);
+    expect(LIVE_TRANSACTION_KNOWN_FIELDS.has('internal_transfer')).toBe(true);
   });
 });
 
@@ -1213,5 +1212,112 @@ describe('LiveTransactionsTools — date-less query rejection', () => {
         period: 'this_year',
       })
     ).resolves.toBeDefined();
+  });
+});
+
+/**
+ * #604 live/cache preset parity: `excluded` and `internal_transfer` are not
+ * on Copilot's GraphQL Transaction type at all, so live synthesizes both —
+ * otherwise `fields: ["default"]` would mean 10 keys in cache mode and 8 here.
+ *
+ * Both default filters hide exactly the rows these flags describe, so every
+ * test below has to turn a filter OFF to see a `true` — which is the same
+ * reason the tool description warns that the flags only carry information for
+ * a caller who passes exclude_excluded: false / exclude_transfers: false.
+ */
+describe('LiveTransactionsTools — synthesized excluded / internal_transfer (#604)', () => {
+  const range = { start_date: '2025-01-01', end_date: '2025-12-31' };
+
+  const CATEGORIES = [
+    {
+      id: 'cat-excluded',
+      name: 'Transfer',
+      templateId: null,
+      colorName: null,
+      icon: null,
+      isExcluded: true,
+      isRolloverDisabled: false,
+      canBeDeleted: true,
+      budget: null,
+    },
+    {
+      id: 'cat-normal',
+      name: 'Food',
+      templateId: 'Food',
+      colorName: 'ORANGE2',
+      icon: null,
+      isExcluded: false,
+      isRolloverDisabled: false,
+      canBeDeleted: true,
+      budget: null,
+    },
+  ];
+
+  async function mkLiveWithCategories(nodes: TransactionNode[]): Promise<LiveCopilotDatabase> {
+    const live = await mkLiveReturning(nodes);
+    live.getCategoriesCache().invalidate();
+    await live.getCategoriesCache().read(() => Promise.resolve(CATEGORIES));
+    return live;
+  }
+
+  test('internal_transfer is true exactly when type === INTERNAL_TRANSFER', async () => {
+    const live = await mkLiveWithCategories([
+      mkNode({ id: 't-transfer', type: 'INTERNAL_TRANSFER', categoryId: 'cat-normal' }),
+      mkNode({ id: 't-regular', type: 'REGULAR', categoryId: 'cat-normal' }),
+      mkNode({ id: 't-income', type: 'INCOME', categoryId: 'cat-normal' }),
+    ]);
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({ ...range, exclude_transfers: false });
+    const byId = new Map(result.transactions.map((r) => [r.transaction_id, r]));
+    expect(byId.get('t-transfer')!.internal_transfer).toBe(true);
+    expect(byId.get('t-regular')!.internal_transfer).toBe(false);
+    expect(byId.get('t-income')!.internal_transfer).toBe(false);
+  });
+
+  test('excluded is true exactly when the row sits in a user-excluded category', async () => {
+    const live = await mkLiveWithCategories([
+      mkNode({ id: 't-excluded', categoryId: 'cat-excluded' }),
+      mkNode({ id: 't-normal', categoryId: 'cat-normal' }),
+      mkNode({ id: 't-uncategorized', categoryId: null }),
+    ]);
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({ ...range, exclude_excluded: false });
+    const byId = new Map(result.transactions.map((r) => [r.transaction_id, r]));
+    expect(byId.get('t-excluded')!.excluded).toBe(true);
+    expect(byId.get('t-normal')!.excluded).toBe(false);
+    // No category at all is not excluded — matching the filter, which keeps
+    // uncategorized rows.
+    expect(byId.get('t-uncategorized')!.excluded).toBe(false);
+  });
+
+  test('the flag agrees with the filter it is derived from', async () => {
+    // The point of sharing one category index: every row the default response
+    // KEEPS must read `excluded: false`, or the two halves have drifted.
+    const live = await mkLiveWithCategories([
+      mkNode({ id: 't-excluded', categoryId: 'cat-excluded' }),
+      mkNode({ id: 't-normal', categoryId: 'cat-normal' }),
+    ]);
+    const tools = new LiveTransactionsTools(live);
+    const kept = await tools.getTransactions({ ...range });
+    expect(kept.transactions.map((r) => r.transaction_id)).toEqual(['t-normal']);
+    expect(kept.transactions.every((r) => r.excluded === false)).toBe(true);
+  });
+
+  test('both names are in the default row, and both are selectable by name', async () => {
+    const live = await mkLiveWithCategories([mkNode({ id: 't1', categoryId: 'cat-normal' })]);
+    const tools = new LiveTransactionsTools(live);
+    const preset = await tools.getTransactions({ ...range });
+    expect(Object.keys(preset.transactions[0]!).sort()).toEqual([...LIVE_PRESET_NAMES].sort());
+
+    const named = await tools.getTransactions({
+      ...range,
+      fields: ['excluded', 'internal_transfer'],
+    });
+    expect(named.transactions[0]).toEqual({
+      excluded: false,
+      internal_transfer: false,
+    } as never);
+    // Both are real row fields now, so naming them must NOT warn.
+    expect('_field_warning' in named).toBe(false);
   });
 });
