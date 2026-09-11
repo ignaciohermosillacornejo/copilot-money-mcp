@@ -80,7 +80,7 @@ Use these MCP tools:
 
 - `refresh_database` — ensure the local cache is current.
 - `get_transactions` with `query: "amazon"` and the same date window. Expect >100KB responses — the MCP saves them to disk; read via `jq` or Python, not into context.
-- `get_accounts` with `fields: ["default", "mask"]` — map `account_mask` back to the payment-method suffix in Amazon data (`Visa - XXXX` in a shipment's `payment_method` → Copilot account with `mask: XXXX`). The `fields` argument is required: `mask` is not in the default row as of v3.0.0, and without it the Phase 4 #3 and Phase 6 account checks below have nothing to compare against.
+- `get_accounts` with `fields: ["default", "mask"]` — map `account_mask` back to the payment-method suffix in Amazon data (`Visa - XXXX` in a shipment's `payment_method` → Copilot account with `mask: XXXX`). The `fields` argument is required: `mask` is not in the default row as of v3.0.0, and without it the Phase 4 #3 and Phase 6 account checks below have nothing to compare against. This skill writes, and `--write` implies `--live-reads`, so the tool you actually reach is `get_accounts_live`: `mask` is selectable there too, but the identity key is `id` (not `account_id`) and there is no `institution_name`.
 - `get_categories` with `view: "list"` — capture the full list of user-created category IDs. Note these IDs; **Plaid taxonomy IDs will not stick on writes.**
 
 Save to `/tmp/amazon-sync/copilot-amazon-txns.json`, `/tmp/amazon-sync/accounts.json`, and `/tmp/amazon-sync/categories.json`.
@@ -212,7 +212,7 @@ Phrase each rule as a simple substring, seller-name, or field match so a reader 
 4. **Tight match window.** Amount within $0.02; dates in `[ship - 2, ship + 5]`. Looser windows produce false positives. "No match" is a valid outcome.
 5. **Exact payment-method match.** A shipment's `payment_method` must contain the Copilot `account_mask`. Do not match across accounts.
 6. **User-created category IDs only.** `update_transaction` and `split_transaction` reject Plaid taxonomy IDs. If the needed category does not exist, `create_category` first.
-7. **Large MCP responses go to disk.** `get_transactions` and `get_accounts` routinely exceed 100KB; read via Python or `jq`. Do not try to pull them into context.
+7. **Large MCP responses go to disk.** Responses over 100KB are saved to temp files instead of returned inline — `get_transactions` still does this routinely. Read via Python or `jq`; do not try to pull them into context. (`get_accounts` shed the embedded `holdings` array in v3.0.0, so it is much smaller than it used to be.)
 8. **Use Python for any aggregation over ~10 rows.** Match scoring, amount comparisons, combo-sum search, allocation math — all via the `Bash` tool with Python.
 9. **Preserve full merchant names.** Show the Copilot `original_name` or `name`, not `normalized_merchant`. Users need the full suffix after `AMAZON MKTPL*` to recall which order a charge corresponds to.
 10. **Report staleness explicitly.** If the export's latest `ship_date` is more than 3 days before the Copilot data's latest Amazon transaction, tell the user the export is stale and suggest a fresh download before acting on recent unmatched transactions.

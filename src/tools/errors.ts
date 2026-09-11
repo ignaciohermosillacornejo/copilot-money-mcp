@@ -56,8 +56,11 @@ export function graphQLErrorToMcpError(e: GraphQLError): string {
 /**
  * Arguments removed in v3, mapped to the migration hint for each. Consumed
  * by {@link rejectRemovedArgs}; `get_accounts`' retired `include_logos` is
- * the first entry (#597 Tier 2) and further removed read-tool args (e.g.
- * `get_transactions`' `compact`) are expected to join it.
+ * the only entry (#597 Tier 2). Tool-scoped on purpose: what Task 6 reuses
+ * for `get_transactions`' retired `compact` is {@link rejectRemovedArgs},
+ * the generic half — it should add a sibling `REMOVED_TRANSACTION_ARGS`
+ * rather than widen this map, whose name would then be a lie about what a
+ * caller of `get_accounts` can trip over.
  */
 export const REMOVED_ACCOUNT_ARGS = {
   // Covers BOTH audiences, because the guard fires on PRESENCE: a caller

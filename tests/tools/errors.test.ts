@@ -125,7 +125,9 @@ describe('graphQLErrorToMcpError', () => {
 });
 
 // #597 Tier 2: the shared removed-argument guard get_accounts' retired
-// include_logos uses, and Task 6 (get_transactions' retired compact) reuses.
+// include_logos uses. Task 6 reuses this FUNCTION for get_transactions'
+// retired compact, with its own REMOVED_TRANSACTION_ARGS map — not by adding
+// an entry to the account-scoped one.
 describe('rejectRemovedArgs', () => {
   test('is silent when no removed argument is present', () => {
     expect(() =>
