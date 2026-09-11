@@ -7,6 +7,8 @@ import { LiveCopilotDatabase } from '../../../src/core/live-database.js';
 import type { GraphQLClient } from '../../../src/core/graphql/client.js';
 import type { CopilotDatabase } from '../../../src/core/database.js';
 import type { AccountNode } from '../../../src/core/graphql/queries/accounts.js';
+import { getAccountsTool } from '../../../src/tools/registry/accounts-system.js';
+import { getAccountsLiveTool } from '../../../src/tools/registry/live.js';
 
 const A = (id: string, opts: Partial<AccountNode> = {}): AccountNode => ({
   id,
@@ -137,13 +139,16 @@ describe('LiveAccountsTools.getAccounts', () => {
 
   test('regression A2: limit:0 mapped to null for charge cards', async () => {
     // Charge cards (e.g., AmEx Platinum) have no preset limit; server returns 0, project null to prevent /0.
+    // `limit` isn't in the v3 default preset (DEFAULT_ACCOUNT_LIVE_FIELDS), so
+    // this test opts in explicitly — the normalization itself must still run
+    // even for a non-default field, per the derive-before-project rule.
     const live = mkLive([
       A('chk', { type: 'DEPOSITORY', balance: 5000, limit: null }),
       A('cc-with-limit', { type: 'CREDIT', balance: 100, limit: 5000 }),
       A('charge', { type: 'CREDIT', balance: 1500, limit: 0 }),
     ]);
     const tools = new LiveAccountsTools(live);
-    const result = await tools.getAccounts({});
+    const result = await tools.getAccounts({ fields: ['default', 'limit'] });
 
     const charge = result.accounts.find((a) => a.id === 'charge');
     const ccLimit = result.accounts.find((a) => a.id === 'cc-with-limit');
@@ -156,9 +161,136 @@ describe('LiveAccountsTools.getAccounts', () => {
     expect(chk?.limit).toBeNull();
   });
 
+  test('regression A2: the limit:0 normalization survives even when limit is excluded by default', async () => {
+    // Same fixture as above but WITHOUT opting into `limit` — this only
+    // proves the normalization runs before projection, not that it's
+    // visible; `limit` itself is legitimately absent from a default row.
+    const live = mkLive([A('charge', { type: 'CREDIT', balance: 1500, limit: 0 })]);
+    const tools = new LiveAccountsTools(live);
+    const result = await tools.getAccounts({});
+    expect(result.accounts[0]).not.toHaveProperty('limit');
+  });
+
+  test('default rows drop sync/plumbing fields', async () => {
+    const live = mkLive([
+      A('a', {
+        hasHistoricalUpdates: true,
+        hasLiveBalance: true,
+        liveBalance: true,
+        latestBalanceUpdate: 1_745_539_200_000,
+        isManual: true,
+      }),
+    ]);
+    const tools = new LiveAccountsTools(live);
+
+    const result = await tools.getAccounts({});
+    expect(result.accounts[0]).not.toHaveProperty('hasHistoricalUpdates');
+    expect(result.accounts[0]).not.toHaveProperty('hasLiveBalance');
+    expect(result.accounts[0]).not.toHaveProperty('liveBalance');
+    expect(result.accounts[0]).not.toHaveProperty('latestBalanceUpdate');
+    expect(result.accounts[0]).not.toHaveProperty('isManual');
+    // Everything in the preset survives.
+    expect(result.accounts[0]).toMatchObject({
+      id: 'a',
+      name: 'Account a',
+      type: 'DEPOSITORY',
+      subType: 'checking',
+      balance: 100,
+      institutionId: 'inst1',
+      itemId: 'item1',
+      isUserHidden: false,
+    });
+  });
+
+  test('sync/plumbing fields are reachable via an explicit fields request', async () => {
+    const live = mkLive([
+      A('a', {
+        hasHistoricalUpdates: true,
+        hasLiveBalance: true,
+        liveBalance: true,
+        latestBalanceUpdate: 1_745_539_200_000,
+        isManual: true,
+      }),
+    ]);
+    const tools = new LiveAccountsTools(live);
+
+    const result = await tools.getAccounts({
+      fields: [
+        'default',
+        'hasHistoricalUpdates',
+        'hasLiveBalance',
+        'liveBalance',
+        'latestBalanceUpdate',
+        'isManual',
+      ],
+    });
+    expect(result.accounts[0]?.hasHistoricalUpdates).toBe(true);
+    expect(result.accounts[0]?.hasLiveBalance).toBe(true);
+    expect(result.accounts[0]?.liveBalance).toBe(true);
+    expect(result.accounts[0]?.latestBalanceUpdate).toBe(1_745_539_200_000);
+    expect(result.accounts[0]?.isManual).toBe(true);
+  });
+
+  test('an unrecognized fields name reports _field_warning', async () => {
+    const live = mkLive([A('a')]);
+    const tools = new LiveAccountsTools(live);
+
+    const result = await tools.getAccounts({ fields: ['id', 'totally_bogus_field'] });
+    expect(result._field_warning).toContain('totally_bogus_field');
+  });
+
+  test('_field_warning fires even on an empty result set (knownFields, not row-key fallback)', async () => {
+    // Without ACCOUNT_LIVE_KNOWN_FIELDS wired, unknown-name detection falls
+    // back to checking requested names against the returned ROWS' own keys —
+    // which stays silent when there are no rows to check against. A
+    // non-matching account_type filter is the one condition that
+    // distinguishes the two. Same reasoning as the get_recurring_live fix in
+    // #606 review.
+    const live = mkLive([A('a', { type: 'DEPOSITORY' })]);
+    const tools = new LiveAccountsTools(live);
+
+    const result = await tools.getAccounts({
+      account_type: 'NO_SUCH_TYPE',
+      fields: ['totally_bogus_field'],
+    });
+    expect(result.count).toBe(0);
+    expect(result._field_warning).toContain('totally_bogus_field');
+  });
+
+  test('"all" returns the full row, including sync/plumbing fields', async () => {
+    const live = mkLive([A('a', { hasHistoricalUpdates: true })]);
+    const tools = new LiveAccountsTools(live);
+
+    const result = await tools.getAccounts({ fields: ['all'] });
+    expect(result.accounts[0]?.hasHistoricalUpdates).toBe(true);
+  });
+
   test('schema definition exposes filter args', () => {
     const schema = createLiveAccountsToolSchema();
     expect(schema.name).toBe('get_accounts_live');
     expect(schema.inputSchema).toBeDefined();
+  });
+});
+
+describe('get_accounts_live fields param — parity with get_accounts', () => {
+  // Compare through the REGISTRY defs (what the server actually lists), not
+  // the shared constant, so forking either side back to a private copy that
+  // then drifts fails here. Same pattern as the transactions parity suite in
+  // tests/tools/live/transactions.test.ts.
+  const cacheFragment = getAccountsTool.schema.inputSchema.properties?.fields;
+  const liveFragment = getAccountsLiveTool.schema.inputSchema.properties?.fields;
+
+  test('both tools expose a fields param', () => {
+    expect(cacheFragment).toBeDefined();
+    expect(liveFragment).toBeDefined();
+  });
+
+  test('cache and live account fields descriptions stay in lockstep', () => {
+    expect(cacheFragment).toEqual(liveFragment);
+  });
+
+  test('include_logos does not exist on either schema (retired in v3)', () => {
+    expect(getAccountsTool.schema.inputSchema.properties?.include_logos).toBeUndefined();
+    expect(getAccountsLiveTool.schema.inputSchema.properties?.include_logos).toBeUndefined();
   });
 });

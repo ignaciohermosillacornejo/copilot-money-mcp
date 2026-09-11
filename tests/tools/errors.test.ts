@@ -1,5 +1,9 @@
 import { describe, test, expect } from 'bun:test';
-import { graphQLErrorToMcpError } from '../../src/tools/errors.js';
+import {
+  graphQLErrorToMcpError,
+  rejectRemovedArgs,
+  REMOVED_ACCOUNT_ARGS,
+} from '../../src/tools/errors.js';
 import { GraphQLError } from '../../src/core/graphql/client.js';
 
 // Assertions here check attribution fragments + raw-server-text inclusion,
@@ -117,5 +121,34 @@ describe('graphQLErrorToMcpError', () => {
       // Every branch surfaces the underlying error text.
       expect(msg).toContain('detail');
     }
+  });
+});
+
+// #597 Tier 2: the shared removed-argument guard get_accounts' retired
+// include_logos uses, and Task 6 (get_transactions' retired compact) reuses.
+describe('rejectRemovedArgs', () => {
+  test('is silent when no removed argument is present', () => {
+    expect(() =>
+      rejectRemovedArgs({ account_type: 'depository' }, REMOVED_ACCOUNT_ARGS)
+    ).not.toThrow();
+  });
+
+  test('is silent on an empty args object', () => {
+    expect(() => rejectRemovedArgs({}, REMOVED_ACCOUNT_ARGS)).not.toThrow();
+  });
+
+  test('throws naming the removed argument and its migration hint', () => {
+    expect(() => rejectRemovedArgs({ include_logos: true }, REMOVED_ACCOUNT_ARGS)).toThrow(
+      /include_logos.*removed in v3\.0\.0.*fields: \["default", "logo"\]/s
+    );
+  });
+
+  test('throws even when the removed argument is explicitly false/undefined (presence, not truthiness)', () => {
+    // A caller migrating from `include_logos: false` (the old default) should
+    // still be told to switch to `fields` — the key being PRESENT is the
+    // signal, not whatever value it holds.
+    expect(() => rejectRemovedArgs({ include_logos: false }, REMOVED_ACCOUNT_ARGS)).toThrow(
+      /include_logos/
+    );
   });
 });

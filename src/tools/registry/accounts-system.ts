@@ -7,6 +7,7 @@
  */
 
 import { defineTool } from './types.js';
+import { ACCOUNT_FIELDS_PARAM_SCHEMA } from '../field-selection.js';
 
 export const getCacheInfoTool = defineTool({
   schema: {
@@ -58,8 +59,14 @@ export const getAccountsTool = defineTool({
       '(checking, savings, credit, investment). Checks both account_type ' +
       'and subtype fields for better filtering (e.g., finds checking accounts ' +
       "even when account_type is 'depository'). By default, hidden accounts are excluded. " +
-      'Institution logos (base64-encoded images) are omitted by default to keep responses compact; ' +
-      'pass include_logos: true to include them.',
+      'Default rows are terse: account_id, name, account_type, subtype, current_balance, ' +
+      'institution_name, iso_currency_code, item_id. That EXCLUDES the embedded `holdings` ' +
+      'array (get_holdings covers it), the denormalized `official_name` / `original_*` name ' +
+      'dupes, `user_id`, and institution `logo` images (base64-encoded, several KB each — this ' +
+      'is where the removed include_logos flag went). Request any of them with ' +
+      'fields: ["default", "holdings"] / ["default", "logo"] / etc., or "all" / "*" for full rows. ' +
+      '`include_logos` was removed in v3.0.0 — passing it now raises an error naming this ' +
+      'migration.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -74,13 +81,7 @@ export const getAccountsTool = defineTool({
           description: 'Include hidden accounts (default: false)',
           default: false,
         },
-        include_logos: {
-          type: 'boolean',
-          description:
-            'Include institution logo images (base64-encoded, several KB each). ' +
-            'Omitted by default to keep responses compact (default: false)',
-          default: false,
-        },
+        fields: ACCOUNT_FIELDS_PARAM_SCHEMA,
       },
     },
     annotations: {

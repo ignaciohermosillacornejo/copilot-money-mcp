@@ -52,3 +52,33 @@ export function graphQLErrorToMcpError(e: GraphQLError): string {
       return `Copilot API request failed: ${e.message}`;
   }
 }
+
+/**
+ * Arguments removed in v3, mapped to the migration hint for each. Consumed
+ * by {@link rejectRemovedArgs}; `get_accounts`' retired `include_logos` is
+ * the first entry (#597 Tier 2) and further removed read-tool args (e.g.
+ * `get_transactions`' `compact`) are expected to join it.
+ */
+export const REMOVED_ACCOUNT_ARGS = {
+  include_logos: 'pass fields: ["default", "logo"] instead',
+} as const;
+
+/**
+ * Throw a migration error when a caller passes an argument removed in v3.
+ *
+ * Nothing else enforces this: `additionalProperties: false` sits only on
+ * write-tool schemas and the server runs no input validator, so a removed
+ * argument would otherwise be dropped in silence — an out-of-date caller
+ * would just see their fields disappear with no explanation. Call this at
+ * the top of a tool handler, before any other argument handling.
+ */
+export function rejectRemovedArgs(
+  args: Record<string, unknown>,
+  removed: Record<string, string>
+): void {
+  for (const [name, hint] of Object.entries(removed)) {
+    if (name in args) {
+      throw new Error(`\`${name}\` was removed in v3.0.0 — ${hint}.`);
+    }
+  }
+}

@@ -5,27 +5,108 @@
  * exposed by LiveCopilotDatabase (1h TTL by default). Output envelope
  * matches the cache-backed get_accounts shape (count, totals, accounts)
  * plus the three live-cache freshness fields.
+ *
+ * v3 (#597 Tier 2): sync/plumbing fields (`hasHistoricalUpdates`,
+ * `hasLiveBalance`, `liveBalance`, `latestBalanceUpdate`, `isManual`) — Plaid
+ * sync state, not the account itself — are, per the #597 audit, ~23% of a
+ * row. Both are EXCLUDED from the default row via the shared field-selection
+ * engine (DEFAULT_ACCOUNT_LIVE_FIELDS in src/tools/field-selection.ts), which
+ * also backs the cache-mode get_accounts default via the shared
+ * ACCOUNT_FIELDS_PARAM_SCHEMA fragment.
  */
 
 import type { LiveCopilotDatabase } from '../../core/live-database.js';
-import { fetchAccounts, type AccountNode } from '../../core/graphql/queries/accounts.js';
+import { fetchAccounts } from '../../core/graphql/queries/accounts.js';
 import { roundAmount } from '../../utils/round.js';
 import type { ToolSchema } from '../tools.js';
+import {
+  DEFAULT_ACCOUNT_LIVE_FIELDS,
+  ACCOUNT_FIELDS_PARAM_SCHEMA,
+  projectRows,
+} from '../field-selection.js';
 
 export interface GetAccountsLiveArgs {
   account_type?: string;
   include_hidden?: boolean;
+  fields?: string[];
 }
+
+// A `type` alias (not an interface) on purpose: type aliases carry an
+// implicit index signature, so rows assign to the field-selection engine's
+// `Record<string, unknown>` constraint without casts — same reasoning as
+// GetRecurringLiveRow in src/tools/live/recurring.ts and CategoryLiveRow in
+// src/tools/live/categories.ts. Mirrors AccountNode's fields exactly; kept
+// as a separate type (rather than projecting AccountNode itself, an
+// interface) for the same reason those two are separate from their node
+// types.
+export type GetAccountsLiveRow = {
+  id: string;
+  itemId: string;
+  name: string;
+  balance: number;
+  liveBalance: boolean;
+  type: string;
+  subType: string | null;
+  mask: string | null;
+  isUserHidden: boolean;
+  isUserClosed: boolean;
+  isManual: boolean;
+  color: string | null;
+  limit: number | null;
+  institutionId: string | null;
+  hasHistoricalUpdates: boolean;
+  hasLiveBalance: boolean;
+  latestBalanceUpdate: number | null;
+};
+
+/**
+ * Every selectable field name on an account row, derived from
+ * {@link GetAccountsLiveRow} itself (not a sample row) via a mapped-type
+ * record: the `[K in keyof ...]-?: true` shape forces this object literal to
+ * carry exactly the type's keys, so a forgotten or renamed field is a
+ * compile error instead of a silent runtime desync. Same reasoning as
+ * RECURRING_LIVE_FIELD_NAMES in src/tools/live/recurring.ts.
+ */
+const ACCOUNT_LIVE_FIELD_NAMES: { [K in keyof GetAccountsLiveRow]-?: true } = {
+  id: true,
+  itemId: true,
+  name: true,
+  balance: true,
+  liveBalance: true,
+  type: true,
+  subType: true,
+  mask: true,
+  isUserHidden: true,
+  isUserClosed: true,
+  isManual: true,
+  color: true,
+  limit: true,
+  institutionId: true,
+  hasHistoricalUpdates: true,
+  hasLiveBalance: true,
+  latestBalanceUpdate: true,
+};
+const ACCOUNT_LIVE_KNOWN_FIELDS: ReadonlySet<string> = new Set(
+  Object.keys(ACCOUNT_LIVE_FIELD_NAMES)
+);
+
+/**
+ * Built FROM the known-field set rather than hand-listed — see the identical
+ * reasoning on RECURRING_LIVE_VALID_FIELDS_HINT in src/tools/live/recurring.ts.
+ */
+const ACCOUNT_LIVE_VALID_FIELDS_HINT = `the account node fields (${[...ACCOUNT_LIVE_KNOWN_FIELDS].join(', ')})`;
 
 export interface GetAccountsLiveResult {
   count: number;
   total_balance: number;
   total_assets: number;
   total_liabilities: number;
-  accounts: AccountNode[];
+  accounts: GetAccountsLiveRow[];
   _cache_oldest_fetched_at: string;
   _cache_newest_fetched_at: string;
   _cache_hit: boolean;
+  // Requested `fields` names that matched nothing (typos), when any.
+  _field_warning?: string;
 }
 
 // GraphQL Account.type returns uppercase enum values ('CREDIT', 'DEPOSITORY',
@@ -47,7 +128,7 @@ export class LiveAccountsTools {
       hit,
     } = await cache.read(() => fetchAccounts(this.live.getClient()));
 
-    let rows = cached;
+    let rows: GetAccountsLiveRow[] = cached.map((a) => ({ ...a }));
 
     if (!include_hidden) {
       rows = rows.filter((a) => !a.isUserHidden && !a.isUserClosed);
@@ -78,8 +159,28 @@ export class LiveAccountsTools {
       else totalAssets += a.balance;
     }
 
-    // A2: server returns limit:0 for charge cards (no preset limit); project null to prevent /0 in utilization.
-    const projectedAccounts = rows.map((a) => (a.limit === 0 ? { ...a, limit: null } : a));
+    // A2: server returns limit:0 for charge cards (no preset limit); project
+    // null to prevent /0 in utilization. Runs BEFORE projectRows below so
+    // the normalization survives even though `limit` isn't in the default
+    // preset — a caller who explicitly asks for it
+    // (fields: ["default", "limit"]) still sees the corrected value, never
+    // the raw wire 0.
+    const normalizedAccounts = rows.map((a) => (a.limit === 0 ? { ...a, limit: null } : a));
+
+    // v3: omitting `fields` yields the terse preset (no sync/plumbing
+    // fields — hasHistoricalUpdates, hasLiveBalance, liveBalance,
+    // latestBalanceUpdate, isManual) — request them explicitly with
+    // fields: ["default", "hasHistoricalUpdates", ...], or take everything
+    // with "all"/"*".
+    const { rows: projectedAccounts, warning } = projectRows(
+      normalizedAccounts,
+      args.fields ?? ['default'],
+      {
+        preset: DEFAULT_ACCOUNT_LIVE_FIELDS,
+        knownFields: ACCOUNT_LIVE_KNOWN_FIELDS,
+        validFieldsHint: ACCOUNT_LIVE_VALID_FIELDS_HINT,
+      }
+    );
 
     const fetchedAtIso = new Date(fetched_at).toISOString();
     return {
@@ -91,6 +192,7 @@ export class LiveAccountsTools {
       _cache_oldest_fetched_at: fetchedAtIso,
       _cache_newest_fetched_at: fetchedAtIso,
       _cache_hit: hit,
+      ...(warning && { _field_warning: warning }),
     };
   }
 }
@@ -99,7 +201,14 @@ export function createLiveAccountsToolSchema(): ToolSchema {
   return {
     name: 'get_accounts_live',
     description:
-      'Get all linked financial accounts (live, GraphQL-backed). Returns balances and metadata. Replaces get_accounts when --live-reads is on.',
+      'Get all linked financial accounts (live, GraphQL-backed). Returns balances and metadata. ' +
+      'Replaces get_accounts when --live-reads is on. Default rows are terse: id, name, type, ' +
+      'subType, balance, institutionId, itemId, isUserHidden. That EXCLUDES sync/plumbing fields — ' +
+      '`hasHistoricalUpdates`, `hasLiveBalance`, `liveBalance`, `latestBalanceUpdate`, `isManual` ' +
+      '— which describe Plaid sync state rather than the account, plus `mask` and `color` ' +
+      '(display detail) and `limit` (credit-line detail; charge-card 0 is normalized to null ' +
+      'either way, before or after opting in). Request any of them with ' +
+      'fields: ["default", "hasHistoricalUpdates"], or "all" / "*" for full rows.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -113,6 +222,7 @@ export function createLiveAccountsToolSchema(): ToolSchema {
           description: 'Include hidden/closed accounts. Default: false.',
           default: false,
         },
+        fields: ACCOUNT_FIELDS_PARAM_SCHEMA,
       },
     },
     annotations: {

@@ -59,9 +59,18 @@ const mockAccounts: Account[] = [
     current_balance: 1500.0,
     available_balance: 1450.0,
     name: 'Checking Account',
+    // Carries every field the v3 diet preset (DEFAULT_ACCOUNT_FIELDS) both
+    // keeps and excludes, so mutating either list has a fixture row to
+    // actually catch it — see 'default cache rows drop holdings...' below.
+    official_name: 'Checking Account Official',
     account_type: 'checking',
+    subtype: 'checking',
     mask: '1234',
     institution_name: 'Bank of Example',
+    iso_currency_code: 'USD',
+    item_id: 'item1',
+    user_id: 'user1',
+    holdings: [{ security_id: 'sec1', quantity: 1 }],
   },
   {
     account_id: 'acc2',
@@ -857,14 +866,71 @@ describe('CopilotMoneyTools', () => {
       expect(result.accounts[0].current_balance).toBe(1500.0);
     });
 
-    test('includes logo fields when include_logos is true', async () => {
+    test('logo fields are reachable via fields: ["default", "logo"] (include_logos replacement)', async () => {
       (db as any)._accounts = [
         { ...mockAccounts[0], logo: 'iVBORw0KGgoAAAANSU...', logo_content_type: 'image/png' },
         mockAccounts[1],
       ];
-      const result = await tools.getAccounts({ include_logos: true });
+      const result = await tools.getAccounts({ fields: ['default', 'logo', 'logo_content_type'] });
       expect(result.accounts[0].logo).toBe('iVBORw0KGgoAAAANSU...');
       expect(result.accounts[0].logo_content_type).toBe('image/png');
+    });
+
+    test('default cache rows drop holdings and the denormalized name dupes', async () => {
+      const result = await tools.getAccounts({});
+      expect(result.accounts[0]).not.toHaveProperty('holdings');
+      expect(result.accounts[0]).not.toHaveProperty('official_name');
+      expect(result.accounts[0]).not.toHaveProperty('user_id');
+      expect(result.accounts[0].current_balance).toBe(1500);
+    });
+
+    test('default cache rows keep every DEFAULT_ACCOUNT_FIELDS preset field', async () => {
+      const result = await tools.getAccounts({});
+      expect(result.accounts[0]).toMatchObject({
+        account_id: 'acc1',
+        name: 'Checking Account',
+        account_type: 'checking',
+        subtype: 'checking',
+        current_balance: 1500,
+        institution_name: 'Bank of Example',
+        iso_currency_code: 'USD',
+        item_id: 'item1',
+      });
+    });
+
+    test('holdings/official_name/user_id are reachable via an explicit fields request', async () => {
+      const result = await tools.getAccounts({
+        fields: ['default', 'holdings', 'official_name', 'user_id'],
+      });
+      expect(result.accounts[0]).toHaveProperty('holdings');
+      expect(result.accounts[0].official_name).toBe('Checking Account Official');
+      expect(result.accounts[0].user_id).toBe('user1');
+    });
+
+    test('include_logos is rejected with a migration hint', async () => {
+      await expect(tools.getAccounts({ include_logos: true } as never)).rejects.toThrow(
+        /include_logos.*removed in v3.*fields/s
+      );
+    });
+
+    test('an unrecognized fields name reports _field_warning', async () => {
+      const result = await tools.getAccounts({ fields: ['account_id', 'totally_bogus_field'] });
+      expect(result._field_warning).toContain('totally_bogus_field');
+    });
+
+    test('_field_warning fires even on an empty result set (knownFields, not row-key fallback)', async () => {
+      // Without ACCOUNT_KNOWN_FIELDS wired, unknown-name detection falls back
+      // to checking requested names against the returned ROWS' own keys —
+      // which stays silent when there are no rows to check against. A
+      // non-matching account_type filter is the one condition that
+      // distinguishes the two: this only warns because knownFields is wired.
+      // Same reasoning as the get_recurring_transactions fix in #606 review.
+      const result = await tools.getAccounts({
+        account_type: 'no_such_account_type_at_all',
+        fields: ['totally_bogus_field'],
+      });
+      expect(result.count).toBe(0);
+      expect(result._field_warning).toContain('totally_bogus_field');
     });
   });
 

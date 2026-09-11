@@ -57,7 +57,12 @@ const RESPONSE_BUDGETS: Record<string, number> = {
   get_transactions: 1_585,
   get_cache_info: 870,
   refresh_database: 245,
-  get_accounts: 795,
+  // 795 -> 635 by #597 Tier 2: rows are terse by default (DEFAULT_ACCOUNT_FIELDS
+  // drops the embedded `holdings` array, `official_name`/`original_*` name
+  // dupes, and `user_id`). The fixture's checking account carries an
+  // `official_name`, so the saving shows up even on this small a fixture.
+  // Measured 575 (~10% headroom).
+  get_accounts: 635,
   // 1_900 -> 2_100 by #659: `decode_health.collections` gained a `repaired`
   // counter (documents kept after a non-finite numeric field was stripped),
   // which adds 13 chars per flagged collection. The populated worst case
@@ -90,7 +95,13 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   get_transactions: 5_100,
   get_cache_info: 640,
   refresh_database: 485,
-  get_accounts: 1_315,
+  // Raised from 1_315 by #597 Tier 2: adds the `fields` param (shared
+  // verbatim with get_accounts_live — see ACCOUNT_FIELDS_PARAM_SCHEMA)
+  // plus a description sentence naming the excluded `holdings` array,
+  // `official_name`/`original_*` name dupes, `user_id`, and `logo` — the
+  // last of these replacing the retired `include_logos` boolean. Measured
+  // 2_046 (~10% headroom). Real new capability, not bloat.
+  get_accounts: 2_255,
   get_connection_status: 850,
   get_categories: 1_405,
   // Raised from 1_900 by #606: adds the `fields` param (excludes the
@@ -120,7 +131,13 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // description sentence naming the 8-vs-10 preset gap — real new capability,
   // not bloat. Measured 4_090 after review amendments (~7% headroom).
   get_transactions_live: 4_370,
-  get_accounts_live: 570,
+  // Raised from 570 by #597 Tier 2: adds the `fields` param (shared verbatim
+  // with get_accounts — see ACCOUNT_FIELDS_PARAM_SCHEMA) plus a description
+  // sentence naming the excluded sync/plumbing fields (`hasHistoricalUpdates`,
+  // `hasLiveBalance`, `liveBalance`, `latestBalanceUpdate`, `isManual`) and
+  // the `mask`/`color`/`limit` display detail. Measured 1_629 (~10% headroom).
+  // Real new capability, not bloat.
+  get_accounts_live: 1_795,
   // Raised from 1_555 by #597 Tier 1: adds the `fields` param (excludes the
   // embedded `budget` object — {current, histories}, ~62% of a row and a
   // duplicate of get_budgets_live — from the default row, replacing it with
@@ -213,20 +230,33 @@ const SCHEMA_BUDGETS: Record<string, number> = {
  * three tools; see the recurring tools' field-selection tests). Not
  * prose bloat — every added sentence names the token it excludes.
  *
- * MUST stay below the sum of every entry in SCHEMA_BUDGETS above (78_590 as
- * of #606 — recompute if that table changes): the completeness guard in
- * registerContextBudgetChecks requires SCHEMA_BUDGETS to have exactly one
+ * Raised again from 74_300 by #597 Tier 2: the accounts pair's shared
+ * `fields` param (get_accounts + get_accounts_live, one fragment shared
+ * verbatim between them via ACCOUNT_FIELDS_PARAM_SCHEMA) pushes the real
+ * total from 71_893 to 73_858 (measured directly against the pre-Tier-2
+ * commit — get_accounts 1_194 -> 2_046, get_accounts_live 516 -> 1_629).
+ * That is still under the previous 74_300 ceiling by itself, but leaving
+ * the ceiling unmoved would shrink this ratchet's headroom from the
+ * documented ~3.3% to ~0.6% — a trap for the next legitimate wording fix,
+ * same trap the prior revision of this comment warned about. 76_300
+ * restores the ~3.3% ratio (73_858 * 1.033 ≈ 76_296) this ratchet has held
+ * since #606.
+ *
+ * MUST stay below the sum of every entry in SCHEMA_BUDGETS above (80_755 as
+ * of #597 Tier 2 — recompute if that table changes): the completeness guard
+ * in registerContextBudgetChecks requires SCHEMA_BUDGETS to have exactly one
  * entry per registered tool, so once every per-tool assertion passes the
  * actual total is bounded by that sum regardless of what this constant
  * says. A value at or above it (79_100, briefly, in an earlier revision of
- * this PR) can never fire — a per-tool assertion always fails first — which
- * silently drops the one check that catches every tool creeping a little
- * without individually breaching its own ceiling. 74_300 keeps this the
- * *tighter* constraint, the same relationship it had pre-#606 (71_000 over
- * a measured 68_724, ~3.3% headroom, vs. that era's per-tool sum of
- * 75_445 — the aggregate was already the binding check then too).
+ * a prior PR) can never fire — a per-tool assertion always fails first —
+ * which silently drops the one check that catches every tool creeping a
+ * little without individually breaching its own ceiling. 76_300 keeps this
+ * the *tighter* constraint, the same relationship this ratchet has held
+ * since #606 (74_300 over a measured 71_893, ~3.3% headroom, vs. that era's
+ * per-tool sum of 78_590 — the aggregate was already the binding check
+ * then too).
  */
-const SCHEMA_TOTAL_BUDGET = 74_300;
+const SCHEMA_TOTAL_BUDGET = 76_300;
 
 // ---------------------------------------------------------------------------
 // Synthetic fixture. Deterministic content, opaque Firestore-shaped IDs

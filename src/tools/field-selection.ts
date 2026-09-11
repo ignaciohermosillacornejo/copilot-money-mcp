@@ -26,6 +26,7 @@
 import type { GetTopMoversLiveEntry } from './live/top-movers.js';
 import type { CategoryLiveRow } from './live/categories.js';
 import type { GetRecurringLiveRow } from './live/recurring.js';
+import type { GetAccountsLiveRow } from './live/accounts.js';
 
 /**
  * The default field set for transaction rows: the v3 baseline that
@@ -244,6 +245,65 @@ export const RECURRING_CACHE_FIELDS_PARAM_SCHEMA = {
     'is always in the default. Request the rest with ' +
     'fields: ["default", "transactions", "confidence_reason"], or "all" / "*" for full rows. ' +
     'Unknown names are omitted and reported via _field_warning.',
+} as const;
+
+/**
+ * Default fields for account rows, shared by get_accounts (cache) and
+ * get_accounts_live (#597 Tier 2). Field NAMES differ between the two
+ * surfaces (cache documents are snake_case, live nodes are camelCase), so
+ * each tool passes its own preset built from this intent: identity, name,
+ * type, balance, institution, currency, item.
+ *
+ * Cut from the cache row: the embedded `holdings` array (~20%, and
+ * get_holdings covers it), `official_name` / `original_*` denormalized dupes
+ * of `name`, and `user_id` (constant across every row of a single-user cache).
+ * Cut from the live row: sync machinery (`hasHistoricalUpdates`,
+ * `hasLiveBalance`, `liveBalance`, `latestBalanceUpdate`, `isManual`) — ~23%
+ * of a row describing Plaid plumbing, not the account. The live row has no
+ * currency field at all, so that part of the intent applies to cache mode
+ * only.
+ */
+export const DEFAULT_ACCOUNT_FIELDS = [
+  'account_id',
+  'name',
+  'account_type',
+  'subtype',
+  'current_balance',
+  'institution_name',
+  'iso_currency_code',
+  'item_id',
+] as const;
+
+export const DEFAULT_ACCOUNT_LIVE_FIELDS = [
+  'id',
+  'name',
+  'type',
+  'subType',
+  'balance',
+  'institutionId',
+  'itemId',
+  'isUserHidden',
+] as const satisfies readonly (keyof GetAccountsLiveRow)[];
+
+/**
+ * JSON-schema fragment for the `fields` input param, shared verbatim by
+ * get_accounts (cache) and get_accounts_live so the two modes cannot drift —
+ * parity is pinned by a schema-equality test in
+ * tests/tools/live/accounts.test.ts. Deliberately generic (unlike e.g.
+ * RECURRING_FIELDS_PARAM_SCHEMA above): the two presets don't share field
+ * names, so this fragment can't name a token both rows recognize — each
+ * tool's own description does that naming instead.
+ */
+export const ACCOUNT_FIELDS_PARAM_SCHEMA = {
+  type: 'array',
+  items: { type: 'string' },
+  description:
+    'Return only these fields per account row (e.g. ["account_id", "name", "current_balance"] ' +
+    'for get_accounts, or ["id", "name", "balance"] for get_accounts_live — field names differ ' +
+    'between the two modes). "default" expands to a terse baseline covering identity, name, ' +
+    "type, balance, institution, and item — see each tool's own description for its exact " +
+    'field list and what "default" excludes. "all" or "*" returns the full row. Unknown names ' +
+    'are omitted and reported via _field_warning.',
 } as const;
 
 /** Token that expands to the caller-supplied preset. */
