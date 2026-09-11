@@ -38,7 +38,7 @@ Answer open-ended financial questions using transaction data, account balances, 
 
 3. **Pull relevant data.** Based on the question:
    - `get_accounts` — current balances
-   - `get_transactions` with `period: "this_month"` — month-to-date spending
+   - `get_transactions` with `period: "this_month"` — month-to-date spending. The default terse row carries what this skill reasons about (`amount`, `date`, `name`, `category_name`); add `fields: ["default", "original_name"]` when you are going to SHOW transactions, since gotcha 6 below asks for the full merchant name and `original_name` is excluded from the default row as of v3.0.0.
    - `get_recurring_transactions` — upcoming obligations
    - `get_categories` — spending patterns for the relevant category
    - `get_goals` — savings targets that might be affected
