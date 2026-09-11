@@ -53,6 +53,8 @@ const DB_PATH = path.join(__dirname, 'fixtures/context-budget-db');
 // Note: get_recurring_transactions groups Copilot subscriptions relative to
 // today's date (next_expected_date / this_month buckets), so its size can
 // drift a few chars across month boundaries — the ~10% headroom absorbs that.
+// Its pattern-analysis half is measured over a fixed 2024 window (see
+// EXTRA_ARGS) and does not move with the clock.
 const RESPONSE_BUDGETS: Record<string, number> = {
   get_transactions: 1_585,
   get_cache_info: 870,
@@ -78,7 +80,20 @@ const RESPONSE_BUDGETS: Record<string, number> = {
   // measures 1_909; this is that plus the usual ~10% headroom.
   get_connection_status: 2_100,
   get_categories: 855,
-  get_recurring_transactions: 755,
+  // 755 -> 1_065, and this one goes UP: the ratchet was measuring a response
+  // whose pattern-detected `recurring` array was always EMPTY, so the #606
+  // row diet it was supposed to gate was not inside the number at all (PR B
+  // review). Two things kept it empty — no fixture merchant repeated, and the
+  // default period is the last 90 days from today, which nothing in a
+  // deterministic 2024 fixture can fall inside. Both are fixed above (a
+  // reshaped Synthetic Streaming pair, plus an explicit window in EXTRA_ARGS),
+  // and the measured response grows 685 -> 968 because it now carries a real
+  // detected row. Same shape as the #622 raise on get_investment_prices below:
+  // a fixture made to model reality, not a response that got fatter.
+  // Measured 968 (~10% headroom). A regression restoring `transactions` +
+  // `confidence_reason` to the default row adds ~170 chars, which this ceiling
+  // catches (mutation-verified in the PR that set it).
+  get_recurring_transactions: 1_065,
   get_budgets: 420,
   get_goals: 365,
   // 1_265 -> 400 by #605: rows are terse by default and the nested `prices`
@@ -330,12 +345,21 @@ async function seedFixture(): Promise<void> {
         category_id: CAT_COFFEE,
         pending: true,
       },
+      // Second charge from the same merchant as the 2024-01-15 row below,
+      // same amount, ~one month later: the ONLY pattern the detector in
+      // get_recurring_transactions can find in this fixture. Without it that
+      // tool's `recurring` array is empty and its budget measures only the
+      // copilot_subscriptions section, leaving the #606 row diet ungated
+      // (found in the PR B review). Deliberately a RESHAPED existing row
+      // rather than extra rows: three more transactions would push
+      // get_transactions past its ceiling, and response budgets only ratchet
+      // down.
       {
         transaction_id: 'txn_2wRb9TzLmV6KqX1cJd8F',
         account_id: ACC_CHECKING,
-        amount: 45.0,
-        date: '2024-02-20',
-        name: 'Synthetic Transit',
+        amount: 15.99,
+        date: '2024-02-15',
+        name: 'Synthetic Streaming',
         category_id: CAT_TRANSPORT,
       },
       {
@@ -550,6 +574,13 @@ const eligibleReadDefs = ALL_TOOL_DEFS.filter(
 /** Extra args for tools that cannot run with `{}`. */
 const EXTRA_ARGS: Record<string, Record<string, unknown>> = {
   get_balance_history: { granularity: 'monthly' },
+  // Pattern detection analyses a PERIOD, defaulting to the last 90 days from
+  // today — which no fixture transaction can ever fall inside, since the
+  // fixture is deterministically dated in 2024. Without an explicit window
+  // the `recurring` array is empty no matter what the fixture seeds, so the
+  // budget below would only ever measure the copilot_subscriptions section
+  // (PR B review). This window covers the seeded Synthetic Streaming pair.
+  get_recurring_transactions: { start_date: '2024-01-01', end_date: '2024-03-31' },
 };
 
 let ctx: ToolContext;

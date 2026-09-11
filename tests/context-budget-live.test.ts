@@ -309,8 +309,18 @@ const LIVE_BUDGETS: Record<string, number> = {
   get_top_movers_live: 300,
   get_investment_balance_live: 365,
   get_categories_live: 290,
-  get_recurring_live: 560,
-  get_upcoming_recurrings_live: 545,
+  // 560 -> 380 and 545 -> 375 by #597 Tier 1 (ratcheted in the PR B review
+  // round): default rows project through DEFAULT_RECURRING_LIVE_FIELDS,
+  // dropping `rule` (the server-side matcher config), `payments` (the payment
+  // history) and `icon` (redundant with `emoji`). The stub rows above carry
+  // all three populated, so the saving is inside these numbers. Measured 345
+  // and 339 against those rows (510 and 496 with the projection taken back to
+  // "all"); the ceilings are those +~10%. Task 2 shipped the diet but left
+  // both entries at their pre-diet values, where a regression putting `rule`
+  // and `payments` back into the default row still passed — the same gap the
+  // get_accounts_live entry below closed.
+  get_recurring_live: 380,
+  get_upcoming_recurrings_live: 375,
   // 615 -> 430 by #597 Tier 2 (ratcheted in the PR B review round, which is
   // also where the CHANGELOG's live accounts figure is measured): default rows
   // now project through DEFAULT_ACCOUNT_LIVE_FIELDS, dropping the Plaid

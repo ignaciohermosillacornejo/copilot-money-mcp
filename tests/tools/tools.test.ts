@@ -421,9 +421,13 @@ describe('CopilotMoneyTools', () => {
       }
     });
 
-    test('fields: [] (explicit empty) beats compact and returns full documents', async () => {
-      // Pins the #593 edge: `??` only falls back to compact on omitted/null
-      // fields, and the engine treats an empty list as "no projection".
+    test('fields: [] beats compact at the engine layer and returns full documents', async () => {
+      // Pins the #593 edge AT THE METHOD LAYER: `??` only falls back to
+      // compact on omitted/null fields, and the engine treats an empty list
+      // as "no projection". A dispatched call resolves differently and is
+      // pinned in tests/e2e/server.test.ts — `defineTool` drops the empty
+      // array, so `{fields: [], compact: true}` becomes `{compact: true}` and
+      // returns COMPACT rows, which is what omitting `fields` does there.
       const result = await tools.getTransactions({ fields: [], compact: true });
       expect(result.transactions[0]).toHaveProperty('category_id');
       expect(result.transactions[0]).toHaveProperty('normalized_merchant');

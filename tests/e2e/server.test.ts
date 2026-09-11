@@ -705,6 +705,57 @@ describe('handleCallTool — read tools', () => {
   });
 });
 
+/**
+ * `fields: []` is normalized to "omitted" in `defineTool`, so a dispatched
+ * call with an empty selection must be byte-identical to the same call
+ * without `fields` — for a terse-by-default tool AND for one v3 has not
+ * flipped yet. Before that normalization, `[]` reached the engine as
+ * "no projection" and silently returned FULL rows from every dieted tool.
+ * The wrapper itself is unit-pinned in
+ * tests/tools/registry/empty-fields-normalization.test.ts; this is the
+ * per-tool consequence, through the real dispatch path.
+ */
+describe('handleCallTool — fields: [] equals omitting fields', () => {
+  let server: CopilotMoneyServer;
+
+  beforeEach(() => {
+    const db = createMockDb();
+    server = new CopilotMoneyServer(FAKE_DB_DIR);
+    server._injectForTesting(db, new CopilotMoneyTools(db));
+  });
+
+  const call = async (name: string, args: Record<string, unknown>): Promise<string> => {
+    const result = await server.handleCallTool(name, args);
+    expect(result.isError).toBeUndefined();
+    return firstText(result);
+  };
+
+  test('get_accounts (terse by default): [] returns the preset row, not the full row', async () => {
+    const empty = await call('get_accounts', { fields: [] });
+    expect(empty).toBe(await call('get_accounts', {}));
+    // Proves which side of the fork it took: the mock brokerage account
+    // carries `holdings`, which the preset drops and "all" keeps.
+    expect(empty).not.toContain('holdings');
+    const all = await call('get_accounts', { fields: ['all'] });
+    expect(all).toContain('holdings');
+    expect(all).not.toBe(empty);
+  });
+
+  test('get_transactions (not flipped in v3 yet): [] still returns full rows', async () => {
+    const empty = await call('get_transactions', { fields: [] });
+    expect(empty).toBe(await call('get_transactions', {}));
+    // "Omitted" means full documents for this tool until #604 flips it, so
+    // the normalization must NOT drag it onto the transaction preset.
+    expect(empty).toBe(await call('get_transactions', { fields: ['all'] }));
+  });
+
+  test('get_transactions: [] with compact: true means what omitting fields means — compact rows', async () => {
+    const empty = await call('get_transactions', { fields: [], compact: true });
+    expect(empty).toBe(await call('get_transactions', { compact: true }));
+    expect(empty).not.toBe(await call('get_transactions', {}));
+  });
+});
+
 describe('handleCallTool — write tools', () => {
   let writeServer: CopilotMoneyServer;
   let db: CopilotDatabase;

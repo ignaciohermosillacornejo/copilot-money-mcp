@@ -6,10 +6,13 @@
  * write gating, and manifest sync are all derived from these definitions
  * (see `registry/index.ts`), so there are no parallel lists to keep in sync.
  *
- * Runtime-leaf module: all imports are type-only, so domain modules can
- * depend on it without creating import cycles with `tools.ts`.
+ * Near-leaf module: every import is type-only except the field-selection
+ * engine's `dropEmptyFieldSelection`, which is itself a leaf (no runtime
+ * imports), so domain modules can still depend on this file without creating
+ * an import cycle with `tools.ts`.
  */
 
+import { dropEmptyFieldSelection } from '../field-selection.js';
 import type { CopilotMoneyTools, ToolSchema } from '../tools.js';
 import type { LiveTransactionsTools } from '../live/transactions.js';
 import type { LiveAccountsTools } from '../live/accounts.js';
@@ -113,7 +116,23 @@ export interface ToolDefinition {
   formatError?: (message: string) => string;
 }
 
-/** Build a `ToolDefinition`, deriving `name` from the schema. */
+/**
+ * Build a `ToolDefinition`, deriving `name` from the schema.
+ *
+ * The handler is wrapped so an empty `fields: []` is dropped before it runs
+ * (see `dropEmptyFieldSelection`): every tool then treats `fields: []` exactly
+ * as it treats `fields` being absent — the terse preset for a
+ * terse-by-default tool, full rows for `get_transactions`. Doing it here
+ * rather than at the ten `projectRows` call sites means a new field-selecting
+ * tool inherits the rule by being registered, and the literal
+ * `x.fields ?? ['default']` idiom those call sites use — which
+ * tests/tools/registry/diet-fields-disclosure.test.ts discovers diet tools by
+ * — is left alone.
+ */
 export function defineTool(def: Omit<ToolDefinition, 'name'>): ToolDefinition {
-  return { name: def.schema.name, ...def };
+  return {
+    name: def.schema.name,
+    ...def,
+    handler: (ctx, args) => def.handler(ctx, dropEmptyFieldSelection(args)),
+  };
 }

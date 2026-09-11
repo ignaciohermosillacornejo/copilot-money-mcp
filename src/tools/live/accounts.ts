@@ -86,7 +86,7 @@ const ACCOUNT_LIVE_FIELD_NAMES: { [K in keyof GetAccountsLiveRow]-?: true } = {
   hasLiveBalance: true,
   latestBalanceUpdate: true,
 };
-const ACCOUNT_LIVE_KNOWN_FIELDS: ReadonlySet<string> = new Set(
+export const ACCOUNT_LIVE_KNOWN_FIELDS: ReadonlySet<string> = new Set(
   Object.keys(ACCOUNT_LIVE_FIELD_NAMES)
 );
 

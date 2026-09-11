@@ -230,7 +230,7 @@ const TRANSACTION_KNOWN_FIELDS: ReadonlySet<string> = new Set([
  * stops rejecting an EXTRA key — i.e. a stale entry for a field the schema no
  * longer has would typecheck.
  */
-const ACCOUNT_KNOWN_FIELDS: ReadonlySet<string> = new Set(Object.keys(AccountSchema.shape));
+export const ACCOUNT_KNOWN_FIELDS: ReadonlySet<string> = new Set(Object.keys(AccountSchema.shape));
 
 /**
  * One pattern-detected recurring merchant row, as built by
@@ -271,7 +271,7 @@ const RECURRING_CACHE_FIELD_NAMES: { [K in keyof DetectedRecurringRow]-?: true }
   next_expected_date: true,
   transactions: true,
 };
-const RECURRING_CACHE_KNOWN_FIELDS: ReadonlySet<string> = new Set(
+export const RECURRING_CACHE_KNOWN_FIELDS: ReadonlySet<string> = new Set(
   Object.keys(RECURRING_CACHE_FIELD_NAMES)
 );
 
@@ -294,8 +294,12 @@ function projectTransactionFields<T extends Record<string, unknown>>(
   options: { fields?: string[]; compact?: boolean }
 ): { rows: T[]; warning?: string } {
   // `??` is deliberate: only an *omitted/null* fields falls back to compact.
-  // An explicit `fields: []` wins over compact and, per the engine's
-  // empty -> undefined rule, means no projection (unchanged from #593).
+  // An explicit `fields: []` would reach the engine's empty -> undefined rule
+  // and mean "no projection" — but a DISPATCHED call never gets here with one:
+  // `defineTool` drops an empty `fields` so that `fields: []` means exactly
+  // what omitting it means for this tool, i.e. compact rows when
+  // `compact: true` is set and full rows otherwise (PR B review, Minor 4).
+  // The engine rule still governs direct method calls.
   const fields =
     options.fields ?? (options.compact ? [...DEFAULT_COMPACT_TRANSACTION_FIELDS] : undefined);
   return projectRows(txns, fields, {

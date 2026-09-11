@@ -93,7 +93,7 @@ const RECURRING_LIVE_FIELD_NAMES: { [K in keyof GetRecurringLiveRow]-?: true } =
   payments: true,
   category_name: true,
 };
-const RECURRING_LIVE_KNOWN_FIELDS: ReadonlySet<string> = new Set(
+export const RECURRING_LIVE_KNOWN_FIELDS: ReadonlySet<string> = new Set(
   Object.keys(RECURRING_LIVE_FIELD_NAMES)
 );
 

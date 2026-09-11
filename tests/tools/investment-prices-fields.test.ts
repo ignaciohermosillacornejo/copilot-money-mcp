@@ -106,11 +106,13 @@ describe('get_investment_prices terse default (#605)', () => {
     expect(unexercised).toEqual([]);
   });
 
-  test('fields: [] returns full rows — the documented no-projection escape', async () => {
-    // Consistent with get_transactions (#593): an explicit empty array means
-    // "no projection", distinct from omitting the param (which now means the
-    // preset). Pinned because in a terse-by-default tool this is the one
-    // spelling that silently restores the fat series without saying "all".
+  test('fields: [] at the engine layer is still "no projection"', async () => {
+    // ENGINE-LAYER semantics, not the caller-visible contract. `defineTool`
+    // drops an empty `fields` before dispatch (PR B review, Minor 4), so an
+    // MCP call with `fields: []` behaves like omitting the param — the terse
+    // preset — and only a direct method call, as here, reaches the engine
+    // with `[]`. Pinned so that internal contract stays explicit; callers who
+    // want the fat series ask for it by name or with "all"/"*".
     const result = await tools.getInvestmentPrices({ price_type: 'daily', fields: [] });
 
     expect(result.prices[0]).toHaveProperty('prices');
