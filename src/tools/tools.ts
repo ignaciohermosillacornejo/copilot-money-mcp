@@ -1301,7 +1301,11 @@ export class CopilotMoneyTools {
     total_balance: number;
     total_assets: number;
     total_liabilities: number;
-    accounts: Account[];
+    // Partial, not Account[]: rows are projected through the field-selection
+    // engine, so every key but the caller's selection is absent. The engine
+    // widens back to T internally; declaring the truth here is what stops the
+    // next reader from assuming a full document is available off this method.
+    accounts: Partial<Account>[];
     _field_warning?: string;
   }> {
     // v3: `include_logos` was retired in favor of `fields` — a caller still

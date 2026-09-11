@@ -412,8 +412,13 @@ describe('CopilotMoneyTools Integration', () => {
       expect(result.accounts).toBeDefined();
       expect(result.count).toBe(result.accounts.length);
 
-      // Verify total balance calculation
-      const calculatedTotal = result.accounts.reduce((sum, acc) => sum + acc.current_balance, 0);
+      // Verify total balance calculation. Rows are projected partials as of
+      // v3, so assert `current_balance` is present rather than coalescing it
+      // away — a preset regression should fail by name, not by arithmetic.
+      const calculatedTotal = result.accounts.reduce((sum, acc) => {
+        expect(acc.current_balance).toBeDefined();
+        return sum + (acc.current_balance ?? 0);
+      }, 0);
       expect(Math.abs(result.total_balance - calculatedTotal)).toBeLessThan(0.01);
     });
 

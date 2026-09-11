@@ -80,7 +80,7 @@ Use these MCP tools:
 
 - `refresh_database` — ensure the local cache is current.
 - `get_transactions` with `query: "amazon"` and the same date window. Expect >100KB responses — the MCP saves them to disk; read via `jq` or Python, not into context.
-- `get_accounts` — map `account_mask` back to the payment-method suffix in Amazon data (`Visa - XXXX` in a shipment's `payment_method` → Copilot account with `mask: XXXX`).
+- `get_accounts` with `fields: ["default", "mask"]` — map `account_mask` back to the payment-method suffix in Amazon data (`Visa - XXXX` in a shipment's `payment_method` → Copilot account with `mask: XXXX`). The `fields` argument is required: `mask` is not in the default row as of v3.0.0, and without it the Phase 4 #3 and Phase 6 account checks below have nothing to compare against.
 - `get_categories` with `view: "list"` — capture the full list of user-created category IDs. Note these IDs; **Plaid taxonomy IDs will not stick on writes.**
 
 Save to `/tmp/amazon-sync/copilot-amazon-txns.json`, `/tmp/amazon-sync/accounts.json`, and `/tmp/amazon-sync/categories.json`.
