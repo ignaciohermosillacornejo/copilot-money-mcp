@@ -28,7 +28,7 @@ When enabled, 6 cache-mode read tools are replaced with GraphQL-backed equivalen
 | Tool | Replaces? | Status | Notes |
 |---|---|---|---|
 | `get_transactions_live` | `get_transactions` | ✅ | Windowed cache; paginates per month |
-| `get_accounts_live` | `get_accounts` | ✅ | 1h cache |
+| `get_accounts_live` | `get_accounts` | ✅ | 1h cache. Rows are terse by default (`fields: [...]` opts into the sync/plumbing fields, `mask`, `color`, `limit`) |
 | `get_categories_live` | `get_categories` | ✅ | 24h cache; reflects rollovers per user setting |
 | `get_budgets_live` | `get_budgets` | ✅ | Projection over `categories_live` data |
 | `get_recurring_live` | `get_recurring_transactions` | ✅ | ⚠️ Pattern-based detection from transactions is NOT in live mode — use cache mode if you need that. Rows are terse by default (`fields: [...]` opts into `rule`, `payments`, `icon`) |

@@ -104,6 +104,10 @@ MANIFEST-*
 CURRENT
 LOCK
 *.log
+# LevelDB writes BOTH a numbered `000003.log` (caught by *.log above) and a
+# bare uppercase `LOG`, which no rule here matched — so a killed test run left
+# one behind and `git add -A` swept it into a commit.
+LOG
 
 # Whitelist scripts whose names happen to match earlier ignore patterns
 # (the MANIFEST-* LevelDB rule above matches "manifest-utils.ts" on case-

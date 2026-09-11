@@ -70,7 +70,7 @@ export const REMOVED_ACCOUNT_ARGS = {
   // misadvised the larger half of the callers it fires on.
   include_logos:
     'logos are excluded by default now, so drop the argument; ' +
-    'pass fields: ["default", "logo"] to include them',
+    'pass fields: ["default", "logo", "logo_content_type"] to include them',
 } as const;
 
 /**
