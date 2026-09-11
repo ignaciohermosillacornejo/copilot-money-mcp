@@ -84,11 +84,6 @@ const CASES: ParityCase[] = [
   },
 ];
 
-const RECURRING_NODE_MIRROR_IS_EXACT: ExactKeys<
-  keyof RecurringNode,
-  keyof typeof RecurringNodeSchema.shape
-> = true;
-
 describe('live known-field sets stay in parity with their wire node (PR B review, I2)', () => {
   test('guards the gate: every case has a non-empty wire shape to compare against', () => {
     expect(CASES.length).toBeGreaterThan(0);
