@@ -101,7 +101,8 @@ const UPCOMING_RECURRING_LIVE_VALID_FIELDS_HINT =
 
 export interface GetUpcomingRecurringsLiveResult {
   count: number;
-  upcoming: GetUpcomingRecurringsLiveRow[];
+  // Partial: projected rows, so `rule` and `payments` are absent by default.
+  upcoming: Partial<GetUpcomingRecurringsLiveRow>[];
   _cache_oldest_fetched_at: string;
   _cache_newest_fetched_at: string;
   _cache_hit: boolean;
