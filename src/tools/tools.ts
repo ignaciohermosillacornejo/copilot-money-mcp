@@ -944,9 +944,14 @@ export class CopilotMoneyTools {
       transactions = transactions.filter((txn) => !txn.plaid_deleted);
     }
 
+    // Hoisted out of the filter below because the `excluded` FIELD is derived
+    // from the same predicate during enrichment, and must be correct even when
+    // the caller passes exclude_excluded: false — which is the only case where
+    // the field carries information at all.
+    const excludedCategoryIds = await this.getExcludedCategoryIds();
+
     // Filter out user-excluded transactions (both txn.excluded and category.excluded)
     if (exclude_excluded) {
-      const excludedCategoryIds = await this.getExcludedCategoryIds();
       transactions = transactions.filter(
         (txn) => !txn.excluded && !(txn.category_id && excludedCategoryIds.has(txn.category_id))
       );
@@ -1001,6 +1006,27 @@ export class CopilotMoneyTools {
           ? await this.resolveCategoryName(txn.category_id)
           : undefined,
         normalized_merchant: normalizeMerchantName(getTransactionDisplayName(txn)),
+        // `excluded` answers "is this row excluded from spending?", which is
+        // the question a caller doing spend math is asking — NOT "is the raw
+        // per-transaction flag set?". Those differ, and shipping the raw flag
+        // made the two modes contradict each other: measured 2026-09-11
+        // against a real transaction in a user-excluded category, the Firestore
+        // document carried `excluded: undefined` while live-mode synthesized
+        // `true` from the same category. Copilot does not stamp the
+        // per-transaction flag when a category is excluded, so the raw flag
+        // alone is not the predicate anyone wants.
+        //
+        // This is the same union the exclude_excluded filter above applies, so
+        // the field now agrees with its own tool's filtering, and matches the
+        // live surface for every row live can observe. The residual gap is the
+        // per-transaction flag itself, which GraphQL exposes nowhere — that
+        // half is why the ledger entry stays `unverified`.
+        //
+        // Derived BEFORE projection: projecting first would drop the key and
+        // leave nothing to correct.
+        excluded:
+          txn.excluded === true ||
+          (txn.category_id ? excludedCategoryIds.has(txn.category_id) : false),
       }))
     );
 

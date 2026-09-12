@@ -1144,6 +1144,82 @@ describe('CopilotMoneyTools', () => {
       expect(result.count).toBe(4);
     });
 
+    test('a row in an EXCLUDED CATEGORY reports excluded:true without the raw flag', async () => {
+      // Measured against a real transaction on 2026-09-11: Copilot does NOT
+      // stamp the per-transaction `excluded` flag when the row's category is
+      // user-excluded — the Firestore document carried `excluded: undefined`.
+      // Shipping the raw flag made cache mode say "not excluded" while live
+      // mode synthesized `true` from the same category, for the same row.
+      (db as any)._userCategories = [
+        { category_id: 'work_cat', name: 'Work', emoji: '💼', order: 0, excluded: true },
+        { category_id: 'groceries', name: 'Groceries', emoji: '🥑', order: 1 },
+      ];
+      (db as any)._transactions = [
+        {
+          transaction_id: 'txn_in_excluded_cat',
+          date: '2024-03-15',
+          amount: 100,
+          name: 'In an excluded category',
+          category_id: 'work_cat',
+          account_id: 'acc_1',
+          item_id: 'item_1',
+          // deliberately NO `excluded` key — this is the shape Copilot writes
+        },
+        {
+          transaction_id: 'txn_in_normal_cat',
+          date: '2024-03-15',
+          amount: 200,
+          name: 'In a normal category',
+          category_id: 'groceries',
+          account_id: 'acc_1',
+          item_id: 'item_1',
+        },
+      ];
+
+      const result = await tools.getTransactions({
+        start_date: '2024-03-01',
+        end_date: '2024-03-31',
+        exclude_excluded: false,
+      });
+
+      const inExcluded = result.transactions.find(
+        (t) => t.transaction_id === 'txn_in_excluded_cat'
+      );
+      const inNormal = result.transactions.find((t) => t.transaction_id === 'txn_in_normal_cat');
+      // The field answers "is this excluded from spending?", so it must agree
+      // with the filter one line above it — and with the live surface.
+      expect(inExcluded?.excluded).toBe(true);
+      // ...and must not smear across every row.
+      expect(inNormal?.excluded).toBe(false);
+    });
+
+    test('the raw per-transaction flag still forces excluded:true on its own', async () => {
+      // The other half of the union: a row whose category is NOT excluded but
+      // that carries the raw flag. Live cannot see this one at all (GraphQL
+      // exposes no per-transaction exclusion), which is why the ledger entry
+      // for the synthesis stays `unverified`.
+      (db as any)._userCategories = [{ category_id: 'groceries', name: 'Groceries', order: 0 }];
+      (db as any)._transactions = [
+        {
+          transaction_id: 'txn_raw_flag',
+          date: '2024-03-15',
+          amount: 100,
+          name: 'Individually excluded',
+          category_id: 'groceries',
+          account_id: 'acc_1',
+          item_id: 'item_1',
+          excluded: true,
+        },
+      ];
+
+      const result = await tools.getTransactions({
+        start_date: '2024-03-01',
+        end_date: '2024-03-31',
+        exclude_excluded: false,
+      });
+      expect(result.transactions[0]?.excluded).toBe(true);
+    });
+
     test('includes split parents when exclude_split_parents is false', async () => {
       const result = await tools.getTransactions({
         start_date: '2024-03-01',
