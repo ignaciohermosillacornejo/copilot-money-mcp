@@ -795,15 +795,24 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
     evidence:
       'Probe 2026-09-11: `excluded` / `isExcluded` / `userExcluded` and 8 further spellings ' +
       'all return `Cannot query field "<name>" on type "Transaction"`; `isExcluded` exists ' +
-      'ONLY on CreateCategoryInput/EditCategoryInput, so there is no per-transaction ' +
-      'exclusion anywhere on the GraphQL surface — the app writes the flag straight to ' +
-      'Firestore, where src/core/decoder.ts reads it. Live therefore synthesizes ' +
-      "`excluded` from the row's category being user-excluded, the same predicate the " +
-      "tool's own exclude_excluded filter uses. This is an APPROXIMATION and is classed " +
-      'unverified deliberately: the 2026-09-11 parity probe could not exercise the ' +
-      'divergence, because 0 of 521 cache rows had `excluded === true`, so its agreement on ' +
-      'this field is trivially false === false. A transaction excluded individually in the ' +
-      'app reads `excluded: true` in cache mode and `false` in live mode.',
+      'ONLY on CreateCategoryInput/EditCategoryInput, and neither EditTransactionInput nor ' +
+      'CreateTransactionInput accepts it either — there is no per-transaction exclusion ' +
+      'anywhere on the GraphQL surface, read or write. The app writes the flag straight to ' +
+      'Firestore, where src/core/decoder.ts reads it. BOTH surfaces therefore report ' +
+      '`excluded` as "is this row excluded from spending?", each computed with the predicate ' +
+      "its own exclude_excluded filter applies: cache = raw per-transaction flag OR the row's " +
+      'category being user-excluded; live = the category half alone, which is all GraphQL ' +
+      'exposes. ' +
+      'MEASURED 2026-09-11 with a real transaction created in a user-excluded category: the ' +
+      'synced Firestore document carried `excluded: undefined` — Copilot does NOT stamp the ' +
+      'per-transaction flag when the category is excluded — so reporting the raw flag made ' +
+      'cache mode answer "not excluded" for a row live mode called excluded. Deriving the ' +
+      'union fixes that, and was verified against that same row (cache now `true`, live ' +
+      '`true`). ' +
+      'Still classed unverified, for the half that remains: a transaction excluded ' +
+      'INDIVIDUALLY in the app reads `excluded: true` in cache mode and `false` in live ' +
+      'mode, and no probe has exercised it — 0 of 521 cache rows carried the raw flag, so ' +
+      "the parity run's agreement on that half is trivially false === false, not evidence.",
   },
 
   queryOperation('categories'),

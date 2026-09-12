@@ -21,7 +21,12 @@ export const getTransactionsTool = defineTool({
       '(5) Location-based: Use city or lat/lon with radius_km. ' +
       '(6) Tag filter: Use tag to find transactions with a specific tag. ' +
       'Rows are TERSE by default: transaction_id, date, amount, name, category_name, ' +
-      'account_id, item_id, pending, excluded, internal_transfer. A cache document carries ' +
+      'account_id, item_id, pending, excluded, internal_transfer. `excluded` answers "is ' +
+      'this row excluded from spending?" — the raw per-transaction flag OR the row\'s ' +
+      'category being user-excluded, the same union exclude_excluded filters on — so it is ' +
+      'true for a row Copilot never stamped individually. It is therefore nearly always ' +
+      'false in a default response, since exclude_excluded already removed those rows; it ' +
+      'carries information only when you pass exclude_excluded: false. A cache document carries ' +
       '~60 fields and most callers need a handful, so the rest are excluded unless asked ' +
       'for. PARTIAL list of what that drops, not exhaustive: Plaid metadata ' +
       '(plaid_category_id, plaid_category_strings, plaid_deleted), internal IDs ' +
