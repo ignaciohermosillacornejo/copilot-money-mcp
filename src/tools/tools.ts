@@ -1027,6 +1027,25 @@ export class CopilotMoneyTools {
         excluded:
           txn.excluded === true ||
           (txn.category_id ? excludedCategoryIds.has(txn.category_id) : false),
+        // `internal_transfer` deliberately does NOT get the same treatment,
+        // and the asymmetry is the point rather than an oversight. The rule is
+        // "the field means the same thing in both modes", not "the field
+        // matches its own filter":
+        //   - `excluded` needed the union above, because the category half is
+        //     exactly what live can compute, so the union is what makes the two
+        //     modes agree.
+        //   - `internal_transfer` is the raw document flag, because that
+        //     already matches live's server-side `type === 'INTERNAL_TRANSFER'`
+        //     classification — measured 508/508 on real data, zero divergence.
+        // The exclude_transfers filter below is deliberately BROADER than the
+        // field: isTransferCategory() also matches `credit_card` and any id
+        // containing `transfer` or `payment`, because it is a spend heuristic
+        // ("don't count this as spending"), not a claim about what the
+        // transaction IS. Adopting that union here would make cache call a
+        // credit-card payment an internal transfer while live types it
+        // REGULAR — trading a cross-mode divergence for an intra-mode one.
+        // Measured 2026-09-11: 0 of 508 joined rows would flip either way, so
+        // the choice is currently unobservable and rests on the reasoning.
       }))
     );
 

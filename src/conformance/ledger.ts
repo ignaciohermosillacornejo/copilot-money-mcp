@@ -786,6 +786,13 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       '506/506 agreement including all 46 rows that are transfers on either side, zero ' +
       'deviations. DERIVED BUT EXACT; nothing re-checks it, so a server-side change to how ' +
       'transfers are typed would drift silently.',
+    // Cache reports the RAW document flag for this field, not the union its
+    // exclude_transfers filter applies (isTransferCategory also matches
+    // credit_card and *payment* ids). That is deliberate: the raw flag matches
+    // this live classification 508/508 on real data, while the filter is a
+    // broader spend heuristic. Field parity across modes wins over field/filter
+    // symmetry within one mode. Measured 2026-09-11: 0 of 508 rows differ
+    // between the two choices, so nothing observable turns on it today.
   },
   {
     surface: 'Transaction.excluded:synthesized',
