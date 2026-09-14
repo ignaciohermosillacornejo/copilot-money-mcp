@@ -68,9 +68,10 @@ export async function assertOutputFieldAbsence(opts: {
   const presentFieldAccepted = !rejectsField(presentBody, typeName, presentField);
   if (!presentFieldAccepted) {
     failures.push(
-      `${typeName}.${presentField} was REJECTED. Either the probe shape is wrong or the field ` +
-        `the internal_transfer synthesis reads has been removed. Absence probing was SKIPPED — ` +
-        `this run proves nothing either way. Investigate before trusting it.`
+      `${typeName}.${presentField} was REJECTED. Either the probe shape is wrong, or the field ` +
+        `this check names as always-present has been removed — see presentField on the ` +
+        `${typeName} check for why that one was chosen. Absence probing was SKIPPED — this run ` +
+        `proves nothing either way. Investigate before trusting it.`
     );
   }
 

@@ -1268,6 +1268,13 @@ describe('CopilotMoneyTools', () => {
       // a derivation always has a value. This is the shape of an ordinary row,
       // so a change that starts emitting absent optional fields — undoing part
       // of the diet — fails here.
+      //
+      // "Copies only the keys a row owns" is a claim about the DOCUMENT's
+      // optional fields. The enrichment keys are a separate matter: this row
+      // has a category, but one without a `category_id` would own
+      // `category_name: undefined` and keep the key through projection.
+      // `JSON.stringify` drops it before any caller sees it, so the wire shape
+      // is the same — worth knowing if this fixture ever loses its category.
       (db as any)._userCategories = [{ category_id: 'groceries', name: 'Groceries', order: 0 }];
       (db as any)._transactions = [
         {
