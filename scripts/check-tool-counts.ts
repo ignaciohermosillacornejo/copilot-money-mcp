@@ -119,8 +119,8 @@ expectSubstring(
   'live tools total callout',
 );
 
-// The landing page states per-mode counts, not the total definition count:
-// no mode serves all ${allTotal} definitions (#610).
+// The landing page states per-mode counts, not the total definition count —
+// no mode ever lists every definition, so that total was unobservable (#610).
 expectSubstring(
   'docs/index.html',
   `${read} read tools locally, up to ${writeModeTotal} with writes enabled`,

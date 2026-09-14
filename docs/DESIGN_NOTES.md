@@ -5,7 +5,8 @@
 > **v1.2.1** — they were superseded by **v3.0.0**, which replaced the ad-hoc "essential
 > fields" shape with a per-tool default field preset plus an explicit `fields` argument
 > (`src/tools/field-selection.ts`). That changed both the rows tools return and the token
-> cost of returning them, so no number or JSON shape below should be read as current.
+> cost of returning them, so no number, JSON shape, or tool name below should be read as
+> current — `search_transactions`, for one, is not in the registry any more.
 >
 > Read this for the rationale, which still holds. Read
 > **[MIGRATING-v3.md](MIGRATING-v3.md)** for the response shapes that ship today, and
