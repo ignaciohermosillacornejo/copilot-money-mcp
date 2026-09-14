@@ -62,6 +62,7 @@ live rows do not carry identical field sets.
 | A `get_categories_live` row lost its `budget` object | Replaced by a derived `budget_amount` | `fields: ["default", "budget"]` |
 | A recurring row lost `rule` or `payments` | Both dropped from the live default row | `fields: ["default", "rule", "payments"]` |
 | Your portfolio total dropped | `get_holdings` now excludes hidden and merged accounts, matching `get_accounts` | Nothing — the new total is the correct one. `include_hidden: true` restores the old sum |
+| Account names changed in `get_holdings`, `get_recurring_transactions` or `get_balance_history` | All four name surfaces now prefer your Copilot nickname, matching `get_accounts` | Nothing — `get_accounts` has reported the nickname since #660; the others now agree. Correlate on `account_id`, never on the name |
 
 Two things that are **not** symptoms of this release:
 
@@ -142,6 +143,18 @@ caller is the one who has to change something.
 - **`get_investment_prices` (cache) rows were unusable before** and are fixed in
   this release, not merely dieted — the previous rows could not answer "what is
   this worth".
+- **Account names now agree across all four surfaces.** `get_holdings` and
+  `get_recurring_transactions`' detail view reported the provider label where
+  `get_accounts` reports your Copilot nickname, so the same account appeared
+  under two names depending on which tool you asked. All four now resolve
+  `nickname || name || official_name`. Two consequences worth knowing: an
+  account whose nickname you cleared previously came back from
+  `get_balance_history` with **no name at all**, and now returns the provider
+  label; and an account that has no `name` at all now reports its
+  `official_name` — which the accounts diet drops from the default preset as a
+  name dupe, so that value reappears under the `name` key. **`account_name` is
+  user-editable and always was** — it is not a stable key, and `get_accounts`'
+  own description now says so. Correlate on `account_id`.
 - **`get_holdings` and `get_holdings_live` no longer report positions on hidden
   or merged accounts.** They used to, while `get_accounts` correctly hid those
   accounts — so summing `institution_value` counted a re-linked brokerage

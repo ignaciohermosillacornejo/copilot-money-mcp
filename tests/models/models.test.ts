@@ -17,10 +17,12 @@ import {
 
 describe('Account model helpers', () => {
   describe('preferredAccountName', () => {
-    // The canonical helper. It sat in five files, none of them a test — covered
-    // only through the four-surface parity tests, which exercise two of its
-    // four input classes. Its deprecated neighbour below has the behaviour
-    // table, which is backwards given the docblocks steer readers this way.
+    // The canonical helper. It sat in six files, none of them a test — covered
+    // only through the four-surface parity tests, which exercised two of its
+    // input classes. Its deprecated neighbour below had the behaviour table,
+    // which was backwards given the docblocks steer readers this way. These
+    // tests are what closed that, so the asymmetry is history, not a standing
+    // complaint.
     const base = { account_id: 'acc1', current_balance: 1000 } as const;
 
     test('nickname wins over both provider labels', () => {
@@ -32,6 +34,23 @@ describe('Account model helpers', () => {
     test('a BLANK nickname is not a name, so the provider label wins', () => {
       // Truthiness, not `??` — the #663-in-reverse bug was `'' ?? name` === ''.
       expect(preferredAccountName({ ...base, nickname: '', name: 'PROVIDER' })).toBe('PROVIDER');
+    });
+
+    test('a WHITESPACE-ONLY nickname is blank too', () => {
+      // `'   '` is truthy, so bare truthiness would return it — and it is
+      // exactly as unidentifiable as `''`, which is the reason the docblock
+      // gives for treating blank as not-a-name. Nothing upstream trims:
+      // `nickname` is z.string().optional() with no transform and the decoder
+      // passes it through.
+      expect(preferredAccountName({ ...base, nickname: '   ', name: 'PROVIDER' })).toBe('PROVIDER');
+    });
+
+    test('a nickname with surrounding space keeps its own spelling', () => {
+      // Blank-detection trims; the returned value does not. Trimming the
+      // answer would silently rewrite a name the user typed.
+      expect(preferredAccountName({ ...base, nickname: ' Rainy Day ', name: 'P' })).toBe(
+        ' Rainy Day '
+      );
     });
 
     test('falls back to official_name when there is no name at all', () => {

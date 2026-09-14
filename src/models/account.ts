@@ -210,5 +210,13 @@ export function isVisibleAccountNode(account: {
 export function preferredAccountName(
   account: Pick<Account, 'nickname' | 'name' | 'official_name'>
 ): string | undefined {
-  return account.nickname || account.name || account.official_name;
+  // Blank-detection trims, the returned value does not. `'   '` is truthy, so
+  // bare truthiness would hand back a nickname that is exactly as
+  // unidentifiable as `''` — the case the rule above exists to reject. Nothing
+  // upstream trims: `nickname` is `z.string().optional()` with no transform and
+  // the decoder passes the field through. Trimming the ANSWER would be a
+  // different decision — it would silently rewrite a name the user typed — so
+  // only the blank test is trimmed.
+  const nickname = account.nickname?.trim() ? account.nickname : undefined;
+  return nickname || account.name || account.official_name;
 }
