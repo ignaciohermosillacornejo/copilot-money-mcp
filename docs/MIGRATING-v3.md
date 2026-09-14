@@ -52,10 +52,10 @@ live rows do not carry identical field sets.
 |---|---|---|
 | A field you read is suddenly `undefined`, no error | That tool is terse by default and the field is not in its preset | Add it: `fields: ["default", "<the field>"]` |
 | `` `compact` was removed in v3.0.0 `` | `compact` is gone from `get_transactions` | Passing `true`? Drop the argument. Passing `false`? Use `fields: ["all"]` |
-| `` `include_logos` was removed in v3.0.0 `` | `include_logos` is gone from the accounts pair | `fields: ["default", "logo", "logo_content_type"]` |
+| `` `include_logos` was removed in v3.0.0 `` | `include_logos` is gone from `get_accounts` | `fields: ["default", "logo", "logo_content_type"]` |
 | `fields: []` used to return full rows, now returns the terse row | An empty selection now means the same as omitting `fields` | Use `fields: ["all"]` |
 | `_field_warning` names a field you know exists | The name exists on the *other* mode, or is misspelled | Check the tables below for the mode you are running |
-| `__typename` keys are gone from live responses | They are stripped from every response now | Nothing to do — they were never meaningful to callers |
+| `__typename` keys are gone from live responses | They are stripped from every response now | Nothing to do in almost every case. The one place it disambiguated anything was the icon union, and `{unicode}` vs `{id, src}` already tells those apart |
 | Responses are no longer pretty-printed | Responses serialize compactly | Nothing to do — the JSON is identical, only whitespace changed |
 | `get_investment_balance_live` returns ~30 history points | `history_limit` defaults to 30 | Pass `history_limit: 0` for the full series |
 | `get_investment_prices` rows lost their `prices` map | Replaced by a derived `latest_price` / `latest_at` | `fields: ["default", "prices"]` |
@@ -109,8 +109,14 @@ dropped looks exactly like the field selection quietly changing underneath you.
 
 | Removed | On | Replacement |
 |---|---|---|
-| `compact` | `get_transactions` | `compact: true` → drop it (the default is terser). `compact: false` → `fields: ["all"]` |
-| `include_logos` | `get_accounts`, `get_accounts_live` | `fields: ["default", "logo", "logo_content_type"]` |
+| `compact` | `get_transactions`, `get_transactions_live` | `compact: true` → drop it (the default is terser). `compact: false` → `fields: ["all"]` |
+| `include_logos` | `get_accounts` only | `fields: ["default", "logo", "logo_content_type"]` |
+
+**`get_accounts_live` is not part of the second row**, and asking it for a logo
+does not work: the GraphQL account node has no logo under any name, so the live
+row never carried one and `include_logos` was never one of its arguments. A
+`fields: ["default", "logo"]` there returns the terse row plus a
+`_field_warning` — the cache tool is the only place an institution logo exists.
 
 Note the direction for `compact: false`. It used to mean "give me everything",
 which is the one shape that omitting `fields` no longer produces — so that
@@ -120,7 +126,8 @@ caller is the one who has to change something.
 
 - **`__typename` is stripped from every response.** Live tools carried a
   GraphQL type discriminator on each nested object. Requests are unchanged; the
-  key is removed on the way out.
+  key is removed on the way out. The icon union is the only place it carried
+  information, and its two shapes distinguish themselves without it.
 - **Responses are serialized compactly.** Previously pretty-printed with
   two-space indentation. The JSON content is identical.
 - **`get_investment_prices` (cache) rows were unusable before** and are fixed in
@@ -145,7 +152,7 @@ caller is the one who has to change something.
 
 Anything that reads a transaction, account, category, recurring or investment
 field by name should pass an explicit `fields` list for that field, or read it
-from the preset tables above. The four skills shipped in this repo were updated
+from the preset tables above. The skills shipped in this repo were updated
 in the same release, and `bun run check:skills` cross-checks skill field
 references against the real presets, so a skill that reads a dropped field fails
 the linter instead of failing silently at use time.

@@ -153,10 +153,18 @@ describe('the SOURCE comment above the synthesis describes the watched spellings
     expect(block().length).toBeGreaterThan(500);
   });
 
-  for (const check of ALL_OUTPUT_FIELD_ABSENCE_CHECKS) {
-    if (check.typeName !== 'Transaction') continue;
+  const txChecks = ALL_OUTPUT_FIELD_ABSENCE_CHECKS.filter((c) => c.typeName === 'Transaction');
 
-    test('every watched spelling is named in the source block', () => {
+  test('guards the gate: a Transaction check exists to loop over', () => {
+    // The loop below filters. If the Transaction check is ever renamed or
+    // dropped, a bare `for` would register ZERO tests and this describe would
+    // pass green — the same executes-but-tests-nothing shape the block it
+    // guards was written to catch.
+    expect(txChecks.length).toBeGreaterThan(0);
+  });
+
+  for (const check of txChecks) {
+    test(`every watched ${check.typeName} spelling is named in the source block`, () => {
       const text = block();
       const unnamed = check.absentFields.filter((f) => !text.includes(`\`${f}\``));
       expect(
@@ -168,7 +176,7 @@ describe('the SOURCE comment above the synthesis describes the watched spellings
       ).toEqual([]);
     });
 
-    test('the source block states the same COUNT as the watched list', () => {
+    test(`the source block states the same ${check.typeName} COUNT as the watched list`, () => {
       expect(
         block(),
         `The ${BLOCK_START} block in ${SOURCE} must state the watched-spelling count as ` +

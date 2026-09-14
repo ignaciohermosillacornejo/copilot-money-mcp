@@ -58,7 +58,11 @@ function documentedRows(): Map<string, string[]> {
     const m = /^\|\s*`([a-z_]+)`\s*\|(.+)\|\s*$/.exec(line);
     if (!m) continue;
     const fields = [...m[2]!.matchAll(/`([a-zA-Z_][a-zA-Z0-9_]*)`/g)].map((f) => f[1]!);
-    rows.set(m[1]!, fields);
+    const tool = m[1]!;
+    // A copy-pasted duplicate row would otherwise overwrite silently AND push
+    // `rows.size` back toward the non-vacuity floor below.
+    expect(rows.has(tool), `${GUIDE} lists \`${tool}\` twice in the preset table`).toBe(false);
+    rows.set(tool, fields);
   }
   return rows;
 }
@@ -106,7 +110,8 @@ describe('the migration guide documents the real presets', () => {
       undocumented,
       `Presets exported from src/tools/field-selection.ts that no row of ${GUIDE} describes: ` +
         `${undocumented.join(', ')}. A tool dieted after v3 should not ship undocumented — ` +
-        `add a row, or if the preset is not a tool default, say so in the guide.`
+        `add a row to the table naming exactly these fields. (Prose elsewhere in the guide ` +
+        `will not satisfy this: the check compares field LISTS against table rows.)`
     ).toEqual([]);
   });
 
