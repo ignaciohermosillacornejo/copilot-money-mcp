@@ -27,7 +27,14 @@
  *                      (nested input objects use `<InputType>.<field>.<subfield>`)
  * - `operation`      → `Mutation.<fieldName>` or `Query.<fieldName>`, e.g.
  *                      `Mutation.createTransaction`, `Query.accounts`
- *                      (covers the operation's existence + top-level args)
+ *                      (covers the operation's existence + top-level args).
+ *                      Also takes a `:<aspect>` suffix for a claim about ONE
+ *                      behaviour of that operation rather than its existence
+ *                      — `Mutation.editTransaction:routing`,
+ *                      `Mutation.splitTransaction:sum`,
+ *                      `Mutation.bulkEditTransactions:silent-skip`. Six live
+ *                      entries already use it; documented here for the same
+ *                      reason as the `response-shape` form below.
  * - `response-shape` → `Mutation.<fieldName>:response` / `Query.<fieldName>:response`
  *                      for a whole operation's shape. For an assumption about
  *                      ONE FIELD's semantics rather than the operation's keys,
@@ -757,7 +764,10 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
 
   // ----- Read queries (issues #439/#460) -------------------------------------
   // One operation + one response-shape entry per QUERY in
-  // operations.generated.ts, named by root Query field.
+  // operations.generated.ts, named by root Query field — plus any field-level
+  // `<Node>.<field>:<aspect>` entries, filed beside the query they concern
+  // rather than in a section of their own, so a reader auditing that query
+  // finds them together.
   // `tests/scripts/read-smoke-coverage.test.ts` enforces this list stays in
   // lockstep with the generated operations AND with the Tier-0 read smoke
   // checks (scripts/smoke/read-checks.ts) — a new query cannot ship without

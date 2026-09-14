@@ -84,11 +84,16 @@ describe('both account tools state the `name` contract (#665)', () => {
       // Word-boundary, not substring: `key on id` is a prefix of `key on ids`
       // and `key on identifier`. The short word is the ONE that differs
       // between the two copies, so it is where exactness earns its keep.
+      //
+      // The optional backtick matters more for the paste-detector below than
+      // here: these sentences backtick other field names two clauses earlier,
+      // so a "make the field names consistent" edit is plausible — and it
+      // would slip a pasted `key on \`account_id\`` PAST a bare-form check.
       expect(
         schema.description,
         `${schema.name} must tell callers to key on \`${stableKey}\` — the field its own rows ` +
           `actually carry.`
-      ).toMatch(new RegExp(`key on ${stableKey}\\b`));
+      ).toMatch(new RegExp(`key on \`?${stableKey}\\b`));
     });
   }
 
@@ -101,7 +106,7 @@ describe('both account tools state the `name` contract (#665)', () => {
       // Same boundary, for the same reason in reverse: a cache sentence that
       // legitimately said `key on ids` must not trip the paste-detector.
       expect(
-        new RegExp(`key on ${otherKey}\\b`).test(schema.description),
+        new RegExp(`key on \`?${otherKey}\\b`).test(schema.description),
         `${schema.name} tells callers to key on \`${otherKey}\`, which is the other mode's ` +
           `field name — its own rows do not carry it.`
       ).toBe(false);
