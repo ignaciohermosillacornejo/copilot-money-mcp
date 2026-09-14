@@ -7,6 +7,14 @@
  * oracle (if any) that re-verifies each assumption and the strongest class
  * of verification it currently has.
  *
+ * Also, since #722, the ONE non-Copilot external surface the server depends
+ * on: Google's Firebase token-exchange endpoint. It is here for the same
+ * reason everything else is — the auth loop branches on how that endpoint
+ * rejects things, so those are assumptions about a system we do not control,
+ * and the #478 post-mortem recorded their absence from this ledger as a gap.
+ * They carry no `toolParams` and no oracle: the bijection tests walk the
+ * write-tool schemas, which never reach them.
+ *
  * Why: the 2026-06 write-field audit found that bugs lived in the gap
  * between our local model and Copilot's server reality, and nothing tracked
  * WHICH assumptions had independent verification. The ledger makes "we
@@ -45,6 +53,12 @@
  *                      `queryOperation`). Only the suffixed form is barred,
  *                      by the reserved-prefix note under `response-shape`,
  *                      which applies to every kind.
+ *                      One deliberate exception, added with the entries that
+ *                      needed it (#722): a third-party HTTP endpoint is named
+ *                      `<Service>.<path>:<aspect>`, e.g.
+ *                      `Securetoken.v1Token:foreignProject`. It is neither a
+ *                      Copilot operation nor a query, so neither ratchet
+ *                      applies; the `:<aspect>` half means the same thing.
  * - `response-shape` → `Mutation.<fieldName>:response` / `Query.<fieldName>:response`
  *                      for a whole operation's shape. For an assumption about
  *                      ONE FIELD's semantics rather than the operation's keys,
@@ -994,6 +1008,52 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   gatedQueryResponseShape('securityPrices'),
   queryOperation('securityPricesHighFrequency'),
   gatedQueryResponseShape('securityPricesHighFrequency'),
+
+  // -------------------------------------------------------------------------
+  // Google Firebase securetoken (#722) — not Copilot's surface, but external,
+  // and the cold-path auth loop branches on all three of these. Candidates are
+  // scraped out of raw browser LevelDB bytes, so the loop must decide, per
+  // rejection, whether to try the next candidate or stop.
+  // -------------------------------------------------------------------------
+  {
+    surface: 'Securetoken.v1Token:foreignProject',
+    kind: 'operation',
+    oracle: null,
+    class: 'verified-once',
+    evidence:
+      'A refresh token belonging to a different Firebase project is rejected with ' +
+      'PROJECT_NUMBER_MISMATCH. Observed repeatedly against production during live-session ' +
+      'work (issue #454, fixed in PR #478) — real foreign tokens, no controlled probe, and ' +
+      'nothing re-checks it. `isForeignProjectError` in src/core/auth/firebase-auth.ts is ' +
+      'the only reason a foreign candidate is skipped rather than reported as a failure.',
+  },
+  {
+    surface: 'Securetoken.v1Token:invalidCandidate',
+    kind: 'operation',
+    oracle: null,
+    class: 'verified-once',
+    evidence:
+      'An `AMf-`-shaped string that is not a usable refresh token is rejected with HTTP 400 ' +
+      'and code INVALID_REFRESH_TOKEN — NOT PROJECT_NUMBER_MISMATCH. One-shot probe for ' +
+      'issue #722: a synthetic non-token posted to the documented endpoint with the public ' +
+      'web API key returned 400 / INVALID_REFRESH_TOKEN. This is why a non-mismatch 4xx is ' +
+      'no longer read as "the candidate was Copilot\'s": the token regex scans raw LevelDB ' +
+      'bytes, so a truncated match from ANY site lands here.',
+  },
+  {
+    surface: 'Securetoken.v1Token:endpointFailure',
+    kind: 'operation',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      'ASSUMED, not observed: the endpoint reports its OWN unavailability with a 5xx (or no ' +
+      'response at all), never by 4xx-ing a valid candidate. Inferred from standard Google ' +
+      'API HTTP semantics; no probe has induced a 5xx. `isCandidateRejection` in ' +
+      'src/core/auth/firebase-auth.ts relies on it to stop the candidate loop on an outage ' +
+      'instead of replaying every candidate against a struggling endpoint. If the ' +
+      'assumption is wrong the failure is benign in the privacy direction (fewer requests, ' +
+      'a raw error surfaced early) rather than a wrong answer.',
+  },
 ];
 
 // ---------------------------------------------------------------------------

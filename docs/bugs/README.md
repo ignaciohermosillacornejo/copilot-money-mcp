@@ -72,7 +72,7 @@ a class yet.
 | `external-api-drift` | An assumption about Copilot's API — an enum value, an input field, an operation signature — was wrong when written, or became wrong. | conformance ledger + Tier-1 smokes (`bun run smoke`); see [`CONFORMANCE_ARCHITECTURE.md`](../CONFORMANCE_ARCHITECTURE.md) |
 | `wire-type-drift` | The API or the cache holds a value the schema cannot represent — a number where a string was expected, a null where non-null was assumed, an IEEE-754 `NaN`/`±Infinity` where JSON has no such value. | runtime warn-mode validation on all read shapes; non-finite leaves are stripped at the decode boundary instead of costing the document (#659), and `smoke:cache` reports any that exist in the real cache |
 | `referential-integrity-gap` | A write accepts ids without existence checks, producing silent no-ops or dangling references. | none — client-side validation on bulk writes only. No full entry yet; instance in [`MINOR.md`](MINOR.md) (#213), and Copilot's own `bulkEditTransactions` has the same gap server-side |
-| `ambiguous-candidate-selection` | Committing to one candidate from a noisy source before the only authority that can validate it runs, with no fallback; the benign rejection is then misreported as a system error. | none |
+| `ambiguous-candidate-selection` | Committing to one candidate from a noisy source before the only authority that can validate it runs, with no fallback; the benign rejection is then misreported as a system error. | `tests/core/auth/candidate-ordering.test.ts` (mutation-verified, four directions): no single candidate may end the search for a valid one behind it — whatever its position in the list or its failure mode (#722) |
 
 ### Computing the answer
 
@@ -105,7 +105,7 @@ a class yet.
 ## How we find bugs
 
 Recorded per entry, using a fixed vocabulary so the corpus stays countable. Here is what
-this corpus actually says, across all 49 entries:
+this corpus actually says, across all 50 entries:
 
 | Found by | Count | |
 |---|---|---|
@@ -116,7 +116,7 @@ this corpus actually says, across all 49 entries:
 | `user-report` | 8 | ███████ |
 | `adversarial-review` — a reviewer tried to refute a claim or mutation-tested a guard | 2 | █ |
 | `detector-first` — a detector was built, and then found bugs | 1 | ▌ |
-| `code-review` | 2 | █ |
+| `code-review` | 3 | ██ |
 | **`ci-gate`** — **a checked-in invariant failed** | **0** | |
 
 **No bug in this corpus was first caught by a CI gate.** That is the single most useful
@@ -208,11 +208,12 @@ record near-misses.
 | #537 | [Read-query interfaces systematically declared the wrong wire types (string amounts that are numbers, non-null prices that are null)](537-read-shape-string-number-drift.md) | `detector-first` | 2026-07-18 |
 | #659 | [An Infinity price in the cache silently removed a whole investment account and 18 months of holdings history](659-non-finite-price-drops-documents.md) | `user-report` | 2026-08-21 |
 
-**`ambiguous-candidate-selection`** — 1
+**`ambiguous-candidate-selection`** — 2
 
 | | Bug | Found by | Date |
 |---|---|---|---|
 | #478 | [Logged-out users got a raw PROJECT_NUMBER_MISMATCH error because the token extractor picked up other sites' Firebase tokens](478-foreign-token-project-mismatch.md) | `incidental` | 2026-06-13 |
+| #722 | [A logged-in user could be told to log in, because other sites' tokens filled the ten-candidate exchange budget first](722-token-candidate-crowding-out.md) | `code-review` | 2026-09-14 |
 
 
 ### Computing the answer

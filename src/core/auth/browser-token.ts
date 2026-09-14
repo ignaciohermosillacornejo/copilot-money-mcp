@@ -21,6 +21,16 @@ export interface BrowserConfig {
 export interface TokenResult {
   token: string;
   browser: string;
+  /**
+   * True when the token was read from a location only Copilot's own web
+   * origin writes to (a per-origin IndexedDB / storage directory whose name
+   * carries `app.copilot.money`); false for browser-wide stores every site
+   * shares. This is provenance, NOT validation: a scoped token can still be
+   * stale, and only the securetoken exchange knows which project a token
+   * belongs to. It exists so the exchange budget in `firebase-auth.ts` can
+   * spend on the high-probability pool first — see issue #722.
+   */
+  scoped: boolean;
 }
 
 /**
@@ -36,6 +46,10 @@ export interface TokenResult {
  * (PROJECT_NUMBER_MISMATCH) and keep trying.
  */
 export interface TokenCandidates {
+  /**
+   * De-duplicated candidates, Copilot-scoped ones first (see `TokenResult.scoped`),
+   * discovery order preserved within each group.
+   */
   candidates: TokenResult[];
   /** Browser names searched, in order — used to build the "no session" error. */
   checked: string[];
@@ -45,6 +59,35 @@ export interface TokenCandidates {
 const REFRESH_TOKEN_REGEX = /AMf-[A-Za-z0-9_-]{100,}/g;
 const COPILOT_INDEXEDDB_DIR = 'IndexedDB/https_app.copilot.money_0.indexeddb.leveldb';
 const LOCAL_STORAGE_DIR = 'Local Storage/leveldb';
+
+/**
+ * Substring every browser's per-origin storage directory for Copilot carries:
+ * Chromium's `https_app.copilot.money_0.indexeddb.leveldb`, Firefox's
+ * `https+++app.copilot.money`, Safari's legacy origin-named database dirs.
+ * Browser-wide stores (`Local Storage/leveldb`, Safari's hashed WebsiteData
+ * dirs) never do, which is exactly the asymmetry the ordering exploits.
+ */
+const COPILOT_ORIGIN_MARKER = 'app.copilot.money';
+
+/**
+ * True when a storage path names Copilot's own web origin, i.e. only
+ * app.copilot.money could have written the tokens under it.
+ *
+ * Deliberately a substring test on the path rather than a per-browser flag:
+ * the three searchers hand it different things (a Chromium search directory,
+ * a Firefox origin directory, a Safari file path) and the property being
+ * asserted — "this location belongs to Copilot's origin" — is the same one in
+ * all three. Exported for the ordering tests.
+ */
+export function isCopilotScopedPath(path: string): boolean {
+  return path.includes(COPILOT_ORIGIN_MARKER);
+}
+
+/** A token plus where it came from, before it is attributed to a browser. */
+interface FoundToken {
+  token: string;
+  scoped: boolean;
+}
 
 /**
  * Build token search paths for Chromium profile directories.
@@ -172,7 +215,7 @@ function tokensInFile(filePath: string): string[] {
 }
 
 /** Search a directory for .ldb and .log files containing refresh tokens. */
-function searchLevelDBDir(dirPath: string): string[] {
+function searchLevelDBDir(dirPath: string): FoundToken[] {
   if (!existsSync(dirPath)) return [];
   let files: string[];
   try {
@@ -181,14 +224,20 @@ function searchLevelDBDir(dirPath: string): string[] {
     return [];
   }
 
+  // Provenance is a property of the SEARCH DIRECTORY here: a Chromium config
+  // lists the per-profile Copilot IndexedDB dir and the browser-wide Local
+  // Storage dir side by side, so the same browser yields both kinds.
+  const scoped = isCopilotScopedPath(dirPath);
   const targetFiles = files.filter((f) => f.endsWith('.ldb') || f.endsWith('.log'));
-  return targetFiles.flatMap((file) => tokensInFile(join(dirPath, file)));
+  return targetFiles.flatMap((file) =>
+    tokensInFile(join(dirPath, file)).map((token) => ({ token, scoped }))
+  );
 }
 
 /** Search Firefox profiles for refresh tokens. */
-function searchFirefoxProfiles(profilesDir: string): string[] {
+function searchFirefoxProfiles(profilesDir: string): FoundToken[] {
   if (!existsSync(profilesDir)) return [];
-  const found: string[] = [];
+  const found: FoundToken[] = [];
   try {
     const profiles = readdirSync(profilesDir, { withFileTypes: true })
       .filter((d) => d.isDirectory())
@@ -202,8 +251,13 @@ function searchFirefoxProfiles(profilesDir: string): string[] {
       for (const origin of origins) {
         const idbDir = join(idbBase, origin, 'idb');
         if (!existsSync(idbDir)) continue;
+        // The read filter above is `includes('copilot')`, which is looser than
+        // Copilot's actual origin — so classify on the origin dir, not on the
+        // fact that we read it. A `copilot-something-else.com` origin is still
+        // read (unchanged behaviour) but ranks with the browser-wide pool.
+        const scoped = isCopilotScopedPath(origin);
         for (const file of readdirSync(idbDir)) {
-          found.push(...tokensInFile(join(idbDir, file)));
+          found.push(...tokensInFile(join(idbDir, file)).map((token) => ({ token, scoped })));
         }
       }
     }
@@ -214,9 +268,9 @@ function searchFirefoxProfiles(profilesDir: string): string[] {
 }
 
 /** Search Safari databases for refresh tokens. */
-function searchSafariDatabases(dbDir: string): string[] {
+function searchSafariDatabases(dbDir: string): FoundToken[] {
   if (!existsSync(dbDir)) return [];
-  const found: string[] = [];
+  const found: FoundToken[] = [];
   try {
     const searchDir = (dir: string, depth: number): void => {
       if (depth > 4) return;
@@ -231,7 +285,11 @@ function searchSafariDatabases(dbDir: string): string[] {
           } catch {
             continue;
           }
-          found.push(...tokensInFile(fullPath));
+          // Safari 17+ hashes its WebsiteData dirs, so this is normally
+          // unscoped; the legacy `Library/Safari/Databases` tree can still
+          // carry origin-named dirs, and those rank as scoped.
+          const scoped = isCopilotScopedPath(fullPath);
+          found.push(...tokensInFile(fullPath).map((token) => ({ token, scoped })));
         }
       }
     };
@@ -243,8 +301,8 @@ function searchSafariDatabases(dbDir: string): string[] {
 }
 
 /** Search one browser config's paths, returning every token found. */
-function searchBrowser(browser: BrowserConfig): string[] {
-  const search: (path: string) => string[] =
+function searchBrowser(browser: BrowserConfig): FoundToken[] {
+  const search: (path: string) => FoundToken[] =
     browser.type === 'chromium'
       ? searchLevelDBDir
       : browser.type === 'firefox'
@@ -279,6 +337,22 @@ export function noCopilotSessionError(checked: string[]): Error {
  * project. Does NOT throw on empty — returns `{ candidates: [], checked }` so
  * the caller can attempt exchanges and build a single, consistent error.
  *
+ * Two orderings matter, and they are NOT the same one (issue #722):
+ *
+ * - **Discovery order** is per browser, then per configured path. Chromium
+ *   configs interleave `<profile>/IndexedDB/https_app.copilot.money_0…` with
+ *   `<profile>/Local Storage/leveldb`, so "prefer the Copilot store" holds
+ *   only *within* a profile — a later profile's real token lands behind an
+ *   earlier profile's browser-wide noise.
+ * - **Returned order** therefore hoists every Copilot-scoped candidate ahead
+ *   of every browser-wide one, stably. The caller's exchange budget is finite,
+ *   so without this a bounded cap can discard the one candidate that would
+ *   have worked; with it, the cap can only ever discard low-probability
+ *   candidates.
+ *
+ * Nothing about WHICH files are read changes here — only the order candidates
+ * come back in, and the provenance flag that explains that order.
+ *
  * @param browserOverrides - Override browser configs for testing
  */
 // Returns a Promise (the TokenExtractor contract is async) but the body is
@@ -292,26 +366,41 @@ export function extractRefreshTokenCandidates(
   const browsers = browserOverrides ?? BROWSER_CONFIGS;
   const checked: string[] = [];
   const candidates: TokenResult[] = [];
-  const seen = new Set<string>();
+  const seen = new Map<string, TokenResult>();
 
   for (const browser of browsers) {
     checked.push(browser.name);
-    for (const token of searchBrowser(browser)) {
-      if (seen.has(token)) continue;
-      seen.add(token);
-      candidates.push({ token, browser: browser.name });
+    for (const { token, scoped } of searchBrowser(browser)) {
+      const existing = seen.get(token);
+      if (existing) {
+        // One token, several sightings: keep the single candidate so a
+        // duplicate can never spend the caller's exchange budget twice, but
+        // let the STRONGER provenance win. Otherwise a token first seen in a
+        // browser-wide store would be pinned to the low-probability pool even
+        // after it turns up in Copilot's own origin directory.
+        existing.scoped ||= scoped;
+        continue;
+      }
+      const candidate: TokenResult = { token, browser: browser.name, scoped };
+      seen.set(token, candidate);
+      candidates.push(candidate);
     }
   }
 
-  return Promise.resolve({ candidates, checked });
+  // Stable partition, not a comparator sort: within each group discovery order
+  // is the existing "newer tokens tend to be longer / earlier browsers first"
+  // preference, and it must survive untouched.
+  const ordered = [...candidates.filter((c) => c.scoped), ...candidates.filter((c) => !c.scoped)];
+
+  return Promise.resolve({ candidates: ordered, checked });
 }
 
 /**
  * Extract the first Firebase refresh-token candidate from browser storage.
  *
  * Thin wrapper over {@link extractRefreshTokenCandidates} that returns the
- * first candidate and throws the actionable "no session" error when none
- * exist. Note: this does NOT validate that the token belongs to Copilot's
+ * first candidate — Copilot-scoped if any scoped candidate exists — and throws
+ * the actionable "no session" error when none exist. Note: this does NOT validate that the token belongs to Copilot's
  * project — callers that need foreign-project rejection should consume the
  * full candidate list and drive the exchange-and-discard loop (see
  * `FirebaseAuth`). Retained for backward compatibility.

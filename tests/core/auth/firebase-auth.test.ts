@@ -2,10 +2,13 @@ import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { FirebaseAuth } from '../../../src/core/auth/firebase-auth.js';
 import type { TokenResult } from '../../../src/core/auth/browser-token.js';
 
-// Mock token extractor: yields a single valid candidate.
+// Mock token extractor: yields a single valid candidate, found where only
+// Copilot's own origin writes (`scoped`) — the shape of a logged-in user.
 const mockExtractor = mock(() =>
   Promise.resolve({
-    candidates: [{ token: 'AMf-fake-refresh-token', browser: 'Chrome' }] as TokenResult[],
+    candidates: [
+      { token: 'AMf-fake-refresh-token', browser: 'Chrome', scoped: true },
+    ] as TokenResult[],
     checked: ['Chrome'],
   })
 );
@@ -119,7 +122,7 @@ describe('FirebaseAuth', () => {
     // correctly rejected with PROJECT_NUMBER_MISMATCH. The user is logged out
     // of Copilot — surface the actionable "no session" message, NOT a raw 400.
     mockExtractor.mockResolvedValueOnce({
-      candidates: [{ token: 'AMf-foreign-project-token', browser: 'Chrome' }],
+      candidates: [{ token: 'AMf-foreign-project-token', browser: 'Chrome', scoped: false }],
       checked: ['Chrome'],
     });
     mockFetch({ error: { message: 'PROJECT_NUMBER_MISMATCH' } }, 400);
@@ -136,10 +139,13 @@ describe('FirebaseAuth', () => {
     // Two foreign tokens precede a real Copilot session token. The first two
     // exchanges reject with PROJECT_NUMBER_MISMATCH; the third succeeds.
     mockExtractor.mockResolvedValueOnce({
+      // All three come from the browser-wide store, so ordering cannot
+      // reshuffle them: this test is about discarding foreign candidates in
+      // sequence, and the sequence has to be the one written here.
       candidates: [
-        { token: 'AMf-foreign-one', browser: 'Chrome' },
-        { token: 'AMf-foreign-two', browser: 'Chrome' },
-        { token: 'AMf-real-copilot-token', browser: 'Arc' },
+        { token: 'AMf-foreign-one', browser: 'Chrome', scoped: false },
+        { token: 'AMf-foreign-two', browser: 'Chrome', scoped: false },
+        { token: 'AMf-real-copilot-token', browser: 'Arc', scoped: false },
       ],
       checked: ['Chrome', 'Arc'],
     });
@@ -180,6 +186,7 @@ describe('FirebaseAuth', () => {
       candidates: Array.from({ length: 25 }, (_, i) => ({
         token: `AMf-foreign-${i}`,
         browser: 'Chrome',
+        scoped: false,
       })),
       checked: ['Chrome'],
     });
@@ -194,7 +201,7 @@ describe('FirebaseAuth', () => {
     // token (e.g. expired/revoked), not a foreign-project token. Don't swallow
     // it into the "logged out" message — the token WAS Copilot's.
     mockExtractor.mockResolvedValueOnce({
-      candidates: [{ token: 'AMf-copilot-but-expired', browser: 'Chrome' }],
+      candidates: [{ token: 'AMf-copilot-but-expired', browser: 'Chrome', scoped: true }],
       checked: ['Chrome'],
     });
     mockFetch({ error: { message: 'INVALID_REFRESH_TOKEN' } }, 400);
