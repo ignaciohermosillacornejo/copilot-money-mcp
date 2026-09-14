@@ -158,14 +158,19 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // understatement #673 fixed on get_categories_live. It now says it is
   // PARTIAL and names the consequential omissions (`mask`, `available_balance`,
   // `limit`, `institution_id`) plus the two visibility flags the preset
-  // gained. Measured 2_305 (~10% headroom). Disclosure required by the #597
-  // convention; compressing the prose to fit the old ceiling would trade the
-  // disclosure for ~250 chars, which is the wrong trade (ruling 2026-08-30).
-  // Headroom is THIN: measured 2_518 against 2_535 after #665 added the
-  // `name` is-a-nickname contract, which is ~17 chars of room — roughly one
-  // more clause. That is the ratchet working (the contract was tightened to
-  // fit rather than the budget raised), but a one-word edit here can fail CI,
-  // and the fix is to justify a raise rather than to trim until it passes.
+  // gained. (Measured 2_305 at that time — SUPERSEDED, see below.) Disclosure
+  // required by the #597 convention; compressing the prose to fit the old
+  // ceiling would trade the disclosure for ~250 chars, which is the wrong
+  // trade (ruling 2026-08-30).
+  //
+  // CURRENT: measured 2_518 against 2_535 after #665 added the `name`
+  // is-a-nickname contract — 17 chars, or 0.67% headroom, not the ~10% this
+  // file uses elsewhere. Two separate claims, and only the second is a fact
+  // about today: tightening the contract to fit rather than raising the
+  // budget was the right call, AND the entry is now a tripwire that will fire
+  // on someone's unrelated typo fix. Its live twin was raised to ~10% in the
+  // same PR, so the asymmetry is deliberate but worth knowing. When it fires:
+  // justify a raise, do not trim the contract until it passes.
   get_accounts: 2_535,
   get_connection_status: 850,
   get_categories: 1_405,

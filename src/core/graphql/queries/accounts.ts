@@ -18,6 +18,11 @@ import { ACCOUNTS } from '../operations.generated.js';
 export interface AccountNode {
   id: string;
   itemId: string;
+  // The user's Copilot NICKNAME when they have set one, not the provider
+  // label — the server resolves it before sending (probed against real data
+  // 2026-09-14; see ledger `AccountNode.name:resolvesNickname`). Cache mode
+  // reaches the same value by mapping `nickname` -> `name` itself. Editable,
+  // so it is not a stable key; both tool descriptions say so.
   name: string;
   balance: number;
   // Boolean flag in the real response (verified against Chrome capture
