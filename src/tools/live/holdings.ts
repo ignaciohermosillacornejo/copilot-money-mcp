@@ -120,9 +120,19 @@ export class LiveHoldingsTools {
    * Account ids `get_accounts_live` would hide, read from the same snapshot
    * cache that tool uses — so the two cannot disagree about which accounts
    * exist, and the join costs nothing when the cache is warm.
+   *
+   * Returns the snapshot's own freshness alongside the ids: the rows this tool
+   * returns depend on BOTH snapshots, so reporting only the holdings one would
+   * advertise a freshness the result does not have (a caller who unhides an
+   * account can get `_cache_hit: false` while a 59-minute-old accounts
+   * snapshot still filters its positions out).
    */
-  private async hiddenAccountIds(): Promise<Set<string>> {
-    const { rows } = await this.live
+  private async readHiddenAccounts(): Promise<{
+    hidden: Set<string>;
+    fetched_at: number;
+    hit: boolean;
+  }> {
+    const { rows, fetched_at, hit } = await this.live
       .getAccountsCache()
       .read(() => fetchAccounts(this.live.getClient()));
 
@@ -132,25 +142,38 @@ export class LiveHoldingsTools {
     // accounts", silently restoring the exact #683 double-count this method
     // exists to prevent. A caller who cannot be told which accounts are
     // hidden should get an error, not a plausible wrong number.
+    //
+    // The remedy names `refresh_cache`, NOT "retry": SnapshotCache.read stores
+    // the entry before the caller sees it, so a malformed response is cached
+    // with a fresh timestamp and every retry inside the TTL hits the same
+    // poisoned entry. `refresh_cache` invalidates; retrying does not.
     if (!Array.isArray(rows)) {
       throw new Error(
         'get_holdings_live could not read the accounts snapshot, so it cannot tell which ' +
           'accounts are hidden or closed. Returning unfiltered holdings would risk ' +
-          'double-counting a merged account (#683). Retry, or pass include_hidden: true to ' +
-          'skip the visibility join deliberately.'
+          'double-counting a merged account (#683). The bad snapshot is cached, so retrying ' +
+          'will not help — call refresh_cache to invalidate it, or pass include_hidden: true ' +
+          'to skip the visibility join deliberately.'
       );
     }
-    return new Set(rows.filter((a) => !isVisibleAccountNode(a)).map((a) => a.id));
+    return {
+      hidden: new Set(rows.filter((a) => !isVisibleAccountNode(a)).map((a) => a.id)),
+      fetched_at,
+      hit,
+    };
   }
 
   async getHoldings(args: GetHoldingsLiveArgs): Promise<GetHoldingsLiveResult> {
     const cache = this.live.getHoldingsCache();
     const startedAt = Date.now();
-    const {
-      rows: cached,
-      fetched_at,
-      hit,
-    } = await cache.read(() => fetchHoldings(this.live.getClient()));
+
+    // Both snapshots in parallel: on a doubly-cold cache these are two
+    // independent round-trips and there is no reason to serialize them.
+    const [holdingsRead, accountsRead] = await Promise.all([
+      cache.read(() => fetchHoldings(this.live.getClient())),
+      args.include_hidden ? Promise.resolve(undefined) : this.readHiddenAccounts(),
+    ]);
+    const { rows: cached, fetched_at, hit } = holdingsRead;
 
     const limit = clampMaxRows(args.limit, { hardMax: MAX_LIMIT, defaultValue: DEFAULT_LIMIT });
     const offset = clampOffset(args.offset);
@@ -169,7 +192,7 @@ export class LiveHoldingsTools {
     // evidence. Filtering here makes the parity hold by construction instead
     // of resting on an unverified assumption about someone else's resolver.
     // If the server does filter too, this is a no-op.
-    const hiddenAccountIds = args.include_hidden ? undefined : await this.hiddenAccountIds();
+    const hiddenAccountIds = accountsRead?.hidden;
 
     // Filter on the raw GraphQL rows before projection — cheaper than
     // projecting then filtering, and the filter predicates only need
@@ -192,20 +215,39 @@ export class LiveHoldingsTools {
       rows: paged.length,
       cache_hit: hit,
     });
+    // The visibility join is its own network op when the accounts snapshot is
+    // cold. Logged separately so the read log records the round-trips this
+    // tool actually issues — otherwise its cost hides inside `Holdings`'
+    // latency and the op never appears at all.
+    if (accountsRead) {
+      this.live.logReadCall({
+        op: 'Accounts',
+        pages: accountsRead.hit ? 0 : 1,
+        latencyMs: Date.now() - startedAt,
+        rows: accountsRead.hidden.size,
+        cache_hit: accountsRead.hit,
+      });
+    }
 
-    const fetchedAtIso = new Date(fetched_at).toISOString();
-    // Both `_cache_oldest_fetched_at` and `_cache_newest_fetched_at` reflect
-    // the same single-snapshot fetch time — unlike the windowed transaction
-    // cache where they can differ across month windows.
+    // Freshness spans BOTH snapshots when the visibility join ran, because the
+    // returned rows depend on both. Reporting only the holdings snapshot would
+    // advertise a freshness the result does not have.
+    const oldestFetchedAt = accountsRead
+      ? Math.min(fetched_at, accountsRead.fetched_at)
+      : fetched_at;
+    const newestFetchedAt = accountsRead
+      ? Math.max(fetched_at, accountsRead.fetched_at)
+      : fetched_at;
+    const cacheHit = accountsRead ? hit && accountsRead.hit : hit;
     return {
       count: paged.length,
       total_count: totalCount,
       offset,
       has_more: hasMore,
       holdings: paged,
-      _cache_oldest_fetched_at: fetchedAtIso,
-      _cache_newest_fetched_at: fetchedAtIso,
-      _cache_hit: hit,
+      _cache_oldest_fetched_at: new Date(oldestFetchedAt).toISOString(),
+      _cache_newest_fetched_at: new Date(newestFetchedAt).toISOString(),
+      _cache_hit: cacheHit,
     };
   }
 }
