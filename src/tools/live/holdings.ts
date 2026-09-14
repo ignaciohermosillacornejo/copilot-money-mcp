@@ -129,6 +129,7 @@ export class LiveHoldingsTools {
    */
   private async readHiddenAccounts(): Promise<{
     hidden: Set<string>;
+    rowCount: number;
     fetched_at: number;
     hit: boolean;
   }> {
@@ -143,21 +144,33 @@ export class LiveHoldingsTools {
     // exists to prevent. A caller who cannot be told which accounts are
     // hidden should get an error, not a plausible wrong number.
     //
-    // The remedy names `refresh_cache`, NOT "retry": SnapshotCache.read stores
-    // the entry before the caller sees it, so a malformed response is cached
-    // with a fresh timestamp and every retry inside the TTL hits the same
-    // poisoned entry. `refresh_cache` invalidates; retrying does not.
+    // Invalidate before throwing, for two reasons.
+    //
+    // 1. It makes "retry" true advice. SnapshotCache.read stores the entry
+    //    BEFORE the caller sees the rows, so without this a malformed response
+    //    sits cached with a fresh timestamp and every retry inside the 1h TTL
+    //    throws off the same poisoned entry. Flushing it means a transient bad
+    //    response self-heals on the next call.
+    // 2. It stops this tool taking `get_accounts_live` down with it. The
+    //    accounts snapshot is SHARED, and that tool does `cached.map(...)` with
+    //    no guard — so a poisoned entry makes it throw a bare TypeError with no
+    //    explanation. That failure mode predates this code, but the #683
+    //    visibility join newly makes get_holdings_live a WRITER of that cache,
+    //    so a holdings call could otherwise break the accounts tool for an
+    //    hour. New blast radius deserves its own cleanup.
     if (!Array.isArray(rows)) {
+      this.live.getAccountsCache().invalidate();
       throw new Error(
         'get_holdings_live could not read the accounts snapshot, so it cannot tell which ' +
           'accounts are hidden or closed. Returning unfiltered holdings would risk ' +
-          'double-counting a merged account (#683). The bad snapshot is cached, so retrying ' +
-          'will not help — call refresh_cache to invalidate it, or pass include_hidden: true ' +
-          'to skip the visibility join deliberately.'
+          'double-counting a merged account (#683). The bad snapshot has been discarded, so ' +
+          'a retry will re-fetch — if it keeps failing, the response itself is malformed and ' +
+          'include_hidden: true skips the visibility join deliberately.'
       );
     }
     return {
       hidden: new Set(rows.filter((a) => !isVisibleAccountNode(a)).map((a) => a.id)),
+      rowCount: rows.length,
       fetched_at,
       hit,
     };
@@ -222,9 +235,17 @@ export class LiveHoldingsTools {
     if (accountsRead) {
       this.live.logReadCall({
         op: 'Accounts',
+        // Rows FETCHED, not hidden-count: everywhere else in the read log
+        // `rows` means that, and a 20-account response with nothing hidden
+        // would otherwise log `pages=1 rows=0` and read like an empty fetch.
+        //
+        // Both logReadCalls report elapsed from the same `startedAt`, so
+        // anything summing per-op latency double-counts the parallel window.
+        // That is honest — the two ops genuinely overlap — but it is the
+        // parallelism, not a measurement error.
         pages: accountsRead.hit ? 0 : 1,
         latencyMs: Date.now() - startedAt,
-        rows: accountsRead.hidden.size,
+        rows: accountsRead.rowCount,
         cache_hit: accountsRead.hit,
       });
     }
@@ -269,7 +290,9 @@ export function createLiveHoldingsToolSchema(): ToolSchema {
       properties: {
         account_id: {
           type: 'string',
-          description: "Filter — exact match on the holding's accountId.",
+          description:
+            "Filter — exact match on the holding's accountId. Returns empty for a hidden or " +
+            'closed account unless include_hidden is also set.',
         },
         ticker_symbol: {
           type: 'string',

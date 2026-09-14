@@ -212,10 +212,16 @@ describe('LiveHoldingsTools.getHoldings', () => {
     // SnapshotCache-backed, which is the point of this test — the warm call
     // adds nothing, so the join is paid once per TTL rather than per call,
     // and `get_accounts_live` usually warms it first anyway.
+    //
+    // Sorted, like its sibling below: the two reads run in parallel, so which
+    // ops were issued is the contract and arrival order is not. It happens to
+    // be deterministic today — the Promise.all array evaluates the holdings
+    // read first, and SnapshotCache.read reaches its loader before the first
+    // await — but that is an incidental of the cache, not something to pin.
     const ops = (client.query as ReturnType<typeof mock>).mock.calls.map(
       (c) => (c as unknown[])[0]
     );
-    expect(ops).toEqual(['Holdings', 'Accounts']);
+    expect([...ops].sort()).toEqual(['Accounts', 'Holdings']);
   });
 
   test('excludes positions on hidden and closed accounts by default (#683)', async () => {
@@ -316,12 +322,15 @@ describe('LiveHoldingsTools.getHoldings', () => {
     expect(escaped.holdings).toHaveLength(1);
   });
 
-  test('retrying after a bad accounts snapshot still throws — refresh_cache is the way out', async () => {
-    // Why the error names refresh_cache rather than "retry": SnapshotCache
-    // stores the entry BEFORE the caller sees the rows, so a malformed
-    // response is cached with a fresh timestamp and every retry inside the
-    // 1h TTL hits the same poisoned entry. Advice that cannot work is worse
-    // than no advice on a money question.
+  test('a bad accounts snapshot is DISCARDED, so a retry re-fetches', async () => {
+    // SnapshotCache stores the entry before the caller sees the rows, so
+    // without an explicit invalidate a malformed response would sit cached for
+    // the full 1h TTL and every retry would throw off the same poisoned entry.
+    //
+    // Two things ride on flushing it: "retry" becomes true advice, and this
+    // tool stops poisoning the SHARED accounts snapshot that get_accounts_live
+    // reads with no guard of its own — blast radius the #683 join newly
+    // created by making this tool a writer of that cache.
     let accountsCalls = 0;
     const client = {
       query: mock((op: string) => {
@@ -334,12 +343,13 @@ describe('LiveHoldingsTools.getHoldings', () => {
     } as unknown as GraphQLClient;
     const tools = new LiveHoldingsTools(makeLive(client));
 
-    await expect(tools.getHoldings({})).rejects.toThrow(/refresh_cache/);
-    await expect(tools.getHoldings({})).rejects.toThrow(/refresh_cache/);
+    await expect(tools.getHoldings({})).rejects.toThrow(/a retry will re-fetch/);
+    await expect(tools.getHoldings({})).rejects.toThrow(/a retry will re-fetch/);
 
-    // The second attempt never re-fetched: it threw off the cached bad entry,
-    // which is exactly why "retry" would have been useless advice.
-    expect(accountsCalls).toBe(1);
+    // The second attempt DID re-fetch — the entry was discarded rather than
+    // cached. This is the assertion that makes the error message's advice
+    // true; asserting only that it threw twice would pass either way.
+    expect(accountsCalls).toBe(2);
   });
 
   test('freshness reflects BOTH snapshots when the visibility join ran (#683)', async () => {
@@ -364,6 +374,12 @@ describe('LiveHoldingsTools.getHoldings', () => {
   });
 
   test('cache metadata: ISO strings, oldest === newest on a single-snapshot fetch', async () => {
+    // `include_hidden: true` below is load-bearing, not incidental: without it
+    // the #683 visibility join stamps a SECOND cache entry with its own
+    // Date.now(), and `oldest === newest` becomes a two-timestamp race that
+    // passes almost always — which is a CI flake waiting to be triaged rather
+    // than a property. Skipping the join makes this genuinely single-snapshot,
+    // which is what the title claims.
     const client = makeClient([equityHolding]);
     const tools = new LiveHoldingsTools(makeLive(client));
 

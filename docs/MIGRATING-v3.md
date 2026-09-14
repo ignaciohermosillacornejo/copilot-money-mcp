@@ -61,6 +61,7 @@ live rows do not carry identical field sets.
 | `get_investment_prices` rows lost their `prices` map | Replaced by a derived `latest_price` / `latest_at` | `fields: ["default", "prices"]` |
 | A `get_categories_live` row lost its `budget` object | Replaced by a derived `budget_amount` | `fields: ["default", "budget"]` |
 | A recurring row lost `rule` or `payments` | Both dropped from the live default row | `fields: ["default", "rule", "payments"]` |
+| Your portfolio total dropped | `get_holdings` now excludes hidden and merged accounts, matching `get_accounts` | Nothing — the new total is the correct one. `include_hidden: true` restores the old sum |
 
 Two things that are **not** symptoms of this release:
 
@@ -141,6 +142,13 @@ caller is the one who has to change something.
 - **`get_investment_prices` (cache) rows were unusable before** and are fixed in
   this release, not merely dieted — the previous rows could not answer "what is
   this worth".
+- **`get_holdings` and `get_holdings_live` no longer report positions on hidden
+  or merged accounts.** They used to, while `get_accounts` correctly hid those
+  accounts — so summing `institution_value` counted a re-linked brokerage
+  twice. If your portfolio total *drops* after upgrading, this is why, and the
+  new number is the one that matches your account list. Pass `include_hidden:
+  true` to get the old behaviour back for an audit.
+
 - **`history_limit` above 5,000 now clamps.** `get_investment_balance_live`
   inherited a shared pagination helper's hard cap where the old local code had
   no upper bound. `0` remains the unlimited escape hatch, so nothing that

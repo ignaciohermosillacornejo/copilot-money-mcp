@@ -18,6 +18,7 @@ export {
   withDisplayName as withAccountDisplayName,
   isVisibleAccount,
   isVisibleAccountNode,
+  preferredAccountName,
 } from './account.js';
 
 export { CategorySchema, type Category } from './category.js';

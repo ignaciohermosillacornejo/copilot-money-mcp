@@ -832,7 +832,12 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'and proves neither side. Filtering remains the right default because get_accounts_live ' +
       'is the parity a caller actually reaches for, but it is a trade made under uncertainty. ' +
       'TO SETTLE: hide an account that HOLDS something, then compare the sum of ' +
-      'get_holdings_live institution_value against get_investment_balance_live.',
+      'get_holdings_live institution_value against get_investment_balance_live. ' +
+      'NAMING: this is an assumption about the accounts QUERY, so `Query.accounts:...` reads ' +
+      'more naturally — but that prefix is reserved. ' +
+      'tests/scripts/read-smoke-coverage.test.ts requires every `Query.*` surface to name a ' +
+      'real generated root field after stripping `:response`, so `Query.accounts:hiddenReturned` ' +
+      'fails that ratchet (verified, not assumed). Type-scoped it is.',
   },
   gatedQueryResponseShape('accounts'),
   // Singular Account: generated document exists but has no hand-written
