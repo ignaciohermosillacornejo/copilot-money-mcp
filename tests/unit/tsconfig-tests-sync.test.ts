@@ -11,6 +11,7 @@
 import { describe, test, expect } from 'bun:test';
 import { readFileSync, readdirSync } from 'fs';
 import { join, relative } from 'path';
+import ts from 'typescript';
 
 const repoRoot = join(import.meta.dir, '../..');
 
@@ -22,15 +23,27 @@ function walk(dir: string): string[] {
   });
 }
 
-// tsconfig.tests.json is JSONC — strip full-line and inline // comments
-// before parsing. The comment marker must sit at line start or after
-// whitespace so protocol-relative strings like "https://x" survive.
+// tsconfig.tests.json is JSONC, so `JSON.parse` cannot read it directly.
+// `ts.parseConfigFileTextToJson` is the compiler's own reader for exactly this
+// file format — it is what `tsc -p` uses — so comments are handled by the
+// thing that defines what a comment is in a tsconfig.
+//
+// This was a hand-rolled line-comment stripper, the fourth copy of the class
+// #691 closed. It was the least wrong of the four (it required the marker to
+// sit at line start or after whitespace, so `"https://x"` survived), but the
+// guard was a heuristic about spacing, not about strings: a path value holding
+// ` //` anywhere would still have been truncated, silently shortening the
+// include list this test compares against. See
+// tests/no-hand-rolled-comment-strippers.test.ts.
 function readJsonc(path: string): { include: string[] } {
-  const raw = readFileSync(join(repoRoot, path), 'utf-8')
-    .split('\n')
-    .map((line) => line.replace(/(^|\s)\/\/.*$/, '$1'))
-    .join('\n');
-  return JSON.parse(raw) as { include: string[] };
+  const raw = readFileSync(join(repoRoot, path), 'utf-8');
+  const parsed = ts.parseConfigFileTextToJson(path, raw);
+  if (parsed.error !== undefined) {
+    throw new Error(
+      `${path} is not valid JSONC: ${ts.flattenDiagnosticMessageText(parsed.error.messageText, ' ')}`
+    );
+  }
+  return parsed.config as { include: string[] };
 }
 
 describe('tsconfig.tests.json stays in sync with typed-mock adoption', () => {

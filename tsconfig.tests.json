@@ -20,6 +20,32 @@
   },
   "include": [
     "tests/helpers/mock-graphql.ts",
+    // The #691 source-scanning machinery. Not GraphQL mocks, but the same
+    // argument applies one step over: outside this list nothing in
+    // `bun run check` reads a line of these files — the base config excludes
+    // tests/, eslint ignores tests/**, and `lint` runs on src/ only — and
+    // strip-comments.ts is a correctness-critical dependency of two scanners
+    // that are NOT on this list.
+    //
+    // Who imports what, since a curated list invites being read as a
+    // dependency map:
+    //   strip-comments.ts     <- decoder-field-completeness.test.ts,
+    //                            dedup-identity.test.ts, and its own contract
+    //                            test below. The two scanners stay OFF the
+    //                            list: they carry some of the ~87 pre-existing
+    //                            errors, and `tsc` does not follow imports
+    //                            upward, so checking the helper does not drag
+    //                            them in.
+    //   ts-files.ts           <- exported-constants.test.ts and
+    //                            no-hand-rolled-comment-strippers.test.ts,
+    //                            both on the list below and both clean.
+    // exported-constants.test.ts imports NO stripper: having no comment
+    // handling at all is its half of the #691 fix.
+    "tests/helpers/strip-comments.ts",
+    "tests/helpers/strip-comments.test.ts",
+    "tests/helpers/ts-files.ts",
+    "tests/no-hand-rolled-comment-strippers.test.ts",
+    "tests/exported-constants.test.ts",
     "tests/context-budget-live.test.ts",
     "tests/e2e/server.test.ts",
     "tests/integration/tools.test.ts",
