@@ -47,10 +47,12 @@ const PROJECT_NUMBER_MISMATCH = 'PROJECT_NUMBER_MISMATCH';
 
 /**
  * A securetoken exchange that came back non-OK, carrying the HTTP status so
- * the candidate loop can tell "this CANDIDATE is no good" (4xx) from "the
- * ENDPOINT is no good" (5xx, and by omission anything that never produced a
- * response at all — DNS, TLS, offline). The message is byte-identical to what
- * the previous plain Error threw, so callers matching on it are unaffected.
+ * the candidate loop can tell "this CANDIDATE is no good" from "the ENDPOINT
+ * is no good". `isCandidateRejection` below draws that line — not simply at
+ * 4xx, because 429 sits on the endpoint's side of it — and anything that never
+ * produced a response at all (DNS, TLS, offline) never becomes one of these.
+ * The message is byte-identical to what the previous plain Error threw, so
+ * callers matching on it are unaffected.
  */
 class TokenExchangeError extends Error {
   readonly status: number;
