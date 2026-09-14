@@ -316,6 +316,53 @@ describe('LiveHoldingsTools.getHoldings', () => {
     expect(escaped.holdings).toHaveLength(1);
   });
 
+  test('retrying after a bad accounts snapshot still throws — refresh_cache is the way out', async () => {
+    // Why the error names refresh_cache rather than "retry": SnapshotCache
+    // stores the entry BEFORE the caller sees the rows, so a malformed
+    // response is cached with a fresh timestamp and every retry inside the
+    // 1h TTL hits the same poisoned entry. Advice that cannot work is worse
+    // than no advice on a money question.
+    let accountsCalls = 0;
+    const client = {
+      query: mock((op: string) => {
+        if (op === 'Accounts') {
+          accountsCalls += 1;
+          return Promise.resolve({});
+        }
+        return Promise.resolve({ holdings: [equityHolding] });
+      }),
+    } as unknown as GraphQLClient;
+    const tools = new LiveHoldingsTools(makeLive(client));
+
+    await expect(tools.getHoldings({})).rejects.toThrow(/refresh_cache/);
+    await expect(tools.getHoldings({})).rejects.toThrow(/refresh_cache/);
+
+    // The second attempt never re-fetched: it threw off the cached bad entry,
+    // which is exactly why "retry" would have been useless advice.
+    expect(accountsCalls).toBe(1);
+  });
+
+  test('freshness reflects BOTH snapshots when the visibility join ran (#683)', async () => {
+    // The returned rows depend on the accounts snapshot too, so reporting only
+    // the holdings snapshot would advertise a freshness the result lacks: a
+    // caller who unhides an account could see _cache_hit: false while a stale
+    // accounts snapshot still filters its positions out.
+    const client = makeClient([equityHolding], [acct('acct-1')]);
+    const tools = new LiveHoldingsTools(makeLive(client));
+
+    const cold = await tools.getHoldings({});
+    expect(cold._cache_hit).toBe(false);
+
+    const warm = await tools.getHoldings({});
+    expect(warm._cache_hit).toBe(true);
+
+    // include_hidden skips the join, so only the holdings snapshot counts —
+    // and it is warm here, so this must not be dragged false by an absent
+    // second read.
+    const skipped = await tools.getHoldings({ include_hidden: true });
+    expect(skipped._cache_hit).toBe(true);
+  });
+
   test('cache metadata: ISO strings, oldest === newest on a single-snapshot fetch', async () => {
     const client = makeClient([equityHolding]);
     const tools = new LiveHoldingsTools(makeLive(client));
@@ -398,7 +445,10 @@ describe('LiveHoldingsTools.getHoldings', () => {
     // rather than by a bare count, so this test says which calls are expected
     // instead of only how many — a count would pass if the join were replaced
     // by some unrelated second query.
-    expect(queryMock.mock.calls.map((c) => (c as unknown[])[0])).toEqual(['Holdings', 'Accounts']);
+    expect(queryMock.mock.calls.map((c) => (c as unknown[])[0]).sort()).toEqual([
+      'Accounts',
+      'Holdings',
+    ]);
   });
 
   test('empty result returns count=0 without throwing', async () => {

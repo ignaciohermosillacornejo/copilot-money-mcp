@@ -16,6 +16,7 @@
  */
 
 import type { LiveCopilotDatabase } from '../../core/live-database.js';
+import { isVisibleAccountNode } from '../../models/account.js';
 import { fetchAccounts } from '../../core/graphql/queries/accounts.js';
 import { roundAmount } from '../../utils/round.js';
 import type { ToolSchema } from '../tools.js';
@@ -135,7 +136,7 @@ export class LiveAccountsTools {
     let rows: GetAccountsLiveRow[] = cached.map((a) => ({ ...a }));
 
     if (!include_hidden) {
-      rows = rows.filter((a) => !a.isUserHidden && !a.isUserClosed);
+      rows = rows.filter(isVisibleAccountNode);
     }
     if (account_type) {
       const normalized = account_type.toUpperCase();

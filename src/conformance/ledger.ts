@@ -805,6 +805,35 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       '`nickname` for an account that has one — which needs real data, so it belongs in a ' +
       'smoke rather than in CI.',
   },
+  {
+    surface: 'Account.hiddenAccountsReturned:assumed',
+    kind: 'response-shape',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      '#683 makes get_holdings_live join the Accounts snapshot to drop positions on hidden ' +
+      'and closed accounts, which ASSUMES the Accounts query returns those accounts rather ' +
+      'than filtering them server-side. If Copilot ever started filtering, hiddenAccountIds ' +
+      'would come back EMPTY and get_holdings_live would silently revert to the #683 ' +
+      'double-count — with no test failing, because the live parity test stubs a client that ' +
+      'always returns the hidden accounts. ' +
+      'Evidence is solid but INDIRECT: get_accounts_live applies its own client-side ' +
+      'isUserHidden/isUserClosed filter, which would be dead code if the server already ' +
+      'filtered, and a 2026-09-14 probe against real data saw hidden accounts in the ' +
+      'Accounts response. That is why this is `unverified` rather than absent: nothing ' +
+      're-checks it. ' +
+      'THE PARITY WAS MOVED, NOT ELIMINATED, and this is the half to watch. ' +
+      'get_investment_balance_live, get_aggregated_holdings_live and ' +
+      'get_investment_allocation_live are SERVER-COMPUTED totals with no per-account rows to ' +
+      "filter. If Copilot's aggregation does NOT exclude hidden accounts, get_holdings_live " +
+      'now sums to LESS than those three — a fresh disagreement about the same money, in the ' +
+      'opposite direction, created by the fix. The same probe could not settle it: the only ' +
+      'hidden accounts in that dataset hold nothing, so every comparison is trivially equal ' +
+      'and proves neither side. Filtering remains the right default because get_accounts_live ' +
+      'is the parity a caller actually reaches for, but it is a trade made under uncertainty. ' +
+      'TO SETTLE: hide an account that HOLDS something, then compare the sum of ' +
+      'get_holdings_live institution_value against get_investment_balance_live.',
+  },
   gatedQueryResponseShape('accounts'),
   // Singular Account: generated document exists but has no hand-written
   // wrapper; the read smoke probes the document directly.
