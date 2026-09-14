@@ -677,6 +677,81 @@ export class CopilotMoneyTools {
   }
 
   /**
+   * Apply the derived fields every cache-mode transaction row carries.
+   *
+   * Both paths through getTransactions() run through here, and that is the
+   * whole point of the function existing: `excluded` first shipped on the
+   * windowed site only, so the same row answered differently depending on
+   * whether the caller passed `transaction_id` or a date window. One site
+   * means the next derived field cannot land on half the tool.
+   *
+   * Runs BEFORE projection — projecting first drops the source keys and
+   * leaves nothing to derive from.
+   *
+   * @param transactions - Raw cache documents
+   * @returns The same rows plus category_name, normalized_merchant, excluded
+   */
+  private async enrichCacheTransactions(
+    transactions: Transaction[]
+  ): Promise<
+    Array<Transaction & { category_name?: string; normalized_merchant: string; excluded: boolean }>
+  > {
+    const excludedCategoryIds = await this.getExcludedCategoryIds();
+    return Promise.all(
+      transactions.map(async (txn) => ({
+        ...txn,
+        category_name: txn.category_id
+          ? await this.resolveCategoryName(txn.category_id)
+          : undefined,
+        normalized_merchant: normalizeMerchantName(getTransactionDisplayName(txn)),
+        // `excluded` answers "is this row excluded from spending?", which is
+        // the question a caller doing spend math is asking — NOT "is the raw
+        // per-transaction flag set?". Those differ, and shipping the raw flag
+        // made the two modes contradict each other: measured 2026-09-11
+        // against a real transaction in a user-excluded category, the Firestore
+        // document carried `excluded: undefined` while live-mode synthesized
+        // `true` from the same category. Copilot does not stamp the
+        // per-transaction flag when a category is excluded, so the raw flag
+        // alone is not the predicate anyone wants.
+        //
+        // This is the same union getTransactions' exclude_excluded filter
+        // applies, so the field agrees with its own tool's filtering, and
+        // matches the live surface for every row live can observe. The
+        // residual gap is the per-transaction flag itself, which GraphQL
+        // exposes nowhere — that half is why the ledger entry stays
+        // `unverified`.
+        excluded:
+          txn.excluded === true ||
+          (txn.category_id ? excludedCategoryIds.has(txn.category_id) : false),
+        // `internal_transfer` deliberately does NOT get the same treatment,
+        // and the asymmetry is the point rather than an oversight. The rule is
+        // "the field means the same thing in both modes", not "the field
+        // matches its own filter":
+        //   - `excluded` needed the union above, because the category half is
+        //     exactly what live can compute, so the union is what makes the two
+        //     modes agree.
+        //   - `internal_transfer` is the raw document flag, because that
+        //     already matches live's server-side `type === 'INTERNAL_TRANSFER'`
+        //     classification — measured 508/508 on real data, zero divergence.
+        // getTransactions' exclude_transfers filter is deliberately BROADER
+        // than the field: isTransferCategory() also matches `credit_card` and
+        // any id containing `transfer` or `payment`, because it is a spend
+        // heuristic ("don't count this as spending"), not a claim about what
+        // the transaction IS. Adopting that union here would let a row's
+        // CATEGORY alone set the field, independently of how live typed the
+        // row — trading a cross-mode divergence for an intra-mode one. That
+        // is the mechanism, not an observation: measured 2026-09-11, 0 of 508
+        // joined rows would flip either way, so nothing in the set exercised
+        // it. The choice is currently unobservable and rests on the reasoning.
+        //
+        // Pinned by "a TRANSFER-CATEGORY row without the raw flag reports
+        // internal_transfer falsy" in tests/tools/tools.test.ts — prose alone
+        // let the next reader "fix the asymmetry" without failing anything.
+      }))
+    );
+  }
+
+  /**
    * Get category name with user-defined categories taking precedence.
    *
    * @param categoryId - The category ID to look up
@@ -846,15 +921,9 @@ export class CopilotMoneyTools {
         };
       }
       const projected = projectTransactionFields(
-        [
-          {
-            ...found,
-            category_name: found.category_id
-              ? await this.resolveCategoryName(found.category_id)
-              : undefined,
-            normalized_merchant: normalizeMerchantName(getTransactionDisplayName(found)),
-          },
-        ],
+        // Same derivation the windowed path uses — a single lookup of a
+        // category-excluded row must not disagree with a windowed one.
+        await this.enrichCacheTransactions([found]),
         // #604: omitting `fields` yields the terse preset, not the full
         // ~35-40 field document. `fields: ["all"]` restores it.
         options.fields ?? ['default']
@@ -944,14 +1013,13 @@ export class CopilotMoneyTools {
       transactions = transactions.filter((txn) => !txn.plaid_deleted);
     }
 
-    // Hoisted out of the filter below because the `excluded` FIELD is derived
-    // from the same predicate during enrichment, and must be correct even when
-    // the caller passes exclude_excluded: false — which is the only case where
-    // the field carries information at all.
-    const excludedCategoryIds = await this.getExcludedCategoryIds();
-
-    // Filter out user-excluded transactions (both txn.excluded and category.excluded)
+    // Filter out user-excluded transactions — the same union
+    // enrichCacheTransactions() derives the `excluded` FIELD from, which is
+    // what makes the field agree with its own tool's filtering. The set is
+    // memoized on the instance, so asking for it here and again during
+    // enrichment costs one read.
     if (exclude_excluded) {
+      const excludedCategoryIds = await this.getExcludedCategoryIds();
       transactions = transactions.filter(
         (txn) => !txn.excluded && !(txn.category_id && excludedCategoryIds.has(txn.category_id))
       );
@@ -998,56 +1066,9 @@ export class CopilotMoneyTools {
     // Apply pagination
     transactions = transactions.slice(validatedOffset, validatedOffset + validatedLimit);
 
-    // Add human-readable category names and normalized merchant
-    const enrichedTransactions = await Promise.all(
-      transactions.map(async (txn) => ({
-        ...txn,
-        category_name: txn.category_id
-          ? await this.resolveCategoryName(txn.category_id)
-          : undefined,
-        normalized_merchant: normalizeMerchantName(getTransactionDisplayName(txn)),
-        // `excluded` answers "is this row excluded from spending?", which is
-        // the question a caller doing spend math is asking — NOT "is the raw
-        // per-transaction flag set?". Those differ, and shipping the raw flag
-        // made the two modes contradict each other: measured 2026-09-11
-        // against a real transaction in a user-excluded category, the Firestore
-        // document carried `excluded: undefined` while live-mode synthesized
-        // `true` from the same category. Copilot does not stamp the
-        // per-transaction flag when a category is excluded, so the raw flag
-        // alone is not the predicate anyone wants.
-        //
-        // This is the same union the exclude_excluded filter above applies, so
-        // the field now agrees with its own tool's filtering, and matches the
-        // live surface for every row live can observe. The residual gap is the
-        // per-transaction flag itself, which GraphQL exposes nowhere — that
-        // half is why the ledger entry stays `unverified`.
-        //
-        // Derived BEFORE projection: projecting first would drop the key and
-        // leave nothing to correct.
-        excluded:
-          txn.excluded === true ||
-          (txn.category_id ? excludedCategoryIds.has(txn.category_id) : false),
-        // `internal_transfer` deliberately does NOT get the same treatment,
-        // and the asymmetry is the point rather than an oversight. The rule is
-        // "the field means the same thing in both modes", not "the field
-        // matches its own filter":
-        //   - `excluded` needed the union above, because the category half is
-        //     exactly what live can compute, so the union is what makes the two
-        //     modes agree.
-        //   - `internal_transfer` is the raw document flag, because that
-        //     already matches live's server-side `type === 'INTERNAL_TRANSFER'`
-        //     classification — measured 508/508 on real data, zero divergence.
-        // The exclude_transfers filter below is deliberately BROADER than the
-        // field: isTransferCategory() also matches `credit_card` and any id
-        // containing `transfer` or `payment`, because it is a spend heuristic
-        // ("don't count this as spending"), not a claim about what the
-        // transaction IS. Adopting that union here would make cache call a
-        // credit-card payment an internal transfer while live types it
-        // REGULAR — trading a cross-mode divergence for an intra-mode one.
-        // Measured 2026-09-11: 0 of 508 joined rows would flip either way, so
-        // the choice is currently unobservable and rests on the reasoning.
-      }))
-    );
+    // Same derivation the transaction_id path above applies — see
+    // enrichCacheTransactions() for what is derived and why.
+    const enrichedTransactions = await this.enrichCacheTransactions(transactions);
 
     // Check if query may be limited by cache
     const cacheWarning = await this.db.checkCacheLimitation(start_date, end_date);
