@@ -4,7 +4,7 @@ title: A logged-in user could be told to log in, because other sites' Firebase t
 class: ambiguous-candidate-selection
 status: fixed
 detected: code-review  # noticed while reviewing #720, the PR that wrote the ten-candidate cap down in PRIVACY.md
-fixed_in: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/723
+fixed_in: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/726
 issue: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/722
 date: 2026-09-14
 ---
