@@ -70,7 +70,8 @@ export const REMOVED_ACCOUNT_ARGS = {
   // misadvised the larger half of the callers it fires on.
   include_logos:
     'logos are excluded by default now, so drop the argument; ' +
-    'pass fields: ["default", "logo", "logo_content_type"] to include them',
+    'pass fields: ["default", "logo", "logo_content_type"] to include them. ' +
+    'See docs/MIGRATING-v3.md',
 } as const;
 
 /**
@@ -89,7 +90,7 @@ export const REMOVED_TRANSACTION_ARGS = {
   compact:
     'rows are terse by default now, so a caller that passed compact: true can just drop ' +
     'the argument; pass fields: ["all"] for the full document, or name the fields you want ' +
-    'with fields: ["default", "user_note", ...]',
+    'with fields: ["default", "user_note", ...]. See docs/MIGRATING-v3.md',
 } as const;
 
 /**
