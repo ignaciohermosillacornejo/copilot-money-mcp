@@ -1207,6 +1207,12 @@ describe('get_transactions_live fields param — parity with get_transactions', 
     // No `startsWith('_')` filter: the regex cannot produce a leading-underscore
     // token, so `_field_warning` never appears here — which also means a
     // mistyped internal name like `_fild_warning` is invisible to this half.
+    //
+    // That blindness reaches the modeOnly check above too, which is the half
+    // with runtime consequences: `_origin` (src/models/transaction.ts) is a
+    // REAL cache-only transaction field, so naming it in the shared fragment
+    // would sail past the mode-parity assertion as well. Both halves start at
+    // the same regex.
     const looksLikeAField = identifiers.filter((n) => n.includes('_'));
     const unknownEverywhere = looksLikeAField.filter((n) => !everyField.has(n));
     expect(
@@ -1380,6 +1386,54 @@ describe('LiveTransactionsTools — synthesized excluded / internal_transfer (#6
     // No category at all is not excluded — matching the filter, which keeps
     // uncategorized rows.
     expect(byId.get('t-uncategorized')!.excluded).toBe(false);
+  });
+
+  test('an uncategorized live row is 9 keys ON THE WIRE, not 10', async () => {
+    // The mirror of cache mode's 'a sparse cache row omits the preset fields
+    // the document lacks'. Live's mappers always WRITE all 10 keys, so
+    // Object.keys() is 10 either way — but `category_name` maps to `undefined`
+    // when there is no category name to resolve, and src/server.ts serializes
+    // with JSON.stringify, which drops undefined values. So the caller
+    // receives 9.
+    //
+    // Asserted after a JSON round-trip for exactly that reason: reading
+    // Object.keys() off the object would pin the wrong thing and pass whether
+    // or not the claim in docs/tools-by-mode.md is true.
+    //
+    // `category_name` is the ONLY preset name that can vanish this way —
+    // `name` is non-nullable in transactionNodeSchema, and the other eight are
+    // always-present scalars or synthesized booleans.
+    const live = await mkLiveWithCategories([
+      mkNode({ id: 't-uncategorized', categoryId: null }),
+      mkNode({ id: 't-normal', categoryId: 'cat-normal' }),
+    ]);
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({ ...range });
+    const onTheWire = JSON.parse(JSON.stringify(result.transactions)) as Record<string, unknown>[];
+    const byId = new Map(onTheWire.map((r) => [r.transaction_id as string, r]));
+
+    const uncategorized = byId.get('t-uncategorized')!;
+    expect(Object.keys(uncategorized).sort()).toEqual(
+      LIVE_PRESET_NAMES.filter((n) => n !== 'category_name').sort()
+    );
+    expect(Object.keys(uncategorized)).toHaveLength(9);
+
+    // The categorized sibling still arrives full-width, so this is about the
+    // missing category and not about the preset having shrunk.
+    expect(Object.keys(byId.get('t-normal')!).sort()).toEqual([...LIVE_PRESET_NAMES].sort());
+  });
+
+  test('a category id missing from the index drops the key the same way', async () => {
+    // The docs attribute the dropped key to `categoryId` being nullable, but a
+    // NON-null id that is absent from the category index yields the same
+    // `undefined` out of `cats.names.get(...)` — a row whose category was
+    // deleted, or a page fetched before the category index caught up.
+    const live = await mkLiveWithCategories([mkNode({ id: 't-orphan', categoryId: 'cat-gone' })]);
+    const tools = new LiveTransactionsTools(live);
+    const result = await tools.getTransactions({ ...range, exclude_excluded: false });
+    const onTheWire = JSON.parse(JSON.stringify(result.transactions[0])) as Record<string, unknown>;
+    expect(Object.keys(onTheWire)).toHaveLength(9);
+    expect(onTheWire).not.toHaveProperty('category_name');
   });
 
   test('the flag agrees with the filter it is derived from', async () => {

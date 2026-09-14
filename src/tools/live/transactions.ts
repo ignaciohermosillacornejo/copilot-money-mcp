@@ -153,11 +153,19 @@ export interface CategoryIndex {
  *    NOT evidence. Treat it as what it is: the tool's own exclusion predicate,
  *    surfaced on the row.
  *
- * Probe transcript (2026-09-11): `excluded`, `isExcluded`, `userExcluded`,
- * `internalTransfer`, `isInternalTransfer` and 6 further spellings all return
+ * Probed 2026-09-11, and WATCHED since: the 8 spellings in
+ * `scripts/smoke/output-field-absence-checks.ts` — `excluded`, `isExcluded`,
+ * `userExcluded`, `isUserExcluded`, `excludeFromSpending`, `internalTransfer`,
+ * `isInternalTransfer`, `isTransfer` — all return
  * `Cannot query field "<name>" on type "Transaction"` with no "did you mean"
  * suggestions, and the web app's own `TransactionFields` fragment selects
- * neither. Ledger entries: `Transaction.internalTransfer:synthesized` (class
+ * neither. An earlier revision of this comment said "and 6 further spellings",
+ * i.e. 11; that count came from a probe transcript that no longer exists and
+ * was retracted everywhere else (#604 review). 8 is what the smoke can prove,
+ * so 8 is the claim — pinned to the watched list by
+ * tests/scripts/synthesized-field-coverage.test.ts.
+ *
+ * Ledger entries: `Transaction.internalTransfer:synthesized` (class
  * verified-once) and `Transaction.excluded:synthesized` (class unverified,
  * for the reason above) in src/conformance/ledger.ts.
  *
