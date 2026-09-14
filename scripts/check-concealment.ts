@@ -1237,8 +1237,8 @@ for (const file of files) {
   // target path past MAX_LINE would be reported, which is the direction this
   // gate errs in everywhere else.
   //
-  // Skipped when it is already what `contents` holds, or the line below and the
-  // walk further down would both report the same payload.
+  // Skipped when the target is already what `contents` holds — the per-line
+  // loop further down would otherwise report the same payload a second time.
   if (link !== undefined && link !== contents) {
     checkLine(rel, 1, link, SELF_EXEMPT.has(rel), false);
   }
