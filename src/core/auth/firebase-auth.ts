@@ -6,7 +6,7 @@
  * when expired (3600 second lifetime).
  */
 
-import { noCopilotSessionError, type TokenCandidates } from './browser-token.js';
+import { noCopilotSessionError, type TokenCandidates, type TokenResult } from './browser-token.js';
 
 // Public client-side Firebase Web API key for copilot-production-22904 — intentionally
 // not a secret. Scoped by Firebase security rules; safe to commit.
@@ -18,19 +18,71 @@ const EXPIRY_MARGIN_MS = 60_000;
 /**
  * Upper bound on how many discovered refresh-token candidates we'll try to
  * exchange. A normal browser has a handful of Firebase-backed sites; this caps
- * the pathological case (many `AMf-` tokens in the Local Storage fallback) so a
- * logged-out user can't trigger an unbounded run of sequential token exchanges.
+ * the pathological case (many `AMf-` tokens in the browser-wide Local Storage
+ * read) so a logged-out user can't trigger an unbounded run of sequential
+ * token exchanges.
+ *
+ * The bound is only SAFE because `selectExchangeCandidates` spends it
+ * Copilot-scoped-first (issue #722). A cap applied to an arbitrarily-ordered
+ * list is finite but not safe: it can discard the one candidate that would
+ * have worked, and the user is then told to log in while already logged in.
+ * Ordering is what makes discarding harmless — everything the cap drops came
+ * from a store every site writes to.
  */
 const MAX_EXCHANGE_CANDIDATES = 10;
 
 /**
  * Securetoken rejection code returned when a refresh token belongs to a
  * DIFFERENT Firebase project than copilot-production-22904. The browser-wide
- * Local Storage fallback surfaces other sites' `AMf-` tokens as candidates, so
+ * Local Storage read surfaces other sites' `AMf-` tokens as candidates, so
  * this is the expected, benign signal that "this candidate is foreign — try
  * the next one," NOT an API/key drift. See issue #454.
  */
 const PROJECT_NUMBER_MISMATCH = 'PROJECT_NUMBER_MISMATCH';
+
+/**
+ * A securetoken exchange that came back non-OK, carrying the HTTP status so
+ * the candidate loop can tell "this CANDIDATE is no good" (4xx) from "the
+ * ENDPOINT is no good" (5xx, and by omission anything that never produced a
+ * response at all — DNS, TLS, offline). The message is byte-identical to what
+ * the previous plain Error threw, so callers matching on it are unaffected.
+ */
+class TokenExchangeError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'TokenExchangeError';
+    this.status = status;
+  }
+}
+
+/**
+ * Order the discovered candidates the way the budget must be spent, then cap.
+ *
+ * Copilot-scoped candidates (`TokenResult.scoped`) come from a directory only
+ * app.copilot.money writes to; browser-wide ones come from a store every site
+ * shares. Hoisting the former is a stable partition, so discovery order —
+ * browser order, and longest-token-first within a file — survives inside each
+ * group.
+ *
+ * Why the ordering is re-applied here rather than trusted from the extractor:
+ * the cap lives in THIS file, `TokenExtractor` is an injected function, and a
+ * bound whose safety depends on a collaborator having sorted first is a bound
+ * that silently stops being safe the day someone writes a second extractor.
+ * The extractor sorts too, because its own single-candidate wrapper needs it.
+ *
+ * The cap stays GLOBAL rather than per-source on purpose (issue #722). With
+ * scoped candidates already holding the first slots, a per-source budget could
+ * not improve their chances — its only effect would be to let more browser-wide
+ * tokens, i.e. other sites' tokens, reach Google's endpoint. See PRIVACY.md.
+ */
+function selectExchangeCandidates(candidates: readonly TokenResult[]): TokenResult[] {
+  return [...candidates.filter((c) => c.scoped), ...candidates.filter((c) => !c.scoped)].slice(
+    0,
+    MAX_EXCHANGE_CANDIDATES
+  );
+}
 
 /**
  * Yields the discovered refresh-token candidates (each potentially from a
@@ -64,22 +116,44 @@ export class FirebaseAuth {
       return this.idToken;
     }
 
-    // Cold path: try each discovered candidate, discarding foreign-project ones
-    // (PROJECT_NUMBER_MISMATCH) and keeping the first that exchanges cleanly.
+    // Cold path: try each discovered candidate, discarding the ones the
+    // endpoint rejects and keeping the first that exchanges cleanly.
     const { candidates, checked } = await this.extractToken();
-    for (const candidate of candidates.slice(0, MAX_EXCHANGE_CANDIDATES)) {
+    // A rejection that was NOT "this token is foreign" — kept so it can be
+    // surfaced if nothing else works, instead of being flattened into the
+    // "you are logged out" message it may well contradict.
+    let firstUnexplainedRejection: TokenExchangeError | null = null;
+
+    for (const candidate of selectExchangeCandidates(candidates)) {
       try {
         await this.exchangeToken(candidate.token);
       } catch (err) {
-        if (isForeignProjectError(err)) continue; // not Copilot's token — try next
-        throw err; // a real exchange failure for a Copilot-project token
+        // 5xx / transport: the endpoint is the problem, not this candidate.
+        // Retrying it nine more times would only hammer it and bury the cause.
+        if (!isCandidateRejection(err)) throw err;
+        // Any 4xx is about THIS candidate, so keep going. A non-mismatch code
+        // does not mean the token was Copilot's: candidates are scraped out of
+        // raw LevelDB bytes, so a truncated `AMf-…` match is INVALID_REFRESH_TOKEN
+        // no matter whose storage it came from (probed for #722 — see the
+        // `Securetoken.v1Token:invalidCandidate` ledger entry). Letting
+        // one of those abort the run is the same crowding-out bug by another
+        // door — a foreign candidate ending the search for a real session.
+        if (!isForeignProjectError(err) && firstUnexplainedRejection === null) {
+          firstUnexplainedRejection = err;
+        }
+        continue;
       }
       if (!this.idToken) throw new Error('Firebase token exchange returned no ID token');
       return this.idToken;
     }
 
-    // No candidate belonged to Copilot's project (or none were found): the user
-    // is logged out. Surface the actionable message, never a raw Firebase 400.
+    // Nothing exchanged. If some candidate failed for a reason we cannot
+    // explain as "that one was foreign", that reason is the more informative
+    // error — surface it raw rather than asserting the user is logged out.
+    if (firstUnexplainedRejection) throw firstUnexplainedRejection;
+
+    // Every candidate was foreign-project (or none were found): the user is
+    // logged out. Surface the actionable message, never a raw Firebase 400.
     throw noCopilotSessionError(checked);
   }
 
@@ -109,7 +183,10 @@ export class FirebaseAuth {
     if (!response.ok) {
       const errorBody = await response.text();
       this.refreshToken = null;
-      throw new Error(`Firebase token exchange failed (${response.status}): ${errorBody}`);
+      throw new TokenExchangeError(
+        response.status,
+        `Firebase token exchange failed (${response.status}): ${errorBody}`
+      );
     }
 
     const data = (await response.json()) as {
@@ -147,4 +224,14 @@ export class FirebaseAuth {
  */
 function isForeignProjectError(err: unknown): boolean {
   return err instanceof Error && err.message.includes(PROJECT_NUMBER_MISMATCH);
+}
+
+/**
+ * True when an exchange failure is a verdict on the CANDIDATE (any 4xx) rather
+ * than on the endpoint or the network. Only these are safe to skip past: a 5xx
+ * or a transport failure says nothing about the token, and trying the rest of
+ * the list would turn one outage into ten requests and hide the real error.
+ */
+function isCandidateRejection(err: unknown): err is TokenExchangeError {
+  return err instanceof TokenExchangeError && err.status >= 400 && err.status < 500;
 }
