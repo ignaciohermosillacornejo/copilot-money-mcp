@@ -187,6 +187,48 @@ jobs:
     );
   });
 
+  test('the ceiling itself passes, one minute over it fails', async () => {
+    // Pins the comparison. Only testing 360 leaves a `>=`/`>` slip invisible.
+    const at = (n: number) => `name: Boundary
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${n}
+    steps:
+      - run: echo hi
+`;
+    await withWorkflows({ 'at-ceiling.yml': at(60) }, ({ code }) => {
+      expect(code).toBe(0);
+    });
+    await withWorkflows({ 'over-ceiling.yml': at(61) }, ({ code, stderr }) => {
+      expect(code).toBe(1);
+      expect(stderr).toContain('ceiling');
+    });
+  });
+
+  test('zero and negative timeouts are rejected', async () => {
+    for (const value of [0, -5]) {
+      await withWorkflows(
+        {
+          'nonpositive.yml': `name: Nonpositive
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${value}
+    steps:
+      - run: echo hi
+`,
+        },
+        ({ code, stderr }) => {
+          expect(code).toBe(1);
+          expect(stderr).toContain('positive number');
+        }
+      );
+    }
+  });
+
   test('every offending job is named, not just the first', async () => {
     await withWorkflows(
       {
@@ -280,6 +322,27 @@ jobs:
     );
   });
 
+  test('a uses: pointing outside this repository is reported, not skipped', async () => {
+    // The skip is only a waiver-with-coverage while the callee is a workflow
+    // this gate also reads. An external target is never parsed, so nothing
+    // would bound the job — the skip's own justification does not hold.
+    await withWorkflows(
+      {
+        'external.yml': `name: External caller
+on: push
+jobs:
+  call:
+    uses: some-org/actions/.github/workflows/build.yml@abc123
+`,
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('jobs.call');
+        expect(stderr).toContain('outside this repository');
+      }
+    );
+  });
+
   test('a mixed workflow bounds the runs-on job and skips the caller', async () => {
     await withWorkflows(
       {
@@ -355,6 +418,84 @@ jobs:
     );
   });
 
+  test('workflow_dispatch that reaches no job is rejected', async () => {
+    // Presence of the trigger is not the property worth gating: a job whose
+    // `if:` still gates on the review payload is skipped under dispatch, and a
+    // skipped job reports success — so the bug reopens with the gate green.
+    await withWorkflows(
+      {
+        'unreachable.yml': `name: Unreachable dispatch
+on:
+  pull_request_review:
+    types: [submitted]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        required: true
+        type: string
+jobs:
+  act:
+    if: github.event.review.state == 'approved'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo hi
+`,
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('no job it can reach');
+      }
+    );
+  });
+
+  test('an if: that admits the dispatch event satisfies reachability', async () => {
+    await withWorkflows(
+      {
+        'reachable.yml': `name: Reachable dispatch
+on:
+  pull_request_review:
+    types: [submitted]
+  workflow_dispatch:
+jobs:
+  act:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.review.state == 'approved'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo hi
+`,
+      },
+      ({ code }) => {
+        expect(code).toBe(0);
+      }
+    );
+  });
+
+  test('a job with no if: at all is reachable', async () => {
+    await withWorkflows(
+      {
+        'no-if.yml': `name: No if
+on:
+  pull_request_review:
+    types: [submitted]
+  workflow_dispatch:
+jobs:
+  act:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo hi
+`,
+      },
+      ({ code }) => {
+        expect(code).toBe(0);
+      }
+    );
+  });
+
   test('the list form of on: is understood', async () => {
     await withWorkflows(
       {
@@ -411,6 +552,12 @@ describe('malformed input', () => {
       expect(code).toBe(1);
       expect(stderr).toContain('no workflow files found');
     });
+  });
+
+  test('a nonexistent workflow directory reports why, not a raw stack', async () => {
+    const { code, stderr } = await runCheck('/definitely/not/a/real/workflow/dir');
+    expect(code).toBe(1);
+    expect(stderr).toContain('cannot read');
   });
 
   test('.yaml files are checked too, not just .yml', async () => {
