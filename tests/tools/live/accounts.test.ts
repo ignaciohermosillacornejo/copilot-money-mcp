@@ -345,16 +345,40 @@ describe('get_accounts_live fields param — parity with get_accounts', () => {
     const identifiers = [...new Set(shared.match(/\b[a-z][a-z0-9_]*\b/g) ?? [])];
     const looksLikeAField = identifiers.filter((n) => n.includes('_'));
 
-    const unknownEverywhere = looksLikeAField.filter(
-      (n) => !everyField.has(n) && !TOOL_REGISTRY.has(n)
-    );
+    // THE WORKED EXAMPLES, which the underscore heuristic above cannot see.
+    // Raised in review of #724: `looksLikeAField` reduces this description to
+    // four tokens, and the entire live-mode example — `["id", "name",
+    // "balance"]` — has no underscore in it. `balance` is one of the two
+    // deliberate per-mode names this test's own docstring singles out, and
+    // typoing it to `balnce` left the guard green. The underscore filter is
+    // there to keep ordinary English words out, and it buys that by going
+    // blind to every single-word field name.
+    //
+    // The fragment offers a way to have both: example field names are QUOTED
+    // and INSIDE BRACKETS. Nothing in the surrounding prose is, so this matches
+    // all six references and zero English words — no heuristic, and no reliance
+    // on a naming convention that only cache mode follows.
+    const bracketed = shared.match(/\[[^\]]*\]/g) ?? [];
+    const exampleNames = [
+      ...new Set(
+        bracketed.flatMap((group) => [...group.matchAll(/"([a-z][a-z0-9_]*)"/g)].map((m) => m[1]))
+      ),
+    ].filter((n) => n !== 'default' && n !== 'all');
+
+    const unknownEverywhere = [
+      ...new Set([
+        ...looksLikeAField.filter((n) => !everyField.has(n) && !TOOL_REGISTRY.has(n)),
+        ...exampleNames.filter((n) => !everyField.has(n)),
+      ]),
+    ];
     expect(
       unknownEverywhere,
-      `Snake_case names in the shared accounts fields description that are neither a field on ` +
-        `either surface nor a registered tool name: ${unknownEverywhere.join(', ')}. The ` +
-        `fragment is shared verbatim by get_accounts and get_accounts_live ` +
-        `(ACCOUNT_FIELDS_PARAM_SCHEMA), so a typo here ships into BOTH schemas and every ` +
-        `caller who copies it gets a _field_warning instead of a field.`
+      `Names in the shared accounts fields description that are a field on NEITHER surface ` +
+        `(and not a registered tool name): ${unknownEverywhere.join(', ')}. Checked in two ` +
+        `passes — every quoted name inside a bracketed worked example, and every snake_case ` +
+        `identifier anywhere in the prose. The fragment is shared verbatim by get_accounts ` +
+        `and get_accounts_live (ACCOUNT_FIELDS_PARAM_SCHEMA), so a typo here ships into BOTH ` +
+        `schemas and every caller who copies it gets a _field_warning instead of a field.`
     ).toEqual([]);
 
     // Guards the gate, four ways, because every one of these can go to zero
@@ -374,6 +398,10 @@ describe('get_accounts_live fields param — parity with get_accounts', () => {
     expect(looksLikeAField.length).toBeGreaterThanOrEqual(4);
     expect(looksLikeAField.filter((n) => everyField.has(n)).length).toBeGreaterThanOrEqual(2);
     expect(looksLikeAField.filter((n) => TOOL_REGISTRY.has(n)).length).toBeGreaterThanOrEqual(2);
+    // Five distinct names across the two worked examples (`name` appears in
+    // both). A bracket or quote regex that stopped matching would take this to
+    // zero and the example half would pass over nothing.
+    expect(exampleNames.length).toBeGreaterThanOrEqual(5);
 
     // Not reachable by the regex, and stated rather than left to be discovered:
     // `\b[a-z]` cannot start a match at a leading underscore, so
