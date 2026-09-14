@@ -19,6 +19,9 @@ jobs:
   required-sections:
     name: Check required PR sections
     runs-on: ubuntu-latest
+    # Observed 3s. Checkout plus one bash script; no installs and no network
+    # beyond the PR event payload.
+    timeout-minutes: 5
     # Bots (Dependabot, etc.) open PRs that don't use the human template, so
     # holding them to it would only produce noise. Skip any `[bot]` actor.
     if: ${{ !endsWith(github.event.pull_request.user.login, '[bot]') }}

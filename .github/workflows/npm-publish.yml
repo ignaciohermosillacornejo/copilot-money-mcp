@@ -41,6 +41,14 @@ jobs:
   publish:
     name: Publish to npm
     runs-on: ubuntu-latest
+    # Observed ~55s, and the longest chain in the repo: install, audit,
+    # typecheck, lint, the full test suite, build, `npm view`, `npm publish
+    # --provenance` (sigstore/OIDC round-trips), then a GitHub-releases curl and
+    # two mcp-publisher calls. Three external services set the pace, so it gets
+    # the widest bound — the same 20 the other externally-paced job
+    # (claude-review) carries. Bounding it at all is the point: this job holds
+    # `id-token: write`, and 360 minutes of that is not a thing we want.
+    timeout-minutes: 20
     # Only run for releases created by trusted publishers, or any other trigger
     # (workflow_dispatch / workflow_call) initiated by the trusted actor. Note: in a
     # workflow_call context, github.event_name reflects the calling workflow's event

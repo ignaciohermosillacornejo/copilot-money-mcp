@@ -266,6 +266,55 @@ class of attack needs — off-screen payloads, invisible characters, dynamic
 execution, install-time scripts. It runs on every PR including forks. Treat it
 as a floor, not a clearance: it checks shape, not intent.
 
+### Merging a first-time fork contributor's PR
+
+**Auto-merge will not fire on it, and nothing will tell you so.** GitHub holds every
+workflow run from a first-time fork contributor at `action_required`. The
+`pull_request` runs (Tests, Required PR Sections, AI Code Review) can be released:
+
+```bash
+gh api -X POST repos/<owner>/<repo>/actions/runs/<id>/approve
+```
+
+The `pull_request_review` run — `auto-merge.yml`, the owner-approval → auto-merge
+path — cannot. That endpoint answers 403 ("This run is not from a fork pull request
+or queued by the Actions bot") and the run dies at `action_required`. So on exactly
+the PR where the flow is most convenient, it silently never fires and there is no
+failed check to notice. From that contributor's *second* PR onward, runs execute
+normally. (Observed on #632, confirmed resolved on #639; issue #643.)
+
+Two ways through, after you have reviewed the branch per the section above:
+
+```bash
+# Preferred: fire the workflow by hand. It re-verifies that the PR carries a
+# standing approval from the owner before doing anything.
+gh workflow run auto-merge.yml -f pr_number=<num>
+
+# Equivalent one-liner, skipping that re-verification.
+gh pr merge <num> --auto --rebase
+```
+
+`workflow_dispatch` requires repository write access, so it is maintainer-only by
+construction — it grants nothing a maintainer could not already do by hand. It is
+not a way for a fork PR to merge itself.
+
+### Workflow hygiene (`check:workflows`)
+
+`bun run check` includes `check:workflows`, which parses `.github/workflows/*.yml`
+and enforces two invariants (`scripts/check-workflows.ts`):
+
+1. Every job that runs steps declares `timeout-minutes`, as a real job-level key
+   and not above a 60-minute ceiling. Without it a job inherits GitHub's
+   360-minute default, which is not a bound. Jobs that call a reusable workflow
+   (`uses:`) are exempt — GitHub does not support the keyword there — and are
+   bound transitively by the called workflow's own jobs, which the gate does
+   require.
+2. A workflow triggered on `pull_request_review` also offers `workflow_dispatch`,
+   for the reason in the section above.
+
+Pick a timeout from the job's observed runtime (`gh run list --workflow <file>`),
+not a uniform default, and say in a comment what you measured.
+
 ## Bug Response Ritual
 
 Every bug-fix PR ratchets the system: fix the **class**, not just the instance.

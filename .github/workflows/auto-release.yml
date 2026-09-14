@@ -14,6 +14,10 @@ jobs:
   detect-version:
     name: Detect version bump
     runs-on: ubuntu-latest
+    # Observed 6s, but two of its steps are unbounded `git fetch`es against the
+    # remote (the pre-push SHA, then `--tags`), which is the only part whose
+    # duration is not ours. A spurious timeout here costs a release, so 10.
+    timeout-minutes: 10
     if: github.actor == 'ignaciohermosillacornejo'
     outputs:
       changed: ${{ steps.version.outputs.changed }}
