@@ -131,6 +131,14 @@ expectSubstring(
   `${read} read tools by default, ${liveModeTotal} with --live-reads, and ${writeModeTotal} with writes enabled`,
   'features subtitle tool count',
 );
+// The hero stat tile was the third hardcoded count in this file, and the only
+// one no needle covered — it read "17 AI Tools", which is LIVE_TOOL_DEFS.length
+// and therefore a count no mode ever lists. Guarded now so it can't drift back.
+expectSubstring(
+  'docs/index.html',
+  `<div class="num">${read}</div><div class="label">Local Read Tools</div>`,
+  'hero stat tile tool count',
+);
 
 expectSubstring(
   'docs/graphql-live-reads.md',
