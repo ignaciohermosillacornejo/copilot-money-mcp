@@ -29,6 +29,21 @@
  *                      `Mutation.createTransaction`, `Query.accounts`
  *                      (covers the operation's existence + top-level args)
  * - `response-shape` → `Mutation.<fieldName>:response` / `Query.<fieldName>:response`
+ *                      for a whole operation's shape. For an assumption about
+ *                      ONE FIELD's semantics rather than the operation's keys,
+ *                      use `<Node>.<field>:<aspect>` — e.g.
+ *                      `Transaction.excluded:synthesized` (we invent it),
+ *                      `AccountNode.name:resolvesNickname` (the server resolves
+ *                      it before sending). Two of those read as exceptions;
+ *                      three are a convention, so it is written down here.
+ *
+ *                      NOTE the `Query.` prefix is effectively RESERVED:
+ *                      `tests/scripts/read-smoke-coverage.test.ts` requires
+ *                      every `Query.*` surface to name a real generated root
+ *                      field after stripping `:response`. An assumption about
+ *                      a query that is not about its response keys therefore
+ *                      cannot use `Query.<field>:<aspect>` without extending
+ *                      that ratchet — name it off the type instead.
  * - `applies`        → `Mutation.<fieldName>:applies` — the mutation's effect
  *                      is actually persisted and visible on an independent
  *                      re-read (not just echoed). Verified by the Tier-2

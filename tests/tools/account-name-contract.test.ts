@@ -32,25 +32,37 @@ import { describe, test, expect } from 'bun:test';
 import { getAccountsTool } from '../../src/tools/registry/accounts-system.js';
 import { getAccountsLiveTool } from '../../src/tools/registry/live.js';
 
-/** The two surfaces that return an editable account label, and their real key. */
+/**
+ * The two surfaces that return an editable account label, and their real key.
+ *
+ * `name` is in the table rather than read off the schema so the gate below can
+ * detect the two rows resolving to the SAME tool — the failure the gate exists
+ * to catch. No casts on `tool.schema`: `ToolSchema` already declares `name` and
+ * `description` as required, and a cast would re-assert that if either ever
+ * became optional, turning a compile error into a runtime throw. In a file
+ * whose thesis is "don't let a guard go vacuous", suppressing the compiler is
+ * the wrong line to write.
+ */
 const SURFACES = [
-  { tool: getAccountsTool, stableKey: 'account_id', otherKey: 'id' },
-  { tool: getAccountsLiveTool, stableKey: 'id', otherKey: 'account_id' },
+  { tool: getAccountsTool, name: 'get_accounts', stableKey: 'account_id', otherKey: 'id' },
+  { tool: getAccountsLiveTool, name: 'get_accounts_live', stableKey: 'id', otherKey: 'account_id' },
 ] as const;
 
 describe('both account tools state the `name` contract (#665)', () => {
-  test('guards the gate: both descriptions were actually found', () => {
+  test('guards the gate: both descriptions were actually found, and they are different tools', () => {
     // Without this, a renamed export or an empty description would make every
-    // assertion below pass over nothing.
-    for (const { tool } of SURFACES) {
-      const schema = tool.schema as { name: string; description: string };
-      expect(schema.name).toMatch(/^get_accounts(_live)?$/);
-      expect(schema.description.length).toBeGreaterThan(200);
+    // assertion below pass over nothing. Asserting each name EXACTLY (rather
+    // than matching a pattern both satisfy) is what makes the gate notice the
+    // two rows pointing at one tool.
+    for (const { tool, name } of SURFACES) {
+      expect(tool.schema.name).toBe(name);
+      expect(tool.schema.description.length).toBeGreaterThan(200);
     }
+    expect(new Set(SURFACES.map((s) => s.tool.schema.name)).size).toBe(SURFACES.length);
   });
 
   for (const { tool, stableKey, otherKey } of SURFACES) {
-    const schema = tool.schema as { name: string; description: string };
+    const schema = tool.schema;
 
     test(`${schema.name} says \`name\` is the nickname and is editable`, () => {
       expect(
@@ -69,11 +81,14 @@ describe('both account tools state the `name` contract (#665)', () => {
       // The one word that differs between the two copies, and the one that is
       // wrong if either is pasted into the other: the cache row's key is
       // `account_id`, the live row's is `id`.
+      // Word-boundary, not substring: `key on id` is a prefix of `key on ids`
+      // and `key on identifier`. The short word is the ONE that differs
+      // between the two copies, so it is where exactness earns its keep.
       expect(
         schema.description,
         `${schema.name} must tell callers to key on \`${stableKey}\` — the field its own rows ` +
           `actually carry.`
-      ).toContain(`key on ${stableKey}`);
+      ).toMatch(new RegExp(`key on ${stableKey}\\b`));
     });
   }
 
@@ -82,9 +97,11 @@ describe('both account tools state the `name` contract (#665)', () => {
     // a field absent from every row it returns, and the caller would have no
     // warning because the advice reads plausibly.
     for (const { tool, otherKey } of SURFACES) {
-      const schema = tool.schema as { name: string; description: string };
+      const schema = tool.schema;
+      // Same boundary, for the same reason in reverse: a cache sentence that
+      // legitimately said `key on ids` must not trip the paste-detector.
       expect(
-        schema.description.includes(`key on ${otherKey}`),
+        new RegExp(`key on ${otherKey}\\b`).test(schema.description),
         `${schema.name} tells callers to key on \`${otherKey}\`, which is the other mode's ` +
           `field name — its own rows do not carry it.`
       ).toBe(false);
