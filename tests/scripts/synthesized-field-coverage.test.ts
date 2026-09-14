@@ -92,14 +92,59 @@ describe('the ledger describes the spellings that are actually watched', () => {
   // on the strength of a probe transcript that no longer exists. A count in
   // prose drifts from the list it describes the moment either moves, so the
   // two are pinned to each other here.
-  const evidenceFor = (surface: string): string => {
-    const entry = CONFORMANCE_LEDGER.find((e) => e.surface === surface);
-    expect(entry, `no ledger entry for ${surface}`).toBeDefined();
-    return entry!.evidence;
-  };
+  /**
+   * Surfaces a check names that the ledger no longer declares.
+   *
+   * Filled by the walk below, which runs in the DESCRIBE BODY — so an
+   * `expect()` inside the lookup fired at collection time: a renamed or
+   * removed ledger surface surfaced as a file-load error that named no test,
+   * carried none of the message written for it, and took the other three
+   * describes in this file down with it (#714). The walk collects, and the
+   * gate test below reports. That is the same split
+   * `tests/docs/migration-guide.test.ts` settled on: throw when the problem
+   * leaves nothing to test, collect when there is still a test to report it.
+   */
+  const missingSurfaces: string[] = [];
+
+  /** Evidence text for a surface, or null when the ledger has no such entry. */
+  const evidenceFor = (surface: string): string | null =>
+    CONFORMANCE_LEDGER.find((e) => e.surface === surface)?.evidence ?? null;
+
+  /** Checks whose surfaces all resolved, and so registered their pair below. */
+  let gated = 0;
+
+  test('guards the gate: every watched surface resolves to a ledger entry', () => {
+    // The walk below completes during collection, so both counters are final
+    // by the time this test runs.
+    expect(
+      missingSurfaces,
+      `scripts/smoke/output-field-absence-checks.ts names ledger surfaces that ` +
+        `src/conformance/ledger.ts does not declare: ${missingSurfaces.join(', ')}. ` +
+        `A check pointing at a renamed or deleted surface gates nothing — and the two ` +
+        `per-check tests for it are not registered at all, so this red is the only ` +
+        `notice you get.`
+    ).toEqual([]);
+    // If every check were dropped, or every surface went missing at once, the
+    // walk would register no tests and this describe would pass over nothing.
+    expect(gated).toBeGreaterThan(0);
+  });
 
   for (const check of ALL_OUTPUT_FIELD_ABSENCE_CHECKS) {
-    const combined = check.ledgerSurfaces.map(evidenceFor).join('\n');
+    const texts: string[] = [];
+    const absent: string[] = [];
+    for (const surface of check.ledgerSurfaces) {
+      const text = evidenceFor(surface);
+      if (text === null) absent.push(surface);
+      else texts.push(text);
+    }
+    if (absent.length > 0) {
+      // Owned by the gate test above. Registering the pair below against
+      // hollow evidence would echo one cause as three unrelated-looking reds.
+      missingSurfaces.push(...absent);
+      continue;
+    }
+    gated++;
+    const combined = texts.join('\n');
 
     test(`every watched ${check.typeName} spelling is named in the ledger`, () => {
       const unnamed = check.absentFields.filter((f) => !combined.includes(`\`${f}\``));

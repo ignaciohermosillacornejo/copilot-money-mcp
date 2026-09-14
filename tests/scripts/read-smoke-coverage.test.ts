@@ -31,21 +31,32 @@ interface ParsedQuery {
   rootField: string;
 }
 
-/** Parse `query <Name>(...) { <rootField> ... }` out of a generated document. */
-function parseQueries(): ParsedQuery[] {
+/**
+ * Parse `query <Name>(...) { <rootField> ... }` out of every generated document.
+ *
+ * Returns the documents it could not parse rather than asserting on them. This
+ * runs at module scope, so an `expect()` here fires while bun is still
+ * collecting: the failure arrives as an unnamed load error and every test below
+ * is dropped from the run instead of reporting (#714). The gate test asserts on
+ * `unparseable`, which matters more than it looks — a document silently skipped
+ * here would silently leave the coverage ratchet.
+ */
+function parseQueries(): { parsed: ParsedQuery[]; unparseable: string[] } {
   const parsed: ParsedQuery[] = [];
+  const unparseable: string[] = [];
   for (const value of Object.values(generated)) {
     if (typeof value !== 'string' || !value.startsWith('query ')) continue;
     const match = /^query\s+(\w+)[^{]*\{\s*(\w+)/.exec(value);
-    expect(match, `could not parse a generated query document: ${value.slice(0, 80)}`).not.toBe(
-      null
-    );
-    parsed.push({ name: match![1]!, rootField: match![2]! });
+    if (match === null) {
+      unparseable.push(value.slice(0, 80));
+      continue;
+    }
+    parsed.push({ name: match[1]!, rootField: match[2]! });
   }
-  return parsed;
+  return { parsed, unparseable };
 }
 
-const queries = parseQueries();
+const { parsed: queries, unparseable } = parseQueries();
 const ledgerSurfaces = new Set(CONFORMANCE_LEDGER.map((entry) => entry.surface));
 
 describe('read-smoke coverage ratchet', () => {
@@ -54,6 +65,13 @@ describe('read-smoke coverage ratchet', () => {
     expect(queries.length).toBeGreaterThanOrEqual(19);
     const names = queries.map((q) => q.name);
     expect(new Set(names).size).toBe(names.length);
+    expect(
+      unparseable,
+      `Generated documents that start with \`query \` but do not match the ` +
+        `\`query <Name> ... { <rootField>\` shape this file parses. Nothing below can see ` +
+        `them, so an unparsed document would drop out of the ratchet without a red:\n  ` +
+        `${unparseable.join('\n  ')}`
+    ).toEqual([]);
   });
 
   test('(a) every generated query has exactly one read smoke check with a matching root field', () => {
