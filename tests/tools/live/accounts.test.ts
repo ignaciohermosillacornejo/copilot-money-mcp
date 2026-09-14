@@ -9,6 +9,9 @@ import type { CopilotDatabase } from '../../../src/core/database.js';
 import type { AccountNode } from '../../../src/core/graphql/queries/accounts.js';
 import { getAccountsTool } from '../../../src/tools/registry/accounts-system.js';
 import { getAccountsLiveTool } from '../../../src/tools/registry/live.js';
+import { TOOL_REGISTRY } from '../../../src/tools/registry/index.js';
+import { ACCOUNT_KNOWN_FIELDS } from '../../../src/tools/tools.js';
+import { ACCOUNT_LIVE_KNOWN_FIELDS } from '../../../src/tools/live/accounts.js';
 
 const A = (id: string, opts: Partial<AccountNode> = {}): AccountNode => ({
   id,
@@ -310,6 +313,72 @@ describe('get_accounts_live fields param — parity with get_accounts', () => {
 
   test('cache and live account fields descriptions stay in lockstep', () => {
     expect(cacheFragment).toEqual(liveFragment);
+  });
+
+  test('the SHARED fragment names no field that exists on NEITHER surface', () => {
+    // #709 — the typo half of the rule #707 established for the transactions
+    // fragment, ported here because this fragment ships verbatim into both
+    // schemas too and had only the equality test above watching it. Equality
+    // pins that the two modes say the SAME thing; it says nothing about whether
+    // the thing they say is true, so a misspelled field name was identical in
+    // both schemas and wrong in both.
+    //
+    // ONLY the typo half transfers. The mode-parity half — "a name only one
+    // surface has is a failure" — cannot: this fragment names `current_balance`
+    // and `balance` deliberately, one per mode, because the two account presets
+    // share no field names at all (see ACCOUNT_FIELDS_PARAM_SCHEMA's own
+    // docstring). Checking each labeled name against the mode it is labeled
+    // for is the stronger guard and the one that would catch the two being
+    // swapped; it needs the prose parsed for "for get_accounts" / "for
+    // get_accounts_live" and is deliberately not attempted here.
+    //
+    // THE TOOL-NAME EXEMPTION. A verbatim port fails on this fragment: it names
+    // four underscored identifiers, and two of them (`get_accounts`,
+    // `get_accounts_live`) are TOOL names, fields on neither surface. The
+    // transactions fragment happens to name no tool, which is why that guard
+    // never needed this. The exemption is the registry's own name→definition
+    // map rather than a pair of string literals, so renaming or retiring a tool
+    // moves it automatically — a hardcoded pair would be the next stale literal,
+    // still green after the name it names is gone.
+    const shared = (cacheFragment as { description: string }).description;
+    const everyField = new Set([...ACCOUNT_KNOWN_FIELDS, ...ACCOUNT_LIVE_KNOWN_FIELDS]);
+    const identifiers = [...new Set(shared.match(/\b[a-z][a-z0-9_]*\b/g) ?? [])];
+    const looksLikeAField = identifiers.filter((n) => n.includes('_'));
+
+    const unknownEverywhere = looksLikeAField.filter(
+      (n) => !everyField.has(n) && !TOOL_REGISTRY.has(n)
+    );
+    expect(
+      unknownEverywhere,
+      `Snake_case names in the shared accounts fields description that are neither a field on ` +
+        `either surface nor a registered tool name: ${unknownEverywhere.join(', ')}. The ` +
+        `fragment is shared verbatim by get_accounts and get_accounts_live ` +
+        `(ACCOUNT_FIELDS_PARAM_SCHEMA), so a typo here ships into BOTH schemas and every ` +
+        `caller who copies it gets a _field_warning instead of a field.`
+    ).toEqual([]);
+
+    // Guards the gate, four ways, because every one of these can go to zero
+    // silently and a filter over an empty list is green: an empty union (a
+    // renamed or unexported known-field set), a regex that matches nothing, a
+    // fragment that stopped naming fields at all, and an exemption that matches
+    // nothing — the last of which fails loudly here rather than quietly
+    // widening. Measured as this lands: 45 cache + 17 live = 57 distinct names,
+    // and four underscored identifiers, two fields and two tool names.
+    //
+    // AFTER the assertion above, not before it. A typo'd field name trips the
+    // "at least two real fields" floor as well, and when the floor ran first
+    // the failure a developer read was `expected >= 2, received 1` instead of
+    // the name that was misspelled — the guard detecting the right thing and
+    // reporting the wrong one. Verified by mutation in both orders.
+    expect(everyField.size).toBeGreaterThan(50);
+    expect(looksLikeAField.length).toBeGreaterThanOrEqual(4);
+    expect(looksLikeAField.filter((n) => everyField.has(n)).length).toBeGreaterThanOrEqual(2);
+    expect(looksLikeAField.filter((n) => TOOL_REGISTRY.has(n)).length).toBeGreaterThanOrEqual(2);
+
+    // Not reachable by the regex, and stated rather than left to be discovered:
+    // `\b[a-z]` cannot start a match at a leading underscore, so
+    // `_field_warning` in this description is invisible to the filter above —
+    // and so would a mistyped `_fild_warning` be.
   });
 
   test('include_logos does not exist on either schema (retired in v3)', () => {
