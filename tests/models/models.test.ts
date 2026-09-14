@@ -5,6 +5,7 @@
 import { describe, test, expect } from 'bun:test';
 import {
   getAccountDisplayName,
+  preferredAccountName,
   withDisplayName as withAccountDisplayName,
   type Account,
 } from '../../src/models/account.js';
@@ -15,6 +16,37 @@ import {
 } from '../../src/models/transaction.js';
 
 describe('Account model helpers', () => {
+  describe('preferredAccountName', () => {
+    // The canonical helper. It sat in five files, none of them a test — covered
+    // only through the four-surface parity tests, which exercise two of its
+    // four input classes. Its deprecated neighbour below has the behaviour
+    // table, which is backwards given the docblocks steer readers this way.
+    const base = { account_id: 'acc1', current_balance: 1000 } as const;
+
+    test('nickname wins over both provider labels', () => {
+      expect(
+        preferredAccountName({ ...base, nickname: 'Rainy Day', name: 'N', official_name: 'O' })
+      ).toBe('Rainy Day');
+    });
+
+    test('a BLANK nickname is not a name, so the provider label wins', () => {
+      // Truthiness, not `??` — the #663-in-reverse bug was `'' ?? name` === ''.
+      expect(preferredAccountName({ ...base, nickname: '', name: 'PROVIDER' })).toBe('PROVIDER');
+    });
+
+    test('falls back to official_name when there is no name at all', () => {
+      // `name` is optional on AccountSchema, so this shape is representable.
+      expect(preferredAccountName({ ...base, official_name: 'OFFICIAL' })).toBe('OFFICIAL');
+    });
+
+    test('returns undefined when nothing is set — it does NOT invent "Unknown"', () => {
+      // The documented difference from getAccountDisplayName below, which
+      // returns the literal 'Unknown'. A caller that wants a placeholder picks
+      // one; this helper says it does not know.
+      expect(preferredAccountName(base)).toBeUndefined();
+    });
+  });
+
   describe('getAccountDisplayName', () => {
     test('returns name when available', () => {
       const account: Account = {
