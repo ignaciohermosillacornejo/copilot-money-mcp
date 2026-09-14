@@ -68,6 +68,10 @@ Passing `--write` implies `--live-reads`; you can still pass `--live-reads` on i
 - **Node.js 18+** (comes bundled with Claude Desktop)
 - **Copilot Money** (macOS App Store version)
 - **Claude Desktop**, **Cursor**, or any MCP-compatible client
+- **For `--live-reads` or `--write` only:** a browser logged in to
+  [app.copilot.money](https://app.copilot.money). The server reuses that session's
+  Firebase refresh token; without it those modes fail at startup. Default mode needs
+  nothing — it reads the local cache and makes no network requests.
 
 ### Installation via Claude Desktop
 

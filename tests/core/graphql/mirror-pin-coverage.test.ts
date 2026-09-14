@@ -36,8 +36,14 @@ import { join } from 'path';
 
 const QUERIES_DIR = join(import.meta.dir, '../../../src/core/graphql/queries');
 
-/** `export const FooNodeSchema = ...` — the named zod mirrors. */
-const NAMED_MIRROR = /export const (\w+NodeSchema)\b/g;
+/**
+ * `export const FooNodeSchema = ...` — the named zod mirrors.
+ *
+ * Anchored to line start (#705). Unanchored, a mirror NAMED IN PROSE counted
+ * as a declaration — a JSDoc usage example, a migration note, a `//` TODO — so
+ * the ratchet could believe a mirror exists where none does.
+ */
+const NAMED_MIRROR = /^export const (\w+NodeSchema)\b/gm;
 /**
  * `export const FOO_NODE_MIRROR_IS_EXACT: ExactKeys<...>` — the pins.
  *
@@ -50,8 +56,15 @@ const NAMED_MIRROR = /export const (\w+NodeSchema)\b/g;
  * arguments name the right interface/mirror pair, and it does not need to —
  * typechecking a correct annotation is what does the real work. This only
  * guarantees the annotation is there to typecheck.
+ *
+ * Anchored to line start (#705), and this one had a live phantom: the
+ * `Usage —` example in `_shared.ts`'s own JSDoc reads
+ * `export const FOO_NODE_MIRROR_IS_EXACT: ExactKeys<`, which the unanchored
+ * regex counted as a real pin. Nothing declares a `FooNodeSchema` today, so it
+ * satisfied no mirror and the ratchet stayed correct by luck — the doc block
+ * teaching people the pattern was also forging one.
  */
-const PIN = /export const (\w+_MIRROR_IS_EXACT):\s*ExactKeys</g;
+const PIN = /^export const (\w+_MIRROR_IS_EXACT):\s*ExactKeys</gm;
 
 /** SecurityNodeSchema -> SECURITY_NODE_MIRROR_IS_EXACT */
 function expectedPinName(mirror: string): string {
@@ -94,6 +107,10 @@ describe('every named zod mirror has a compile-time pin to its interface', () =>
     expect(allMirrors).toContain('SecurityNodeSchema');
   });
 
+  /** Re-run a discovery regex against a string, with its own flags. */
+  const matches = (re: RegExp, text: string): string[] =>
+    [...text.matchAll(new RegExp(re.source, re.flags))].map((m) => m[1] as string);
+
   test('a bare `= true` const is NOT counted as a pin', () => {
     // The remedy for a failure here must not be fakeable. Discovery requires
     // the ExactKeys annotation, so the lazy edit that silences the message
@@ -101,8 +118,63 @@ describe('every named zod mirror has a compile-time pin to its interface', () =>
     const bare = 'export const TAG_NODE_MIRROR_IS_EXACT = true;';
     const annotated =
       'export const TAG_NODE_MIRROR_IS_EXACT: ExactKeys<keyof TagNode, keyof typeof TagNodeSchema.shape> = true;';
-    expect([...bare.matchAll(new RegExp(PIN.source, 'g'))]).toHaveLength(0);
-    expect([...annotated.matchAll(new RegExp(PIN.source, 'g'))]).toHaveLength(1);
+    expect(matches(PIN, bare)).toHaveLength(0);
+    expect(matches(PIN, annotated)).toHaveLength(1);
+  });
+
+  test('a pin or mirror written in PROSE is not a declaration (#705)', () => {
+    // The other half of "not fakeable", and the half that was open: the
+    // remedy must not be satisfiable by TALKING about a pin. Both regexes
+    // were unanchored, so any line that merely CONTAINED the text counted —
+    // a JSDoc usage example, a migration note, a commented-out draft.
+    //
+    // This was not hypothetical. `_shared.ts`'s own `Usage —` block, the doc
+    // that teaches the pattern, reads `export const FOO_NODE_MIRROR_IS_EXACT:
+    // ExactKeys<` and was being counted as a real pin. It satisfied no mirror
+    // only because nothing declares a `FooNodeSchema`, so the ratchet was
+    // correct by luck rather than by construction.
+    const prose = [
+      ' * Usage — one line per interface/mirror twin, assigned `true`:',
+      ' *',
+      ' *   export const FOO_NODE_MIRROR_IS_EXACT: ExactKeys<',
+      ' *     keyof FooNode,',
+      ' *   > = true;',
+      '// TODO: export const BAR_NODE_MIRROR_IS_EXACT: ExactKeys<...> = true;',
+      '  // export const BazNodeSchema = z.looseObject({});',
+      ' * and then export const QuuxNodeSchema = ... would need a pin too',
+    ].join('\n');
+
+    expect(
+      matches(PIN, prose),
+      'a pin named inside a comment must not count as a declared pin'
+    ).toEqual([]);
+    expect(
+      matches(NAMED_MIRROR, prose),
+      'a mirror named inside a comment must not count as a declared mirror'
+    ).toEqual([]);
+
+    // ...and the real thing at line start still counts, both ways, so the
+    // anchoring did not simply break discovery.
+    const real = [
+      'export const QuuxNodeSchema = z.looseObject({ id: z.string() });',
+      'export const QUUX_NODE_MIRROR_IS_EXACT: ExactKeys<keyof QuuxNode, keyof typeof QuuxNodeSchema.shape> = true;',
+    ].join('\n');
+    expect(matches(NAMED_MIRROR, real)).toEqual(['QuuxNodeSchema']);
+    expect(matches(PIN, real)).toEqual(['QUUX_NODE_MIRROR_IS_EXACT']);
+  });
+
+  test('the phantom in _shared.ts is gone, and the real pins survive', () => {
+    // The live instance, asserted against the file rather than a fixture, so
+    // this fails if the anchoring is ever reverted while that doc block stands.
+    const shared = scans.find((s) => s.file === '_shared.ts');
+    expect(shared, '_shared.ts is no longer in the queries dir').toBeDefined();
+    expect(
+      shared!.pins,
+      'FOO_NODE_MIRROR_IS_EXACT comes from the Usage example in _shared.ts JSDoc, not from code'
+    ).not.toContain('FOO_NODE_MIRROR_IS_EXACT');
+    // Guards the gate: the file does declare real pins, so the assertion above
+    // is not passing because discovery found nothing at all.
+    expect(shared!.pins.length).toBeGreaterThan(0);
   });
 
   test('the name mapping is what the pins actually use', () => {

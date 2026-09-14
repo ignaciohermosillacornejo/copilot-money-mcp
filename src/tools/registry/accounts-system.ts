@@ -59,6 +59,8 @@ export const getAccountsTool = defineTool({
       '(checking, savings, credit, investment). Checks both account_type ' +
       'and subtype fields for better filtering (e.g., finds checking accounts ' +
       "even when account_type is 'depository'). By default, hidden accounts are excluded. " +
+      '`name` is your Copilot nickname when set, else the provider label — it is ' +
+      'user-editable, so key on account_id, never on name. ' +
       'Default rows are terse: account_id, name, account_type, subtype, current_balance, ' +
       'institution_name, iso_currency_code, item_id, plus user_hidden / user_deleted when set ' +
       '(the flags include_hidden controls). That drops the other ~35 document fields. PARTIAL ' +
