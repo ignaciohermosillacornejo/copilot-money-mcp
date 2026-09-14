@@ -49,7 +49,8 @@ const SCANNED_TREES = ['src', 'scripts', 'tests'];
  * Built by concatenation so this file cannot match itself. A literal `*` + `/`
  * alone on a line, followed by a line opening a docblock, is exactly the
  * pattern below — writing the fixture out would make the detector report its
- * own test.
+ * own test. The controls at the bottom assemble their fixtures from these two
+ * constants for the same reason.
  */
 const CLOSES_COMMENT = `*${'/'}`;
 const OPENS_DOCBLOCK = `/*${'*'}`;
@@ -68,6 +69,11 @@ const OPENS_DOCBLOCK = `/*${'*'}`;
  *
  * The closing slash is interpolated rather than written, for the same
  * self-match reason as CLOSES_COMMENT above.
+ *
+ * `.*` is greedy, so a line holding TWO one-line docblocks matches once and is
+ * classed as one — a docblock stranded by another on the same physical line is
+ * invisible. The mirror of the known false-positive shape in the header, with
+ * the same status: no instance exists, and Prettier does not produce one.
  */
 const ONE_LINE_DOCBLOCK = new RegExp(`^\\${'/'}\\*\\*.*\\*\\${'/'}$`);
 
@@ -119,27 +125,55 @@ function tsFilesUnder(dir: string): string[] {
 }
 
 interface Scan {
+  /** Files swept per tree, so one tree leaving the sweep cannot hide in a sum. */
+  perTree: Record<string, number>;
   files: number;
   /** Lines that are nothing but a closing delimiter. */
   bareClosings: number;
   /** Whole docblocks written on one line — the round-2 widening. */
   oneLineClosings: number;
+  /** Lines that OPEN a docblock — the other half of the rule's conjunction. */
+  opens: number;
   /** Files the sweep could not read, with the cause. */
   unreadable: string[];
   stranded: string[];
 }
 
+/**
+ * The rule itself, over one file's lines: 1-based numbers of every line that
+ * closes a comment and is immediately followed by one that opens a docblock.
+ *
+ * Extracted from scan() so a POSITIVE CONTROL can run past it. Round-4 review
+ * of #724 pointed out that the rule is a conjunction and only its closing half
+ * was floored — the closing counters are incremented before the opening test,
+ * so breaking OPENS_DOCBLOCK left every assertion green and the sweep reporting
+ * zero for the same reason a clean tree does. Floors alone cannot fix that:
+ * they measure inputs, and a detector that has only ever been observed
+ * returning [] has not been observed detecting. The controls below feed it a
+ * hit, built from the same constants so this file still cannot match itself.
+ */
+function strandedLines(lines: string[]): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < lines.length - 1; i++) {
+    if (closingKind(lines[i].trim()) === undefined) continue;
+    if (lines[i + 1].trim().startsWith(OPENS_DOCBLOCK)) out.push(i + 1);
+  }
+  return out;
+}
+
 function scan(): Scan {
   const result: Scan = {
+    perTree: {},
     files: 0,
     bareClosings: 0,
     oneLineClosings: 0,
+    opens: 0,
     unreadable: [],
     stranded: [],
   };
   for (const tree of SCANNED_TREES) {
+    result.perTree[tree] = 0;
     for (const file of tsFilesUnder(join(REPO_ROOT, tree))) {
-      result.files++;
       const rel = relative(REPO_ROOT, file);
       // Collected rather than thrown, for the reason the gate this test was
       // written for now applies to itself: `scan()` runs at MODULE scope, so an
@@ -155,16 +189,19 @@ function scan(): Scan {
         result.unreadable.push(`${rel}  ${err instanceof Error ? err.message : String(err)}`);
         continue;
       }
+      // Counted only once the file has actually been read, so the number cannot
+      // overstate by construction — the principle this PR's own gate fix rests
+      // on, applied here rather than left to the neighbouring unreadable test.
+      result.files++;
+      result.perTree[tree]++;
       const lines = contents.split('\n');
-      for (let i = 0; i < lines.length - 1; i++) {
-        const kind = closingKind(lines[i].trim());
-        if (kind === undefined) continue;
+      for (const line of lines) {
+        const kind = closingKind(line.trim());
         if (kind === 'bare') result.bareClosings++;
-        else result.oneLineClosings++;
-        if (lines[i + 1].trim().startsWith(OPENS_DOCBLOCK)) {
-          result.stranded.push(`${rel}:${i + 1}`);
-        }
+        else if (kind === 'oneLine') result.oneLineClosings++;
+        if (line.trim().startsWith(OPENS_DOCBLOCK)) result.opens++;
       }
+      for (const n of strandedLines(lines)) result.stranded.push(`${rel}:${n}`);
     }
   }
   return result;
@@ -178,13 +215,51 @@ describe('no stranded docblocks (#701)', () => {
     // matched nothing, would report zero stranded blocks for the same reason a
     // clean tree does.
     //
-    // The two spellings are floored SEPARATELY. A single floor over their sum
-    // is satisfied by either arm alone — see closingKind — so the arm added in
-    // round 2 could have been deleted in silence. Measured as this lands: 336
-    // files, 999 bare delimiters, 298 one-line docblocks.
+    // Every arm floored SEPARATELY, because a floor over a sum is satisfied by
+    // one arm alone. That argument has now been made three times about this one
+    // test — the two closing spellings (a widening deletable in silence), the
+    // opening delimiter (the conjunction's other half, whose counters sit
+    // BEFORE it, so breaking it left everything green), and the tree list
+    // itself: with one floor of 200 over three trees, dropping `src` left 220
+    // and dropping `scripts` left 287, so either could leave the sweep quietly
+    // — including `scripts`, where the bug that prompted all of this lives.
+    //
+    // Measured as this lands: 336 files (src 116, scripts 49, tests 171), 999
+    // bare delimiters, 298 one-line docblocks, 1342 opening delimiters. Every
+    // floor sits roughly 3x below its value, and each tree only grows.
     expect(result.files).toBeGreaterThan(200);
+    // PINNED, not iterated. The first version of this looped over
+    // SCANNED_TREES, which cannot see a tree removed FROM SCANNED_TREES —
+    // measured, not reasoned about: deleting `scripts` from the list passed
+    // every assertion. A guard whose domain is the thing it guards has no
+    // domain. The literal below is what makes the per-tree floors reachable.
+    expect([...SCANNED_TREES].sort()).toEqual(['scripts', 'src', 'tests']);
+    for (const tree of ['src', 'scripts', 'tests']) {
+      expect(result.perTree[tree], `${tree} left the sweep`).toBeGreaterThan(30);
+    }
     expect(result.bareClosings).toBeGreaterThan(500);
     expect(result.oneLineClosings).toBeGreaterThan(150);
+    expect(result.opens).toBeGreaterThan(600);
+  });
+
+  test('positive control: the rule detects a hit it is shown', () => {
+    // A detector observed only returning [] has not been observed detecting.
+    // Fixtures are assembled from the delimiter constants at runtime, so this
+    // source file still contains no literal stranded pair for the sweep above
+    // to report.
+    const closed = `${OPENS_DOCBLOCK} the block that gets stranded ${CLOSES_COMMENT}`;
+    expect(strandedLines([CLOSES_COMMENT, closed, 'const x = 1;'])).toEqual([1]);
+    // Both closing spellings reach the rule, not just the bare delimiter — the
+    // round-2 widening pinned through the detector rather than through a count.
+    expect(strandedLines([closed, closed, 'const x = 1;'])).toEqual([1]);
+  });
+
+  test('negative control: a blank line between them is not stranding', () => {
+    // The adjacency rule the header docblock argues for, asserted rather than
+    // asserted about. Without this, "no stranded blocks" would also be the
+    // answer a rule that matched nothing gave.
+    const closed = `${OPENS_DOCBLOCK} a module header ${CLOSES_COMMENT}`;
+    expect(strandedLines([CLOSES_COMMENT, '', closed, 'const x = 1;'])).toEqual([]);
   });
 
   test('every scanned file was actually read', () => {
