@@ -197,7 +197,7 @@ const INVESTMENT_PRICE_KNOWN_FIELDS: ReadonlySet<string> = new Set([
  * document schema keys plus the two enrichment fields synthesized at read
  * time. Derived from the zod schema so model drift cannot desync this set.
  */
-const TRANSACTION_KNOWN_FIELDS: ReadonlySet<string> = new Set([
+export const TRANSACTION_KNOWN_FIELDS: ReadonlySet<string> = new Set([
   ...Object.keys(TransactionSchema.shape),
   'category_name',
   'normalized_merchant',

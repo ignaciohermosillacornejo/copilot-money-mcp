@@ -105,8 +105,17 @@ export const INVESTMENT_PRICE_FIELDS_PARAM_SCHEMA = {
  * parameter, so the wording that names the exclusions had to wait for the
  * flip rather than ship ahead of it. The same #604 closed the old 10-vs-8
  * gap by synthesizing `excluded` and `internal_transfer` on live rows, so
- * this fragment can now describe one default row for both modes — with the
- * fidelity caveat on the live tool's own description, where it belongs.
+ * this fragment can now describe one default row for both modes.
+ *
+ * BECAUSE IT IS SHARED, it may name only field names BOTH modes have. A first
+ * revision of the #604 wording enumerated the cache document here — 16 of the
+ * 27 names it listed do not exist on a live row, and its worked example was
+ * `user_note`, whose live spelling is `user_notes` — so a live caller copying
+ * the parameter docs got a `_field_warning` instead of a field. That is the
+ * same cache/live mismatch this PR fixed by hand in three skills, one layer
+ * below the schema those skills read. Each tool's OWN description owns its
+ * exclusions list, and both already carry a correct one; this fragment stays
+ * mode-neutral. Pinned by tests/tools/live/transactions.test.ts.
  */
 export const TRANSACTION_FIELDS_PARAM_SCHEMA = {
   type: 'array',
@@ -114,17 +123,11 @@ export const TRANSACTION_FIELDS_PARAM_SCHEMA = {
   description:
     'Return only these fields per transaction. Default when omitted: a terse row ' +
     '(transaction_id, date, amount, name, category_name, account_id, item_id, pending, ' +
-    'excluded, internal_transfer). That drops ~50 other fields of a cache document. ' +
-    'PARTIAL list of what goes, not exhaustive: Plaid metadata (plaid_category_id, ' +
-    'plaid_category_strings, plaid_transaction_type, plaid_deleted), internal IDs ' +
-    '(category_id, recurring_id, goal_id, parent_transaction_id, children_transaction_ids, ' +
-    'pending_transaction_id, user_id), enrichment and intelligence fields ' +
-    '(normalized_merchant, intelligence_suggested_category_ids, suggestion_ids, ' +
-    'original_name, name_override), tagging (tag_ids), review state (user_reviewed, ' +
-    'user_note), location (city, region, country, lat, lon), and flags like is_amazon / ' +
-    'from_investment / is_manual. Any of them is requestable by name: ' +
-    'fields: ["default", "tag_ids", "user_note"], or "all" / "*" for the full row. ' +
-    'Unknown names are omitted and reported via _field_warning.',
+    'excluded, internal_transfer). Anything else is requestable by name alongside the ' +
+    'preset: fields: ["default", "tag_ids"], or "all" / "*" for the whole row. THIS ' +
+    "TOOL's own description names what its rows drop — the two modes drop different " +
+    'things, because a live row is not a cache document. Unknown names are omitted and ' +
+    'reported via _field_warning.',
 } as const;
 
 /**
