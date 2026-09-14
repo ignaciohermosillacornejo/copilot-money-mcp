@@ -1220,6 +1220,45 @@ describe('CopilotMoneyTools', () => {
       expect(result.transactions[0]?.excluded).toBe(true);
     });
 
+    test('an UNCATEGORIZED cache row is 7 keys on the wire', async () => {
+      // The sparse-row test above gives its fixture a category deliberately, so
+      // its 8 holds. This is the third condition on that number, and the guide
+      // framed the dropped `category_name` as live mode's "mirror case" — it is
+      // not: cache resolves it to `undefined` when there is no category, the
+      // key survives projection because the row owns it, and JSON.stringify
+      // drops it. Both modes lose the same key for the same reason; live merely
+      // starts from 10.
+      //
+      // Asserted after a JSON round-trip for that reason — `Object.keys()` off
+      // the object is 8 here and would pin the wrong thing.
+      (db as any)._userCategories = [{ category_id: 'groceries', name: 'Groceries', order: 0 }];
+      (db as any)._transactions = [
+        {
+          transaction_id: 'txn_uncategorized',
+          date: '2024-03-15',
+          amount: 100,
+          name: 'No category',
+          account_id: 'acc_1',
+          item_id: 'item_1',
+          // no `category_id` — and no `pending` / `internal_transfer` either
+        },
+      ];
+
+      const result = await tools.getTransactions({
+        start_date: '2024-03-01',
+        end_date: '2024-03-31',
+      });
+      const onTheWire = JSON.parse(JSON.stringify(result.transactions[0])) as Record<
+        string,
+        unknown
+      >;
+      expect(Object.keys(onTheWire)).toHaveLength(7);
+      expect(onTheWire).not.toHaveProperty('category_name');
+      // ...and the derived key is still there, because a derivation always has
+      // a value — that is what separates it from the dropped ones.
+      expect(onTheWire.excluded).toBe(false);
+    });
+
     test('the transaction_id path enriches identically to the windowed one', async () => {
       // The two cache paths through getTransactions() derive the same fields,
       // and a caller who passes transaction_id must not get a different answer
