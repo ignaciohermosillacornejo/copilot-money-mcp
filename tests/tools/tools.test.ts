@@ -3352,7 +3352,27 @@ describe('getHoldings', () => {
         },
       ],
     };
-    (db as any)._accounts = [...mockAccountsWithHoldings, hiddenByUser];
+    // An EMPTY nickname and a real one, so the id -> name half of this
+    // comparison exercises both branches of the preference rule rather than
+    // only the absent-nickname case the other fixtures cover.
+    const blankNickname = {
+      ...mockAccountsWithHoldings[0],
+      account_id: 'inv_blank',
+      name: 'Provider Label',
+      nickname: '',
+      holdings: [
+        {
+          security_id: 'sec_aapl',
+          account_id: 'inv_blank',
+          cost_basis: 100,
+          institution_price: 1.0,
+          institution_value: 100,
+          quantity: 100,
+          iso_currency_code: 'USD',
+        },
+      ],
+    };
+    (db as any)._accounts = [...mockAccountsWithHoldings, hiddenByUser, blankNickname];
 
     const accountRows = (await tools.getAccounts({})).accounts;
     const visibleAccountIds = new Set(accountRows.map((a) => a.account_id));
@@ -3388,6 +3408,47 @@ describe('getHoldings', () => {
     // Guards the gate: both sets must be non-empty, or the comparison is vacuous.
     expect(visibleAccountIds.size).toBeGreaterThan(0);
     expect(holdingAccountIds.size).toBeGreaterThan(0);
+  });
+
+  test('an EMPTY nickname resolves the same way in both tools (#663 in reverse)', async () => {
+    // `nickname` is a bare optional string on AccountSchema — no `.min(1)` —
+    // so `''` is a value the decoder can produce for a cleared nickname. The
+    // two sites disagreed about it: getAccounts used truthiness (`''` falls
+    // through to the provider label) and getHoldings used `??` (`''` wins and
+    // the row reports an empty name). Same account, two names — which is #663
+    // again, in the opposite direction, created by the commit that fixed #663.
+    //
+    // The parity test above could not see it: its fixtures only ever have an
+    // absent or non-empty nickname, so the id -> name comparison never reached
+    // this branch. Pinned explicitly here AND exercised there, via the
+    // empty-nickname account added to that fixture.
+    (db as any)._accounts = [
+      {
+        ...mockAccountsWithHoldings[0],
+        account_id: 'inv_blank',
+        name: 'PROVIDER LABEL',
+        nickname: '',
+        holdings: [
+          {
+            security_id: 'sec_aapl',
+            account_id: 'inv_blank',
+            cost_basis: 15000,
+            institution_price: 190.0,
+            institution_value: 19000,
+            quantity: 100,
+            iso_currency_code: 'USD',
+          },
+        ],
+      },
+    ];
+
+    const accountName = (await tools.getAccounts({})).accounts[0]?.name;
+    const holdingName = (await tools.getHoldings({})).holdings[0]?.account_name;
+
+    expect(holdingName).toBe(accountName);
+    // ...and the agreed answer is the provider label, not the empty string: an
+    // account with no usable nickname should still be identifiable.
+    expect(accountName).toBe('PROVIDER LABEL');
   });
 
   test('get_holdings reports the Copilot nickname, like get_accounts (#663)', async () => {

@@ -171,3 +171,28 @@ export function isVisibleAccountNode(account: {
 }): boolean {
   return !account.isUserHidden && !account.isUserClosed;
 }
+
+/**
+ * The label to show for an account: the user's Copilot nickname when they have
+ * set a usable one, the provider's label otherwise (#660, #663).
+ *
+ * Empty-string handling is the whole reason this is a function. `nickname` is
+ * a bare optional string on {@link AccountSchema} — no `.min(1)` — so `''` is
+ * a value the decoder can produce for a cleared nickname, and the two call
+ * sites disagreed about it: `getAccounts` used truthiness (`''` falls through
+ * to the provider label) while `getHoldings` used `??` (`''` wins, and the row
+ * reports an empty name). Same account, two names — #663 again, in the
+ * opposite direction, introduced by the commit that fixed #663.
+ *
+ * Truthiness is the right branch: an account whose nickname is blank should
+ * still be identifiable, so a blank one is not a name.
+ *
+ * Sibling of {@link isVisibleAccount}, and here for the same reason — the rule
+ * existed at one site and a second surface reimplemented it slightly
+ * differently.
+ */
+export function preferredAccountName(
+  account: Pick<Account, 'nickname' | 'name' | 'official_name'>
+): string | undefined {
+  return account.nickname || account.name || account.official_name;
+}

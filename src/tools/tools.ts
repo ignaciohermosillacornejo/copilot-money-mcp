@@ -104,6 +104,7 @@ import {
   getLatestPricePoint,
   AccountSchema,
   isVisibleAccount,
+  preferredAccountName,
 } from '../models/index.js';
 import type { GoalHistory } from '../models/goal-history.js';
 import { isItemHealthy, itemNeedsAttention, getItemDisplayName } from '../models/item.js';
@@ -1393,7 +1394,13 @@ export class CopilotMoneyTools {
     // all; doing it in the other order would silently reinstate the
     // provider label for a projected row.
     accounts = accounts.map((account) =>
-      account.nickname ? { ...account, name: account.nickname } : account
+      // Rewrite only when the preferred name is usable AND different — so a
+      // blank or absent nickname leaves the row untouched rather than writing
+      // `name: undefined` onto an account that never had one.
+      (() => {
+        const preferred = preferredAccountName(account);
+        return preferred && preferred !== account.name ? { ...account, name: preferred } : account;
+      })()
     );
 
     // Calculate totals by asset/liability classification
@@ -2721,7 +2728,7 @@ export class CopilotMoneyTools {
           // nickname when the user set one. Without this the two tools show two
           // different names for one account, which the v3 accounts diet made more
           // likely by redirecting holdings callers here.
-          account_name: acct.nickname ?? acct.name ?? acct.official_name,
+          account_name: preferredAccountName(acct),
           quantity: h.quantity,
           institution_price: h.institution_price,
           institution_value: h.institution_value,
