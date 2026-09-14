@@ -365,7 +365,7 @@ const SCHEMA_BUDGETS: Record<string, number> = {
  * total 77_042, ~3.0% headroom — the same band this ratchet has held since
  * #606, so it stays the binding check rather than a formality.
  *
- * MUST stay below the sum of every entry in SCHEMA_BUDGETS above (84_350 over
+ * MUST stay below the sum of every entry in SCHEMA_BUDGETS above (84_540 over
  * 50 entries after #604's two raises, 5_100 -> 6_425 and 4_370 -> 6_360;
  * 81_035 before them — recompute if that table changes): the completeness guard
  * in registerContextBudgetChecks requires SCHEMA_BUDGETS to have exactly one
@@ -384,8 +384,10 @@ const SCHEMA_BUDGETS: Record<string, number> = {
 // reductions above; raised to 79_600 by #683, which spends ~260 chars each on
 // get_holdings and get_holdings_live — an include_hidden param and a
 // changed-default sentence per tool (see the per-tool comments for why that
-// trade is worth making in a diet release). Measured 77_309 (~2.9% headroom),
-// still the binding check against a per-tool sum of 84_540.
+// trade is worth making in a diet release). Measured 77_633 (~2.5% headroom),
+// still the binding check against a per-tool sum of 84_540. (Re-measured at
+// this commit: the earlier 77_309 was taken mid-PR and went stale two commits
+// later, when get_holdings_live's account_id note landed.)
 const SCHEMA_TOTAL_BUDGET = 79_600;
 
 // ---------------------------------------------------------------------------

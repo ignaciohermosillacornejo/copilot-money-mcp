@@ -148,7 +148,6 @@ caller is the one who has to change something.
   twice. If your portfolio total *drops* after upgrading, this is why, and the
   new number is the one that matches your account list. Pass `include_hidden:
   true` to get the old behaviour back for an audit.
-
 - **`history_limit` above 5,000 now clamps.** `get_investment_balance_live`
   inherited a shared pagination helper's hard cap where the old local code had
   no upper bound. `0` remains the unlimited escape hatch, so nothing that

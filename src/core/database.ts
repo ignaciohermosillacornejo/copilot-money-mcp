@@ -46,6 +46,7 @@ import type {
   PriceType,
 } from '../models/index.js';
 import type { BalanceHistory } from '../models/balance-history.js';
+import { preferredAccountName } from '../models/account.js';
 import { getCategoryName } from '../utils/categories.js';
 
 /**
@@ -1377,7 +1378,12 @@ export class CopilotDatabase {
     const nameMap = new Map<string, string>();
 
     for (const account of accounts) {
-      const displayName = account.nickname ?? account.name;
+      // `preferredAccountName`, not `nickname ?? name` (#663). The old form
+      // had the bug twice over: a CLEARED nickname is `''`, which `??` keeps,
+      // and the truthiness guard below then dropped the account from the map
+      // entirely — so get_balance_history reported `account_name: undefined`.
+      // Not a wrong name; no name at all.
+      const displayName = preferredAccountName(account);
       if (displayName) {
         nameMap.set(account.account_id, displayName);
       }
