@@ -161,6 +161,11 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // gained. Measured 2_305 (~10% headroom). Disclosure required by the #597
   // convention; compressing the prose to fit the old ceiling would trade the
   // disclosure for ~250 chars, which is the wrong trade (ruling 2026-08-30).
+  // Headroom is THIN: measured 2_518 against 2_535 after #665 added the
+  // `name` is-a-nickname contract, which is ~17 chars of room — roughly one
+  // more clause. That is the ratchet working (the contract was tightened to
+  // fit rather than the budget raised), but a one-word edit here can fail CI,
+  // and the fix is to justify a raise rather than to trim until it passes.
   get_accounts: 2_535,
   get_connection_status: 850,
   get_categories: 1_405,
@@ -213,7 +218,13 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // Re-measured at 1_696 after the PR B review added `isUserClosed` to the
   // preset and to that sentence's default-field list (measured 1_629 before);
   // 1_795 still holds it with ~5.8% headroom, so the ceiling does not move.
-  get_accounts_live: 1_795,
+  // Raised 1_795 -> 1_995 by #665's live half: `--write` implies --live-reads,
+  // so get_accounts is swapped out and write-capable callers — the ones most
+  // likely to key on an account identifier — never saw the cache tool's
+  // "`name` is editable, key on the id" contract. Same sentence, naming `id`
+  // rather than `account_id`, because that is this row's key. Measured 1_814
+  // (~10% headroom).
+  get_accounts_live: 1_995,
   // Raised from 1_555 by #597 Tier 1: adds the `fields` param (excludes the
   // embedded `budget` object — {current, histories}, ~62% of a row and a
   // duplicate of get_budgets_live — from the default row, replacing it with

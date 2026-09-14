@@ -14,7 +14,7 @@ copilot-money-mcp --write
 ```
 
 Prerequisites:
-- You must be logged into `app.copilot.money` in Chrome, Arc, Safari, or Firefox. The MCP extracts a Firebase refresh token from browser storage.
+- You must be logged into `app.copilot.money` in a supported browser. The MCP extracts a Firebase refresh token from browser storage. Supported today (`src/core/auth/browser-token.ts`): the Chromium family — Chrome, Arc, Edge, Brave, Vivaldi, Chromium, Opera and Opera GX — plus Safari and Firefox.
 - Network connectivity to `app.copilot.money`.
 
 If auth fails at boot, the server logs a diagnostic line to stderr and exits non-zero. Claude Desktop will show the transport as closed; check the MCP server logs for the explanation.
