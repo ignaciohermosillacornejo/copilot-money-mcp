@@ -33,6 +33,8 @@
 
 import type { LiveCopilotDatabase } from '../../core/live-database.js';
 import { fetchHoldings, type HoldingNode } from '../../core/graphql/queries/holdings.js';
+import { fetchAccounts } from '../../core/graphql/queries/accounts.js';
+import { isVisibleAccountNode } from '../../models/account.js';
 import { computeTotalReturnPercent, roundAmount } from '../../utils/round.js';
 import { clampMaxRows, clampOffset } from '../../utils/pagination.js';
 import type { ToolSchema } from '../tools.js';
@@ -46,6 +48,11 @@ export interface GetHoldingsLiveArgs {
   account_id?: string;
   /** Filter — case-insensitive match on `security.symbol`. */
   ticker_symbol?: string;
+  /**
+   * Include positions on hidden and closed accounts. Default false, matching
+   * `get_accounts_live` (#683).
+   */
+  include_hidden?: boolean;
   /** Default 100; clamped to [1, 10000]. */
   limit?: number;
   /** Default 0; clamped to >= 0. */
@@ -109,6 +116,33 @@ function projectHolding(h: HoldingNode): GetHoldingsLiveEntry {
 export class LiveHoldingsTools {
   constructor(private readonly live: LiveCopilotDatabase) {}
 
+  /**
+   * Account ids `get_accounts_live` would hide, read from the same snapshot
+   * cache that tool uses — so the two cannot disagree about which accounts
+   * exist, and the join costs nothing when the cache is warm.
+   */
+  private async hiddenAccountIds(): Promise<Set<string>> {
+    const { rows } = await this.live
+      .getAccountsCache()
+      .read(() => fetchAccounts(this.live.getClient()));
+
+    // Fail rather than fall back to unfiltered. `fetchAccounts` returns
+    // `data.accounts` with no runtime guard, so a malformed response yields
+    // undefined — and the tempting `?? []` here would mean "no hidden
+    // accounts", silently restoring the exact #683 double-count this method
+    // exists to prevent. A caller who cannot be told which accounts are
+    // hidden should get an error, not a plausible wrong number.
+    if (!Array.isArray(rows)) {
+      throw new Error(
+        'get_holdings_live could not read the accounts snapshot, so it cannot tell which ' +
+          'accounts are hidden or closed. Returning unfiltered holdings would risk ' +
+          'double-counting a merged account (#683). Retry, or pass include_hidden: true to ' +
+          'skip the visibility join deliberately.'
+      );
+    }
+    return new Set(rows.filter((a) => !isVisibleAccountNode(a)).map((a) => a.id));
+  }
+
   async getHoldings(args: GetHoldingsLiveArgs): Promise<GetHoldingsLiveResult> {
     const cache = this.live.getHoldingsCache();
     const startedAt = Date.now();
@@ -122,10 +156,26 @@ export class LiveHoldingsTools {
     const offset = clampOffset(args.offset);
     const tickerLower = args.ticker_symbol?.toLowerCase();
 
+    // Account visibility, the live half of #683. get_accounts_live filters
+    // isUserHidden/isUserClosed; this tool loaded holdings and filtered
+    // neither, so the two live tools disagreed about which accounts exist —
+    // the same split the cache pair had, on the surface `--write` users get,
+    // since get_holdings is swappedOutInLiveMode.
+    //
+    // Joined against the accounts snapshot rather than trusted to the server:
+    // a probe against real data could NOT settle whether the Holdings query
+    // already excludes hidden accounts, because the only hidden accounts in
+    // that dataset hold nothing — their absence is uninformative, not
+    // evidence. Filtering here makes the parity hold by construction instead
+    // of resting on an unverified assumption about someone else's resolver.
+    // If the server does filter too, this is a no-op.
+    const hiddenAccountIds = args.include_hidden ? undefined : await this.hiddenAccountIds();
+
     // Filter on the raw GraphQL rows before projection — cheaper than
     // projecting then filtering, and the filter predicates only need
     // fields already present on HoldingNode.
     const filtered = cached.filter((h) => {
+      if (hiddenAccountIds?.has(h.accountId)) return false;
       if (args.account_id && h.accountId !== args.account_id) return false;
       if (tickerLower && h.security.symbol.toLowerCase() !== tickerLower) return false;
       return true;
@@ -171,7 +221,7 @@ export function createLiveHoldingsToolSchema(): ToolSchema {
       'omitted from the row; check `is_cash_equivalent` (derived from ' +
       "`security.type === 'CASH'`) to distinguish. For monthly snapshots, " +
       'use cache-mode `get_holdings` with `include_history: true` — history ' +
-      'is not available on the live query. Available when --live-reads is on.',
+      'is not available on the live query. Positions on hidden and closed accounts are EXCLUDED by default, matching get_accounts_live — pass include_hidden: true for them. Available when --live-reads is on.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -182,6 +232,14 @@ export function createLiveHoldingsToolSchema(): ToolSchema {
         ticker_symbol: {
           type: 'string',
           description: "Filter — case-insensitive match on the security's ticker symbol.",
+        },
+        include_hidden: {
+          type: 'boolean',
+          description:
+            'Include positions on hidden and closed accounts (default: false). Same flag, ' +
+            'same default as get_accounts_live — leave it off and the two tools agree on ' +
+            'which accounts exist.',
+          default: false,
         },
         limit: {
           type: 'integer',

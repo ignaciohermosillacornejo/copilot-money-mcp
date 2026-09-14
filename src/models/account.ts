@@ -132,3 +132,42 @@ export function withDisplayName(account: Account): AccountWithDisplayName {
     display_name: getAccountDisplayName(account),
   };
 }
+
+/**
+ * ACCOUNT VISIBILITY — one rule, two field vocabularies (#683).
+ *
+ * "Is this an account the user still counts as part of their finances?" The
+ * cache document and the GraphQL wire spell the same idea differently, so the
+ * two predicates cannot share a body — but they live here, adjacent to the
+ * schema that declares the flags, so a reader finds both at once and a new
+ * surface cannot apply one while being unaware of the other.
+ *
+ * They are here rather than in `src/tools/tools.ts` deliberately: exporting a
+ * domain predicate from a ~3k-line tools module means `src/core/` and
+ * `src/tools/live/` cannot import it without pulling that module in.
+ *
+ * Why the rule needed a name at all: it existed as an inline filter at ONE of
+ * the surfaces that needed it. `get_accounts` filtered; `get_holdings` loaded
+ * the same accounts and did not, so a re-linked brokerage contributed its
+ * positions twice while the account list looked correct (#683). The live pair
+ * had the identical split.
+ */
+
+/** Cache-document form: `user_deleted` (merged/removed) or `user_hidden`. */
+export function isVisibleAccount(account: Pick<Account, 'user_deleted' | 'user_hidden'>): boolean {
+  return account.user_deleted !== true && account.user_hidden !== true;
+}
+
+/**
+ * GraphQL-wire form: `isUserClosed` / `isUserHidden`, both always-present
+ * booleans rather than optional flags.
+ *
+ * Structurally typed rather than importing `AccountNode`, so `src/models/`
+ * keeps no dependency on the GraphQL layer.
+ */
+export function isVisibleAccountNode(account: {
+  isUserHidden: boolean;
+  isUserClosed: boolean;
+}): boolean {
+  return !account.isUserHidden && !account.isUserClosed;
+}

@@ -103,6 +103,7 @@ import {
   InvestmentPriceSchema,
   getLatestPricePoint,
   AccountSchema,
+  isVisibleAccount,
 } from '../models/index.js';
 import type { GoalHistory } from '../models/goal-history.js';
 import { isItemHealthy, itemNeedsAttention, getItemDisplayName } from '../models/item.js';
@@ -610,30 +611,6 @@ function buildEditCachePatch(edit: TransactionEdit): Partial<Transaction> {
 /**
  * Collection of MCP tools for querying Copilot Money data.
  */
-/**
- * Is this account one the user still considers part of their finances?
- *
- * Both flags live on the account document itself:
- *   `user_deleted` — merged or removed accounts
- *   `user_hidden`  — hidden by the user in the Copilot app
- *
- * This previously read `user_hidden` from a `users/{uid}/accounts`
- * customization collection, which no longer has any documents — Copilot moved
- * the flags onto the account records. So the hidden filter was a silent no-op:
- * the collection was always empty, and the flag that IS present was decoded
- * into the model and then never read (#624).
- *
- * Named and shared rather than inlined, because the rule was applied at ONE of
- * the surfaces that needed it. `getAccounts` filtered; `getHoldings` loaded the
- * same account list and did not (#683), so a re-linked brokerage contributed
- * its positions twice while the account list looked correct. A predicate with
- * one definition makes each call site's choice visible — including
- * `resolveAccountName`, which deliberately does NOT apply it.
- */
-export function isVisibleAccount(account: Account): boolean {
-  return account.user_deleted !== true && account.user_hidden !== true;
-}
-
 export class CopilotMoneyTools {
   private db: CopilotDatabase;
   private graphqlClient: GraphQLClient | null;
@@ -2691,6 +2668,12 @@ export class CopilotMoneyTools {
     // default (#683) — otherwise a merged account's stale positions are
     // reported as live holdings while the account list correctly hides it,
     // and anything summing institution_value double-counts.
+    //
+    // Note this applies even when account_id names a hidden account, so that
+    // call returns an empty result. Deliberate: the alternative — an explicit
+    // id bypassing the filter — makes the tool's answer depend on HOW you
+    // asked rather than on what is true, which is the shape of the bug being
+    // fixed. The param description says so, and include_hidden is the way in.
     const allAccounts = await this.db.getAccounts();
     const accounts = include_hidden ? allAccounts : allAccounts.filter(isVisibleAccount);
     const securityMap = await this.db.getSecurityMap();
@@ -2734,7 +2717,11 @@ export class CopilotMoneyTools {
           name: sec?.name,
           type: sec?.type,
           account_id: acct.account_id,
-          account_name: acct.name ?? acct.official_name,
+          // #663: same preference get_accounts applies (#660) — the Copilot
+          // nickname when the user set one. Without this the two tools show two
+          // different names for one account, which the v3 accounts diet made more
+          // likely by redirecting holdings callers here.
+          account_name: acct.nickname ?? acct.name ?? acct.official_name,
           quantity: h.quantity,
           institution_price: h.institution_price,
           institution_value: h.institution_value,

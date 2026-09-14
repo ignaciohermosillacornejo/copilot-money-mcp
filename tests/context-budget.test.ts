@@ -270,7 +270,13 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // descriptions cannot drift. Measured 1_718 (~10% headroom).
   get_upcoming_recurrings_live: 1_890,
   get_monthly_spend_live: 1_235,
-  get_holdings_live: 1_210,
+  // Raised 1_210 -> 1_615 by #683, the live half of the same fix that raised
+  // get_holdings. Same trade, same reason: an `include_hidden` param so
+  // filtering by default removes no capability, and a description sentence
+  // saying the default changed. This is the tool `--write` users actually get
+  // (get_holdings is swappedOutInLiveMode), so it is the half that mattered
+  // more. Measured 1_469 (~10% headroom).
+  get_holdings_live: 1_615,
   get_balance_history_live: 1_800,
   get_investment_prices_live: 1_835,
   get_investment_allocation_live: 810,
@@ -375,12 +381,12 @@ const SCHEMA_BUDGETS: Record<string, number> = {
  * then too).
  */
 // Lowered 79_400 -> 78_700 in review round five, tracking the two per-tool
-// reductions above; raised to 79_100 by #683, which spends ~260 chars on
-// get_holdings' include_hidden param and its changed-default sentence (see the
-// per-tool comment for why that trade is worth making in a diet release).
-// Measured 76_855 (~2.9% headroom), still the binding check against a per-tool
-// sum of 84_135.
-const SCHEMA_TOTAL_BUDGET = 79_100;
+// reductions above; raised to 79_600 by #683, which spends ~260 chars each on
+// get_holdings and get_holdings_live — an include_hidden param and a
+// changed-default sentence per tool (see the per-tool comments for why that
+// trade is worth making in a diet release). Measured 77_309 (~2.9% headroom),
+// still the binding check against a per-tool sum of 84_540.
+const SCHEMA_TOTAL_BUDGET = 79_600;
 
 // ---------------------------------------------------------------------------
 // Synthetic fixture. Deterministic content, opaque Firestore-shaped IDs

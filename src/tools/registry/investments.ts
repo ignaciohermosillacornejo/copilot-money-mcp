@@ -116,7 +116,12 @@ export const getHoldingsTool = defineTool({
     inputSchema: {
       type: 'object',
       properties: {
-        account_id: { type: 'string', description: 'Filter by investment account ID' },
+        account_id: {
+          type: 'string',
+          description:
+            'Filter by investment account ID. Returns empty for a hidden or merged account ' +
+            'unless include_hidden is also set.',
+        },
         ticker_symbol: {
           type: 'string',
           description: 'Filter by ticker symbol (e.g., "AAPL", "SCHX")',

@@ -3354,12 +3354,10 @@ describe('getHoldings', () => {
     };
     (db as any)._accounts = [...mockAccountsWithHoldings, hiddenByUser];
 
-    const visibleAccountIds = new Set(
-      (await tools.getAccounts({})).accounts.map((a) => a.account_id)
-    );
-    const holdingAccountIds = new Set(
-      (await tools.getHoldings({})).holdings.map((h) => h.account_id)
-    );
+    const accountRows = (await tools.getAccounts({})).accounts;
+    const visibleAccountIds = new Set(accountRows.map((a) => a.account_id));
+    const holdings = (await tools.getHoldings({})).holdings;
+    const holdingAccountIds = new Set(holdings.map((h) => h.account_id));
 
     const orphaned = [...holdingAccountIds].filter((id) => !visibleAccountIds.has(id));
     expect(
@@ -3367,9 +3365,58 @@ describe('getHoldings', () => {
       `get_holdings reported positions on accounts get_accounts hides: ${orphaned.join(', ')}. ` +
         `A caller summing institution_value would count money the account list says is not there.`
     ).toEqual([]);
+
+    // Same comparison, one field over (#663): the two tools must also agree on
+    // what each account is CALLED. get_accounts prefers the Copilot nickname
+    // (#660) and get_holdings used to report the provider label, so a renamed
+    // brokerage had two names across tools the v3 diet encourages using
+    // together. Comparing id -> name rather than the id sets alone is what
+    // makes one assertion cover both rules.
+    const nameById = new Map(accountRows.map((a) => [a.account_id, a.name]));
+    const disagreements = holdings
+      .filter((h) => nameById.get(h.account_id) !== h.account_name)
+      .map(
+        (h) =>
+          `${h.account_id}: accounts="${nameById.get(h.account_id)}" holdings="${h.account_name}"`
+      );
+    expect(
+      disagreements,
+      `get_accounts and get_holdings disagree about an account's name: ` +
+        `${disagreements.join('; ')}. A caller correlating the two tools sees two accounts.`
+    ).toEqual([]);
+
     // Guards the gate: both sets must be non-empty, or the comparison is vacuous.
     expect(visibleAccountIds.size).toBeGreaterThan(0);
     expect(holdingAccountIds.size).toBeGreaterThan(0);
+  });
+
+  test('get_holdings reports the Copilot nickname, like get_accounts (#663)', async () => {
+    // #660 made get_accounts prefer the user's nickname over the provider
+    // label. get_holdings kept reporting `name ?? official_name`, so the same
+    // account appeared under two names depending on which tool you asked —
+    // and the v3 accounts diet made asking both the documented path.
+    (db as any)._accounts = [
+      {
+        ...mockAccountsWithHoldings[0],
+        account_id: 'inv_nick',
+        name: 'BIG BROKERAGE NA',
+        nickname: 'Retirement',
+        holdings: [
+          {
+            security_id: 'sec_aapl',
+            account_id: 'inv_nick',
+            cost_basis: 15000,
+            institution_price: 190.0,
+            institution_value: 19000,
+            quantity: 100,
+            iso_currency_code: 'USD',
+          },
+        ],
+      },
+    ];
+
+    const holding = (await tools.getHoldings({})).holdings[0];
+    expect(holding?.account_name).toBe('Retirement');
   });
 
   test('computes average_cost and total_return when cost_basis is present', async () => {

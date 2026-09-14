@@ -3,11 +3,43 @@ import type { GraphQLClient } from '../../../src/core/graphql/client.js';
 import { CopilotDatabase } from '../../../src/core/database.js';
 import { LiveCopilotDatabase } from '../../../src/core/live-database.js';
 import { LiveHoldingsTools } from '../../../src/tools/live/holdings.js';
+import { LiveAccountsTools } from '../../../src/tools/live/accounts.js';
 
-function makeClient(rows: unknown[]): GraphQLClient {
+/**
+ * `accounts` is served alongside `holdings` because get_holdings_live joins
+ * the accounts snapshot to decide which positions are on hidden or closed
+ * accounts (#683). A client that answers only `holdings` is not a realistic
+ * stand-in for the live database any more.
+ */
+function makeClient(rows: unknown[], accounts: unknown[] = []): GraphQLClient {
   return {
-    query: mock(() => Promise.resolve({ holdings: rows })),
+    query: mock((op: string) =>
+      Promise.resolve(op === 'Accounts' ? { accounts } : { holdings: rows })
+    ),
   } as unknown as GraphQLClient;
+}
+
+/** A minimal AccountNode — only the fields the visibility join reads. */
+function acct(id: string, flags: { isUserHidden?: boolean; isUserClosed?: boolean } = {}) {
+  return {
+    id,
+    itemId: 'item-1',
+    name: `Account ${id}`,
+    balance: 0,
+    liveBalance: true,
+    type: 'INVESTMENT',
+    subType: 'brokerage',
+    mask: null,
+    institutionId: 'ins_test',
+    isUserHidden: flags.isUserHidden ?? false,
+    isUserClosed: flags.isUserClosed ?? false,
+    isManual: false,
+    hasLiveBalance: true,
+    hasHistoricalUpdates: true,
+    latestBalanceUpdate: 0,
+    limit: null,
+    color: '#000000',
+  };
 }
 
 function makeLive(client: GraphQLClient): LiveCopilotDatabase {
@@ -175,7 +207,113 @@ describe('LiveHoldingsTools.getHoldings', () => {
     expect(first._cache_hit).toBe(false);
     expect(second._cache_hit).toBe(true);
     expect(second.holdings[0]?.security_id).toBe('sec-equity');
-    expect(client.query).toHaveBeenCalledTimes(1);
+    // A cold call now costs TWO operations, not one: Holdings plus the
+    // Accounts snapshot the visibility join reads (#683). Both are
+    // SnapshotCache-backed, which is the point of this test — the warm call
+    // adds nothing, so the join is paid once per TTL rather than per call,
+    // and `get_accounts_live` usually warms it first anyway.
+    const ops = (client.query as ReturnType<typeof mock>).mock.calls.map(
+      (c) => (c as unknown[])[0]
+    );
+    expect(ops).toEqual(['Holdings', 'Accounts']);
+  });
+
+  test('excludes positions on hidden and closed accounts by default (#683)', async () => {
+    // The live half of #683, and the half that mattered more: get_holdings is
+    // swappedOutInLiveMode, so under --live-reads — which --write implies —
+    // this is the tool callers actually get. The cache fix could not reach it.
+    const client = makeClient(
+      [
+        { ...equityHolding, id: 'h-visible', accountId: 'acct-visible' },
+        { ...equityHolding, id: 'h-hidden', accountId: 'acct-hidden' },
+        { ...equityHolding, id: 'h-closed', accountId: 'acct-closed' },
+      ],
+      [
+        acct('acct-visible'),
+        acct('acct-hidden', { isUserHidden: true }),
+        acct('acct-closed', { isUserClosed: true }),
+      ]
+    );
+    const tools = new LiveHoldingsTools(makeLive(client));
+
+    const result = await tools.getHoldings({});
+
+    expect(result.holdings.map((h) => h.account_id)).toEqual(['acct-visible']);
+    expect(result.total_count).toBe(1);
+  });
+
+  test('include_hidden: true brings them back (#683)', async () => {
+    const client = makeClient(
+      [
+        { ...equityHolding, id: 'h-visible', accountId: 'acct-visible' },
+        { ...equityHolding, id: 'h-hidden', accountId: 'acct-hidden' },
+      ],
+      [acct('acct-visible'), acct('acct-hidden', { isUserHidden: true })]
+    );
+    const tools = new LiveHoldingsTools(makeLive(client));
+
+    const result = await tools.getHoldings({ include_hidden: true });
+
+    expect(result.holdings.map((h) => h.account_id).sort()).toEqual([
+      'acct-hidden',
+      'acct-visible',
+    ]);
+  });
+
+  test('the two LIVE tools agree on which accounts exist (#683)', async () => {
+    // Mirror of the cache-mode parity test, and the one the cache test could
+    // never stand in for: it exercises only cache-mode handlers, so it would
+    // stay green while live mode shipped the same bug.
+    //
+    // Pins the RELATIONSHIP: whatever get_accounts_live hides, get_holdings_live
+    // must report no positions for.
+    const accounts = [
+      acct('acct-visible'),
+      acct('acct-hidden', { isUserHidden: true }),
+      acct('acct-closed', { isUserClosed: true }),
+    ];
+    const client = makeClient(
+      accounts.map((a, i) => ({ ...equityHolding, id: `h-${i}`, accountId: a.id })),
+      accounts
+    );
+    const live = makeLive(client);
+
+    const visible = new Set(
+      (await new LiveAccountsTools(live).getAccounts({})).accounts.map((a) => a.id)
+    );
+    const held = new Set(
+      (await new LiveHoldingsTools(live).getHoldings({})).holdings.map((h) => h.account_id)
+    );
+
+    const orphaned = [...held].filter((id) => !visible.has(id));
+    expect(
+      orphaned,
+      `get_holdings_live reported positions on accounts get_accounts_live hides: ` +
+        `${orphaned.join(', ')}. A caller summing institution_value would count money the ` +
+        `account list says is not there.`
+    ).toEqual([]);
+    // Guards the gate: both sets non-empty, or the comparison is vacuous.
+    expect(visible.size).toBeGreaterThan(0);
+    expect(held.size).toBeGreaterThan(0);
+  });
+
+  test('an unreadable accounts snapshot fails loudly, not unfiltered (#683)', async () => {
+    // The tempting `?? []` in the visibility join would mean "no hidden
+    // accounts" and silently restore the double-count. A caller who cannot be
+    // told which accounts are hidden gets an error instead of a plausible
+    // wrong number.
+    const client = {
+      query: mock((op: string) =>
+        Promise.resolve(op === 'Accounts' ? {} : { holdings: [equityHolding] })
+      ),
+    } as unknown as GraphQLClient;
+    const tools = new LiveHoldingsTools(makeLive(client));
+
+    await expect(tools.getHoldings({})).rejects.toThrow(/cannot tell which accounts are hidden/);
+
+    // ...and include_hidden skips the join entirely, so it still works.
+    const escaped = await tools.getHoldings({ include_hidden: true });
+    expect(escaped.holdings).toHaveLength(1);
   });
 
   test('cache metadata: ISO strings, oldest === newest on a single-snapshot fetch', async () => {
@@ -250,12 +388,17 @@ describe('LiveHoldingsTools.getHoldings', () => {
 
     await tools.getHoldings({});
 
-    expect(client.query).toHaveBeenCalledTimes(1);
     const queryMock = client.query as ReturnType<typeof mock>;
     const callArgs = queryMock.mock.calls[0] as unknown[];
     expect(callArgs[0]).toBe('Holdings');
     expect(typeof callArgs[1]).toBe('string');
     expect(callArgs[2]).toEqual({});
+
+    // The second operation is the #683 visibility join. Asserted by NAME
+    // rather than by a bare count, so this test says which calls are expected
+    // instead of only how many — a count would pass if the join were replaced
+    // by some unrelated second query.
+    expect(queryMock.mock.calls.map((c) => (c as unknown[])[0])).toEqual(['Holdings', 'Accounts']);
   });
 
   test('empty result returns count=0 without throwing', async () => {
