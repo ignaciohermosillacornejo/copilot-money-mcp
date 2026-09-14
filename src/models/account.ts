@@ -111,6 +111,16 @@ export type Account = z.infer<typeof AccountSchema>;
 
 /**
  * Get the best display name for an account.
+ *
+ * NOT the user-facing account label — use {@link preferredAccountName} (#663).
+ * This one is nickname-UNAWARE and uses `??` where that helper deliberately
+ * uses `||`, so a `name: ''` returns `''` here and the provider label there.
+ * It has no production consumers today (only `withDisplayName`, itself used
+ * only by tests), and it is kept rather than deleted because the models test
+ * pins its behaviour — but two exported name helpers in one module, one of
+ * them literally called "display name", is exactly how a future surface picks
+ * the wrong one. It has happened: docs/bugs/662-account-dedup-drops-documents.md
+ * records the account dedup key being built from this function.
  */
 export function getAccountDisplayName(account: Account): string {
   return account.name ?? account.official_name ?? 'Unknown';

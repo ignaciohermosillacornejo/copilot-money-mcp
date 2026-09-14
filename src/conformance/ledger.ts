@@ -841,6 +841,13 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'is the parity a caller actually reaches for, but it is a trade made under uncertainty. ' +
       'TO SETTLE: hide an account that HOLDS something, then compare the sum of ' +
       'get_holdings_live institution_value against get_investment_balance_live. ' +
+      'KNOWN RESIDUAL: an EMPTY accounts response yields an empty hidden set, so holdings come ' +
+      'back unfiltered — the one input that reaches that path without an error. Treating it as ' +
+      'a contradiction (zero accounts, non-zero holdings) was tried and backed out: it conflicts ' +
+      "with the filter's own rule that a holding whose account is absent from the snapshot is " +
+      'KEPT, since unknown is not hidden. Pinned as-is by "an EMPTY accounts snapshot returns ' +
+      'UNFILTERED holdings" in tests/tools/live/holdings.test.ts, so the behaviour is a decision ' +
+      'rather than a discovery. ' +
       'NAMING: this is an assumption about the accounts QUERY, so `Query.accounts:...` reads ' +
       'more naturally — but that prefix is reserved. ' +
       'tests/scripts/read-smoke-coverage.test.ts requires every `Query.*` surface to name a ' +

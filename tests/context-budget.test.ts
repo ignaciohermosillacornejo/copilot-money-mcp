@@ -200,7 +200,7 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // filtering by default would REMOVE the ability to audit a merged account;
   // and a description sentence saying the default changed, without which a
   // caller sees their holdings total move and has nothing to read. Measured
-  // 1_375 (~10% headroom). Schema cost is paid once per session; a wrong
+  // 1_456 against 1_515 — 3.9% headroom. Schema cost is paid once per session; a wrong
   // portfolio total is paid every time someone asks.
   get_holdings: 1_515,
   get_balance_history: 1_395,
@@ -275,7 +275,11 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // filtering by default removes no capability, and a description sentence
   // saying the default changed. This is the tool `--write` users actually get
   // (get_holdings is swappedOutInLiveMode), so it is the half that mattered
-  // more. Measured 1_469 (~10% headroom).
+  // more. Measured 1_549 against 1_615 — 4.1% headroom, not the ~10% an
+  // earlier revision recorded. That figure was taken BEFORE the account_id
+  // description note landed later in the same PR, which is the shape the
+  // ledger header now has a rule about: a present-tense measurement in a
+  // comment goes false on the next commit and nothing re-derives it.
   get_holdings_live: 1_615,
   get_balance_history_live: 1_800,
   get_investment_prices_live: 1_835,
