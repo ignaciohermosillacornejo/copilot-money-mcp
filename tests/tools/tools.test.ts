@@ -1256,6 +1256,44 @@ describe('CopilotMoneyTools', () => {
       expect(byId.transactions[0]!.excluded).toBe(true);
     });
 
+    test('a sparse cache row omits the preset fields the document lacks', async () => {
+      // The two modes agree on what each preset name MEANS; they do not agree
+      // on key COUNT, and the ledger header used to claim they did. Live's
+      // mappers always emit a boolean, while cache projects a document and
+      // copies only owned keys — so an ordinary row that is neither pending
+      // nor a transfer comes back 8 wide, not 10. That is why the measured
+      // headline in CHANGELOG.md reads 9 keys and not 10.
+      //
+      // `excluded` is the exception and must stay present: it is DERIVED, and
+      // a derivation always has a value. This is the shape of an ordinary row,
+      // so a change that starts emitting absent optional fields — undoing part
+      // of the diet — fails here.
+      (db as any)._userCategories = [{ category_id: 'groceries', name: 'Groceries', order: 0 }];
+      (db as any)._transactions = [
+        {
+          transaction_id: 'txn_plain',
+          date: '2024-03-15',
+          amount: 100,
+          name: 'Plain row',
+          category_id: 'groceries',
+          account_id: 'acc_1',
+          item_id: 'item_1',
+          // no `pending`, no `internal_transfer` — an ordinary cache document
+        },
+      ];
+
+      const result = await tools.getTransactions({
+        start_date: '2024-03-01',
+        end_date: '2024-03-31',
+      });
+
+      const keys = Object.keys(result.transactions[0]!).sort();
+      expect(keys).toEqual(
+        CACHE_PRESET_NAMES.filter((n) => n !== 'pending' && n !== 'internal_transfer').sort()
+      );
+      expect(keys).toHaveLength(8);
+    });
+
     test('a TRANSFER-CATEGORY row without the raw flag reports internal_transfer falsy', async () => {
       // Pins the deliberate asymmetry documented on the enrichment helper:
       // `excluded` is the union of the raw flag and the category predicate,

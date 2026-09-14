@@ -30,7 +30,7 @@ If auth fails at boot, the server logs a diagnostic line to stderr and exits non
 | `transaction_type: foreign \| duplicates` | Supported | **Not supported** |
 | `exclude_split_parents: false` | Supported | **Not supported** (server omits parents) |
 | `transaction_id` single lookup | Requires only the ID | Requires `transaction_id` + `account_id` + `item_id` |
-| Field selection (`fields`) | Terse by default since v3.0.0; `fields: ["all"]` for the full document. No `compact` — the boolean was removed | Terse by default too — but `excluded` and `internal_transfer` are cache-document-only, so `fields: ["default"]` yields 8 of the 10 baseline names and requesting either explicitly warns |
+| Field selection (`fields`) | Terse by default since v3.0.0; `fields: ["all"]` for the full document. No `compact` — the boolean was removed | Terse by default too — `fields: ["default"]` names the same 10 fields. GraphQL carries neither `excluded` nor `internal_transfer` under any spelling, so both are **synthesized**: `internal_transfer` is `type === "INTERNAL_TRANSFER"` (exact); `excluded` is whether the row's category is user-excluded, which cache unions with a per-transaction flag GraphQL exposes nowhere. Key counts still differ: live always emits both booleans, cache omits optional document fields the row lacks (an ordinary row is 8 keys wide) |
 | Auth required | No | Yes |
 
 Every unsupported filter produces an error message telling the LLM to retry without that parameter — it doesn't silently drop.
