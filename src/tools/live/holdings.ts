@@ -310,7 +310,9 @@ export function createLiveHoldingsToolSchema(): ToolSchema {
       'omitted from the row; check `is_cash_equivalent` (derived from ' +
       "`security.type === 'CASH'`) to distinguish. For monthly snapshots, " +
       'use cache-mode `get_holdings` with `include_history: true` — history ' +
-      'is not available on the live query. Positions on hidden and closed accounts are EXCLUDED by default, matching get_accounts_live — pass include_hidden: true for them. Available when --live-reads is on.',
+      'is not available on the live query. Positions on hidden and closed ' +
+      'accounts are EXCLUDED by default, matching get_accounts_live — pass ' +
+      'include_hidden: true for them. Available when --live-reads is on.',
     inputSchema: {
       type: 'object' as const,
       properties: {

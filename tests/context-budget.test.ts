@@ -369,29 +369,33 @@ const SCHEMA_BUDGETS: Record<string, number> = {
  * total 77_042, ~3.0% headroom — the same band this ratchet has held since
  * #606, so it stays the binding check rather than a formality.
  *
- * MUST stay below the sum of every entry in SCHEMA_BUDGETS above (84_540 over
- * 50 entries after #604's two raises, 5_100 -> 6_425 and 4_370 -> 6_360;
- * 81_035 before them — recompute if that table changes): the completeness guard
- * in registerContextBudgetChecks requires SCHEMA_BUDGETS to have exactly one
- * entry per registered tool, so once every per-tool assertion passes the
- * actual total is bounded by that sum regardless of what this constant
- * says. A value at or above it (79_100, briefly, in an earlier revision of
- * a prior PR) can never fire — a per-tool assertion always fails first —
- * which silently drops the one check that catches every tool creeping a
- * little without individually breaching its own ceiling. 76_300 keeps this
- * the *tighter* constraint, the same relationship this ratchet has held
- * since #606 (74_300 over a measured 71_893, ~3.3% headroom, vs. that era's
- * per-tool sum of 78_590 — the aggregate was already the binding check
- * then too).
+ * MUST stay below the sum of every entry in SCHEMA_BUDGETS above: the
+ * completeness guard in registerContextBudgetChecks requires SCHEMA_BUDGETS to
+ * have exactly one entry per registered tool, so once every per-tool assertion
+ * passes the actual total is bounded by that sum regardless of what this
+ * constant says. A value at or above it (79_100, briefly, in an earlier
+ * revision of a prior PR) can never fire — a per-tool assertion always fails
+ * first — which silently drops the one check that catches every tool creeping
+ * a little without individually breaching its own ceiling.
+ *
+ * Keeping this the *tighter* constraint is the relationship the ratchet has
+ * held since #606 (74_300 over a measured 71_893, ~3.3% headroom, against that
+ * era's per-tool sum of 78_590 — the aggregate was already binding then too).
+ * It is now asserted rather than described: see 'stays the binding check'.
  */
 // Lowered 79_400 -> 78_700 in review round five, tracking the two per-tool
 // reductions above; raised to 79_600 by #683, which spends ~260 chars each on
 // get_holdings and get_holdings_live — an include_hidden param and a
 // changed-default sentence per tool (see the per-tool comments for why that
-// trade is worth making in a diet release). Measured 77_633 (~2.5% headroom),
-// still the binding check against a per-tool sum of 84_540. (Re-measured at
-// this commit: the earlier 77_309 was taken mid-PR and went stale two commits
-// later, when get_holdings_live's account_id note landed.)
+// trade is worth making in a diet release). Measured 77_633 (~2.5% headroom).
+// That it is still the BINDING check — below the per-tool sum rather than
+// above it — is asserted by 'stays the binding check' below, so no number for
+// that sum is written here to go stale.
+//
+// Re-measured at this commit, from two causes not one: get_holdings_live's
+// account_id note (~80) and #717's accounts descriptions arriving via the
+// rebase (~244), which together move the earlier 77_309 to 77_633. Against
+// origin/main (76_736) the delta is +897 and all of it is this PR.
 const SCHEMA_TOTAL_BUDGET = 79_600;
 
 // ---------------------------------------------------------------------------
@@ -870,6 +874,30 @@ describe('context-budget ratchet (#597)', () => {
         console.log(`[schema] TOTAL: ${total} chars`);
       }
       expect(total).toBeLessThanOrEqual(SCHEMA_TOTAL_BUDGET);
+    });
+
+    test('SCHEMA_TOTAL_BUDGET stays the binding check (below the per-tool sum)', () => {
+      // The aggregate ceiling only catches "every tool crept a little" while it
+      // sits BELOW the sum of the per-tool ceilings; at or above it, a per-tool
+      // assertion always fails first and this check can never fire.
+      //
+      // Computed, not quoted. Two comments in this file used to state the sum
+      // as a literal and both drifted 200 chars behind the table — which is the
+      // failure this release keeps rediscovering: a present-tense number with
+      // nothing re-deriving it.
+      const perToolSum = Object.values(SCHEMA_BUDGETS).reduce((a, b) => a + b, 0);
+      if (process.env.CONTEXT_BUDGET_PRINT) {
+        console.log(
+          `[schema] per-tool sum: ${perToolSum} over ${Object.keys(SCHEMA_BUDGETS).length} entries`
+        );
+      }
+      expect(
+        SCHEMA_TOTAL_BUDGET,
+        `SCHEMA_TOTAL_BUDGET (${SCHEMA_TOTAL_BUDGET}) must stay below the sum of every ` +
+          `SCHEMA_BUDGETS entry (${perToolSum}). At or above it the aggregate check is dead: ` +
+          `a per-tool assertion always fails first, so nothing catches every tool growing a ` +
+          `little at once. Lower SCHEMA_TOTAL_BUDGET rather than raising it past the sum.`
+      ).toBeLessThan(perToolSum);
     });
   });
 });
