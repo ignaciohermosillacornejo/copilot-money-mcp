@@ -610,6 +610,30 @@ function buildEditCachePatch(edit: TransactionEdit): Partial<Transaction> {
 /**
  * Collection of MCP tools for querying Copilot Money data.
  */
+/**
+ * Is this account one the user still considers part of their finances?
+ *
+ * Both flags live on the account document itself:
+ *   `user_deleted` — merged or removed accounts
+ *   `user_hidden`  — hidden by the user in the Copilot app
+ *
+ * This previously read `user_hidden` from a `users/{uid}/accounts`
+ * customization collection, which no longer has any documents — Copilot moved
+ * the flags onto the account records. So the hidden filter was a silent no-op:
+ * the collection was always empty, and the flag that IS present was decoded
+ * into the model and then never read (#624).
+ *
+ * Named and shared rather than inlined, because the rule was applied at ONE of
+ * the surfaces that needed it. `getAccounts` filtered; `getHoldings` loaded the
+ * same account list and did not (#683), so a re-linked brokerage contributed
+ * its positions twice while the account list looked correct. A predicate with
+ * one definition makes each call site's choice visible — including
+ * `resolveAccountName`, which deliberately does NOT apply it.
+ */
+export function isVisibleAccount(account: Account): boolean {
+  return account.user_deleted !== true && account.user_hidden !== true;
+}
+
 export class CopilotMoneyTools {
   private db: CopilotDatabase;
   private graphqlClient: GraphQLClient | null;
@@ -769,6 +793,10 @@ export class CopilotMoneyTools {
    * @returns Account name or undefined if not found
    */
   private async resolveAccountName(accountId: string): Promise<string | undefined> {
+    // Deliberately UNFILTERED by isVisibleAccount: a transaction or recurring
+    // item can reference a hidden or merged account, and the caller is asking
+    // what that account is called, not whether to count it. Filtering here
+    // would turn a resolvable name into `undefined`.
     const accounts = await this.db.getAccounts();
     const account = accounts.find((a) => a.account_id === accountId);
     return account?.name;
@@ -1379,16 +1407,7 @@ export class CopilotMoneyTools {
     let accounts = await this.db.getAccounts(account_type);
 
     if (!include_hidden) {
-      // Both flags live on the account document itself:
-      //   user_deleted — merged or removed accounts
-      //   user_hidden  — hidden by the user in the Copilot app
-      //
-      // This previously read `user_hidden` from a `users/{uid}/accounts`
-      // customization collection, which no longer has any documents — Copilot
-      // moved these flags onto the account records. So the hidden filter was a
-      // silent no-op: the collection was always empty, and the flag that IS
-      // present was decoded into the model and then never read (#624).
-      accounts = accounts.filter((acc) => acc.user_deleted !== true && acc.user_hidden !== true);
+      accounts = accounts.filter(isVisibleAccount);
     }
 
     // #660: prefer the Copilot nickname over the provider `name`. This MUST
@@ -2653,6 +2672,7 @@ export class CopilotMoneyTools {
       account_id?: string;
       ticker_symbol?: string;
       include_history?: boolean;
+      include_hidden?: boolean;
       limit?: number;
       offset?: number;
     } = {}
@@ -2663,12 +2683,16 @@ export class CopilotMoneyTools {
     has_more: boolean;
     holdings: HoldingEntry[];
   }> {
-    const { account_id, ticker_symbol, include_history = false } = options;
+    const { account_id, ticker_symbol, include_history = false, include_hidden = false } = options;
     const validatedLimit = validateLimit(options.limit, DEFAULT_QUERY_LIMIT);
     const validatedOffset = validateOffset(options.offset);
 
-    // Load data sources
-    const accounts = await this.db.getAccounts();
+    // Load data sources. Same visibility rule as getAccounts, and the same
+    // default (#683) — otherwise a merged account's stale positions are
+    // reported as live holdings while the account list correctly hides it,
+    // and anything summing institution_value double-counts.
+    const allAccounts = await this.db.getAccounts();
+    const accounts = include_hidden ? allAccounts : allAccounts.filter(isVisibleAccount);
     const securityMap = await this.db.getSecurityMap();
 
     // Build ticker → security_id lookup for ticker_symbol filtering

@@ -192,7 +192,17 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // trade only pays at scale, which is exactly the usage this tool has.
   get_investment_prices: 1_900,
   get_investment_splits: 1_635,
-  get_holdings: 1_115,
+  // Raised 1_115 -> 1_515 by #683, and this is a v3 entry that GROWS a schema
+  // in a release about shrinking them — so the trade is stated rather than
+  // absorbed. `get_holdings` silently reported positions on accounts
+  // `get_accounts` hides, which double-counts a re-linked brokerage. The fix
+  // buys two things worth ~260 chars: an `include_hidden` param, without which
+  // filtering by default would REMOVE the ability to audit a merged account;
+  // and a description sentence saying the default changed, without which a
+  // caller sees their holdings total move and has nothing to read. Measured
+  // 1_375 (~10% headroom). Schema cost is paid once per session; a wrong
+  // portfolio total is paid every time someone asks.
+  get_holdings: 1_515,
   get_balance_history: 1_395,
   get_goal_history: 1_040,
   // Live (--live-reads) tools
@@ -365,9 +375,12 @@ const SCHEMA_BUDGETS: Record<string, number> = {
  * then too).
  */
 // Lowered 79_400 -> 78_700 in review round five, tracking the two per-tool
-// reductions above. Measured 76_492 (~2.9% headroom), still the binding check
-// against a per-tool sum of 83_735.
-const SCHEMA_TOTAL_BUDGET = 78_700;
+// reductions above; raised to 79_100 by #683, which spends ~260 chars on
+// get_holdings' include_hidden param and its changed-default sentence (see the
+// per-tool comment for why that trade is worth making in a diet release).
+// Measured 76_855 (~2.9% headroom), still the binding check against a per-tool
+// sum of 84_135.
+const SCHEMA_TOTAL_BUDGET = 79_100;
 
 // ---------------------------------------------------------------------------
 // Synthetic fixture. Deterministic content, opaque Firestore-shaped IDs

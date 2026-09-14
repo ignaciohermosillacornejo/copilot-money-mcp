@@ -2101,6 +2101,51 @@ describe('CopilotMoneyTools - Recurring Transactions Detail View', () => {
     (db as any)._userAccounts = [];
   });
 
+  test('a recurring on a HIDDEN account still resolves its account name (#683)', async () => {
+    // The other half of #683, and the half a mutation test caught: #683 gave
+    // the account-visibility rule one definition and applied it in
+    // getHoldings. resolveAccountName deliberately does NOT apply it — a
+    // recurring item can sit on a hidden or merged account, and the caller is
+    // asking what that account is CALLED, not whether to count its money.
+    //
+    // Nothing enforced that. Applying isVisibleAccount here too passed the
+    // entire suite, so "deliberately unfiltered" was a comment a later reader
+    // could delete while "fixing the inconsistency". This is the test that
+    // makes the asymmetry cost something to undo.
+    (db as any)._accounts = [
+      {
+        account_id: 'acc_gone',
+        name: 'Old Checking',
+        account_type: 'checking',
+        user_deleted: true,
+      },
+      {
+        account_id: 'acc_quiet',
+        name: 'Hidden Savings',
+        account_type: 'savings',
+        user_hidden: true,
+      },
+    ];
+    (db as any)._recurring = [
+      {
+        recurring_id: 'rec_hidden',
+        name: 'Gym',
+        amount: 40,
+        merchant_name: 'Gym',
+        account_id: 'acc_quiet',
+        frequency: 'monthly',
+        state: 'active',
+        transaction_ids: [],
+      },
+    ];
+    (db as any)._transactions = [];
+
+    const result = await tools.getRecurringTransactions({ name: 'Gym' });
+
+    expect(result.detail_view?.length).toBe(1);
+    expect(result.detail_view?.[0].account_name).toBe('Hidden Savings');
+  });
+
   test('returns detail view with transaction history when filtering by name', async () => {
     const mockRecurring = [
       {
@@ -3192,6 +3237,139 @@ describe('getHoldings', () => {
     expect(aapl!.institution_price).toBe(190.0);
     expect(aapl!.institution_value).toBe(19000);
     expect(aapl!.account_name).toBe('Individual Brokerage');
+  });
+
+  test('excludes holdings on merged and hidden accounts by default (#683)', async () => {
+    // The scenario that produces a WRONG NUMBER: a brokerage re-linked. The
+    // stale account is flagged user_deleted and still carries its holdings;
+    // the replacement is active with the same positions. get_accounts hides
+    // the stale one, so a caller summing institution_value from get_holdings
+    // sees the portfolio twice while the account list looks right.
+    //
+    // v3 is what makes this reachable by following instructions: the accounts
+    // diet cut the embedded `holdings` array from the default row and the tool
+    // description now sends callers here instead ("the embedded holdings array
+    // (get_holdings covers it)"). Before that a caller could read holdings off
+    // get_accounts, which filters.
+    const stale = {
+      account_id: 'inv_old',
+      current_balance: 50000,
+      name: 'Brokerage (old link)',
+      account_type: 'investment',
+      user_deleted: true,
+      holdings: [
+        {
+          security_id: 'sec_aapl',
+          account_id: 'inv_old',
+          cost_basis: 15000,
+          institution_price: 190.0,
+          institution_value: 19000,
+          quantity: 100,
+          iso_currency_code: 'USD',
+        },
+      ],
+    };
+    const hiddenByUser = {
+      account_id: 'inv_hidden',
+      current_balance: 9000,
+      name: 'Hidden Brokerage',
+      account_type: 'investment',
+      user_hidden: true,
+      holdings: [
+        {
+          security_id: 'sec_schx',
+          account_id: 'inv_hidden',
+          cost_basis: 5000,
+          institution_price: 25.0,
+          institution_value: 7500,
+          quantity: 300,
+          iso_currency_code: 'USD',
+        },
+      ],
+    };
+    (db as any)._accounts = [...mockAccountsWithHoldings, stale, hiddenByUser];
+
+    const result = await tools.getHoldings({});
+
+    const accountIds = new Set(result.holdings.map((h) => h.account_id));
+    expect(accountIds.has('inv_old')).toBe(false);
+    expect(accountIds.has('inv_hidden')).toBe(false);
+    // The visible fixture is unchanged, so the count must not have moved.
+    expect(result.total_count).toBe(4);
+  });
+
+  test('include_hidden: true brings them back, matching get_accounts (#683)', async () => {
+    // Filtering by default must not REMOVE the capability. get_accounts has
+    // had include_hidden since #624; get_holdings now takes the same escape
+    // hatch under the same name, so a caller auditing a merged account can
+    // still see what it holds.
+    const stale = {
+      account_id: 'inv_old',
+      current_balance: 50000,
+      name: 'Brokerage (old link)',
+      account_type: 'investment',
+      user_deleted: true,
+      holdings: [
+        {
+          security_id: 'sec_aapl',
+          account_id: 'inv_old',
+          cost_basis: 15000,
+          institution_price: 190.0,
+          institution_value: 19000,
+          quantity: 100,
+          iso_currency_code: 'USD',
+        },
+      ],
+    };
+    (db as any)._accounts = [...mockAccountsWithHoldings, stale];
+
+    const result = await tools.getHoldings({ include_hidden: true });
+
+    expect(result.holdings.map((h) => h.account_id)).toContain('inv_old');
+    expect(result.total_count).toBe(5);
+  });
+
+  test('the two tools agree on which accounts exist (#683)', async () => {
+    // The class, not the instance: whatever get_accounts hides, get_holdings
+    // must not report positions for. Pins the RELATIONSHIP, so a future
+    // visibility rule that lands on one tool and misses the other fails here
+    // even though both tools individually look correct.
+    const hiddenByUser = {
+      account_id: 'inv_hidden',
+      current_balance: 9000,
+      name: 'Hidden Brokerage',
+      account_type: 'investment',
+      user_hidden: true,
+      holdings: [
+        {
+          security_id: 'sec_schx',
+          account_id: 'inv_hidden',
+          cost_basis: 5000,
+          institution_price: 25.0,
+          institution_value: 7500,
+          quantity: 300,
+          iso_currency_code: 'USD',
+        },
+      ],
+    };
+    (db as any)._accounts = [...mockAccountsWithHoldings, hiddenByUser];
+
+    const visibleAccountIds = new Set(
+      (await tools.getAccounts({})).accounts.map((a) => a.account_id)
+    );
+    const holdingAccountIds = new Set(
+      (await tools.getHoldings({})).holdings.map((h) => h.account_id)
+    );
+
+    const orphaned = [...holdingAccountIds].filter((id) => !visibleAccountIds.has(id));
+    expect(
+      orphaned,
+      `get_holdings reported positions on accounts get_accounts hides: ${orphaned.join(', ')}. ` +
+        `A caller summing institution_value would count money the account list says is not there.`
+    ).toEqual([]);
+    // Guards the gate: both sets must be non-empty, or the comparison is vacuous.
+    expect(visibleAccountIds.size).toBeGreaterThan(0);
+    expect(holdingAccountIds.size).toBeGreaterThan(0);
   });
 
   test('computes average_cost and total_return when cost_basis is present', async () => {
