@@ -135,6 +135,12 @@ export interface AccountWithDisplayName extends Account {
 
 /**
  * Add display_name to an account object.
+ *
+ * NOT the user-facing label: this is {@link getAccountDisplayName} with a
+ * spread around it, so it inherits the same nickname-unaware rule (#663) and
+ * is the more tempting of the two, because it stamps the field onto the row
+ * rather than returning a bare string. A surface a user reads wants
+ * {@link preferredAccountName}.
  */
 export function withDisplayName(account: Account): AccountWithDisplayName {
   return {
