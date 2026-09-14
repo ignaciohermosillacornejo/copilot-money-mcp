@@ -82,6 +82,12 @@ function closesAComment(line: string): boolean {
  * suite instead of failing informatively here. lstat answers about the link
  * itself, and a link is not a directory to descend into. (Raised in review of
  * #724.)
+ *
+ * That is a scan SHRINK, which is the class this PR is about, so it is stated
+ * rather than left implicit: stat used to follow a symlinked DIRECTORY under a
+ * scanned tree and lstat does not. No such link exists under src/, scripts/ or
+ * tests/ today, not following one avoids a cycle, and the files floor below
+ * catches gross shrinkage — but it catches only gross shrinkage.
  */
 function tsFilesUnder(dir: string): string[] {
   const out: string[] = [];
