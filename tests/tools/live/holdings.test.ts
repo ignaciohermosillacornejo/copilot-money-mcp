@@ -373,6 +373,23 @@ describe('LiveHoldingsTools.getHoldings', () => {
     await expect(tools.getHoldings({})).rejects.toThrow(/cannot tell which accounts are hidden/);
   });
 
+  test('an EMPTY accounts snapshot returns UNFILTERED holdings — the known residual (#683)', async () => {
+    // Pins the documented gap so it stays documented. `{ accounts: [] }` is
+    // the one input that reaches the unfiltered path without an error, and
+    // treating it as a contradiction was tried and backed out: it conflicts
+    // with this filter's own "unknown is not hidden" rule, under which a
+    // holding whose account is absent from the snapshot is kept.
+    //
+    // If someone later decides the hard failure is right after all, this test
+    // is what they change — deliberately, rather than discovering the
+    // behaviour from a support question.
+    const client = makeClient([equityHolding], []);
+    const tools = new LiveHoldingsTools(makeLive(client));
+
+    const result = await tools.getHoldings({});
+    expect(result.holdings).toHaveLength(1);
+  });
+
   test('freshness reflects BOTH snapshots when the visibility join ran (#683)', async () => {
     // The returned rows depend on the accounts snapshot too, so reporting only
     // the holdings snapshot would advertise a freshness the result lacks: a

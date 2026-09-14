@@ -3483,6 +3483,15 @@ describe('getHoldings', () => {
         ],
       },
     ];
+    (db as any)._balanceHistory = [
+      {
+        balance_id: `i1:acc_renamed:2024-01-01`,
+        date: '2024-01-01',
+        item_id: 'i1',
+        account_id: 'acc_renamed',
+        current_balance: 1000,
+      },
+    ];
     (db as any)._recurring = [
       {
         recurring_id: 'rec_1',
@@ -3501,13 +3510,19 @@ describe('getHoldings', () => {
     const fromHoldings = (await tools.getHoldings({})).holdings[0]?.account_name;
     const fromRecurring = (await tools.getRecurringTransactions({ name: 'Advisory Fee' }))
       .detail_view?.[0]?.account_name;
-    const fromNameMap = (await db.getAccountNameMap()).get('acc_renamed');
+    // Through getBalanceHistory, not db.getAccountNameMap(): the map is the
+    // shared chokepoint, but the link that makes it get_balance_history's NAME
+    // is in the tool. A refactor that re-derives the name there would pass a
+    // db-layer assertion while reintroducing the divergence.
+    const fromBalanceHistory = (
+      await tools.getBalanceHistory({ account_id: 'acc_renamed', granularity: 'daily' })
+    ).balance_history?.[0]?.account_name;
 
-    expect({ fromAccounts, fromHoldings, fromRecurring, fromNameMap }).toEqual({
+    expect({ fromAccounts, fromHoldings, fromRecurring, fromBalanceHistory }).toEqual({
       fromAccounts: 'Retirement',
       fromHoldings: 'Retirement',
       fromRecurring: 'Retirement',
-      fromNameMap: 'Retirement',
+      fromBalanceHistory: 'Retirement',
     });
   });
 
@@ -3537,6 +3552,15 @@ describe('getHoldings', () => {
         ],
       },
     ];
+    (db as any)._balanceHistory = [
+      {
+        balance_id: `i1:acc_blank:2024-01-01`,
+        date: '2024-01-01',
+        item_id: 'i1',
+        account_id: 'acc_blank',
+        current_balance: 1000,
+      },
+    ];
     (db as any)._recurring = [
       {
         recurring_id: 'rec_1',
@@ -3555,13 +3579,15 @@ describe('getHoldings', () => {
     const fromHoldings = (await tools.getHoldings({})).holdings[0]?.account_name;
     const fromRecurring = (await tools.getRecurringTransactions({ name: 'Advisory Fee' }))
       .detail_view?.[0]?.account_name;
-    const fromNameMap = (await db.getAccountNameMap()).get('acc_blank');
+    const fromBalanceHistory = (
+      await tools.getBalanceHistory({ account_id: 'acc_blank', granularity: 'daily' })
+    ).balance_history?.[0]?.account_name;
 
-    expect({ fromAccounts, fromHoldings, fromRecurring, fromNameMap }).toEqual({
+    expect({ fromAccounts, fromHoldings, fromRecurring, fromBalanceHistory }).toEqual({
       fromAccounts: 'PROVIDER LABEL',
       fromHoldings: 'PROVIDER LABEL',
       fromRecurring: 'PROVIDER LABEL',
-      fromNameMap: 'PROVIDER LABEL',
+      fromBalanceHistory: 'PROVIDER LABEL',
     });
   });
 

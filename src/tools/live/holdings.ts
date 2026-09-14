@@ -164,6 +164,27 @@ export class LiveHoldingsTools {
     // for every one — an empty hidden set, and the #683 double-count restored
     // silently. That is the same failure the `?? []` refusal above rejects,
     // one level down, so it takes the same error path.
+    // SAMPLES the first row — not full validation, which the read-shape smoke
+    // owns. The point is that an array whose rows lack
+    // isUserHidden/isUserClosed passes an Array.isArray guard, and
+    // isVisibleAccountNode then computes `!undefined && !undefined` === true
+    // for every one: an empty hidden set, and the #683 double-count restored
+    // silently. Same failure as the `?? []` refusal above, one level down, so
+    // it takes the same error path.
+    //
+    // KNOWN RESIDUAL, stated rather than closed: an EMPTY array passes, so an
+    // accounts response of `{ accounts: [] }` yields an empty hidden set and
+    // holdings come back unfiltered — the one input that reaches that path
+    // without an error.
+    //
+    // Treating it as a contradiction (zero accounts, non-zero holdings) was
+    // tried and backed out. It conflicts with the choice this filter already
+    // makes everywhere else: a holding whose accountId is absent from the
+    // snapshot is KEPT, because unknown is not the same as hidden. Hard-failing
+    // the empty case would make a transient empty response break a working
+    // holdings call while a partial one silently would not — inconsistent, and
+    // strictly worse than the documented gap. Recorded in the ledger entry
+    // instead, where the rest of this assumption's residual risk lives.
     const rowsUsable =
       Array.isArray(rows) &&
       (rows.length === 0 ||
