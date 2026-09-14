@@ -15,7 +15,7 @@ export {
   type Account,
   type AccountWithDisplayName,
   getAccountDisplayName, // not the user-facing label — see preferredAccountName (#663)
-  withDisplayName as withAccountDisplayName, // same rule, stamped onto the row — see preferredAccountName (#663)
+  withDisplayName as withAccountDisplayName, // same rule — see preferredAccountName (#663)
   isVisibleAccount,
   isVisibleAccountNode,
   preferredAccountName,

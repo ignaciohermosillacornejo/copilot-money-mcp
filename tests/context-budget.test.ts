@@ -330,8 +330,7 @@ const SCHEMA_BUDGETS: Record<string, number> = {
 };
 
 /**
- * Aggregate schema budget across ALL registered tools (measured +~3.3%,
- * matching the headroom this ratchet used pre-#606 — see below).
+ * Aggregate schema budget across ALL registered tools (see below).
  *
  * Raised from 71_000 by #606: the recurring group's three `fields` params
  * (shared verbatim between the two live tools, plus the cache-mode
