@@ -78,6 +78,14 @@ const COPILOT_ORIGIN_MARKER = 'app.copilot.money';
  * a Firefox origin directory, a Safari file path) and the property being
  * asserted — "this location belongs to Copilot's origin" — is the same one in
  * all three. Exported for the ordering tests.
+ *
+ * A substring rather than an exact origin match, because the real directory
+ * names carry decoration this would otherwise have to enumerate (Chromium's
+ * `_0.indexeddb.leveldb` suffix, Firefox's partition-key suffixes). The loose
+ * end is a hostile origin like `app.copilot.money.example.com`, which would
+ * rank as scoped; the cost of that is one budget slot spent earlier, since the
+ * exchange still rejects it as foreign. Note the read filter it feeds is
+ * looser still — Firefox visits any origin containing `copilot`.
  */
 export function isCopilotScopedPath(path: string): boolean {
   return path.includes(COPILOT_ORIGIN_MARKER);

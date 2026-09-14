@@ -54,6 +54,12 @@ function labelFor(body: string): 'session' | 'foreign' {
 
 const originalFetch = globalThis.fetch;
 
+/** How the endpoint turns down a token from another Firebase project. */
+const FOREIGN_REJECTION: [object, number] = [
+  { error: { message: 'PROJECT_NUMBER_MISMATCH' } },
+  400,
+];
+
 /**
  * Fake securetoken: accepts exactly the one synthetic token standing in for
  * the user's Copilot session and rejects everything else the way the real
@@ -79,11 +85,6 @@ function mockExchange(attempts: string[], foreign: [object, number] = FOREIGN_RE
     return Promise.resolve(Response.json(errorBody, { status }));
   }) as typeof fetch;
 }
-
-const FOREIGN_REJECTION: [object, number] = [
-  { error: { message: 'PROJECT_NUMBER_MISMATCH' } },
-  400,
-];
 
 describe('candidate ordering across the extractor and the exchange budget (#722)', () => {
   let tempDir: string;
