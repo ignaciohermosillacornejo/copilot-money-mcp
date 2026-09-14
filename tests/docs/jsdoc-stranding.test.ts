@@ -37,7 +37,16 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { lstatSync, readdirSync, readFileSync } from 'node:fs';
+import {
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 
 const REPO_ROOT = join(import.meta.dir, '..', '..');
@@ -151,17 +160,52 @@ interface Scan {
  * they measure inputs, and a detector that has only ever been observed
  * returning [] has not been observed detecting. The controls below feed it a
  * hit, built from the same constants so this file still cannot match itself.
+ *
+ * It returns the COUNTS as well, in the same single pass, and that is not
+ * tidiness. Round-5 review of #724: with the counters in their own loop over
+ * the same lines, every floor measured a traversal that was not the rule —
+ * deleting the `strandedLines` call site left `stranded` empty, all four floors
+ * green and BOTH controls passing, because the controls call this function
+ * directly. Truncating the loop to one iteration was green too, since each
+ * control's only hit sat at index 0. One pass means each floor is now evidence
+ * that the rule itself ran over the tree, which is the property the floors were
+ * always supposed to have.
  */
-function strandedLines(lines: string[]): number[] {
-  const out: number[] = [];
-  for (let i = 0; i < lines.length - 1; i++) {
-    if (closingKind(lines[i].trim()) === undefined) continue;
-    if (lines[i + 1].trim().startsWith(OPENS_DOCBLOCK)) out.push(i + 1);
+interface LineScan {
+  /** 1-based line numbers where a comment closes and the next line opens one. */
+  stranded: number[];
+  bare: number;
+  oneLine: number;
+  opens: number;
+}
+
+function strandedLines(lines: string[]): LineScan {
+  const out: LineScan = { stranded: [], bare: 0, oneLine: 0, opens: 0 };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    const kind = closingKind(line);
+    if (kind === 'bare') out.bare++;
+    else if (kind === 'oneLine') out.oneLine++;
+    if (line.startsWith(OPENS_DOCBLOCK)) out.opens++;
+    if (kind === undefined) continue;
+    const next = lines[i + 1];
+    if (next !== undefined && next.trim().startsWith(OPENS_DOCBLOCK)) out.stranded.push(i + 1);
   }
   return out;
 }
 
-function scan(): Scan {
+/**
+ * Parameterised on the root, so the same machinery that sweeps this repository
+ * can be pointed at a synthetic tree — see the end-to-end control below.
+ *
+ * Why that matters and a control over `strandedLines` alone does not: the two
+ * are separated by an accumulation step, and "the rule found nothing" and "the
+ * rule's findings were thrown away" are the same observation over a clean tree.
+ * Measured, not supposed — deleting only the line that pushes into
+ * `result.stranded` left every floor and both unit controls green. A positive
+ * has to be fed to THIS function, not to the rule underneath it.
+ */
+function scanTrees(root: string, trees: readonly string[]): Scan {
   const result: Scan = {
     perTree: {},
     files: 0,
@@ -171,10 +215,10 @@ function scan(): Scan {
     unreadable: [],
     stranded: [],
   };
-  for (const tree of SCANNED_TREES) {
+  for (const tree of trees) {
     result.perTree[tree] = 0;
-    for (const file of tsFilesUnder(join(REPO_ROOT, tree))) {
-      const rel = relative(REPO_ROOT, file);
+    for (const file of tsFilesUnder(join(root, tree))) {
+      const rel = relative(root, file);
       // Collected rather than thrown, for the reason the gate this test was
       // written for now applies to itself: `scan()` runs at MODULE scope, so an
       // uncaught read failure here takes down the whole suite with a raw ENOENT
@@ -194,21 +238,18 @@ function scan(): Scan {
       // on, applied here rather than left to the neighbouring unreadable test.
       result.files++;
       result.perTree[tree]++;
-      const lines = contents.split('\n');
-      for (const line of lines) {
-        const kind = closingKind(line.trim());
-        if (kind === 'bare') result.bareClosings++;
-        else if (kind === 'oneLine') result.oneLineClosings++;
-        if (line.trim().startsWith(OPENS_DOCBLOCK)) result.opens++;
-      }
-      for (const n of strandedLines(lines)) result.stranded.push(`${rel}:${n}`);
+      const scanned = strandedLines(contents.split('\n'));
+      result.bareClosings += scanned.bare;
+      result.oneLineClosings += scanned.oneLine;
+      result.opens += scanned.opens;
+      for (const n of scanned.stranded) result.stranded.push(`${rel}:${n}`);
     }
   }
   return result;
 }
 
 describe('no stranded docblocks (#701)', () => {
-  const result = scan();
+  const result = scanTrees(REPO_ROOT, SCANNED_TREES);
 
   test('the sweep actually reached the repository', () => {
     // Guards the gate: a walker that returned nothing, or a delimiter that
@@ -225,14 +266,23 @@ describe('no stranded docblocks (#701)', () => {
     // — including `scripts`, where the bug that prompted all of this lives.
     //
     // Measured as this lands: 336 files (src 116, scripts 49, tests 171), 999
-    // bare delimiters, 298 one-line docblocks, 1342 opening delimiters. Every
-    // floor sits roughly 3x below its value, and each tree only grows.
+    // bare delimiters, 298 one-line docblocks, 1342 opening delimiters. The
+    // margins are 1.7x (files), 1.6x (scripts, the smallest tree), 2.0x (both
+    // closing spellings) and 2.2x (opens) — stated as measured rather than
+    // rounded up to a comfortable "3x", which is what the first version of this
+    // comment said and what a reader would have re-derived and found false. The
+    // thin ones are the file counts; a deletion large enough to trip them
+    // innocently would be a refactor worth re-reading this test during.
     expect(result.files).toBeGreaterThan(200);
     // PINNED, not iterated. The first version of this looped over
     // SCANNED_TREES, which cannot see a tree removed FROM SCANNED_TREES —
     // measured, not reasoned about: deleting `scripts` from the list passed
     // every assertion. A guard whose domain is the thing it guards has no
     // domain. The literal below is what makes the per-tree floors reachable.
+    //
+    // It fails on an ADDED tree too, reporting the list mismatch rather than
+    // anything about floors. That is the intended direction: a new tree has to
+    // arrive with a floor of its own rather than sliding under the aggregate.
     expect([...SCANNED_TREES].sort()).toEqual(['scripts', 'src', 'tests']);
     for (const tree of ['src', 'scripts', 'tests']) {
       expect(result.perTree[tree], `${tree} left the sweep`).toBeGreaterThan(30);
@@ -248,10 +298,43 @@ describe('no stranded docblocks (#701)', () => {
     // source file still contains no literal stranded pair for the sweep above
     // to report.
     const closed = `${OPENS_DOCBLOCK} the block that gets stranded ${CLOSES_COMMENT}`;
-    expect(strandedLines([CLOSES_COMMENT, closed, 'const x = 1;'])).toEqual([1]);
+    // The hit sits at line 3, never at line 1: a loop truncated to its first
+    // iteration — the shape an "optimization" produces — satisfies a control
+    // whose only hit is at index 0, and did, before round 5.
+    const lead = ['const before = 1;', ''];
+    expect(strandedLines([...lead, CLOSES_COMMENT, closed, 'const x = 1;']).stranded).toEqual([3]);
     // Both closing spellings reach the rule, not just the bare delimiter — the
     // round-2 widening pinned through the detector rather than through a count.
-    expect(strandedLines([closed, closed, 'const x = 1;'])).toEqual([1]);
+    expect(strandedLines([...lead, closed, closed, 'const x = 1;']).stranded).toEqual([3]);
+  });
+
+  test('end-to-end control: a stranded file inside a swept tree is reported', () => {
+    // The control the unit ones cannot be: it runs the WHOLE sweep — walk,
+    // read, rule, accumulate — over a tree built to contain exactly one hit.
+    // Without it, discarding the rule's output is indistinguishable from a
+    // clean repository, which is how deleting the accumulation line passed
+    // every other assertion in this file.
+    const dir = mkdtempSync(join(tmpdir(), 'jsdoc-stranding-'));
+    try {
+      mkdirSync(join(dir, 'src'), { recursive: true });
+      writeFileSync(
+        join(dir, 'src', 'strand.ts'),
+        [
+          'const before = 1;',
+          '',
+          CLOSES_COMMENT,
+          `${OPENS_DOCBLOCK} the block inserted into the gap ${CLOSES_COMMENT}`,
+          'const after = 2;',
+          '',
+        ].join('\n')
+      );
+      const probe = scanTrees(dir, ['src']);
+      expect(probe.stranded).toEqual([`${join('src', 'strand.ts')}:3`]);
+      expect(probe.files).toBe(1);
+      expect(probe.unreadable).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('negative control: a blank line between them is not stranding', () => {
@@ -259,7 +342,9 @@ describe('no stranded docblocks (#701)', () => {
     // asserted about. Without this, "no stranded blocks" would also be the
     // answer a rule that matched nothing gave.
     const closed = `${OPENS_DOCBLOCK} a module header ${CLOSES_COMMENT}`;
-    expect(strandedLines([CLOSES_COMMENT, '', closed, 'const x = 1;'])).toEqual([]);
+    expect(
+      strandedLines(['const before = 1;', CLOSES_COMMENT, '', closed, 'const x = 1;']).stranded
+    ).toEqual([]);
   });
 
   test('every scanned file was actually read', () => {
