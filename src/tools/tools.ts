@@ -843,7 +843,7 @@ export class CopilotMoneyTools {
     lat?: number;
     lon?: number;
     radius_km?: number;
-    // NEW: Field selection (issue: cache-mode transactions run ~35-40 fields wide)
+    // NEW: Field selection (issue: a real cache-mode transaction row runs ~30 fields wide)
     fields?: string[];
   }): Promise<{
     count: number;
@@ -865,6 +865,14 @@ export class CopilotMoneyTools {
     // Requested `fields` names that matched nothing (typos), when any
     _field_warning?: string;
   }> {
+    // v3: `compact` was retired in favor of `fields` (#604). Without this a
+    // caller still passing it would silently get the terse default rows —
+    // close to what compact: true meant, and the opposite of compact: false.
+    // First statement, before the destructure, matching getAccounts below and
+    // the live handler: a retired argument is refused before anything is read
+    // off the options object.
+    rejectRemovedArgs(options, REMOVED_TRANSACTION_ARGS);
+
     const {
       period,
       category,
@@ -888,11 +896,6 @@ export class CopilotMoneyTools {
       lon,
       radius_km = 10,
     } = options;
-
-    // v3: `compact` was retired in favor of `fields` (#604). Without this a
-    // caller still passing it would silently get the terse default rows —
-    // close to what compact: true meant, and the opposite of compact: false.
-    rejectRemovedArgs(options, REMOVED_TRANSACTION_ARGS);
 
     // Validate inputs
     const validatedLimit = validateLimit(options.limit, DEFAULT_QUERY_LIMIT);
@@ -925,7 +928,7 @@ export class CopilotMoneyTools {
         // category-excluded row must not disagree with a windowed one.
         await this.enrichCacheTransactions([found]),
         // #604: omitting `fields` yields the terse preset, not the full
-        // ~35-40 field document. `fields: ["all"]` restores it.
+        // ~30-field document. `fields: ["all"]` restores it.
         options.fields ?? ['default']
       );
       return {
@@ -1074,7 +1077,7 @@ export class CopilotMoneyTools {
     const cacheWarning = await this.db.checkCacheLimitation(start_date, end_date);
 
     // #604: omitting `fields` yields the terse preset (10 fields), not the
-    // full ~35-40 field document — `fields: ["all"]` restores it.
+    // full ~30-field document — `fields: ["all"]` restores it.
     const projected = projectTransactionFields(enrichedTransactions, options.fields ?? ['default']);
 
     return {

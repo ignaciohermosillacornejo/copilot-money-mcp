@@ -790,9 +790,10 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
     oracle: null,
     class: 'verified-once',
     evidence:
-      'Probe 2026-09-11: `internalTransfer` / `isInternalTransfer` and 9 further spellings ' +
-      'all return `Cannot query field "<name>" on type "Transaction"` with no did-you-mean ' +
-      "suggestions, and the web app's own TransactionFields fragment selects none of them — " +
+      'Probe 2026-09-11: the transfer spellings `internalTransfer`, `isInternalTransfer` and ' +
+      '`isTransfer` all return `Cannot query field "<name>" on type "Transaction"` with no ' +
+      "did-you-mean suggestions, and the web app's own TransactionFields fragment selects none " +
+      'of them — ' +
       'live models a transfer as `type === INTERNAL_TRANSFER`. Derivation measured against ' +
       'real data the same day: 600 live rows paginated, 506 joined to cache documents by id, ' +
       '506/506 agreement including all 46 rows that are transfers on either side, zero ' +
@@ -814,8 +815,15 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
     oracle: null,
     class: 'unverified',
     evidence:
-      'Probe 2026-09-11: `excluded` / `isExcluded` / `userExcluded` and 8 further spellings ' +
-      'all return `Cannot query field "<name>" on type "Transaction"`; `isExcluded` exists ' +
+      'Probe 2026-09-11: the exclusion spellings `excluded`, `isExcluded`, `userExcluded`, ' +
+      '`isUserExcluded` and `excludeFromSpending` all return `Cannot query field "<name>" on ' +
+      'type "Transaction"`. Together with the three transfer spellings on the sibling entry ' +
+      'that is 8 spellings, and all 8 are WATCHED by scripts/smoke/output-field-absence-checks.ts ' +
+      '— the count and the watched list are pinned to each other by ' +
+      'tests/scripts/synthesized-field-coverage.test.ts, because an earlier revision of these ' +
+      'entries claimed 11 on the strength of a probe transcript that no longer exists (the three ' +
+      'further names were never recorded, so nothing watches them and nothing can cite them). ' +
+      '`isExcluded` exists ' +
       'ONLY on CreateCategoryInput/EditCategoryInput, and neither EditTransactionInput nor ' +
       'CreateTransactionInput accepts it either — there is no per-transaction exclusion ' +
       'anywhere on the GraphQL surface, read or write. The app writes the flag straight to ' +

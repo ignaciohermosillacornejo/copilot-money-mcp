@@ -1160,6 +1160,30 @@ describe('get_transactions_live fields param — parity with get_transactions', 
   test('live tool does NOT grow a compact param (retired in v3; tokens cover it)', () => {
     expect(getTransactionsLiveTool.schema.inputSchema.properties.compact).toBeUndefined();
   });
+
+  test('the live HANDLER rejects compact, not just the schema', async () => {
+    // The assertion above proves the param is undeclared, which is not the
+    // same as rejected: an MCP client passing an undeclared argument reaches
+    // the handler, and before #604 `compact: false` meant FULL rows — the
+    // opposite of the terse default it would now silently get. Exercising the
+    // schema alone left that path unguarded on the live side while cache mode
+    // had a test for it.
+    //
+    // Asserted as a REJECTION, matching cache mode's test: the guard is the
+    // first statement of an `async` method, so it produces a rejected promise
+    // rather than a synchronous throw. `expect(fn).toThrow()` appears to pass
+    // here either way, which makes it the wrong instrument — it would read as
+    // a green sync-throw assertion while the value under test is a promise.
+    //
+    // Fires on PRESENCE, so `compact: false` — the old way of asking for full
+    // rows — gets the migration too, and needs it most.
+    const tools = new LiveTransactionsTools(mkLive());
+    for (const compact of [true, false]) {
+      await expect(tools.getTransactions({ compact } as never)).rejects.toThrow(
+        /`compact` was removed in v3\.0\.0.*fields: \["all"\]/s
+      );
+    }
+  });
 });
 
 describe('LiveTransactionsTools — date-less query rejection', () => {

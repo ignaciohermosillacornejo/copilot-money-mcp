@@ -23,6 +23,7 @@ import {
   KNOWN_BAD_OUTPUT_FIELD,
   synthesizedLedgerSurfaces,
 } from '../../scripts/smoke/output-field-absence-checks.js';
+import { CONFORMANCE_LEDGER } from '../../src/conformance/ledger.js';
 
 describe('every synthesized ledger surface has an absence smoke', () => {
   const covered = new Set(ALL_OUTPUT_FIELD_ABSENCE_CHECKS.flatMap((c) => c.ledgerSurfaces));
@@ -78,4 +79,42 @@ describe('the absence checks are shaped to be non-vacuous', () => {
       expect(c.buildQuery('someProbeField')).toContain('transactions(first: 1)');
     }
   });
+});
+
+describe('the ledger describes the spellings that are actually watched', () => {
+  // The smoke watched 8 spellings while the ledger and CHANGELOG both said 11,
+  // on the strength of a probe transcript that no longer exists. A count in
+  // prose drifts from the list it describes the moment either moves, so the
+  // two are pinned to each other here.
+  const evidenceFor = (surface: string): string => {
+    const entry = CONFORMANCE_LEDGER.find((e) => e.surface === surface);
+    expect(entry, `no ledger entry for ${surface}`).toBeDefined();
+    return entry!.evidence;
+  };
+
+  for (const check of ALL_OUTPUT_FIELD_ABSENCE_CHECKS) {
+    const combined = check.ledgerSurfaces.map(evidenceFor).join('\n');
+
+    test(`every watched ${check.typeName} spelling is named in the ledger`, () => {
+      const unnamed = check.absentFields.filter((f) => !combined.includes(`\`${f}\``));
+      expect(
+        unnamed,
+        `Spellings watched by scripts/smoke/output-field-absence-checks.ts but named in no ` +
+          `ledger entry for ${check.ledgerSurfaces.join(', ')}: ${unnamed.join(', ')}. ` +
+          `A reader who wants to know what the absence assumption covers reads the ledger.`
+      ).toEqual([]);
+    });
+
+    test(`the ledger's ${check.typeName} spelling COUNT matches the watched list`, () => {
+      // The claim is written as "that is N spellings", so it moves only when
+      // someone updating the list also updates the sentence.
+      expect(
+        combined,
+        `The ledger entries for ${check.ledgerSurfaces.join(', ')} must state the number of ` +
+          `watched spellings as "is ${check.absentFields.length} spellings" — the absence ` +
+          `check currently watches ${check.absentFields.length} ` +
+          `(${check.absentFields.join(', ')}). Update the evidence text and this passes.`
+      ).toContain(`is ${check.absentFields.length} spellings`);
+    });
+  }
 });

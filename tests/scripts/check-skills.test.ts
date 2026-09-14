@@ -327,6 +327,38 @@ describe('terse-default field references (#704)', () => {
     );
   });
 
+  test("a name that is another tool's PARAMETER is still a field here", async () => {
+    // The check skipped any token that was an argument of ANY tool in the
+    // repo, so a name with two jobs was invisible: `tag_ids` is a parameter of
+    // update_transaction AND a transaction row field the v3 diet dropped. A
+    // skill told to read it off `get_transactions` sailed through. Parameters
+    // now only excuse a token on a line that names the tool they belong to.
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        argsBody: `console.log(JSON.stringify({ get_transactions: ['fields'], update_transaction: ['tag_ids'] }));`,
+        skill: skillWith('Read `tag_ids` off each `get_transactions` row.'),
+      },
+      ({ code, stdout, stderr }) => {
+        expect(code).toBe(1);
+        expect(stdout + stderr).toContain('`tag_ids` is a row field');
+      }
+    );
+  });
+
+  test('...but a parameter of a tool NAMED ON THE LINE is still excused', async () => {
+    // The narrowing must not start flagging real parameters. Same token, same
+    // skill line, except the tool it belongs to is the one being called.
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        argsBody: `console.log(JSON.stringify({ get_transactions: ['fields', 'tag_ids'], update_transaction: ['transaction_id'] }));`,
+        skill: skillWith('Call `get_transactions` with `tag_ids`.'),
+      },
+      ({ code }) => expect(code).toBe(0)
+    );
+  });
+
   // The three ways the discovery can quietly stop discovering. Each must be a
   // LINTER fault (validate nothing, blame no skill), never a silent pass — a
   // check that validates every field against an empty world reports OK for a

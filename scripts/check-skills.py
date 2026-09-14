@@ -430,7 +430,6 @@ def check_field_refs(
 ) -> list[str]:
     """Report fields a skill reads that its tool no longer returns by default."""
     errors: list[str] = []
-    every_arg = {arg for args in tool_args.values() for arg in args}
     for line_no, line in enumerate(
         (skill_dir / "SKILL.md").read_text().splitlines(), start=1
     ):
@@ -443,9 +442,16 @@ def check_field_refs(
         if "fields:" in line:
             continue
         default_fields = set().union(*(terse_tools[t] for t in referenced))
+        # Arguments of the tools NAMED ON THIS LINE, not of every tool in the
+        # repo. The union blinded the check to any name that is a row field on
+        # one tool and a parameter on another: `tag_ids` is a parameter of
+        # update_transaction, so a line telling a skill to read `tag_ids` off
+        # `get_transactions` — where v3 dropped it from the default row — was
+        # skipped as "a documented parameter".
+        referenced_args = set().union(*(tool_args.get(t, set()) for t in referenced))
         for token in tokens:
-            if token in tool_args or token in every_arg:
-                continue  # a tool name or a documented parameter, not a field
+            if token in tool_args or token in referenced_args:
+                continue  # a tool name or a parameter of a tool on this line
             if token in default_fields or token not in vocabulary:
                 continue
             errors.append(
