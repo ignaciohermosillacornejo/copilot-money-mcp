@@ -158,12 +158,7 @@ export class LiveHoldingsTools {
     //    visibility join newly makes get_holdings_live a WRITER of that cache,
     //    so a holdings call could otherwise break the accounts tool for an
     //    hour. New blast radius deserves its own cleanup.
-    // Checks the ROWS, not just the container. An array whose rows lack
-    // isUserHidden/isUserClosed passes an Array.isArray guard, and
-    // isVisibleAccountNode then computes `!undefined && !undefined` === true
-    // for every one — an empty hidden set, and the #683 double-count restored
-    // silently. That is the same failure the `?? []` refusal above rejects,
-    // one level down, so it takes the same error path.
+    //
     // SAMPLES the first row — not full validation, which the read-shape smoke
     // owns. The point is that an array whose rows lack
     // isUserHidden/isUserClosed passes an Array.isArray guard, and

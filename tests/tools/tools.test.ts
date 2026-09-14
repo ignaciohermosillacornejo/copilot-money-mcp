@@ -3485,7 +3485,7 @@ describe('getHoldings', () => {
     ];
     (db as any)._balanceHistory = [
       {
-        balance_id: `i1:acc_renamed:2024-01-01`,
+        balance_id: 'i1:acc_renamed:2024-01-01',
         date: '2024-01-01',
         item_id: 'i1',
         account_id: 'acc_renamed',
@@ -3554,7 +3554,7 @@ describe('getHoldings', () => {
     ];
     (db as any)._balanceHistory = [
       {
-        balance_id: `i1:acc_blank:2024-01-01`,
+        balance_id: 'i1:acc_blank:2024-01-01',
         date: '2024-01-01',
         item_id: 'i1',
         account_id: 'acc_blank',

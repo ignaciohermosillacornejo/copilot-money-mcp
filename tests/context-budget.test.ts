@@ -200,8 +200,8 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // filtering by default would REMOVE the ability to audit a merged account;
   // and a description sentence saying the default changed, without which a
   // caller sees their holdings total move and has nothing to read. Measured
-  // 1_456 against 1_515 — 3.9% headroom. Schema cost is paid once per session; a wrong
-  // portfolio total is paid every time someone asks.
+  // 1_456 against 1_515 — 3.9% headroom. Schema cost is paid once per
+  // session; a wrong portfolio total is paid every time someone asks.
   get_holdings: 1_515,
   get_balance_history: 1_395,
   get_goal_history: 1_040,

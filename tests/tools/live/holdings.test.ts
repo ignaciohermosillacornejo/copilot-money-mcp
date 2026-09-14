@@ -390,6 +390,33 @@ describe('LiveHoldingsTools.getHoldings', () => {
     expect(result.holdings).toHaveLength(1);
   });
 
+  test('a holding whose account is ABSENT from a POPULATED snapshot is kept (#683)', async () => {
+    // The rule the empty-snapshot back-out rests on, tested in the shape that
+    // can actually distinguish it. `accounts: []` cannot: an empty hidden set
+    // keeps everything, so that test stays green even if this filter were an
+    // inner join. Here the hidden set is NON-empty, so the join demonstrably
+    // ran — and the holding on an unlisted account still survives it.
+    //
+    // The case exists at all only in live mode. Cache-mode getHoldings walks
+    // accounts and reads each one's nested `holdings[]` (src/tools/tools.ts),
+    // so a position on an account absent from the list is unreachable by
+    // construction — there is nothing to decide. Live mode fetches holdings
+    // FLAT, keyed by accountId, so an unmatched row is a real input, and the
+    // rule above is what answers it. The ledger records the asymmetry.
+    const client = makeClient(
+      [
+        { ...equityHolding, id: 'h-unknown', accountId: 'acct-not-in-snapshot' },
+        { ...equityHolding, id: 'h-hidden', accountId: 'acct-hidden' },
+      ],
+      [acct('acct-hidden', { isUserHidden: true }), acct('acct-visible')]
+    );
+    const tools = new LiveHoldingsTools(makeLive(client));
+
+    const result = await tools.getHoldings({});
+
+    expect(result.holdings.map((h) => h.account_id)).toEqual(['acct-not-in-snapshot']);
+  });
+
   test('freshness reflects BOTH snapshots when the visibility join ran (#683)', async () => {
     // The returned rows depend on the accounts snapshot too, so reporting only
     // the holdings snapshot would advertise a freshness the result lacks: a
