@@ -31,11 +31,27 @@
  *     collection-time code — called (`evidenceFor(s)`) or merely passed along
  *     (`.map(evidenceFor)`, which is how #714 actually reached the body).
  *
- * WHAT IT DOES NOT CATCH, stated rather than implied: an asserting helper
- * imported from another module (the analysis is per-file), and a helper reached
- * only through a value the syntax cannot follow (stored in an object, returned
- * from a factory). Both were absent from the two real instances, and closing
- * them needs a type checker rather than a parse.
+ * WHAT IT DOES NOT CATCH, stated rather than implied:
+ *   - an asserting helper imported from another module: the analysis is
+ *     per-file, and closing that needs a type checker rather than a parse;
+ *   - a helper reached only through a value the syntax cannot follow (stored
+ *     in an object, returned from a factory);
+ *   - an anonymous IIFE that asserts at module scope — the arrow suppresses
+ *     the direct finding, and having no declared name it never becomes a
+ *     helper either, so it falls through both arms.
+ * All three were absent from the real instances.
+ *
+ * WHERE IT MAY OVER-REPORT, which is friction rather than a missed bug:
+ *   - an asserting helper named inside ANOTHER local helper that is itself
+ *     only ever called from a test body. Deciding that needs a fixpoint over
+ *     the file's call graph; the two real instances did not need it;
+ *   - `test('name', assertingHelper)` — a helper passed to a test by reference
+ *     rather than wrapped in an arrow, which is not marked deferred;
+ *   - the helper map is keyed by bare name for the whole file, so two
+ *     same-named helpers in different scopes, or a parameter shadowing one,
+ *     collide.
+ * In each case the remedy is the one the gate asks for anyway: assert inside
+ * the test.
  */
 
 import { describe, test, expect } from 'bun:test';
@@ -201,13 +217,28 @@ function scan(file: string): Finding[] {
   return findings;
 }
 
-const files = testFiles(TESTS_ROOT);
-const findings = files.flatMap(scan);
+let swept: { files: string[]; findings: Finding[] } | undefined;
+
+/**
+ * The whole-suite walk, run once on first use.
+ *
+ * Lazy on purpose: at module scope, a readFileSync or a parse that threw here
+ * would arrive as exactly the unnamed load error this file exists to prevent.
+ */
+function sweepSuite(): { files: string[]; findings: Finding[] } {
+  if (!swept) {
+    const files = testFiles(TESTS_ROOT);
+    swept = { files, findings: files.flatMap(scan) };
+  }
+  return swept;
+}
 
 describe('no test file asserts outside a test', () => {
   test('guards the gate: the scan found the test suite', () => {
     // An empty file list, or a parse that silently produced nothing, would make
-    // the assertion below a pass over zero files.
+    // the assertion below a pass over zero files. The floor is a vacuity guard,
+    // not a census: it needs revisiting only if the suite is ever split up.
+    const { files } = sweepSuite();
     expect(files.length).toBeGreaterThan(100);
     expect(files.some((f) => f.endsWith('no-collection-time-assertions.test.ts'))).toBe(true);
   });
@@ -229,6 +260,7 @@ describe('no test file asserts outside a test', () => {
   });
 
   test('every expect() runs inside a test or hook', () => {
+    const { findings } = sweepSuite();
     expect(
       findings.map((f) => `${f.file}:${f.line} — ${f.what}`),
       `These assertions are evaluated while bun is still collecting tests, so a failure is ` +

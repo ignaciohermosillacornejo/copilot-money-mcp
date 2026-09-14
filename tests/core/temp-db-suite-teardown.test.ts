@@ -45,12 +45,18 @@ const REPO_ROOT = path.resolve(__dirname, '../..');
  */
 const PROBE = './tests/fixtures/temp-db-leak-probe.ts';
 
+/** A child `bun test` invocation is two LevelDB fixtures and a worker decode. */
+const PROBE_TIMEOUT_MS = 60_000;
+
 interface ProbeRun {
   /** The private TMPDIR the child ran with. */
   tmpDir: string;
   /** `copilot-leveldb-*` directories still present after the child exited. */
   leftovers: string[];
+  /** null when the child was signalled or never launched — see `signal`/`error`. */
   status: number | null;
+  signal: NodeJS.Signals | null;
+  error?: Error;
   output: string;
 }
 
@@ -80,6 +86,10 @@ function runProbe(preload: boolean): ProbeRun {
     cwd: REPO_ROOT,
     env: { ...process.env, TMPDIR: tmpDir },
     encoding: 'utf8',
+    // Without this a wedged child (a worker deadlock, a probe that awaits
+    // something that never settles) hangs the whole job until CI kills it,
+    // with nothing attributing the hang to this file.
+    timeout: PROBE_TIMEOUT_MS,
   });
 
   const leftovers = fs
@@ -102,7 +112,13 @@ describe('a bun test run leaves no LevelDB temp copy behind', () => {
   beforeAll(() => {
     swept = runProbe(true);
     control = runProbe(false);
-  });
+    // Two full child `bun test` runs — each transpiles the decoder, builds two
+    // LevelDB fixtures and decodes in a worker — against bun's 5s default hook
+    // budget on a cold, coverage-instrumented CI runner. A hook that times out
+    // leaves `swept`/`control` undefined and every test below fails with a
+    // TypeError instead of its own message, so the budget is explicit.
+    // Precedents: leveldb-reader-temp-cleanup.test.ts, mcpb-bundle.test.ts.
+  }, 3 * PROBE_TIMEOUT_MS);
 
   afterAll(() => {
     for (const dir of runs) fs.rmSync(dir, { recursive: true, force: true });
@@ -118,16 +134,24 @@ describe('a bun test run leaves no LevelDB temp copy behind', () => {
     ] as const) {
       expect(
         run.status,
-        `The probe run ${label} did not exit 0. Two things put it here: one of the probes ` +
-          `failed its own assertion — the child output below names it, and the worker-sweep ` +
-          `probe asserts there — or the child never launched, in which case check that ` +
-          `${PROBE} still exists, still holds both probes, and is still excluded from the ` +
-          `normal suite by its name.\n${run.output}`
+        `The probe run ${label} did not exit 0 ` +
+          `(signal=${run.signal ?? 'none'}, spawn error=${run.error?.message ?? 'none'}). ` +
+          `Three things put it here: one of the probes failed its own assertion — the child ` +
+          `output below names it, and the worker-sweep probe asserts there — or the child was ` +
+          `killed at the ${PROBE_TIMEOUT_MS}ms timeout, or it never launched, in which case ` +
+          `check that ${PROBE} still exists, still holds both probes, and is still excluded ` +
+          `from the normal suite by its name.\n${run.output}`
       ).toBe(0);
       // Both probes must have run: a filtered or renamed one would read the
-      // copy path fewer times than this file assumes.
-      expect(run.output).toContain('Ran 2 tests');
-      expect(run.output).toContain('0 fail');
+      // copy path fewer times than this file assumes. These two match bun's
+      // own summary wording, so a bun release that rewords it fails HERE — if
+      // that is what happened, these assertions are the stale thing, not the
+      // teardown.
+      const summary =
+        `(bun summary wording; if bun changed it, fix this assertion, not the ` +
+        `teardown)\n${run.output}`;
+      expect(run.output, summary).toContain('Ran 2 tests');
+      expect(run.output, summary).toContain('0 fail');
     }
   });
 

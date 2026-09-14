@@ -51,7 +51,23 @@ async function main(): Promise<void> {
     // as copies stranded in $TMPDIR by every decode a `bun test` run performs.
     // #631 established the lesson (release, do not schedule); #642 found the
     // one place in the read path where it had not been applied.
-    cleanupAllTempDatabases();
+    //
+    // The sweep sits between a completed decode and its postMessage, so it is
+    // now inside the parent's decode-timeout budget (`getDecodeTimeoutMs`,
+    // which is not cleared until the message lands). An rmSync of a copied
+    // LevelDB is nowhere near that budget, and the alternative is a guaranteed
+    // leak — but it is a real term in it, deliberately.
+    //
+    // Wrapped, because "a completed decode always posts its result" must not
+    // become conditional on a callee's internals: `cleanupTempDatabase`
+    // swallows its own rmSync failures today, and if anything added here later
+    // threw, a successful decode would reach the parent as
+    // "worker exited without sending result".
+    try {
+      cleanupAllTempDatabases();
+    } catch {
+      // Never let cleanup cost the caller a result it already has.
+    }
   }
 
   port.postMessage(message);
