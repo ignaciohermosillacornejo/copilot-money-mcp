@@ -1461,6 +1461,26 @@ describe('a file the gate could not read is never counted as scanned (#701)', ()
     );
   });
 
+  test('a tracked file deleted from the tree is named, not counted', async () => {
+    // The case a developer actually hits, and the one that runs on every uid
+    // and filesystem: `git ls-files` answers from the INDEX, so a file removed
+    // without staging the removal is listed and then is not there to read. It
+    // reaches the same accounting as an unreadable one, which is why the
+    // refusal message names both remedies rather than assuming permissions.
+    await withGitTree(
+      { 'src/a.ts': CLEAN, 'src/gone.ts': CLEAN },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('src/gone.ts');
+        expect(stderr).toContain('ENOENT');
+        expect(stderr).toContain('1 of 2 files were actually read');
+      },
+      {},
+      () => ({}),
+      { afterCommit: async (dir) => void (await rm(join(dir, 'src/gone.ts'))) }
+    );
+  });
+
   test('a symlink to a directory is scanned as its target path, not dropped', async () => {
     // git tracks a symlink as mode 120000 whose blob is the TARGET PATH, so it
     // lists one as a file and `readFileSync` follows it into a directory —
