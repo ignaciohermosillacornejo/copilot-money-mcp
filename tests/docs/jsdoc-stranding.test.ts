@@ -14,10 +14,12 @@
  * PR #698 re-stranded it by inserting `gitDecline` back into the same gap
  * (audit issue #701). A fix that only moves the block back is a fix aimed at
  * the instance — it leaves the third occurrence to be found by a reviewer who
- * happens to read carefully. The sweep below found three siblings the moment it
- * was written (`src/tools/tools.ts`, `src/models/account.ts`, and a SECOND site
- * in `scripts/check-concealment.ts`), all fixed in the same PR, which is the
- * evidence that reading carefully is not a strategy.
+ * happens to read carefully. The sweep found three siblings the moment it was
+ * written (`src/tools/tools.ts`, `src/models/account.ts`, and a SECOND site in
+ * `scripts/check-concealment.ts`), and a fourth when review widened it to the
+ * one-line form (`tests/core/decoder-field-completeness.test.ts`). Five
+ * instances, in a tree nobody suspected of having any, is the evidence that
+ * reading carefully is not a strategy.
  *
  * KNOWN FALSE-POSITIVE SHAPE, stated rather than left to be discovered: a
  * multi-line NON-doc comment (a license header, say) immediately followed by a
@@ -29,7 +31,7 @@
  * BLANK LINE and then the first declaration's docblock is ordinary and common
  * here — seven such pairs in src/ alone. Those are not stranded: the header
  * documents the module. Requiring the two to be touching separates them
- * cleanly, and it is measured rather than assumed — after the four fixes in
+ * cleanly, and it is measured rather than assumed — after the five fixes in
  * this PR the whole tree has zero touching pairs, so the rule has no
  * exemption list and needs none.
  */
