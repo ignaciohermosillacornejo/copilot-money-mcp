@@ -51,7 +51,7 @@ live rows do not carry identical field sets.
 | Symptom | Cause | Fix |
 |---|---|---|
 | A field you read is suddenly `undefined`, no error | That tool is terse by default and the field is not in its preset | Add it: `fields: ["default", "<the field>"]` |
-| `` `compact` was removed in v3.0.0 `` | `compact` is gone from `get_transactions` | Passing `true`? Drop the argument. Passing `false`? Use `fields: ["all"]` |
+| `` `compact` was removed in v3.0.0 `` | `compact` is gone from `get_transactions` and `get_transactions_live` | Passing `true`? Drop the argument. Passing `false`? Use `fields: ["all"]` |
 | `` `include_logos` was removed in v3.0.0 `` | `include_logos` is gone from `get_accounts` | `fields: ["default", "logo", "logo_content_type"]` |
 | `fields: []` used to return full rows, now returns the terse row | An empty selection now means the same as omitting `fields` | Use `fields: ["all"]` |
 | `_field_warning` names a field you know exists | The name exists on the *other* mode, or is misspelled | Check the tables below for the mode you are running |
