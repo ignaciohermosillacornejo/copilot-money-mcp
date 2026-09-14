@@ -1486,8 +1486,9 @@ describe('a file the gate could not read is never counted as scanned (#701)', ()
 
   test('a payload in a symlink TARGET PATH is reported, not just tolerated', async () => {
     // Non-vacuity for the fallback: scanning the target string has to mean
-    // CHECKING it. A link name is attacker-chosen, and a gap-and-payload in one
-    // reads in a diff exactly the way the better-auth line did.
+    // CHECKING it. A link's TARGET is attacker-chosen free text, and a
+    // gap-and-payload in one renders in a diff exactly the way the better-auth
+    // line did.
     await withGitTree(
       { 'src/a.ts': CLEAN },
       ({ code, stderr }) => {
