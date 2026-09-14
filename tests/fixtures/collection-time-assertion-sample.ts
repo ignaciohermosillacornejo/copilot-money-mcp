@@ -30,3 +30,11 @@ describe('a specimen', () => {
     expect(doubled).toEqual([2, 4, 6]);
   });
 });
+
+// Must NOT be flagged: a re-export names an asserting helper without calling
+// it, and "assert inside the test" is not a move its author can make.
+const assertRow = (n: number): void => {
+  expect(n).toBe(n);
+};
+
+export { assertRow };

@@ -79,10 +79,12 @@ const DEFERRED_CALLERS = new Set([
 ]);
 
 /**
- * The deliberate specimen in tests/fixtures/ reproduces both shapes on purpose,
- * so the sweep must skip it — `guards the gate` scans it directly instead.
+ * The deliberate specimen reproduces both shapes on purpose, so the sweep must
+ * skip it — `guards the gate` scans it directly instead. Matched by full path,
+ * not basename: this file already keys one map by bare name and says so, and
+ * one such key is enough.
  */
-const SPECIMEN = 'collection-time-assertion-sample.ts';
+const SPECIMEN = join(TESTS_ROOT, 'fixtures', 'collection-time-assertion-sample.ts');
 
 /**
  * Every TypeScript file under tests/, not only `*.test.ts`.
@@ -97,7 +99,7 @@ function testFiles(dir: string): string[] {
   for (const name of readdirSync(dir)) {
     const full = join(dir, name);
     if (statSync(full).isDirectory()) out.push(...testFiles(full));
-    else if (name.endsWith('.ts') && name !== SPECIMEN) out.push(full);
+    else if (name.endsWith('.ts') && full !== SPECIMEN) out.push(full);
   }
   return out;
 }
@@ -216,10 +218,16 @@ function scan(file: string): Finding[] {
         for (let p: ts.Node | undefined = node; p; p = p.parent) if (p === decl) return true;
         return false;
       };
+      // A re-export names the helper without calling it, and unlike every
+      // shape this gate does flag, the remedy it asks for — assert inside the
+      // test — has no meaning for `export { assertRow }`. Idiomatic in exactly
+      // the helper modules the sweep newly covers.
       const isTheDeclarationName =
         node.parent &&
         ((ts.isVariableDeclaration(node.parent) && node.parent.name === node) ||
-          (ts.isFunctionDeclaration(node.parent) && node.parent.name === node));
+          (ts.isFunctionDeclaration(node.parent) && node.parent.name === node) ||
+          ts.isExportSpecifier(node.parent) ||
+          ts.isExportAssignment(node.parent));
       if (!insideOwnDeclaration() && !isTheDeclarationName) {
         findings.push({
           file: rel,
@@ -260,16 +268,21 @@ describe('no test file asserts outside a test', () => {
     const { files } = sweepSuite();
     expect(files.length).toBeGreaterThan(100);
     expect(files.some((f) => f.endsWith('no-collection-time-assertions.test.ts'))).toBe(true);
-    // The sweep covers helpers and fixtures too, not only `*.test.ts`.
-    expect(files.some((f) => f.endsWith(join('helpers', 'test-db.ts')))).toBe(true);
-    expect(files.some((f) => f.endsWith(SPECIMEN))).toBe(false);
+    expect(
+      files.some((f) => !f.endsWith('.test.ts')),
+      'The sweep must reach helper and setup modules too, not only *.test.ts: a bare ' +
+        'module-scope expect() in a helper runs during the collection of every test that ' +
+        'imports it. Finding none means the walk narrowed back to test files.'
+    ).toBe(true);
+    expect(files, 'The deliberate specimen must be scanned only by the gate below.').not.toContain(
+      SPECIMEN
+    );
   });
 
   test('guards the gate: the scanner recognises the shape it looks for', () => {
     // The detector is only worth its runtime if it still fires. This is the
     // #714 shape, verbatim, fed through the same scanner via a fixture file.
-    const fixture = join(TESTS_ROOT, 'fixtures', SPECIMEN);
-    const found = scan(fixture);
+    const found = scan(SPECIMEN);
     expect(
       found.map((f) => f.what).sort(),
       `tests/fixtures/collection-time-assertion-sample.ts reproduces both shapes this gate ` +
