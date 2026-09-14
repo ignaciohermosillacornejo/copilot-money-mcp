@@ -14,7 +14,7 @@ export {
   AccountSchema,
   type Account,
   type AccountWithDisplayName,
-  getAccountDisplayName,
+  getAccountDisplayName, // not the user-facing label — see preferredAccountName (#663)
   withDisplayName as withAccountDisplayName,
   isVisibleAccount,
   isVisibleAccountNode,
