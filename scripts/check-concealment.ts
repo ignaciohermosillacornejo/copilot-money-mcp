@@ -426,6 +426,11 @@ function walk(dir: string, out: string[]): string[] {
  *
  * Returns undefined for anything that is not a symlink, so a genuinely
  * unreadable regular file still reaches the refusal below.
+ *
+ * Cost, so it is known rather than discovered: one lstat per LISTED file, ~549
+ * on this repo, against a read of every one of them. Immeasurable here, and the
+ * alternative — calling this only after a read fails — is the half-application
+ * the paragraph above exists to describe.
  */
 function linkTarget(path: string): string | undefined {
   try {
@@ -1259,7 +1264,22 @@ for (const file of files) {
   }
 
   const exempt = SELF_EXEMPT.has(rel);
-  const prose = isProse(rel);
+  // `contents !== link` is the same condition as the dedicated checkLine above,
+  // and it is here for the case that call skips: a link that does NOT resolve,
+  // where `contents` IS the target path and this loop is the only thing that
+  // sees it. Without the conjunct a link named `*.md`, `*.txt` or `*.rst` had
+  // its target path checked as PROSE — no MAX_LINE, no DYNAMIC_EXEC — so the
+  // DANGLING case, the more attacker-controlled of the two since the target
+  // need not exist, was checked less strictly than the resolving one. This repo
+  // tracks `AGENTS.md` and `GEMINI.md` as mode-120000 blobs, so that was one
+  // rename of CLAUDE.md away from being the live configuration. Caught in
+  // review of #724.
+  //
+  // Not `false` for every symlink, which would over-apply: `AGENTS.md` RESOLVES
+  // to CLAUDE.md, whose prose lines run past MAX_LINE, so the code rules on a
+  // resolving link's target bytes would manufacture findings on this repo's own
+  // tree. Prose is a property of the bytes being scanned, not of the path.
+  const prose = isProse(rel) && contents !== link;
   const lines = contents.split('\n');
   for (let i = 0; i < lines.length; i++) checkLine(rel, i + 1, lines[i], exempt, prose);
 

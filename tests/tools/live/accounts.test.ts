@@ -363,6 +363,11 @@ describe('get_accounts_live fields param — parity with get_accounts', () => {
       ...new Set(
         bracketed.flatMap((group) => [...group.matchAll(/"([a-z][a-z0-9_]*)"/g)].map((m) => m[1]))
       ),
+      // ANTICIPATORY, unlike every other filter here, which is load-bearing:
+      // neither selection token appears inside a bracketed group in this
+      // fragment today, so this drops nothing. Kept because a future example
+      // could write `["default", "balance"]`, and noted because it would also
+      // exempt a real field genuinely called `default` or `all`.
     ].filter((n) => n !== 'default' && n !== 'all');
 
     const unknownEverywhere = [

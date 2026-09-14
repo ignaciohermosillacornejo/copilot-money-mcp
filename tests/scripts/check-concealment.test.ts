@@ -1520,7 +1520,9 @@ describe('a file the gate could not read is never counted as scanned (#701)', ()
       { [name]: CLEAN, 'src/a.ts': CLEAN },
       ({ code, stderr }) => {
         expect(code).toBe(1);
-        expect(stderr).toContain('link');
+        // `link:1`, not `link` — pinned to the link's own line rather than to the
+        // word appearing anywhere in the output.
+        expect(stderr).toContain('link:1');
         expect(stderr).toContain('eval() call');
         // Not an unreadable-file report: the link resolves fine.
         expect(stderr).not.toContain('could not be read');
@@ -1528,6 +1530,32 @@ describe('a file the gate could not read is never counted as scanned (#701)', ()
       {},
       () => ({}),
       { beforeCommit: async (dir) => void (await symlink(name, join(dir, 'link'))) }
+    );
+  });
+
+  test('a DANGLING .md symlink gets the code rules, not the prose ones', async () => {
+    // Round-2 review of #724. The dedicated link-target checkLine is skipped
+    // when the target IS the contents — the dangling case — so that path fell
+    // through to the generic loop, which asked `isProse(rel)`. For a link named
+    // `*.md` that dropped MAX_LINE and DYNAMIC_EXEC from a string the attacker
+    // wrote, checking the DANGLING case (whose target need not exist at all)
+    // less strictly than the resolving one. `AGENTS.md` and `GEMINI.md` are
+    // tracked mode-120000 blobs in this repo, so it was a rename away from live.
+    //
+    // Identical to the fixture below except for the `.md`, which is the whole
+    // test: same payload, same assertion, one extension apart.
+    await withGitTree(
+      { 'src/a.ts': CLEAN },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('link.md:1');
+        expect(stderr).toContain('eval() call');
+      },
+      {},
+      () => ({}),
+      {
+        beforeCommit: async (dir) => void (await symlink(concealed.trim(), join(dir, 'link.md'))),
+      }
     );
   });
 
@@ -1540,7 +1568,7 @@ describe('a file the gate could not read is never counted as scanned (#701)', ()
       { 'src/a.ts': CLEAN },
       ({ code, stderr }) => {
         expect(code).toBe(1);
-        expect(stderr).toContain('link');
+        expect(stderr).toContain('link:1');
         // The rule name, not just the file name. Deleting the fallback also
         // exits 1 and also prints `link` — as an UNREADABLE file — so asserting
         // the name alone would pass against the bug this test exists for.
