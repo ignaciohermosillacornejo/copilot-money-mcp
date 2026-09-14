@@ -13,6 +13,13 @@
 // is intentionally NOT included yet — expanding this include list to
 // tests/**/* is follow-up work tracked outside this gate. When a new test file
 // adopts createMockGraphQLClient, add it here.
+//
+// The temp-db and collection-time gates below are here for a different
+// reason: a test file outside this list is checked by nothing (`eslint` reads
+// src/ only), and #725 shipped a review round with an object literal silently
+// missing two declared fields — the failure message read them and got
+// `undefined`. A gate whose legibility depends on its own types should have
+// them checked. Both files are type-clean; keep them that way.
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
@@ -50,6 +57,10 @@
     "tests/helpers/ts-files.ts",
     "tests/no-hand-rolled-comment-strippers.test.ts",
     "tests/exported-constants.test.ts",
+    "tests/core/temp-db-suite-teardown.test.ts",
+    "tests/no-collection-time-assertions.test.ts",
+    "tests/setup/temp-db-teardown.ts",
+    "tests/fixtures/temp-db-leak-probe.ts",
     "tests/context-budget-live.test.ts",
     "tests/core/auth/browser-token.test.ts",
     "tests/core/auth/candidate-ordering.test.ts",
