@@ -346,9 +346,41 @@ describe('terse-default field references (#704)', () => {
     );
   });
 
-  test('...but a parameter of a tool NAMED ON THE LINE is still excused', async () => {
-    // The narrowing must not start flagging real parameters. Same token, same
-    // skill line, except the tool it belongs to is the one being called.
+  test("a WRITE tool's parameter is excused when that write tool is on the line", async () => {
+    // The realistic skill line: pull rows, then write one back. `category_id`
+    // is an update_transaction parameter AND a transaction row field the diet
+    // dropped, and update_transaction is not terse-by-default — so a filter
+    // built from the TERSE tools on the line would report it while the line
+    // names both tools and instructs nothing wrong.
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        argsBody: `console.log(JSON.stringify({ get_transactions: ['fields'], update_transaction: ['category_id'] }));`,
+        sourceFiles: {
+          'src/models/transaction.ts': `export const TransactionSchema = z.object({
+  transaction_id: z.string(),
+  date: z.string(),
+  amount: z.number(),
+  category_id: z.string(),
+});
+`,
+        },
+        skill: skillWith(
+          'Pull with `get_transactions`, then call `update_transaction` with the new `category_id`.'
+        ),
+      },
+      ({ code, stdout, stderr }) => {
+        expect(stdout + stderr).not.toContain('`category_id` is a row field');
+        expect(code).toBe(0);
+      }
+    );
+  });
+
+  test("...but the terse tool's OWN parameter is still excused", async () => {
+    // The weaker half of the pair, kept because it is the regression the
+    // narrowing could most easily cause. It does NOT discriminate between the
+    // repo-wide union and either narrowing — all three excuse this token —
+    // which is why the two tests around it carry the real load.
     await withRepo(
       {
         dumpBody: WORKING_DUMP,

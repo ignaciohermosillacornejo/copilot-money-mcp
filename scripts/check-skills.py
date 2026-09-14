@@ -33,7 +33,11 @@ The rule, deliberately narrow (see LIMITATIONS):
   - On a line that references such a tool in backticks and passes no
     `fields:` argument, every OTHER backticked identifier that is a known
     field name somewhere in this server's models — but is not in that tool's
-    preset, and is not an argument name of any tool — is reported.
+    preset, and is not an argument name of a tool NAMED ON THAT LINE — is
+    reported. Scoping the argument exemption to the line, rather than to a
+    union over every tool in the repo, is what lets the check see a name with
+    two jobs: `tag_ids` is an `update_transaction` parameter AND a transaction
+    row field the v3 diet dropped.
 
 LIMITATIONS (documented rather than silently tolerated):
   - Proximity is one LINE. A field named two lines below its tool reference is
@@ -43,6 +47,12 @@ LIMITATIONS (documented rather than silently tolerated):
   - A backticked token that is not in the model vocabulary (`jq`, a CLI name)
     is never reported, so a genuinely misspelled field slips through. That is
     the same trade: the vocabulary is what keeps English out of the check.
+  - The price of scoping the argument exemption to the line is that PROSE
+    naming a dropped row field next to a terse tool now reports, where the
+    repo-wide union would have swallowed it if any tool happened to take that
+    name as an argument. The remedy is the one already in the failure message
+    — drop the backticks — and it is the intended trade, not a bug: a line
+    that cannot be told from an instruction is worth one look.
   - Both remedies are in the failure message: add the `fields:` argument when
     the line really does instruct a read, or drop the backticks when it is
     prose ABOUT a field rather than an instruction to read one.
@@ -442,13 +452,18 @@ def check_field_refs(
         if "fields:" in line:
             continue
         default_fields = set().union(*(terse_tools[t] for t in referenced))
-        # Arguments of the tools NAMED ON THIS LINE, not of every tool in the
-        # repo. The union blinded the check to any name that is a row field on
-        # one tool and a parameter on another: `tag_ids` is a parameter of
-        # update_transaction, so a line telling a skill to read `tag_ids` off
-        # `get_transactions` — where v3 dropped it from the default row — was
-        # skipped as "a documented parameter".
-        referenced_args = set().union(*(tool_args.get(t, set()) for t in referenced))
+        # Arguments of EVERY tool named on this line — not of every tool in the
+        # repo, and not only of the terse ones. The repo-wide union blinded the
+        # check to any name that is a row field on one tool and a parameter on
+        # another: `tag_ids` is a parameter of update_transaction, so a line
+        # telling a skill to read `tag_ids` off `get_transactions` — where v3
+        # dropped it from the default row — was skipped as "a documented
+        # parameter". Narrowing to `referenced` (the TERSE tools on the line)
+        # overshot the other way: an ordinary "pull with get_transactions, then
+        # update_transaction with the new `category_id`" line names both tools
+        # and instructs nothing wrong, but update_transaction is a write tool
+        # and so is never in `referenced`.
+        referenced_args = set().union(*(tool_args[t] for t in tokens if t in tool_args))
         for token in tokens:
             if token in tool_args or token in referenced_args:
                 continue  # a tool name or a parameter of a tool on this line

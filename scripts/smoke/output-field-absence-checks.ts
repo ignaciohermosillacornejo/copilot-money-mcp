@@ -14,8 +14,11 @@
  * conformance check here asks "is what we send still accepted?"; this one asks
  * "is what we assume missing still missing?".
  *
- * Probe safety: read-only queries with `first: 1`, rejected during VALIDATION
- * before any resolver runs when the field is absent. Nothing mutates.
+ * Probe safety: read-only queries with `first: 1`. The absent-field and
+ * known-bad probes are rejected during VALIDATION, before any resolver runs.
+ * The `presentField` control is valid GraphQL by design, so it is the one
+ * probe in the suite that EXECUTES — a read of a single transaction, selecting
+ * one field. Nothing mutates.
  *
  * Non-vacuous by construction — each check asserts three things:
  *   1. every `absentFields` name is REJECTED (the assumption still holds);
