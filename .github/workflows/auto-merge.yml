@@ -19,8 +19,9 @@ name: Auto Merge on Approval
 # triggered run would have done. It is not a weakening of the fork-PR posture —
 # `workflow_dispatch` requires repository write access, so only someone who could
 # already merge by hand can fire it, and the "Verify owner approval" step below
-# re-checks the PR's live review state on both paths. It never merges a PR the
-# owner has not approved.
+# re-checks the PR's live review state on both paths, and that the approval
+# belongs to the PR's *current* head commit. It never merges a PR the owner has
+# not approved, and never on code the owner has not seen.
 #
 # Before reaching for it on a branch you did not write, read CONTRIBUTING.md →
 # "Reviewing a Contributor Branch (maintainers)". Merging is not the risky step;
@@ -44,7 +45,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.review.state == 'approved' &&
-      github.event.review.user.login == 'ignaciohermosillacornejo')
+      github.event.review.user.login == github.repository_owner)
     runs-on: ubuntu-latest
     # Observed 4s. Two shell steps, no checkout and no install — there is
     # nothing in here that can legitimately take minutes, so this is the floor.
@@ -56,11 +57,13 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
+      OWNER: ${{ github.repository_owner }}
       PR_NUMBER: ${{ github.event.inputs.pr_number || github.event.pull_request.number }}
 
     steps:
       - name: Validate PR number
         run: |
+          set -euo pipefail
           if ! [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
             echo "::error::Invalid PR number: $PR_NUMBER"
             exit 1
@@ -80,19 +83,36 @@ jobs:
           # --paginate` applies `--jq` to each page separately — an aggregating
           # filter passed straight to `--jq` would emit one answer per page. Same
           # pattern as the commit-authorship step in test.yml.
-          STATE=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews?per_page=100" --paginate --jq '.[]' \
-            | jq -s -r '
+          REVIEW=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews?per_page=100" --paginate --jq '.[]' \
+            | jq -s -r --arg owner "$OWNER" '
                 [ .[]
-                  | select(.user.login == "ignaciohermosillacornejo")
+                  | select(.user.login == $owner)
                   | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED")
-                ] | last | .state // "NONE"
+                ] | last | "\(.state // "NONE") \(.commit_id // "-")"
               ')
-          echo "Owner review state on PR #$PR_NUMBER: $STATE"
+          STATE="${REVIEW%% *}"
+          APPROVED_SHA="${REVIEW##* }"
+          echo "Owner review state on PR #$PR_NUMBER: $STATE (at $APPROVED_SHA)"
           if [[ "$STATE" != "APPROVED" ]]; then
             echo "::error::PR #$PR_NUMBER does not carry a standing approval from the repository owner (state: $STATE)"
             exit 1
           fi
-          echo "✅ Owner approval verified"
+
+          # An approval is given for one commit and survives later pushes unless
+          # branch protection dismisses stale reviews. On the review-triggered
+          # path head and approval were the same commit by construction — the
+          # event fired at approval time. The dispatch path breaks that coupling:
+          # it runs at an arbitrary later moment, by PR number, on exactly the
+          # fork PRs where the contributor can push in between. `--auto` waits
+          # for required checks, but a green CI run is not a code review, so bind
+          # the approval to the commit it was actually given for rather than
+          # leasing the guarantee from a branch-protection setting.
+          HEAD_SHA=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.head.sha')
+          if [[ "$APPROVED_SHA" != "$HEAD_SHA" ]]; then
+            echo "::error::Owner approval is for $APPROVED_SHA but PR #$PR_NUMBER now heads at $HEAD_SHA — re-review the current head"
+            exit 1
+          fi
+          echo "✅ Owner approval verified, at the current head"
 
       - name: Enable auto-merge
         run: |

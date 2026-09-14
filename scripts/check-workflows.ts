@@ -21,14 +21,17 @@
  *   exists on the job mapping itself — the same mapping that carries `runs-on` —
  *   which a step-level key, a commented-out key, and a mention in prose all fail.
  *
- *   Jobs that call a reusable workflow (`uses:`) are SKIPPED, because
+ *   Jobs that call a LOCAL reusable workflow (`uses: ./…`) are SKIPPED, because
  *   `timeout-minutes` is not one of the keywords GitHub supports there
  *   (https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations#supported-keywords-for-jobs-that-call-a-reusable-workflow).
  *   Demanding it would demand YAML that GitHub rejects. Those callers are bound
  *   transitively instead, by the jobs of the workflow they call — which this
- *   check does require, so the coverage is real rather than waived. A `uses:`
- *   job that carries `timeout-minutes` anyway is reported, since that is the
- *   mirror-image mistake and the skip would otherwise hide it.
+ *   check does require, so the coverage is real rather than waived. That
+ *   sentence is only true for a local callee, so a `uses:` pointing at another
+ *   repository is reported rather than skipped: this gate never reads it, so
+ *   nothing would bound that job. A `uses:` job that carries `timeout-minutes`
+ *   anyway is reported too, since that is the mirror-image mistake and the skip
+ *   would otherwise hide it.
  *
  * Invariant 2 — a `pull_request_review`-triggered workflow offers a manual
  *   trigger (#643).
@@ -40,7 +43,11 @@
  *   a standing condition under which it never fires and never reports failing.
  *   `workflow_dispatch` is the escape hatch: it requires repository write access,
  *   so it is maintainer-only by construction and adds no capability a maintainer
- *   lacks.
+ *   lacks. Declaring the trigger is not enough — at least one job must be
+ *   reachable under it, because a job whose `if:` excludes the event is skipped,
+ *   and a skipped job reports success. Presence alone would be satisfiable
+ *   without fixing anything, the same way `timeout-minutes: 360` satisfies
+ *   invariant 1's presence without bounding anything.
  *
  * Run as part of `bun run check` and as a step in `.github/workflows/test.yml`.
  */
@@ -87,13 +94,37 @@ function triggerNames(on: unknown): string[] {
   return [];
 }
 
+/**
+ * Whether a manual run could actually execute this job.
+ *
+ * A job with no `if:` runs on every trigger the workflow declares. One with an
+ * `if:` runs only when that expression is true, and an expression that never
+ * names the event cannot admit it except by accident — so requiring the event
+ * name to appear is slightly strict, in the direction that fails loudly and is
+ * trivial to satisfy honestly.
+ */
+function reachableUnderDispatch(job: unknown): boolean {
+  if (!isRecord(job)) return false;
+  if (job.if === undefined) return true;
+  return String(job.if).includes(ESCAPE_HATCH_TRIGGER);
+}
+
 const problems: string[] = [];
 let jobsChecked = 0;
 let callerJobsSkipped = 0;
 
-const files = readdirSync(WORKFLOW_DIR)
-  .filter((f) => /\.ya?ml$/.test(f))
-  .sort();
+let entries: string[];
+try {
+  entries = readdirSync(WORKFLOW_DIR);
+} catch (err) {
+  console.error(
+    `Workflow check failed — cannot read ${WORKFLOW_DIR}: ` +
+      `${err instanceof Error ? err.message : String(err)}`,
+  );
+  process.exit(1);
+}
+
+const files = entries.filter((f) => /\.ya?ml$/.test(f)).sort();
 
 if (files.length === 0) {
   console.error(`Workflow check failed — no workflow files found in ${WORKFLOW_DIR}`);
@@ -113,6 +144,12 @@ for (const file of files) {
     continue;
   }
 
+  const jobs = doc.jobs;
+  if (!isRecord(jobs)) {
+    problems.push(`${file}: no \`jobs:\` mapping`);
+    continue;
+  }
+
   // --- invariant 2: manual escape hatch for a withheld trigger --------------
   // YAML 1.1 reads a bare `on` as the boolean true; Bun's parser follows the
   // 1.2 core schema and keeps it a string. Accept either rather than silently
@@ -122,23 +159,32 @@ for (const file of files) {
   const triggers = triggerNames(on);
   if (triggers.length === 0) {
     problems.push(`${file}: no recognizable \`on:\` trigger block`);
-  } else if (triggers.includes(WITHHELD_TRIGGER) && !triggers.includes(ESCAPE_HATCH_TRIGGER)) {
-    problems.push(
-      `${file}: triggers on \`${WITHHELD_TRIGGER}\` with no \`${ESCAPE_HATCH_TRIGGER}\`. ` +
-        `For a first-time fork contributor GitHub parks the run at \`action_required\` and ` +
-        `refuses to release it (the approve endpoint answers 403 for this event), so the ` +
-        `workflow never fires and never reports failing. Add \`${ESCAPE_HATCH_TRIGGER}\` — it ` +
-        `requires repository write access, so it stays maintainer-only.`,
-    );
+  } else if (triggers.includes(WITHHELD_TRIGGER)) {
+    if (!triggers.includes(ESCAPE_HATCH_TRIGGER)) {
+      problems.push(
+        `${file}: triggers on \`${WITHHELD_TRIGGER}\` with no \`${ESCAPE_HATCH_TRIGGER}\`. ` +
+          `For a first-time fork contributor GitHub parks the run at \`action_required\` and ` +
+          `refuses to release it (the approve endpoint answers 403 for this event), so the ` +
+          `workflow never fires and never reports failing. Add \`${ESCAPE_HATCH_TRIGGER}\` — it ` +
+          `requires repository write access, so it stays maintainer-only.`,
+      );
+    } else if (!Object.values(jobs).some(reachableUnderDispatch)) {
+      // Declaring the trigger is not the same as having a job it can reach. A
+      // job whose `if:` still gates on the review payload is *skipped* under
+      // dispatch, and a skipped job reports success — so narrowing that `if:`
+      // later would silently reopen the bug while leaving this gate green.
+      // That is the same failure shape the trigger rule exists to prevent, so
+      // presence alone is not the property worth gating here either.
+      problems.push(
+        `${file}: declares \`${ESCAPE_HATCH_TRIGGER}\` but no job it can reach — every job's ` +
+          `\`if:\` gates on something else, so a manual run would skip them all and still ` +
+          `report success. Admit the event in at least one job's \`if:\`, e.g. ` +
+          `\`github.event_name == '${ESCAPE_HATCH_TRIGGER}' || <the existing condition>\`.`,
+      );
+    }
   }
 
   // --- invariant 1: every step-running job is bounded ----------------------
-  const jobs = doc.jobs;
-  if (!isRecord(jobs)) {
-    problems.push(`${file}: no \`jobs:\` mapping`);
-    continue;
-  }
-
   for (const [jobId, job] of Object.entries(jobs)) {
     const where = `${file} → jobs.${jobId}`;
     if (!isRecord(job)) {
@@ -153,6 +199,19 @@ for (const file of files) {
           `${where}: calls a reusable workflow and also sets \`timeout-minutes\`, which is not ` +
             `a supported keyword on a \`uses:\` job. Remove it and bound the jobs inside ` +
             `\`${job.uses}\` instead — that covers every caller.`,
+        );
+      }
+      // The skip is only a waiver-with-coverage while the callee is a workflow
+      // this gate also reads. A `uses:` pointing at another repository is never
+      // parsed here, so nothing would bound that job at all — which is exactly
+      // the hole the skip is not supposed to be.
+      if (!job.uses.startsWith('./')) {
+        problems.push(
+          `${where}: calls a reusable workflow outside this repository (\`${job.uses}\`). ` +
+            `\`timeout-minutes\` is unsupported on a \`uses:\` job and this gate cannot read ` +
+            `the called workflow's jobs either, so nothing would bound this job. Either call a ` +
+            `local \`./.github/workflows/*.yml\` (whose jobs this gate does bound) or inline ` +
+            `the work into a \`runs-on\` job that can carry its own \`timeout-minutes\`.`,
         );
       }
       callerJobsSkipped++;
