@@ -3591,6 +3591,79 @@ describe('getHoldings', () => {
     });
   });
 
+  test('an account with ONLY an official_name reports it on all four (#663)', async () => {
+    // The third branch of preferredAccountName, and the one this PR added
+    // without claiming. `name` is `z.string().optional()`, so a nameless
+    // account is representable rather than hypothetical.
+    //
+    // On main each surface answered differently: getAccounts' nickname step
+    // was `nickname ? ... : account`, so a nameless account stayed nameless;
+    // getAccountNameMap did `nickname ?? name` -> undefined and its truthiness
+    // guard then dropped the account from the map entirely; resolveAccountName
+    // was a bare `account?.name`. One rule now, so all four agree.
+    //
+    // Worth pinning rather than leaving as behaviour: the v3 accounts diet
+    // drops `official_name` from the default preset as a name dupe, so for
+    // THIS shape of account its value reappears under the `name` key — the one
+    // interaction between #663 and the release's headline change.
+    (db as any)._accounts = [
+      {
+        account_id: 'acc_official_only',
+        current_balance: 1000,
+        official_name: 'OFFICIAL NAME ONLY',
+        account_type: 'investment',
+        holdings: [
+          {
+            security_id: 'sec_aapl',
+            account_id: 'acc_official_only',
+            cost_basis: 100,
+            institution_price: 1.0,
+            institution_value: 100,
+            quantity: 100,
+            iso_currency_code: 'USD',
+          },
+        ],
+      },
+    ];
+    (db as any)._balanceHistory = [
+      {
+        balance_id: 'i1:acc_official_only:2024-01-01',
+        date: '2024-01-01',
+        item_id: 'i1',
+        account_id: 'acc_official_only',
+        current_balance: 1000,
+      },
+    ];
+    (db as any)._recurring = [
+      {
+        recurring_id: 'rec_1',
+        name: 'Advisory Fee',
+        amount: 40,
+        merchant_name: 'Advisory Fee',
+        account_id: 'acc_official_only',
+        frequency: 'monthly',
+        state: 'active',
+        transaction_ids: [],
+      },
+    ];
+    (db as any)._transactions = [];
+
+    const fromAccounts = (await tools.getAccounts({})).accounts[0]?.name;
+    const fromHoldings = (await tools.getHoldings({})).holdings[0]?.account_name;
+    const fromRecurring = (await tools.getRecurringTransactions({ name: 'Advisory Fee' }))
+      .detail_view?.[0]?.account_name;
+    const fromBalanceHistory = (
+      await tools.getBalanceHistory({ account_id: 'acc_official_only', granularity: 'daily' })
+    ).balance_history?.[0]?.account_name;
+
+    expect({ fromAccounts, fromHoldings, fromRecurring, fromBalanceHistory }).toEqual({
+      fromAccounts: 'OFFICIAL NAME ONLY',
+      fromHoldings: 'OFFICIAL NAME ONLY',
+      fromRecurring: 'OFFICIAL NAME ONLY',
+      fromBalanceHistory: 'OFFICIAL NAME ONLY',
+    });
+  });
+
   test('get_holdings reports the Copilot nickname, like get_accounts (#663)', async () => {
     // #660 made get_accounts prefer the user's nickname over the provider
     // label. get_holdings kept reporting `name ?? official_name`, so the same
