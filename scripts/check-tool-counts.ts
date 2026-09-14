@@ -31,6 +31,9 @@ const swapped = READ_TOOL_DEFS.filter((t) => t.swappedOutInLiveMode).length;
 const survivingCache = read - swapped;
 const liveModeTotal = survivingCache + live;
 const baseTotal = read + write;
+// Largest surface a user can actually be served: --write forcibly enables
+// --live-reads (src/cli.ts), so write mode is live-mode reads + write tools.
+const writeModeTotal = liveModeTotal + write;
 const allTotal = read + live + write;
 
 const mismatches: string[] = [];
@@ -116,14 +119,16 @@ expectSubstring(
   'live tools total callout',
 );
 
+// The landing page states per-mode counts, not the total definition count:
+// no mode serves all ${allTotal} definitions (#610).
 expectSubstring(
   'docs/index.html',
-  `${allTotal} tools for transactions`,
+  `${read} read tools locally, up to ${writeModeTotal} with writes enabled`,
   'meta description tool count',
 );
 expectSubstring(
   'docs/index.html',
-  `${allTotal} tools covering every aspect`,
+  `${read} read tools by default, ${liveModeTotal} with --live-reads, and ${writeModeTotal} with writes enabled`,
   'features subtitle tool count',
 );
 
