@@ -86,6 +86,14 @@
  *      `[^;]*?` capture truncates on a nested paren and pins unparseable
  *      text (documented at the regex, no live instance, deliberately not
  *      changed), plus everything revision 9 left
+ *  11. the three regex passes replaced by the parser-owned
+ *      tests/helpers/strip-comments.ts (#691), so a `//` or a block opener
+ *      inside a STRING LITERAL is content rather than syntax, and the
+ *      truncated-window case revision 10 bought with a third pass now falls
+ *      out of the parser reporting an unterminated comment. The
+ *      string-literal ASSUMPTION revision 8 left unchanged is closed for the
+ *      comment half. Still open afterwards: `balanced()`'s bracket/brace
+ *      counting is still character-based, and everything revision 10 left
  *
  * Revision 2 could not see `dedupeAndSortInvestmentPrices`, which carries no
  * comment — the site that shipped #622, the previous instance of this exact
@@ -128,6 +136,50 @@ import {
   decodeAllCollections,
 } from '../../src/core/decoder.js';
 import { createCombinedDb } from '../helpers/test-db.js';
+import { stripComments } from '../helpers/strip-comments.js';
+
+// ---------------------------------------------------------------------------
+// COMMENT STRIPPING — where it lives now, and what it used to be
+//
+// `stripComments` is imported (tests/helpers/strip-comments.ts) and is now
+// parser-owned: comment ranges come from the TypeScript parser, so a `//` or a
+// block-comment opener inside a string literal is content, not syntax. It is
+// applied to the WINDOW below before `balanced()` ever sees it — an unstripped
+// comment containing an unbalanced `{` or `}` would otherwise shift where
+// `balanced()` thinks the guard body ends, in either direction.
+//
+// HISTORY, because this file's own revision log refers to it. The local copy
+// was three regex passes: block comments, then line comments, then a third
+// pass dropping an UNTERMINATED block opener to the end of the text. The third
+// pass existed because both scanners here slice a DISCOVERY_WINDOW first and
+// strip second, so a window whose end lands inside a block comment left that
+// comment's text in the scanned string, where it could match the guard regex
+// or the `const key = ...;` resolution exactly like live code. That had a LIVE
+// instance: `decodeAllCollections|tagSeen`'s window ends inside the docblock
+// above `getDecodeTimeoutMs`.
+//
+// The shared helper needs no equivalent pass and the divergence from the
+// sibling file is gone: an unterminated block comment is unterminated to the
+// parser too, which reports it as a comment running to the end of the text, so
+// the truncated-window case falls out of being correct rather than out of a
+// fourth rule. The fixture that pins it is still at the bottom of this file.
+//
+// What the local copy could NOT do, and #691 is: the first pass ran before the
+// line pass, so a block opener sitting inside a `//` comment was removed by
+// accident of ordering rather than by knowing where it was — and a `//` inside
+// a string literal was always taken as a comment. Neither shape has a live
+// instance in the decoder, whose scanned regions hold field names; both are
+// now structurally impossible rather than unexercised.
+//
+// One behaviour change the swap does carry, noted for the next reader rather
+// than fixed: comments are BLANKED in place now, not deleted, so text either
+// side of one is no longer joined. The guard matcher below looks for
+// `if (!seen.has(` with exactly one space, so a comment sitting between `if`
+// and `(` used to be closed up and now leaves a run of spaces, and that shape
+// stops matching. No live instance, and it fails CLOSED — the block drops out
+// of the map and trips the non-vacuity floor and the 36-key equality — so it
+// is loud rather than silent if one ever appears.
+// ---------------------------------------------------------------------------
 
 const FIXTURES_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'dedup-identity-'));
 const DB_PATH = path.join(FIXTURES_DIR, 'combined');
@@ -376,53 +428,14 @@ const UNTESTED_BY_CHOICE = new Set([
 ]);
 
 /**
- * ASSUMPTION: no string literal in a scanned region contains `//` or a block
- * comment opener. Mirrors the identically-named helper in
- * decoder-field-completeness.test.ts. Applied to the WINDOW below before
- * `balanced()` ever sees it — an unstripped comment containing an unbalanced
- * `{` or `}` would otherwise shift where `balanced()` thinks the guard body
- * ends, in either direction.
- *
- * The THIRD pass is what makes that safe on a windowed input, and is why this
- * copy has diverged from the sibling's (fourth review follow-up on the #688
- * review). The block-comment pass needs the closing `*\/`; both scanners here
- * slice a DISCOVERY_WINDOW first and strip second, so a window whose end lands
- * inside a block comment leaves that comment's text in the scanned string,
- * where it can match the guard regex or the `const key = ...;` resolution
- * exactly like live code. That is precisely the failure revision 7's strip was
- * added to prevent, reached through the window boundary rather than through a
- * `//` line. Since the first pass has already removed every TERMINATED block
- * comment, any `/*` still present is unterminated within this text, so
- * dropping from it to the end is exact rather than heuristic. It runs after
- * the line pass so that a `/*` appearing inside a `//` comment is already gone
- * and cannot trigger it.
- *
- * This was not theoretical: `decodeAllCollections|tagSeen`'s window ends
- * inside the docblock above `getDecodeTimeoutMs`, so that prose was being
- * scanned as code — harmless only because it happens to contain no `.has(`
- * and no `const x = ...;`. Adding the pass changes 0 of the 36 resolved keys
- * and leaves 0 windows holding an unterminated opener.
- *
- * The sibling file's copy does NOT need this pass and deliberately does not
- * have it: there `stripComments` is applied to a `balanced()` function body or
- * to the whole source, never to a truncated character window, so its block
- * comments always arrive with their closers.
- */
-function stripComments(text: string): string {
-  return text
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/\/\/[^\n]*/g, '')
-    .replace(/\/\*[\s\S]*$/, '');
-}
-
-/**
  * Slice out `open`..`close` starting at `openIdx`, counting nesting depth.
  *
  * ASSUMPTION: no string literal inside the region contains an unbalanced
  * bracket or brace. True for guard bodies today — zero of the 36 real dedup
  * blocks contain one — but unlike the comment half of this same risk (closed
- * outright by stripComments above, applied to the window before balanced()
- * ever sees it), the string half is not fixed here, only unexercised so far.
+ * outright by the parser-owned stripComments, applied to the window before
+ * balanced() ever sees it), the string half is not fixed here, only
+ * unexercised so far.
  * The failure direction is NOT symmetric: a stray `{` inside a string FAILS
  * OPEN — depth never returns to 0 where the real guard closes, the boundary
  * shifts outward, and a later unrelated `.push(` can be mis-credited to this
@@ -431,15 +444,19 @@ function stripComments(text: string): string {
  * FAILS CLOSED — depth reaches 0 early, the guard body truncates, and a real
  * push inside it goes missing, which is loud rather than silent: the dropped
  * block fails the `discoverAggregatePushTargets` non-vacuity floor and the
- * pinned-equality test below. Same class of assumption as stripComments
- * above.
+ * pinned-equality test below. It is the last character-counting assumption
+ * either file's discovery still carries: stripComments used to carry the
+ * matching one and no longer does (#691).
  *
  * Mirrors the identically-named helper in decoder-field-completeness.test.ts,
  * including this same ASSUMPTION, carried here rather than left to diverge
- * from it. One place the two DO differ: the sibling's own `functionBody()`
- * calls `balanced()` on raw, UNSTRIPPED `src` to find a `process*` function's
- * outer body extent, stripping only the RESULT afterward — so "the sibling
- * never runs balanced() on raw source" is not true of it in general. This
+ * from it. The two USED to differ in one place: the sibling's `functionBody()`
+ * ran `balanced()` on raw, UNSTRIPPED `src` to find a `process*` function's
+ * outer body extent, stripping only the RESULT afterward, so a brace inside a
+ * block comment could truncate a body mid-comment. #691 closed that too — the
+ * sibling now strips once at the top of `discoverProcessors` and walks the
+ * stripped text, which the parser-owned helper makes safe by blanking comments
+ * in place instead of deleting them, leaving every offset where it was. This
  * copy is narrower: `discoverAggregatePushTargets` strips the window before
  * `balanced()` ever runs on it, so THIS copy never sees raw text at all.
  *
@@ -749,10 +766,12 @@ const TWIN_TESTED = new Set(
  * with a comment standing in for the label. No live instance today — none of
  * the comments above the real blocks contain `.has(` — but this function
  * feeds every other test in the file, so it is the worst place to leave it
- * open. Note the enclosing-function scan still reads raw `source`: matching
- * the sibling exactly, only the window is stripped, keeping stripComments's
- * own string-literal ASSUMPTION scoped to a few hundred characters rather
- * than the whole 3 000-line decoder.
+ * open. Note the enclosing-function scan still reads raw `source`, and that
+ * is now a cost rather than a hedge: it used to keep the hand-rolled
+ * stripper's string-literal assumption scoped to a few hundred characters,
+ * and since #691 made stripping parser-owned there is nothing left to scope.
+ * Left as-is because widening it is a behaviour change to the declaration
+ * scan, not a lexing fix.
  *
  * The window is bounded by the NEXT function declaration as well as by
  * DISCOVERY_WINDOW (second review follow-up on #688 review). A character
@@ -1618,12 +1637,17 @@ export function decodeMember(): unknown {
 
 describe('stripComments drops a block comment the window cut in half (#688 review)', () => {
   test('a decoy guard inside a truncated block comment does not win the key', () => {
-    // stripComments removes block comments with `/\*[\s\S]*?\*\//`, which needs
-    // the CLOSING `*/`. Both scanners slice a window and strip second, so a
-    // window whose end lands inside a block comment leaves that comment's text
-    // in the scanned string, eligible to match the guard regex exactly like
-    // live code — the failure revision 7's strip was added to prevent, reached
-    // through the window boundary instead of through a `//` line.
+    // Both scanners slice a window and strip second, so a window whose end
+    // lands inside a block comment can leave that comment's text in the
+    // scanned string, eligible to match the guard regex exactly like live
+    // code — the failure revision 7's strip was added to prevent, reached
+    // through the window boundary instead of through a line comment.
+    //
+    // Revision 10 bought this with a third regex pass. Since #691 the parser
+    // owns it: an unterminated block comment is unterminated to the parser
+    // too, which reports it as a comment running to the end of the text. This
+    // test did not change, which is the point — the property is the same one,
+    // now held by something that also knows what a string literal is.
     //
     // This one had a LIVE instance, unlike most residuals recorded here:
     // `decodeAllCollections|tagSeen`'s window ends inside the docblock above

@@ -104,6 +104,8 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { stripComments } from '../helpers/strip-comments.js';
+
 const DECODER_PATH = join(import.meta.dir, '..', '..', 'src', 'core', 'decoder.ts');
 const SRC = readFileSync(DECODER_PATH, 'utf-8');
 
@@ -155,7 +157,19 @@ type DiscoveredProcessor = ProcessorPin & {
  *
  * ASSUMPTION: no string literal inside the region contains an unbalanced
  * bracket or brace. True for field-name lists; a literal like `'a[b'` would
- * break the depth count. Same class of assumption as stripComments above.
+ * break the depth count. It is the last string-blind assumption here that can
+ * fail SILENTLY: `stripComments` used to carry the matching one (a `//` or a
+ * block opener inside a literal derailed it), and #691 replaced it with the
+ * parser-owned helper in tests/helpers/strip-comments.ts. The brace half is
+ * still a character count.
+ *
+ * Three others survive and are string-blind in exactly the same sense, but all
+ * three fail LOUDLY — into the `lists` equality pin or `unresolved` — so they
+ * are noted rather than fixed: `stringLiteralMembers` and the `spec()` token
+ * scan both recognise SINGLE-quoted members only (the Prettier apostrophe flip
+ * the sibling file's header names as a live hazard), and `topLevelKeys`
+ * collapses braces and brackets by character, so one inside a literal misreads
+ * the key list.
  */
 function balanced(text: string, openIdx: number, open: string, close: string): [string, number] {
   let depth = 0;
@@ -171,25 +185,14 @@ function balanced(text: string, openIdx: number, open: string, close: string): [
 }
 
 /**
- * ASSUMPTION: no string literal in a scanned region contains `//` or a block
- * comment opener. True for the decoder, whose scanned regions hold field names
- * only. If it were ever false the effect is a SILENT one — the residue check in
- * stringLiteralMembers would reject the mangled array and drop that list from
- * the pin — which is this file's own failure mode, so it is stated rather than
- * left implicit. Making it string-aware is the fix if a URL ever lands in one.
- */
-function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
-}
-
-/**
  * Members of a pure string-literal array, or null if the array holds anything
  * else. Deliberately narrow, same rationale as tests/exported-constants.test.ts:
  * an array built from identifiers or numbers is not a field allow-list.
  *
- * `raw` is always a slice of `body` (see discoverProcessors), which is
- * stripped once at the top of that function — no `stripComments()` call
- * needed here, the same leftover this file's own `spec()` fix removed.
+ * `raw` is always a slice of `body`, which is itself a slice of the
+ * comment-free text `discoverProcessors` strips once at the top — no
+ * `stripComments()` call needed here, the same leftover this file's own
+ * `spec()` fix removed.
  */
 function stringLiteralMembers(raw: string): string[] | null {
   const items = [...raw.matchAll(/'([^']*)'/g)].map((m) => m[1] as string);
@@ -199,8 +202,8 @@ function stringLiteralMembers(raw: string): string[] | null {
 
 /**
  * Top-level keys of an object literal body, ignoring nested groups. `literal`
- * is always a slice of `body` (see discoverProcessors), already stripped —
- * no `stripComments()` call needed here either.
+ * is always a slice of `body` (see discoverProcessors), which descends from
+ * text already stripped — no `stripComments()` call needed here either.
  */
 function topLevelKeys(literal: string): string[] {
   let text = literal;
@@ -225,7 +228,14 @@ function topLevelKeys(literal: string): string[] {
  * would be the RETURN TYPE for `): { securityId: string } {`. In that case the
  * processor's pinned `lists` quietly become `{}` — which the contents pin then
  * catches loudly, so it is safe rather than silent. Verified: no processor has
- * one today. Same class of assumption as `balanced` and `stripComments` above.
+ * one today. Same class of assumption as `balanced` above.
+ *
+ * `src` here is the STRIPPED text (see discoverProcessors). It used to be raw
+ * source, which meant a `{` or `}` inside a block comment shifted the depth
+ * count and could truncate a processor body mid-comment — the same family as
+ * #691, closed by stripping before this walk rather than after it. Safe to do
+ * because the shared stripper blanks comments in place rather than deleting
+ * them, so every offset stays where it was.
  */
 function functionBody(src: string, parenIdx: number): string {
   let i = parenIdx;
@@ -252,17 +262,18 @@ function discoverProcessors(src: string = SRC): DiscoveredProcessor[] {
   const declaration = /function (process\w+)(?:<[^>]*>)?\s*\(/g;
   let match: RegExpExecArray | null;
 
-  while ((match = declaration.exec(src)) !== null) {
+  // Stripped ONCE, here, and used for EVERY scan below — including the
+  // declaration sweep and `functionBody`'s brace walk, which used to run on raw
+  // source while only the body they produced was stripped. Two texts meant a
+  // commented-out line was invisible to one half and load-bearing to the other,
+  // and a brace inside a block comment could truncate a body mid-comment. The
+  // shared stripper blanks comments in place, so offsets into `text` are still
+  // offsets into `src` and nothing downstream has to compensate.
+  const text = stripComments(src);
+
+  while ((match = declaration.exec(text)) !== null) {
     const name = match[1] as string;
-    // Stripped ONCE, here, and used for every scan below — the list/rowIdent/
-    // surfacing scans and the warnUnreadFields census used to run on two
-    // different texts (raw body vs. a separately-stripped copy only the
-    // census used), so a commented-out line was invisible to one half and
-    // load-bearing to the other. `balanced()`'s bracket/brace counting is
-    // safe against the shift stripping introduces because every index this
-    // function computes downstream is relative to THIS `body`, never to raw
-    // source positions.
-    const body = stripComments(functionBody(src, match.index + match[0].length - 1));
+    const body = functionBody(text, match.index + match[0].length - 1);
     const unresolved: string[] = [];
 
     // --- every string-literal field list in the body ---------------------
@@ -284,10 +295,10 @@ function discoverProcessors(src: string = SRC): DiscoveredProcessor[] {
     // --- every warnUnreadFields call -------------------------------------
     const calls: WarnCallSpec[] = [];
     const consumedFields = new Set<string>();
-    // `body` is already stripped (see above), so this agrees with the census
-    // total below, which counts on stripComments(SRC) — counting a RAW body
-    // here would let a commented-out call inflate this processor's pin AND
-    // the census total.
+    // `body` is a slice of the stripped text (see above), so this agrees with
+    // the census total below, which counts on stripComments(SRC) — counting a
+    // RAW body here would let a commented-out call inflate this processor's pin
+    // AND the census total.
     for (const m of body.matchAll(/warnUnreadFields\(/g)) {
       const [args] = balanced(body, m.index + m[0].length - 1, '(', ')');
       const spec = (key: 'consumed' | 'ignored'): string[] => {
@@ -1454,5 +1465,51 @@ function processFixture(fields: Map<string, unknown>): unknown {
 
   test('the real, adjacent loop still surfaces its own field', () => {
     expect(fixture?.surfaced.has('real_field')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: the brace walk must run on comment-free text (#691)
+// ---------------------------------------------------------------------------
+
+describe('a stray brace inside a comment does not truncate a processor body (#691)', () => {
+  // `functionBody` finds a processor's extent by counting braces, and it used
+  // to count them in RAW source, stripping only the body it returned. A `}`
+  // inside a comment therefore closed the walk early and everything after it —
+  // here the only field list in the processor — fell outside the body.
+  //
+  // The failure is silent in this file's own direction: the truncated
+  // processor still discovers, still reports a name, and simply pins FEWER
+  // fields than the decoder really reads. `discoverProcessors` now strips once
+  // at the top and walks the stripped text, which the parser-owned stripper
+  // makes safe by blanking comments in place rather than deleting them.
+  //
+  // Same family as the string-literal half of #691 and not fixed by it: the
+  // walk is still a character count, so a stray brace inside a STRING literal
+  // has this effect today (see `balanced`'s ASSUMPTION above).
+  const FIXTURE_SRC = `
+function processFixture(fields: Map<string, unknown>): unknown {
+  const row: Record<string, unknown> = {};
+  /* a note that happens to carry a closing brace: } */
+  const stringFields = ['kept_field'];
+  for (const key of stringFields) {
+    row[key] = fields.get(key);
+  }
+  return row;
+}
+`;
+
+  const [fixture] = discoverProcessors(FIXTURE_SRC);
+
+  test('fixture is discovered at all (non-vacuity)', () => {
+    expect(fixture?.name).toBe('processFixture');
+  });
+
+  test('the list declared after the comment is still inside the body', () => {
+    expect(fixture?.lists.stringFields).toEqual(['kept_field']);
+  });
+
+  test('and the field it names still reaches the row', () => {
+    expect(fixture?.surfaced.has('kept_field')).toBe(true);
   });
 });
