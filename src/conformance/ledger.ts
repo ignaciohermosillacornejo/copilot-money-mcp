@@ -36,11 +36,15 @@
  *                      live entries already use it; documented here for the
  *                      same reason as the `response-shape` form below. (No
  *                      count on purpose: a present-tense tally in a comment
- *                      goes silently false on the next entry, which is the
- *                      class #705 was about.)
- *                      `Mutation.` ONLY — see the reserved-prefix note under
- *                      `response-shape`; it applies to every kind, so
- *                      `Query.<field>:<aspect>` fails CI here too.
+ *                      goes silently false on the next entry — a claim with
+ *                      no detector. NOT #705's class, which is the narrower
+ *                      one of a guard you can satisfy by writing the guarded
+ *                      thing where it has no effect.)
+ *                      THE ASPECT SUFFIX is `Mutation.`-only — the bullet's
+ *                      bare `Query.<fieldName>` form is fine and live (see
+ *                      `queryOperation`). Only the suffixed form is barred,
+ *                      by the reserved-prefix note under `response-shape`,
+ *                      which applies to every kind.
  * - `response-shape` → `Mutation.<fieldName>:response` / `Query.<fieldName>:response`
  *                      for a whole operation's shape. For an assumption about
  *                      ONE FIELD's semantics rather than the operation's keys,
@@ -49,6 +53,10 @@
  *                      `AccountNode.name:resolvesNickname` (the server resolves
  *                      it before sending). Two of those read as exceptions;
  *                      three are a convention, so it is written down here.
+ *                      (That count survives the no-tallies rule above because
+ *                      it is RETROSPECTIVE — it narrates why the form got
+ *                      documented at a moment in time, and stays true however
+ *                      many entries accrue. Only a tally of today rots.)
  *
  *                      NOTE the `Query.` prefix is effectively RESERVED:
  *                      `tests/scripts/read-smoke-coverage.test.ts` requires
