@@ -59,7 +59,15 @@
  */
 
 import { spawnSync } from 'child_process';
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'fs';
+import {
+  existsSync,
+  lstatSync,
+  readFileSync,
+  readdirSync,
+  readlinkSync,
+  realpathSync,
+  statSync,
+} from 'fs';
 import { dirname, join, relative, sep } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -387,6 +395,36 @@ function walk(dir: string, out: string[]): string[] {
     else if (inScope(p)) out.push(p);
   }
   return out;
+}
+
+/**
+ * The content git stores for a SYMLINK: its target path, not the target's
+ * bytes.
+ *
+ * git tracks a symlink as mode 120000 whose blob is the target path, so the
+ * target path is the entire content a reviewer is shown in a diff for it —
+ * following the link and scanning the file at the other end scans something
+ * the diff never contained.
+ *
+ * Used only as the fallback when `readFileSync` fails, which keeps the change
+ * additive: a link that resolves to a readable file is still read exactly as
+ * before (`package.json` -> `manifest.json` in the routing test depends on
+ * that), and a link that resolves to a DIRECTORY or to nothing stops being an
+ * unreadable file and becomes one line of scannable content. This repo tracks
+ * two of the former — `.agents/skills` and `.claude/skills`, both pointing at
+ * directories — and they are why the silent `continue` this replaces was
+ * invisible: every run dropped two files while counting them as scanned.
+ *
+ * Returns undefined for anything that is not a symlink, so a genuinely
+ * unreadable regular file still reaches the refusal below.
+ */
+function linkTarget(path: string): string | undefined {
+  try {
+    if (!lstatSync(path).isSymbolicLink()) return undefined;
+    return readlinkSync(path);
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -731,6 +769,16 @@ function checkLifecycleScripts(contents: string, rel: string): void {
 }
 
 /**
+ * Why the git listing declined, set by whichever branch of gitFiles declined.
+ *
+ * The strategy check at the bottom of this file turns a decline into a hard
+ * failure, so the operator is entitled to the cause that was actually observed
+ * rather than the most likely one. Every `return undefined` in gitFiles sets
+ * this first; there is no path that declines silently.
+ */
+let gitDecline: string | undefined;
+
+/**
  * The set of files this gate inspects: everything git would show in a diff.
  *
  * Removing the extension allowlist (F2) put the whole working tree in scope,
@@ -751,16 +799,6 @@ function checkLifecycleScripts(contents: string, rel: string): void {
  * tests drive it (synthetic trees under CHECK_CONCEALMENT_ROOT). Both paths
  * are covered: see 'file list' in tests/scripts/check-concealment.test.ts.
  */
-/**
- * Why the git listing declined, set by whichever branch of gitFiles declined.
- *
- * The strategy check at the bottom of this file turns a decline into a hard
- * failure, so the operator is entitled to the cause that was actually observed
- * rather than the most likely one. Every `return undefined` in gitFiles sets
- * this first; there is no path that declines silently.
- */
-let gitDecline: string | undefined;
-
 function gitFiles(root: string): { tracked: string[]; untracked: string[] } | undefined {
   // Strip inherited git plumbing vars before shelling out. A pre-push hook runs
   // with GIT_DIR set, and `git -C <dir>` does NOT override it — so without this,
@@ -983,6 +1021,39 @@ function underSkippedDir(root: string, file: string): boolean {
 }
 
 /**
+ * Only the route TARGET is memoized, and the asymmetry is a decision rather
+ * than an oversight — it has been read as one, so here is the measurement.
+ *
+ * Counted by instrumenting a copy of this file with a counter around
+ * `realOrUndefined` and running it over this repo (535 files):
+ *
+ *   realpath total=140  targetMisses=120  selfCalls=20  distinctSelfFiles=20
+ *
+ * Two things fall out. The cache that exists is on the hot side: 120 of the 140
+ * calls are target lookups, and without it they would be roughly two per
+ * scanned file. And a second cache keyed on `file` would save exactly ZERO of
+ * the remaining 20, because every one of those 20 calls is already for a
+ * distinct file.
+ *
+ * That is structural, not luck. `realOrUndefined(file)` sits after the
+ * `target === undefined` early return, so it is reached only for a file whose
+ * OWN directory contains the routed name — and reached twice only for a file
+ * whose directory contains BOTH `package.json` and `.gitattributes`. The bound
+ * on what a second Map could ever save is therefore one call per file sitting
+ * beside both, which is not a number worth a second piece of mutable state in
+ * the routing path.
+ */
+const routeTargetCache = new Map<string, string | undefined>();
+
+function realOrUndefined(path: string): string | undefined {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Does `file` answer to `name` in its own directory — is it the file that git
  * or npm opens when it asks for `.gitattributes` or `package.json`?
  *
@@ -1028,39 +1099,6 @@ function underSkippedDir(root: string, file: string): boolean {
  * test, so a failure here can only ever scan more, never skip something that
  * was already being checked.
  */
-/**
- * Only the route TARGET is memoized, and the asymmetry is a decision rather
- * than an oversight — it has been read as one, so here is the measurement.
- *
- * Counted by instrumenting a copy of this file with a counter around
- * `realOrUndefined` and running it over this repo (535 files):
- *
- *   realpath total=140  targetMisses=120  selfCalls=20  distinctSelfFiles=20
- *
- * Two things fall out. The cache that exists is on the hot side: 120 of the 140
- * calls are target lookups, and without it they would be roughly two per
- * scanned file. And a second cache keyed on `file` would save exactly ZERO of
- * the remaining 20, because every one of those 20 calls is already for a
- * distinct file.
- *
- * That is structural, not luck. `realOrUndefined(file)` sits after the
- * `target === undefined` early return, so it is reached only for a file whose
- * OWN directory contains the routed name — and reached twice only for a file
- * whose directory contains BOTH `package.json` and `.gitattributes`. The bound
- * on what a second Map could ever save is therefore one call per file sitting
- * beside both, which is not a number worth a second piece of mutable state in
- * the routing path.
- */
-const routeTargetCache = new Map<string, string | undefined>();
-
-function realOrUndefined(path: string): string | undefined {
-  try {
-    return realpathSync.native(path);
-  } catch {
-    return undefined;
-  }
-}
-
 function answersToName(file: string, name: string): boolean {
   const dir = dirname(file);
   const key = `${dir}\0${name}`;
@@ -1140,14 +1178,45 @@ if (listing.strategy === 'walk' && existsSync(join(ROOT, '.git'))) {
 }
 
 const files = listing.files.filter((f) => inScope(f));
+
+/**
+ * Files that were listed and then could NOT be inspected, with the cause.
+ *
+ * This list and the `scanned` counter beside it exist because the summary used
+ * to print `files.length` — computed BEFORE the loop — while the loop dropped
+ * an unreadable file with a bare `catch { continue }`: no log, no counter, no
+ * finding. A file the gate never opened was reported as scanned, on a gate
+ * whose entire output is a claim about what it inspected. That is a fail-open,
+ * and the cheapest attack on it was to make a file unreadable rather than to
+ * hide anything inside it.
+ *
+ * Two changes, and they are separate: the number printed is now `scanned`,
+ * incremented at the point of inspection, so it cannot overstate by
+ * construction; and an unreadable file is a refusal rather than a note, for the
+ * same reason the walk fallback above is one — "refusing rather than reporting
+ * a green run over a shrunken scan". A scan that is quietly smaller than its
+ * listing is the shape of every bug in this file.
+ */
+const unreadable: Array<{ file: string; cause: string }> = [];
+let scanned = 0;
+
 for (const file of files) {
   const rel = relative(ROOT, file);
   let contents: string;
   try {
     contents = readFileSync(file, 'utf-8');
-  } catch {
-    continue;
+  } catch (err) {
+    // See linkTarget: for a symlink the target PATH is the whole of what the
+    // diff shows, so a link that does not resolve to a readable file is not an
+    // unreadable file — it is one line of content the gate can scan directly.
+    const target = linkTarget(file);
+    if (target === undefined) {
+      unreadable.push({ file: rel, cause: err instanceof Error ? err.message : String(err) });
+      continue;
+    }
+    contents = target;
   }
+  scanned++;
   if (contents.includes(NUL)) {
     // Not "binary, therefore safe" — see BINARY_EXTENSIONS. A NUL in a file
     // that is not an expected binary is itself the concealment: it makes git
@@ -1204,27 +1273,47 @@ for (const file of files) {
   }
 }
 
-if (findings.length === 0) {
-  console.log(`check-concealment: ${files.length} files scanned (${listing.strategy}), nothing hidden`);
+if (findings.length > 0) {
+  console.error(
+    `check-concealment: found content engineered to be invisible in review ` +
+      `(${scanned} files scanned, listed by ${listing.strategy}).\n`
+  );
+  const byRule = new Map<string, Finding[]>();
+  for (const f of findings) {
+    const list = byRule.get(f.rule) ?? [];
+    list.push(f);
+    byRule.set(f.rule, list);
+  }
+  for (const [rule, items] of byRule) {
+    console.error(`  ${rule}:`);
+    for (const f of items) console.error(`    ${f.file}:${f.line}  ${f.detail}`);
+    console.error('');
+  }
+  console.error('  Each of these has no legitimate use in this repository. If one is genuinely');
+  console.error('  needed, add a narrow, justified exemption to scripts/check-concealment.ts');
+  console.error('  in the same PR — do not widen a threshold to make the gate quiet.\n');
+}
+
+// Reported AFTER the findings, never instead of them: an unreadable file and a
+// concealed payload are independent, and a run that hit both has to show both.
+if (unreadable.length > 0) {
+  console.error(
+    `check-concealment: ${unreadable.length} of ${files.length} listed files could not be read, ` +
+      `so they were NOT inspected. Refusing rather than reporting a scan over a set smaller ` +
+      `than the one git listed — ${scanned} of ${files.length} files were actually read.\n`
+  );
+  for (const u of unreadable) console.error(`    ${u.file}  ${u.cause}`);
+  console.error(
+    `\n  A tracked file that is missing from the working tree is the usual cause: stage the ` +
+      `deletion so the listing and the tree agree. Otherwise it is a permissions problem on ` +
+      `the file itself — fix that rather than making this gate quiet, because the one thing ` +
+      `it must never do is vouch for a file it did not open.\n`
+  );
+}
+
+if (findings.length === 0 && unreadable.length === 0) {
+  console.log(`check-concealment: ${scanned} files scanned (${listing.strategy}), nothing hidden`);
   process.exit(0);
 }
 
-console.error(
-  `check-concealment: found content engineered to be invisible in review ` +
-    `(${files.length} files scanned, listed by ${listing.strategy}).\n`
-);
-const byRule = new Map<string, Finding[]>();
-for (const f of findings) {
-  const list = byRule.get(f.rule) ?? [];
-  list.push(f);
-  byRule.set(f.rule, list);
-}
-for (const [rule, items] of byRule) {
-  console.error(`  ${rule}:`);
-  for (const f of items) console.error(`    ${f.file}:${f.line}  ${f.detail}`);
-  console.error('');
-}
-console.error('  Each of these has no legitimate use in this repository. If one is genuinely');
-console.error('  needed, add a narrow, justified exemption to scripts/check-concealment.ts');
-console.error('  in the same PR — do not widen a threshold to make the gate quiet.\n');
 process.exit(1);

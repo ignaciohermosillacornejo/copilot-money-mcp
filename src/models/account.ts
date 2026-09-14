@@ -7,9 +7,6 @@
 import { z } from 'zod';
 
 /**
- * Account schema with validation.
- */
-/**
  * Schema for a single holding within an investment account.
  */
 const AccountHoldingSchema = z
@@ -26,6 +23,9 @@ const AccountHoldingSchema = z
   })
   .passthrough();
 
+/**
+ * Account schema with validation.
+ */
 export const AccountSchema = z
   .object({
     // Required fields
