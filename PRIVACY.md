@@ -1,6 +1,6 @@
 # Privacy Policy for Copilot Money MCP Server
 
-**Last Updated:** July 31, 2026
+**Last Updated:** September 14, 2026
 
 ## Disclaimer
 
@@ -39,7 +39,7 @@ Each provider has its own privacy policy, data retention, and training-data prac
 
 The Copilot Money MCP Server:
 - Operates on your local machine
-- Reads data only from your local Copilot Money database cache
+- Reads your financial data from your local Copilot Money database cache — and, in the opt-in `--live-reads` and `--write` modes, from Copilot Money's own API. Those two modes additionally read your local browser profile storage to find your Copilot Money session token; see **Browser Profile Storage** under [Data Access](#data-access)
 - Never sends your financial data to servers operated by this project (we don't have servers)
 - Does not include any analytics or telemetry
 - Makes zero network requests in the default (cache-only) mode
@@ -60,9 +60,21 @@ This database contains:
 - Budgets, goals, tags, categories, and recurring transactions
 - Investment holdings, prices, and performance data
 
+### Browser Profile Storage (`--live-reads` and `--write` only)
+
+To authenticate as you, those two modes need the Firebase refresh token that the Copilot Money **web app** stores in your browser. The server finds it by reading files inside your local browser profiles. **This happens only when you start the server with `--live-reads` or `--write` — the default cache-only mode never reads browser storage.**
+
+- **Which browsers:** ten are searched — Chrome, Arc, Microsoft Edge, Brave, Vivaldi, Chromium, Opera, Opera GX, Safari, and Firefox (the list lives in `BROWSER_CONFIGS` in `src/core/auth/browser-token.ts`). Chromium-family browsers are searched across every `Default` / `Profile N` directory, not only the default profile.
+- **Which files:** the `.ldb` and `.log` files under `IndexedDB/https_app.copilot.money_0.indexeddb.leveldb` — Copilot's own origin — and, as a fallback, `Local Storage/leveldb`. Firefox is searched only under profile storage origins whose directory name contains `copilot`.
+- **The fallback is not scoped to Copilot's origin.** A browser's `Local Storage/leveldb` is a single database holding *every* site's local storage, and Safari's website-data container is walked the same way. The server scans those bytes for the Firebase refresh-token pattern and keeps each match as a candidate; nothing else in those files is parsed, retained, or transmitted.
+- **A consequence of that:** a refresh token belonging to a different Firebase-backed site you are logged into can be picked up as a candidate. Candidates are tried against Google's token-exchange endpoint (see [Network Access](#network-access)) and discarded when they do not belong to Copilot's Firebase project — so such a token may reach Google's endpoint before being rejected. It is never sent to Copilot Money's API, never logged, and never written to disk; all candidates are held in memory only.
+- **To avoid browser-storage reads entirely,** run the server in the default cache-only mode.
+
+Note for auditors: `scripts/check-privacy-endpoints.ts` verifies the network destinations named in this document, not local file reads. This disclosure is a prose obligation with no automated gate behind it.
+
 ### How We Access Data
 
-- **Local Reads by Default:** In the default mode, all data reads happen against your local Copilot Money database cache
+- **Local Reads by Default:** In the default mode, all data reads happen against your local Copilot Money database cache, and no browser profile is opened
 - **Local Processing:** All query processing, filtering, and aggregation happens on your machine
 - **Cache-Only by Default:** In the default mode, the server only reads locally and makes zero network requests
 - **Opt-In Live Reads:** With `--live-reads`, several read tools query Copilot Money's API directly instead of the local cache. This is still read-only — it modifies nothing — but your requests, and the financial data returned, travel over the network
