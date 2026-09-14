@@ -237,11 +237,12 @@ describe('terse-by-default tools disclose their fields param (#606 review, class
  *
  * These two checks close both without hand-listing anything: they read the
  * preset exports and the call sites themselves, so a preset added tomorrow is
- * covered the day it lands. A preset that is NOT terse-by-default is still
- * legitimate — get_transactions / get_transactions_live pass
- * DEFAULT_TRANSACTION_FIELDS as an opt-in preset with no `"default"` fallback
- * — so the gate is "every preset is wired to a handler", not "every preset
- * defaults".
+ * covered the day it lands. A preset that is NOT terse-by-default would still
+ * be legitimate — the gate is "every preset is wired to a handler", not "every
+ * preset defaults". (The example this comment used to give, get_transactions
+ * and get_transactions_live passing DEFAULT_TRANSACTION_FIELDS "with no
+ * `\"default\"` fallback", stopped being one in #604: both now pass
+ * `fields ?? ['default']` like every other dieted tool.)
  */
 describe('every field-selection preset stays reachable by the sweep (PR B review, M3)', () => {
   const presets = exportedPresets();

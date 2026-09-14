@@ -122,7 +122,7 @@ Scan the 6-month transaction history for merchants appearing 3+ times at regular
 
 ### 2.4 Overdue Recurrings — investigate matcher before archiving
 
-When `get_recurring_transactions` surfaces a sub as "overdue" (expected charge hasn't arrived), **do not recommend archiving it until you've ruled out a stale matcher rule.** In real sessions, ~⅔ of "overdue" subs were actually still charging — the matcher's `name_contains` or `min_amount`/`max_amount` rule had just drifted.
+When `get_recurring_transactions` surfaces a sub as "overdue" (expected charge hasn't arrived), **do not recommend archiving it until you've ruled out a stale matcher rule.** In real sessions, ~⅔ of "overdue" subs were actually still charging — the matcher's name-match or amount-bound rule had just drifted.
 
 Before flagging archive, for each overdue sub:
 

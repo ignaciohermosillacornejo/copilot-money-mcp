@@ -9,7 +9,8 @@
  *
  * The rule cannot live in `projectRows`: by then each handler has already
  * folded "omitted" into its own default (`args.fields ?? ['default']` for a
- * terse-by-default tool, `undefined`/`compact` for `get_transactions`), and an
+ * terse-by-default tool, which since #604 is every field-selecting read tool;
+ * a plain `undefined` = full rows for any tool that is not dieted), and an
  * explicit `[]` survives `??` unchanged — so the engine sees `[]` from both
  * kinds of tool and cannot tell which default to stand in for. `defineTool`
  * drops the empty array BEFORE the handler runs, which routes the call down

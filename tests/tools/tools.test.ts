@@ -451,7 +451,7 @@ describe('CopilotMoneyTools', () => {
       const all = await tools.getTransactions({ fields: ['all'] });
       const terse = await tools.getTransactions({});
       // Widths are fixture-relative on purpose: these mock documents carry a
-      // handful of keys, not the ~60 a real cache row does, so pinning an
+      // handful of keys, not the ~30 a real cache row does, so pinning an
       // absolute count here would measure the fixture, not the behaviour.
       expect(Object.keys(all.transactions[0]!).length).toBeGreaterThan(
         Object.keys(terse.transactions[0]!).length

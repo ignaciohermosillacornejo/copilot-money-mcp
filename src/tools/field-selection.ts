@@ -1,7 +1,7 @@
 /**
  * Shared field-selection engine (#597 v3 base).
  *
- * A single cached document often carries 35-40 fields, most of which go
+ * A single cached document often carries dozens of fields, most of which go
  * unused for typical queries — pulling result pages at full width wastes an
  * MCP client's context. This module is the one engine every field-selecting
  * tool builds on (cache reshape, live parity, accounts preset): token

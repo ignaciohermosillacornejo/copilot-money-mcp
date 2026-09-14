@@ -43,16 +43,53 @@ function rejectsField(body: string, typeName: string, fieldName: string): boolea
 export async function assertOutputFieldAbsence(opts: {
   check: OutputFieldAbsenceCheck;
   idToken: string;
+  /** Seam for tests; defaults to the real network probe. */
+  sendProbe?: (idToken: string, query: string) => Promise<string>;
 }): Promise<OutputFieldAbsenceResult> {
-  const { check, idToken } = opts;
+  const { check, idToken, sendProbe = sendValidationProbe } = opts;
   const { typeName, absentFields, presentField, knownBadField, buildQuery } = check;
 
   const stillAbsent: string[] = [];
   const nowPresent: string[] = [];
   const failures: string[] = [];
 
+  // THE CONTROLS RUN FIRST, and the field loop below does not run at all if
+  // either fails. The ordering is the finding, not a style preference: when
+  // the matcher was broken (it compared JSON-escaped quotes against unescaped
+  // text), every field came back "not rejected", so a controls-last runner
+  // printed N copies of "NOW EXPOSED — retire the approximation" and only then
+  // the one line explaining that none of them meant anything. The operator
+  // reads the alarms first and the retraction last. A run whose controls fail
+  // has no findings to report, so it reports none.
+
+  // Guards the gate, half 1: a field that MUST exist has to be accepted, or a
+  // malformed probe would "prove" every absence at once while proving nothing.
+  const presentBody = await sendProbe(idToken, buildQuery(presentField));
+  const presentFieldAccepted = !rejectsField(presentBody, typeName, presentField);
+  if (!presentFieldAccepted) {
+    failures.push(
+      `${typeName}.${presentField} was REJECTED. Either the probe shape is wrong or the field ` +
+        `the internal_transfer synthesis reads has been removed. Absence probing was SKIPPED — ` +
+        `this run proves nothing either way. Investigate before trusting it.`
+    );
+  }
+
+  // Guards the gate, half 2: a name that cannot exist must be rejected.
+  const badBody = await sendProbe(idToken, buildQuery(knownBadField));
+  const knownBadRejected = rejectsField(badBody, typeName, knownBadField);
+  if (!knownBadRejected) {
+    failures.push(
+      `control ${typeName}.${knownBadField} was ACCEPTED — the probe cannot discriminate, so ` +
+        `neither can this check. Absence probing was SKIPPED.`
+    );
+  }
+
+  if (!presentFieldAccepted || !knownBadRejected) {
+    return { typeName, stillAbsent, nowPresent, presentFieldAccepted, knownBadRejected, failures };
+  }
+
   for (const field of absentFields) {
-    const body = await sendValidationProbe(idToken, buildQuery(field));
+    const body = await sendProbe(idToken, buildQuery(field));
     if (rejectsField(body, typeName, field)) {
       stillAbsent.push(field);
       smokeLog('absent', { type: typeName, field, present: false });
@@ -65,28 +102,6 @@ export async function assertOutputFieldAbsence(opts: {
           `retire the approximation in favour of the real field, and update the ledger entry.`
       );
     }
-  }
-
-  // Guards the gate, half 1: a field that MUST exist has to be accepted, or a
-  // malformed probe would "prove" every absence at once while proving nothing.
-  const presentBody = await sendValidationProbe(idToken, buildQuery(presentField));
-  const presentFieldAccepted = !rejectsField(presentBody, typeName, presentField);
-  if (!presentFieldAccepted) {
-    failures.push(
-      `${typeName}.${presentField} was REJECTED. Either the probe shape is wrong (in which case ` +
-        `every absence result above is meaningless) or the field the internal_transfer ` +
-        `synthesis reads has been removed. Investigate before trusting this run.`
-    );
-  }
-
-  // Guards the gate, half 2: a name that cannot exist must be rejected.
-  const badBody = await sendValidationProbe(idToken, buildQuery(knownBadField));
-  const knownBadRejected = rejectsField(badBody, typeName, knownBadField);
-  if (!knownBadRejected) {
-    failures.push(
-      `control ${typeName}.${knownBadField} was ACCEPTED — the probe cannot discriminate, so ` +
-        `neither can this check.`
-    );
   }
 
   return { typeName, stillAbsent, nowPresent, presentFieldAccepted, knownBadRejected, failures };
