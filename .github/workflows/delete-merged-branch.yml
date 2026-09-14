@@ -9,6 +9,8 @@ jobs:
     # Only run when PR is merged (not just closed)
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
+    # Observed 4s. One `gh api` DELETE, post-merge and non-gating.
+    timeout-minutes: 5
     permissions:
       contents: write
 

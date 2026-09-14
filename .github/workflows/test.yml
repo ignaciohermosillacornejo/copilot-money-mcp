@@ -10,6 +10,11 @@ jobs:
   quality:
     name: Quality Checks
     runs-on: ubuntu-latest
+    # Observed ~1 min. Two separate package installs (`bun install`, plus
+    # `npm install --omit=dev` inside .license-check) and an `npx
+    # license-checker` fetch make this the most registry-dependent job here,
+    # and it gates every PR — so it gets headroom rather than a tight bound.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -47,6 +52,11 @@ jobs:
       # built once. See scripts/check-concealment.ts.
       - name: Concealed-content check
         run: bun run check:concealment
+
+      # Parses every workflow in this directory, including its own. See
+      # scripts/check-workflows.ts for the two invariants and why each exists.
+      - name: Workflow hygiene check
+        run: bun run check:workflows
 
       # Fork PRs only — a same-repo branch already required push access, so
       # there is no identity to forge. Reads public commit metadata with the
@@ -88,6 +98,10 @@ jobs:
     name: Tests
     needs: [quality]
     runs-on: ubuntu-latest
+    # Observed ~50s. `bun install` + the full suite with coverage + a Codecov
+    # upload that fails the job on error. Grows with the suite, and gates every
+    # PR, so it shares the quality job's ceiling.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 

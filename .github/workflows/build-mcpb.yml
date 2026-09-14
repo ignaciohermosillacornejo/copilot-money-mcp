@@ -36,6 +36,10 @@ jobs:
   build-and-release:
     name: Build and release .mcpb
     runs-on: ubuntu-latest
+    # Observed ~25s. `pack:mcpb` runs its own `npm install --omit=dev` and the
+    # release step uploads the bundle to the releases API. Retriable via
+    # workflow_dispatch, but a half-created release is worth avoiding.
+    timeout-minutes: 15
     permissions:
       contents: write
 
