@@ -111,7 +111,8 @@ export const getHoldingsTool = defineTool({
       'quantity, current price, equity value, average cost, and total return per holding. ' +
       'Joins data from account holdings, securities, and optionally historical snapshots. ' +
       'Filter by account or ticker symbol. Note: cost_basis may be unavailable for ' +
-      'cash-equivalent positions.',
+      'cash-equivalent positions. Positions on hidden and merged accounts are EXCLUDED by ' +
+      'default, matching get_accounts — pass include_hidden: true for them.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -123,6 +124,14 @@ export const getHoldingsTool = defineTool({
         include_history: {
           type: 'boolean',
           description: 'Include monthly price/quantity snapshots per holding (default: false)',
+          default: false,
+        },
+        include_hidden: {
+          type: 'boolean',
+          description:
+            'Include positions on hidden and merged accounts (default: false). Same flag, ' +
+            'same default as get_accounts — leave it off and the two tools agree on which ' +
+            'accounts exist.',
           default: false,
         },
         limit: {
