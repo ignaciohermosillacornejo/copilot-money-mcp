@@ -20,6 +20,22 @@
  * that clean up in their own hooks are unaffected: `cleanupAllTempDatabases`
  * iterates the in-process cache, which those files have already emptied.
  *
+ * SCOPE, stated because the sentence "a test run leaves nothing behind" is
+ * easy to over-trust:
+ *   - it covers a run that REACHES THE END. `--bail` aborts without firing
+ *     this hook (verified), and `bun run check` is `bun test --bail` — so a
+ *     check run that fails a test still strands what it made. A Ctrl-C'd run
+ *     is the same. The hour-old orphan sweep in leveldb-reader.ts remains the
+ *     backstop for both, which is what it is for.
+ *   - it covers copies made on THIS thread. A worker thread's isolate has its
+ *     own temp-copy cache that nothing here can see, so the decode worker
+ *     sweeps for itself before it posts its result.
+ *   - the import binding is resolved at preload time, so a test file that
+ *     `mock.module`s the reader does not replace the function this hook calls.
+ *     That is the behaviour we want — a mocked cleanup would leave the real
+ *     copies on disk — and it is stated here because it is easy to mistake
+ *     for an accident.
+ *
  * Wired in `bunfig.toml`. Guarded by `tests/core/temp-db-suite-teardown.test.ts`,
  * which proves a `bun test` run leaves no copy behind *and* that the same run
  * does strand one when this preload is removed.

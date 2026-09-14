@@ -159,7 +159,7 @@ bun test -t "getBalanceHistory"               # Test name pattern
 
 Tests mirror the `src/` structure in `tests/`. The synthetic test DB is generated at runtime by `tests/helpers/test-db.ts` (no checked-in DB fixtures).
 
-`bunfig.toml` preloads `tests/setup/temp-db-teardown.ts`, a run-wide `afterAll` that deletes the LevelDB temp copies the suite made. It exists because `bun test` hard-exits without firing `process.on('exit')`, so the reader's own exit sweep cannot cover a test run ([#642](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/642)) — a test file that reads a fixture database needs no cleanup hook of its own.
+`bunfig.toml` preloads `tests/setup/temp-db-teardown.ts`, a run-wide `afterAll` that deletes the LevelDB temp copies the suite made. It exists because `bun test` hard-exits without firing `process.on('exit')`, so the reader's own exit sweep cannot cover a test run ([#642](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/642)) — a test file that reads a fixture database needs no cleanup hook of its own. It covers a run that reaches the end: `--bail` aborts without firing the hook, so a failing `bun run check` still leaves its copies to the hour-old orphan sweep.
 
 ### Writing Tests
 

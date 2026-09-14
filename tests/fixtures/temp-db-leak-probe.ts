@@ -38,7 +38,14 @@ function copiesInTmp(): string[] {
   return fs.readdirSync(os.tmpdir()).filter((name) => name.startsWith('copilot-leveldb-'));
 }
 
-/** One fixture database, reused by both probes below. */
+/**
+ * One fixture database per probe.
+ *
+ * The source directory is left behind on purpose as well, not just the copy:
+ * this file must have no cleanup hooks at all, or a later edit tidying the
+ * source would be one step from tidying the copy the parent measures. The
+ * parent removes the whole private TMPDIR in its own `afterAll`.
+ */
 async function makeDb(): Promise<string> {
   const src = fs.mkdtempSync(path.join(os.tmpdir(), 'temp-db-leak-probe-src-'));
   await createTestDatabase(src, [
