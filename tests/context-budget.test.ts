@@ -131,11 +131,11 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // what a default row contains AND, per the #597 convention, name what it
   // drops — Plaid metadata, internal IDs, enrichment/intelligence fields,
   // tag_ids, review state, location, flags — explicitly as a PARTIAL list, the
-  // disclosure fix the PR B review required on get_accounts. Measured 5_833
-  // Paying schema chars once per session to stop shipping ~20 unwanted fields
-  // on every row of every page is the trade #597 exists to make. (~20, not
-  // ~50: a real row populates ~30 of the 64 declared schema fields, and 10 of
-  // those are the preset.)
+  // disclosure fix the PR B review required on get_accounts. Paying schema
+  // chars once per session to stop shipping ~20 unwanted fields on every row
+  // of every page is the trade #597 exists to make. (~20, not ~50: a real row
+  // populates ~30 of the 64 declared schema fields, and 10 of those are the
+  // preset.)
   //
   // Lowered 6_425 -> 6_340 in review round five: the shared `fields` fragment
   // stopped duplicating the cache document's dropped-field list, which each

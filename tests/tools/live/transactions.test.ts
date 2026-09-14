@@ -1156,31 +1156,48 @@ describe('get_transactions_live fields param — parity with get_transactions', 
     // `user_note`, whose live spelling is `user_notes`. A live caller copying
     // the parameter docs got a `_field_warning` instead of a field.
     //
-    // Derived, never hand-listed: every snake_case identifier the shared text
-    // names must be selectable on BOTH surfaces. Each tool's own description
-    // owns its mode-specific exclusions, and both already carry one.
+    // SYMMETRIC on purpose. The first version of this guard only rejected
+    // CACHE-only names, which is the direction the bug came from — so the
+    // mirror image sailed through: `user_notes`, `tip_amount`,
+    // `suggested_category_ids` and `type` are live-only, and "correcting" the
+    // worked example to the live spelling would have shipped a name cache mode
+    // answers with a `_field_warning`. A guard whose title claims "BOTH modes"
+    // has to check both.
+    //
+    // Field references are found by intersecting every identifier in the text
+    // with the UNION of the two known-field sets, rather than by a snake_case
+    // pattern: `type` and `logo` carry no underscore and were invisible to the
+    // pattern. The cost is that a prose word which is also a field name gets
+    // treated as a reference — it passes as long as both modes have it, and
+    // fails loudly with a rewordable message if they don't, which is the safe
+    // direction for a guard.
     const shared = cacheFragment.description;
-    const named = [...new Set(shared.match(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g) ?? [])];
-    // Guards the gate: a fragment that named nothing would pass vacuously.
-    expect(named.length).toBeGreaterThan(0);
+    const everyField = new Set([...TRANSACTION_KNOWN_FIELDS, ...LIVE_TRANSACTION_KNOWN_FIELDS]);
+    const identifiers = [...new Set(shared.match(/\b[a-z][a-z0-9_]*\b/g) ?? [])];
+    const named = identifiers.filter((n) => everyField.has(n));
+    // Guards the gate: a fragment that named nothing would pass vacuously, and
+    // so would a broken regex or an empty union.
+    expect(everyField.size).toBeGreaterThan(20);
+    expect(named.length).toBeGreaterThan(5);
 
-    const cacheOnly = named.filter(
-      (n) => TRANSACTION_KNOWN_FIELDS.has(n) && !LIVE_TRANSACTION_KNOWN_FIELDS.has(n)
+    const modeOnly = named.filter(
+      (n) => TRANSACTION_KNOWN_FIELDS.has(n) !== LIVE_TRANSACTION_KNOWN_FIELDS.has(n)
     );
     expect(
-      cacheOnly,
+      modeOnly.map((n) => `${n} (only in ${TRANSACTION_KNOWN_FIELDS.has(n) ? 'cache' : 'live'})`),
       `The fields param is shared verbatim by get_transactions and get_transactions_live ` +
-        `(see TRANSACTION_FIELDS_PARAM_SCHEMA), so a cache-only name here is advertised to ` +
-        `live callers as requestable and answers with a _field_warning instead: ` +
-        `${cacheOnly.join(', ')}. Move mode-specific names to the tool's own description.`
+        `(see TRANSACTION_FIELDS_PARAM_SCHEMA), so a name only one mode has is advertised to ` +
+        `the other mode's callers as requestable and answers with a _field_warning instead. ` +
+        `Move mode-specific names to the tool's own description, which owns its exclusions.`
     ).toEqual([]);
 
-    const unknownEverywhere = named.filter(
-      (n) => !TRANSACTION_KNOWN_FIELDS.has(n) && !LIVE_TRANSACTION_KNOWN_FIELDS.has(n)
-    );
+    // The typo half: a name no surface has cannot be caught by the check
+    // above, because it is in neither set and so never becomes a reference.
+    const looksLikeAField = identifiers.filter((n) => n.includes('_') && !n.startsWith('_'));
+    const unknownEverywhere = looksLikeAField.filter((n) => !everyField.has(n));
     expect(
       unknownEverywhere,
-      `Names in the shared fields description that are not fields on either surface: ` +
+      `Snake_case names in the shared fields description that are fields on neither surface: ` +
         `${unknownEverywhere.join(', ')}. A typo here ships straight into both schemas.`
     ).toEqual([]);
   });
