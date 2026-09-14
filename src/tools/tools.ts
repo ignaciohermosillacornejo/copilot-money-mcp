@@ -1398,15 +1398,13 @@ export class CopilotMoneyTools {
     // after this resolution is what makes the preferred name selectable at
     // all; doing it in the other order would silently reinstate the
     // provider label for a projected row.
-    accounts = accounts.map((account) =>
+    accounts = accounts.map((account) => {
       // Rewrite only when the preferred name is usable AND different — so a
       // blank or absent nickname leaves the row untouched rather than writing
       // `name: undefined` onto an account that never had one.
-      (() => {
-        const preferred = preferredAccountName(account);
-        return preferred && preferred !== account.name ? { ...account, name: preferred } : account;
-      })()
-    );
+      const preferred = preferredAccountName(account);
+      return preferred && preferred !== account.name ? { ...account, name: preferred } : account;
+    });
 
     // Calculate totals by asset/liability classification
     let totalAssets = 0;
