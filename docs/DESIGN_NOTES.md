@@ -1,5 +1,16 @@
 # Design Notes
 
+> **Historical (v1.2.1).** This document records the original context-budget reasoning
+> behind the tool surface. Its token estimates and example output shapes describe
+> **v1.2.1** — they were superseded by **v3.0.0**, which replaced the ad-hoc "essential
+> fields" shape with a per-tool default field preset plus an explicit `fields` argument
+> (`src/tools/field-selection.ts`). That changed both the rows tools return and the token
+> cost of returning them, so no number or JSON shape below should be read as current.
+>
+> Read this for the rationale, which still holds. Read
+> **[MIGRATING-v3.md](MIGRATING-v3.md)** for the response shapes that ship today, and
+> **[tools-by-mode.md](tools-by-mode.md)** for the tools that exist in each mode.
+
 ## Context-Conscious MCP Tool Design
 
 **Critical Consideration:** MCP tools must be mindful of Claude's context window.
@@ -38,7 +49,10 @@ Use compact structured data instead of verbose JSON:
 }
 ```
 
-**Implementation:** `src/tools/tools.ts` - enriched transaction mapping
+**Implementation:** `src/tools/field-selection.ts` — the per-tool default field presets and
+the `fields` argument that expands them. (In v1.2.1 this lived in the enriched-transaction
+mapping in `src/tools/tools.ts`.) The `✅ GOOD` block above is the v1.2.1 illustration, not
+the row v3 returns; see [MIGRATING-v3.md](MIGRATING-v3.md) for each tool's current default.
 
 #### 2. Smart Defaults
 
