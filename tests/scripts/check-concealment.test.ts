@@ -1453,7 +1453,7 @@ describe('a file the gate could not read is never counted as scanned (#701)', ()
       { 'src/a.ts': CLEAN, 'src/b.ts': CLEAN, 'src/locked.ts': CLEAN },
       ({ stderr }) => {
         expect(stderr).toContain('1 of 3 listed files could not be read');
-        expect(stderr).toContain('2 of 3 files were actually read');
+        expect(stderr).toContain('2 of 3 were actually inspected');
       },
       {},
       () => ({}),
@@ -1473,7 +1473,7 @@ describe('a file the gate could not read is never counted as scanned (#701)', ()
         expect(code).toBe(1);
         expect(stderr).toContain('src/gone.ts');
         expect(stderr).toContain('ENOENT');
-        expect(stderr).toContain('1 of 2 files were actually read');
+        expect(stderr).toContain('1 of 2 were actually inspected');
       },
       {},
       () => ({}),
@@ -1501,6 +1501,33 @@ describe('a file the gate could not read is never counted as scanned (#701)', ()
       {},
       () => ({}),
       { beforeCommit: async (dir) => void (await symlink('pkg', join(dir, 'link'))) }
+    );
+  });
+
+  test('a RESOLVABLE symlink has its target path checked too, not just its bytes', async () => {
+    // Review of #724. The first revision reached linkTarget only from the
+    // `catch`, so this case — a link that resolves — had its TARGET'S BYTES
+    // scanned and its target PATH, the only thing git puts in the diff for a
+    // mode-120000 blob, never looked at. Same class as the bug the whole
+    // describe block is about, pointing the other way: content inspected is
+    // not content listed.
+    //
+    // The fixture is a file whose NAME is the payload, so the link resolves
+    // (bytes are clean) and the finding can only come from checking the link
+    // string itself. `concealed` contains no `/`, so it is a legal filename.
+    const name = concealed.trim();
+    await withGitTree(
+      { [name]: CLEAN, 'src/a.ts': CLEAN },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('link');
+        expect(stderr).toContain('eval() call');
+        // Not an unreadable-file report: the link resolves fine.
+        expect(stderr).not.toContain('could not be read');
+      },
+      {},
+      () => ({}),
+      { beforeCommit: async (dir) => void (await symlink(name, join(dir, 'link'))) }
     );
   });
 

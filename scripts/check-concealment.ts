@@ -406,14 +406,23 @@ function walk(dir: string, out: string[]): string[] {
  * following the link and scanning the file at the other end scans something
  * the diff never contained.
  *
- * Used only as the fallback when `readFileSync` fails, which keeps the change
- * additive: a link that resolves to a readable file is still read exactly as
- * before (`package.json` -> `manifest.json` in the routing test depends on
- * that), and a link that resolves to a DIRECTORY or to nothing stops being an
- * unreadable file and becomes one line of scannable content. This repo tracks
- * two of the former — `.agents/skills` and `.claude/skills`, both pointing at
- * directories — and they are why the silent `continue` this replaces was
- * invisible: every run dropped two files while counting them as scanned.
+ * Called for EVERY symlink, not only for the ones that fail to resolve. The
+ * first revision reached this from the `catch` alone, which left the principle
+ * above stated but half-applied: a link that DOES resolve had its target's
+ * bytes scanned — content no reviewer is shown — while the target path, the
+ * only thing the diff actually contains, went unread. `link -> ../../outside/
+ * payload` is the concrete case, and it is the same class as the bug this
+ * function was added for, pointing the other way: content inspected is not
+ * content listed. Caught in review of #724.
+ *
+ * So both are scanned now, and neither replaces the other. Following the link
+ * is still how a resolvable one is read (`package.json` -> `manifest.json` in
+ * the routing test depends on the resolved contents), and a link that resolves
+ * to a DIRECTORY or to nothing stops being an unreadable file and becomes one
+ * line of scannable content. This repo tracks two of the latter —
+ * `.agents/skills` and `.claude/skills`, both pointing at directories — and
+ * they are why the silent `continue` this replaces was invisible: every run
+ * dropped two files while counting them as scanned.
  *
  * Returns undefined for anything that is not a symlink, so a genuinely
  * unreadable regular file still reaches the refusal below.
@@ -1202,21 +1211,37 @@ let scanned = 0;
 
 for (const file of files) {
   const rel = relative(ROOT, file);
+  // undefined for everything that is not a symlink. See linkTarget: for a
+  // symlink this string IS the diff, so it is checked whether or not the link
+  // also resolves to something readable.
+  const link = linkTarget(file);
   let contents: string;
   try {
     contents = readFileSync(file, 'utf-8');
   } catch (err) {
-    // See linkTarget: for a symlink the target PATH is the whole of what the
-    // diff shows, so a link that does not resolve to a readable file is not an
-    // unreadable file — it is one line of content the gate can scan directly.
-    const target = linkTarget(file);
-    if (target === undefined) {
+    if (link === undefined) {
       unreadable.push({ file: rel, cause: err instanceof Error ? err.message : String(err) });
       continue;
     }
-    contents = target;
+    // Nothing else to scan: the link is the whole of the content.
+    contents = link;
   }
   scanned++;
+
+  // Ahead of the NUL check below, which returns early for an expected binary —
+  // a link to a `.png` still has an attacker-chosen target path.
+  //
+  // `prose: false` regardless of the link's own extension, because a target
+  // path is a path and not a paragraph: `AGENTS.md -> CLAUDE.md` should be held
+  // to the code rules on the string `CLAUDE.md`. The cost is that a legitimate
+  // target path past MAX_LINE would be reported, which is the direction this
+  // gate errs in everywhere else.
+  //
+  // Skipped when it is already what `contents` holds, or the line below and the
+  // walk further down would both report the same payload.
+  if (link !== undefined && link !== contents) {
+    checkLine(rel, 1, link, SELF_EXEMPT.has(rel), false);
+  }
   if (contents.includes(NUL)) {
     // Not "binary, therefore safe" — see BINARY_EXTENSIONS. A NUL in a file
     // that is not an expected binary is itself the concealment: it makes git
@@ -1300,7 +1325,7 @@ if (unreadable.length > 0) {
   console.error(
     `check-concealment: ${unreadable.length} of ${files.length} listed files could not be read, ` +
       `so they were NOT inspected. Refusing rather than reporting a scan over a set smaller ` +
-      `than the one git listed — ${scanned} of ${files.length} files were actually read.\n`
+      `than the one git listed — ${scanned} of ${files.length} were actually inspected.\n`
   );
   for (const u of unreadable) console.error(`    ${u.file}  ${u.cause}`);
   console.error(

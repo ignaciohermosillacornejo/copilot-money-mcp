@@ -221,8 +221,9 @@ function topLevelKeys(literal: string): string[] {
     .filter((name): name is string => name !== undefined);
 }
 
-/** Body of the function whose parameter list opens at `parenIdx`. */
 /**
+ * Body of the function whose parameter list opens at `parenIdx`.
+ *
  * ASSUMPTION: no `process*` has an inline object return type. This walks to the
  * first `{` at paren-depth 0, which is the body for `): Account | null {` but
  * would be the RETURN TYPE for `): { securityId: string } {`. In that case the
