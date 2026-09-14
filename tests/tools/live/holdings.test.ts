@@ -352,6 +352,27 @@ describe('LiveHoldingsTools.getHoldings', () => {
     expect(accountsCalls).toBe(2);
   });
 
+  test('accounts rows MISSING the visibility flags fail too, not silently pass (#683)', async () => {
+    // An Array.isArray guard checks the container. Rows that are an array but
+    // lack isUserHidden/isUserClosed sail through it, and
+    // isVisibleAccountNode then reads `!undefined && !undefined` === true for
+    // every row — an empty hidden set, and the double-count back with no
+    // error. Same failure as the `?? []` fallback the code refuses, one level
+    // down.
+    const client = {
+      query: mock((op: string) =>
+        Promise.resolve(
+          op === 'Accounts'
+            ? { accounts: [{ id: 'acct-1', name: 'No flags here' }] }
+            : { holdings: [equityHolding] }
+        )
+      ),
+    } as unknown as GraphQLClient;
+    const tools = new LiveHoldingsTools(makeLive(client));
+
+    await expect(tools.getHoldings({})).rejects.toThrow(/cannot tell which accounts are hidden/);
+  });
+
   test('freshness reflects BOTH snapshots when the visibility join ran (#683)', async () => {
     // The returned rows depend on the accounts snapshot too, so reporting only
     // the holdings snapshot would advertise a freshness the result lacks: a

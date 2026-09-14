@@ -814,7 +814,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'smoke rather than in CI.',
   },
   {
-    surface: 'Account.hiddenAccountsReturned:assumed',
+    surface: 'AccountNode.hiddenAccounts:returnedUnfiltered',
     kind: 'response-shape',
     oracle: null,
     class: 'unverified',

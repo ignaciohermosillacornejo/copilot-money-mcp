@@ -777,7 +777,12 @@ export class CopilotMoneyTools {
     // would turn a resolvable name into `undefined`.
     const accounts = await this.db.getAccounts();
     const account = accounts.find((a) => a.account_id === accountId);
-    return account?.name;
+    // The NAME rule applies here even though the VISIBILITY rule does not: the
+    // opt-out above is from isVisibleAccount only. A caller asking what an
+    // account is called should get the same answer this tool's siblings give,
+    // hidden or not — otherwise a renamed brokerage reads as two accounts
+    // depending on which tool you asked (#663).
+    return account && preferredAccountName(account);
   }
 
   /**

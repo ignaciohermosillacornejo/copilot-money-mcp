@@ -3451,6 +3451,120 @@ describe('getHoldings', () => {
     expect(accountName).toBe('PROVIDER LABEL');
   });
 
+  test('all four account-name surfaces agree on a renamed account (#663)', async () => {
+    // #663 was fixed at get_holdings and left at two more surfaces, which is
+    // the same shape as the bug: a rule applied where someone remembered.
+    //
+    //   get_accounts              nickname  (since #660)
+    //   get_holdings              nickname  (since #663)
+    //   get_recurring_transactions  PROVIDER LABEL  <- resolveAccountName
+    //   get_balance_history         nickname-ish    <- getAccountNameMap
+    //
+    // Pins the RELATIONSHIP across all four, so the next surface that resolves
+    // an account name and forgets fails here rather than shipping a fourth
+    // spelling of the same account.
+    (db as any)._accounts = [
+      {
+        account_id: 'acc_renamed',
+        current_balance: 1000,
+        name: 'BIG BROKERAGE NA',
+        nickname: 'Retirement',
+        account_type: 'investment',
+        holdings: [
+          {
+            security_id: 'sec_aapl',
+            account_id: 'acc_renamed',
+            cost_basis: 100,
+            institution_price: 1.0,
+            institution_value: 100,
+            quantity: 100,
+            iso_currency_code: 'USD',
+          },
+        ],
+      },
+    ];
+    (db as any)._recurring = [
+      {
+        recurring_id: 'rec_1',
+        name: 'Advisory Fee',
+        amount: 40,
+        merchant_name: 'Advisory Fee',
+        account_id: 'acc_renamed',
+        frequency: 'monthly',
+        state: 'active',
+        transaction_ids: [],
+      },
+    ];
+    (db as any)._transactions = [];
+
+    const fromAccounts = (await tools.getAccounts({})).accounts[0]?.name;
+    const fromHoldings = (await tools.getHoldings({})).holdings[0]?.account_name;
+    const fromRecurring = (await tools.getRecurringTransactions({ name: 'Advisory Fee' }))
+      .detail_view?.[0]?.account_name;
+    const fromNameMap = (await db.getAccountNameMap()).get('acc_renamed');
+
+    expect({ fromAccounts, fromHoldings, fromRecurring, fromNameMap }).toEqual({
+      fromAccounts: 'Retirement',
+      fromHoldings: 'Retirement',
+      fromRecurring: 'Retirement',
+      fromNameMap: 'Retirement',
+    });
+  });
+
+  test('an EMPTY nickname keeps the provider label on all four (#663)', async () => {
+    // The `??`-vs-truthiness half, on the two surfaces that still had it.
+    // getAccountNameMap was the worst of them: `'' ?? name` is `''`, which its
+    // own truthiness guard then dropped — so the account vanished from the map
+    // and get_balance_history reported `account_name: undefined`. Not a wrong
+    // name; no name at all.
+    (db as any)._accounts = [
+      {
+        account_id: 'acc_blank',
+        current_balance: 1000,
+        name: 'PROVIDER LABEL',
+        nickname: '',
+        account_type: 'investment',
+        holdings: [
+          {
+            security_id: 'sec_aapl',
+            account_id: 'acc_blank',
+            cost_basis: 100,
+            institution_price: 1.0,
+            institution_value: 100,
+            quantity: 100,
+            iso_currency_code: 'USD',
+          },
+        ],
+      },
+    ];
+    (db as any)._recurring = [
+      {
+        recurring_id: 'rec_1',
+        name: 'Advisory Fee',
+        amount: 40,
+        merchant_name: 'Advisory Fee',
+        account_id: 'acc_blank',
+        frequency: 'monthly',
+        state: 'active',
+        transaction_ids: [],
+      },
+    ];
+    (db as any)._transactions = [];
+
+    const fromAccounts = (await tools.getAccounts({})).accounts[0]?.name;
+    const fromHoldings = (await tools.getHoldings({})).holdings[0]?.account_name;
+    const fromRecurring = (await tools.getRecurringTransactions({ name: 'Advisory Fee' }))
+      .detail_view?.[0]?.account_name;
+    const fromNameMap = (await db.getAccountNameMap()).get('acc_blank');
+
+    expect({ fromAccounts, fromHoldings, fromRecurring, fromNameMap }).toEqual({
+      fromAccounts: 'PROVIDER LABEL',
+      fromHoldings: 'PROVIDER LABEL',
+      fromRecurring: 'PROVIDER LABEL',
+      fromNameMap: 'PROVIDER LABEL',
+    });
+  });
+
   test('get_holdings reports the Copilot nickname, like get_accounts (#663)', async () => {
     // #660 made get_accounts prefer the user's nickname over the provider
     // label. get_holdings kept reporting `name ?? official_name`, so the same
