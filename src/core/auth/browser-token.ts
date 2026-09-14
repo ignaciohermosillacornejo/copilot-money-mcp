@@ -343,6 +343,38 @@ export function noCopilotSessionError(checked: string[]): Error {
 }
 
 /**
+ * Collapse repeated sightings of one token into a single candidate (#722).
+ *
+ * A LevelDB directory holds the same record many times over — every `.log`
+ * append and every compaction leaves a copy — so one token can easily be found
+ * ten times. Against a bounded exchange budget that is indistinguishable from
+ * ten different foreign tokens: it starves whatever sits behind it.
+ *
+ * Keeps the FIRST sighting's position and browser, and lifts `scoped` if any
+ * later sighting came from Copilot's own origin — otherwise a token first seen
+ * in a browser-wide store would stay pinned to the low-probability pool after
+ * turning up in the scoped one. Returns new objects rather than mutating, so
+ * callers never share state through a candidate.
+ *
+ * Exported because both the extractor and the exchange budget in
+ * `firebase-auth.ts` apply it, for the same reason they both apply
+ * {@link orderByProvenance}.
+ */
+export function dedupeByToken(candidates: readonly TokenResult[]): TokenResult[] {
+  const byToken = new Map<string, TokenResult>();
+  for (const candidate of candidates) {
+    const existing = byToken.get(candidate.token);
+    if (!existing) {
+      byToken.set(candidate.token, candidate);
+    } else if (candidate.scoped && !existing.scoped) {
+      // Map.set on an existing key keeps its original insertion position.
+      byToken.set(candidate.token, { ...existing, scoped: true });
+    }
+  }
+  return [...byToken.values()];
+}
+
+/**
  * Hoist Copilot-scoped candidates ahead of browser-wide ones (issue #722).
  *
  * A stable partition, not a comparator sort: within each group the existing
@@ -397,29 +429,16 @@ export function extractRefreshTokenCandidates(
 ): Promise<TokenCandidates> {
   const browsers = browserOverrides ?? BROWSER_CONFIGS;
   const checked: string[] = [];
-  const candidates: TokenResult[] = [];
-  const seen = new Map<string, TokenResult>();
+  const found: TokenResult[] = [];
 
   for (const browser of browsers) {
     checked.push(browser.name);
     for (const { token, scoped } of searchBrowser(browser)) {
-      const existing = seen.get(token);
-      if (existing) {
-        // One token, several sightings: keep the single candidate so a
-        // duplicate can never spend the caller's exchange budget twice, but
-        // let the STRONGER provenance win. Otherwise a token first seen in a
-        // browser-wide store would be pinned to the low-probability pool even
-        // after it turns up in Copilot's own origin directory.
-        existing.scoped ||= scoped;
-        continue;
-      }
-      const candidate: TokenResult = { token, browser: browser.name, scoped };
-      seen.set(token, candidate);
-      candidates.push(candidate);
+      found.push({ token, browser: browser.name, scoped });
     }
   }
 
-  return Promise.resolve({ candidates: orderByProvenance(candidates), checked });
+  return Promise.resolve({ candidates: orderByProvenance(dedupeByToken(found)), checked });
 }
 
 /**

@@ -7,6 +7,7 @@
  */
 
 import {
+  dedupeByToken,
   noCopilotSessionError,
   orderByProvenance,
   type TokenCandidates,
@@ -67,13 +68,16 @@ class TokenExchangeError extends Error {
 /**
  * Order the discovered candidates the way the budget must be spent, then cap.
  *
- * Why the ordering is re-applied here rather than trusted from the extractor:
- * the cap lives in THIS file, `TokenExtractor` is an injected function, and a
- * bound whose safety depends on a collaborator having sorted first is a bound
- * that silently stops being safe the day someone writes a second extractor.
- * The extractor orders too, because its own single-candidate wrapper needs it;
- * calling the same helper is what keeps the two definitions of "first" from
- * drifting apart while staying independently applied.
+ * Why the ordering AND the de-duplication are re-applied here rather than
+ * trusted from the extractor: the cap lives in THIS file, `TokenExtractor` is
+ * an injected function, and a bound whose safety depends on a collaborator
+ * having sorted — or collapsed duplicates — first is a bound that silently
+ * stops being safe the day someone writes a second extractor. Ten sightings of
+ * one token starve a valid candidate behind them exactly the way ten foreign
+ * tokens did; it is the same class with a cheaper cause. The extractor applies
+ * both too, because its own single-candidate wrapper needs them; calling the
+ * same two helpers is what keeps the definitions from drifting apart while
+ * staying independently applied.
  *
  * The cap stays GLOBAL rather than per-source on purpose (issue #722). With
  * scoped candidates already holding the first slots, a per-source budget could
@@ -81,7 +85,7 @@ class TokenExchangeError extends Error {
  * tokens, i.e. other sites' tokens, reach Google's endpoint. See PRIVACY.md.
  */
 function selectExchangeCandidates(candidates: readonly TokenResult[]): TokenResult[] {
-  return orderByProvenance(candidates).slice(0, MAX_EXCHANGE_CANDIDATES);
+  return orderByProvenance(dedupeByToken(candidates)).slice(0, MAX_EXCHANGE_CANDIDATES);
 }
 
 /**
@@ -128,9 +132,9 @@ export class FirebaseAuth {
       try {
         await this.exchangeToken(candidate.token);
       } catch (err) {
-        // 429 / 5xx / transport: the endpoint is the problem, not this
+        // The endpoint, our API key, or the network is the problem — not this
         // candidate. Retrying nine more times would only hammer it and bury
-        // the cause.
+        // the cause behind an unactionable message.
         if (!isCandidateRejection(err)) throw err;
         // Any 4xx is about THIS candidate, so keep going. A non-mismatch code
         // does not mean the token was Copilot's: candidates are scraped out of
@@ -235,25 +239,56 @@ function isForeignProjectError(err: unknown): boolean {
 }
 
 /**
- * Rate-limit / quota status. A 4xx by number, a statement about the ENDPOINT by
- * meaning: Google returns it for `RESOURCE_EXHAUSTED`, and Firebase Auth for
- * `TOO_MANY_ATTEMPTS_TRY_LATER`. Replaying the rest of the list against a
- * server that just said "back off" is the exact harm the 5xx guard exists to
- * prevent, so it is excluded from the per-candidate class below.
+ * 4xx statuses that are about the CALLER or the API, never about the candidate.
+ *
+ * - `429` — rate limit / quota. Google returns it for `RESOURCE_EXHAUSTED`,
+ *   Firebase Auth for `TOO_MANY_ATTEMPTS_TRY_LATER`.
+ * - `403` — no usable API identity. Probed for #722: a request with no key at
+ *   all returns `403 PERMISSION_DENIED`, and key restrictions (referrer, IP,
+ *   service-disabled) land here too. Securetoken's per-token verdicts —
+ *   `INVALID_REFRESH_TOKEN`, `TOKEN_EXPIRED`, `USER_DISABLED`,
+ *   `PROJECT_NUMBER_MISMATCH` — are all 400s, so nothing about a candidate
+ *   arrives as a 403.
  */
-const TOO_MANY_REQUESTS = 429;
+const ENDPOINT_LEVEL_STATUSES: readonly number[] = [403, 429];
+
+/**
+ * Error reasons that make a **400** a statement about our own API key rather
+ * than about the token we sent with it.
+ *
+ * `FIREBASE_API_KEY` is hardcoded in this file, so "the key stopped working"
+ * is a real operational state, not a hypothetical — and probed for #722, an
+ * invalid key comes back `400` with `"reason": "API_KEY_INVALID"`, the same
+ * status a bad refresh token uses. Status alone therefore cannot separate
+ * them; the body has to. Same shape as `isForeignProjectError`, for the same
+ * reason: securetoken encodes the distinction we need in the message, not the
+ * status line.
+ *
+ * Rejected alternative: infer it from every candidate having failed with the
+ * byte-identical message. That misfires on the population this whole change
+ * exists to protect — a genuinely logged-out user's candidates are ALL
+ * `INVALID_REFRESH_TOKEN` with identical bodies, and they would then be shown
+ * a raw 400 instead of "log in".
+ */
+const ENDPOINT_LEVEL_ERROR_CODES: readonly string[] = [
+  'API_KEY_INVALID',
+  'API_KEY_HTTP_REFERRER_BLOCKED',
+  'API_KEY_IP_ADDRESS_BLOCKED',
+  'API_KEY_SERVICE_BLOCKED',
+  'SERVICE_DISABLED',
+];
 
 /**
  * True when an exchange failure is a verdict on the CANDIDATE rather than on
- * the endpoint or the network. Only these are safe to skip past: a 429, a 5xx
- * or a transport failure says nothing about the token, and trying the rest of
- * the list would turn one outage into ten requests and hide the real error.
+ * the endpoint, our API key, or the network. Only these are safe to skip past:
+ * everything else says nothing about the token, and trying the rest of the
+ * list would turn one outage into ten requests and bury the real error behind
+ * "No Copilot Money session found" — a message naming an action that cannot
+ * help.
  */
 function isCandidateRejection(err: unknown): err is TokenExchangeError {
-  return (
-    err instanceof TokenExchangeError &&
-    err.status >= 400 &&
-    err.status < 500 &&
-    err.status !== TOO_MANY_REQUESTS
-  );
+  if (!(err instanceof TokenExchangeError)) return false;
+  if (err.status < 400 || err.status >= 500) return false;
+  if (ENDPOINT_LEVEL_STATUSES.includes(err.status)) return false;
+  return !ENDPOINT_LEVEL_ERROR_CODES.some((code) => err.message.includes(code));
 }

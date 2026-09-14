@@ -1046,16 +1046,19 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
     oracle: null,
     class: 'unverified',
     evidence:
-      'ASSUMED, not observed: the endpoint reports its OWN unavailability with a 5xx, a 429, ' +
-      'or no response at all — never by 4xx-ing a valid candidate. Inferred from standard ' +
-      'Google API HTTP semantics; no probe has induced either. 429 is carved out explicitly ' +
-      'because it is the known counterexample to the simpler "any 4xx is about the ' +
-      'candidate" reading: Google returns it for RESOURCE_EXHAUSTED and Firebase Auth for ' +
-      'TOO_MANY_ATTEMPTS_TRY_LATER, both statements about the endpoint. `isCandidateRejection` in ' +
-      'src/core/auth/firebase-auth.ts relies on it to stop the candidate loop on an outage ' +
-      'instead of replaying every candidate against a struggling endpoint. If the ' +
-      'assumption is wrong the failure is benign in the privacy direction (fewer requests, ' +
-      'a raw error surfaced early) rather than a wrong answer.',
+      'PARTLY probed for issue #722, and the probe refuted the simple version. Key-level ' +
+      'failures do NOT arrive as 5xx: a request with an invalid API key returns HTTP 400 ' +
+      'with reason API_KEY_INVALID — the same status a bad refresh token uses — and a ' +
+      'request with no key at all returns HTTP 403 PERMISSION_DENIED. So status alone ' +
+      'cannot separate "this candidate is bad" from "our key is bad", and ' +
+      '`isCandidateRejection` in src/core/auth/firebase-auth.ts classifies on 403/429 plus ' +
+      'a body-code list (ENDPOINT_LEVEL_ERROR_CODES). STILL UNVERIFIED: that securetoken ' +
+      'reports its own unavailability with a 5xx or no response, that 429 is only ever ' +
+      'rate-limiting (RESOURCE_EXHAUSTED / TOO_MANY_ATTEMPTS_TRY_LATER), and that the ' +
+      'body-code list is exhaustive — no probe induced any of those. If the list is ' +
+      'incomplete the failure is benign in the privacy direction (a raw error surfaced ' +
+      'after the budget, not a wrong answer), but the user-facing message degrades to the ' +
+      'unactionable "no session" one, which is the bug #722 was about.',
   },
 ];
 
