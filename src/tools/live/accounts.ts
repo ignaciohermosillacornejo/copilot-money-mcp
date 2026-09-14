@@ -173,6 +173,16 @@ export class LiveAccountsTools {
     // cache-mode nickname resolution in tools.ts, which writes a DIFFERENT key
     // — `nickname` into `name` — and therefore must run before projection or
     // the projected row silently reverts to the provider label.)
+    //
+    // That contrast raised a fair question in review on #717: live does no
+    // nickname handling at all, so does live `name` carry the nickname or the
+    // provider label? PROBED 2026-09-14 against real data — for every cache
+    // account whose nickname differs from its provider name, the live `name`
+    // matched the NICKNAME, not the provider label. The server resolves it on
+    // the wire, so cache's explicit mapping is what brings cache INTO
+    // agreement with live rather than a divergence from it. Both tool
+    // descriptions therefore state the same contract: `name` is editable, key
+    // on the id.
     const normalizedAccounts = rows.map((a) => (a.limit === 0 ? { ...a, limit: null } : a));
 
     // v3: omitting `fields` yields the terse preset (no sync/plumbing
@@ -210,7 +220,9 @@ export function createLiveAccountsToolSchema(): ToolSchema {
     name: 'get_accounts_live',
     description:
       'Get all linked financial accounts (live, GraphQL-backed). Returns balances and metadata. ' +
-      'Replaces get_accounts when --live-reads is on. Default rows are terse: id, name, type, ' +
+      'Replaces get_accounts when --live-reads is on. `name` is your Copilot nickname when ' +
+      'set, else the provider label — it is user-editable, so key on id, never on name. ' +
+      'Default rows are terse: id, name, type, ' +
       'subType, balance, institutionId, itemId, isUserHidden, isUserClosed (the last two are the ' +
       'flags include_hidden controls). That EXCLUDES sync/plumbing fields — ' +
       '`hasHistoricalUpdates`, `hasLiveBalance`, `liveBalance`, `latestBalanceUpdate`, `isManual` ' +

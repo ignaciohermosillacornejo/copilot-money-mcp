@@ -42,6 +42,13 @@ const QUERIES_DIR = join(import.meta.dir, '../../../src/core/graphql/queries');
  * Anchored to line start (#705). Unanchored, a mirror NAMED IN PROSE counted
  * as a declaration — a JSDoc usage example, a migration note, a `//` TODO — so
  * the ratchet could believe a mirror exists where none does.
+ *
+ * What anchoring reaches: line-prefixed comments (`//`, ` * `) and indented
+ * drafts. What it does NOT reach: a `/* ... *\/` block whose body sits at
+ * column 0. No such instance exists today, and full comment-stripping is more
+ * machinery than a ratchet warrants — but do not read `^` as "comments are
+ * handled". A phantom MIRROR is the more annoying direction: it demands a pin
+ * that cannot exist, failing CI until someone forges one.
  */
 const NAMED_MIRROR = /^export const (\w+NodeSchema)\b/gm;
 /**
@@ -166,6 +173,22 @@ describe('every named zod mirror has a compile-time pin to its interface', () =>
   test('the phantom in _shared.ts is gone, and the real pins survive', () => {
     // The live instance, asserted against the file rather than a fixture, so
     // this fails if the anchoring is ever reverted while that doc block stands.
+    //
+    // Guards the gate on the OTHER half of that sentence: if the `Usage —`
+    // block is ever reworded or moved, the phantom text disappears and the
+    // assertion below starts passing for the wrong reason. Assert the subject
+    // still exists — and still is not at line start, which is the only reason
+    // anchoring excludes it.
+    const sharedSource = readFileSync(join(QUERIES_DIR, '_shared.ts'), 'utf8');
+    expect(
+      sharedSource,
+      'the Usage example this test is about has moved — re-point it or delete the test'
+    ).toContain('export const FOO_NODE_MIRROR_IS_EXACT: ExactKeys<');
+    expect(
+      /^export const FOO_NODE_MIRROR_IS_EXACT/m.test(sharedSource),
+      'the Usage example is now at column 0, so anchoring no longer excludes it'
+    ).toBe(false);
+
     const shared = scans.find((s) => s.file === '_shared.ts');
     expect(shared, '_shared.ts is no longer in the queries dir').toBeDefined();
     expect(
