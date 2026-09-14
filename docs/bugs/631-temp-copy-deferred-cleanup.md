@@ -101,6 +101,15 @@ sweep to disable and was rewritten during review to be non-vacuous against the f
 build. The copy-loop test was checked the same way: delete the `cleanupTempDatabase(tempDir)`
 line and it goes red naming the stranded directory.
 
+**Amended 2026-09-14 ([#642](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/642)).**
+The exit sweep this fix added turned out not to run under `bun test` at all — the runner
+hard-exits without emitting `'exit'` — so the suite itself kept stranding copies (46 per
+full run) while every one of the tests above passed. `tests/core/temp-db-suite-teardown.test.ts`
+now asserts the property for that deployment too, by running a probe suite as a real
+`bun test` child with a private `TMPDIR`. It is worth recording that the gap was in the
+*runtime* the tests ran on, not in the code they tested: the child-process tests below
+prove the sweep works, and proved nothing about whether it was reached.
+
 The cheapest real gate for the class would be a review question rather than code: *does
 anything here schedule cleanup on a timer, and is this process guaranteed to be alive when
 it fires?* Both existing `setTimeout` siblings in `src/` were audited against it

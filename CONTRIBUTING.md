@@ -159,9 +159,12 @@ bun test -t "getBalanceHistory"               # Test name pattern
 
 Tests mirror the `src/` structure in `tests/`. The synthetic test DB is generated at runtime by `tests/helpers/test-db.ts` (no checked-in DB fixtures).
 
+`bunfig.toml` preloads `tests/setup/temp-db-teardown.ts`, a run-wide `afterAll` that deletes the LevelDB temp copies the suite made. It exists because `bun test` hard-exits without firing `process.on('exit')`, so the reader's own exit sweep cannot cover a test run ([#642](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/642)) — a test file that reads a fixture database needs no cleanup hook of its own.
+
 ### Writing Tests
 
 - Use `(db as any)._fieldName = [...]` to inject mock data in `beforeEach`
+- **Never `expect()` outside a `test()` or hook body** — including from a helper called in a `describe` body. Bun evaluates those while it is still discovering tests, so the failure is reported as an unnamed load error and every `test()` the throw skipped past is never registered. `throw` for a structural problem that leaves nothing to test; otherwise collect the problem during the walk and assert on it inside a named test. Enforced by `tests/no-collection-time-assertions.test.ts`
 - Write tool tests need a mock `GraphQLClient` — use `createMockGraphQLClient` from `tests/helpers/mock-graphql.ts`
 - Run `bun run check` before submitting to catch typecheck, lint, format, version-sync, server-json, dependency-pinning, and test failures (run `bun run check:skills` too if you touched `skills/` — it is not part of `check`)
 

@@ -85,6 +85,8 @@ src/
 - Tests in `tests/` mirror `src/` structure
 - Synthetic test DB is generated at runtime by `tests/helpers/test-db.ts` (no checked-in DB fixtures)
 - Run specific tests: `bun test tests/tools/tools.test.ts`
+- `bunfig.toml` preloads `tests/setup/temp-db-teardown.ts`, a run-wide `afterAll` that sweeps the LevelDB temp copies the suite made — `bun test` never fires `process.on('exit')`, so the reader's own exit sweep does not cover a test run (#642). A test file that reads a fixture database needs no cleanup hook of its own
+- Never `expect()` outside a `test()`/hook body, including from a helper called in a `describe` body: bun evaluates those during collection, so the failure arrives as an unnamed load error and the tests after it are never registered. Throw when there is nothing left to test, otherwise collect and assert inside a named test (#714, gated by `tests/no-collection-time-assertions.test.ts`)
 
 ### Tool Implementation Pattern
 Every MCP tool is exactly one `ToolDefinition` in the registry (`src/tools/registry/`) —
