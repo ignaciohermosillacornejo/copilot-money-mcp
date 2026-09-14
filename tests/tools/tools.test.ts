@@ -1221,8 +1221,11 @@ describe('CopilotMoneyTools', () => {
     });
 
     test('an UNCATEGORIZED cache row is 7 keys on the wire', async () => {
-      // The sparse-row test above gives its fixture a category deliberately, so
-      // its 8 holds. This is the third condition on that number, and the guide
+      // 'a sparse cache row omits the preset fields the document lacks' gives
+      // its fixture a category deliberately, so its 8 holds. Named by title
+      // rather than by direction — the next insertion between them moves
+      // whichever word you pick. This is the third condition on that number,
+      // and the guide
       // framed the dropped `category_name` as live mode's "mirror case" — it is
       // not: cache resolves it to `undefined` when there is no category, the
       // key survives projection because the row owns it, and JSON.stringify
