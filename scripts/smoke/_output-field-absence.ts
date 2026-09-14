@@ -6,8 +6,11 @@
  * asks whether what we assume MISSING is still missing, because two live-row
  * fields are synthesized on the strength of that absence.
  *
- * Read-only. Every probe is a `transactions(first: 1)` query whose selection is
- * rejected during validation when the field is absent.
+ * Read-only. Every probe is a `transactions(first: 1)` query. The absent-field
+ * and known-bad probes are rejected during validation, before any resolver
+ * runs; the `presentField` control is valid by design and therefore executes,
+ * reading one transaction. See the rules of engagement in
+ * ./output-field-absence-checks.ts.
  */
 
 import { sendValidationProbe, smokeLog } from './_conformance.js';

@@ -6,7 +6,7 @@ This server exposes different tools depending on which CLI flags you enable. The
 
 | Tool | Status | Notes |
 |---|---|---|
-| `get_transactions` | ✅ | Query transactions with filters (date range, category, merchant, amount, account, text search, etc.). Rows are terse by default as of v3.0.0 (10 fields); `fields: ["all"]` returns the full document (~30 fields on a real row; the schema declares 64) and `fields: ["default", "tag_ids"]` adds named fields. The `compact` boolean was removed |
+| `get_transactions` | ✅ | Query transactions with filters (date range, category, merchant, amount, account, text search, etc.). Rows are terse by default as of v3.0.0 (the preset names 10 fields; a cache row carries the ones it has, so an ordinary row is 8); `fields: ["all"]` returns the full document (~30 fields on a real row; the schema declares 64) and `fields: ["default", "tag_ids"]` adds named fields. The `compact` boolean was removed |
 | `get_accounts` | ✅ | List accounts with balances; filter by type. Rows are terse by default (`fields: [...]` opts into `holdings`, `official_name`, `logo`, etc.) |
 | `get_categories` | ✅ | Category hierarchy with spending totals |
 | `get_budgets` | ✅ | Budgets vs. spending |

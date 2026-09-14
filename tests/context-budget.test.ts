@@ -132,10 +132,17 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // drops — Plaid metadata, internal IDs, enrichment/intelligence fields,
   // tag_ids, review state, location, flags — explicitly as a PARTIAL list, the
   // disclosure fix the PR B review required on get_accounts. Measured 5_833
-  // (~10% headroom). Paying ~700 schema chars once per session to stop
-  // shipping ~50 unwanted fields on every page is the trade #597 exists to
-  // make.
-  get_transactions: 6_425,
+  // Paying schema chars once per session to stop shipping ~20 unwanted fields
+  // on every row of every page is the trade #597 exists to make. (~20, not
+  // ~50: a real row populates ~30 of the 64 declared schema fields, and 10 of
+  // those are the preset.)
+  //
+  // Lowered 6_425 -> 6_340 in review round five: the shared `fields` fragment
+  // stopped duplicating the cache document's dropped-field list, which each
+  // tool's own description already owns. Measured 5_763 (~10% headroom) —
+  // re-tightened rather than left, because a budget with 11.5% slack is the
+  // "ratchet that could not fail" this PR called out on the live tool.
+  get_transactions: 6_340,
   get_cache_info: 640,
   refresh_database: 485,
   // Raised from 1_315 by #597 Tier 2: adds the `fields` param (shared
@@ -190,9 +197,14 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // row drops. It then also has to disclose what the other half of #604 cost:
   // `excluded` and `internal_transfer` are SYNTHESIZED here (no GraphQL
   // equivalent), one exactly and one by approximation, and the description
-  // says which is which and when the approximation can mislead. Measured
-  // 5_779 (~10% headroom).
-  get_transactions_live: 6_360,
+  // says which is which and when the approximation can mislead.
+  //
+  // Lowered 6_360 -> 5_830 in review round five. The shared `fields` fragment
+  // had been enumerating the CACHE document — 16 of its 27 names do not exist
+  // on a live row — so making it mode-neutral took ~480 chars of wrong
+  // information out of this schema. Measured 5_299 (~10% headroom); the old
+  // budget left 20% and would not have failed.
+  get_transactions_live: 5_830,
   // Raised from 570 by #597 Tier 2: adds the `fields` param (shared verbatim
   // with get_accounts — see ACCOUNT_FIELDS_PARAM_SCHEMA) plus a description
   // sentence naming the excluded sync/plumbing fields (`hasHistoricalUpdates`,
@@ -336,7 +348,10 @@ const SCHEMA_BUDGETS: Record<string, number> = {
  * per-tool sum of 78_590 — the aggregate was already the binding check
  * then too).
  */
-const SCHEMA_TOTAL_BUDGET = 79_400;
+// Lowered 79_400 -> 78_700 in review round five, tracking the two per-tool
+// reductions above. Measured 76_492 (~2.9% headroom), still the binding check
+// against a per-tool sum of 83_735.
+const SCHEMA_TOTAL_BUDGET = 78_700;
 
 // ---------------------------------------------------------------------------
 // Synthetic fixture. Deterministic content, opaque Firestore-shaped IDs

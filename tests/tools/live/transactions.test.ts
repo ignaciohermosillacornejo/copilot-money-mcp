@@ -6,6 +6,7 @@ import {
   LIVE_TRANSACTION_KNOWN_FIELDS,
 } from '../../../src/tools/live/transactions.js';
 import { getTransactionsTool } from '../../../src/tools/registry/transactions.js';
+import { TRANSACTION_KNOWN_FIELDS } from '../../../src/tools/tools.js';
 import { getTransactionsLiveTool } from '../../../src/tools/registry/live.js';
 import { LiveCopilotDatabase } from '../../../src/core/live-database.js';
 import type { GraphQLClient } from '../../../src/core/graphql/client.js';
@@ -1146,6 +1147,42 @@ describe('get_transactions_live fields param — parity with get_transactions', 
     expect(JSON.parse(JSON.stringify(liveFragment))).toEqual(
       JSON.parse(JSON.stringify(cacheFragment))
     );
+  });
+
+  test('the SHARED fragment names only fields BOTH modes have', () => {
+    // The constraint that makes sharing safe. A first revision of the #604
+    // wording enumerated the cache document in this fragment — 16 of the 27
+    // names it listed have no live equivalent, and its worked example was
+    // `user_note`, whose live spelling is `user_notes`. A live caller copying
+    // the parameter docs got a `_field_warning` instead of a field.
+    //
+    // Derived, never hand-listed: every snake_case identifier the shared text
+    // names must be selectable on BOTH surfaces. Each tool's own description
+    // owns its mode-specific exclusions, and both already carry one.
+    const shared = cacheFragment.description;
+    const named = [...new Set(shared.match(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g) ?? [])];
+    // Guards the gate: a fragment that named nothing would pass vacuously.
+    expect(named.length).toBeGreaterThan(0);
+
+    const cacheOnly = named.filter(
+      (n) => TRANSACTION_KNOWN_FIELDS.has(n) && !LIVE_TRANSACTION_KNOWN_FIELDS.has(n)
+    );
+    expect(
+      cacheOnly,
+      `The fields param is shared verbatim by get_transactions and get_transactions_live ` +
+        `(see TRANSACTION_FIELDS_PARAM_SCHEMA), so a cache-only name here is advertised to ` +
+        `live callers as requestable and answers with a _field_warning instead: ` +
+        `${cacheOnly.join(', ')}. Move mode-specific names to the tool's own description.`
+    ).toEqual([]);
+
+    const unknownEverywhere = named.filter(
+      (n) => !TRANSACTION_KNOWN_FIELDS.has(n) && !LIVE_TRANSACTION_KNOWN_FIELDS.has(n)
+    );
+    expect(
+      unknownEverywhere,
+      `Names in the shared fields description that are not fields on either surface: ` +
+        `${unknownEverywhere.join(', ')}. A typo here ships straight into both schemas.`
+    ).toEqual([]);
   });
 
   test('fragment is non-vacuous: array of strings, description covers tokens and _field_warning', () => {

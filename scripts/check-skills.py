@@ -47,6 +47,12 @@ LIMITATIONS (documented rather than silently tolerated):
   - A backticked token that is not in the model vocabulary (`jq`, a CLI name)
     is never reported, so a genuinely misspelled field slips through. That is
     the same trade: the vocabulary is what keeps English out of the check.
+  - The argument exemption keys on BACKTICKED tool names, because `tokens` is
+    what the backtick regex found. A line that names the second tool in plain
+    prose ("...then call update_transaction with the new `category_id`") still
+    reports. Every tool mention in the checked-in skills is backticked today,
+    so this is latent; it is the same shape as the bug the line-scoping fixed,
+    recorded rather than silently tolerated.
   - The price of scoping the argument exemption to the line is that PROSE
     naming a dropped row field next to a terse tool now reports, where the
     repo-wide union would have swallowed it if any tool happened to take that
