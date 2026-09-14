@@ -1,0 +1,13 @@
+# Bun configuration for this repo.
+#
+# [test].preload is evaluated once per `bun test` process, before any test file
+# is collected, and lifecycle hooks registered there scope to the ENTIRE run
+# (verified on bun 1.3.5: one beforeAll before the first file, one afterAll
+# after the last). That makes it the only place a run-wide teardown can live.
+#
+# It exists because `bun test` hard-exits without emitting 'exit', so the
+# process-exit temp-copy sweep in src/core/leveldb-reader.ts — the guarantee
+# that a temp copy never outlives the process that made it — silently does not
+# apply to a test run. See tests/setup/temp-db-teardown.ts and issue #642.
+[test]
+preload = ["./tests/setup/temp-db-teardown.ts"]
