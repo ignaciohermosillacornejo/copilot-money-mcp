@@ -767,8 +767,20 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'surfaced via _dropped_invalid_rows + a deduped stderr warning.',
   },
   // ----- Synthesized transaction row fields (#604) ---------------------------
-  // Not fields Copilot returns: fields this repo INVENTS on live rows so
-  // `fields: ["default"]` means the same 10 keys in cache mode and live mode.
+  // Not fields Copilot returns: fields this repo INVENTS on live rows so both
+  // names are SELECTABLE under `fields: ["default"]` and MEAN the same thing in
+  // cache mode and live mode.
+  //
+  // Not the same key COUNT, and an earlier revision of this header claimed it
+  // was: live's mappers always emit a boolean, while cache projects a document
+  // and omits optional fields the row does not carry. A plain cache row comes
+  // back 8 keys wide — no `pending`, no `internal_transfer` — against live's
+  // 10, which is why the measured headline in CHANGELOG.md reads 9 and not 10.
+  // Boolean reads still agree (an absent key is falsy); `Object.keys().length`
+  // does not. `excluded` is the exception that is always present on both
+  // surfaces, because it is DERIVED rather than copied — a derivation always
+  // has a value.
+  //
   // Each one is an assumption about Copilot's data model, so each gets its own
   // entry — they are not equally strong, and collapsing them into one would
   // launder the weaker of the two.
@@ -785,14 +797,16 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'real data the same day: 600 live rows paginated, 506 joined to cache documents by id, ' +
       '506/506 agreement including all 46 rows that are transfers on either side, zero ' +
       'deviations. DERIVED BUT EXACT; nothing re-checks it, so a server-side change to how ' +
-      'transfers are typed would drift silently.',
-    // Cache reports the RAW document flag for this field, not the union its
-    // exclude_transfers filter applies (isTransferCategory also matches
-    // credit_card and *payment* ids). That is deliberate: the raw flag matches
-    // this live classification 508/508 on real data, while the filter is a
-    // broader spend heuristic. Field parity across modes wins over field/filter
-    // symmetry within one mode. Measured 2026-09-11: 0 of 508 rows differ
-    // between the two choices, so nothing observable turns on it today.
+      'transfers are typed would drift silently. ' +
+      'CACHE SIDE: cache reports the RAW document flag for this field, not the union its ' +
+      'exclude_transfers filter applies (isTransferCategory also matches credit_card and ' +
+      '*payment* ids, because it is a spend heuristic rather than a claim about what the ' +
+      'transaction is). Deliberate: field parity ACROSS modes wins over field/filter symmetry ' +
+      'WITHIN one mode. A SECOND run the same day, joining 508 rows rather than the 506 of ' +
+      'the run above, measured both choices — 0 rows differ, so nothing observable turns on ' +
+      'the decision today and it rests on the reasoning alone. Pinned by "a TRANSFER-CATEGORY ' +
+      'row without the raw flag reports internal_transfer falsy" in tests/tools/tools.test.ts, ' +
+      'so a later "fix the asymmetry" fails a test instead of merely contradicting prose.',
   },
   {
     surface: 'Transaction.excluded:synthesized',

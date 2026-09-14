@@ -101,7 +101,9 @@ interface PageResult {
   // same honest widening cache-mode get_transactions took.
   transactions: Partial<EnrichedTransaction>[];
   // Requested `fields` names that matched nothing (typos, or cache-only
-  // names like `excluded` that live rows don't carry), when any.
+  // names like `original_name` that live rows don't carry), when any. `excluded`
+  // and `internal_transfer` are NOT such names since #604 — both are
+  // synthesized onto live rows, so both project.
   _field_warning?: string;
 }
 
@@ -224,8 +226,8 @@ function projectLiveTransactionFields(
       'the get_transactions_live row fields (including the enrichment fields category_name and ' +
       'normalized_merchant, and the synthesized excluded and internal_transfer — the latter is ' +
       "exactly type === INTERNAL_TRANSFER, while excluded is DERIVED from the row's category " +
-      'being user-excluded and can disagree with cache mode, which stores a per-transaction flag ' +
-      'GraphQL does not expose)',
+      'being user-excluded. Cache mode reports the union of that and a per-transaction flag ' +
+      'GraphQL does not expose, so the two modes agree except on a row excluded individually)',
   });
 }
 
