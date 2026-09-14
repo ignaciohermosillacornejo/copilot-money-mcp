@@ -446,13 +446,6 @@ export interface HoldingEntry {
 }
 
 /**
- * Drop split-transaction parents from a list. Each split parent's amount
- * equals the sum of its children's amounts, so any aggregation (category
- * totals, merchant grouping, recurring detection) double-counts if parents
- * are included alongside their children. Copilot hides parents in its own
- * UI for the same reason.
- */
-/**
  * Ceiling on targets per bulk_edit_transactions call.
  *
  * Unlike a client-side fan-out, the whole batch is ONE server request, so this
@@ -462,6 +455,13 @@ export interface HoldingEntry {
  */
 const MAX_BULK_EDIT_TARGETS = 500;
 
+/**
+ * Drop split-transaction parents from a list. Each split parent's amount
+ * equals the sum of its children's amounts, so any aggregation (category
+ * totals, merchant grouping, recurring detection) double-counts if parents
+ * are included alongside their children. Copilot hides parents in its own
+ * UI for the same reason.
+ */
 function filterSplitParents<T extends { children_transaction_ids?: string[] }>(txns: T[]): T[] {
   return txns.filter((t) => !t.children_transaction_ids || t.children_transaction_ids.length === 0);
 }

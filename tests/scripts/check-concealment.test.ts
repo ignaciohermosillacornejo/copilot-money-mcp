@@ -21,7 +21,7 @@
  * whole checker commented out.
  */
 import { describe, expect, test } from 'bun:test';
-import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -138,7 +138,18 @@ async function withGitTree(
   afterCommit: Record<string, string> = {},
   // Built from the temp dir, because anything pointing at a file inside the
   // tree needs its absolute path.
-  extraEnv: (dir: string) => Promise<Record<string, string>> | Record<string, string> = () => ({})
+  extraEnv: (dir: string) => Promise<Record<string, string>> | Record<string, string> = () => ({}),
+  // Tree states a path->contents map cannot express: a symlink, a mode change,
+  // a deletion. The two hooks are NOT interchangeable. `beforeCommit` runs with
+  // the seed files in place and its effects are committed, which is the only
+  // way to get a symlink TRACKED — git lists a tracked symlink as a file, and
+  // the walk does not list it at all. `afterCommit` runs on the committed tree,
+  // which is the only way to produce a file git lists and the gate cannot read:
+  // `git add` has to hash a file, so it fails on one it cannot read.
+  hooks: {
+    beforeCommit?: (dir: string) => Promise<void>;
+    afterCommit?: (dir: string) => Promise<void>;
+  } = {}
 ): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), 'concealment-git-'));
   try {
@@ -161,6 +172,7 @@ async function withGitTree(
       const r = Bun.spawnSync(['git', '-C', dir, ...args], { env: cleanEnv });
       if (r.exitCode !== 0) throw new Error(`git ${args.join(' ')} failed`);
     };
+    await hooks.beforeCommit?.(dir);
     git('init', '-q');
     git('config', 'user.email', 'test@example.com');
     git('config', 'user.name', 'test');
@@ -171,8 +183,11 @@ async function withGitTree(
       await mkdir(join(path, '..'), { recursive: true });
       await writeFile(path, contents);
     }
+    await hooks.afterCommit?.(dir);
     await assertions(await runCheck(dir, [], await extraEnv(dir)));
   } finally {
+    // `force` matters here: a test that removes a file's read bit leaves a mode
+    // rm would otherwise refuse, and a failed cleanup would leak temp trees.
     await rm(dir, { recursive: true, force: true });
   }
 }
@@ -1387,5 +1402,108 @@ describe('reporting', () => {
     await withTree({ 'src/a.ts': `const ok = 1;\nconst bad${ZWSP} = 2;\n` }, ({ stderr }) => {
       expect(stderr).toContain('src/a.ts:2');
     });
+  });
+});
+
+describe('a file the gate could not read is never counted as scanned (#701)', () => {
+  // The audit finding: the scan loop dropped an unreadable file with a bare
+  // `catch { continue }` — no log, no counter, no finding — while the summary
+  // printed `files.length`, computed BEFORE the loop. So the gate reported a
+  // file it never opened as scanned, which on a gate whose whole output is a
+  // claim about what it inspected is a fail-open: the cheapest way past it was
+  // to make a file unreadable rather than to hide anything inside one.
+  //
+  // Skipped for uid 0, who can read a 0o000 file — the mode is advisory for
+  // root, so the fixture would not be unreadable and these would assert the
+  // opposite of what they mean. CI runs as a normal user.
+  const asRoot = process.getuid?.() === 0;
+  const lock =
+    (path: string) =>
+    async (dir: string): Promise<void> => {
+      await chmod(join(dir, path), 0o000);
+    };
+
+  test.skipIf(asRoot)(
+    'an unreadable file refuses the run, by name and with its cause',
+    async () => {
+      await withGitTree(
+        { 'src/a.ts': CLEAN, 'src/b.ts': CLEAN, 'src/locked.ts': CLEAN },
+        ({ code, stdout, stderr }) => {
+          expect(code).toBe(1);
+          expect(stderr).toContain('src/locked.ts');
+          expect(stderr).toContain('could not be read');
+          // The measured cause, not a guess at it — same standard the strategy
+          // refusal above holds itself to, and for the same reason: the remedy
+          // for a permissions problem is not the remedy for a missing file.
+          expect(stderr).toMatch(/EACCES|EPERM/);
+          // And no green line over a shrunken scan.
+          expect(stdout).not.toContain('nothing hidden');
+        },
+        {},
+        () => ({}),
+        { afterCommit: lock('src/locked.ts') }
+      );
+    }
+  );
+
+  test.skipIf(asRoot)('the count is what was read, not what was listed', async () => {
+    // The half of the bug that a log line alone would not have fixed. Both
+    // numbers are printed so the gap is legible rather than inferred.
+    await withGitTree(
+      { 'src/a.ts': CLEAN, 'src/b.ts': CLEAN, 'src/locked.ts': CLEAN },
+      ({ stderr }) => {
+        expect(stderr).toContain('1 of 3 listed files could not be read');
+        expect(stderr).toContain('2 of 3 files were actually read');
+      },
+      {},
+      () => ({}),
+      { afterCommit: lock('src/locked.ts') }
+    );
+  });
+
+  test('a symlink to a directory is scanned as its target path, not dropped', async () => {
+    // git tracks a symlink as mode 120000 whose blob is the TARGET PATH, so it
+    // lists one as a file and `readFileSync` follows it into a directory —
+    // EISDIR, which is precisely the silent drop above. This repo tracks two of
+    // them (`.agents/skills`, `.claude/skills`), so without linkTarget the
+    // refusal would fire on the repository's own tree and the real-root test in
+    // 'clean input' would go red. The target path is all a reviewer is shown
+    // for such a file, so scanning that string scans the whole of its diff.
+    await withGitTree(
+      { 'src/a.ts': CLEAN, 'pkg/b.ts': CLEAN },
+      ({ code, stdout, stderr }) => {
+        expect(stderr).toBe('');
+        expect(code).toBe(0);
+        // 3, not 2: the link is listed, and it is now inspected rather than
+        // counted-but-skipped.
+        expect(stdout).toContain('3 files scanned');
+      },
+      {},
+      () => ({}),
+      { beforeCommit: async (dir) => void (await symlink('pkg', join(dir, 'link'))) }
+    );
+  });
+
+  test('a payload in a symlink TARGET PATH is reported, not just tolerated', async () => {
+    // Non-vacuity for the fallback: scanning the target string has to mean
+    // CHECKING it. A link name is attacker-chosen, and a gap-and-payload in one
+    // reads in a diff exactly the way the better-auth line did.
+    await withGitTree(
+      { 'src/a.ts': CLEAN },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('link');
+        // The rule name, not just the file name. Deleting the fallback also
+        // exits 1 and also prints `link` — as an UNREADABLE file — so asserting
+        // the name alone would pass against the bug this test exists for.
+        expect(stderr).toContain('eval() call');
+        expect(stderr).not.toContain('could not be read');
+      },
+      {},
+      () => ({}),
+      {
+        beforeCommit: async (dir) => void (await symlink(concealed.trim(), join(dir, 'link'))),
+      }
+    );
   });
 });
