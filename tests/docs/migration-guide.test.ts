@@ -44,31 +44,39 @@ function exportedPresets(): Map<string, readonly string[]> {
   return out;
 }
 
-/** The guide's table, parsed into tool -> field names. */
-function documentedRows(): Map<string, string[]> {
+/**
+ * The guide's table, parsed into tool -> field names, plus any duplicate rows.
+ *
+ * Reports duplicates rather than asserting on them: this runs at module scope,
+ * so an `expect()` here would surface as a file-load error — losing the message
+ * and taking the other tests down with it — instead of as one named red test.
+ * A missing marker still throws, because there is nothing to test without one.
+ */
+function documentedRows(): { rows: Map<string, string[]>; duplicates: string[] } {
   const text = readFileSync(join(REPO_ROOT, GUIDE), 'utf-8');
   const from = text.indexOf(BEGIN);
   const to = text.indexOf(END, from);
-  expect(from, `${GUIDE} is missing its "${BEGIN}" marker`).toBeGreaterThan(-1);
-  expect(to, `${GUIDE} is missing its "${END}" marker`).toBeGreaterThan(from);
+  if (from === -1) throw new Error(`${GUIDE} is missing its "${BEGIN}" marker`);
+  if (to <= from) throw new Error(`${GUIDE} is missing its "${END}" marker`);
 
   const rows = new Map<string, string[]>();
+  const duplicates: string[] = [];
   for (const line of text.slice(from, to).split('\n')) {
     // | `tool_name` | `field`, `field`, ... |
     const m = /^\|\s*`([a-z_]+)`\s*\|(.+)\|\s*$/.exec(line);
     if (!m) continue;
     const fields = [...m[2]!.matchAll(/`([a-zA-Z_][a-zA-Z0-9_]*)`/g)].map((f) => f[1]!);
     const tool = m[1]!;
-    // A copy-pasted duplicate row would otherwise overwrite silently AND push
-    // `rows.size` back toward the non-vacuity floor below.
-    expect(rows.has(tool), `${GUIDE} lists \`${tool}\` twice in the preset table`).toBe(false);
+    // A copy-pasted duplicate would otherwise overwrite silently AND push
+    // `rows.size` back toward the non-vacuity floor.
+    if (rows.has(tool)) duplicates.push(tool);
     rows.set(tool, fields);
   }
-  return rows;
+  return { rows, duplicates };
 }
 
 const presets = exportedPresets();
-const rows = documentedRows();
+const { rows, duplicates } = documentedRows();
 const registeredTools = new Set(
   [...READ_TOOL_DEFS, ...LIVE_TOOL_DEFS].map((d) => (d.schema as { name: string }).name)
 );
@@ -84,6 +92,11 @@ describe('the migration guide documents the real presets', () => {
     expect(presets.size).toBeGreaterThanOrEqual(8);
     expect(rows.size).toBeGreaterThanOrEqual(8);
     expect(registeredTools.size).toBeGreaterThan(20);
+    expect(
+      duplicates,
+      `${GUIDE} lists these tools more than once in the preset table: ${duplicates.join(', ')}. ` +
+        `A duplicate row overwrites the earlier one silently and depresses the count above.`
+    ).toEqual([]);
   });
 
   test('every documented field list is exactly one of the real presets', () => {
