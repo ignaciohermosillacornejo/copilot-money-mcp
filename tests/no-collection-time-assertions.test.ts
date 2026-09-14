@@ -24,7 +24,8 @@
  *   - COLLECT during the walk and ASSERT inside a named test for a problem the
  *     file still has a test to report.
  *
- * WHAT IT CATCHES — per file, syntax only, no type checker:
+ * WHAT IT CATCHES — every `tests/**` TypeScript file, per file, syntax only,
+ * no type checker:
  *   - an `expect()` evaluated at collection time (module body or `describe`
  *     body), directly;
  *   - a locally declared helper that asserts, *named* anywhere in
@@ -32,8 +33,12 @@
  *     (`.map(evidenceFor)`, which is how #714 actually reached the body).
  *
  * WHAT IT DOES NOT CATCH, stated rather than implied:
- *   - an asserting helper imported from another module: the analysis is
- *     per-file, and closing that needs a type checker rather than a parse;
+ *   - an asserting helper DEFINED in one module and named at collection time
+ *     in another: the analysis is per-file, and closing that needs a type
+ *     checker rather than a parse. (A bare module-scope `expect()` in a helper
+ *     IS caught — the sweep covers every `tests/**\/*.ts`, not just test
+ *     files, because such a line runs during the collection of every test
+ *     that imports it.);
  *   - a helper reached only through a value the syntax cannot follow (stored
  *     in an object, returned from a factory);
  *   - an anonymous IIFE that asserts at module scope — the arrow suppresses
@@ -73,12 +78,26 @@ const DEFERRED_CALLERS = new Set([
   'afterEach',
 ]);
 
+/**
+ * The deliberate specimen in tests/fixtures/ reproduces both shapes on purpose,
+ * so the sweep must skip it — `guards the gate` scans it directly instead.
+ */
+const SPECIMEN = 'collection-time-assertion-sample.ts';
+
+/**
+ * Every TypeScript file under tests/, not only `*.test.ts`.
+ *
+ * A bare `expect()` at the module scope of a helper runs during the collection
+ * of every test file that imports it, and produces the same unnamed load
+ * error — it is the identical single-file check, just applied to a file a
+ * `*.test.ts` filter would skip.
+ */
 function testFiles(dir: string): string[] {
   const out: string[] = [];
   for (const name of readdirSync(dir)) {
     const full = join(dir, name);
     if (statSync(full).isDirectory()) out.push(...testFiles(full));
-    else if (name.endsWith('.test.ts')) out.push(full);
+    else if (name.endsWith('.ts') && name !== SPECIMEN) out.push(full);
   }
   return out;
 }
@@ -241,12 +260,15 @@ describe('no test file asserts outside a test', () => {
     const { files } = sweepSuite();
     expect(files.length).toBeGreaterThan(100);
     expect(files.some((f) => f.endsWith('no-collection-time-assertions.test.ts'))).toBe(true);
+    // The sweep covers helpers and fixtures too, not only `*.test.ts`.
+    expect(files.some((f) => f.endsWith(join('helpers', 'test-db.ts')))).toBe(true);
+    expect(files.some((f) => f.endsWith(SPECIMEN))).toBe(false);
   });
 
   test('guards the gate: the scanner recognises the shape it looks for', () => {
     // The detector is only worth its runtime if it still fires. This is the
     // #714 shape, verbatim, fed through the same scanner via a fixture file.
-    const fixture = join(TESTS_ROOT, 'fixtures', 'collection-time-assertion-sample.ts');
+    const fixture = join(TESTS_ROOT, 'fixtures', SPECIMEN);
     const found = scan(fixture);
     expect(
       found.map((f) => f.what).sort(),

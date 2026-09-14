@@ -29,6 +29,12 @@
  * This gates the mechanism, not one test file: any future test that reads a
  * fixture database is covered by the same teardown, and any change that stops
  * the teardown running is caught here regardless of which file leaked.
+ *
+ * COST, so it reads as a decision rather than a discovery to whoever comes
+ * looking for suite time: two full child `bun test` runs per suite run, each
+ * building two LevelDB fixtures and performing a worker-thread decode. Both
+ * are essential — the second is the control, and without it the first proves
+ * only that a directory is empty.
  */
 
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
@@ -101,6 +107,8 @@ function runProbe(preload: boolean): ProbeRun {
     tmpDir,
     leftovers,
     status: res.status,
+    signal: res.signal,
+    error: res.error,
     output: `${res.stdout ?? ''}${res.stderr ?? ''}`,
   };
 }
