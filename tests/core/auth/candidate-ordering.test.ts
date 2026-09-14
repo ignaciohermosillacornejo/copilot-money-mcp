@@ -279,7 +279,8 @@ describe('no single candidate can starve a valid one behind it (#722)', () => {
   test.each([
     ['a foreign-project rejection', { error: { message: 'PROJECT_NUMBER_MISMATCH' } }, 400],
     ['a truncated/garbage token', { error: { message: 'INVALID_REFRESH_TOKEN' } }, 400],
-    ['a refused request', { error: { message: 'PERMISSION_DENIED' } }, 403],
+    ['an expired token', { error: { message: 'TOKEN_EXPIRED' } }, 400],
+    ['a disabled account', { error: { message: 'USER_DISABLED' } }, 400],
   ])('%s on an earlier candidate does not end the search', async (_name, body, status) => {
     // Every candidate here is browser-wide, so ordering cannot help: this is
     // purely about a 4xx verdict on one candidate not being read as a verdict
@@ -309,6 +310,50 @@ describe('no single candidate can starve a valid one behind it (#722)', () => {
 
     await expect(auth.getIdToken()).rejects.toThrow('Firebase token exchange failed (503)');
     expect(attempts).toHaveLength(1);
+  });
+
+  test.each([
+    // Probed for #722: no API key at all returns 403 PERMISSION_DENIED, and an
+    // invalid key returns 400 API_KEY_INVALID — the SAME status a bad refresh
+    // token uses. The key is hardcoded in src/, so "the key stopped working"
+    // is an operational state, and every candidate would fail identically.
+    // Continuing would send ten tokens for nothing and then report "log in"
+    // for an outage logging in cannot fix.
+    ['a blocked API identity', { error: { message: 'PERMISSION_DENIED' } }, 403],
+    [
+      'a rotated API key',
+      { error: { message: 'API key not valid', status: 'API_KEY_INVALID' } },
+      400,
+    ],
+    ['a disabled API', { error: { message: 'SERVICE_DISABLED' } }, 403],
+  ])('%s stops the run instead of spending the budget', async (_name, body, status) => {
+    const candidates = Array.from({ length: 5 }, (_, i) =>
+      candidate(syntheticToken(`foreign${i}`), false)
+    );
+    const attempts: string[] = [];
+    mockExchange(attempts, [body, status as number]);
+    const auth = new FirebaseAuth(() => Promise.resolve({ candidates, checked: ['Chrome'] }));
+
+    await expect(auth.getIdToken()).rejects.toThrow('Firebase token exchange failed');
+    await expect(auth.getIdToken()).rejects.not.toThrow('No Copilot Money session found');
+    expect(attempts).toHaveLength(2); // one per getIdToken call, not one per candidate
+  });
+
+  test('duplicate sightings of one token cannot spend the budget more than once', async () => {
+    // The budget refuses to trust its collaborator to ORDER; it must equally
+    // refuse to trust it to DE-DUPLICATE. Ten copies of one token starve a
+    // valid candidate behind them exactly the way ten foreign tokens did.
+    const repeated = syntheticToken('repeated');
+    const candidates = [
+      ...Array.from({ length: MAX_EXCHANGE_CANDIDATES + 5 }, () => candidate(repeated, false)),
+      candidate(REAL_SESSION, false),
+    ];
+    const attempts: string[] = [];
+    mockExchange(attempts);
+    const auth = new FirebaseAuth(() => Promise.resolve({ candidates, checked: ['Chrome'] }));
+
+    expect(await auth.getIdToken()).toBe(ID_TOKEN);
+    expect(attempts).toEqual(['foreign', 'session']);
   });
 
   test('a rate limit stops immediately, even though 429 is a 4xx', async () => {

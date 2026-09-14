@@ -103,6 +103,12 @@ verdict on a *candidate* from a verdict on the *endpoint* — the former is skip
 latter (5xx, transport, and 429, which is a 4xx by number and a "back off" by meaning)
 still stops the run immediately.
 
+Classification is by *meaning*, not by status number. Review and probe together showed
+status alone cannot carry it: an invalid API key returns **400** `API_KEY_INVALID` — the
+same status a bad refresh token uses — and no key at all returns **403**. Left on the
+status rule, a rotated key would have spent the whole budget and then reported "log in"
+for an outage logging in cannot fix, which is this bug's own symptom.
+
 Provenance also decides what is worth *reporting*. A rejection from a browser-wide
 candidate says nothing about Copilot, so only a **scoped** candidate's unexplained failure
 is surfaced raw; everything else still resolves to the actionable "log in" message. Without
@@ -129,6 +135,8 @@ locally).
 | loop aborts on any non-mismatch error | a truncated token / a 403 ends the search |
 | de-dup keeps first provenance | token in both stores ranked by weakest source |
 | origin match is a bare substring | lookalike `app.copilot.money.example.com` ranks scoped |
+| budget trusts the extractor to de-duplicate | one token repeated past the cap starves the session |
+| key-level 4xx treated as a candidate verdict | a rotated API key spends the budget, then says "log in" |
 
 A second gate came out of the review, and it is the more interesting one: the auth test
 files were **not in any typecheck program**, so adding a required field to `TokenResult`
