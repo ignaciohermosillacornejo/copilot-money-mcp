@@ -1220,6 +1220,86 @@ describe('CopilotMoneyTools', () => {
       expect(result.transactions[0]?.excluded).toBe(true);
     });
 
+    test('the transaction_id path enriches identically to the windowed one', async () => {
+      // The two cache paths through getTransactions() derive the same fields,
+      // and a caller who passes transaction_id must not get a different answer
+      // about the same row than a caller who passed a window containing it.
+      // This pins the parity itself rather than one field: the next derived
+      // field that lands on only one of the two sites fails here.
+      (db as any)._userCategories = [
+        { category_id: 'work_cat', name: 'Work', emoji: '💼', order: 0, excluded: true },
+      ];
+      (db as any)._transactions = [
+        {
+          transaction_id: 'txn_in_excluded_cat',
+          date: '2024-03-15',
+          amount: 100,
+          name: 'In an excluded category',
+          category_id: 'work_cat',
+          account_id: 'acc_1',
+          item_id: 'item_1',
+          // deliberately NO `excluded` key — this is the shape Copilot writes
+        },
+      ];
+
+      const byId = await tools.getTransactions({ transaction_id: 'txn_in_excluded_cat' });
+      const byWindow = await tools.getTransactions({
+        start_date: '2024-03-01',
+        end_date: '2024-03-31',
+        exclude_excluded: false,
+      });
+
+      expect(byId.transactions).toHaveLength(1);
+      expect(byWindow.transactions).toHaveLength(1);
+      expect(byId.transactions[0]).toEqual(byWindow.transactions[0]!);
+      // ...and the agreed value is the derived one, not a shared omission.
+      expect(byId.transactions[0]!.excluded).toBe(true);
+    });
+
+    test('a TRANSFER-CATEGORY row without the raw flag reports internal_transfer falsy', async () => {
+      // Pins the deliberate asymmetry documented on the enrichment helper:
+      // `excluded` is the union of the raw flag and the category predicate,
+      // `internal_transfer` is the raw flag alone. exclude_transfers is
+      // broader than the field on purpose — isTransferCategory() is a spend
+      // heuristic that also matches `credit_card`, not a claim about what the
+      // transaction IS — so this row is HIDDEN by the filter while the field
+      // stays falsy. "Fixing the asymmetry" to match `excluded` fails here.
+      (db as any)._userCategories = [
+        { category_id: 'credit_card', name: 'Credit Card Payment', order: 0 },
+      ];
+      (db as any)._transactions = [
+        {
+          transaction_id: 'txn_card_payment',
+          date: '2024-03-15',
+          amount: 100,
+          name: 'Card payment',
+          category_id: 'credit_card',
+          account_id: 'acc_1',
+          item_id: 'item_1',
+          // deliberately NO `internal_transfer` key
+        },
+      ];
+
+      // The filter is broader than the field: default filtering hides the row.
+      const filtered = await tools.getTransactions({
+        start_date: '2024-03-01',
+        end_date: '2024-03-31',
+      });
+      expect(filtered.transactions).toHaveLength(0);
+
+      // ...but the field itself must not claim the row IS an internal transfer.
+      const shown = await tools.getTransactions({
+        start_date: '2024-03-01',
+        end_date: '2024-03-31',
+        exclude_transfers: false,
+      });
+      expect(shown.transactions[0]!.internal_transfer).toBeFalsy();
+
+      // Same answer down the single-lookup path.
+      const byId = await tools.getTransactions({ transaction_id: 'txn_card_payment' });
+      expect(byId.transactions[0]!.internal_transfer).toBeFalsy();
+    });
+
     test('includes split parents when exclude_split_parents is false', async () => {
       const result = await tools.getTransactions({
         start_date: '2024-03-01',
