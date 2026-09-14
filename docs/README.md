@@ -15,9 +15,11 @@ something stopped returning a field.
   against drift in Copilot's API, which we neither own nor get change notice for. Covers
   the three kinds of oracle, the conformance ledger as the spine, the five invariants,
   the standing (no-one-is-coding) posture, and where each piece lives. Read this first.
-- **[DESIGN_NOTES.md](DESIGN_NOTES.md)** — Context-conscious tool design: why tool
-  responses are compact, paginated, and aggregate-first, so a large transaction history
-  can't blow out the model's context window.
+- **[DESIGN_NOTES.md](DESIGN_NOTES.md)** — The original (v1.2.1) context-budget writeup:
+  why tool responses are compact, paginated, and aggregate-first, so a large transaction
+  history can't blow out the model's context window. Historical in framing — its token
+  estimates and example output shapes predate the v3 field-selection redesign, so read it
+  for the rationale and [MIGRATING-v3.md](MIGRATING-v3.md) for what ships today.
 - **[MIGRATING-v3.md](MIGRATING-v3.md)** — Upgrading from v2.x. v3 is a response-shape
   release: read tools return a small default row and everything else is one named
   `fields` request away. Symptom-to-fix table, the terse preset for every tool, and the
