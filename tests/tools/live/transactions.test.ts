@@ -1166,11 +1166,19 @@ describe('get_transactions_live fields param — parity with get_transactions', 
     //
     // Field references are found by intersecting every identifier in the text
     // with the UNION of the two known-field sets, rather than by a snake_case
-    // pattern: `type` and `logo` carry no underscore and were invisible to the
-    // pattern. The cost is that a prose word which is also a field name gets
-    // treated as a reference — it passes as long as both modes have it, and
-    // fails loudly with a rewordable message if they don't, which is the safe
-    // direction for a guard.
+    // pattern, which could not see a single-word field name at all: `type` is
+    // live-only, and `recurring`, `city`, `region`, `address`, `country`,
+    // `lat`, `lon` are cache-only. (An earlier revision of this comment cited
+    // `logo` — it is an ACCOUNT field, on no transaction surface, so it is in
+    // neither set and this guard still cannot see it. The example asserted a
+    // reach the code does not have, which is the defect class this very test
+    // exists to catch.)
+    //
+    // The cost is that a prose word which is also a field name counts as a
+    // reference. It passes as long as both modes have it, and fails loudly
+    // when they don't — the safe direction for a guard, but the failure
+    // message has to offer rewording, because several cache-only fields
+    // (`recurring`, `city`, `country`) are ordinary English words.
     const shared = cacheFragment.description;
     const everyField = new Set([...TRANSACTION_KNOWN_FIELDS, ...LIVE_TRANSACTION_KNOWN_FIELDS]);
     const identifiers = [...new Set(shared.match(/\b[a-z][a-z0-9_]*\b/g) ?? [])];
@@ -1188,12 +1196,18 @@ describe('get_transactions_live fields param — parity with get_transactions', 
       `The fields param is shared verbatim by get_transactions and get_transactions_live ` +
         `(see TRANSACTION_FIELDS_PARAM_SCHEMA), so a name only one mode has is advertised to ` +
         `the other mode's callers as requestable and answers with a _field_warning instead. ` +
-        `Move mode-specific names to the tool's own description, which owns its exclusions.`
+        `Either move the mode-specific name to the tool's own description, which owns its ` +
+        `exclusions — OR reword, if the token is English rather than a field reference. This ` +
+        `extraction cannot tell the two apart, and 'recurring', 'city', 'region', 'address' ` +
+        `and 'country' are all cache-only transaction fields as well as ordinary words.`
     ).toEqual([]);
 
     // The typo half: a name no surface has cannot be caught by the check
     // above, because it is in neither set and so never becomes a reference.
-    const looksLikeAField = identifiers.filter((n) => n.includes('_') && !n.startsWith('_'));
+    // No `startsWith('_')` filter: the regex cannot produce a leading-underscore
+    // token, so `_field_warning` never appears here — which also means a
+    // mistyped internal name like `_fild_warning` is invisible to this half.
+    const looksLikeAField = identifiers.filter((n) => n.includes('_'));
     const unknownEverywhere = looksLikeAField.filter((n) => !everyField.has(n));
     expect(
       unknownEverywhere,
