@@ -776,6 +776,12 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   // and omits optional fields the row does not carry. A plain cache row comes
   // back 8 keys wide — no `pending`, no `internal_transfer` — against live's
   // 10, which is why the measured headline in CHANGELOG.md reads 9 and not 10.
+  // Live's 10 is itself a ceiling rather than a constant: `category_name`
+  // resolves to `undefined` for a row with no category, or one whose category
+  // id is missing from the index, and JSON.stringify drops the key — so an
+  // uncategorized live row reaches the caller 9 wide. It is the only preset
+  // name that can vanish this way, and it is pinned by 'an uncategorized live
+  // row is 9 keys ON THE WIRE, not 10' in tests/tools/live/transactions.test.ts.
   // Boolean reads still agree (an absent key is falsy); `Object.keys().length`
   // does not. `excluded` is the exception that is always present on both
   // surfaces, because it is DERIVED rather than copied — a derivation always

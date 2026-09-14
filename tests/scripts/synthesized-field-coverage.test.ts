@@ -24,6 +24,12 @@ import {
   synthesizedLedgerSurfaces,
 } from '../../scripts/smoke/output-field-absence-checks.js';
 import { CONFORMANCE_LEDGER } from '../../src/conformance/ledger.js';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+/** Repo root, derived from this file's location — no cwd assumption. */
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 describe('every synthesized ledger surface has an absence smoke', () => {
   const covered = new Set(ALL_OUTPUT_FIELD_ABSENCE_CHECKS.flatMap((c) => c.ledgerSurfaces));
@@ -115,6 +121,61 @@ describe('the ledger describes the spellings that are actually watched', () => {
           `check currently watches ${check.absentFields.length} ` +
           `(${check.absentFields.join(', ')}). Update the evidence text and this passes.`
       ).toContain(`is ${check.absentFields.length} spellings`);
+    });
+  }
+});
+
+describe('the SOURCE comment above the synthesis describes the watched spellings too', () => {
+  // The ledger pin above did not reach this one. `src/tools/live/transactions.ts`
+  // carries a SYNTHESIZED FIELDS block directly above the mappers — the copy a
+  // maintainer reads first, before touching the derivation — and it went on
+  // claiming 11 spellings for a full release cycle after the ledger, the
+  // CHANGELOG and the smoke had all been corrected to 8. A pin that covers
+  // only `entry.evidence` leaves every prose copy outside it free to drift.
+  //
+  // Reads the file rather than importing, because the claim lives in a comment
+  // and comments are not values.
+  const SOURCE = 'src/tools/live/transactions.ts';
+  const BLOCK_START = 'SYNTHESIZED FIELDS';
+
+  const block = (): string => {
+    const text = readFileSync(join(REPO_ROOT, SOURCE), 'utf8');
+    const from = text.indexOf(BLOCK_START);
+    expect(from, `${SOURCE} no longer contains a "${BLOCK_START}" doc block`).toBeGreaterThan(-1);
+    const to = text.indexOf('*/', from);
+    expect(to, `the ${BLOCK_START} block in ${SOURCE} is unterminated`).toBeGreaterThan(from);
+    return text.slice(from, to);
+  };
+
+  test('guards the gate: the block exists and is substantial', () => {
+    // Without this, a renamed or deleted block turns both assertions below
+    // into vacuous passes over an empty string.
+    expect(block().length).toBeGreaterThan(500);
+  });
+
+  for (const check of ALL_OUTPUT_FIELD_ABSENCE_CHECKS) {
+    if (check.typeName !== 'Transaction') continue;
+
+    test('every watched spelling is named in the source block', () => {
+      const text = block();
+      const unnamed = check.absentFields.filter((f) => !text.includes(`\`${f}\``));
+      expect(
+        unnamed,
+        `Spellings watched by scripts/smoke/output-field-absence-checks.ts but absent from the ` +
+          `${BLOCK_START} block in ${SOURCE}: ${unnamed.join(', ')}. That block is what a ` +
+          `maintainer reads before changing the synthesis, so it has to name what is actually ` +
+          `watched.`
+      ).toEqual([]);
+    });
+
+    test('the source block states the same COUNT as the watched list', () => {
+      expect(
+        block(),
+        `The ${BLOCK_START} block in ${SOURCE} must state the watched-spelling count as ` +
+          `"the ${check.absentFields.length} spellings" — the absence check currently watches ` +
+          `${check.absentFields.length} (${check.absentFields.join(', ')}). An earlier revision ` +
+          `said "and 6 further spellings" (11) long after every other site had been corrected.`
+      ).toContain(`the ${check.absentFields.length} spellings`);
     });
   }
 });
