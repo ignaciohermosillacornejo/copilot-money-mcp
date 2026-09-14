@@ -773,9 +773,12 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   //
   // Not the same key COUNT, and an earlier revision of this header claimed it
   // was: live's mappers always emit a boolean, while cache projects a document
-  // and omits optional fields the row does not carry. A plain cache row comes
-  // back 8 keys wide — no `pending`, no `internal_transfer` — against live's
-  // 10, which is why the measured headline in CHANGELOG.md reads 9 and not 10.
+  // and omits optional fields the row does not carry. A categorized cache row
+  // that is neither pending nor a transfer comes back 8 keys wide — no
+  // `pending`, no `internal_transfer` — against live's 10, which is why the
+  // measured headline in CHANGELOG.md reads 9 and not 10. An UNCATEGORIZED
+  // cache row is 7: `category_name` resolves to `undefined` and serialization
+  // drops it, the same mechanism that makes an uncategorized live row 9.
   // Live's 10 is itself a ceiling rather than a constant: `category_name`
   // resolves to `undefined` for a row with no category, or one whose category
   // id is missing from the index, and JSON.stringify drops the key — so an
