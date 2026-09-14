@@ -400,10 +400,11 @@ export function extractRefreshTokenCandidates(
  *
  * Thin wrapper over {@link extractRefreshTokenCandidates} that returns the
  * first candidate — Copilot-scoped if any scoped candidate exists — and throws
- * the actionable "no session" error when none exist. Note: this does NOT validate that the token belongs to Copilot's
- * project — callers that need foreign-project rejection should consume the
- * full candidate list and drive the exchange-and-discard loop (see
- * `FirebaseAuth`). Retained for backward compatibility.
+ * the actionable "no session" error when none exist. Note: this does NOT
+ * validate that the token belongs to Copilot's project — callers that need
+ * foreign-project rejection should consume the full candidate list and drive
+ * the exchange-and-discard loop (see `FirebaseAuth`). Retained for backward
+ * compatibility.
  *
  * @param browserOverrides - Override browser configs for testing
  * @throws Error if no token is found in any browser
