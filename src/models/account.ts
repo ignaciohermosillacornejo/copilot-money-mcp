@@ -110,46 +110,6 @@ export const AccountSchema = z
 export type Account = z.infer<typeof AccountSchema>;
 
 /**
- * Get the best display name for an account.
- *
- * NOT the user-facing account label — use {@link preferredAccountName} (#663).
- * This one is nickname-UNAWARE and uses `??` where that helper deliberately
- * uses `||`, so a `name: ''` returns `''` here and the provider label there.
- * It has no production consumers today (only `withDisplayName`, itself used
- * only by tests), and it is kept rather than deleted because the models test
- * pins its behaviour — but two exported name helpers in one module, one of
- * them literally called "display name", is exactly how a future surface picks
- * the wrong one. It has happened: docs/bugs/662-account-dedup-drops-documents.md
- * records the account dedup key being built from this function.
- */
-export function getAccountDisplayName(account: Account): string {
-  return account.name ?? account.official_name ?? 'Unknown';
-}
-
-/**
- * Extended account with computed display_name field.
- */
-export interface AccountWithDisplayName extends Account {
-  display_name: string;
-}
-
-/**
- * Add display_name to an account object.
- *
- * NOT the user-facing label: this is {@link getAccountDisplayName} with a
- * spread around it, so it inherits the same nickname-unaware rule (#663) and
- * is the more tempting of the two, because it stamps the field onto the row
- * rather than returning a bare string. A surface a user reads wants
- * {@link preferredAccountName}.
- */
-export function withDisplayName(account: Account): AccountWithDisplayName {
-  return {
-    ...account,
-    display_name: getAccountDisplayName(account),
-  };
-}
-
-/**
  * ACCOUNT VISIBILITY — one rule, two field vocabularies (#683).
  *
  * "Is this an account the user still counts as part of their finances?" The
