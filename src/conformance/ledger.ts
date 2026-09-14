@@ -32,9 +32,15 @@
  *                      behaviour of that operation rather than its existence
  *                      — `Mutation.editTransaction:routing`,
  *                      `Mutation.splitTransaction:sum`,
- *                      `Mutation.bulkEditTransactions:silent-skip`. Six live
- *                      entries already use it; documented here for the same
- *                      reason as the `response-shape` form below.
+ *                      `Mutation.bulkEditTransactions:silent-skip`. Several
+ *                      live entries already use it; documented here for the
+ *                      same reason as the `response-shape` form below. (No
+ *                      count on purpose: a present-tense tally in a comment
+ *                      goes silently false on the next entry, which is the
+ *                      class #705 was about.)
+ *                      `Mutation.` ONLY — see the reserved-prefix note under
+ *                      `response-shape`; it applies to every kind, so
+ *                      `Query.<field>:<aspect>` fails CI here too.
  * - `response-shape` → `Mutation.<fieldName>:response` / `Query.<fieldName>:response`
  *                      for a whole operation's shape. For an assumption about
  *                      ONE FIELD's semantics rather than the operation's keys,

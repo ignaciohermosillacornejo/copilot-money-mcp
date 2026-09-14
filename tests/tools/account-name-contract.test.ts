@@ -89,6 +89,13 @@ describe('both account tools state the `name` contract (#665)', () => {
       // here: these sentences backtick other field names two clauses earlier,
       // so a "make the field names consistent" edit is plausible — and it
       // would slip a pasted `key on \`account_id\`` PAST a bare-form check.
+      //
+      // Deliberately the INSTANCE fix, not the class one. Normalizing all
+      // markup out of the description before matching would also absorb
+      // `**account_id**` or `"account_id"` — but backtick is the only
+      // convention these descriptions use, and an MCP tool description is not
+      // going to grow bold field names. Widening the guard to cover markup
+      // nobody writes would cost legibility for no reachable case.
       expect(
         schema.description,
         `${schema.name} must tell callers to key on \`${stableKey}\` — the field its own rows ` +
