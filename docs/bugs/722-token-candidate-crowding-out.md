@@ -99,8 +99,15 @@ is independently mutation-verified below.
 
 Downstream: de-duplication now promotes provenance (a token seen in a browser-wide store
 *and* in Copilot's own directory ranks as scoped), and the exchange loop distinguishes a
-4xx verdict on a *candidate* from a 5xx/transport failure of the *endpoint* — the former is
-skipped past, the latter still stops the run immediately.
+verdict on a *candidate* from a verdict on the *endpoint* — the former is skipped past, the
+latter (5xx, transport, and 429, which is a 4xx by number and a "back off" by meaning)
+still stops the run immediately.
+
+Provenance also decides what is worth *reporting*. A rejection from a browser-wide
+candidate says nothing about Copilot, so only a **scoped** candidate's unexplained failure
+is surfaced raw; everything else still resolves to the actionable "log in" message. Without
+that, a logged-out user whose `Local Storage` held one truncated `AMf-` fragment would have
+got a Firebase 400 instead — #722's symptom reached from the opposite side.
 
 The cap stays at ten, and stays a single global budget rather than one budget per source.
 With scoped candidates already holding the first slots, a per-source budget could not
@@ -110,7 +117,7 @@ Google's endpoint.
 ## Detector
 
 `tests/core/auth/candidate-ordering.test.ts` — class-level, and **mutation-verified** in
-four independent directions. It runs the real extractor over a real temp profile layout
+five independent directions. It runs the real extractor over a real temp profile layout
 built by the production path helper, and only `fetch` is faked (deciding accept-vs-reject
 from the token the request actually carries, which is the one thing that cannot run
 locally).
@@ -121,6 +128,14 @@ locally).
 | `FirebaseAuth` caps without ordering | unsorted extractor result defeats the budget |
 | loop aborts on any non-mismatch error | a truncated token / a 403 ends the search |
 | de-dup keeps first provenance | token in both stores ranked by weakest source |
+| origin match is a bare substring | lookalike `app.copilot.money.example.com` ranks scoped |
+
+A second gate came out of the review, and it is the more interesting one: the auth test
+files were **not in any typecheck program**, so adding a required field to `TokenResult`
+broke nothing anywhere — the existing `as TokenResult[]` assertions silently produced
+`scoped: undefined`. They are now in `tsconfig.tests.json`, with the extractor mocks typed
+by return annotation rather than assertion, so dropping the field is a build error. Also
+mutation-verified.
 
 The class invariant it encodes is broader than the reported bug: *no single candidate may
 end the search for a valid one behind it*, whatever its position or failure mode. That is
@@ -141,3 +156,7 @@ the version that shipped.
 The corollary is about the detector, not the code: a test that pins a limit should also pin
 what the limit is allowed to discard. Ours pinned the number and let the choice go
 unobserved for three months.
+
+And one found only by fixing it: a required field added to a shared type is a migration
+only where something typechecks. Four files here asserted their way past it with `as`, in a
+directory no `tsconfig` covered, so the compiler had no opinion at all.

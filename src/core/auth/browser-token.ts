@@ -61,34 +61,42 @@ const COPILOT_INDEXEDDB_DIR = 'IndexedDB/https_app.copilot.money_0.indexeddb.lev
 const LOCAL_STORAGE_DIR = 'Local Storage/leveldb';
 
 /**
- * Substring every browser's per-origin storage directory for Copilot carries:
- * Chromium's `https_app.copilot.money_0.indexeddb.leveldb`, Firefox's
- * `https+++app.copilot.money`, Safari's legacy origin-named database dirs.
- * Browser-wide stores (`Local Storage/leveldb`, Safari's hashed WebsiteData
- * dirs) never do, which is exactly the asymmetry the ordering exploits.
+ * Copilot's web origin as browsers encode it into a storage directory name —
+ * matched as a WHOLE HOST, not as a substring of a longer one.
+ *
+ * Every encoding wraps the host in characters that cannot occur inside a
+ * hostname: Chromium writes `https_app.copilot.money_0.indexeddb.leveldb`,
+ * Firefox writes `https+++app.copilot.money` (optionally followed by
+ * `^partitionKey=…`), and Safari's legacy origin-named database directories
+ * follow Chromium's shape. So requiring a non-hostname character on both sides
+ * is enough to separate the real origin from a lookalike, without having to
+ * enumerate the encodings — which would rot the day a browser adds a suffix.
+ *
+ * `app.copilot.money.example.com` and `evil-app.copilot.money` are the cases
+ * this rules out: both contain the host as a substring, neither is delimited
+ * by it. Getting that wrong is not a vulnerability — the exchange still
+ * rejects a foreign token — but it would hand a lookalike a slot in the
+ * high-priority pool it has no claim to.
  */
-const COPILOT_ORIGIN_MARKER = 'app.copilot.money';
+const COPILOT_ORIGIN_PATTERN = /(?:^|[^A-Za-z0-9.-])app\.copilot\.money(?![A-Za-z0-9.-])/;
 
 /**
  * True when a storage path names Copilot's own web origin, i.e. only
  * app.copilot.money could have written the tokens under it.
  *
- * Deliberately a substring test on the path rather than a per-browser flag:
- * the three searchers hand it different things (a Chromium search directory,
- * a Firefox origin directory, a Safari file path) and the property being
- * asserted — "this location belongs to Copilot's origin" — is the same one in
- * all three. Exported for the ordering tests.
+ * Deliberately a test on the path rather than a per-browser flag: the three
+ * searchers hand it different things (a Chromium search directory, a Firefox
+ * origin directory, a Safari file path) and the property being asserted —
+ * "this location belongs to Copilot's origin" — is the same one in all three.
  *
- * A substring rather than an exact origin match, because the real directory
- * names carry decoration this would otherwise have to enumerate (Chromium's
- * `_0.indexeddb.leveldb` suffix, Firefox's partition-key suffixes). The loose
- * end is a hostile origin like `app.copilot.money.example.com`, which would
- * rank as scoped; the cost of that is one budget slot spent earlier, since the
- * exchange still rejects it as foreign. Note the read filter it feeds is
- * looser still — Firefox visits any origin containing `copilot`.
+ * Provenance, NOT validation. It says who wrote the bytes, never whether the
+ * token inside them is live or whose project it belongs to; only the exchange
+ * knows that. Note the READ filter it feeds is far looser — Firefox visits any
+ * storage origin whose directory name contains `copilot` — and this does not
+ * change that. Exported for the ordering tests.
  */
 export function isCopilotScopedPath(path: string): boolean {
-  return path.includes(COPILOT_ORIGIN_MARKER);
+  return COPILOT_ORIGIN_PATTERN.test(path);
 }
 
 /** A token plus where it came from, before it is attributed to a browser. */
@@ -335,6 +343,22 @@ export function noCopilotSessionError(checked: string[]): Error {
 }
 
 /**
+ * Hoist Copilot-scoped candidates ahead of browser-wide ones (issue #722).
+ *
+ * A stable partition, not a comparator sort: within each group the existing
+ * discovery order — browser order, and longest-token-first within a file — is
+ * a real preference and must survive untouched.
+ *
+ * Exported because BOTH the extractor and the exchange budget in
+ * `firebase-auth.ts` apply it, and they must agree on what "first" means. They
+ * still apply it independently: the budget's safety cannot rest on its
+ * collaborator having called this, only on the ordering being the same one.
+ */
+export function orderByProvenance(candidates: readonly TokenResult[]): TokenResult[] {
+  return [...candidates.filter((c) => c.scoped), ...candidates.filter((c) => !c.scoped)];
+}
+
+/**
  * Extract ALL Firebase refresh-token candidates from browser local storage.
  *
  * Searches browsers in order: the Chromium family (Chrome, Arc, Edge, Brave,
@@ -395,12 +419,7 @@ export function extractRefreshTokenCandidates(
     }
   }
 
-  // Stable partition, not a comparator sort: within each group discovery order
-  // is the existing "newer tokens tend to be longer / earlier browsers first"
-  // preference, and it must survive untouched.
-  const ordered = [...candidates.filter((c) => c.scoped), ...candidates.filter((c) => !c.scoped)];
-
-  return Promise.resolve({ candidates: ordered, checked });
+  return Promise.resolve({ candidates: orderByProvenance(candidates), checked });
 }
 
 /**

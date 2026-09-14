@@ -1046,9 +1046,12 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
     oracle: null,
     class: 'unverified',
     evidence:
-      'ASSUMED, not observed: the endpoint reports its OWN unavailability with a 5xx (or no ' +
-      'response at all), never by 4xx-ing a valid candidate. Inferred from standard Google ' +
-      'API HTTP semantics; no probe has induced a 5xx. `isCandidateRejection` in ' +
+      'ASSUMED, not observed: the endpoint reports its OWN unavailability with a 5xx, a 429, ' +
+      'or no response at all — never by 4xx-ing a valid candidate. Inferred from standard ' +
+      'Google API HTTP semantics; no probe has induced either. 429 is carved out explicitly ' +
+      'because it is the known counterexample to the simpler "any 4xx is about the ' +
+      'candidate" reading: Google returns it for RESOURCE_EXHAUSTED and Firebase Auth for ' +
+      'TOO_MANY_ATTEMPTS_TRY_LATER, both statements about the endpoint. `isCandidateRejection` in ' +
       'src/core/auth/firebase-auth.ts relies on it to stop the candidate loop on an outage ' +
       'instead of replaying every candidate against a struggling endpoint. If the ' +
       'assumption is wrong the failure is benign in the privacy direction (fewer requests, ' +

@@ -4,11 +4,15 @@
 // `bun run typecheck` instead of silently keeping the suite green (#433).
 //
 // Scope: tests/helpers/mock-graphql.ts plus every test file that calls
-// createMockGraphQLClient (tsc also follows their imports). The rest of
-// tests/ carries ~87 pre-existing type errors and is intentionally NOT
-// included yet — expanding this include list to tests/**/* is follow-up
-// work tracked outside this gate. When a new test file adopts
-// createMockGraphQLClient, add it here.
+// createMockGraphQLClient (tsc also follows their imports), and since #722 the
+// auth test surface — the token extractor and exchange loop. Those were added
+// because a required field appeared on TokenResult and NOTHING failed: the
+// files were outside this program, so their `as TokenResult[]` assertions were
+// never checked by anything. A typed contract that no program typechecks is
+// not a contract. The rest of tests/ carries ~87 pre-existing type errors and
+// is intentionally NOT included yet — expanding this include list to
+// tests/**/* is follow-up work tracked outside this gate. When a new test file
+// adopts createMockGraphQLClient, add it here.
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
@@ -47,6 +51,10 @@
     "tests/no-hand-rolled-comment-strippers.test.ts",
     "tests/exported-constants.test.ts",
     "tests/context-budget-live.test.ts",
+    "tests/core/auth/browser-token.test.ts",
+    "tests/core/auth/candidate-ordering.test.ts",
+    "tests/core/auth/firebase-auth.test.ts",
+    "tests/integration/uid-transition-sweep.test.ts",
     "tests/e2e/server.test.ts",
     "tests/integration/tools.test.ts",
     "tests/tools/bulk-edit-transactions.test.ts",
