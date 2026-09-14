@@ -30,7 +30,7 @@ Give the user a 30-second financial check-in. One number, a few flags, prospecti
 
 2. **Pull data.** Use these MCP tools in parallel:
    - `get_accounts` — all accounts with balances (for net worth and available cash)
-   - `get_transactions` with `period: "this_month"`, `exclude_transfers: true` — current month spending. No `fields` argument needed anywhere in this skill: everything it computes (sums, per-category totals, merchant names, dates) is in the v3.0.0 default row
+   - `get_transactions` with `period: "this_month"`, `exclude_transfers: true` — current month spending. No `fields` argument needed on the `get_transactions` calls: everything this skill computes from them (sums, per-category totals, merchant names, dates) is in the v3.0.0 default row. `get_recurring_transactions` below is the exception and does need one
    - `get_transactions` with `period: "last_month"`, `exclude_transfers: true` — last month for comparison
    - `get_transactions` with `period: "last_90_days"`, `exclude_transfers: true` — for rolling averages
    - `get_categories` with `view: "list"`, `period: "this_month"` — category spending this month

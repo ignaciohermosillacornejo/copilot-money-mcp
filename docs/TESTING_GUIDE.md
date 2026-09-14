@@ -264,7 +264,7 @@ Find all my monthly recurring charges
 - Recurring items are detected correctly
 - Frequency is accurate
 - Next expected date is shown
-- Transaction history is available
+- Transaction history is available **only when the call passes `fields: ["default", "transactions"]`** — as of v3.0.0 the matched per-charge array is excluded from the default row
 
 **What to Verify:**
 - ✅ Recurring items are identified

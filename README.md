@@ -57,6 +57,8 @@ Passing `--write` implies `--live-reads`; you can still pass `--live-reads` on i
 
 📖 **See [docs/tools-by-mode.md](docs/tools-by-mode.md)** for the full per-tool inventory with status, caveats, and known limitations (goals, stock splits, response-size caps).
 
+⬆️ **Upgrading from v2?** v3.0.0 changed the shape of read responses — see **[docs/MIGRATING-v3.md](docs/MIGRATING-v3.md)**. No tool was renamed or removed; rows got terse and two arguments were retired.
+
 ---
 
 ## Quick Start
@@ -250,7 +252,7 @@ Use this when:
 copilot-money-mcp --write
 ```
 
-Adds 17 mutation tools for transactions, tags, categories, recurrings, budgets, and split-transactions. Off by default — the server is read-only unless you opt in.
+Adds 19 mutation tools for transactions, tags, categories, recurrings, budgets, and split-transactions. Off by default — the server is read-only unless you opt in.
 
 `--write` automatically enables `--live-reads` as well. Write tools resolve transaction metadata (account/item IDs) against the live GraphQL surface so they can edit any transaction the API exposes, not just the ~30 days the local LevelDB cache happens to hold. Once you've consented to the authenticated network calls writes require, there's no privacy or perf reason to keep reads pinned to the stale cache.
 
@@ -300,6 +302,8 @@ Also: `get_investment_prices` and `get_investment_prices_live` already return sp
 ### Long time-series responses are capped
 
 Time-series live tools (`get_balance_history_live`, `get_networth_live`, `get_investment_prices_live`) cap responses at 500 rows by default to fit the MCP single-tool-result token limit. Pass `max_rows` / `offset` to paginate, or narrow `time_frame` for fewer rows.
+
+`get_investment_balance_live` has its own, much tighter cap under a different name: `history_limit`, default **30** points, `0` for the whole series. Its responses always report `history_total_count` and `history_truncated`, and its `current` value is resolved separately so it can never be lost to truncation.
 
 ## Troubleshooting
 

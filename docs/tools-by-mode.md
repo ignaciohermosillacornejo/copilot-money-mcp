@@ -6,14 +6,14 @@ This server exposes different tools depending on which CLI flags you enable. The
 
 | Tool | Status | Notes |
 |---|---|---|
-| `get_transactions` | ✅ | Query transactions with filters (date range, category, merchant, amount, account, text search, etc.). Rows are terse by default as of v3.0.0 (the preset names 10 fields; a cache row carries the ones it has, so an ordinary row is 8); `fields: ["all"]` returns the full document (~30 fields on a real row; the schema declares 64) and `fields: ["default", "tag_ids"]` adds named fields. The `compact` boolean was removed |
+| `get_transactions` | ✅ | Query transactions with filters (date range, category, merchant, amount, account, text search, etc.). Rows are terse by default as of v3.0.0 (the preset names 10 fields; a cache row carries the ones it has, so a row that is neither pending nor a transfer is 8 — the CHANGELOG's measured 9 is a real 100-row page, whose rows do carry `pending`); `fields: ["all"]` returns the full document (~30 fields on a real row; the schema declares 64) and `fields: ["default", "tag_ids"]` adds named fields. The `compact` boolean was removed |
 | `get_accounts` | ✅ | List accounts with balances; filter by type. Rows are terse by default (`fields: [...]` opts into `holdings`, `official_name`, `logo`, etc.) |
 | `get_categories` | ✅ | Category hierarchy with spending totals |
 | `get_budgets` | ✅ | Budgets vs. spending |
 | `get_recurring_transactions` | ✅ | Detected subscriptions + recurring charges. Pattern-detected rows are terse by default (`fields: [...]` opts into the matched `transactions` array and `confidence_reason`) |
 | `get_holdings` | ✅ | Investment positions with cost basis (cached) |
 | `get_balance_history` | ✅ | Daily balance history; supports cross-account + daily/weekly/monthly granularity |
-| `get_investment_prices` | ✅ | Historical price data |
+| `get_investment_prices` | ✅ | Historical price data. Terse by default as of v3.0.0: rows carry a derived `latest_price` / `latest_at` and NOT the `prices` series — a history query needs `fields: ["default", "prices"]` |
 | `get_investment_splits` | ⚠️ | Cache-only — returns stock-split events (date + multiplier) for held securities that have split. Empty for securities that never split. Note that prices from `get_investment_prices` are already split-adjusted; use this tool only for narrative/historical analysis. |
 | `get_goals` | ⚠️ | Cache-only — Copilot's GraphQL endpoint doesn't expose goals data, so no `--live-reads` counterpart exists |
 | `get_goal_history` | ⚠️ | Same — cache-only forever |
@@ -27,9 +27,9 @@ When enabled, 6 cache-mode read tools are replaced with GraphQL-backed equivalen
 
 | Tool | Replaces? | Status | Notes |
 |---|---|---|---|
-| `get_transactions_live` | `get_transactions` | ✅ | Windowed cache; paginates per month. Terse by default too, same 10 preset names — but live emits both booleans unconditionally, where a cache row carries only the document fields it has, so an ordinary cache row is 8 keys and its live counterpart is 10. An uncategorized live row is 9 on the wire: `categoryId` is nullable, so `category_name` maps to `undefined` and `JSON.stringify` drops the key |
+| `get_transactions_live` | `get_transactions` | ✅ | Windowed cache; paginates per month. Terse by default too, same 10 preset names — but live emits both booleans unconditionally, where a cache row carries only the document fields it has, so a cache row that is neither pending nor a transfer is 8 keys and its live counterpart is 10. An uncategorized live row is 9 on the wire: `categoryId` is nullable, so `category_name` maps to `undefined` and `JSON.stringify` drops the key |
 | `get_accounts_live` | `get_accounts` | ✅ | 1h cache. Rows are terse by default (`fields: [...]` opts into the sync/plumbing fields, `mask`, `color`, `limit`) |
-| `get_categories_live` | `get_categories` | ✅ | 24h cache; reflects rollovers per user setting |
+| `get_categories_live` | `get_categories` | ✅ | 24h cache; reflects rollovers per user setting. Terse by default as of v3.0.0: rows are `{id, parentId, name, colorName, isExcluded, budget_amount}` — the embedded `budget` object (and `templateId`, `icon`, `isRolloverDisabled`, `canBeDeleted`) come back with `fields: ["default", "budget"]` |
 | `get_budgets_live` | `get_budgets` | ✅ | Projection over `categories_live` data |
 | `get_recurring_live` | `get_recurring_transactions` | ✅ | ⚠️ Pattern-based detection from transactions is NOT in live mode — use cache mode if you need that. Rows are terse by default (`fields: [...]` opts into `rule`, `payments`, `icon`) |
 | `get_holdings_live` | `get_holdings` | ✅ | Includes cost basis via `metrics`; `metrics: null` for CASH and some 401(k) mutual fund positions (Copilot doesn't compute basis for those) |
@@ -40,9 +40,9 @@ When enabled, 6 cache-mode read tools are replaced with GraphQL-backed equivalen
 | `get_balance_history_live` | _(additive)_ | ✅ | ⚠️ Single-account only (server constraint — requires `item_id` + `account_id`); use cache-mode `get_balance_history` for cross-account or weekly/monthly granularity |
 | `get_investment_prices_live` | _(additive)_ | ✅ | ⚠️ Server-side ownership-gated: only works for securities currently in your linked accounts |
 | `get_investment_allocation_live` | _(additive)_ | ✅ | Portfolio asset-class allocation (`type` / `amount` / `percentage`); `percentage` is a percent (0–100). Optional `account_id` / `item_id` scope (server-side) |
-| `get_top_movers_live` | _(additive)_ | ✅ | Biggest movers across holdings; `filter` = MY_EQUITY_CHANGE (default) or PRICE_CHANGE; each row has `change` + a `price_points` series |
+| `get_top_movers_live` | _(additive)_ | ✅ | Biggest movers across holdings; `filter` = MY_EQUITY_CHANGE (default) or PRICE_CHANGE. Terse by default as of v3.0.0: rows carry `change` but NOT the `price_points` tick series — ask for it with `fields: ["default", "price_points"]` |
 | `get_aggregated_holdings_live` | _(additive)_ | ✅ | Per-security aggregated market `value` + `change` over `time_frame`; collapses accounts (vs per-position `get_holdings_live`) |
-| `get_investment_balance_live` | _(additive)_ | ✅ | Investments-only combined balance: `current` live dot + daily `history` over `time_frame` (vs whole-net-worth `get_networth_live` / per-account `get_balance_history_live`) |
+| `get_investment_balance_live` | _(additive)_ | ✅ | Investments-only combined balance: `current` live dot + daily `history` over `time_frame` (vs whole-net-worth `get_networth_live` / per-account `get_balance_history_live`). As of v3.0.0 `history` is CAPPED, not excluded: `history_limit` defaults to 30 points, `0` returns the whole series, and every response reports `history_total_count` / `history_truncated` |
 | `refresh_cache` | _(utility)_ | ✅ | Invalidate live-mode caches by scope |
 
 ## ✍️ `--write` mode — mutations via Copilot's GraphQL API (requires browser auth 🔒, implies `--live-reads`)
@@ -72,5 +72,5 @@ Enabling `--write` automatically turns on `--live-reads`, so the tools below are
 | Goals (`get_goals`, `get_goal_history`) | ⚠️ Cache-only. Copilot's GraphQL endpoint doesn't expose goals. There is no live counterpart, and there are no goal write tools (goals are desktop-only in Copilot). |
 | Goal write tools (`create_goal` / `update_goal` / `delete_goal`) | ❌ Not implemented. Copilot doesn't expose goal mutations via GraphQL. |
 | Stock-split data | ⚠️ Available via `get_investment_splits` for currently-held securities that have split (one row per `(security_id, effective_date)` with adjustment multiplier). Empty for securities that never split. Securities a user no longer holds eventually fall out of the cache. There is no GraphQL endpoint for splits — this is the only way to get them, and only for held securities. |
-| Long time-series responses | ⚠️ The MCP single-tool-result token cap means very long histories (e.g., multi-year daily prices or balances) are capped at 500 rows by default. Use `max_rows` / `offset` parameters, or narrow `time_frame` to fetch more. |
+| Long time-series responses | ⚠️ The MCP single-tool-result token cap means very long histories (e.g., multi-year daily prices or balances) are capped at 500 rows by default. Use `max_rows` / `offset` parameters, or narrow `time_frame` to fetch more. **`get_investment_balance_live` is the exception**: its series is capped by `history_limit` (default 30, `0` = unlimited) rather than `max_rows`. |
 | 🔒 Browser authentication | Both `--live-reads` and `--write` require a logged-in browser session against `app.copilot.money` (the server uses the same Firebase refresh-token flow as the web app). Reads in default mode require nothing. |

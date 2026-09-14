@@ -6,7 +6,8 @@ Start with **[CONFORMANCE_ARCHITECTURE.md](CONFORMANCE_ARCHITECTURE.md)** if you
 to touch the GraphQL surface, add a tool, or fix a boundary bug — it explains the ledger,
 the smokes, and the PR rituals as one system. Start with
 **[tools-by-mode.md](tools-by-mode.md)** if you just want to know which tools exist in
-which mode.
+which mode, or **[MIGRATING-v3.md](MIGRATING-v3.md)** if you upgraded from v2 and
+something stopped returning a field.
 
 ## Architecture & design
 
@@ -17,6 +18,10 @@ which mode.
 - **[DESIGN_NOTES.md](DESIGN_NOTES.md)** — Context-conscious tool design: why tool
   responses are compact, paginated, and aggregate-first, so a large transaction history
   can't blow out the model's context window.
+- **[MIGRATING-v3.md](MIGRATING-v3.md)** — Upgrading from v2.x. v3 is a response-shape
+  release: read tools return a small default row and everything else is one named
+  `fields` request away. Symptom-to-fix table, the terse preset for every tool, and the
+  two arguments that were removed.
 - **[tools-by-mode.md](tools-by-mode.md)** — Per-tool inventory across the three modes
   (default cache reads, `--live-reads`, `--write`), including which cache tools get
   swapped for `_live` variants, which are cache-only forever, and known caveats.

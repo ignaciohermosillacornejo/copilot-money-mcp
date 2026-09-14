@@ -30,10 +30,12 @@ If auth fails at boot, the server logs a diagnostic line to stderr and exits non
 | `transaction_type: foreign \| duplicates` | Supported | **Not supported** |
 | `exclude_split_parents: false` | Supported | **Not supported** (server omits parents) |
 | `transaction_id` single lookup | Requires only the ID | Requires `transaction_id` + `account_id` + `item_id` |
-| Field selection (`fields`) | Terse by default since v3.0.0; `fields: ["all"]` for the full document. No `compact` — the boolean was removed | Terse by default too — `fields: ["default"]` names the same 10 fields. GraphQL carries neither `excluded` nor `internal_transfer` under any spelling, so both are **synthesized**: `internal_transfer` is `type === "INTERNAL_TRANSFER"` (exact); `excluded` is whether the row's category is user-excluded, which cache unions with a per-transaction flag GraphQL exposes nowhere. Key counts still differ: live always emits both booleans, cache omits optional document fields the row lacks (an ordinary row is 8 keys wide) |
+| Field selection (`fields`) | Terse by default since v3.0.0; `fields: ["all"]` for the full document. No `compact` — the boolean was removed | Terse by default too — `fields: ["default"]` names the same 10 fields. GraphQL carries neither `excluded` nor `internal_transfer` under any spelling, so both are **synthesized**: `internal_transfer` is `type === "INTERNAL_TRANSFER"` (exact); `excluded` is whether the row's category is user-excluded, which cache unions with a per-transaction flag GraphQL exposes nowhere. Key counts still differ: live always emits both booleans, cache omits optional document fields the row lacks (a row that is neither pending nor a transfer is 8 keys wide; a real 100-row page measures 9, since those rows carry `pending`) |
 | Auth required | No | Yes |
 
 Every unsupported filter produces an error message telling the LLM to retry without that parameter — it doesn't silently drop.
+
+**`__typename` is stripped from every response.** The generated operations select it on each non-root selection set so requests keep matching what the web app's Apollo Client sends, but it is removed on the way out (`src/tools/strip-typename.ts`), at all nesting depths, for every live tool and every write-tool echo. Requests are unchanged. Code that keyed on `__typename` to tell response objects apart has to use the shapes themselves — the icon union is the only place it mattered, and `{unicode}` vs `{id, src}` already distinguish those.
 
 ## Filter reference for `get_transactions_live`
 

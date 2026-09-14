@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+> **Upgrading from v2.x?** This release changes the shape of read responses.
+> [docs/MIGRATING-v3.md](docs/MIGRATING-v3.md) is the short version: what breaks, what to
+> pass instead, and the default row for every tool.
+
 ### Added
 
 - **Shared field-selection engine + `_field_warning` on unknown field names** (part of [#597](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/597), groundwork for v3). The `fields`/`compact` projection behind `get_transactions` is now a standalone engine (`src/tools/field-selection.ts`) the upcoming v3 PRs (cache reshape, live parity, accounts preset) all build on: token expansion (`"default"` → per-tool preset, `"all"`/`"*"` → full documents), order-preserving dedupe, allowlist projection, and unknown-name detection. Two deliberate behavior changes for callers: (1) requested field names that match nothing (typos) are now reported in a top-level `_field_warning` on the response instead of being silently ignored; (2) `"default"`, `"all"` and `"*"` are now interpreted as selection tokens — previously they were ordinary (nonexistent) field names, so e.g. `fields: ["all"]` projected every row down to `{}` and now returns full documents. These three names are permanently unselectable as literal fields. Opt-in `fields`/`compact` behavior was otherwise unchanged at that point: no selection → full documents, `compact` keeping its 7-field set, `fields` beating `compact`. Both of those were superseded later in this same release by #604 below, which made rows terse by default and deleted `compact` outright.
