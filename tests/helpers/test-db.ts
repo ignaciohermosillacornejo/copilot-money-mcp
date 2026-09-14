@@ -5,10 +5,9 @@
  * that can be properly read by the decoder.
  */
 
-import { LevelDBReader, createTestDatabase } from '../../src/core/leveldb-reader.js';
+import { createTestDatabase } from '../../src/core/leveldb-reader.js';
 import { encodeFirestoreDocument } from '../../src/core/protobuf-parser.js';
 import fs from 'node:fs';
-import path from 'node:path';
 
 /**
  * Test data types that match our model schemas.

@@ -6,7 +6,12 @@
  * when expired (3600 second lifetime).
  */
 
-import { noCopilotSessionError, type TokenCandidates, type TokenResult } from './browser-token.js';
+import {
+  noCopilotSessionError,
+  orderByProvenance,
+  type TokenCandidates,
+  type TokenResult,
+} from './browser-token.js';
 
 // Public client-side Firebase Web API key for copilot-production-22904 — intentionally
 // not a secret. Scoped by Firebase security rules; safe to commit.
@@ -29,7 +34,7 @@ const EXPIRY_MARGIN_MS = 60_000;
  * Ordering is what makes discarding harmless — everything the cap drops came
  * from a store every site writes to.
  */
-const MAX_EXCHANGE_CANDIDATES = 10;
+export const MAX_EXCHANGE_CANDIDATES = 10;
 
 /**
  * Securetoken rejection code returned when a refresh token belongs to a
@@ -60,17 +65,13 @@ class TokenExchangeError extends Error {
 /**
  * Order the discovered candidates the way the budget must be spent, then cap.
  *
- * Copilot-scoped candidates (`TokenResult.scoped`) come from a directory only
- * app.copilot.money writes to; browser-wide ones come from a store every site
- * shares. Hoisting the former is a stable partition, so discovery order —
- * browser order, and longest-token-first within a file — survives inside each
- * group.
- *
  * Why the ordering is re-applied here rather than trusted from the extractor:
  * the cap lives in THIS file, `TokenExtractor` is an injected function, and a
  * bound whose safety depends on a collaborator having sorted first is a bound
  * that silently stops being safe the day someone writes a second extractor.
- * The extractor sorts too, because its own single-candidate wrapper needs it.
+ * The extractor orders too, because its own single-candidate wrapper needs it;
+ * calling the same helper is what keeps the two definitions of "first" from
+ * drifting apart while staying independently applied.
  *
  * The cap stays GLOBAL rather than per-source on purpose (issue #722). With
  * scoped candidates already holding the first slots, a per-source budget could
@@ -78,10 +79,7 @@ class TokenExchangeError extends Error {
  * tokens, i.e. other sites' tokens, reach Google's endpoint. See PRIVACY.md.
  */
 function selectExchangeCandidates(candidates: readonly TokenResult[]): TokenResult[] {
-  return [...candidates.filter((c) => c.scoped), ...candidates.filter((c) => !c.scoped)].slice(
-    0,
-    MAX_EXCHANGE_CANDIDATES
-  );
+  return orderByProvenance(candidates).slice(0, MAX_EXCHANGE_CANDIDATES);
 }
 
 /**
@@ -128,17 +126,24 @@ export class FirebaseAuth {
       try {
         await this.exchangeToken(candidate.token);
       } catch (err) {
-        // 5xx / transport: the endpoint is the problem, not this candidate.
-        // Retrying it nine more times would only hammer it and bury the cause.
+        // 429 / 5xx / transport: the endpoint is the problem, not this
+        // candidate. Retrying nine more times would only hammer it and bury
+        // the cause.
         if (!isCandidateRejection(err)) throw err;
         // Any 4xx is about THIS candidate, so keep going. A non-mismatch code
         // does not mean the token was Copilot's: candidates are scraped out of
         // raw LevelDB bytes, so a truncated `AMf-…` match is INVALID_REFRESH_TOKEN
         // no matter whose storage it came from (probed for #722 — see the
-        // `Securetoken.v1Token:invalidCandidate` ledger entry). Letting
-        // one of those abort the run is the same crowding-out bug by another
-        // door — a foreign candidate ending the search for a real session.
-        if (!isForeignProjectError(err) && firstUnexplainedRejection === null) {
+        // `Securetoken.v1Token:invalidCandidate` ledger entry). Letting one of
+        // those abort the run is the same crowding-out bug by another door — a
+        // foreign candidate ending the search for a real session.
+        //
+        // And by the same argument such a rejection is only worth REPORTING
+        // when the candidate was Copilot-scoped. From a browser-wide store it
+        // says nothing about Copilot, so surfacing it would swap the
+        // actionable "log in" message for a raw Firebase 400 — #722's symptom
+        // again, arrived at from the other side.
+        if (candidate.scoped && !isForeignProjectError(err) && firstUnexplainedRejection === null) {
           firstUnexplainedRejection = err;
         }
         continue;
@@ -147,9 +152,10 @@ export class FirebaseAuth {
       return this.idToken;
     }
 
-    // Nothing exchanged. If some candidate failed for a reason we cannot
-    // explain as "that one was foreign", that reason is the more informative
-    // error — surface it raw rather than asserting the user is logged out.
+    // Nothing exchanged. If a candidate from COPILOT'S OWN store failed for a
+    // reason we cannot explain as "that one was foreign" — expired, revoked —
+    // that reason is the more informative error, and telling the user to log
+    // in would contradict evidence we hold. Surface it raw.
     if (firstUnexplainedRejection) throw firstUnexplainedRejection;
 
     // Every candidate was foreign-project (or none were found): the user is
@@ -227,11 +233,25 @@ function isForeignProjectError(err: unknown): boolean {
 }
 
 /**
- * True when an exchange failure is a verdict on the CANDIDATE (any 4xx) rather
- * than on the endpoint or the network. Only these are safe to skip past: a 5xx
+ * Rate-limit / quota status. A 4xx by number, a statement about the ENDPOINT by
+ * meaning: Google returns it for `RESOURCE_EXHAUSTED`, and Firebase Auth for
+ * `TOO_MANY_ATTEMPTS_TRY_LATER`. Replaying the rest of the list against a
+ * server that just said "back off" is the exact harm the 5xx guard exists to
+ * prevent, so it is excluded from the per-candidate class below.
+ */
+const TOO_MANY_REQUESTS = 429;
+
+/**
+ * True when an exchange failure is a verdict on the CANDIDATE rather than on
+ * the endpoint or the network. Only these are safe to skip past: a 429, a 5xx
  * or a transport failure says nothing about the token, and trying the rest of
  * the list would turn one outage into ten requests and hide the real error.
  */
 function isCandidateRejection(err: unknown): err is TokenExchangeError {
-  return err instanceof TokenExchangeError && err.status >= 400 && err.status < 500;
+  return (
+    err instanceof TokenExchangeError &&
+    err.status >= 400 &&
+    err.status < 500 &&
+    err.status !== TOO_MANY_REQUESTS
+  );
 }

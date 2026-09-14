@@ -1,14 +1,12 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { FirebaseAuth } from '../../../src/core/auth/firebase-auth.js';
-import type { TokenResult } from '../../../src/core/auth/browser-token.js';
+import type { TokenCandidates } from '../../../src/core/auth/browser-token.js';
 
 // Mock token extractor: yields a single valid candidate, found where only
 // Copilot's own origin writes (`scoped`) — the shape of a logged-in user.
-const mockExtractor = mock(() =>
+const mockExtractor = mock((): Promise<TokenCandidates> =>
   Promise.resolve({
-    candidates: [
-      { token: 'AMf-fake-refresh-token', browser: 'Chrome', scoped: true },
-    ] as TokenResult[],
+    candidates: [{ token: 'AMf-fake-refresh-token', browser: 'Chrome', scoped: true }],
     checked: ['Chrome'],
   })
 );
@@ -26,7 +24,7 @@ function mockFetch(response: object, status = 200) {
         headers: { 'Content-Type': 'application/json' },
       })
     );
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
 }
 
 /**
@@ -45,7 +43,7 @@ function mockFetchSequence(responses: [object, number][]) {
         headers: { 'Content-Type': 'application/json' },
       })
     );
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
 }
 
 function restoreFetch() {

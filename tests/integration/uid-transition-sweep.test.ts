@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { CopilotMoneyServer } from '../../src/server.js';
 import { FirebaseAuth } from '../../src/core/auth/firebase-auth.js';
 import { GraphQLClient } from '../../src/core/graphql/client.js';
-import type { TokenResult } from '../../src/core/auth/browser-token.js';
+import type { TokenCandidates } from '../../src/core/auth/browser-token.js';
 import { createTestDb } from '../helpers/test-db.js';
 
 const originalFetch = globalThis.fetch;
@@ -99,16 +99,16 @@ test('mid-session uid transition flushes all live caches (#521)', async () => {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
 
   // Provide a synthetic LevelDB so isAvailable() passes on CI (no real DB).
   // The live tools never touch LevelDB; the DB only needs to satisfy the guard.
   tempDbDir = mkdtempSync(join(tmpdir(), 'copilot-sweep-'));
   await createTestDb(tempDbDir, []);
 
-  const extractor = mock(() =>
+  const extractor = mock((): Promise<TokenCandidates> =>
     Promise.resolve({
-      candidates: [{ token: 'AMf-r', browser: 'Chrome' }] as TokenResult[],
+      candidates: [{ token: 'AMf-r', browser: 'Chrome', scoped: true }],
       checked: ['Chrome'],
     })
   );

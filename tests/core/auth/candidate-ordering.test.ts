@@ -29,10 +29,7 @@ import {
   type BrowserConfig,
   type TokenResult,
 } from '../../../src/core/auth/browser-token.js';
-import { FirebaseAuth } from '../../../src/core/auth/firebase-auth.js';
-
-/** The cap under test, mirrored from src/core/auth/firebase-auth.ts. */
-const MAX_EXCHANGE_CANDIDATES = 10;
+import { FirebaseAuth, MAX_EXCHANGE_CANDIDATES } from '../../../src/core/auth/firebase-auth.js';
 
 /**
  * A synthetic `AMf-`-shaped string long enough to match the extractor's regex
@@ -83,7 +80,7 @@ function mockExchange(attempts: string[], foreign: [object, number] = FOREIGN_RE
     }
     const [errorBody, status] = foreign;
     return Promise.resolve(Response.json(errorBody, { status }));
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
 }
 
 describe('candidate ordering across the extractor and the exchange budget (#722)', () => {
@@ -212,6 +209,40 @@ describe('candidate ordering across the extractor and the exchange budget (#722)
   });
 });
 
+describe('what counts as Copilot-scoped (#722)', () => {
+  test.each([
+    [
+      'Chromium IndexedDB',
+      '/u/Chrome/Default/IndexedDB/https_app.copilot.money_0.indexeddb.leveldb',
+    ],
+    ['Firefox origin dir', '/u/Firefox/storage/default/https+++app.copilot.money/idb'],
+    ['Firefox partitioned origin', '/u/Firefox/storage/default/https+++app.copilot.money^p=x/idb'],
+  ])('%s is scoped', (_name, path) => {
+    expect(isCopilotScopedPath(path)).toBe(true);
+  });
+
+  test.each([
+    ['browser-wide Local Storage', '/u/Chrome/Default/Local Storage/leveldb'],
+    [
+      'a lookalike subdomain suffix',
+      '/u/Firefox/storage/default/https+++app.copilot.money.example.com/idb',
+    ],
+    [
+      'a lookalike prefix',
+      '/u/Chrome/Default/IndexedDB/https_evil-app.copilot.money_0.indexeddb.leveldb',
+    ],
+    [
+      'a genuine other host',
+      '/u/Chrome/Default/IndexedDB/https_app.example.com_0.indexeddb.leveldb',
+    ],
+  ])('%s is not scoped', (_name, path) => {
+    // A lookalike ranking as scoped would not be a vulnerability — the
+    // exchange still rejects a foreign token — but it would hand an
+    // attacker-controlled origin a slot in the high-priority pool.
+    expect(isCopilotScopedPath(path)).toBe(false);
+  });
+});
+
 /**
  * Class-level detector for `ambiguous-candidate-selection`: no single candidate
  * may end the search for a valid one behind it. The candidate list is handed
@@ -280,19 +311,52 @@ describe('no single candidate can starve a valid one behind it (#722)', () => {
     expect(attempts).toHaveLength(1);
   });
 
-  test('an unexplained rejection is surfaced rather than flattened into "log in"', async () => {
-    // Nothing worked and one candidate failed for a reason we cannot explain
-    // as "that one was foreign" — asserting the user is logged out would be a
-    // guess that contradicts the evidence.
+  test('a rate limit stops immediately, even though 429 is a 4xx', async () => {
+    // 429 is a 4xx by number and a statement about the endpoint by meaning.
+    // Replaying the list against a server that just said "back off" is the
+    // same harm the 5xx guard prevents, so it must not count as a verdict on
+    // the candidate.
+    const candidates = Array.from({ length: 5 }, (_, i) =>
+      candidate(syntheticToken(`foreign${i}`), false)
+    );
+    const attempts: string[] = [];
+    mockExchange(attempts, [{ error: { message: 'RESOURCE_EXHAUSTED' } }, 429]);
+    const auth = new FirebaseAuth(() => Promise.resolve({ candidates, checked: ['Chrome'] }));
+
+    await expect(auth.getIdToken()).rejects.toThrow('Firebase token exchange failed (429)');
+    expect(attempts).toHaveLength(1);
+  });
+
+  test("a SCOPED candidate's unexplained rejection is surfaced rather than flattened", async () => {
+    // The token came from Copilot's own store and the endpoint refused it for
+    // a reason other than "wrong project" — expired, revoked. Telling this
+    // user to log in would contradict evidence we hold, so surface it raw.
     const candidates = [
-      candidate(syntheticToken('foreign0'), false),
-      candidate(syntheticToken('foreign1'), false),
+      candidate(syntheticToken('copilot-expired'), true),
+      candidate(syntheticToken('other-site'), false),
     ];
     const attempts: string[] = [];
     mockExchange(attempts, [{ error: { message: 'INVALID_REFRESH_TOKEN' } }, 400]);
     const auth = new FirebaseAuth(() => Promise.resolve({ candidates, checked: ['Chrome'] }));
 
     await expect(auth.getIdToken()).rejects.toThrow('Firebase token exchange failed (400)');
+    expect(attempts).toHaveLength(2);
+  });
+
+  test('the same rejection from browser-wide candidates only still says "log in"', async () => {
+    // Mirror image, and the one that matters for a logged-out user: a
+    // truncated `AMf-` fragment from some other site's storage is not evidence
+    // about Copilot. Reporting it raw would swap the one actionable message
+    // for a Firebase 400 — #722's symptom, reached from the other side.
+    const candidates = [
+      candidate(syntheticToken('other-site-0'), false),
+      candidate(syntheticToken('other-site-1'), false),
+    ];
+    const attempts: string[] = [];
+    mockExchange(attempts, [{ error: { message: 'INVALID_REFRESH_TOKEN' } }, 400]);
+    const auth = new FirebaseAuth(() => Promise.resolve({ candidates, checked: ['Chrome'] }));
+
+    await expect(auth.getIdToken()).rejects.toThrow('No Copilot Money session found');
     expect(attempts).toHaveLength(2);
   });
 
