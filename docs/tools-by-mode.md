@@ -27,7 +27,7 @@ When enabled, 6 cache-mode read tools are replaced with GraphQL-backed equivalen
 
 | Tool | Replaces? | Status | Notes |
 |---|---|---|---|
-| `get_transactions_live` | `get_transactions` | ✅ | Windowed cache; paginates per month. Terse by default too, same 10 preset names — but live always emits all 10, where a cache row carries only the ones it has, so an ordinary cache row is 8 keys and its live counterpart is 10 |
+| `get_transactions_live` | `get_transactions` | ✅ | Windowed cache; paginates per month. Terse by default too, same 10 preset names — but live emits both booleans unconditionally, where a cache row carries only the document fields it has, so an ordinary cache row is 8 keys and its live counterpart is 10. An uncategorized live row is 9 on the wire: `categoryId` is nullable, so `category_name` maps to `undefined` and `JSON.stringify` drops the key |
 | `get_accounts_live` | `get_accounts` | ✅ | 1h cache. Rows are terse by default (`fields: [...]` opts into the sync/plumbing fields, `mask`, `color`, `limit`) |
 | `get_categories_live` | `get_categories` | ✅ | 24h cache; reflects rollovers per user setting |
 | `get_budgets_live` | `get_budgets` | ✅ | Projection over `categories_live` data |
