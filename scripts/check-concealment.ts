@@ -1279,6 +1279,15 @@ for (const file of files) {
   // to CLAUDE.md, whose prose lines run past MAX_LINE, so the code rules on a
   // resolving link's target bytes would manufacture findings on this repo's own
   // tree. Prose is a property of the bytes being scanned, not of the path.
+  //
+  // Which leaves one asymmetry, stated so nobody "fixes" it the wrong way: for
+  // a symlink that RESOLVES, `prose` is still derived from the LINK's extension
+  // while `contents` are the TARGET's bytes, so `notes.md -> thing.ts` reads
+  // code under prose rules. Not a hole, for two reasons that have to hold
+  // together — the git-visible content, the target path, gets code rules
+  // unconditionally from the checkLine above, and a target tracked in this tree
+  // is listed and scanned strictly under its own path. It would become one for
+  // a link pointing OUTSIDE the tree, which is content no diff contains at all.
   const prose = isProse(rel) && contents !== link;
   const lines = contents.split('\n');
   for (let i = 0; i < lines.length; i++) checkLine(rel, i + 1, lines[i], exempt, prose);

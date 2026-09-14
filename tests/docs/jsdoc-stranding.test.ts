@@ -71,9 +71,22 @@ const OPENS_DOCBLOCK = `/*${'*'}`;
  */
 const ONE_LINE_DOCBLOCK = new RegExp(`^\\${'/'}\\*\\*.*\\*\\${'/'}$`);
 
-/** True for any line that ENDS a comment, in either spelling. */
-function closesAComment(line: string): boolean {
-  return line === CLOSES_COMMENT || ONE_LINE_DOCBLOCK.test(line);
+/**
+ * Which spelling of "this line ends a comment" a line is, or undefined.
+ *
+ * Returns the KIND rather than a boolean, and the two kinds are counted
+ * separately below, because a disjunction behind a single total is deletable in
+ * silence: floored only on the sum, dropping the one-line arm took the count
+ * from 1297 to 999, still far over a 500 floor, so the round-2 widening could
+ * be removed with the whole suite green and the detector quietly back to the
+ * round-1 rule. That is the vacuous-assertion class applied to the guard added
+ * to close a gap — caught in round-3 review of #724, and the reason each arm
+ * now has a floor naming the way its own input can go to zero.
+ */
+function closingKind(line: string): 'bare' | 'oneLine' | undefined {
+  if (line === CLOSES_COMMENT) return 'bare';
+  if (ONE_LINE_DOCBLOCK.test(line)) return 'oneLine';
+  return undefined;
 }
 
 /**
@@ -83,11 +96,16 @@ function closesAComment(line: string): boolean {
  * itself, and a link is not a directory to descend into. (Raised in review of
  * #724.)
  *
- * That is a scan SHRINK, which is the class this PR is about, so it is stated
- * rather than left implicit: stat used to follow a symlinked DIRECTORY under a
- * scanned tree and lstat does not. No such link exists under src/, scripts/ or
- * tests/ today, not following one avoids a cycle, and the files floor below
- * catches gross shrinkage — but it catches only gross shrinkage.
+ * It fixes the WALKER only, which is half the claim: a dangling link named
+ * `*.ts` is not a directory, so it lands in the file list and throws at the
+ * read instead. That is why scan() collects unreadable files rather than
+ * letting the read throw at module scope.
+ *
+ * lstat is also a scan SHRINK, which is the class this PR is about, so it is
+ * stated rather than left implicit: stat used to follow a symlinked DIRECTORY
+ * under a scanned tree and lstat does not. No such link exists under src/,
+ * scripts/ or tests/ today, not following one avoids a cycle, and the files
+ * floor below catches gross shrinkage — but it catches only gross shrinkage.
  */
 function tsFilesUnder(dir: string): string[] {
   const out: string[] = [];
@@ -102,21 +120,49 @@ function tsFilesUnder(dir: string): string[] {
 
 interface Scan {
   files: number;
-  closings: number;
+  /** Lines that are nothing but a closing delimiter. */
+  bareClosings: number;
+  /** Whole docblocks written on one line — the round-2 widening. */
+  oneLineClosings: number;
+  /** Files the sweep could not read, with the cause. */
+  unreadable: string[];
   stranded: string[];
 }
 
 function scan(): Scan {
-  const result: Scan = { files: 0, closings: 0, stranded: [] };
+  const result: Scan = {
+    files: 0,
+    bareClosings: 0,
+    oneLineClosings: 0,
+    unreadable: [],
+    stranded: [],
+  };
   for (const tree of SCANNED_TREES) {
     for (const file of tsFilesUnder(join(REPO_ROOT, tree))) {
       result.files++;
-      const lines = readFileSync(file, 'utf-8').split('\n');
+      const rel = relative(REPO_ROOT, file);
+      // Collected rather than thrown, for the reason the gate this test was
+      // written for now applies to itself: `scan()` runs at MODULE scope, so an
+      // uncaught read failure here takes down the whole suite with a raw ENOENT
+      // and no indication of which file produced it. lstat above stops the
+      // WALKER throwing on a dangling link; a dangling link named `*.ts` is not
+      // a directory, so it lands in the file list and fails here instead — the
+      // robustness claim was half-applied until this. (Round-3 review of #724.)
+      let contents: string;
+      try {
+        contents = readFileSync(file, 'utf-8');
+      } catch (err) {
+        result.unreadable.push(`${rel}  ${err instanceof Error ? err.message : String(err)}`);
+        continue;
+      }
+      const lines = contents.split('\n');
       for (let i = 0; i < lines.length - 1; i++) {
-        if (!closesAComment(lines[i].trim())) continue;
-        result.closings++;
+        const kind = closingKind(lines[i].trim());
+        if (kind === undefined) continue;
+        if (kind === 'bare') result.bareClosings++;
+        else result.oneLineClosings++;
         if (lines[i + 1].trim().startsWith(OPENS_DOCBLOCK)) {
-          result.stranded.push(`${relative(REPO_ROOT, file)}:${i + 1}`);
+          result.stranded.push(`${rel}:${i + 1}`);
         }
       }
     }
@@ -128,13 +174,28 @@ describe('no stranded docblocks (#701)', () => {
   const result = scan();
 
   test('the sweep actually reached the repository', () => {
-    // Guards the gate: a walker that returned nothing, or a closing-delimiter
-    // string that matched nothing, would report zero stranded blocks for the
-    // same reason a clean tree does. Both floors are far below the real
-    // numbers (336 files and 1295 closing delimiters as this lands) and far
-    // above zero.
+    // Guards the gate: a walker that returned nothing, or a delimiter that
+    // matched nothing, would report zero stranded blocks for the same reason a
+    // clean tree does.
+    //
+    // The two spellings are floored SEPARATELY. A single floor over their sum
+    // is satisfied by either arm alone — see closingKind — so the arm added in
+    // round 2 could have been deleted in silence. Measured as this lands: 336
+    // files, 999 bare delimiters, 298 one-line docblocks.
     expect(result.files).toBeGreaterThan(200);
-    expect(result.closings).toBeGreaterThan(500);
+    expect(result.bareClosings).toBeGreaterThan(500);
+    expect(result.oneLineClosings).toBeGreaterThan(150);
+  });
+
+  test('every scanned file was actually read', () => {
+    // The sweep's own version of the fail-open this PR fixes in the concealment
+    // gate: a file that could not be read contributes no findings and, without
+    // this, would be indistinguishable from a clean one.
+    expect(
+      result.unreadable,
+      `Files under ${SCANNED_TREES.join(', ')} that the sweep could not read, so nothing ` +
+        `above covers them: ${result.unreadable.join('; ')}.`
+    ).toEqual([]);
   });
 
   test('no docblock is immediately followed by another docblock', () => {
