@@ -335,13 +335,17 @@ jobs:
     uses: some-org/actions/.github/workflows/build.yml@abc123
 `,
       },
-      ({ code, stderr, stdout }) => {
+      ({ code, stderr }) => {
         expect(code).toBe(1);
         expect(stderr).toContain('jobs.call');
         expect(stderr).toContain('outside this repository');
-        // Not counted as a clean skip: the summary must not report a job it
-        // just flagged as covered.
-        expect(stdout).not.toContain('caller job(s) skipped');
+        // Deliberately NOT asserting that the summary omits this job from the
+        // clean-skip count. The summary prints only when there are no problems,
+        // and an external `uses:` is always a problem, so stdout is empty on
+        // every path where the counter could be wrong — an assertion here would
+        // pass with the fix reverted (verified by mutation). Keeping the
+        // counter honest is defensive tidiness, not observable behaviour, and
+        // claiming coverage it doesn't have would be worse than claiming none.
       }
     );
   });
