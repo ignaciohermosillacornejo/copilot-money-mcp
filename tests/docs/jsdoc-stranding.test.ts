@@ -362,7 +362,17 @@ describe('no stranded docblocks (#701)', () => {
       expect(probe.unreadable[0]).toContain('ENOENT');
       // And the readable sibling is still swept, so the failure is scoped to
       // the file that caused it rather than to the tree.
+      //
+      // Both counters, not just the total. They are adjacent and were added two
+      // rounds apart, and until this assertion `perTree` was the one counter
+      // here that could still overstate with everything green: moving its `++`
+      // above the read leaves the repo sweep unchanged (nothing under the real
+      // trees is unreadable) and no control looked at it. Asserting the exact
+      // value on a tree that contains an unreadable file is what makes
+      // "increment at the point of inspection" checkable for both of them.
+      // (Round-7 review of #724.)
       expect(probe.files).toBe(1);
+      expect(probe.perTree.src).toBe(1);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
