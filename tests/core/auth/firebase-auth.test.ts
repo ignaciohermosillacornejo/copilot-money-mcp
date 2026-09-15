@@ -110,7 +110,10 @@ describe('FirebaseAuth', () => {
   });
 
   test('throws on failed token exchange', async () => {
-    mockFetch({ error: { message: 'INVALID_REFRESH_TOKEN' } }, 400);
+    // USER_DISABLED rather than INVALID_REFRESH_TOKEN since #722: a dead token
+    // IS the logged-out state, so it now resolves to the actionable message
+    // (pinned below). A disabled account is the failure logging in cannot fix.
+    mockFetch({ error: { message: 'USER_DISABLED' } }, 400);
     await expect(auth.getIdToken()).rejects.toThrow('Firebase token exchange failed');
   });
 
@@ -195,16 +198,35 @@ describe('FirebaseAuth', () => {
   });
 
   test('a non-mismatch exchange error on a candidate is surfaced raw (not "no session")', async () => {
-    // INVALID_REFRESH_TOKEN is a genuine exchange failure for a Copilot-project
-    // token (e.g. expired/revoked), not a foreign-project token. Don't swallow
-    // it into the "logged out" message — the token WAS Copilot's.
+    // A genuine exchange failure for a Copilot-project token that "you are
+    // logged out" does NOT explain. Don't swallow it into the logged-out
+    // message — the token WAS Copilot's, and logging in will not help.
+    //
+    // This pinned INVALID_REFRESH_TOKEN from #478 until #722 narrowed it: that
+    // code, and TOKEN_EXPIRED, mean the token is dead, which is precisely the
+    // state the actionable message describes. USER_DISABLED is the case where
+    // surfacing raw still earns its keep.
+    mockExtractor.mockResolvedValueOnce({
+      candidates: [{ token: 'AMf-copilot-but-disabled', browser: 'Chrome', scoped: true }],
+      checked: ['Chrome'],
+    });
+    mockFetch({ error: { message: 'USER_DISABLED' } }, 400);
+
+    await expect(auth.getIdToken()).rejects.toThrow('Firebase token exchange failed');
+  });
+
+  test('a dead Copilot token yields the actionable message, not a raw 400 (#722)', async () => {
+    // The residue case: the user logged out, but their Copilot IndexedDB still
+    // holds the now-dead token until compaction. It is scoped, so it used to
+    // reach the raw-error branch — reporting a Firebase 400 whose remedy is
+    // exactly what the actionable message already says.
     mockExtractor.mockResolvedValueOnce({
       candidates: [{ token: 'AMf-copilot-but-expired', browser: 'Chrome', scoped: true }],
       checked: ['Chrome'],
     });
-    mockFetch({ error: { message: 'INVALID_REFRESH_TOKEN' } }, 400);
+    mockFetch({ error: { message: 'TOKEN_EXPIRED' } }, 400);
 
-    await expect(auth.getIdToken()).rejects.toThrow('Firebase token exchange failed');
+    await expect(auth.getIdToken()).rejects.toThrow('No Copilot Money session found');
   });
 
   test('refreshes expired token', async () => {

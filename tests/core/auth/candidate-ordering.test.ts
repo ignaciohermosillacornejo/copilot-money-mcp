@@ -322,7 +322,24 @@ describe('no single candidate can starve a valid one behind it (#722)', () => {
     ['a blocked API identity', { error: { message: 'PERMISSION_DENIED' } }, 403],
     [
       'a rotated API key',
-      { error: { message: 'API key not valid', status: 'API_KEY_INVALID' } },
+      // Verbatim shape from the #722 probe — Google puts the reason in
+      // error.details[].reason with error.status "INVALID_ARGUMENT", so this
+      // pins what production returns rather than a hand-shaped body.
+      {
+        error: {
+          code: 400,
+          message: 'API key not valid. Please pass a valid API key.',
+          status: 'INVALID_ARGUMENT',
+          details: [
+            {
+              '@type': 'type.googleapis.com/google.rpc.ErrorInfo',
+              reason: 'API_KEY_INVALID',
+              domain: 'googleapis.com',
+              metadata: { service: 'securetoken.googleapis.com' },
+            },
+          ],
+        },
+      },
       400,
     ],
     ['a disabled API', { error: { message: 'SERVICE_DISABLED' } }, 403],
@@ -374,19 +391,36 @@ describe('no single candidate can starve a valid one behind it (#722)', () => {
 
   test("a SCOPED candidate's unexplained rejection is surfaced rather than flattened", async () => {
     // The token came from Copilot's own store and the endpoint refused it for
-    // a reason other than "wrong project" — expired, revoked. Telling this
-    // user to log in would contradict evidence we hold, so surface it raw.
+    // a reason "you are logged out" does not cover. Telling this user to log
+    // in would contradict evidence we hold, so surface it raw.
     const candidates = [
-      candidate(syntheticToken('copilot-expired'), true),
+      candidate(syntheticToken('copilot-disabled'), true),
       candidate(syntheticToken('other-site'), false),
     ];
     const attempts: string[] = [];
-    mockExchange(attempts, [{ error: { message: 'INVALID_REFRESH_TOKEN' } }, 400]);
+    mockExchange(attempts, [{ error: { message: 'USER_DISABLED' } }, 400]);
     const auth = new FirebaseAuth(() => Promise.resolve({ candidates, checked: ['Chrome'] }));
 
     await expect(auth.getIdToken()).rejects.toThrow('Firebase token exchange failed (400)');
     expect(attempts).toHaveLength(2);
   });
+
+  test.each([['INVALID_REFRESH_TOKEN'], ['TOKEN_EXPIRED']])(
+    'a scoped candidate rejected %s still says "log in", because that is the remedy',
+    async (code) => {
+      // Residue: the user logged out, but Copilot's own IndexedDB still holds
+      // the dead token until compaction. Scoped, so it reaches the raw-error
+      // branch — and a Firebase 400 here would name no action the actionable
+      // message doesn't already name, which is #722's symptom once more.
+      const candidates = [candidate(syntheticToken('copilot-dead'), true)];
+      const attempts: string[] = [];
+      mockExchange(attempts, [{ error: { message: code } }, 400]);
+      const auth = new FirebaseAuth(() => Promise.resolve({ candidates, checked: ['Chrome'] }));
+
+      await expect(auth.getIdToken()).rejects.toThrow('No Copilot Money session found');
+      expect(attempts).toHaveLength(1);
+    }
+  );
 
   test('the same rejection from browser-wide candidates only still says "log in"', async () => {
     // Mirror image, and the one that matters for a logged-out user: a
