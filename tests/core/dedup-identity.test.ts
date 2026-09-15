@@ -179,6 +179,22 @@ import { stripComments } from '../helpers/strip-comments.js';
 // stops matching. No live instance, and it fails CLOSED — the block drops out
 // of the map and trips the non-vacuity floor and the 36-key equality — so it
 // is loud rather than silent if one ever appears.
+//
+// A second limit of the same shape, named because the windows here are the
+// repo's only invalid-TS input to the helper: both scanners hand it arbitrary
+// character SLICES, which usually do not parse (a window opens right after
+// `const X = new Set<string>()`, so it starts on a stray `;`). The helper
+// collects comment ranges from node positions, so in a badly recovered parse a
+// comment in a region no node's leading- or trailing-trivia scan reaches would
+// survive blanking, where the old unconditional regex removed it regardless.
+// Loud in that direction too: an unblanked comment that matched the guard regex
+// yields a wrong key and fails the 36-key equality and the non-vacuity floor,
+// rather than passing quietly. It runs the other way too: a synthesised node
+// boundary landing mid-literal can pull a `//` that is inside a STRING into
+// leading trivia, blanking real characters — loud for the same reason, since a
+// blanked guard stops matching and the block drops out. The unterminated-comment
+// fixture at the bottom of this file pins the one window shape that had a live
+// instance.
 // ---------------------------------------------------------------------------
 
 const FIXTURES_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'dedup-identity-'));

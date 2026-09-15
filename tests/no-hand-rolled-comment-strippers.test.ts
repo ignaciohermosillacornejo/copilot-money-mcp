@@ -232,6 +232,32 @@ function findCommentMatchingRegexes(source: string, file: string): Finding[] {
   return scanRegexLiterals(source, file).findings;
 }
 
+/** Every regex literal's raw text, for the drift ratchet below. */
+function regexLiteralsIn(source: string, file: string): string[] {
+  const sourceFile = ts.createSourceFile(
+    file,
+    source,
+    ts.ScriptTarget.Latest,
+    false,
+    scriptKindFor(file)
+  );
+  const out: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (node.kind === ts.SyntaxKind.RegularExpressionLiteral) out.push(node.getText(sourceFile));
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return out;
+}
+
+/**
+ * The literal tests/helpers/strip-comments.ts uses to blank a comment range the
+ * parser handed it. It appears in the clearing fixture below — the gate needs a
+ * real regex from the tree that must NEVER be flagged — and the test above
+ * pins that this copy is still one the helper actually contains.
+ */
+const HELPER_BLANK_LITERAL = String.raw`/[^\r\n\u2028\u2029]/g`;
+
 describe('no hand-rolled comment strippers (#691 class detector)', () => {
   const files = SCANNED_DIRS.flatMap((dir) => tsFilesUnder(join(REPO_ROOT, dir)));
   const scans = files.map((file) =>
@@ -328,13 +354,27 @@ describe('no hand-rolled comment strippers (#691 class detector)', () => {
     expect(findCommentMatchingRegexes(source, 'fixture.ts')).toEqual([]);
   });
 
+  test("the helper's own blanking literal is the one this file keeps clear", () => {
+    // The drift ratchet for HELPER_BLANK_LITERAL below. It drifted once
+    // already: the U+2028/U+2029 fix changed the real literal and the copy kept
+    // the old one, and nothing went red — both match a single character, so
+    // neither could swallow a probe end to end. The mitigation shipped with
+    // that fix was a comment saying "keep it verbatim", which is documentation
+    // in a file whose whole thesis is that comments are not gates. This is the
+    // gate: the copy has to still be a literal the helper actually contains.
+    const helper = readFileSync(join(REPO_ROOT, 'tests/helpers/strip-comments.ts'), 'utf-8');
+    const literals = regexLiteralsIn(helper, 'strip-comments.ts');
+    expect(literals).toContain(HELPER_BLANK_LITERAL);
+  });
+
   test('clears regexes that are not about comments', () => {
     // The false-positive direction. A gate that fired on ordinary regexes
-    // would be turned off, and then it protects nothing. `[^\\r\\n]` is the one
-    // the shared helper itself uses to blank a comment range it was HANDED by
-    // the parser — it matches one character and knows nothing about comments.
+    // would be turned off, and then it protects nothing. The first entry is the
+    // literal the shared helper itself uses to blank a comment range it was
+    // HANDED by the parser — it matches one character and knows nothing about
+    // comments. The test above is what keeps that claim true.
     const source = [
-      'const a = text.replace(/[^\\r\\n]/g, " ");',
+      `const a = text.replace(${HELPER_BLANK_LITERAL}, " ");`,
       'const b = text.replace(/\\s+/g, " ");',
       'const c = host.replace(/[.,)]+$/, "");',
       'const d = /https?:' + '\\/\\/' + '([a-zA-Z0-9.-]+)/g;',
