@@ -310,7 +310,15 @@ and enforces two invariants (`scripts/check-workflows.ts`):
    bound transitively by the called workflow's own jobs, which the gate does
    require.
 2. A workflow triggered on `pull_request_review` also offers `workflow_dispatch`,
-   for the reason in the section above.
+   for the reason in the section above — **and has a job that trigger can reach**.
+   Declaring the trigger is the obvious half; wiring the job's `if:` to admit the
+   event is the half people forget, and a job skipped for a failed `if:` reports
+   success, so the bug would reopen with the gate green. Adding the trigger
+   therefore also means writing
+   `github.event_name == 'workflow_dispatch' || <the existing condition>`.
+
+This gate parses the YAML with `Bun.YAML`, so it needs bun 1.2.21 or newer; it
+says so if yours is older.
 
 Pick a timeout from the job's observed runtime (`gh run list --workflow <file>`),
 not a uniform default, and say in a comment what you measured.

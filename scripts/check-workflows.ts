@@ -95,23 +95,55 @@ function triggerNames(on: unknown): string[] {
 }
 
 /**
+ * A positive comparison against the dispatch event, e.g.
+ * `github.event_name == 'workflow_dispatch'` in either operand order.
+ *
+ * Deliberately `==` and not "mentions the event name": `github.event_name !=
+ * 'workflow_dispatch'` mentions it too, while being exactly the unreachable
+ * case this is here to catch. `!=` cannot match, because it carries one `=`.
+ */
+const POSITIVE_DISPATCH_TEST = new RegExp(
+  `(?:==\\s*['"]?${ESCAPE_HATCH_TRIGGER}['"]?)|(?:['"]?${ESCAPE_HATCH_TRIGGER}['"]?\\s*==)`,
+);
+
+/**
  * Whether a manual run could actually execute this job.
  *
  * A job with no `if:` runs on every trigger the workflow declares. One with an
- * `if:` runs only when that expression is true, and an expression that never
- * names the event cannot admit it except by accident — so requiring the event
- * name to appear is slightly strict, in the direction that fails loudly and is
- * trivial to satisfy honestly.
+ * `if:` runs only when that expression is true, so it must positively admit the
+ * event. This reads the expression as text and does not evaluate it, which
+ * bounds the claim in two ways worth knowing:
+ *
+ *   - a deliberately negated positive (`!(github.event_name == '…')`) would
+ *     still pass. Nothing short of an expression evaluator catches that, and it
+ *     is not a shape anyone writes by accident — unlike the plain `!=`, which
+ *     is exactly what a maintainer excluding the event would reach for.
+ *   - reachability is judged per job. A job that `needs:` a review-gated job is
+ *     skipped when its dependency skips, and this does not walk that graph.
+ *     Moot while the only such workflow has one job; say so here rather than
+ *     build the walk for a case that does not exist yet.
  */
 function reachableUnderDispatch(job: unknown): boolean {
   if (!isRecord(job)) return false;
   if (job.if === undefined) return true;
-  return String(job.if).includes(ESCAPE_HATCH_TRIGGER);
+  return POSITIVE_DISPATCH_TEST.test(String(job.if));
 }
 
 const problems: string[] = [];
 let jobsChecked = 0;
 let callerJobsSkipped = 0;
+
+// `Bun.YAML` is a recent addition and the only use of it in this repo. Without
+// this guard an older bun throws inside the per-file try/catch below, and the
+// gate reports a toolchain problem as one "is not valid YAML" per workflow —
+// the opposite of the actionable messages that are the point of this script.
+if (typeof Bun.YAML?.parse !== 'function') {
+  console.error(
+    'Workflow check failed — this gate parses YAML with `Bun.YAML`, which this bun does ' +
+      'not have (added in bun 1.2.21). Run `bun upgrade`.',
+  );
+  process.exit(1);
+}
 
 let entries: string[];
 try {
@@ -213,8 +245,11 @@ for (const file of files) {
             `local \`./.github/workflows/*.yml\` (whose jobs this gate does bound) or inline ` +
             `the work into a \`runs-on\` job that can carry its own \`timeout-minutes\`.`,
         );
+      } else {
+        // Only a clean local skip counts — otherwise the summary line would
+        // report a job it just flagged as covered.
+        callerJobsSkipped++;
       }
-      callerJobsSkipped++;
       continue;
     }
 
