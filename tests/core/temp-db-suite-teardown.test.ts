@@ -94,7 +94,9 @@ function runProbe(preload: boolean): ProbeRun {
     encoding: 'utf8',
     // Without this a wedged child (a worker deadlock, a probe that awaits
     // something that never settles) hangs the whole job until CI kills it,
-    // with nothing attributing the hang to this file.
+    // with nothing attributing the hang to this file. Confirmed that bun
+    // honours the option rather than ignoring it: spawning `while(1){}` with
+    // timeout 1000 returns status null, signal SIGTERM, error ETIMEDOUT.
     timeout: PROBE_TIMEOUT_MS,
   });
 
