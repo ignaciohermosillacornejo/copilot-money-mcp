@@ -38,3 +38,8 @@ const assertRow = (n: number): void => {
 };
 
 export { assertRow };
+
+// Must NOT be flagged either, for the same reason: a slot in an object literal
+// names the helper without calling it. A CALL in that slot still fires — the
+// exclusion tests the identifier's position, not the property.
+export const assertions = { assertRow, row: assertRow };

@@ -31,6 +31,9 @@
  *   - a locally declared helper that asserts, *named* anywhere in
  *     collection-time code — called (`evidenceFor(s)`) or merely passed along
  *     (`.map(evidenceFor)`, which is how #714 actually reached the body).
+ *     Except where naming it cannot be calling it: a re-export or a slot in
+ *     an object literal is deliberately not flagged, because there is no
+ *     assertion there to move into a test.
  *
  * WHAT IT DOES NOT CATCH, stated rather than implied:
  *   - an asserting helper DEFINED in one module and named at collection time
@@ -218,17 +221,22 @@ function scan(file: string): Finding[] {
         for (let p: ts.Node | undefined = node; p; p = p.parent) if (p === decl) return true;
         return false;
       };
-      // A re-export names the helper without calling it, and unlike every
-      // shape this gate does flag, the remedy it asks for — assert inside the
-      // test — has no meaning for `export { assertRow }`. Idiomatic in exactly
-      // the helper modules the sweep newly covers.
-      const isTheDeclarationName =
+      // Positions that NAME the helper without being able to call it: a
+      // re-export, and membership of an object literal. Unlike every shape
+      // this gate does flag, the remedy it prints — assert inside the test —
+      // is not a move their author can make. Both are idiomatic in exactly
+      // the helper modules the widened sweep brought into scope. A call still
+      // fires: `{ row: assertRow(x) }` has a CallExpression in the position
+      // this exclusion tests, not the identifier.
+      const isNamedWithoutBeingCalled =
         node.parent &&
         ((ts.isVariableDeclaration(node.parent) && node.parent.name === node) ||
           (ts.isFunctionDeclaration(node.parent) && node.parent.name === node) ||
           ts.isExportSpecifier(node.parent) ||
-          ts.isExportAssignment(node.parent));
-      if (!insideOwnDeclaration() && !isTheDeclarationName) {
+          ts.isExportAssignment(node.parent) ||
+          ts.isShorthandPropertyAssignment(node.parent) ||
+          (ts.isPropertyAssignment(node.parent) && node.parent.initializer === node));
+      if (!insideOwnDeclaration() && !isNamedWithoutBeingCalled) {
         findings.push({
           file: rel,
           line: lineOf(node),
