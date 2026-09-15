@@ -81,8 +81,16 @@ const LOCAL_STORAGE_DIR = 'Local Storage/leveldb';
 const COPILOT_ORIGIN_PATTERN = /(?:^|[^A-Za-z0-9.-])app\.copilot\.money(?![A-Za-z0-9.-])/;
 
 /**
- * True when a storage path names Copilot's own web origin, i.e. only
- * app.copilot.money could have written the tokens under it.
+ * True when a storage path names Copilot's own web origin as a whole host.
+ *
+ * What that supports is "a browser wrote this directory for app.copilot.money,
+ * so app.copilot.money is what put tokens in it" — not a property of the whole
+ * path. Chromium and Safari are matched on the full path rather than on an
+ * isolated origin component (Firefox passes the origin directory itself), so a
+ * user-data directory living under a path component literally named
+ * `app.copilot.money` would also match. That fails toward pre-#722 behaviour —
+ * a candidate ranked higher than it earned, still rejected by the exchange —
+ * and reads nothing extra from disk.
  *
  * Deliberately a test on the path rather than a per-browser flag: the three
  * searchers hand it different things (a Chromium search directory, a Firefox

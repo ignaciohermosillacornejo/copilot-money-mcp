@@ -32,8 +32,10 @@ const EXPIRY_MARGIN_MS = 60_000;
  * Copilot-scoped-first (issue #722). A cap applied to an arbitrarily-ordered
  * list is finite but not safe: it can discard the one candidate that would
  * have worked, and the user is then told to log in while already logged in.
- * Ordering is what makes discarding harmless — everything the cap drops came
- * from a store every site writes to.
+ * Ordering is what makes discarding harmless: as long as there are fewer than
+ * MAX distinct Copilot-scoped candidates — which de-duplication makes the
+ * normal case, since compaction residue collapses to one — everything the cap
+ * drops came from a store every site writes to.
  */
 export const MAX_EXCHANGE_CANDIDATES = 10;
 
@@ -145,11 +147,17 @@ export class FirebaseAuth {
         // foreign candidate ending the search for a real session.
         //
         // And by the same argument such a rejection is only worth REPORTING
-        // when the candidate was Copilot-scoped. From a browser-wide store it
-        // says nothing about Copilot, so surfacing it would swap the
-        // actionable "log in" message for a raw Firebase 400 — #722's symptom
-        // again, arrived at from the other side.
-        if (candidate.scoped && !isForeignProjectError(err) && firstUnexplainedRejection === null) {
+        // when the candidate was Copilot-scoped AND the rejection is not
+        // already explained by the user being logged out. From a browser-wide
+        // store it says nothing about Copilot; and a dead Copilot token IS the
+        // logged-out state, so reporting it raw would swap the actionable
+        // message for a Firebase 400 whose remedy that message already names.
+        // Either way it is #722's symptom, arrived at from another side.
+        if (
+          candidate.scoped &&
+          !isExplainedByLoggedOut(err) &&
+          firstUnexplainedRejection === null
+        ) {
           firstUnexplainedRejection = err;
         }
         continue;
@@ -159,9 +167,10 @@ export class FirebaseAuth {
     }
 
     // Nothing exchanged. If a candidate from COPILOT'S OWN store failed for a
-    // reason we cannot explain as "that one was foreign" — expired, revoked —
-    // that reason is the more informative error, and telling the user to log
-    // in would contradict evidence we hold. Surface it raw.
+    // reason "you are logged out" does not already cover — a disabled account,
+    // a code we have never seen — that reason is the more informative error,
+    // and telling the user to log in would contradict evidence we hold.
+    // Surface it raw.
     if (firstUnexplainedRejection) throw firstUnexplainedRejection;
 
     // Every candidate was foreign-project (or none were found): the user is
@@ -226,6 +235,32 @@ export class FirebaseAuth {
       }
     }
   }
+}
+
+/**
+ * Rejection codes that mean "this token is dead" — the state
+ * `noCopilotSessionError` already describes, whose remedy is exactly the
+ * action it names.
+ *
+ * Narrow on purpose (#722 review). `USER_DISABLED` is NOT here: logging in
+ * cannot revive a disabled account, so that one is worth surfacing raw. Nor is
+ * any code Google adds that we have never seen — an unrecognised rejection on
+ * a token from Copilot's own store is precisely the case where a raw error
+ * tells the user more than a guess does.
+ */
+const DEAD_TOKEN_CODES: readonly string[] = ['INVALID_REFRESH_TOKEN', 'TOKEN_EXPIRED'];
+
+/**
+ * True when a rejection is already accounted for by "you are logged out of
+ * Copilot" — either the token belongs to someone else's project, or it is
+ * Copilot's and no longer alive. Both resolve to the actionable message; only
+ * a rejection that is NOT explained this way is worth showing raw.
+ */
+function isExplainedByLoggedOut(err: unknown): boolean {
+  return (
+    isForeignProjectError(err) ||
+    (err instanceof Error && DEAD_TOKEN_CODES.some((code) => err.message.includes(code)))
+  );
 }
 
 /**

@@ -123,7 +123,7 @@ Google's endpoint.
 ## Detector
 
 `tests/core/auth/candidate-ordering.test.ts` — class-level, and **mutation-verified** in
-five independent directions. It runs the real extractor over a real temp profile layout
+every direction it asserts (no count: this sentence has already gone stale twice). It runs the real extractor over a real temp profile layout
 built by the production path helper, and only `fetch` is faked (deciding accept-vs-reject
 from the token the request actually carries, which is the one thing that cannot run
 locally).
@@ -137,6 +137,7 @@ locally).
 | origin match is a bare substring | lookalike `app.copilot.money.example.com` ranks scoped |
 | budget trusts the extractor to de-duplicate | one token repeated past the cap starves the session |
 | key-level 4xx treated as a candidate verdict | a rotated API key spends the budget, then says "log in" |
+| a dead scoped token treated as unexplained | residue after logout reports a raw 400, not "log in" |
 
 A second gate came out of the review, and it is the more interesting one: the auth test
 files were **not in any typecheck program**, so adding a required field to `TokenResult`
