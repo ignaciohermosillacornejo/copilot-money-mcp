@@ -106,7 +106,11 @@ describe('stripComments parses under the ScriptKind its file name implies', () =
   // to stop at this helper, which hardcoded ScriptKind.TS. This snippet is the
   // demonstration that the name is load-bearing rather than decorative: parsed
   // as TSX it is a JSX element followed by a line comment, parsed as TS it is
-  // not, and the trailing comment survives the TS parse untouched.
+  // not. What the TS parse does with the remains is deliberately NOT stated
+  // here — that is error-recovery behaviour, this repo takes `typescript` on a
+  // caret range, and an unpinned claim written as fact is the shape this file
+  // set exists to stop. The mapping it rests on is asserted directly, in
+  // tests/helpers/ts-files.test.ts.
   const jsx = 'const el = <div className="a">{/* note */}</div>; // tail\nconst after = 1;';
 
   test('a .tsx name is honoured, and its comments are stripped', () => {
@@ -114,13 +118,6 @@ describe('stripComments parses under the ScriptKind its file name implies', () =
     expect(stripped).not.toContain('note');
     expect(stripped).not.toContain('tail');
     expect(stripped).toContain('const after = 1;');
-  });
-
-  test('the same text under a .ts name does NOT see the trailing comment', () => {
-    // Not a defect — it is the point. A helper that cannot be told its input's
-    // extension hands this result back as a comment map, which is the misparse
-    // the `fileName` parameter exists to let a caller avoid.
-    expect(stripComments(jsx, 'widget.ts')).toContain('// tail');
   });
 
   test('the default is the non-JSX .ts behaviour, so existing callers are unchanged', () => {

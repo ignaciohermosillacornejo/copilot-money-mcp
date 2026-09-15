@@ -27,7 +27,14 @@ import { join } from 'node:path';
 import ts from 'typescript';
 
 const SKIP = new Set(['node_modules', 'dist', '.git']);
-const EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts'];
+/**
+ * Exported so the kind-mapping test can be DERIVED from this list rather than
+ * hand-copying it: add an extension here without teaching `scriptKindFor` about
+ * it and the new files get walked and parsed under a kind nothing pinned. The
+ * docblock above anticipates this list growing, which is exactly when a
+ * hand-copied assertion would keep passing.
+ */
+export const EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts'] as const;
 
 export function tsFilesUnder(dir: string): string[] {
   const out: string[] = [];
