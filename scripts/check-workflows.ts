@@ -122,6 +122,12 @@ const POSITIVE_DISPATCH_TEST = new RegExp(
  *     skipped when its dependency skips, and this does not walk that graph.
  *     Moot while the only such workflow has one job; say so here rather than
  *     build the walk for a case that does not exist yet.
+ *   - and it is too strict in the other direction: an `if:` that admits the
+ *     event without naming it — `contains(fromJSON('[…]'), github.event_name)`,
+ *     or admission by excluding the other trigger — is reachable but fails.
+ *     That is the intended trade. The remedy is to write the `==` form, which
+ *     the failure message hands you, not to loosen this back into a test a
+ *     `!=` can satisfy.
  */
 function reachableUnderDispatch(job: unknown): boolean {
   if (!isRecord(job)) return false;
@@ -137,10 +143,14 @@ let callerJobsSkipped = 0;
 // this guard an older bun throws inside the per-file try/catch below, and the
 // gate reports a toolchain problem as one "is not valid YAML" per workflow —
 // the opposite of the actionable messages that are the point of this script.
-if (typeof Bun.YAML?.parse !== 'function') {
+// The `typeof Bun` half is not redundant: `typeof` suppresses a ReferenceError
+// only for a bare identifier, so `typeof Bun.YAML` still throws under a runtime
+// with no `Bun` at all — which is the raw stack this guard exists to replace.
+if (typeof Bun === 'undefined' || typeof Bun.YAML?.parse !== 'function') {
   console.error(
-    'Workflow check failed — this gate parses YAML with `Bun.YAML`, which this bun does ' +
-      'not have (added in bun 1.2.21). Run `bun upgrade`.',
+    'Workflow check failed — this gate parses YAML with `Bun.YAML`, so it must run under ' +
+      'bun 1.2.21 or newer (`bun run check:workflows`). If you are on an older bun, run ' +
+      '`bun upgrade`.',
   );
   process.exit(1);
 }

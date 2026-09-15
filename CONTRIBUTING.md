@@ -6,7 +6,7 @@ Contributions welcome! This guide covers development setup, architecture, and ho
 
 ### Prerequisites
 
-- **Bun** (latest; required for development and tests)
+- **Bun** 1.2.21 or newer (latest recommended; required for development and tests — `check:workflows` parses YAML with `Bun.YAML`, added in 1.2.21)
 - **Node.js 18+** (optional; only needed to run the built server)
 - **Copilot Money** installed on macOS (for integration testing)
 
@@ -317,8 +317,8 @@ and enforces two invariants (`scripts/check-workflows.ts`):
    therefore also means writing
    `github.event_name == 'workflow_dispatch' || <the existing condition>`.
 
-This gate parses the YAML with `Bun.YAML`, so it needs bun 1.2.21 or newer; it
-says so if yours is older.
+This gate parses the YAML with `Bun.YAML` (see Prerequisites for the bun floor);
+it tells you if your bun is too old, rather than blaming the workflow files.
 
 Pick a timeout from the job's observed runtime (`gh run list --workflow <file>`),
 not a uniform default, and say in a comment what you measured.
