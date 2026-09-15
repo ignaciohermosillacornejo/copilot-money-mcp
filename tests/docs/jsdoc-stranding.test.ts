@@ -44,6 +44,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -332,6 +333,36 @@ describe('no stranded docblocks (#701)', () => {
       expect(probe.stranded).toEqual([`${join('src', 'strand.ts')}:3`]);
       expect(probe.files).toBe(1);
       expect(probe.unreadable).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('end-to-end control: a file the sweep cannot read is named, not skipped', () => {
+    // The positive control for `unreadable`, raised in round-6 review of #724.
+    // Both assertions on that list are `toEqual([])`, and nothing fed it a file
+    // it could not read — so replacing the wrapped read with the literal
+    // `catch { continue }` this PR exists to remove left every assertion in
+    // this file green, `unreadable` included, because an empty list is also
+    // what a clean tree produces. A collector only ever observed empty has not
+    // been observed collecting: the round-4 argument about `stranded`, applied
+    // to the list beside it.
+    //
+    // A dangling symlink named `*.ts` is the exact case the lstat docblock
+    // claims is handled: lstat says it is not a directory, so it enters the
+    // file list, and the read is where it fails.
+    const dir = mkdtempSync(join(tmpdir(), 'jsdoc-stranding-unreadable-'));
+    try {
+      mkdirSync(join(dir, 'src'), { recursive: true });
+      writeFileSync(join(dir, 'src', 'ok.ts'), 'const a = 1;\n');
+      symlinkSync('no-such-target.ts', join(dir, 'src', 'dangling.ts'));
+      const probe = scanTrees(dir, ['src']);
+      expect(probe.unreadable).toHaveLength(1);
+      expect(probe.unreadable[0]).toContain(join('src', 'dangling.ts'));
+      expect(probe.unreadable[0]).toContain('ENOENT');
+      // And the readable sibling is still swept, so the failure is scoped to
+      // the file that caused it rather than to the tree.
+      expect(probe.files).toBe(1);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
