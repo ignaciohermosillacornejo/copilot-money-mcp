@@ -115,11 +115,22 @@ export class FirebaseAuth {
     }
     // Fast path: we already hold a Copilot-project refresh token (from a prior
     // successful exchange) — just refresh it. The server-returned refresh token
-    // is known-good, so any failure here is a genuine error, not a foreign one.
+    // is known-good, so it can never be foreign; but "known-good" expires the
+    // moment the user logs out, and a dead token here is the same logged-out
+    // state the cold path knows how to report. So fall through to a cold
+    // re-extract rather than throwing a raw Firebase 400 at the caller: that
+    // finds either a fresh session in another profile or the actionable
+    // message. `exchangeToken` has already cleared `refreshToken`, so the
+    // fall-through cannot loop. Any OTHER failure is a genuine error and still
+    // propagates untouched.
     if (this.refreshToken) {
-      await this.exchangeToken(this.refreshToken);
-      if (!this.idToken) throw new Error('Firebase token exchange returned no ID token');
-      return this.idToken;
+      try {
+        await this.exchangeToken(this.refreshToken);
+        if (!this.idToken) throw new Error('Firebase token exchange returned no ID token');
+        return this.idToken;
+      } catch (err) {
+        if (!isExplainedByLoggedOut(err)) throw err;
+      }
     }
 
     // Cold path: try each discovered candidate, discarding the ones the
