@@ -115,6 +115,16 @@ is surfaced raw; everything else still resolves to the actionable "log in" messa
 that, a logged-out user whose `Local Storage` held one truncated `AMf-` fragment would have
 got a Firebase 400 instead — #722's symptom reached from the opposite side.
 
+*Unexplained* then had to be narrowed twice more, because each round of carve-outs changed
+what was left in it. After the endpoint-level codes moved out, the codes that could still
+reach the raw branch were mostly `INVALID_REFRESH_TOKEN` and `TOKEN_EXPIRED` — a **dead
+token**, which is not a mystery at all but the very state the actionable message names. Those
+are now explained too; `USER_DISABLED` and any code we have never seen stay raw, because an
+unrecognised rejection on a token from Copilot's own store is where a raw error beats a
+guess. The same reasoning reached the *fast* path, which refreshes a server-issued token
+and used to throw its raw 400: a token the server issued is known-good only until the user
+logs out, so a dead one there now falls through to a cold re-extract instead.
+
 The cap stays at ten, and stays a single global budget rather than one budget per source.
 With scoped candidates already holding the first slots, a per-source budget could not
 improve their chances; its only effect would be to let more of other sites' tokens reach
@@ -123,10 +133,10 @@ Google's endpoint.
 ## Detector
 
 `tests/core/auth/candidate-ordering.test.ts` — class-level, and **mutation-verified** in
-every direction it asserts (no count: this sentence has already gone stale twice). It runs the real extractor over a real temp profile layout
-built by the production path helper, and only `fetch` is faked (deciding accept-vs-reject
-from the token the request actually carries, which is the one thing that cannot run
-locally).
+every direction it asserts (no count: this sentence has already gone stale twice). It runs
+the real extractor over a real temp profile layout built by the production path helper, and
+only `fetch` is faked (deciding accept-vs-reject from the token the request actually
+carries, which is the one thing that cannot run locally).
 
 | Mutation | Test that goes red |
 |---|---|
@@ -138,6 +148,8 @@ locally).
 | budget trusts the extractor to de-duplicate | one token repeated past the cap starves the session |
 | key-level 4xx treated as a candidate verdict | a rotated API key spends the budget, then says "log in" |
 | a dead scoped token treated as unexplained | residue after logout reports a raw 400, not "log in" |
+| the allowlist inverted into a denylist | an unrecognised future code resolves to "log in" |
+| the fast path rethrows instead of falling through | a dead cached token reports a raw 400 |
 
 A second gate came out of the review, and it is the more interesting one: the auth test
 files were **not in any typecheck program**, so adding a required field to `TokenResult`

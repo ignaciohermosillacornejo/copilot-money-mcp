@@ -405,6 +405,20 @@ describe('no single candidate can starve a valid one behind it (#722)', () => {
     expect(attempts).toHaveLength(2);
   });
 
+  test('an UNRECOGNISED rejection on a scoped candidate is still surfaced raw', async () => {
+    // The allowlist's second, load-bearing claim: only codes we have actually
+    // reasoned about count as explained. Without this case the predicate can be
+    // mutated into a denylist (`!message.includes('USER_DISABLED')`) and the
+    // whole suite still passes — verified, it did — while every future
+    // securetoken code silently resolves to "log in".
+    const candidates = [candidate(syntheticToken('copilot-unknown'), true)];
+    const attempts: string[] = [];
+    mockExchange(attempts, [{ error: { message: 'SOME_CODE_GOOGLE_HAS_NOT_SHIPPED_YET' } }, 400]);
+    const auth = new FirebaseAuth(() => Promise.resolve({ candidates, checked: ['Chrome'] }));
+
+    await expect(auth.getIdToken()).rejects.toThrow('Firebase token exchange failed (400)');
+  });
+
   test.each([['INVALID_REFRESH_TOKEN'], ['TOKEN_EXPIRED']])(
     'a scoped candidate rejected %s still says "log in", because that is the remedy',
     async (code) => {
@@ -438,6 +452,73 @@ describe('no single candidate can starve a valid one behind it (#722)', () => {
     await expect(auth.getIdToken()).rejects.toThrow('No Copilot Money session found');
     expect(attempts).toHaveLength(2);
   });
+
+  test.each([
+    ['nothing else works', false, 'No Copilot Money session found'],
+    ['another profile has a live session', true, null],
+  ])(
+    'a dead CACHED token falls through to a cold re-extract when %s',
+    async (_name, coldSessionExists, expectedError) => {
+      // The fast path refreshes a token the server itself issued — known-good
+      // until the user logs out, and dead afterwards. Throwing its raw 400 at
+      // the caller is #722's symptom on the one path the cold-path fix cannot
+      // reach, so it falls through instead.
+      const cold = coldSessionExists
+        ? [candidate(REAL_SESSION, true)]
+        : [candidate(syntheticToken('other-site'), false)];
+      const attempts: string[] = [];
+      let issued = false;
+      globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
+        const body = String(options?.body ?? '');
+        if (!issued) {
+          // First call: a normal cold exchange that hands back a server token
+          // and expires immediately, so the next call takes the fast path.
+          issued = true;
+          attempts.push('bootstrap');
+          return Promise.resolve(
+            Response.json({
+              id_token: 'bootstrap-id-token',
+              refresh_token: syntheticToken('server-issued'),
+              expires_in: '0',
+              token_type: 'Bearer',
+              user_id: 'synthetic-user',
+            })
+          );
+        }
+        if (body.includes(syntheticToken('server-issued'))) {
+          attempts.push('fast-path');
+          return Promise.resolve(
+            Response.json({ error: { message: 'INVALID_REFRESH_TOKEN' } }, { status: 400 })
+          );
+        }
+        return Promise.resolve(
+          body.includes(REAL_SESSION)
+            ? Response.json({
+                id_token: ID_TOKEN,
+                refresh_token: REAL_SESSION,
+                expires_in: '3600',
+                token_type: 'Bearer',
+                user_id: 'synthetic-user',
+              })
+            : Response.json({ error: { message: 'PROJECT_NUMBER_MISMATCH' } }, { status: 400 })
+        );
+      }) as unknown as typeof fetch;
+
+      let candidates = [candidate(syntheticToken('bootstrap'), true)];
+      const auth = new FirebaseAuth(() => Promise.resolve({ candidates, checked: ['Chrome'] }));
+      expect(await auth.getIdToken()).toBe('bootstrap-id-token');
+
+      // The session the cold re-extract will find on the second call.
+      candidates = cold;
+      if (expectedError === null) {
+        expect(await auth.getIdToken()).toBe(ID_TOKEN);
+      } else {
+        await expect(auth.getIdToken()).rejects.toThrow(expectedError);
+        await expect(auth.getIdToken()).rejects.not.toThrow('Firebase token exchange failed');
+      }
+      expect(attempts).toContain('fast-path');
+    }
+  );
 
   test('all-foreign candidates still yield the actionable "no session" error', async () => {
     const candidates = Array.from({ length: 3 }, (_, i) =>

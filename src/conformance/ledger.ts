@@ -1025,7 +1025,9 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'PROJECT_NUMBER_MISMATCH. Observed repeatedly against production during live-session ' +
       'work (issue #454, fixed in PR #478) — real foreign tokens, no controlled probe, and ' +
       'nothing re-checks it. `isForeignProjectError` in src/core/auth/firebase-auth.ts is ' +
-      'the only reason a foreign candidate is skipped rather than reported as a failure.',
+      'why a foreign candidate is skipped rather than reported as a failure — one of two ' +
+      'reasons a rejection is treated as already explained, alongside DEAD_TOKEN_CODES; ' +
+      '`isExplainedByLoggedOut` is the branch condition that combines them.',
   },
   {
     surface: 'Securetoken.v1Token:invalidCandidate',
