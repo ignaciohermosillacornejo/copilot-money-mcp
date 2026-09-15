@@ -335,10 +335,13 @@ jobs:
     uses: some-org/actions/.github/workflows/build.yml@abc123
 `,
       },
-      ({ code, stderr }) => {
+      ({ code, stderr, stdout }) => {
         expect(code).toBe(1);
         expect(stderr).toContain('jobs.call');
         expect(stderr).toContain('outside this repository');
+        // Not counted as a clean skip: the summary must not report a job it
+        // just flagged as covered.
+        expect(stdout).not.toContain('caller job(s) skipped');
       }
     );
   });
@@ -462,6 +465,55 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       github.event.review.state == 'approved'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo hi
+`,
+      },
+      ({ code }) => {
+        expect(code).toBe(0);
+      }
+    );
+  });
+
+  test('a negated mention of the event does not count as reachable', async () => {
+    // The shape a substring test waves through while being exactly the
+    // unreachable case: it names the event in order to EXCLUDE it.
+    await withWorkflows(
+      {
+        'negated.yml': `name: Negated
+on:
+  pull_request_review:
+    types: [submitted]
+  workflow_dispatch:
+jobs:
+  act:
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo hi
+`,
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('no job it can reach');
+      }
+    );
+  });
+
+  test('the reverse operand order is accepted', async () => {
+    await withWorkflows(
+      {
+        'reversed.yml': `name: Reversed
+on:
+  pull_request_review:
+    types: [submitted]
+  workflow_dispatch:
+jobs:
+  act:
+    if: "'workflow_dispatch' == github.event_name"
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
