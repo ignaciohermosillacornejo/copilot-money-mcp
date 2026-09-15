@@ -29,7 +29,7 @@
  *
  * THE RULE IS ADJACENCY, NOT PROXIMITY. A file-header docblock followed by a
  * BLANK LINE and then the first declaration's docblock is ordinary and common
- * here — seven such pairs in src/ alone. Those are not stranded: the header
+ * here — eight such pairs in src/ alone. Those are not stranded: the header
  * documents the module. Requiring the two to be touching separates them
  * cleanly, and it is measured rather than assumed — after the five fixes in
  * this PR the whole tree has zero touching pairs, so the rule has no
@@ -92,7 +92,7 @@ const ONE_LINE_DOCBLOCK = new RegExp(`^\\${'/'}\\*\\*.*\\*\\${'/'}$`);
  * Returns the KIND rather than a boolean, and the two kinds are counted
  * separately below, because a disjunction behind a single total is deletable in
  * silence: floored only on the sum, dropping the one-line arm took the count
- * from 1297 to 999, still far over a 500 floor, so the round-2 widening could
+ * from 1328 to 1015, still far over a 500 floor, so the round-2 widening could
  * be removed with the whole suite green and the detector quietly back to the
  * round-1 rule. That is the vacuous-assertion class applied to the guard added
  * to close a gap — caught in round-3 review of #724, and the reason each arm
@@ -265,10 +265,10 @@ describe('no stranded docblocks (#701)', () => {
     // and dropping `scripts` left 287, so either could leave the sweep quietly
     // — including `scripts`, where the bug that prompted all of this lives.
     //
-    // Measured as this lands: 336 files (src 116, scripts 49, tests 171), 999
-    // bare delimiters, 298 one-line docblocks, 1342 opening delimiters. The
+    // Measured as this lands: 340 files (src 116, scripts 49, tests 175), 1015
+    // bare delimiters, 313 one-line docblocks, 1370 opening delimiters. The
     // margins are 1.7x (files), 1.6x (scripts, the smallest tree), 2.0x (both
-    // closing spellings) and 2.2x (opens) — stated as measured rather than
+    // closing spellings) and 2.3x (opens) — stated as measured rather than
     // rounded up to a comfortable "3x", which is what the first version of this
     // comment said and what a reader would have re-derived and found false. The
     // thin ones are the file counts; a deletion large enough to trip them
