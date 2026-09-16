@@ -158,18 +158,35 @@ describe('a typechecked helper brings its own contract test onto the list', () =
 /**
  * The entries whose MEMBERSHIP IS THE COVERAGE — nothing imports them, so
  * `tsc` cannot follow anything in, and deleting a line deletes the checking
- * rather than relocating it. The tsconfig header names these same files and
- * says "keep them that way"; this is the "that way" being kept.
+ * rather than relocating it.
+ *
+ * The criterion, applied to all of tsconfig.tests.json's entries: not reached
+ * by an import from anything (so `tsc` cannot pull it in), and not a
+ * mock-GraphQL adopter (so the adoption rule above does not already cover it).
+ * Thirteen entries meet it. Two of those — the tests/helpers/ contract tests —
+ * are covered by the helper-pairing rule above, so they are deliberately NOT
+ * repeated here; the rest are these. The three auth files are the sharpest
+ * case: the tsconfig header justifies their membership with the exact #725
+ * story this pin exists to prevent a repeat of.
+ *
+ * Hand-maintained, like the header prose it mirrors. Deriving it would need a
+ * real import graph rather than a grep; the two lists cross-reference each
+ * other instead, so drifting apart is the intended failure direction — a file
+ * genuinely leaving the include list should require editing both.
  *
  * One literal read by the assertion, the `PINNED_TREES` shape from
- * tests/docs/jsdoc-stranding.test.ts. Drifting from the header is the intended
- * failure direction: a file genuinely leaving the list should require editing
- * both, not one.
+ * tests/docs/jsdoc-stranding.test.ts.
  */
 const MEMBERSHIP_IS_THE_COVERAGE = [
+  'tests/core/auth/browser-token.test.ts',
+  'tests/core/auth/candidate-ordering.test.ts',
+  'tests/core/auth/firebase-auth.test.ts',
   'tests/core/temp-db-suite-teardown.test.ts',
+  'tests/exported-constants.test.ts',
   'tests/fixtures/temp-db-leak-probe.ts',
+  'tests/integration/uid-transition-sweep.test.ts',
   'tests/no-collection-time-assertions.test.ts',
+  'tests/no-hand-rolled-comment-strippers.test.ts',
   'tests/setup/temp-db-teardown.ts',
   'tests/unit/tsconfig-tests-sync.test.ts',
 ];
