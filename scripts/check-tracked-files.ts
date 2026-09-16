@@ -112,8 +112,27 @@ const SCRIPTS_PATH_TOKEN = /(?:[\w.-]+\/)*scripts\/(?:[\w.-]+\/)*[\w.-]+\.[\w]+/
 const RELATIVE_IMPORT =
   /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)['"](\.\.?\/[^'"]+)['"]/g;
 
+/**
+ * The environment every `git` call here runs under.
+ *
+ * `GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE` are exported by git into
+ * every hook it runs — and this gate runs from the pre-push hook. Inheriting
+ * them silently redirects the query away from `repoRoot`: a gate answering
+ * about a different repository than the one it names is the failure mode it
+ * exists to prevent. Stripping every `GIT_*` variable keeps `cwd` the only
+ * thing that decides which repository is inspected.
+ */
+const GIT_ENV: NodeJS.ProcessEnv = Object.fromEntries(
+  Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')),
+);
+
 function git(args: string[]): { code: number; stdout: string } {
-  const r = spawnSync('git', args, { cwd: repoRoot, encoding: 'utf-8', maxBuffer: 64 * 1024 * 1024 });
+  const r = spawnSync('git', args, {
+    cwd: repoRoot,
+    env: GIT_ENV,
+    encoding: 'utf-8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
   return { code: r.status ?? 1, stdout: r.stdout ?? '' };
 }
 
@@ -244,6 +263,7 @@ let ignoreMatched: string[] = [];
 if (candidates.length > 0) {
   const r = spawnSync('git', ['check-ignore', '--no-index', '--stdin', '-z'], {
     cwd: repoRoot,
+    env: GIT_ENV,
     input: `${candidates.join('\0')}\0`,
     encoding: 'utf-8',
     maxBuffer: 64 * 1024 * 1024,

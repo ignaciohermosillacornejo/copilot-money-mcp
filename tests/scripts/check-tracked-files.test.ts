@@ -29,8 +29,38 @@ const SCRIPT = fileURLToPath(new URL('../../scripts/check-tracked-files.ts', imp
 
 type Result = { code: number; stderr: string; stdout: string };
 
-async function runCheck(root?: string): Promise<Result> {
-  const env = { ...process.env };
+/**
+ * An environment in which `git` can only see the repository `cwd` points at.
+ *
+ * Not a nicety. `bun run check` runs from the pre-push hook, and git exports
+ * `GIT_DIR` / `GIT_WORK_TREE` / `GIT_INDEX_FILE` into every hook it runs. An
+ * earlier draft of this file inherited them, so `git init` in a temp directory
+ * re-initialised **the real repository** instead — which set `core.bare = true`
+ * in the shared config and left `user.email = test@example.com` behind, in a
+ * config every worktree of the repo reads. Tests that shell out to git must
+ * pin the repository explicitly or they are not sandboxed at all.
+ *
+ * `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` point at /dev/null for the mirror
+ * reason: the temp repos must not pick up the developer's real identity or
+ * signing configuration, which would make commits here prompt for a key.
+ */
+function sandboxedEnv(extra: Record<string, string> = {}): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key.startsWith('GIT_') || value === undefined) continue;
+    env[key] = value;
+  }
+  return {
+    ...env,
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_SYSTEM: '/dev/null',
+    GIT_TERMINAL_PROMPT: '0',
+    ...extra,
+  };
+}
+
+async function runCheck(root?: string, extraEnv: Record<string, string> = {}): Promise<Result> {
+  const env = sandboxedEnv(extraEnv);
   delete env.CHECK_TRACKED_FILES_ROOT;
   if (root !== undefined) env.CHECK_TRACKED_FILES_ROOT = root;
   const proc = Bun.spawn(['bun', 'run', SCRIPT], { env, stdout: 'pipe', stderr: 'pipe' });
@@ -42,7 +72,12 @@ async function runCheck(root?: string): Promise<Result> {
 }
 
 async function git(cwd: string, args: string[]): Promise<void> {
-  const proc = Bun.spawn(['git', ...args], { cwd, stdout: 'pipe', stderr: 'pipe' });
+  const proc = Bun.spawn(['git', ...args], {
+    cwd,
+    env: sandboxedEnv(),
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
   const code = await proc.exited;
   if (code !== 0) {
     throw new Error(
@@ -84,7 +119,8 @@ const PACKAGE_JSON = JSON.stringify(
  */
 async function withRepo(
   perturb: (root: string) => Promise<void>,
-  assertions: (result: Result) => void
+  assertions: (result: Result) => void,
+  extraEnv: Record<string, string> = {}
 ): Promise<void> {
   const root = await mkdtemp(join(tmpdir(), 'check-tracked-files-'));
   try {
@@ -103,7 +139,7 @@ async function withRepo(
     await git(root, ['commit', '-qm', 'initial']);
 
     await perturb(root);
-    assertions(await runCheck(root));
+    assertions(await runCheck(root, extraEnv));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -226,6 +262,22 @@ describe('check:tracked-files', () => {
         expect(stderr).toContain('scripts/renamed-away.ts');
         expect(stderr).toContain('does not exist');
       }
+    );
+  });
+
+  // `bun run check` runs from the pre-push hook, and git exports GIT_DIR into
+  // every hook. A gate that inherited it would answer about whichever
+  // repository the hook belongs to rather than the one it was pointed at —
+  // and would report a bogus failure the moment the two differ.
+  test('answers about the repo it was pointed at, not an inherited GIT_DIR', async () => {
+    await withRepo(
+      async () => {},
+      ({ code, stdout, stderr }) => {
+        expect(stderr).toBe('');
+        expect(code).toBe(0);
+        expect(stdout).toContain('tooling files are tracked and un-ignored');
+      },
+      { GIT_DIR: join(tmpdir(), 'check-tracked-files-not-a-git-dir') }
     );
   });
 
