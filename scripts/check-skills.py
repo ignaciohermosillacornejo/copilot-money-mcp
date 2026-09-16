@@ -226,6 +226,13 @@ def collect_tool_args() -> dict[str, set[str]]:
     # silently turns every argument name in the repo into a candidate row
     # field. Under-collection indistinguishable from a pass, in the map that
     # exists to prevent a false positive.
+    #
+    # This catches the TOTAL break only. A PARTIAL under-collection — reading
+    # `properties` but not nested blocks, which is what this map actually had —
+    # produces a perfectly healthy-looking 75 names across 50 tools and is
+    # invisible here, because a collector's correctness is not observable from
+    # its output shape. That half is gated on the TypeScript side, by
+    # tests/scripts/schema-args.test.ts against the real registry.
     if not any(args.values()):
         raise ToolLookupError(
             f"{ARGS_SCRIPT.name} returned {len(args)} tools and not one argument "

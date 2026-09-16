@@ -156,7 +156,7 @@ ${body}
 describe('tool-lookup gate (class-level detector)', () => {
   // Each case is a different way the lookup can go wrong. The invariant is the
   // same every time: report the linter, validate nothing, blame no skill.
-  const cases: Array<{ name: string; dumpBody?: string }> = [
+  const cases: Array<{ name: string; dumpBody?: string; argsBody?: string }> = [
     { name: 'the dump script is missing entirely', dumpBody: undefined },
     {
       name: 'the dump script exits non-zero',
@@ -175,11 +175,21 @@ describe('tool-lookup gate (class-level detector)', () => {
       name: 'the dump script returns an empty list',
       dumpBody: `console.log(JSON.stringify([]));`,
     },
+    {
+      // The ARGS dump's version of the same shape, and the one an empty-map
+      // check cannot see: renaming the schema field the collector reads gives
+      // a healthy-looking map of empty lists, which passes shape validation
+      // and the emptiness check and then silently turns every argument name in
+      // the repo into a candidate row field.
+      name: 'the args dump returns a map of empty lists',
+      dumpBody: WORKING_DUMP,
+      argsBody: `console.log(JSON.stringify({ get_transactions: [], update_transaction: [] }));`,
+    },
   ];
 
-  for (const { name, dumpBody } of cases) {
+  for (const { name, dumpBody, argsBody } of cases) {
     test(`fails as a linter fault when ${name}`, async () => {
-      await withRepo({ dumpBody }, ({ code, stderr }) => {
+      await withRepo({ dumpBody, argsBody }, ({ code, stderr }) => {
         expect(code).toBe(1);
         expect(stderr).toContain('linter self-check');
         expect(stderr).toContain('Skill references were NOT validated');

@@ -22,45 +22,11 @@
  * broken collector here would actually produce.
  */
 import { ALL_TOOL_DEFS } from '../src/tools/registry/index.js';
-
-/** JSON-Schema node, as much of it as the argument walk needs to see. */
-interface SchemaNode {
-  properties?: Record<string, SchemaNode>;
-  items?: SchemaNode;
-}
-
-/**
- * Collect argument names by descending `properties` and `items`.
- *
- * One level is not enough, and the docblock above promised more than a
- * one-level read delivered: `update_recurring` nests a `rule` object whose
- * `name_contains` is a real parameter, and `edits`, `splits` and `rows` carry
- * nested blocks too. This map is an EXCLUSION set in check-skills.py — a token
- * it does not contain is tested as a row field — so a missing nested name is a
- * false positive telling the author to add a `fields:` argument for something
- * that is a parameter. Mirrors `collectPropertyNames` in
- * scripts/check-tool-counts.ts, which had the same gap.
- *
- * Known limit, the same one: this walks those TWO keywords, not every route a
- * JSON Schema has to a property name. `oneOf`/`anyOf`/`allOf`,
- * `patternProperties`, `$defs`, a schema-valued `additionalProperties` and the
- * tuple form of `items` would under-collect. None occurs in this registry —
- * every `additionalProperties` here is the boolean `false`.
- */
-function collectArgNames(node: SchemaNode | undefined, into: Set<string>): void {
-  if (node === undefined) return;
-  for (const [name, child] of Object.entries(node.properties ?? {})) {
-    into.add(name);
-    collectArgNames(child, into);
-  }
-  collectArgNames(node.items, into);
-}
+import { schemaArgNames } from './schema-args.js';
 
 const args: Record<string, string[]> = {};
 for (const def of ALL_TOOL_DEFS) {
-  const names = new Set<string>();
-  collectArgNames(def.schema.inputSchema, names);
-  args[def.name] = [...names].sort();
+  args[def.name] = [...schemaArgNames(def.schema.inputSchema)].sort();
 }
 
 console.log(JSON.stringify(args));

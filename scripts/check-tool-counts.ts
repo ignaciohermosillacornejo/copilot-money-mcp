@@ -33,6 +33,7 @@ import {
   WRITE_TOOL_DEFS,
   ALL_TOOL_DEFS,
 } from '../src/tools/registry/index.js';
+import { collectSchemaArgNames } from './schema-args.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // CHECK_TOOL_COUNTS_ROOT lets tests point the checker at a synthetic doc tree
@@ -56,61 +57,6 @@ const allTotal = read + live + write;
 /** Every tool name the registry knows, in any mode — the vocabulary a doc may name. */
 const ALL_TOOL_NAMES = new Set(ALL_TOOL_DEFS.map((t) => t.schema.name));
 
-/** JSON-Schema node, as much of it as the argument walk needs to see. */
-interface SchemaNode {
-  properties?: Record<string, SchemaNode>;
-  items?: SchemaNode;
-}
-
-/**
- * Collect property names by descending `properties` and `items`.
- *
- * One level is not enough: `update_recurring` nests a `rule` object whose
- * `name_contains` is a real argument — real enough that the conformance ledger
- * names it as `update_recurring.rule.name_contains` — and `edits`, `splits`
- * and `rows` all carry nested blocks too. A one-level read left those failing
- * as "unknown tool", the residual this walk exists to close.
- *
- * Known limit, stated because the opening finding of this PR was a docblock
- * claiming "every repo-relative path" over a regex that took a subset: this
- * walks those TWO keywords, not every route a JSON Schema has to a property
- * name. A schema reaching arguments through `oneOf`/`anyOf`/`allOf`,
- * `patternProperties`, `$defs`, a schema-valued `additionalProperties`, or the
- * tuple (array) form of `items` would under-collect. None does today — every
- * `additionalProperties` in this repo is the boolean `false`.
- *
- * No visited set, deliberately, after two rounds of trying to justify one.
- *
- * These schemas form a DAG, not a tree — by-reference sharing is exactly what
- * makes them one, and is why a visited set was ever on the table. What rules
- * out a cycle is not the shape but how they are built: `const` object literals
- * initialised in module order, so a fragment can only embed one already
- * defined. The sharing: every `*_FIELDS_PARAM_SCHEMA` in
- * `src/tools/field-selection.ts` with more than one use site — three today —
- * is embedded by identity rather than copied.
- *
- * Omitting the set is correct under ANY schema shape, not because of that
- * sharing: a re-walk collects the same names into the same `into`, so a
- * revisit can never lose a name. What the fragments' shape buys is the cost
- * bound — each is a LEAF, `{ type: 'array', items: { type: 'string' },
- * description }`, so a repeat re-walks the fragment and its single `items`
- * child and neither contributes a name.
- *
- * A future visited set would therefore be a cost optimisation, never a
- * correctness fix — and one whose deletion stays byte-identical, since dedupe
- * not changing the output set is its definition. If you add one anyway: it is
- * sound only while every call sharing it also shares one `into`, because a
- * skipped subtree's names survive only in the set the earlier visit wrote to.
- */
-function collectPropertyNames(node: SchemaNode | undefined, into: Set<string>): void {
-  if (node === undefined) return;
-  for (const [name, child] of Object.entries(node.properties ?? {})) {
-    into.add(name);
-    collectPropertyNames(child, into);
-  }
-  collectPropertyNames(node.items, into);
-}
-
 /**
  * Every argument name a doc may legitimately backtick.
  *
@@ -118,9 +64,8 @@ function collectPropertyNames(node: SchemaNode | undefined, into: Set<string>): 
  * "looks tool-shaped" discriminator below cannot tell them from a mistyped tool
  * name on shape alone. A row writing `` `get_transactions` (with `account_id`) ``
  * is ordinary documentation, and failing it as an unknown tool would be the
- * prose trap returning under a new spelling. Derived from the registry through
- * `properties` and `items`, so a new argument — nested or not — needs no edit
- * here, within the limit `collectPropertyNames` records.
+ * prose trap returning under a new spelling. Derived from the registry by
+ * `scripts/schema-args.ts`, which records what it walks and what it does not.
  *
  * Unlike tool names, argument names need no charset invariant of their own.
  * This set is only ever compared against tokens harvested by the same
@@ -129,7 +74,7 @@ function collectPropertyNames(node: SchemaNode | undefined, into: Set<string>): 
  * the asymmetry with tests/tools/registry/tool-name-shape.test.ts is deliberate.
  */
 const ALL_ARG_NAMES = new Set<string>();
-for (const def of ALL_TOOL_DEFS) collectPropertyNames(def.schema.inputSchema, ALL_ARG_NAMES);
+for (const def of ALL_TOOL_DEFS) collectSchemaArgNames(def.schema.inputSchema, ALL_ARG_NAMES);
 
 const mismatches: string[] = [];
 
