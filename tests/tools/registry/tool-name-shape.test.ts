@@ -15,6 +15,14 @@
  * here instead, loudly, at the point where the convention is broken rather
  * than at the surface that depends on it.
  *
+ * Two premises, gated separately because they fail differently:
+ *
+ *   - **charset** (`/^[a-z_]+$/`) — the token regex `/`([a-z_]+)`/` cannot even
+ *     see a name outside it, so `missing` reports the tool forever and no doc
+ *     edit clears it.
+ *   - **underscore** (`verb_noun`) — the discriminator that separates a typo
+ *     from prose. Relax it and an unknown tool name goes unreported instead.
+ *
  * Sibling of the same argument in `scripts/check-tracked-files.ts`: a guard
  * that reasons from a naming convention needs the convention gated, or the
  * guard is one rename away from being a no-op.
@@ -30,6 +38,18 @@ import {
 const ALL_DEFS = [...READ_TOOL_DEFS, ...LIVE_TOOL_DEFS, ...WRITE_TOOL_DEFS];
 
 describe('tool name shape', () => {
+  // The token regex in `expectToolTable` is `/`([a-z_]+)`/`. A name outside
+  // that charset — a digit, a hyphen, a capital — is not merely unmatched, it
+  // is UNREPORTABLE: `missing` names it forever and no edit to the doc can
+  // clear it, because the parser cannot see the token that would satisfy it.
+  // `bun run check` stays red until someone reads the regex. That is a worse
+  // failure than the one the underscore test prevents, and it is the half of
+  // the convention that was not gated.
+  test('every registry tool name is lowercase and underscores only', () => {
+    const offShape = ALL_DEFS.map((d) => d.schema.name).filter((n) => !/^[a-z_]+$/.test(n));
+    expect(offShape).toEqual([]);
+  });
+
   test('every registry tool name contains an underscore', () => {
     const singleWord = ALL_DEFS.map((d) => d.schema.name).filter((n) => !n.includes('_'));
     expect(singleWord).toEqual([]);

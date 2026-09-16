@@ -75,9 +75,16 @@ async function withDocTree(
  * other test. Only a fixture whose sole edit is what makes the assertion true
  * fails loudly by itself.
  *
- * So every non-trivial edit routes through here. Throws rather than asserts, so
- * the message reads "the fixture is stale" and not "the gate is broken" — the
- * distinction that matters when it fires.
+ * So the compound fixtures route through here, and the single-edit exit-1 ones
+ * deliberately do not — the discriminator above exempts them, and one
+ * (`reports every mismatch`) edits two files while asserting on each name
+ * separately, so either edit going stale fails loudly on its own. Throws rather
+ * than asserts, so the message reads "the fixture is stale" and not "the gate
+ * is broken" — the distinction that matters when it fires.
+ *
+ * A string `from` replaces every occurrence; a RegExp replaces the first only,
+ * which is what both current regex callers want. Pass a global regex if you
+ * mean all of them.
  */
 function anchoredEdit(file: string, doc: string, from: string | RegExp, to: string): string {
   const out = typeof from === 'string' ? doc.replaceAll(from, to) : doc.replace(from, to);
@@ -87,7 +94,41 @@ function anchoredEdit(file: string, doc: string, from: string | RegExp, to: stri
   return out;
 }
 
-/** The doc every fixture in this file edits. */
+/**
+ * Fail if `needle` is not inside the section `expectToolTable` actually reads.
+ *
+ * `anchoredEdit` proves the edit changed the doc; it cannot prove the result is
+ * in scope. `expectToolTable` reads from the heading to the next `^---$`, and
+ * the prose this file anchors on sits three lines above that rule. Move it
+ * below — a plausible edit, it is a "see the README" pointer — and the fixture
+ * still applies, the prose lands out of section, and the row-scoping test
+ * quietly becomes a duplicate of the plain missing-row one.
+ */
+function assertInToolSection(doc: string, needle: string): void {
+  const start = doc.indexOf(TOOL_SECTION_HEADING);
+  if (start === -1)
+    throw new Error(`fixture anchor gone from ${EXAMPLES}: the tool-reference heading`);
+  const rest = doc.slice(start + TOOL_SECTION_HEADING.length);
+  const end = rest.search(/^---$/m);
+  const section = end === -1 ? rest : rest.slice(0, end);
+  if (!section.includes(needle)) {
+    throw new Error(
+      `fixture landed outside the scanned section of ${EXAMPLES}: ${JSON.stringify(needle)}`
+    );
+  }
+}
+
+/** Assert-and-return, so a fixture can wrap its result inline. */
+function proseInSection(doc: string): string {
+  assertInToolSection(doc, 'Balances over time come from `get_balance_history`.');
+  return doc;
+}
+
+/** The heading `expectToolTable` scans from — mirrored from the script's call site. */
+const TOOL_SECTION_HEADING = '## Tool Reference (Behind the Scenes)';
+
+/** The doc every `anchoredEdit` call names — not every file the fixtures touch,
+ *  which also includes package.json, README.md, CONTRIBUTING.md and docs/index.html. */
 const EXAMPLES = 'docs/EXAMPLE_QUERIES.md';
 
 const read = READ_TOOL_DEFS.length;
@@ -208,11 +249,13 @@ describe('check:tool-counts', () => {
           // Same compound shape: without the prose edit guarded, rewording
           // that sentence in the real doc would make this a byte-for-byte
           // duplicate of the test above, covering nothing about row-scoping.
-          anchoredEdit(
-            EXAMPLES,
-            anchoredEdit(EXAMPLES, doc, /^.*`get_balance_history`.*$/m, ''),
-            'With `--live-reads`',
-            'Balances over time come from `get_balance_history`.\n\nWith `--live-reads`'
+          proseInSection(
+            anchoredEdit(
+              EXAMPLES,
+              anchoredEdit(EXAMPLES, doc, /^.*`get_balance_history`.*$/m, ''),
+              'With `--live-reads`',
+              'Balances over time come from `get_balance_history`.\n\nWith `--live-reads`'
+            )
           )
         );
       },
