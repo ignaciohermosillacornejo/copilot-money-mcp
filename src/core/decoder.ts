@@ -296,6 +296,17 @@ function deduplicateAccounts(accounts: Account[]): Account[] {
  * id on both paths, so this is a no-op refactor — the point is that a future
  * change to the rule can no longer land on one path and miss the other, which
  * is how #662 shipped the same bad key twice.
+ *
+ * WHY THIS IS NOT `dedupeById(rows, keyOf)`. All five `deduplicate*` helpers
+ * are the same nine lines differing only in the id field, and collapsing them
+ * into one generic is the obvious next move. It is deliberately not made:
+ * `tests/core/dedup-identity.test.ts` discovers dedup blocks by their
+ * `new Set<string>()` allocation and pins the KEY EXPRESSION each one tests. A
+ * generic leaves ONE block and moves all five key expressions out to call-site
+ * lambdas the scanner cannot see — trading the detector for a few lines. The
+ * repetition here is five DIFFERENT identity claims that happen to share a
+ * shape; what #669 removed was two copies of ONE claim, and only that kind can
+ * drift apart.
  */
 function deduplicateRecurring(recurring: Recurring[]): Recurring[] {
   const seen = new Set<string>();

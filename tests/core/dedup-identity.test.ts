@@ -141,6 +141,19 @@ import {
 import { createCombinedDb } from '../helpers/test-db.js';
 import { stripComments } from '../helpers/strip-comments.js';
 
+/**
+ * The decoder source, read once and named once.
+ *
+ * It used to be spelled out twice, as the default argument of each scanner.
+ * A third copy for the routing test below would have been three chances for
+ * the scanners and the test to end up reading different files — the very
+ * shape this file exists to remove from the decoder.
+ */
+const DECODER_SRC = fs.readFileSync(
+  path.join(import.meta.dir, '..', '..', 'src', 'core', 'decoder.ts'),
+  'utf-8'
+);
+
 // ---------------------------------------------------------------------------
 // COMMENT STRIPPING — where it lives now, and what it used to be
 //
@@ -522,7 +535,7 @@ const DISCOVERY_WINDOW = 3000;
  * collision class outright rather than merely tolerating it.
  *
  * Two failure modes, both closed HERE rather than left for the floor test or
- * the AGGREGATE_SET_VAR pin two layers downstream to catch by accident
+ * the aggregate count-pin two layers downstream to catch by accident
  * (review follow-up — mutation-verified both were only caught that far away
  * before this fix):
  *
@@ -579,10 +592,12 @@ const DISCOVERY_WINDOW = 3000;
  * function). And even the maximally-adversarial payload above does not
  * pass silently end to end — the per-block scan in
  * `discoverAggregatePushTargets` still finds no genuine guard for the fake
- * declaration and returns `{}`, so the count-pin and the `AGGREGATE_SET_VAR`
- * pin still catch it, exactly as they did before this fix — only the
- * DIAGNOSTIC quality regresses (caught two layers downstream instead of
- * named here), not correctness.
+ * declaration and returns `{}`, so the count-pin still catches it at
+ * "Expected: 22, Received: 0" — only the DIAGNOSTIC quality regresses (caught
+ * two layers downstream instead of named here), not correctness. Note it is
+ * the count-pin ALONE that does this, and the conjunction that used to be
+ * written here — "and the `AGGREGATE_SET_VAR` pin" — stopped being true at
+ * #669: that pin now expects `{}`, so a scan degenerating to `{}` passes it.
  */
 const MIN_PLAUSIBLE_BODY_LENGTH = 5000;
 
@@ -655,10 +670,7 @@ function decodeAllCollectionsBody(
  * scoped — see the fixtures below.
  */
 function discoverAggregatePushTargets(
-  source: string = fs.readFileSync(
-    path.join(import.meta.dir, '..', '..', 'src', 'core', 'decoder.ts'),
-    'utf-8'
-  ),
+  source: string = DECODER_SRC,
   // Passed through to decodeAllCollectionsBody. Defaults to the real
   // production floor; fixtures below that are testing something OTHER than
   // the length assertion itself override it down, since a synthetic snippet
@@ -831,12 +843,7 @@ const TWIN_TESTED = new Set(
  * why the duplicate-block throw below says "the same enclosing declaration"
  * rather than "the same function": the scanner cannot tell the difference.
  */
-function discoverDedupBlocks(
-  source: string = fs.readFileSync(
-    path.join(import.meta.dir, '..', '..', 'src', 'core', 'decoder.ts'),
-    'utf-8'
-  )
-): Record<string, string> {
+function discoverDedupBlocks(source: string = DECODER_SRC): Record<string, string> {
   const declarations = [...source.matchAll(/^(?:export )?(?:async )?function (\w+)/gm)].map(
     (m) => [m.index as number, m[1] as string] as const
   );
@@ -1017,9 +1024,14 @@ describe('dedup coverage is declared, not assumed (#668 review)', () => {
     // this describe that survives regenerating the pin, which is the same
     // argument the `toBe(22)` count pin makes two tests down.
     //
-    // `>= 30` against 33 real IS a margin here, unlike that pin: this scan
-    // covers blocks the file does not otherwise enumerate one by one, and the
-    // exact count is already pinned by DEDUP_BLOCKS itself.
+    // `>= 30` is still a margin rather than a pin, unlike that count: this
+    // scan covers blocks the file does not otherwise enumerate one by one,
+    // and the exact count is already pinned by DEDUP_BLOCKS itself, so a
+    // second exact count here would buy nothing. But the headroom is 3 now,
+    // not 6 — #669 removed three blocks without moving this floor — so the
+    // next extraction of that same shape turns a GOOD change red here. That
+    // is a cost worth naming rather than pre-paying: lowering the floor now
+    // would weaken a live guard against a change nobody has proposed.
     expect(Object.keys(discovered).length).toBeGreaterThanOrEqual(30);
   });
 
@@ -1072,6 +1084,47 @@ describe('dedup coverage is declared, not assumed (#668 review)', () => {
     // 22 real aggregate blocks, so an empty result here means "none of them
     // belongs to a COLLECTIONS entry", not "the scan found nothing".
     expect(AGGREGATE_SET_VAR).toEqual({});
+  });
+
+  test('decodeAllCollections routes every twin-tested collection through its helper', () => {
+    // What the three inline aggregate blocks used to pin for free, and what
+    // #669 would otherwise have thrown away: that the aggregate path still
+    // DEDUPS AT ALL. Replacing `const recurring = deduplicateRecurring(
+    // rawRecurring)` with `const recurring = rawRecurring` has to fail
+    // something, and before this test it failed nothing (review follow-up on
+    // #669).
+    //
+    // Nothing else here covers that direction, and each near-miss fails for
+    // its own reason:
+    //
+    //   - `discovered` sees the helper, not its callers. The helper still
+    //     exists and `decodeRecurring` still calls it, so DEDUP_BLOCKS is
+    //     byte-identical with the aggregate call gone.
+    //   - `toBe(22)` and the empty AGGREGATE_SET_VAR count `new Set<string>()`
+    //     allocations INSIDE decodeAllCollections. A removed call allocates
+    //     no Set, so it moves neither number.
+    //   - the aggregate twin test compares a SET of ids against two
+    //     distinct-id twins. It fails on OVER-deduping — the #662 direction
+    //     it was built for — and is blind to UNDER-deduping, because
+    //     duplicate rows collapse into the Set before the comparison.
+    //   - `decode-path-parity` compares lengths across the two paths, but no
+    //     fixture seeds a physically duplicated document, so both paths agree
+    //     whether or not either of them dedups.
+    //
+    // Hence static rather than behavioural: a fixture cannot express "the
+    // same document stored twice" (`createTestDb` writes one row per id —
+    // the same limitation #122 had, recorded in this file's header), so the
+    // call being present is the only observable left. Comment-stripped
+    // first, so a docblock mentioning `deduplicateRecurring()` cannot stand
+    // in for the call — the same reason both scanners above strip.
+    //
+    // Reports the collection NAMES rather than a boolean: a bare `toBe(true)`
+    // would say a routing regressed without saying which.
+    const body = stripComments(decodeAllCollectionsBody(DECODER_SRC));
+    const notRouted = COLLECTIONS.filter((c) => !body.includes(`${c.standaloneName}(`)).map(
+      (c) => c.name
+    );
+    expect(notRouted).toEqual([]);
   });
 
   test('every dedup block and its key expression are unchanged', () => {
@@ -1312,7 +1365,9 @@ describe('decodeAllCollectionsBody rejects an implausibly short slice (#688 revi
     // so balanced() faithfully extracts just the few characters of ` ok:
     // boolean ` as `scoped` if nothing catches it. Before the length
     // assertion, this returned `{}` silently, detected only two layers
-    // downstream by the non-vacuity floor and the AGGREGATE_SET_VAR pin.
+    // downstream by the non-vacuity floor and the aggregate count-pin. (Not
+    // the AGGREGATE_SET_VAR pin, which has expected `{}` since #669 and so
+    // passes on a degenerate scan.)
     // No override on the call below — this fixture exercises the REAL
     // production default (5000), not a relaxed one, since the whole point
     // is proving that default actually protects the real call site.
@@ -1381,9 +1436,11 @@ export async function decodeAllCollections(dbPath: string): Promise<{ marker: 'c
     // But the per-block scan, run on that wrong slice, finds no genuine
     // `.has(...)`-guarded `.push(` for the fake declaration — the STRING
     // content has the shape of a Set declaration but not of a real guard —
-    // so the overall result is still the empty map the count-pin and the
-    // AGGREGATE_SET_VAR pin would both catch downstream. Silently WRONG
-    // slice, but not silently PASSING.
+    // so the overall result is still the empty map the count-pin would catch
+    // downstream. Silently WRONG slice, but not silently PASSING. The
+    // AGGREGATE_SET_VAR pin is NOT a second catcher here and has not been
+    // since #669 — it expects `{}`, which is exactly what a degenerate scan
+    // produces.
     expect(found).toEqual({});
   });
 });
