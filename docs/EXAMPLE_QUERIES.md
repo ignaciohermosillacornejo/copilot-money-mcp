@@ -538,7 +538,8 @@ While the MCP server returns data, you can ask Claude to:
 
 ## Tool Reference (Behind the Scenes)
 
-When you ask questions, Claude uses these 12 tools automatically:
+When you ask questions, Claude uses these 14 tools automatically — every tool the
+server lists in its default (cache-only) mode:
 
 | Your Question | Tool Used |
 |---------------|-----------|
@@ -550,12 +551,17 @@ When you ask questions, Claude uses these 12 tools automatically:
 | "Find subscriptions" | `get_recurring_transactions` |
 | "Show my budgets" | `get_budgets` |
 | "What are my goals?" | `get_goals` |
+| "How has that goal progressed?" | `get_goal_history` |
 | "Check bank connection status" | `get_connection_status` |
 | "What are my holdings?" | `get_holdings` |
+| "How has my balance changed over time?" | `get_balance_history` |
 | "Price history of AAPL" | `get_investment_prices` |
 | "Show stock splits" | `get_investment_splits` |
 | "Check cache status" | `get_cache_info` |
 | "Refresh database" | `refresh_database` |
+
+With `--live-reads` or `--write` the server lists a different set — see the
+[README](../README.md) for the per-mode counts.
 
 ---
 
