@@ -41,13 +41,13 @@
 // which rule holds which, and states the adopter carve-out explicitly, so the
 // two descriptions can be compared rather than merely agreeing in tone.
 //
-// tsconfig-tests-sync.test.ts is here for the #725 reason plus one: it is the gate
-// that decides who is on THIS list, it casts the parsed JSONC (`as { include:
-// string[] }`), and it builds failure messages by interpolating derived values
-// — the #725 shape exactly. Its own helper-pairing rule is scoped to
-// tests/helpers/ on purpose and so cannot reach it, which is why this entry is
-// a deliberate manual add. It asserts its own membership instead, so removing
-// this line turns a test red rather than going unnoticed.
+// tsconfig-tests-sync.test.ts is here for the #725 reason plus one: it is the
+// gate that decides who is on THIS list, it casts the parsed JSONC (`as {
+// include: string[] }`), and it builds failure messages by interpolating
+// derived values — the #725 shape exactly. Its own helper-pairing rule is
+// scoped to tests/helpers/ on purpose and so cannot reach it, which is why
+// this entry is a deliberate manual add. It asserts its own membership
+// instead, so removing this line turns a test red rather than going unnoticed.
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
