@@ -29,15 +29,13 @@
  */
 import { describe, expect, test } from 'bun:test';
 
-// The registry's own union, not a local rebuild of it. A hand-assembled
-// `[...READ, ...LIVE, ...WRITE]` here would keep passing, silently, the day a
-// fourth def array joined the registry — it would simply stop gating the
-// charset and underscore premises for those tools. That is the
-// silent-under-collecting-scan class, in the test that exists to stop the
-// unrecoverable charset failure.
+// Read ALL_TOOL_DEFS directly below, never through a local alias or a
+// hand-assembled `[...READ, ...LIVE, ...WRITE]`. A rebuilt union would keep
+// passing, silently, the day a fourth def array joined the registry — it would
+// simply stop gating the charset and underscore premises for those tools,
+// which is the silent-under-collecting-scan class, in the test that exists to
+// stop the unrecoverable charset failure.
 import { ALL_TOOL_DEFS } from '../../../src/tools/registry/index.js';
-
-const ALL_DEFS = ALL_TOOL_DEFS;
 
 describe('tool name shape', () => {
   // The token regex in `expectToolTable` is `/`([a-z_]+)`/`. A name outside
@@ -48,12 +46,12 @@ describe('tool name shape', () => {
   // failure than the one the underscore test prevents, and it is the half of
   // the convention that was not gated.
   test('every registry tool name is lowercase and underscores only', () => {
-    const offShape = ALL_DEFS.map((d) => d.schema.name).filter((n) => !/^[a-z_]+$/.test(n));
+    const offShape = ALL_TOOL_DEFS.map((d) => d.schema.name).filter((n) => !/^[a-z_]+$/.test(n));
     expect(offShape).toEqual([]);
   });
 
   test('every registry tool name contains an underscore', () => {
-    const singleWord = ALL_DEFS.map((d) => d.schema.name).filter((n) => !n.includes('_'));
+    const singleWord = ALL_TOOL_DEFS.map((d) => d.schema.name).filter((n) => !n.includes('_'));
     expect(singleWord).toEqual([]);
   });
 
@@ -64,6 +62,6 @@ describe('tool name shape', () => {
   // script had a hardcoded 16 in a comment for the same reason, and it was
   // wrong.)
   test('the invariant is checked against a non-empty registry', () => {
-    expect(ALL_DEFS.length).toBeGreaterThan(0);
+    expect(ALL_TOOL_DEFS.length).toBeGreaterThan(0);
   });
 });

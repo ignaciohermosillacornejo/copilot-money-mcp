@@ -104,6 +104,12 @@ function anchoredEdit(file: string, doc: string, from: string | RegExp, to: stri
  * still applies, the prose lands out of section, and the row-scoping test
  * quietly becomes a duplicate of the plain missing-row one.
  *
+ * `file` labels the messages only. The heading and the `^---$` boundary stay
+ * module-global, so this function is specific to docs/EXAMPLE_QUERIES.md by
+ * construction — pass another file and you get a message naming it for a
+ * section it was never able to find. Loud rather than silent, so not the class
+ * this file is about, but it is the question the signature invites.
+ *
  * MIRRORED, and the mirror must move in lockstep: the slicing below copies
  * `expectToolTable`'s. The test cannot import the script — running it IS the
  * check, which is why these tests spawn a subprocess — so there is no shared
@@ -136,7 +142,7 @@ function proseInSection(doc: string): string {
 /** The heading `expectToolTable` scans from — mirrored from the script's call site. */
 const TOOL_SECTION_HEADING = '## Tool Reference (Behind the Scenes)';
 
-/** The doc every `anchoredEdit` call names — not every file the fixtures touch. */
+/** The doc every anchored helper names — not every file the fixtures touch. */
 const EXAMPLES = 'docs/EXAMPLE_QUERIES.md';
 
 const read = READ_TOOL_DEFS.length;

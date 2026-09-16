@@ -220,6 +220,18 @@ def collect_tool_args() -> dict[str, set[str]]:
         )
     if not args:
         raise ToolLookupError(f"{ARGS_SCRIPT.name} returned an empty tool list")
+    # An empty MAP is not the shape a broken collector produces. Renaming the
+    # schema field it reads yields {"get_transactions": [], "get_accounts": [],
+    # ...} — a non-empty map of empty lists, which passes both checks above and
+    # silently turns every argument name in the repo into a candidate row
+    # field. Under-collection indistinguishable from a pass, in the map that
+    # exists to prevent a false positive.
+    if not any(args.values()):
+        raise ToolLookupError(
+            f"{ARGS_SCRIPT.name} returned {len(args)} tools and not one argument "
+            "between them — the collector is reading the wrong schema field, not "
+            "describing a registry where no tool takes arguments"
+        )
 
     return {name: set(props) for name, props in args.items()}
 
