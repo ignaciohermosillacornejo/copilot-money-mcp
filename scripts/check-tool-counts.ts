@@ -78,16 +78,22 @@ interface SchemaNode {
  *
  * No visited set, deliberately, after two rounds of trying to justify one.
  * JSON Schema here is a tree, so there are no cycles. There IS by-reference
- * sharing across tools — `TRANSACTION_FIELDS_PARAM_SCHEMA` and
- * `RECURRING_FIELDS_PARAM_SCHEMA` from `src/tools/field-selection.ts` are each
- * embedded by identity in two tools — but every one of those fragments is a
- * LEAF: `{ type: 'array', items: { type: 'string' }, description }`, with no
- * `properties` at any depth. Measured: three nodes are reached twice across the
- * whole registry and each contributes zero names. So revisiting costs one empty
- * loop and can lose nothing, and a dedupe guard would be a mechanism whose
- * deletion is byte-identical — unobservable by construction, since dedupe does
- * not change the output set. Add one if a shared fragment ever carries
- * properties; until then this is the honest shape.
+ * sharing across tools: every `*_FIELDS_PARAM_SCHEMA` in
+ * `src/tools/field-selection.ts` with more than one use site — three today —
+ * is embedded by identity rather than copied.
+ *
+ * Omitting the set is correct under ANY schema shape, not because of that
+ * sharing: a re-walk collects the same names into the same `into`, so a
+ * revisit can never lose a name. What the fragments' shape buys is the cost
+ * bound — each is a LEAF, `{ type: 'array', items: { type: 'string' },
+ * description }`, so a repeat re-walks the fragment and its single `items`
+ * child and neither contributes a name.
+ *
+ * A future visited set would therefore be a cost optimisation, never a
+ * correctness fix — and one whose deletion stays byte-identical, since dedupe
+ * not changing the output set is its definition. If you add one anyway: it is
+ * sound only while every call sharing it also shares one `into`, because a
+ * skipped subtree's names survive only in the set the earlier visit wrote to.
  */
 function collectPropertyNames(node: SchemaNode | undefined, into: Set<string>): void {
   if (node === undefined) return;
