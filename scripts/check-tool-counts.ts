@@ -76,29 +76,26 @@ interface SchemaNode {
  * tuple (array) form of `items` would under-collect. None does today — every
  * `additionalProperties` in this repo is the boolean `false`.
  *
- * The `seen` set is not for cycles — JSON Schema here is a tree. It is for
- * by-reference sharing ACROSS tools, which is already the present rather than a
- * hedge: `TRANSACTION_FIELDS_PARAM_SCHEMA` from `src/tools/field-selection.ts`
- * is embedded by identity in both `get_transactions` and
- * `get_transactions_live`, and `RECURRING_FIELDS_PARAM_SCHEMA` by two live
- * tools. That is why the caller hoists ONE set across the whole pass instead of
- * letting the default create a per-tool one — per-tool is the exact scope where
- * nothing is ever reachable twice, so the guard would be unobservable. Skipping
- * a revisited node loses no names: a parent adds a child's name before
- * recursing into it.
+ * No visited set, deliberately, after two rounds of trying to justify one.
+ * JSON Schema here is a tree, so there are no cycles. There IS by-reference
+ * sharing across tools — `TRANSACTION_FIELDS_PARAM_SCHEMA` and
+ * `RECURRING_FIELDS_PARAM_SCHEMA` from `src/tools/field-selection.ts` are each
+ * embedded by identity in two tools — but every one of those fragments is a
+ * LEAF: `{ type: 'array', items: { type: 'string' }, description }`, with no
+ * `properties` at any depth. Measured: three nodes are reached twice across the
+ * whole registry and each contributes zero names. So revisiting costs one empty
+ * loop and can lose nothing, and a dedupe guard would be a mechanism whose
+ * deletion is byte-identical — unobservable by construction, since dedupe does
+ * not change the output set. Add one if a shared fragment ever carries
+ * properties; until then this is the honest shape.
  */
-function collectPropertyNames(
-  node: SchemaNode | undefined,
-  into: Set<string>,
-  seen: Set<SchemaNode> = new Set(),
-): void {
-  if (node === undefined || seen.has(node)) return;
-  seen.add(node);
+function collectPropertyNames(node: SchemaNode | undefined, into: Set<string>): void {
+  if (node === undefined) return;
   for (const [name, child] of Object.entries(node.properties ?? {})) {
     into.add(name);
-    collectPropertyNames(child, into, seen);
+    collectPropertyNames(child, into);
   }
-  collectPropertyNames(node.items, into, seen);
+  collectPropertyNames(node.items, into);
 }
 
 /**
@@ -119,10 +116,7 @@ function collectPropertyNames(
  * the asymmetry with tests/tools/registry/tool-name-shape.test.ts is deliberate.
  */
 const ALL_ARG_NAMES = new Set<string>();
-const seenSchemaNodes = new Set<SchemaNode>();
-for (const def of ALL_TOOL_DEFS) {
-  collectPropertyNames(def.schema.inputSchema, ALL_ARG_NAMES, seenSchemaNodes);
-}
+for (const def of ALL_TOOL_DEFS) collectPropertyNames(def.schema.inputSchema, ALL_ARG_NAMES);
 
 const mismatches: string[] = [];
 
