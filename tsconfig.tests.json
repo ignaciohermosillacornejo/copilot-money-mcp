@@ -19,7 +19,15 @@
 // src/ only), and #725 shipped a review round with an object literal silently
 // missing two declared fields — the failure message read them and got
 // `undefined`. A gate whose legibility depends on its own types should have
-// them checked. Both files are type-clean; keep them that way.
+// them checked. All three files are type-clean; keep them that way.
+//
+// The third is tsconfig-tests-sync.test.ts, added for that same reason with
+// one extra: it is the gate that decides who is on THIS list, it casts the
+// parsed JSONC (`as { include: string[] }`), and it builds two failure
+// messages by interpolating derived values — the #725 shape exactly. Its own
+// helper-pairing rule is scoped to tests/helpers/ on purpose and so cannot
+// reach it, which is why this entry is a deliberate manual add rather than
+// something a ratchet produced.
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
@@ -63,6 +71,7 @@
     "tests/exported-constants.test.ts",
     "tests/core/temp-db-suite-teardown.test.ts",
     "tests/no-collection-time-assertions.test.ts",
+    "tests/unit/tsconfig-tests-sync.test.ts",
     "tests/setup/temp-db-teardown.ts",
     "tests/fixtures/temp-db-leak-probe.ts",
     "tests/context-budget-live.test.ts",
