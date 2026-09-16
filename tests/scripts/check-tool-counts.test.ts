@@ -112,23 +112,24 @@ function anchoredEdit(file: string, doc: string, from: string | RegExp, to: stri
  * script to `^---+$`, or to "stop at the next `##`", and this copy keeps
  * returning a region that is no longer the scanned one.
  */
-function assertInToolSection(doc: string, needle: string): void {
+function assertInToolSection(file: string, doc: string, needle: string): void {
   const start = doc.indexOf(TOOL_SECTION_HEADING);
-  if (start === -1)
-    throw new Error(`fixture anchor gone from ${EXAMPLES}: the tool-reference heading`);
+  if (start === -1) {
+    throw new Error(`fixture anchor gone from ${file}: the tool-reference heading`);
+  }
   const rest = doc.slice(start + TOOL_SECTION_HEADING.length);
   const end = rest.search(/^---$/m);
   const section = end === -1 ? rest : rest.slice(0, end);
   if (!section.includes(needle)) {
     throw new Error(
-      `fixture landed outside the scanned section of ${EXAMPLES}: ${JSON.stringify(needle)}`
+      `fixture landed outside the scanned section of ${file}: ${JSON.stringify(needle)}`
     );
   }
 }
 
 /** Assert-and-return, so a fixture can wrap its result inline. */
 function proseInSection(doc: string): string {
-  assertInToolSection(doc, 'Balances over time come from `get_balance_history`.');
+  assertInToolSection(EXAMPLES, doc, 'Balances over time come from `get_balance_history`.');
   return doc;
 }
 

@@ -27,7 +27,12 @@
 import { readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { READ_TOOL_DEFS, LIVE_TOOL_DEFS, WRITE_TOOL_DEFS } from '../src/tools/registry/index.js';
+import {
+  READ_TOOL_DEFS,
+  LIVE_TOOL_DEFS,
+  WRITE_TOOL_DEFS,
+  ALL_TOOL_DEFS,
+} from '../src/tools/registry/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // CHECK_TOOL_COUNTS_ROOT lets tests point the checker at a synthetic doc tree
@@ -47,8 +52,6 @@ const baseTotal = read + write;
 // --live-reads (src/cli.ts), so write mode is live-mode reads + write tools.
 const writeModeTotal = liveModeTotal + write;
 const allTotal = read + live + write;
-
-const ALL_TOOL_DEFS = [...READ_TOOL_DEFS, ...LIVE_TOOL_DEFS, ...WRITE_TOOL_DEFS];
 
 /** Every tool name the registry knows, in any mode — the vocabulary a doc may name. */
 const ALL_TOOL_NAMES = new Set(ALL_TOOL_DEFS.map((t) => t.schema.name));
@@ -77,8 +80,12 @@ interface SchemaNode {
  * `additionalProperties` in this repo is the boolean `false`.
  *
  * No visited set, deliberately, after two rounds of trying to justify one.
- * JSON Schema here is a tree, so there are no cycles. There IS by-reference
- * sharing across tools: every `*_FIELDS_PARAM_SCHEMA` in
+ *
+ * These schemas form a DAG, not a tree — by-reference sharing is exactly what
+ * makes them one, and is why a visited set was ever on the table. What rules
+ * out a cycle is not the shape but how they are built: `const` object literals
+ * initialised in module order, so a fragment can only embed one already
+ * defined. The sharing: every `*_FIELDS_PARAM_SCHEMA` in
  * `src/tools/field-selection.ts` with more than one use site — three today —
  * is embedded by identity rather than copied.
  *

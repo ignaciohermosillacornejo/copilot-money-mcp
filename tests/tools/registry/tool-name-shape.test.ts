@@ -29,13 +29,15 @@
  */
 import { describe, expect, test } from 'bun:test';
 
-import {
-  READ_TOOL_DEFS,
-  LIVE_TOOL_DEFS,
-  WRITE_TOOL_DEFS,
-} from '../../../src/tools/registry/index.js';
+// The registry's own union, not a local rebuild of it. A hand-assembled
+// `[...READ, ...LIVE, ...WRITE]` here would keep passing, silently, the day a
+// fourth def array joined the registry — it would simply stop gating the
+// charset and underscore premises for those tools. That is the
+// silent-under-collecting-scan class, in the test that exists to stop the
+// unrecoverable charset failure.
+import { ALL_TOOL_DEFS } from '../../../src/tools/registry/index.js';
 
-const ALL_DEFS = [...READ_TOOL_DEFS, ...LIVE_TOOL_DEFS, ...WRITE_TOOL_DEFS];
+const ALL_DEFS = ALL_TOOL_DEFS;
 
 describe('tool name shape', () => {
   // The token regex in `expectToolTable` is `/`([a-z_]+)`/`. A name outside
