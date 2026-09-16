@@ -23,8 +23,10 @@ const CHECKED_FILES = [
   'package.json',
   'README.md',
   'CLAUDE.md',
+  'CONTRIBUTING.md',
   'docs/index.html',
   'docs/graphql-live-reads.md',
+  'docs/EXAMPLE_QUERIES.md',
 ];
 
 async function runCheck(root?: string): Promise<{ code: number; stderr: string; stdout: string }> {
@@ -114,6 +116,60 @@ describe('check:tool-counts', () => {
         expect(code).toBe(1);
         expect(stderr).toContain('package.json');
         expect(stderr).toContain('README.md');
+      }
+    );
+  });
+
+  // The #723 trap: docs/EXAMPLE_QUERIES.md said "12 tools" over a table of 12,
+  // so the count was self-consistent and the surface was still two tools short.
+  // A needle on the number alone would have ratcheted the understatement in, so
+  // the table is asserted for set equality against the registry as well.
+  test('fails when the tool-reference table omits a default-mode tool', async () => {
+    await withDocTree(
+      async (root) => {
+        const path = join(root, 'docs/EXAMPLE_QUERIES.md');
+        const doc = await readFile(path, 'utf-8');
+        await writeFile(path, doc.replace(/^.*`get_balance_history`.*$/m, ''));
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('docs/EXAMPLE_QUERIES.md');
+        expect(stderr).toContain('get_balance_history');
+      }
+    );
+  });
+
+  test('fails when the table is trimmed and the count is edited to match it', async () => {
+    await withDocTree(
+      async (root) => {
+        const path = join(root, 'docs/EXAMPLE_QUERIES.md');
+        const doc = await readFile(path, 'utf-8');
+        await writeFile(
+          path,
+          doc
+            .replace(/^.*`get_balance_history`.*$/m, '')
+            .replace(`these ${read} tools`, `these ${read - 1} tools`)
+        );
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        // The count needle goes red too, but the table assertion is the one
+        // that would still be red if the author had "fixed" the number.
+        expect(stderr).toContain('omits 1 tool(s): get_balance_history');
+      }
+    );
+  });
+
+  test('fails when CONTRIBUTING.md restates a count the registry disagrees with', async () => {
+    await withDocTree(
+      async (root) => {
+        const path = join(root, 'CONTRIBUTING.md');
+        const doc = await readFile(path, 'utf-8');
+        await writeFile(path, doc.replaceAll(`(${read} read + `, `(${read + 1} read + `));
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('CONTRIBUTING.md');
       }
     );
   });

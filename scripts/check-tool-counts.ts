@@ -51,6 +51,55 @@ function expectSubstring(file: string, needle: string, label: string): void {
   }
 }
 
+/**
+ * Assert that a Markdown table names exactly the given set of tools.
+ *
+ * A count needle on its own only proves a doc is self-consistent, which is
+ * precisely how docs/EXAMPLE_QUERIES.md went stale: "12 tools" over a table of
+ * 12, while default mode listed 14 (#723). Set equality is what makes the
+ * surface complete rather than merely consistent, so adding a tool to the
+ * registry fails here until the table gains a row.
+ *
+ * The section runs from `heading` to the next horizontal rule; tool names are
+ * the backticked identifiers inside it. Duplicate rows are fine — one tool can
+ * answer several questions — so the comparison is over the distinct set.
+ */
+function expectToolTable(
+  file: string,
+  heading: string,
+  expected: string[],
+  label: string,
+): void {
+  let content: string;
+  try {
+    content = readFileSync(root(file), 'utf-8');
+  } catch {
+    mismatches.push(`${file}: could not read file (checking "${label}")`);
+    return;
+  }
+  const start = content.indexOf(heading);
+  if (start === -1) {
+    mismatches.push(`${file}: no "${heading}" section to check "${label}" against`);
+    return;
+  }
+  const rest = content.slice(start + heading.length);
+  const end = rest.search(/^---$/m);
+  const section = end === -1 ? rest : rest.slice(0, end);
+
+  const named = new Set<string>();
+  for (const m of section.matchAll(/`([a-z_]+)`/g)) named.add(m[1]);
+
+  const want = new Set(expected);
+  const missing = [...want].filter((t) => !named.has(t)).sort();
+  const extra = [...named].filter((t) => !want.has(t)).sort();
+  if (missing.length > 0) {
+    mismatches.push(`${file}: "${label}" omits ${missing.length} tool(s): ${missing.join(', ')}`);
+  }
+  if (extra.length > 0) {
+    mismatches.push(`${file}: "${label}" names ${extra.length} unknown tool(s): ${extra.join(', ')}`);
+  }
+}
+
 expectSubstring(
   'package.json',
   `(${read} cache-mode read tools)`,
@@ -144,6 +193,42 @@ expectSubstring(
   'docs/graphql-live-reads.md',
   `${live} \`_live\` tools ship today`,
   'live tool count',
+);
+
+// CONTRIBUTING.md restated the same three counts CLAUDE.md does, in the same
+// shape, with no needle behind any of them (#723). Correct at the time, but
+// "correct today" is what every stale count used to be.
+expectSubstring(
+  'CONTRIBUTING.md',
+  `advertises all ${baseTotal} base tools (${read} read + ${write} write)`,
+  'writes-enabled bundle tool count',
+);
+expectSubstring(
+  'CONTRIBUTING.md',
+  `implements the ${baseTotal} base tools (${read} read + ${write} write); \`src/tools/live/\` adds ${live} GraphQL-backed live read tools`,
+  'data-flow tool counts',
+);
+expectSubstring(
+  'CONTRIBUTING.md',
+  `All ${baseTotal} base tools (${read} read + ${write} write) as async methods`,
+  'Key Files tool count',
+);
+
+// docs/EXAMPLE_QUERIES.md is the one surface where a needle alone would have
+// ratcheted in a falsehood: the count there agreed with the table under it, and
+// the table was missing two default-mode tools (#723). So the count is asserted
+// AND the table is required to name every tool default mode lists — otherwise
+// the cheapest way to pass is to edit one digit and leave the table short.
+expectSubstring(
+  'docs/EXAMPLE_QUERIES.md',
+  `Claude uses these ${read} tools automatically`,
+  'default-mode tool count',
+);
+expectToolTable(
+  'docs/EXAMPLE_QUERIES.md',
+  '## Tool Reference (Behind the Scenes)',
+  READ_TOOL_DEFS.map((t) => t.schema.name),
+  'default-mode tool reference table',
 );
 
 if (mismatches.length > 0) {
