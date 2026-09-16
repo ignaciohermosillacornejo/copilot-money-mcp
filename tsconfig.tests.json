@@ -22,9 +22,9 @@
 // have them checked. Named rather than counted, since a bare count over a
 // fuzzy antecedent is the drift shape this list keeps attracting. They are
 // temp-db-suite-teardown.test.ts, no-collection-time-assertions.test.ts and
-// tsconfig-tests-sync.test.ts, plus the two modules the first of those needs:
-// temp-db-teardown.ts and temp-db-leak-probe.ts. All are type-clean; keep them
-// that way.
+// tsconfig-tests-sync.test.ts, plus temp-db-teardown.ts and
+// temp-db-leak-probe.ts, which are on the list in their own right. All are
+// type-clean; keep them that way.
 //
 // For each, the LINE is the only thing putting the file in a program: nothing
 // in this repo imports a `.test.ts`, the probe is a path string the suite
@@ -41,7 +41,7 @@
 // which rule holds which, and states the adopter carve-out explicitly, so the
 // two descriptions can be compared rather than merely agreeing in tone.
 //
-// tsconfig-tests-sync.test.ts is here for that reason plus one: it is the gate
+// tsconfig-tests-sync.test.ts is here for the #725 reason plus one: it is the gate
 // that decides who is on THIS list, it casts the parsed JSONC (`as { include:
 // string[] }`), and it builds failure messages by interpolating derived values
 // — the #725 shape exactly. Its own helper-pairing rule is scoped to

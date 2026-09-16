@@ -235,10 +235,11 @@ describe('the entries whose membership is the coverage stay on the include list'
  *
  * Every rule here compares LITERAL paths against the include list. The
  * tsconfig header calls expanding to `tests/**` tracked follow-up work, and on
- * that day each breaks differently and silently: the positive rules go red for
- * the wrong reason, and the negative one below goes GREEN for the wrong reason
- * — `has()` is false whether the file is absent or merely spelled by a glob. A
- * shared premise is worth one assertion rather than a paragraph apiece.
+ * that day each breaks differently: the positive rules loudly and for the
+ * wrong reason, the negative one below SILENTLY, because `has()` is false
+ * whether the file is absent or merely spelled by a glob. Loud-but-misattributed
+ * is exactly why this is one premise test rather than a caveat on each rule —
+ * the reds were never the problem, the cause they named was.
  */
 describe('the rules in this file assume literal include paths', () => {
   test('no include entry is a glob', () => {
