@@ -22,20 +22,24 @@
 // have them checked. Named rather than counted, since a bare count over a
 // fuzzy antecedent is the drift shape this list keeps attracting. They are
 // temp-db-suite-teardown.test.ts, no-collection-time-assertions.test.ts and
-// tsconfig-tests-sync.test.ts. temp-db-teardown.ts and temp-db-leak-probe.ts
-// are listed in their OWN right, not followed in by `tsc`: nothing imports
-// them — the probe is a path string the suite spawns, and the teardown module
-// is named in prose and preloaded by bunfig.toml. All are type-clean; keep
-// them that way. Nothing in this repo imports a `.test.ts`, and the two
-// temp-db support modules are not imported either — spawned as a path and
-// preloaded by bunfig.toml — so for every one of these entries its LINE is the
-// only thing putting it in a program: delete the line and the checking is
-// gone, not relocated. All three ratchets
-// against that live in tsconfig-tests-sync.test.ts: the adoption rule covers
-// the mock-GraphQL adopters, the helper-pairing rule covers the tests/helpers/
-// contract tests, and MEMBERSHIP_IS_THE_COVERAGE pins what is left. That file
-// says which rule holds which, and its criterion names the adopter carve-out
-// explicitly so the two descriptions can be compared.
+// tsconfig-tests-sync.test.ts, plus the two modules the first of those needs:
+// temp-db-teardown.ts and temp-db-leak-probe.ts. All are type-clean; keep them
+// that way.
+//
+// For each, the LINE is the only thing putting the file in a program: nothing
+// in this repo imports a `.test.ts`, the probe is a path string the suite
+// spawns, and the teardown module is named in prose and preloaded by
+// bunfig.toml. So `tsc` follows nothing in, and deleting a line deletes the
+// checking rather than relocating it.
+//
+// Which is why every entry whose line is load-bearing that way is ratcheted by
+// a rule in tsconfig-tests-sync.test.ts: the adoption rule for the mock-GraphQL
+// adopters, the helper-pairing rule for the tests/helpers/ contract tests, and
+// MEMBERSHIP_IS_THE_COVERAGE for the rest. The helper MODULES are the
+// exception and need no pin — an importer on this list drags each of them in,
+// so `tsc` reaches them whether or not their own line survives. That file says
+// which rule holds which, and states the adopter carve-out explicitly, so the
+// two descriptions can be compared rather than merely agreeing in tone.
 //
 // tsconfig-tests-sync.test.ts is here for that reason plus one: it is the gate
 // that decides who is on THIS list, it casts the parsed JSONC (`as { include:
