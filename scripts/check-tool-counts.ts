@@ -60,22 +60,39 @@ interface SchemaNode {
 }
 
 /**
- * Collect every property name in a JSON Schema, at any depth.
+ * Collect property names by descending `properties` and `items`.
  *
  * One level is not enough: `update_recurring` nests a `rule` object whose
  * `name_contains` is a real argument — real enough that the conformance ledger
  * names it as `update_recurring.rule.name_contains` — and `edits`, `splits`
- * and `rows` all carry nested blocks too. A one-level read would leave those
- * failing as "unknown tool", which is the residual this walk exists to close,
- * and would quietly make the "no edit needed here" claim below false.
+ * and `rows` all carry nested blocks too. A one-level read left those failing
+ * as "unknown tool", the residual this walk exists to close.
+ *
+ * Known limit, stated because the opening finding of this PR was a docblock
+ * claiming "every repo-relative path" over a regex that took a subset: this
+ * walks those TWO keywords, not every route a JSON Schema has to a property
+ * name. A schema reaching arguments through `oneOf`/`anyOf`/`allOf`,
+ * `patternProperties`, `$defs`, a schema-valued `additionalProperties`, or the
+ * tuple (array) form of `items` would under-collect. None does today — every
+ * `additionalProperties` in this repo is the boolean `false`.
+ *
+ * The `seen` set is not for cycles — JSON Schema here is a tree — but the
+ * registry shares fragments between tools (`BULK_TARGET_PROPERTIES`), so it
+ * keeps the walk linear and would contain a cycle if schemas ever got built by
+ * reference.
  */
-function collectPropertyNames(node: SchemaNode | undefined, into: Set<string>): void {
-  if (node === undefined) return;
+function collectPropertyNames(
+  node: SchemaNode | undefined,
+  into: Set<string>,
+  seen: Set<SchemaNode> = new Set(),
+): void {
+  if (node === undefined || seen.has(node)) return;
+  seen.add(node);
   for (const [name, child] of Object.entries(node.properties ?? {})) {
     into.add(name);
-    collectPropertyNames(child, into);
+    collectPropertyNames(child, into, seen);
   }
-  collectPropertyNames(node.items, into);
+  collectPropertyNames(node.items, into, seen);
 }
 
 /**
@@ -85,8 +102,9 @@ function collectPropertyNames(node: SchemaNode | undefined, into: Set<string>): 
  * "looks tool-shaped" discriminator below cannot tell them from a mistyped tool
  * name on shape alone. A row writing `` `get_transactions` (with `account_id`) ``
  * is ordinary documentation, and failing it as an unknown tool would be the
- * prose trap returning under a new spelling. Derived from the registry at every
- * depth, so a new argument — nested or not — needs no edit here.
+ * prose trap returning under a new spelling. Derived from the registry through
+ * `properties` and `items`, so a new argument — nested or not — needs no edit
+ * here, within the limit `collectPropertyNames` records.
  */
 const ALL_ARG_NAMES = new Set<string>();
 for (const def of ALL_TOOL_DEFS) collectPropertyNames(def.schema.inputSchema, ALL_ARG_NAMES);
