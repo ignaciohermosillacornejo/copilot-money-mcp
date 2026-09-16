@@ -285,6 +285,73 @@ function deduplicateAccounts(accounts: Account[]): Account[] {
 }
 
 /**
+ * Deduplicate recurring transactions by recurring_id.
+ *
+ * LevelDB may store the same Firestore document multiple times; this collapses
+ * true duplicates without dropping distinct recurrings that happen to share a
+ * merchant and amount.
+ *
+ * Extracted from `decodeRecurring` and `decodeAllCollections`, which carried
+ * byte-identical copies of this loop (#669). The key was already the document
+ * id on both paths, so this is a no-op refactor — the point is that a future
+ * change to the rule can no longer land on one path and miss the other, which
+ * is how #662 shipped the same bad key twice.
+ */
+function deduplicateRecurring(recurring: Recurring[]): Recurring[] {
+  const seen = new Set<string>();
+  const unique: Recurring[] = [];
+
+  for (const rec of recurring) {
+    if (!seen.has(rec.recurring_id)) {
+      seen.add(rec.recurring_id);
+      unique.push(rec);
+    }
+  }
+
+  return unique;
+}
+
+/**
+ * Deduplicate budgets by budget_id.
+ *
+ * Same shape and same reason as `deduplicateRecurring` above — one rule, one
+ * place, called from both decode paths (#669).
+ */
+function deduplicateBudgets(budgets: Budget[]): Budget[] {
+  const seen = new Set<string>();
+  const unique: Budget[] = [];
+
+  for (const budget of budgets) {
+    if (!seen.has(budget.budget_id)) {
+      seen.add(budget.budget_id);
+      unique.push(budget);
+    }
+  }
+
+  return unique;
+}
+
+/**
+ * Deduplicate financial goals by goal_id.
+ *
+ * Same shape and same reason as `deduplicateRecurring` above — one rule, one
+ * place, called from both decode paths (#669).
+ */
+function deduplicateGoals(goals: Goal[]): Goal[] {
+  const seen = new Set<string>();
+  const unique: Goal[] = [];
+
+  for (const goal of goals) {
+    if (!seen.has(goal.goal_id)) {
+      seen.add(goal.goal_id);
+      unique.push(goal);
+    }
+  }
+
+  return unique;
+}
+
+/**
  * Reconcile pending and posted versions of the same transaction.
  * When a charge posts, two versions can coexist in LevelDB:
  * - A pending version (pending=true)
@@ -358,18 +425,7 @@ export async function decodeRecurring(dbPath: string): Promise<Recurring[]> {
     if (rec) recurring.push(rec);
   }
 
-  // Deduplicate by recurring_id
-  const seen = new Set<string>();
-  const unique: Recurring[] = [];
-
-  for (const rec of recurring) {
-    if (!seen.has(rec.recurring_id)) {
-      seen.add(rec.recurring_id);
-      unique.push(rec);
-    }
-  }
-
-  return unique;
+  return deduplicateRecurring(recurring);
 }
 
 /**
@@ -383,18 +439,7 @@ export async function decodeBudgets(dbPath: string): Promise<Budget[]> {
     if (budget) budgets.push(budget);
   }
 
-  // Deduplicate by budget_id
-  const seen = new Set<string>();
-  const unique: Budget[] = [];
-
-  for (const budget of budgets) {
-    if (!seen.has(budget.budget_id)) {
-      seen.add(budget.budget_id);
-      unique.push(budget);
-    }
-  }
-
-  return unique;
+  return deduplicateBudgets(budgets);
 }
 
 /**
@@ -408,18 +453,7 @@ export async function decodeGoals(dbPath: string): Promise<Goal[]> {
     if (goal) goals.push(goal);
   }
 
-  // Deduplicate by goal_id
-  const seen = new Set<string>();
-  const unique: Goal[] = [];
-
-  for (const goal of goals) {
-    if (!seen.has(goal.goal_id)) {
-      seen.add(goal.goal_id);
-      unique.push(goal);
-    }
-  }
-
-  return unique;
+  return deduplicateGoals(goals);
 }
 
 /**
@@ -2986,35 +3020,14 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
   // Accounts: dedupe by account_id (see deduplicateAccounts — #662)
   const accounts = deduplicateAccounts(rawAccounts);
 
-  // Recurring: dedupe by recurring_id
-  const recSeen = new Set<string>();
-  const recurring: Recurring[] = [];
-  for (const rec of rawRecurring) {
-    if (!recSeen.has(rec.recurring_id)) {
-      recSeen.add(rec.recurring_id);
-      recurring.push(rec);
-    }
-  }
+  // Recurring: dedupe by recurring_id (see deduplicateRecurring — #669)
+  const recurring = deduplicateRecurring(rawRecurring);
 
-  // Budgets: dedupe by budget_id
-  const budgetSeen = new Set<string>();
-  const budgets: Budget[] = [];
-  for (const budget of rawBudgets) {
-    if (!budgetSeen.has(budget.budget_id)) {
-      budgetSeen.add(budget.budget_id);
-      budgets.push(budget);
-    }
-  }
+  // Budgets: dedupe by budget_id (see deduplicateBudgets — #669)
+  const budgets = deduplicateBudgets(rawBudgets);
 
-  // Goals: dedupe by goal_id
-  const goalSeen = new Set<string>();
-  const goals: Goal[] = [];
-  for (const goal of rawGoals) {
-    if (!goalSeen.has(goal.goal_id)) {
-      goalSeen.add(goal.goal_id);
-      goals.push(goal);
-    }
-  }
+  // Goals: dedupe by goal_id (see deduplicateGoals — #669)
+  const goals = deduplicateGoals(rawGoals);
 
   // Goal history: dedupe by goal_id + month, sort by goal_id then month desc
   const histSeen = new Set<string>();
