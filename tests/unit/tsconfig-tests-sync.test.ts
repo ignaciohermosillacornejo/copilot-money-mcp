@@ -205,6 +205,24 @@ describe('the entries whose membership is the coverage stay on the include list'
     expect(MEMBERSHIP_IS_THE_COVERAGE).toContain(relative(repoRoot, import.meta.path));
   });
 
+  test('a file whose argument rests on being ABSENT stays absent', () => {
+    // The negative of the same idea. tests/tools/live/known-fields-wire-parity
+    // .test.ts places its MIRROR_IS_EXACT pins in src/ rather than in itself,
+    // and the whole justification is "THIS FILE IS NOT TYPECHECKED, so a
+    // type-level pin here would compile-check nothing". Adding it to the
+    // include list one day would leave those pins sitting in src/ justified by
+    // a premise that had stopped holding, with nothing saying so — its own
+    // comment calls the claim "checkable", which is a property rather than a
+    // promise until something checks it. This is the something.
+    const absent = 'tests/tools/live/known-fields-wire-parity.test.ts';
+    expect(
+      included.has(absent),
+      `${absent} is now typechecked, which invalidates the reason its MIRROR_IS_EXACT pins ` +
+        `live in src/ instead of in it. Either move those pins into it and delete this ` +
+        `assertion, or take it back off the include list.`
+    ).toBe(false);
+  });
+
   test('each of them is still there', () => {
     // Not vacuous, and not circular: `bun test` collects this file from the
     // filesystem regardless of any tsconfig, so removing an entry leaves this

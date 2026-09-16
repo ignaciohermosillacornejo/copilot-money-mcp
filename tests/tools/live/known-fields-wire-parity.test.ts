@@ -36,7 +36,10 @@
  * tsconfig.tests.json is an explicit allowlist and this is not on it, so a
  * type-level pin placed here would compile-check nothing. (No count: the size
  * of another file's list is a number nothing here re-derives, so it goes stale
- * unnoticed. Membership is the load-bearing half, and it is checkable.)
+ * unnoticed. Membership is the load-bearing half, and it IS checked — the
+ * negative is asserted in tests/unit/tsconfig-tests-sync.test.ts, so adding
+ * this file to the include list goes red there rather than quietly
+ * invalidating the reason those pins live in src/.)
  *
  * Scope: the three row types PR B touches. The other live tools' known-field
  * sets are module-private and shaped by per-tool derivation/renaming, so they
