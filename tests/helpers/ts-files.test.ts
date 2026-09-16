@@ -25,15 +25,18 @@ describe('ts-files: ScriptKind follows the extension', () => {
     // Derived, not copied. The assertion is over the real list, so adding an
     // extension without deciding its kind fails here rather than silently
     // parsing those files as TS.
-    // `as const` on the callback's return, so it is a TUPLE rather than an
-    // `(string | ts.ScriptKind)[]`. Without it `Object.fromEntries` resolves to
-    // its untyped overload, `mapped` is `any`, and the `toEqual` below is a
-    // runtime check only — a misspelled key in the literal would not be a
-    // compile error. This file is on tsconfig.tests.json's include list for
-    // exactly that kind of reason.
-    const mapped = Object.fromEntries(
-      EXTENSIONS.map((ext) => [ext, scriptKindFor(`f${ext}`)] as const)
-    );
+    // No `as const` on the callback's return, deliberately. Review of #732 read
+    // this as resolving to `Object.fromEntries`'s untyped `any` overload, which
+    // would make the `toEqual` below a runtime check only. Measured instead of
+    // reasoned about: with the array literal exactly as written, `tsc -p
+    // tsconfig.tests.json` reports `mapped` as `{ [k: string]: ts.ScriptKind }`
+    // — identical with and without the annotation — so the values in the table
+    // below ARE compile-checked and the annotation would buy nothing.
+    //
+    // What did buy something is this file being on tsconfig.tests.json's
+    // include list at all: before that, no program read it, and the type it
+    // resolved to was moot.
+    const mapped = Object.fromEntries(EXTENSIONS.map((ext) => [ext, scriptKindFor(`f${ext}`)]));
     expect(mapped).toEqual({
       '.ts': ts.ScriptKind.TS,
       '.tsx': ts.ScriptKind.TSX,
