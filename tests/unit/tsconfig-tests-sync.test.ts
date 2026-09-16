@@ -163,11 +163,11 @@ describe('a typechecked helper brings its own contract test onto the list', () =
  * The criterion, applied to all of tsconfig.tests.json's entries: not reached
  * by an import from anything (so `tsc` cannot pull it in), and not a
  * mock-GraphQL adopter (so the adoption rule above does not already cover it).
- * Thirteen entries meet it. Two of those — the tests/helpers/ contract tests —
- * are covered by the helper-pairing rule above, so they are deliberately NOT
- * repeated here; the rest are these. The three auth files are the sharpest
- * case: the tsconfig header justifies their membership with the exact #725
- * story this pin exists to prevent a repeat of.
+ * Every entry meeting it belongs here EXCEPT the tests/helpers/ contract
+ * tests, which the helper-pairing rule above already holds — deliberately not
+ * repeated, so each file is ratcheted once and by the rule that explains it.
+ * The auth files are the sharpest case: the tsconfig header justifies their
+ * membership with the exact #725 story this pin exists to prevent a repeat of.
  *
  * Hand-maintained, like the header prose it mirrors. Deriving it would need a
  * real import graph rather than a grep; the two lists cross-reference each
