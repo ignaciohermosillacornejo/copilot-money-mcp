@@ -203,6 +203,12 @@ jobs:
 
       - name: Create follow-up issue if suggestions remain
         if: steps.check.outputs.skip != 'true'
+        env:
+          # Findings at or above this severity open an issue. A batch entirely
+          # below it is posted as a PR comment instead. Change this one word to
+          # retune: "low" restores the old file-everything behaviour, "high"
+          # narrows it further.
+          AUDIT_ISSUE_THRESHOLD: medium
         run: |
           # Missing or malformed output means the audit didn't complete.
           # Fail the step so the "audited" label isn't applied and the run
@@ -224,23 +230,57 @@ jobs:
             exit 0
           fi
 
+          # Severity gate. The audit has always collected a severity per finding
+          # and then ignored it: ANY finding opened an issue, so the repo's
+          # open-issue count had a floor set by MERGE RATE rather than by what
+          # was actually wrong (76 audit issues filed lifetime; at one point half
+          # the open backlog, most of it comment-precision nits).
+          #
+          # Now: anything at or above AUDIT_ISSUE_THRESHOLD opens an issue. A
+          # batch entirely below it becomes a PR comment instead — visible to the
+          # author, without becoming a tracked item someone has to close later.
+          #
+          # Nothing is dropped either way. BOTH bodies list EVERY finding, not
+          # just the escalating ones, so lowering the threshold later never
+          # recovers information that was lost — it was never lost.
+          #
+          # A finding whose severity is missing or unrecognised counts as
+          # ESCALATING. A gate that cannot classify something must not be the
+          # reason it disappears, and a new severity value appearing upstream
+          # should make this louder rather than quieter.
+          ESCALATING=$(jq --arg t "$AUDIT_ISSUE_THRESHOLD" \
+            -f .github/audit-severity-gate.jq audit-result.json)
+          echo "At or above '$AUDIT_ISSUE_THRESHOLD': $ESCALATING of $COUNT"
+
           PR_TITLE=$(gh pr view "$PR_NUMBER" --json title --jq .title)
 
           {
-            echo "## Unaddressed review suggestions from PR #$PR_NUMBER"
+            if [ "$ESCALATING" -gt 0 ]; then
+              echo "## Unaddressed review suggestions from PR #$PR_NUMBER"
+            else
+              echo "## Unaddressed review suggestions from this PR (all below \`$AUDIT_ISSUE_THRESHOLD\`)"
+            fi
             echo
             echo "**PR title:** $PR_TITLE"
             echo
             jq -r '.unaddressed[] | "### \(.severity | ascii_upcase): \(.summary)\n\n- **File:** `\(.file)`\(if .line then ":\(.line|tostring)" else "" end)\n- **Reviewer said:** > \(.quote)\n- **Evidence not applied:** \(.evidence)\n"' audit-result.json
             echo
             echo "---"
-            echo "_Produced by the PR review audit workflow. Close if not actionable._"
-          } > issue-body.md
+            if [ "$ESCALATING" -gt 0 ]; then
+              echo "_Produced by the PR review audit workflow. Close if not actionable._"
+            else
+              echo "_Produced by the PR review audit workflow. Posted as a comment rather than an issue because every finding is below \`$AUDIT_ISSUE_THRESHOLD\` — see AUDIT_ISSUE_THRESHOLD in .github/workflows/audit-reviews.yml._"
+            fi
+          } > audit-body.md
 
-          gh issue create \
-            --title "[Audit] Unaddressed suggestions from PR #$PR_NUMBER" \
-            --body-file issue-body.md \
-            --label "audit,review-followup"
+          if [ "$ESCALATING" -gt 0 ]; then
+            gh issue create \
+              --title "[Audit] Unaddressed suggestions from PR #$PR_NUMBER" \
+              --body-file audit-body.md \
+              --label "audit,review-followup"
+          else
+            gh pr comment "$PR_NUMBER" --body-file audit-body.md
+          fi
 
       - name: Mark PR as audited
         if: steps.check.outputs.skip != 'true' && success()
