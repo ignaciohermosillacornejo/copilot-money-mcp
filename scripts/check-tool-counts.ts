@@ -53,6 +53,31 @@ const ALL_TOOL_DEFS = [...READ_TOOL_DEFS, ...LIVE_TOOL_DEFS, ...WRITE_TOOL_DEFS]
 /** Every tool name the registry knows, in any mode — the vocabulary a doc may name. */
 const ALL_TOOL_NAMES = new Set(ALL_TOOL_DEFS.map((t) => t.schema.name));
 
+/** JSON-Schema node, as much of it as the argument walk needs to see. */
+interface SchemaNode {
+  properties?: Record<string, SchemaNode>;
+  items?: SchemaNode;
+}
+
+/**
+ * Collect every property name in a JSON Schema, at any depth.
+ *
+ * One level is not enough: `update_recurring` nests a `rule` object whose
+ * `name_contains` is a real argument — real enough that the conformance ledger
+ * names it as `update_recurring.rule.name_contains` — and `edits`, `splits`
+ * and `rows` all carry nested blocks too. A one-level read would leave those
+ * failing as "unknown tool", which is the residual this walk exists to close,
+ * and would quietly make the "no edit needed here" claim below false.
+ */
+function collectPropertyNames(node: SchemaNode | undefined, into: Set<string>): void {
+  if (node === undefined) return;
+  for (const [name, child] of Object.entries(node.properties ?? {})) {
+    into.add(name);
+    collectPropertyNames(child, into);
+  }
+  collectPropertyNames(node.items, into);
+}
+
 /**
  * Every argument name a doc may legitimately backtick.
  *
@@ -60,17 +85,11 @@ const ALL_TOOL_NAMES = new Set(ALL_TOOL_DEFS.map((t) => t.schema.name));
  * "looks tool-shaped" discriminator below cannot tell them from a mistyped tool
  * name on shape alone. A row writing `` `get_transactions` (with `account_id`) ``
  * is ordinary documentation, and failing it as an unknown tool would be the
- * prose trap returning under a new spelling. Derived from the registry, so a new
- * argument needs no edit here.
+ * prose trap returning under a new spelling. Derived from the registry at every
+ * depth, so a new argument — nested or not — needs no edit here.
  */
-const ALL_ARG_NAMES = new Set(
-  ALL_TOOL_DEFS.flatMap((t) =>
-    Object.keys(
-      (t.schema as { inputSchema?: { properties?: Record<string, unknown> } }).inputSchema
-        ?.properties ?? {},
-    ),
-  ),
-);
+const ALL_ARG_NAMES = new Set<string>();
+for (const def of ALL_TOOL_DEFS) collectPropertyNames(def.schema.inputSchema, ALL_ARG_NAMES);
 
 const mismatches: string[] = [];
 
