@@ -153,13 +153,18 @@ describe('a typechecked helper brings its own contract test onto the list', () =
         `say what the helper promises (#737) — add them:\n  ${missing.join('\n  ')}`
     ).toEqual([]);
   });
+});
 
+/**
+ * Its own membership, which neither rule above can reach — the helper-pairing
+ * one is scoped to `tests/helpers/` on purpose and this file is in
+ * `tests/unit/`. Its own `describe`, rather than filed under a header that
+ * says it is about helper contract tests: a failure should not print a title
+ * contradicting the test under it. `included` is module-scope, so the move
+ * costs nothing.
+ */
+describe('the include-list gate is on the include list', () => {
   test('this gate is itself typechecked (#725 shape, manual entry)', () => {
-    // The one include-list entry nothing above can reach: the rule is scoped
-    // to tests/helpers/ on purpose, and this file is not there. But it already
-    // holds the parsed list, so its own membership costs one assertion rather
-    // than a standing note that it is unratcheted.
-    //
     // Not vacuous, and not circular: `bun test` collects this file from the
     // filesystem regardless of any tsconfig, so removing the entry leaves this
     // assertion running and red. Keyed off `import.meta.path` rather than a
@@ -169,7 +174,10 @@ describe('a typechecked helper brings its own contract test onto the list', () =
       included.has(self),
       `${self} casts the parsed JSONC and interpolates derived values into its failure ` +
         `messages — the #725 shape the tsconfig header cites — and no rule in it can reach ` +
-        `itself, so its membership on the include list is asserted here by hand.`
+        `itself, so its membership on the include list is asserted here by hand. If the ` +
+        `include list moved to a GLOB, this is a false red for the same reason the ` +
+        `helper-pairing floor is: both compare literal paths and would need to resolve ` +
+        `globs instead.`
     ).toBe(true);
   });
 });
