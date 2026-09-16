@@ -67,21 +67,28 @@ async function withDocTree(
 /**
  * Apply a fixture edit, refusing to continue if it changed nothing.
  *
- * An exit-0 fixture whose `replace` no-ops is the worst shape in this file: the
- * doc is unmodified, the gate passes, and the test reports success while
- * covering nothing — silent-under-covering, the class this whole PR is about.
- * Exit-1 fixtures fail loudly on a no-op and do not need this; the exit-0 ones
- * do. Throws rather than asserts so the message reads "the fixture is stale",
- * not "the gate is broken" — that is the distinction that matters when it
- * fires.
+ * The discriminator is NOT the asserted exit code — an earlier version of this
+ * comment said it was, and that was wrong. It is whether any single edit in the
+ * chain is load-bearing on its own. A compound exit-1 fixture where edit A
+ * already produces the asserted failure and edit B is the thing actually under
+ * test passes green when B no-ops, having silently become a duplicate of some
+ * other test. Only a fixture whose sole edit is what makes the assertion true
+ * fails loudly by itself.
+ *
+ * So every non-trivial edit routes through here. Throws rather than asserts, so
+ * the message reads "the fixture is stale" and not "the gate is broken" — the
+ * distinction that matters when it fires.
  */
-function mutate(doc: string, from: string, to: string): string {
-  const out = doc.replaceAll(from, to);
+function anchoredEdit(file: string, doc: string, from: string | RegExp, to: string): string {
+  const out = typeof from === 'string' ? doc.replaceAll(from, to) : doc.replace(from, to);
   if (out === doc) {
-    throw new Error(`fixture anchor gone from docs/EXAMPLE_QUERIES.md: ${JSON.stringify(from)}`);
+    throw new Error(`fixture anchor gone from ${file}: ${String(from)}`);
   }
   return out;
 }
+
+/** The doc every fixture in this file edits. */
+const EXAMPLES = 'docs/EXAMPLE_QUERIES.md';
 
 const read = READ_TOOL_DEFS.length;
 
@@ -148,7 +155,7 @@ describe('check:tool-counts', () => {
       async (root) => {
         const path = join(root, 'docs/EXAMPLE_QUERIES.md');
         const doc = await readFile(path, 'utf-8');
-        await writeFile(path, doc.replace(/^.*`get_balance_history`.*$/m, ''));
+        await writeFile(path, anchoredEdit(EXAMPLES, doc, /^.*`get_balance_history`.*$/m, ''));
       },
       ({ code, stderr }) => {
         expect(code).toBe(1);
@@ -165,9 +172,16 @@ describe('check:tool-counts', () => {
         const doc = await readFile(path, 'utf-8');
         await writeFile(
           path,
-          doc
-            .replace(/^.*`get_balance_history`.*$/m, '')
-            .replace(`these ${read} tools`, `these ${read - 1} tools`)
+          // Both edits guarded: the row removal alone already satisfies the
+          // assertion, so a no-op in the count edit would leave the half this
+          // test exists for — "the author fixed the number instead" — untested
+          // and the test green.
+          anchoredEdit(
+            EXAMPLES,
+            anchoredEdit(EXAMPLES, doc, /^.*`get_balance_history`.*$/m, ''),
+            `these ${read} tools`,
+            `these ${read - 1} tools`
+          )
         );
       },
       ({ code, stderr }) => {
@@ -191,12 +205,15 @@ describe('check:tool-counts', () => {
         const doc = await readFile(path, 'utf-8');
         await writeFile(
           path,
-          doc
-            .replace(/^.*`get_balance_history`.*$/m, '')
-            .replace(
-              'With `--live-reads`',
-              'Balances over time come from `get_balance_history`.\n\nWith `--live-reads`'
-            )
+          // Same compound shape: without the prose edit guarded, rewording
+          // that sentence in the real doc would make this a byte-for-byte
+          // duplicate of the test above, covering nothing about row-scoping.
+          anchoredEdit(
+            EXAMPLES,
+            anchoredEdit(EXAMPLES, doc, /^.*`get_balance_history`.*$/m, ''),
+            'With `--live-reads`',
+            'Balances over time come from `get_balance_history`.\n\nWith `--live-reads`'
+          )
         );
       },
       ({ code, stderr }) => {
@@ -214,7 +231,7 @@ describe('check:tool-counts', () => {
       async (root) => {
         const path = join(root, 'docs/EXAMPLE_QUERIES.md');
         const doc = await readFile(path, 'utf-8');
-        await writeFile(path, mutate(doc, '\n|', '\n  |'));
+        await writeFile(path, anchoredEdit(EXAMPLES, doc, '\n|', '\n  |'));
       },
       ({ code, stderr }) => {
         expect(stderr).toBe('');
@@ -231,7 +248,10 @@ describe('check:tool-counts', () => {
       async (root) => {
         const path = join(root, 'docs/EXAMPLE_QUERIES.md');
         const doc = await readFile(path, 'utf-8');
-        await writeFile(path, mutate(doc, '(with merchant filter)', '(with `merchant` filter)'));
+        await writeFile(
+          path,
+          anchoredEdit(EXAMPLES, doc, '(with merchant filter)', '(with `merchant` filter)')
+        );
       },
       ({ code, stderr }) => {
         expect(stderr).toBe('');
@@ -251,7 +271,33 @@ describe('check:tool-counts', () => {
         const doc = await readFile(path, 'utf-8');
         await writeFile(
           path,
-          mutate(doc, '(with merchant filter)', '(with `account_id` or `start_date`)')
+          anchoredEdit(
+            EXAMPLES,
+            doc,
+            '(with merchant filter)',
+            '(with `account_id` or `start_date`)'
+          )
+        );
+      },
+      ({ code, stderr }) => {
+        expect(stderr).toBe('');
+        expect(code).toBe(0);
+      }
+    );
+  });
+
+  // Nested arguments are arguments: `update_recurring` carries a `rule` object
+  // whose `name_contains` the conformance ledger names as a real input. A
+  // one-level property read would leave it failing as an unknown tool, and
+  // would make the walk's "no edit needed here" claim false.
+  test('a backticked NESTED argument name is not an unknown tool either', async () => {
+    await withDocTree(
+      async (root) => {
+        const path = join(root, 'docs/EXAMPLE_QUERIES.md');
+        const doc = await readFile(path, 'utf-8');
+        await writeFile(
+          path,
+          anchoredEdit(EXAMPLES, doc, '(with merchant filter)', '(with `name_contains`)')
         );
       },
       ({ code, stderr }) => {

@@ -36,8 +36,12 @@ describe('tool name shape', () => {
   });
 
   // The sweep must actually have swept something — an empty registry would
-  // satisfy the assertion above without observing anything.
-  test('the invariant is checked against the whole registry', () => {
-    expect(ALL_DEFS.length).toBeGreaterThan(40);
+  // satisfy the assertion above without observing anything. `> 0` states
+  // exactly that; a larger floor would be a number with no source, and a
+  // spurious failure the day the surface legitimately shrinks. (The sibling
+  // script had a hardcoded 16 in a comment for the same reason, and it was
+  // wrong.)
+  test('the invariant is checked against a non-empty registry', () => {
+    expect(ALL_DEFS.length).toBeGreaterThan(0);
   });
 });
