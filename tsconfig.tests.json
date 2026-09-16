@@ -14,19 +14,21 @@
 // tests/**/* is follow-up work tracked outside this gate. When a new test file
 // adopts createMockGraphQLClient, add it here.
 //
-// The temp-db and collection-time gates below are here for a different
-// reason: a test file outside this list is checked by nothing (`eslint` reads
-// src/ only), and #725 shipped a review round with an object literal silently
-// missing two declared fields — the failure message read them and got
-// `undefined`. A gate whose legibility depends on its own types should have
-// them checked. Named rather than counted, since a bare count over a fuzzy
-// antecedent is the drift shape this list keeps attracting. The gates are
+// The gates listed below, other than the mock-GraphQL adopters above, are here
+// for a different reason: a test file outside this list is checked by nothing
+// (`eslint` reads src/ only), and #725 shipped a review round with an object
+// literal silently missing two declared fields — the failure message read them
+// and got `undefined`. A gate whose legibility depends on its own types should
+// have them checked. Named rather than counted, since a bare count over a
+// fuzzy antecedent is the drift shape this list keeps attracting. They are
 // temp-db-suite-teardown.test.ts, no-collection-time-assertions.test.ts and
 // tsconfig-tests-sync.test.ts. temp-db-teardown.ts and temp-db-leak-probe.ts
 // are listed in their OWN right, not followed in by `tsc`: nothing imports
 // them — the probe is a path string the suite spawns, and the teardown module
 // is named in prose and preloaded by bunfig.toml. All are type-clean; keep
-// them that way.
+// them that way — and that list is pinned in tsconfig-tests-sync.test.ts, so
+// deleting one of those five lines turns a test red instead of silently
+// dropping the only checking they get.
 //
 // tsconfig-tests-sync.test.ts is here for that reason plus one: it is the gate
 // that decides who is on THIS list, it casts the parsed JSONC (`as { include:

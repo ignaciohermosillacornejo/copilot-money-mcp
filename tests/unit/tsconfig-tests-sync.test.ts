@@ -156,28 +156,60 @@ describe('a typechecked helper brings its own contract test onto the list', () =
 });
 
 /**
- * Its own membership, which neither rule above can reach — the helper-pairing
- * one is scoped to `tests/helpers/` on purpose and this file is in
- * `tests/unit/`. Its own `describe`, rather than filed under a header that
- * says it is about helper contract tests: a failure should not print a title
- * contradicting the test under it. `included` is module-scope, so the move
- * costs nothing.
+ * The entries whose MEMBERSHIP IS THE COVERAGE — nothing imports them, so
+ * `tsc` cannot follow anything in, and deleting a line deletes the checking
+ * rather than relocating it. The tsconfig header names these same files and
+ * says "keep them that way"; this is the "that way" being kept.
+ *
+ * One literal read by the assertion, the `PINNED_TREES` shape from
+ * tests/docs/jsdoc-stranding.test.ts. Drifting from the header is the intended
+ * failure direction: a file genuinely leaving the list should require editing
+ * both, not one.
  */
-describe('the include-list gate is on the include list', () => {
-  test('this gate is itself typechecked (#725 shape, manual entry)', () => {
+const MEMBERSHIP_IS_THE_COVERAGE = [
+  'tests/core/temp-db-suite-teardown.test.ts',
+  'tests/fixtures/temp-db-leak-probe.ts',
+  'tests/no-collection-time-assertions.test.ts',
+  'tests/setup/temp-db-teardown.ts',
+  'tests/unit/tsconfig-tests-sync.test.ts',
+];
+
+/**
+ * Membership neither rule above can reach — the helper-pairing one is scoped
+ * to `tests/helpers/` on purpose, and none of these are there. Its own
+ * `describe` rather than filed under a header about helper contract tests: a
+ * failure should not print a title contradicting the test under it.
+ */
+describe('the entries whose membership is the coverage stay on the include list', () => {
+  test('the pin names this file (keyed off the file, not a literal)', () => {
+    // The self entry is pinned by identity rather than by spelling, so
+    // renaming this file reports the rename here instead of surfacing as a
+    // membership failure pointing at a path that no longer exists.
+    expect(MEMBERSHIP_IS_THE_COVERAGE).toContain(relative(repoRoot, import.meta.path));
+  });
+
+  test('each of them is still there', () => {
     // Not vacuous, and not circular: `bun test` collects this file from the
-    // filesystem regardless of any tsconfig, so removing the entry leaves this
-    // assertion running and red. Keyed off `import.meta.path` rather than a
-    // literal so a rename reports the rename, not a false membership failure.
-    const self = relative(repoRoot, import.meta.path);
+    // filesystem regardless of any tsconfig, so removing an entry leaves this
+    // assertion running and red.
+    const gone = MEMBERSHIP_IS_THE_COVERAGE.filter((file) => !included.has(file));
+    // A renamed file should say so rather than read as a deleted entry.
+    const missingFromDisk = MEMBERSHIP_IS_THE_COVERAGE.filter(
+      (file) => !existsSync(join(repoRoot, file))
+    );
     expect(
-      included.has(self),
-      `${self} casts the parsed JSONC and interpolates derived values into its failure ` +
-        `messages — the #725 shape the tsconfig header cites — and no rule in it can reach ` +
-        `itself, so its membership on the include list is asserted here by hand. If the ` +
-        `include list moved to a GLOB, this is a false red for the same reason the ` +
-        `helper-pairing floor is: both compare literal paths and would need to resolve ` +
-        `globs instead.`
-    ).toBe(true);
+      missingFromDisk,
+      `Pinned above but not on disk — renamed or deleted? Update the pin and the ` +
+        `tsconfig header together:\n  ${missingFromDisk.join('\n  ')}`
+    ).toEqual([]);
+    expect(
+      gone,
+      `These are on tsconfig.tests.json's include list because NOTHING IMPORTS THEM — no ` +
+        `program reaches them any other way, so dropping a line drops the type checking ` +
+        `entirely rather than moving it (#725, #737). Removed on purpose? Edit the pin ` +
+        `above and the tsconfig header too. If the include list moved to a GLOB, this is a ` +
+        `false red for the same reason the helper-pairing floor is: both compare literal ` +
+        `paths and would need to resolve globs instead.\n  ${gone.join('\n  ')}`
+    ).toEqual([]);
   });
 });
