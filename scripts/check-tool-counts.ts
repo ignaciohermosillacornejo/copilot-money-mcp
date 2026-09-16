@@ -4,11 +4,23 @@
  *
  * The registry (`src/tools/registry/index.ts`) is the single source of truth
  * for tool counts, but several human-written surfaces (package.json's npm
- * description, README.md, CLAUDE.md, docs/index.html, docs/graphql-live-reads.md)
- * restate those counts in prose. Nothing enforced agreement, so a registry
- * change (or a copy edit that "helpfully" rewords a count) went stale twice in
- * a row (commits 49f267d and 1038ec7 shipped two different wrong splits of
- * the same description string before b22bacc caught the other two files).
+ * description, README.md, CLAUDE.md, CONTRIBUTING.md, docs/index.html,
+ * docs/graphql-live-reads.md, docs/EXAMPLE_QUERIES.md) restate those counts in
+ * prose. Nothing enforced agreement, so a registry change (or a copy edit that
+ * "helpfully" rewords a count) went stale twice in a row (commits 49f267d and
+ * 1038ec7 shipped two different wrong splits of the same description string
+ * before b22bacc caught the other two files).
+ *
+ * Two shapes of assertion, because a needle alone is not always enough:
+ *
+ *   - `expectSubstring` pins a registry-derived phrase. Sufficient where the
+ *     count is the whole claim.
+ *   - `expectToolTable` pins a table's *contents* against the registry.
+ *     Needed where the doc also enumerates: docs/EXAMPLE_QUERIES.md said "12
+ *     tools" over a table of 12 that was two tools short, so the count agreed
+ *     with the doc and disagreed with the product, and a needle for 12 would
+ *     have ratcheted the understatement in (#723).
+ *
  * Run as part of `bun run check`.
  */
 
