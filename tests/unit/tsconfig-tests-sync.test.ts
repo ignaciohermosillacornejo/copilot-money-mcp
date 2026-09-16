@@ -230,16 +230,25 @@ describe('the entries whose membership is the coverage stay on the include list'
 });
 
 /**
- * The premise every rule in this file rests on, asserted instead of repeated
- * as a caveat in each of their failure messages.
+ * The premise the include-list rules above rest on, asserted once instead of
+ * repeated as a caveat in each of their failure messages.
  *
- * Every rule here compares LITERAL paths against the include list. The
- * tsconfig header calls expanding to `tests/**` tracked follow-up work, and on
- * that day each breaks differently: the positive rules loudly and for the
- * wrong reason, the negative one below SILENTLY, because `has()` is false
- * whether the file is absent or merely spelled by a glob. Loud-but-misattributed
- * is exactly why this is one premise test rather than a caveat on each rule —
- * the reds were never the problem, the cause they named was.
+ * Each of them compares LITERAL paths against the include list, and the
+ * tsconfig header calls expanding to `tests/**` tracked follow-up work. On
+ * that day they break in three different ways, which is the reason this is one
+ * test rather than three caveats:
+ *
+ *   - the adoption rule, the pairing FLOOR and the membership pin go red —
+ *     loudly, but naming a cause that has nothing to do with what broke;
+ *   - the pairing RULE goes vacuously green: `typechecked` is empty, so
+ *     `missing` is `[]`. Its floor is what catches that, and is why the floor
+ *     was put on the filtered list rather than the walk;
+ *   - the negative membership rule goes green and NOTHING catches it —
+ *     `has()` is false whether the file is genuinely absent or merely spelled
+ *     by a glob.
+ *
+ * Only the last is silent end to end. The others are legible once you know to
+ * look here, which is what this test is for.
  */
 describe('the rules in this file assume literal include paths', () => {
   test('no include entry is a glob', () => {
