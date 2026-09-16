@@ -121,13 +121,23 @@ const TOOLING_ROOTS = ['scripts/', 'tests/'];
  * happens to be tracked already; a *new* workflow-only script would reproduce
  * #727 exactly, through a different door.
  *
- * `skills/` is here for a different reason: `scripts/pack-mcpb.ts` stages it
- * into the shipped `.mcpb`, and it is the only directory besides `scripts/`
- * with a hand-written `.gitignore` rule inside it. The repo-wide UNANCHORED
- * rules — `LOG`, `CURRENT`, `LOCK`, `*.log` — match at any depth, so a skill
- * reference file can be ignore-matched exactly the way
- * `tests/unit/manifest-sync.test.ts` was, and nothing would say so until
- * `pack:mcpb` threw in CI.
+ * `skills/` is here for a different reason, and earns its keep through the
+ * OTHER half of what a root does. A root contributes twice: every tracked file
+ * under it becomes a closure MEMBER (asserted tracked and un-ignored), and
+ * becomes a text-sweep SOURCE. `skills/` is listed for membership:
+ * `scripts/pack-mcpb.ts` stages it into the shipped `.mcpb`, and it is the only
+ * directory besides `scripts/` with a hand-written `.gitignore` rule inside it,
+ * while the repo-wide UNANCHORED rules — `LOG`, `CURRENT`, `LOCK`, `*.log` —
+ * match at any depth. So a skill reference file can be ignore-matched exactly
+ * the way `tests/unit/manifest-sync.test.ts` was, and nothing would say so
+ * until `pack:mcpb` threw in CI.
+ *
+ * Its sweep half is a side effect, and a harmless one: `resolveLiteral`
+ * requires both a LITERAL_PREFIXES hit and `isFile`, so narrative prose naming
+ * a path that does not exist is skipped in silence rather than reported. Adding
+ * seven markdown files of prose to the sweep therefore carries none of the
+ * blast radius the PATH_TOKEN widening did. It does pull in real references —
+ * `scripts/decode-coverage.ts`, named by `skills/boundary-audit/SKILL.md`.
  *
  * Known limit: roots are tracked-only, so this closes the ignore-matched half
  * for `skills/` and NOT the untracked half. A whole-directory dependency like
