@@ -40,14 +40,22 @@ describe('ts-files: ScriptKind follows the extension', () => {
     // resolved to was moot.
     const mapped = Object.fromEntries(EXTENSIONS.map((ext) => [ext, scriptKindFor(`f${ext}`)]));
     // And the measurement above is now a GATE rather than a note about one
-    // `tsc` run. `mapped` is `{ [k: string]: ts.ScriptKind }`, so assigning it
-    // to a `string` is an error and the directive is used. If it ever resolves
-    // to `any` — the thing review of #732 believed was already true — the
-    // assignment starts succeeding, the directive becomes unused, and `tsc`
-    // fails with TS2578. A one-time probe re-run on every `bun run check`.
-    // @ts-expect-error `mapped` must not be `any`; see the paragraph above.
-    const mustNotBeAny: string = mapped;
-    void mustNotBeAny;
+    // `tsc` run. Indexed deliberately: the claim being re-run is that the
+    // table's VALUES are compile-checked, and `mapped` not being `any` is
+    // weaker than that. If `Object.fromEntries`'s `T` ever infers as `any`
+    // while the tuple shape still matches, `mapped` is
+    // `{ [k: string]: any }` — assigning THAT to a `string` is still an error,
+    // so a gate written against `mapped` would stay green while the four
+    // values below went unchecked, which is the failure it exists to catch.
+    //
+    // `mapped['.ts']` is `ts.ScriptKind`, a numeric enum, so the assignment is
+    // an error today and the directive is used. The day the value type becomes
+    // `any` — whether the whole expression widened or only the values — it
+    // compiles, the directive goes unused, and `tsc` fails with TS2578. No
+    // `| undefined` noise: this program sets `noUncheckedIndexedAccess: false`.
+    // @ts-expect-error `mapped`'s VALUES must be ScriptKind, not `any`; see above.
+    const valuesMustNotBeAny: string = mapped['.ts'];
+    void valuesMustNotBeAny;
     expect(mapped).toEqual({
       '.ts': ts.ScriptKind.TS,
       '.tsx': ts.ScriptKind.TSX,

@@ -15,12 +15,18 @@ import ts from 'typescript';
 
 const repoRoot = join(import.meta.dir, '../..');
 
+// Sorted for the same reason the pairing walk below is: `readdirSync` order is
+// the filesystem's, it differs between a dev machine and CI, and both walks
+// feed a `missing.join('\n  ')` failure message that gets read by diffing it
+// against the one someone else saw.
 function walk(dir: string): string[] {
-  return readdirSync(join(repoRoot, dir), { withFileTypes: true }).flatMap((entry) => {
-    const rel = join(dir, entry.name);
-    if (entry.isDirectory()) return entry.name === 'node_modules' ? [] : walk(rel);
-    return rel.endsWith('.test.ts') ? [rel] : [];
-  });
+  return readdirSync(join(repoRoot, dir), { withFileTypes: true })
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    .flatMap((entry) => {
+      const rel = join(dir, entry.name);
+      if (entry.isDirectory()) return entry.name === 'node_modules' ? [] : walk(rel);
+      return rel.endsWith('.test.ts') ? [rel] : [];
+    });
 }
 
 // tsconfig.tests.json is JSONC, so `JSON.parse` cannot read it directly.
