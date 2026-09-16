@@ -9,7 +9,7 @@ bun install          # Install dependencies
 bun test             # Run tests
 bun run build        # Build for production
 bun run pack:mcpb    # Create .mcpb bundle for Claude Desktop
-bun run check        # typecheck + lint + format:check + check:version-sync + check:server-json + check:deps-pinned + check:tool-counts + check:privacy-endpoints + check:concealment + check:workflows + bun test --bail
+bun run check        # typecheck + lint + format:check + check:version-sync + check:server-json + check:deps-pinned + check:tool-counts + check:privacy-endpoints + check:concealment + check:workflows + check:tracked-files + bun test --bail
 bun run fix          # Run lint:fix + format
 ```
 

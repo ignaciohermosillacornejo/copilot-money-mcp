@@ -62,6 +62,13 @@ tests/fixtures/demo_database/
 # Local scratch/debug scripts belong in scripts/local/ — gitignored AND excluded
 # from the scripts typecheck gate (tsconfig.scripts.json), which otherwise
 # sweeps all of scripts/ and breaks `bun run check` on files CI never sees.
+#
+# Forgetting a negation below used to be SILENT: `git add -A` skipped the new
+# file, every local gate read it off disk and passed, and CI was the first to
+# notice (#727). `bun run check:tracked-files` now fails on any script the
+# repo's own tooling reaches that is untracked or matched by a rule in here,
+# so an omission from this list is loud. Keep the list; the gate is what makes
+# it safe to hand-maintain.
 scripts/local/
 scripts/*
 !scripts/graphql-capture/
@@ -80,6 +87,7 @@ scripts/*
 !scripts/check-concealment.ts
 !scripts/check-workflows.ts
 !scripts/check-commit-authorship.ts
+!scripts/check-tracked-files.ts
 !scripts/check-skills.py
 !scripts/dump-tool-names.ts
 !scripts/dump-tool-args.ts
@@ -87,6 +95,15 @@ scripts/*
 !scripts/install-scheduled-smoke.sh
 !scripts/uninstall-scheduled-smoke.sh
 !scripts/check-pr-sections.sh
+# Tracked before the gate existed, and ignore-matched the whole time — each one
+# would have vanished on a rename or a re-add.
+!scripts/pack-mcpb.ts
+!scripts/sync-manifest.ts
+!scripts/snapshot.ts
+!scripts/copy_demo_database.py
+!scripts/decode-coverage.ts
+!scripts/generate-test-db.ts
+!scripts/profile-database.ts
 # License-check scratch directory (created by CI license gate)
 .license-check/
 # Generated test fixtures
@@ -102,7 +119,14 @@ snapshots/
 # LevelDB files (except synthetic test fixtures)
 *.ldb
 !tests/fixtures/synthetic-db/*.ldb
-MANIFEST-*
+# A LevelDB manifest is always `MANIFEST-` plus a zero-padded number. The old
+# `MANIFEST-*` matched far more than that on a case-insensitive filesystem
+# (default macOS APFS): it swallowed `scripts/manifest-utils.ts`, which needed
+# its own trailing negation, and `tests/unit/manifest-sync.test.ts`, which
+# nobody had noticed — a tracked test file one rename away from silently
+# leaving the repo. Requiring the digit describes the artifact instead of
+# guessing at it, so no `manifest-<word>` source file can be caught again.
+MANIFEST-[0-9]*
 CURRENT
 LOCK
 *.log
@@ -110,12 +134,7 @@ LOCK
 # bare uppercase `LOG`, which no rule here matched — so a killed test run left
 # one behind and `git add -A` swept it into a commit. The artifact is always a
 # FILE; the negation keeps a legitimately-named source directory trackable,
-# since a bare pattern would otherwise swallow it whole (same case-insensitive
-# over-match the manifest-utils.ts whitelist below documents).
+# since a bare pattern would otherwise swallow it whole (the same over-match
+# the MANIFEST rule above documents).
 LOG
 !LOG/
-
-# Whitelist scripts whose names happen to match earlier ignore patterns
-# (the MANIFEST-* LevelDB rule above matches "manifest-utils.ts" on case-
-# insensitive filesystems like default macOS APFS).
-!scripts/manifest-utils.ts

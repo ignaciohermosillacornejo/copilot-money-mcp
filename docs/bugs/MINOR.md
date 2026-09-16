@@ -5,10 +5,12 @@ release plumbing, packaging, and latent defects fixed before anyone hit them.
 
 They are here for two reasons: a class with only minor instances still shows up in the
 [class list](README.md#bug-classes), and a run of minor bugs in one area is often the
-early signal for a major one. `silent-failure-masking` appears **eight** times below and
-has no full entry — a class that has never once produced a bug worth a post-mortem, yet
-keeps costing us release and audit incidents, is exactly the pattern this ledger exists to
-make visible.
+early signal for a major one. `silent-failure-masking` appears **more often than any other
+class** below and has one full entry — a class that keeps costing us release, audit and CI
+incidents without often producing a bug worth a post-mortem is exactly the pattern this
+ledger exists to make visible. (That sentence used to name a number, which nothing derived
+and which had drifted by two before anyone noticed. A count no gate computes is a count
+that will be wrong; the ordering is the claim worth making.)
 
 Promote a row to a full entry if a later instance turns out to be user-visible.
 

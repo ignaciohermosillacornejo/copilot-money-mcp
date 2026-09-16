@@ -58,6 +58,12 @@ jobs:
       - name: Workflow hygiene check
         run: bun run check:workflows
 
+      # The gate's whole point is to fail locally, before the push — CI already
+      # notices an uncommitted script, just too late (#727). Running it here too
+      # costs nothing and keeps the local and CI surfaces identical.
+      - name: Tooling files tracked check
+        run: bun run check:tracked-files
+
       # Fork PRs only — a same-repo branch already required push access, so
       # there is no identity to forge. Reads public commit metadata with the
       # read-only fork token.
