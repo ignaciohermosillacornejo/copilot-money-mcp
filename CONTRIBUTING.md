@@ -326,6 +326,30 @@ it tells you if your bun is too old, rather than blaming the workflow files.
 Pick a timeout from the job's observed runtime (`gh run list --workflow <file>`),
 not a uniform default, and say in a comment what you measured.
 
+### Adding a file under `scripts/` (`check:tracked-files`)
+
+`.gitignore` ignores all of `scripts/*` and re-admits individual files by name.
+Forgetting the negation used to be **silent**: `git add -A` skipped the new file
+and exited 0, every local gate read it off disk and passed, and CI — which
+clones — was the first thing to notice. That is how `scripts/check-workflows.ts`
+shipped in #727 without ever being committed.
+
+`bun run check` includes `check:tracked-files` (`scripts/check-tracked-files.ts`),
+which fails when any file the repo's own tooling reaches is untracked, or is
+matched by a `.gitignore` rule. "Reaches" is derived, not listed: paths named by
+`package.json` scripts, the relative-import closure of those plus every tracked
+file under `scripts/` and `tests/`, and `scripts/…` paths named as string
+literals (the spawn-not-import case).
+
+So when you add a script:
+
+1. Add `!scripts/<your-file>` to the allowlist under the `scripts/*` rule.
+2. `git add` it, and confirm `git status` actually shows it.
+
+Untracked scratch that nothing references is fine and stays unreported — that is
+what `scripts/local/` is for. The gate only cares about files something in the
+repo depends on.
+
 ## Bug Response Ritual
 
 Every bug-fix PR ratchets the system: fix the **class**, not just the instance.
