@@ -9,7 +9,7 @@
  */
 
 import { describe, test, expect } from 'bun:test';
-import { existsSync, readFileSync, readdirSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import { join, relative } from 'path';
 import ts from 'typescript';
 
@@ -230,8 +230,9 @@ describe('the entries whose membership is the coverage stay on the include list'
 });
 
 /**
- * The premise the include-list rules above rest on, asserted once instead of
- * repeated as a caveat in each of their failure messages.
+ * The premise the include-list rules rest on — the four above and the negative
+ * one below — asserted once instead of repeated as a caveat in each of their
+ * failure messages.
  *
  * Each of them compares LITERAL paths against the include list, and the
  * tsconfig header calls expanding to `tests/**` tracked follow-up work. On
@@ -251,13 +252,30 @@ describe('the entries whose membership is the coverage stay on the include list'
  * look here, which is what this test is for.
  */
 describe('the rules in this file assume literal include paths', () => {
-  test('no include entry is a glob', () => {
-    const globs = [...included].filter((entry) => /[*?]/.test(entry));
+  test('every include entry is a literal path to a file', () => {
+    // Not just "contains no `*` or `?`". A tsconfig include entry that is a
+    // bare DIRECTORY is tsc's own shorthand for recursive inclusion —
+    // `"include": ["tests"]` means `tests/**/*` — and carries no wildcard
+    // character at all. A glob-only check passes it while every rule here
+    // compares file paths against a Set holding the single string `tests`,
+    // which is the fail-open this test exists to prevent, reached by the
+    // spelling the tracked follow-up is most likely to use.
+    //
+    // So assert the property the rules actually need: each entry names an
+    // existing FILE. Non-vacuous by fact rather than by construction — every
+    // entry today is one.
+    const notLiteralFiles = [...included].filter((entry) => {
+      if (/[*?]/.test(entry)) return true;
+      const abs = join(repoRoot, entry);
+      return !existsSync(abs) || !statSync(abs).isFile();
+    });
     expect(
-      globs,
-      `tsconfig.tests.json's include list now uses glob patterns, so every rule in this ` +
-        `file is comparing literal paths against something else. They must resolve globs ` +
-        `before any of their verdicts mean anything:\n  ${globs.join('\n  ')}`
+      notLiteralFiles,
+      `tsconfig.tests.json's include list no longer names individual files — these entries ` +
+        `are globs, directories (tsc reads a bare directory as \`<dir>/**/*\`), or missing. ` +
+        `Every rule in this file compares literal file paths against that list, so they ` +
+        `must resolve patterns before their verdicts mean anything:\n  ` +
+        `${notLiteralFiles.join('\n  ')}`
     ).toEqual([]);
   });
 });
