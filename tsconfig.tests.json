@@ -26,9 +26,10 @@
 // are listed in their OWN right, not followed in by `tsc`: nothing imports
 // them — the probe is a path string the suite spawns, and the teardown module
 // is named in prose and preloaded by bunfig.toml. All are type-clean; keep
-// them that way — and that list is pinned in tsconfig-tests-sync.test.ts, so
-// deleting one of those five lines turns a test red instead of silently
-// dropping the only checking they get.
+// them that way. Every entry here that nothing imports — these, the auth
+// files above, and the other scanners — is pinned in
+// tsconfig-tests-sync.test.ts, so deleting a pinned line turns a test red
+// instead of silently dropping the only checking it gets.
 //
 // tsconfig-tests-sync.test.ts is here for that reason plus one: it is the gate
 // that decides who is on THIS list, it casts the parsed JSONC (`as { include:

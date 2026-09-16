@@ -34,12 +34,10 @@
  * passes. The `MIRROR_IS_EXACT` pins in the two query modules close that hop
  * at compile time — they live in src/ because THIS FILE IS NOT TYPECHECKED:
  * tsconfig.tests.json is an explicit allowlist and this is not on it, so a
- * type-level pin placed here would compile-check nothing. (No count. It used
- * to give one and the list had long since outgrown it — and the first attempt
- * to explain that deletion stated a replacement count, which was itself wrong
- * by the time it was written. The load-bearing half is membership, which is
- * checkable; the size is a number about another file that nothing here
- * re-derives.)
+ * type-level pin placed here would compile-check nothing. (No count, twice
+ * learned: the size of another file's list is a number nothing here
+ * re-derives, so it goes stale unnoticed. Membership is the load-bearing half
+ * and is checkable.)
  *
  * Scope: the three row types PR B touches. The other live tools' known-field
  * sets are module-private and shaped by per-tool derivation/renaming, so they
