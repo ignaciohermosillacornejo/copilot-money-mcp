@@ -47,10 +47,12 @@
     //                            errors, and `tsc` does not follow imports
     //                            upward, so checking the helper does not drag
     //                            them in.
-    //   ts-files.ts           <- exported-constants.test.ts,
+    //   ts-files.ts           <- strip-comments.ts, exported-constants.test.ts,
     //                            no-hand-rolled-comment-strippers.test.ts, and
-    //                            its own contract test — all three on the list
-    //                            below and all three clean.
+    //                            its own contract test — all four on the list
+    //                            below and all four clean. (`scriptKindFor` is
+    //                            how strip-comments.ts picks a ScriptKind, so
+    //                            the two helpers are a pair, not a layer.)
     // exported-constants.test.ts imports NO stripper: having no comment
     // handling at all is its half of the #691 fix.
     "tests/helpers/strip-comments.ts",

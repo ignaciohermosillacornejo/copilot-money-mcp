@@ -59,7 +59,7 @@
  *     same-named helpers in different scopes, or a parameter shadowing one,
  *     collide;
  *   - an asserting helper's name appearing in a position that cannot call it
- *     and is NOT one of the five the exclusion list knows. That list is a
+ *     and is NOT one of the six the exclusion list knows. That list is a
  *     denylist, so it has grown by one AST shape per review round, and these
  *     are the shapes still outside it: a variable INITIALIZER (`const f =
  *     assertRow`, as opposed to the declaration's name, which is excluded), a
@@ -71,7 +71,9 @@
  *     would close all six at once and stop the list growing; it is not done
  *     because it widens what the gate MISSES, and no real instance has needed
  *     it. Listed here so the next round adds a line to this block rather than a
- *     sixth clause to the denylist.
+ *     seventh clause to the denylist. (Six, counted as written at
+ *     `isNamedWithoutBeingCalled` below: the two declaration-name clauses are
+ *     separate disjuncts there, and so are the two object-literal ones.)
  * In each case the remedy is the one the gate asks for anyway: assert inside
  * the test.
  */
