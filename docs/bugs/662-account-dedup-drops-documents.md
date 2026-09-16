@@ -100,7 +100,9 @@ budgets, goals) it seeds **two documents identical in every content field, diffe
 by id**, then asserts both survive — on the standalone decoder *and* on the single-pass
 aggregate, since this defect shipped two independent copies.
 
-**Coverage guard.** The twin tests cover 8 of the decoder's 36 dedup blocks. Rather than
+**Coverage guard.** The twin tests cover 5 of the decoder's 33 dedup blocks — 8 of 36 when
+this detector shipped, before #669 extracted the recurring/budgets/goals dedups into shared
+helpers, so each of the five collections now has one block serving both decode paths. Rather than
 claim more than that, the guard discovers every dedup block — each `new Set<string>()`
 allocation — and pins the **key expression** it tests. A block that is new, removed, or
 whose key changes from an id to a content field fails there, and every block must be
