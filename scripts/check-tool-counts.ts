@@ -73,8 +73,9 @@ function expectSubstring(file: string, needle: string, label: string): void {
  * registry fails here until the table gains a row.
  *
  * The section runs from `heading` to the next horizontal rule; tool names are
- * the backticked identifiers inside it. Duplicate rows are fine — one tool can
- * answer several questions — so the comparison is over the distinct set.
+ * the backticked identifiers in its table ROWS, not in its prose. Duplicate
+ * rows are fine — one tool can answer several questions — so the comparison is
+ * over the distinct set.
  */
 function expectToolTable(
   file: string,
@@ -98,8 +99,16 @@ function expectToolTable(
   const end = rest.search(/^---$/m);
   const section = end === -1 ? rest : rest.slice(0, end);
 
+  // Only the table's own rows count as claims. Reading every backticked token
+  // in the section would make ordinary prose — a sentence mentioning `amount`
+  // or `merchant` — fail as "names 1 unknown tool(s)", which reads as a
+  // registry problem and is a trap for whoever writes that sentence. It passes
+  // today only because the prose here happens to use hyphen-leading flags.
   const named = new Set<string>();
-  for (const m of section.matchAll(/`([a-z_]+)`/g)) named.add(m[1]);
+  for (const line of section.split('\n')) {
+    if (!line.startsWith('|')) continue;
+    for (const m of line.matchAll(/`([a-z_]+)`/g)) named.add(m[1]);
+  }
 
   const want = new Set(expected);
   const missing = [...want].filter((t) => !named.has(t)).sort();

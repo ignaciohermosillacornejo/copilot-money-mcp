@@ -336,10 +336,13 @@ shipped in #727 without ever being committed.
 
 `bun run check` includes `check:tracked-files` (`scripts/check-tracked-files.ts`),
 which fails when any file the repo's own tooling reaches is untracked, or is
-matched by a `.gitignore` rule. "Reaches" is derived, not listed: paths named by
+matched by an ignore rule. "Reaches" is derived, not listed: paths named by
 `package.json` scripts, the relative-import closure of those plus every tracked
-file under `scripts/` and `tests/`, and `scripts/…` paths named as string
-literals (the spawn-not-import case).
+file under `scripts/` and `tests/`, and `scripts/…` / `.github/…` paths named as
+text — in those files and in tracked `.github/workflows/*.yml`, `.husky/*` and
+`skills/*`, which invoke scripts by name and have no import graph to walk. That
+last source is why `scripts/check-pr-sections.sh`, run only from
+`required-sections.yml`, is covered by a reference rather than by luck.
 
 So when you add a script:
 
