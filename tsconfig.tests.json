@@ -19,7 +19,11 @@
 // src/ only), and #725 shipped a review round with an object literal silently
 // missing two declared fields — the failure message read them and got
 // `undefined`. A gate whose legibility depends on its own types should have
-// them checked. All three files are type-clean; keep them that way.
+// them checked. Named rather than counted, since a bare count over a fuzzy
+// antecedent is the drift shape this list keeps attracting:
+// temp-db-suite-teardown.test.ts, no-collection-time-assertions.test.ts and
+// tsconfig-tests-sync.test.ts (plus the two temp-db support modules they read).
+// All are type-clean; keep them that way.
 //
 // The third is tsconfig-tests-sync.test.ts, added for that same reason with
 // one extra: it is the gate that decides who is on THIS list, it casts the
