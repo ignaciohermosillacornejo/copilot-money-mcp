@@ -30,10 +30,13 @@
  *   2. The relative-import closure of (1) plus every **tracked** file under
  *      `scripts/` and `tests/`. An import that cannot resolve is a hard
  *      failure too, transitively.
- *   3. `scripts/…` and `.github/…` paths named as text inside those files —
- *      the spawn-and-read case, which no import graph reaches:
- *      `scripts/check-skills.py` shells out to `scripts/dump-tool-names.ts`,
- *      and `tests/scripts/audit-severity-gate.test.ts` reads
+ *   3. `scripts/…` and `.github/…` paths named as text in those files — and in
+ *      tracked `.github/workflows/*.yml` and `.husky/*`, which name scripts
+ *      but have no import graph to walk. This is the spawn-and-read case that
+ *      (2) cannot reach: `scripts/check-skills.py` shells out to
+ *      `scripts/dump-tool-names.ts`, `required-sections.yml` runs
+ *      `scripts/check-pr-sections.sh` (named by nothing in package.json), and
+ *      `tests/scripts/audit-severity-gate.test.ts` reads
  *      `.github/audit-severity-gate.jq` through a joined path. Deliberately
  *      narrowed to those two prefixes: a broader "any path-like literal" sweep
  *      would sweep up the directories tooling *writes* (snapshots, generated
