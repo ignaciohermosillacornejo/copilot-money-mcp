@@ -284,8 +284,15 @@ describe('no stranded docblocks (#701)', () => {
     // It fails on an ADDED tree too, reporting the list mismatch rather than
     // anything about floors. That is the intended direction: a new tree has to
     // arrive with a floor of its own rather than sliding under the aggregate.
-    expect([...SCANNED_TREES].sort()).toEqual(['scripts', 'src', 'tests']);
-    for (const tree of ['src', 'scripts', 'tests']) {
+    //
+    // ONE literal, read twice. Written as two — a pin and a separately-typed
+    // loop over the same three names — adding a tree could be made to pass by
+    // updating the pin alone, and the new tree would then have no floor: the
+    // same "a guard whose domain is the thing it guards" defect the pin exists
+    // to fix, one line further down.
+    const PINNED_TREES = ['scripts', 'src', 'tests'];
+    expect([...SCANNED_TREES].sort()).toEqual(PINNED_TREES);
+    for (const tree of PINNED_TREES) {
       expect(result.perTree[tree], `${tree} left the sweep`).toBeGreaterThan(30);
     }
     expect(result.bareClosings).toBeGreaterThan(500);
@@ -362,16 +369,14 @@ describe('no stranded docblocks (#701)', () => {
       expect(probe.unreadable[0]).toContain('ENOENT');
       // And the readable sibling is still swept, so the failure is scoped to
       // the file that caused it rather than to the tree.
-      //
-      // Both counters, not just the total. They are adjacent and were added two
-      // rounds apart, and until this assertion `perTree` was the one counter
-      // here that could still overstate with everything green: moving its `++`
-      // above the read leaves the repo sweep unchanged (nothing under the real
-      // trees is unreadable) and no control looked at it. Asserting the exact
-      // value on a tree that contains an unreadable file is what makes
-      // "increment at the point of inspection" checkable for both of them.
-      // (Round-7 review of #724.)
       expect(probe.files).toBe(1);
+      // The same claim for the per-tree counter, which was added two rounds
+      // later and was, until this assertion, the one counter here that could
+      // still overstate with everything green: moving its `++` above the read
+      // leaves the repo sweep unchanged (nothing under the real trees is
+      // unreadable) and no control looked at it. Asserting the exact value on a
+      // tree that contains an unreadable file is what makes "increment at the
+      // point of inspection" checkable for it too. (Round-7 review of #724.)
       expect(probe.perTree.src).toBe(1);
     } finally {
       rmSync(dir, { recursive: true, force: true });

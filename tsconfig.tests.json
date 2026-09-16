@@ -47,14 +47,16 @@
     //                            errors, and `tsc` does not follow imports
     //                            upward, so checking the helper does not drag
     //                            them in.
-    //   ts-files.ts           <- exported-constants.test.ts and
-    //                            no-hand-rolled-comment-strippers.test.ts,
-    //                            both on the list below and both clean.
+    //   ts-files.ts           <- exported-constants.test.ts,
+    //                            no-hand-rolled-comment-strippers.test.ts, and
+    //                            its own contract test — all three on the list
+    //                            below and all three clean.
     // exported-constants.test.ts imports NO stripper: having no comment
     // handling at all is its half of the #691 fix.
     "tests/helpers/strip-comments.ts",
     "tests/helpers/strip-comments.test.ts",
     "tests/helpers/ts-files.ts",
+    "tests/helpers/ts-files.test.ts",
     "tests/no-hand-rolled-comment-strippers.test.ts",
     "tests/exported-constants.test.ts",
     "tests/core/temp-db-suite-teardown.test.ts",

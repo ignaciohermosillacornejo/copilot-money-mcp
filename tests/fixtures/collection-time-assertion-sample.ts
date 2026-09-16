@@ -43,3 +43,10 @@ export { assertRow };
 // names the helper without calling it. A CALL in that slot still fires — the
 // exclusion tests the identifier's position, not the property.
 export const assertions = { assertRow, row: assertRow };
+
+// Must NOT be flagged either, and the reason this line exists: `export default`
+// is an ExportAssignment, which the detector excludes for the same "naming is
+// not calling" reason as the two above — but nothing in `tests/` used the form,
+// so deleting that clause left the whole suite green. A specimen the gate is
+// measured against should carry every shape the gate claims to know.
+export default assertRow;

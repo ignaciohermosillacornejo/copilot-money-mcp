@@ -1225,12 +1225,11 @@ describe('CopilotMoneyTools', () => {
       // its fixture a category deliberately, so its 8 holds. Named by title
       // rather than by direction — the next insertion between them moves
       // whichever word you pick. This is the third condition on that number,
-      // and the guide
-      // framed the dropped `category_name` as live mode's "mirror case" — it is
-      // not: cache resolves it to `undefined` when there is no category, the
-      // key survives projection because the row owns it, and JSON.stringify
-      // drops it. Both modes lose the same key for the same reason; live merely
-      // starts from 10.
+      // and the guide framed the dropped `category_name` as live mode's
+      // "mirror case" — it is not: cache resolves it to `undefined` when there
+      // is no category, the key survives projection because the row owns it,
+      // and JSON.stringify drops it. Both modes lose the same key for the same
+      // reason; live merely starts from 10.
       //
       // Asserted after a JSON round-trip for that reason — `Object.keys()` off
       // the object is 8 here and would pin the wrong thing.

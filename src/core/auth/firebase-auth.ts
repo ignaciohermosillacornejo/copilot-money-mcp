@@ -123,13 +123,27 @@ export class FirebaseAuth {
     // message. `exchangeToken` has already cleared `refreshToken`, so the
     // fall-through cannot loop. Any OTHER failure is a genuine error and still
     // propagates untouched.
+    //
+    // The guard is the cold path's two-step, in the same order: FIRST "is this
+    // about the token at all" (`isCandidateRejection` — a 4xx that is not
+    // endpoint-level), THEN "is it already explained by being logged out". The
+    // second predicate alone would be a substring test on any Error's message,
+    // so a 403 or a rate limit whose body happened to quote a dead-token code
+    // would be read as a verdict on the token and silently swallowed into a
+    // cold re-extract. Writing the two paths differently is also how they drift.
+    //
+    // `isExplainedByLoggedOut` leads with `isForeignProjectError`, which the
+    // paragraph above says cannot happen here — deliberately kept rather than
+    // hand-inlining the dead-token half: one predicate means "explained by
+    // logged out" has one definition, and a disjunct that never fires on this
+    // path costs a string compare. It is dead code, not a contradiction.
     if (this.refreshToken) {
       try {
         await this.exchangeToken(this.refreshToken);
         if (!this.idToken) throw new Error('Firebase token exchange returned no ID token');
         return this.idToken;
       } catch (err) {
-        if (!isExplainedByLoggedOut(err)) throw err;
+        if (!isCandidateRejection(err) || !isExplainedByLoggedOut(err)) throw err;
       }
     }
 

@@ -57,7 +57,21 @@
  *     rather than wrapped in an arrow, which is not marked deferred;
  *   - the helper map is keyed by bare name for the whole file, so two
  *     same-named helpers in different scopes, or a parameter shadowing one,
- *     collide.
+ *     collide;
+ *   - an asserting helper's name appearing in a position that cannot call it
+ *     and is NOT one of the five the exclusion list knows. That list is a
+ *     denylist, so it has grown by one AST shape per review round, and these
+ *     are the shapes still outside it: a variable INITIALIZER (`const f =
+ *     assertRow`, as opposed to the declaration's name, which is excluded), a
+ *     property NAME (`{ assertRow: 1 }`, as opposed to a property's value,
+ *     which is excluded), a property ACCESS (`helpers.assertRow`), a binding
+ *     element (`const { assertRow } = helpers`), a type query (`typeof
+ *     assertRow`), and an array element (`[assertRow]`). Inverting to an
+ *     allowlist — flag only a CallExpression's callee or one of its arguments —
+ *     would close all six at once and stop the list growing; it is not done
+ *     because it widens what the gate MISSES, and no real instance has needed
+ *     it. Listed here so the next round adds a line to this block rather than a
+ *     sixth clause to the denylist.
  * In each case the remedy is the one the gate asks for anyway: assert inside
  * the test.
  */
@@ -104,7 +118,11 @@ function testFiles(dir: string): string[] {
     if (statSync(full).isDirectory()) out.push(...testFiles(full));
     else if (name.endsWith('.ts') && full !== SPECIMEN) out.push(full);
   }
-  return out;
+  // Sorted, because `readdirSync` order is the filesystem's and differs between
+  // a dev machine and CI. A multi-finding failure message is read by diffing it
+  // against the one someone else saw; an order nobody chose makes that harder
+  // for nothing.
+  return out.sort();
 }
 
 /** Leftmost identifier of a callee: `test.each(x)` and `it.skip` both -> the root. */

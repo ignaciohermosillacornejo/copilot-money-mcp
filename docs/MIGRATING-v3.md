@@ -146,8 +146,11 @@ caller is the one who has to change something.
 - **Account names now agree across all four surfaces.** `get_holdings` and
   `get_recurring_transactions`' detail view reported the provider label where
   `get_accounts` reports your Copilot nickname, so the same account appeared
-  under two names depending on which tool you asked. All four now resolve
-  `nickname || name || official_name`. Two consequences worth knowing: an
+  under two names depending on which tool you asked. All four now prefer your
+  nickname when you have set a non-blank one, and fall back to the provider's
+  label otherwise (`preferredAccountName`, `src/models/account.ts` — blank
+  means whitespace-only too, at every step, so there is no exact one-line
+  formula to quote). Two consequences worth knowing: an
   account whose nickname you cleared previously came back from
   `get_balance_history` with **no name at all**, and now returns the provider
   label; and an account that has no `name` at all now reports its
