@@ -135,7 +135,7 @@ const TOOLING_ROOTS = ['scripts/', 'tests/'];
  * Its sweep half is a side effect, and a harmless one: `resolveLiteral`
  * requires both a LITERAL_PREFIXES hit and `isFile`, so narrative prose naming
  * a path that does not exist is skipped in silence rather than reported. Adding
- * seven markdown files of prose to the sweep therefore carries none of the
+ * every tracked file under it to the sweep therefore carries none of the
  * blast radius the PATH_TOKEN widening did. It does pull in real references —
  * `scripts/decode-coverage.ts`, named by `skills/boundary-audit/SKILL.md`.
  *

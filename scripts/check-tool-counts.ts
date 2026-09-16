@@ -48,9 +48,28 @@ const baseTotal = read + write;
 const writeModeTotal = liveModeTotal + write;
 const allTotal = read + live + write;
 
+const ALL_TOOL_DEFS = [...READ_TOOL_DEFS, ...LIVE_TOOL_DEFS, ...WRITE_TOOL_DEFS];
+
 /** Every tool name the registry knows, in any mode — the vocabulary a doc may name. */
-const ALL_TOOL_NAMES = new Set(
-  [...READ_TOOL_DEFS, ...LIVE_TOOL_DEFS, ...WRITE_TOOL_DEFS].map((t) => t.schema.name),
+const ALL_TOOL_NAMES = new Set(ALL_TOOL_DEFS.map((t) => t.schema.name));
+
+/**
+ * Every argument name a doc may legitimately backtick.
+ *
+ * These are snake_case too — `account_id`, `start_date`, `min_amount` — so the
+ * "looks tool-shaped" discriminator below cannot tell them from a mistyped tool
+ * name on shape alone. A row writing `` `get_transactions` (with `account_id`) ``
+ * is ordinary documentation, and failing it as an unknown tool would be the
+ * prose trap returning under a new spelling. Derived from the registry, so a new
+ * argument needs no edit here.
+ */
+const ALL_ARG_NAMES = new Set(
+  ALL_TOOL_DEFS.flatMap((t) =>
+    Object.keys(
+      (t.schema as { inputSchema?: { properties?: Record<string, unknown> } }).inputSchema
+        ?.properties ?? {},
+    ),
+  ),
 );
 
 const mismatches: string[] = [];
@@ -85,11 +104,14 @@ function expectSubstring(file: string, needle: string, label: string): void {
  * The two arms are deliberately asymmetric. `missing` is the #723 property and
  * is absolute: a default-mode tool absent from the table fails, no exceptions.
  * `extra` reports a name only when it is a real tool in the wrong section, or
- * is tool-SHAPED (`verb_noun`) and unknown to the registry — a typo, or a
- * rename whose old row survived. A lone backticked word is prose and ignored,
- * because failing on `merchant` would read as a registry problem when it is a
- * copy edit. What that shape does NOT catch: a misspelling with no underscore
- * in it.
+ * is tool-SHAPED (`verb_noun`), unknown to the registry, and not one of the
+ * registry's own argument names — a typo, or a rename whose old row survived.
+ * A lone backticked word is prose and ignored, because failing on `merchant`
+ * would read as a registry problem when it is a copy edit; so is a backticked
+ * argument name like `account_id`, which is snake_case exactly like a tool.
+ *
+ * The residuals, both ways: a misspelling with no underscore in it is not
+ * reported, and neither is one that happens to collide with an argument name.
  */
 function expectToolTable(
   file: string,
@@ -139,11 +161,23 @@ function expectToolTable(
   // then tell a user to call a tool that does not exist, past the only gate that
   // reads this table.
   //
-  // Tool names are `verb_noun`; the prose this filter exists for (`merchant`,
-  // `amount`, `date`) is single words. So: a real tool in the wrong section, or
-  // anything tool-SHAPED the registry does not have.
+  // Tool names are `verb_noun` (gated by tests/tools/registry/tool-name-shape.test.ts,
+  // so the premise is enforced rather than assumed). A lone English word is
+  // prose. An ARGUMENT name is snake_case too, and is also legitimate prose in
+  // a row — so shape alone cannot separate `account_id` from `get_transactons`,
+  // and argument names are excluded by name.
+  //
+  // The `ALL_TOOL_NAMES` arm is unreachable while every tool name contains an
+  // underscore, which the invariant test above enforces. It is kept because it
+  // is what would carry the check if a single-word tool name were ever added,
+  // and because it is the tiebreak if a tool name ever collides with an
+  // argument name. Deleting it today changes nothing — that is a statement
+  // about the invariant, not about the arm being decoration.
   const extra = [...named]
-    .filter((t) => !want.has(t) && (ALL_TOOL_NAMES.has(t) || t.includes('_')))
+    .filter(
+      (t) =>
+        !want.has(t) && (ALL_TOOL_NAMES.has(t) || (t.includes('_') && !ALL_ARG_NAMES.has(t))),
+    )
     .sort();
   if (missing.length > 0) {
     mismatches.push(`${file}: "${label}" omits ${missing.length} tool(s): ${missing.join(', ')}`);

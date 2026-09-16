@@ -64,6 +64,25 @@ async function withDocTree(
   }
 }
 
+/**
+ * Apply a fixture edit, refusing to continue if it changed nothing.
+ *
+ * An exit-0 fixture whose `replace` no-ops is the worst shape in this file: the
+ * doc is unmodified, the gate passes, and the test reports success while
+ * covering nothing — silent-under-covering, the class this whole PR is about.
+ * Exit-1 fixtures fail loudly on a no-op and do not need this; the exit-0 ones
+ * do. Throws rather than asserts so the message reads "the fixture is stale",
+ * not "the gate is broken" — that is the distinction that matters when it
+ * fires.
+ */
+function mutate(doc: string, from: string, to: string): string {
+  const out = doc.replaceAll(from, to);
+  if (out === doc) {
+    throw new Error(`fixture anchor gone from docs/EXAMPLE_QUERIES.md: ${JSON.stringify(from)}`);
+  }
+  return out;
+}
+
 const read = READ_TOOL_DEFS.length;
 
 describe('check:tool-counts', () => {
@@ -195,7 +214,7 @@ describe('check:tool-counts', () => {
       async (root) => {
         const path = join(root, 'docs/EXAMPLE_QUERIES.md');
         const doc = await readFile(path, 'utf-8');
-        await writeFile(path, doc.replaceAll('\n|', '\n  |'));
+        await writeFile(path, mutate(doc, '\n|', '\n  |'));
       },
       ({ code, stderr }) => {
         expect(stderr).toBe('');
@@ -212,7 +231,28 @@ describe('check:tool-counts', () => {
       async (root) => {
         const path = join(root, 'docs/EXAMPLE_QUERIES.md');
         const doc = await readFile(path, 'utf-8');
-        await writeFile(path, doc.replace('(with merchant filter)', '(with `merchant` filter)'));
+        await writeFile(path, mutate(doc, '(with merchant filter)', '(with `merchant` filter)'));
+      },
+      ({ code, stderr }) => {
+        expect(stderr).toBe('');
+        expect(code).toBe(0);
+      }
+    );
+  });
+
+  // Argument names are snake_case exactly like tool names, so the shape rule
+  // cannot tell `account_id` from a mistyped tool on form alone — and a doc
+  // author reaching for a backtick in a row is at least as likely to reach for
+  // the real parameter name as for an English word.
+  test('a backticked argument name inside a table row is not an unknown tool', async () => {
+    await withDocTree(
+      async (root) => {
+        const path = join(root, 'docs/EXAMPLE_QUERIES.md');
+        const doc = await readFile(path, 'utf-8');
+        await writeFile(
+          path,
+          mutate(doc, '(with merchant filter)', '(with `account_id` or `start_date`)')
+        );
       },
       ({ code, stderr }) => {
         expect(stderr).toBe('');
