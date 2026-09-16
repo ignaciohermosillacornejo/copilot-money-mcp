@@ -139,8 +139,8 @@ describe('a typechecked helper brings its own contract test onto the list', () =
     expect(
       typechecked.length,
       'No helper module paired with a contract test is on the include list, so the rule ' +
-        'below is vacuous. If the include list moved to a glob, this test needs to resolve ' +
-        'globs rather than compare literal paths.'
+        'below is vacuous. (A glob include list would do that; the premise test below ' +
+        'catches that case by name.)'
     ).toBeGreaterThanOrEqual(2);
   });
 
@@ -205,24 +205,6 @@ describe('the entries whose membership is the coverage stay on the include list'
     expect(MEMBERSHIP_IS_THE_COVERAGE).toContain(relative(repoRoot, import.meta.path));
   });
 
-  test('a file whose argument rests on being ABSENT stays absent', () => {
-    // The negative of the same idea. tests/tools/live/known-fields-wire-parity
-    // .test.ts places its MIRROR_IS_EXACT pins in src/ rather than in itself,
-    // and the whole justification is "THIS FILE IS NOT TYPECHECKED, so a
-    // type-level pin here would compile-check nothing". Adding it to the
-    // include list one day would leave those pins sitting in src/ justified by
-    // a premise that had stopped holding, with nothing saying so — its own
-    // comment calls the claim "checkable", which is a property rather than a
-    // promise until something checks it. This is the something.
-    const absent = 'tests/tools/live/known-fields-wire-parity.test.ts';
-    expect(
-      included.has(absent),
-      `${absent} is now typechecked, which invalidates the reason its MIRROR_IS_EXACT pins ` +
-        `live in src/ instead of in it. Either move those pins into it and delete this ` +
-        `assertion, or take it back off the include list.`
-    ).toBe(false);
-  });
-
   test('each of them is still there', () => {
     // Not vacuous, and not circular: `bun test` collects this file from the
     // filesystem regardless of any tsconfig, so removing an entry leaves this
@@ -242,9 +224,57 @@ describe('the entries whose membership is the coverage stay on the include list'
       `These are on tsconfig.tests.json's include list because NOTHING IMPORTS THEM — no ` +
         `program reaches them any other way, so dropping a line drops the type checking ` +
         `entirely rather than moving it (#725, #737). Removed on purpose? Edit the pin ` +
-        `above and the tsconfig header too. If the include list moved to a GLOB, this is a ` +
-        `false red for the same reason the helper-pairing floor is: both compare literal ` +
-        `paths and would need to resolve globs instead.\n  ${gone.join('\n  ')}`
+        `above and the tsconfig header too.\n  ${gone.join('\n  ')}`
     ).toEqual([]);
+  });
+});
+
+/**
+ * The premise all three rules in this file rest on, asserted instead of
+ * repeated as a caveat in each of their failure messages.
+ *
+ * Every rule here compares LITERAL paths against the include list. The
+ * tsconfig header calls expanding to `tests/**` tracked follow-up work, and on
+ * that day each rule breaks differently and silently: the positive pins go red
+ * for the wrong reason, and the negative one below goes GREEN for the wrong
+ * reason — `has()` is false whether the file is absent or merely spelled by a
+ * glob. A shared premise is worth one assertion rather than three paragraphs.
+ */
+describe('the rules in this file assume literal include paths', () => {
+  test('no include entry is a glob', () => {
+    const globs = [...included].filter((entry) => /[*?]/.test(entry));
+    expect(
+      globs,
+      `tsconfig.tests.json's include list now uses glob patterns, so every rule in this ` +
+        `file is comparing literal paths against something else. They must resolve globs ` +
+        `before any of their verdicts mean anything:\n  ${globs.join('\n  ')}`
+    ).toEqual([]);
+  });
+});
+
+/**
+ * The negative of MEMBERSHIP_IS_THE_COVERAGE, in its own `describe` because
+ * this one is about a file staying OFF the list — filed under the positive
+ * rule's title, a failure would print a header contradicting the test.
+ *
+ * tests/tools/live/known-fields-wire-parity.test.ts places its MIRROR_IS_EXACT
+ * pins in src/ rather than in itself, justified by "THIS FILE IS NOT
+ * TYPECHECKED, so a type-level pin here would compile-check nothing". Adding it
+ * to the include list would leave those pins in src/ resting on a premise that
+ * had stopped holding, with nothing saying so. Its own comment called that
+ * claim "checkable" — a property, not a promise, until something checks it.
+ */
+describe('a file whose argument rests on being absent stays absent', () => {
+  test('known-fields-wire-parity is still outside every program', () => {
+    // Meaningful only because the literal-paths premise above is asserted:
+    // under a glob include list this would pass while the file was in fact
+    // typechecked.
+    const absent = 'tests/tools/live/known-fields-wire-parity.test.ts';
+    expect(
+      included.has(absent),
+      `${absent} is now typechecked, which invalidates the reason its MIRROR_IS_EXACT pins ` +
+        `live in src/ instead of in it. Either move those pins into it and delete this ` +
+        `assertion, or take it back off the include list.`
+    ).toBe(false);
   });
 });
