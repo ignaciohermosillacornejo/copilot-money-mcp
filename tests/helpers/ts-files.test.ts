@@ -25,7 +25,15 @@ describe('ts-files: ScriptKind follows the extension', () => {
     // Derived, not copied. The assertion is over the real list, so adding an
     // extension without deciding its kind fails here rather than silently
     // parsing those files as TS.
-    const mapped = Object.fromEntries(EXTENSIONS.map((ext) => [ext, scriptKindFor(`f${ext}`)]));
+    // `as const` on the callback's return, so it is a TUPLE rather than an
+    // `(string | ts.ScriptKind)[]`. Without it `Object.fromEntries` resolves to
+    // its untyped overload, `mapped` is `any`, and the `toEqual` below is a
+    // runtime check only — a misspelled key in the literal would not be a
+    // compile error. This file is on tsconfig.tests.json's include list for
+    // exactly that kind of reason.
+    const mapped = Object.fromEntries(
+      EXTENSIONS.map((ext) => [ext, scriptKindFor(`f${ext}`)] as const)
+    );
     expect(mapped).toEqual({
       '.ts': ts.ScriptKind.TS,
       '.tsx': ts.ScriptKind.TSX,
@@ -43,9 +51,12 @@ describe('ts-files: ScriptKind follows the extension', () => {
   });
 
   test('the walker list is non-empty and holds `.ts` (guards the guard)', () => {
-    // An empty EXTENSIONS would make both assertions above vacuous — the first
-    // compares `{}` to a literal and would fail, but the second would pass on
-    // an empty filter. Floor, not a budget.
+    // Neither assertion above states what EXTENSIONS must CONTAIN: both are
+    // derived from it, so both describe whatever list they are handed. An
+    // empty one fails them by accident — `{}` is not the table, `[]` is not
+    // `['.tsx']` — which is luck, not a guard, and a list that dropped `.ts`
+    // while keeping `.tsx` would satisfy both on purpose. This is the
+    // assertion that names something. Floor, not a budget.
     expect(EXTENSIONS.length).toBeGreaterThanOrEqual(1);
     expect(EXTENSIONS).toContain('.ts');
   });

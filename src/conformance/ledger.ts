@@ -818,6 +818,14 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'from its provider `name`, the live `name` matched the NICKNAME, not the provider ' +
       "label. The server resolves it, so the two modes agree and cache's explicit mapping " +
       'brings cache INTO line rather than away from it. ' +
+      'ONE INPUT THE PROBE COULD NOT COVER: cache mode treats a BLANK label as no label ' +
+      '(`preferredAccountName` trims before testing, so `nickname: "   "` falls through to ' +
+      'the provider label, and so does `name: "   "`). Live mode does no such handling and ' +
+      'returns AccountNode.name as sent, so the two modes agree on every input EXCEPT a ' +
+      'whitespace-only nickname — for which cache reports the provider label and live ' +
+      'reports the whitespace, if the server passes it through. No account in the probe had ' +
+      'one, so which side is right is unknown; it is recorded because this entry exists to ' +
+      'say where the claim rests on the server and nothing re-checks it. ' +
       'Classed verified-once rather than left unrecorded: nothing re-checks it. If Copilot ' +
       'stopped resolving the nickname, AccountNode.name would keep its key and its type, the ' +
       'gated read-shape entry for Query.accounts would stay green because it gates KEYS not ' +

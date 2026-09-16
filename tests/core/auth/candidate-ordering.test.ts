@@ -513,12 +513,75 @@ describe('no single candidate can starve a valid one behind it (#722)', () => {
       if (expectedError === null) {
         expect(await auth.getIdToken()).toBe(ID_TOKEN);
       } else {
+        // One call, not two. A third `getIdToken()` asserting `.not.toThrow`
+        // used to sit here: by then `refreshToken` is already null (the failed
+        // exchange cleared it), so it never entered the fast path and pinned
+        // the cold path a second time under a fast-path test's name.
         await expect(auth.getIdToken()).rejects.toThrow(expectedError);
-        await expect(auth.getIdToken()).rejects.not.toThrow('Firebase token exchange failed');
       }
       expect(attempts).toContain('fast-path');
     }
   );
+
+  test.each([
+    // Both rows send an ENDPOINT-level failure through the fast path, where
+    // the token is not the thing at fault, so the raw error is the whole
+    // message a caller can act on. They pin the two halves of that guard
+    // independently:
+    ['a plain endpoint failure', 'PERMISSION_DENIED'],
+    // ...and one whose body happens to quote a dead-token code. The
+    // "explained by logged out" predicate is a substring test over the error
+    // message, so on its own it reads this as a verdict on the token and
+    // swallows a 403 into a cold re-extract that reports "log in" for an
+    // outage logging in cannot fix. Only the `isCandidateRejection` gate in
+    // front of it — the same one the cold path applies first — keeps it raw.
+    ['an endpoint failure quoting a dead-token code', 'PERMISSION_DENIED (TOKEN_EXPIRED)'],
+  ])('%s on the fast path is rethrown, not swallowed into a cold re-extract', async (_n, msg) => {
+    // The direction the fast-path fall-through test above does NOT cover:
+    // it pins fall-through on a dead token, and nothing pinned rethrow on
+    // anything else — so `catch {}` (swallow everything) passed the suite.
+    let issued = false;
+    const attempts: string[] = [];
+    globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
+      if (!issued) {
+        issued = true;
+        attempts.push('bootstrap');
+        return Promise.resolve(
+          Response.json({
+            id_token: 'bootstrap-id-token',
+            refresh_token: syntheticToken('server-issued'),
+            expires_in: '0',
+            token_type: 'Bearer',
+            user_id: 'synthetic-user',
+          })
+        );
+      }
+      attempts.push(
+        String(options?.body ?? '').includes(syntheticToken('server-issued'))
+          ? 'fast-path'
+          : 'cold-path'
+      );
+      return Promise.resolve(Response.json({ error: { message: msg } }, { status: 403 }));
+    }) as unknown as typeof fetch;
+
+    let extractions = 0;
+    const auth = new FirebaseAuth(() => {
+      extractions++;
+      return Promise.resolve({
+        candidates: [candidate(syntheticToken('bootstrap'), true)],
+        checked: ['Chrome'],
+      });
+    });
+    expect(await auth.getIdToken()).toBe('bootstrap-id-token');
+    expect(extractions).toBe(1);
+
+    await expect(auth.getIdToken()).rejects.toThrow('Firebase token exchange failed (403)');
+    // The raw error came FROM the fast path, not from a cold path that
+    // happened to fail the same way: no second extraction ran, and no
+    // cold-path exchange was attempted.
+    expect(extractions).toBe(1);
+    expect(attempts).toEqual(['bootstrap', 'fast-path']);
+  });
 
   test('all-foreign candidates still yield the actionable "no session" error', async () => {
     const candidates = Array.from({ length: 3 }, (_, i) =>

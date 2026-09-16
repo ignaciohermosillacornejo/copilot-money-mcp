@@ -437,6 +437,19 @@ function linkTarget(path: string): string | undefined {
     if (!lstatSync(path).isSymbolicLink()) return undefined;
     return readlinkSync(path);
   } catch {
+    // CONFLATES "not a symlink" with "could not tell" — deliberately, and only
+    // safe because of what the caller does with `undefined`. There it means
+    // "no link content to scan", and the single caller reaches that branch only
+    // after a read of the same path ALSO failed, in which case the file is
+    // pushed onto `unreadable` and the gate refuses. So a lost race (lstat
+    // succeeds, the link is unlinked before readlink) or a permission change
+    // mid-run fails LOUD by the caller's route, not silently by this one.
+    //
+    // The co-dependency is the load-bearing part: a future caller that treats
+    // `undefined` as "definitely a regular file, definitely fine" and does not
+    // read the path would reintroduce the fail-open this whole file exists to
+    // remove. Distinguishing the two cases here would need a thrown error or a
+    // third return state; nothing needs it yet.
     return undefined;
   }
 }

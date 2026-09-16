@@ -155,8 +155,10 @@ collection === target || collection.endsWith(`/${target}`)
 | `user_hidden` | boolean | User has hidden this account in the UI |
 | `holdings` | array | Investment holdings (see Cost Basis section) |
 
-**Naming:** the account's display name is `nickname || name || official_name`
-(`preferredAccountName`, `src/models/account.ts`), and the first branch is
+**Naming:** the account's display name is your Copilot nickname when you have
+set a non-blank one, otherwise the provider's label — `preferredAccountName`
+in `src/models/account.ts` is the rule, and it treats a whitespace-only value
+as no value at every step, so no prose formula here is exact. The nickname is
 user-editable, so **never key on a name** — `account_id` is the stable
 identifier. A reader who takes `name` for the account's name reaches the
 conclusion that produced #660/#663/#664.

@@ -163,13 +163,15 @@ function matchesWholly(pattern: RegExp, probe: string): boolean {
 }
 
 /**
- * One file's regex literals: how many there were, and which of them recognise a
- * comment as a unit.
+ * One file's regex literals: how many there were, which of them recognise a
+ * comment as a unit, and their raw text.
  *
- * The count comes back alongside the findings rather than from a second walk,
- * because it is the non-vacuity floor for those findings — a scan that parsed
- * nothing and a scan that found nothing both report zero, and the floor only
- * separates them if it counts what the SAME walk considered.
+ * All three come off ONE walk. The count is the non-vacuity floor for the
+ * findings — a scan that parsed nothing and a scan that found nothing both
+ * report zero, and the floor only separates them if it counts what the SAME
+ * walk considered — and the raw text is what the drift ratchet below reads.
+ * Returning the literals from here is what keeps the second consumer from
+ * being a second tree walk in a file whose whole thesis is one lexer, not four.
  *
  * Regex literals are collected from the AST, not by text search: a slash inside
  * a string, a comment or a division is not a regex literal, and this file would
@@ -178,7 +180,7 @@ function matchesWholly(pattern: RegExp, probe: string): boolean {
 function scanRegexLiterals(
   source: string,
   file: string
-): { considered: number; findings: Finding[] } {
+): { considered: number; findings: Finding[]; literals: string[] } {
   // `setParentNodes: false`: nothing here needs a parent pointer — `getText`
   // and `getStart` are both handed the source file explicitly, and the walk is
   // `forEachChild`, not `getChildren`. This runs over every .ts in three trees
@@ -191,12 +193,17 @@ function scanRegexLiterals(
     scriptKindFor(file)
   );
   const findings: Finding[] = [];
-  let considered = 0;
+  // Every literal the walk saw, in source order. Collected HERE rather than by
+  // a second walk of its own: a file whose thesis is "one lexer, not four"
+  // should not carry two near-identical tree walks. `considered` is now just
+  // `literals.length` by construction, which is the invariant the non-vacuity
+  // floor below wanted and previously had to trust.
+  const literals: string[] = [];
 
   const visit = (node: ts.Node): void => {
     if (node.kind === ts.SyntaxKind.RegularExpressionLiteral) {
-      considered++;
       const literal = node.getText(sourceFile);
+      literals.push(literal);
       const parts = splitRegexLiteral(literal);
       if (parts !== null) {
         let compiled: RegExp | null = null;
@@ -224,7 +231,7 @@ function scanRegexLiterals(
   };
 
   visit(sourceFile);
-  return { considered, findings };
+  return { considered: literals.length, findings, literals };
 }
 
 /** Just the findings, for the synthetic snippets below. */
@@ -234,20 +241,7 @@ function findCommentMatchingRegexes(source: string, file: string): Finding[] {
 
 /** Every regex literal's raw text, for the drift ratchet below. */
 function regexLiteralsIn(source: string, file: string): string[] {
-  const sourceFile = ts.createSourceFile(
-    file,
-    source,
-    ts.ScriptTarget.Latest,
-    false,
-    scriptKindFor(file)
-  );
-  const out: string[] = [];
-  const visit = (node: ts.Node): void => {
-    if (node.kind === ts.SyntaxKind.RegularExpressionLiteral) out.push(node.getText(sourceFile));
-    ts.forEachChild(node, visit);
-  };
-  visit(sourceFile);
-  return out;
+  return scanRegexLiterals(source, file).literals;
 }
 
 /**

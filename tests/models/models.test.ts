@@ -53,6 +53,35 @@ describe('Account model helpers', () => {
       expect(preferredAccountName({ ...base, official_name: 'OFFICIAL' })).toBe('OFFICIAL');
     });
 
+    test('a BLANK provider `name` is not a name either, so official_name wins', () => {
+      // The blank rule is about identifiability, so it holds for every input,
+      // not only the nickname. `src/core/decoder.ts` drops an account only when
+      // `name` AND `official_name` are both absent, so this shape reaches the
+      // helper. Before the widening, `'   '` was truthy and beat a perfectly
+      // good `official_name` — the same defect the nickname trim was added for,
+      // one operand over.
+      expect(preferredAccountName({ ...base, name: '   ', official_name: 'OFFICIAL' })).toBe(
+        'OFFICIAL'
+      );
+      expect(preferredAccountName({ ...base, name: '', official_name: 'OFFICIAL' })).toBe(
+        'OFFICIAL'
+      );
+    });
+
+    test('a blank official_name is not a last resort — undefined beats whitespace', () => {
+      // The end of the chain gets the rule too. Returning `'   '` here would
+      // hand a caller a name that renders as nothing and compares equal to
+      // nothing; `undefined` is the honest answer and the one the final test
+      // below already pins for the empty case.
+      expect(preferredAccountName({ ...base, official_name: '   ' })).toBeUndefined();
+    });
+
+    test('a provider name with surrounding space keeps its own spelling', () => {
+      // Same asymmetry as the nickname case: blank-detection trims, the
+      // returned value does not.
+      expect(preferredAccountName({ ...base, name: ' Everyday ' })).toBe(' Everyday ');
+    });
+
     test('returns undefined when nothing is set — it does NOT invent "Unknown"', () => {
       // A caller that wants a placeholder picks one; this helper says it
       // does not know.

@@ -161,7 +161,12 @@ export function isVisibleAccountNode(account: {
  * opposite direction, introduced by the commit that fixed #663.
  *
  * Truthiness is the right branch: an account whose nickname is blank should
- * still be identifiable, so a blank one is not a name.
+ * still be identifiable, so a blank one is not a name. The rule is about
+ * IDENTIFIABILITY, so it applies to all three inputs, not just the nickname:
+ * `name: '   '` is exactly as unidentifiable as `nickname: '   '`, and it is
+ * representable — `processAccount` in `src/core/decoder.ts` drops an account
+ * only when `name` AND `official_name` are both absent, so a whitespace-only
+ * `name` beside a perfectly good `official_name` reaches here.
  *
  * Sibling of {@link isVisibleAccount}, and here for the same reason — the rule
  * existed at one site and a second surface reimplemented it slightly
@@ -171,12 +176,16 @@ export function preferredAccountName(
   account: Pick<Account, 'nickname' | 'name' | 'official_name'>
 ): string | undefined {
   // Blank-detection trims, the returned value does not. `'   '` is truthy, so
-  // bare truthiness would hand back a nickname that is exactly as
-  // unidentifiable as `''` — the case the rule above exists to reject. Nothing
-  // upstream trims: `nickname` is `z.string().optional()` with no transform and
-  // the decoder passes the field through. Trimming the ANSWER would be a
-  // different decision — it would silently rewrite a name the user typed — so
-  // only the blank test is trimmed.
-  const nickname = account.nickname?.trim() ? account.nickname : undefined;
-  return nickname || account.name || account.official_name;
+  // bare truthiness would hand back a label that is exactly as unidentifiable
+  // as `''` — the case the rule above exists to reject. Nothing upstream trims:
+  // all three are `z.string().optional()` with no transform and the decoder
+  // passes them through. Trimming the ANSWER would be a different decision — it
+  // would silently rewrite a name the user typed — so only the blank test is
+  // trimmed.
+  //
+  // One predicate applied three times rather than three `||` operands with one
+  // of them special-cased: a rule stated for one input and applied to another
+  // is how the two call sites drifted in the first place (#663).
+  const usable = (s?: string): string | undefined => (s?.trim() ? s : undefined);
+  return usable(account.nickname) || usable(account.name) || usable(account.official_name);
 }
