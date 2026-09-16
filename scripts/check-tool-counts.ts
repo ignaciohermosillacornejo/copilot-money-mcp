@@ -48,6 +48,11 @@ const baseTotal = read + write;
 const writeModeTotal = liveModeTotal + write;
 const allTotal = read + live + write;
 
+/** Every tool name the registry knows, in any mode — the vocabulary a doc may name. */
+const ALL_TOOL_NAMES = new Set(
+  [...READ_TOOL_DEFS, ...LIVE_TOOL_DEFS, ...WRITE_TOOL_DEFS].map((t) => t.schema.name),
+);
+
 const mismatches: string[] = [];
 
 function expectSubstring(file: string, needle: string, label: string): void {
@@ -76,6 +81,12 @@ function expectSubstring(file: string, needle: string, label: string): void {
  * the backticked identifiers in its table ROWS, not in its prose. Duplicate
  * rows are fine — one tool can answer several questions — so the comparison is
  * over the distinct set.
+ *
+ * The two arms are deliberately asymmetric. `missing` is the #723 property and
+ * is absolute: a default-mode tool absent from the table fails, no exceptions.
+ * `extra` only reports names the registry actually knows, because a backticked
+ * word in a row that is no tool at all is prose, and failing on it would read
+ * as a registry problem when it is a copy edit.
  */
 function expectToolTable(
   file: string,
@@ -106,13 +117,21 @@ function expectToolTable(
   // today only because the prose here happens to use hyphen-leading flags.
   const named = new Set<string>();
   for (const line of section.split('\n')) {
-    if (!line.startsWith('|')) continue;
+    // trimStart, not startsWith: a table nested in a list item, a <details>, or
+    // a blockquote is indented, and skipping every row then reports "omits 16
+    // tool(s)" — a registry catastrophe caused by a whitespace edit.
+    if (!line.trimStart().startsWith('|')) continue;
     for (const m of line.matchAll(/`([a-z_]+)`/g)) named.add(m[1]);
   }
 
   const want = new Set(expected);
   const missing = [...want].filter((t) => !named.has(t)).sort();
-  const extra = [...named].filter((t) => !want.has(t)).sort();
+  // `extra` reports only names that are REAL tools in the wrong section. A
+  // backticked token in a row that is not a tool at all — `(with `merchant`
+  // filter)` is one edit away in this very table — is prose, and reporting it
+  // as an unknown tool reads as a registry problem. Row-scoping alone narrows
+  // that trap; intersecting with the registry closes it.
+  const extra = [...named].filter((t) => !want.has(t) && ALL_TOOL_NAMES.has(t)).sort();
   if (missing.length > 0) {
     mismatches.push(`${file}: "${label}" omits ${missing.length} tool(s): ${missing.join(', ')}`);
   }

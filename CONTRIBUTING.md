@@ -339,10 +339,13 @@ which fails when any file the repo's own tooling reaches is untracked, or is
 matched by an ignore rule. "Reaches" is derived, not listed: paths named by
 `package.json` scripts, the relative-import closure of those plus every tracked
 file under `scripts/` and `tests/`, and `scripts/…` / `.github/…` paths named as
-text — in those files and in tracked `.github/workflows/*.yml`, `.husky/*` and
-`skills/*`, which invoke scripts by name and have no import graph to walk. That
-last source is why `scripts/check-pr-sections.sh`, run only from
-`required-sections.yml`, is covered by a reference rather than by luck.
+text — in those files and in **every tracked file at any depth** under
+`.github/workflows/`, `.husky/` and `skills/`, none of which has an import graph
+to walk (`.husky/pre-push` has no extension at all). That last source is why
+`scripts/check-pr-sections.sh`, run only from `required-sections.yml`, is
+covered by a reference rather than by luck; `skills/` is there because
+`pack-mcpb.ts` ships it inside the `.mcpb` and the repo-wide unanchored rules
+(`LOG`, `CURRENT`, `LOCK`, `*.log`) match at any depth.
 
 So when you add a script:
 

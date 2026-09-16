@@ -31,9 +31,9 @@
  *      `scripts/` and `tests/`. An import that cannot resolve is a hard
  *      failure too, transitively.
  *   3. `scripts/…` and `.github/…` paths named as text in those files — and in
- *      tracked `.github/workflows/*.yml` and `.husky/*`, which name scripts
- *      but have no import graph to walk. This is the spawn-and-read case that
- *      (2) cannot reach: `scripts/check-skills.py` shells out to
+ *      every tracked file under `.github/workflows/`, `.husky/` and `skills/`,
+ *      none of which has an import graph to walk. This is the spawn-and-read
+ *      case that (2) cannot reach: `scripts/check-skills.py` shells out to
  *      `scripts/dump-tool-names.ts`, `required-sections.yml` runs
  *      `scripts/check-pr-sections.sh` (named by nothing in package.json), and
  *      `tests/scripts/audit-severity-gate.test.ts` reads
@@ -112,13 +112,29 @@ const TOOLING_ROOTS = ['scripts/', 'tests/'];
 /**
  * Roots read for the text sweep (3) but not walked for imports.
  *
- * CI and the git hooks invoke scripts by name, from YAML and shell that has no
- * import graph to follow — and `scripts/check-pr-sections.sh` is named ONLY
- * from `.github/workflows/required-sections.yml`, by nothing in package.json.
- * Without these roots it passed the gate incidentally, because it happens to
- * be tracked already; a *new* workflow-only script would reproduce #727
- * exactly, through a different door. Every tracked file here is a sweep
- * source, extension or not — `.husky/pre-push` has none.
+ * Two different reasons, both ending in the same treatment.
+ *
+ * `.github/workflows/` and `.husky/` invoke scripts by name, from YAML and
+ * shell that has no import graph to follow — and `scripts/check-pr-sections.sh`
+ * is named ONLY from `.github/workflows/required-sections.yml`, by nothing in
+ * package.json. Without these roots it passed the gate incidentally, because it
+ * happens to be tracked already; a *new* workflow-only script would reproduce
+ * #727 exactly, through a different door.
+ *
+ * `skills/` is here for a different reason: `scripts/pack-mcpb.ts` stages it
+ * into the shipped `.mcpb`, and it is the only directory besides `scripts/`
+ * with a hand-written `.gitignore` rule inside it. The repo-wide UNANCHORED
+ * rules — `LOG`, `CURRENT`, `LOCK`, `*.log` — match at any depth, so a skill
+ * reference file can be ignore-matched exactly the way
+ * `tests/unit/manifest-sync.test.ts` was, and nothing would say so until
+ * `pack:mcpb` threw in CI.
+ *
+ * Known limit: roots are tracked-only, so this closes the ignore-matched half
+ * for `skills/` and NOT the untracked half. A whole-directory dependency like
+ * `pack-mcpb.ts`'s `'skills'` names no individual file for the closure to miss.
+ *
+ * Every tracked file here is a sweep source, extension or not — `.husky/pre-push`
+ * has none.
  */
 const TEXT_SWEEP_ROOTS = ['.github/workflows/', '.husky/', 'skills/'];
 
@@ -132,11 +148,21 @@ const SOURCE_EXT = /\.(?:ts|tsx|mts|cts|js|mjs|cjs|sh|py)$/;
  * the header's claim to cover "every repo-relative path" was one character
  * wider than the regex.
  *
- * The trailing `(?![\\w])` is load-bearing, not decoration. Alternation is
+ * The trailing `(?![\w])` is load-bearing, not decoration. Alternation is
  * ordered, so `js` matched first inside `.json` and the token came out as
  * `tsconfig.tests.js` — a path that does not exist, reported as a dangling
  * reference. Requiring the extension to end the word makes the match
- * independent of the order the alternatives happen to be written in.
+ * independent of the order the alternatives happen to be written in. It does
+ * NOT make it suffix-independent: `(?![\w])` permits a following `.`, so a
+ * `foo.yml.j2` or `foo.js.map` name would still match its `foo.yml` prefix.
+ * No instances today.
+ *
+ * Dropping the directory requirement also widened the blast radius for prose.
+ * `package.json` carries deliberate prose in its `_comment_*` entries, and a
+ * bare filename in one of those — "was old-config.json" — is now a hard
+ * dangling failure where before prose had to name a `dir/file.ext` to trip it.
+ * Nothing does today; the fix if one ever does is to name no file, or to name
+ * one that exists.
  */
 const PATH_TOKEN =
   /(?:[\w.-]+\/)*[\w.-]+\.(?:ts|tsx|mts|cts|js|mjs|cjs|sh|py|json|ya?ml)(?![\w])/g;
@@ -374,7 +400,8 @@ for (const file of ignoreMatched.sort()) {
   // with the failure that actually bites. Saying "tracked, but…" about it too
   // would be a second line that contradicts the first.
   if (!tracked.has(file)) continue;
-  const rule = git(['check-ignore', '--no-index', '-v', '--', file]).stdout.trim().split('\t')[0] ?? '';
+  const rule =
+    git(['check-ignore', '--no-index', '-v', '--', file]).stdout.trim().split('\t')[0] ?? '';
   // The source is whatever `-v` reports — .gitignore, .git/info/exclude, or the
   // user's global excludes — so name the rule rather than assuming .gitignore.
   failures.push(
