@@ -12,11 +12,12 @@ import {
 
 describe('Account model helpers', () => {
   describe('preferredAccountName', () => {
-    // The canonical helper. It sat in six files, none of them a test — covered
-    // only through the four-surface parity tests, which exercised two of its
-    // input classes. These tests pin the rest directly. Blank-vs-absent is the
-    // axis worth the coverage: that is where the rule's trimmed truthiness
-    // parts company with a nullish check, and where #663 went in reverse.
+    // The canonical helper (#663). Before this block it was covered only
+    // indirectly, through the four-surface parity tests, which exercised two
+    // of its input classes. These tests pin the rest directly. Blank-vs-absent
+    // is the axis worth the coverage: that is where the rule's trimmed
+    // truthiness parts company with a nullish check, and where #663 went in
+    // reverse.
     const base = { account_id: 'acc1', current_balance: 1000 } as const;
 
     test('nickname wins over both provider labels', () => {

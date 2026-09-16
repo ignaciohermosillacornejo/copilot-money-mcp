@@ -7,7 +7,7 @@ This server exposes different tools depending on which CLI flags you enable. The
 | Tool | Status | Notes |
 |---|---|---|
 | `get_transactions` | ✅ | Query transactions with filters (date range, category, merchant, amount, account, text search, etc.). Rows are terse by default as of v3.0.0 (the preset names 10 fields; a cache row carries the ones it has, so a row that is categorized, not pending and not a transfer is 8 — an uncategorized one is 7, and the CHANGELOG's measured 9 is a real 100-row page whose rows carry `pending`); `fields: ["all"]` returns the full document (~30 fields on a real row; the schema declares 64) and `fields: ["default", "tag_ids"]` adds named fields. The `compact` boolean was removed |
-| `get_accounts` | ✅ | List accounts with balances; filter by type. Rows are terse by default (`fields: [...]` opts into `holdings`, `official_name`, `logo`, etc.) |
+| `get_accounts` | ✅ | List accounts with balances; filter by type. `name` is your Copilot **nickname** when you have set one, else the provider's label — it is user-editable and can change under you, so key on `account_id`, never on `name` (#660/#663). Rows are terse by default (`fields: [...]` opts into `holdings`, `official_name`, `logo`, etc.) |
 | `get_categories` | ✅ | Category hierarchy with spending totals |
 | `get_budgets` | ✅ | Budgets vs. spending |
 | `get_recurring_transactions` | ✅ | Detected subscriptions + recurring charges. Pattern-detected rows are terse by default (`fields: [...]` opts into the matched `transactions` array and `confidence_reason`) |
@@ -28,7 +28,7 @@ When enabled, 6 cache-mode read tools are replaced with GraphQL-backed equivalen
 | Tool | Replaces? | Status | Notes |
 |---|---|---|---|
 | `get_transactions_live` | `get_transactions` | ✅ | Windowed cache; paginates per month. Terse by default too, same 10 preset names — but live emits both booleans unconditionally, where a cache row carries only the document fields it has, so a categorized cache row that is neither pending nor a transfer is 8 keys and its live counterpart is 10. An uncategorized live row is 9 on the wire: `categoryId` is nullable, so `category_name` maps to `undefined` and `JSON.stringify` drops the key |
-| `get_accounts_live` | `get_accounts` | ✅ | 1h cache. Rows are terse by default (`fields: [...]` opts into the sync/plumbing fields, `mask`, `color`, `limit`) |
+| `get_accounts_live` | `get_accounts` | ✅ | 1h cache. Same naming contract as cache-mode `get_accounts`: `name` is your Copilot **nickname** when set, else the provider's label, and it is user-editable — key on `id` (the live row's identifier field), never on `name`. Rows are terse by default (`fields: [...]` opts into the sync/plumbing fields, `mask`, `color`, `limit`) |
 | `get_categories_live` | `get_categories` | ✅ | 24h cache; reflects rollovers per user setting. Terse by default as of v3.0.0: rows are `{id, parentId, name, colorName, isExcluded, budget_amount}`. The embedded `budget` object comes back with `fields: ["default", "budget"]`; `templateId`, `icon`, `isRolloverDisabled` and `canBeDeleted` are separate top-level fields and each has to be named too (or take `fields: ["all"]`) |
 | `get_budgets_live` | `get_budgets` | ✅ | Projection over `categories_live` data |
 | `get_recurring_live` | `get_recurring_transactions` | ✅ | ⚠️ Pattern-based detection from transactions is NOT in live mode — use cache mode if you need that. Rows are terse by default (`fields: [...]` opts into `rule`, `payments`, `icon`) |
