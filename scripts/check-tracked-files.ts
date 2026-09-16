@@ -30,12 +30,14 @@
  *   2. The relative-import closure of (1) plus every **tracked** file under
  *      `scripts/` and `tests/`. An import that cannot resolve is a hard
  *      failure too, transitively.
- *   3. `scripts/…` paths named as string literals inside those files — the
- *      spawn-not-import case, e.g. `scripts/check-skills.py` shelling out to
- *      `scripts/dump-tool-names.ts`. Deliberately narrowed to the `scripts/`
- *      prefix: a broader "any path-like literal" sweep would sweep up the
- *      directories tooling *writes* (snapshots, generated fixtures, the demo
- *      database), which are ignored on purpose.
+ *   3. `scripts/…` and `.github/…` paths named as text inside those files —
+ *      the spawn-and-read case, which no import graph reaches:
+ *      `scripts/check-skills.py` shells out to `scripts/dump-tool-names.ts`,
+ *      and `tests/scripts/audit-severity-gate.test.ts` reads
+ *      `.github/audit-severity-gate.jq` through a joined path. Deliberately
+ *      narrowed to those two prefixes: a broader "any path-like literal" sweep
+ *      would sweep up the directories tooling *writes* (snapshots, generated
+ *      fixtures, the demo database), which are ignored on purpose.
  *
  * ## Why the roots are tracked-only
  *
@@ -55,6 +57,16 @@
  *   something re-adds it: a rename, a `git rm --cached`, a move between
  *   worktrees. Then it silently disappears in exactly the #727 way. Reported
  *   because the fix (one negation) is cheap and the failure is not.
+ *
+ * The second kind is **platform-dependent**, and legitimately so. Matching
+ * honours `core.ignoreCase`, which git sets at clone time from the
+ * filesystem, so a rule like `MANIFEST-*` catches `manifest-sync.test.ts` on
+ * default macOS APFS and nothing at all on Linux. All eight instances this
+ * gate found on its first run were invisible to CI for that reason. So the
+ * local run can be red while the CI run is green — always in that direction,
+ * never the reverse, because the stricter filesystem is the one a contributor
+ * is working on. "CI green, my machine red" is the gate working, not broken:
+ * the fix is the same negation either way.
  *
  * Run as part of `bun run check`.
  */
@@ -84,15 +96,28 @@ const GENERATED_PREFIXES = ['dist/'];
 
 /**
  * The declared home for local scratch — gitignored on purpose, and excluded
- * from the scripts typecheck for the same reason. Excluded from the
- * string-literal sweep (3) only: a *comment* naming an example path under it
+ * from the scripts typecheck for the same reason. Honoured by the text sweep
+ * (3) only, in `resolveLiteral`: a comment naming an example path under it
  * must not fail the gate, while an actual `import` of one still does, because
- * the import closure (2) does not consult this list.
+ * the import closure (2) does not consult this.
  */
 const LOCAL_SCRATCH_PREFIX = 'scripts/local/';
 
-/** Roots whose tracked files are tooling by definition. */
+/** Roots whose tracked source files are tooling by definition. */
 const TOOLING_ROOTS = ['scripts/', 'tests/'];
+
+/**
+ * Roots read for the text sweep (3) but not walked for imports.
+ *
+ * CI and the git hooks invoke scripts by name, from YAML and shell that has no
+ * import graph to follow — and `scripts/check-pr-sections.sh` is named ONLY
+ * from `.github/workflows/required-sections.yml`, by nothing in package.json.
+ * Without these roots it passed the gate incidentally, because it happens to
+ * be tracked already; a *new* workflow-only script would reproduce #727
+ * exactly, through a different door. Every tracked file here is a sweep
+ * source, extension or not — `.husky/pre-push` has none.
+ */
+const TEXT_SWEEP_ROOTS = ['.github/workflows/', '.husky/'];
 
 /** Extensions whose files are read as source by something in this repo. */
 const SOURCE_EXT = /\.(?:ts|tsx|mts|cts|js|mjs|cjs|sh|py)$/;
@@ -100,8 +125,27 @@ const SOURCE_EXT = /\.(?:ts|tsx|mts|cts|js|mjs|cjs|sh|py)$/;
 /** A repo-relative path with at least one directory segment and a known extension. */
 const PATH_TOKEN = /(?:[\w.-]+\/)+[\w.-]+\.(?:ts|tsx|mts|cts|js|mjs|cjs|sh|py|json|ya?ml)/g;
 
-/** A `scripts/…` path named anywhere in a tooling file — spawned, not imported. */
-const SCRIPTS_PATH_TOKEN = /(?:[\w.-]+\/)*scripts\/(?:[\w.-]+\/)*[\w.-]+\.[\w]+/g;
+/**
+ * Directories whose files are always tooling *inputs*, never build output.
+ *
+ * A path naming a file under one of these, anywhere in a tooling file, joins
+ * the closure even when nothing imports it — the spawn-and-read case:
+ * `check-skills.py` shells out to `scripts/dump-tool-names.ts`, and
+ * `tests/scripts/audit-severity-gate.test.ts` reads
+ * `.github/audit-severity-gate.jq` through a `join()`ed path rather than an
+ * import. Neither is reachable from the import graph, and both are files a
+ * clean checkout must have.
+ *
+ * Deliberately a short prefix list rather than "any path-like literal". A
+ * broader sweep would pull in the directories tooling *writes* — snapshots,
+ * generated fixtures, the demo database — which are ignored on purpose, and a
+ * gate that flags those gets switched off. Nothing in this repo writes into
+ * `scripts/` (except `scripts/local/`, excluded below) or `.github/`.
+ */
+const LITERAL_PREFIXES = ['scripts/', '.github/'];
+
+/** A path with at least one directory segment, optionally reached via `../`. */
+const PATH_LITERAL = /(?:\.\.?\/)*(?:[\w.-]+\/)+[\w.-]+\.[\w]+/g;
 
 /**
  * Relative module specifiers, in every form that reaches a file: `from './x.js'`,
@@ -202,6 +246,7 @@ const tracked = new Set(lsFiles.stdout.split('\0').filter((p) => p !== ''));
 const needed = new Set<string>(seeds);
 for (const file of tracked) {
   if (TOOLING_ROOTS.some((r) => file.startsWith(r)) && SOURCE_EXT.test(file)) needed.add(file);
+  if (TEXT_SWEEP_ROOTS.some((r) => file.startsWith(r))) needed.add(file);
 }
 
 /** Resolve a relative specifier the way bun/tsc would, including `.js` → `.ts`. */
@@ -225,6 +270,33 @@ function resolveSpecifier(fromFile: string, spec: string): string | null {
   return null;
 }
 
+/**
+ * Resolve a path named in a tooling file's text, or null if it is not one of
+ * the inputs this gate is about.
+ *
+ * Tried both ways a tooling file writes such a path: repo-relative
+ * (`'scripts/dump-tool-names.ts'`, spawned from a `cwd` at the repo root) and
+ * relative to the file itself (`'../../.github/audit-severity-gate.jq'`,
+ * joined onto `import.meta.dir`). The result must land under a
+ * LITERAL_PREFIXES directory and exist, so ordinary prose and every path
+ * outside those two directories is ignored.
+ */
+function resolveLiteral(fromFile: string, token: string): string | null {
+  const candidates = [token, join(dirname(fromFile), token)];
+  for (const candidate of candidates) {
+    const rel = toRepoRelative(join(repoRoot, candidate));
+    if (rel === null) continue;
+    if (!LITERAL_PREFIXES.some((p) => rel.startsWith(p))) continue;
+    // scripts/local/ is the declared home for local scratch. A comment naming
+    // an example path under it must not fail the gate; an actual `import` of
+    // one still does, because the import closure does not consult this.
+    if (rel.startsWith(LOCAL_SCRATCH_PREFIX)) continue;
+    if (isGenerated(rel) || !isFile(rel)) continue;
+    return rel;
+  }
+  return null;
+}
+
 const queue = [...needed];
 while (queue.length > 0) {
   const file = queue.pop() as string;
@@ -239,10 +311,9 @@ while (queue.length > 0) {
     }
   }
 
-  for (const match of source.matchAll(SCRIPTS_PATH_TOKEN)) {
-    const rel = match[0];
-    if (rel.startsWith(LOCAL_SCRATCH_PREFIX)) continue;
-    if (isGenerated(rel) || needed.has(rel) || !isFile(rel)) continue;
+  for (const match of source.matchAll(PATH_LITERAL)) {
+    const rel = resolveLiteral(file, match[0]);
+    if (rel === null || needed.has(rel)) continue;
     needed.add(rel);
     queue.push(rel);
   }
