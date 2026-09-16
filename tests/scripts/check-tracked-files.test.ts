@@ -226,6 +226,69 @@ describe('check:tracked-files', () => {
     );
   });
 
+  // CI and the git hooks invoke scripts by name from YAML and shell, which
+  // carry no import graph. `scripts/check-pr-sections.sh` is named only from
+  // `.github/workflows/required-sections.yml`; before this root existed it
+  // passed the gate incidentally, because it happened to be tracked already.
+  test('fails on a script referenced only from a workflow file', async () => {
+    await withRepo(
+      async (root) => {
+        await write(root, 'scripts/ci-only.sh', "echo 'ci only'\n");
+        await write(
+          root,
+          '.github/workflows/ci.yml',
+          'jobs:\n  a:\n    steps:\n      - run: bash scripts/ci-only.sh\n'
+        );
+        await git(root, ['add', '-A']);
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('scripts/ci-only.sh');
+        expect(stderr).toContain('NOT TRACKED');
+      }
+    );
+  });
+
+  test('fails on a script referenced only from a git hook', async () => {
+    await withRepo(
+      async (root) => {
+        await write(root, 'scripts/hook-only.sh', "echo 'hook only'\n");
+        await write(root, '.husky/pre-push', 'bash scripts/hook-only.sh\n');
+        await git(root, ['add', '-A']);
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('scripts/hook-only.sh');
+      }
+    );
+  });
+
+  // The token class admits `..`, so a literal like the `new URL('../../scripts/x.ts')`
+  // this very file uses can name a path above the checkout. It must resolve
+  // relative to the file that wrote it, never be joined onto the repo root raw,
+  // or the gate reports a path outside the repository as untracked.
+  test('resolves a ../-prefixed literal against its own file, not the repo root', async () => {
+    await withRepo(
+      async (root) => {
+        await write(root, 'scripts/target.ts', 'export const target = 1;\n');
+        // From tests/, '../scripts/target.ts' is the real file; joined onto the
+        // repo root it would be '../scripts/target.ts' — outside the checkout.
+        await write(
+          root,
+          'tests/example.test.ts',
+          "const p = '../scripts/target.ts';\nexport { p };\n"
+        );
+        await git(root, ['add', '-A']);
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        // Named by its in-repo path, with no `../` escaping into the message.
+        expect(stderr).toContain('scripts/target.ts');
+        expect(stderr).not.toContain('../scripts/target.ts');
+      }
+    );
+  });
+
   // A tracked file that a rule also matches still works — until a rename or a
   // `git rm --cached` re-adds it, at which point it leaves silently. The real
   // repo had seven such scripts plus one test file when this gate first ran.
