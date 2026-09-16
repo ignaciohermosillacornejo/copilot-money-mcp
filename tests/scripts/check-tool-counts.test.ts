@@ -195,7 +195,7 @@ describe('check:tool-counts', () => {
       async (root) => {
         const path = join(root, 'docs/EXAMPLE_QUERIES.md');
         const doc = await readFile(path, 'utf-8');
-        await writeFile(path, doc.replaceAll('\n| ', '\n  | '));
+        await writeFile(path, doc.replaceAll('\n|', '\n  |'));
       },
       ({ code, stderr }) => {
         expect(stderr).toBe('');
@@ -217,6 +217,30 @@ describe('check:tool-counts', () => {
       ({ code, stderr }) => {
         expect(stderr).toBe('');
         expect(code).toBe(0);
+      }
+    );
+  });
+
+  // The hole the registry filter opened, and the reason `extra` also admits
+  // anything tool-SHAPED: this table has duplicate rows for `get_transactions`,
+  // so typo-ing one leaves `missing` quiet — the real name is still on the other
+  // row — and a membership-only filter would leave `extra` quiet too.
+  test('reports a tool-shaped name the registry does not have', async () => {
+    await withDocTree(
+      async (root) => {
+        const path = join(root, 'docs/EXAMPLE_QUERIES.md');
+        const doc = await readFile(path, 'utf-8');
+        await writeFile(
+          path,
+          doc.replace(
+            '| "Search for Amazon" | `get_transactions`',
+            '| "Search for Amazon" | `get_transactons`'
+          )
+        );
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('get_transactons');
       }
     );
   });

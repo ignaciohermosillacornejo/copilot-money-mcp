@@ -84,9 +84,12 @@ function expectSubstring(file: string, needle: string, label: string): void {
  *
  * The two arms are deliberately asymmetric. `missing` is the #723 property and
  * is absolute: a default-mode tool absent from the table fails, no exceptions.
- * `extra` only reports names the registry actually knows, because a backticked
- * word in a row that is no tool at all is prose, and failing on it would read
- * as a registry problem when it is a copy edit.
+ * `extra` reports a name only when it is a real tool in the wrong section, or
+ * is tool-SHAPED (`verb_noun`) and unknown to the registry — a typo, or a
+ * rename whose old row survived. A lone backticked word is prose and ignored,
+ * because failing on `merchant` would read as a registry problem when it is a
+ * copy edit. What that shape does NOT catch: a misspelling with no underscore
+ * in it.
  */
 function expectToolTable(
   file: string,
@@ -118,20 +121,30 @@ function expectToolTable(
   const named = new Set<string>();
   for (const line of section.split('\n')) {
     // trimStart, not startsWith: a table nested in a list item, a <details>, or
-    // a blockquote is indented, and skipping every row then reports "omits 16
-    // tool(s)" — a registry catastrophe caused by a whitespace edit.
+    // a blockquote is indented, and skipping every row then reports every tool
+    // as missing — a registry catastrophe caused by a whitespace edit. (This
+    // comment used to name the number, which was wrong, in the script whose
+    // entire job is stopping hand-typed counts.)
     if (!line.trimStart().startsWith('|')) continue;
     for (const m of line.matchAll(/`([a-z_]+)`/g)) named.add(m[1]);
   }
 
   const want = new Set(expected);
   const missing = [...want].filter((t) => !named.has(t)).sort();
-  // `extra` reports only names that are REAL tools in the wrong section. A
-  // backticked token in a row that is not a tool at all — `(with `merchant`
-  // filter)` is one edit away in this very table — is prose, and reporting it
-  // as an unknown tool reads as a registry problem. Row-scoping alone narrows
-  // that trap; intersecting with the registry closes it.
-  const extra = [...named].filter((t) => !want.has(t) && ALL_TOOL_NAMES.has(t)).sort();
+  // `extra` must separate prose from a name that MEANT to be a tool. Filtering
+  // on registry membership alone silences both, and the second is the one worth
+  // reporting: this table carries duplicate rows for `get_transactions`, so a
+  // typo in one of them leaves `missing` quiet — the real name is still on the
+  // other row — and membership-only would leave `extra` quiet too. The doc would
+  // then tell a user to call a tool that does not exist, past the only gate that
+  // reads this table.
+  //
+  // Tool names are `verb_noun`; the prose this filter exists for (`merchant`,
+  // `amount`, `date`) is single words. So: a real tool in the wrong section, or
+  // anything tool-SHAPED the registry does not have.
+  const extra = [...named]
+    .filter((t) => !want.has(t) && (ALL_TOOL_NAMES.has(t) || t.includes('_')))
+    .sort();
   if (missing.length > 0) {
     mismatches.push(`${file}: "${label}" omits ${missing.length} tool(s): ${missing.join(', ')}`);
   }
