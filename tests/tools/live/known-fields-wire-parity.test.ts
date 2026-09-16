@@ -33,8 +33,11 @@
  * returns), forget the separate mirror edit, and every assertion below still
  * passes. The `MIRROR_IS_EXACT` pins in the two query modules close that hop
  * at compile time — they live in src/ because THIS FILE IS NOT TYPECHECKED:
- * tsconfig.tests.json is an explicit 17-file allowlist and this is not on it,
- * so a type-level pin placed here would compile-check nothing.
+ * tsconfig.tests.json is an explicit allowlist and this is not on it, so a
+ * type-level pin placed here would compile-check nothing. (No count: it said
+ * "17-file" and had been 29 for a while. The load-bearing half is membership,
+ * which is checkable; the size is a number about another file that nothing
+ * here re-derives.)
  *
  * Scope: the three row types PR B touches. The other live tools' known-field
  * sets are module-private and shaped by per-tool derivation/renaming, so they

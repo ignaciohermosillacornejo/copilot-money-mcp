@@ -53,6 +53,14 @@ describe('ts-files: ScriptKind follows the extension', () => {
     // `any` — whether the whole expression widened or only the values — it
     // compiles, the directive goes unused, and `tsc` fails with TS2578. No
     // `| undefined` noise: this program sets `noUncheckedIndexedAccess: false`.
+    // Two assertions, because neither half is the claim on its own. A
+    // suppressor passes on ANY error, so it says "not assignable to `string`",
+    // which `unknown` also satisfies; a positive assignment says "assignable
+    // to ScriptKind", which `any` also satisfies. Together they are exact:
+    // the positive one rejects `unknown`, `string`, a widened union; the
+    // suppressor rejects the `any` the positive one would wave through.
+    const valuesAreScriptKind: ts.ScriptKind = mapped['.ts'];
+    void valuesAreScriptKind;
     // @ts-expect-error `mapped`'s VALUES must be ScriptKind, not `any`; see above.
     const valuesMustNotBeAny: string = mapped['.ts'];
     void valuesMustNotBeAny;

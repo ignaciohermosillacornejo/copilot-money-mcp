@@ -52,9 +52,14 @@ function readJsonc(path: string): { include: string[] } {
   return parsed.config as { include: string[] };
 }
 
-describe('tsconfig.tests.json stays in sync with typed-mock adoption', () => {
-  const included = new Set(readJsonc('tsconfig.tests.json').include);
+/**
+ * One parse, read by both rules below. Written twice, they were two
+ * derivations of one fact in one file — the shape `PINNED_TREES` in
+ * tests/docs/jsdoc-stranding.test.ts exists to avoid.
+ */
+const included = new Set(readJsonc('tsconfig.tests.json').include);
 
+describe('tsconfig.tests.json stays in sync with typed-mock adoption', () => {
   // Adoption = importing the typed-mock helper module (merely naming the
   // function in prose is not adoption). The needle is split so this file's
   // own source doesn't match it.
@@ -96,7 +101,6 @@ describe('tsconfig.tests.json stays in sync with typed-mock adoption', () => {
  * nothing about the two scanners, which are off the list on purpose.
  */
 describe('a typechecked helper brings its own contract test onto the list', () => {
-  const included = new Set(readJsonc('tsconfig.tests.json').include);
   const HELPERS = 'tests/helpers';
 
   // Pairing is by name AND by import: `<name>.test.ts` beside `<name>.ts`,
@@ -148,5 +152,24 @@ describe('a typechecked helper brings its own contract test onto the list', () =
         `contract tests are not, so nothing in \`bun run check\` reads the assertions that ` +
         `say what the helper promises (#737) — add them:\n  ${missing.join('\n  ')}`
     ).toEqual([]);
+  });
+
+  test('this gate is itself typechecked (#725 shape, manual entry)', () => {
+    // The one include-list entry nothing above can reach: the rule is scoped
+    // to tests/helpers/ on purpose, and this file is not there. But it already
+    // holds the parsed list, so its own membership costs one assertion rather
+    // than a standing note that it is unratcheted.
+    //
+    // Not vacuous, and not circular: `bun test` collects this file from the
+    // filesystem regardless of any tsconfig, so removing the entry leaves this
+    // assertion running and red. Keyed off `import.meta.path` rather than a
+    // literal so a rename reports the rename, not a false membership failure.
+    const self = relative(repoRoot, import.meta.path);
+    expect(
+      included.has(self),
+      `${self} casts the parsed JSONC and interpolates derived values into its failure ` +
+        `messages — the #725 shape the tsconfig header cites — and no rule in it can reach ` +
+        `itself, so its membership on the include list is asserted here by hand.`
+    ).toBe(true);
   });
 });
