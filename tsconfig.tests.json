@@ -26,9 +26,11 @@
 // are listed in their OWN right, not followed in by `tsc`: nothing imports
 // them — the probe is a path string the suite spawns, and the teardown module
 // is named in prose and preloaded by bunfig.toml. All are type-clean; keep
-// them that way. Nothing in this repo imports a `.test.ts`, so for every test
-// entry on this list its LINE is the only thing putting it in a program —
-// delete the line and the checking is gone, not relocated. All three ratchets
+// them that way. Nothing in this repo imports a `.test.ts`, and the two
+// temp-db support modules are not imported either — spawned as a path and
+// preloaded by bunfig.toml — so for every one of these entries its LINE is the
+// only thing putting it in a program: delete the line and the checking is
+// gone, not relocated. All three ratchets
 // against that live in tsconfig-tests-sync.test.ts: the adoption rule covers
 // the mock-GraphQL adopters, the helper-pairing rule covers the tests/helpers/
 // contract tests, and MEMBERSHIP_IS_THE_COVERAGE pins what is left. That file
