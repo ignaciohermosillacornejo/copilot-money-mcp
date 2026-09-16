@@ -76,10 +76,16 @@ interface SchemaNode {
  * tuple (array) form of `items` would under-collect. None does today — every
  * `additionalProperties` in this repo is the boolean `false`.
  *
- * The `seen` set is not for cycles — JSON Schema here is a tree — but the
- * registry shares fragments between tools (`BULK_TARGET_PROPERTIES`), so it
- * keeps the walk linear and would contain a cycle if schemas ever got built by
- * reference.
+ * The `seen` set is not for cycles — JSON Schema here is a tree. It is for
+ * by-reference sharing ACROSS tools, which is already the present rather than a
+ * hedge: `TRANSACTION_FIELDS_PARAM_SCHEMA` from `src/tools/field-selection.ts`
+ * is embedded by identity in both `get_transactions` and
+ * `get_transactions_live`, and `RECURRING_FIELDS_PARAM_SCHEMA` by two live
+ * tools. That is why the caller hoists ONE set across the whole pass instead of
+ * letting the default create a per-tool one — per-tool is the exact scope where
+ * nothing is ever reachable twice, so the guard would be unobservable. Skipping
+ * a revisited node loses no names: a parent adds a child's name before
+ * recursing into it.
  */
 function collectPropertyNames(
   node: SchemaNode | undefined,
@@ -105,9 +111,18 @@ function collectPropertyNames(
  * prose trap returning under a new spelling. Derived from the registry through
  * `properties` and `items`, so a new argument — nested or not — needs no edit
  * here, within the limit `collectPropertyNames` records.
+ *
+ * Unlike tool names, argument names need no charset invariant of their own.
+ * This set is only ever compared against tokens harvested by the same
+ * `/`([a-z_]+)`/`, so an off-charset argument (`min_amount2`) yields no token
+ * to match rather than a spurious one. Benign by construction, not by luck —
+ * the asymmetry with tests/tools/registry/tool-name-shape.test.ts is deliberate.
  */
 const ALL_ARG_NAMES = new Set<string>();
-for (const def of ALL_TOOL_DEFS) collectPropertyNames(def.schema.inputSchema, ALL_ARG_NAMES);
+const seenSchemaNodes = new Set<SchemaNode>();
+for (const def of ALL_TOOL_DEFS) {
+  collectPropertyNames(def.schema.inputSchema, ALL_ARG_NAMES, seenSchemaNodes);
+}
 
 const mismatches: string[] = [];
 
