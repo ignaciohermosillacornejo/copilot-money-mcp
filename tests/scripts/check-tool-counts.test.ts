@@ -103,6 +103,14 @@ function anchoredEdit(file: string, doc: string, from: string | RegExp, to: stri
  * below — a plausible edit, it is a "see the README" pointer — and the fixture
  * still applies, the prose lands out of section, and the row-scoping test
  * quietly becomes a duplicate of the plain missing-row one.
+ *
+ * MIRRORED, and the mirror must move in lockstep: the slicing below copies
+ * `expectToolTable`'s. The test cannot import the script — running it IS the
+ * check, which is why these tests spawn a subprocess — so there is no shared
+ * function to depend on. A divergence in the HEADING is caught (it throws
+ * "fixture anchor gone"); a divergence in the BOUNDARY is not. Change the
+ * script to `^---+$`, or to "stop at the next `##`", and this copy keeps
+ * returning a region that is no longer the scanned one.
  */
 function assertInToolSection(doc: string, needle: string): void {
   const start = doc.indexOf(TOOL_SECTION_HEADING);
@@ -127,8 +135,7 @@ function proseInSection(doc: string): string {
 /** The heading `expectToolTable` scans from — mirrored from the script's call site. */
 const TOOL_SECTION_HEADING = '## Tool Reference (Behind the Scenes)';
 
-/** The doc every `anchoredEdit` call names — not every file the fixtures touch,
- *  which also includes package.json, README.md, CONTRIBUTING.md and docs/index.html. */
+/** The doc every `anchoredEdit` call names — not every file the fixtures touch. */
 const EXAMPLES = 'docs/EXAMPLE_QUERIES.md';
 
 const read = READ_TOOL_DEFS.length;

@@ -690,7 +690,13 @@ export const reviewTransactionsTool = defineTool({
     ctx.tools.reviewTransactions(args as ToolMethodArgs<'reviewTransactions'>),
 });
 
-/** Target-selection properties shared by review_transactions and bulk_edit_transactions. */
+/**
+ * Target-selection properties for bulk_edit_transactions.
+ *
+ * Named "shared" when review_transactions was expected to use it; that tool
+ * duplicates the block inline above instead, and the single use site here is a
+ * spread, so nothing shares this object by reference.
+ */
 const BULK_TARGET_PROPERTIES = {
   transaction_ids: {
     type: 'array',
