@@ -97,6 +97,7 @@ describe('a typechecked helper brings its own contract test onto the list', () =
   // where the test really imports the sibling. Name alone would pair a file
   // that merely shares a prefix.
   const pairs = readdirSync(join(repoRoot, HELPERS))
+    .sort()
     .filter((name) => name.endsWith('.test.ts'))
     .map((name) => ({
       test: join(HELPERS, name),
@@ -109,19 +110,32 @@ describe('a typechecked helper brings its own contract test onto the list', () =
         readFileSync(join(repoRoot, test), 'utf-8').includes(specifier)
     );
 
+  // The rule turns on this filter, not on `pairs`, so this is what has to be
+  // non-vacuous.
+  const typechecked = pairs.filter(({ subject }) => included.has(subject));
+
   test('the pairing walk finds the known helper contract tests (sanity floor)', () => {
     // A rule that paired nothing would pass the assertion below for the wrong
     // reason — the same non-vacuity argument the adopter floor above makes.
     const names = pairs.map((p) => p.test);
     expect(names).toContain(join(HELPERS, 'strip-comments.test.ts'));
     expect(names).toContain(join(HELPERS, 'ts-files.test.ts'));
+
+    // ...and `pairs` being full is not enough, because `included` holds the
+    // include list's LITERAL strings. The header of tsconfig.tests.json calls
+    // expanding to `tests/**/*` tracked follow-up work; on that day every
+    // `included.has(...)` goes false, the rule below checks nothing, and the
+    // walk floor above stays green while it does. So floor the filter too.
+    expect(
+      typechecked.length,
+      'No helper module paired with a contract test is on the include list, so the rule ' +
+        'below is vacuous. If the include list moved to a glob, this test needs to resolve ' +
+        'globs rather than compare literal paths.'
+    ).toBeGreaterThanOrEqual(2);
   });
 
   test("a typechecked helper's contract test is typechecked too", () => {
-    const missing = pairs
-      .filter(({ subject }) => included.has(subject))
-      .map(({ test }) => test)
-      .filter((test) => !included.has(test));
+    const missing = typechecked.map(({ test }) => test).filter((test) => !included.has(test));
     expect(
       missing,
       `These helper modules are on tsconfig.tests.json's include list but their own ` +

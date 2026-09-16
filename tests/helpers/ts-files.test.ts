@@ -39,6 +39,15 @@ describe('ts-files: ScriptKind follows the extension', () => {
     // include list at all: before that, no program read it, and the type it
     // resolved to was moot.
     const mapped = Object.fromEntries(EXTENSIONS.map((ext) => [ext, scriptKindFor(`f${ext}`)]));
+    // And the measurement above is now a GATE rather than a note about one
+    // `tsc` run. `mapped` is `{ [k: string]: ts.ScriptKind }`, so assigning it
+    // to a `string` is an error and the directive is used. If it ever resolves
+    // to `any` — the thing review of #732 believed was already true — the
+    // assignment starts succeeding, the directive becomes unused, and `tsc`
+    // fails with TS2578. A one-time probe re-run on every `bun run check`.
+    // @ts-expect-error `mapped` must not be `any`; see the paragraph above.
+    const mustNotBeAny: string = mapped;
+    void mustNotBeAny;
     expect(mapped).toEqual({
       '.ts': ts.ScriptKind.TS,
       '.tsx': ts.ScriptKind.TSX,
@@ -61,10 +70,11 @@ describe('ts-files: ScriptKind follows the extension', () => {
     // whatever list it is handed, and an empty one fails it only by accident
     // (`[]` is not `['.tsx']`). The table test above is stronger than that: it
     // compares against a hand-written four-key literal, so dropping `.ts` DOES
-    // fail it on the missing key. That literal is the reason to keep this one
-    // anyway — it is the thing the file's own docblock says will be derived
-    // from EXTENSIONS one day, and on that day this is the only assertion left
-    // naming an extension outright. Floor, not a budget.
+    // fail it on the missing key — what the table derives from `EXTENSIONS` is
+    // the key SET, not the expected values, which are hand-listed. So this
+    // floor is not what catches a dropped `.ts` today. It is here for the day
+    // that literal is derived too, which would leave nothing else naming an
+    // extension outright. Floor, not a budget.
     expect(EXTENSIONS.length).toBeGreaterThanOrEqual(1);
     expect(EXTENSIONS).toContain('.ts');
   });

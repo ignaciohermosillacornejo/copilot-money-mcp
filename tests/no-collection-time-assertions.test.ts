@@ -59,21 +59,22 @@
  *     same-named helpers in different scopes, or a parameter shadowing one,
  *     collide;
  *   - an asserting helper's name appearing in a position that cannot call it
- *     and is NOT one of the six the exclusion list knows. That list is a
- *     denylist, so it has grown by one AST shape per review round, and these
- *     are the shapes still outside it: a variable INITIALIZER (`const f =
- *     assertRow`, as opposed to the declaration's name, which is excluded), a
- *     property NAME (`{ assertRow: 1 }`, as opposed to a property's value,
- *     which is excluded), a property ACCESS (`helpers.assertRow`), a binding
- *     element (`const { assertRow } = helpers`), a type query (`typeof
- *     assertRow`), and an array element (`[assertRow]`). Inverting to an
- *     allowlist — flag only a CallExpression's callee or one of its arguments —
- *     would close all six at once and stop the list growing; it is not done
- *     because it widens what the gate MISSES, and no real instance has needed
- *     it. Listed here so the next round adds a line to this block rather than a
- *     seventh clause to the denylist. (Six, counted as written at
- *     `isNamedWithoutBeingCalled` below: the two declaration-name clauses are
- *     separate disjuncts there, and so are the two object-literal ones.)
+ *     and that the exclusion list does not know. That list is a denylist, so it
+ *     has grown by one AST shape per review round, and these are the SHAPES
+ *     STILL OUTSIDE IT: a variable INITIALIZER (`const f = assertRow`, as
+ *     opposed to the declaration's name, which is excluded), a property NAME
+ *     (`{ assertRow: 1 }`, as opposed to a property's value, which is
+ *     excluded), a property ACCESS (`helpers.assertRow`), a binding element
+ *     (`const { assertRow } = helpers`), a type query (`typeof assertRow`), and
+ *     an array element (`[assertRow]`). Inverting to an allowlist — flag only a
+ *     CallExpression's callee or one of its arguments — would close all six of
+ *     THOSE at once and stop the list growing; it is not done because it widens
+ *     what the gate MISSES, and no real instance has needed it. Listed here so
+ *     the next round adds a line to this block rather than another clause to
+ *     the denylist — which, separately and confusingly also six, currently
+ *     stands at six DISJUNCTS at `isNamedWithoutBeingCalled` below (the two
+ *     declaration-name clauses are written separately there, and so are the two
+ *     object-literal ones), making the next one the seventh.
  * In each case the remedy is the one the gate asks for anyway: assert inside
  * the test.
  */
