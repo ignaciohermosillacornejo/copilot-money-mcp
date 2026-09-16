@@ -9,7 +9,7 @@
  */
 
 import { describe, test, expect } from 'bun:test';
-import { readFileSync, readdirSync } from 'fs';
+import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, relative } from 'path';
 import ts from 'typescript';
 
@@ -69,6 +69,64 @@ describe('tsconfig.tests.json stays in sync with typed-mock adoption', () => {
       missing,
       `These files call createMockGraphQLClient but are not in tsconfig.tests.json's ` +
         `include list, so their mock shapes are NOT typechecked — add them:\n  ${missing.join('\n  ')}`
+    ).toEqual([]);
+  });
+});
+
+/**
+ * The class behind #737, which was fixed one file at a time.
+ *
+ * `tests/helpers/ts-files.test.ts` sat outside every program in
+ * `bun run check` — the base config excludes `tests/`, eslint reads `src/`
+ * only, and it was not on the include list — so nothing read a line of it.
+ * Its subject module WAS on the list. A helper judged worth typechecking whose
+ * own contract test is not typechecked is the shape: the assertions that say
+ * what the helper promises are the half nothing checks.
+ *
+ * Deliberately narrow, so it holds today rather than fighting the ~87
+ * pre-existing errors the tsconfig header describes: it speaks only about
+ * `tests/helpers/<name>.test.ts` next to a `tests/helpers/<name>.ts` it
+ * actually imports, and only when the SUBJECT is already on the list. It says
+ * nothing about the two scanners, which are off the list on purpose.
+ */
+describe('a typechecked helper brings its own contract test onto the list', () => {
+  const included = new Set(readJsonc('tsconfig.tests.json').include);
+  const HELPERS = 'tests/helpers';
+
+  // Pairing is by name AND by import: `<name>.test.ts` beside `<name>.ts`,
+  // where the test really imports the sibling. Name alone would pair a file
+  // that merely shares a prefix.
+  const pairs = readdirSync(join(repoRoot, HELPERS))
+    .filter((name) => name.endsWith('.test.ts'))
+    .map((name) => ({
+      test: join(HELPERS, name),
+      subject: join(HELPERS, name.replace(/\.test\.ts$/, '.ts')),
+      specifier: `./${name.replace(/\.test\.ts$/, '')}.js`,
+    }))
+    .filter(
+      ({ test, subject, specifier }) =>
+        existsSync(join(repoRoot, subject)) &&
+        readFileSync(join(repoRoot, test), 'utf-8').includes(specifier)
+    );
+
+  test('the pairing walk finds the known helper contract tests (sanity floor)', () => {
+    // A rule that paired nothing would pass the assertion below for the wrong
+    // reason — the same non-vacuity argument the adopter floor above makes.
+    const names = pairs.map((p) => p.test);
+    expect(names).toContain(join(HELPERS, 'strip-comments.test.ts'));
+    expect(names).toContain(join(HELPERS, 'ts-files.test.ts'));
+  });
+
+  test("a typechecked helper's contract test is typechecked too", () => {
+    const missing = pairs
+      .filter(({ subject }) => included.has(subject))
+      .map(({ test }) => test)
+      .filter((test) => !included.has(test));
+    expect(
+      missing,
+      `These helper modules are on tsconfig.tests.json's include list but their own ` +
+        `contract tests are not, so nothing in \`bun run check\` reads the assertions that ` +
+        `say what the helper promises (#737) — add them:\n  ${missing.join('\n  ')}`
     ).toEqual([]);
   });
 });

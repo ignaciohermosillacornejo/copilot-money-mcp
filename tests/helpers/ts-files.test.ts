@@ -3,10 +3,12 @@
  *
  * `scriptKindFor` had no test file of its own and its only assertion lived
  * under a `describe` about `stripComments`, which is not where the next reader
- * looks for it — it has three callers (`strip-comments.ts`,
- * `exported-constants.test.ts`, `no-hand-rolled-comment-strippers.test.ts`) and
- * the invariant it carries is "ScriptKind follows the extension", not anything
- * about comments.
+ * looks for it — it has four callers (`strip-comments.ts`,
+ * `exported-constants.test.ts`, `no-hand-rolled-comment-strippers.test.ts`,
+ * and this file) and the invariant it carries is "ScriptKind follows the
+ * extension", not anything about comments. Same four named in
+ * tsconfig.tests.json's importer map; if these two lists ever disagree, one of
+ * them is wrong and neither is a gate.
  *
  * The mapping is asserted by DERIVING it from `EXTENSIONS` rather than
  * hand-listing the four values. Hand-listing is the drift shape this whole
@@ -54,12 +56,15 @@ describe('ts-files: ScriptKind follows the extension', () => {
   });
 
   test('the walker list is non-empty and holds `.ts` (guards the guard)', () => {
-    // Neither assertion above states what EXTENSIONS must CONTAIN: both are
-    // derived from it, so both describe whatever list they are handed. An
-    // empty one fails them by accident — `{}` is not the table, `[]` is not
-    // `['.tsx']` — which is luck, not a guard, and a list that dropped `.ts`
-    // while keeping `.tsx` would satisfy both on purpose. This is the
-    // assertion that names something. Floor, not a budget.
+    // The `exactly one of them is JSX` test states nothing about what
+    // EXTENSIONS must CONTAIN — it is derived from the list, so it describes
+    // whatever list it is handed, and an empty one fails it only by accident
+    // (`[]` is not `['.tsx']`). The table test above is stronger than that: it
+    // compares against a hand-written four-key literal, so dropping `.ts` DOES
+    // fail it on the missing key. That literal is the reason to keep this one
+    // anyway — it is the thing the file's own docblock says will be derived
+    // from EXTENSIONS one day, and on that day this is the only assertion left
+    // naming an extension outright. Floor, not a budget.
     expect(EXTENSIONS.length).toBeGreaterThanOrEqual(1);
     expect(EXTENSIONS).toContain('.ts');
   });
