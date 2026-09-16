@@ -137,9 +137,10 @@ collection === target || collection.endsWith(`/${target}`)
 
 | Field | Type | Description |
 |---|---|---|
-| `account_id` | string | Unique identifier |
-| `name` | string | Account name |
-| `official_name` | string | Official name from institution |
+| `account_id` | string | Unique identifier — the only stable key for an account |
+| `nickname` | string | The user's Copilot nickname. Optional; `''` when cleared, and whitespace-only when sloppily set — which is why `preferredAccountName` trims for the blank test but not for the value it returns. Preferred over `name` / `official_name` whenever non-blank, so this, not `name`, is normally what the app shows |
+| `name` | string | The provider's label for the account. The displayed name only when `nickname` is blank or absent |
+| `official_name` | string | Official name from institution; last fallback after `nickname` and `name` |
 | `account_type` | string | Account type: `depository`, `credit`, `investment`, `loan`, `brokerage` |
 | `subtype` | string | Subtype: `checking`, `savings`, `credit card`, `401k`, `brokerage`, etc. |
 | `mask` | string | Last 4 digits of account number |
@@ -150,8 +151,21 @@ collection === target || collection.endsWith(`/${target}`)
 | `institution_id` | string | Plaid institution ID |
 | `institution_name` | string | Institution display name |
 | `item_id` | string | Parent Plaid item |
-| `user_deleted` | boolean | User has deleted this account |
+| `user_deleted` | boolean | User has deleted this account, or it was merged into another |
+| `user_hidden` | boolean | User has hidden this account in the UI |
 | `holdings` | array | Investment holdings (see Cost Basis section) |
+
+**Naming:** the account's display name is `nickname || name || official_name`
+(`preferredAccountName`, `src/models/account.ts`), and the first branch is
+user-editable, so **never key on a name** — `account_id` is the stable
+identifier. A reader who takes `name` for the account's name reaches the
+conclusion that produced #660/#663/#664.
+
+**Visibility:** `user_deleted` and `user_hidden` are ONE rule, not two
+independent flags — an account is visible only when neither is `true`
+(`isVisibleAccount`). #683 shipped because one surface filtered and a sibling
+surface did not. The GraphQL wire form spells the same rule
+`isUserClosed` / `isUserHidden` (`isVisibleAccountNode`).
 
 **App-visible data from this collection:**
 - Balance chart uses `balance_history` subcollection (separate)
