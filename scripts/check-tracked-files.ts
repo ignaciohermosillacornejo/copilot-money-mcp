@@ -120,13 +120,26 @@ const TOOLING_ROOTS = ['scripts/', 'tests/'];
  * exactly, through a different door. Every tracked file here is a sweep
  * source, extension or not — `.husky/pre-push` has none.
  */
-const TEXT_SWEEP_ROOTS = ['.github/workflows/', '.husky/'];
+const TEXT_SWEEP_ROOTS = ['.github/workflows/', '.husky/', 'skills/'];
 
 /** Extensions whose files are read as source by something in this repo. */
 const SOURCE_EXT = /\.(?:ts|tsx|mts|cts|js|mjs|cjs|sh|py)$/;
 
-/** A repo-relative path with at least one directory segment and a known extension. */
-const PATH_TOKEN = /(?:[\w.-]+\/)+[\w.-]+\.(?:ts|tsx|mts|cts|js|mjs|cjs|sh|py|json|ya?ml)/g;
+/**
+ * A repo-relative path with a known extension. The directory prefix is
+ * OPTIONAL: `typecheck` names `tsconfig.tests.json` and `tsconfig.scripts.json`
+ * at the repo root, and requiring a directory segment silently dropped both —
+ * the header's claim to cover "every repo-relative path" was one character
+ * wider than the regex.
+ *
+ * The trailing `(?![\\w])` is load-bearing, not decoration. Alternation is
+ * ordered, so `js` matched first inside `.json` and the token came out as
+ * `tsconfig.tests.js` — a path that does not exist, reported as a dangling
+ * reference. Requiring the extension to end the word makes the match
+ * independent of the order the alternatives happen to be written in.
+ */
+const PATH_TOKEN =
+  /(?:[\w.-]+\/)*[\w.-]+\.(?:ts|tsx|mts|cts|js|mjs|cjs|sh|py|json|ya?ml)(?![\w])/g;
 
 /**
  * Directories whose files are always tooling *inputs*, never build output.
@@ -361,9 +374,11 @@ for (const file of ignoreMatched.sort()) {
   // with the failure that actually bites. Saying "tracked, but…" about it too
   // would be a second line that contradicts the first.
   if (!tracked.has(file)) continue;
-  const rule = git(['check-ignore', '--no-index', '-v', file]).stdout.trim().split('\t')[0] ?? '';
+  const rule = git(['check-ignore', '--no-index', '-v', '--', file]).stdout.trim().split('\t')[0] ?? '';
+  // The source is whatever `-v` reports — .gitignore, .git/info/exclude, or the
+  // user's global excludes — so name the rule rather than assuming .gitignore.
   failures.push(
-    `${file}: tracked, but matched by .gitignore${rule === '' ? '' : ` (${rule})`} — ` +
+    `${file}: tracked, but matched by an ignore rule${rule === '' ? '' : ` (${rule})`} — ` +
       'a rename or re-add would silently drop it',
   );
 }

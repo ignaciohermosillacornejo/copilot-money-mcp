@@ -302,7 +302,7 @@ describe('check:tracked-files', () => {
       ({ code, stderr }) => {
         expect(code).toBe(1);
         expect(stderr).toContain('scripts/landmine.ts');
-        expect(stderr).toContain('tracked, but matched by .gitignore');
+        expect(stderr).toContain('tracked, but matched by an ignore rule');
         expect(stderr).toContain('scripts/*');
       }
     );
@@ -341,6 +341,82 @@ describe('check:tracked-files', () => {
         expect(stdout).toContain('tooling files are tracked and un-ignored');
       },
       { GIT_DIR: join(tmpdir(), 'check-tracked-files-not-a-git-dir') }
+    );
+  });
+
+  // The rule that produced seven of this PR's eight sibling fixes was
+  // `MANIFEST-*`, which over-matches only where `core.ignoreCase` is true —
+  // default macOS APFS, not ubuntu-latest's ext4. Without setting it here the
+  // whole case-fold class is unobservable on Linux, so CI could never see a
+  // regression of it. The fixture sets it explicitly.
+  test('detects a case-fold over-match, on any filesystem', async () => {
+    await withRepo(
+      async (root) => {
+        await git(root, ['config', 'core.ignorecase', 'true']);
+        await writeFile(join(root, '.gitignore'), `${GITIGNORE}MANIFEST-*\n`);
+        await write(root, 'scripts/manifest-utils.ts', 'export const u = 1;\n');
+        await git(root, ['add', '-f', 'scripts/manifest-utils.ts']);
+        await git(root, ['add', '.gitignore']);
+        await git(root, ['commit', '-qm', 'an over-broad rule and its victim']);
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('scripts/manifest-utils.ts');
+        expect(stderr).toContain('MANIFEST-*');
+      }
+    );
+  });
+
+  // skills/ ships to users inside the .mcpb and is the only directory besides
+  // scripts/ with a hand-written rule inside it. The repo-wide unanchored rules
+  // (LOG, CURRENT, LOCK, *.log) match at any depth, so a skill reference file
+  // can be ignore-matched exactly the way tests/unit/manifest-sync.test.ts was.
+  test('flags a tracked file under a shipped directory that an unanchored rule matches', async () => {
+    await withRepo(
+      async (root) => {
+        await writeFile(join(root, '.gitignore'), `${GITIGNORE}LOG\n`);
+        await write(root, 'skills/demo/references/LOG', 'notes\n');
+        await git(root, ['add', '-f', 'skills/demo/references/LOG']);
+        await git(root, ['add', '.gitignore']);
+        await git(root, ['commit', '-qm', 'a shipped file an unanchored rule matches']);
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('skills/demo/references/LOG');
+        expect(stderr).toContain('tracked, but matched by an ignore rule');
+      }
+    );
+  });
+
+  // The header claims every repo-relative path a package.json script names, and
+  // `typecheck` names two tsconfigs at the repo root. Requiring a directory
+  // segment dropped both silently — and widening the token exposed an ordered
+  // alternation that matched `js` inside `.json`, turning `tsconfig.tests.json`
+  // into a dangling reference to `tsconfig.tests.js`.
+  test('seeds a root-level path, and does not truncate its extension', async () => {
+    await withRepo(
+      async (root) => {
+        await write(root, 'tsconfig.tests.json', '{}\n');
+        await write(
+          root,
+          'package.json',
+          PACKAGE_JSON.replace(
+            '"check:kept"',
+            '"typecheck": "tsc -p tsconfig.tests.json",\n    "check:kept"'
+          )
+        );
+        await git(root, ['add', '-A']);
+        await git(root, ['commit', '-qm', 'a root-level tsconfig']);
+        // Now make it vanish the way a rename would.
+        await git(root, ['rm', '-q', '--cached', 'tsconfig.tests.json']);
+        await rm(join(root, 'tsconfig.tests.json'));
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        // The whole extension, not `tsconfig.tests.js`.
+        expect(stderr).toContain('tsconfig.tests.json');
+        expect(stderr).not.toContain('tsconfig.tests.js,');
+      }
     );
   });
 
