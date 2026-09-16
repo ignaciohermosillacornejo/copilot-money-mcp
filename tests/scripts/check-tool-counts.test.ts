@@ -160,6 +160,89 @@ describe('check:tool-counts', () => {
     );
   });
 
+  // Detector for the ROW-SCOPING half. Prose inside the section must not be
+  // able to satisfy `missing` on the table's behalf: without the row filter, a
+  // sentence naming the tool would stand in for the row, and #723's property —
+  // the TABLE names every default-mode tool — would be satisfiable by mentioning
+  // it anywhere in the section.
+  test('prose naming a tool does not stand in for its missing table row', async () => {
+    await withDocTree(
+      async (root) => {
+        const path = join(root, 'docs/EXAMPLE_QUERIES.md');
+        const doc = await readFile(path, 'utf-8');
+        await writeFile(
+          path,
+          doc
+            .replace(/^.*`get_balance_history`.*$/m, '')
+            .replace(
+              'With `--live-reads`',
+              'Balances over time come from `get_balance_history`.\n\nWith `--live-reads`'
+            )
+        );
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('omits 1 tool(s): get_balance_history');
+      }
+    );
+  });
+
+  // `trimStart`, not a bare `startsWith`: a table nested in a list item, a
+  // <details>, or a blockquote is indented, and skipping every row then reports
+  // "omits 14 tool(s)" — a registry catastrophe caused by a whitespace edit.
+  test('reads an indented table, rather than reporting every tool missing', async () => {
+    await withDocTree(
+      async (root) => {
+        const path = join(root, 'docs/EXAMPLE_QUERIES.md');
+        const doc = await readFile(path, 'utf-8');
+        await writeFile(path, doc.replaceAll('\n| ', '\n  | '));
+      },
+      ({ code, stderr }) => {
+        expect(stderr).toBe('');
+        expect(code).toBe(0);
+      }
+    );
+  });
+
+  // Detector for the REGISTRY-FILTER half, which row-scoping cannot cover: a
+  // backticked word inside a row that is no tool at all is prose. This table is
+  // one edit from that shape — `get_transactions` (with merchant filter).
+  test('a backticked non-tool inside a table row is not an unknown tool', async () => {
+    await withDocTree(
+      async (root) => {
+        const path = join(root, 'docs/EXAMPLE_QUERIES.md');
+        const doc = await readFile(path, 'utf-8');
+        await writeFile(path, doc.replace('(with merchant filter)', '(with `merchant` filter)'));
+      },
+      ({ code, stderr }) => {
+        expect(stderr).toBe('');
+        expect(code).toBe(0);
+      }
+    );
+  });
+
+  // The other half of the same guard: a name the registry DOES know, in a
+  // section that should not be listing it, is the failure worth reporting.
+  test('still reports a real tool the section should not be naming', async () => {
+    await withDocTree(
+      async (root) => {
+        const path = join(root, 'docs/EXAMPLE_QUERIES.md');
+        const doc = await readFile(path, 'utf-8');
+        await writeFile(
+          path,
+          doc.replace(
+            '| "Check cache status" |',
+            '| "Net worth" | `get_networth_live` |\n| "Check cache status" |'
+          )
+        );
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('get_networth_live');
+      }
+    );
+  });
+
   test('fails when CONTRIBUTING.md restates a count the registry disagrees with', async () => {
     await withDocTree(
       async (root) => {

@@ -413,9 +413,13 @@ describe('check:tracked-files', () => {
       },
       ({ code, stderr }) => {
         expect(code).toBe(1);
-        // The whole extension, not `tsconfig.tests.js`.
+        // The whole extension, not `tsconfig.tests.js`. A lookahead rather than
+        // `not.toContain('tsconfig.tests.js,')`: that trailing comma was doing
+        // the work of telling the two apart, so any change to how the message
+        // punctuates a path would have retired this detector in silence — the
+        // exact class this gate exists for.
         expect(stderr).toContain('tsconfig.tests.json');
-        expect(stderr).not.toContain('tsconfig.tests.js,');
+        expect(stderr).not.toMatch(/tsconfig\.tests\.js(?!on)/);
       }
     );
   });
