@@ -13,6 +13,13 @@ bun run check        # typecheck + lint + format:check + check:version-sync + ch
 bun run fix          # Run lint:fix + format
 ```
 
+> `bun run check` does NOT run `check:ghost-lines` either. That mode of
+> `scripts/check-concealment.ts` compares a PR's commits against its final tree,
+> so it needs a commit range rather than a working tree; it runs as its own
+> `pull_request` job in `test.yml` (with `fetch-depth: 0`) and can be run by
+> hand with `bun run check:ghost-lines`. With no range it prints `SKIPPED` and
+> exits 0 locally, and exits 1 in CI.
+
 > `bun run check` does NOT run `check:skills` (the `skills/` linter). Run
 > `bun run check:skills` separately when touching anything under `skills/`.
 > It shells out to `scripts/dump-tool-names.ts` and `scripts/dump-tool-args.ts`

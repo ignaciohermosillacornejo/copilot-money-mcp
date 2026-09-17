@@ -46,12 +46,14 @@
  *     endings read `nothing hidden`. INSIDE a repo — a `.git` at the root —
  *     git declining is a failure rather than a fallback: see the strategy
  *     check at the bottom of this file. The swap only ever scans less.
- *   - It sees one tree, never a range of commits. The cross-commit half of
- *     #6003 — content added by one commit and removed by another, so it never
- *     appears in the combined diff — cannot be seen from a tree at all. That
- *     needs the PR's commit range, which this gate does not read: there is no
- *     flag for it and nothing passes one. Open work, not an option somebody
- *     forgot to switch on.
+ *   - The DEFAULT mode sees one tree, never a range of commits. The cross-commit
+ *     half of #6003 — content added by one commit and removed by another, so it
+ *     never appears in the combined diff — cannot be seen from a tree at all.
+ *     `--ghost-lines` is that half (#648), and it is a MODE rather than an extra
+ *     pass: it needs a pull request's commit range, which a working tree does
+ *     not carry, so it runs as its own CI job and not inside `bun run check`.
+ *     See the ghost-lines section further down for how the range is obtained,
+ *     and what the mode does when there is none.
  *   - The dynamic-execution rule is regex-based, so it reads a construct inside
  *     a string literal the same as a real one. That is why this file and its
  *     test are exempt from that rule alone (see SELF_EXEMPT) — they necessarily
@@ -812,27 +814,15 @@ function checkLifecycleScripts(contents: string, rel: string): void {
 let gitDecline: string | undefined;
 
 /**
- * The set of files this gate inspects: everything git would show in a diff.
+ * The environment every `git` in this file is spawned with.
  *
- * Removing the extension allowlist (F2) put the whole working tree in scope,
- * including trees git is told to ignore — `snapshots/`, a local
- * `tests/fixtures/demo_database/`, `docs/graphql-capture/raw/`, `.env.local`.
- * Two problems, both landing only on developer machines (CI is a clean
- * checkout, which is why this was invisible in the PR run): a
- * multi-hundred-MB LevelDB snapshot gets fully UTF-8-decoded into a JS string
- * before the NUL check discards it, and a Firebase JWT in `.env.local` runs
- * past MAX_LINE, failing the gate locally with a finding no PR can resolve.
- *
- * This is NOT a re-introduced allowlist. It is exactly the gate's threat
- * model: content that can reach a reviewer's diff. And it cannot be used to
- * evade the gate — adding a `.gitignore` entry does not untrack a file that
- * is already committed, so anything in the repo stays in scope.
- *
- * Falls back to the filesystem walk outside a git repo, which is how the
- * tests drive it (synthetic trees under CHECK_CONCEALMENT_ROOT). Both paths
- * are covered: see 'file list' in tests/scripts/check-concealment.test.ts.
+ * Extracted so the two callers cannot drift: the tree scan's `gitFiles`
+ * below and the ghost-lines mode further down both depend on the SAME
+ * sanitisation, and a range resolved under an inherited GIT_DIR would be the
+ * range of a different repository. The reasoning is unchanged and unabridged;
+ * only its address moved.
  */
-function gitFiles(root: string): { tracked: string[]; untracked: string[] } | undefined {
+function gitEnv(): NodeJS.ProcessEnv {
   // Strip inherited git plumbing vars before shelling out. A pre-push hook runs
   // with GIT_DIR set, and `git -C <dir>` does NOT override it — so without this,
   // `git ls-files` inside a scratch directory silently answers about the AMBIENT
@@ -890,6 +880,33 @@ function gitFiles(root: string): { tracked: string[]; untracked: string[] } | un
   env.GIT_CONFIG_NOSYSTEM = '1';
   env.GIT_CONFIG_GLOBAL = '/dev/null';
   env.GIT_CONFIG_SYSTEM = '/dev/null';
+  return env;
+}
+
+/**
+ * The set of files this gate inspects: everything git would show in a diff.
+ *
+ * Removing the extension allowlist (F2) put the whole working tree in scope,
+ * including trees git is told to ignore — `snapshots/`, a local
+ * `tests/fixtures/demo_database/`, `docs/graphql-capture/raw/`, `.env.local`.
+ * Two problems, both landing only on developer machines (CI is a clean
+ * checkout, which is why this was invisible in the PR run): a
+ * multi-hundred-MB LevelDB snapshot gets fully UTF-8-decoded into a JS string
+ * before the NUL check discards it, and a Firebase JWT in `.env.local` runs
+ * past MAX_LINE, failing the gate locally with a finding no PR can resolve.
+ *
+ * This is NOT a re-introduced allowlist. It is exactly the gate's threat
+ * model: content that can reach a reviewer's diff. And it cannot be used to
+ * evade the gate — adding a `.gitignore` entry does not untrack a file that
+ * is already committed, so anything in the repo stays in scope.
+ *
+ * Falls back to the filesystem walk outside a git repo, which is how the
+ * tests drive it (synthetic trees under CHECK_CONCEALMENT_ROOT). Both paths
+ * are covered: see 'file list' in tests/scripts/check-concealment.test.ts.
+ */
+function gitFiles(root: string): { tracked: string[]; untracked: string[] } | undefined {
+  // Sanitised as a namespace, not as a list of names — see gitEnv above.
+  const env = gitEnv();
 
   const run = (args: string[]): string[] | undefined => {
     const shown = `git -C ${root} ${args.join(' ')}`;
@@ -1141,6 +1158,769 @@ function answersToName(file: string, name: string): boolean {
   const self = realOrUndefined(file);
   return self !== undefined && self === target;
 }
+
+// ───────────────────────────────── ghost lines ──────────────────────────────
+//
+// Everything from here to the dispatch below is the PR-scoped half of this
+// gate, and it answers a question no tree scan can.
+//
+// better-auth #6003 concealed its payload twice over. The scan above catches
+// the horizontal half. The other half was temporal: the payload was added by
+// one commit on the branch and deleted by a later one, so the combined "Files
+// changed / All commits" view — the view a maintainer reviews from — showed a
+// trailing-newline change and nothing else. The branch still built on the way
+// past, and building it is what ran the payload.
+//
+// No tree contains that content at any point after the deleting commit, so
+// nothing that reads a tree can see it. It needs the PR's commit RANGE.
+//
+// What gets reported is an INTERSECTION, not a fact about git:
+//
+//   ghost line  = a line in a blob introduced somewhere in base..head that is
+//                 absent from the final tree's version of the same path
+//   reported    = a ghost line that ALSO trips one of the rules above
+//
+// The first half alone is worthless as a gate. The audit that produced #648
+// counted 195 ghost lines in this repository's history and every one was
+// ordinary review churn — a reworded comment, a renamed variable, a fixture
+// deleted three commits later. A gate that fired on those would be switched
+// off inside a week, and a switched-off gate is the outcome this whole file is
+// written to avoid. So the churn is the SCOPE and the rules are the PREDICATE,
+// and the pair was measured rather than hoped for: see the numbers on the
+// ghost-blob loop below.
+
+const GHOST_MODE = process.argv.slice(2).includes('--ghost-lines');
+
+/**
+ * Is this run inside a CI job?
+ *
+ * The two endings of this mode differ by exactly this flag. On a laptop with no
+ * branch to compare, skipping is the honest answer — there is nothing to check.
+ * In CI there always is, so the same state means the range resolution broke,
+ * and printing a green line over it would be this file's own recurring bug: a
+ * scan that quietly covered nothing while reporting success.
+ *
+ * Both spellings, and the broad direction on purpose. GitHub sets CI and
+ * GITHUB_ACTIONS to "true"; other runners set CI to "1". A CI that cannot say
+ * which range it is testing must not print a green concealment gate, so an
+ * unrecognised runner failing LOUD is the error worth having.
+ */
+const IN_CI =
+  ['true', '1'].includes(process.env.CI ?? '') ||
+  ['true', '1'].includes(process.env.GITHUB_ACTIONS ?? '');
+
+interface CommitRange {
+  base: string;
+  head: string;
+  /** How it was resolved. Quoted in every message: a range nobody can trace is a range nobody trusts. */
+  how: string;
+}
+
+/**
+ * Three outcomes, and they are not two.
+ *
+ * `skip` means there is nothing to compare — exit 0, but only outside CI, and
+ * never silently. `refuse` means there IS something to compare and this gate
+ * could not do it — always exit 1. Collapsing the second into the first is the
+ * fail-open #724 removed from the tree scan, arriving by a different road.
+ */
+type RangeOutcome =
+  | { kind: 'range'; range: CommitRange }
+  | { kind: 'skip'; why: string }
+  | { kind: 'refuse'; why: string; remedy: string };
+
+/**
+ * The remedy for every "that commit is not in this checkout" ending.
+ *
+ * `actions/checkout` fetches ONE commit by default (fetch-depth: 1). On a
+ * pull_request event that one commit is the merge ref's tip, so neither
+ * `base.sha` nor `head.sha` is present as an object and no range can be walked
+ * — which is why the job that runs this mode sets fetch-depth: 0 and why that
+ * is the first thing to check when this fires.
+ */
+const FETCH_DEPTH_REMEDY =
+  'actions/checkout fetches a single commit by default (fetch-depth: 1), which is not a ' +
+  'history. A job running this mode must set `fetch-depth: 0` — see the Cross-commit ' +
+  'concealment job in .github/workflows/test.yml. Locally, `git fetch --unshallow`.';
+
+/** Text from one git invocation, or the reason it did not produce any. */
+function gitText(
+  args: string[],
+  input?: string
+): { ok: true; text: string } | { ok: false; why: string } {
+  const shown = `git -C ${ROOT} ${args.join(' ')}`;
+  const r = spawnSync('git', ['-C', ROOT, ...args], {
+    encoding: 'utf-8',
+    env: gitEnv(),
+    maxBuffer: MAX_GIT_OUTPUT,
+    ...(input === undefined ? {} : { input }),
+  });
+  // Same three-way split as run() inside gitFiles, and for the same reason: a
+  // spawn failure, a kill for exceeding maxBuffer and git's own non-zero exit
+  // have three different remedies, and a message naming the wrong one sends the
+  // operator to a command that reproduces nothing.
+  const code = (r.error as (Error & { code?: string }) | undefined)?.code;
+  if (code !== undefined) {
+    return {
+      ok: false,
+      why:
+        code === 'ENOENT'
+          ? `git is not on PATH — spawning \`${shown}\` failed with ENOENT`
+          : code === 'ENOBUFS'
+            ? `\`${shown}\` produced more than the ${MAX_GIT_OUTPUT} bytes this gate allows ` +
+              `and was cut off — raise MAX_GIT_OUTPUT in scripts/check-concealment.ts`
+            : `spawning \`${shown}\` failed with ${code}`,
+    };
+  }
+  if (r.status !== 0 || typeof r.stdout !== 'string') {
+    const said = (typeof r.stderr === 'string' ? r.stderr : '').split('\n')[0]?.trim() ?? '';
+    return {
+      ok: false,
+      why:
+        `\`${shown}\` exited ${r.status === null ? 'without a status' : String(r.status)}` +
+        (said === '' ? '' : ` — ${said}`),
+    };
+  }
+  return { ok: true, text: r.stdout };
+}
+
+/**
+ * Bytes, not text, because this reads blob CONTENT.
+ *
+ * `git cat-file --batch` frames each object as a header line followed by
+ * exactly `size` BYTES, and `size` is a byte count. Decoding the stream as
+ * UTF-8 before framing it would move every frame boundary by however many
+ * multi-byte sequences preceded it, so the parser has to see bytes and the
+ * decode has to happen per object, after the split.
+ */
+function gitBytes(args: string[], input: string): { ok: true; bytes: Buffer } | { ok: false; why: string } {
+  const shown = `git -C ${ROOT} ${args.join(' ')}`;
+  const r = spawnSync('git', ['-C', ROOT, ...args], {
+    env: gitEnv(),
+    maxBuffer: MAX_GIT_OUTPUT,
+    input,
+  });
+  const code = (r.error as (Error & { code?: string }) | undefined)?.code;
+  if (code !== undefined) {
+    return {
+      ok: false,
+      why:
+        code === 'ENOBUFS'
+          ? `\`${shown}\` produced more than the ${MAX_GIT_OUTPUT} bytes this gate allows ` +
+            `and was cut off — raise MAX_GIT_OUTPUT in scripts/check-concealment.ts`
+          : `spawning \`${shown}\` failed with ${code}`,
+    };
+  }
+  if (r.status !== 0 || !Buffer.isBuffer(r.stdout)) {
+    const said = Buffer.isBuffer(r.stderr) ? r.stderr.toString('utf-8').split('\n')[0]?.trim() : '';
+    return {
+      ok: false,
+      why:
+        `\`${shown}\` exited ${r.status === null ? 'without a status' : String(r.status)}` +
+        (said === undefined || said === '' ? '' : ` — ${said}`),
+    };
+  }
+  return { ok: true, bytes: r.stdout };
+}
+
+/** The commit a ref names, or undefined if this checkout does not have it. */
+function commitSha(ref: string): string | undefined {
+  // `^{commit}` so a tag or a tree spelled into --range fails here rather than
+  // producing a range git will not walk three calls later.
+  const r = gitText(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
+  if (!r.ok) return undefined;
+  const sha = r.text.trim();
+  return sha === '' ? undefined : sha;
+}
+
+function shortSha(sha: string): string {
+  return sha.slice(0, 7);
+}
+
+/** An explicit range from `--range=<base>..<head>` or CHECK_GHOST_LINES_RANGE. */
+function explicitRangeSpec(): string | undefined {
+  const flag = process.argv.slice(2).find((a) => a.startsWith('--range='));
+  if (flag !== undefined) return flag.slice('--range='.length);
+  const fromEnv = process.env.CHECK_GHOST_LINES_RANGE;
+  return fromEnv === undefined || fromEnv === '' ? undefined : fromEnv;
+}
+
+function rangeFrom(baseRef: string, headRef: string, how: string): RangeOutcome {
+  const base = commitSha(baseRef);
+  const head = commitSha(headRef);
+  if (base === undefined || head === undefined) {
+    const missing = [base === undefined ? baseRef : '', head === undefined ? headRef : '']
+      .filter((s) => s !== '')
+      .join(' and ');
+    return {
+      kind: 'refuse',
+      why: `${missing} is not a commit object in this checkout (range from ${how})`,
+      remedy: FETCH_DEPTH_REMEDY,
+    };
+  }
+  return { kind: 'range', range: { base, head, how } };
+}
+
+/**
+ * The range GitHub Actions is testing, read from the event payload.
+ *
+ * `pull_request.base.sha`..`pull_request.head.sha`, not GITHUB_SHA: on a
+ * pull_request event GITHUB_SHA is the ephemeral merge commit, whose tree is
+ * the merged RESULT. The range wanted here is the contributor's own commits,
+ * and `head.sha` names exactly those.
+ *
+ * `base.sha` being stale — the base branch moved after the event fired — is
+ * harmless in this direction. `A..B` is "reachable from B, not from A", so a
+ * base that has run ahead only removes objects that are already on the base
+ * branch, and a base that has fallen behind only adds some. Neither can drop a
+ * commit the contributor pushed, which is the set this mode exists to read.
+ *
+ * `pull_request_target` is deliberately NOT accepted. Its checkout is the BASE
+ * branch by default, so the PR's own commits are not present and any range
+ * built from it would describe something the reviewer is not being asked to
+ * review. It is also the trigger that runs with repository secrets, which is
+ * the last place this gate should be teaching anyone to fetch fork refs into.
+ */
+function actionsRange(): RangeOutcome | undefined {
+  const event = process.env.GITHUB_EVENT_NAME;
+  if (event === undefined) return undefined;
+  if (event !== 'pull_request') {
+    return {
+      kind: 'refuse',
+      why: `this mode compares a pull request's commits against its final tree, and this run is a "${event}" event`,
+      remedy:
+        'Gate the step on `if: github.event_name == \'pull_request\'`, or pass an explicit ' +
+        '`--range=<base>..<head>`.',
+    };
+  }
+  const payloadPath = process.env.GITHUB_EVENT_PATH;
+  if (payloadPath === undefined) {
+    return {
+      kind: 'refuse',
+      why: 'GITHUB_EVENT_NAME is pull_request but GITHUB_EVENT_PATH is unset, so the event payload cannot be read',
+      remedy: 'Pass an explicit `--range=<base>..<head>`.',
+    };
+  }
+  let payload: { pull_request?: { base?: { sha?: unknown }; head?: { sha?: unknown } } };
+  try {
+    payload = JSON.parse(readFileSync(payloadPath, 'utf-8')) as typeof payload;
+  } catch (err) {
+    return {
+      kind: 'refuse',
+      why: `${payloadPath} could not be read as JSON — ${err instanceof Error ? err.message : String(err)}`,
+      remedy: 'Pass an explicit `--range=<base>..<head>`.',
+    };
+  }
+  const base = payload.pull_request?.base?.sha;
+  const head = payload.pull_request?.head?.sha;
+  if (typeof base !== 'string' || typeof head !== 'string') {
+    return {
+      kind: 'refuse',
+      why: `${payloadPath} has no pull_request.base.sha / pull_request.head.sha to build a range from`,
+      remedy: 'Pass an explicit `--range=<base>..<head>`.',
+    };
+  }
+  return rangeFrom(base, head, 'the pull_request event payload (base.sha..head.sha)');
+}
+
+/**
+ * The range a developer's own branch implies, with no PR anywhere.
+ *
+ * This is a convenience, not the gate's contract: it lets the same command run
+ * before the push and produce the same answer CI will. It is inferred and says
+ * so in every line it prints, because a merge-base against a STALE origin/main
+ * quietly widens the range — which scans more, never less, and so is the
+ * direction to be wrong in.
+ *
+ * `origin/HEAD` first because it names whatever the remote's default branch
+ * actually is; the two literals after it are for clones that never had it set.
+ * HEAD already contained in the base ref yields base === head, a zero-commit
+ * range, which the caller reports as such rather than as a clean run.
+ */
+function localRange(): RangeOutcome {
+  const head = commitSha('HEAD');
+  if (head === undefined) {
+    return {
+      kind: 'skip',
+      why: 'HEAD does not name a commit — an empty repository, or a checkout with no history',
+    };
+  }
+  for (const ref of ['origin/HEAD', 'origin/main', 'main']) {
+    const tip = commitSha(ref);
+    if (tip === undefined) continue;
+    const merged = gitText(['merge-base', tip, head]);
+    if (!merged.ok) continue;
+    const base = merged.text.trim();
+    if (base === '') continue;
+    return {
+      kind: 'range',
+      range: { base, head, how: `merge-base(${ref}, HEAD), inferred locally — no PR context` },
+    };
+  }
+  return {
+    kind: 'skip',
+    why: 'no pull-request context, and none of origin/HEAD, origin/main or main exists to take a merge-base against',
+  };
+}
+
+function resolveRange(): RangeOutcome {
+  const spec = explicitRangeSpec();
+  if (spec !== undefined) {
+    // `...` is the symmetric difference and would silently include the base
+    // branch's own commits. Refused by name rather than split on `..` and
+    // mis-parsed into an empty endpoint.
+    if (spec.includes('...')) {
+      return {
+        kind: 'refuse',
+        why: `"${spec}" uses the three-dot symmetric difference, which includes commits from the base branch too`,
+        remedy: 'Use the two-dot form: `--range=<base>..<head>`.',
+      };
+    }
+    const parts = spec.split('..');
+    if (parts.length !== 2 || parts[0] === '' || parts[1] === '') {
+      return {
+        kind: 'refuse',
+        why: `"${spec}" is not a <base>..<head> range`,
+        remedy: 'Spell both endpoints: `--range=<base>..<head>`.',
+      };
+    }
+    return rangeFrom(parts[0] as string, parts[1] as string, `--range=${spec}`);
+  }
+  const fromActions = actionsRange();
+  if (fromActions !== undefined) return fromActions;
+  if (IN_CI) {
+    return {
+      kind: 'refuse',
+      why: 'this run is in CI (CI or GITHUB_ACTIONS is set) but there is no pull_request event and no --range',
+      remedy:
+        'A CI job that cannot say which range it is testing must not report this gate green. ' +
+        'Pass `--range=<base>..<head>`, or run the step only on `pull_request`.',
+    };
+  }
+  return localRange();
+}
+
+function ghostRefuse(why: string, remedy: string): never {
+  console.error('check-concealment --ghost-lines: REFUSING to report on a range it could not read.\n');
+  console.error(`  Cause: ${why}\n`);
+  console.error(`  ${remedy}\n`);
+  process.exit(1);
+}
+
+function ghostSkip(why: string): never {
+  // Not `console.log`, and not the word "clean" anywhere in it. A skip is an
+  // absence of evidence; the tree scan's green line is evidence. Printing them
+  // in the same voice is how a gate stops meaning anything.
+  console.error('check-concealment --ghost-lines: SKIPPED — nothing was checked.\n');
+  console.error(`  ${why}.\n`);
+  console.error(
+    '  This mode compares a pull request\'s own commits against its final tree, so it needs a\n' +
+      '  commit range. Give it one with `--range=<base>..<head>` or CHECK_GHOST_LINES_RANGE.\n'
+  );
+  console.error(
+    '  Exit 0 because there is nothing here to check, NOT because anything was found clean.\n' +
+      '  The same state inside CI exits 1 — see resolveRange.\n'
+  );
+  process.exit(0);
+}
+
+/** One object from `git cat-file --batch`: `<sha> <type> <size>\n<size bytes>\n`. */
+function parseCatFileBatch(bytes: Buffer): Map<string, Buffer> {
+  const out = new Map<string, Buffer>();
+  let i = 0;
+  while (i < bytes.length) {
+    const nl = bytes.indexOf(0x0a, i);
+    if (nl < 0) break;
+    const header = bytes.subarray(i, nl).toString('utf-8');
+    const [sha, type, size] = header.split(' ');
+    // `<name> missing` — no content frame follows, so the cursor advances by
+    // the header alone. Silently dropping the object here is safe only because
+    // the caller reports every sha it asked for and did not get back.
+    if (sha === undefined || type === undefined || size === undefined) {
+      i = nl + 1;
+      continue;
+    }
+    const start = nl + 1;
+    const length = Number(size);
+    if (!Number.isFinite(length) || length < 0) break;
+    out.set(sha, bytes.subarray(start, start + length));
+    i = start + length + 1; // +1 for the LF git writes after the content
+  }
+  return out;
+}
+
+/**
+ * Blob contents for `shas`, fetched in batches that stay inside MAX_GIT_OUTPUT.
+ *
+ * Sizes come from a `--batch-check` pass the caller already ran, so the batching
+ * is measured rather than guessed. A SINGLE blob larger than the budget is a
+ * refusal, not a skip: the one thing this file must never do is vouch for
+ * content it did not read.
+ */
+function blobContents(
+  shas: string[],
+  sizeOf: Map<string, number>
+): { ok: true; contents: Map<string, Buffer> } | { ok: false; why: string } {
+  const budget = Math.floor(MAX_GIT_OUTPUT / 2); // headroom for the header lines
+  const contents = new Map<string, Buffer>();
+  let batch: string[] = [];
+  let used = 0;
+  const flush = (): string | undefined => {
+    if (batch.length === 0) return undefined;
+    const got = gitBytes(['cat-file', '--batch'], batch.join('\n') + '\n');
+    if (!got.ok) return got.why;
+    for (const [sha, buf] of parseCatFileBatch(got.bytes)) contents.set(sha, buf);
+    batch = [];
+    used = 0;
+    return undefined;
+  };
+  for (const sha of shas) {
+    const size = sizeOf.get(sha) ?? 0;
+    if (size > budget) {
+      return {
+        ok: false,
+        why:
+          `blob ${shortSha(sha)} is ${size} bytes, past the ${budget} this gate reads in one ` +
+          `batch — raise MAX_GIT_OUTPUT in scripts/check-concealment.ts rather than skipping it`,
+      };
+    }
+    if (used + size > budget) {
+      const failed = flush();
+      if (failed !== undefined) return { ok: false, why: failed };
+    }
+    batch.push(sha);
+    used += size;
+  }
+  const failed = flush();
+  return failed === undefined ? { ok: true, contents } : { ok: false, why: failed };
+}
+
+/**
+ * Which commit first put each blob on the branch, for the report only.
+ *
+ * Best-effort by construction: `git log --raw` shows no diff for a merge
+ * commit, so a blob introduced by an evil merge has no attribution here and is
+ * printed without one. That is a gap in the LABEL, never in the scan — the scan
+ * enumerates by object reachability (see ghostBlobs), which no commit shape can
+ * hide from. Keeping the two separate is the point: a best-effort enumeration
+ * would be a hole, a best-effort label is a label.
+ *
+ * `git log` walks newest-first, so the last writer wins and the map ends up
+ * holding the OLDEST commit that carries each blob — the one that introduced it.
+ */
+function attribution(range: CommitRange): Map<string, string> {
+  const byBlob = new Map<string, string>();
+  const log = gitText([
+    'log',
+    '--format=%H %s',
+    '--raw',
+    '-r',
+    '--no-abbrev',
+    '--no-renames',
+    '--no-color',
+    `${range.base}..${range.head}`,
+  ]);
+  if (!log.ok) return byBlob;
+  let current = '';
+  for (const line of log.text.split('\n')) {
+    if (line.startsWith(':')) {
+      // :<srcmode> <dstmode> <srcsha> <dstsha> <status>\t<path>
+      const fields = line.slice(1).split(' ');
+      const dst = fields[3];
+      if (current !== '' && dst !== undefined && !/^0+$/.test(dst)) byBlob.set(dst, current);
+      continue;
+    }
+    const match = /^([0-9a-f]{40})(?: (.*))?$/.exec(line);
+    if (match !== null) current = `${shortSha(match[1] as string)} "${(match[2] ?? '').trim()}"`;
+  }
+  return byBlob;
+}
+
+/**
+ * The PR-scoped scan. Returns `never` on purpose: this is a MODE, not a phase,
+ * and the tree scan below must not run after it. Typing it so makes that a
+ * compile error rather than a code-review question — add a `return` here and
+ * `tsc` rejects the file.
+ */
+function runGhostScan(): never {
+  // Same belt-and-braces as gitFiles: if ROOT is a subdirectory of some
+  // unrelated repository, git would answer about THAT repository's history and
+  // every number below would describe the wrong tree.
+  const top = gitText(['rev-parse', '--show-toplevel']);
+  if (!top.ok) ghostRefuse(top.why, 'Run this inside the repository whose pull request you are checking.');
+  try {
+    if (realpathSync.native(top.text.trim()) !== realpathSync.native(ROOT)) {
+      ghostRefuse(
+        `${ROOT} is not the toplevel of the repository git found (${top.text.trim()})`,
+        'Point CHECK_CONCEALMENT_ROOT at the repository root.'
+      );
+    }
+  } catch {
+    ghostRefuse(
+      `could not resolve ${ROOT} or git's reported toplevel on disk`,
+      'Point CHECK_CONCEALMENT_ROOT at the repository root.'
+    );
+  }
+
+  const outcome = resolveRange();
+  if (outcome.kind === 'refuse') ghostRefuse(outcome.why, outcome.remedy);
+  if (outcome.kind === 'skip') ghostSkip(outcome.why);
+  const range = outcome.range;
+
+  // A shallow clone is the CI default, and it is the one state where every
+  // command below still SUCCEEDS while describing a history that was cut off.
+  // Checked before the walk rather than inferred from its results.
+  const shallow = gitText(['rev-parse', '--is-shallow-repository']);
+  if (!shallow.ok) ghostRefuse(shallow.why, FETCH_DEPTH_REMEDY);
+  if (shallow.text.trim() === 'true') {
+    ghostRefuse(
+      'this checkout is SHALLOW, so the commits between the endpoints are not all present and ' +
+        'any range walked over it would be silently incomplete',
+      FETCH_DEPTH_REMEDY
+    );
+  }
+
+  const label = `${shortSha(range.base)}..${shortSha(range.head)} (via ${range.how})`;
+
+  const commits = gitText(['rev-list', `${range.base}..${range.head}`]);
+  if (!commits.ok) ghostRefuse(commits.why, FETCH_DEPTH_REMEDY);
+  const commitCount = commits.text.split('\n').filter((l) => l !== '').length;
+  if (commitCount === 0) {
+    // In CI this is not "nothing to do", it is "the range resolved to nothing",
+    // and a pull request with no commits of its own cannot be merged anyway.
+    if (IN_CI) {
+      ghostRefuse(
+        `the range ${label} contains no commits, so this job inspected none of the pull request`,
+        'Check how the range was resolved — a pull request always has at least one commit not on its base.'
+      );
+    }
+    ghostSkip(`the range ${label} contains no commits`);
+  }
+
+  // Enumeration is by OBJECT REACHABILITY, not by walking diffs. `A..B` on
+  // rev-list --objects is every object reachable from B and not from A, so it
+  // covers blobs introduced by a merge commit, by an amended commit still on
+  // the branch, and by anything else a diff-based walk would have had to
+  // anticipate. The file this gate lives in has been bitten four times by
+  // enumerating the cases somebody thought of; this is the same lesson applied
+  // to a commit graph.
+  const objects = gitText(['rev-list', '--objects', `${range.base}..${range.head}`]);
+  if (!objects.ok) ghostRefuse(objects.why, FETCH_DEPTH_REMEDY);
+
+  const headTree = gitText(['ls-tree', '-r', '-z', range.head]);
+  if (!headTree.ok) ghostRefuse(headTree.why, FETCH_DEPTH_REMEDY);
+  const headShaByPath = new Map<string, string>();
+  const headShas = new Set<string>();
+  for (const entry of headTree.text.split('\0')) {
+    if (entry === '') continue;
+    // <mode> SP <type> SP <sha> TAB <path>
+    const tab = entry.indexOf('\t');
+    if (tab < 0) continue;
+    const fields = entry.slice(0, tab).split(' ');
+    const sha = fields[2];
+    if (sha === undefined) continue;
+    headShaByPath.set(entry.slice(tab + 1), sha);
+    headShas.add(sha);
+  }
+
+  // git speaks '/' whatever the platform does. Normalising here is what lets
+  // SELF_EXEMPT, isProse and extensionOf — all written against the tree scan's
+  // `relative()` output — mean the same thing in this mode.
+  const toRel = (gitPath: string): string => gitPath.split('/').join(sep);
+
+  const candidates: Array<{ sha: string; rel: string }> = [];
+  const seen = new Set<string>();
+  for (const line of objects.text.split('\n')) {
+    const space = line.indexOf(' ');
+    if (space < 0) continue; // a commit: no path
+    const sha = line.slice(0, space);
+    const rel = toRel(line.slice(space + 1));
+    if (headShas.has(sha)) continue; // survives into the final tree; the tree scan owns it
+    if (!inScope(rel)) continue; // lockfiles, exactly as above
+    const key = `${sha}\0${rel}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    candidates.push({ sha, rel });
+  }
+
+  // --batch-check first: it returns type and size without content, which is
+  // what makes the content fetch below bounded by measurement instead of hope.
+  // It is also how trees are separated from blobs — rev-list --objects lists
+  // both, and both carry paths.
+  const sizeOf = new Map<string, number>();
+  const ghosts: Array<{ sha: string; rel: string }> = [];
+  if (candidates.length > 0) {
+    const uniqueShas = [...new Set(candidates.map((c) => c.sha))];
+    const checked = gitText(['cat-file', '--batch-check'], uniqueShas.join('\n') + '\n');
+    if (!checked.ok) ghostRefuse(checked.why, FETCH_DEPTH_REMEDY);
+    const blobs = new Set<string>();
+    for (const line of checked.text.split('\n')) {
+      const [sha, type, size] = line.split(' ');
+      if (sha === undefined || type !== 'blob' || size === undefined) continue;
+      blobs.add(sha);
+      sizeOf.set(sha, Number(size));
+    }
+    for (const c of candidates) if (blobs.has(c.sha)) ghosts.push(c);
+  }
+
+  // The final tree's version of each path a ghost blob claims. Absent from the
+  // map means the path is not in the final tree at all — a file added and
+  // deleted inside the pull request, whose every line is therefore a ghost.
+  const wantedHeadShas = [
+    ...new Set(
+      ghosts
+        .map((g) => headShaByPath.get(g.rel.split(sep).join('/')))
+        .filter((s): s is string => s !== undefined)
+    ),
+  ];
+  const headSizes = new Map<string, number>();
+  if (wantedHeadShas.length > 0) {
+    const checked = gitText(['cat-file', '--batch-check'], wantedHeadShas.join('\n') + '\n');
+    if (!checked.ok) ghostRefuse(checked.why, FETCH_DEPTH_REMEDY);
+    for (const line of checked.text.split('\n')) {
+      const [sha, type, size] = line.split(' ');
+      if (sha === undefined || type !== 'blob' || size === undefined) continue;
+      headSizes.set(sha, Number(size));
+    }
+  }
+
+  const ghostBytes = blobContents([...new Set(ghosts.map((g) => g.sha))], sizeOf);
+  if (!ghostBytes.ok) ghostRefuse(ghostBytes.why, FETCH_DEPTH_REMEDY);
+  const headBytes = blobContents(wantedHeadShas, headSizes);
+  if (!headBytes.ok) ghostRefuse(headBytes.why, FETCH_DEPTH_REMEDY);
+
+  const headLineCache = new Map<string, Set<string>>();
+  const headLinesFor = (rel: string): Set<string> => {
+    let lines = headLineCache.get(rel);
+    if (lines !== undefined) return lines;
+    lines = new Set<string>();
+    const sha = headShaByPath.get(rel.split(sep).join('/'));
+    const buf = sha === undefined ? undefined : headBytes.contents.get(sha);
+    if (buf !== undefined) for (const line of buf.toString('utf-8').split('\n')) lines.add(line);
+    headLineCache.set(rel, lines);
+    return lines;
+  };
+
+  const introducedBy = attribution(range);
+
+  interface GhostFinding extends Finding {
+    origin: string | undefined;
+  }
+  const ghostFindings: GhostFinding[] = [];
+  const missing: string[] = [];
+  let scannedBlobs = 0;
+
+  for (const { sha, rel } of ghosts) {
+    const buf = ghostBytes.contents.get(sha);
+    if (buf === undefined) {
+      // Asked for and not returned. Same standard as the tree scan's
+      // `unreadable` list: a blob that was listed and not read is a hole in the
+      // claim this gate makes, so it is named rather than counted as scanned.
+      missing.push(`${rel}  blob ${shortSha(sha)}`);
+      continue;
+    }
+    scannedBlobs++;
+    const text = buf.toString('utf-8');
+    const lines = text.split('\n');
+
+    // Findings land in the shared `findings` array, exactly as the tree scan's
+    // do, and are taken back out here. Reusing report() is the point: a rule
+    // added above is a rule this mode enforces, with nothing to keep in sync.
+    const before = findings.length;
+    if (text.includes(NUL)) {
+      if (!isExpectedBinary(rel)) {
+        report(
+          rel,
+          1,
+          'NUL byte in a non-binary file',
+          'a NUL makes git render the whole file as binary — no diff for a reviewer to read — ' +
+            'while the module still executes'
+        );
+      }
+    } else {
+      const exempt = SELF_EXEMPT.has(rel);
+      const prose = isProse(rel);
+      for (let i = 0; i < lines.length; i++) checkLine(rel, i + 1, lines[i] as string, exempt, prose);
+      const basename = rel.slice(rel.lastIndexOf(sep) + 1).toLowerCase();
+      // Name only — `answersToName` asks the filesystem which file a name
+      // opens, and a blob that is not in any tree has no filesystem to ask.
+      // The case-folding hole that probe closes is a working-tree property, so
+      // the tree scan still owns it.
+      if (basename === 'package.json') checkLifecycleScripts(text, rel);
+      if (basename === '.gitattributes') checkGitAttributes(text, rel);
+    }
+
+    // THE predicate, in one place and in one form: a finding is reported iff the
+    // LINE it sits on is absent from the final tree's version of the same path.
+    // Applied uniformly to the per-line rules and to the two whole-file checkers
+    // — both of those report against a line of the blob they parsed, so both
+    // answer the same question. Anything still present at head is content the
+    // combined diff DOES show, and the tree scan above is what judges it.
+    const surviving = headLinesFor(rel);
+    for (const f of findings.splice(before)) {
+      const text2 = lines[f.line - 1];
+      if (text2 !== undefined && surviving.has(text2)) continue;
+      ghostFindings.push({ ...f, origin: introducedBy.get(sha) });
+    }
+  }
+
+  const scope =
+    `${commitCount} commit${commitCount === 1 ? '' : 's'}, ` +
+    `${scannedBlobs} blob${scannedBlobs === 1 ? '' : 's'} absent from the final tree`;
+
+  if (ghostFindings.length > 0) {
+    console.error(
+      'check-concealment --ghost-lines: found content that this pull request added and then ' +
+        'removed, which the combined diff never shows.\n'
+    );
+    console.error(`  Range ${label}: ${scope}.\n`);
+    const byRule = new Map<string, GhostFinding[]>();
+    for (const f of ghostFindings) {
+      const list = byRule.get(f.rule) ?? [];
+      list.push(f);
+      byRule.set(f.rule, list);
+    }
+    for (const [rule, items] of byRule) {
+      console.error(`  ${rule}:`);
+      for (const f of items) {
+        console.error(`    ${f.file}:${f.line}${f.origin === undefined ? '' : `  added in ${f.origin}`}`);
+        console.error(`      ${f.detail}`);
+      }
+      console.error('');
+    }
+    console.error(
+      '  A line that a later commit removed is not suspicious by itself — ordinary review churn\n' +
+        '  produces those constantly, and none of them are listed here. What is listed is content\n' +
+        '  that BOTH vanished before the final tree AND trips a concealment rule: the shape of\n' +
+        '  better-auth #6003, where a build config carried a loader for exactly as long as it took\n' +
+        '  CI to run it.\n'
+    );
+    console.error(
+      '  The remedy is never to squash the history away. Say in the pull request what the removed\n' +
+        '  content was and why it was there, or rewrite the branch so the content never existed.\n'
+    );
+  }
+
+  if (missing.length > 0) {
+    console.error(
+      `check-concealment --ghost-lines: ${missing.length} blob(s) were listed by git and could ` +
+        `not be read back, so they were NOT inspected — ${scannedBlobs} of ${ghosts.length} were.\n`
+    );
+    for (const m of missing) console.error(`    ${m}`);
+    console.error('');
+  }
+
+  if (ghostFindings.length === 0 && missing.length === 0) {
+    console.log(
+      `check-concealment --ghost-lines: ${scope}, range ${label} — nothing hidden from the ` +
+        `combined diff`
+    );
+    process.exit(0);
+  }
+  process.exit(1);
+}
+
+if (GHOST_MODE) runGhostScan();
 
 const listing = listFiles(ROOT);
 
