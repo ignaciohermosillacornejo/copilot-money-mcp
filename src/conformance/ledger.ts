@@ -79,6 +79,22 @@
  *                      a query that is not about its response keys therefore
  *                      cannot use `Query.<field>:<aspect>` without extending
  *                      that ratchet — name it off the type instead.
+ *
+ *                      SECOND DELIBERATE STRETCH of this kind, added with the
+ *                      entries that needed it (#718): a field of a Firestore
+ *                      CACHE document is named
+ *                      `<Collection>Document.<field>:wireType`, e.g.
+ *                      `TransactionDocument.amazon:wireType`. Nothing about
+ *                      it is a GraphQL response — it is the decode boundary —
+ *                      but the claim has the same shape (one field of a
+ *                      structure Copilot controls and we transcribe), and
+ *                      inventing a kind per boundary would fragment the
+ *                      class distribution that `bun run smoke` reports.
+ *                      The `Document` suffix is what keeps a cache surface
+ *                      from colliding with the GraphQL node of the same
+ *                      name: `Transaction.excluded:synthesized` is the wire
+ *                      type; `TransactionDocument.amazon:wireType` is the
+ *                      cached one.
  * - `applies`        → `Mutation.<fieldName>:applies` — the mutation's effect
  *                      is actually persisted and visible on an independent
  *                      re-read (not just echoed). Verified by the Tier-2
@@ -1070,6 +1086,90 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'after the budget, not a wrong answer), but the user-facing message degrades to the ' +
       'unactionable "no session" one, which is the bug #722 was about.',
   },
+
+  // -------------------------------------------------------------------------
+  // Firestore CACHE DOCUMENT fields (#718) — the decode boundary, not the
+  // GraphQL one. Copilot's app writes these documents and src/core/decoder.ts
+  // reads them, so a field's wire type is an assumption about a system we do
+  // not control in exactly the sense this ledger exists for. Three of them
+  // were added by Copilot after the decoder coverage-warn triage closed at
+  // zero (#317), and `bun run smoke:cache` is what noticed.
+  //
+  // NAMING: `<Collection>Document.<field>:wireType`. The `Query.` prefix is
+  // reserved (see the header), and these are not query responses anyway; the
+  // `response-shape` KIND is reused rather than a new one added, the same
+  // stretch the Securetoken entries above make with `operation`.
+  //
+  // EVIDENCE CLASS is `verified-once` for all three, and the oracle is null on
+  // purpose: `smoke:cache` DOES re-read the real cache, but it gates decode
+  // invariants (total decode loss, joins, non-finite values) and would stay
+  // green if `amazon` started arriving as an array, because the decoder's
+  // `getMap` would return undefined and the field would simply vanish. A
+  // silent disappearance is the failure mode these entries record, and nothing
+  // re-checks for it today.
+  // -------------------------------------------------------------------------
+  {
+    surface: 'TransactionDocument.amazon:wireType',
+    kind: 'response-shape',
+    oracle: null,
+    class: 'verified-once',
+    evidence:
+      'PROBE 2026-09-16 over the real local cache, types only, no values read: `amazon` is a ' +
+      'MAP on 26 of 1040 non-empty transaction documents, 26/26 map, no other wire type ' +
+      'observed. Sub-shape across those 26 documents and their 34 items: `order_id` string ' +
+      '(26/26); `items` array (26/26) of maps (34/34) with `id`/`name`/`link` string (34/34 ' +
+      'each), `price` and `quantity` number; `other` map (26/26) with numeric ' +
+      '`giftWrapping`/`rewards`/`savings`/`shipping`/`tax`. ' +
+      'THE SUB-SHAPE IS RECORDED BUT NOT ASSERTED. `price` arrived as a Firestore `double` ' +
+      'on 33 items and an `integer` on 1, and four of the five `other` keys mixed both types ' +
+      'across the same 26 documents — a single sample would have "proved" either one. ' +
+      'src/models/transaction.ts therefore types the field as an opaque map, so drift in a ' +
+      'sub-field cannot drop the transaction it hangs off (the #302/#659 class). What IS ' +
+      "asserted is only the outer type, which is what the decoder's `getMap` requires. " +
+      'WHY IT MATTERS BEYOND DECODE: `order_id` and `items` are the data ' +
+      'skills/amazon-sync/SKILL.md obtains today from a manually exported Amazon CSV.',
+  },
+  {
+    surface: 'TransactionDocument.user_changed_type:wireType',
+    kind: 'response-shape',
+    oracle: null,
+    class: 'verified-once',
+    evidence:
+      'PROBE 2026-09-16 over the real local cache, types only: BOOLEAN, present on 1 of 1040 ' +
+      'non-empty transaction documents. ' +
+      'ONE SAMPLE IS THE WHOLE EVIDENCE, and it is worth saying so rather than letting the ' +
+      '`verified-once` class imply more: a boolean flag has nowhere much to drift, but the ' +
+      'cardinality means the type rests on a single document. The exposure if it is wrong is ' +
+      'bounded — `getBoolean` returns undefined for any non-boolean, so a re-typed field ' +
+      'would make this read absent rather than wrong, and absent already means "not ' +
+      'overridden". It is NOT in DEFAULT_TRANSACTION_FIELDS, so no default response changes ' +
+      'either way.',
+  },
+  {
+    surface: 'AccountDocument.creation_timestamp:wireType',
+    kind: 'response-shape',
+    oracle: null,
+    class: 'verified-once',
+    evidence:
+      'PROBE 2026-09-16 over the real local cache, types only: Firestore TIMESTAMP, present ' +
+      'on 1 of 21 non-empty account documents — Copilot appears to have started stamping it ' +
+      'recently, so absence means unknown rather than old. Decoded through the same ' +
+      '`getDateString` as `latest_balance_update`, which accepts a timestamp OR an ' +
+      'already-formatted string and narrows both to YYYY-MM-DD, so the one drift this field ' +
+      'could plausibly undergo is already absorbed. ' +
+      'NOT ADDED to the sibling `plaid_accounts` processor: the probe saw the field only on ' +
+      '`accounts`, and decoding it there on the strength of "the collections look alike" ' +
+      'would be exactly the guess this ledger exists to prevent.',
+  },
+
+  // NOT IN THIS LEDGER: `accounts.apy`, the fourth field #718 names. It is
+  // present on 15 account documents and NULL on all 15, so its wire type is
+  // unproven — writing `apy: z.number()` would assert a type no sample
+  // demonstrated, which is the #537 class run backwards. A passthrough
+  // (`z.unknown()`) is not a middle ground: it surfaces the value while
+  // asserting nothing, which is how a wrong type reaches a caller
+  // unannounced. #718 stays open for that field alone, labelled `help wanted`,
+  // and what would close it is one cache in which `apy` is non-null.
 ];
 
 // ---------------------------------------------------------------------------
