@@ -31,8 +31,17 @@
  * the shared module", because that would excuse an inline walk sitting beside
  * a legitimate import — see `isOffender`. Every other file under `scripts/` is in
  * scope INCLUDING SUBDIRECTORIES (`scripts/smoke/`, `scripts/graphql-capture/`),
- * which is why the import check tolerates any `../` depth. Zero files need an
- * exemption today. If a script ever legitimately reads the field
+ * which the sweep test asserts by measurement rather than by a stated count.
+ * Zero files need an exemption today.
+ *
+ * Sources are comment-stripped before testing (`tests/helpers/strip-comments.ts`,
+ * the #691 helper). A walk cannot hide inside a comment, so stripping can only
+ * reduce false positives — and the single realized hit this sweep has ever had
+ * is one: `scripts/schema-args.ts` names the literal in its own docblock, not
+ * in its code, which the walk never writes. That makes the identity exclusion a
+ * statement of intent rather than load-bearing suppression, and it is why a new
+ * script documenting "uses schemaArgNames() rather than reading
+ * inputSchema.properties" is not reported for saying so. If a script ever legitimately reads the field
  * without walking it, the honest fix is to make this check narrower for a
  * stated reason, not to add a name to a list — that is the shape
  * `.gitignore`'s hand-maintained allowlist has, and #729 is what it cost.
@@ -46,9 +55,10 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { stripComments } from '../helpers/strip-comments.js';
 import { tsFilesUnder } from '../helpers/ts-files.js';
 
 const SCRIPTS_DIR = fileURLToPath(new URL('../../scripts', import.meta.url));
@@ -108,11 +118,17 @@ describe('no hand-rolled JSON-Schema argument walks under scripts/', () => {
     expect(files.length).toBeGreaterThan(0);
     expect(files).toContain(SHARED_MODULE);
     // Descent specifically: a floor of `length > 0` plus the module itself is
-    // satisfied by the top-level files alone, so the 26 files under
+    // satisfied by the top-level files alone, so everything under
     // scripts/smoke/ and scripts/graphql-capture/ could silently leave scope.
     // tests/helpers/ts-files.test.ts covers extensions and ScriptKind, not
     // whether a caller's tree is actually descended.
-    expect(files.some((f) => f.startsWith(join(SCRIPTS_DIR, 'smoke')))).toBe(true);
+    //
+    // Measured by separator, not by name prefix. The first version of this line
+    // was `startsWith(join(SCRIPTS_DIR, 'smoke'))`, which the TOP-LEVEL
+    // scripts/smoke-graphql.ts satisfies — an assertion written to close a
+    // vacuity, vacuous.
+    const inSubdirectories = files.filter((f) => f.slice(SCRIPTS_DIR.length + 1).includes(sep));
+    expect(inSubdirectories.length).toBeGreaterThan(0);
   });
 
   // A scan that parsed nothing and a scan that found nothing both report zero
@@ -137,9 +153,20 @@ describe('no hand-rolled JSON-Schema argument walks under scripts/', () => {
   test('no script but the shared module reads inputSchema.properties', () => {
     const offenders = files
       .filter((file) => file !== SHARED_MODULE)
-      .filter((file) => isOffender(readFileSync(file, 'utf-8')))
+      .filter((file) => isOffender(stripComments(readFileSync(file, 'utf-8'), file)))
       .map((file) => file.slice(SCRIPTS_DIR.length + 1));
-    expect(offenders).toEqual([]);
+    expect(
+      offenders,
+      'A script here reads `inputSchema.properties` directly instead of going ' +
+        'through scripts/schema-args.ts. Use schemaArgNames() (or ' +
+        'collectSchemaArgNames() for a caller-supplied set): a one-level read ' +
+        'under-collects nested parameters such as update_recurring.rule.name_contains, ' +
+        'and an under-collecting scan is indistinguishable from a passing one — ' +
+        'which is how the same defect survived in two copies of this walk. ' +
+        'If this is a false positive, argue the exception in this file: there is ' +
+        'deliberately no allowlist to append to, and narrowing the check is the ' +
+        'mechanism, with the reason recorded.'
+    ).toEqual([]);
   });
 
   // The forward direction has nothing to compare against — a repo where no
