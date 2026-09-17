@@ -4,7 +4,7 @@ title: An endpoint-level failure discarded a known-good refresh token, so the ne
 class: proxy-for-authority
 status: fixed
 detected: code-review  # surfaced while reviewing the fast-path guard added by #749
-fixed_in: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/752
+fixed_in: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/760
 issue: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/751
 date: 2026-09-16
 ---
