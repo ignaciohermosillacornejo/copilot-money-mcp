@@ -67,6 +67,8 @@
     "check:tool-counts": "bun run scripts/check-tool-counts.ts",
     "check:privacy-endpoints": "bun run scripts/check-privacy-endpoints.ts",
     "check:concealment": "bun run scripts/check-concealment.ts",
+    "_comment_ghost_lines": "check:ghost-lines is deliberately NOT in `check`. It needs a pull request's commit range, and the attacker it defends against never runs `bun run check` — the gate is worth everything on the reviewing side, which is CI, and little on the authoring side. Rationale in full: the ghost-lines section of scripts/check-concealment.ts.",
+    "check:ghost-lines": "bun run scripts/check-concealment.ts --ghost-lines",
     "check:workflows": "bun run scripts/check-workflows.ts",
     "check:tracked-files": "bun run scripts/check-tracked-files.ts",
     "check:authorship": "bun run scripts/check-commit-authorship.ts",

@@ -269,6 +269,39 @@ class of attack needs — off-screen payloads, invisible characters, dynamic
 execution, install-time scripts. It runs on every PR including forks. Treat it
 as a floor, not a clearance: it checks shape, not intent.
 
+That check reads a **tree**, and better-auth #6003 hid its payload from a tree
+as well as from a screen: one commit added the loader, a later commit removed
+it, and the combined "Files changed / All commits" diff — the view you review
+from — showed a trailing-newline change. The payload never needed to be merged.
+It only needed to exist on the branch while CI built it.
+
+`check:ghost-lines` is that half. It reads the PR's commit **range** and reports
+content that a commit introduced, that the final tree does not contain, and that
+trips one of the rules above. Ghost lines on their own are ordinary review churn
+— this repo's history has hundreds — so the report is the intersection, not the
+churn.
+
+It runs as its own CI job (`Cross-commit concealment` in `test.yml`, on
+`pull_request` only, with `fetch-depth: 0`) and is deliberately **not** in
+`bun run check`: an attacker never runs your pre-push hook, and on `main` there
+is no range to read. Run it by hand on a branch whenever you want the answer
+early:
+
+```bash
+bun run check:ghost-lines                       # infers base from origin/HEAD
+bun run check:ghost-lines -- --range=<base>..<head>
+```
+
+A run with no range prints `SKIPPED` and exits 0 on a laptop, and **exits 1
+inside CI** — a security gate that quietly inspects nothing is worse than one
+that is absent.
+
+**Its own weakest link is the CI job, not the detector.** Deleting a step leaves
+its job green; deleting a job leaves a required check permanently pending. That
+is why this is a job rather than a step in `quality` — register
+`Cross-commit concealment` as a required status check so removing it blocks the
+merge instead of passing it.
+
 ### Merging a first-time fork contributor's PR
 
 **Auto-merge will not fire on it, and nothing will tell you so.** GitHub holds every

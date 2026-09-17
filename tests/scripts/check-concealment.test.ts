@@ -84,7 +84,18 @@ async function runCheck(
     // Same reason as withGitTree's cleanEnv: a pre-push run sets GIT_DIR, and
     // leaking it makes the gate resolve to the ambient repo instead of `root`.
     env: Object.fromEntries([
-      ...Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')),
+      // GIT_*: same reason as withGitTree's cleanEnv — a pre-push run sets
+      // GIT_DIR, and leaking it makes the gate resolve to the ambient repo
+      // instead of `root`.
+      //
+      // CI and GITHUB_*: the ghost-lines mode reads both. `CI=true` turns a
+      // skip into a refusal and GITHUB_EVENT_NAME picks the range source, so
+      // leaving them inherited would make this suite assert one thing on a
+      // laptop and another thing inside the very CI it gates. Stripped here and
+      // put back deliberately by the tests that are about those endings.
+      ...Object.entries(process.env).filter(
+        ([k]) => !k.startsWith('GIT_') && !k.startsWith('GITHUB_') && k !== 'CI'
+      ),
       ['CHECK_CONCEALMENT_ROOT', root],
       ...Object.entries(extraEnv),
     ]) as Record<string, string>,
@@ -1581,5 +1592,442 @@ describe('a file the gate could not read is never counted as scanned (#701)', ()
         beforeCommit: async (dir) => void (await symlink(concealed.trim(), join(dir, 'link'))),
       }
     );
+  });
+});
+
+/**
+ * A payload that exists only ACROSS commits. Inert by construction: a comment
+ * and a sentinel, never anything that would do something if it ran. What makes
+ * it a fixture is its SHAPE — an 80-space gap pushing text past column 120 —
+ * which is the horizontal half of better-auth #6003, and the half a reviewer
+ * cannot see. Built with repeat() so this source file does not itself contain
+ * the shape the gate it tests would report.
+ */
+const GHOST_SENTINEL = 'GHOST_FIXTURE_INERT_MARKER';
+const ghostPayload = `export const ok = 1;${' '.repeat(80)}// ${GHOST_SENTINEL}${'x'.repeat(60)}\n`;
+
+interface History {
+  dir: string;
+  shas: string[];
+  base: string;
+  head: string;
+  git: (...args: string[]) => string;
+}
+
+/**
+ * Build a real repository one commit at a time, then run assertions over it.
+ *
+ * Each entry is a commit: path -> contents, or path -> null to delete. The
+ * FIRST commit is the base — it stands for the state of `main` — and every
+ * commit after it is the pull request. `base` and `head` name those two ends.
+ *
+ * The default branch is `work`, not `main`, on purpose: the gate's local range
+ * inference takes a merge-base against origin/HEAD, origin/main or main, and a
+ * repo whose only branch is `main` would resolve a range in the tests that are
+ * about having NO range. The one test that exercises the inference makes a
+ * `main` branch for itself.
+ */
+async function withHistory(
+  commits: Array<Record<string, string | null>>,
+  assertions: (history: History) => void | Promise<void>
+): Promise<void> {
+  const dir = await mkdtemp(join(tmpdir(), 'concealment-history-'));
+  try {
+    const cleanEnv: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) {
+      if (k.startsWith('GIT_')) continue;
+      if (v !== undefined) cleanEnv[k] = v;
+    }
+    const git = (...args: string[]): string => {
+      const r = Bun.spawnSync(['git', '-C', dir, ...args], { env: cleanEnv });
+      if (r.exitCode !== 0) {
+        throw new Error(`git ${args.join(' ')} failed: ${r.stderr.toString()}`);
+      }
+      return r.stdout.toString().trim();
+    };
+    git('init', '-q', '-b', 'work');
+    git('config', 'user.email', 'test@example.com');
+    git('config', 'user.name', 'test');
+    const shas: string[] = [];
+    for (const [i, files] of commits.entries()) {
+      for (const [name, contents] of Object.entries(files)) {
+        const path = join(dir, name);
+        if (contents === null) {
+          await rm(path, { force: true });
+          continue;
+        }
+        await mkdir(join(path, '..'), { recursive: true });
+        await writeFile(path, contents);
+      }
+      git('add', '-A');
+      git('commit', '-qm', `commit ${i}`, '--no-gpg-sign', '--allow-empty');
+      shas.push(git('rev-parse', 'HEAD'));
+    }
+    await assertions({
+      dir,
+      git,
+      shas,
+      base: shas[0] as string,
+      head: shas[shas.length - 1] as string,
+    });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+/** The gate in ghost-lines mode, over an explicit range. */
+function runGhost(
+  dir: string,
+  range?: string,
+  extraEnv: Record<string, string> = {}
+): Promise<Result> {
+  return runCheck(
+    dir,
+    range === undefined ? ['--ghost-lines'] : ['--ghost-lines', `--range=${range}`],
+    extraEnv
+  );
+}
+
+describe('ghost lines — content the combined diff never shows (#648)', () => {
+  test('a payload added by one commit and removed by a later one is reported', async () => {
+    // The whole issue in one fixture. Commit 1 is the base; commit 2 appends
+    // the payload to a config; commit 3 takes it back out. GitHub's combined
+    // "Files changed / All commits" view — base..head — shows NOTHING, because
+    // the two edits cancel. The working tree is clean, so the tree scan is
+    // clean. Only the range sees it.
+    await withHistory(
+      [
+        { 'postcss.config.mjs': 'export default {};\n' },
+        { 'postcss.config.mjs': `export default {};\n${ghostPayload}` },
+        { 'postcss.config.mjs': 'export default {};\n' },
+      ],
+      async ({ dir, base, head, git }) => {
+        // The premise, measured rather than asserted from the fixture's shape:
+        // a real `git diff base..head` is empty, so a reviewer of this pull
+        // request is shown no change at all.
+        expect(git('diff', '--stat', `${base}..${head}`)).toBe('');
+
+        // The control. Without it this test would pass against a gate that
+        // simply scans the tree twice, and would prove nothing about ranges.
+        const tree = await runCheck(dir);
+        expect(tree.code).toBe(0);
+        expect(tree.stdout).toContain('nothing hidden');
+
+        const ghost = await runGhost(dir, `${base}..${head}`);
+        expect(ghost.code).toBe(1);
+        expect(ghost.stderr).toContain('postcss.config.mjs');
+        expect(ghost.stderr).toContain('whitespace run');
+      }
+    );
+  });
+
+  test('the report names the commit that introduced the line', async () => {
+    // Attribution is what makes a finding actionable: the reviewer has to be
+    // able to go and read the commit, and `git show` needs a sha.
+    await withHistory(
+      [{ 'src/a.ts': CLEAN }, { 'src/a.ts': `${CLEAN}${ghostPayload}` }, { 'src/a.ts': CLEAN }],
+      async ({ dir, base, head, shas }) => {
+        const { stderr } = await runGhost(dir, `${base}..${head}`);
+        expect(stderr).toContain(`added in ${(shas[1] as string).slice(0, 7)}`);
+      }
+    );
+  });
+
+  test('a file added and deleted inside the range is scanned in full', async () => {
+    // The other shape of the same trick, and the one a path-based comparison
+    // gets wrong: the path is absent from the final tree entirely, so there is
+    // no head version to compare against and every line of it is a ghost line.
+    await withHistory(
+      [{ 'src/a.ts': CLEAN }, { 'tools/helper.mjs': ghostPayload }, { 'tools/helper.mjs': null }],
+      async ({ dir, base, head }) => {
+        const { code, stderr } = await runGhost(dir, `${base}..${head}`);
+        expect(code).toBe(1);
+        expect(stderr).toContain('tools/helper.mjs');
+      }
+    );
+  });
+
+  test('an install-time script added and removed inside the range is reported', async () => {
+    // better-auth's actual vector, and the reason this mode cannot be "the
+    // line rules over old blobs". A `postinstall` runs on `npm install` — in
+    // CI, on the branch, before anybody reads anything — and then a later
+    // commit deletes it and the combined diff is empty. The whole-file checker
+    // runs over the off-tree blob, and its finding survives the ghost filter
+    // because the line it sits on is not in the final package.json.
+    const withHook = JSON.stringify(
+      { name: 'x', scripts: { postinstall: `echo ${GHOST_SENTINEL}` } },
+      null,
+      2
+    );
+    const without = JSON.stringify({ name: 'x', scripts: {} }, null, 2);
+    await withHistory(
+      [{ 'package.json': without }, { 'package.json': withHook }, { 'package.json': without }],
+      async ({ dir, base, head }) => {
+        const tree = await runCheck(dir);
+        expect(tree.code).toBe(0);
+
+        const { code, stderr } = await runGhost(dir, `${base}..${head}`);
+        expect(code).toBe(1);
+        expect(stderr).toContain('auto-fired lifecycle script');
+        expect(stderr).toContain('postinstall');
+      }
+    );
+  });
+
+  test('ordinary multi-commit churn is NOT reported', async () => {
+    // The other direction of the mutation test, and the one that decides
+    // whether this gate survives contact with a real repository. Every commit
+    // here leaves ghost lines behind — a reworded comment, a renamed symbol, a
+    // deleted fixture, a file that existed for one commit. The audit behind
+    // #648 counted 195 of these in this repo's own history. None of them is
+    // concealment, and a gate that said otherwise would be switched off inside
+    // a week.
+    await withHistory(
+      [
+        {
+          'src/a.ts': '// first pass\nexport const total = 1;\n',
+          'src/fixture.ts': 'export const sample = [1, 2, 3];\n',
+        },
+        {
+          'src/a.ts': '// second pass, reworded\nexport const sum = 1;\n',
+          'src/scratch.ts': 'export const temp = true;\n',
+        },
+        { 'src/a.ts': '// final wording\nexport const sum = 2;\n', 'src/scratch.ts': null },
+        { 'src/fixture.ts': null, 'src/b.ts': 'export const other = 3;\n' },
+      ],
+      async ({ dir, base, head }) => {
+        const { code, stdout, stderr } = await runGhost(dir, `${base}..${head}`);
+        expect(stderr).toBe('');
+        expect(code).toBe(0);
+        // Non-vacuous: the run has to have HAD ghost blobs to stay quiet about.
+        // Without this the test would also pass against a mode that enumerated
+        // nothing at all.
+        expect(stdout).toMatch(/[1-9]\d* blobs? absent from the final tree/);
+        expect(stdout).toContain('nothing hidden');
+      }
+    );
+  });
+
+  test('content that survives into the final tree is left to the tree scan', async () => {
+    // The boundary the predicate draws. The payload is added by commit 2 and
+    // never removed, so it IS in the combined diff and the tree scan reports
+    // it. Reporting it here as well would be the same finding twice with a
+    // wrong explanation attached — "hidden from review" about a line the
+    // review shows.
+    //
+    // Three commits, not two, and that is the whole fixture. Commit 2's blob
+    // has to be a GHOST blob — superseded by commit 3, so absent from the final
+    // tree — for the line filter to be the thing under test. With only two
+    // commits the payload-bearing blob IS the final tree's blob, the enumeration
+    // never offers it, and this test passes with the filter deleted. It did.
+    await withHistory(
+      [
+        { 'src/a.ts': CLEAN },
+        { 'src/a.ts': `${CLEAN}${ghostPayload}` },
+        { 'src/a.ts': `${CLEAN}${ghostPayload}export const more = 1;\n` },
+      ],
+      async ({ dir, base, head }) => {
+        const tree = await runCheck(dir);
+        expect(tree.code).toBe(1);
+
+        const ghost = await runGhost(dir, `${base}..${head}`);
+        expect(ghost.stderr).toBe('');
+        expect(ghost.code).toBe(0);
+        // Non-vacuous: commit 2's superseded blob really was enumerated and
+        // really did carry the payload. Without this the assertion above holds
+        // just as well over an empty scan.
+        expect(ghost.stdout).toMatch(/[1-9]\d* blobs? absent from the final tree/);
+      }
+    );
+  });
+
+  test('a line moved around inside the range is not reported', async () => {
+    // The commonest false positive a naive implementation produces: an edit
+    // that shifts a payload-shaped line from one place in a file to another
+    // makes the old blob a ghost blob, but the LINE is still in the final tree
+    // and still in the diff. The filter is by line TEXT, not by line number and
+    // not by blob identity, which is what makes this quiet — and the tree scan
+    // still fails, because the line is really there.
+    await withHistory(
+      [
+        { 'src/a.ts': CLEAN },
+        { 'src/a.ts': `${CLEAN}${ghostPayload}` },
+        { 'src/a.ts': `${ghostPayload}${CLEAN}export const more = 1;\n` },
+      ],
+      async ({ dir, base, head }) => {
+        const ghost = await runGhost(dir, `${base}..${head}`);
+        expect(ghost.stderr).toBe('');
+        expect(ghost.code).toBe(0);
+      }
+    );
+  });
+
+  test('a lockfile is out of scope here too', async () => {
+    // Same scoping as the tree scan, for the same reason: generated, enormous,
+    // and covered by check:deps-pinned. Asserting it keeps the two modes from
+    // drifting into different definitions of what is reviewable.
+    await withHistory(
+      [{ 'src/a.ts': CLEAN }, { 'package-lock.json': ghostPayload }, { 'package-lock.json': null }],
+      async ({ dir, base, head }) => {
+        const { code, stderr } = await runGhost(dir, `${base}..${head}`);
+        expect(stderr).toBe('');
+        expect(code).toBe(0);
+      }
+    );
+  });
+});
+
+describe('ghost lines — how the range is obtained', () => {
+  test('with no range and no CI, it SKIPS loudly instead of passing quietly', async () => {
+    // The ending this mode has to get right. A security gate that quietly does
+    // nothing is worse than one that is absent, because the absent one is not
+    // also printing a line people read as an all-clear. Exit 0 — there is
+    // genuinely nothing to compare on a branchless checkout — but never in the
+    // tree scan's voice.
+    await withHistory([{ 'src/a.ts': CLEAN }], async ({ dir }) => {
+      const { code, stdout, stderr } = await runGhost(dir);
+      expect(code).toBe(0);
+      expect(stderr).toContain('SKIPPED');
+      expect(stderr).toContain('NOT because anything was found clean');
+      expect(stdout).toBe('');
+      expect(stdout).not.toContain('nothing hidden');
+    });
+  });
+
+  test('the same state inside CI is a refusal, not a skip', async () => {
+    // The fail-open this mode would otherwise ship with, and the exact class
+    // #724 removed from the tree scan: a step that is green because it
+    // inspected nothing. In CI there is always a range, so failing to find one
+    // means the resolution broke.
+    await withHistory([{ 'src/a.ts': CLEAN }], async ({ dir }) => {
+      const { code, stderr } = await runGhost(dir, undefined, { CI: 'true' });
+      expect(code).toBe(1);
+      expect(stderr).toContain('REFUSING');
+      expect(stderr).not.toContain('SKIPPED');
+    });
+  });
+
+  test('it reads the range from the GitHub Actions pull_request payload', async () => {
+    await withHistory(
+      [{ 'src/a.ts': CLEAN }, { 'src/a.ts': `${CLEAN}${ghostPayload}` }, { 'src/a.ts': CLEAN }],
+      async ({ dir, base, head }) => {
+        const payload = join(dir, '..', `event-${Date.now()}.json`);
+        await writeFile(
+          payload,
+          JSON.stringify({ pull_request: { base: { sha: base }, head: { sha: head } } })
+        );
+        try {
+          const { code, stderr } = await runGhost(dir, undefined, {
+            CI: 'true',
+            GITHUB_ACTIONS: 'true',
+            GITHUB_EVENT_NAME: 'pull_request',
+            GITHUB_EVENT_PATH: payload,
+          });
+          expect(code).toBe(1);
+          expect(stderr).toContain('pull_request event payload');
+          expect(stderr).toContain('src/a.ts');
+        } finally {
+          await rm(payload, { force: true });
+        }
+      }
+    );
+  });
+
+  test('pull_request_target is refused rather than guessed at', async () => {
+    // Its checkout is the BASE branch, so the contributor's commits are not
+    // even present — a range built from it would describe something nobody is
+    // being asked to review. It is also the trigger that carries repository
+    // secrets, which is the last place to teach anyone to fetch fork refs.
+    await withHistory([{ 'src/a.ts': CLEAN }], async ({ dir }) => {
+      const { code, stderr } = await runGhost(dir, undefined, {
+        GITHUB_ACTIONS: 'true',
+        GITHUB_EVENT_NAME: 'pull_request_target',
+      });
+      expect(code).toBe(1);
+      expect(stderr).toContain('REFUSING');
+      expect(stderr).toContain('pull_request_target');
+    });
+  });
+
+  test('a shallow checkout is refused, and the message names fetch-depth', async () => {
+    // The CI default, and the one state where every command still succeeds
+    // while describing a history that was cut off. `actions/checkout` fetches
+    // one commit unless told otherwise, so this is the first thing that goes
+    // wrong when somebody wires the job up by hand.
+    await withHistory(
+      [{ 'src/a.ts': CLEAN }, { 'src/a.ts': `${CLEAN}${ghostPayload}` }, { 'src/a.ts': CLEAN }],
+      async ({ dir, base, head, git }) => {
+        const shallow = await mkdtemp(join(tmpdir(), 'concealment-shallow-'));
+        try {
+          git('clone', '--depth', '1', '--quiet', `file://${dir}`, shallow);
+
+          // The endpoints are not even objects in a depth-1 clone.
+          const missing = await runGhost(shallow, `${base}..${head}`);
+          expect(missing.code).toBe(1);
+          expect(missing.stderr).toContain('fetch-depth: 0');
+
+          // And with a range it CAN resolve, the shallow state itself refuses,
+          // rather than walking a truncated history and calling it clean.
+          const truncated = await runGhost(shallow, 'HEAD..HEAD');
+          expect(truncated.code).toBe(1);
+          expect(truncated.stderr).toContain('SHALLOW');
+          expect(truncated.stderr).toContain('fetch-depth: 0');
+        } finally {
+          await rm(shallow, { recursive: true, force: true });
+        }
+      }
+    );
+  });
+
+  test('an empty range is a skip locally and a refusal in CI', async () => {
+    await withHistory(
+      [{ 'src/a.ts': CLEAN }, { 'src/a.ts': `${CLEAN}// more\n` }],
+      async ({ dir, head }) => {
+        const local = await runGhost(dir, `${head}..${head}`);
+        expect(local.code).toBe(0);
+        expect(local.stderr).toContain('SKIPPED');
+
+        const ci = await runGhost(dir, `${head}..${head}`, { CI: 'true' });
+        expect(ci.code).toBe(1);
+        expect(ci.stderr).toContain('no commits');
+      }
+    );
+  });
+
+  test('the three-dot form is refused rather than silently widened', async () => {
+    // `a...b` is the symmetric difference: it drags in the base branch's own
+    // commits, so a green run would be green over somebody else's work.
+    await withHistory([{ 'src/a.ts': CLEAN }], async ({ dir, base, head }) => {
+      const { code, stderr } = await runGhost(dir, `${base}...${head}`);
+      expect(code).toBe(1);
+      expect(stderr).toContain('symmetric difference');
+    });
+  });
+
+  test('with no PR context it falls back to a merge-base against a local base branch', async () => {
+    // The local convenience: the same command, run on a feature branch before
+    // the push, resolves the range CI will use. Inferred, and the output says
+    // so, because a stale base only ever widens the range.
+    await withHistory(
+      [{ 'src/a.ts': CLEAN }, { 'src/a.ts': `${CLEAN}${ghostPayload}` }, { 'src/a.ts': CLEAN }],
+      async ({ dir, base, git }) => {
+        git('branch', 'main', base);
+        const { code, stderr } = await runGhost(dir);
+        expect(code).toBe(1);
+        expect(stderr).toContain('inferred locally');
+        expect(stderr).toContain('src/a.ts');
+      }
+    );
+  });
+
+  test('a subdirectory is refused rather than answered about the wrong repository', async () => {
+    // Same belt-and-braces as the tree scan's gitFiles: git happily answers
+    // about the enclosing repository, and every number in the report would
+    // then describe a tree nobody asked about.
+    await withHistory([{ 'src/a.ts': CLEAN }], async ({ dir }) => {
+      const { code, stderr } = await runGhost(join(dir, 'src'), 'HEAD..HEAD');
+      expect(code).toBe(1);
+      expect(stderr).toContain('toplevel');
+    });
   });
 });

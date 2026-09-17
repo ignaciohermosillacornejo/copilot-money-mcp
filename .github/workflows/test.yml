@@ -100,6 +100,53 @@ jobs:
             --excludePackages "copilot-money-mcp@$(node -p "require('./package.json').version")" \
             --summary
 
+  # The cross-commit half of the concealment gate (#648). Its own job, not a
+  # step in `quality`, for two reasons that both come down to what an attacker
+  # can remove:
+  #
+  #   - It needs a full-history checkout, and `quality` does not. Deepening that
+  #     job's checkout would slow every other gate for one of them.
+  #   - The status check a branch-protection rule can require is a JOB, not a
+  #     step. Delete a step and its job still reports green; delete a required
+  #     job and the check stays permanently pending and the pull request cannot
+  #     merge. For a gate whose entire purpose is to read code no maintainer has
+  #     read yet, that difference is the gate. Register "Cross-commit
+  #     concealment" as a required check.
+  ghost-lines:
+    name: Cross-commit concealment
+    # A pull request is the only event with two ends to compare. A push to main
+    # has already been through this on the branch, and a direct push is made by
+    # somebody with write access — there is no reviewer left to conceal from.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    # Measured at ~7s over 258 commits and 689 off-tree blobs of this repo's own
+    # history; a pull request's range is a small fraction of that. Headroom, not
+    # a threshold anything is near.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # The whole reason this job exists. actions/checkout fetches ONE
+          # commit by default, so on a pull_request event neither base.sha nor
+          # head.sha is present as an object and nothing between them is
+          # either. The gate verifies this rather than trusting it — it refuses
+          # on a shallow checkout and on a missing endpoint, and names this
+          # line as the remedy — so getting it wrong turns CI red with an
+          # explanation instead of green over an empty scan.
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: latest
+
+      # No `bun install`: this gate imports node builtins only and shells out to
+      # git, so the job is a checkout and a script. A registry outage cannot
+      # turn a security gate red, and nothing from the dependency graph runs
+      # before it reads the contributor's commits.
+      - name: Ghost-lines check
+        run: bun run check:ghost-lines
+
   tests:
     name: Tests
     needs: [quality]
