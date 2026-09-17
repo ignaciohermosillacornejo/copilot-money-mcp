@@ -55,6 +55,17 @@ describe('audit severity gate', () => {
     expect(escalating('medium', [{ severity: 'Medium' }])).toBe(1);
   });
 
+  test('the THRESHOLD is matched case-insensitively too', () => {
+    // The half that was missing: finding severities were normalised and the
+    // threshold was not, so `AUDIT_ISSUE_THRESHOLD: Medium` was unrecognised —
+    // and unrecognised escalates everything. The knob's own comment in
+    // audit-reviews.yml invites editing that one word, which is what makes the
+    // capitalised spelling reachable rather than hypothetical. Both rows would
+    // read 2 under the old filter.
+    expect(escalating('Medium', [{ severity: 'low' }, { severity: 'low' }])).toBe(0);
+    expect(escalating('HIGH', [{ severity: 'low' }, { severity: 'medium' }])).toBe(0);
+  });
+
   // --- fail-safe direction: unclassifiable input must ESCALATE ---
 
   test('a finding with NO severity escalates rather than being dropped', () => {
@@ -63,6 +74,17 @@ describe('audit severity gate', () => {
 
   test('an UNRECOGNISED severity escalates — a new value upstream gets louder, not quieter', () => {
     expect(escalating('medium', [{ severity: 'critical' }])).toBe(1);
+  });
+
+  test('a NON-STRING severity escalates instead of crashing the filter', () => {
+    // The fail-safe has to survive the input that triggers it. `// ""` covers
+    // only null, and `ascii_downcase` throws on every other non-string, so
+    // these two aborted the gate — which under `set -e` is neither the loud
+    // direction nor the quiet one: no issue, no comment, and a jq error that
+    // names no finding. `escalating()` would throw rather than return a number
+    // if that came back.
+    expect(escalating('medium', [{ severity: 3 }])).toBe(1);
+    expect(escalating('medium', [{ severity: true }])).toBe(1);
   });
 
   test('an unrecognised THRESHOLD escalates everything rather than silencing the gate', () => {
