@@ -9,7 +9,7 @@ bun install          # Install dependencies
 bun test             # Run tests
 bun run build        # Build for production
 bun run pack:mcpb    # Create .mcpb bundle for Claude Desktop
-bun run check        # typecheck + lint + format:check + check:version-sync + check:server-json + check:deps-pinned + check:tool-counts + check:privacy-endpoints + check:concealment + check:workflows + check:tracked-files + bun test --bail
+bun run check        # typecheck + lint + format:check + check:version-sync + check:server-json + check:deps-pinned + check:tool-counts + check:privacy-endpoints + check:concealment + check:workflows + check:tracked-files + check:mutation-guards + bun test --bail
 bun run fix          # Run lint:fix + format
 ```
 
@@ -118,6 +118,7 @@ in sync. The pattern:
 - **Database Location**: `~/Library/Containers/com.copilot.production/Data/Library/Application Support/firestore/__FIRAPP_DEFAULT/copilot-production-22904/main`
 - **External assumptions (every PR)**: fill the "External assumptions" section of `.github/PULL_REQUEST_TEMPLATE.md` — each new assumption about Copilot's API/data declares an evidence class (probe transcript / live round-trip / `unverified` + ledger entry in `src/conformance/ledger.ts`). "None" is an explicit answer, not a default.
 - **Bug Response Ritual (bug-fix PRs)**: fill the bug-response template in CONTRIBUTING.md — root cause → bug class → class-level detector → siblings checked → ledger updated. Fix the class, not just the instance; an instance-only regression test does not satisfy "Detector added".
+- **Mutation-guard registry**: `scripts/mutation-guards.ts` is the ledger of safety invariants that have proven detectors. Each row pairs the exact edit that disables a guard with the one test file that must fail when it does, and `bun run check:mutation-guards` (in `check` and in CI) asserts both directions — passes unmutated, fails mutated. Touching a guarded site means keeping its `// mutation-guard: <name>` marker and its row in agreement; the gate requires a bijection. A guard that turns out to have no detector fails as `VACUOUS` rather than being taken on trust (#596).
 
 ## Common Tasks
 

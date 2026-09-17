@@ -88,6 +88,7 @@ scripts/*
 !scripts/check-workflows.ts
 !scripts/check-commit-authorship.ts
 !scripts/check-tracked-files.ts
+!scripts/mutation-guards.ts
 !scripts/check-skills.py
 !scripts/dump-tool-names.ts
 !scripts/dump-tool-args.ts

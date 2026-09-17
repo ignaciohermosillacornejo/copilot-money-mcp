@@ -55,14 +55,30 @@ re-anchored on the real steering sentence and verified the same way.
 
 ## Detector
 
-None automated yet — this is the class's canonical entry precisely because the proposed
-class-level detector is still an open issue (#596): a mutation-guard registry
-(`check:mutation-guards`) that applies each registered guard's exact mutation and asserts
-the named test file fails, turning "mutation-tested" from a PR-body claim into something CI
-verifies. Five seed guards were hand-verified during #587/#595. Until the registry lands,
-the only defense is the manual mutation-test ritual, which this incident demonstrates is
-not reliably applied — one of the two vacuous tests carried a false "mutation-tested"
-claim.
+`bun run check:mutation-guards` (`scripts/mutation-guards.ts`), in `bun run check` and as a
+step in `.github/workflows/test.yml`. It is a ledger of designated safety invariants: each
+row carries the exact edit that disables one guard and the single test file that must go red
+when it does, and the runner asserts BOTH directions — the file passes unmutated and fails
+mutated. A guard whose removal leaves its detector green is reported as `VACUOUS`, which is
+the shape of this bug caught mechanically rather than by a reviewer who happened to be told
+to mutation-test.
+
+Three details are there because the gate could otherwise carry the very defect it checks
+for. The mutated run must execute the same number of tests as the baseline and report no
+module-level error, so a `find` string that merely breaks the parse cannot pass as a
+detection. The baseline must be green, so an always-failing test cannot be registered as
+proof. And every guard carries a `// mutation-guard: <name>` marker at its site which the
+gate requires to be in bijection with the registry, so deleting a row — the cheapest way to
+make a ledger quiet — leaves an orphaned marker and fails.
+
+Six guards are registered, not the five proposed in the issue: three of those five were
+ambiguous (matched twice) or inert (removing the string left the `throw` standing), and the
+`skipped`-rows entry turned out to name two distinct guards, `bulk_edit_transactions` and
+`review_transactions`, which are now separate rows.
+
+Scope, stated because a ledger invites being read as coverage: this proves the registered
+invariants have detectors. It says nothing about the rest of the suite, where a vacuous
+assertion is still only findable by writing one deliberately or by mutation-testing by hand.
 
 ## Lesson
 
