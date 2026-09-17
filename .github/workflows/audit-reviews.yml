@@ -218,8 +218,15 @@ jobs:
             exit 1
           fi
 
-          if ! jq -e '.unaddressed | type == "array"' audit-result.json >/dev/null 2>&1; then
-            echo "::error::audit-result.json is missing or has an invalid 'unaddressed' array."
+          # The ELEMENTS are checked too, not just the array. Everything
+          # downstream reads `.severity` off each one, and `.severity` on a
+          # string element is a raw jq type error INSIDE the severity gate —
+          # the guard's whole job is to turn malformed audit output into the
+          # explicit ::error:: above, with the file printed, rather than a
+          # stack-trace-shaped failure two steps later.
+          if ! jq -e '.unaddressed | type == "array" and all(type == "object")' \
+            audit-result.json >/dev/null 2>&1; then
+            echo "::error::audit-result.json is missing 'unaddressed', or it is not an array of objects."
             cat audit-result.json
             exit 1
           fi
@@ -263,7 +270,11 @@ jobs:
             echo
             echo "**PR title:** $PR_TITLE"
             echo
-            jq -r '.unaddressed[] | "### \(.severity | ascii_upcase): \(.summary)\n\n- **File:** `\(.file)`\(if .line then ":\(.line|tostring)" else "" end)\n- **Reviewer said:** > \(.quote)\n- **Evidence not applied:** \(.evidence)\n"' audit-result.json
+            # In a file, not inline, so the "lists EVERY finding" claim above is
+            # something a test can hold: this render used to abort the whole
+            # step on a finding whose severity was missing, and an inline filter
+            # is unreachable from tests/.
+            jq -r -f .github/audit-issue-body.jq audit-result.json
             echo
             echo "---"
             if [ "$ESCALATING" -gt 0 ]; then
