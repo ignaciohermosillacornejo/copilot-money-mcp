@@ -73,6 +73,7 @@ scripts/local/
 scripts/*
 !scripts/graphql-capture/
 !scripts/launcher.sh
+!scripts/check-action-pins.ts
 !scripts/generate-graphql-operations.ts
 !scripts/smoke-graphql.ts
 !scripts/smoke/
