@@ -30,7 +30,7 @@ const WORKFLOW_DIR = '.github/workflows';
 /** `uses: owner/repo@<40-hex>` followed by a `# comment`, capturing all three. */
 const PINNED = /uses:\s*([A-Za-z0-9/_.-]+)@([0-9a-f]{40})(?:\s*#\s*(\S+))?/g;
 
-interface Pin {
+export interface Pin {
   action: string;
   sha: string;
   comment: string | undefined;
@@ -38,11 +38,11 @@ interface Pin {
   line: number;
 }
 
-function collectPins(): Pin[] {
+export function collectPins(dir: string = WORKFLOW_DIR): Pin[] {
   const pins: Pin[] = [];
-  for (const name of readdirSync(WORKFLOW_DIR)) {
+  for (const name of readdirSync(dir)) {
     if (!name.endsWith('.yml') && !name.endsWith('.yaml')) continue;
-    const path = join(WORKFLOW_DIR, name);
+    const path = join(dir, name);
     const lines = readFileSync(path, 'utf-8').split('\n');
     lines.forEach((text, i) => {
       for (const m of text.matchAll(PINNED)) {
