@@ -19,14 +19,22 @@
 # comment was filed at all. `tostring` turns such a value into an unrecognised
 # string, which the branch below already knows how to escalate.
 #
-# The THRESHOLD is downcased for the same reason the severities are. Without it
-# `AUDIT_ISSUE_THRESHOLD: Medium` is unrecognised, and unrecognised means
-# escalate EVERYTHING — the fail-safe firing over a difference in case rather
-# than a difference in meaning, on a knob whose own comment invites editing it.
-# Normalising narrows the fail-safe to genuine typos: "Medium" now means
-# medium, while "mediumm" still escalates.
+# The THRESHOLD is normalised the same way, and by the same two steps. Without
+# the downcase, `AUDIT_ISSUE_THRESHOLD: Medium` is unrecognised, and
+# unrecognised means escalate EVERYTHING — the fail-safe firing over a
+# difference in case rather than a difference in meaning, on a knob whose own
+# comment invites editing it. Normalising narrows the fail-safe to genuine
+# typos: "Medium" now means medium, while "mediumm" still escalates.
+#
+# The `// "" | tostring` half is unreachable while the caller passes `--arg`,
+# which always yields a string. It is here because the two ways that stops being
+# true are both one-line edits nobody would think of as touching jq types —
+# `--argjson`, or `$ENV.AUDIT_ISSUE_THRESHOLD`, which is `null` when the
+# variable is unset — and either would reproduce the crash being fixed one line
+# below. Symmetry also means a reader does not have to reconstruct the `--arg`
+# guarantee to see why one reader is guarded and the other is not.
 def rank: {"low": 1, "medium": 2, "high": 3};
-($t | ascii_downcase) as $threshold
+(($t // "") | tostring | ascii_downcase) as $threshold
 | [ .unaddressed[]
     | ((.severity // "") | tostring | ascii_downcase) as $s
     | if (rank | has($s)) and (rank | has($threshold))
