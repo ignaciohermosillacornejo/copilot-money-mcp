@@ -75,6 +75,15 @@ use this Tier 1 / Tier 2 shorthand.
 assumption and the oracle (if any) guarding it. Each entry carries a
 **verification class**:
 
+> **"External" is wider than GraphQL**, and the entry naming says which boundary
+> an assumption sits on. Most are Copilot's API (`Mutation.*`, `Query.*`,
+> `<Node>.<field>:<aspect>`). Two others are inventoried in the same list rather
+> than in one of their own, because a ledger per boundary would fragment the
+> class distribution below: Google's Firebase token endpoint
+> (`Securetoken.v1Token:*`, #722) and the **decode** boundary — Firestore cache
+> document fields, named `<Collection>Document.<field>:wireType` (#718). The
+> full convention lives in the ledger's own header.
+
 | Class | Meaning |
 | --- | --- |
 | `gated` | An oracle actively re-verifies this; drift fails a check. |
