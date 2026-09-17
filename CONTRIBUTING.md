@@ -411,6 +411,22 @@ A regression test for the instance alone does not satisfy "Detector added" — t
 detector must cover the class. Canonical example: the #419→#424 arc (one bad enum
 value → a conformance harness that gates every enum, plus sibling coverage).
 
+**If the class is a safety invariant, its detector belongs in the mutation-guard
+registry.** `scripts/mutation-guards.ts` lists the guards whose violation writes
+wrong data to a real account. Each row names the exact edit that disables one
+guard and the single test file that must go red when it does;
+`bun run check:mutation-guards` applies the edit, runs that file, and requires it
+to **pass unmutated and fail mutated**. A detector that would stay green with the
+guard gone fails the gate as `VACUOUS` instead of being believed — which is the
+point, since "mutation-tested" was an unverifiable claim in PR bodies until #596,
+and at least one such claim was wrong.
+
+Registering a guard is two edits, deliberately: a `// mutation-guard: <name>`
+comment at the site in `src/`, and the matching row. The gate requires a
+bijection between the two, so neither the marker nor the row can be dropped on
+its own, and a row whose `find` string has stopped matching its site is an error
+rather than a silent skip.
+
 **Then write the post-mortem.** [`docs/bugs/`](docs/bugs/README.md) is the accumulated
 record: one entry per user-visible bug, filed under its class, recording how it was
 found and whether the class has a detector yet. Copy

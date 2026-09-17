@@ -235,6 +235,7 @@ export async function bulkEditTransactions(
   // Defense in depth: the type system already forbids an empty tuple, but this
   // module is reachable from JS callers and the failure mode is unbounded
   // writes, so re-check at runtime rather than trusting the cast.
+  // mutation-guard: bulk write refuses an unbounded row set
   if (!Array.isArray(args.ids) || args.ids.length === 0) {
     throw new Error(
       'bulkEditTransactions: refusing to send without explicit target ids — ' +
@@ -247,6 +248,7 @@ export async function bulkEditTransactions(
   >('BulkEditTransactions', BULK_EDIT_TRANSACTIONS, {
     input: args.input,
     // `ids` is the ONLY filter key ever sent. See BulkEditTransactionsArgs.
+    // mutation-guard: bulk filter carries only ids
     filter: { ids: args.ids.map(({ id, accountId, itemId }) => ({ id, accountId, itemId })) },
   });
   const { updated, failed } = data.bulkEditTransactions;

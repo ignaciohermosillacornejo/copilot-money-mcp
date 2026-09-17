@@ -1,0 +1,422 @@
+/**
+ * Behavioural tests for scripts/mutation-guards.ts — the `check:mutation-guards`
+ * gate in `bun run check` and in `.github/workflows/test.yml`.
+ *
+ * The gate exists to catch a safety guard that executes but cannot fail
+ * (#596, docs/bugs/596-vacuous-assertions-bulk-edit.md). A gate with that same
+ * defect would be worse than none, so most of this file is the gate's own
+ * mutation test: it is driven end-to-end against SYNTHETIC repositories — a
+ * throwaway `src/` plus a throwaway test file — where the answer is known by
+ * construction, the same way tests/scripts/check-workflows.test.ts drives its
+ * gate against synthetic workflow trees.
+ *
+ * Four negatives carry the weight, because each is a way the gate could report
+ * green over nothing:
+ *
+ *   - a guard whose removal leaves its detector passing must be VACUOUS
+ *     (the #596 instance itself, reproduced from scratch);
+ *   - a detector that is red before any mutation must be rejected, so an
+ *     always-failing test cannot be registered as proof of anything;
+ *   - a mutation that leaves the file unparseable must be rejected, because
+ *     "the test file went red" is satisfied by a broken mutation too;
+ *   - a registry row deleted while its marker stays in `src/` must fail, since
+ *     quietly dropping a row is the cheapest way to make this gate quiet.
+ *
+ * The restoration tests are the other half: this gate edits tracked source
+ * files in place, so it has to put them back after a throw and after a SIGKILL
+ * that skips every handler it could install.
+ */
+import { afterEach, describe, expect, test } from 'bun:test';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import {
+  applyMutation,
+  assertRegistryConsistent,
+  findMarkers,
+  journalPath,
+  MARKER_PREFIX,
+  MUTATION_GUARDS,
+  parseBunTestSummary,
+  recoverJournal,
+  REPO_ROOT,
+  runGuards,
+  withMutation,
+  type MutationGuard,
+} from '../../scripts/mutation-guards.js';
+
+// --- Synthetic-repository helpers -----------------------------------------
+
+const roots: string[] = [];
+
+afterEach(() => {
+  for (const root of roots.splice(0)) {
+    rmSync(journalPath(root), { force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/**
+ * A two-file repository: one guarded source module, one detector.
+ *
+ * `guardLine` is the guard itself; `assertion` is the body of the detector's
+ * second test. Varying just those two reproduces every outcome the gate has to
+ * tell apart, without any of the real code being involved.
+ */
+function syntheticRepo(opts: { guardLine: string; assertion: string; markerName: string }): string {
+  const root = mkdtempSync(join(tmpdir(), 'mutation-guards-test-'));
+  roots.push(root);
+  mkdirSync(join(root, 'src'));
+  mkdirSync(join(root, 't'));
+  writeFileSync(
+    join(root, 'src/pay.ts'),
+    [
+      'export function pay(rows: string[], failAt: string): string[] {',
+      '  const written: string[] = [];',
+      '  for (const row of rows) {',
+      '    if (row === failAt) {',
+      `      ${MARKER_PREFIX}${opts.markerName}`,
+      `      ${opts.guardLine}`,
+      '    }',
+      '    written.push(row);',
+      '  }',
+      '  return written;',
+      '}',
+      '',
+    ].join('\n'),
+    'utf8'
+  );
+  writeFileSync(
+    join(root, 't/pay.test.ts'),
+    [
+      "import { expect, test } from 'bun:test';",
+      "import { pay } from '../src/pay.js';",
+      '',
+      "test('writes everything when nothing fails', () => {",
+      "  expect(pay(['a', 'b', 'c'], 'none')).toEqual(['a', 'b', 'c']);",
+      '});',
+      '',
+      "test('the guard holds', () => {",
+      `  ${opts.assertion}`,
+      '});',
+      '',
+    ].join('\n'),
+    'utf8'
+  );
+  return root;
+}
+
+function guardFor(root: string, over: Partial<MutationGuard> = {}): MutationGuard {
+  const name = [...findMarkers(root)][0]?.[0] ?? 'unnamed';
+  return {
+    name,
+    file: 'src/pay.ts',
+    invariant: 'Rows after the failing one are never written.',
+    mutation: {
+      kind: 'remove',
+      find: `\n      ${MARKER_PREFIX}${name}\n      break;`,
+    },
+    expectFails: 't/pay.test.ts',
+    ...over,
+  };
+}
+
+async function run(root: string, guards: readonly MutationGuard[]) {
+  return runGuards({ root, guards, log: () => {} });
+}
+
+// --- The real registry -----------------------------------------------------
+
+describe('the registry agrees with the source tree', () => {
+  test('no static problems: markers, uniqueness, files, detectors', () => {
+    expect(assertRegistryConsistent(REPO_ROOT)).toEqual([]);
+  });
+
+  test('every mutation string matches exactly once in its file', () => {
+    // Stated separately from the sweep above because it is the acceptance
+    // criterion #596 named, and because a `find` that matches twice is the
+    // defect three of the five seed entries proposed in that issue carried.
+    for (const guard of MUTATION_GUARDS) {
+      const content = readFileSync(join(REPO_ROOT, guard.file), 'utf8');
+      expect(content.split(guard.mutation.find).length - 1).toBe(1);
+    }
+  });
+
+  test('every registered guard marks its own site, and nothing else does', () => {
+    const markers = [...findMarkers(REPO_ROOT).keys()].sort();
+    expect(markers).toEqual(MUTATION_GUARDS.map((g) => g.name).sort());
+  });
+
+  test('a mutation actually changes the file it names', () => {
+    for (const guard of MUTATION_GUARDS) {
+      const content = readFileSync(join(REPO_ROOT, guard.file), 'utf8');
+      expect(applyMutation(content, guard.mutation)).not.toBe(content);
+    }
+  });
+});
+
+// --- The gate's own mutation test, on synthetic repositories ---------------
+
+describe('a guard is only green when its detector really detects it', () => {
+  test('a real detector passes unmutated and fails mutated', async () => {
+    const root = syntheticRepo({
+      markerName: 'rows after the failure are never written',
+      guardLine: 'break;',
+      // Pins the PROPERTY: the tail must not be written.
+      assertion: "expect(pay(['a', 'b', 'c'], 'b')).toEqual(['a']);",
+    });
+    const { ok, results } = await run(root, [guardFor(root)]);
+    expect(results.map((r) => r.detail).join('\n')).toBeTruthy();
+    expect(ok).toBe(true);
+  });
+
+  test('VACUOUS: a detector satisfied by both behaviours fails the gate', async () => {
+    // The #596 instance, rebuilt: the assertion is true whether or not the
+    // guard is there, which is precisely what 98.7% patch coverage could not
+    // see. Nothing about it is red until this gate runs.
+    const root = syntheticRepo({
+      markerName: 'rows after the failure are never written',
+      guardLine: 'break;',
+      assertion: "expect(pay(['a', 'b', 'c'], 'b').length).toBeGreaterThan(0);",
+    });
+    const { ok, results } = await run(root, [guardFor(root)]);
+    expect(ok).toBe(false);
+    expect(results[0]?.detail).toContain('VACUOUS');
+  });
+
+  test('a detector that is red before any mutation is rejected', async () => {
+    // Otherwise the registry is satisfiable by writing `expect(1).toBe(2)`:
+    // the mutated run would "fail" exactly as required, proving nothing. The
+    // unmutated direction is checked first for this reason.
+    const root = syntheticRepo({
+      markerName: 'rows after the failure are never written',
+      guardLine: 'break;',
+      assertion: "expect(pay(['a'], 'a')).toEqual(['never']);",
+    });
+    const { ok, results } = await run(root, [guardFor(root)]);
+    expect(ok).toBe(false);
+    expect(results[0]?.detail).toContain('does not PASS unmutated');
+  });
+
+  test('a mutation that leaves the file unparseable is not a detection', async () => {
+    // "The test file went red" is also what a syntax error looks like. Without
+    // this, any entry could be made green by choosing a `find` that breaks the
+    // parse — the guard would never be exercised at all.
+    const root = syntheticRepo({
+      markerName: 'rows after the failure are never written',
+      guardLine: 'break;',
+      assertion: "expect(pay(['a', 'b', 'c'], 'b')).toEqual(['a']);",
+    });
+    const broken = guardFor(root, {
+      mutation: {
+        kind: 'replace',
+        find: `      ${MARKER_PREFIX}rows after the failure are never written\n      break;`,
+        with: `      ${MARKER_PREFIX}rows after the failure are never written\n      break; ((( ;`,
+      },
+    });
+    const { ok, results } = await run(root, [broken]);
+    expect(ok).toBe(false);
+    expect(results[0]?.detail).toMatch(/tests RAN|module-level/);
+  });
+
+  test('deleting the registry row while the marker stays fails the gate', async () => {
+    // The cheapest false green for a ledger like this. It cannot be made
+    // impossible, but the marker bijection makes it a two-file edit that a
+    // reviewer sees rather than one silent deletion.
+    const root = syntheticRepo({
+      markerName: 'rows after the failure are never written',
+      guardLine: 'break;',
+      assertion: "expect(pay(['a', 'b', 'c'], 'b')).toEqual(['a']);",
+    });
+    const { ok, results } = await run(root, []);
+    expect(ok).toBe(false);
+    expect(results[0]?.detail).toContain('marker with no registry entry');
+  });
+
+  test('a mutation string that no longer matches is an error, not a skip', async () => {
+    const root = syntheticRepo({
+      markerName: 'rows after the failure are never written',
+      guardLine: 'break;',
+      assertion: "expect(pay(['a', 'b', 'c'], 'b')).toEqual(['a']);",
+    });
+    const drifted = guardFor(root, {
+      mutation: {
+        kind: 'remove',
+        find: `\n      ${MARKER_PREFIX}rows after the failure are never written\n      return written;`,
+      },
+    });
+    const { ok, results } = await run(root, [drifted]);
+    expect(ok).toBe(false);
+    expect(results[0]?.detail).toContain('matches 0 times');
+  });
+
+  test('an entry whose find omits its marker is rejected', async () => {
+    const root = syntheticRepo({
+      markerName: 'rows after the failure are never written',
+      guardLine: 'break;',
+      assertion: "expect(pay(['a', 'b', 'c'], 'b')).toEqual(['a']);",
+    });
+    const unanchored = guardFor(root, {
+      mutation: { kind: 'remove', find: '\n      break;' },
+    });
+    const { ok, results } = await run(root, [unanchored]);
+    expect(ok).toBe(false);
+    expect(results[0]?.detail).toContain('does not contain its site marker');
+  });
+
+  test('--guard selects one entry, and an unknown name is an error', async () => {
+    const root = syntheticRepo({
+      markerName: 'rows after the failure are never written',
+      guardLine: 'break;',
+      assertion: "expect(pay(['a', 'b', 'c'], 'b')).toEqual(['a']);",
+    });
+    const guard = guardFor(root);
+    const selected = await runGuards({ root, guards: [guard], only: guard.name, log: () => {} });
+    expect(selected.ok).toBe(true);
+    expect(selected.results).toHaveLength(1);
+
+    const missing = await runGuards({ root, guards: [guard], only: 'nope', log: () => {} });
+    expect(missing.ok).toBe(false);
+    expect(missing.results[0]?.detail).toContain('no guard named');
+  });
+});
+
+// --- Restoration -----------------------------------------------------------
+
+describe('the working tree is put back whatever happens', () => {
+  test('a throw inside the mutated window still restores', async () => {
+    const root = syntheticRepo({
+      markerName: 'x',
+      guardLine: 'break;',
+      assertion: 'expect(1).toBe(1);',
+    });
+    const file = join(root, 'src/pay.ts');
+    const original = readFileSync(file, 'utf8');
+
+    await expect(
+      withMutation(root, 'src/pay.ts', 'MUTATED', () => {
+        expect(readFileSync(file, 'utf8')).toBe('MUTATED');
+        throw new Error('boom');
+      })
+    ).rejects.toThrow('boom');
+
+    expect(readFileSync(file, 'utf8')).toBe(original);
+    expect(existsSync(journalPath(root))).toBe(false);
+  });
+
+  test('a SIGKILL leaves the file mutated, and the next run recovers it', () => {
+    // SIGKILL is the one thing no handler can catch, so this is the case the
+    // on-disk journal exists for. Asserting the file IS mutated first is the
+    // point: it proves the kill really did bypass `finally`, so the recovery
+    // below is doing the work rather than following a restore that already ran.
+    const root = syntheticRepo({
+      markerName: 'x',
+      guardLine: 'break;',
+      assertion: 'expect(1).toBe(1);',
+    });
+    const file = join(root, 'src/pay.ts');
+    const original = readFileSync(file, 'utf8');
+
+    const child = join(root, 'crash.ts');
+    writeFileSync(
+      child,
+      [
+        `import { withMutation } from ${JSON.stringify(join(REPO_ROOT, 'scripts/mutation-guards.ts'))};`,
+        `await withMutation(${JSON.stringify(root)}, 'src/pay.ts', 'MUTATED', async () => {`,
+        "  process.kill(process.pid, 'SIGKILL');",
+        '  await new Promise((r) => setTimeout(r, 10_000));',
+        '});',
+        '',
+      ].join('\n'),
+      'utf8'
+    );
+    const res = spawnSync('bun', ['run', child], { cwd: root, encoding: 'utf8' });
+    expect(res.signal).toBe('SIGKILL');
+
+    expect(readFileSync(file, 'utf8')).toBe('MUTATED');
+    expect(existsSync(journalPath(root))).toBe(true);
+
+    const report = recoverJournal(root);
+    expect(report.refused).toEqual([]);
+    expect(report.recovered).toEqual([file]);
+    expect(readFileSync(file, 'utf8')).toBe(original);
+    expect(existsSync(journalPath(root))).toBe(false);
+  });
+
+  test('a file changed while mutated is left alone, with the original beside it', async () => {
+    const root = syntheticRepo({
+      markerName: 'x',
+      guardLine: 'break;',
+      assertion: 'expect(1).toBe(1);',
+    });
+    const file = join(root, 'src/pay.ts');
+
+    await withMutation(root, 'src/pay.ts', 'MUTATED', () => {
+      // Someone else's editor saving over the mutated file.
+      writeFileSync(file, 'SOMEONE ELSE WAS HERE', 'utf8');
+    });
+
+    expect(readFileSync(file, 'utf8')).toBe('SOMEONE ELSE WAS HERE');
+    expect(readFileSync(`${file}.mutation-guard-original`, 'utf8')).toContain(
+      'export function pay'
+    );
+  });
+
+  test('a journal owned by a live process is refused rather than raced', () => {
+    const root = syntheticRepo({
+      markerName: 'x',
+      guardLine: 'break;',
+      assertion: 'expect(1).toBe(1);',
+    });
+    mkdirSync(join(journalPath(root), '..'), { recursive: true });
+    writeFileSync(
+      journalPath(root),
+      JSON.stringify({
+        // This process: alive by definition, and not us, since recoverJournal
+        // only waives the check for its own pid.
+        pid: process.ppid,
+        startedAt: new Date().toISOString(),
+        entries: [],
+      }),
+      'utf8'
+    );
+    expect(() => recoverJournal(root)).toThrow(/another run/);
+  });
+});
+
+// --- Output parsing --------------------------------------------------------
+
+describe('bun output is read for the difference that matters', () => {
+  test('an ordinary failure reports a count and no error line', () => {
+    const summary = parseBunTestSummary(
+      ['(fail) b [0.78ms]', '', ' 1 pass', ' 1 fail', 'Ran 2 tests across 1 file. [8.00ms]'].join(
+        '\n'
+      ),
+      1
+    );
+    expect(summary).toMatchObject({ ran: 2, pass: 1, fail: 1, errors: 0 });
+  });
+
+  test('a module that will not parse reports an error line and a different count', () => {
+    // This is what makes the two indistinguishable on exit code alone, and why
+    // the gate compares both numbers against the unmutated baseline.
+    const summary = parseBunTestSummary(
+      [
+        'error: Unexpected end of file',
+        '',
+        ' 0 pass',
+        ' 1 fail',
+        ' 1 error',
+        'Ran 1 test across 1 file. [7.00ms]',
+      ].join('\n'),
+      1
+    );
+    expect(summary).toMatchObject({ ran: 1, fail: 1, errors: 1 });
+  });
+
+  test('output with no summary at all reports ran: null', () => {
+    expect(parseBunTestSummary('bun: command not found', 127).ran).toBeNull();
+  });
+});

@@ -64,6 +64,14 @@ jobs:
       - name: Tooling files tracked check
         run: bun run check:tracked-files
 
+      # Mutates a source file, runs the one test file that is supposed to
+      # notice, restores it. Runs here as well as in `bun run check` because a
+      # gate only the author's machine runs is the shape of hole #727 was, and
+      # because the whole point of the registry is that "mutation-tested" stops
+      # being a claim in a PR body. Seconds: one test file per entry.
+      - name: Mutation-guard registry check
+        run: bun run check:mutation-guards
+
       # Fork PRs only — a same-repo branch already required push access, so
       # there is no identity to forge. Reads public commit metadata with the
       # read-only fork token.

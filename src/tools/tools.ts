@@ -3258,6 +3258,7 @@ export class CopilotMoneyTools {
     await Promise.all(
       entries.map((entry, idx) =>
         limit(async () => {
+          // mutation-guard: update_transactions stops on first failure
           if (stopOnError && failures.length > 0) return;
           try {
             await task(entry, idx);
@@ -4090,6 +4091,7 @@ export class CopilotMoneyTools {
     // Unknown ids are dropped silently by the server rather than reported in
     // failed[] (verified live). Surfacing them as a hard failure preserves the
     // pre-bulk contract: a review that didn't land must not report success.
+    // mutation-guard: review_transactions surfaces silently-skipped rows
     if (result.skipped.length > 0) {
       throw new Error(
         `review_transactions: ${result.updated.length}/${entries.length} succeeded — ` +
@@ -4283,6 +4285,7 @@ export class CopilotMoneyTools {
       validateDocId(category_id, 'category_id');
       // Load-bearing: the server accepts unknown category ids verbatim and
       // writes a dangling reference. This is the only guard.
+      // mutation-guard: bulk edit validates category ids client-side
       await this.validateCategoryId(category_id);
     }
     if (type !== undefined && !TRANSACTION_TYPES.includes(type)) {
@@ -4363,6 +4366,7 @@ export class CopilotMoneyTools {
     const [first, ...rest] = entries;
     const result = await this.bulkEdit(client, [first!, ...rest], input, 'bulk_edit_transactions');
 
+    // mutation-guard: bulk_edit_transactions surfaces silently-skipped rows
     if (result.skipped.length > 0) {
       throw new Error(
         `bulk_edit_transactions: ${result.updated.length}/${entries.length} succeeded — the ` +
