@@ -16,6 +16,7 @@ import {
   nonEmptyRowsUnder,
   isAccountDocumentPattern,
   readAccountVisibilityRow,
+  countDashboardActive,
   classifyDashboardActive,
 } from '../../scripts/smoke/cache.js';
 import type { AccountVisibilityRow } from '../../scripts/smoke/cache.js';
@@ -311,6 +312,30 @@ describe('readAccountVisibilityRow', () => {
       ])
     );
     expect(row).toEqual({ dashboardActive: undefined, invisible: false });
+  });
+});
+
+describe('countDashboardActive', () => {
+  test('counts the four numbers the check reports, and only those', () => {
+    // The detail line is built from these, so a wrong count here is a smoke
+    // run that describes a cache it did not see.
+    expect(
+      countDashboardActive([
+        { dashboardActive: true, invisible: false },
+        { dashboardActive: false, invisible: false },
+        { dashboardActive: false, invisible: true },
+        { dashboardActive: undefined, invisible: false },
+      ])
+    ).toEqual({ accounts: 4, carrying: 3, negatives: 2, visibleNegatives: 1 });
+  });
+
+  test('is all zeroes for no accounts', () => {
+    expect(countDashboardActive([])).toEqual({
+      accounts: 0,
+      carrying: 0,
+      negatives: 0,
+      visibleNegatives: 0,
+    });
   });
 });
 
