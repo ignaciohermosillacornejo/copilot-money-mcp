@@ -21,6 +21,8 @@ import {
 } from '../../scripts/smoke/cache.js';
 import type { AccountVisibilityRow } from '../../scripts/smoke/cache.js';
 import type { FirestoreValue } from '../../src/core/protobuf-parser.js';
+import { isVisibleAccount } from '../../src/models/account.js';
+import type { Account } from '../../src/models/account.js';
 
 describe('normalizeCollection', () => {
   test('wildcards document ids at odd path depths', () => {
@@ -265,6 +267,14 @@ describe('isAccountDocumentPattern', () => {
     expect(isAccountDocumentPattern('users/*/accounts')).toBe(false);
   });
 
+  test('rejects a NESTED user-customization path, as the decoder does', () => {
+    // The decoder routes on `collection.includes('users/')`, so a path with
+    // the segment anywhere goes to processUserAccount. A startsWith-based
+    // predicate here would admit it and read `user_hidden` off a document
+    // that spells the flag `hidden`.
+    expect(isAccountDocumentPattern('tenants/*/users/*/accounts')).toBe(false);
+  });
+
   test('rejects an unrelated collection', () => {
     expect(isAccountDocumentPattern('transactions')).toBe(false);
   });
@@ -370,8 +380,15 @@ describe('classifyDashboardActive', () => {
     expect(classifyDashboardActive([row(undefined), row(undefined)])).toBe('absent');
   });
 
-  test('no account documents at all reads as absent', () => {
-    expect(classifyDashboardActive([])).toBe('absent');
+  test('no account documents at all is NOT absent — the check measured nothing', () => {
+    // 'absent' means the field is gone from documents we did see; this means
+    // we saw no documents. Opposite conclusions, so they get separate names
+    // and separate statuses (SKIP vs WARN).
+    expect(classifyDashboardActive([])).toBe('no-account-documents');
+  });
+
+  test('absent still means account documents exist and none carries the field', () => {
+    expect(classifyDashboardActive([row(undefined), row(undefined)])).toBe('absent');
   });
 
   test('rows without the field never make a verdict', () => {
@@ -379,4 +396,49 @@ describe('classifyDashboardActive', () => {
     // as visible negatives would manufacture 'independent' out of silence.
     expect(classifyDashboardActive([row(undefined), row(false, true)])).toBe('indistinguishable');
   });
+});
+
+describe('readAccountVisibilityRow agrees with isVisibleAccount (for now)', () => {
+  const flag = (value: boolean): FirestoreValue => ({ type: 'boolean', value });
+
+  // WHY THIS TEST EXISTS. `readAccountVisibilityRow` re-implements the
+  // visibility rule off raw fields instead of importing `isVisibleAccount`,
+  // and that is deliberate: check 7 asks whether a THIRD flag belongs in that
+  // rule, so it must not inherit the rule's current answer. The cost is a
+  // silent coupling — grow `isVisibleAccount` a term and `invisible` quietly
+  // starts meaning something else, which changes what 'independent' asserts.
+  //
+  // So the divergence is pinned rather than prevented: the two must agree over
+  // every combination of the flags they both know about, AND over
+  // `dashboard_active`, which only one of them knows about. If
+  // `isVisibleAccount` ever starts consulting `dashboard_active`, the rows
+  // where it is `false` stop agreeing and this fails — which is the moment to
+  // re-read the comment on the field and re-run the probe.
+  const combos = [false, true].flatMap((hidden) =>
+    [false, true].flatMap((deleted) =>
+      [false, true].map((dashboardActive) => ({ hidden, deleted, dashboardActive }))
+    )
+  );
+
+  test.each(combos)(
+    'hidden=$hidden deleted=$deleted dashboard_active=$dashboardActive',
+    ({ hidden, deleted, dashboardActive }) => {
+      const row = readAccountVisibilityRow(
+        new Map([
+          ['user_hidden', flag(hidden)],
+          ['user_deleted', flag(deleted)],
+          ['dashboard_active', flag(dashboardActive)],
+        ])
+      );
+      const account: Account = {
+        account_id: 'acc_7Kd2mQxZ1vBnR4pLcS9t',
+        current_balance: 100,
+        user_hidden: hidden,
+        user_deleted: deleted,
+        dashboard_active: dashboardActive,
+      };
+
+      expect(row.invisible).toBe(!isVisibleAccount(account));
+    }
+  );
 });

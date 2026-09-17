@@ -87,10 +87,16 @@ export const AccountSchema = z
      * the field.
      *
      * So it stays decoded and deliberately unfiltered, and the claim is not
-     * left as prose: `scripts/smoke/cache.ts` re-checks the independence above
-     * on whatever real cache it runs, and the assumption is filed as
+     * left as prose: `scripts/smoke/cache.ts` check 7 re-checks it on whatever
+     * real cache it runs, and the assumption is filed as
      * `FirestoreAccount.dashboard_active:notVisibility` in
      * `src/conformance/ledger.ts`.
+     *
+     * What is re-checked is the INDEPENDENCE — that some account with the flag
+     * `false` is neither hidden nor deleted — because that is what the code
+     * decision rests on. The type correlation is the softer half: a one-time
+     * observation over 21 accounts on one cache, not re-measured, and not
+     * something to cite as though it were.
      */
     dashboard_active: z.boolean().optional(),
     savings_active: z.boolean().optional(),

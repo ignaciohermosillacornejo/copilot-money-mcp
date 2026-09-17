@@ -126,9 +126,23 @@ export function nonEmptyRowsUnder(
  * with a different field vocabulary (`hidden`, not `user_hidden`) — the
  * ambiguity `docs/firestore-collections.md` warns about, and the reason this
  * is a named predicate rather than an inline `endsWith`.
+ *
+ * The exclusion is `includes('users/')`, not `startsWith`, to match the
+ * decoder's own routing verbatim (`decodeAllCollections` in
+ * `src/core/decoder.ts`, and `decodeUserAccounts` beside it). Real paths are
+ * top-level today, so the two spellings agree — but this check's whole value
+ * is that its row set is the one `processAccount` sees, and the permissive
+ * spelling is the one that would quietly admit rows whose visibility
+ * vocabulary this file cannot read.
+ *
+ * NOT the same definition check 1 uses: that one measures accounts as
+ * `rawRows('accounts')`, root-anchored to the top-level collection, while this
+ * admits every pattern whose leaf is `accounts`. Deliberate — check 1 compares a decoder's
+ * output against the collection it names, this one wants every document the
+ * account processor would route. Left asymmetric rather than unified.
  */
 export function isAccountDocumentPattern(pattern: string): boolean {
-  if (pattern.startsWith('users/')) return false;
+  if (pattern.includes('users/')) return false;
   return pattern === 'accounts' || pattern.endsWith('/accounts');
 }
 
@@ -184,14 +198,24 @@ export function readAccountVisibilityRow(
  *                          there is nothing to distinguish. Reported rather
  *                          than folded into `indistinguishable`, where it
  *                          would pass vacuously (#596).
- * - `absent`             — no account document carries the field. Copilot may
- *                          have retired it.
+ * - `absent`             — account documents exist and none carries the field.
+ *                          Copilot may have retired it.
+ * - `no-account-documents`
+ *                        — nothing was measured at all. Split out from
+ *                          `absent` because they support opposite conclusions
+ *                          ("the field is gone" vs "the check stopped seeing
+ *                          accounts", e.g. a collection path that moved), and
+ *                          because a detector that quietly stops measuring is
+ *                          the vacuity of `no-negatives` one level up: the
+ *                          empty-`negatives` set is guarded, so guard the
+ *                          empty-`rows` set too.
  */
 export type DashboardActiveEvidence =
   | 'independent'
   | 'indistinguishable'
   | 'no-negatives'
-  | 'absent';
+  | 'absent'
+  | 'no-account-documents';
 
 /**
  * The three counts the verdict turns on, and the only numbers the check logs.
@@ -223,7 +247,8 @@ export function countDashboardActive(
 export function classifyDashboardActive(
   rows: readonly AccountVisibilityRow[]
 ): DashboardActiveEvidence {
-  const { carrying, negatives, visibleNegatives } = countDashboardActive(rows);
+  const { accounts, carrying, negatives, visibleNegatives } = countDashboardActive(rows);
+  if (accounts === 0) return 'no-account-documents';
   if (carrying === 0) return 'absent';
   if (negatives === 0) return 'no-negatives';
   return visibleNegatives > 0 ? 'independent' : 'indistinguishable';
@@ -611,6 +636,16 @@ async function main(): Promise<void> {
         `${counts} — no account document carries the field; Copilot may have retired it`
       );
       break;
+    case 'no-account-documents':
+      record(
+        'dashboard_active is not visibility',
+        'WARN',
+        `no account documents were collected at all — the check is measuring nothing. ` +
+          `Zero accounts on a real cache is itself surprising, so suspect a moved ` +
+          `collection path over an empty cache, and compare isAccountDocumentPattern ` +
+          `against the decoder's routing`
+      );
+      break;
   }
 
   // ---------------------------------------------------------------------
@@ -652,11 +687,15 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------
   const failed = results.filter((r) => r.status === 'FAIL');
   const warned = results.filter((r) => r.status === 'WARN');
+  // Skips are in the tally on purpose: a check that has stopped measuring
+  // anything shows up as one fewer pass and nothing else, which reads exactly
+  // like a check that was never there.
+  const skipped = results.filter((r) => r.status === 'SKIP');
 
   console.error('');
   console.error(
     `[cache-smoke] ${results.filter((r) => r.status === 'PASS').length} pass, ` +
-      `${warned.length} warn, ${failed.length} fail`
+      `${warned.length} warn, ${skipped.length} skip, ${failed.length} fail`
   );
 
   if (failed.length > 0) {

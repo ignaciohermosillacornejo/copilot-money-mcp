@@ -152,7 +152,7 @@ record near-misses.
 | #85 | [Sign convention "fixed" backwards — tests rewritten to encode the wrong convention, then flipped again](85-sign-convention-double-inversion.md) | `dogfooding` | 2026-01-17 |
 | #355 | [total_liabilities came back 0 — lowercase literals compared against uppercase server enums](355-liability-enum-case-mismatch.md) | `audit-sweep` | 2026-05-04 |
 | #622 | [get_investment_prices returned rows that named no security, mislabelled their type, and silently dropped 91% of documents](622-investment-prices-nested-layout.md) | `incidental` | 2026-08-05 |
-| #624 | [Cache-mode get_accounts hides nothing — include_hidden filters against an extinct collection while the real flag is decoded and ignored](624-hidden-accounts-not-filtered.md) ⚠️ **open** | `audit-sweep` | 2026-08-05 |
+| #624 | [Cache-mode get_accounts hides nothing — include_hidden filters against an extinct collection while the real flag is decoded and ignored](624-hidden-accounts-not-filtered.md) | `audit-sweep` | 2026-08-05 |
 
 **`heuristic-decode-bleed`** — 2
 
