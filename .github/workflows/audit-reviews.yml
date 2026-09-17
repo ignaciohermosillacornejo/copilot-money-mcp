@@ -224,6 +224,19 @@ jobs:
           # the guard's whole job is to turn malformed audit output into the
           # explicit ::error:: above, with the file printed, rather than a
           # stack-trace-shaped failure two steps later.
+          #
+          # This is deliberately the ONE reader that still lets a bad row cost
+          # the batch, and it is not made redundant by the two filters below
+          # being forgiving: a `null` element is one they would both survive
+          # (escalate, and render as "unspecified"), and this rejects it first,
+          # so no issue is filed for the well-formed findings alongside it.
+          # Chosen rather than overlooked. `unaddressed` is a contract the audit
+          # step is asked to produce, and output that violates it is a broken
+          # audit rather than a finding — failing loudly with the file printed
+          # beats filing a partial batch that reads as the whole one. The loss
+          # is recoverable, which is what makes it the right trade: the
+          # `audited` label is gated on `success()`, so the run stays retryable
+          # via workflow_dispatch. Do not relax this to match the filters below.
           if ! jq -e '.unaddressed | type == "array" and all(type == "object")' \
             audit-result.json >/dev/null 2>&1; then
             echo "::error::audit-result.json is missing 'unaddressed', or it is not an array of objects."
