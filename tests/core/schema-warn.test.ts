@@ -17,6 +17,7 @@ import {
   __resetWarnedKeys,
   getDecodeStats,
   resetDecodeStats,
+  FIRESTORE_BACKEND_MARKERS,
 } from '../../src/core/schema-warn.js';
 import type { FirestoreValue } from '../../src/core/protobuf-parser.js';
 
@@ -281,6 +282,71 @@ describe('warnUnreadFields', () => {
       { collection: 'transactions', docId: 'doc2' }
     );
     expect(warnSpy).toHaveBeenCalledTimes(2);
+  });
+
+  // -------------------------------------------------------------------------
+  // Backend markers (#718, closing #611). Copilot's server stamps
+  // `_migration_backfill` / `_replicated_at` on documents across the database,
+  // and which collections carry them changes between snapshots — so they are
+  // ignored centrally instead of in eleven `ignored:` lists.
+  //
+  // The exemption is a silencer, which makes it the kind of guard worth
+  // mutation-testing from both sides: it must quiet those two names ANYWHERE,
+  // and it must not quiet anything else. Deleting a member of
+  // FIRESTORE_BACKEND_MARKERS fails the first two tests; widening the set
+  // (e.g. to every `_`-prefixed key) fails the third.
+  // -------------------------------------------------------------------------
+  test('backend markers are silent on a collection that lists neither', () => {
+    warnUnreadFields(
+      fakeFields(['_migration_backfill', '_replicated_at']),
+      { consumed: [], ignored: [] },
+      { collection: 'budgets', docId: 'doc1' }
+    );
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  test('a backend marker is silent on EVERY collection, not a listed subset', () => {
+    // The split across collections is a snapshot of which documents a backend
+    // job happened to touch — measured as 11/7 on 2026-09-16 against 10/8 two
+    // days earlier — so a per-collection allow-list would go stale by itself.
+    for (const collection of ['transactions', 'accounts', 'securities', 'tags', 'user_profile']) {
+      warnUnreadFields(
+        fakeFields(['_replicated_at']),
+        { consumed: [], ignored: [] },
+        { collection, docId: 'doc1' }
+      );
+    }
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  test('a NEW underscore-prefixed field still warns — the exemption is two names, not a prefix', () => {
+    warnUnreadFields(
+      fakeFields(['_shard_key']),
+      { consumed: [], ignored: [] },
+      { collection: 'transactions', docId: 'doc1' }
+    );
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0][0] as string).toContain('field=_shard_key');
+  });
+
+  test('the marker set is exactly the two names, pinned verbatim', () => {
+    // Membership is the whole contract: a third entry silences a third field
+    // everywhere, which is a decision that belongs in a PR rather than in a
+    // one-line edit nothing notices.
+    expect([...FIRESTORE_BACKEND_MARKERS]).toEqual(['_migration_backfill', '_replicated_at']);
+  });
+
+  test('backend markers do not count toward the unread-field stats either', () => {
+    // The stderr warn and the per-collection counter are separate paths in
+    // warnUnreadFields; silencing one while the other still counts would make
+    // `bun run smoke:cache` report warnings it never printed.
+    resetDecodeStats();
+    warnUnreadFields(
+      fakeFields(['_migration_backfill', 'genuinely_new']),
+      { consumed: [], ignored: [] },
+      { collection: 'categories', docId: 'doc1' }
+    );
+    expect(getDecodeStats().categories?.unread_field_warnings).toBe(1);
   });
 });
 
