@@ -724,10 +724,41 @@ export async function decodeCategories(dbPath: string): Promise<Category[]> {
 }
 
 /**
- * User account customization data.
+ * User account customization data — EXTINCT CANDIDATE, kept on purpose (#666).
+ *
+ * `users/{uid}/accounts` was where Copilot once stored per-account display
+ * overrides. It no longer is: the customizations live on the account document
+ * itself, and both things that read this collection have been moved there —
+ * the hidden-account filter in #624 (`Account.user_hidden`) and the account
+ * name map in #660 (`Account.nickname`). Nothing under `src/` consumes this
+ * decoder today; the remaining callers are `scripts/profile-database.ts` and
+ * two test files.
+ *
+ * WHY IT IS STILL HERE. One cache cannot prove a collection is extinct — the
+ * sampling-bias trap #622 documented, and the caveat #624 attached to exactly
+ * this deletion. A scan of a real cache on 2026-09-16 (62,639 documents, 35
+ * collection patterns) found ZERO `users/<uid>/accounts` documents, which is one
+ * data point, not a proof: an older account, a different plan, or a
+ * migration-in-progress user could still have them, and deleting the decoder
+ * would turn "data we ignore" into "data we cannot see".
+ *
+ * WHAT WOULD SETTLE IT. `scripts/smoke/cache.ts` reports the observed document
+ * count for this collection on every run, on whatever machine runs it, so the
+ * evidence accumulates instead of being re-derived. Remove the decoder, the
+ * loader, the fixtures and this interface once several independent caches have
+ * reported zero — and NOT before, because the fixtures in
+ * `tests/core/decoder-coverage.test.ts` are the only thing keeping the shape
+ * described here recoverable.
  */
 export interface UserAccountCustomization {
   account_id: string;
+  /**
+   * The user's display override for the account.
+   *
+   * Historically "the name that beats the bank's label" — that job now belongs
+   * to `Account.nickname`, read through `preferredAccountName` (#660). Nothing
+   * reads this one.
+   */
   name?: string;
   user_id?: string;
   hidden?: boolean;
@@ -736,6 +767,9 @@ export interface UserAccountCustomization {
 
 /**
  * Decode user-defined account customizations from LevelDB database.
+ *
+ * EXTINCT CANDIDATE — see {@link UserAccountCustomization} for the evidence,
+ * its limits, and what would justify deleting this. No `src/` caller.
  */
 export async function decodeUserAccounts(dbPath: string): Promise<UserAccountCustomization[]> {
   const userAccounts: UserAccountCustomization[] = [];

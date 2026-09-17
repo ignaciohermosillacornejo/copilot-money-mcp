@@ -100,6 +100,110 @@ export function findExtinctDependencies(
 }
 
 /**
+ * Non-empty documents under a normalized collection root.
+ *
+ * Shared by the decode-loss check and the extinct-candidate report so the two
+ * cannot disagree about what "has documents" means. Fieldless Firestore parent
+ * pointers are excluded for the reason spelled out on
+ * {@link findExtinctDependencies}: they exist for any path with
+ * subcollections and would make an extinct collection look alive.
+ */
+export function nonEmptyRowsUnder(
+  root: string,
+  raw: ReadonlyMap<string, { total: number; empty: number }>
+): number {
+  let n = 0;
+  for (const [pattern, counts] of raw) {
+    if (pattern === root || pattern.startsWith(`${root}/`)) n += counts.total - counts.empty;
+  }
+  return n;
+}
+
+/**
+ * Is this normalized pattern the ACCOUNT-document collection?
+ *
+ * `users/<uid>/accounts` also ends in `/accounts` and is a different collection
+ * with a different field vocabulary (`hidden`, not `user_hidden`) — the
+ * ambiguity `docs/firestore-collections.md` warns about, and the reason this
+ * is a named predicate rather than an inline `endsWith`.
+ */
+export function isAccountDocumentPattern(pattern: string): boolean {
+  if (pattern.startsWith('users/')) return false;
+  return pattern === 'accounts' || pattern.endsWith('/accounts');
+}
+
+/**
+ * One account document reduced to the two facts check 7 needs (#666).
+ *
+ * `invisible` is the cache-document visibility rule (`isVisibleAccount`
+ * inverted) read straight off the raw fields, deliberately NOT by importing
+ * the predicate: the check exists to test whether a THIRD flag belongs in that
+ * rule, so it must not inherit the rule's current definition.
+ */
+export interface AccountVisibilityRow {
+  dashboardActive?: boolean;
+  invisible: boolean;
+}
+
+export function readAccountVisibilityRow(
+  fields: Map<string, FirestoreValue>
+): AccountVisibilityRow {
+  const bool = (key: string): boolean | undefined => {
+    const value = fields.get(key);
+    return value?.type === 'boolean' ? value.value : undefined;
+  };
+  return {
+    dashboardActive: bool('dashboard_active'),
+    invisible: bool('user_hidden') === true || bool('user_deleted') === true,
+  };
+}
+
+/**
+ * Does this cache still show `dashboard_active` to be independent of
+ * visibility? (#666)
+ *
+ * #624 filed `dashboard_active` as the third of three account customizations
+ * Copilot migrated onto the account document, next to `nickname` and
+ * `user_hidden`, and #666 proposed adding it to the default `get_accounts`
+ * filter on that reading. A 2026-09-16 measurement said otherwise: every
+ * account with `dashboard_active: false` was an investment account, most of
+ * them carried no `user_hidden` at all, and a live `Accounts` round-trip
+ * reported those same accounts as neither hidden nor closed. So the flag is
+ * decoded and deliberately NOT filtered on.
+ *
+ * That decision rests on a property of real data, which is the kind of claim
+ * that goes quietly false. This is the re-check:
+ *
+ * - `independent`        — at least one `dashboard_active: false` account is
+ *                          visible. The evidence still holds.
+ * - `indistinguishable`  — there are `false` accounts and EVERY one of them is
+ *                          hidden or deleted. On this cache the flag cannot be
+ *                          told apart from "invisible", which is what #666
+ *                          assumed; worth re-deciding, not an error.
+ * - `no-negatives`       — the field is present but nothing is `false`, so
+ *                          there is nothing to distinguish. Reported rather
+ *                          than folded into `indistinguishable`, where it
+ *                          would pass vacuously (#596).
+ * - `absent`             — no account document carries the field. Copilot may
+ *                          have retired it.
+ */
+export type DashboardActiveEvidence =
+  | 'independent'
+  | 'indistinguishable'
+  | 'no-negatives'
+  | 'absent';
+
+export function classifyDashboardActive(
+  rows: readonly AccountVisibilityRow[]
+): DashboardActiveEvidence {
+  const carrying = rows.filter((row) => row.dashboardActive !== undefined);
+  if (carrying.length === 0) return 'absent';
+  const negatives = carrying.filter((row) => row.dashboardActive === false);
+  if (negatives.length === 0) return 'no-negatives';
+  return negatives.some((row) => !row.invisible) ? 'independent' : 'indistinguishable';
+}
+
+/**
  * How many references resolve against a target id set.
  *
  * Returns counts as well as the rate so callers never have to divide and
@@ -186,6 +290,9 @@ async function main(): Promise<void> {
   const raw = new Map<string, { total: number; empty: number }>();
   // `${collection}:${path}` → how many documents carry a non-finite value there.
   const nonFinite = new Map<string, number>();
+  // Account documents reduced to two booleans for check 7. PII-safe by
+  // construction: nothing but flags is kept, and only counts are reported.
+  const accountRows: AccountVisibilityRow[] = [];
   let scanned = 0;
   const started = Date.now();
 
@@ -206,6 +313,10 @@ async function main(): Promise<void> {
       const key = `${pattern}:${leafPath}`;
       nonFinite.set(key, (nonFinite.get(key) ?? 0) + 1);
     }
+
+    if (doc.fields.size > 0 && isAccountDocumentPattern(pattern)) {
+      accountRows.push(readAccountVisibilityRow(doc.fields));
+    }
   }
 
   const elapsed = ((Date.now() - started) / 1000).toFixed(1);
@@ -216,13 +327,7 @@ async function main(): Promise<void> {
   );
 
   /** Non-empty raw documents under a collection root. */
-  function rawRows(root: string): number {
-    let n = 0;
-    for (const [pattern, counts] of raw) {
-      if (pattern === root || pattern.startsWith(`${root}/`)) n += counts.total - counts.empty;
-    }
-    return n;
-  }
+  const rawRows = (root: string): number => nonEmptyRowsUnder(root, raw);
 
   const all = await decodeAllCollections(dbPath);
 
@@ -299,7 +404,9 @@ async function main(): Promise<void> {
   // resolved by moving the two things that read it — the hidden-account filter
   // and the account name map — onto the account documents, where Copilot now
   // puts those customizations. The collection is still decoded, so the data is
-  // there if it ever comes back, but no behaviour depends on it.
+  // there if it ever comes back, but no behaviour depends on it. It is not
+  // unwatched: check 8 below reports its document count as an extinct
+  // CANDIDATE, which is the question that replaced this one (#666).
   const DEPENDED_ON: string[] = [];
   const extinct = findExtinctDependencies(DEPENDED_ON, raw);
 
@@ -429,6 +536,91 @@ async function main(): Promise<void> {
     );
   } else {
     record('non-finite values', 'PASS', 'no NaN/±Infinity numbers anywhere in the cache');
+  }
+
+  // ---------------------------------------------------------------------
+  // Check 7 — `dashboard_active` is not a visibility flag (#666).
+  //
+  // #624 recorded three account customizations Copilot migrated onto the
+  // account document. Two of them had a consumer to restore (`user_hidden`
+  // in #624, `nickname` in #660); the third was assumed to be one and never
+  // was. Measurement, not symmetry, settled it — and measurement is the kind
+  // of evidence that expires, so this re-runs it. See
+  // `classifyDashboardActive` for the four outcomes and what each means.
+  // ---------------------------------------------------------------------
+  const carrying = accountRows.filter((row) => row.dashboardActive !== undefined);
+  const negatives = carrying.filter((row) => row.dashboardActive === false);
+  const visibleNegatives = negatives.filter((row) => !row.invisible);
+  const counts =
+    `${accountRows.length} account document(s), ${carrying.length} carrying the field, ` +
+    `${negatives.length} false, ${visibleNegatives.length} of those visible`;
+
+  switch (classifyDashboardActive(accountRows)) {
+    case 'independent':
+      record(
+        'dashboard_active is not visibility',
+        'PASS',
+        `${counts} — a false flag on a visible account, so the flag is still independent ` +
+          `of user_hidden/user_deleted and stays out of isVisibleAccount`
+      );
+      break;
+    case 'indistinguishable':
+      record(
+        'dashboard_active is not visibility',
+        'WARN',
+        `${counts} — every false flag is on a hidden/deleted account, so this cache cannot ` +
+          `tell the flag apart from invisibility (the #666 reading). Re-probe before ` +
+          `trusting the note on Account.dashboard_active`
+      );
+      break;
+    case 'no-negatives':
+      record(
+        'dashboard_active is not visibility',
+        'SKIP',
+        `${counts} — nothing is false, so this cache distinguishes nothing either way`
+      );
+      break;
+    case 'absent':
+      record(
+        'dashboard_active is not visibility',
+        'SKIP',
+        `${counts} — no account document carries the field; Copilot may have retired it`
+      );
+      break;
+  }
+
+  // ---------------------------------------------------------------------
+  // Check 8 — extinct candidate: users/<uid>/accounts (#624, #666).
+  //
+  // The inverse of check 3, and deliberately not part of it: check 3 fails
+  // when code DEPENDS on an empty collection. Nothing depends on this one any
+  // more — #624 moved the hidden filter and #660 moved the name map onto the
+  // account documents — so the question is not "is a filter a no-op" but "may
+  // the decoder, the model and the fixtures be deleted yet".
+  //
+  // One cache cannot answer that (#622's sampling-bias trap, which #624
+  // attached to exactly this deletion). What this check does is make every
+  // run on every machine a recorded data point, so the evidence accumulates
+  // instead of being re-derived by the next person who notices the dead code.
+  // ---------------------------------------------------------------------
+  const EXTINCT_CANDIDATES = ['users/*/accounts'] as const;
+  for (const pattern of EXTINCT_CANDIDATES) {
+    const rows = nonEmptyRowsUnder(pattern, raw);
+    if (rows === 0) {
+      record(
+        `extinct candidate: ${pattern}`,
+        'PASS',
+        `zero documents on this cache — one more data point for deleting the decoder, ` +
+          `the model and the fixtures (#666). Deletion still waits on independent caches`
+      );
+    } else {
+      record(
+        `extinct candidate: ${pattern}`,
+        'WARN',
+        `${rows} document(s) — NOT extinct on this cache, and nothing in src/ reads them. ` +
+          `Do not delete the path; re-open #666 with this cache as the counter-example`
+      );
+    }
   }
 
   // ---------------------------------------------------------------------

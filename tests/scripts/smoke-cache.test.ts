@@ -13,7 +13,12 @@ import {
   joinStats,
   findExtinctDependencies,
   nonFiniteLeafPaths,
+  nonEmptyRowsUnder,
+  isAccountDocumentPattern,
+  readAccountVisibilityRow,
+  classifyDashboardActive,
 } from '../../scripts/smoke/cache.js';
+import type { AccountVisibilityRow } from '../../scripts/smoke/cache.js';
 import type { FirestoreValue } from '../../src/core/protobuf-parser.js';
 
 describe('normalizeCollection', () => {
@@ -215,5 +220,138 @@ describe('nonFiniteLeafPaths', () => {
     ]);
 
     expect(nonFiniteLeafPaths(doc)).toEqual([]);
+  });
+});
+
+describe('nonEmptyRowsUnder', () => {
+  const raw = new Map([
+    ['items/*/accounts', { total: 30, empty: 9 }],
+    ['items/*/accounts/*/transactions', { total: 1000, empty: 0 }],
+    ['users/*/accounts', { total: 438, empty: 438 }],
+    ['accounts_archive', { total: 5, empty: 0 }],
+  ]);
+
+  test('sums a root and its subcollections, excluding parent pointers', () => {
+    expect(nonEmptyRowsUnder('items/*/accounts', raw)).toBe(21 + 1000);
+  });
+
+  test('reads an all-parent-pointer collection as zero rows', () => {
+    // The extinct-candidate report turns on this number, so counting the 438
+    // structural documents would report a dead collection as alive.
+    expect(nonEmptyRowsUnder('users/*/accounts', raw)).toBe(0);
+  });
+
+  test('returns zero for a collection the cache does not have', () => {
+    expect(nonEmptyRowsUnder('never/*/existed', raw)).toBe(0);
+  });
+
+  test('matches on a path SEGMENT, not a string prefix', () => {
+    // 'accounts_archive' starts with neither 'accounts' nor 'accounts/'; a
+    // bare startsWith would fold it into the accounts total.
+    expect(nonEmptyRowsUnder('accounts', raw)).toBe(0);
+  });
+});
+
+describe('isAccountDocumentPattern', () => {
+  test.each([['accounts'], ['items/*/accounts']])('accepts %s', (pattern) => {
+    expect(isAccountDocumentPattern(pattern)).toBe(true);
+  });
+
+  test('rejects the user-customization collection that shares the leaf', () => {
+    // Both end in '/accounts' and the two have different field vocabularies —
+    // 'hidden' there, 'user_hidden' here. Mixing them would feed check 7 rows
+    // whose visibility is unreadable.
+    expect(isAccountDocumentPattern('users/*/accounts')).toBe(false);
+  });
+
+  test('rejects an unrelated collection', () => {
+    expect(isAccountDocumentPattern('transactions')).toBe(false);
+  });
+});
+
+describe('readAccountVisibilityRow', () => {
+  const flag = (value: boolean): FirestoreValue => ({ type: 'boolean', value });
+
+  test('reads both flags off a raw document', () => {
+    const row = readAccountVisibilityRow(
+      new Map([
+        ['dashboard_active', flag(false)],
+        ['user_hidden', flag(true)],
+      ])
+    );
+    expect(row).toEqual({ dashboardActive: false, invisible: true });
+  });
+
+  test('a missing dashboard_active is undefined, not false', () => {
+    // The three-way distinction is the whole point: 'absent' and 'false' mean
+    // different things to classifyDashboardActive.
+    expect(readAccountVisibilityRow(new Map()).dashboardActive).toBeUndefined();
+  });
+
+  test('user_deleted alone makes a row invisible', () => {
+    expect(readAccountVisibilityRow(new Map([['user_deleted', flag(true)]])).invisible).toBe(true);
+  });
+
+  test('an account with neither flag set is visible', () => {
+    expect(
+      readAccountVisibilityRow(
+        new Map([
+          ['user_hidden', flag(false)],
+          ['user_deleted', flag(false)],
+        ])
+      ).invisible
+    ).toBe(false);
+  });
+
+  test('ignores a non-boolean value in a boolean field', () => {
+    const row = readAccountVisibilityRow(
+      new Map<string, FirestoreValue>([
+        ['dashboard_active', { type: 'null', value: null }],
+        ['user_hidden', { type: 'string', value: 'true' }],
+      ])
+    );
+    expect(row).toEqual({ dashboardActive: undefined, invisible: false });
+  });
+});
+
+describe('classifyDashboardActive', () => {
+  const row = (dashboardActive: boolean | undefined, invisible = false): AccountVisibilityRow => ({
+    dashboardActive,
+    invisible,
+  });
+
+  test('the shape measured on a real cache reads as independent', () => {
+    // A false flag on an account the user has neither hidden nor deleted is
+    // the whole evidence that this is not a visibility flag (#666).
+    expect(classifyDashboardActive([row(true), row(false), row(false, true)])).toBe('independent');
+  });
+
+  test('all-false-and-all-invisible reads as indistinguishable', () => {
+    // The #666 reading. Not a failure — this cache simply cannot tell the two
+    // apart, so the note on Account.dashboard_active needs a fresh probe.
+    expect(classifyDashboardActive([row(true), row(false, true), row(false, true)])).toBe(
+      'indistinguishable'
+    );
+  });
+
+  test('no false values reads as no-negatives, not as independence', () => {
+    // The vacuous pass (#596): with nothing false, "every false account is
+    // visible" and "every false account is hidden" are both true and neither
+    // means anything.
+    expect(classifyDashboardActive([row(true), row(true)])).toBe('no-negatives');
+  });
+
+  test('a field no document carries reads as absent', () => {
+    expect(classifyDashboardActive([row(undefined), row(undefined)])).toBe('absent');
+  });
+
+  test('no account documents at all reads as absent', () => {
+    expect(classifyDashboardActive([])).toBe('absent');
+  });
+
+  test('rows without the field never make a verdict', () => {
+    // Accounts that do not carry the flag say nothing about it; counting them
+    // as visible negatives would manufacture 'independent' out of silence.
+    expect(classifyDashboardActive([row(undefined), row(false, true)])).toBe('indistinguishable');
   });
 });

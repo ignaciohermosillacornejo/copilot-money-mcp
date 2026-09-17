@@ -81,6 +81,10 @@ export const TransactionSchema = z
     plaid_transaction_type: z.string().optional(),
     is_amazon: z.boolean().optional(),
     from_investment: z.union([z.string(), z.boolean()]).optional(),
+    /**
+     * The owning account's `dashboard_active`, carried on the transaction.
+     * Not a visibility flag — see `./account.ts` for the measurement (#666).
+     */
     account_dashboard_active: z.boolean().optional(),
     user_note: z.string().optional(),
     _origin: z.string().optional(),

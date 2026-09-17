@@ -59,6 +59,16 @@
  *                      `Securetoken.v1Token:foreignProject`. It is neither a
  *                      Copilot operation nor a query, so neither ratchet
  *                      applies; the `:<aspect>` half means the same thing.
+ *                      A SECOND exception, on the same precedent (#666): an
+ *                      assumption about a Copilot FIRESTORE CACHE document
+ *                      rather than the GraphQL wire is named
+ *                      `Firestore<Collection>.<field>:<aspect>`, e.g.
+ *                      `FirestoreAccount.dashboard_active:notVisibility`. The
+ *                      cache is a Copilot-controlled data surface this server
+ *                      reads and does not own — the same reason everything
+ *                      else is in here — and the `Firestore` prefix keeps it
+ *                      from being mistaken for the `Account` GraphQL type,
+ *                      whose fields are a different set.
  * - `response-shape` → `Mutation.<fieldName>:response` / `Query.<fieldName>:response`
  *                      for a whole operation's shape. For an assumption about
  *                      ONE FIELD's semantics rather than the operation's keys,
@@ -876,6 +886,41 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'tests/scripts/read-smoke-coverage.test.ts requires every `Query.*` surface to name a ' +
       'real generated root field after stripping `:response`, so `Query.accounts:hiddenReturned` ' +
       'fails that ratchet (verified, not assumed). Type-scoped it is.',
+  },
+  {
+    surface: 'FirestoreAccount.dashboard_active:notVisibility',
+    kind: 'response-shape',
+    oracle: null,
+    class: 'verified-once',
+    evidence:
+      'The cache account document carries `dashboard_active`, and #624 filed it as the third ' +
+      'of three account customizations Copilot migrated onto that document, beside `nickname` ' +
+      'and `user_hidden`. The other two each had a consumer to restore (#624, #660); #666 ' +
+      'proposed the symmetric move for this one — add it to the default `get_accounts` ' +
+      'visibility filter. THE ASSUMPTION RECORDED HERE IS THAT IT IS NOT A VISIBILITY FLAG, ' +
+      'so `isVisibleAccount` deliberately ignores it. ' +
+      'PROBE 2026-09-16, two independent sources. Cache cross-tab (counts only): of 21 ' +
+      'account documents all 21 carry the field, 8 are `false`, and 6 of those 8 carry no ' +
+      '`user_hidden` at all — the split tracks account TYPE, every `false` document being an ' +
+      'investment account and every `true` one not. Live round-trip the same day: the ' +
+      'Accounts query returned those same 6 with `isUserHidden: false, isUserClosed: false`. ' +
+      'Filtering on the flag would therefore have dropped every investment account from the ' +
+      'default account list. ' +
+      'CORROBORATION FROM OUR OWN WIRE: `AccountFields`, the fragment we send for an account, ' +
+      'has no counterpart field, so live mode could not implement such a filter even if the ' +
+      'reading were right — any cache-side behaviour built on it would be a cache/live ' +
+      'divergence of the #663/#683 kind, and invisible to the parity tests because only one ' +
+      'mode has the field. ' +
+      'WHY verified-once RATHER THAN gated: `scripts/smoke/cache.ts` check 7 re-measures the ' +
+      'independence on whatever real cache it runs and reports four outcomes, but it WARNS ' +
+      'rather than fails when the evidence goes away — a cache whose only `false` accounts ' +
+      'happen to be hidden is ambiguous, not wrong — and `smoke:cache` is not yet in any ' +
+      'composite or schedule. A WARN nothing runs automatically is not a gate. ' +
+      'TO GATE: wire `smoke:cache` into the scheduled drift check (blocked on the reporting ' +
+      'gap noted in package.json) and decide whether `indistinguishable` should be fatal. ' +
+      'WHAT DRIFT WOULD LOOK LIKE: Copilot repurposing the flag, at which point cache-mode ' +
+      '`get_accounts` would list accounts the app hides — #624 again, in the mode where it ' +
+      'was already found once.',
   },
   gatedQueryResponseShape('accounts'),
   // Singular Account: generated document exists but has no hand-written

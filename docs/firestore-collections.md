@@ -115,7 +115,7 @@ collection === target || collection.endsWith(`/${target}`)
 | `reference_number` | string | Reference number |
 | `ppd_id` | string | ACH PPD ID |
 | `by_order_of` | string | ACH originator |
-| `account_dashboard_active` | boolean | Dashboard visibility |
+| `account_dashboard_active` | boolean | The account's `dashboard_active` seen from the transaction. **Not** a visibility flag — see the Accounts section below. (Every measured transaction carrying it sat under an account whose own flag was `true`, so "mirrors the parent" is consistent with the data but unconfirmed — the disagreeing case does not occur, because the `false` accounts hold no transactions) |
 | `created_timestamp` | timestamp | Creation timestamp |
 | `note` | string | User-added note |
 | `tags` | string[] | User-assigned tag IDs |
@@ -153,6 +153,7 @@ collection === target || collection.endsWith(`/${target}`)
 | `item_id` | string | Parent Plaid item |
 | `user_deleted` | boolean | User has deleted this account, or it was merged into another |
 | `user_hidden` | boolean | User has hidden this account in the UI |
+| `dashboard_active` | boolean | **Not** a visibility flag despite the name — see below |
 | `holdings` | array | Investment holdings (see Cost Basis section) |
 
 **Naming:** the account's display name is your Copilot nickname when you have
@@ -169,6 +170,18 @@ independent flags — an account is visible only when neither is `true`
 surface did not. The GraphQL wire form spells the same rule
 `isUserClosed` / `isUserHidden` (`isVisibleAccountNode`).
 
+**`dashboard_active` is not part of that rule.** It reads like a third
+visibility flag and [#624](bugs/624-hidden-accounts-not-filtered.md) listed it
+as one, which is why #666 proposed adding it to the filter. Measured against a
+real cache and a live `Accounts` round-trip on 2026-09-16, it tracks account
+TYPE rather than user intent: every account carrying it as `false` was an
+investment account, most of them had no `user_hidden` at all, and the server
+reported those same accounts as neither hidden nor closed. Filtering on it
+would hide every investment account. It has no counterpart in `AccountFields`,
+the fragment the GraphQL client requests, so live mode could not mirror such a
+filter either. The flag is decoded and deliberately unfiltered; `scripts/smoke/cache.ts`
+check 7 re-measures the independence on whatever cache it runs.
+
 **App-visible data from this collection:**
 - Balance chart uses `balance_history` subcollection (separate)
 - Account balance change % shown in list view
@@ -182,6 +195,13 @@ surface did not. The GraphQL wire form spells the same rule
 **Path:** `users/{user_id}/accounts/{account_id}`
 
 User overrides for account display. Must be checked BEFORE main `accounts` since both end with `/accounts`.
+
+> **EXTINCT CANDIDATE.** Copilot no longer populates this collection: the overrides moved
+> onto the account document itself, where `nickname` replaced `name` ([#660](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/660))
+> and `user_hidden` replaced `hidden` ([#624](bugs/624-hidden-accounts-not-filtered.md)).
+> Nothing in `src/` reads it; the decoder is kept because one cache cannot prove a
+> collection extinct (#622's sampling-bias trap), and `scripts/smoke/cache.ts` check 8
+> reports its document count on every run so the evidence accumulates (#666).
 
 | Field | Type | Description |
 |---|---|---|

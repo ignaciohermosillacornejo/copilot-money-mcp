@@ -65,6 +65,33 @@ export const AccountSchema = z
 
     // Flags
     historical_update: z.boolean().optional(),
+    /**
+     * NOT a visibility flag — despite the name, and despite #624 listing it
+     * alongside `nickname` and `user_hidden` as the third "account
+     * customization" Copilot migrated onto the account document (#666).
+     *
+     * MEASURED 2026-09-16 against a real cache (counts only): of 21 account
+     * documents, 8 carry `dashboard_active: false` and 13 carry `true`, and
+     * the split is exactly account TYPE — every `false` document is an
+     * investment account, every `true` one is not. It is not visibility: 6 of
+     * the 8 `false` documents carry no `user_hidden` at all, and a live
+     * `Accounts` round-trip the same day returned all 6 with
+     * `isUserHidden: false, isUserClosed: false`. Filtering the default
+     * `get_accounts` on it — the change #666 floated — would have dropped
+     * every investment account from the account list.
+     *
+     * It is also absent from `AccountFields`, the fragment Copilot's own
+     * client requests for an account, so live mode has no counterpart: any
+     * cache-side behaviour built on it would be a cache/live divergence of the
+     * #663/#683 kind, invisible to the parity tests because only one mode has
+     * the field.
+     *
+     * So it stays decoded and deliberately unfiltered, and the claim is not
+     * left as prose: `scripts/smoke/cache.ts` re-checks the independence above
+     * on whatever real cache it runs, and the assumption is filed as
+     * `FirestoreAccount.dashboard_active:notVisibility` in
+     * `src/conformance/ledger.ts`.
+     */
     dashboard_active: z.boolean().optional(),
     savings_active: z.boolean().optional(),
     provider_deleted: z.boolean().optional(),
@@ -129,7 +156,15 @@ export type Account = z.infer<typeof AccountSchema>;
  * had the identical split.
  */
 
-/** Cache-document form: `user_deleted` (merged/removed) or `user_hidden`. */
+/**
+ * Cache-document form: `user_deleted` (merged/removed) or `user_hidden`.
+ *
+ * `dashboard_active` is deliberately NOT a third term. It reads like one and
+ * #624 named it one; the measurement recorded on its declaration above shows
+ * it tracks account type, and the accounts it is `false` for are reported by
+ * the server as neither hidden nor closed. Adding it here would hide every
+ * investment account (#666).
+ */
 export function isVisibleAccount(account: Pick<Account, 'user_deleted' | 'user_hidden'>): boolean {
   return account.user_deleted !== true && account.user_hidden !== true;
 }
