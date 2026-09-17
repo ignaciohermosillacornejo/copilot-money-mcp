@@ -93,6 +93,18 @@ describe('audit issue body renderer', () => {
     expect(render([{ ...FULL, severity: false }])).toContain('### UNSPECIFIED: a summary');
   });
 
+  test('an unrecognised severity renders as itself, string or not', () => {
+    // The argument for NOT marking a non-string severity as unclassifiable,
+    // as an assertion rather than as prose in the filter. The gate cannot
+    // classify either of these rows and escalates both; the heading shows what
+    // the audit reported in both cases. Marking one and not the other would
+    // teach a reader that an unmarked heading was classified — and the first
+    // row here, a severity value someone adds upstream, is the one that would
+    // stay unmarked.
+    expect(render([{ ...FULL, severity: 'critical' }])).toContain('### CRITICAL: a summary');
+    expect(render([{ ...FULL, severity: 3 }])).toContain('### 3: a summary');
+  });
+
   test('every finding in a batch is rendered', () => {
     // The workflow's "nothing is dropped either way" claim, as an assertion
     // over a mixed batch rather than as prose next to the threshold.

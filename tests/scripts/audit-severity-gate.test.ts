@@ -30,6 +30,23 @@ function escalating(threshold: string, findings: unknown[]): number {
   return Number(out.trim());
 }
 
+/**
+ * The same gate with `$t` bound as raw JSON rather than as a string.
+ *
+ * `--arg` always yields a string, so the non-string threshold cases are
+ * unreachable through `escalating()`. This is how the two plausible future
+ * edits would bind it — `--argjson`, or `$ENV.AUDIT_ISSUE_THRESHOLD`, which is
+ * `null` when the variable is unset — and the guard against them would
+ * otherwise be a guard nothing runs.
+ */
+function escalatingRaw(thresholdJson: string, findings: unknown[]): number {
+  const out = execFileSync('jq', ['--argjson', 't', thresholdJson, '-f', GATE], {
+    input: JSON.stringify({ unaddressed: findings }),
+    encoding: 'utf-8',
+  });
+  return Number(out.trim());
+}
+
 describe('audit severity gate', () => {
   test('guards the gate: the filter file the workflow reads actually exists', () => {
     // If this path moves, every assertion below would silently test nothing —
@@ -91,6 +108,14 @@ describe('audit severity gate', () => {
     // A typo in AUDIT_ISSUE_THRESHOLD must not disable issue creation. The
     // wrong direction here is the dangerous one: it would be invisible.
     expect(escalating('mediumm', [{ severity: 'low' }, { severity: 'low' }])).toBe(2);
+  });
+
+  test('a NON-STRING threshold escalates instead of crashing the filter', () => {
+    // Same direction as an unrecognised threshold, and for the same reason: a
+    // gate that cannot classify must not be why a finding disappears. Both
+    // rows throw out of `escalatingRaw` without the `// "" | tostring`.
+    expect(escalatingRaw('2', [{ severity: 'low' }])).toBe(1);
+    expect(escalatingRaw('null', [{ severity: 'low' }])).toBe(1);
   });
 
   test('threshold "low" restores the previous file-everything behaviour', () => {

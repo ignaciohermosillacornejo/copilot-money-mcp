@@ -19,6 +19,18 @@
 # also the direction that keeps the two filters agreeing: the gate counts such a
 # finding as escalating, so the issue it opens has to be able to print it.
 #
+# The heading shows the severity AS REPORTED, and a non-string one is not
+# marked as unclassifiable. Reviewed and declined once, so the next round reads
+# the reason rather than re-deriving it: the gate treats an unrecognised STRING
+# ("critical") as unclassifiable too, and that renders plainly as `### CRITICAL:`.
+# Marking only the non-string arm would put a signal on one of the two
+# unclassifiable shapes, which teaches a reader that an unmarked heading was
+# classified — and the heading most likely to appear, the new severity value
+# someone adds upstream, is the unmarked one. The alternative that would be
+# consistent is this filter carrying its own copy of the gate's rank table,
+# which is the duplication the gate was extracted to avoid. The severity gate,
+# not the heading, is what decides escalation.
+#
 # The remaining fields need no guard, and the difference is not stylistic:
 # interpolation renders `null` as the text "null" rather than throwing, so a
 # missing `.file` costs one wrong-looking line instead of the whole report.
