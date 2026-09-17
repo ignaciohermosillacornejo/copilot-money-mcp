@@ -43,13 +43,19 @@ on:
 
 jobs:
   auto-merge:
-    # Cheap gate on the event payload so a non-owner's approval never starts a
-    # runner. The dispatch path has no review payload to gate on, so it is
+    # Cheap gate on the event payload so a non-approver's approval never starts
+    # a runner. The dispatch path has no review payload to gate on, so it is
     # admitted here and verified by the step below — which runs on both paths.
+    #
+    # The login is a LITERAL here, not a reference to `env.APPROVERS` below: a
+    # job-level `if:` can read `github`, `needs`, `vars` and `inputs`, and not
+    # `env`. Two copies of one fact is the thing that drifts, so
+    # `scripts/check-workflows.ts` (invariant 3) fails the build if this literal
+    # and the declaration ever disagree, in either direction.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.review.state == 'approved' &&
-      github.event.review.user.login == github.repository_owner)
+      github.event.review.user.login == 'ignaciohermosillacornejo')
     runs-on: ubuntu-latest
     # Observed 4s. Two shell steps, no checkout and no install — there is
     # nothing in here that can legitimately take minutes, so this is the floor.
@@ -61,7 +67,14 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
-      OWNER: ${{ github.repository_owner }}
+      # Whose approval enables auto-merge. DECLARED, not derived: this workflow
+      # used to read `github.repository_owner`, which spells this same login
+      # only because the repository is personal. Transfer it to an organisation
+      # and that expression yields the org login — an account that reviews
+      # nothing — so every review would read NONE and nothing would ever merge
+      # (#741). A JSON array, so `jq` below and GitHub's `fromJSON()` can read
+      # the same bytes.
+      APPROVERS: '["ignaciohermosillacornejo"]'
       PR_NUMBER: ${{ github.event.inputs.pr_number || github.event.pull_request.number }}
 
     steps:
@@ -73,32 +86,35 @@ jobs:
             exit 1
           fi
 
-      - name: Verify owner approval
+      - name: Verify approval
         run: |
           set -euo pipefail
           # Authoritative on both paths: ask the API for the PR's current review
           # state rather than trusting a single review event. Reviews are listed
-          # chronologically, so the owner's last *decisive* review (APPROVED /
+          # chronologically, so an approver's last *decisive* review (APPROVED /
           # CHANGES_REQUESTED / DISMISSED — COMMENTED does not change a decision)
           # is the one that stands. A dismissed approval therefore reads as
           # not-approved, which a payload check on one submitted review cannot see.
+          #
+          # The identity comes from `$APPROVERS` — the declared list — not from
+          # who happens to own the repository (#741).
           #
           # Streamed as `.[]` and re-slurped with `jq -s` because `gh api
           # --paginate` applies `--jq` to each page separately — an aggregating
           # filter passed straight to `--jq` would emit one answer per page. Same
           # pattern as the commit-authorship step in test.yml.
           REVIEW=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews?per_page=100" --paginate --jq '.[]' \
-            | jq -s -r --arg owner "$OWNER" '
+            | jq -s -r --argjson approvers "$APPROVERS" '
                 [ .[]
-                  | select(.user.login == $owner)
+                  | select(.user.login as $login | $approvers | index($login))
                   | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED")
                 ] | last | "\(.state // "NONE") \(.commit_id // "-")"
               ')
           STATE="${REVIEW%% *}"
           APPROVED_SHA="${REVIEW##* }"
-          echo "Owner review state on PR #$PR_NUMBER: $STATE (at $APPROVED_SHA)"
+          echo "Approver review state on PR #$PR_NUMBER: $STATE (at $APPROVED_SHA)"
           if [[ "$STATE" != "APPROVED" ]]; then
-            echo "::error::PR #$PR_NUMBER does not carry a standing approval from the repository owner (state: $STATE)"
+            echo "::error::PR #$PR_NUMBER does not carry a standing approval from a declared approver (state: $STATE)"
             exit 1
           fi
 
@@ -113,10 +129,10 @@ jobs:
           # leasing the guarantee from a branch-protection setting.
           HEAD_SHA=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.head.sha')
           if [[ "$APPROVED_SHA" != "$HEAD_SHA" ]]; then
-            echo "::error::Owner approval is for $APPROVED_SHA but PR #$PR_NUMBER now heads at $HEAD_SHA — re-review the current head"
+            echo "::error::The approval is for $APPROVED_SHA but PR #$PR_NUMBER now heads at $HEAD_SHA — re-review the current head"
             exit 1
           fi
-          echo "✅ Owner approval verified, at the current head"
+          echo "✅ Approval by a declared approver verified, at the current head"
 
       - name: Enable auto-merge
         run: |

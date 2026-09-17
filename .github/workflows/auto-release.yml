@@ -10,6 +10,16 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  # Whose push to main may cut a release. All three gates below are job-level
+  # `if:`s, which have no `env` context, so each has to carry its own copy of
+  # the literal — three copies of one fact, across three jobs, where dropping
+  # one means the release half-runs. This declaration is what
+  # `scripts/check-workflows.ts` (invariant 3) compares them against, in both
+  # directions: a login gated but not declared, or declared but missing from a
+  # gate, fails the build instead of failing a release quietly (#741).
+  TRUSTED_PUBLISHERS: '["ignaciohermosillacornejo"]'
+
 jobs:
   detect-version:
     name: Detect version bump

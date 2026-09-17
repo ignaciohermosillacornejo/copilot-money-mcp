@@ -636,6 +636,303 @@ jobs:
   });
 });
 
+describe('invariant 3 — a trust gate names the people it trusts (#741)', () => {
+  /** The shape the bug had: an identity read off the account that holds the repo. */
+  test('a job `if:` comparing a login against github.repository_owner fails', async () => {
+    await withWorkflows(
+      {
+        'gate.yml': `name: Gate
+on:
+  pull_request_review:
+    types: [submitted]
+  workflow_dispatch:
+jobs:
+  merge:
+    if: github.event_name == 'workflow_dispatch' || github.event.review.user.login == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo hi
+`,
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('gate.yml');
+        expect(stderr).toContain('github.repository_owner');
+        expect(stderr).toContain('HOLDS the repo');
+      }
+    );
+  });
+
+  test('laundering it through `env:` into a shell step fails too', async () => {
+    // auto-merge.yml's actual shape before #741: the `if:` was only half of it,
+    // and a rule that read `if:` expressions alone would have passed the `jq`
+    // filter that did the real work.
+    await withWorkflows(
+      {
+        'laundered.yml': `name: Laundered
+on: push
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      OWNER: \${{ github.repository_owner }}
+    steps:
+      - run: test "$ACTOR" = "$OWNER"
+`,
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('laundered.yml');
+        expect(stderr).toContain('github.repository_owner');
+      }
+    );
+  });
+
+  test('a comment mentioning it does not trip the rule', async () => {
+    // The check parses YAML rather than scanning text, so prose about the
+    // expression — including the paragraph in auto-merge.yml explaining why it
+    // is not used — is not the expression. A file-wide grep would fail this.
+    await withWorkflows(
+      {
+        'prose.yml': `name: Prose
+on: push
+jobs:
+  build:
+    # Deliberately NOT github.repository_owner — see #741.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo hi
+`,
+      },
+      ({ code }) => {
+        expect(code).toBe(0);
+      }
+    );
+  });
+
+  test('a login literal with no declaration fails', async () => {
+    await withWorkflows(
+      {
+        'undeclared.yml': `name: Undeclared
+on: push
+jobs:
+  publish:
+    if: github.actor == 'octocat'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo hi
+`,
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('undeclared.yml');
+        expect(stderr).toContain("'octocat'");
+        expect(stderr).toContain('env.APPROVERS');
+      }
+    );
+  });
+
+  test('a gate and a declaration that disagree fail, naming the direction', async () => {
+    await withWorkflows(
+      {
+        'drift.yml': `name: Drift
+on: push
+env:
+  APPROVERS: '["octocat"]'
+jobs:
+  publish:
+    if: github.actor == 'someone-else'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo hi
+`,
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('gated but not declared: someone-else');
+        expect(stderr).toContain('declared but not gated: octocat');
+      }
+    );
+  });
+
+  test('a declared approver missing from the cheap gate fails — the silent direction', async () => {
+    // The whole reason set EQUALITY is the rule rather than membership. Adding
+    // a second maintainer to the declaration and not to the job `if:` means
+    // their approval never starts the job: no error, no run, nothing to notice.
+    await withWorkflows(
+      {
+        'half-added.yml': `name: Half added
+on: push
+env:
+  APPROVERS: '["octocat","hubot"]'
+jobs:
+  publish:
+    if: github.actor == 'octocat'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo hi
+`,
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('declared but not gated: hubot');
+      }
+    );
+  });
+
+  test('a gate that agrees with its declaration passes', async () => {
+    await withWorkflows(
+      {
+        'agrees.yml': `name: Agrees
+on: push
+env:
+  APPROVERS: '["octocat"]'
+jobs:
+  publish:
+    if: github.event.review.user.login == 'octocat'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo hi
+`,
+      },
+      ({ code, stdout }) => {
+        expect(code).toBe(0);
+        expect(stdout).toContain('1 approver gate(s)');
+      }
+    );
+  });
+
+  test('a step `if:` reading the declaration needs no literal at all', async () => {
+    // claude-review.yml's shape. A STEP `if:` can read `env`, so there is one
+    // copy and nothing to keep in agreement — the rule must not demand a
+    // literal that the file correctly does not have.
+    await withWorkflows(
+      {
+        'single-source.yml': `name: Single source
+on: push
+env:
+  APPROVERS: '["octocat"]'
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - if: contains(fromJSON(env.APPROVERS), github.event.pull_request.user.login)
+        run: echo approve
+`,
+      },
+      ({ code, stdout }) => {
+        expect(code).toBe(0);
+        expect(stdout).toContain('1 approver gate(s)');
+      }
+    );
+  });
+
+  test('a literal in a STEP `if:` is held to the declaration too', async () => {
+    // Step-level `if:` is where a login literal is least defensible — a step
+    // CAN read `env` — and also where a scan that only walked job-level `if:`
+    // would go quiet. Without this case, narrowing the walk to jobs passes the
+    // whole suite (verified: it did).
+    await withWorkflows(
+      {
+        'step-literal.yml': `name: Step literal
+on: push
+env:
+  APPROVERS: '["octocat"]'
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - if: github.event.pull_request.user.login == 'stale-maintainer'
+        run: echo approve
+`,
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('gated but not declared: stale-maintainer');
+      }
+    );
+  });
+
+  test('a declaration that is not a JSON array of logins fails', async () => {
+    await withWorkflows(
+      {
+        'bare.yml': `name: Bare
+on: push
+env:
+  APPROVERS: 'octocat'
+jobs:
+  publish:
+    if: github.actor == 'octocat'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo hi
+`,
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('must be a JSON array of logins');
+      }
+    );
+  });
+
+  test('an exclusion (`!=`) is not a declaration of trust', async () => {
+    // `github.actor != 'dependabot[bot]'` is in claude-review.yml today.
+    // Demanding that a DENIED login appear in the trust list would be exactly
+    // backwards, so `==` is the only shape this reads.
+    await withWorkflows(
+      {
+        'excludes.yml': `name: Excludes
+on: push
+jobs:
+  review:
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo hi
+`,
+      },
+      ({ code }) => {
+        expect(code).toBe(0);
+      }
+    );
+  });
+
+  test('two conflicting declarations in one workflow fail', async () => {
+    await withWorkflows(
+      {
+        'two.yml': `name: Two
+on: push
+env:
+  APPROVERS: '["octocat"]'
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      APPROVERS: '["hubot"]'
+    steps:
+      - run: echo hi
+`,
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('more than once with different values');
+      }
+    );
+  });
+});
+
 describe('the real repository', () => {
   test('every workflow satisfies both invariants', async () => {
     const { code, stdout } = await runCheck(REAL_WORKFLOW_DIR);
