@@ -29,7 +29,13 @@ import {
   type BrowserConfig,
   type TokenResult,
 } from '../../../src/core/auth/browser-token.js';
-import { FirebaseAuth, MAX_EXCHANGE_CANDIDATES } from '../../../src/core/auth/firebase-auth.js';
+import {
+  DEAD_TOKEN_CODES,
+  ENDPOINT_LEVEL_ERROR_CODES,
+  ENDPOINT_LEVEL_STATUSES,
+  FirebaseAuth,
+  MAX_EXCHANGE_CANDIDATES,
+} from '../../../src/core/auth/firebase-auth.js';
 
 /**
  * A synthetic `AMf-`-shaped string long enough to match the extractor's regex
@@ -594,4 +600,167 @@ describe('no single candidate can starve a valid one behind it (#722)', () => {
     await expect(auth.getIdToken()).rejects.toThrow('No Copilot Money session found');
     expect(attempts).toHaveLength(3);
   });
+});
+
+/**
+ * Class-level detector for `proxy-for-authority` on the auth side (#751).
+ *
+ * The cached refresh token is the one credential this module holds that a
+ * browser read cannot cheaply replace. Discarding it is a verdict — "this token
+ * is finished" — and the only signal entitled to deliver that verdict is one
+ * the endpoint made ABOUT THE TOKEN. "The request failed" is a proxy for it:
+ * true whenever the verdict is true, and also true during a rate limit, a
+ * blocked API identity, and a rotated key, none of which know anything about
+ * the token that was sent.
+ *
+ * So this does not enumerate "429 and 403". It walks the two lists the
+ * production classifier itself branches on — `ENDPOINT_LEVEL_STATUSES` and
+ * `ENDPOINT_LEVEL_ERROR_CODES` — so a signal added there tomorrow is asserted
+ * here the same day, and asserts the mirror image over `DEAD_TOKEN_CODES`:
+ * a real verdict MUST discard the token, or the fast path would retry a dead
+ * credential forever. Both directions are mutation-verified; an
+ * unconditional clear and a clear that never fires each turn one of them red.
+ */
+describe('an endpoint-level failure does not discard a known-good cached token (#751)', () => {
+  const candidate = (token: string, scoped: boolean): TokenResult => ({
+    token,
+    browser: 'Chrome',
+    scoped,
+  });
+
+  /** What the browser read finds; stands in for the user's live session. */
+  const BOOTSTRAP = syntheticToken('bootstrap');
+  /** What securetoken hands back in exchange for it — the CACHED token. */
+  const SERVER_ISSUED = syntheticToken('server-issued');
+
+  /**
+   * A successful exchange response. `expiresIn: '0'` makes the ID token
+   * useless immediately, so the very next `getIdToken()` has to refresh —
+   * which is how the fast path gets exercised at all.
+   */
+  const issued = (expiresIn: string) =>
+    Response.json({
+      id_token: ID_TOKEN,
+      refresh_token: SERVER_ISSUED,
+      expires_in: expiresIn,
+      token_type: 'Bearer',
+      user_id: 'synthetic-user',
+    });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  /**
+   * Realistic bodies for the statuses in `ENDPOINT_LEVEL_STATUSES`, with a
+   * fallback so a status added to that list still produces a row rather than
+   * silently dropping out of the matrix.
+   */
+  const BODY_FOR_STATUS: Record<number, string> = {
+    403: 'PERMISSION_DENIED',
+    429: 'RESOURCE_EXHAUSTED',
+  };
+
+  const ENDPOINT_FAILURES: [string, string, number][] = [
+    ...ENDPOINT_LEVEL_STATUSES.map((status): [string, string, number] => [
+      `HTTP ${status}`,
+      BODY_FOR_STATUS[status] ?? 'ENDPOINT_LEVEL_FAILURE',
+      status,
+    ]),
+    // The body-classified half: securetoken reports a dead API key with the
+    // same 400 a dead refresh token uses, so status alone cannot separate them.
+    ...ENDPOINT_LEVEL_ERROR_CODES.map((code): [string, string, number] => [code, code, 400]),
+    // Not derived from either list, because the predicate reaches it by a third
+    // route (`status >= 500`), and an outage is the case the whole guard is for.
+    ['HTTP 503', 'UNAVAILABLE', 503],
+    // Candidate-level, and still not a verdict that the token is FINISHED.
+    // These close the too-loose mutation of the shared predicate — dropping its
+    // `isExplainedByLoggedOut` half, so that any 400 about the token discards
+    // it. A disabled account is not fixed by scraping the browser again, and an
+    // unrecognised code is not evidence of anything; both leave the credential
+    // alone and are surfaced raw.
+    ['a disabled account', 'USER_DISABLED', 400],
+    ['an unrecognised code', 'SOME_CODE_GOOGLE_HAS_NOT_SHIPPED_YET', 400],
+  ];
+
+  test.each(ENDPOINT_FAILURES)(
+    '%s on the fast path leaves the cached token usable on the next call',
+    async (_label, message, status) => {
+      const attempts: string[] = [];
+      let extractions = 0;
+      let stage: 'bootstrap' | 'outage' | 'recovered' = 'bootstrap';
+
+      globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
+        const sent = String(options?.body ?? '');
+        if (stage === 'bootstrap') {
+          stage = 'outage';
+          attempts.push('bootstrap');
+          return Promise.resolve(issued('0'));
+        }
+        attempts.push(sent.includes(SERVER_ISSUED) ? 'fast-path' : 'cold-path');
+        if (stage === 'outage') {
+          stage = 'recovered';
+          return Promise.resolve(Response.json({ error: { message } }, { status }));
+        }
+        return Promise.resolve(issued('3600'));
+      }) as unknown as typeof fetch;
+
+      const auth = new FirebaseAuth(() => {
+        extractions++;
+        return Promise.resolve({ candidates: [candidate(BOOTSTRAP, true)], checked: ['Chrome'] });
+      });
+
+      expect(await auth.getIdToken()).toBe(ID_TOKEN);
+      await expect(auth.getIdToken()).rejects.toThrow(`Firebase token exchange failed (${status})`);
+      expect(await auth.getIdToken()).toBe(ID_TOKEN);
+
+      // The claim: the retry refreshed the SAME cached token. No second browser
+      // read — which, for a rate limit, would mean answering "slow down" with a
+      // browser-wide scrape and up to ten more exchanges against the endpoint
+      // that just said it (PRIVACY.md, "Browser Profile Storage").
+      expect(extractions).toBe(1);
+      expect(attempts).toEqual(['bootstrap', 'fast-path', 'fast-path']);
+    }
+  );
+
+  test.each([...DEAD_TOKEN_CODES])(
+    'a %s verdict on the fast path does discard the cached token',
+    async (code) => {
+      // The mirror image, and the reason the gate is a predicate rather than
+      // `never clear`: these codes ARE about the token we sent. Without the
+      // clear, the fall-through to a cold re-extract would leave a dead
+      // credential cached, and every later call would spend a request on it
+      // before doing the same cold read anyway.
+      const attempts: string[] = [];
+      let extractions = 0;
+      let bootstrapped = false;
+
+      globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
+        const sent = String(options?.body ?? '');
+        if (!bootstrapped) {
+          bootstrapped = true;
+          attempts.push('bootstrap');
+          return Promise.resolve(issued('0'));
+        }
+        attempts.push(sent.includes(SERVER_ISSUED) ? 'fast-path' : 'cold-path');
+        return Promise.resolve(Response.json({ error: { message: code } }, { status: 400 }));
+      }) as unknown as typeof fetch;
+
+      const auth = new FirebaseAuth(() => {
+        extractions++;
+        return Promise.resolve({ candidates: [candidate(BOOTSTRAP, true)], checked: ['Chrome'] });
+      });
+
+      expect(await auth.getIdToken()).toBe(ID_TOKEN);
+      // Second call: the fast path gets the verdict and falls through to a cold
+      // re-extract, which finds only the same dead session.
+      await expect(auth.getIdToken()).rejects.toThrow('No Copilot Money session found');
+      await expect(auth.getIdToken()).rejects.toThrow('No Copilot Money session found');
+
+      // Exactly one fast-path attempt across all three calls: the token was
+      // discarded when the verdict arrived, so nothing retried it.
+      expect(attempts).toEqual(['bootstrap', 'fast-path', 'cold-path', 'cold-path']);
+      expect(extractions).toBe(3);
+    }
+  );
 });
