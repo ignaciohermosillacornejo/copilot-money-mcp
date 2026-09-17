@@ -74,12 +74,9 @@ const SCRIPTS_DIR = fileURLToPath(new URL('../../scripts', import.meta.url));
 const SHARED_MODULE = join(SCRIPTS_DIR, 'schema-args.ts');
 
 /**
- * Depth-tolerant: `scripts/` has 26 TS files in subdirectories, and one of those
- * importing the shared module correctly writes `'../schema-args.js'`. A
- * `'./schema-args.js'` substring check would report it as an offender FOR DOING
- * THE RIGHT THING — and with no allowlist, its only ways out would be an
- * exemption or hand-rolling the walk, i.e. the guard pushing toward the thing it
- * exists to prevent.
+ * Depth-tolerant, because `scripts/` has subdirectories and a script in one of
+ * them writes `'../schema-args.js'`. Used only by the "both known consumers"
+ * test below — the offender predicate does NOT consult it, deliberately.
  */
 const IMPORTS_SHARED = /from '(?:\.\.?\/)+schema-args\.js'/;
 
@@ -99,10 +96,15 @@ const READS_SCHEMA_PROPERTIES = 'inputSchema.properties';
  * actually experienced it is not "a third copy in a new file", it is "a copy in
  * a file that also legitimately touches schemas".
  *
- * Dropping it also closes the comment hole: `IMPORTS_SHARED` matched inside a
- * comment, so `// unlike ../schema-args.js, this walks it inline` was an
- * allowlist entry in a file whose docblock says there is none. Reading raw
- * source is now safe in that direction, because nothing exempts.
+ * Dropping it also closed the comment hole it had: `IMPORTS_SHARED` matched
+ * inside a comment, so `// unlike ../schema-args.js, this walks it inline` was
+ * an allowlist entry in a file whose docblock says there is none.
+ *
+ * This function takes whatever string it is given. Its caller passes
+ * comment-STRIPPED source — a walk cannot hide in a comment, but a prose
+ * mention of the field is a natural thing to write, and the shared module's own
+ * docblock is the proof. The predicate test passes raw synthetic strings, which
+ * is the same thing for inputs that carry no comments.
  */
 export function isOffender(source: string): boolean {
   return source.includes(READS_SCHEMA_PROPERTIES);
@@ -127,8 +129,15 @@ describe('no hand-rolled JSON-Schema argument walks under scripts/', () => {
     // was `startsWith(join(SCRIPTS_DIR, 'smoke'))`, which the TOP-LEVEL
     // scripts/smoke-graphql.ts satisfies — an assertion written to close a
     // vacuity, vacuous.
-    const inSubdirectories = files.filter((f) => f.slice(SCRIPTS_DIR.length + 1).includes(sep));
-    expect(inSubdirectories.length).toBeGreaterThan(0);
+    // Every subdirectory, not "at least one file somewhere below". A `> 0`
+    // floor is satisfied while one of the two trees leaves scope entirely.
+    const subdirectories = new Set(
+      files
+        .map((f) => f.slice(SCRIPTS_DIR.length + 1))
+        .filter((rel) => rel.includes(sep))
+        .map((rel) => rel.slice(0, rel.indexOf(sep)))
+    );
+    expect([...subdirectories].sort()).toEqual(['graphql-capture', 'smoke']);
   });
 
   // A scan that parsed nothing and a scan that found nothing both report zero
