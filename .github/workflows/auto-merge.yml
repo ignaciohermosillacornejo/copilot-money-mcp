@@ -106,7 +106,7 @@ jobs:
           REVIEW=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews?per_page=100" --paginate --jq '.[]' \
             | jq -s -r --argjson approvers "$APPROVERS" '
                 [ .[]
-                  | select(.user.login as $login | $approvers | index($login))
+                  | select(.user.login | IN($approvers[]))
                   | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED")
                 ] | last | "\(.state // "NONE") \(.commit_id // "-")"
               ')

@@ -10,6 +10,10 @@ env:
   # because the repository is personal and would become an organisation login —
   # which opens no pull requests — the day it is transferred (#741). A step-level
   # `if:` can read `env`, so this is the only copy. A JSON array for `fromJSON()`.
+  # Note `contains()` compares strings case-INsensitively, unlike the `jq`
+  # membership tests in auto-merge.yml and npm-publish.yml. Both directions fail
+  # closed against the API's canonical casing; the asymmetry is recorded because
+  # a reader will otherwise wonder which one is authoritative.
   APPROVERS: '["ignaciohermosillacornejo"]'
 
 jobs:

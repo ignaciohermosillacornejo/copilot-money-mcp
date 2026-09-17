@@ -81,11 +81,19 @@ leaves the cached token in place and refreshable on the next call — the extrac
 run a second time — and the mirror image over `DEAD_TOKEN_CODES`, where the token must be
 discarded. A signal added to any of those lists is asserted the day it is added.
 
-**Mutation-verified, four ways.** Clearing unconditionally (the bug) turns 8 rows red;
+**Mutation-verified, five ways.** Clearing unconditionally (the bug) turns 8 rows red;
 never clearing turns 2 red; dropping either half of the shared predicate turns 2 and 1 red
 respectively. Two further rows — `USER_DISABLED` and a code Google has not shipped — exist
 only to kill the "too loose" mutant, since both are candidate-level 400s that still must
 not discard the credential.
+
+The fifth came from review of the fix: the discard needs TWO facts, and only one of them
+is in the failure. `isTokenFinished` says the token in *that request* is dead; nulling
+`this.refreshToken` on it is warranted only while they are the same token, and
+`getIdToken()` has no in-flight dedupe. A concurrent test now pins it — two callers enter
+the fast path with the same expired credential, the first re-extracts and installs a fresh
+one, and the second's true-but-stale verdict must not null the replacement. That is this
+same class, one level down, inside the fix for it.
 
 The class's other half lives in `scripts/check-workflows.ts` (invariant 3), which catches
 the same substitution in GitHub workflow gates; see

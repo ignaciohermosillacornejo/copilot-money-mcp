@@ -128,8 +128,9 @@ export class FirebaseAuth {
     // the fall-through must not leave a dead credential cached (the next call
     // would spend a request on it before doing this same cold read anyway), and
     // an endpoint-level failure must not discard a live one (#751). Sharing one
-    // predicate is what makes "fell through ⇒ already discarded" true by
-    // construction rather than by two expressions happening to agree.
+    // predicate is what makes "fell through ⇒ the token it failed on is no
+    // longer cached" true by construction rather than by two expressions
+    // happening to agree.
     if (this.refreshToken) {
       try {
         await this.exchangeToken(this.refreshToken);
@@ -225,14 +226,32 @@ export class FirebaseAuth {
         response.status,
         `Firebase token exchange failed (${response.status}): ${errorBody}`
       );
-      // Discard the cached token only on a verdict ABOUT IT. "The request
-      // failed" is a proxy for that verdict — true whenever it is true, and
-      // also true for a rate limit, a blocked API identity, a rotated key, an
-      // outage. Acting on the proxy threw away a known-good credential and
-      // charged the next call a browser-wide Local Storage read plus up to
+      // Discard the cached token only on a verdict ABOUT IT — which takes two
+      // facts, and the second one is not in the failure.
+      //
+      // `isTokenFinished` answers "the endpoint said the token in THIS REQUEST
+      // is dead". "The request failed" is a proxy for that: true whenever it is
+      // true, and also true for a rate limit, a blocked API identity, a rotated
+      // key, an outage. Acting on the proxy threw away a known-good credential
+      // and charged the next call a browser-wide Local Storage read plus up to
       // MAX_EXCHANGE_CANDIDATES exchanges against the endpoint that had just
       // said "slow down" (#751).
-      if (isTokenFinished(failure)) this.refreshToken = null;
+      //
+      // The identity check is the same mistake one level down (#760 review).
+      // `getIdToken` has no in-flight dedupe and the GraphQL client calls it per
+      // request, so two callers can be inside this method at once: the first
+      // clears a dead token, cold-extracts, and installs a FRESH one, and the
+      // second's rejection — a true verdict, about a token nobody holds any
+      // more — would then null the replacement. It also makes the cold loop's
+      // safety explicit rather than incidental: a dead CANDIDATE is not a
+      // statement about whatever is cached.
+      //
+      // The fast path's "fell through ⇒ the token it failed on is no longer
+      // cached" still holds, and is now the stronger claim: either this cleared
+      // it, or someone else had already replaced it with a live one.
+      if (isTokenFinished(failure) && this.refreshToken === refreshToken) {
+        this.refreshToken = null;
+      }
       throw failure;
     }
 

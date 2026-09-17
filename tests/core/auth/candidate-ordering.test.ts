@@ -723,6 +723,103 @@ describe('an endpoint-level failure does not discard a known-good cached token (
     }
   );
 
+  test('a verdict on a token that is no longer the cached one leaves the cache alone', async () => {
+    // The same substitution one level down, and the reason the discard takes
+    // TWO facts: `isTokenFinished` says the token in THAT REQUEST is dead, which
+    // authorises clearing `this.refreshToken` only while they are the same
+    // token. `getIdToken()` has no in-flight dedupe and the GraphQL client calls
+    // it once per request, so they need not be.
+    //
+    // Both callers below enter the fast path holding the same expired
+    // credential. The first finishes — clears, re-extracts, installs a fresh
+    // one — and only then does the second's rejection arrive: a TRUE verdict
+    // about a token nobody holds any more. Clearing on it costs the
+    // browser-wide re-extract this whole change exists to prevent, which the
+    // third call is here to observe.
+    const attempts: string[] = [];
+    // Overwritten synchronously by the Promise executor below; the no-op
+    // initializer is what keeps it callable without a definite-assignment
+    // assertion.
+    let releaseSecond: () => void = () => {};
+    const secondRejectionSent = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    let seenExpiredToken = 0;
+
+    globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
+      const sent = String(options?.body ?? '');
+      if (sent.includes(syntheticToken('server-issued'))) {
+        attempts.push('expired-token');
+        seenExpiredToken += 1;
+        const rejection = Response.json(
+          { error: { message: 'INVALID_REFRESH_TOKEN' } },
+          { status: 400 }
+        );
+        // Hold the second caller's rejection until the first has finished
+        // installing its replacement. That ordering IS the bug's precondition.
+        return seenExpiredToken === 1
+          ? Promise.resolve(rejection)
+          : secondRejectionSent.then(() => rejection);
+      }
+      attempts.push(sent.includes(REAL_SESSION) ? 'session-token' : 'bootstrap');
+      return Promise.resolve(
+        Response.json({
+          id_token: ID_TOKEN,
+          // Every exchange expires immediately, so each call has to refresh and
+          // the cached refresh token is what the next one depends on.
+          refresh_token: sent.includes(REAL_SESSION)
+            ? REAL_SESSION
+            : syntheticToken('server-issued'),
+          expires_in: '0',
+          token_type: 'Bearer',
+          user_id: 'synthetic-user',
+        })
+      );
+    }) as unknown as typeof fetch;
+
+    // Extraction 1 seeds the cache, extraction 2 is the first caller's cold
+    // re-extract and finds the live session; anything after that finds nothing,
+    // so a needless third extraction is fatal rather than merely wasteful.
+    const found: TokenResult[][] = [
+      [candidate(syntheticToken('bootstrap'), true)],
+      [candidate(REAL_SESSION, true)],
+    ];
+    let extractions = 0;
+    const auth = new FirebaseAuth(() => {
+      const candidates = found[extractions] ?? [];
+      extractions += 1;
+      return Promise.resolve({ candidates, checked: ['Chrome'] });
+    });
+
+    expect(await auth.getIdToken()).toBe(ID_TOKEN);
+    expect(extractions).toBe(1);
+
+    // Both start before either can mutate the cache: `getIdToken` runs to its
+    // first await synchronously, so both read the same `refreshToken`.
+    const first = auth.getIdToken();
+    const second = auth.getIdToken();
+    expect(await first).toBe(ID_TOKEN);
+    expect(extractions).toBe(2);
+
+    releaseSecond();
+    await expect(second).rejects.toThrow('No Copilot Money session found');
+
+    // The point: the fresh credential the first caller installed is still
+    // cached, so this refreshes it instead of re-reading every browser profile.
+    expect(await auth.getIdToken()).toBe(ID_TOKEN);
+    expect(extractions).toBe(3);
+    // Both callers spent the expired token once, the replacement was exchanged
+    // by the caller that installed it, and the last call refreshed that same
+    // replacement — never a fourth browser read.
+    expect(attempts).toEqual([
+      'bootstrap',
+      'expired-token',
+      'expired-token',
+      'session-token',
+      'session-token',
+    ]);
+  });
+
   test.each([...DEAD_TOKEN_CODES])(
     'a %s verdict on the fast path does discard the cached token',
     async (code) => {
