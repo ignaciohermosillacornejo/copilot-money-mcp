@@ -72,6 +72,16 @@ jobs:
       - name: Mutation-guard registry check
         run: bun run check:mutation-guards
 
+      # Free here and nowhere else: CI checks out clean, so the tree must be
+      # byte-identical after a step whose whole job is to edit tracked source
+      # and put it back. Deliberately NOT a precondition locally — `bun run
+      # check` is the pre-push hook and runs mid-edit — and deliberately not
+      # the runner's own bookkeeping, which is the thing being checked. Note
+      # this job never runs `bun test`, so the "the next command in check is a
+      # whole-repo test run over the damage" backstop is a local one.
+      - name: Working tree unchanged by the mutation-guard run
+        run: git diff --exit-code
+
       # Fork PRs only — a same-repo branch already required push access, so
       # there is no identity to forge. Reads public commit metadata with the
       # read-only fork token.
