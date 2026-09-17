@@ -187,6 +187,7 @@ const MEMBERSHIP_IS_THE_COVERAGE = [
   'tests/integration/uid-transition-sweep.test.ts',
   'tests/no-collection-time-assertions.test.ts',
   'tests/no-hand-rolled-comment-strippers.test.ts',
+  'tests/scripts/no-duplicate-schema-walks.test.ts',
   'tests/setup/temp-db-teardown.ts',
   'tests/unit/tsconfig-tests-sync.test.ts',
 ];

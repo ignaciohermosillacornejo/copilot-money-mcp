@@ -19,14 +19,17 @@
  *
  * WHAT IT REQUIRES
  *
- * Any file under `scripts/` that reads `inputSchema.properties` must import
- * `./schema-args.js`. That is a derived expectation, not a text match on the
- * walk's body: a fresh hand-rolled walk has to start somewhere, and reading
- * that field is where.
+ * No file under `scripts/` except the shared module may read
+ * `inputSchema.properties` at all. That is a derived expectation, not a text
+ * match on the walk's body: a walk has to start somewhere, and reading that
+ * field is where. Consumers satisfy it by going through `schemaArgNames()`,
+ * which is why neither of them contains the literal today.
  *
- * THERE IS NO ALLOWLIST. `scripts/schema-args.ts` is excluded because it IS
- * the shared module — by absolute path, so a `scripts/smoke/schema-args.ts`
- * could not exempt itself by name. Every other file under `scripts/` is in
+ * THERE IS NO ALLOWLIST, and exactly one exclusion: `scripts/schema-args.ts`,
+ * by absolute-path identity, because it IS the shared module. Not by name, so
+ * a `scripts/smoke/schema-args.ts` cannot exempt itself; and not by "imports
+ * the shared module", because that would excuse an inline walk sitting beside
+ * a legitimate import — see `isOffender`. Every other file under `scripts/` is in
  * scope INCLUDING SUBDIRECTORIES (`scripts/smoke/`, `scripts/graphql-capture/`),
  * which is why the import check tolerates any `../` depth. Zero files need an
  * exemption today. If a script ever legitimately reads the field
@@ -73,9 +76,26 @@ const IMPORTS_SHARED = /from '(?:\.\.?\/)+schema-args\.js'/;
 /** The literal a fresh hand-rolled walk has to start from. */
 const READS_SCHEMA_PROPERTIES = 'inputSchema.properties';
 
-/** Exported shape of the offender test, so its trigger can be exercised directly. */
+/**
+ * Exported shape of the offender test, so its trigger can be exercised directly.
+ *
+ * Deliberately NOT exempting a file that imports the shared module. That
+ * exemption was file-scoped rather than use-scoped, and it protected nothing:
+ * going through the shared module is precisely what stops a consumer containing
+ * the literal, so no consumer was ever being excused. What it bought was two
+ * holes — an inline walk re-added to `dump-tool-args.ts` ALONGSIDE its existing
+ * import would have been invisible, and that is the file which carried this
+ * exact defect through seven commits of review. The class as this repo has
+ * actually experienced it is not "a third copy in a new file", it is "a copy in
+ * a file that also legitimately touches schemas".
+ *
+ * Dropping it also closes the comment hole: `IMPORTS_SHARED` matched inside a
+ * comment, so `// unlike ../schema-args.js, this walks it inline` was an
+ * allowlist entry in a file whose docblock says there is none. Reading raw
+ * source is now safe in that direction, because nothing exempts.
+ */
 export function isOffender(source: string): boolean {
-  return source.includes(READS_SCHEMA_PROPERTIES) && !IMPORTS_SHARED.test(source);
+  return source.includes(READS_SCHEMA_PROPERTIES);
 }
 
 describe('no hand-rolled JSON-Schema argument walks under scripts/', () => {
@@ -87,6 +107,12 @@ describe('no hand-rolled JSON-Schema argument walks under scripts/', () => {
   test('the sweep reaches the scripts it is meant to cover', () => {
     expect(files.length).toBeGreaterThan(0);
     expect(files).toContain(SHARED_MODULE);
+    // Descent specifically: a floor of `length > 0` plus the module itself is
+    // satisfied by the top-level files alone, so the 26 files under
+    // scripts/smoke/ and scripts/graphql-capture/ could silently leave scope.
+    // tests/helpers/ts-files.test.ts covers extensions and ScriptKind, not
+    // whether a caller's tree is actually descended.
+    expect(files.some((f) => f.startsWith(join(SCRIPTS_DIR, 'smoke')))).toBe(true);
   });
 
   // A scan that parsed nothing and a scan that found nothing both report zero
@@ -97,18 +123,18 @@ describe('no hand-rolled JSON-Schema argument walks under scripts/', () => {
   test('the offender predicate fires on a hand-rolled walk', () => {
     const handRolled = 'const props = def.schema.inputSchema.properties ?? {};';
     expect(isOffender(handRolled)).toBe(true);
+    // Importing the shared module does NOT excuse an inline walk beside it —
+    // the realized-instance case, and the one this repo actually shipped.
     expect(isOffender(`import { schemaArgNames } from './schema-args.js';\n${handRolled}`)).toBe(
-      false
+      true
     );
-    // …at any depth, which is the finding this predicate was rewritten for.
-    expect(isOffender(`import { schemaArgNames } from '../schema-args.js';\n${handRolled}`)).toBe(
-      false
-    );
+    // A consumer that routes through the module never writes the literal.
+    expect(isOffender("import { schemaArgNames } from '../schema-args.js';")).toBe(false);
     // And a file that never touches the schema is not an offender.
     expect(isOffender('export const unrelated = 1;')).toBe(false);
   });
 
-  test('every script reading inputSchema.properties imports the shared walk', () => {
+  test('no script but the shared module reads inputSchema.properties', () => {
     const offenders = files
       .filter((file) => file !== SHARED_MODULE)
       .filter((file) => isOffender(readFileSync(file, 'utf-8')))
