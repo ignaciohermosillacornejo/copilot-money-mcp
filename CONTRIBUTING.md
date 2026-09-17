@@ -425,7 +425,9 @@ Registering a guard is two edits, deliberately: a `// mutation-guard: <name>`
 comment at the site in `src/`, and the matching row. The gate requires a
 bijection between the two, so neither the marker nor the row can be dropped on
 its own, and a row whose `find` string has stopped matching its site is an error
-rather than a silent skip.
+rather than a silent skip. The row also names the test(s) that must be among the
+failures (`expectFailingTests`), because several rows share a detector file and
+"the file went red" is satisfied by a sibling.
 
 **Then write the post-mortem.** [`docs/bugs/`](docs/bugs/README.md) is the accumulated
 record: one entry per user-visible bug, filed under its class, recording how it was
