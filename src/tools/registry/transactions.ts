@@ -34,8 +34,13 @@ export const getTransactionsTool = defineTool({
       'children_transaction_ids, user_id), enrichment and intelligence fields ' +
       '(normalized_merchant — still the normalized merchant name when requested — ' +
       'intelligence_suggested_category_ids, suggestion_ids, original_name), tag_ids, ' +
-      'review state (user_reviewed, user_note), location (city, region, country, lat/lon), ' +
-      'and flags like is_amazon/from_investment. Ask for any of them by name with ' +
+      'review state (user_reviewed, user_note, user_changed_type — true only when a human ' +
+      're-typed the row, so do not second-guess its type), location (city, region, country, ' +
+      'lat/lon), and flags like is_amazon/from_investment. `amazon` is worth naming because ' +
+      'nothing else hints it exists: on rows Copilot matched to an Amazon order it carries ' +
+      'the receipt — {order_id, items: [{id, name, link, price, quantity}], other: ' +
+      '{giftWrapping, rewards, savings, shipping, tax}} — so fields: ["default", "amazon"] ' +
+      'answers "what was in this order" without an exported CSV. Ask for any of them by name with ' +
       'fields: ["default", "tag_ids"], or take the whole document with fields: ["all"] ' +
       '(or "*"). category_name is always resolved to a human-readable name. ' +
       '`compact` was removed in v3.0.0 — passing it now raises an error naming this ' +

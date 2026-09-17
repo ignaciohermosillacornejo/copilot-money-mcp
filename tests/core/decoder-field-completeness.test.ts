@@ -518,6 +518,7 @@ const PINNED: Record<string, ProcessorPin> = {
         'user_deleted',
         'intelligence_powered',
         'internal_transfer',
+        'user_changed_type',
       ],
       numericFields: ['original_amount', 'lat', 'lon', 'pending_amount'],
       stringArrayFields: [
@@ -527,7 +528,7 @@ const PINNED: Record<string, ProcessorPin> = {
         'children_transaction_ids',
         'suggestion_ids',
       ],
-      mapFields: ['internal_tx_match', 'venmo_extra_data'],
+      mapFields: ['internal_tx_match', 'venmo_extra_data', 'amazon'],
     },
     calls: [
       {
@@ -600,6 +601,7 @@ const PINNED: Record<string, ProcessorPin> = {
           'original_subtype',
           'verification_status',
           'latest_balance_update',
+          'creation_timestamp',
           'holdings',
           'metadata',
           'merged',
@@ -1085,7 +1087,13 @@ const PINNED: Record<string, ProcessorPin> = {
           '...booleanFields',
           '...mapFields',
         ],
-        ignored: [],
+        ignored: [
+          'app_sections_order',
+          'walkthroughs_completed',
+          'transcend_user_id',
+          'transcend_last_user_provisioned',
+          'transcend_email_hash',
+        ],
       },
     ],
   },

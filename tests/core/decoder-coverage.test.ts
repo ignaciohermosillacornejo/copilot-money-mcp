@@ -670,6 +670,143 @@ describe('decoder coverage', () => {
       expect(investBool.from_investment).toBe(true);
     });
 
+    // -----------------------------------------------------------------
+    // Fields Copilot added AFTER the decoder coverage-warn triage closed at
+    // zero (#317) — found by `bun run smoke:cache` and decoded in #718.
+    // Every fixture value below is synthetic; the real cache's order ids and
+    // item names never leave the machine.
+    // -----------------------------------------------------------------
+    test('extracts the Amazon receipt map and the user_changed_type override flag', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'txn-718-fields-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'transactions',
+          id: 'txn-amazon',
+          fields: {
+            transaction_id: 'txn-amazon',
+            amount: 75,
+            date: '2026-09-01',
+            name: 'Online Retailer',
+            user_changed_type: true,
+            amazon: {
+              order_id: 'order-synthetic-1',
+              items: [
+                {
+                  id: 'item-1',
+                  name: 'Widget',
+                  link: 'https://example.invalid/1',
+                  price: 40,
+                  quantity: 1,
+                },
+                // `price` as an integer on one item and a double on another:
+                // the real cache mixes both for the same key, which is why
+                // the model types this map opaquely (#718 ledger entry).
+                {
+                  id: 'item-2',
+                  name: 'Gadget',
+                  link: 'https://example.invalid/2',
+                  price: 25.5,
+                  quantity: 2,
+                },
+              ],
+              other: { giftWrapping: 0, rewards: 0, savings: 0, shipping: 0, tax: 9.5 },
+            },
+          },
+        },
+      ]);
+
+      const txns = await decodeTransactions(dbPath);
+      const txn = txns.find((t) => t.transaction_id === 'txn-amazon')!;
+      expect(txn).toBeDefined();
+      expect(txn.user_changed_type).toBe(true);
+      // Decoded verbatim, nesting intact — an MCP caller reads the receipt
+      // straight off the row, which is the point of decoding it at all.
+      expect(txn.amazon).toEqual({
+        order_id: 'order-synthetic-1',
+        items: [
+          {
+            id: 'item-1',
+            name: 'Widget',
+            link: 'https://example.invalid/1',
+            price: 40,
+            quantity: 1,
+          },
+          {
+            id: 'item-2',
+            name: 'Gadget',
+            link: 'https://example.invalid/2',
+            price: 25.5,
+            quantity: 2,
+          },
+        ],
+        other: { giftWrapping: 0, rewards: 0, savings: 0, shipping: 0, tax: 9.5 },
+      });
+    });
+
+    test('a wrongly-typed amazon field costs the field, never the transaction', async () => {
+      // The reason `amazon` is an opaque map on TransactionSchema rather than
+      // a nested schema: if Copilot ever ships a different shape, the row it
+      // hangs off must still reach the caller. This pins that — delete the
+      // `getMap` guard or narrow the model and a transaction disappears from
+      // every spend total instead of one field going missing.
+      const dbPath = path.join(FIXTURES_DIR, 'txn-718-amazon-drift-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'transactions',
+          id: 'txn-amazon-drift',
+          fields: {
+            transaction_id: 'txn-amazon-drift',
+            amount: 30,
+            date: '2026-09-02',
+            name: 'Online Retailer',
+            amazon: 'order-synthetic-2',
+          },
+        },
+      ]);
+
+      const txns = await decodeTransactions(dbPath);
+      const txn = txns.find((t) => t.transaction_id === 'txn-amazon-drift');
+      expect(txn).toBeDefined();
+      expect(txn?.amount).toBe(30);
+      expect(txn?.amazon).toBeUndefined();
+    });
+
+    test('backend replication markers decode without an unread-field warning', async () => {
+      // `_migration_backfill` / `_replicated_at` are stamped by Copilot's
+      // backend across collections and ignored centrally (#718, closing
+      // #611). Asserted end-to-end through the decoder rather than only at
+      // the warnUnreadFields unit — the unit test cannot catch the exemption
+      // being wired up to the wrong call.
+      const dbPath = path.join(FIXTURES_DIR, 'txn-718-markers-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'transactions',
+          id: 'txn-markers',
+          fields: {
+            transaction_id: 'txn-markers',
+            amount: 12,
+            date: '2026-09-03',
+            name: 'Corner Store',
+            _migration_backfill: true,
+            _replicated_at: { __type: 'timestamp', seconds: 1_780_000_000, nanos: 0 },
+          },
+        },
+      ]);
+
+      const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        __resetWarnedKeys();
+        const txns = await decodeTransactions(dbPath);
+        expect(txns.find((t) => t.transaction_id === 'txn-markers')).toBeDefined();
+        const unread = warnSpy.mock.calls
+          .map((call) => String(call[0] ?? ''))
+          .filter((msg) => msg.includes('unread field'));
+        expect(unread).toEqual([]);
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
     test('extracts split-transaction linkage fields', async () => {
       // When the user splits a transaction in Copilot, the original doc gets
       // `children_transaction_ids: string[]` and each new child doc gets
@@ -2812,6 +2949,43 @@ describe('decoder coverage', () => {
       // Complex objects
       expect(acc.metadata).toEqual({ source: 'plaid', last_sync: 'yesterday' });
       expect(acc.merged).toEqual({ from_account: 'old-acc-1' });
+    });
+
+    test('creation_timestamp decodes to a date, and stays absent when unwritten (#718)', async () => {
+      // Copilot started stamping this after the coverage-warn triage closed
+      // at zero. Both rows matter: the present one pins the timestamp ->
+      // YYYY-MM-DD narrowing (the same one `latest_balance_update` gets), and
+      // the absent one pins that a row without it comes back with NO key —
+      // so a caller can tell "unknown" from a date, rather than reading a
+      // null as "created at the epoch".
+      const dbPath = path.join(FIXTURES_DIR, 'account-creation-timestamp-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'accounts',
+          id: 'acc-new',
+          fields: {
+            account_id: 'acc-new',
+            name: 'Recently Opened',
+            current_balance: 100,
+            creation_timestamp: { __type: 'timestamp', seconds: 1_767_225_600, nanos: 0 },
+          },
+        },
+        {
+          collection: 'accounts',
+          id: 'acc-old',
+          fields: {
+            account_id: 'acc-old',
+            name: 'Opened Before The Field Existed',
+            current_balance: 200,
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+      const fresh = result.accounts.find((a) => a.account_id === 'acc-new')!;
+      const old = result.accounts.find((a) => a.account_id === 'acc-old')!;
+      expect(fresh.creation_timestamp).toBe('2026-01-01');
+      expect('creation_timestamp' in old).toBe(false);
     });
 
     test('account with null limit (credit card)', async () => {

@@ -62,6 +62,12 @@ export const TransactionSchema = z
 
     // Transaction type
     transaction_type: z.string().optional(), // "place", "special", "digital", etc.
+    // True when a human re-typed this transaction, overriding Copilot's own
+    // classification (#718). Absent on every row nobody re-typed — 1 of 1040
+    // in the probed cache — so read it as "was this overridden?", where
+    // absent means no. Worth checking before any automation second-guesses a
+    // transaction's type.
+    user_changed_type: z.boolean().optional(),
 
     // Payment info
     payment_method: z.string().optional(),
@@ -113,6 +119,34 @@ export const TransactionSchema = z
     // Complex nested data
     internal_tx_match: z.record(z.string(), z.unknown()).optional(),
     venmo_extra_data: z.record(z.string(), z.unknown()).optional(),
+    /**
+     * Copilot's per-transaction Amazon receipt (#718), present on the rows
+     * its Amazon integration has matched — 26 of 1040 documents in the probed
+     * cache. Carries the order id and the line items, which is the data
+     * `skills/amazon-sync/SKILL.md` currently obtains from a manually
+     * exported CSV.
+     *
+     * MEASURED SHAPE, 2026-09-16, 26 documents / 34 items, types only:
+     *   order_id  string
+     *   items     array of maps: id/name/link string, price number,
+     *             quantity number
+     *   other     map: giftWrapping / rewards / savings / shipping / tax,
+     *             all numbers
+     *
+     * TYPED AS AN OPAQUE MAP ANYWAY, deliberately. A nested schema here does
+     * not merely fail to help — it adds a way to LOSE a transaction, since a
+     * sub-field that arrives with an unexpected type fails the parse and
+     * `validateOrWarn` drops the WHOLE document (the #302/#659 class: an
+     * unusable leaf costing the row it sits on). The probe is itself the
+     * argument: `price` came back `double` on 33 items and `integer` on 1,
+     * and four of the five `other` keys mixed both types across 26
+     * documents, so "the type I saw" is demonstrably not "the type it is".
+     * An MCP caller receives JSON either way and gains nothing from the Zod
+     * narrowing, so the risk buys nothing. The shape is recorded here and in
+     * the conformance ledger instead, where being wrong costs a correction
+     * rather than a missing transaction.
+     */
+    amazon: z.record(z.string(), z.unknown()).optional(),
     old_category_id: z.string().optional(),
 
     // References
