@@ -16,8 +16,8 @@
  * each entry the runner asserts BOTH directions:
  *
  *   1. unmutated → the named test file PASSES
- *   2. mutated   → the named test file FAILS, with the same number of tests
- *      executed and no module-level error
+ *   2. mutated   → the named test file FAILS, at the test(s) the row names,
+ *      with the same number of tests executed and no module-level error
  *
  * Direction (1) is what stops the registry being trivially satisfiable: a
  * detector that always fails cannot be registered. Direction (2)'s two extra
