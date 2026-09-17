@@ -713,6 +713,109 @@ jobs:
     );
   });
 
+  test('the bracket spelling of the same context is caught too', async () => {
+    // `github['repository_owner']` is not a shape anyone reaches for by
+    // accident, but a rule whose evasion is "write it the other way" is not a
+    // rule.
+    await withWorkflows(
+      {
+        'bracketed.yml': `name: Bracketed
+on: push
+jobs:
+  build:
+    if: github.actor == github['repository_owner']
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo hi
+`,
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('bracketed.yml');
+        expect(stderr).toContain('github.repository_owner');
+      }
+    );
+  });
+
+  test('a declared login written out in a `run:` block fails', async () => {
+    // The hole the npm-publish.yml sibling lived in: a shell test comparing
+    // against the literal while the env key beside it declared the same name.
+    // It tripped this gate only because that declaration happened to be a bare
+    // string; declared as JSON, an `if:`-only scan would have gone quiet.
+    await withWorkflows(
+      {
+        'shell-literal.yml': `name: Shell literal
+on: push
+env:
+  TRUSTED_PUBLISHERS: '["octocat"]'
+jobs:
+  publish:
+    if: github.actor == 'octocat'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: |
+          if [[ "$PUBLISHER" != "octocat" ]]; then exit 1; fi
+`,
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain("the login 'octocat' is written out somewhere");
+      }
+    );
+  });
+
+  test('reading the declaration from the shell instead passes', async () => {
+    // The remedy the failure message names, so the gate is not merely a wall.
+    await withWorkflows(
+      {
+        'shell-reads-env.yml': `name: Shell reads env
+on: push
+env:
+  TRUSTED_PUBLISHERS: '["octocat"]'
+jobs:
+  publish:
+    if: github.actor == 'octocat'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: |
+          jq -e --arg p "$PUBLISHER" 'IN($p; .[])' <<<"$TRUSTED_PUBLISHERS"
+`,
+      },
+      ({ code }) => {
+        expect(code).toBe(0);
+      }
+    );
+  });
+
+  test('a positive comparison against a bot login is not a trust declaration', async () => {
+    // `github.actor == 'dependabot[bot]'` is the usual dependabot auto-merge
+    // shape. Demanding it appear in `APPROVERS` would put a bot where the humans
+    // are named — so bot logins sit outside this rule in both directions, and
+    // the declaration here is still held to the human gate beside it.
+    await withWorkflows(
+      {
+        'bots.yml': `name: Bots
+on: push
+env:
+  APPROVERS: '["octocat"]'
+jobs:
+  merge-bot-pr:
+    if: github.actor == 'dependabot[bot]' || github.actor == 'octocat'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo hi
+`,
+      },
+      ({ code }) => {
+        expect(code).toBe(0);
+      }
+    );
+  });
+
   test('a login literal with no declaration fails', async () => {
     await withWorkflows(
       {

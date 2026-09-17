@@ -69,14 +69,17 @@ jobs:
           RELEASE_AUTHOR: ${{ github.event.release.author.login }}
         run: |
           set -euo pipefail
-          if [[ "${{ github.event_name }}" == "release" ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == "release" ]]; then
             PUBLISHER="$RELEASE_AUTHOR"
           else
             PUBLISHER="$GITHUB_ACTOR"
           fi
           echo "Publisher: $PUBLISHER"
-          # Membership in the declared list, not a literal repeated here.
-          if ! jq -e --arg p "$PUBLISHER" 'index($p) != null' <<<"$TRUSTED_PUBLISHERS" >/dev/null; then
+          # Membership in the declared list, not a literal repeated here. Same
+          # `IN(...)` spelling as auto-merge.yml's review filter, deliberately:
+          # a PR about two expressions that must agree should not leave two
+          # spellings of one predicate behind.
+          if ! jq -e --arg p "$PUBLISHER" 'IN($p; .[])' <<<"$TRUSTED_PUBLISHERS" >/dev/null; then
             echo "::error::Publisher '$PUBLISHER' is not authorized to publish packages"
             exit 1
           fi

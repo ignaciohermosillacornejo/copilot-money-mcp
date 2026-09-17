@@ -75,6 +75,18 @@
  *   literal compared in an `if:` must match the declared set exactly, in both
  *   directions.
  *
+ *   Everywhere ELSE, a declared login may not be written out at all: a `run:`
+ *   block, an action input. A step can read `env`, so it has no excuse, and that
+ *   is precisely where the `npm-publish.yml` sibling lived. Bot logins
+ *   (`…[bot]`, a suffix no human login can carry) sit outside both rules: a
+ *   positive comparison against one is a statement about automation, not a claim
+ *   that a person is trusted.
+ *
+ *   What this still does not read: a login compared in a shell script that is
+ *   NOT in the declaration — the gate has nothing to compare it against, and
+ *   "quoted string that happens to be a GitHub login" is not a decidable shape.
+ *   Declaring the list is what brings a workflow inside the rule.
+ *
  * Run as part of `bun run check` and as a step in `.github/workflows/test.yml`.
  */
 
@@ -132,8 +144,27 @@ const POSITIVE_DISPATCH_TEST = new RegExp(
   `(?:==\\s*['"]?${ESCAPE_HATCH_TRIGGER}['"]?)|(?:['"]?${ESCAPE_HATCH_TRIGGER}['"]?\\s*==)`
 );
 
-/** The context expression that spells an account name and is read as a person. */
-const OWNER_PROXY = /github\s*\.\s*repository_owner/;
+/**
+ * The context expression that spells an account name and is read as a person.
+ *
+ * Both spellings GitHub accepts. The indexed form is not a shape anyone reaches
+ * for by accident, but a rule whose evasion is "write it the other way" is not a
+ * rule — and the alternation costs one line.
+ */
+const OWNER_PROXY = /github\s*(?:\.\s*repository_owner|\[\s*['"]repository_owner['"]\s*\])/;
+
+/**
+ * A GitHub App's login, which ends in a bracketed suffix no human login can
+ * carry (GitHub logins are alphanumerics and hyphens).
+ *
+ * Bot logins sit outside the trust-list rule in BOTH directions. A positive
+ * comparison against one — `github.actor == 'dependabot[bot]'`, the usual shape
+ * for a dependabot auto-merge job — is a statement about automation, not a claim
+ * that a person is trusted, and forcing it into an approver list would put a bot
+ * where the humans are named. Symmetrically, a bot login that IS declared is not
+ * demanded of the gates.
+ */
+const BOT_LOGIN = /\[bot\]$/;
 
 /**
  * The env keys a workflow may declare its trusted logins under.
@@ -165,6 +196,26 @@ const LOGIN_COMPARISONS: readonly RegExp[] = [
   new RegExp(`${ACTOR_EXPRESSION}\\s*==\\s*'([^']*)'`, 'g'),
   new RegExp(`'([^']*)'\\s*==\\s*[\\w.[\\]']*${ACTOR_EXPRESSION}`, 'g'),
 ];
+
+/**
+ * Every string in the document EXCEPT the two places invariant 3 handles by
+ * other means: an `if:` expression (held to set-equality against the
+ * declaration) and the declaration itself (which necessarily spells the logins).
+ *
+ * Everything else — `run:` blocks above all — is where a login has no business
+ * being written out. That is not hypothetical: `npm-publish.yml`'s shell step
+ * compared `"$PUBLISHER" != "<login>"` against a literal while the env key
+ * beside it declared the same name and was read by nothing. It was caught here
+ * only because that declaration happened to be a bare string and tripped the
+ * JSON-array rule; declared as JSON, the literal would have gone quiet.
+ */
+function* stringValuesOutsideGates(node: unknown, key = ''): Generator<string> {
+  if (key === 'if' || TRUST_LIST_KEYS.includes(key)) return;
+  if (typeof node === 'string') yield node;
+  else if (Array.isArray(node)) for (const v of node) yield* stringValuesOutsideGates(v, key);
+  else if (isRecord(node))
+    for (const [k, v] of Object.entries(node)) yield* stringValuesOutsideGates(v, k);
+}
 
 /** Every string anywhere in the parsed document — comments excluded by parsing. */
 function* stringValues(node: unknown): Generator<string> {
@@ -374,7 +425,28 @@ for (const file of files) {
   for (const expression of ifExpressions(jobs)) {
     for (const pattern of LOGIN_COMPARISONS) {
       pattern.lastIndex = 0;
-      for (const match of expression.matchAll(pattern)) compared.add(match[1]);
+      for (const match of expression.matchAll(pattern)) {
+        if (!BOT_LOGIN.test(match[1])) compared.add(match[1]);
+      }
+    }
+  }
+
+  // A declared login written out anywhere else — a shell test, an action input —
+  // is the second copy this invariant exists to prevent, wearing a syntax the
+  // `if:` rule cannot see.
+  if (declared !== null) {
+    const humanDeclared = [...declared].filter((l) => !BOT_LOGIN.test(l));
+    for (const value of stringValuesOutsideGates(doc)) {
+      const spelled = humanDeclared.find((login) => value.includes(login));
+      if (spelled === undefined) continue;
+      problems.push(
+        `${file}: the login '${spelled}' is written out somewhere that is neither the ` +
+          `\`env.${declarationKey}\` declaration nor an \`if:\` gate — a \`run:\` block, an ` +
+          `action input. Read the declaration instead (\`$${declarationKey}\` is in the ` +
+          `environment; \`jq -e --arg p "$WHO" 'IN($p; .[])'\` tests membership), so there is ` +
+          `one place to change when the list does.`
+      );
+      break; // One report per file; the remedy is the same for every occurrence.
     }
   }
 
@@ -393,7 +465,7 @@ for (const file of files) {
       }
     } else {
       const missing = [...compared].filter((l) => !declared.has(l));
-      const unused = [...declared].filter((l) => !compared.has(l));
+      const unused = [...declared].filter((l) => !BOT_LOGIN.test(l) && !compared.has(l));
       if (missing.length > 0 || unused.length > 0) {
         problems.push(
           `${file}: the login literals in \`if:\` and \`env.${declarationKey}\` disagree` +
