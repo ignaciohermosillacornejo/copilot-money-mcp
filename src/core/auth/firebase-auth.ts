@@ -120,30 +120,23 @@ export class FirebaseAuth {
     // state the cold path knows how to report. So fall through to a cold
     // re-extract rather than throwing a raw Firebase 400 at the caller: that
     // finds either a fresh session in another profile or the actionable
-    // message. `exchangeToken` has already cleared `refreshToken`, so the
-    // fall-through cannot loop. Any OTHER failure is a genuine error and still
-    // propagates untouched.
+    // message. Any OTHER failure is a genuine error and still propagates
+    // untouched.
     //
-    // The guard is the cold path's two-step, in the same order: FIRST "is this
-    // about the token at all" (`isCandidateRejection` — a 4xx that is not
-    // endpoint-level), THEN "is it already explained by being logged out". The
-    // second predicate alone would be a substring test on any Error's message,
-    // so a 403 or a rate limit whose body happened to quote a dead-token code
-    // would be read as a verdict on the token and silently swallowed into a
-    // cold re-extract. Writing the two paths differently is also how they drift.
-    //
-    // `isExplainedByLoggedOut` leads with `isForeignProjectError`, which the
-    // paragraph above says cannot happen here — deliberately kept rather than
-    // hand-inlining the dead-token half: one predicate means "explained by
-    // logged out" has one definition, and a disjunct that never fires on this
-    // path costs a string compare. It is dead code, not a contradiction.
+    // The condition is `isTokenFinished` — the same predicate `exchangeToken`
+    // uses to decide whether to DISCARD the cached token. That is not a tidy-up:
+    // the fall-through must not leave a dead credential cached (the next call
+    // would spend a request on it before doing this same cold read anyway), and
+    // an endpoint-level failure must not discard a live one (#751). Sharing one
+    // predicate is what makes "fell through ⇒ already discarded" true by
+    // construction rather than by two expressions happening to agree.
     if (this.refreshToken) {
       try {
         await this.exchangeToken(this.refreshToken);
         if (!this.idToken) throw new Error('Firebase token exchange returned no ID token');
         return this.idToken;
       } catch (err) {
-        if (!isCandidateRejection(err) || !isExplainedByLoggedOut(err)) throw err;
+        if (!isTokenFinished(err)) throw err;
       }
     }
 
@@ -228,11 +221,19 @@ export class FirebaseAuth {
 
     if (!response.ok) {
       const errorBody = await response.text();
-      this.refreshToken = null;
-      throw new TokenExchangeError(
+      const failure = new TokenExchangeError(
         response.status,
         `Firebase token exchange failed (${response.status}): ${errorBody}`
       );
+      // Discard the cached token only on a verdict ABOUT IT. "The request
+      // failed" is a proxy for that verdict — true whenever it is true, and
+      // also true for a rate limit, a blocked API identity, a rotated key, an
+      // outage. Acting on the proxy threw away a known-good credential and
+      // charged the next call a browser-wide Local Storage read plus up to
+      // MAX_EXCHANGE_CANDIDATES exchanges against the endpoint that had just
+      // said "slow down" (#751).
+      if (isTokenFinished(failure)) this.refreshToken = null;
+      throw failure;
     }
 
     const data = (await response.json()) as {
@@ -272,8 +273,14 @@ export class FirebaseAuth {
  * any code Google adds that we have never seen — an unrecognised rejection on
  * a token from Copilot's own store is precisely the case where a raw error
  * tells the user more than a guess does.
+ *
+ * Exported for one reason: `tests/core/auth/candidate-ordering.test.ts` walks
+ * this list and the two ENDPOINT_LEVEL_* lists below to assert, per member,
+ * which signals may and may not discard a cached token (#751). A signal added
+ * to any of them is covered the day it is added, rather than the day someone
+ * remembers to write a test row for it.
  */
-const DEAD_TOKEN_CODES: readonly string[] = ['INVALID_REFRESH_TOKEN', 'TOKEN_EXPIRED'];
+export const DEAD_TOKEN_CODES: readonly string[] = ['INVALID_REFRESH_TOKEN', 'TOKEN_EXPIRED'];
 
 /**
  * True when a rejection is already accounted for by "you are logged out of
@@ -310,7 +317,7 @@ function isForeignProjectError(err: unknown): boolean {
  *   `PROJECT_NUMBER_MISMATCH` — are all 400s, so nothing about a candidate
  *   arrives as a 403.
  */
-const ENDPOINT_LEVEL_STATUSES: readonly number[] = [403, 429];
+export const ENDPOINT_LEVEL_STATUSES: readonly number[] = [403, 429];
 
 /**
  * Error reasons that make a **400** a statement about our own API key rather
@@ -330,7 +337,7 @@ const ENDPOINT_LEVEL_STATUSES: readonly number[] = [403, 429];
  * `INVALID_REFRESH_TOKEN` with identical bodies, and they would then be shown
  * a raw 400 instead of "log in".
  */
-const ENDPOINT_LEVEL_ERROR_CODES: readonly string[] = [
+export const ENDPOINT_LEVEL_ERROR_CODES: readonly string[] = [
   'API_KEY_INVALID',
   'API_KEY_HTTP_REFERRER_BLOCKED',
   'API_KEY_IP_ADDRESS_BLOCKED',
@@ -351,4 +358,29 @@ function isCandidateRejection(err: unknown): err is TokenExchangeError {
   if (err.status < 400 || err.status >= 500) return false;
   if (ENDPOINT_LEVEL_STATUSES.includes(err.status)) return false;
   return !ENDPOINT_LEVEL_ERROR_CODES.some((code) => err.message.includes(code));
+}
+
+/**
+ * True when the endpoint has told us the token we just sent has no future —
+ * the only thing entitled to invalidate a cached refresh token, and the only
+ * thing that makes falling through to a cold re-extract worth its cost.
+ *
+ * It is the cold path's two-step, in the same order: FIRST "is this about the
+ * token at all" (`isCandidateRejection` — a 4xx that is not endpoint-level),
+ * THEN "is it already explained by being logged out". Order matters. The second
+ * predicate alone is a substring test on any Error's message, so a 403 or a
+ * rate limit whose body happened to quote a dead-token code would read as a
+ * verdict on the token: swallowed into a cold re-extract that reports "log in"
+ * for an outage logging in cannot fix, and — until #751 — with the cached token
+ * already thrown away before the guard ever ran.
+ *
+ * `isExplainedByLoggedOut` leads with `isForeignProjectError`, which cannot fire
+ * for a server-issued token; kept rather than hand-inlining the dead-token half,
+ * because one predicate means "explained by logged out" has one definition and a
+ * disjunct that never fires costs a string compare. Dead code, not a
+ * contradiction — and on the cold path, where this same predicate decides the
+ * discard for a scraped candidate, it is not even dead.
+ */
+function isTokenFinished(err: unknown): boolean {
+  return isCandidateRejection(err) && isExplainedByLoggedOut(err);
 }
