@@ -1146,7 +1146,34 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'body-code list is exhaustive — no probe induced any of those. If the list is ' +
       'incomplete the failure is benign in the privacy direction (a raw error surfaced ' +
       'after the budget, not a wrong answer), but the user-facing message degrades to the ' +
-      'unactionable "no session" one, which is the bug #722 was about.',
+      'unactionable "no session" one, which is the bug #722 was about. SECOND CONSUMER ' +
+      'since #751: the same classification now decides whether a failed exchange DISCARDS ' +
+      'the cached refresh token. A misclassification is benign in the privacy direction ' +
+      'there too, and in the opposite one from the bug: an endpoint-level code missing ' +
+      'from the list costs one wasted fast-path request on the next call, where reading ' +
+      'it as a verdict cost a browser-wide re-extract.',
+  },
+  {
+    surface: 'GitHubApi.pullsReviews:standingApproval',
+    kind: 'operation',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      'Not Copilot, and not even an HTTP surface this package calls — `.github/workflows/' +
+      'auto-merge.yml` does, and #741 moved its approver identity onto it, so the ' +
+      'assumption is now load-bearing for who may merge. Probed once for #741: ' +
+      '`GET /repos/{owner}/{repo}` reports owner.login "ignaciohermosillacornejo" with ' +
+      'owner.type "User" — i.e. `github.repository_owner` and the declared approver login ' +
+      'are the same string today, which is why the change is a no-op on this repository — ' +
+      'and `GET /repos/{owner}/{repo}/pulls/{n}/reviews` returns per-review `user.login` ' +
+      'and `state`. STILL UNVERIFIED: that reviews come back in chronological order (the ' +
+      'filter takes the LAST decisive one and would read a stale verdict if they did ' +
+      'not), that DISMISSED is the state a dismissed approval reports rather than the ' +
+      'review disappearing, and that a job-level `if:` can never read the `env` context — ' +
+      'the reason the approver login is duplicated as a literal there at all. The first ' +
+      'two are long-standing (#727); the third is documented by GitHub and deliberately ' +
+      'not probed, since probing it means shipping a workflow that errors. All three fail ' +
+      'closed: the wrong answer is a merge that does not happen.',
   },
 
   // -------------------------------------------------------------------------

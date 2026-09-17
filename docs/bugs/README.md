@@ -101,12 +101,13 @@ a class yet.
 | `unbounded-trusted-payload` | A budgeted or validated surface embeds a value whose size or shape is guaranteed only by convention, because the only writer it has met is well-behaved. The guarantee holds until something else writes the file. | partial — `tests/context-budget.test.ts` measures the populated branch against a maximal legitimate input, for this surface only; no sweep across budgeted responses that embed external files |
 | `alarm-by-fallthrough` | A classifier recognizes a few signatures and routes *everything else* into its most alarming state, so any unmodelled failure is reported as the specific serious condition the detector exists to find. The inverse of `silent-failure-masking`: unknown becomes red rather than green, and the alarm stops correlating with the condition it names. | `tests/scripts/scheduled-smoke.test.ts` (mutation-verified): `fail` is reachable only when the output carries a drift-verdict marker, asserted over a corpus of every real non-drift failure mode |
 | `silent-under-collecting-scan` | A guard derives its own coverage by scanning source, and the scan takes less than it claims to — a declaration shape outside its grammar, a line its lexer mangled, a key it collapsed. The miss is indistinguishable from a pass: the forward direction has nothing to compare, so an unprotected declaration and a protected one look identical. Distinct from `vacuous-assertion`, where the assertion runs on the right input and cannot fail; here the input never arrives. | partial (mutation-verified) — `tests/no-hand-rolled-comment-strippers.test.ts` compiles every regex literal in `src/`, `tests/` and `scripts/` and fails on any that recognises a whole comment, which closes the lexing mechanism repo-wide with no allowlist; `tests/helpers/strip-comments.test.ts` pins the parser-owned replacement's contract; `tests/exported-constants.test.ts` reports cross-file name collisions instead of merging them. No general gate for "the grammar is narrower than the rationale the file states" — that is still read by eye |
+| `proxy-for-authority` | A decision reads a signal that merely *correlates* with the fact it needs, rather than the fact: the account that holds the repository standing in for the person who approves; a failed request standing in for a dead credential. The proxy agrees with the authority in the configuration it was written in, which is why it survives review — and it diverges silently in every other, because nothing re-checks a value that has always been right. Distinct from `identity-resolution`, where two id spaces are compared and the mismatch is visible in the values; here the two agree, and only the reason they agree is wrong. | partial (mutation-verified) — `scripts/check-workflows.ts` invariant 3 (`tests/scripts/check-workflows.test.ts`): no workflow may mention `github.repository_owner`, and every login literal in an `if:` must equal the declared `env.APPROVERS` / `env.TRUSTED_PUBLISHERS` set in both directions (#741). `tests/core/auth/candidate-ordering.test.ts`: every signal in `ENDPOINT_LEVEL_STATUSES` and `ENDPOINT_LEVEL_ERROR_CODES` must leave a cached credential intact, and every `DEAD_TOKEN_CODES` verdict must discard it — driven from the production lists, so a signal added tomorrow is asserted tomorrow (#751). Both are substrate-specific by necessity: "this input is not the authority" is not a property any general scan can decide. |
 | `overbroad-precondition-gate` | A precondition for one resource is checked at a shared chokepoint (dispatch, startup) for all requests, including those whose handling never uses the resource — so any configuration where the resource is legitimately absent is fully locked out. | registry-walk sweep in `tests/integration/live-reads.test.ts` (mutation-verified): every live tool and live-mode write must dispatch past the local-cache gate with the cache absent |
 
 ## How we find bugs
 
 Recorded per entry, using a fixed vocabulary so the corpus stays countable. Here is what
-this corpus actually says, across all 50 entries:
+this corpus actually says, across all 51 entries:
 
 | Found by | Count | |
 |---|---|---|
@@ -117,7 +118,7 @@ this corpus actually says, across all 50 entries:
 | `user-report` | 8 | ███████ |
 | `adversarial-review` — a reviewer tried to refute a claim or mutation-tested a guard | 2 | █ |
 | `detector-first` — a detector was built, and then found bugs | 1 | ▌ |
-| `code-review` | 3 | ██ |
+| `code-review` | 4 | ███ |
 | **`ci-gate`** — **a checked-in invariant failed** | **0** | |
 
 **No bug in this corpus was first caught by a CI gate.** That is the single most useful
@@ -292,6 +293,12 @@ record near-misses.
 |---|---|---|---|
 | #251 | [Shipped .mcpb bundle omitted a runtime dependency; two releases dead on install](251-mcpb-bundle-missing-deps.md) | `user-report` | 2026-04-14 |
 | #270 | [Claude Desktop launched the server in an Electron UtilityProcess that rejects the native module](270-claude-desktop-utilityprocess-dlopen.md) | `user-report` | 2026-04-15 |
+
+**`proxy-for-authority`** — 1
+
+| | Bug | Found by | Date |
+|---|---|---|---|
+| #751 | [An endpoint-level failure discarded a known-good refresh token, charging the next call a browser-wide re-extract](751-endpoint-failure-discards-cached-token.md) | `code-review` | 2026-09-16 |
 
 **`unsettled-promise`** — 1
 
