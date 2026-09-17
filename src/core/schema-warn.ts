@@ -175,6 +175,41 @@ export function validateOrWarn<T>(schema: ZodType<T>, data: unknown, ctx: Decode
 }
 
 /**
+ * Fields Copilot's BACKEND stamps on documents across the whole database,
+ * ignored by every processor rather than by 11 of them (#718, closing #611).
+ *
+ * `_migration_backfill` marks a document rewritten by a server-side backfill;
+ * `_replicated_at` marks when a replication pass last copied it. Neither says
+ * anything about the money in the document, and no processor reads either.
+ *
+ * WHY THIS IS NOT ELEVEN `ignored:` ENTRIES. A `bun run smoke:cache` against
+ * a real cache on 2026-09-16 found `_migration_backfill` on 11 collections
+ * (amazon_orders, investment_prices, items, accounts, balance_history,
+ * transactions, budgets, categories, goals, goal_history, recurring) and
+ * `_replicated_at` on 7 (investment_prices, accounts, items, balance_history,
+ * securities, user_profile, recurring). Issue #718's body recorded 10 and 8
+ * two days earlier. NEITHER SPLIT IS A PROPERTY OF THOSE COLLECTIONS — it is
+ * a record of which documents a backend job happened to touch before the
+ * snapshot, and it moved between two runs of the same command. Encoding it
+ * per-processor would bake a measurement that is already stale into eleven
+ * places and guarantee a fresh warning the next time the backfill reaches a
+ * twelfth collection.
+ *
+ * THE COST OF CENTRALISING, stated plainly: a field with one of these two
+ * names is now unreportable everywhere, including on a collection where it
+ * has never been seen. That is acceptable only because the names are the
+ * backend's own underscore-prefixed namespace rather than anything Copilot
+ * would use for user data — the risk a future `_replicated_at` carries
+ * spendable information is what this comment is wagering against. Membership
+ * is pinned verbatim by tests/core/schema-warn.test.ts, so adding a third
+ * name is a deliberate edit to a failing test rather than a quiet widening.
+ */
+export const FIRESTORE_BACKEND_MARKERS: readonly string[] = [
+  '_migration_backfill',
+  '_replicated_at',
+];
+
+/**
  * Warn once per `(collection, fieldName)` when a raw Firestore doc contains a
  * field that is neither consumed nor explicitly ignored by the processor.
  *
@@ -188,7 +223,9 @@ export function validateOrWarn<T>(schema: ZodType<T>, data: unknown, ctx: Decode
  *   - `ignored`: fields we know about but deliberately drop (e.g. denormalized
  *     nested objects where we read the flat equivalents, or noisy intelligence
  *     scores). Entries here document intent.
- *   - Any raw key not in either set emits one `console.warn` per process.
+ *   - {@link FIRESTORE_BACKEND_MARKERS}: ignored on every collection without
+ *     any processor listing them. See that constant for why.
+ *   - Any raw key in none of the three emits one `console.warn` per process.
  *   - Consumed and ignored may overlap freely (e.g. if a field is read in
  *     some branches and ignored in others).
  */
@@ -197,7 +234,11 @@ export function warnUnreadFields(
   options: { consumed: readonly string[]; ignored: readonly string[] },
   ctx: DecodeContext
 ): void {
-  const known = new Set<string>([...options.consumed, ...options.ignored]);
+  const known = new Set<string>([
+    ...options.consumed,
+    ...options.ignored,
+    ...FIRESTORE_BACKEND_MARKERS,
+  ]);
   for (const key of fields.keys()) {
     if (known.has(key)) continue;
     const dedupeKey = `unread::${ctx.collection}::${key}`;
