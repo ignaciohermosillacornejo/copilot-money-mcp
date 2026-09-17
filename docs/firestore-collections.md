@@ -36,7 +36,7 @@ collection === target || collection.endsWith(`/${target}`)
 |---|---|---|---|
 | `transactions` | ~5,500+ | Yes | Financial transactions |
 | `accounts` | 0 observed | Yes | Top-level account collection. Decoded, and matched by leaf so `items/{id}/accounts` documents land here too — which is where all of them actually were on the cache measured 2026-09-16 |
-| `users/{user_id}/accounts` | ~20 | Yes | User account customizations |
+| `users/{user_id}/accounts` | 0 observed | Yes | User account customizations — **extinct candidate**, see its section below. Nothing in `src/` reads it (#624, #660) and the cache measured 2026-09-16 had none |
 | `users/{user_id}/recurring` | ~66 | Yes | Recurring transaction patterns |
 | `users/{user_id}/budgets` | ~36 | Yes | Budget configurations |
 | `users/{user_id}/categories` | ~32 | Yes | User-defined categories |
