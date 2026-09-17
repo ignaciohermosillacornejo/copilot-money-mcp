@@ -597,7 +597,9 @@ async function main(): Promise<void> {
   // in #624, `nickname` in #660); the third was assumed to be one and never
   // was. Measurement, not symmetry, settled it — and measurement is the kind
   // of evidence that expires, so this re-runs it. See
-  // `classifyDashboardActive` for the four outcomes and what each means.
+  // `classifyDashboardActive` for the outcomes and what each means — the
+  // count is deliberately not written here, since a tally in a comment goes
+  // silently false the next time one is added (it already did once).
   // ---------------------------------------------------------------------
   const tally = countDashboardActive(accountRows);
   const counts =
