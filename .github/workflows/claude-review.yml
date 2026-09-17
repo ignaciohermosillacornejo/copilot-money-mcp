@@ -4,6 +4,14 @@ on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
 
+env:
+  # Whose PRs are auto-approved below. DECLARED, not derived: the step used to
+  # compare against `github.repository_owner`, which spells this login only
+  # because the repository is personal and would become an organisation login —
+  # which opens no pull requests — the day it is transferred (#741). A step-level
+  # `if:` can read `env`, so this is the only copy. A JSON array for `fromJSON()`.
+  APPROVERS: '["ignaciohermosillacornejo"]'
+
 jobs:
   review:
     # Skip draft PRs, forked PRs, and Dependabot PRs (secrets are unavailable)
@@ -58,13 +66,14 @@ jobs:
             --allowedTools "Bash(gh pr diff*),Bash(gh pr view*),Read,Grep,Glob"
             --disallowedTools "Bash(gh pr review --approve*),Bash(gh pr merge*),Bash(gh pr close*)"
 
-      # Auto-approve owner PRs after the review step completes so the
-      # 1-approval branch protection is satisfied without a second reviewer.
+      # Auto-approve a declared approver's own PR after the review step
+      # completes, so the 1-approval branch protection is satisfied without a
+      # second reviewer.
       # Note: this approves if the review step didn't error — it does NOT
       # gate on whether the AI flagged issues (Claude exits 0 either way).
       # Fork PRs are excluded by the job-level `if` condition above.
-      - name: Auto-approve owner PRs
-        if: github.event.pull_request.user.login == github.repository_owner
+      - name: Auto-approve a declared approver's own PR
+        if: contains(fromJSON(env.APPROVERS), github.event.pull_request.user.login)
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |

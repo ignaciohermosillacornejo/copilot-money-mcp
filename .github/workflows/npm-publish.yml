@@ -30,8 +30,14 @@ on:
 
 env:
   BUN_VERSION: 'latest'
-  # Only these users can publish packages
-  TRUSTED_PUBLISHERS: 'ignaciohermosillacornejo'
+  # The only logins allowed to publish. This declaration used to be decorative:
+  # it named the trusted publisher while all three gates below — the job `if:`
+  # (twice) and the verify step — carried their own copy of the literal and
+  # nothing ever read this key (#741). The step now reads it; the job `if:`
+  # still cannot, because a job-level `if:` has no `env` context, so
+  # `scripts/check-workflows.ts` (invariant 3) holds the two in agreement.
+  # A JSON array so `jq` and GitHub's `fromJSON()` can read the same bytes.
+  TRUSTED_PUBLISHERS: '["ignaciohermosillacornejo"]'
 
 permissions:
   contents: read
@@ -59,14 +65,18 @@ jobs:
 
     steps:
       - name: Verify publisher is trusted
+        env:
+          RELEASE_AUTHOR: ${{ github.event.release.author.login }}
         run: |
+          set -euo pipefail
           if [[ "${{ github.event_name }}" == "release" ]]; then
-            PUBLISHER="${{ github.event.release.author.login }}"
+            PUBLISHER="$RELEASE_AUTHOR"
           else
-            PUBLISHER="${{ github.actor }}"
+            PUBLISHER="$GITHUB_ACTOR"
           fi
           echo "Publisher: $PUBLISHER"
-          if [[ "$PUBLISHER" != "ignaciohermosillacornejo" ]]; then
+          # Membership in the declared list, not a literal repeated here.
+          if ! jq -e --arg p "$PUBLISHER" 'index($p) != null' <<<"$TRUSTED_PUBLISHERS" >/dev/null; then
             echo "::error::Publisher '$PUBLISHER' is not authorized to publish packages"
             exit 1
           fi
