@@ -69,12 +69,14 @@
     // Who imports what, since a curated list invites being read as a
     // dependency map:
     //   strip-comments.ts     <- decoder-field-completeness.test.ts,
-    //                            dedup-identity.test.ts, and its own contract
-    //                            test below. The two scanners stay OFF the
-    //                            list: they carry some of the ~87 pre-existing
-    //                            errors, and `tsc` does not follow imports
-    //                            upward, so checking the helper does not drag
-    //                            them in.
+    //                            dedup-identity.test.ts, its own contract test
+    //                            below, and
+    //                            scripts/no-duplicate-schema-walks.test.ts.
+    //                            The two scanners stay OFF the list: they carry
+    //                            some of the ~87 pre-existing errors, and `tsc`
+    //                            does not follow imports upward, so checking the
+    //                            helper does not drag them in. The schema-walk
+    //                            ratchet IS on the list, so it is checked.
     //   ts-files.ts           <- strip-comments.ts, exported-constants.test.ts,
     //                            no-hand-rolled-comment-strippers.test.ts, its
     //                            own contract test, and
