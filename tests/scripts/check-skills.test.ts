@@ -216,7 +216,10 @@ describe('tool-lookup gate (class-level detector)', () => {
       // The historical shape: a lookup that "works" but answers with nothing.
       name: 'the dump script returns an empty list',
       dumpBody: `console.log(JSON.stringify([]));`,
-      because: 'returned an empty tool list',
+      // Qualified: check-skills.py raises this sentence for BOTH dumps,
+      // differing only by the script-name prefix, so the bare phrase would pin
+      // the message class rather than this row.
+      because: 'dump-tool-names.ts returned an empty tool list',
     },
     {
       // The ARGS dump's version of the same shape, and the one an empty-map

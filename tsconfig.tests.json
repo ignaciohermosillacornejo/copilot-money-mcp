@@ -76,11 +76,13 @@
     //                            upward, so checking the helper does not drag
     //                            them in.
     //   ts-files.ts           <- strip-comments.ts, exported-constants.test.ts,
-    //                            no-hand-rolled-comment-strippers.test.ts, and
-    //                            its own contract test — all four on the list
-    //                            below and all four clean. (`scriptKindFor` is
-    //                            how strip-comments.ts picks a ScriptKind, so
-    //                            the two helpers are a pair, not a layer.)
+    //                            no-hand-rolled-comment-strippers.test.ts, its
+    //                            own contract test, and
+    //                            scripts/no-duplicate-schema-walks.test.ts —
+    //                            all five on the list below and all five clean.
+    //                            (`scriptKindFor` is how strip-comments.ts picks
+    //                            a ScriptKind, so the two helpers are a pair,
+    //                            not a layer.)
     // exported-constants.test.ts imports NO stripper: having no comment
     // handling at all is its half of the #691 fix.
     "tests/helpers/strip-comments.ts",
@@ -89,6 +91,12 @@
     "tests/helpers/ts-files.test.ts",
     "tests/no-hand-rolled-comment-strippers.test.ts",
     "tests/exported-constants.test.ts",
+    // The schema-walk ratchet (#750 follow-up). Here for the #725 reason: it
+    // exports `isOffender`, whose predicate is the whole guard, and nothing
+    // else in `bun run check` reads a line of it — `tests/scripts/` is outside
+    // every other program here. Membership IS the coverage, so it is pinned in
+    // tests/unit/tsconfig-tests-sync.test.ts.
+    "tests/scripts/no-duplicate-schema-walks.test.ts",
     "tests/core/temp-db-suite-teardown.test.ts",
     "tests/no-collection-time-assertions.test.ts",
     "tests/unit/tsconfig-tests-sync.test.ts",
