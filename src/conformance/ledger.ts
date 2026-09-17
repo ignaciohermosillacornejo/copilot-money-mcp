@@ -68,7 +68,14 @@
  *                      reads and does not own — the same reason everything
  *                      else is in here — and the `Firestore` prefix keeps it
  *                      from being mistaken for the `Account` GraphQL type,
- *                      whose fields are a different set.
+ *                      whose fields are a different set. SUCH AN ENTRY TAKES
+ *                      `kind: 'response-shape'` — a cache document is data
+ *                      Copilot sends us and we read, which is what that kind
+ *                      means here; `operation` (the kind the Securetoken
+ *                      entries take) describes something we CALL, and there is
+ *                      no call. Neither fits perfectly and nothing validates
+ *                      the choice, so it is written down to stop the next
+ *                      Firestore entry picking the other one.
  * - `response-shape` → `Mutation.<fieldName>:response` / `Query.<fieldName>:response`
  *                      for a whole operation's shape. For an assumption about
  *                      ONE FIELD's semantics rather than the operation's keys,
