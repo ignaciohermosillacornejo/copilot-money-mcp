@@ -35,7 +35,7 @@ collection === target || collection.endsWith(`/${target}`)
 | Collection Pattern | Count | Decoded? | Description |
 |---|---|---|---|
 | `transactions` | ~5,500+ | Yes | Financial transactions |
-| `accounts` | ~20 | Yes | Plaid account data |
+| `accounts` | 0 observed | Yes | Top-level account collection. Decoded, and matched by leaf so `items/{id}/accounts` documents land here too — which is where all of them actually were on the cache measured 2026-09-16 |
 | `users/{user_id}/accounts` | ~20 | Yes | User account customizations |
 | `users/{user_id}/recurring` | ~66 | Yes | Recurring transaction patterns |
 | `users/{user_id}/budgets` | ~36 | Yes | Budget configurations |
@@ -47,12 +47,12 @@ collection === target || collection.endsWith(`/${target}`)
 | `investment_prices/{hash}/hf` | ~850 | Yes | High-frequency price subcollection |
 | `investment_splits` | ~17 | Yes | Stock split records |
 | `items` | ~13 | Yes | Plaid item connections |
-| `items/{id}/accounts/{id}` | ~6,867 | Yes | Plaid account docs (with holdings) |
+| `items/{id}/accounts/{id}` | ~4,250, **all fieldless** | n/a | Not account documents. Firestore parent pointers for the per-account subcollections listed below — the `~6,867` this row used to claim was counting them as data (#666). The account documents themselves are the `items/{id}/accounts` row |
 | `items/{id}/accounts/{id}/balance_history` | ~4,945 | Yes | Daily account balance history |
 | `items/{id}/accounts/{id}/transactions` | ~1,367 | Yes | Plaid raw transactions |
 | `items/{id}/accounts/{id}/holdings_history/{hash}` | ~630 | Yes | Holdings snapshot metadata |
 | `items/{id}/accounts/{id}/holdings_history/{hash}/history` | ~84 | Yes | Daily holdings price/quantity |
-| `items/{id}/accounts` | ~23 | Yes | Plaid account listing per item |
+| `items/{id}/accounts` | ~21, none fieldless | Yes | **The account documents.** The only collection `processAccount` routes to on a real cache; there is no top-level `accounts` collection on the one measured 2026-09-16 |
 | `investment_performance` | ~10 | Yes | Performance tracking metadata |
 | `investment_performance/{hash}` | ~8,088 | Yes | Performance data per security |
 | `investment_performance/{hash}/twr_holding` | ~887 | Yes | Time-weighted return per holding |

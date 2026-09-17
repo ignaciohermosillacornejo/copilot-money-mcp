@@ -911,6 +911,15 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       '`user_hidden` at all — the split tracks account TYPE, every `false` document being an ' +
       'investment account and every `true` one not. Live round-trip the same day: the ' +
       'Accounts query returned those same 6 with `isUserHidden: false, isUserClosed: false`. ' +
+      'THE POPULATION IS THE WHOLE ONE, measured rather than assumed: every account ' +
+      'document on that cache lives under `items/*/accounts` (there is no top-level ' +
+      '`accounts` collection on it), all 21 carry fields, all 21 have distinct document ' +
+      'ids, and `decodeAccounts` — which dedupes by `account_id` — also returns 21. So the ' +
+      'cross-tab above and `smoke:cache` check 7 cover the same set, and on this cache ' +
+      '"21 documents" and "21 accounts" are the same number. They need not be in general: ' +
+      'check 7 counts DOCUMENTS and does not dedupe, so on a cache where the same account ' +
+      'appears at two LevelDB levels (#662) its counts are an upper bound on accounts. The ' +
+      'verdict is existential, so duplicates cannot change it — only the reported counts. ' +
       'Filtering on the flag would therefore have dropped every investment account from the ' +
       'default account list. ' +
       'CORROBORATION FROM OUR OWN WIRE: `AccountFields`, the fragment we send for an account, ' +

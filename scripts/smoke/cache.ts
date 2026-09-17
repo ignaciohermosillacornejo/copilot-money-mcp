@@ -642,7 +642,8 @@ async function main(): Promise<void> {
       record(
         'dashboard_active is not visibility',
         'WARN',
-        `no account documents were collected at all — the check is measuring nothing. ` +
+        `${counts} — no account documents were collected at all, so the check is ` +
+          `measuring nothing. ` +
           `Zero accounts on a real cache is itself surprising, so suspect a moved ` +
           `collection path over an empty cache, and compare isAccountDocumentPattern ` +
           `against the decoder's routing`
