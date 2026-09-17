@@ -103,6 +103,10 @@ const SOURCE_TREE: Record<string, string> = {
 async function makeRepo(opts: {
   dumpBody?: string;
   argsBody?: string;
+  /** Write the names dump but NOT the args dump — the only way to reach
+   *  `_run_dump_script`'s "is missing" branch for ARGS_SCRIPT, since removing
+   *  the whole scripts/ directory makes the names lookup raise first. */
+  omitArgs?: boolean;
   skill?: string;
   sourceFiles?: Record<string, string | null>;
 }): Promise<string> {
@@ -114,7 +118,12 @@ async function makeRepo(opts: {
   if (opts.dumpBody !== undefined || opts.argsBody !== undefined) {
     await mkdir(join(root, 'scripts'), { recursive: true });
     await writeFile(join(root, 'scripts', 'dump-tool-names.ts'), opts.dumpBody ?? WORKING_DUMP);
-    await writeFile(join(root, 'scripts', 'dump-tool-args.ts'), opts.argsBody ?? WORKING_ARGS_DUMP);
+    if (opts.omitArgs !== true) {
+      await writeFile(
+        join(root, 'scripts', 'dump-tool-args.ts'),
+        opts.argsBody ?? WORKING_ARGS_DUMP
+      );
+    }
   }
   for (const [path, body] of Object.entries({ ...SOURCE_TREE, ...opts.sourceFiles })) {
     if (body === null) continue;
@@ -133,6 +142,7 @@ async function withRepo(
   opts: {
     dumpBody?: string;
     argsBody?: string;
+    omitArgs?: boolean;
     skill?: string;
     sourceFiles?: Record<string, string | null>;
     env?: Record<string, string>;
@@ -160,29 +170,53 @@ ${body}
 describe('tool-lookup gate (class-level detector)', () => {
   // Each case is a different way the lookup can go wrong. The invariant is the
   // same every time: report the linter, validate nothing, blame no skill.
-  // `because` pins the case to ITS failure, not just to the shared invariants.
+  // `because` pins each case to ITS failure, not just to the shared invariants.
   // Without it a case that silently degrades into another case's scenario —
   // e.g. an args-only case whose scripts/ directory never got written, so it
   // really tests "the dump script is missing entirely" — passes identically,
-  // since every row asserts the same four things.
-  const cases: Array<{ name: string; dumpBody?: string; argsBody?: string; because?: string }> = [
-    { name: 'the dump script is missing entirely', dumpBody: undefined },
+  // since every row asserts the same four things. Every row sets one: the
+  // mechanism is only worth having if the table is self-pinning throughout,
+  // and a row without one is a row that can quietly become a duplicate.
+  const cases: Array<{
+    name: string;
+    dumpBody?: string;
+    argsBody?: string;
+    omitArgs?: boolean;
+    /**
+     * REQUIRED — and enforced at runtime below, not by the type.
+     * `tests/scripts/` is outside every tsconfig program in this repo
+     * (tsconfig.tests.json names its files individually and this is not one),
+     * so `because: string` documents the intent and checks nothing. Omitting
+     * it would otherwise reach `toContain(undefined)`, which fails with a type
+     * complaint instead of naming the row that lost its pin.
+     */
+    because: string;
+  }> = [
+    {
+      name: 'the dump script is missing entirely',
+      dumpBody: undefined,
+      because: 'dump-tool-names.ts is missing',
+    },
     {
       name: 'the dump script exits non-zero',
       dumpBody: `console.error('registry blew up'); process.exit(1);`,
+      because: 'exited 1:',
     },
     {
       name: 'the dump script prints something that is not JSON',
       dumpBody: `console.log('not json at all');`,
+      because: 'did not print valid JSON',
     },
     {
       name: 'the dump script prints JSON of the wrong shape',
       dumpBody: `console.log(JSON.stringify({ tools: ['get_transactions'] }));`,
+      because: 'expected a JSON array of strings',
     },
     {
       // The historical shape: a lookup that "works" but answers with nothing.
       name: 'the dump script returns an empty list',
       dumpBody: `console.log(JSON.stringify([]));`,
+      because: 'returned an empty tool list',
     },
     {
       // The ARGS dump's version of the same shape, and the one an empty-map
@@ -194,17 +228,32 @@ describe('tool-lookup gate (class-level detector)', () => {
       argsBody: `console.log(JSON.stringify({ get_transactions: [], update_transaction: [] }));`,
       because: 'not one argument between them',
     },
+    {
+      // `_run_dump_script`'s "is missing" branch was only ever reached for the
+      // NAMES dump: case 1 removes the whole scripts/ directory and the names
+      // lookup raises first. This omits just the args dump.
+      name: 'the args dump script is missing',
+      dumpBody: WORKING_DUMP,
+      omitArgs: true,
+      because: 'dump-tool-args.ts is missing',
+    },
   ];
 
-  for (const { name, dumpBody, argsBody, because } of cases) {
+  for (const { name, dumpBody, argsBody, omitArgs, because } of cases) {
     test(`fails as a linter fault when ${name}`, async () => {
-      await withRepo({ dumpBody, argsBody }, ({ code, stderr }) => {
+      if (!because) {
+        throw new Error(
+          `detector-table row "${name}" has no \`because\`: every row must pin itself ` +
+            'to its own failure, or it can silently become a duplicate of another row'
+        );
+      }
+      await withRepo({ dumpBody, argsBody, omitArgs }, ({ code, stderr }) => {
         expect(code).toBe(1);
         expect(stderr).toContain('linter self-check');
         expect(stderr).toContain('Skill references were NOT validated');
         // The whole point: it must NOT blame the skills.
         expect(stderr).not.toContain('references unknown MCP tool');
-        if (because !== undefined) expect(stderr).toContain(because);
+        expect(stderr).toContain(because);
       });
     });
   }
