@@ -402,6 +402,10 @@ const PINNED: Record<string, readonly string[]> = {
   CONFORMANCE_CLASSES: ['gated', 'verified-once', 'unverified'],
   // src/models/item.ts
   CONNECTION_STATUSES: ['active', 'error', 'disconnected', 'pending'],
+  // src/core/schema-warn.ts — every name here is silenced on EVERY collection,
+  // so a third entry hides a third field database-wide. That is a decision,
+  // not a one-line edit, and this pin is what makes it look like one.
+  FIRESTORE_BACKEND_MARKERS: ['_migration_backfill', '_replicated_at'],
   // src/tools/field-selection.ts
   DEFAULT_ACCOUNT_FIELDS: [
     'account_id',

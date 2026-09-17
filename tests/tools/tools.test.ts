@@ -876,6 +876,46 @@ describe('CopilotMoneyTools', () => {
       expect(Array.isArray(result.type_specific_data?.tags)).toBe(true);
     });
 
+    test('the amazon receipt is reachable by name, nesting intact (#718)', async () => {
+      // get_transactions' description names the sub-shape and promises
+      // fields: ["default", "amazon"] returns it. Nothing else asserts that
+      // end-to-end — projection copies own keys by reference, so a future
+      // change that treated nested maps differently (deep-cloning, flattening,
+      // dropping non-scalars) would silently break the one field this release
+      // added for the Amazon workflow. Synthetic receipt; no real order data.
+      const amazonTxn: Transaction = {
+        transaction_id: 'txn_amazon',
+        amount: 65.0,
+        date: '2024-01-30',
+        name: 'Online Retailer',
+        category_id: 'shopping',
+        account_id: 'acc1',
+        user_changed_type: true,
+        amazon: {
+          order_id: 'order-synthetic-1',
+          items: [{ id: 'item-1', name: 'Widget', price: 65, quantity: 1 }],
+          other: { tax: 5 },
+        },
+      };
+      (db as any)._transactions = [...mockTransactions, amazonTxn];
+
+      const terse = await tools.getTransactions({ transaction_id: 'txn_amazon' });
+      expect(terse.transactions[0]!).not.toHaveProperty('amazon');
+      expect(terse.transactions[0]!).not.toHaveProperty('user_changed_type');
+
+      const asked = await tools.getTransactions({
+        transaction_id: 'txn_amazon',
+        fields: ['default', 'amazon', 'user_changed_type'],
+      });
+      expect(asked._field_warning).toBeUndefined();
+      expect(asked.transactions[0]!.user_changed_type).toBe(true);
+      expect(asked.transactions[0]!.amazon).toEqual({
+        order_id: 'order-synthetic-1',
+        items: [{ id: 'item-1', name: 'Widget', price: 65, quantity: 1 }],
+        other: { tax: 5 },
+      });
+    });
+
     test('transaction_type tagged returns tag counts', async () => {
       const txn1: Transaction = {
         transaction_id: 'txn_tag1',
@@ -991,6 +1031,23 @@ describe('CopilotMoneyTools', () => {
       expect(result.accounts[0]).toHaveProperty('holdings');
       expect(result.accounts[0].official_name).toBe('Checking Account Official');
       expect(result.accounts[0].user_id).toBe('user1');
+    });
+
+    test('creation_timestamp is reachable by name, and only by name (#718)', async () => {
+      // get_accounts' description tells callers this field exists and is
+      // requestable. Asserted end-to-end through the same projection a
+      // dispatched call takes, because the description is a promise and
+      // nothing else checks it: ACCOUNT_KNOWN_FIELDS derives from the Zod
+      // shape, so selectability comes for free — until a projection change
+      // treats some field differently and no test notices.
+      (db as any)._accounts = [{ ...mockAccounts[0], creation_timestamp: '2026-01-01' }];
+
+      const terse = await tools.getAccounts({});
+      expect(terse.accounts[0]).not.toHaveProperty('creation_timestamp');
+
+      const asked = await tools.getAccounts({ fields: ['default', 'creation_timestamp'] });
+      expect(asked.accounts[0].creation_timestamp).toBe('2026-01-01');
+      expect(asked._field_warning).toBeUndefined();
     });
 
     test('include_logos is rejected with a migration hint', async () => {

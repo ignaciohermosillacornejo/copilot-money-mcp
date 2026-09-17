@@ -417,11 +417,14 @@ const SCHEMA_BUDGETS: Record<string, number> = {
 // rebase (~244), which together move the earlier 77_309 to 77_633. Against
 // origin/main (76_736) the delta is +897 and all of it is this PR.
 //
-// UNMOVED by #718 (+574: get_transactions +435, get_accounts +139, both for
-// naming newly-decoded document fields a caller cannot guess). Measured 78_207
-// — ~1.75% headroom, the tightest this has run, and deliberately left there.
-// Raising it to restore ~2.5% would spend the one check that notices every
-// tool creeping at once in order to make room for the next creep.
+// UNMOVED by #718 (+823: get_transactions +435 and get_accounts +139 for naming
+// newly-decoded document fields a caller cannot guess, then get_transactions_live
+// +249 in review — the review found the headline claim false in the mode the
+// Amazon workflow actually runs in, since a live row has no `amazon` at any
+// fields setting, so the live tool now says so where a live caller will look).
+// Measured 78_456 — ~1.4% headroom, the tightest this has run, and deliberately
+// left there. Raising it to restore ~2.5% would spend the one check that notices
+// every tool creeping at once in order to make room for the next creep.
 const SCHEMA_TOTAL_BUDGET = 79_600;
 
 // ---------------------------------------------------------------------------

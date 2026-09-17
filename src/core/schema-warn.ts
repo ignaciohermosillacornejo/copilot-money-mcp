@@ -182,18 +182,27 @@ export function validateOrWarn<T>(schema: ZodType<T>, data: unknown, ctx: Decode
  * `_replicated_at` marks when a replication pass last copied it. Neither says
  * anything about the money in the document, and no processor reads either.
  *
- * WHY THIS IS NOT ELEVEN `ignored:` ENTRIES. A `bun run smoke:cache` against
- * a real cache on 2026-09-16 found `_migration_backfill` on 11 collections
- * (amazon_orders, investment_prices, items, accounts, balance_history,
- * transactions, budgets, categories, goals, goal_history, recurring) and
- * `_replicated_at` on 7 (investment_prices, accounts, items, balance_history,
- * securities, user_profile, recurring). Issue #718's body recorded 10 and 8
- * two days earlier. NEITHER SPLIT IS A PROPERTY OF THOSE COLLECTIONS — it is
- * a record of which documents a backend job happened to touch before the
- * snapshot, and it moved between two runs of the same command. Encoding it
- * per-processor would bake a measurement that is already stale into eleven
- * places and guarantee a fresh warning the next time the backfill reaches a
- * twelfth collection.
+ * WHY THIS IS NOT A PER-PROCESSOR `ignored:` ENTRY. A `bun run smoke:cache`
+ * against a real cache on 2026-09-16 WARNED about `_migration_backfill` on 11
+ * collections (amazon_orders, investment_prices, items, accounts,
+ * balance_history, transactions, budgets, categories, goals, goal_history,
+ * recurring) and `_replicated_at` on 7 (investment_prices, accounts, items,
+ * balance_history, securities, user_profile, recurring). Issue #718's body
+ * recorded 10 and 8 two days earlier.
+ *
+ * READ THOSE AS WARNING COUNTS, NOT PREVALENCE. `tags` carried
+ * `_migration_backfill` on 10 of 11 documents and appears in neither figure,
+ * because #608 had already silenced it locally — so the true reach of that
+ * marker was ≥12 collections while the measurement said 11. The local entry is
+ * gone as of #718 (see `processTag` in decoder.ts) precisely because a copy
+ * that both duplicates this list and distorts the census is worse than no copy.
+ *
+ * NEITHER SPLIT IS A PROPERTY OF THOSE COLLECTIONS — each is a record of which
+ * documents a backend job happened to touch before the snapshot, and it moved
+ * between two runs of the same command two days apart. Encoding it
+ * per-processor would bake an already-stale measurement into eleven places and
+ * guarantee a fresh warning the next time the backfill reaches a twelfth
+ * collection.
  *
  * THE COST OF CENTRALISING, stated plainly: a field with one of these two
  * names is now unreportable everywhere, including on a collection where it
@@ -201,13 +210,19 @@ export function validateOrWarn<T>(schema: ZodType<T>, data: unknown, ctx: Decode
  * backend's own underscore-prefixed namespace rather than anything Copilot
  * would use for user data — the risk a future `_replicated_at` carries
  * spendable information is what this comment is wagering against. Membership
- * is pinned verbatim by tests/core/schema-warn.test.ts, so adding a third
- * name is a deliberate edit to a failing test rather than a quiet widening.
+ * is pinned verbatim by the #635 class detector in
+ * tests/exported-constants.test.ts, so adding a third name is a deliberate
+ * edit to a failing test rather than a quiet widening; tests/core/
+ * schema-warn.test.ts pins the other half, that each declared name is
+ * actually wired to the silencer rather than merely listed.
  */
-export const FIRESTORE_BACKEND_MARKERS: readonly string[] = [
-  '_migration_backfill',
-  '_replicated_at',
-];
+export const FIRESTORE_BACKEND_MARKERS = ['_migration_backfill', '_replicated_at'] as const;
+
+/**
+ * Hoisted so the per-document `known` Set below composes with a ready-made
+ * Set rather than re-walking the marker array ~62k times a full decode pass.
+ */
+const BACKEND_MARKER_SET: ReadonlySet<string> = new Set(FIRESTORE_BACKEND_MARKERS);
 
 /**
  * Warn once per `(collection, fieldName)` when a raw Firestore doc contains a
@@ -234,13 +249,9 @@ export function warnUnreadFields(
   options: { consumed: readonly string[]; ignored: readonly string[] },
   ctx: DecodeContext
 ): void {
-  const known = new Set<string>([
-    ...options.consumed,
-    ...options.ignored,
-    ...FIRESTORE_BACKEND_MARKERS,
-  ]);
+  const known = new Set<string>([...options.consumed, ...options.ignored]);
   for (const key of fields.keys()) {
-    if (known.has(key)) continue;
+    if (known.has(key) || BACKEND_MARKER_SET.has(key)) continue;
     const dedupeKey = `unread::${ctx.collection}::${key}`;
     if (!countedUnreadKeys.has(dedupeKey)) {
       countedUnreadKeys.add(dedupeKey);

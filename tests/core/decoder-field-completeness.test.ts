@@ -919,7 +919,8 @@ const PINNED: Record<string, ProcessorPin> = {
       {
         collection: 'tags',
         consumed: ['...stringFields'],
-        ignored: ['_migration_backfill'],
+        // Was ['_migration_backfill'] until #718 centralised the marker.
+        ignored: [],
       },
     ],
   },

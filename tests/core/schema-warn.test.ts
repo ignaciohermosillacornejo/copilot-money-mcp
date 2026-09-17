@@ -329,11 +329,26 @@ describe('warnUnreadFields', () => {
     expect(warnSpy.mock.calls[0][0] as string).toContain('field=_shard_key');
   });
 
-  test('the marker set is exactly the two names, pinned verbatim', () => {
-    // Membership is the whole contract: a third entry silences a third field
-    // everywhere, which is a decision that belongs in a PR rather than in a
-    // one-line edit nothing notices.
-    expect([...FIRESTORE_BACKEND_MARKERS]).toEqual(['_migration_backfill', '_replicated_at']);
+  test('every declared marker is actually wired to the silencer', () => {
+    // MEMBERSHIP is pinned elsewhere, by the #635 class detector in
+    // tests/exported-constants.test.ts, which discovers every exported `as
+    // const` string array in src/ — a stronger pin than a hand-written one
+    // here, because it cannot forget a constant it has never heard of.
+    //
+    // What that pin does NOT check is that the list is CONNECTED to anything.
+    // A name could be added to the array, pinned in both places, and still
+    // warn — the array is only a silencer because `warnUnreadFields` consults
+    // it. This drives every declared name through the function itself, so the
+    // constant and its one consumer cannot drift apart.
+    expect(FIRESTORE_BACKEND_MARKERS.length).toBeGreaterThan(0);
+    for (const marker of FIRESTORE_BACKEND_MARKERS) {
+      warnUnreadFields(
+        fakeFields([marker]),
+        { consumed: [], ignored: [] },
+        { collection: 'transactions', docId: 'doc1' }
+      );
+    }
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 
   test('backend markers do not count toward the unread-field stats either', () => {

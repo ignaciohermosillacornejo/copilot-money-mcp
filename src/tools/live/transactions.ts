@@ -599,6 +599,9 @@ export function createLiveTransactionsToolSchema(): ToolSchema {
       'user_notes, tip_amount, suggested_category_ids, iso_currency_code, ' +
       'normalized_merchant, type, created_timestamp. Ask for any of them by name with ' +
       'fields: ["default", "tag_ids"], or take the full row with fields: ["all"] (or "*"). ' +
+      'CACHE-ONLY, on no live row at any fields setting: `amazon` (the per-transaction ' +
+      'Amazon receipt — order_id and line items) and `user_changed_type`. Asking for either ' +
+      'here returns a _field_warning, not data; read them via cache-mode get_transactions. ' +
       'If the backend is unreachable this returns an isError result; it does NOT fall ' +
       'back to the local cache.',
     inputSchema: {

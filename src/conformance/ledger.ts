@@ -1154,9 +1154,14 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'PROBE 2026-09-16 over the real local cache, types only: Firestore TIMESTAMP, present ' +
       'on 1 of 21 non-empty account documents — Copilot appears to have started stamping it ' +
       'recently, so absence means unknown rather than old. Decoded through the same ' +
-      '`getDateString` as `latest_balance_update`, which accepts a timestamp OR an ' +
-      'already-formatted string and narrows both to YYYY-MM-DD, so the one drift this field ' +
-      'could plausibly undergo is already absorbed. ' +
+      '`getDateString` as `latest_balance_update`, which narrows a TIMESTAMP to YYYY-MM-DD ' +
+      'and passes an already-formatted STRING through verbatim. ' +
+      'SO THE OBVIOUS DRIFT IS NOT ABSORBED, and an earlier revision of this entry claimed ' +
+      'it was: if Copilot switched to writing an ISO string, `creation_timestamp` would ' +
+      'reach callers as `2026-01-01T12:00:00Z` and quietly contradict the YYYY-MM-DD both ' +
+      "the model comment and `get_accounts`' description promise. Narrowing the string " +
+      'branch would change `latest_balance_update` too, so it belongs in its own change ' +
+      'rather than riding along here — recorded as the exposure it is. ' +
       'NOT ADDED to the sibling `plaid_accounts` processor: the probe saw the field only on ' +
       '`accounts`, and decoding it there on the strength of "the collections look alike" ' +
       'would be exactly the guess this ledger exists to prevent.',
