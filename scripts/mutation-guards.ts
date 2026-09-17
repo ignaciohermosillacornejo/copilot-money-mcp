@@ -75,10 +75,10 @@
  *   1. `finally` — the normal path.
  *   2. `process.on('exit')` plus SIGINT/SIGTERM/SIGHUP handlers — covers a throw
  *      that escapes, an explicit `process.exit`, Ctrl-C, and a closed terminal.
- *   3. A journal under the OS temp dir, written *before* the file is touched
- *      and deleted after it is restored. A SIGKILL or a power cut skips every
- *      handler; the next run finds the journal and restores from it before
- *      doing anything else.
+ *   3. A journal under the checkout's own `node_modules/.cache/`, written
+ *      *before* the file is touched and deleted after it is restored. A SIGKILL
+ *      or a power cut skips every handler; the next run finds the journal and
+ *      restores from it before doing anything else.
  *   4. Restoration is content-addressed and verified: it writes the original
  *      bytes back only if what is on disk is still exactly the bytes this
  *      runner wrote. If something else changed the file mid-run (an editor
@@ -90,9 +90,9 @@
  * The child test run is bounded (`TEST_TIMEOUT_MS`), because several registered
  * mutations delete an early exit and a hang would hold a tracked source file
  * mutated for as long as it liked. And the journal is read as UNTRUSTED input
- * (`validEntries`): it lives at a predictable path under `tmpdir()`, which is
- * shared on Linux, so a blob found there is a suggestion, never a list of write
- * instructions.
+ * (`validEntries`) even though it now lives inside the checkout: it is a list of
+ * "write these bytes to this path", so it gets validated on the way in whether
+ * or not the directory it came from is trusted today.
  *
  * #596 proposed refusing to run on a dirty working tree and verifying restore
  * with `git diff --quiet`. This does neither, deliberately: `bun run check` is
@@ -121,10 +121,8 @@
  */
 
 import { spawnSync } from 'child_process';
-import { createHash } from 'crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { dirname, join, resolve, sep } from 'path';
-import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -506,13 +504,23 @@ interface Journal {
 }
 
 /**
- * Deterministic per repo root, so a run that was killed can be cleaned up by
- * the next run in the same checkout — and so two different worktrees of this
- * repo (this project uses them heavily) never share one.
+ * Inside the run root's own `node_modules`, not the OS temp dir.
+ *
+ * It has to be derivable from `root` alone, so the next run in the same
+ * checkout can find what a killed one left behind — which rules out a random
+ * name. A fixed path under `tmpdir()` satisfies that too, but on Linux
+ * `tmpdir()` is the shared `/tmp`: `mkdirSync(..., { recursive: true })` adopts
+ * a directory someone else created, and `writeFileSync` follows a symlink
+ * planted at the journal's name. `validEntries` closes the READ side of that,
+ * but a docblock claiming the journal is untrusted should not leave the write
+ * side pointing at a world-writable directory.
+ *
+ * `node_modules/` is per-checkout (this project uses worktrees heavily, and
+ * they do not share it), already gitignored, and writable only by whoever owns
+ * the checkout — which is the same person the runner is already acting as.
  */
 export function journalPath(root: string): string {
-  const key = createHash('sha1').update(root).digest('hex').slice(0, 16);
-  return join(tmpdir(), 'copilot-money-mcp-mutation-guards', `${key}.json`);
+  return join(root, 'node_modules', '.cache', 'mutation-guards', 'journal.json');
 }
 
 const ACTIVE = new Map<string, JournalEntry>();
@@ -526,13 +534,17 @@ function writeJournal(root: string): void {
   const journal: Journal = {
     pid: process.pid,
     startedAt: new Date().toISOString(),
-    entries: [...ACTIVE.values()],
+    // This root's entries only. A process driving more than one root (the
+    // meta-test does) would otherwise write every root's journal with every other
+    // root's files in it — which `validEntries` then rejects on read, turning a
+    // bookkeeping slip into a stream of scary-looking warnings.
+    entries: [...ACTIVE.values()].filter((entry) => entry.root === root),
   };
   writeFileSync(path, JSON.stringify(journal), 'utf8');
 }
 
 function clearJournal(root: string): void {
-  if (ACTIVE.size > 0) {
+  if ([...ACTIVE.values()].some((entry) => entry.root === root)) {
     writeJournal(root);
     return;
   }
@@ -659,8 +671,15 @@ export function recoverJournal(root: string): RecoveryReport {
     return { recovered: [], refused: [] };
   }
   const journal = isRecord(parsed) ? parsed : {};
+  const entries = validEntries(journal.entries, root);
   const pid = typeof journal.pid === 'number' ? journal.pid : 0;
-  if (pid !== process.pid && isAlive(pid)) {
+  // Only refuse over a journal that actually holds something. `writeJournal` is
+  // never called with an empty entry list for this root, so an entry-less
+  // journal names no file either run could collide over — and refusing on one
+  // would brick every `bun run check` until someone hand-deleted it, which is
+  // the failure the JSON-parse branch above exists to avoid. Reachable without
+  // an attacker, too: pid reuse.
+  if (entries.length > 0 && pid !== process.pid && isAlive(pid)) {
     throw new Error(
       `mutation-guards: another run (pid ${String(pid)}, started ${safe(journal.startedAt)}) ` +
         `holds ${path}. Two runs mutating the same files would restore each other's ` +
@@ -669,7 +688,7 @@ export function recoverJournal(root: string): RecoveryReport {
   }
   const recovered: string[] = [];
   const refused: string[] = [];
-  for (const entry of validEntries(journal.entries, root)) {
+  for (const entry of entries) {
     const before = existsSync(entry.abs) ? readFileSync(entry.abs, 'utf8') : '';
     if (before === entry.original) continue;
     if (restoreEntry(entry)) recovered.push(entry.abs);
@@ -700,16 +719,15 @@ function safe(value: unknown): string {
 /**
  * The entries of a journal that this runner could plausibly have written.
  *
- * `journalPath` is predictable — `tmpdir()/copilot-money-mcp-mutation-guards/
- * <sha1(root)>.json` — and on Linux `tmpdir()` is the shared `/tmp`. Treating a
- * blob found there as a list of write instructions would make "someone can
- * create a file in /tmp" into "someone can write any file, as you, on your next
- * `bun run check`", which runs before anything else this script does. The pid
- * check is no defence at all against that: a planted journal simply names a
- * dead pid.
+ * The journal is a list of "write these bytes to that path", executed before
+ * anything else this script does. `journalPath` now points inside the
+ * checkout's own `node_modules`, which closes the original hole — it used to be
+ * a fixed name under the shared `/tmp`, where creating the file is not a
+ * privilege — but the validation stays, because the pid field was never a
+ * defence (a planted journal names a dead pid) and a file's trustworthiness is
+ * a property of today's path, not of the code that reads it.
  *
- * So the file is read as untrusted input. Two conditions, and an entry failing
- * either is dropped rather than obeyed:
+ * Two conditions, and an entry failing either is dropped rather than obeyed:
  *
  *   - it has the three string fields a real entry has, which also stops a
  *     structurally-corrupt-but-parseable journal (`entries: [{}]`) from
@@ -876,8 +894,15 @@ export interface RunOptions {
   /** Run only the guard with this exact name. */
   readonly only?: string;
   readonly markerDir?: string;
-  /** Per-detector-file bound; overridable so the timeout path is testable. */
+  /** Bound on the MUTATED run; overridable so the timeout path is testable. */
   readonly timeoutMs?: number;
+  /**
+   * Bound on the unmutated baseline, kept separate on purpose. A test that
+   * shortens `timeoutMs` to exercise a hanging mutation must not also shorten
+   * the baseline, or a cold runner transpiling the fixture slowly fails with a
+   * message about the wrong thing.
+   */
+  readonly baselineTimeoutMs?: number;
   readonly log?: (line: string) => void;
 }
 
@@ -888,6 +913,7 @@ export async function runGuards(
   const all = options.guards ?? MUTATION_GUARDS;
   const log = options.log ?? ((line: string) => void console.log(line));
   const timeoutMs = options.timeoutMs ?? TEST_TIMEOUT_MS;
+  const baselineTimeoutMs = options.baselineTimeoutMs ?? TEST_TIMEOUT_MS;
   // Module-level, because the exit handler has nowhere else to report from.
   // Each run owns its own verdict, so clear it rather than inheriting one from
   // a previous call in the same process (the meta-test makes several).
@@ -942,8 +968,25 @@ export async function runGuards(
   const evaluate = async (guard: MutationGuard): Promise<GuardResult> => {
     let baseline = baselines.get(guard.expectFails);
     if (baseline === undefined) {
-      baseline = runTestFile(root, guard.expectFails, timeoutMs);
+      baseline = runTestFile(root, guard.expectFails, baselineTimeoutMs);
       baselines.set(guard.expectFails, baseline);
+    }
+    if (baseline.killedBy !== null) {
+      // Read BEFORE the red-either-way branch below, which a killed baseline
+      // would otherwise land in: `ran: null` looks identical there, and
+      // "your detector fails without any mutation" is the wrong thing to send
+      // someone to fix when what happened is that it never finished.
+      return {
+        name: guard.name,
+        ok: false,
+        detail:
+          `the UNMUTATED run of ${guard.expectFails} was killed ` +
+          (baseline.killedBy === 'timeout'
+            ? `after ${String(baselineTimeoutMs / 1000)}s`
+            : 'by a signal (an out-of-memory kill is the usual cause)') +
+          `, so nothing was mutated and nothing was proved. This is the detector or the ` +
+          `machine, not the guard.\n${tail(baseline.output)}`,
+      };
     }
     if (baseline.ran === null || baseline.ran === 0 || baseline.fail > 0 || baseline.errors > 0) {
       return {
@@ -1031,14 +1074,29 @@ export async function runGuards(
     };
   };
 
-  for (const guard of selected) {
+  for (const [index, guard] of selected.entries()) {
     // A refused restore means some file under `root` now holds a third party's
     // bytes and this runner no longer has a model of it. Three of the six rows
     // target src/tools/tools.ts, so continuing would read THAT content as the
     // next row's `original` — either mutating a file we no longer understand,
     // or throwing out of applyMutation and losing the `(restore)` row that
     // tells the operator about the sidecar. Stop editing the tree instead.
-    if (restoreFailed) break;
+    if (restoreFailed) {
+      // Naming what was skipped, because `results` only ever holds rows that
+      // were evaluated and the summary counts against it: a refusal on row 1 of
+      // six would otherwise print "1 of 2 failed" and read as a two-row
+      // registry. A run that covered less than it appears to, without saying
+      // so, is the shape of the bug this whole file exists to prevent.
+      const skipped = selected.slice(index).map((g) => g.name);
+      results.push({
+        name: '(skipped)',
+        ok: false,
+        detail:
+          `${String(skipped.length)} row(s) were never evaluated because the run stopped: ` +
+          `${skipped.join(', ')}. They are neither proved nor disproved.`,
+      });
+      break;
+    }
     try {
       results.push(await evaluate(guard));
     } catch (e) {
@@ -1077,8 +1135,12 @@ if (import.meta.main) {
     }
     process.exit(0);
   }
+  // Both spellings. `--guard=name` silently running the whole registry and
+  // exiting 0 would be the same class as the bare-`--guard` bug just below,
+  // one spelling over — and the greener of the two, which is worse.
+  const inlineOnly = argv.find((a) => a.startsWith('--guard='))?.slice('--guard='.length);
   const onlyAt = argv.indexOf('--guard');
-  const only = onlyAt === -1 ? undefined : argv[onlyAt + 1];
+  const only = inlineOnly ?? (onlyAt === -1 ? undefined : argv[onlyAt + 1]);
   if (onlyAt !== -1 && only === undefined) {
     // Falling through with `only: undefined` would run the WHOLE registry and
     // report success — a green that the operator asked a narrower question for.
