@@ -142,6 +142,15 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // tool's own description already owns. Measured 5_763 (~10% headroom) —
   // re-tightened rather than left, because a budget with 11.5% slack is the
   // "ratchet that could not fail" this PR called out on the live tool.
+  //
+  // UNMOVED by #718, which spends +435 here (5_763 -> 6_198) naming the
+  // `amazon` receipt map and the `user_changed_type` override flag among the
+  // dropped fields. `amazon` gets its sub-shape spelled out — {order_id,
+  // items, other} — because it is the one newly-decoded field a caller could
+  // never guess at: nothing about a transaction suggests Copilot has the
+  // Amazon line items for it, and an undiscoverable field is a field nobody
+  // requests. Headroom drops from ~10% to ~2.3%, which is inside the band the
+  // rest of this file runs at; the next addition here needs its own argument.
   get_transactions: 6_340,
   get_cache_info: 640,
   refresh_database: 485,
@@ -171,7 +180,19 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // on someone's unrelated typo fix. Its live twin was raised to ~10% in the
   // same PR, so the asymmetry is deliberate but worth knowing. When it fires:
   // justify a raise, do not trim the contract until it passes.
-  get_accounts: 2_535,
+  //
+  // IT FIRED, as that sentence predicted, and the raise is justified here
+  // rather than by trimming: #718 names `creation_timestamp` in the dropped-
+  // field list (2_518 -> 2_657, +139). Copilot started writing that field
+  // after the decoder coverage triage closed at zero, and it carries a
+  // footgun the name alone does not — it is stamped only on newer rows, so an
+  // ABSENT value means unknown, NOT old. A caller who reads absence as "this
+  // account predates the field" gets a wrong answer with no warning, which is
+  // exactly the disclosure the #597 convention buys schema chars for.
+  // 2_700 keeps this entry's deliberate tightness (1.6% headroom) rather than
+  // restoring the ~10% the rest of the file uses: it is a tripwire on the
+  // most-described read tool, and that is the property worth preserving.
+  get_accounts: 2_700,
   get_connection_status: 850,
   get_categories: 1_405,
   // Raised from 1_900 by #606: adds the `fields` param (excludes the
@@ -395,6 +416,12 @@ const SCHEMA_BUDGETS: Record<string, number> = {
 // account_id note (~80) and #717's accounts descriptions arriving via the
 // rebase (~244), which together move the earlier 77_309 to 77_633. Against
 // origin/main (76_736) the delta is +897 and all of it is this PR.
+//
+// UNMOVED by #718 (+574: get_transactions +435, get_accounts +139, both for
+// naming newly-decoded document fields a caller cannot guess). Measured 78_207
+// — ~1.75% headroom, the tightest this has run, and deliberately left there.
+// Raising it to restore ~2.5% would spend the one check that notices every
+// tool creeping at once in order to make room for the next creep.
 const SCHEMA_TOTAL_BUDGET = 79_600;
 
 // ---------------------------------------------------------------------------

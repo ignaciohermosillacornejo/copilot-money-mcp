@@ -93,6 +93,13 @@ export const AccountSchema = z
 
     // Timestamps
     latest_balance_update: z.string().optional(),
+    // When the account row was created in Copilot (#718). A Firestore
+    // timestamp on the wire, narrowed to YYYY-MM-DD by the decoder like
+    // `latest_balance_update` above. Present on 1 of 21 accounts in the
+    // probed cache — Copilot appears to stamp it only on rows created since
+    // it started writing the field — so an ABSENT value means "unknown",
+    // never "created long ago".
+    creation_timestamp: z.string().optional(),
 
     // Grouping
     group_id: z.string().optional(),

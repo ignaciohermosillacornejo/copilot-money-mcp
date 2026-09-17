@@ -68,7 +68,9 @@ export const getAccountsTool = defineTool({
       'it), institution `logo` images plus their `logo_content_type` (base64-encoded, several KB ' +
       'each — this PAIR is where the removed include_logos flag went, and the flag gated both, ' +
       'so request them together), `mask` (the last-4 digits humans identify an account ' +
-      'by), `available_balance`, `limit`, `institution_id`, the denormalized `official_name` / ' +
+      'by), `available_balance`, `limit`, `institution_id`, `creation_timestamp` (when the ' +
+      'account was created in Copilot, YYYY-MM-DD — written only on newer rows, so absent ' +
+      'means unknown, not old), the denormalized `official_name` / ' +
       '`original_*` name dupes, and `user_id`. Any document field is requestable by name: ' +
       'fields: ["default", "mask", "available_balance"], or "all" / "*" for full rows. ' +
       '`include_logos` was removed in v3.0.0 — passing it now raises an error naming this ' +

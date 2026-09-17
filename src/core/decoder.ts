@@ -899,6 +899,11 @@ function processTransaction(
     // Some docs store internal_transfer directly as a boolean in addition to
     // (or instead of) the string `type === "internal_transfer"` pattern.
     'internal_transfer',
+    // True when the user overrode Copilot's transaction type by hand (#718).
+    // Copilot stamps it only on the rows a human actually re-typed — 1 of
+    // 1040 documents in the probed cache — so any consumer must treat an
+    // ABSENT flag as "not overridden", never as "not yet decoded".
+    'user_changed_type',
   ];
 
   for (const field of booleanFields) {
@@ -933,7 +938,13 @@ function processTransaction(
   }
 
   // Map fields (converted to plain objects)
-  const mapFields = ['internal_tx_match', 'venmo_extra_data'];
+  //
+  // `amazon` (#718) is Copilot's per-transaction Amazon receipt: the order id
+  // and the line items, written by the same integration that fills the
+  // `amazon/{user}/orders` collection. It rides the generic map path on
+  // purpose — see the shape note on `TransactionSchema.amazon`, which records
+  // what the probe measured and why none of it is asserted here.
+  const mapFields = ['internal_tx_match', 'venmo_extra_data', 'amazon'];
 
   for (const field of mapFields) {
     const mapValue = getMap(fields, field);
@@ -1110,6 +1121,14 @@ function processAccount(fields: Map<string, FirestoreValue>, docId: string): Acc
   const latestBalanceUpdate = getDateString(fields, 'latest_balance_update');
   if (latestBalanceUpdate) accData.latest_balance_update = latestBalanceUpdate;
 
+  // When the account row was created in Copilot (#718) — account age, and a
+  // tiebreaker for a merged/re-linked pair. Narrowed to YYYY-MM-DD by
+  // `getDateString`, exactly as `latest_balance_update` above is: a date is
+  // what the question ("how long have I banked here") needs, and matching the
+  // sibling field keeps every account timestamp one type.
+  const creationTimestamp = getDateString(fields, 'creation_timestamp');
+  if (creationTimestamp) accData.creation_timestamp = creationTimestamp;
+
   // Holdings array (investment accounts)
   const holdingsField = fields.get('holdings');
   if (holdingsField && holdingsField.type === 'array') {
@@ -1152,6 +1171,7 @@ function processAccount(fields: Map<string, FirestoreValue>, docId: string): Acc
         'original_subtype',
         'verification_status',
         'latest_balance_update',
+        'creation_timestamp',
         'holdings',
         'metadata',
         'merged',
@@ -2548,7 +2568,24 @@ function processUserProfile(
         ...booleanFields,
         ...mapFields,
       ],
-      ignored: [],
+      // #718/#611. None of these is financial data, and two of them are
+      // things this server should not re-emit even though it can read them.
+      ignored: [
+        // macOS app chrome: which sections the user dragged where, and which
+        // product walkthroughs they have dismissed. UI state, not finance.
+        'app_sections_order',
+        'walkthroughs_completed',
+        // Transcend is Copilot's privacy-compliance vendor (consent + data
+        // subject requests). These three are that integration's bookkeeping:
+        // a vendor-side user id, the timestamp of the last provisioning
+        // push, and a HASH OF THE USER'S EMAIL. The hash in particular is
+        // PII whose only purpose is to key a third party's records — reading
+        // it would widen this server's exposure to no one's benefit. Ignored
+        // on principle, not merely because nothing consumes them.
+        'transcend_user_id',
+        'transcend_last_user_provisioned',
+        'transcend_email_hash',
+      ],
     },
     { collection: 'user_profile', docId }
   );
