@@ -34,8 +34,8 @@
  * The restoration tests are the other half: this gate edits tracked source
  * files in place, so it has to put them back after a throw and after a SIGKILL
  * that skips every handler it could install — and it has to treat the journal
- * it recovers from as untrusted input, since that file sits at a predictable
- * path in a directory that is shared on Linux.
+ * it recovers from as untrusted input, since that file is a list of "write
+ * these bytes to that path" that runs before anything else.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
@@ -95,6 +95,11 @@ function syntheticRepo(opts: {
           '  const written: string[] = [];',
           '  for (let i = 0; ; i++) {',
           '    const row = rows[i % rows.length]!;',
+          // Capped: the point of this fixture is that it never RETURNS, not
+          // that it exhausts the machine. Without the cap, raising the timeout
+          // — the instinctive response to a flaky hang test — turns it into an
+          // OOM of the runner.',
+          '    if (written.length > 64) { i = 0; written.length = 0; }',
           '    if (row === failAt) {',
           `      ${MARKER_PREFIX}${opts.markerName}`,
           `      ${opts.guardLine}`,
@@ -209,8 +214,12 @@ function addSecondGuard(root: string, name: string): MutationGuard {
   };
 }
 
-async function run(root: string, guards: readonly MutationGuard[], timeoutMs?: number) {
-  return runGuards({ root, guards, timeoutMs, log: () => {} });
+async function run(
+  root: string,
+  guards: readonly MutationGuard[],
+  over: { timeoutMs?: number; baselineTimeoutMs?: number } = {}
+) {
+  return runGuards({ root, guards, ...over, log: () => {} });
 }
 
 // --- The real registry -----------------------------------------------------
@@ -363,7 +372,10 @@ describe('a guard is only green when its detector really detects it', () => {
       assertion: "expect(pay(['a', 'b', 'c'], 'b')).toEqual(['a']);",
       nonTerminating: true,
     });
-    const { ok, results } = await run(root, [guardFor(root)], 3000);
+    // Only the MUTATED run is bounded at 3s; the baseline keeps the real
+    // bound, so a slow cold runner cannot fail this test with a message about
+    // the wrong thing.
+    const { ok, results } = await run(root, [guardFor(root)], { timeoutMs: 3000 });
     expect(ok).toBe(false);
     expect(results[0]?.detail).toContain('was killed after');
     // And the file is back, which is the part that would actually hurt.
@@ -432,6 +444,24 @@ describe('a guard is only green when its detector really detects it', () => {
     const restore = results.find((r) => r.name === '(restore)');
     expect(restore?.detail).toContain('mutation-guard-original');
     expect(results.map((r) => r.name)).not.toContain(second.name);
+    // And the report says so, rather than reading as a one-row registry.
+    const skipped = results.find((r) => r.name === '(skipped)');
+    expect(skipped?.detail).toContain(second.name);
+  });
+
+  test('a killed BASELINE is diagnosed as the detector, not as a red-either-way test', async () => {
+    // Without its own branch this lands in "does not PASS unmutated", whose
+    // advice — rewrite your detector — is the wrong fix for a run that never
+    // finished.
+    const root = syntheticRepo({
+      markerName: 'rows after the failure are never written',
+      guardLine: 'break;',
+      assertion: "expect(pay(['a', 'b', 'c'], 'b')).toEqual(['a']);",
+    });
+    const { ok, results } = await run(root, [guardFor(root)], { baselineTimeoutMs: 1 });
+    expect(ok).toBe(false);
+    expect(results[0]?.detail).toContain('UNMUTATED run');
+    expect(results[0]?.detail).toContain('nothing was proved');
   });
 
   test('an unexpected throw becomes a failing row, not a lost run', async () => {
@@ -565,11 +595,36 @@ describe('the working tree is put back whatever happens', () => {
         // only waives the check for its own pid.
         pid: process.ppid,
         startedAt: new Date().toISOString(),
-        entries: [],
+        // One REAL entry. The refusal is about two runs restoring each other's
+        // originals, so it is gated on the journal naming a file at all — see
+        // the sibling test below for why an entry-less one must not brick the
+        // gate.
+        entries: [{ abs: join(root, 'src/pay.ts'), original: 'ORIGINAL', mutated: 'MUTATED' }],
       }),
       'utf8'
     );
     expect(() => recoverJournal(root)).toThrow(/another run/);
+  });
+
+  test('an entry-less journal from a live pid does not brick the gate', () => {
+    // Reachable by accident through pid reuse, and the consequence would be
+    // every `bun run check` in the checkout throwing until someone found a file
+    // and deleted it — the same failure the unreadable-journal branch exists to
+    // avoid. writeJournal never emits an empty entry list for a root, so such a
+    // journal names no file the two runs could collide over.
+    const root = syntheticRepo({
+      markerName: 'x',
+      guardLine: 'break;',
+      assertion: 'expect(1).toBe(1);',
+    });
+    mkdirSync(join(journalPath(root), '..'), { recursive: true });
+    writeFileSync(
+      journalPath(root),
+      JSON.stringify({ pid: process.ppid, startedAt: '', entries: [] }),
+      'utf8'
+    );
+    expect(recoverJournal(root)).toEqual({ recovered: [], refused: [] });
+    expect(existsSync(journalPath(root))).toBe(false);
   });
 
   test('a journal entry pointing outside the run root is ignored, not obeyed', () => {
