@@ -193,14 +193,40 @@ export type DashboardActiveEvidence =
   | 'no-negatives'
   | 'absent';
 
+/**
+ * The three counts the verdict turns on, and the only numbers the check logs.
+ *
+ * Separate from {@link classifyDashboardActive} so the reported counts and the
+ * reported verdict cannot disagree: computing them twice is how a detail line
+ * ends up describing a state the classifier did not reach.
+ */
+export interface DashboardActiveCounts {
+  accounts: number;
+  carrying: number;
+  negatives: number;
+  visibleNegatives: number;
+}
+
+export function countDashboardActive(
+  rows: readonly AccountVisibilityRow[]
+): DashboardActiveCounts {
+  const carrying = rows.filter((row) => row.dashboardActive !== undefined);
+  const negatives = carrying.filter((row) => row.dashboardActive === false);
+  return {
+    accounts: rows.length,
+    carrying: carrying.length,
+    negatives: negatives.length,
+    visibleNegatives: negatives.filter((row) => !row.invisible).length,
+  };
+}
+
 export function classifyDashboardActive(
   rows: readonly AccountVisibilityRow[]
 ): DashboardActiveEvidence {
-  const carrying = rows.filter((row) => row.dashboardActive !== undefined);
-  if (carrying.length === 0) return 'absent';
-  const negatives = carrying.filter((row) => row.dashboardActive === false);
-  if (negatives.length === 0) return 'no-negatives';
-  return negatives.some((row) => !row.invisible) ? 'independent' : 'indistinguishable';
+  const { carrying, negatives, visibleNegatives } = countDashboardActive(rows);
+  if (carrying === 0) return 'absent';
+  if (negatives === 0) return 'no-negatives';
+  return visibleNegatives > 0 ? 'independent' : 'indistinguishable';
 }
 
 /**
@@ -548,12 +574,10 @@ async function main(): Promise<void> {
   // of evidence that expires, so this re-runs it. See
   // `classifyDashboardActive` for the four outcomes and what each means.
   // ---------------------------------------------------------------------
-  const carrying = accountRows.filter((row) => row.dashboardActive !== undefined);
-  const negatives = carrying.filter((row) => row.dashboardActive === false);
-  const visibleNegatives = negatives.filter((row) => !row.invisible);
+  const tally = countDashboardActive(accountRows);
   const counts =
-    `${accountRows.length} account document(s), ${carrying.length} carrying the field, ` +
-    `${negatives.length} false, ${visibleNegatives.length} of those visible`;
+    `${tally.accounts} account document(s), ${tally.carrying} carrying the field, ` +
+    `${tally.negatives} false, ${tally.visibleNegatives} of those visible`;
 
   switch (classifyDashboardActive(accountRows)) {
     case 'independent':
