@@ -18,14 +18,14 @@ name: Auto Merge on Approval
 # workflow by hand with the PR number and it does exactly what the review-
 # triggered run would have done. It is not a weakening of the fork-PR posture —
 # `workflow_dispatch` requires repository write access, so only someone who could
-# already merge by hand can fire it, and the "Verify owner approval" step below
+# already merge by hand can fire it, and the "Verify approval" step below
 # re-checks the PR's live review state on both paths, and that the approval
 # belongs to the PR's head commit as of that moment. It never *enables*
-# auto-merge on a PR the owner has not approved, or on a head the owner has not
-# seen. Note the scope: this workflow runs once, when auto-merge is enabled. A
-# push landing after that does not re-run it, and GitHub then merges whatever
-# head is current once required checks pass — whether that head was reviewed is
-# branch protection's job, not this file's.
+# auto-merge on a PR a declared approver has not approved, or on a head they
+# have not seen. Note the scope: this workflow runs once, when auto-merge is
+# enabled. A push landing after that does not re-run it, and GitHub then
+# merges whatever head is current once required checks pass — whether that head
+# was reviewed is branch protection's job, not this file's.
 #
 # Before reaching for it on a branch you did not write, read CONTRIBUTING.md →
 # "Reviewing a Contributor Branch (maintainers)". Merging is not the risky step;
