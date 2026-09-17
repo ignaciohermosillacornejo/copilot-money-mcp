@@ -25,7 +25,11 @@
  *   - a row whose named test passed while a SIBLING in the same detector file
  *     failed must fail, since four of the six real rows share one file;
  *   - a registry row deleted while its marker stays in `src/` must fail, since
- *     quietly dropping a row is the cheapest way to make this gate quiet.
+ *     quietly dropping a row is the cheapest way to make this gate quiet;
+ *   - a refused restore must surface as its own row and STOP the run, because
+ *     the rows after it would otherwise read a third party's bytes as their
+ *     `original`, and an unexpected throw must become a failing row rather than
+ *     take every result computed so far with it.
  *
  * The restoration tests are the other half: this gate edits tracked source
  * files in place, so it has to put them back after a throw and after a SIGKILL
@@ -156,6 +160,52 @@ function guardFor(root: string, over: Partial<MutationGuard> = {}): MutationGuar
     expectFails: 't/pay.test.ts',
     expectFailingTests: ['the guard holds'],
     ...over,
+  };
+}
+
+/**
+ * A second guarded file in the same synthetic root, so a run can have a row
+ * AFTER the one whose restore is refused.
+ */
+function addSecondGuard(root: string, name: string): MutationGuard {
+  writeFileSync(
+    join(root, 'src/ship.ts'),
+    [
+      'export function ship(rows: string[], failAt: string): string[] {',
+      '  const sent: string[] = [];',
+      '  for (const row of rows) {',
+      '    if (row === failAt) {',
+      `      ${MARKER_PREFIX}${name}`,
+      '      break;',
+      '    }',
+      '    sent.push(row);',
+      '  }',
+      '  return sent;',
+      '}',
+      '',
+    ].join('\n'),
+    'utf8'
+  );
+  writeFileSync(
+    join(root, 't/ship.test.ts'),
+    [
+      "import { expect, test } from 'bun:test';",
+      "import { ship } from '../src/ship.js';",
+      '',
+      "test('the guard holds', () => {",
+      "  expect(ship(['a', 'b', 'c'], 'b')).toEqual(['a']);",
+      '});',
+      '',
+    ].join('\n'),
+    'utf8'
+  );
+  return {
+    name,
+    file: 'src/ship.ts',
+    invariant: 'Rows after the failing one are never sent.',
+    mutation: { kind: 'remove', find: `\n      ${MARKER_PREFIX}${name}\n      break;` },
+    expectFails: 't/ship.test.ts',
+    expectFailingTests: ['the guard holds'],
   };
 }
 
@@ -347,6 +397,60 @@ describe('a guard is only green when its detector really detects it', () => {
     const { ok, results } = await run(root, [renamed]);
     expect(ok).toBe(false);
     expect(results[0]?.detail).toContain('does not appear in');
+  });
+
+  test('a refused restore is reported as its own row, and stops the run', async () => {
+    // The branch the previous review round was about, and the only one in this
+    // file that had no test of its own. The first row's detector overwrites the
+    // mutated source from inside the run — standing in for an editor saving
+    // while the file is mutated — so restore is refused. Two things must then
+    // happen: the run says so in a NAMED row (otherwise the summary reads "0 of
+    // 2 failed" over exit 1, in the one outcome that needs hand reconciliation),
+    // and the second row never runs, because its `original` would be the third
+    // party's bytes.
+    const root = syntheticRepo({
+      markerName: 'rows after the failure are never written',
+      guardLine: 'break;',
+      assertion: [
+        // Relative path: bun test runs with cwd = the synthetic root. Guarded
+        // on the mutation being present so the BASELINE run leaves the file
+        // alone — clobbering it there would break the run before any mutation
+        // and test something else entirely. Written before the assertion,
+        // since a failing expect() ends the test body.
+        "const fs = require('node:fs');",
+        "if (!fs.readFileSync('src/pay.ts', 'utf8').includes('break;'))",
+        "  fs.writeFileSync('src/pay.ts', 'SOMEONE ELSE WAS HERE');",
+        "expect(pay(['a', 'b', 'c'], 'b')).toEqual(['a']);",
+      ].join('\n  '),
+    });
+    const first = guardFor(root);
+    const second = addSecondGuard(root, 'a second marked site');
+
+    const { ok, results } = await run(root, [first, second]);
+
+    expect(ok).toBe(false);
+    const restore = results.find((r) => r.name === '(restore)');
+    expect(restore?.detail).toContain('mutation-guard-original');
+    expect(results.map((r) => r.name)).not.toContain(second.name);
+  });
+
+  test('an unexpected throw becomes a failing row, not a lost run', async () => {
+    // Reachable, not hypothetical: a detector that rewrites its own source
+    // during the BASELINE run leaves `find` absent by the time applyMutation
+    // reads the file, and that throw used to escape runGuards entirely — taking
+    // every result already computed, and the `(restore)` row, with it.
+    const root = syntheticRepo({
+      markerName: 'rows after the failure are never written',
+      guardLine: 'break;',
+      assertion: [
+        "require('node:fs').writeFileSync('src/pay.ts', 'export const pay = () => [];');",
+        'expect(1).toBe(1);',
+      ].join('\n  '),
+    });
+    const { ok, results } = await run(root, [guardFor(root)]);
+    expect(ok).toBe(false);
+    expect(results[0]?.detail).toContain('the runner threw while evaluating this row');
+    expect(results[0]?.detail).toContain('find string not present');
   });
 
   test('--guard selects one entry, and an unknown name is an error', async () => {

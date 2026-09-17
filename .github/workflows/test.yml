@@ -79,8 +79,22 @@ jobs:
       # the runner's own bookkeeping, which is the thing being checked. Note
       # this job never runs `bun test`, so the "the next command in check is a
       # whole-repo test run over the damage" backstop is a local one.
+      #
+      # `if: always()` because a FAILING mutation-guard step is the likeliest
+      # way a file is left behind, so skipping the independent check on failure
+      # would disable it exactly when it has something to say. `git status`
+      # rather than `git diff` because the runner's give-up path writes an
+      # UNTRACKED `<file>.mutation-guard-original` sidecar, which `git diff`
+      # cannot see.
       - name: Working tree unchanged by the mutation-guard run
-        run: git diff --exit-code
+        if: always()
+        run: |
+          left=$(git status --porcelain)
+          if [ -n "$left" ]; then
+            echo "The mutation-guard step left the working tree changed:"
+            echo "$left"
+            exit 1
+          fi
 
       # Fork PRs only — a same-repo branch already required push access, so
       # there is no identity to forge. Reads public commit metadata with the

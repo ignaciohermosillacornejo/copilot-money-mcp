@@ -73,8 +73,8 @@
  * worst thing it could do. Four layers, weakest failure first:
  *
  *   1. `finally` — the normal path.
- *   2. `process.on('exit')` plus SIGINT/SIGTERM handlers — covers a throw that
- *      escapes, an explicit `process.exit`, and Ctrl-C.
+ *   2. `process.on('exit')` plus SIGINT/SIGTERM/SIGHUP handlers — covers a throw
+ *      that escapes, an explicit `process.exit`, Ctrl-C, and a closed terminal.
  *   3. A journal under the OS temp dir, written *before* the file is touched
  *      and deleted after it is restored. A SIGKILL or a power cut skips every
  *      handler; the next run finds the journal and restores from it before
@@ -662,7 +662,7 @@ export function recoverJournal(root: string): RecoveryReport {
   const pid = typeof journal.pid === 'number' ? journal.pid : 0;
   if (pid !== process.pid && isAlive(pid)) {
     throw new Error(
-      `mutation-guards: another run (pid ${String(pid)}, started ${String(journal.startedAt)}) ` +
+      `mutation-guards: another run (pid ${String(pid)}, started ${safe(journal.startedAt)}) ` +
         `holds ${path}. Two runs mutating the same files would restore each other's ` +
         `originals. Wait for it, or delete that file if you are sure the process is unrelated.`
     );
@@ -681,6 +681,20 @@ export function recoverJournal(root: string): RecoveryReport {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Strip control characters from a string that came out of the journal.
+ *
+ * `validEntries` treats that file as hostile, so its contents must not be
+ * echoed to a terminal verbatim: the reachable payoff is ANSI escapes rewriting
+ * the very message that reports the rejection, which would undo the reporting.
+ * Small, but the threat model is only worth stating if it is carried all the
+ * way through.
+ */
+function safe(value: unknown): string {
+  // eslint-disable-next-line no-control-regex
+  return String(value).replace(/[\u0000-\u001f\u007f]/g, '?');
 }
 
 /**
@@ -716,7 +730,7 @@ function validEntries(raw: unknown, root: string): JournalEntry[] {
     }
     if (!resolve(abs).startsWith(prefix)) {
       console.error(
-        `mutation-guards: ignoring a journal entry for ${abs}, which is outside ${root}. ` +
+        `mutation-guards: ignoring a journal entry for ${safe(abs)}, which is outside ${root}. ` +
           `This runner only ever mutates files under the root it was given, so that entry ` +
           `was not written by it.`
       );
@@ -753,8 +767,12 @@ export interface TestSummary {
    * tests that must be among these.
    */
   readonly failingTests: string[];
-  /** True when the child was killed for exceeding TEST_TIMEOUT_MS. */
-  readonly timedOut: boolean;
+  /**
+   * How the child died, when it did not exit on its own. `'timeout'` is the
+   * bounded-run case; `'signal'` is any other kill (an OOM, most likely), kept
+   * separate so the report does not name a timeout that did not happen.
+   */
+  readonly killedBy: 'timeout' | 'signal' | null;
   readonly pass: number;
   readonly fail: number;
   /**
@@ -770,7 +788,7 @@ export interface TestSummary {
 export function parseBunTestSummary(
   output: string,
   exitCode: number,
-  timedOut = false
+  killedBy: 'timeout' | 'signal' | null = null
 ): TestSummary {
   const num = (re: RegExp): number => {
     const m = re.exec(output);
@@ -786,7 +804,7 @@ export function parseBunTestSummary(
   return {
     ran: ranMatch?.[1] === undefined ? null : Number(ranMatch[1]),
     failingTests,
-    timedOut,
+    killedBy,
     pass: num(/^\s*(\d+) pass\b/m),
     fail: num(/^\s*(\d+) fail\b/m),
     errors: num(/^\s*(\d+) errors?\b/m),
@@ -822,12 +840,17 @@ export function runTestFile(root: string, file: string, timeoutMs = TEST_TIMEOUT
     killSignal: 'SIGKILL',
     env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
   });
+  // The OR is a fail-safe: spawnSync reports the timeout through `error`, but a
+  // child that died to SIGKILL some other way (an OOM) must not be read as a
+  // clean run either. They are reported apart so neither borrows the other's
+  // explanation.
   const timedOut =
     res.error !== undefined && (res.error as NodeJS.ErrnoException).code === 'ETIMEDOUT';
+  const killedBy = timedOut ? 'timeout' : res.signal === 'SIGKILL' ? 'signal' : null;
   return parseBunTestSummary(
     `${res.stdout ?? ''}\n${res.stderr ?? ''}`,
     res.status ?? -1,
-    timedOut || res.signal === 'SIGKILL'
+    killedBy
   );
 }
 
@@ -909,14 +932,21 @@ export async function runGuards(
   const baselines = new Map<string, TestSummary>();
   const results: GuardResult[] = [];
 
-  for (const guard of selected) {
+  /**
+   * One row, evaluated. Separated out so the loop can turn an UNEXPECTED throw
+   * into a failing row: without that, a surprise here (applyMutation on content
+   * the runner no longer understands, an unreadable file) escapes runGuards
+   * entirely and the operator gets a stack trace instead of the results already
+   * computed — including the `(restore)` row that points at the sidecar.
+   */
+  const evaluate = async (guard: MutationGuard): Promise<GuardResult> => {
     let baseline = baselines.get(guard.expectFails);
     if (baseline === undefined) {
       baseline = runTestFile(root, guard.expectFails, timeoutMs);
       baselines.set(guard.expectFails, baseline);
     }
     if (baseline.ran === null || baseline.ran === 0 || baseline.fail > 0 || baseline.errors > 0) {
-      results.push({
+      return {
         name: guard.name,
         ok: false,
         detail:
@@ -924,8 +954,7 @@ export async function runGuards(
           `(ran=${String(baseline.ran)} pass=${String(baseline.pass)} fail=${String(baseline.fail)} ` +
           `errors=${String(baseline.errors)}). A detector that is red either way proves nothing, ` +
           `so this direction is checked first.\n${tail(baseline.output)}`,
-      });
-      continue;
+      };
     }
 
     const abs = join(root, guard.file);
@@ -934,43 +963,45 @@ export async function runGuards(
       runTestFile(root, guard.expectFails, timeoutMs)
     );
 
-    if (after.timedOut) {
-      results.push({
+    if (after.killedBy !== null) {
+      return {
         name: guard.name,
         ok: false,
         detail:
-          `the mutated run was killed after ${String(timeoutMs / 1000)}s. Deleting an ` +
-          `early-exit guard is the edit class that turns a bounded loop unbounded, so treat ` +
-          `this as "the mutation hung the detector", not as a detection.\n${tail(after.output)}`,
-      });
-      continue;
+          (after.killedBy === 'timeout'
+            ? `the mutated run was killed after ${String(timeoutMs / 1000)}s. Deleting an ` +
+              `early-exit guard is the edit class that turns a bounded loop unbounded, so ` +
+              `treat this as "the mutation hung the detector", not as a detection.`
+            : `the mutated run was killed by a signal without hitting the ${String(
+                timeoutMs / 1000
+              )}s bound — an out-of-memory kill is the usual cause. Either way the detector ` +
+              `never reported, so this is not a detection.`) + `\n${tail(after.output)}`,
+      };
     }
     if (after.ran !== baseline.ran) {
-      results.push({
+      return {
         name: guard.name,
         ok: false,
         detail:
           `the mutation changed how many tests RAN (${String(baseline.ran)} → ${String(after.ran)}), ` +
           `so ${guard.expectFails} did not fail for a behavioural reason. Almost always a ` +
           `mutation that leaves the file unparseable — fix the find/with strings.`,
-      });
-      continue;
+      };
     }
     if (after.errors > 0) {
-      results.push({
+      return {
         name: guard.name,
         ok: false,
         detail:
           `the mutated run reported ${String(after.errors)} module-level/uncaught error(s). ` +
           `That is a broken mutation wearing a detection's clothes; the guard is unproven.`,
-      });
-      continue;
+      };
     }
     const undetectedBy = guard.expectFailingTests.filter(
       (needle) => !after.failingTests.some((name) => name.includes(needle))
     );
     if (after.fail > 0 && undetectedBy.length > 0) {
-      results.push({
+      return {
         name: guard.name,
         ok: false,
         detail:
@@ -978,28 +1009,45 @@ export async function runGuards(
           `${undetectedBy.join(', ')} still passed. What failed instead: ` +
           `${after.failingTests.join(', ')}. A row riding on a sibling test's failure is the ` +
           `same hole as a guard with no detector, one level up.`,
-      });
-      continue;
+      };
     }
     if (after.fail === 0) {
-      results.push({
+      return {
         name: guard.name,
         ok: false,
         detail:
           `VACUOUS — disabling this guard left ${guard.expectFails} entirely green ` +
           `(${String(after.pass)} pass, 0 fail). Nothing detects its removal. Write a test that ` +
           `pins the PROPERTY ("${guard.invariant.split('.')[0]!.trim()}"), not the error message.`,
-      });
-      continue;
+      };
     }
 
-    results.push({
+    return {
       name: guard.name,
       ok: true,
       detail:
         `${guard.expectFails}: ${String(baseline.pass)} pass unmutated → ${String(after.fail)} ` +
         `fail mutated\n      caught by: ${after.failingTests.join(' | ')}`,
-    });
+    };
+  };
+
+  for (const guard of selected) {
+    // A refused restore means some file under `root` now holds a third party's
+    // bytes and this runner no longer has a model of it. Three of the six rows
+    // target src/tools/tools.ts, so continuing would read THAT content as the
+    // next row's `original` — either mutating a file we no longer understand,
+    // or throwing out of applyMutation and losing the `(restore)` row that
+    // tells the operator about the sidecar. Stop editing the tree instead.
+    if (restoreFailed) break;
+    try {
+      results.push(await evaluate(guard));
+    } catch (e) {
+      results.push({
+        name: guard.name,
+        ok: false,
+        detail: `the runner threw while evaluating this row: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    }
   }
 
   if (restoreFailed) {
