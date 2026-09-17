@@ -294,12 +294,6 @@ record near-misses.
 | #251 | [Shipped .mcpb bundle omitted a runtime dependency; two releases dead on install](251-mcpb-bundle-missing-deps.md) | `user-report` | 2026-04-14 |
 | #270 | [Claude Desktop launched the server in an Electron UtilityProcess that rejects the native module](270-claude-desktop-utilityprocess-dlopen.md) | `user-report` | 2026-04-15 |
 
-**`proxy-for-authority`** — 1
-
-| | Bug | Found by | Date |
-|---|---|---|---|
-| #751 | [An endpoint-level failure discarded a known-good refresh token, charging the next call a browser-wide re-extract](751-endpoint-failure-discards-cached-token.md) | `code-review` | 2026-09-16 |
-
 **`unsettled-promise`** — 1
 
 | | Bug | Found by | Date |
@@ -317,6 +311,12 @@ record near-misses.
 | | Bug | Found by | Date |
 |---|---|---|---|
 | #638 | [A context-budget assertion counted bytes it did not own](638-unbounded-trusted-payload-in-budgeted-response.md) | `incidental` | 2026-08-12 |
+
+**`proxy-for-authority`** — 1
+
+| | Bug | Found by | Date |
+|---|---|---|---|
+| #751 | [An endpoint-level failure discarded a known-good refresh token, charging the next call a browser-wide re-extract](751-endpoint-failure-discards-cached-token.md) | `code-review` | 2026-09-16 |
 
 **`overbroad-precondition-gate`** — 1
 
