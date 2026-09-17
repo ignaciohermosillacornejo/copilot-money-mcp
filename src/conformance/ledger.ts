@@ -919,7 +919,8 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'divergence of the #663/#683 kind, and invisible to the parity tests because only one ' +
       'mode has the field. ' +
       'WHY verified-once RATHER THAN gated: `scripts/smoke/cache.ts` check 7 re-measures the ' +
-      'independence on whatever real cache it runs and reports four outcomes, but it WARNS ' +
+      'independence on whatever real cache it runs and separates every outcome it can tell ' +
+      'apart, including the two that measure nothing — but it WARNS ' +
       'rather than fails when the evidence goes away — a cache whose only `false` accounts ' +
       'happen to be hidden is ambiguous, not wrong — and `smoke:cache` is not yet in any ' +
       'composite or schedule. A WARN nothing runs automatically is not a gate. ' +
