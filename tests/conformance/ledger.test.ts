@@ -39,6 +39,18 @@ const SMOKE_DIR = join(import.meta.dir, '..', '..', 'scripts', 'smoke');
 // ---------------------------------------------------------------------------
 // Walk the write-tool JSON schemas, collecting every reachable parameter path
 // (`<tool>.<param>`, arrays as `<param>[]`) and every enum value set.
+//
+// The THIRD walk of this shape in the repo, and deliberately not the shared one
+// (`scripts/schema-args.ts`). That module collects bare names; this builds
+// dotted paths and enum sets, so folding them together would couple a coverage
+// gate to a name-collection helper. What they DO share is the limit: both
+// descend `properties` and `items` and nothing else, so a schema reaching a
+// parameter through `oneOf`/`anyOf`/`allOf`, `patternProperties`, `$defs`, a
+// schema-valued `additionalProperties`, or the tuple form of `items` is
+// invisible here. None occurs today — every `additionalProperties` in this repo
+// is the boolean `false`. Worth stating because this walk drives a COVERAGE
+// gate: a parameter it cannot reach has no conformance-ledger entry and the
+// gate passes anyway, which is under-collection reported as success.
 // ---------------------------------------------------------------------------
 
 interface JsonSchemaNode {

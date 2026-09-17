@@ -107,9 +107,13 @@ async function makeRepo(opts: {
   sourceFiles?: Record<string, string | null>;
 }): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'check-skills-'));
-  if (opts.dumpBody !== undefined) {
+  // EITHER body, not just `dumpBody`. Gating on `dumpBody` alone meant a case
+  // that set only `argsBody` got no `scripts/` directory at all and silently
+  // tested "the dump script is missing entirely" instead — invisible in this
+  // file, because that case asserts the same four invariants.
+  if (opts.dumpBody !== undefined || opts.argsBody !== undefined) {
     await mkdir(join(root, 'scripts'), { recursive: true });
-    await writeFile(join(root, 'scripts', 'dump-tool-names.ts'), opts.dumpBody);
+    await writeFile(join(root, 'scripts', 'dump-tool-names.ts'), opts.dumpBody ?? WORKING_DUMP);
     await writeFile(join(root, 'scripts', 'dump-tool-args.ts'), opts.argsBody ?? WORKING_ARGS_DUMP);
   }
   for (const [path, body] of Object.entries({ ...SOURCE_TREE, ...opts.sourceFiles })) {
@@ -156,7 +160,12 @@ ${body}
 describe('tool-lookup gate (class-level detector)', () => {
   // Each case is a different way the lookup can go wrong. The invariant is the
   // same every time: report the linter, validate nothing, blame no skill.
-  const cases: Array<{ name: string; dumpBody?: string; argsBody?: string }> = [
+  // `because` pins the case to ITS failure, not just to the shared invariants.
+  // Without it a case that silently degrades into another case's scenario —
+  // e.g. an args-only case whose scripts/ directory never got written, so it
+  // really tests "the dump script is missing entirely" — passes identically,
+  // since every row asserts the same four things.
+  const cases: Array<{ name: string; dumpBody?: string; argsBody?: string; because?: string }> = [
     { name: 'the dump script is missing entirely', dumpBody: undefined },
     {
       name: 'the dump script exits non-zero',
@@ -182,12 +191,12 @@ describe('tool-lookup gate (class-level detector)', () => {
       // and the emptiness check and then silently turns every argument name in
       // the repo into a candidate row field.
       name: 'the args dump returns a map of empty lists',
-      dumpBody: WORKING_DUMP,
       argsBody: `console.log(JSON.stringify({ get_transactions: [], update_transaction: [] }));`,
+      because: 'not one argument between them',
     },
   ];
 
-  for (const { name, dumpBody, argsBody } of cases) {
+  for (const { name, dumpBody, argsBody, because } of cases) {
     test(`fails as a linter fault when ${name}`, async () => {
       await withRepo({ dumpBody, argsBody }, ({ code, stderr }) => {
         expect(code).toBe(1);
@@ -195,6 +204,7 @@ describe('tool-lookup gate (class-level detector)', () => {
         expect(stderr).toContain('Skill references were NOT validated');
         // The whole point: it must NOT blame the skills.
         expect(stderr).not.toContain('references unknown MCP tool');
+        if (because !== undefined) expect(stderr).toContain(because);
       });
     });
   }
