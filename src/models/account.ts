@@ -78,7 +78,11 @@ export const AccountSchema = z
      * `Accounts` round-trip the same day returned all 6 with
      * `isUserHidden: false, isUserClosed: false`. Filtering the default
      * `get_accounts` on it — the change #666 floated — would have dropped
-     * every investment account from the account list.
+     * every investment account from the account list. (Those 21 are the whole
+     * account population of that cache, not a sample: every account document
+     * on it lives under the per-item accounts collection, all 21 carry fields and
+     * distinct ids, and `decodeAccounts` — which dedupes by `account_id` —
+     * also returns 21.)
      *
      * It is also absent from `AccountFields`, the fragment Copilot's own
      * client requests for an account, so live mode has no counterpart: any
