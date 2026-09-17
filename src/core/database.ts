@@ -950,6 +950,9 @@ export class CopilotDatabase {
   /**
    * Load user accounts with caching.
    * Uses batch loading for optimal performance on first access.
+   *
+   * Feeds {@link CopilotDatabase.getUserAccounts}, which is an extinct
+   * candidate — see that method's note (#666).
    */
   private async loadUserAccounts(): Promise<UserAccountCustomization[]> {
     if (this._userAccounts !== null) {
@@ -1337,13 +1340,17 @@ export class CopilotDatabase {
   }
 
   /**
-   * Get user-defined account customizations from Firestore.
+   * Get user-defined account customizations from `users/{uid}/accounts`.
    *
-   * These are user settings for accounts stored in the Copilot Money app,
-   * stored in /users/{user_id}/accounts/{account_id}.
+   * EXTINCT CANDIDATE, kept deliberately — see
+   * {@link UserAccountCustomization} in `src/core/decoder.ts` for the evidence,
+   * its limits, and the bar for deleting the path (#666).
    *
-   * This includes user-defined account names (e.g., "Chase Sapphire Preferred")
-   * which override the bank's internal names (e.g., "CHASE CREDIT CRD AUTOPAY").
+   * The description this JSDoc used to carry — "user-defined account names
+   * which override the bank's internal names" — describes what
+   * `Account.nickname` does now (#660). This collection is empty on the caches
+   * we have looked at, so the method reliably returns `[]`; no `src/` caller
+   * depends on it.
    *
    * @returns List of user account customizations
    */

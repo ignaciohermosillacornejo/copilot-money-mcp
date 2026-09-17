@@ -50,6 +50,11 @@ export const PlaidAccountSchema = z
     color: z.string().optional(),
     logo: z.string().optional(),
     logo_content_type: z.string().optional(),
+    /**
+     * Not a visibility flag — see the measurement on `dashboard_active` in
+     * `./account.ts`, which this mirrors. Decoded, deliberately unfiltered
+     * (#666).
+     */
     dashboard_active: z.boolean().optional(),
     live_balance_backend_disabled: z.boolean().optional(),
     live_balance_user_disabled: z.boolean().optional(),
