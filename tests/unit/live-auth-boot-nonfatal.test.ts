@@ -15,7 +15,15 @@
  * advance. It did nothing for the person who gets it wrong anyway, which is
  * the case that generated the report.
  *
- * THE CLASS, and why the second test is not about auth at all
+ * TWO WAYS TO KILL THE TRANSPORT, and this file covers both
+ *
+ * Exiting is the obvious one. Blocking is the other: an offline boot spends
+ * four 30s attempts plus backoff in the probe, and a host whose startup
+ * timeout fires during that wait shows the same closed transport for the same
+ * reason. So `runServer` now connects the transport BEFORE probing, and the
+ * ordering is pinned here rather than left to the next reader's judgement.
+ *
+ * THE CLASS, and why the structural tests are not about auth at all
  *
  * Instance: "boot auth failure exits". Class: **a failure inside the server
  * reported by terminating the process rather than through an MCP result.**
@@ -31,14 +39,17 @@
  */
 
 import { describe, test, expect, spyOn } from 'bun:test';
-import { readdirSync, readFileSync, statSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
 import { join, relative } from 'path';
 import ts from 'typescript';
+import { tsFilesUnder, scriptKindFor } from '../helpers/ts-files.js';
 import { CopilotMoneyServer, preflightLiveAuthOrWarn } from '../../src/server.js';
 import { GraphQLClient, GraphQLError } from '../../src/core/graphql/client.js';
 import { noCopilotSessionError } from '../../src/core/auth/browser-token.js';
 
 const SRC_DIR = join(import.meta.dir, '../../src');
+const SERVER_TS = join(SRC_DIR, 'server.ts');
 
 /** A client whose every request fails the way boot/tool calls would. */
 function failingClient(err: unknown): GraphQLClient {
@@ -83,6 +94,30 @@ describe('preflightLiveAuthOrWarn survives every boot failure (#708)', () => {
     expect(query).toHaveBeenCalled();
   });
 
+  test('a SUCCEEDING probe says nothing at all', async () => {
+    // The direction every other case in this file leaves open. Without it, a
+    // refactor that logged `[live-reads] preflight failed` unconditionally —
+    // or any scary line on a healthy boot — would pass the whole file, and
+    // the user would be told to go log in while already logged in.
+    const client = {
+      query: () =>
+        Promise.resolve({
+          transactions: { edges: [], pageInfo: { endCursor: null, hasNextPage: false } },
+        }),
+      mutate: () => Promise.reject(new Error('preflight must not mutate')),
+    } as unknown as GraphQLClient;
+    const stderr = spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await expect(preflightLiveAuthOrWarn(client)).resolves.toBeUndefined();
+      expect(
+        stderr.mock.calls.flat().join('\n'),
+        'a healthy boot must be silent — a diagnostic nobody needs trains people to ignore it'
+      ).toBe('');
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
   for (const { label, err } of BOOT_FAILURES) {
     test(`${label}: resolves instead of exiting, and names the remedy on stderr`, async () => {
       // `process.exit` is typed as returning `never`, so a stub that returns
@@ -96,6 +131,11 @@ describe('preflightLiveAuthOrWarn survives every boot failure (#708)', () => {
         expect(exit, 'a boot failure must not terminate the server').not.toHaveBeenCalled();
         const logged = stderr.mock.calls.flat().join('\n');
         expect(logged).toContain('[live-reads] preflight failed');
+        // The URL comes from the SECOND (static) line for a `GraphQLError`,
+        // whose rendering says "Sign in to the Copilot web app" without one;
+        // only `noCopilotSessionError` carries it in the message itself. This
+        // asserts the pair, which is the thing a person reading the log sees
+        // — not the rendering of any single error.
         expect(
           logged,
           'the host log must still name the browser login, for the person reading logs'
@@ -149,13 +189,15 @@ describe('the live tool surface still reports the failure to the client (#708)',
   });
 });
 
-/** Every `.ts` file under src/, repo-relative. */
-function srcFiles(dir: string): string[] {
-  return readdirSync(dir).flatMap((entry) => {
-    const full = join(dir, entry);
-    if (statSync(full).isDirectory()) return srcFiles(full);
-    return entry.endsWith('.ts') ? [full] : [];
-  });
+/** Parse a source file once, for the AST walks below. */
+function parse(file: string): ts.SourceFile {
+  return ts.createSourceFile(
+    file,
+    readFileSync(file, 'utf8'),
+    ts.ScriptTarget.Latest,
+    true,
+    scriptKindFor(file)
+  );
 }
 
 /**
@@ -167,19 +209,45 @@ function srcFiles(dir: string): string[] {
  * the JSDoc in `src/server.ts` that explains why the call was removed, so the
  * gate would fail on its own rationale. The parser never sees comments as
  * calls, so no stripping pass is needed either.
+ *
+ * KNOWN LIMITS, so a green run is not over-read. It recognises the callee
+ * written as a member of `process` — `process.exit(…)` and `process['exit'](…)`
+ * — and nothing else. These evade it:
+ *
+ *   const { exit } = process; exit(1);
+ *   import { exit } from 'node:process'; exit(1);
+ *   const p = process; p.exit(1);
+ *
+ * Closing those needs binding resolution (a `ts.Program`, not a `SourceFile`),
+ * which is more machinery than this gate earns — and none of the three is a
+ * shape anyone in this repo writes. What is guarded is the spelling a person
+ * reintroducing the bug would actually reach for.
  */
 function processExitArgs(file: string): string[] {
-  const text = readFileSync(file, 'utf8');
-  const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+  const sf = parse(file);
   const found: string[] = [];
-  const visit = (node: ts.Node): void => {
+  const isProcessExit = (callee: ts.Expression): boolean => {
+    // `process.exit(…)`
     if (
-      ts.isCallExpression(node) &&
-      ts.isPropertyAccessExpression(node.expression) &&
-      ts.isIdentifier(node.expression.expression) &&
-      node.expression.expression.text === 'process' &&
-      node.expression.name.text === 'exit'
+      ts.isPropertyAccessExpression(callee) &&
+      ts.isIdentifier(callee.expression) &&
+      callee.expression.text === 'process'
     ) {
+      return callee.name.text === 'exit';
+    }
+    // `process['exit'](…)` — same call, different spelling.
+    if (
+      ts.isElementAccessExpression(callee) &&
+      ts.isIdentifier(callee.expression) &&
+      callee.expression.text === 'process' &&
+      ts.isStringLiteralLike(callee.argumentExpression)
+    ) {
+      return callee.argumentExpression.text === 'exit';
+    }
+    return false;
+  };
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && isProcessExit(node.expression)) {
       found.push(node.arguments[0]?.getText(sf) ?? '');
     }
     ts.forEachChild(node, visit);
@@ -189,7 +257,12 @@ function processExitArgs(file: string): string[] {
 }
 
 describe('class detector: only the argv layer may kill the process (#708)', () => {
-  const files = srcFiles(SRC_DIR);
+  // `tsFilesUnder` rather than a local walk: it covers the whole TS extension
+  // family (`'a.mts'.endsWith('.ts')` is false, so a `.ts`-only filter would
+  // NEVER OPEN such a file and report zero offenders over it — under-collection
+  // reported as success, this detector's own worst failure mode), skips
+  // node_modules/dist/.git, and does not follow symlinks into a cycle.
+  const files = tsFilesUnder(SRC_DIR);
 
   test('guards the gate: the walk found src/ and it found real exit calls', () => {
     // A discovery scan that collects nothing passes every "no offenders"
@@ -199,16 +272,50 @@ describe('class detector: only the argv layer may kill the process (#708)', () =
     expect(processExitArgs(join(SRC_DIR, 'cli.ts')).length).toBeGreaterThan(0);
   });
 
+  test('both spellings of the callee are recognised, and near-misses are not', () => {
+    // The limits in `processExitArgs`' docblock are only honest if the forms
+    // it DOES claim actually work. Written to a real file and run through
+    // `processExitArgs` itself — a matcher reimplemented inline here would be
+    // testing a copy, and the copy is the one thing that cannot drift from
+    // the gate by being wrong.
+    //
+    // `process['exit']` appears nowhere in the tree, so without a fixture the
+    // element-access branch would be uncovered by construction.
+    const fixture = join(mkdtempSync(join(tmpdir(), 'exit-spellings-')), 'fixture.ts');
+    writeFileSync(
+      fixture,
+      [
+        'process.exit(1);',
+        "process['exit'](2);",
+        // Near-misses that must NOT be counted: an assignment, a different
+        // method that merely mentions the word, and a comment.
+        'process.exitCode = 3;',
+        "process.emit('exit');",
+        '// process.exit(4);',
+        'export {};',
+      ].join('\n')
+    );
+    try {
+      expect(processExitArgs(fixture)).toEqual(['1', '2']);
+    } finally {
+      rmSync(fixture, { force: true });
+    }
+  });
+
   test('the walk ignores a `process.exit(1)` written in a comment', () => {
     // The #705 failure mode, asserted directly: `src/server.ts` documents the
     // removed call in prose, and a text scan would count it. If this ever
     // fails, the gate below has started reading documentation as code.
-    const server = readFileSync(join(SRC_DIR, 'server.ts'), 'utf8');
+    //
+    // The claim is about COMMENT PARSING, so the assertion is scoped to it:
+    // `not.toContain('1')`, not an exact list. Pinning the exact multiset
+    // would make a new SIGHUP handler fail a test about comments.
+    const server = readFileSync(SERVER_TS, 'utf8');
     expect(
       server,
       'the rationale this assertion is about has moved — re-point it or delete it'
     ).toContain('`process.exit(1)`');
-    expect(processExitArgs(join(SRC_DIR, 'server.ts'))).toEqual(['0', '0']);
+    expect(processExitArgs(SERVER_TS)).not.toContain('1');
   });
 
   test('no module outside src/cli.ts exits non-zero', () => {
@@ -228,5 +335,84 @@ describe('class detector: only the argv layer may kill the process (#708)', () =
         'exiting destroys the only channel that could explain it (#708). Only src/cli.ts, ' +
         'which runs before any transport exists, may exit non-zero.'
     ).toEqual([]);
+  });
+});
+
+describe('the transport connects before the probe runs (#708)', () => {
+  /**
+   * The OTHER way to reproduce #708's symptom, and the reason this is
+   * structural rather than behavioural: `runServer` claims stdio, so calling
+   * it in-process is not an option, and the invariant is about statement
+   * ORDER inside it.
+   *
+   * WHAT THIS PROVES: in `runServer`'s body, the `server.run()` call — which
+   * connects the stdio transport — precedes the `preflightLiveAuthOrWarn`
+   * call, and the probe is not awaited.
+   *
+   * WHAT IT DOES NOT: that `server.run()` itself returns promptly, or that
+   * any particular host tolerates any particular delay. A probe moved into a
+   * helper that `runServer` awaits before `server.run()` would also evade it.
+   * It pins the shape a person editing this function would actually change.
+   */
+  function runServerBody(): ts.FunctionDeclaration {
+    const sf = parse(SERVER_TS);
+    const fn = sf.statements.find(
+      (s): s is ts.FunctionDeclaration =>
+        ts.isFunctionDeclaration(s) && s.name?.text === 'runServer'
+    );
+    if (!fn?.body)
+      throw new Error('runServer is no longer a function declaration in src/server.ts');
+    return fn;
+  }
+
+  /** Position of the first call whose text starts with `prefix`, or -1. */
+  function callPos(fn: ts.FunctionDeclaration, prefix: string): number {
+    const sf = fn.getSourceFile();
+    let pos = -1;
+    const visit = (node: ts.Node): void => {
+      if (pos === -1 && ts.isCallExpression(node) && node.expression.getText(sf).startsWith(prefix))
+        pos = node.getStart(sf);
+      ts.forEachChild(node, visit);
+    };
+    ts.forEachChild(fn, visit);
+    return pos;
+  }
+
+  test('guards the gate: both calls were actually found', () => {
+    // Either one going missing (a rename, an extraction into a helper) would
+    // make the ordering assertion below compare -1 against -1 and pass.
+    const fn = runServerBody();
+    expect(callPos(fn, 'server.run'), 'server.run() not found in runServer').toBeGreaterThan(-1);
+    expect(
+      callPos(fn, 'preflightLiveAuthOrWarn'),
+      'preflightLiveAuthOrWarn not found in runServer'
+    ).toBeGreaterThan(-1);
+  });
+
+  test('server.run() comes first, and the probe is not awaited', () => {
+    const fn = runServerBody();
+    expect(
+      callPos(fn, 'preflightLiveAuthOrWarn'),
+      'the boot probe must run AFTER the transport connects: an offline boot spends ~125s ' +
+        'in it (four 30s attempts plus backoff), and a host whose startup timeout fires ' +
+        'during that wait shows the same closed transport #708 is about'
+    ).toBeGreaterThan(callPos(fn, 'server.run'));
+
+    const sf = fn.getSourceFile();
+    let awaited = false;
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isAwaitExpression(node) &&
+        node.expression.getText(sf).startsWith('preflightLiveAuthOrWarn')
+      )
+        awaited = true;
+      ts.forEachChild(node, visit);
+    };
+    ts.forEachChild(fn, visit);
+    expect(
+      awaited,
+      'awaiting the probe holds runServer open for the whole retry budget — it is ' +
+        'fire-and-forget on purpose (it catches everything and never rejects)'
+    ).toBe(false);
   });
 });
