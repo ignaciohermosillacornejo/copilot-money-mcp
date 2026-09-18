@@ -227,9 +227,9 @@ if (shellSyntaxTokens.length > 0) {
   console.error(
     `Tracked-files check failed: package.json scripts.clean names ${quoted(shellSyntaxTokens)}, ` +
       'which this script cannot read as a directory: a target must be a plain path of ' +
-      'ASCII letters, digits, `.`, `-`, `_` and `/`. Shell syntax is not interpreted — operators, ' +
-      'globs, braces, quoting, `~` and escapes all reach this script verbatim. Write the ' +
-      'targets as plain paths, or re-point the parse in this script.'
+      'ASCII letters, digits, `.`, `-`, `_` and `/`. Shell syntax is not interpreted — ' +
+      'operators, globs, braces, quoting, `~` and escapes all reach this script verbatim. ' +
+      'Write the targets as plain paths, or re-point the parse in this script.'
   );
 }
 if (outsideRepoTokens.length > 0) {

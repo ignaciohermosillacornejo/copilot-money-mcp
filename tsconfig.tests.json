@@ -20,11 +20,16 @@
 // literal silently missing two declared fields — the failure message read them
 // and got `undefined`. A gate whose legibility depends on its own types should
 // have them checked. Named rather than counted, since a bare count over a
-// fuzzy antecedent is the drift shape this list keeps attracting. They are
-// temp-db-suite-teardown.test.ts, no-collection-time-assertions.test.ts and
-// tsconfig-tests-sync.test.ts, plus temp-db-teardown.ts and
-// temp-db-leak-probe.ts, which are on the list in their own right. All are
-// type-clean; keep them that way.
+// fuzzy antecedent is the drift shape this list keeps attracting — but the
+// naming belongs on the entries, not in a second copy up here. It WAS a second
+// copy, and it drifted exactly as a count would have: five files named against
+// nine in the category, four of them missed before #766 and two more added by
+// it. Nothing gated the prose, because the ratchet reads include LINES and
+// never this paragraph. So: each such entry carries its reason as an inline
+// comment on its own line below, where a reason cannot separate from its
+// subject, and the set is pinned as MEMBERSHIP_IS_THE_COVERAGE in
+// tests/unit/tsconfig-tests-sync.test.ts. All are type-clean; keep them that
+// way.
 //
 // For each, the LINE is the only thing putting the file in a program: nothing
 // in this repo imports a `.test.ts`, the probe is a path string the suite

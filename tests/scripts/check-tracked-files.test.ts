@@ -647,7 +647,7 @@ describe('check:tracked-files', () => {
     }
   });
 
-  test('guards the gate: both causes are actually exercised above', () => {
+  test('guards the gate: each cause is actually exercised above', () => {
     // Anti-vacuity for the LOOP, which is a different claim from the one the
     // assertions inside it make: an empty group would skip its rows silently.
     for (const { cause, scripts, expected } of UNREADABLE_CLEAN_SCRIPTS) {
