@@ -20,8 +20,14 @@
  * Exiting is the obvious one. Blocking is the other: an offline boot spends
  * four 30s attempts plus backoff in the probe, and a host whose startup
  * timeout fires during that wait shows the same closed transport for the same
- * reason. So `runServer` now connects the transport BEFORE probing, and the
- * ordering is pinned here rather than left to the next reader's judgement.
+ * reason. So `runServer` now connects the transport BEFORE probing, and that
+ * ordering is pinned by RUNNING it: `runServer` takes a small injection seam
+ * (`RunServerDeps`) because `server.run()` claims this process's stdio, and
+ * the test drives the real probe against a client whose query never settles.
+ * An earlier revision pinned the same rule by walking `runServer`'s AST. That
+ * is gone: it asserted a literal `server.run()` call site, which the seam
+ * removed — a gate that breaks when the code it guards is refactored
+ * correctly was pinning the spelling, not the rule.
  *
  * THE CLASS, and why the structural tests are not about auth at all
  *
@@ -44,7 +50,7 @@ import { tmpdir } from 'os';
 import { join, relative } from 'path';
 import ts from 'typescript';
 import { tsFilesUnder, scriptKindFor } from '../helpers/ts-files.js';
-import { CopilotMoneyServer, preflightLiveAuthOrWarn } from '../../src/server.js';
+import { CopilotMoneyServer, preflightLiveAuthOrWarn, runServer } from '../../src/server.js';
 import { GraphQLClient, GraphQLError } from '../../src/core/graphql/client.js';
 import { noCopilotSessionError } from '../../src/core/auth/browser-token.js';
 
@@ -338,81 +344,74 @@ describe('class detector: only the argv layer may kill the process (#708)', () =
   });
 });
 
-describe('the transport connects before the probe runs (#708)', () => {
+describe('runServer connects the transport before probing, and never waits on it (#708)', () => {
   /**
-   * The OTHER way to reproduce #708's symptom, and the reason this is
-   * structural rather than behavioural: `runServer` claims stdio, so calling
-   * it in-process is not an option, and the invariant is about statement
-   * ORDER inside it.
+   * The behavioural half of the ordering rule, run rather than read.
    *
-   * WHAT THIS PROVES: in `runServer`'s body, the `server.run()` call — which
-   * connects the stdio transport — precedes the `preflightLiveAuthOrWarn`
-   * call, and the probe is not awaited.
-   *
-   * WHAT IT DOES NOT: that `server.run()` itself returns promptly, or that
-   * any particular host tolerates any particular delay. A probe moved into a
-   * helper that `runServer` awaits before `server.run()` would also evade it.
-   * It pins the shape a person editing this function would actually change.
+   * `runServer` takes a `RunServerDeps` seam (see its docblock) because
+   * `server.run()` claims this process's stdin and stdout, which the test
+   * runner is also using. The seam replaces exactly two things — how the
+   * GraphQL client is built and how the transport connects — and the real
+   * `preflightLiveAuthOrWarn` runs untouched against a client whose `query`
+   * NEVER SETTLES. That is the offline boot in miniature: ~125s of retries in
+   * production, unbounded here, which is the point.
    */
-  function runServerBody(): ts.FunctionDeclaration {
-    const sf = parse(SERVER_TS);
-    const fn = sf.statements.find(
-      (s): s is ts.FunctionDeclaration =>
-        ts.isFunctionDeclaration(s) && s.name?.text === 'runServer'
-    );
-    if (!fn?.body)
-      throw new Error('runServer is no longer a function declaration in src/server.ts');
-    return fn;
+  function hangingClient(onQuery: () => void): GraphQLClient {
+    return {
+      query: () => {
+        onQuery();
+        return new Promise<never>(() => {});
+      },
+      mutate: () => new Promise<never>(() => {}),
+    } as unknown as GraphQLClient;
   }
 
-  /** Position of the first call whose text starts with `prefix`, or -1. */
-  function callPos(fn: ts.FunctionDeclaration, prefix: string): number {
-    const sf = fn.getSourceFile();
-    let pos = -1;
-    const visit = (node: ts.Node): void => {
-      if (pos === -1 && ts.isCallExpression(node) && node.expression.getText(sf).startsWith(prefix))
-        pos = node.getStart(sf);
-      ts.forEachChild(node, visit);
-    };
-    ts.forEachChild(fn, visit);
-    return pos;
-  }
+  test('a probe that never settles does not hold up the transport', async () => {
+    const order: string[] = [];
+    // A real timeout, so a regression HANGS THE TEST rather than passing
+    // slowly: if `runServer` ever awaits the probe again, this never resolves
+    // and bun fails the test instead of the suite quietly taking 125s.
+    await Promise.race([
+      runServer('/nonexistent/run-server-order', undefined, false, true, {
+        createGraphQLClient: () => hangingClient(() => order.push('probe')),
+        connect: () => {
+          order.push('connect');
+          return Promise.resolve();
+        },
+      }),
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error('runServer did not return — it is awaiting the probe')),
+          5_000
+        )
+      ),
+    ]);
 
-  test('guards the gate: both calls were actually found', () => {
-    // Either one going missing (a rename, an extraction into a helper) would
-    // make the ordering assertion below compare -1 against -1 and pass.
-    const fn = runServerBody();
-    expect(callPos(fn, 'server.run'), 'server.run() not found in runServer').toBeGreaterThan(-1);
     expect(
-      callPos(fn, 'preflightLiveAuthOrWarn'),
-      'preflightLiveAuthOrWarn not found in runServer'
-    ).toBeGreaterThan(-1);
+      order,
+      'the transport must connect first, and runServer must return while the probe is still ' +
+        'in flight — an offline boot spends ~125s in it, and a host whose startup timeout ' +
+        'fires during that wait sees the same closed transport #708 is about'
+    ).toEqual(['connect', 'probe']);
   });
 
-  test('server.run() comes first, and the probe is not awaited', () => {
-    const fn = runServerBody();
-    expect(
-      callPos(fn, 'preflightLiveAuthOrWarn'),
-      'the boot probe must run AFTER the transport connects: an offline boot spends ~125s ' +
-        'in it (four 30s attempts plus backoff), and a host whose startup timeout fires ' +
-        'during that wait shows the same closed transport #708 is about'
-    ).toBeGreaterThan(callPos(fn, 'server.run'));
-
-    const sf = fn.getSourceFile();
-    let awaited = false;
-    const visit = (node: ts.Node): void => {
-      if (
-        ts.isAwaitExpression(node) &&
-        node.expression.getText(sf).startsWith('preflightLiveAuthOrWarn')
-      )
-        awaited = true;
-      ts.forEachChild(node, visit);
-    };
-    ts.forEachChild(fn, visit);
-    expect(
-      awaited,
-      'awaiting the probe holds runServer open for the whole retry budget — it is ' +
-        'fire-and-forget on purpose (it catches everything and never rejects)'
-    ).toBe(false);
+  test('guards the gate: without --live-reads there is no probe at all', () => {
+    // Pins that the assertion above is about ORDER, not about the probe being
+    // unreachable. If `createGraphQLClient` were never called in live mode,
+    // `order` would read ['connect'] and `toEqual` would have caught it — but
+    // only this case proves the absence is conditional rather than total.
+    const order: string[] = [];
+    return runServer('/nonexistent/run-server-cache-mode', undefined, false, false, {
+      createGraphQLClient: () => {
+        order.push('client');
+        return hangingClient(() => order.push('probe'));
+      },
+      connect: () => {
+        order.push('connect');
+        return Promise.resolve();
+      },
+    }).then(() => {
+      expect(order).toEqual(['connect']);
+    });
   });
 });
