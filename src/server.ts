@@ -15,7 +15,7 @@ import {
 import { CopilotDatabase } from './core/database.js';
 import { CopilotMoneyTools } from './tools/index.js';
 import { ALL_TOOL_DEFS, TOOL_REGISTRY, type LiveToolContext } from './tools/registry/index.js';
-import { GraphQLClient } from './core/graphql/client.js';
+import { GraphQLClient, GraphQLError } from './core/graphql/client.js';
 import { FirebaseAuth } from './core/auth/firebase-auth.js';
 import { extractRefreshTokenCandidates } from './core/auth/browser-token.js';
 import { LiveCopilotDatabase, preflightLiveAuth } from './core/live-database.js';
@@ -37,6 +37,7 @@ import { LiveAggregatedHoldingsTools } from './tools/live/aggregated-holdings.js
 import { LiveInvestmentBalanceTools } from './tools/live/investment-balance.js';
 import { RefreshCacheTool } from './tools/live/refresh-cache.js';
 import { stripTypename } from './tools/strip-typename.js';
+import { graphQLErrorToMcpError } from './tools/errors.js';
 
 // Read version from package.json
 import { createRequire } from 'module';
@@ -320,36 +321,110 @@ export class CopilotMoneyServer {
 }
 
 /**
+ * Render a boot-preflight failure for the stderr diagnostic.
+ *
+ * `GraphQLError` gets the same attribution the tool handlers use
+ * (`graphQLErrorToMcpError`) so the host log and the client-facing error
+ * agree on WHOSE fault it is; anything else — notably the plain
+ * `No Copilot Money session found …` thrown before a request is ever sent —
+ * already carries its own remedy and is passed through.
+ */
+function describeBootFailure(err: unknown): string {
+  if (err instanceof GraphQLError) return graphQLErrorToMcpError(err);
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Run the live-reads boot probe, and REPORT rather than die on failure (#708).
+ *
+ * This used to `process.exit(1)`. That put the one fact the user needed —
+ * "log into app.copilot.money" — in the one place they never look: the MCP
+ * host's stderr log. The host reports a closed transport, the agent sees no
+ * tools at all, and it cannot tell the user what to do because it was never
+ * told. That is how #708 was found: an external user read it out of the logs.
+ *
+ * Staying up fixes exactly that. The live tools stay listed, and the first
+ * call returns the auth failure as an `isError` result, so the AGENT reads
+ * "Please log into Copilot Money at https://app.copilot.money in your
+ * browser" and can relay it. Nothing is served stale in the meantime: a live
+ * tool with no session fails, it does not fall back to the cache.
+ *
+ * It also makes the state recoverable without a restart. After a failed cold
+ * extraction `FirebaseAuth` has cached no token, so the next call re-runs
+ * browser extraction and picks up the session the user just created.
+ * Exiting made every failure permanent, including the transient ones — no
+ * network at launch, laptop asleep, Copilot 5xx.
+ *
+ * Deliberately NOT classified by error code: a SCHEMA_ERROR or a NETWORK
+ * failure at boot has the same remedy shape as an auth one — surface it to
+ * the caller in its own words rather than killing the transport that would
+ * carry it. The stderr lines stay for host-log diagnosis.
+ *
+ * Exported for tests: this resolving (rather than exiting) IS the fix, and
+ * `runServer` cannot be called in-process without claiming stdio.
+ */
+export async function preflightLiveAuthOrWarn(client: GraphQLClient): Promise<void> {
+  try {
+    await preflightLiveAuth(client);
+  } catch (err) {
+    console.error(`[live-reads] preflight failed: ${describeBootFailure(err)}`);
+    console.error(
+      '[live-reads] starting anyway — live tools will report this error to the client ' +
+        'on first use. If it is an auth failure, log into app.copilot.money in your ' +
+        'browser; no restart needed.'
+    );
+  }
+}
+
+/** The real GraphQL client: browser-session auth against Copilot's endpoint. */
+function defaultGraphQLClient(): GraphQLClient {
+  return new GraphQLClient(new FirebaseAuth(() => extractRefreshTokenCandidates()));
+}
+
+/** The real transport: stdio, which claims this process's stdin and stdout. */
+function defaultConnect(server: CopilotMoneyServer): Promise<void> {
+  return server.run();
+}
+
+/**
+ * Injection seam for {@link runServer}, mirroring the one
+ * `CopilotMoneyServer`'s constructor already takes for its GraphQL client.
+ *
+ * It exists because the two things `runServer` decides — that the transport
+ * connects BEFORE the boot probe, and that it does not wait on the probe —
+ * are orderings, and an ordering is only really pinned by running it. Without
+ * a seam that is untestable in-process: `server.run()` claims this process's
+ * stdin and stdout, which a test runner is also using.
+ *
+ * Both default to the real thing, so the production call in `src/cli.ts`
+ * passes nothing and behaves exactly as before.
+ */
+export interface RunServerDeps {
+  /** Builds the GraphQL client. Default: {@link defaultGraphQLClient}. */
+  createGraphQLClient?: () => GraphQLClient;
+  /** Connects the transport. Default: {@link defaultConnect}. */
+  connect?: (server: CopilotMoneyServer) => Promise<void>;
+}
+
+/**
  * Run the Copilot Money MCP server.
  *
  * @param dbPath - Optional path to LevelDB database.
  *                If undefined, uses default Copilot Money location.
  * @param decodeTimeoutMs - Optional timeout for decode operations in milliseconds.
  * @param writeEnabled - If true, register write tools and enable GraphQL writes.
+ * @param deps - Test seam; see {@link RunServerDeps}. Production passes nothing.
  */
 export async function runServer(
   dbPath?: string,
   decodeTimeoutMs?: number,
   writeEnabled = false,
-  liveReadsEnabled = false
+  liveReadsEnabled = false,
+  deps: RunServerDeps = {}
 ): Promise<void> {
   let graphqlClient: GraphQLClient | undefined;
   if (writeEnabled || liveReadsEnabled) {
-    const auth = new FirebaseAuth(() => extractRefreshTokenCandidates());
-    graphqlClient = new GraphQLClient(auth);
-  }
-
-  if (liveReadsEnabled && graphqlClient) {
-    try {
-      await preflightLiveAuth(graphqlClient);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[live-reads] preflight failed: ${msg}`);
-      console.error(
-        '[live-reads] ensure you are logged into app.copilot.money in your default browser, then restart.'
-      );
-      process.exit(1);
-    }
+    graphqlClient = (deps.createGraphQLClient ?? defaultGraphQLClient)();
   }
 
   const server = new CopilotMoneyServer(
@@ -359,5 +434,44 @@ export async function runServer(
     liveReadsEnabled,
     graphqlClient
   );
-  await server.run();
+
+  // Connect FIRST, probe after. The probe used to run before this line, which
+  // was defensible while it could refuse to start the server — and is not now
+  // that its only product on the failure path is a log line.
+  //
+  // The wait is not small. An offline boot is four 30s attempts plus backoff
+  // (`DEFAULT_TIMEOUT_MS`, `DEFAULT_RETRY_DELAYS_MS`) ≈ 125s, on top of
+  // browser-storage extraction across every profile. Blocking the transport
+  // for that long reproduces #708's symptom by another route: if the host's
+  // startup timeout fires first the user sees a closed transport and the agent
+  // sees no tools, which is the thing this change exists to prevent.
+  await (deps.connect ?? defaultConnect)(server);
+
+  // Fire-and-forget, deliberately. What the probe still buys is a stderr
+  // diagnostic for host-log debugging and a warm token cache for the first
+  // real call; neither needs to gate anything.
+  //
+  // The `.catch` is NOT redundant with the one inside the probe, and an
+  // earlier revision of this comment was wrong about why. It claimed
+  // `no-floating-promises` would catch a regression here — but that rule
+  // defaults to `ignoreVoid: true` and nothing overrides it, so `void` IS the
+  // sanctioned suppression and the lint can never fire at this line. The
+  // comment named as a backstop the one thing the `void` switches off.
+  //
+  // What sits behind that gap is `src/cli.ts`'s
+  // `process.on('unhandledRejection', … process.exit(1))`, which stays armed
+  // for the whole process lifetime. So if a later edit ever let this promise
+  // reject — a widened body outside the probe's own `try`, a throw while
+  // rendering the error — the process would exit AFTER the transport was
+  // connected: a client watching its server die mid-session, with no tool
+  // list and no isError result. #708's class again, in its worst form, and
+  // reached through the one file the class detector exempts.
+  //
+  // Attaching the handler here makes that unreachable whatever the callee
+  // does later, which is the property a comment about the callee cannot have.
+  if (liveReadsEnabled && graphqlClient) {
+    void preflightLiveAuthOrWarn(graphqlClient).catch((err: unknown) => {
+      console.error(`[live-reads] preflight threw unexpectedly: ${String(err)}`);
+    });
+  }
 }

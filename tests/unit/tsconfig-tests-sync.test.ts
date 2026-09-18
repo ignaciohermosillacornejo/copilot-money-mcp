@@ -166,8 +166,11 @@ describe('a typechecked helper brings its own contract test onto the list', () =
  * Every entry meeting it belongs here EXCEPT the tests/helpers/ contract
  * tests, which the helper-pairing rule above already holds — deliberately not
  * repeated, so each file is ratcheted once and by the rule that explains it.
- * The auth files are the sharpest case: the tsconfig header justifies their
- * membership with the exact #725 story this pin exists to prevent a repeat of.
+ * The auth files are the sharpest case: the block heading their run in
+ * tsconfig.tests.json justifies their membership with the exact #725 story
+ * this pin exists to prevent a repeat of. (That reason sat in the file's
+ * HEADER until #766 moved it onto the run — a second copy that had already
+ * drifted, naming two of its three subjects.)
  *
  * Hand-maintained, like the header prose it mirrors. Deriving it would need a
  * real import graph rather than a grep; the two lists cross-reference each
@@ -188,8 +191,10 @@ const MEMBERSHIP_IS_THE_COVERAGE = [
   'tests/no-collection-time-assertions.test.ts',
   'tests/no-hand-rolled-comment-strippers.test.ts',
   'tests/scripts/no-duplicate-schema-walks.test.ts',
+  'tests/scripts/check-tracked-files.test.ts',
   'tests/scripts/mutation-guards.test.ts',
   'tests/setup/temp-db-teardown.ts',
+  'tests/unit/live-auth-boot-nonfatal.test.ts',
   'tests/unit/tsconfig-tests-sync.test.ts',
 ];
 

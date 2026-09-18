@@ -71,9 +71,10 @@ Passing `--write` implies `--live-reads`; you can still pass `--live-reads` on i
 - **For `--live-reads` or `--write` only:** a supported browser logged in to
   [app.copilot.money](https://app.copilot.money) — the Chromium family, Firefox, or
   Safari; see [docs/graphql-live-reads.md](docs/graphql-live-reads.md) for the list.
-  The server reuses that session's Firebase refresh token; without it those modes fail
-  at startup. Default mode needs nothing — it reads the local cache and makes no
-  network requests.
+  The server reuses that session's Firebase refresh token. Without it the server still
+  starts, and the first live or write tool call tells the assistant to log in — log in
+  and retry, no restart needed. Default mode needs nothing — it reads the local cache
+  and makes no network requests.
 
 ### Installation via Claude Desktop
 

@@ -104,6 +104,14 @@ const PACKAGE_JSON = JSON.stringify(
     scripts: {
       'check:kept': 'bun run scripts/kept.ts',
       build: 'bun build src/entry.ts --outdir dist && chmod +x dist/entry.js',
+      // The gate derives its generated-directory list from this script rather
+      // than from a list of its own, so the fixture needs one to model the real
+      // repo. Without it the gate's anti-vacuity guard fires and every case
+      // here fails on a message about `clean` instead of its own subject.
+      // `out-stage` is deliberately a name no hand-written list would carry:
+      // the derivation test below tracks a file under it, which only fails if
+      // the gate really did read this script.
+      clean: 'rm -rf dist coverage out-stage',
     },
   },
   null,
@@ -469,6 +477,270 @@ describe('check:tracked-files', () => {
       ({ code, stderr }) => {
         expect(code).toBe(1);
         expect(stderr).toContain('scripts/local/helper.ts');
+      }
+    );
+  });
+
+  // -------------------------------------------------------------------------
+  // The inverse direction (#766): nothing GENERATED may be tracked.
+  // -------------------------------------------------------------------------
+
+  test('flags a tracked file under a directory `clean` deletes', async () => {
+    // The instance that motivated it: a `git add -A` after a local coverage run
+    // committed `coverage/`, and every gate stayed green because all of them
+    // asked "is what we need present?" and none asked "is anything here that
+    // should not be?".
+    await withRepo(
+      async (root) => {
+        await write(root, 'coverage/lcov.info', 'TN:\nSF:src/entry.ts\nend_of_record\n');
+        // A plain `add`, not `add -f`: the fixture has no `coverage/` ignore
+        // rule, mirroring the real repo's state, and an ordinary add is how
+        // the file actually got committed. `-f` would keep this test passing
+        // if the fixture ever gained such a rule — at which point it would be
+        // exercising a state the real bug did not have. `withRepo`'s docblock
+        // makes the same argument about `add -A`.
+        await git(root, ['add', 'coverage/lcov.info']);
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('coverage/lcov.info');
+        expect(stderr).toContain('`bun run clean` deletes');
+        // The remedy has to be the one that STAYS fixed: deleting the file
+        // without an ignore rule leaves the next `git add -A` free to re-add it.
+        expect(stderr).toContain('git rm -r --cached');
+      }
+    );
+  });
+
+  test('a generated directory that is empty of tracked files passes', async () => {
+    // Guards the gate from the other side: the check is about the INDEX, not
+    // about the directory existing on disk. A contributor who has just run the
+    // tests must not fail a check they cannot act on.
+    await withRepo(
+      async (root) => {
+        await write(root, 'coverage/lcov.info', 'TN:\n');
+        // Deliberately NOT added — present on disk, absent from the index.
+      },
+      ({ code, stderr }) => {
+        expect(stderr).toBe('');
+        expect(code).toBe(0);
+      }
+    );
+  });
+
+  test('the generated list is derived from `clean`, not hardcoded', async () => {
+    // `out-stage` is the point: it appears in the fixture's `clean` script and
+    // nowhere in this repo, so no hand-written list in the gate could contain
+    // it. If the derivation stopped working, this file would simply not be
+    // guarded and the case would go green.
+    await withRepo(
+      async (root) => {
+        await write(root, 'out-stage/bundle.js', "console.log('staged');\n");
+        await git(root, ['add', 'out-stage/bundle.js']);
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('out-stage/bundle.js');
+      }
+    );
+  });
+
+  test('an ignored generated directory is caught too', async () => {
+    // `dist/` IS in the fixture's ignore file, so this one needs `-f` — the
+    // contrast with the coverage case above, where the missing ignore rule is
+    // what let an ordinary `add` sweep the file in.
+    await withRepo(
+      async (root) => {
+        await write(root, 'dist/entry.js', "console.log('built');\n");
+        await git(root, ['add', '-f', 'dist/entry.js']);
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('dist/entry.js');
+      }
+    );
+  });
+
+  /**
+   * Each rejection cause gets its own expected sentence.
+   *
+   * One shared assertion on "cannot read as a directory" would pass for every
+   * row while the message told the outside-repo group that their script
+   * contains shell operators — advice that names no cause they have and a
+   * remedy ("write plain paths") they have already followed. The table is
+   * split so a message that collapses back into one sentence fails here.
+   */
+  const UNREADABLE_CLEAN_SCRIPTS = [
+    {
+      cause: 'shell syntax',
+      expected: 'a target must be a plain path of ASCII letters, digits',
+      scripts: [
+        'rm -rf "dist" coverage',
+        'rm -rf dist/*',
+        'rm -rf dist && rm -rf coverage',
+        // Brace expansion carries no operator, quote or glob character, so the
+        // first draft's metacharacter denylist passed it as ONE directory named
+        // `{dist,coverage,.bun-build}` — a non-empty parse guarding nothing.
+        // It is also the most natural way to write this exact script.
+        'rm -rf {dist,coverage,.bun-build}',
+        'rm -rf dist[0-9] coverage',
+        'rm -rf ~/dist coverage',
+      ],
+    },
+    {
+      cause: 'outside the repo',
+      expected: 'not ones inside this repository',
+      // Plain paths, every one of them — and none names anything
+      // `git ls-files` can print, so each would report a directory count over
+      // a scan matching nothing. Being free of shell syntax was only half of
+      // "readable"; the other half is "inside this repo".
+      scripts: ['rm -rf ../dist coverage', 'rm -rf /tmp/build coverage', 'rm -rf .'],
+    },
+  ] as const;
+
+  test('a `clean` this script cannot parse fails loudly, naming the right cause', async () => {
+    // The half the empty-parse guard misses: these produce a NON-empty list
+    // whose entries match no path `git ls-files` emits, so the gate would
+    // report a directory count over a scan that guards nothing — the same
+    // "finds nothing, looks like a pass" shape one layer in.
+    // NB `./dist` is absent: a leading `./` is normalised, not rejected, and
+    // the next test pins that. Listing it here too would be two tests asserting
+    // opposite things about one spelling.
+    for (const group of UNREADABLE_CLEAN_SCRIPTS) {
+      // Every OTHER group, not just one. With two causes `find` was exhaustive,
+      // but a third would silently leave each row unchecked against it — the
+      // complementary-by-hand shape this branch removed from the script itself
+      // one commit ago. `filter` makes the contrast total by construction.
+      const others = UNREADABLE_CLEAN_SCRIPTS.filter((g) => g.cause !== group.cause);
+      if (others.length === 0) throw new Error('the table needs a second cause to contrast');
+      for (const clean of group.scripts) {
+        await withRepo(
+          async (root) => {
+            const pkg = JSON.parse(PACKAGE_JSON) as { scripts: Record<string, string> };
+            pkg.scripts.clean = clean;
+            await write(root, 'package.json', JSON.stringify(pkg, null, 2));
+            await git(root, ['add', '-A']);
+          },
+          ({ code, stderr }) => {
+            expect(code, `\`${clean}\` must not pass silently`).toBe(1);
+            expect(
+              stderr,
+              `\`${clean}\` is rejected for being ${group.cause}, and the message must say so`
+            ).toContain(group.expected);
+            // The half that carries the claim. An earlier revision asserted
+            // only the line above plus `shell.expected !== outside.expected`
+            // between two literals in THIS file — which never runs the script,
+            // so collapsing both branches back into one message containing
+            // both phrases passed every row and the guard with it (checked).
+            // A gate that cannot fail is worse than none, which this PR
+            // already argued once when it deleted such a test.
+            for (const other of others) {
+              expect(
+                stderr,
+                `\`${clean}\` is ${group.cause}, so the message must not also tell the ` +
+                  `author about ${other.cause}`
+              ).not.toContain(other.expected);
+            }
+          }
+        );
+      }
+    }
+  });
+
+  test('guards the gate: each cause is actually exercised above', () => {
+    // Anti-vacuity for the LOOP, which is a different claim from the one the
+    // assertions inside it make: an empty group would skip its rows silently.
+    for (const { cause, scripts, expected } of UNREADABLE_CLEAN_SCRIPTS) {
+      expect(scripts.length, `the ${cause} group exercises nothing`).toBeGreaterThan(0);
+      expect(expected.length, `the ${cause} group asserts nothing`).toBeGreaterThan(0);
+    }
+    // Load-bearing, not tidiness: the contrast above selects "every other
+    // group" by `cause`, so two groups sharing one would exclude each other
+    // from their own checks and the negative assertion would test nothing.
+    expect(
+      new Set(UNREADABLE_CLEAN_SCRIPTS.map((g) => g.cause)).size,
+      'two groups share a cause, which would silently drop them from the contrast'
+    ).toBe(UNREADABLE_CLEAN_SCRIPTS.length);
+  });
+
+  test('`./dist` is normalised rather than rejected when it stands alone', async () => {
+    // Not every unusual spelling is unreadable. A leading `./` is normalised,
+    // because `git ls-files` never emits one and the intent is unambiguous —
+    // so this must still CATCH, not complain about the parse.
+    await withRepo(
+      async (root) => {
+        const pkg = JSON.parse(PACKAGE_JSON) as { scripts: Record<string, string> };
+        pkg.scripts.clean = 'rm -rf ./dist ./coverage ./out-stage';
+        await write(root, 'package.json', JSON.stringify(pkg, null, 2));
+        await write(root, 'out-stage/bundle.js', "console.log('staged');\n");
+        await git(root, ['add', '-A']);
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('out-stage/bundle.js');
+      }
+    );
+  });
+
+  test('a `clean` target that names a FILE is generated for both consumers', async () => {
+    // `rm -rf` is routinely pointed at a file. When it is, the two users of
+    // this derivation must agree: the seeds sweep must treat the path as
+    // generated (so a fresh clone, where it does not exist, is not reported as
+    // "names X, which does not exist"), and rule (4) must still refuse to let
+    // it be tracked. A prefix-only test in one of them and an exact-or-prefix
+    // test in the other would answer those two questions differently.
+    await withRepo(
+      async (root) => {
+        const pkg = JSON.parse(PACKAGE_JSON) as { scripts: Record<string, string> };
+        pkg.scripts.clean = 'rm -rf dist coverage out-stage scripts/generated-manifest.json';
+        pkg.scripts['check:manifest'] = 'bun run scripts/kept.ts scripts/generated-manifest.json';
+        await write(root, 'package.json', JSON.stringify(pkg, null, 2));
+        await git(root, ['add', '-A']);
+      },
+      ({ code, stderr }) => {
+        // The file is named by a script and absent from disk. Without the
+        // shared predicate this reads "names scripts/generated-manifest.json,
+        // which does not exist" — the report `isGenerated` exists to prevent.
+        expect(stderr).toBe('');
+        expect(code).toBe(0);
+      }
+    );
+  });
+
+  test('...and rule (4) still refuses to let that file be tracked', async () => {
+    // The other half of the same agreement. Asserted separately so a failure
+    // says which direction broke.
+    await withRepo(
+      async (root) => {
+        const pkg = JSON.parse(PACKAGE_JSON) as { scripts: Record<string, string> };
+        pkg.scripts.clean = 'rm -rf dist coverage out-stage scripts/generated-manifest.json';
+        await write(root, 'package.json', JSON.stringify(pkg, null, 2));
+        await write(root, 'scripts/generated-manifest.json', '{}\n');
+        await git(root, ['add', '-f', 'package.json', 'scripts/generated-manifest.json']);
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('scripts/generated-manifest.json');
+        expect(stderr).toContain('`bun run clean` deletes');
+      }
+    );
+  });
+
+  test('a `clean` naming no directories fails loudly instead of passing over everything', async () => {
+    // The anti-vacuity guard itself. A reworded `clean` would otherwise make
+    // every case above pass by scanning nothing — the failure mode this repo
+    // keeps finding, where an under-collecting scan is indistinguishable from
+    // a clean run.
+    await withRepo(
+      async (root) => {
+        const pkg = JSON.parse(PACKAGE_JSON) as { scripts: Record<string, string> };
+        pkg.scripts.clean = 'echo nothing to do';
+        await write(root, 'package.json', JSON.stringify(pkg, null, 2));
+        await git(root, ['add', '-A']);
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('named no `rm -rf` targets');
       }
     );
   });
