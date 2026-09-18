@@ -573,6 +573,13 @@ describe('check:tracked-files', () => {
       'rm -rf "dist" coverage',
       'rm -rf dist/*',
       'rm -rf dist && rm -rf coverage',
+      // Brace expansion carries no operator, quote or glob character, so the
+      // first draft's metacharacter denylist passed it as ONE directory named
+      // `{dist,coverage,.bun-build}` — a non-empty parse guarding nothing.
+      // It is also the most natural way to write this exact script.
+      'rm -rf {dist,coverage,.bun-build}',
+      'rm -rf dist[0-9] coverage',
+      'rm -rf ~/dist coverage',
     ]) {
       await withRepo(
         async (root) => {
@@ -606,6 +613,50 @@ describe('check:tracked-files', () => {
       ({ code, stderr }) => {
         expect(code).toBe(1);
         expect(stderr).toContain('out-stage/bundle.js');
+      }
+    );
+  });
+
+  test('a `clean` target that names a FILE is generated for both consumers', async () => {
+    // `rm -rf` is routinely pointed at a file. When it is, the two users of
+    // this derivation must agree: the seeds sweep must treat the path as
+    // generated (so a fresh clone, where it does not exist, is not reported as
+    // "names X, which does not exist"), and rule (4) must still refuse to let
+    // it be tracked. A prefix-only test in one of them and an exact-or-prefix
+    // test in the other would answer those two questions differently.
+    await withRepo(
+      async (root) => {
+        const pkg = JSON.parse(PACKAGE_JSON) as { scripts: Record<string, string> };
+        pkg.scripts.clean = 'rm -rf dist coverage out-stage scripts/generated-manifest.json';
+        pkg.scripts['check:manifest'] = 'bun run scripts/kept.ts scripts/generated-manifest.json';
+        await write(root, 'package.json', JSON.stringify(pkg, null, 2));
+        await git(root, ['add', '-A']);
+      },
+      ({ code, stderr }) => {
+        // The file is named by a script and absent from disk. Without the
+        // shared predicate this reads "names scripts/generated-manifest.json,
+        // which does not exist" — the report `isGenerated` exists to prevent.
+        expect(stderr).toBe('');
+        expect(code).toBe(0);
+      }
+    );
+  });
+
+  test('...and rule (4) still refuses to let that file be tracked', async () => {
+    // The other half of the same agreement. Asserted separately so a failure
+    // says which direction broke.
+    await withRepo(
+      async (root) => {
+        const pkg = JSON.parse(PACKAGE_JSON) as { scripts: Record<string, string> };
+        pkg.scripts.clean = 'rm -rf dist coverage out-stage scripts/generated-manifest.json';
+        await write(root, 'package.json', JSON.stringify(pkg, null, 2));
+        await write(root, 'scripts/generated-manifest.json', '{}\n');
+        await git(root, ['add', '-f', 'package.json', 'scripts/generated-manifest.json']);
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('scripts/generated-manifest.json');
+        expect(stderr).toContain('`bun run clean` deletes');
       }
     );
   });

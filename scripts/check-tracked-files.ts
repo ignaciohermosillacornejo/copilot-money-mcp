@@ -113,11 +113,24 @@ const pkg = JSON.parse(pkgRaw) as { scripts?: Record<string, string> };
  * `git ls-files` emits — `./dist` matches no tracked path, so the gate would
  * guard nothing while reporting a directory count. A shell operator is worse:
  * `rm -rf dist && rm -rf coverage` parses to four tokens, two of which are not
- * directories at all. Both are handled by normalising what can be normalised
- * (`./`, surrounding quotes, trailing slashes) and treating anything still
- * carrying shell syntax as "this script says something I cannot read".
+ * directories at all. What can be normalised is (`./`, surrounding quotes,
+ * trailing slashes); anything left is "this script says something I cannot
+ * read", which fails loudly.
+ *
+ * Stated as what a readable token IS, not as a list of what it is not. A
+ * denylist of metacharacters was the first version and it missed the spelling
+ * most likely to be used: `rm -rf {dist,coverage,.bun-build}` carries no
+ * operator, no quote and no glob character, so it passed as one directory
+ * named `{dist,coverage,.bun-build}` — a non-empty parse guarding nothing,
+ * which is the exact shape the guard exists to prevent. Braces, character
+ * classes, `~` and backslash escapes all fall out of one rule instead of
+ * four, and so does whatever nobody has thought of yet.
+ *
+ * Flag spellings the `-rf?` match rejects outright — `rm -fr`, `rm -rfv` —
+ * produce no match at all and land on the EMPTY-parse guard below, which is
+ * the safe direction. `rm -r -f dist` works, via the `-`-prefix filter.
  */
-const SHELL_SYNTAX = /[&|;<>*?$()`'"]/;
+const PLAIN_PATH = /^[\w.\-/]+$/;
 
 /**
  * Directories the repo GENERATES, derived from `package.json`'s `clean`.
@@ -140,10 +153,12 @@ const cleanScript = pkg.scripts?.clean ?? '';
 const cleanTokens = [...cleanScript.matchAll(/(?:^|\s)rm\s+-rf?\s+(.+)$/gm)]
   .flatMap((m) => (m[1] ?? '').split(/\s+/))
   .filter((d) => d !== '' && !d.startsWith('-'));
-const unreadableCleanTokens = cleanTokens.filter((d) => SHELL_SYNTAX.test(d));
-const generatedDirs = cleanTokens
-  .filter((d) => !SHELL_SYNTAX.test(d))
-  .map((d) => d.replace(/^\.\//, '').replace(/\/+$/, ''));
+/** Strip the spellings that are unambiguous but not what `git ls-files` emits. */
+const normaliseCleanToken = (d: string): string =>
+  d.replace(/^\.\//, '').replace(/\/+$/, '');
+
+const unreadableCleanTokens = cleanTokens.filter((d) => !PLAIN_PATH.test(normaliseCleanToken(d)));
+const generatedDirs = cleanTokens.filter((d) => PLAIN_PATH.test(normaliseCleanToken(d))).map(normaliseCleanToken);
 
 // Both of these stop the world rather than joining `failures` below, unlike
 // every other check in this file. That is deliberate: they mean the gate does
@@ -172,7 +187,23 @@ if (generatedDirs.length === 0) {
   process.exit(1);
 }
 
-const GENERATED_PREFIXES = generatedDirs.map((d) => `${d}/`);
+/**
+ * Is this path generated — the file itself, or anything beneath it?
+ *
+ * ONE predicate, used by both consumers: {@link isGenerated}, which excludes
+ * these from the "needed by tooling, so it must be tracked" sweep, and rule
+ * (4), which forbids tracking them. An earlier revision had the two spelled
+ * differently — a `${d}/` prefix test here, `f === d || f.startsWith(…)`
+ * there — which agreed for every directory-valued target and diverged the
+ * moment `clean` named a FILE, which `rm -rf` is routinely used for. Then
+ * `isGenerated` would say no while rule (4) said yes: the seeds sweep would
+ * report the file as dangling on a fresh clone, and a tracked one would draw
+ * two failures with opposite remedies. Same bug as the two lists, one
+ * spelling further out, so it gets the same answer — one definition.
+ */
+function isGeneratedPath(rel: string): boolean {
+  return generatedDirs.some((d) => rel === d || rel.startsWith(`${d}/`));
+}
 
 /**
  * The declared home for local scratch — gitignored on purpose, and excluded
@@ -318,9 +349,7 @@ function isFile(rel: string): boolean {
   }
 }
 
-function isGenerated(rel: string): boolean {
-  return GENERATED_PREFIXES.some((p) => rel.startsWith(p));
-}
+const isGenerated = isGeneratedPath;
 
 /** Normalise a matched token to a repo-relative path, or null if it escapes the repo. */
 function toRepoRelative(abs: string): string | null {
@@ -483,9 +512,7 @@ if (candidates.length > 0) {
  * committed numbers as if they were its own; and a 21k-line generated file
  * conflicts on every branch that regenerates it.
  */
-const trackedGenerated = [...tracked]
-  .filter((f) => generatedDirs.some((d) => f === d || f.startsWith(`${d}/`)))
-  .sort();
+const trackedGenerated = [...tracked].filter(isGeneratedPath).sort();
 
 const failures: string[] = [];
 for (const problem of dangling) failures.push(problem);
