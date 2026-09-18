@@ -573,7 +573,7 @@ describe('check:tracked-files', () => {
   const UNREADABLE_CLEAN_SCRIPTS = [
     {
       cause: 'shell syntax',
-      expected: 'a target must be a plain path of letters, digits',
+      expected: 'a target must be a plain path of ASCII letters, digits',
       scripts: [
         'rm -rf "dist" coverage',
         'rm -rf dist/*',
@@ -607,8 +607,12 @@ describe('check:tracked-files', () => {
     // the next test pins that. Listing it here too would be two tests asserting
     // opposite things about one spelling.
     for (const group of UNREADABLE_CLEAN_SCRIPTS) {
-      const other = UNREADABLE_CLEAN_SCRIPTS.find((g) => g.cause !== group.cause);
-      if (other === undefined) throw new Error('the table needs two causes to contrast');
+      // Every OTHER group, not just one. With two causes `find` was exhaustive,
+      // but a third would silently leave each row unchecked against it — the
+      // complementary-by-hand shape this branch removed from the script itself
+      // one commit ago. `filter` makes the contrast total by construction.
+      const others = UNREADABLE_CLEAN_SCRIPTS.filter((g) => g.cause !== group.cause);
+      if (others.length === 0) throw new Error('the table needs a second cause to contrast');
       for (const clean of group.scripts) {
         await withRepo(
           async (root) => {
@@ -630,11 +634,13 @@ describe('check:tracked-files', () => {
             // both phrases passed every row and the guard with it (checked).
             // A gate that cannot fail is worse than none, which this PR
             // already argued once when it deleted such a test.
-            expect(
-              stderr,
-              `\`${clean}\` is ${group.cause}, so the message must not also tell the ` +
-                `author about ${other.cause}`
-            ).not.toContain(other.expected);
+            for (const other of others) {
+              expect(
+                stderr,
+                `\`${clean}\` is ${group.cause}, so the message must not also tell the ` +
+                  `author about ${other.cause}`
+              ).not.toContain(other.expected);
+            }
           }
         );
       }
@@ -648,9 +654,13 @@ describe('check:tracked-files', () => {
       expect(scripts.length, `the ${cause} group exercises nothing`).toBeGreaterThan(0);
       expect(expected.length, `the ${cause} group asserts nothing`).toBeGreaterThan(0);
     }
-    expect(new Set(UNREADABLE_CLEAN_SCRIPTS.map((g) => g.cause)).size).toBe(
-      UNREADABLE_CLEAN_SCRIPTS.length
-    );
+    // Load-bearing, not tidiness: the contrast above selects "every other
+    // group" by `cause`, so two groups sharing one would exclude each other
+    // from their own checks and the negative assertion would test nothing.
+    expect(
+      new Set(UNREADABLE_CLEAN_SCRIPTS.map((g) => g.cause)).size,
+      'two groups share a cause, which would silently drop them from the contrast'
+    ).toBe(UNREADABLE_CLEAN_SCRIPTS.length);
   });
 
   test('`./dist` is normalised rather than rejected when it stands alone', async () => {
