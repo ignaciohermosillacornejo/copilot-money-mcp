@@ -20,13 +20,16 @@
 // have them checked. Named rather than counted, since a bare count over a
 // fuzzy antecedent is the drift shape this list keeps attracting — but the
 // naming belongs on the entries, not in a second copy up here. It WAS a second
-// copy, and it drifted exactly as a count would have: five files named against
-// nine in the category, four of them missed before #766 and two more added by
+// copy, and it drifted exactly as a count would have: several files named
+// against the whole category, some missed long before #766 and more added by
 // it. Nothing gated the prose, because the ratchet reads include LINES and
-// never this paragraph. So: each such entry carries its reason as an inline
-// comment below — on its own line, or in the block heading the run it belongs
-// to — where a reason cannot separate from its subject, and the set is pinned
-// as MEMBERSHIP_IS_THE_COVERAGE in tests/unit/tsconfig-tests-sync.test.ts.
+// never this paragraph — so a number written here would go stale the same way
+// the names did, which is why this sentence no longer carries one.
+//
+// So: each such entry carries its reason as an inline comment below — on its
+// own line, or in the block heading the run it belongs to — where a reason
+// cannot separate from its subject, and the set is pinned as
+// MEMBERSHIP_IS_THE_COVERAGE in tests/unit/tsconfig-tests-sync.test.ts.
 // One deliberate exception: tsconfig-tests-sync.test.ts is argued by the
 // closing paragraph of this header instead, because it is the file that
 // decides who is on the list.
