@@ -580,6 +580,13 @@ describe('check:tracked-files', () => {
       'rm -rf {dist,coverage,.bun-build}',
       'rm -rf dist[0-9] coverage',
       'rm -rf ~/dist coverage',
+      // Plain paths, every one of them — and none names anything
+      // `git ls-files` can print, so each would report a directory count over
+      // a scan matching nothing. Being free of shell syntax was only half of
+      // "readable"; the other half is "inside this repo".
+      'rm -rf ../dist coverage',
+      'rm -rf /tmp/build coverage',
+      'rm -rf .',
     ]) {
       await withRepo(
         async (root) => {
