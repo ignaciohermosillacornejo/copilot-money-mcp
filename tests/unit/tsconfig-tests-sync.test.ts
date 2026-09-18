@@ -189,6 +189,7 @@ const MEMBERSHIP_IS_THE_COVERAGE = [
   'tests/no-hand-rolled-comment-strippers.test.ts',
   'tests/scripts/no-duplicate-schema-walks.test.ts',
   'tests/setup/temp-db-teardown.ts',
+  'tests/unit/live-auth-boot-nonfatal.test.ts',
   'tests/unit/tsconfig-tests-sync.test.ts',
 ];
 

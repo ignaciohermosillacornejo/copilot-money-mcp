@@ -102,6 +102,15 @@
     "tests/core/temp-db-suite-teardown.test.ts",
     "tests/no-collection-time-assertions.test.ts",
     "tests/unit/tsconfig-tests-sync.test.ts",
+    // The #708 boot-probe gates. Here for the #725 reason: the file is a
+    // structural detector whose `as unknown as GraphQLClient` doubles would
+    // hide a `query`/`mutate` signature drift in silence, and outside this
+    // list nothing in `bun run check` reads a line of it. It imports
+    // tests/helpers/ts-files.ts, which is already here — but `tsc` does not
+    // follow imports upward, so that does not put this file in any program.
+    // Membership IS the coverage, so it is pinned in this same file's
+    // MEMBERSHIP_IS_THE_COVERAGE list.
+    "tests/unit/live-auth-boot-nonfatal.test.ts",
     "tests/setup/temp-db-teardown.ts",
     "tests/fixtures/temp-db-leak-probe.ts",
     "tests/context-budget-live.test.ts",

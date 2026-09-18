@@ -396,10 +396,6 @@ export async function runServer(
     graphqlClient = new GraphQLClient(auth);
   }
 
-  if (liveReadsEnabled && graphqlClient) {
-    await preflightLiveAuthOrWarn(graphqlClient);
-  }
-
   const server = new CopilotMoneyServer(
     dbPath,
     decodeTimeoutMs,
@@ -407,5 +403,26 @@ export async function runServer(
     liveReadsEnabled,
     graphqlClient
   );
+
+  // Connect FIRST, probe after. The probe used to run before this line, which
+  // was defensible while it could refuse to start the server — and is not now
+  // that its only product on the failure path is a log line.
+  //
+  // The wait is not small. An offline boot is four 30s attempts plus backoff
+  // (`DEFAULT_TIMEOUT_MS`, `DEFAULT_RETRY_DELAYS_MS`) ≈ 125s, on top of
+  // browser-storage extraction across every profile. Blocking the transport
+  // for that long reproduces #708's symptom by another route: if the host's
+  // startup timeout fires first the user sees a closed transport and the agent
+  // sees no tools, which is the thing this change exists to prevent.
   await server.run();
+
+  // Fire-and-forget, deliberately. What the probe still buys is a stderr
+  // diagnostic for host-log debugging and a warm token cache for the first
+  // real call; neither needs to gate anything. `void` is safe because
+  // `preflightLiveAuthOrWarn` catches everything and never rejects — there is
+  // no unhandled rejection to leak, and if that ever stops being true the
+  // no-floating-promises lint fires here.
+  if (liveReadsEnabled && graphqlClient) {
+    void preflightLiveAuthOrWarn(graphqlClient);
+  }
 }
