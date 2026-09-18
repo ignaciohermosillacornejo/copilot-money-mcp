@@ -26,10 +26,13 @@
 // nine in the category, four of them missed before #766 and two more added by
 // it. Nothing gated the prose, because the ratchet reads include LINES and
 // never this paragraph. So: each such entry carries its reason as an inline
-// comment on its own line below, where a reason cannot separate from its
-// subject, and the set is pinned as MEMBERSHIP_IS_THE_COVERAGE in
-// tests/unit/tsconfig-tests-sync.test.ts. All are type-clean; keep them that
-// way.
+// comment below — on its own line, or in the block heading the run it belongs
+// to — where a reason cannot separate from its subject, and the set is pinned
+// as MEMBERSHIP_IS_THE_COVERAGE in tests/unit/tsconfig-tests-sync.test.ts.
+// One deliberate exception: tsconfig-tests-sync.test.ts is argued by the
+// closing paragraph of this header instead, because it is the file that
+// decides who is on the list.
+// All are type-clean; keep them that way.
 //
 // For each, the LINE is the only thing putting the file in a program: nothing
 // in this repo imports a `.test.ts`, the probe is a path string the suite
@@ -112,7 +115,13 @@
     // exactly, where a literal missing a declared field reads `undefined` in
     // the message that was supposed to explain the failure.
     "tests/scripts/check-tracked-files.test.ts",
+    // The run-wide teardown's own contract test (#642). `bun test` never fires
+    // `process.on('exit')`, so the reader's exit sweep does not cover a test
+    // run and this is what proves the replacement sweep works.
     "tests/core/temp-db-suite-teardown.test.ts",
+    // The #714 ratchet: an `expect()` in a `describe` body runs at collection
+    // time, so the failure arrives unnamed and every test after it is never
+    // registered. Nothing else reads this file.
     "tests/no-collection-time-assertions.test.ts",
     "tests/unit/tsconfig-tests-sync.test.ts",
     // The sole verification of a gate that edits tracked source files in
@@ -132,9 +141,18 @@
     // Membership IS the coverage, so it is pinned in this same file's
     // MEMBERSHIP_IS_THE_COVERAGE list.
     "tests/unit/live-auth-boot-nonfatal.test.ts",
+    // Preloaded by bunfig.toml and named in prose — no import reaches it, so
+    // this line is the only thing putting it in a program (#642).
     "tests/setup/temp-db-teardown.ts",
+    // A path string the suite spawns rather than imports, for the same reason
+    // and with the same consequence: deleting the line deletes the checking.
     "tests/fixtures/temp-db-leak-probe.ts",
     "tests/context-budget-live.test.ts",
+    // The auth surface (#722): the token extractor, the exchange loop and the
+    // mid-session uid transition. Added because a required field appeared on
+    // `TokenResult` and NOTHING failed — these files were outside every
+    // program, so their `as TokenResult[]` assertions were checked by nobody.
+    // A typed contract no program typechecks is not a contract.
     "tests/core/auth/browser-token.test.ts",
     "tests/core/auth/candidate-ordering.test.ts",
     "tests/core/auth/firebase-auth.test.ts",
