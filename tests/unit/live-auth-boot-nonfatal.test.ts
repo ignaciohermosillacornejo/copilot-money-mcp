@@ -39,9 +39,21 @@
  * each reach for `process.exit(1)` in `src/server.ts` and reintroduce it.
  *
  * So the detector is structural: no module under `src/` except `src/cli.ts`
- * may exit non-zero. `cli.ts` is the argv layer and runs before any transport
- * exists, so a bad flag there has no client to be reported to — that is the
- * one place where exiting IS the report.
+ * may exit non-zero. The carve-out is about `cli.ts`'s ARGV PATH: it runs
+ * before any transport exists, so a bad flag there has no client to be
+ * reported to — that is the one place where exiting IS the report.
+ *
+ * Read the exemption no wider than that. `cli.ts` also installs an
+ * `unhandledRejection` handler and a `main().catch`, and those stay armed for
+ * the whole process lifetime — they can fire long after the transport is up,
+ * which is the #708 symptom in its worst form (a client watching its server
+ * die mid-session). The detector does not and cannot police that; what keeps
+ * it unreachable is the `.catch` on the fire-and-forget probe in
+ * `runServer` — defence in depth, deliberately NOT gated by a test here.
+ * The probe swallows everything, so through the seam its promise cannot be
+ * made to reject: a test would pass with the `.catch` deleted (checked),
+ * and a gate that cannot fail is worse than none. The guarantee is the
+ * handler's presence, not an assertion about it.
  */
 
 import { describe, test, expect, spyOn } from 'bun:test';
