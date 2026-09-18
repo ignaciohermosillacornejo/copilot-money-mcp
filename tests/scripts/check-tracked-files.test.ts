@@ -561,7 +561,44 @@ describe('check:tracked-files', () => {
     );
   });
 
-  test('a `clean` this script cannot parse fails loudly, per spelling', async () => {
+  /**
+   * Each rejection cause gets its own expected sentence.
+   *
+   * One shared assertion on "cannot read as a directory" would pass for every
+   * row while the message told the outside-repo group that their script
+   * contains shell operators — advice that names no cause they have and a
+   * remedy ("write plain paths") they have already followed. The table is
+   * split so a message that collapses back into one sentence fails here.
+   */
+  const UNREADABLE_CLEAN_SCRIPTS = [
+    {
+      cause: 'shell syntax',
+      expected: 'shell operators, globs, braces and quoting are not interpreted',
+      scripts: [
+        'rm -rf "dist" coverage',
+        'rm -rf dist/*',
+        'rm -rf dist && rm -rf coverage',
+        // Brace expansion carries no operator, quote or glob character, so the
+        // first draft's metacharacter denylist passed it as ONE directory named
+        // `{dist,coverage,.bun-build}` — a non-empty parse guarding nothing.
+        // It is also the most natural way to write this exact script.
+        'rm -rf {dist,coverage,.bun-build}',
+        'rm -rf dist[0-9] coverage',
+        'rm -rf ~/dist coverage',
+      ],
+    },
+    {
+      cause: 'outside the repo',
+      expected: 'not one inside this repository',
+      // Plain paths, every one of them — and none names anything
+      // `git ls-files` can print, so each would report a directory count over
+      // a scan matching nothing. Being free of shell syntax was only half of
+      // "readable"; the other half is "inside this repo".
+      scripts: ['rm -rf ../dist coverage', 'rm -rf /tmp/build coverage', 'rm -rf .'],
+    },
+  ] as const;
+
+  test('a `clean` this script cannot parse fails loudly, naming the right cause', async () => {
     // The half the empty-parse guard misses: these produce a NON-empty list
     // whose entries match no path `git ls-files` emits, so the gate would
     // report a directory count over a scan that guards nothing — the same
@@ -569,40 +606,34 @@ describe('check:tracked-files', () => {
     // NB `./dist` is absent: a leading `./` is normalised, not rejected, and
     // the next test pins that. Listing it here too would be two tests asserting
     // opposite things about one spelling.
-    for (const clean of [
-      'rm -rf "dist" coverage',
-      'rm -rf dist/*',
-      'rm -rf dist && rm -rf coverage',
-      // Brace expansion carries no operator, quote or glob character, so the
-      // first draft's metacharacter denylist passed it as ONE directory named
-      // `{dist,coverage,.bun-build}` — a non-empty parse guarding nothing.
-      // It is also the most natural way to write this exact script.
-      'rm -rf {dist,coverage,.bun-build}',
-      'rm -rf dist[0-9] coverage',
-      'rm -rf ~/dist coverage',
-      // Plain paths, every one of them — and none names anything
-      // `git ls-files` can print, so each would report a directory count over
-      // a scan matching nothing. Being free of shell syntax was only half of
-      // "readable"; the other half is "inside this repo".
-      'rm -rf ../dist coverage',
-      'rm -rf /tmp/build coverage',
-      'rm -rf .',
-    ]) {
-      await withRepo(
-        async (root) => {
-          const pkg = JSON.parse(PACKAGE_JSON) as { scripts: Record<string, string> };
-          pkg.scripts.clean = clean;
-          await write(root, 'package.json', JSON.stringify(pkg, null, 2));
-          await git(root, ['add', '-A']);
-        },
-        ({ code, stderr }) => {
-          expect(code, `\`${clean}\` must not pass silently`).toBe(1);
-          expect(stderr, `\`${clean}\` must name the parse as the problem`).toContain(
-            'cannot read as a directory'
-          );
-        }
-      );
+    for (const { cause, expected, scripts } of UNREADABLE_CLEAN_SCRIPTS) {
+      for (const clean of scripts) {
+        await withRepo(
+          async (root) => {
+            const pkg = JSON.parse(PACKAGE_JSON) as { scripts: Record<string, string> };
+            pkg.scripts.clean = clean;
+            await write(root, 'package.json', JSON.stringify(pkg, null, 2));
+            await git(root, ['add', '-A']);
+          },
+          ({ code, stderr }) => {
+            expect(code, `\`${clean}\` must not pass silently`).toBe(1);
+            expect(
+              stderr,
+              `\`${clean}\` is rejected for being ${cause}, and the message must say so`
+            ).toContain(expected);
+          }
+        );
+      }
     }
+  });
+
+  test('guards the gate: the two causes carry different messages', () => {
+    // Without this, collapsing both branches back into one sentence that
+    // contained both phrases would satisfy every row above.
+    const [shell, outside] = UNREADABLE_CLEAN_SCRIPTS;
+    expect(shell.expected).not.toBe(outside.expected);
+    expect(shell.scripts.length).toBeGreaterThan(0);
+    expect(outside.scripts.length).toBeGreaterThan(0);
   });
 
   test('`./dist` is normalised rather than rejected when it stands alone', async () => {
