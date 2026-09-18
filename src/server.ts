@@ -444,11 +444,29 @@ export async function runServer(
 
   // Fire-and-forget, deliberately. What the probe still buys is a stderr
   // diagnostic for host-log debugging and a warm token cache for the first
-  // real call; neither needs to gate anything. `void` is safe because
-  // `preflightLiveAuthOrWarn` catches everything and never rejects — there is
-  // no unhandled rejection to leak, and if that ever stops being true the
-  // no-floating-promises lint fires here.
+  // real call; neither needs to gate anything.
+  //
+  // The `.catch` is NOT redundant with the one inside the probe, and an
+  // earlier revision of this comment was wrong about why. It claimed
+  // `no-floating-promises` would catch a regression here — but that rule
+  // defaults to `ignoreVoid: true` and nothing overrides it, so `void` IS the
+  // sanctioned suppression and the lint can never fire at this line. The
+  // comment named as a backstop the one thing the `void` switches off.
+  //
+  // What sits behind that gap is `src/cli.ts`'s
+  // `process.on('unhandledRejection', … process.exit(1))`, which stays armed
+  // for the whole process lifetime. So if a later edit ever let this promise
+  // reject — a widened body outside the probe's own `try`, a throw while
+  // rendering the error — the process would exit AFTER the transport was
+  // connected: a client watching its server die mid-session, with no tool
+  // list and no isError result. #708's class again, in its worst form, and
+  // reached through the one file the class detector exempts.
+  //
+  // Attaching the handler here makes that unreachable whatever the callee
+  // does later, which is the property a comment about the callee cannot have.
   if (liveReadsEnabled && graphqlClient) {
-    void preflightLiveAuthOrWarn(graphqlClient);
+    void preflightLiveAuthOrWarn(graphqlClient).catch((err: unknown) => {
+      console.error(`[live-reads] preflight threw unexpectedly: ${String(err)}`);
+    });
   }
 }
