@@ -99,6 +99,14 @@
     // every other program here. Membership IS the coverage, so it is pinned in
     // tests/unit/tsconfig-tests-sync.test.ts.
     "tests/scripts/no-duplicate-schema-walks.test.ts",
+    // The tracked-files gate's own tests, here for the same reason as its two
+    // siblings above and below: nothing else in `bun run check` reads a line
+    // of `tests/scripts/`. #766 grew this file by ~260 lines, including a
+    // table of object literals whose `expected` fields are load-bearing and
+    // failure messages built by interpolating `group.cause` — the #725 shape
+    // exactly, where a literal missing a declared field reads `undefined` in
+    // the message that was supposed to explain the failure.
+    "tests/scripts/check-tracked-files.test.ts",
     "tests/core/temp-db-suite-teardown.test.ts",
     "tests/no-collection-time-assertions.test.ts",
     "tests/unit/tsconfig-tests-sync.test.ts",
