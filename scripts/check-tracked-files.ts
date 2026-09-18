@@ -205,32 +205,39 @@ for (const raw of cleanTokens) {
   else generatedDirs.push(d);
 }
 
-// Both of these stop the world rather than joining `failures` below, unlike
-// every other check in this file. That is deliberate: they mean the gate does
-// not know what "generated" is, and every later result depends on that answer —
+const quoted = (tokens: string[]): string => tokens.map((t) => `\`${t}\``).join(', ');
+
+// EVERY inline exit below — the two parse-failure branches and the empty-parse
+// guard — stops the world rather than joining `failures`, unlike every other
+// check in this file. That is deliberate: each means the gate does not know
+// what "generated" is, and every later result depends on that answer —
 // `isGenerated` feeds the seeds sweep, so a bad derivation does not merely skip
 // rule (4), it makes the "needed but not tracked" report wrong too. Reporting
 // downstream findings computed from a definition we just admitted we could not
 // read would be worse than reporting one failure at a time.
-const quoted = (tokens: string[]): string => tokens.map((t) => `\`${t}\``).join(', ');
-
-// One sentence per rejection cause. A single message naming only shell syntax
-// would be wrong advice for the outside-repo group — `../dist` IS a plain
-// path, so "write the targets as plain paths" is something they already did.
+//
+// One sentence per rejection cause, and each states its rule POSITIVELY.
+// A single message naming only shell syntax would be wrong advice for the
+// outside-repo group — `../dist` IS a plain path, so "write the targets as
+// plain paths" is something they already did. The same trap one notch in:
+// enumerating "operators, globs, braces and quoting" names no cause that
+// `~/dist` or a backslash-escaped space has, and an enumeration is the shape
+// `PLAIN_PATH` exists to replace. Say what a target must BE.
 if (shellSyntaxTokens.length > 0) {
   console.error(
     `Tracked-files check failed: package.json scripts.clean names ${quoted(shellSyntaxTokens)}, ` +
-      'which this script cannot read as a directory — shell operators, globs, braces and ' +
-      'quoting are not interpreted. Write the targets as plain paths, or re-point the parse ' +
-      'in this script.'
+      'which this script cannot read as a directory: a target must be a plain path of ' +
+      'letters, digits, `.`, `-`, `_` and `/`. Shell syntax is not interpreted — operators, ' +
+      'globs, braces, quoting, `~` and escapes all reach this script verbatim. Write the ' +
+      'targets as plain paths, or re-point the parse in this script.'
   );
 }
 if (outsideRepoTokens.length > 0) {
   console.error(
     `Tracked-files check failed: package.json scripts.clean names ${quoted(outsideRepoTokens)}, ` +
-      'which is a plain path but not one inside this repository. This gate is a scan over ' +
+      'which are plain paths but not ones inside this repository. This gate is a scan over ' +
       '`git ls-files`, which emits no leading `/` and no `.`/`..` segment, so such a target ' +
-      'would be counted as generated and then never checked. Name a repo-relative path, or ' +
+      'would be counted as generated and then never checked. Name repo-relative paths, or ' +
       're-point the parse in this script.'
   );
 }
