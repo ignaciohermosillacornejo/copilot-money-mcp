@@ -104,6 +104,11 @@ const PACKAGE_JSON = JSON.stringify(
     scripts: {
       'check:kept': 'bun run scripts/kept.ts',
       build: 'bun build src/entry.ts --outdir dist && chmod +x dist/entry.js',
+      // The gate derives its generated-directory list from this script rather
+      // than from a list of its own, so the fixture needs one to model the real
+      // repo. Without it the gate's anti-vacuity guard fires and every case
+      // here fails on a message about `clean` instead of its own subject.
+      clean: 'rm -rf dist coverage',
     },
   },
   null,
@@ -469,6 +474,85 @@ describe('check:tracked-files', () => {
       ({ code, stderr }) => {
         expect(code).toBe(1);
         expect(stderr).toContain('scripts/local/helper.ts');
+      }
+    );
+  });
+
+  // -------------------------------------------------------------------------
+  // The inverse direction (#766): nothing GENERATED may be tracked.
+  // -------------------------------------------------------------------------
+
+  test('flags a tracked file under a directory `clean` deletes', async () => {
+    // The instance that motivated it: a `git add -A` after a local coverage run
+    // committed `coverage/`, and every gate stayed green because all of them
+    // asked "is what we need present?" and none asked "is anything here that
+    // should not be?".
+    await withRepo(
+      async (root) => {
+        await write(root, 'coverage/lcov.info', 'TN:\nSF:src/entry.ts\nend_of_record\n');
+        // `-f`, because the point is that the directory is NOT ignored — which
+        // is exactly the state the real repo was in.
+        await git(root, ['add', '-f', 'coverage/lcov.info']);
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('coverage/lcov.info');
+        expect(stderr).toContain('`bun run clean` deletes');
+        // The remedy has to be the one that STAYS fixed: deleting the file
+        // without an ignore rule leaves the next `git add -A` free to re-add it.
+        expect(stderr).toContain('git rm -r --cached');
+      }
+    );
+  });
+
+  test('a generated directory that is empty of tracked files passes', async () => {
+    // Guards the gate from the other side: the check is about the INDEX, not
+    // about the directory existing on disk. A contributor who has just run the
+    // tests must not fail a check they cannot act on.
+    await withRepo(
+      async (root) => {
+        await write(root, 'coverage/lcov.info', 'TN:\n');
+        // Deliberately NOT added — present on disk, absent from the index.
+      },
+      ({ code, stderr }) => {
+        expect(stderr).toBe('');
+        expect(code).toBe(0);
+      }
+    );
+  });
+
+  test('the generated list is derived from `clean`, not hardcoded', async () => {
+    // If the list were a literal in the script, renaming the directory in
+    // `clean` would leave the gate guarding a name nothing produces. Here the
+    // fixture's `clean` names `dist` too, so a tracked file under THAT is
+    // caught by the same code path with no second rule.
+    await withRepo(
+      async (root) => {
+        await write(root, 'dist/entry.js', "console.log('built');\n");
+        await git(root, ['add', '-f', 'dist/entry.js']);
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('dist/entry.js');
+      }
+    );
+  });
+
+  test('a `clean` naming no directories fails loudly instead of passing over everything', async () => {
+    // The anti-vacuity guard itself. A reworded `clean` would otherwise make
+    // every case above pass by scanning nothing — the failure mode this repo
+    // keeps finding, where an under-collecting scan is indistinguishable from
+    // a clean run.
+    await withRepo(
+      async (root) => {
+        const pkg = JSON.parse(PACKAGE_JSON) as { scripts: Record<string, string> };
+        pkg.scripts.clean = 'echo nothing to do';
+        await write(root, 'package.json', JSON.stringify(pkg, null, 2));
+        await git(root, ['add', '-A']);
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('named no `rm -rf` targets');
       }
     );
   });
