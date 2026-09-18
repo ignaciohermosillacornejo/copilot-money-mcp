@@ -400,10 +400,65 @@ if (candidates.length > 0) {
   ignoreMatched = (r.stdout ?? '').split('\0').filter((p) => p !== '');
 }
 
+// ---------------------------------------------------------------------------
+// (4) The inverse: nothing GENERATED may be tracked.
+// ---------------------------------------------------------------------------
+
+/**
+ * Directories the `clean` script deletes, and therefore directories git must
+ * not be carrying.
+ *
+ * Derived from `package.json` rather than listed here, for the same reason as
+ * everything above: a list would be one more thing to keep in sync, and the
+ * `clean` script already IS the repo's statement of what is generated.
+ *
+ * The rest of this file asserts that every file the tooling NEEDS survives a
+ * fresh clone. This is the other direction, and nothing checked it: on #766 a
+ * `git add -A` after a local `bun test --coverage` committed `coverage/` —
+ * 43,687 lines of machine output, including bun's in-progress `.tmp` scratch
+ * file — and every gate stayed green. `.gitignore` covered `dist/` and
+ * `.bun-build/` but not `coverage/`, so the hole was one name wide and nothing
+ * pointed at it.
+ *
+ * What a tracked generated directory costs, beyond the diff noise: `bun run
+ * clean` deletes tracked files, so a routine clean dirties the tree and the
+ * next `git add -A` commits the deletion; a fresh clone has `coverage/lcov.info`
+ * on disk BEFORE the test step writes it, and CI's upload step reads that path
+ * unconditionally, so a run that does not fully overwrite it uploads the
+ * committed numbers as if they were its own; and a 21k-line generated file
+ * conflicts on every branch that regenerates it.
+ */
+const cleanScript = pkg.scripts?.clean ?? '';
+const generatedDirs = [...cleanScript.matchAll(/(?:^|\s)rm\s+-rf\s+(.+)$/gm)]
+  .flatMap((m) => (m[1] ?? '').split(/\s+/))
+  .filter((d) => d !== '' && !d.startsWith('-'))
+  .map((d) => d.replace(/\/+$/, ''));
+
+if (generatedDirs.length === 0) {
+  // Guards the gate: a reworded `clean` script would make every assertion
+  // below vacuous, and a scan that finds nothing looks exactly like a pass.
+  console.error(
+    'Tracked-files check failed: package.json scripts.clean named no `rm -rf` targets, ' +
+      'so the generated-directory check would silently pass over everything. Re-point ' +
+      'the parse in this script at whatever states which directories are generated.',
+  );
+  process.exit(1);
+}
+
+const trackedGenerated = [...tracked]
+  .filter((f) => generatedDirs.some((d) => f === d || f.startsWith(`${d}/`)))
+  .sort();
+
 const failures: string[] = [];
 for (const problem of dangling) failures.push(problem);
 for (const file of untracked) {
   failures.push(`${file}: needed by the repo's tooling but NOT TRACKED by git`);
+}
+for (const file of trackedGenerated) {
+  failures.push(
+    `${file}: TRACKED, but sits under a directory \`bun run clean\` deletes — ` +
+      'it is generated output and must not be in the index',
+  );
 }
 for (const file of ignoreMatched.sort()) {
   // An untracked file that is also ignore-matched is already reported above,
@@ -424,7 +479,9 @@ if (failures.length > 0) {
   console.error('Tracked-files check failed:');
   for (const f of failures) console.error(`  - ${f}`);
   console.error(
-    '\nEvery file the repo\'s tooling reaches must survive a fresh clone. Add a ' +
+    '\nA file listed as TRACKED-but-generated is fixed with `git rm -r --cached <dir>` ' +
+      'plus a `<dir>/` rule in .gitignore, so the next `git add -A` cannot re-add it.\n' +
+      '\nEvery file the repo\'s tooling reaches must survive a fresh clone. Add a ' +
       '`!<path>` negation to the allowlist under the `scripts/*` rule in .gitignore ' +
       '(or fix the over-broad rule the message names), then `git add` the file and ' +
       're-run. If the path is genuinely produced by the build, add its directory to ' +
@@ -435,5 +492,7 @@ if (failures.length > 0) {
 
 console.log(
   `All ${candidates.length} tooling files are tracked and un-ignored ` +
-    `(${seeds.size} named by package.json scripts).`,
+    `(${seeds.size} named by package.json scripts), and no file is tracked under ` +
+    `the ${generatedDirs.length} generated directories \`clean\` deletes ` +
+    `(${generatedDirs.join(', ')}).`,
 );
