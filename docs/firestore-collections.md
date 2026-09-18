@@ -338,10 +338,15 @@ cache and not on GraphQL. Do not re-derive this; the sweep below was exhaustive.
   transaction got its category. Over a 1,049-document cache sample:
   `plaid_category` 475, `intelligence` 181, **`name_rule` 138**, `recurring` 83,
   `user_edit` 57, `copilot_copilot` 7. So ~13% were set by a name rule.
-- **`partial_name_rules` is empty on every document.** Present on 22–23 of 38
-  category docs, zero entries on all of them. Verified at the protobuf byte
-  level — the bytes after the field name are `12 02 4a 00`, i.e.
-  `Value{array_value:{}}`, a zero-entry array. **This is not a decoder bug.**
+- **`partial_name_rules` is empty on every document.** Present on 22 of 38
+  category documents (via `iterateDocuments`, the same path the server uses),
+  zero entries on all of them. Verified at the protobuf byte level across all
+  23 raw LevelDB values carrying the field — in every one the bytes after the
+  field name are `12 02 4a 00`, i.e. `Value{array_value:{}}`, a zero-entry
+  array. **This is not a decoder bug.** (The raw scan sees 23 rather than 22
+  because scanning values by substring also matches entries an ad-hoc key
+  parser cannot attribute; the discrepancy is in that throwaway tooling, not in
+  the data. Both counts agree that every array is empty.)
   Treat the field as legacy; the categories collection also carries
   `_migration_backfill`, consistent with a migration that moved rules
   server-side.
