@@ -132,12 +132,43 @@ export class FirebaseAuth {
     // longer cached" true by construction rather than by two expressions
     // happening to agree.
     if (this.refreshToken) {
+      // Capture WHICH token this attempt spends. `this.refreshToken` is instance
+      // state and the await below is a suspension point, so a concurrent caller
+      // can replace it — and whether it did is the only thing that distinguishes
+      // "we are logged out" from "someone else just logged us in".
+      const tried = this.refreshToken;
       try {
-        await this.exchangeToken(this.refreshToken);
+        await this.exchangeToken(tried);
         if (!this.idToken) throw new Error('Firebase token exchange returned no ID token');
         return this.idToken;
       } catch (err) {
         if (!isTokenFinished(err)) throw err;
+
+        // Our token is finished — but the INSTANCE may not be logged out. While
+        // the exchange above was in flight, a concurrent getIdToken() could have
+        // completed a cold extract and installed a live session. Falling through
+        // to the cold path here would re-scan every browser profile and then
+        // very likely report "No Copilot Money session found" to a caller whose
+        // own object is holding a working token. That is #722's symptom reached
+        // from a third side: telling a logged-in user to log in.
+        //
+        // Both checks below are only reachable because of the guard in
+        // exchangeToken, which nulls the cached token ONLY when it still equals
+        // the one that failed (#751). So a surviving, DIFFERENT refreshToken is
+        // positive evidence that another caller installed it — not a leftover.
+        if (this.idToken && Date.now() < this.expiresAt) return this.idToken;
+
+        if (this.refreshToken && this.refreshToken !== tried) {
+          // Exactly one retry, against the token someone else installed. Not a
+          // loop: a second failure means that token is finished too, and the
+          // cold path is the right answer at that point.
+          try {
+            await this.exchangeToken(this.refreshToken);
+            if (this.idToken) return this.idToken;
+          } catch (retryErr) {
+            if (!isTokenFinished(retryErr)) throw retryErr;
+          }
+        }
       }
     }
 

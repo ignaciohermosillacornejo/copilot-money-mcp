@@ -802,22 +802,111 @@ describe('an endpoint-level failure does not discard a known-good cached token (
     expect(extractions).toBe(2);
 
     releaseSecond();
-    await expect(second).rejects.toThrow('No Copilot Money session found');
+    // THE POINT (#765): the second caller's own token is finished, but the
+    // INSTANCE is not logged out — the first caller installed a live session
+    // while this exchange was in flight. Before the fix this fell through to a
+    // cold re-extract and told the caller 'No Copilot Money session found'
+    // while the object it was holding had a working token.
+    expect(await second).toBe(ID_TOKEN);
+    expect(extractions).toBe(2);
 
-    // The point: the fresh credential the first caller installed is still
-    // cached, so this refreshes it instead of re-reading every browser profile.
+    // And the fresh credential is still cached, so this refreshes it rather
+    // than re-reading every browser profile.
     expect(await auth.getIdToken()).toBe(ID_TOKEN);
-    expect(extractions).toBe(3);
-    // Both callers spent the expired token once, the replacement was exchanged
-    // by the caller that installed it, and the last call refreshed that same
-    // replacement — never a fourth browser read.
+    expect(extractions).toBe(2);
+    // Both callers spent the expired token once; the replacement was exchanged
+    // by the caller that installed it; the second caller then retried ONCE
+    // against that replacement rather than re-reading every browser profile;
+    // and the last call refreshed the same replacement. Never a third browser
+    // read.
+    //
+    // That third 'session-token' is the #765 fix showing up as cost, and it is
+    // the cheap side of the trade: one token exchange in place of a cold walk
+    // over ten browser profiles that would have ended in 'No Copilot Money
+    // session found'.
     expect(attempts).toEqual([
       'bootstrap',
       'expired-token',
       'expired-token',
       'session-token',
       'session-token',
+      'session-token',
     ]);
+  });
+
+  test('a still-valid idToken installed mid-flight is returned without another exchange', async () => {
+    // The OTHER half of the #765 fix, and it needs its own fixture: every
+    // scenario above uses `expires_in: '0'`, so `this.idToken` is expired the
+    // instant it is stored and the fresh-idToken check can never return. That
+    // made the check a guard which executed but could not fail — removing it
+    // left the whole suite green (verified by mutation).
+    //
+    // Here the replacement carries a REAL expiry, so the second caller should
+    // hand back the token the first installed and perform no exchange of its
+    // own — not even the one-shot retry.
+    const attempts: string[] = [];
+    let releaseSecond: () => void = () => {};
+    const secondRejectionSent = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    let seenExpiredToken = 0;
+
+    globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
+      const sent = String(options?.body ?? '');
+      if (sent.includes(syntheticToken('server-issued'))) {
+        attempts.push('expired-token');
+        seenExpiredToken += 1;
+        const rejection = Response.json(
+          { error: { message: 'INVALID_REFRESH_TOKEN' } },
+          { status: 400 }
+        );
+        return seenExpiredToken === 1
+          ? Promise.resolve(rejection)
+          : secondRejectionSent.then(() => rejection);
+      }
+      attempts.push(sent.includes(REAL_SESSION) ? 'session-token' : 'bootstrap');
+      return Promise.resolve(
+        Response.json({
+          id_token: ID_TOKEN,
+          refresh_token: sent.includes(REAL_SESSION)
+            ? REAL_SESSION
+            : syntheticToken('server-issued'),
+          // The one difference that matters: a live token, not an
+          // already-expired one.
+          expires_in: sent.includes(REAL_SESSION) ? '3600' : '0',
+          token_type: 'Bearer',
+          user_id: 'synthetic-user',
+        })
+      );
+    }) as unknown as typeof fetch;
+
+    const found: TokenResult[][] = [
+      [candidate(syntheticToken('bootstrap'), true)],
+      [candidate(REAL_SESSION, true)],
+    ];
+    let extractions = 0;
+    const auth = new FirebaseAuth(() => {
+      const candidates = found[extractions] ?? [];
+      extractions += 1;
+      return Promise.resolve({ candidates, checked: ['Chrome'] });
+    });
+
+    expect(await auth.getIdToken()).toBe(ID_TOKEN);
+    expect(extractions).toBe(1);
+
+    const first = auth.getIdToken();
+    const second = auth.getIdToken();
+    expect(await first).toBe(ID_TOKEN);
+    expect(extractions).toBe(2);
+
+    releaseSecond();
+    expect(await second).toBe(ID_TOKEN);
+    expect(extractions).toBe(2);
+
+    // No third 'session-token': the second caller returned the live idToken
+    // directly instead of retrying the exchange. That is the distinction
+    // between this test and the one above it.
+    expect(attempts).toEqual(['bootstrap', 'expired-token', 'expired-token', 'session-token']);
   });
 
   test.each([...DEAD_TOKEN_CODES])(
