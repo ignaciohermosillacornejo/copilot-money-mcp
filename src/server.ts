@@ -381,6 +381,11 @@ function defaultGraphQLClient(): GraphQLClient {
   return new GraphQLClient(new FirebaseAuth(() => extractRefreshTokenCandidates()));
 }
 
+/** The real transport: stdio, which claims this process's stdin and stdout. */
+function defaultConnect(server: CopilotMoneyServer): Promise<void> {
+  return server.run();
+}
+
 /**
  * Injection seam for {@link runServer}, mirroring the one
  * `CopilotMoneyServer`'s constructor already takes for its GraphQL client.
@@ -395,9 +400,9 @@ function defaultGraphQLClient(): GraphQLClient {
  * passes nothing and behaves exactly as before.
  */
 export interface RunServerDeps {
-  /** Builds the GraphQL client. Default: browser-session auth. */
+  /** Builds the GraphQL client. Default: {@link defaultGraphQLClient}. */
   createGraphQLClient?: () => GraphQLClient;
-  /** Connects the transport. Default: `server.run()`. */
+  /** Connects the transport. Default: {@link defaultConnect}. */
   connect?: (server: CopilotMoneyServer) => Promise<void>;
 }
 
@@ -440,7 +445,7 @@ export async function runServer(
   // for that long reproduces #708's symptom by another route: if the host's
   // startup timeout fires first the user sees a closed transport and the agent
   // sees no tools, which is the thing this change exists to prevent.
-  await (deps.connect ?? ((s: CopilotMoneyServer) => s.run()))(server);
+  await (deps.connect ?? defaultConnect)(server);
 
   // Fire-and-forget, deliberately. What the probe still buys is a stderr
   // diagnostic for host-log debugging and a warm token cache for the first

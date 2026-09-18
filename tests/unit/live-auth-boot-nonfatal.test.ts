@@ -299,7 +299,8 @@ describe('class detector: only the argv layer may kill the process (#708)', () =
     //
     // `process['exit']` appears nowhere in the tree, so without a fixture the
     // element-access branch would be uncovered by construction.
-    const fixture = join(mkdtempSync(join(tmpdir(), 'exit-spellings-')), 'fixture.ts');
+    const dir = mkdtempSync(join(tmpdir(), 'exit-spellings-'));
+    const fixture = join(dir, 'fixture.ts');
     writeFileSync(
       fixture,
       [
@@ -316,7 +317,9 @@ describe('class detector: only the argv layer may kill the process (#708)', () =
     try {
       expect(processExitArgs(fixture)).toEqual(['1', '2']);
     } finally {
-      rmSync(fixture, { force: true });
+      // The DIRECTORY, not just the file: `mkdtempSync` made it, so removing
+      // only its contents leaves one empty `exit-spellings-*` per run.
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 
@@ -378,26 +381,61 @@ describe('runServer connects the transport before probing, and never waits on it
     } as unknown as GraphQLClient;
   }
 
+  /**
+   * Reject after `ms` unless the work settles first, clearing the timer either
+   * way so no handle outlives the test.
+   *
+   * A real timeout rather than bun's default, because the failure it describes
+   * is specific: if `runServer` ever awaits the probe again the hanging client
+   * means it never returns, and the message should say so rather than
+   * "timed out".
+   */
+  async function within<T>(work: Promise<T>, message: string, ms = 5_000): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        work,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(message)), ms);
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
+
   test('a probe that never settles does not hold up the transport', async () => {
     const order: string[] = [];
-    // A real timeout, so a regression HANGS THE TEST rather than passing
-    // slowly: if `runServer` ever awaits the probe again, this never resolves
-    // and bun fails the test instead of the suite quietly taking 125s.
-    await Promise.race([
+    // The two facts are awaited SEPARATELY on purpose. Asserting `order`
+    // straight after `runServer` returns would also pass today, but only
+    // because `fetchTransactionsPage`'s first statement is
+    // `await client.query(...)` with nothing before it — so `'probe'` lands in
+    // the same microtask. That is a fact about a different file: add one
+    // `await` anywhere upstream of that call and this test fails with "the
+    // transport must connect first", pointing the next reader at an ordering
+    // rule that is perfectly intact. Waiting for the probe to actually start
+    // drops the dependency on microtask depth without weakening either claim.
+    let probeStarted!: () => void;
+    const probeHasStarted = new Promise<void>((resolve) => {
+      probeStarted = resolve;
+    });
+
+    await within(
       runServer('/nonexistent/run-server-order', undefined, false, true, {
-        createGraphQLClient: () => hangingClient(() => order.push('probe')),
+        createGraphQLClient: () =>
+          hangingClient(() => {
+            order.push('probe');
+            probeStarted();
+          }),
         connect: () => {
           order.push('connect');
           return Promise.resolve();
         },
       }),
-      new Promise((_, reject) =>
-        setTimeout(
-          () => reject(new Error('runServer did not return — it is awaiting the probe')),
-          5_000
-        )
-      ),
-    ]);
+      'runServer did not return — it is awaiting the probe'
+    );
+
+    await within(probeHasStarted, 'runServer returned but never started the probe');
 
     expect(
       order,
@@ -407,23 +445,25 @@ describe('runServer connects the transport before probing, and never waits on it
     ).toEqual(['connect', 'probe']);
   });
 
-  test('guards the gate: without --live-reads there is no probe at all', () => {
+  test('guards the gate: without --live-reads there is no probe at all', async () => {
     // Pins that the assertion above is about ORDER, not about the probe being
     // unreachable. If `createGraphQLClient` were never called in live mode,
     // `order` would read ['connect'] and `toEqual` would have caught it — but
     // only this case proves the absence is conditional rather than total.
     const order: string[] = [];
-    return runServer('/nonexistent/run-server-cache-mode', undefined, false, false, {
-      createGraphQLClient: () => {
-        order.push('client');
-        return hangingClient(() => order.push('probe'));
-      },
-      connect: () => {
-        order.push('connect');
-        return Promise.resolve();
-      },
-    }).then(() => {
-      expect(order).toEqual(['connect']);
-    });
+    await within(
+      runServer('/nonexistent/run-server-cache-mode', undefined, false, false, {
+        createGraphQLClient: () => {
+          order.push('client');
+          return hangingClient(() => order.push('probe'));
+        },
+        connect: () => {
+          order.push('connect');
+          return Promise.resolve();
+        },
+      }),
+      'runServer did not return in cache mode, where it has no probe to wait on'
+    );
+    expect(order).toEqual(['connect']);
   });
 });
