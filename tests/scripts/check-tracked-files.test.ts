@@ -573,7 +573,7 @@ describe('check:tracked-files', () => {
   const UNREADABLE_CLEAN_SCRIPTS = [
     {
       cause: 'shell syntax',
-      expected: 'shell operators, globs, braces and quoting are not interpreted',
+      expected: 'a target must be a plain path of letters, digits',
       scripts: [
         'rm -rf "dist" coverage',
         'rm -rf dist/*',
@@ -589,7 +589,7 @@ describe('check:tracked-files', () => {
     },
     {
       cause: 'outside the repo',
-      expected: 'not one inside this repository',
+      expected: 'not ones inside this repository',
       // Plain paths, every one of them — and none names anything
       // `git ls-files` can print, so each would report a directory count over
       // a scan matching nothing. Being free of shell syntax was only half of
@@ -606,8 +606,10 @@ describe('check:tracked-files', () => {
     // NB `./dist` is absent: a leading `./` is normalised, not rejected, and
     // the next test pins that. Listing it here too would be two tests asserting
     // opposite things about one spelling.
-    for (const { cause, expected, scripts } of UNREADABLE_CLEAN_SCRIPTS) {
-      for (const clean of scripts) {
+    for (const group of UNREADABLE_CLEAN_SCRIPTS) {
+      const other = UNREADABLE_CLEAN_SCRIPTS.find((g) => g.cause !== group.cause);
+      if (other === undefined) throw new Error('the table needs two causes to contrast');
+      for (const clean of group.scripts) {
         await withRepo(
           async (root) => {
             const pkg = JSON.parse(PACKAGE_JSON) as { scripts: Record<string, string> };
@@ -619,21 +621,36 @@ describe('check:tracked-files', () => {
             expect(code, `\`${clean}\` must not pass silently`).toBe(1);
             expect(
               stderr,
-              `\`${clean}\` is rejected for being ${cause}, and the message must say so`
-            ).toContain(expected);
+              `\`${clean}\` is rejected for being ${group.cause}, and the message must say so`
+            ).toContain(group.expected);
+            // The half that carries the claim. An earlier revision asserted
+            // only the line above plus `shell.expected !== outside.expected`
+            // between two literals in THIS file — which never runs the script,
+            // so collapsing both branches back into one message containing
+            // both phrases passed every row and the guard with it (checked).
+            // A gate that cannot fail is worse than none, which this PR
+            // already argued once when it deleted such a test.
+            expect(
+              stderr,
+              `\`${clean}\` is ${group.cause}, so the message must not also tell the ` +
+                `author about ${other.cause}`
+            ).not.toContain(other.expected);
           }
         );
       }
     }
   });
 
-  test('guards the gate: the two causes carry different messages', () => {
-    // Without this, collapsing both branches back into one sentence that
-    // contained both phrases would satisfy every row above.
-    const [shell, outside] = UNREADABLE_CLEAN_SCRIPTS;
-    expect(shell.expected).not.toBe(outside.expected);
-    expect(shell.scripts.length).toBeGreaterThan(0);
-    expect(outside.scripts.length).toBeGreaterThan(0);
+  test('guards the gate: both causes are actually exercised above', () => {
+    // Anti-vacuity for the LOOP, which is a different claim from the one the
+    // assertions inside it make: an empty group would skip its rows silently.
+    for (const { cause, scripts, expected } of UNREADABLE_CLEAN_SCRIPTS) {
+      expect(scripts.length, `the ${cause} group exercises nothing`).toBeGreaterThan(0);
+      expect(expected.length, `the ${cause} group asserts nothing`).toBeGreaterThan(0);
+    }
+    expect(new Set(UNREADABLE_CLEAN_SCRIPTS.map((g) => g.cause)).size).toBe(
+      UNREADABLE_CLEAN_SCRIPTS.length
+    );
   });
 
   test('`./dist` is normalised rather than rejected when it stands alone', async () => {
