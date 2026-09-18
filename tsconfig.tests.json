@@ -88,9 +88,13 @@
     //                            ratchet IS on the list, so it is checked.
     //   ts-files.ts           <- strip-comments.ts, exported-constants.test.ts,
     //                            no-hand-rolled-comment-strippers.test.ts, its
-    //                            own contract test, and
-    //                            scripts/no-duplicate-schema-walks.test.ts —
-    //                            all five on the list below and all five clean.
+    //                            own contract test,
+    //                            scripts/no-duplicate-schema-walks.test.ts and
+    //                            unit/live-auth-boot-nonfatal.test.ts — every
+    //                            one on the list below, and every one clean.
+    //                            (No count: this map is prose that nothing
+    //                            gates, and the last one went stale the moment
+    //                            #766 added an importer.)
     //                            (`scriptKindFor` is how strip-comments.ts picks
     //                            a ScriptKind, so the two helpers are a pair,
     //                            not a layer.)
