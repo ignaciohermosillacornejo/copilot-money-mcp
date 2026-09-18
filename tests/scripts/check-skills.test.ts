@@ -291,11 +291,7 @@ describe('tool-lookup gate (class-level detector)', () => {
 
 describe('skill validation', () => {
   test('passes when every referenced tool is in the registry', async () => {
-    // Both dumps left to their defaults, which is what exercises the
-    // `undefined` half of makeRepo's convention: every other call site names a
-    // body, so without this row "undefined means the working default" would be
-    // documented behaviour that nothing runs.
-    await withRepo({}, ({ code, stdout }) => {
+    await withRepo({ dumpBody: WORKING_DUMP }, ({ code, stdout }) => {
       expect(code).toBe(0);
       expect(stdout).toContain('1 skills validated');
     });
