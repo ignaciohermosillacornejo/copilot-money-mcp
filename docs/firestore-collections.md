@@ -91,7 +91,7 @@ collection === target || collection.endsWith(`/${target}`)
 | `original_date` | string | Original date before edits |
 | `original_amount` | number | Original amount before edits |
 | `category_id` | string | Category identifier |
-| `category_id_source` | string | How category was assigned |
+| `category_id_source` | string | How the category was assigned. Observed values: `plaid_category`, `intelligence`, `name_rule`, `recurring`, `user_edit`, `copilot_copilot`. Decoded into the model but not projected by any tool; no GraphQL equivalent exists |
 | `plaid_category_id` | string | Plaid's category ID |
 | `plaid_category_strings` | string[] | Category hierarchy from Plaid |
 | `account_id` | string | Associated account |
@@ -309,7 +309,7 @@ User overrides for account display. Must be checked BEFORE main `accounts` since
 | `auto_budget_lock` | boolean | Locked from automatic budget adjustments | Yes |
 | `auto_delete_lock` | boolean | Locked from automatic deletion | Yes |
 | `plaid_category_ids` | string[] | Plaid category IDs mapped to this custom category (e.g., `["18021000", "19025000"]`) | Yes |
-| `partial_name_rules` | string[] | Merchant name substrings for auto-categorization | Yes |
+| `partial_name_rules` | string[] | Legacy auto-categorization rules. **Always an empty array** — see "Categorization rules" below | Yes |
 | `user_id` | string | Owner user ID | Yes |
 | `budget_id` | string | Associated budget ID | No (in Firestore, not in schema) |
 | `children_categories` | unknown | Alternate children field | No (in Firestore, not in schema) |
@@ -327,8 +327,38 @@ User overrides for account display. Must be checked BEFORE main `accounts` since
 
 **Plaid category mapping:**
 - `plaid_category_ids` maps Plaid numeric IDs to this custom category for auto-categorization
-- `partial_name_rules` provides merchant-name-based auto-categorization
 - Copilot also has a hardcoded Plaid taxonomy (`src/utils/categories.ts`, `src/models/category-full.ts`)
+
+**Categorization rules — not reachable from the cache (verified 2026-09-18):**
+
+Copilot's auto-categorization rules run, but their definitions are not in this
+cache and not on GraphQL. Do not re-derive this; the sweep below was exhaustive.
+
+- **They demonstrably fire.** `transactions.category_id_source` records why each
+  transaction got its category. Over a 1,049-document cache sample:
+  `plaid_category` 475, `intelligence` 181, **`name_rule` 138**, `recurring` 83,
+  `user_edit` 57, `copilot_copilot` 7. So ~13% were set by a name rule.
+- **`partial_name_rules` is empty on every document.** Present on 22–23 of 38
+  category docs, zero entries on all of them. Verified at the protobuf byte
+  level — the bytes after the field name are `12 02 4a 00`, i.e.
+  `Value{array_value:{}}`, a zero-entry array. **This is not a decoder bug.**
+  Treat the field as legacy; the categories collection also carries
+  `_migration_backfill`, consistent with a migration that moved rules
+  server-side.
+- **Nothing else in the cache holds them.** A full scan (62,790 documents, 191
+  collection paths) found no other field or collection matching
+  `rule|matcher|pattern|auto_categor|recategor|memoriz|learn`, and the field
+  names of every non-timeseries collection were reviewed by hand.
+- **They never sync.** The `changes/{user_id}/{a,t}` change log only ever
+  references `items/…/accounts/…/transactions` paths.
+- **Not on GraphQL either** — see the "Rules" entry under "Tested-and-absent
+  surface" in [`graphql-capture/hidden-mutations.md`](graphql-capture/hidden-mutations.md).
+
+Rules are managed in the macOS/iOS client and enforced server-side. Because the
+macOS app maintains this very cache and the arrays are empty here too, that app
+is not reading them from Firestore. The only untried avenue is intercepting the
+macOS app's own HTTPS traffic to find the non-GraphQL endpoint its rules UI
+calls.
 
 **Detail panel (for category groups):**
 - Color dot + emoji + name, subcategory badges
