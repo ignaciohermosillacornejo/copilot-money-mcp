@@ -376,6 +376,31 @@ export async function preflightLiveAuthOrWarn(client: GraphQLClient): Promise<vo
   }
 }
 
+/** The real GraphQL client: browser-session auth against Copilot's endpoint. */
+function defaultGraphQLClient(): GraphQLClient {
+  return new GraphQLClient(new FirebaseAuth(() => extractRefreshTokenCandidates()));
+}
+
+/**
+ * Injection seam for {@link runServer}, mirroring the one
+ * `CopilotMoneyServer`'s constructor already takes for its GraphQL client.
+ *
+ * It exists because the two things `runServer` decides — that the transport
+ * connects BEFORE the boot probe, and that it does not wait on the probe —
+ * are orderings, and an ordering is only really pinned by running it. Without
+ * a seam that is untestable in-process: `server.run()` claims this process's
+ * stdin and stdout, which a test runner is also using.
+ *
+ * Both default to the real thing, so the production call in `src/cli.ts`
+ * passes nothing and behaves exactly as before.
+ */
+export interface RunServerDeps {
+  /** Builds the GraphQL client. Default: browser-session auth. */
+  createGraphQLClient?: () => GraphQLClient;
+  /** Connects the transport. Default: `server.run()`. */
+  connect?: (server: CopilotMoneyServer) => Promise<void>;
+}
+
 /**
  * Run the Copilot Money MCP server.
  *
@@ -383,17 +408,18 @@ export async function preflightLiveAuthOrWarn(client: GraphQLClient): Promise<vo
  *                If undefined, uses default Copilot Money location.
  * @param decodeTimeoutMs - Optional timeout for decode operations in milliseconds.
  * @param writeEnabled - If true, register write tools and enable GraphQL writes.
+ * @param deps - Test seam; see {@link RunServerDeps}. Production passes nothing.
  */
 export async function runServer(
   dbPath?: string,
   decodeTimeoutMs?: number,
   writeEnabled = false,
-  liveReadsEnabled = false
+  liveReadsEnabled = false,
+  deps: RunServerDeps = {}
 ): Promise<void> {
   let graphqlClient: GraphQLClient | undefined;
   if (writeEnabled || liveReadsEnabled) {
-    const auth = new FirebaseAuth(() => extractRefreshTokenCandidates());
-    graphqlClient = new GraphQLClient(auth);
+    graphqlClient = (deps.createGraphQLClient ?? defaultGraphQLClient)();
   }
 
   const server = new CopilotMoneyServer(
@@ -414,7 +440,7 @@ export async function runServer(
   // for that long reproduces #708's symptom by another route: if the host's
   // startup timeout fires first the user sees a closed transport and the agent
   // sees no tools, which is the thing this change exists to prevent.
-  await server.run();
+  await (deps.connect ?? ((s: CopilotMoneyServer) => s.run()))(server);
 
   // Fire-and-forget, deliberately. What the probe still buys is a stderr
   // diagnostic for host-log debugging and a warm token cache for the first
