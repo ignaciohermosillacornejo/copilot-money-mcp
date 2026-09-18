@@ -109,13 +109,14 @@ const pkg = JSON.parse(pkgRaw) as { scripts?: Record<string, string> };
 /**
  * Tokens in `clean` that the parse below refuses to read as a directory.
  *
- * A quoted or `./`-prefixed name is not WRONG shell, it just is not what
- * `git ls-files` emits — `./dist` matches no tracked path, so the gate would
- * guard nothing while reporting a directory count. A shell operator is worse:
+ * A `./`-prefixed name is not WRONG shell, it just is not what `git ls-files`
+ * emits — `./dist` matches no tracked path, so the gate would guard nothing
+ * while reporting a directory count. A shell operator is worse:
  * `rm -rf dist && rm -rf coverage` parses to four tokens, two of which are not
- * directories at all. What can be normalised is (`./`, surrounding quotes,
- * trailing slashes); anything left is "this script says something I cannot
- * read", which fails loudly.
+ * directories at all. What is NORMALISED is exactly `./` and trailing slashes;
+ * quoting is not — `"dist"` is a rejection cause alongside operators and
+ * globs, and the test suite pins it as one. Anything not normalised away is
+ * "this script says something I cannot read", which fails loudly.
  *
  * Stated as what a readable token IS, not as a list of what it is not. A
  * denylist of metacharacters was the first version and it missed the spelling
@@ -142,13 +143,16 @@ const pkg = JSON.parse(pkgRaw) as { scripts?: Record<string, string> };
  */
 const PLAIN_PATH = /^[\w.\-/]+$/;
 
-/** A path git could actually emit: repo-relative, no `.`/`..` segment. */
-function namesSomethingGitCouldEmit(d: string): boolean {
-  return (
-    PLAIN_PATH.test(d) &&
-    !d.startsWith('/') &&
-    !d.split('/').some((seg) => seg === '.' || seg === '..')
-  );
+/**
+ * Is this a path INSIDE the repo — no leading `/`, no `.` or `..` segment?
+ *
+ * The second of "readable"'s two claims, kept separate from `PLAIN_PATH` so
+ * each rejection can name its own cause in the failure text. A contributor
+ * told "shell operators, globs and quoting are not interpreted" about
+ * `../dist` would go looking for a metacharacter that is not there.
+ */
+function isInsideRepo(d: string): boolean {
+  return !d.startsWith('/') && !d.split('/').some((seg) => seg === '.' || seg === '..');
 }
 
 /**
@@ -175,11 +179,31 @@ const cleanTokens = [...cleanScript.matchAll(/(?:^|\s)rm\s+-rf?\s+(.+)$/gm)]
 /** Strip the spellings that are unambiguous but not what `git ls-files` emits. */
 const normaliseCleanToken = (d: string): string => d.replace(/^\.\//, '').replace(/\/+$/, '');
 
-const readableCleanTokens = cleanTokens.map(normaliseCleanToken).filter(namesSomethingGitCouldEmit);
-const unreadableCleanTokens = cleanTokens.filter(
-  (d) => !namesSomethingGitCouldEmit(normaliseCleanToken(d))
-);
-const generatedDirs = readableCleanTokens;
+/**
+ * Every token lands in exactly one bucket, in ONE pass.
+ *
+ * Two independent filters would be complementary only by hand, and the two
+ * ways of getting that wrong are not equally visible: a token in BOTH lists
+ * fails loudly (the unreadable guard exits first), while a token in NEITHER
+ * disappears from `generatedDirs` unreported — and the success line still
+ * prints a directory count over a scan that never looked at it. That silent
+ * state is the one this whole gate exists to prevent, so it is removed by
+ * construction rather than left to the next editor noticing there are two
+ * expressions to keep in step.
+ *
+ * The rejected buckets keep the author's OWN spelling while `generatedDirs`
+ * takes the normalised one: a message should quote what they wrote, not what
+ * this script made of it. Do not "simplify" the two to share a value.
+ */
+const generatedDirs: string[] = [];
+const shellSyntaxTokens: string[] = [];
+const outsideRepoTokens: string[] = [];
+for (const raw of cleanTokens) {
+  const d = normaliseCleanToken(raw);
+  if (!PLAIN_PATH.test(d)) shellSyntaxTokens.push(raw);
+  else if (!isInsideRepo(d)) outsideRepoTokens.push(raw);
+  else generatedDirs.push(d);
+}
 
 // Both of these stop the world rather than joining `failures` below, unlike
 // every other check in this file. That is deliberate: they mean the gate does
@@ -188,13 +212,29 @@ const generatedDirs = readableCleanTokens;
 // rule (4), it makes the "needed but not tracked" report wrong too. Reporting
 // downstream findings computed from a definition we just admitted we could not
 // read would be worse than reporting one failure at a time.
-if (unreadableCleanTokens.length > 0) {
+const quoted = (tokens: string[]): string => tokens.map((t) => `\`${t}\``).join(', ');
+
+// One sentence per rejection cause. A single message naming only shell syntax
+// would be wrong advice for the outside-repo group — `../dist` IS a plain
+// path, so "write the targets as plain paths" is something they already did.
+if (shellSyntaxTokens.length > 0) {
   console.error(
-    'Tracked-files check failed: package.json scripts.clean names ' +
-      `${unreadableCleanTokens.map((t) => `\`${t}\``).join(', ')}, which this script cannot ` +
-      'read as a directory (shell operators, globs and quoting are not interpreted). ' +
-      'Write the targets as plain paths, or re-point the parse in this script.'
+    `Tracked-files check failed: package.json scripts.clean names ${quoted(shellSyntaxTokens)}, ` +
+      'which this script cannot read as a directory — shell operators, globs, braces and ' +
+      'quoting are not interpreted. Write the targets as plain paths, or re-point the parse ' +
+      'in this script.'
   );
+}
+if (outsideRepoTokens.length > 0) {
+  console.error(
+    `Tracked-files check failed: package.json scripts.clean names ${quoted(outsideRepoTokens)}, ` +
+      'which is a plain path but not one inside this repository. This gate is a scan over ' +
+      '`git ls-files`, which emits no leading `/` and no `.`/`..` segment, so such a target ' +
+      'would be counted as generated and then never checked. Name a repo-relative path, or ' +
+      're-point the parse in this script.'
+  );
+}
+if (shellSyntaxTokens.length > 0 || outsideRepoTokens.length > 0) {
   process.exit(1);
 }
 if (generatedDirs.length === 0) {
