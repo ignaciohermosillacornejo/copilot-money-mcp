@@ -190,6 +190,7 @@ const MEMBERSHIP_IS_THE_COVERAGE = [
   'tests/scripts/no-duplicate-schema-walks.test.ts',
   'tests/scripts/mutation-guards.test.ts',
   'tests/setup/temp-db-teardown.ts',
+  'tests/unit/live-auth-boot-nonfatal.test.ts',
   'tests/unit/tsconfig-tests-sync.test.ts',
 ];
 
