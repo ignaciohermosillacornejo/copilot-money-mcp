@@ -15,7 +15,7 @@ import {
 import { CopilotDatabase } from './core/database.js';
 import { CopilotMoneyTools } from './tools/index.js';
 import { ALL_TOOL_DEFS, TOOL_REGISTRY, type LiveToolContext } from './tools/registry/index.js';
-import { GraphQLClient } from './core/graphql/client.js';
+import { GraphQLClient, GraphQLError } from './core/graphql/client.js';
 import { FirebaseAuth } from './core/auth/firebase-auth.js';
 import { extractRefreshTokenCandidates } from './core/auth/browser-token.js';
 import { LiveCopilotDatabase, preflightLiveAuth } from './core/live-database.js';
@@ -37,6 +37,7 @@ import { LiveAggregatedHoldingsTools } from './tools/live/aggregated-holdings.js
 import { LiveInvestmentBalanceTools } from './tools/live/investment-balance.js';
 import { RefreshCacheTool } from './tools/live/refresh-cache.js';
 import { stripTypename } from './tools/strip-typename.js';
+import { graphQLErrorToMcpError } from './tools/errors.js';
 
 // Read version from package.json
 import { createRequire } from 'module';
@@ -320,6 +321,62 @@ export class CopilotMoneyServer {
 }
 
 /**
+ * Render a boot-preflight failure for the stderr diagnostic.
+ *
+ * `GraphQLError` gets the same attribution the tool handlers use
+ * (`graphQLErrorToMcpError`) so the host log and the client-facing error
+ * agree on WHOSE fault it is; anything else — notably the plain
+ * `No Copilot Money session found …` thrown before a request is ever sent —
+ * already carries its own remedy and is passed through.
+ */
+function describeBootFailure(err: unknown): string {
+  if (err instanceof GraphQLError) return graphQLErrorToMcpError(err);
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Run the live-reads boot probe, and REPORT rather than die on failure (#708).
+ *
+ * This used to `process.exit(1)`. That put the one fact the user needed —
+ * "log into app.copilot.money" — in the one place they never look: the MCP
+ * host's stderr log. The host reports a closed transport, the agent sees no
+ * tools at all, and it cannot tell the user what to do because it was never
+ * told. That is how #708 was found: an external user read it out of the logs.
+ *
+ * Staying up fixes exactly that. The live tools stay listed, and the first
+ * call returns the auth failure as an `isError` result, so the AGENT reads
+ * "Please log into Copilot Money at https://app.copilot.money in your
+ * browser" and can relay it. Nothing is served stale in the meantime: a live
+ * tool with no session fails, it does not fall back to the cache.
+ *
+ * It also makes the state recoverable without a restart. After a failed cold
+ * extraction `FirebaseAuth` has cached no token, so the next call re-runs
+ * browser extraction and picks up the session the user just created.
+ * Exiting made every failure permanent, including the transient ones — no
+ * network at launch, laptop asleep, Copilot 5xx.
+ *
+ * Deliberately NOT classified by error code: a SCHEMA_ERROR or a NETWORK
+ * failure at boot has the same remedy shape as an auth one — surface it to
+ * the caller in its own words rather than killing the transport that would
+ * carry it. The stderr lines stay for host-log diagnosis.
+ *
+ * Exported for tests: this resolving (rather than exiting) IS the fix, and
+ * `runServer` cannot be called in-process without claiming stdio.
+ */
+export async function preflightLiveAuthOrWarn(client: GraphQLClient): Promise<void> {
+  try {
+    await preflightLiveAuth(client);
+  } catch (err) {
+    console.error(`[live-reads] preflight failed: ${describeBootFailure(err)}`);
+    console.error(
+      '[live-reads] starting anyway — live tools will report this error to the client ' +
+        'on first use. If it is an auth failure, log into app.copilot.money in your ' +
+        'browser; no restart needed.'
+    );
+  }
+}
+
+/**
  * Run the Copilot Money MCP server.
  *
  * @param dbPath - Optional path to LevelDB database.
@@ -340,16 +397,7 @@ export async function runServer(
   }
 
   if (liveReadsEnabled && graphqlClient) {
-    try {
-      await preflightLiveAuth(graphqlClient);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[live-reads] preflight failed: ${msg}`);
-      console.error(
-        '[live-reads] ensure you are logged into app.copilot.money in your default browser, then restart.'
-      );
-      process.exit(1);
-    }
+    await preflightLiveAuthOrWarn(graphqlClient);
   }
 
   const server = new CopilotMoneyServer(

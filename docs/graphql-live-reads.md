@@ -17,7 +17,9 @@ Prerequisites:
 - You must be logged into `app.copilot.money` in a supported browser. The MCP extracts a Firebase refresh token from browser storage. Supported today (`src/core/auth/browser-token.ts`): the Chromium family — Chrome, Arc, Edge, Brave, Vivaldi, Chromium, Opera and Opera GX — plus Safari and Firefox.
 - Network connectivity to `app.copilot.money`.
 
-If auth fails at boot, the server logs a diagnostic line to stderr and exits non-zero. Claude Desktop will show the transport as closed; check the MCP server logs for the explanation.
+If auth fails at boot the server **starts anyway** ([#708](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/708)). It writes a diagnostic line to stderr for host-log debugging, and the live tools stay listed — the first call to one returns the failure as an MCP error result, so the assistant reads `Please log into Copilot Money at https://app.copilot.money in your browser` and can tell you directly instead of leaving you to find it in a log. Nothing is served stale in the meantime: a live tool with no session fails, it does not fall back to the cache.
+
+Recovery needs no restart. After a failed extraction no token is cached, so the next tool call re-reads browser storage and picks up the session you just created. The same holds for a boot failure that was never about auth (no network at launch, a Copilot 5xx).
 
 ## What changes when `--live-reads` is on
 
