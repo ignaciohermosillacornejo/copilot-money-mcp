@@ -30,6 +30,23 @@ function escalating(threshold: string, findings: unknown[]): number {
   return Number(out.trim());
 }
 
+/**
+ * The same gate with `$t` bound as raw JSON rather than as a string.
+ *
+ * `--arg` always yields a string, so the non-string threshold cases are
+ * unreachable through `escalating()`. This is how the two plausible future
+ * edits would bind it — `--argjson`, or `$ENV.AUDIT_ISSUE_THRESHOLD`, which is
+ * `null` when the variable is unset — and the guard against them would
+ * otherwise be a guard nothing runs.
+ */
+function escalatingRaw(thresholdJson: string, findings: unknown[]): number {
+  const out = execFileSync('jq', ['--argjson', 't', thresholdJson, '-f', GATE], {
+    input: JSON.stringify({ unaddressed: findings }),
+    encoding: 'utf-8',
+  });
+  return Number(out.trim());
+}
+
 describe('audit severity gate', () => {
   test('guards the gate: the filter file the workflow reads actually exists', () => {
     // If this path moves, every assertion below would silently test nothing —
@@ -55,6 +72,17 @@ describe('audit severity gate', () => {
     expect(escalating('medium', [{ severity: 'Medium' }])).toBe(1);
   });
 
+  test('the THRESHOLD is matched case-insensitively too', () => {
+    // The half that was missing: finding severities were normalised and the
+    // threshold was not, so `AUDIT_ISSUE_THRESHOLD: Medium` was unrecognised —
+    // and unrecognised escalates everything. The knob's own comment in
+    // audit-reviews.yml invites editing that one word, which is what makes the
+    // capitalised spelling reachable rather than hypothetical. Both rows would
+    // read 2 under the old filter.
+    expect(escalating('Medium', [{ severity: 'low' }, { severity: 'low' }])).toBe(0);
+    expect(escalating('HIGH', [{ severity: 'low' }, { severity: 'medium' }])).toBe(0);
+  });
+
   // --- fail-safe direction: unclassifiable input must ESCALATE ---
 
   test('a finding with NO severity escalates rather than being dropped', () => {
@@ -65,10 +93,29 @@ describe('audit severity gate', () => {
     expect(escalating('medium', [{ severity: 'critical' }])).toBe(1);
   });
 
+  test('a NON-STRING severity escalates instead of crashing the filter', () => {
+    // The fail-safe has to survive the input that triggers it. `// ""` covers
+    // only null, and `ascii_downcase` throws on every other non-string, so
+    // these two aborted the gate — which under `set -e` is neither the loud
+    // direction nor the quiet one: no issue, no comment, and a jq error that
+    // names no finding. `escalating()` would throw rather than return a number
+    // if that came back.
+    expect(escalating('medium', [{ severity: 3 }])).toBe(1);
+    expect(escalating('medium', [{ severity: true }])).toBe(1);
+  });
+
   test('an unrecognised THRESHOLD escalates everything rather than silencing the gate', () => {
     // A typo in AUDIT_ISSUE_THRESHOLD must not disable issue creation. The
     // wrong direction here is the dangerous one: it would be invisible.
     expect(escalating('mediumm', [{ severity: 'low' }, { severity: 'low' }])).toBe(2);
+  });
+
+  test('a NON-STRING threshold escalates instead of crashing the filter', () => {
+    // Same direction as an unrecognised threshold, and for the same reason: a
+    // gate that cannot classify must not be why a finding disappears. Both
+    // rows throw out of `escalatingRaw` without the `// "" | tostring`.
+    expect(escalatingRaw('2', [{ severity: 'low' }])).toBe(1);
+    expect(escalatingRaw('null', [{ severity: 'low' }])).toBe(1);
   });
 
   test('threshold "low" restores the previous file-everything behaviour', () => {

@@ -64,6 +64,38 @@ jobs:
       - name: Tooling files tracked check
         run: bun run check:tracked-files
 
+      # Mutates a source file, runs the one test file that is supposed to
+      # notice, restores it. Runs here as well as in `bun run check` because a
+      # gate only the author's machine runs is the shape of hole #727 was, and
+      # because the whole point of the registry is that "mutation-tested" stops
+      # being a claim in a PR body. Seconds: one test file per entry.
+      - name: Mutation-guard registry check
+        run: bun run check:mutation-guards
+
+      # Free here and nowhere else: CI checks out clean, so the tree must be
+      # byte-identical after a step whose whole job is to edit tracked source
+      # and put it back. Deliberately NOT a precondition locally — `bun run
+      # check` is the pre-push hook and runs mid-edit — and deliberately not
+      # the runner's own bookkeeping, which is the thing being checked. Note
+      # this job never runs `bun test`, so the "the next command in check is a
+      # whole-repo test run over the damage" backstop is a local one.
+      #
+      # `if: always()` because a FAILING mutation-guard step is the likeliest
+      # way a file is left behind, so skipping the independent check on failure
+      # would disable it exactly when it has something to say. `git status`
+      # rather than `git diff` because the runner's give-up path writes an
+      # UNTRACKED `<file>.mutation-guard-original` sidecar, which `git diff`
+      # cannot see.
+      - name: Working tree unchanged by the mutation-guard run
+        if: always()
+        run: |
+          left=$(git status --porcelain)
+          if [ -n "$left" ]; then
+            echo "The mutation-guard step left the working tree changed:"
+            echo "$left"
+            exit 1
+          fi
+
       # Fork PRs only — a same-repo branch already required push access, so
       # there is no identity to forge. Reads public commit metadata with the
       # read-only fork token.

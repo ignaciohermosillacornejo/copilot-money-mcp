@@ -102,6 +102,14 @@
     "tests/core/temp-db-suite-teardown.test.ts",
     "tests/no-collection-time-assertions.test.ts",
     "tests/unit/tsconfig-tests-sync.test.ts",
+    // The sole verification of a gate that edits tracked source files in
+    // place (scripts/mutation-guards.ts, #596). Nothing imports a .test.ts and
+    // `lint` reads src/ only, so without this line the one file standing
+    // between a mutated `src/tools/tools.ts` and a lost working tree is checked
+    // by nothing. The tsconfig header's own #725 argument, applied to the case
+    // where it bites hardest. It drags the script in too, which tsconfig.scripts.json
+    // already covers — the redundancy is harmless and the coupling is real.
+    "tests/scripts/mutation-guards.test.ts",
     // The #708 boot-probe gates. Here for the #725 reason: the file is a
     // structural detector whose `as unknown as GraphQLClient` doubles would
     // hide a `query`/`mutate` signature drift in silence, and outside this

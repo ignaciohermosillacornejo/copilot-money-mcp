@@ -218,8 +218,28 @@ jobs:
             exit 1
           fi
 
-          if ! jq -e '.unaddressed | type == "array"' audit-result.json >/dev/null 2>&1; then
-            echo "::error::audit-result.json is missing or has an invalid 'unaddressed' array."
+          # The ELEMENTS are checked too, not just the array. Everything
+          # downstream reads `.severity` off each one, and `.severity` on a
+          # string element is a raw jq type error INSIDE the severity gate —
+          # the guard's whole job is to turn malformed audit output into the
+          # explicit ::error:: above, with the file printed, rather than a
+          # stack-trace-shaped failure two steps later.
+          #
+          # This is deliberately the ONE reader that still lets a bad row cost
+          # the batch, and it is not made redundant by the two filters below
+          # being forgiving: a `null` element is one they would both survive
+          # (escalate, and render as "unspecified"), and this rejects it first,
+          # so no issue is filed for the well-formed findings alongside it.
+          # Chosen rather than overlooked. `unaddressed` is a contract the audit
+          # step is asked to produce, and output that violates it is a broken
+          # audit rather than a finding — failing loudly with the file printed
+          # beats filing a partial batch that reads as the whole one. The loss
+          # is recoverable, which is what makes it the right trade: the
+          # `audited` label is gated on `success()`, so the run stays retryable
+          # via workflow_dispatch. Do not relax this to match the filters below.
+          if ! jq -e '.unaddressed | type == "array" and all(type == "object")' \
+            audit-result.json >/dev/null 2>&1; then
+            echo "::error::audit-result.json is missing 'unaddressed', or it is not an array of objects."
             cat audit-result.json
             exit 1
           fi
@@ -263,7 +283,11 @@ jobs:
             echo
             echo "**PR title:** $PR_TITLE"
             echo
-            jq -r '.unaddressed[] | "### \(.severity | ascii_upcase): \(.summary)\n\n- **File:** `\(.file)`\(if .line then ":\(.line|tostring)" else "" end)\n- **Reviewer said:** > \(.quote)\n- **Evidence not applied:** \(.evidence)\n"' audit-result.json
+            # In a file, not inline, so the "lists EVERY finding" claim above is
+            # something a test can hold: this render used to abort the whole
+            # step on a finding whose severity was missing, and an inline filter
+            # is unreachable from tests/.
+            jq -r -f .github/audit-issue-body.jq audit-result.json
             echo
             echo "---"
             if [ "$ESCALATING" -gt 0 ]; then
