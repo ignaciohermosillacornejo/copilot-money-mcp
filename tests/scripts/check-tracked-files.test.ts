@@ -108,7 +108,10 @@ const PACKAGE_JSON = JSON.stringify(
       // than from a list of its own, so the fixture needs one to model the real
       // repo. Without it the gate's anti-vacuity guard fires and every case
       // here fails on a message about `clean` instead of its own subject.
-      clean: 'rm -rf dist coverage',
+      // `out-stage` is deliberately a name no hand-written list would carry:
+      // the derivation test below tracks a file under it, which only fails if
+      // the gate really did read this script.
+      clean: 'rm -rf dist coverage out-stage',
     },
   },
   null,
@@ -490,9 +493,13 @@ describe('check:tracked-files', () => {
     await withRepo(
       async (root) => {
         await write(root, 'coverage/lcov.info', 'TN:\nSF:src/entry.ts\nend_of_record\n');
-        // `-f`, because the point is that the directory is NOT ignored — which
-        // is exactly the state the real repo was in.
-        await git(root, ['add', '-f', 'coverage/lcov.info']);
+        // A plain `add`, not `add -f`: the fixture has no `coverage/` ignore
+        // rule, mirroring the real repo's state, and an ordinary add is how
+        // the file actually got committed. `-f` would keep this test passing
+        // if the fixture ever gained such a rule — at which point it would be
+        // exercising a state the real bug did not have. `withRepo`'s docblock
+        // makes the same argument about `add -A`.
+        await git(root, ['add', 'coverage/lcov.info']);
       },
       ({ code, stderr }) => {
         expect(code).toBe(1);
@@ -522,10 +529,26 @@ describe('check:tracked-files', () => {
   });
 
   test('the generated list is derived from `clean`, not hardcoded', async () => {
-    // If the list were a literal in the script, renaming the directory in
-    // `clean` would leave the gate guarding a name nothing produces. Here the
-    // fixture's `clean` names `dist` too, so a tracked file under THAT is
-    // caught by the same code path with no second rule.
+    // `out-stage` is the point: it appears in the fixture's `clean` script and
+    // nowhere in this repo, so no hand-written list in the gate could contain
+    // it. If the derivation stopped working, this file would simply not be
+    // guarded and the case would go green.
+    await withRepo(
+      async (root) => {
+        await write(root, 'out-stage/bundle.js', "console.log('staged');\n");
+        await git(root, ['add', 'out-stage/bundle.js']);
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('out-stage/bundle.js');
+      }
+    );
+  });
+
+  test('an ignored generated directory is caught too', async () => {
+    // `dist/` IS in the fixture's ignore file, so this one needs `-f` — the
+    // contrast with the coverage case above, where the missing ignore rule is
+    // what let an ordinary `add` sweep the file in.
     await withRepo(
       async (root) => {
         await write(root, 'dist/entry.js', "console.log('built');\n");
@@ -534,6 +557,55 @@ describe('check:tracked-files', () => {
       ({ code, stderr }) => {
         expect(code).toBe(1);
         expect(stderr).toContain('dist/entry.js');
+      }
+    );
+  });
+
+  test('a `clean` this script cannot parse fails loudly, per spelling', async () => {
+    // The half the empty-parse guard misses: these produce a NON-empty list
+    // whose entries match no path `git ls-files` emits, so the gate would
+    // report a directory count over a scan that guards nothing — the same
+    // "finds nothing, looks like a pass" shape one layer in.
+    // NB `./dist` is absent: a leading `./` is normalised, not rejected, and
+    // the next test pins that. Listing it here too would be two tests asserting
+    // opposite things about one spelling.
+    for (const clean of [
+      'rm -rf "dist" coverage',
+      'rm -rf dist/*',
+      'rm -rf dist && rm -rf coverage',
+    ]) {
+      await withRepo(
+        async (root) => {
+          const pkg = JSON.parse(PACKAGE_JSON) as { scripts: Record<string, string> };
+          pkg.scripts.clean = clean;
+          await write(root, 'package.json', JSON.stringify(pkg, null, 2));
+          await git(root, ['add', '-A']);
+        },
+        ({ code, stderr }) => {
+          expect(code, `\`${clean}\` must not pass silently`).toBe(1);
+          expect(stderr, `\`${clean}\` must name the parse as the problem`).toContain(
+            'cannot read as a directory'
+          );
+        }
+      );
+    }
+  });
+
+  test('`./dist` is normalised rather than rejected when it stands alone', async () => {
+    // Not every unusual spelling is unreadable. A leading `./` is normalised,
+    // because `git ls-files` never emits one and the intent is unambiguous —
+    // so this must still CATCH, not complain about the parse.
+    await withRepo(
+      async (root) => {
+        const pkg = JSON.parse(PACKAGE_JSON) as { scripts: Record<string, string> };
+        pkg.scripts.clean = 'rm -rf ./dist ./coverage ./out-stage';
+        await write(root, 'package.json', JSON.stringify(pkg, null, 2));
+        await write(root, 'out-stage/bundle.js', "console.log('staged');\n");
+        await git(root, ['add', '-A']);
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('out-stage/bundle.js');
       }
     );
   });

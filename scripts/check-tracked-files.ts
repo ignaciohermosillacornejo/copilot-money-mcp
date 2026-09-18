@@ -86,16 +86,93 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(process.env.CHECK_TRACKED_FILES_ROOT ?? join(__dirname, '..'));
 
 /**
- * Directories the build *produces*.
+ * Read a repo file, or null when it is not there.
  *
- * `bun run build` names `dist/cli.js` and `dist/launcher.sh` after creating
- * them, so they are outputs, not inputs, and a clean checkout is right not to
- * have them. This is a hand-written list, which is the thing #729 is about —
- * but its failure mode is the opposite one: a generated path outside these
- * prefixes makes this gate fail loudly and the author adds a prefix. The
- * `.gitignore` allowlist fails silently, which is why it needed a gate.
+ * Defined this high because the generated-directory derivation below needs
+ * `package.json` before anything else runs.
  */
-const GENERATED_PREFIXES = ['dist/'];
+function readIfPossible(rel: string): string | null {
+  try {
+    return readFileSync(join(repoRoot, rel), 'utf-8');
+  } catch {
+    return null;
+  }
+}
+
+const pkgRaw = readIfPossible('package.json');
+if (pkgRaw === null) {
+  console.error(`Tracked-files check failed: cannot read ${join(repoRoot, 'package.json')}`);
+  process.exit(1);
+}
+const pkg = JSON.parse(pkgRaw) as { scripts?: Record<string, string> };
+
+/**
+ * Tokens in `clean` that the parse below refuses to read as a directory.
+ *
+ * A quoted or `./`-prefixed name is not WRONG shell, it just is not what
+ * `git ls-files` emits — `./dist` matches no tracked path, so the gate would
+ * guard nothing while reporting a directory count. A shell operator is worse:
+ * `rm -rf dist && rm -rf coverage` parses to four tokens, two of which are not
+ * directories at all. Both are handled by normalising what can be normalised
+ * (`./`, surrounding quotes, trailing slashes) and treating anything still
+ * carrying shell syntax as "this script says something I cannot read".
+ */
+const SHELL_SYNTAX = /[&|;<>*?$()`'"]/;
+
+/**
+ * Directories the repo GENERATES, derived from `package.json`'s `clean`.
+ *
+ * Derived rather than listed, which is this file's rule everywhere else: the
+ * `clean` script already IS the repo's statement of what is generated, and a
+ * second list beside it is a second thing to keep in sync. It was a
+ * hand-written `['dist/']` until #766, which is how `coverage/` came to be
+ * neither recognised here nor ignored by git.
+ *
+ * One derivation, two consumers, and they MUST agree. {@link isGenerated}
+ * excludes these paths from the "needed by tooling, so it must be tracked"
+ * sweep; rule (4) forbids tracking anything under them. Two lists could
+ * disagree, and disagreeing is worse than either being wrong alone: rename the
+ * build output and update `clean`, and the seeds sweep would report
+ * `build/cli.js` as "needed but NOT TRACKED" while rule (4) forbade tracking
+ * it — one run, two failures, opposite remedies.
+ */
+const cleanScript = pkg.scripts?.clean ?? '';
+const cleanTokens = [...cleanScript.matchAll(/(?:^|\s)rm\s+-rf?\s+(.+)$/gm)]
+  .flatMap((m) => (m[1] ?? '').split(/\s+/))
+  .filter((d) => d !== '' && !d.startsWith('-'));
+const unreadableCleanTokens = cleanTokens.filter((d) => SHELL_SYNTAX.test(d));
+const generatedDirs = cleanTokens
+  .filter((d) => !SHELL_SYNTAX.test(d))
+  .map((d) => d.replace(/^\.\//, '').replace(/\/+$/, ''));
+
+// Both of these stop the world rather than joining `failures` below, unlike
+// every other check in this file. That is deliberate: they mean the gate does
+// not know what "generated" is, and every later result depends on that answer —
+// `isGenerated` feeds the seeds sweep, so a bad derivation does not merely skip
+// rule (4), it makes the "needed but not tracked" report wrong too. Reporting
+// downstream findings computed from a definition we just admitted we could not
+// read would be worse than reporting one failure at a time.
+if (unreadableCleanTokens.length > 0) {
+  console.error(
+    'Tracked-files check failed: package.json scripts.clean names ' +
+      `${unreadableCleanTokens.map((t) => `\`${t}\``).join(', ')}, which this script cannot ` +
+      'read as a directory (shell operators, globs and quoting are not interpreted). ' +
+      'Write the targets as plain paths, or re-point the parse in this script.',
+  );
+  process.exit(1);
+}
+if (generatedDirs.length === 0) {
+  // A scan that finds nothing looks exactly like a pass, which is the failure
+  // shape this repo keeps meeting. Say so instead.
+  console.error(
+    'Tracked-files check failed: package.json scripts.clean named no `rm -rf` targets, ' +
+      'so the generated-directory check would silently pass over everything. Re-point ' +
+      'the parse in this script at whatever states which directories are generated.',
+  );
+  process.exit(1);
+}
+
+const GENERATED_PREFIXES = generatedDirs.map((d) => `${d}/`);
 
 /**
  * The declared home for local scratch — gitignored on purpose, and excluded
@@ -252,24 +329,9 @@ function toRepoRelative(abs: string): string | null {
   return rel.split('\\').join('/');
 }
 
-function readIfPossible(rel: string): string | null {
-  try {
-    return readFileSync(join(repoRoot, rel), 'utf-8');
-  } catch {
-    return null;
-  }
-}
-
 // ---------------------------------------------------------------------------
 // (1) Paths named by package.json scripts.
 // ---------------------------------------------------------------------------
-
-const pkgRaw = readIfPossible('package.json');
-if (pkgRaw === null) {
-  console.error(`Tracked-files check failed: cannot read ${join(repoRoot, 'package.json')}`);
-  process.exit(1);
-}
-const pkg = JSON.parse(pkgRaw) as { scripts?: Record<string, string> };
 
 const seeds = new Set<string>();
 /** A package.json script names a path that is neither generated nor on disk. */
@@ -405,20 +467,13 @@ if (candidates.length > 0) {
 // ---------------------------------------------------------------------------
 
 /**
- * Directories the `clean` script deletes, and therefore directories git must
- * not be carrying.
+ * The other direction, and nothing checked it before #766.
  *
- * Derived from `package.json` rather than listed here, for the same reason as
- * everything above: a list would be one more thing to keep in sync, and the
- * `clean` script already IS the repo's statement of what is generated.
- *
- * The rest of this file asserts that every file the tooling NEEDS survives a
- * fresh clone. This is the other direction, and nothing checked it: on #766 a
+ * Everything above asks whether every file the tooling NEEDS survives a fresh
+ * clone. Nothing asked whether anything is here that should not be, so a
  * `git add -A` after a local `bun test --coverage` committed `coverage/` —
  * 43,687 lines of machine output, including bun's in-progress `.tmp` scratch
- * file — and every gate stayed green. `.gitignore` covered `dist/` and
- * `.bun-build/` but not `coverage/`, so the hole was one name wide and nothing
- * pointed at it.
+ * file — and every gate stayed green.
  *
  * What a tracked generated directory costs, beyond the diff noise: `bun run
  * clean` deletes tracked files, so a routine clean dirties the tree and the
@@ -428,23 +483,6 @@ if (candidates.length > 0) {
  * committed numbers as if they were its own; and a 21k-line generated file
  * conflicts on every branch that regenerates it.
  */
-const cleanScript = pkg.scripts?.clean ?? '';
-const generatedDirs = [...cleanScript.matchAll(/(?:^|\s)rm\s+-rf\s+(.+)$/gm)]
-  .flatMap((m) => (m[1] ?? '').split(/\s+/))
-  .filter((d) => d !== '' && !d.startsWith('-'))
-  .map((d) => d.replace(/\/+$/, ''));
-
-if (generatedDirs.length === 0) {
-  // Guards the gate: a reworded `clean` script would make every assertion
-  // below vacuous, and a scan that finds nothing looks exactly like a pass.
-  console.error(
-    'Tracked-files check failed: package.json scripts.clean named no `rm -rf` targets, ' +
-      'so the generated-directory check would silently pass over everything. Re-point ' +
-      'the parse in this script at whatever states which directories are generated.',
-  );
-  process.exit(1);
-}
-
 const trackedGenerated = [...tracked]
   .filter((f) => generatedDirs.some((d) => f === d || f.startsWith(`${d}/`)))
   .sort();
@@ -478,15 +516,25 @@ for (const file of ignoreMatched.sort()) {
 if (failures.length > 0) {
   console.error('Tracked-files check failed:');
   for (const f of failures) console.error(`  - ${f}`);
-  console.error(
-    '\nA file listed as TRACKED-but-generated is fixed with `git rm -r --cached <dir>` ' +
-      'plus a `<dir>/` rule in .gitignore, so the next `git add -A` cannot re-add it.\n' +
+  // Each remedy prints only for the failure kind it addresses. Stacking both
+  // on every run means one of them is always advice for a problem the reader
+  // does not have — and the "add it to the list" half no longer exists as an
+  // action, since the list is derived from `clean`.
+  if (trackedGenerated.length > 0) {
+    console.error(
+      '\nA file listed as TRACKED-but-generated is fixed with `git rm -r --cached <dir>` ' +
+        'plus a `<dir>/` rule in .gitignore, so the next `git add -A` cannot re-add it.',
+    );
+  }
+  if (failures.length > trackedGenerated.length) {
+    console.error(
       '\nEvery file the repo\'s tooling reaches must survive a fresh clone. Add a ' +
-      '`!<path>` negation to the allowlist under the `scripts/*` rule in .gitignore ' +
-      '(or fix the over-broad rule the message names), then `git add` the file and ' +
-      're-run. If the path is genuinely produced by the build, add its directory to ' +
-      'GENERATED_PREFIXES in this script.',
-  );
+        '`!<path>` negation to the allowlist under the `scripts/*` rule in .gitignore ' +
+        '(or fix the over-broad rule the message names), then `git add` the file and ' +
+        're-run. If the path is genuinely produced by the build, name its directory in ' +
+        "package.json's `clean` script, which is where this gate reads that from.",
+    );
+  }
   process.exit(1);
 }
 
