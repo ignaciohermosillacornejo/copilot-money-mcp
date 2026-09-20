@@ -811,8 +811,12 @@ jobs:
       - run: echo "See https://github.com/octocat/some-repo for details"
 `,
       },
-      ({ code }) => {
+      ({ code, stdout }) => {
         expect(code).toBe(0);
+        // Not just "no problem was reported" — pin that the approver-gate scan
+        // actually ran and reached the login-outside-gates check, so a green
+        // `code` here can't be explained by that branch never executing.
+        expect(stdout).toContain('1 approver gate(s)');
       }
     );
   });

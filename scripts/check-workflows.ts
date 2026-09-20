@@ -218,22 +218,28 @@ function* stringValuesOutsideGates(node: unknown, key = ''): Generator<string> {
 }
 
 /**
- * True when `login` appears in `value` as its own token — not flanked by a
- * word character, hyphen, or slash on either side.
+ * A regex matching `login` only where it stands as its own token — not
+ * flanked by a word character, hyphen, or slash on either side.
  *
- * A plain substring test also fires on a login that is merely the owner
- * segment of a `github.com/<owner>/<repo>` URL sitting in unrelated free
- * text (a PR description template, a comment left for a human) — that is
- * not the login "written out" in the sense this invariant polices, and
- * flagging it teaches the gate to cry wolf. The boundary excludes exactly
- * the characters a URL or a compound identifier would use to extend the
- * match (`/octocat/`, `octocat-bot`), while leaving quotes, spaces, and
- * other punctuation as valid boundaries so the shell-literal case this scan
+ * A plain substring test also fires wherever `login` is merely a SUBSTRING of
+ * a larger token — the owner segment of an unrelated `github.com/<owner>/
+ * <repo>` URL sitting in free text (a PR description template, a comment left
+ * for a human), or a compound identifier like `<login>-bot` that names a
+ * different account entirely. Neither is the login "written out" in the
+ * sense this invariant polices, and flagging either teaches the gate to cry
+ * wolf. The boundary excludes exactly the two characters that extend a
+ * login into a different token this way — a slash (path/URL segments) or a
+ * hyphen (compound identifiers) — while leaving quotes, spaces, and other
+ * punctuation as valid boundaries, so the shell-literal case this scan
  * exists to catch (`"octocat"`) still matches.
+ *
+ * Takes a single `login` rather than the whole candidate list so the cost of
+ * building the pattern (and escaping it) is paid once per login, not once
+ * per (login × string) pair scanned.
  */
-function isLoginSpelledOut(value: string, login: string): boolean {
+function loginBoundaryPattern(login: string): RegExp {
   const escaped = login.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(?<![\\w/-])${escaped}(?![\\w/-])`).test(value);
+  return new RegExp(`(?<![\\w/-])${escaped}(?![\\w/-])`);
 }
 
 /** Every string anywhere in the parsed document — comments excluded by parsing. */
@@ -455,8 +461,13 @@ for (const file of files) {
   // `if:` rule cannot see.
   if (declared !== null) {
     const humanDeclared = [...declared].filter((l) => !BOT_LOGIN.test(l));
+    // One pattern built per login, not per (login × string) pair scanned below.
+    const spellings = humanDeclared.map((login) => ({
+      login,
+      pattern: loginBoundaryPattern(login),
+    }));
     for (const value of stringValuesOutsideGates(doc)) {
-      const spelled = humanDeclared.find((login) => isLoginSpelledOut(value, login));
+      const spelled = spellings.find(({ pattern }) => pattern.test(value))?.login;
       if (spelled === undefined) continue;
       problems.push(
         `${file}: the login '${spelled}' is written out somewhere that is neither the ` +
