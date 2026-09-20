@@ -862,13 +862,22 @@ jobs:
     // only boundary on that side.
     //
     // Four one-sided mentions close all four (character × side) cells
-    // independently: nothing precedes or follows `octocat` on the other
-    // side of the boundary character being tested, so only that one
-    // lookaround can be responsible for the match staying blocked.
-    //   - "https://github.com/octocat" (nothing follows) → pins lookbehind /
-    //   - "octocat/some-repo" (nothing precedes but a space)  → pins lookahead /
-    //   - "octocat-bot" (nothing precedes but a space) → pins lookahead -
-    //   - "renovate-octocat" (nothing follows) → pins lookbehind -
+    // independently: on the side NOT being tested, nothing from the
+    // boundary class (`\w/-`) is adjacent to `octocat`, so only the one
+    // lookaround under test can be responsible for the match staying
+    // blocked.
+    //   - "https://github.com/octocat" (only a quote follows — not in the class) → pins lookbehind /
+    //   - "octocat/some-repo" (only a space precedes — not in the class)         → pins lookahead /
+    //   - "octocat-bot" (only a space precedes — not in the class)              → pins lookahead -
+    //   - "renovate-octocat" (only a quote follows — not in the class)          → pins lookbehind -
+    //
+    // All four live in one `run: |` scalar rather than four separate
+    // fixtures: the scan reports one problem per FILE (it `break`s after the
+    // first match), so bundling costs nothing in detection power — any one
+    // mention regressing still reds this test. The trade is attribution, not
+    // coverage: a red here says the boundary regressed, not which of the
+    // four cells did, so tracking down a failure means re-checking all four
+    // mentions against the mutated pattern.
     await withWorkflows(
       {
         'boundary-matrix.yml': `name: Boundary matrix
