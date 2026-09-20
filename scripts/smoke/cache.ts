@@ -118,7 +118,8 @@ export interface RootComparison {
 }
 
 /**
- * Check 1b's whole verdict, status and wording together (#763).
+ * Check 1b's whole verdict — status, wording, and the counts checks 1 and 1b
+ * both report (#763).
  *
  * A function rather than an `if` in `main()` so the WARN can be asserted from a
  * test. `main()` needs a real Copilot cache and never runs under `bun test`, so
@@ -127,19 +128,50 @@ export interface RootComparison {
  * `docs/bugs/596-vacuous-assertions-bulk-edit.md` is about. Returning the
  * detail string too, rather than only a verdict, is what lets a test pin that
  * the WARN actually names its reason instead of just being yellow.
+ *
+ * `comparedSummary` is check 1's own count, phrased here rather than assembled
+ * at the call site. It counts roots with `raw > 0` — the ones whose comparison
+ * had a left-hand side — and NOT "roots that are not unmeasured", which would
+ * put a `raw === 0 && rows === 0` root in the numerator: nothing on disk and
+ * nothing decoded is consistent rather than vacuous, but it still compared
+ * nothing. Returned as a finished fragment, not as two numbers for the caller
+ * to divide, because the caller is `main()`: a figure whose whole job is to say
+ * how much was measured must not be the one thing in this block that only runs
+ * on a machine with a cache, and two fields are two chances to combine them
+ * wrongly where one leaves none.
+ *
+ * SKIP for an empty list, matching {@link reportExtinctDependencies}: "all 0
+ * roots had documents to compare" is the same true-of-nothing line this whole
+ * change exists to remove. Unreachable today — `decoded` in `main()` is a
+ * nine-element literal — but a status that would be wrong if it were ever
+ * reached is not worth keeping for the sake of a shorter function.
  */
 export function reportDecodeLossCoverage(roots: readonly RootComparison[]): {
   status: Status;
   detail: string;
+  comparedSummary: string;
 } {
+  const measured = roots.filter((d) => d.raw > 0).length;
+  const counts = {
+    comparedSummary: `${measured}/${roots.length} roots had documents to compare`,
+  };
+  if (roots.length === 0) {
+    return {
+      ...counts,
+      status: 'SKIP',
+      detail: 'no roots were compared at all, so there is no coverage to report',
+    };
+  }
   const unmeasured = roots.filter((d) => isUnmeasuredRoot(d.raw, d.rows));
   if (unmeasured.length === 0) {
     return {
+      ...counts,
       status: 'PASS',
-      detail: `all ${roots.length} roots had raw documents to compare their decoded rows against`,
+      detail: `all ${roots.length} roots decoded rows only where raw documents backed them`,
     };
   }
   return {
+    ...counts,
     status: 'WARN',
     detail:
       `${unmeasured.length}/${roots.length} roots decoded rows with zero raw documents beneath ` +
@@ -148,7 +180,7 @@ export function reportDecodeLossCoverage(roots: readonly RootComparison[]): {
       ` — the root name matches no collection pattern on this cache, so the decode-loss and ` +
       `conservation checks are measuring nothing for it. Their PASS for these roots carries no ` +
       `evidence; re-anchor each root to the pattern its documents actually use (the decoder ` +
-      `matches by leaf, this counts by root prefix)`,
+      `matches by leaf, this counts by root prefix — #778)`,
   };
 }
 
@@ -519,7 +551,9 @@ async function main(): Promise<void> {
   ];
 
   const withRaw = decoded.map((d) => ({ ...d, raw: rawRows(d.root) }));
-  const unmeasured = withRaw.filter((d) => isUnmeasuredRoot(d.raw, d.rows));
+  // Computed before check 1 reports, because check 1's own PASS quotes how many
+  // roots it compared and that count belongs to one tested function (#763).
+  const coverage = reportDecodeLossCoverage(withRaw);
   const blackHoles = withRaw.filter((d) => isTotalDecodeLoss(d.raw, d.rows));
   if (blackHoles.length > 0) {
     record(
@@ -533,8 +567,7 @@ async function main(): Promise<void> {
       'total decode loss',
       'PASS',
       `every collection with documents decoded at least one row ` +
-        `(${withRaw.length - unmeasured.length}/${withRaw.length} roots had documents to ` +
-        `compare — see the coverage check below for the rest)`
+        `(${coverage.comparedSummary} — see the coverage check below for the rest)`
     );
   }
 
@@ -546,8 +579,12 @@ async function main(): Promise<void> {
   // a nested path is compared against nothing and passes vacuously. Reported
   // as its own line rather than folded into check 1's detail: a caveat inside
   // another check's PASS is read as part of the pass.
+  //
+  // This WARNs on every real cache today, which is its own hazard — a
+  // permanently-yellow line is read as furniture, and a SEVENTH root joining
+  // the set would move 6/9 to 7/9 unnoticed. Re-anchoring the roots, and
+  // ratcheting this on growth until that lands, are #778.
   // ---------------------------------------------------------------------
-  const coverage = reportDecodeLossCoverage(withRaw);
   record('decode-loss coverage', coverage.status, coverage.detail);
 
   // ---------------------------------------------------------------------
