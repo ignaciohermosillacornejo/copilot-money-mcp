@@ -187,8 +187,12 @@ describe('reportDecodeLossCoverage', () => {
   test('an empty comparison list SKIPs rather than passing over nothing', () => {
     // "All 0 roots had documents to compare" is the same true-of-nothing line
     // this whole change removes, and the sibling reporter already answers the
-    // empty case with SKIP. Unreachable today; wrong if it ever were reached.
-    expect(reportDecodeLossCoverage([]).status).toBe('SKIP');
+    // empty case with SKIP. Unreachable today; wrong if it ever were reached —
+    // which is also why the summary it carries is pinned rather than assumed:
+    // the knowingly-unreached branch is the one nothing else would notice.
+    const { status, comparedSummary } = reportDecodeLossCoverage([]);
+    expect(status).toBe('SKIP');
+    expect(comparedSummary).toBe('0/0 roots had documents to compare');
   });
 
   test('counts a root as measured only when raw documents backed it', () => {

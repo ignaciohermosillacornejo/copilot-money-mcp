@@ -118,8 +118,8 @@ export interface RootComparison {
 }
 
 /**
- * Check 1b's whole verdict — status, wording, and the counts checks 1 and 1b
- * both report (#763).
+ * Check 1b's whole verdict — status, wording, and the coverage count that
+ * checks 1 and 2 quote in their own PASS lines (#763).
  *
  * A function rather than an `if` in `main()` so the WARN can be asserted from a
  * test. `main()` needs a real Copilot cache and never runs under `bun test`, so
@@ -129,8 +129,10 @@ export interface RootComparison {
  * detail string too, rather than only a verdict, is what lets a test pin that
  * the WARN actually names its reason instead of just being yellow.
  *
- * `comparedSummary` is check 1's own count, phrased here rather than assembled
- * at the call site. It counts roots with `raw > 0` — the ones whose comparison
+ * `comparedSummary` is the count checks 1 and 2 print, phrased here rather than
+ * assembled at either call site — both share this blind spot, so both say how
+ * much they measured instead of leaving it to a comment the output never shows.
+ * It counts roots with `raw > 0` — the ones whose comparison
  * had a left-hand side — and NOT "roots that are not unmeasured", which would
  * put a `raw === 0 && rows === 0` root in the numerator: nothing on disk and
  * nothing decoded is consistent rather than vacuous, but it still compared
@@ -567,7 +569,7 @@ async function main(): Promise<void> {
       'total decode loss',
       'PASS',
       `every collection with documents decoded at least one row ` +
-        `(${coverage.comparedSummary} — see the coverage check below for the rest)`
+        `(${coverage.comparedSummary} — see the coverage check below)`
     );
   }
 
@@ -597,7 +599,9 @@ async function main(): Promise<void> {
   //
   // Shares check 1's blind spot, and for the same reason: `d.raw > 10` is
   // never true for a root the raw side cannot find, so check 1b's WARN is the
-  // coverage statement for this check too (#763).
+  // coverage statement for this check too (#763) — which is why its PASS
+  // quotes the same count rather than leaving the caveat in this comment,
+  // where the output never shows it.
   // ---------------------------------------------------------------------
   const lossy = withRaw.filter((d) => d.raw > 10 && d.rows > 0 && d.rows / d.raw < 0.5);
 
@@ -610,7 +614,12 @@ async function main(): Promise<void> {
         ` (legitimate for soft-deletes/dedup — confirm each)`
     );
   } else {
-    record('conservation', 'PASS', 'no collection loses more than half its documents');
+    record(
+      'conservation',
+      'PASS',
+      `no collection loses more than half its documents ` +
+        `(${coverage.comparedSummary} — see the coverage check above)`
+    );
   }
 
   // ---------------------------------------------------------------------
