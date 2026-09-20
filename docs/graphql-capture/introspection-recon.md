@@ -104,7 +104,7 @@ Fields still unknown even after recon:
 2. **Arg signatures** for `createAccount` and `deleteAccount` (beyond the required ones) — we know they exist and what they return but haven't fully walked their inputs.
 3. **Full `BulkEditTransactionInput` shape** — we refuse to probe with empty input because that path does not short-circuit at validation (see the "Rules of engagement" caveat above). Need iOS traffic to reverse.
 4. **Full `CreateTransactionInput` optional fields** — required ones known (`name`, `date`, `amount`, `categoryId`, `type: TransactionType!`); optional unknown.
-5. **Queries**. This recon only covered `Mutation`. Copilot's server likely has unpublished queries too (e.g. admin/debug). Run the same sweep against `query Probe { ... }` instead of `mutation`.
+5. **Queries**. This recon only covered `Mutation`. Copilot's server likely has unpublished queries too (e.g. admin/debug). Run the same sweep against `query Probe { ... }` instead of `mutation`. **Partially discharged 2026-09-18:** the rules-related query stems were swept (8 root queries, 5 `Category` fields, 2 `User` fields, ~40-stem root fishing) and are all absent — see the "Rules" entry under "Tested-and-absent surface" in [`hidden-mutations.md`](hidden-mutations.md). The broader query surface is still unswept.
 6. **Subscriptions**. GraphQL subscriptions for real-time updates may exist. Probe `subscription Probe { ... }` with candidate names.
 7. **The `TransactionType` enum**. Known to exist (required on `createTransaction`) but values unknown. Send invalid values and harvest from the "must be one of X, Y, Z" error.
 

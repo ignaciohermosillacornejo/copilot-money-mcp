@@ -91,7 +91,7 @@ collection === target || collection.endsWith(`/${target}`)
 | `original_date` | string | Original date before edits |
 | `original_amount` | number | Original amount before edits |
 | `category_id` | string | Category identifier |
-| `category_id_source` | string | How the category was assigned. Observed values: `plaid_category`, `intelligence`, `name_rule`, `recurring`, `user_edit`, `copilot_copilot`. Decoded into the model but not projected by any tool; no GraphQL equivalent exists |
+| `category_id_source` | string | How the category was assigned. Observed values: `plaid_category`, `intelligence`, `name_rule`, `recurring`, `user_edit`, `copilot_copilot`. Absent from `DEFAULT_TRANSACTION_FIELDS`, but selectable by name — `get_transactions({ fields: ["default", "category_id_source"] })` returns it, since `TRANSACTION_KNOWN_FIELDS` is `Object.keys(TransactionSchema.shape)` (`src/tools/tools.ts:202`) and projection is a by-name allowlist (`src/tools/field-selection.ts:488`). Genuinely unreachable in **live** mode: `LIVE_TRANSACTION_KNOWN_FIELDS` derives from `ENRICHED_FIELD_MAPPERS` (`src/tools/live/transactions.ts:179-219`), which has no equivalent, and no GraphQL field exposes it |
 | `plaid_category_id` | string | Plaid's category ID |
 | `plaid_category_strings` | string[] | Category hierarchy from Plaid |
 | `account_id` | string | Associated account |
@@ -292,7 +292,7 @@ User overrides for account display. Must be checked BEFORE main `accounts` since
 
 **Path:** `users/{user_id}/categories/{category_id}`
 **App view:** Categories list (Regular Categories / Excluded Categories), category detail panel
-**32 documents**
+**32 documents** (2026-04-05); **38** as of 2026-09-18
 
 | Field | Type | Description | In Schema? |
 |---|---|---|---|
@@ -309,7 +309,7 @@ User overrides for account display. Must be checked BEFORE main `accounts` since
 | `auto_budget_lock` | boolean | Locked from automatic budget adjustments | Yes |
 | `auto_delete_lock` | boolean | Locked from automatic deletion | Yes |
 | `plaid_category_ids` | string[] | Plaid category IDs mapped to this custom category (e.g., `["18021000", "19025000"]`) | Yes |
-| `partial_name_rules` | string[] | Legacy auto-categorization rules. **Always an empty array** — see "Categorization rules" below | Yes |
+| `partial_name_rules` | string[] | Legacy auto-categorization rules. **Always an empty array** on read — see "Categorization rules" below. **Do not prune it from writes:** `create_category` must still send `partial_name_rules: []` (`reference/firestore-write-schema.md`); categories created without it were invisible to the Copilot app (#232) | Yes |
 | `user_id` | string | Owner user ID | Yes |
 | `budget_id` | string | Associated budget ID | No (in Firestore, not in schema) |
 | `children_categories` | unknown | Alternate children field | No (in Firestore, not in schema) |
@@ -337,7 +337,10 @@ cache and not on GraphQL. Do not re-derive this; the sweep below was exhaustive.
 - **They demonstrably fire.** `transactions.category_id_source` records why each
   transaction got its category. Over a 1,049-document cache sample:
   `plaid_category` 475, `intelligence` 181, **`name_rule` 138**, `recurring` 83,
-  `user_edit` 57, `copilot_copilot` 7. So ~13% were set by a name rule.
+  `user_edit` 57, `copilot_copilot` 7. That is a full enumeration of the values
+  present — it sums to 941, and the remaining **108 documents carry no
+  `category_id_source` field at all**, so the residual is absence, not a
+  seventh value. `name_rule`'s ~13% is against the 1,049 denominator.
 - **`partial_name_rules` is empty on every document.** Present on 22 of 38
   category documents (via `iterateDocuments`, the same path the server uses),
   zero entries on all of them. Verified at the protobuf byte level across all
@@ -347,11 +350,15 @@ cache and not on GraphQL. Do not re-derive this; the sweep below was exhaustive.
   because scanning values by substring also matches entries an ad-hoc key
   parser cannot attribute; the discrepancy is in that throwaway tooling, not in
   the data. Both counts agree that every array is empty.)
-  Treat the field as legacy; the categories collection also carries
-  `_migration_backfill`, consistent with a migration that moved rules
-  server-side.
-- **Nothing else in the cache holds them.** A full scan (62,790 documents, 191
-  collection paths) found no other field or collection matching
+  Treat the field as inert for reading. Note that `_migration_backfill` on this
+  collection is **not** corroborating evidence: per `src/core/schema-warn.ts`
+  it appears on 11 collections and only records which documents a backend job
+  touched before the snapshot, so it says nothing rules-specific either way.
+- **Nothing else in the cache holds them.** A full scan on 2026-09-18 (62,790
+  documents over 191 distinct collection *paths* — the header's ~35 counts
+  collection *patterns*, which collapse per-entity subcollections such as
+  `items/{id}/accounts/{id}/balance_history`) found no other field or
+  collection matching
   `rule|matcher|pattern|auto_categor|recategor|memoriz|learn`, and the field
   names of every non-timeseries collection were reviewed by hand.
 - **They never sync.** The `changes/{user_id}/{a,t}` change log only ever
