@@ -10,8 +10,10 @@
 
 import { describe, test, expect } from 'bun:test';
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
-import { join, relative } from 'path';
+import { basename, dirname, join, relative, resolve } from 'path';
 import ts from 'typescript';
+
+import { scriptKindFor, tsFilesUnder } from '../helpers/ts-files.js';
 
 const repoRoot = join(import.meta.dir, '../..');
 
@@ -151,6 +153,218 @@ describe('a typechecked helper brings its own contract test onto the list', () =
       `These helper modules are on tsconfig.tests.json's include list but their own ` +
         `contract tests are not, so nothing in \`bun run check\` reads the assertions that ` +
         `say what the helper promises (#737) — add them:\n  ${missing.join('\n  ')}`
+    ).toEqual([]);
+  });
+});
+
+/**
+ * The header's "who imports what" map, derived from the tree instead of read.
+ *
+ * tsconfig.tests.json enumerates the importers of the two #691 scanning
+ * helpers, because a curated include list invites being read as a dependency
+ * map and is not one. That enumeration was prose: nothing read it, and it
+ * drifted twice inside the single PR whose subject was ratcheting exactly this
+ * class of unchecked prose (#764).
+ *
+ * The map is PARSED out of the header rather than restated here. A copy in
+ * this file would be the same defect one file over — the shape already
+ * rejected in this repo once, when a header block added to delete a second
+ * copy WAS a second copy.
+ *
+ * What is pinned below is which helpers must HAVE an entry, which is a
+ * requirement rather than a second derivation of the same fact: without it,
+ * deleting the enumeration is a passing remedy.
+ */
+const LINE_COMMENT = '//';
+
+/** Separates a map entry's subject from its importer list. */
+const IMPORTS_ARROW = ' <- ';
+
+/** Where an importer may live. `scripts/` is swept too: it must not import
+ *  from `tests/`, and a scan that never looks cannot say so. */
+const IMPORTER_DIRS = ['tests', 'scripts'];
+
+/**
+ * The helpers the header must map. Not the whole include list and not every
+ * `tests/helpers/` module: `mock-graphql.ts` is deliberately absent, because
+ * the adoption rule at the top of this file already derives its importers and
+ * a second mechanism over one fact is the thing this file keeps deleting.
+ */
+const MAPPED_HELPERS = ['tests/helpers/strip-comments.ts', 'tests/helpers/ts-files.ts'];
+
+/**
+ * The text of every `//` line in a file, marker removed.
+ *
+ * Assembled from a string constant and `startsWith`, not a regex: a regex
+ * literal that recognises a whole comment is what
+ * tests/no-hand-rolled-comment-strippers.test.ts flags, and rightly — though
+ * the hazard that gate names does not apply here, since this reads comments
+ * rather than removing them and a value mis-read as a comment can only add a
+ * phantom entry, which the rule below reports rather than swallows.
+ */
+function commentBodies(raw: string): string[] {
+  return raw
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith(LINE_COMMENT))
+    .map((line) => line.slice(LINE_COMMENT.length).trim());
+}
+
+/**
+ * `<subject> <- a, b, c` across as many comment lines as the list needs, where
+ * a TRAILING COMMA is what says "continued below". Self-terminating, so the
+ * prose after the map is not absorbed into it — and if someone drops the
+ * comma discipline mid-list, the prose becomes phantom importers and the rule
+ * below says so, rather than the parse silently shortening the list.
+ */
+function parseImporterMap(raw: string): Map<string, string[]> {
+  const bodies = commentBodies(raw);
+  const map = new Map<string, string[]>();
+  for (let i = 0; i < bodies.length; i += 1) {
+    const line = bodies[i];
+    const arrow = line.indexOf(IMPORTS_ARROW);
+    if (arrow === -1) continue;
+    const subject = line.slice(0, arrow).trim();
+    if (!subject.endsWith('.ts') || subject.includes(' ')) continue;
+    let listed = line.slice(arrow + IMPORTS_ARROW.length).trim();
+    while (listed.endsWith(',') && i + 1 < bodies.length) {
+      i += 1;
+      listed = `${listed} ${bodies[i]}`;
+    }
+    map.set(
+      subject,
+      listed
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0)
+        .sort()
+    );
+  }
+  return map;
+}
+
+/**
+ * Every module specifier a file imports, from the PARSER rather than a text
+ * search: a specifier named in a docblock is not an import, and five of the
+ * files in play name these helpers in prose.
+ */
+function moduleSpecifiers(file: string, text: string): string[] {
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, scriptKindFor(file));
+  const specifiers: string[] = [];
+  const visit = (node: ts.Node): void => {
+    const fromDeclaration =
+      ts.isImportDeclaration(node) || ts.isExportDeclaration(node)
+        ? node.moduleSpecifier
+        : undefined;
+    if (fromDeclaration !== undefined && ts.isStringLiteral(fromDeclaration)) {
+      specifiers.push(fromDeclaration.text);
+    }
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      const first = node.arguments[0];
+      if (first !== undefined && ts.isStringLiteral(first)) specifiers.push(first.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return specifiers;
+}
+
+/** Repo-relative importers of each subject, sorted, self-imports excluded. */
+function realImporters(subjects: string[]): Map<string, string[]> {
+  const bySubjectPath = new Map(subjects.map((subject) => [join(repoRoot, subject), subject]));
+  const found = new Map(subjects.map((subject) => [subject, [] as string[]]));
+  // An import of `<dir>/<name>.ts` necessarily spells `<name>` in its
+  // specifier, so a file whose text holds no subject's basename cannot import
+  // one. Parsing the rest of two trees to learn that is work every
+  // `bun run check` would pay for nothing.
+  const needles = subjects.map((subject) => basename(subject, '.ts'));
+  for (const dir of IMPORTER_DIRS) {
+    for (const file of tsFilesUnder(join(repoRoot, dir))) {
+      const text = readFileSync(file, 'utf-8');
+      if (!needles.some((needle) => text.includes(needle))) continue;
+      const rel = relative(repoRoot, file);
+      for (const specifier of moduleSpecifiers(file, text)) {
+        if (!specifier.startsWith('.')) continue;
+        const target = resolve(dirname(file), specifier);
+        // Written `./x.js` throughout this repo, but an extensionless
+        // specifier resolves to the same module and must not read as "nobody
+        // imports it".
+        const candidates = [
+          target,
+          target.endsWith('.js') ? `${target.slice(0, -'.js'.length)}.ts` : `${target}.ts`,
+        ];
+        for (const candidate of candidates) {
+          const subject = bySubjectPath.get(candidate);
+          if (subject === undefined || subject === rel) continue;
+          const importers = found.get(subject);
+          if (importers !== undefined && !importers.includes(rel)) importers.push(rel);
+        }
+      }
+    }
+  }
+  for (const importers of found.values()) importers.sort();
+  return found;
+}
+
+describe("the header's importer map says who really imports the #691 helpers", () => {
+  const declared = parseImporterMap(readFileSync(join(repoRoot, 'tsconfig.tests.json'), 'utf-8'));
+  const actual = realImporters(MAPPED_HELPERS);
+
+  test('the header still carries an entry for each mapped helper', () => {
+    // The cheapest way to turn the rule below green is to DELETE the
+    // enumeration: `declared` empties, every comparison iterates nothing, and
+    // the map this gate exists to keep honest is simply gone. So the entries
+    // are required to exist before their contents are compared.
+    expect(
+      [...declared.keys()].sort(),
+      `tsconfig.tests.json's header must carry a parseable "<helper> <- <importer>, ..." ` +
+        `entry for each of these, continued across comment lines by a trailing comma. ` +
+        `Deleting or reshaping the map does not satisfy the importer rule below — the map ` +
+        `is what that rule checks:\n  ${MAPPED_HELPERS.join('\n  ')}`
+    ).toEqual([...MAPPED_HELPERS].sort());
+
+    // A rename should report itself here rather than as a scan that suddenly
+    // finds no importers of a path that no longer exists.
+    const offList = MAPPED_HELPERS.filter((helper) => !included.has(helper));
+    expect(
+      offList,
+      `Mapped above but no longer on tsconfig.tests.json's include list — renamed, or ` +
+        `dropped? Update MAPPED_HELPERS and the header map together:\n  ${offList.join('\n  ')}`
+    ).toEqual([]);
+  });
+
+  test('the scan finds real importers for each mapped helper (sanity floor)', () => {
+    // If specifier resolution broke, every real set would be empty and the
+    // rule below would demand an empty map — loud, but blaming the header for
+    // a bug in this file. This says which end is broken.
+    const barren = MAPPED_HELPERS.filter((helper) => (actual.get(helper) ?? []).length === 0);
+    expect(
+      barren,
+      `The import scan over ${IMPORTER_DIRS.map((dir) => `${dir}/`).join(' and ')} found NO ` +
+        `importer of these, which is not a fact about the tree — both are imported. ` +
+        `Specifier resolution here is broken, so the comparison below measures ` +
+        `nothing:\n  ${barren.join('\n  ')}`
+    ).toEqual([]);
+  });
+
+  test('each entry lists exactly the files that really import it', () => {
+    const drift = MAPPED_HELPERS.flatMap((helper) => {
+      const listed = declared.get(helper) ?? [];
+      const real = actual.get(helper) ?? [];
+      const unlisted = real.filter((file) => !listed.includes(file));
+      const phantom = listed.filter((file) => !real.includes(file));
+      if (unlisted.length === 0 && phantom.length === 0) return [];
+      return [
+        `${helper}\n    import it, unlisted: ${unlisted.join(', ') || '(none)'}` +
+          `\n    listed, but do not import it: ${phantom.join(', ') || '(none)'}`,
+      ];
+    });
+    expect(
+      drift,
+      `tsconfig.tests.json's header enumerates who imports each #691 scanning helper, and ` +
+        `the enumeration no longer matches the tree. Readers use it to decide how far a ` +
+        `change to one of these helpers reaches, and it drifted twice as unread prose ` +
+        `before this rule existed — fix the header, not this test:\n  ${drift.join('\n  ')}`
     ).toEqual([]);
   });
 });

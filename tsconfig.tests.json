@@ -46,9 +46,12 @@
 // adopters, the helper-pairing rule for the tests/helpers/ contract tests, and
 // MEMBERSHIP_IS_THE_COVERAGE for the rest. The helper MODULES are the
 // exception and need no pin — an importer on this list drags each of them in,
-// so `tsc` reaches them whether or not their own line survives. That file says
-// which rule holds which, and states the adopter carve-out explicitly, so the
-// two descriptions can be compared rather than merely agreeing in tone.
+// so `tsc` reaches them whether or not their own line survives; the importer
+// map further down is what makes that claim checkable, and a fourth rule in
+// the same file derives it from the tree so it cannot quietly stop being
+// true. That file says which rule holds which, and states the adopter
+// carve-out explicitly, so the two descriptions can be compared rather than
+// merely agreeing in tone.
 //
 // tsconfig-tests-sync.test.ts is here for the #725 reason plus one: it is the
 // gate that decides who is on THIS list, it casts the parsed JSONC (`as {
@@ -76,28 +79,32 @@
     // that are NOT on this list.
     //
     // Who imports what, since a curated list invites being read as a
-    // dependency map:
-    //   strip-comments.ts     <- decoder-field-completeness.test.ts,
-    //                            dedup-identity.test.ts, its own contract test
-    //                            below, and
-    //                            scripts/no-duplicate-schema-walks.test.ts.
-    //                            The two scanners stay OFF the list: they carry
-    //                            some of the ~87 pre-existing errors, and `tsc`
-    //                            does not follow imports upward, so checking the
-    //                            helper does not drag them in. The schema-walk
-    //                            ratchet IS on the list, so it is checked.
-    //   ts-files.ts           <- strip-comments.ts, exported-constants.test.ts,
-    //                            no-hand-rolled-comment-strippers.test.ts, its
-    //                            own contract test,
-    //                            scripts/no-duplicate-schema-walks.test.ts and
-    //                            unit/live-auth-boot-nonfatal.test.ts — every
-    //                            one on the list below, and every one clean.
-    //                            (No count: this map is prose that nothing
-    //                            gates, and the last one went stale the moment
-    //                            #766 added an importer.)
-    //                            (`scriptKindFor` is how strip-comments.ts picks
-    //                            a ScriptKind, so the two helpers are a pair,
-    //                            not a layer.)
+    // dependency map. This was prose nothing gated, and it drifted twice
+    // inside the one PR that existed to ratchet that class. It is now PARSED
+    // out of this comment and compared against a real import scan of tests/
+    // and scripts/ by tests/unit/tsconfig-tests-sync.test.ts, so the shape
+    // below is load-bearing: one entry per helper, `<subject> <- ` followed by
+    // repo-relative importer paths, and a trailing comma means the list
+    // continues on the next comment line.
+    //   tests/helpers/strip-comments.ts <- tests/core/decoder-field-completeness.test.ts,
+    //     tests/core/dedup-identity.test.ts,
+    //     tests/helpers/strip-comments.test.ts,
+    //     tests/scripts/no-duplicate-schema-walks.test.ts
+    //   tests/helpers/ts-files.ts <- tests/exported-constants.test.ts,
+    //     tests/helpers/strip-comments.ts,
+    //     tests/helpers/ts-files.test.ts,
+    //     tests/no-hand-rolled-comment-strippers.test.ts,
+    //     tests/scripts/no-duplicate-schema-walks.test.ts,
+    //     tests/unit/live-auth-boot-nonfatal.test.ts,
+    //     tests/unit/tsconfig-tests-sync.test.ts
+    //
+    // Importing a checked helper is not itself a reason to be on the include
+    // list: the decoder-field-completeness and dedup-identity scanners are off
+    // it because they carry some of the ~87 pre-existing errors, and `tsc`
+    // does not follow imports upward, so checking the helper does not drag
+    // them in. Which importers are checked is settled by the entries below,
+    // never by the map above. (`scriptKindFor` is how strip-comments.ts picks
+    // a ScriptKind, so the two helpers are a pair, not a layer.)
     // exported-constants.test.ts imports NO stripper: having no comment
     // handling at all is its half of the #691 fix.
     "tests/helpers/strip-comments.ts",
