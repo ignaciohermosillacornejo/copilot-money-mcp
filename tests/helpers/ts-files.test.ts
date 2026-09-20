@@ -3,12 +3,12 @@
  *
  * `scriptKindFor` had no test file of its own and its only assertion lived
  * under a `describe` about `stripComments`, which is not where the next reader
- * looks for it — it has four callers (`strip-comments.ts`,
- * `exported-constants.test.ts`, `no-hand-rolled-comment-strippers.test.ts`,
- * and this file) and the invariant it carries is "ScriptKind follows the
- * extension", not anything about comments. Same four named in
- * tsconfig.tests.json's importer map; if these two lists ever disagree, one of
- * them is wrong and neither is a gate.
+ * looks for it: the invariant it carries is "ScriptKind follows the
+ * extension", not anything about comments, and its callers are spread across
+ * the tests/ tree. WHO they are is not restated here. tsconfig.tests.json's
+ * header carries that map and tests/unit/tsconfig-tests-sync.test.ts derives
+ * it from the tree, so a list here would be a second one that nothing gates —
+ * which is what it was, and it had already gone wrong.
  *
  * The mapping is asserted by DERIVING it from `EXTENSIONS` rather than
  * hand-listing the four values. Hand-listing is the drift shape this whole
