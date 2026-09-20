@@ -40,7 +40,7 @@ import {
 import { CopilotDatabase } from '../../src/core/database.js';
 import type { FirestoreValue } from '../../src/core/protobuf-parser.js';
 
-type Status = 'PASS' | 'FAIL' | 'WARN' | 'SKIP';
+export type Status = 'PASS' | 'FAIL' | 'WARN' | 'SKIP';
 
 interface Check {
   name: string;
@@ -78,6 +78,81 @@ export function isTotalDecodeLoss(rawNonEmpty: number, decodedRows: number): boo
 }
 
 /**
+ * The decoder returned rows and the raw side found nothing to compare them
+ * against, so checks 1 and 2 never measured this root at all (#763).
+ *
+ * Both checks read the raw side through {@link nonEmptyRowsUnder}, which is
+ * ROOT-anchored: a pattern counts only if it IS the root or sits directly under
+ * it. The decoder is LEAF-anchored — `collectionMatches` in
+ * `src/core/decoder.ts` accepts `collection === target || endsWith('/'+target)`
+ * — so for every collection whose real path is nested, the two never meet. On
+ * the cache measured 2026-09-20 that is most of them: account documents live at
+ * `items/<id>/accounts`, transactions at `items/<id>/accounts/<id>/transactions`,
+ * and budgets, categories, financial_goals and tags all under `users/<uid>/...`.
+ * Six of the nine roots came back `raw === 0` with a non-zero decoded count.
+ *
+ * `isTotalDecodeLoss(0, 21)` is `false`, so check 1 reported PASS for each of
+ * them — the same PASS it would report if the decoder were wrong in every way
+ * the check exists to catch. That is the #596 vacuity one level up from the
+ * classifier already guarding against it, so it gets a name and a status of its
+ * own instead of hiding inside another check's pass.
+ *
+ * WARN, not FAIL, matching this file's convention (check 2, and check 7's
+ * `no-account-documents`): rows with no raw counterpart is the HEALTHY
+ * direction — the decoder is reading real documents, and it is the check's
+ * anchoring that is wrong. Failing would redden `smoke:cache` on every real
+ * cache over a coverage gap no cache can clear, which is how a gate gets muted.
+ *
+ * Disjoint from {@link isTotalDecodeLoss} by construction: that one needs
+ * `rawNonEmpty > 0`, this one needs it to be `0`. Neither ever masks the other.
+ */
+export function isUnmeasuredRoot(rawNonEmpty: number, decodedRows: number): boolean {
+  return rawNonEmpty === 0 && decodedRows > 0;
+}
+
+/** One row of the decode-loss comparison: a root, its raw side and its decoded side. */
+export interface RootComparison {
+  root: string;
+  raw: number;
+  rows: number;
+}
+
+/**
+ * Check 1b's whole verdict, status and wording together (#763).
+ *
+ * A function rather than an `if` in `main()` so the WARN can be asserted from a
+ * test. `main()` needs a real Copilot cache and never runs under `bun test`, so
+ * a branch left in there is executed on exactly the machines that have one and
+ * on no CI run at all — and a status branch nothing can assert is the shape
+ * `docs/bugs/596-vacuous-assertions-bulk-edit.md` is about. Returning the
+ * detail string too, rather than only a verdict, is what lets a test pin that
+ * the WARN actually names its reason instead of just being yellow.
+ */
+export function reportDecodeLossCoverage(roots: readonly RootComparison[]): {
+  status: Status;
+  detail: string;
+} {
+  const unmeasured = roots.filter((d) => isUnmeasuredRoot(d.raw, d.rows));
+  if (unmeasured.length === 0) {
+    return {
+      status: 'PASS',
+      detail: `all ${roots.length} roots had raw documents to compare their decoded rows against`,
+    };
+  }
+  return {
+    status: 'WARN',
+    detail:
+      `${unmeasured.length}/${roots.length} roots decoded rows with zero raw documents beneath ` +
+      `them: ` +
+      unmeasured.map((d) => `${d.root} (0 raw → ${d.rows} rows)`).join(', ') +
+      ` — the root name matches no collection pattern on this cache, so the decode-loss and ` +
+      `conservation checks are measuring nothing for it. Their PASS for these roots carries no ` +
+      `evidence; re-anchor each root to the pattern its documents actually use (the decoder ` +
+      `matches by leaf, this counts by root prefix)`,
+  };
+}
+
+/**
  * Which of the collections a caller depends on have no real documents.
  *
  * "Real" excludes Firestore's fieldless parent pointers, which exist for any
@@ -97,6 +172,48 @@ export function findExtinctDependencies(
     const counts = raw.get(pattern);
     return !counts || counts.total - counts.empty === 0;
   });
+}
+
+/**
+ * Check 3's verdict, and the one other place in this file that reported a pass
+ * over an empty comparison (#763).
+ *
+ * `DEPENDED_ON` has been empty since #624 removed its only entry, so
+ * `findExtinctDependencies` returns `[]` and the check printed
+ * "every depended-on collection has documents" — true of nothing, and
+ * indistinguishable from the same line over a populated list. Same defect as
+ * check 1's vacuous PASS, so it gets the same treatment rather than being left
+ * as the instance the fix did not reach.
+ *
+ * SKIP, not WARN: an empty maintenance list is the documented state of this
+ * check, not a surprise about the cache — and the summary counts skips
+ * precisely so a dormant check does not read as one fewer pass.
+ */
+export function reportExtinctDependencies(
+  dependedOn: readonly string[],
+  raw: ReadonlyMap<string, { total: number; empty: number }>
+): { status: Status; detail: string } {
+  if (dependedOn.length === 0) {
+    return {
+      status: 'SKIP',
+      detail:
+        'nothing is registered as depended-on, so this check compared nothing — see the ' +
+        'MAINTENANCE CONTRACT at its call site before reading the absence as health',
+    };
+  }
+  const extinct = findExtinctDependencies(dependedOn, raw);
+  if (extinct.length > 0) {
+    return {
+      status: 'FAIL',
+      detail:
+        `code reads collections with zero documents: ${extinct.join(', ')} — ` +
+        `any filter built on them is a silent no-op (see #624)`,
+    };
+  }
+  return {
+    status: 'PASS',
+    detail: `all ${dependedOn.length} depended-on collection(s) have documents`,
+  };
 }
 
 /**
@@ -402,6 +519,7 @@ async function main(): Promise<void> {
   ];
 
   const withRaw = decoded.map((d) => ({ ...d, raw: rawRows(d.root) }));
+  const unmeasured = withRaw.filter((d) => isUnmeasuredRoot(d.raw, d.rows));
   const blackHoles = withRaw.filter((d) => isTotalDecodeLoss(d.raw, d.rows));
   if (blackHoles.length > 0) {
     record(
@@ -411,8 +529,26 @@ async function main(): Promise<void> {
         blackHoles.map((d) => `${d.root} (${d.raw} docs)`).join(', ')
     );
   } else {
-    record('total decode loss', 'PASS', 'every collection with documents decoded at least one row');
+    record(
+      'total decode loss',
+      'PASS',
+      `every collection with documents decoded at least one row ` +
+        `(${withRaw.length - unmeasured.length}/${withRaw.length} roots had documents to ` +
+        `compare — see the coverage check below for the rest)`
+    );
   }
+
+  // ---------------------------------------------------------------------
+  // Check 1b — decode-loss coverage (#763).
+  //
+  // What checks 1 and 2 could not see. Both read the raw side root-anchored
+  // while the decoder routes leaf-anchored, so a root whose documents live at
+  // a nested path is compared against nothing and passes vacuously. Reported
+  // as its own line rather than folded into check 1's detail: a caveat inside
+  // another check's PASS is read as part of the pass.
+  // ---------------------------------------------------------------------
+  const coverage = reportDecodeLossCoverage(withRaw);
+  record('decode-loss coverage', coverage.status, coverage.detail);
 
   // ---------------------------------------------------------------------
   // Check 2 — conservation.
@@ -421,6 +557,10 @@ async function main(): Promise<void> {
   // legitimate (dedup, tombstones, soft-deletes), so this warns rather than
   // fails; #622 discarded 91% of investment_prices and would have shown here
   // long before anyone read the output.
+  //
+  // Shares check 1's blind spot, and for the same reason: `d.raw > 10` is
+  // never true for a root the raw side cannot find, so check 1b's WARN is the
+  // coverage statement for this check too (#763).
   // ---------------------------------------------------------------------
   const lossy = withRaw.filter((d) => d.raw > 10 && d.rows > 0 && d.rows / d.raw < 0.5);
 
@@ -459,18 +599,8 @@ async function main(): Promise<void> {
   // unwatched: check 8 below reports its document count as an extinct
   // CANDIDATE, which is the question that replaced this one (#666).
   const DEPENDED_ON: string[] = [];
-  const extinct = findExtinctDependencies(DEPENDED_ON, raw);
-
-  if (extinct.length > 0) {
-    record(
-      'extinct dependencies',
-      'FAIL',
-      `code reads collections with zero documents: ${extinct.join(', ')} — ` +
-        `any filter built on them is a silent no-op (see #624)`
-    );
-  } else {
-    record('extinct dependencies', 'PASS', 'every depended-on collection has documents');
-  }
+  const dependencies = reportExtinctDependencies(DEPENDED_ON, raw);
+  record('extinct dependencies', dependencies.status, dependencies.detail);
 
   // ---------------------------------------------------------------------
   // Check 4 — identity joins.
