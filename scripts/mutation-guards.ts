@@ -76,15 +76,21 @@
  *   2. `process.on('exit')` plus SIGINT/SIGTERM/SIGHUP handlers — covers a throw
  *      that escapes, an explicit `process.exit`, Ctrl-C, and a closed terminal.
  *   3. A journal under the checkout's own `node_modules/.cache/`, written
- *      *before* the file is touched and deleted after it is restored. A SIGKILL
- *      or a power cut skips every handler; the next run finds the journal and
- *      restores from it before doing anything else.
+ *      *before* the file is touched and deleted after it is restored — and
+ *      KEPT whenever a restore was refused, so the next run inherits the
+ *      refusal instead of starting green over a tree nobody reconciled. A
+ *      SIGKILL or a power cut skips every handler; the next run finds the
+ *      journal and restores from it before doing anything else.
  *   4. Restoration is content-addressed and verified: it writes the original
  *      bytes back only if what is on disk is still exactly the bytes this
  *      runner wrote. If something else changed the file mid-run (an editor
  *      saving over it), the original is dropped next to it as
  *      `<file>.mutation-guard-original` and the run fails loudly rather than
- *      clobbering someone's edit.
+ *      clobbering someone's edit. That sidecar is the one piece of state that
+ *      outlives the process that wrote it, so every run scans for one
+ *      (`findSidecars`) before it touches anything: an orphaned sidecar means
+ *      an earlier run gave up on a file and nobody has reconciled it since,
+ *      which is not a tree to report a green registry over.
  *
  * Two things follow from the runner being the thing that holds the mutation.
  * The child test run is bounded (`TEST_TIMEOUT_MS`), because several registered
@@ -118,6 +124,11 @@
  *   bun run check:mutation-guards
  *   bun run scripts/mutation-guards.ts --list
  *   bun run scripts/mutation-guards.ts --guard 'update_transactions stops on first failure'
+ *
+ * Those three spellings and nothing else: anything the parser does not
+ * recognise exits 2 naming the offender (`parseCliArgs`), because the failure
+ * mode of a lenient parser here is a typo'd `--gaurd` running the WHOLE
+ * registry and exiting 0 — a green answer to a question nobody asked.
  */
 
 import { spawnSync } from 'child_process';
@@ -523,6 +534,55 @@ export function journalPath(root: string): string {
   return join(root, 'node_modules', '.cache', 'mutation-guards', 'journal.json');
 }
 
+/**
+ * What `restoreEntry` names the file it refuses to overwrite.
+ *
+ * A constant rather than an inline template because two very different things
+ * depend on the spelling: the give-up path that writes it, and the pre-run scan
+ * that has to find one written by a process that has long since exited.
+ */
+export const SIDECAR_SUFFIX = '.mutation-guard-original';
+
+/**
+ * Every leftover `<file>.mutation-guard-original` under `root`.
+ *
+ * The sidecar outlives everything else about a refused restore: the journal can
+ * be deleted, the process is gone, and what is left is one untracked file next
+ * to a source file holding somebody's unreconciled bytes. Nothing was looking
+ * for it, so the run after the refusal could evaluate the whole registry green
+ * over exactly the tree the refusal said not to trust.
+ *
+ * `node_modules/` and `.git/` are skipped: this runner only ever mutates the
+ * tracked source files its rows name, so neither can hold a sidecar it wrote,
+ * and walking them would turn a few milliseconds into seconds on every run.
+ * Symlinked directories are not followed — `isDirectory()` is false for a
+ * symlink — which keeps the scan inside the checkout it was given.
+ */
+export function findSidecars(root: string): string[] {
+  const skip = new Set(['node_modules', '.git']);
+  const found: string[] = [];
+  const walk = (dir: string): void => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      // An unreadable directory is not a reason to abandon the scan, and not a
+      // finding either: the scan reports sidecars, not permissions.
+      return;
+    }
+    for (const entry of entries) {
+      const abs = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (!skip.has(entry.name)) walk(abs);
+        continue;
+      }
+      if (entry.isFile() && entry.name.endsWith(SIDECAR_SUFFIX)) found.push(abs);
+    }
+  };
+  walk(root);
+  return found.sort();
+}
+
 const ACTIVE = new Map<string, JournalEntry>();
 let handlersInstalled = false;
 /** Set when a restore could not be completed safely; forces a non-zero exit. */
@@ -577,7 +637,7 @@ function restoreEntry(entry: JournalEntry): boolean {
     }
     return true;
   }
-  const sidecar = `${entry.abs}.mutation-guard-original`;
+  const sidecar = `${entry.abs}${SIDECAR_SUFFIX}`;
   writeFileSync(sidecar, entry.original, 'utf8');
   console.error(
     `mutation-guards: ${entry.abs} changed while it was mutated, so it was NOT overwritten.\n` +
@@ -648,6 +708,15 @@ export async function withMutation<T>(
 export interface RecoveryReport {
   readonly recovered: string[];
   readonly refused: string[];
+  /**
+   * `<file>.mutation-guard-original` files that were already on disk when this
+   * run started — an EARLIER run gave up restoring those files and nothing has
+   * reconciled them since. Reported separately from `refused`, which is this
+   * run's own give-ups, because the two need different sentences: one says
+   * "I could not put this back", the other "someone before me could not, and
+   * you have not dealt with it yet".
+   */
+  readonly sidecars: string[];
 }
 
 /**
@@ -657,8 +726,12 @@ export interface RecoveryReport {
  * same files would each restore the other's "original", and the loser wins.
  */
 export function recoverJournal(root: string): RecoveryReport {
+  // Before the journal, and unconditionally: the sidecar is what a refusal
+  // leaves behind AFTER its journal is gone, so a scan that only ran when there
+  // was a journal to read would miss the exact state it exists to catch.
+  const sidecars = findSidecars(root);
   const path = journalPath(root);
-  if (!existsSync(path)) return { recovered: [], refused: [] };
+  if (!existsSync(path)) return { recovered: [], refused: [], sidecars };
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(path, 'utf8'));
@@ -668,7 +741,7 @@ export function recoverJournal(root: string): RecoveryReport {
     // `bun run check` until someone hand-deletes a file in the temp dir would be
     // a worse failure than the one it is recovering from.
     rmSync(path, { force: true });
-    return { recovered: [], refused: [] };
+    return { recovered: [], refused: [], sidecars };
   }
   const journal = isRecord(parsed) ? parsed : {};
   const entries = validEntries(journal.entries, root);
@@ -694,8 +767,16 @@ export function recoverJournal(root: string): RecoveryReport {
     if (restoreEntry(entry)) recovered.push(entry.abs);
     else refused.push(entry.abs);
   }
-  rmSync(path, { force: true });
-  return { recovered, refused };
+  // The journal is deleted only when there is nothing left to recover. Deleting
+  // it after a REFUSED entry destroys the only record of the original bytes and
+  // the only thing that reports the refusal: the next `bun run check` finds no
+  // journal, calls recovery a no-op, and evaluates every row green over a file
+  // still holding a third party's content with a stale sidecar beside it. A
+  // kept journal is re-read on the next run, where the entries that did come
+  // back are no-ops (`before === entry.original`) and the ones that did not are
+  // refused again — reported every run until a human reconciles them.
+  if (refused.length === 0) rmSync(path, { force: true });
+  return { recovered, refused, sidecars };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -923,18 +1004,33 @@ export async function runGuards(
   for (const file of recovery.recovered) {
     log(`  ! recovered a file left mutated by an earlier killed run: ${file}`);
   }
+  // Both rows, not the first one only: they name different files as often as
+  // not, and a run blocked on an unreconciled tree should print everything the
+  // operator has to deal with before the next run can say anything.
+  const blocked: GuardResult[] = [];
   if (recovery.refused.length > 0) {
-    return {
+    blocked.push({
+      name: '(journal recovery)',
       ok: false,
-      results: [
-        {
-          name: '(journal recovery)',
-          ok: false,
-          detail: `could not restore ${recovery.refused.join(', ')} — see the sidecar files`,
-        },
-      ],
-    };
+      detail:
+        `could not restore ${recovery.refused.join(', ')} — see the sidecar files. The ` +
+        `journal was KEPT, so this run and every run after it says so until the files are ` +
+        `reconciled; a recovery that deleted it would hand the next run a green registry ` +
+        `over the same tree.`,
+    });
   }
+  if (recovery.sidecars.length > 0) {
+    blocked.push({
+      name: '(unreconciled sidecar)',
+      ok: false,
+      detail:
+        `an earlier run gave up restoring a file and left ${recovery.sidecars.join(', ')} ` +
+        `behind. Nothing has reconciled it since, so the tree this registry would be ` +
+        `measured over is not one this runner wrote. Compare the sidecar with the file ` +
+        `beside it, keep the version you want, and delete the sidecar.`,
+    });
+  }
+  if (blocked.length > 0) return { ok: false, results: blocked };
 
   const problems = assertRegistryConsistent(root, all, options.markerDir);
   if (problems.length > 0) {
@@ -1127,28 +1223,81 @@ export async function runGuards(
 // CLI
 // ---------------------------------------------------------------------------
 
+/** What an argv asked for. `error` carries the message and means exit 2. */
+export type CliPlan =
+  | { readonly kind: 'list' }
+  | { readonly kind: 'run'; readonly only?: string }
+  | { readonly kind: 'error'; readonly message: string };
+
+/** The usage-error exit code, as distinct from 1 = "a guard failed". */
+export const CLI_USAGE_EXIT = 2;
+
+/**
+ * Read argv, or say why it cannot be read — never a third thing.
+ *
+ * The failure this replaces is the one shape of bug this whole file is about:
+ * a parser that recognises `--guard` and ignores everything else answers
+ * `--gaurd 'one row'` by running the WHOLE registry and exiting 0, and the
+ * operator reads that green as an answer to the narrow question they asked.
+ * The same goes for a stray positional — `mutation-guards 'one row'`, the
+ * likeliest typo of all, since the name is the part you remember. So every
+ * argv entry must be claimed by a spelling this function knows, and an
+ * unclaimed one is an error naming itself rather than a silent default.
+ *
+ * Separated from the `import.meta.main` block so it can be tested as a
+ * function: argv parsing that only exists inside a top-level `if` is reachable
+ * from a test only by spawning the CLI, which is why it had no coverage at all.
+ */
+export function parseCliArgs(argv: readonly string[]): CliPlan {
+  const usage = '--list, --guard <name>, or --guard=<name>';
+  let only: string | undefined;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i] ?? '';
+    if (arg === '--list') return { kind: 'list' };
+    if (arg === '--guard' || arg.startsWith('--guard=')) {
+      const inline = arg.startsWith('--guard=');
+      const value = inline ? arg.slice('--guard='.length) : argv[i + 1];
+      // A name that starts with `--` is a missing name, not a guard: no row is
+      // spelled that way, and treating the next flag as the value would run
+      // one nonexistent row instead of reporting the mistake.
+      if (value === undefined || value === '' || value.startsWith('--')) {
+        return {
+          kind: 'error',
+          message: 'mutation-guards: --guard needs a name. `--list` prints them.',
+        };
+      }
+      only = value;
+      if (!inline) i++;
+      continue;
+    }
+    return {
+      kind: 'error',
+      // `safe()` because the offender is echoed to a terminal, and argv reaches
+      // this script from wrappers (npm scripts, CI) as well as a human shell —
+      // the same reason the journal's own strings are scrubbed before printing.
+      message:
+        `mutation-guards: unrecognised argument "${safe(arg)}". Usage: ${usage}. ` +
+        `Refusing rather than running the whole registry, which would answer a question ` +
+        `you did not ask — with a green.`,
+    };
+  }
+  return { kind: 'run', only };
+}
+
 if (import.meta.main) {
-  const argv = process.argv.slice(2);
-  if (argv.includes('--list')) {
+  const plan = parseCliArgs(process.argv.slice(2));
+  if (plan.kind === 'error') {
+    console.error(plan.message);
+    process.exit(CLI_USAGE_EXIT);
+  }
+  if (plan.kind === 'list') {
     for (const guard of MUTATION_GUARDS) {
       console.log(`${guard.name}\n  ${guard.file} → ${guard.expectFails}\n  ${guard.invariant}\n`);
     }
     process.exit(0);
   }
-  // Both spellings. `--guard=name` silently running the whole registry and
-  // exiting 0 would be the same class as the bare-`--guard` bug just below,
-  // one spelling over — and the greener of the two, which is worse.
-  const inlineOnly = argv.find((a) => a.startsWith('--guard='))?.slice('--guard='.length);
-  const onlyAt = argv.indexOf('--guard');
-  const only = inlineOnly ?? (onlyAt === -1 ? undefined : argv[onlyAt + 1]);
-  if (onlyAt !== -1 && only === undefined) {
-    // Falling through with `only: undefined` would run the WHOLE registry and
-    // report success — a green that the operator asked a narrower question for.
-    console.error('mutation-guards: --guard needs a name. `--list` prints them.');
-    process.exit(2);
-  }
 
-  const { ok, results } = await runGuards({ only });
+  const { ok, results } = await runGuards({ only: plan.only });
   for (const r of results) {
     console.log(`${r.ok ? '  ✓' : '  ✗'} ${r.name}\n      ${r.detail}`);
   }
