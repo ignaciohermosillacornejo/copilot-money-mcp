@@ -10,8 +10,11 @@ import { describe, test, expect } from 'bun:test';
 import {
   normalizeCollection,
   isTotalDecodeLoss,
+  isUnmeasuredRoot,
+  reportDecodeLossCoverage,
   joinStats,
   findExtinctDependencies,
+  reportExtinctDependencies,
   nonFiniteLeafPaths,
   nonEmptyRowsUnder,
   isAccountDocumentPattern,
@@ -19,7 +22,7 @@ import {
   countDashboardActive,
   classifyDashboardActive,
 } from '../../scripts/smoke/cache.js';
-import type { AccountVisibilityRow } from '../../scripts/smoke/cache.js';
+import type { AccountVisibilityRow, RootComparison } from '../../scripts/smoke/cache.js';
 import type { FirestoreValue } from '../../src/core/protobuf-parser.js';
 import { isVisibleAccount } from '../../src/models/account.js';
 import type { Account } from '../../src/models/account.js';
@@ -66,6 +69,122 @@ describe('isTotalDecodeLoss', () => {
 
   test('does not fire on partial loss', () => {
     expect(isTotalDecodeLoss(863, 78)).toBe(false);
+  });
+});
+
+describe('isUnmeasuredRoot', () => {
+  test('fires on the shape that made check 1 pass vacuously (#763)', () => {
+    // The real measurement: the account documents live at `items/<id>/accounts`
+    // and the root-anchored raw count for `accounts` is 0, so check 1 compared
+    // 21 decoded rows against nothing and called it a pass.
+    expect(isUnmeasuredRoot(0, 21)).toBe(true);
+  });
+
+  test('fires wherever the decoder found rows the raw side could not', () => {
+    // Not a property of one root: six of the nine had this shape. A single
+    // decoded row with no raw counterpart is already unmeasured.
+    expect(isUnmeasuredRoot(0, 1)).toBe(true);
+  });
+
+  test('a healthy root with documents on both sides does not warn', () => {
+    // The direction that must stay quiet, or the WARN is noise on every run
+    // and gets muted. `securities` measured 16 raw and 16 decoded.
+    expect(isUnmeasuredRoot(16, 16)).toBe(false);
+  });
+
+  test('a root that lost every row is NOT unmeasured — it is check 1 failing', () => {
+    // The #622 signature is a real measurement with a bad result. Calling it
+    // "unmeasured" would downgrade a FAIL to a WARN.
+    expect(isUnmeasuredRoot(863, 0)).toBe(false);
+  });
+
+  test('a genuinely empty collection is not unmeasured either', () => {
+    // Nothing on disk and nothing decoded is consistent, not vacuous — check 3
+    // owns the question of whether code depends on it.
+    expect(isUnmeasuredRoot(0, 0)).toBe(false);
+  });
+
+  test('partial loss is a measurement, so it does not warn', () => {
+    expect(isUnmeasuredRoot(863, 78)).toBe(false);
+  });
+
+  test('never overlaps isTotalDecodeLoss, so a warn can never hide a fail', () => {
+    // The two predicates run over the same list in the same order. If both
+    // could hold for one root, the WARN would be describing a FAIL.
+    for (const raw of [0, 1, 10, 863]) {
+      for (const rows of [0, 1, 21, 945]) {
+        expect(isUnmeasuredRoot(raw, rows) && isTotalDecodeLoss(raw, rows)).toBe(false);
+      }
+    }
+  });
+
+  test('reads its arguments in the same order as isTotalDecodeLoss', () => {
+    // Both take (rawNonEmpty, decodedRows) and are called on the same tuple.
+    // A swapped argument at either call site turns the warn into a fail and
+    // back; this pins the orientation from the outside.
+    expect(isUnmeasuredRoot(0, 945)).toBe(true);
+    expect(isUnmeasuredRoot(945, 0)).toBe(false);
+  });
+});
+
+describe('reportDecodeLossCoverage', () => {
+  // Shaped like the real comparison list, with synthetic counts.
+  const healthy: RootComparison[] = [
+    { root: 'securities', raw: 16, rows: 16 },
+    { root: 'investment_prices', raw: 498, rows: 498 },
+  ];
+
+  test('WARNs when a root decoded rows the raw side never found', () => {
+    // The branch that did not exist before #763: without it this list produces
+    // the same output as `healthy`, which is the vacuous PASS itself.
+    const { status } = reportDecodeLossCoverage([
+      ...healthy,
+      { root: 'accounts', raw: 0, rows: 21 },
+    ]);
+    expect(status).toBe('WARN');
+  });
+
+  test('the WARN names the roots it could not measure', () => {
+    const { detail } = reportDecodeLossCoverage([
+      ...healthy,
+      { root: 'accounts', raw: 0, rows: 21 },
+      { root: 'tags', raw: 0, rows: 11 },
+    ]);
+    expect(detail).toContain('accounts');
+    expect(detail).toContain('tags');
+    expect(detail).toContain('2/4');
+    // A yellow line that does not say why is a line people learn to skip.
+    expect(detail).toContain('measuring nothing');
+  });
+
+  test('the WARN does not name a root it did measure', () => {
+    // Listing a healthy root would make the reason false for it, and the
+    // reader cannot tell which half of the list to believe.
+    const { detail } = reportDecodeLossCoverage([
+      ...healthy,
+      { root: 'accounts', raw: 0, rows: 21 },
+    ]);
+    expect(detail).not.toContain('securities');
+  });
+
+  test('PASSes when every root had raw documents to compare against', () => {
+    // The other direction: a healthy cache must not warn, or the WARN is noise
+    // on every run and stops being read.
+    const { status, detail } = reportDecodeLossCoverage(healthy);
+    expect(status).toBe('PASS');
+    expect(detail).toContain('all 2 roots');
+  });
+
+  test('a total decode loss is left to check 1 rather than warned about here', () => {
+    // raw > 0 and zero rows is the #622 FAIL. Reporting it as a coverage WARN
+    // would downgrade the only failing status this file has.
+    expect(
+      reportDecodeLossCoverage([{ root: 'investment_prices', raw: 863, rows: 0 }]).status
+    ).toBe('PASS');
+  });
+
+  test('an empty comparison list does not warn', () => {
+    expect(reportDecodeLossCoverage([]).status).toBe('PASS');
   });
 });
 
@@ -153,6 +272,29 @@ describe('findExtinctDependencies', () => {
 
   test('returns nothing for an empty dependency list', () => {
     expect(findExtinctDependencies([], raw)).toEqual([]);
+  });
+
+  describe('reportExtinctDependencies', () => {
+    test('SKIPs rather than passing when nothing is registered as depended-on (#763)', () => {
+      // The live state of the check: DEPENDED_ON has been empty since #624.
+      // "Every depended-on collection has documents" is true of nothing, and
+      // reads exactly like the same line over a populated list.
+      const { status, detail } = reportExtinctDependencies([], raw);
+      expect(status).toBe('SKIP');
+      expect(detail).toContain('compared nothing');
+    });
+
+    test('FAILs when a depended-on collection has no real documents', () => {
+      const { status, detail } = reportExtinctDependencies(['users/*/accounts'], raw);
+      expect(status).toBe('FAIL');
+      expect(detail).toContain('users/*/accounts');
+    });
+
+    test('PASSes when every depended-on collection has documents', () => {
+      // The pass must stay reachable, or the SKIP branch has just disabled the
+      // check instead of qualifying it.
+      expect(reportExtinctDependencies(['transactions'], raw).status).toBe('PASS');
+    });
   });
 });
 
@@ -376,8 +518,12 @@ describe('classifyDashboardActive', () => {
     expect(classifyDashboardActive([row(true), row(true)])).toBe('no-negatives');
   });
 
-  test('a field no document carries reads as absent', () => {
-    expect(classifyDashboardActive([row(undefined), row(undefined)])).toBe('absent');
+  test('absent still means account documents exist and none carries the field', () => {
+    // One visible document and one hidden one, neither carrying the flag.
+    // Visibility is the only other thing a row knows, so this also pins that
+    // 'absent' is decided on the field alone — which an all-visible row set
+    // cannot show.
+    expect(classifyDashboardActive([row(undefined), row(undefined, true)])).toBe('absent');
   });
 
   test('no account documents at all is NOT absent — the check measured nothing', () => {
@@ -385,10 +531,6 @@ describe('classifyDashboardActive', () => {
     // we saw no documents. Opposite conclusions, so they get separate names
     // and separate statuses (SKIP vs WARN).
     expect(classifyDashboardActive([])).toBe('no-account-documents');
-  });
-
-  test('absent still means account documents exist and none carries the field', () => {
-    expect(classifyDashboardActive([row(undefined), row(undefined)])).toBe('absent');
   });
 
   test('rows without the field never make a verdict', () => {
