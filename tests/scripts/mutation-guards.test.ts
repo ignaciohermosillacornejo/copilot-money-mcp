@@ -30,10 +30,12 @@
  *     the rows after it would otherwise read a third party's bytes as their
  *     `original`, and an unexpected throw must become a failing row rather than
  *     take every result computed so far with it;
- *   - a refusal must survive the process that made it: the journal is kept and
- *     the sidecar is looked for, so the NEXT run inherits the refusal instead
- *     of finding an empty desk and reporting the registry green over a tree
- *     nobody reconciled;
+ *   - a refusal must survive the process that made it: both give-up branches
+ *     leave the sidecar, the journal is kept and the sidecar is looked for, so
+ *     the NEXT run inherits the refusal instead of finding an empty desk and
+ *     reporting the registry green over a tree nobody reconciled — and it must
+ *     be endable, by restoring the bytes OR by accepting the file, or a red
+ *     gate nobody can turn green again is a gate that gets deleted;
  *   - an argv the CLI does not understand must exit non-zero naming the
  *     offender, since the alternative is `--gaurd` running the whole registry
  *     and answering a question nobody asked — with a green.
@@ -46,7 +48,15 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -592,9 +602,45 @@ describe('the working tree is put back whatever happens', () => {
     });
 
     expect(readFileSync(file, 'utf8')).toBe('SOMEONE ELSE WAS HERE');
-    expect(readFileSync(`${file}.mutation-guard-original`, 'utf8')).toContain(
-      'export function pay'
+    expect(readFileSync(`${file}${SIDECAR_SUFFIX}`, 'utf8')).toContain('export function pay');
+    // And the journal stays: the sidecar says what the bytes were, the journal
+    // is what makes the NEXT run say so again. Clearing it here was the same
+    // "the refusal outlives nothing" shape as clearing it after recovery.
+    expect(existsSync(journalPath(root))).toBe(true);
+  });
+
+  test('a restore that writes but cannot verify still leaves the original beside it', async () => {
+    // The other way `restoreEntry` returns false: the write-back reports
+    // success and reads back something else. It used to return without a
+    // sidecar, so the run told the operator to go look at a file nobody had
+    // written, and the journal was cleared on the way out — the bug this file
+    // was just fixed for, one branch over. Driven through a symlink to
+    // /dev/null, which accepts every write and reads back empty.
+    const root = syntheticRepo({
+      markerName: 'x',
+      guardLine: 'break;',
+      assertion: 'expect(1).toBe(1);',
+    });
+    const sink = join(root, 'src/sink.ts');
+    symlinkSync('/dev/null', sink);
+
+    mkdirSync(join(journalPath(root), '..'), { recursive: true });
+    writeFileSync(
+      journalPath(root),
+      JSON.stringify({
+        pid: 999_999_999,
+        startedAt: new Date().toISOString(),
+        // `mutated: ''` is what the sink reads back, so recovery takes the
+        // write-then-verify path rather than the changed-underneath one.
+        entries: [{ abs: sink, original: 'THE ORIGINAL BYTES', mutated: '' }],
+      }),
+      'utf8'
     );
+
+    const report = recoverJournal(root);
+    expect(report.refused).toEqual([sink]);
+    expect(readFileSync(`${sink}${SIDECAR_SUFFIX}`, 'utf8')).toBe('THE ORIGINAL BYTES');
+    expect(existsSync(journalPath(root))).toBe(true);
   });
 
   test('a journal owned by a live process is refused rather than raced', () => {
@@ -767,6 +813,101 @@ describe('the working tree is put back whatever happens', () => {
     expect(ok).toBe(false);
     expect(results.map((r) => r.name)).toContain('(journal recovery)');
     expect(results.map((r) => r.name)).not.toContain(guard.name);
+    // A gate that can be turned red but not green again is a gate someone
+    // deletes. The refusal is ended either by putting the original bytes back
+    // or by accepting the file as it stands, and only the second needs the
+    // journal named — so the row has to name it.
+    const recovery = results.find((r) => r.name === '(journal recovery)');
+    expect(recovery?.detail).toContain(journalPath(root));
+  });
+
+  test('a kept refusal can be accepted as well as reversed, and both end it', async () => {
+    // The route that needs the guidance is "keep the file as it is": the
+    // journal re-refuses the same entry on every run, so deleting the sidecar
+    // alone gets you the same two rows and a freshly written sidecar, forever.
+    const plant = (): { root: string; guard: MutationGuard; file: string } => {
+      const root = syntheticRepo({
+        markerName: 'rows after the failure are never written',
+        guardLine: 'break;',
+        assertion: "expect(pay(['a', 'b', 'c'], 'b')).toEqual(['a']);",
+      });
+      const guard = guardFor(root);
+      const file = join(root, 'src/pay.ts');
+      mkdirSync(join(journalPath(root), '..'), { recursive: true });
+      writeFileSync(
+        journalPath(root),
+        JSON.stringify({
+          pid: 999_999_999,
+          startedAt: new Date().toISOString(),
+          entries: [{ abs: file, original: readFileSync(file, 'utf8'), mutated: 'MUTATED' }],
+        }),
+        'utf8'
+      );
+      // What the editor saved over the mutation: a real edit to the same file,
+      // guard and marker intact, which is the case the refusal exists for. A
+      // file turned to rubble would fail the registry check for its own
+      // reasons and prove nothing about recovery.
+      writeFileSync(file, `${readFileSync(file, 'utf8')}\n// a later edit, by someone else\n`);
+      expect(recoverJournal(root).refused).toEqual([file]);
+      return { root, guard, file };
+    };
+
+    // Route 1 — reverse it: the original bytes go back, the sidecar goes.
+    const reversed = plant();
+    writeFileSync(reversed.file, readFileSync(`${reversed.file}${SIDECAR_SUFFIX}`, 'utf8'));
+    rmSync(`${reversed.file}${SIDECAR_SUFFIX}`);
+    expect((await run(reversed.root, [reversed.guard])).ok).toBe(true);
+
+    // Route 2 — accept it: the other edit stays, and the two things that
+    // remember the refusal go. Deleting the sidecar alone is NOT route 2: the
+    // kept journal refuses the same entry again and writes the sidecar back,
+    // which is why the row has to name the journal.
+    const accepted = plant();
+    rmSync(`${accepted.file}${SIDECAR_SUFFIX}`);
+    expect((await run(accepted.root, [accepted.guard])).ok).toBe(false);
+    rmSync(`${accepted.file}${SIDECAR_SUFFIX}`, { force: true });
+    rmSync(journalPath(accepted.root), { force: true });
+    expect((await run(accepted.root, [accepted.guard])).ok).toBe(true);
+  }, 120_000);
+
+  test('an entry that came back is not re-armed by the kept journal', async () => {
+    // The journal survives a refusal, so what it still names matters: an entry
+    // already put back is finished, and leaving it in would make the next
+    // ordinary edit to THAT file a refusal of its own — a sidecar dropped over
+    // a file this runner never left mutated.
+    const root = syntheticRepo({
+      markerName: 'x',
+      guardLine: 'break;',
+      assertion: 'expect(1).toBe(1);',
+    });
+    const recovered = join(root, 'src/pay.ts');
+    const refused = join(root, 'src/other.ts');
+    writeFileSync(recovered, 'MUTATED', 'utf8');
+    writeFileSync(refused, 'SOMEONE ELSE WAS HERE', 'utf8');
+    mkdirSync(join(journalPath(root), '..'), { recursive: true });
+    writeFileSync(
+      journalPath(root),
+      JSON.stringify({
+        pid: 999_999_999,
+        startedAt: new Date().toISOString(),
+        entries: [
+          { abs: recovered, original: 'THE ORIGINAL', mutated: 'MUTATED' },
+          { abs: refused, original: 'ITS ORIGINAL', mutated: 'ITS MUTATION' },
+        ],
+      }),
+      'utf8'
+    );
+
+    const first = recoverJournal(root);
+    expect(first.recovered).toEqual([recovered]);
+    expect(first.refused).toEqual([refused]);
+
+    // An ordinary edit to the file that was successfully put back.
+    writeFileSync(recovered, 'THE ORIGINAL, edited since', 'utf8');
+    const second = recoverJournal(root);
+    expect(second.refused).toEqual([refused]);
+    expect(existsSync(`${recovered}${SIDECAR_SUFFIX}`)).toBe(false);
+    expect(readFileSync(recovered, 'utf8')).toBe('THE ORIGINAL, edited since');
   });
 
   test('a sidecar left by an earlier run blocks the next one, journal or no journal', async () => {
@@ -825,6 +966,25 @@ describe('the CLI answers the question it was asked, or none', () => {
       // Naming the offender, not just refusing: the operator has to be able to
       // tell which of their arguments the parser did not take.
       expect(plan.message).toContain(offender);
+    }
+  });
+
+  test('reading stops at nothing: a typo after --list is still rejected', () => {
+    // Returning on the first recognised entry would make the promise
+    // order-dependent — the list prints, the typo is dropped, and the operator
+    // never learns they misspelled anything.
+    const cases: readonly (readonly [string[], string])[] = [
+      [['--list', '--gaurd', 'a name'], '--gaurd'],
+      [['--guard', 'a name', '--guard', 'another name'], 'given twice'],
+      [['--guard=a name', '--guard=another name'], 'given twice'],
+      [['--list', '--guard', 'a name'], 'different questions'],
+    ];
+    for (const [argv, expected] of cases) {
+      const plan = parseCliArgs(argv);
+      if (plan.kind !== 'error') {
+        throw new Error(`${JSON.stringify(argv)} was accepted as ${plan.kind}, not rejected`);
+      }
+      expect(plan.message).toContain(expected);
     }
   });
 

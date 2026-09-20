@@ -84,10 +84,11 @@
  *   4. Restoration is content-addressed and verified: it writes the original
  *      bytes back only if what is on disk is still exactly the bytes this
  *      runner wrote. If something else changed the file mid-run (an editor
- *      saving over it), the original is dropped next to it as
- *      `<file>.mutation-guard-original` and the run fails loudly rather than
- *      clobbering someone's edit. That sidecar is the one piece of state that
- *      outlives the process that wrote it, so every run scans for one
+ *      saving over it), or if the write-back reads back as something else, the
+ *      original is dropped next to it as `<file>.mutation-guard-original` —
+ *      both give-up branches, through `refuse()` — and the run fails loudly
+ *      rather than clobbering someone's edit. That sidecar is the one piece of
+ *      state that outlives the process that wrote it, so every run scans for one
  *      (`findSidecars`) before it touches anything: an orphaned sidecar means
  *      an earlier run gave up on a file and nobody has reconciled it since,
  *      which is not a tree to report a green registry over.
@@ -132,7 +133,15 @@
  */
 
 import { spawnSync } from 'child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+  type Dirent,
+} from 'fs';
 import { dirname, join, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -552,17 +561,21 @@ export const SIDECAR_SUFFIX = '.mutation-guard-original';
  * for it, so the run after the refusal could evaluate the whole registry green
  * over exactly the tree the refusal said not to trust.
  *
- * `node_modules/` and `.git/` are skipped: this runner only ever mutates the
- * tracked source files its rows name, so neither can hold a sidecar it wrote,
- * and walking them would turn a few milliseconds into seconds on every run.
+ * Root-wide rather than `src`-only like `findMarkers`, because a row may name
+ * a file anywhere in the checkout and a refusal must be findable without
+ * knowing which row produced it — the scan runs before the registry is even
+ * read. `SKIPPED_DIRS` is the cost control and the statement of what cannot
+ * hold one: dependencies, git's object store, and build output are not files a
+ * registry row names, so a sidecar there would not be one this runner wrote.
  * Symlinked directories are not followed — `isDirectory()` is false for a
  * symlink — which keeps the scan inside the checkout it was given.
  */
+const SKIPPED_DIRS = new Set(['node_modules', '.git', 'dist', 'coverage']);
+
 export function findSidecars(root: string): string[] {
-  const skip = new Set(['node_modules', '.git']);
   const found: string[] = [];
   const walk = (dir: string): void => {
-    let entries;
+    let entries: Dirent[];
     try {
       entries = readdirSync(dir, { withFileTypes: true });
     } catch {
@@ -573,7 +586,7 @@ export function findSidecars(root: string): string[] {
     for (const entry of entries) {
       const abs = join(dir, entry.name);
       if (entry.isDirectory()) {
-        if (!skip.has(entry.name)) walk(abs);
+        if (!SKIPPED_DIRS.has(entry.name)) walk(abs);
         continue;
       }
       if (entry.isFile() && entry.name.endsWith(SIDECAR_SUFFIX)) found.push(abs);
@@ -632,17 +645,37 @@ function restoreEntry(entry: JournalEntry): boolean {
     writeFileSync(entry.abs, entry.original, 'utf8');
     const after = readFileSync(entry.abs, 'utf8');
     if (after !== entry.original) {
-      console.error(`mutation-guards: FAILED to restore ${entry.abs} — content still differs`);
-      return false;
+      return refuse(
+        entry,
+        `FAILED to restore ${entry.abs} — the write-back reported success and read back ` +
+          `different bytes, so the file holds neither the mutation nor the original.`
+      );
     }
     return true;
   }
+  return refuse(
+    entry,
+    `${entry.abs} changed while it was mutated, so it was NOT overwritten. Restoring ` +
+      `automatically here would throw away whatever made the change.`
+  );
+}
+
+/**
+ * Give up on one entry, loudly and with the evidence on disk.
+ *
+ * Every `false` out of `restoreEntry` comes through here, which is the point:
+ * the verification branch used to return without writing a sidecar, so that
+ * refusal ended the run with the `(restore)` row pointing at a file nobody had
+ * written — and, once `withMutation` cleared the journal, with nothing at all
+ * for the next run to find. That is the same shape as the bug this file was
+ * just fixed for, one branch over.
+ */
+function refuse(entry: JournalEntry, why: string): boolean {
   const sidecar = `${entry.abs}${SIDECAR_SUFFIX}`;
   writeFileSync(sidecar, entry.original, 'utf8');
   console.error(
-    `mutation-guards: ${entry.abs} changed while it was mutated, so it was NOT overwritten.\n` +
-      `  The pre-mutation content is at ${sidecar}. Reconcile by hand — restoring ` +
-      `automatically here would throw away whatever made the change.`
+    `mutation-guards: ${why}\n  The pre-mutation content is at ${sidecar}. Reconcile by ` +
+      `hand: put those bytes back, or keep what is there and delete the sidecar.`
   );
   return false;
 }
@@ -655,12 +688,22 @@ function installHandlers(): void {
   handlersInstalled = true;
   const restoreAll = (): void => {
     const roots = new Set<string>();
+    const unreconciled = new Set<string>();
     for (const entry of [...ACTIVE.values()]) {
-      if (!restoreEntry(entry)) restoreFailed = true;
+      if (!restoreEntry(entry)) {
+        restoreFailed = true;
+        unreconciled.add(entry.root);
+      }
       ACTIVE.delete(entry.abs);
       roots.add(entry.root);
     }
-    for (const root of roots) clearJournal(root);
+    // A root with a refused entry keeps its journal, for the same reason
+    // `recoverJournal` does: the journal is the record that the refusal
+    // happened and the only copy of the original bytes, so clearing it here
+    // would hand the next run an empty desk. Tracked per root rather than off
+    // the module-level `restoreFailed`, which is sticky across calls in one
+    // process and would keep journals for roots that restored cleanly.
+    for (const root of roots) if (!unreconciled.has(root)) clearJournal(root);
   };
   // 'exit' is synchronous-only, which is exactly what fs.*Sync needs; it covers
   // an escaped throw and an explicit process.exit. The signals do not fire
@@ -701,7 +744,10 @@ export async function withMutation<T>(
     const ok = restoreEntry(entry);
     if (!ok) restoreFailed = true;
     ACTIVE.delete(abs);
-    clearJournal(root);
+    // Only a restore that worked clears the journal. A refusal leaves both the
+    // sidecar and the journal that names it, so the next run in this checkout
+    // inherits the refusal instead of finding nothing and starting green.
+    if (ok) clearJournal(root);
   }
 }
 
@@ -771,11 +817,28 @@ export function recoverJournal(root: string): RecoveryReport {
   // it after a REFUSED entry destroys the only record of the original bytes and
   // the only thing that reports the refusal: the next `bun run check` finds no
   // journal, calls recovery a no-op, and evaluates every row green over a file
-  // still holding a third party's content with a stale sidecar beside it. A
-  // kept journal is re-read on the next run, where the entries that did come
-  // back are no-ops (`before === entry.original`) and the ones that did not are
-  // refused again — reported every run until a human reconciles them.
-  if (refused.length === 0) rmSync(path, { force: true });
+  // still holding a third party's content with a stale sidecar beside it. So
+  // the refusal is re-read and re-reported every run until a human reconciles
+  // it — by restoring those bytes, or by deleting this file to accept what is
+  // on disk, which is what the `(journal recovery)` row tells them.
+  //
+  // Narrowed to the refused entries rather than kept verbatim: an entry that
+  // DID come back is finished, and leaving it armed would turn the next
+  // ordinary edit to that file into a refusal of its own — a sidecar dropped
+  // over a file this runner never left mutated.
+  if (refused.length === 0) {
+    rmSync(path, { force: true });
+  } else {
+    const kept: Journal = {
+      // This process, as `writeJournal` does: the field is only read to ask
+      // whether a LIVE run holds the journal, and by the time anything reads
+      // it back this run is over.
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      entries: entries.filter((entry) => refused.includes(entry.abs)),
+    };
+    writeFileSync(path, JSON.stringify(kept), 'utf8');
+  }
   return { recovered, refused, sidecars };
 }
 
@@ -1013,10 +1076,12 @@ export async function runGuards(
       name: '(journal recovery)',
       ok: false,
       detail:
-        `could not restore ${recovery.refused.join(', ')} — see the sidecar files. The ` +
-        `journal was KEPT, so this run and every run after it says so until the files are ` +
-        `reconciled; a recovery that deleted it would hand the next run a green registry ` +
-        `over the same tree.`,
+        `could not restore ${recovery.refused.join(', ')} — the pre-mutation bytes are in ` +
+        `the ${SIDECAR_SUFFIX} file beside each. The journal was KEPT, so this run and ` +
+        `every run after it says so rather than handing the next one a green registry over ` +
+        `the same tree. Two ways to end it, and BOTH are reconciling: put the original ` +
+        `bytes back, or keep the file as it stands and delete ${journalPath(root)}. Either ` +
+        `way delete the sidecar — while it is there the run below still refuses.`,
     });
   }
   if (recovery.sidecars.length > 0) {
@@ -1027,7 +1092,8 @@ export async function runGuards(
         `an earlier run gave up restoring a file and left ${recovery.sidecars.join(', ')} ` +
         `behind. Nothing has reconciled it since, so the tree this registry would be ` +
         `measured over is not one this runner wrote. Compare the sidecar with the file ` +
-        `beside it, keep the version you want, and delete the sidecar.`,
+        `beside it, keep the version you want, delete the sidecar — and if ` +
+        `${journalPath(root)} is still there, it holds the same refusal and goes too.`,
     });
   }
   if (blocked.length > 0) return { ok: false, results: blocked };
@@ -1251,9 +1317,17 @@ export const CLI_USAGE_EXIT = 2;
 export function parseCliArgs(argv: readonly string[]): CliPlan {
   const usage = '--list, --guard <name>, or --guard=<name>';
   let only: string | undefined;
+  let list = false;
+  // Every entry is read before anything is dispatched. Returning from inside
+  // the loop on the first thing recognised would make the promise above
+  // order-dependent: `--list --gaurd x` would print the list and drop the typo
+  // silently, which is the failure this function exists to remove.
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i] ?? '';
-    if (arg === '--list') return { kind: 'list' };
+    if (arg === '--list') {
+      list = true;
+      continue;
+    }
     if (arg === '--guard' || arg.startsWith('--guard=')) {
       const inline = arg.startsWith('--guard=');
       const value = inline ? arg.slice('--guard='.length) : argv[i + 1];
@@ -1264,6 +1338,15 @@ export function parseCliArgs(argv: readonly string[]): CliPlan {
         return {
           kind: 'error',
           message: 'mutation-guards: --guard needs a name. `--list` prints them.',
+        };
+      }
+      if (only !== undefined) {
+        return {
+          kind: 'error',
+          message:
+            `mutation-guards: --guard given twice ("${safe(only)}" then "${safe(value)}"). ` +
+            `This runs one row; last-wins would silently answer for the second and leave ` +
+            `the first unasked.`,
         };
       }
       only = value;
@@ -1281,6 +1364,16 @@ export function parseCliArgs(argv: readonly string[]): CliPlan {
         `you did not ask — with a green.`,
     };
   }
+  if (list && only !== undefined) {
+    return {
+      kind: 'error',
+      message:
+        `mutation-guards: --list and --guard "${safe(only)}" ask different questions. ` +
+        `Answering one of them and dropping the other is how a narrower question gets a ` +
+        `wider answer; pass one.`,
+    };
+  }
+  if (list) return { kind: 'list' };
   return { kind: 'run', only };
 }
 
