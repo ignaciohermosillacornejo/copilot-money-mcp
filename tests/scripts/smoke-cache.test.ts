@@ -74,9 +74,10 @@ describe('isTotalDecodeLoss', () => {
 
 describe('isUnmeasuredRoot', () => {
   test('fires on the shape that made check 1 pass vacuously (#763)', () => {
-    // The real measurement: the account documents live at `items/<id>/accounts`
-    // and the root-anchored raw count for `accounts` is 0, so check 1 compared
-    // 21 decoded rows against nothing and called it a pass.
+    // The shape, with an illustrative row count: account documents live at
+    // `items/<id>/accounts`, so the root-anchored raw count for `accounts` is
+    // 0 and check 1 compared the decoded rows against nothing, then called it
+    // a pass.
     expect(isUnmeasuredRoot(0, 21)).toBe(true);
   });
 
@@ -88,7 +89,7 @@ describe('isUnmeasuredRoot', () => {
 
   test('a healthy root with documents on both sides does not warn', () => {
     // The direction that must stay quiet, or the WARN is noise on every run
-    // and gets muted. `securities` measured 16 raw and 16 decoded.
+    // and gets muted.
     expect(isUnmeasuredRoot(16, 16)).toBe(false);
   });
 
@@ -183,8 +184,43 @@ describe('reportDecodeLossCoverage', () => {
     ).toBe('PASS');
   });
 
-  test('an empty comparison list does not warn', () => {
-    expect(reportDecodeLossCoverage([]).status).toBe('PASS');
+  test('an empty comparison list SKIPs rather than passing over nothing', () => {
+    // "All 0 roots had documents to compare" is the same true-of-nothing line
+    // this whole change removes, and the sibling reporter already answers the
+    // empty case with SKIP. Unreachable today; wrong if it ever were reached.
+    expect(reportDecodeLossCoverage([]).status).toBe('SKIP');
+  });
+
+  test('counts a root as measured only when raw documents backed it', () => {
+    // The count check 1 quotes. "Not unmeasured" is the wrong definition: a
+    // root with nothing on disk AND nothing decoded is consistent rather than
+    // vacuous, but it still compared nothing, so it must not inflate the
+    // numerator. `total - unmeasured` would say 3/4 here.
+    const { comparedSummary } = reportDecodeLossCoverage([
+      ...healthy,
+      { root: 'accounts', raw: 0, rows: 21 }, // unmeasured: rows with no raw
+      { root: 'financial_goals', raw: 0, rows: 0 }, // empty on both sides
+    ]);
+    expect(comparedSummary).toBe('2/4 roots had documents to compare');
+  });
+
+  test('the summary check 1 quotes comes from here, already assembled', () => {
+    // Returned as a finished fragment, not as two numbers: `main()` cannot be
+    // reached by a test, so anything it has to combine itself is asserted
+    // nowhere. One field leaves no way to combine it wrongly.
+    const roots: RootComparison[] = [
+      { root: 'securities', raw: 16, rows: 16 },
+      { root: 'tags', raw: 0, rows: 11 },
+    ];
+    expect(reportDecodeLossCoverage(roots).comparedSummary).toBe(
+      '1/2 roots had documents to compare'
+    );
+  });
+
+  test('reports zero measured when nothing on the list had raw documents', () => {
+    expect(reportDecodeLossCoverage([{ root: 'tags', raw: 0, rows: 11 }]).comparedSummary).toBe(
+      '0/1 roots had documents to compare'
+    );
   });
 });
 
@@ -237,19 +273,22 @@ describe('joinStats', () => {
   });
 });
 
+// Shared by the two extinct-dependency suites below. A collection consisting
+// ENTIRELY of Firestore parent pointers (`users/*/accounts`) is what an extinct
+// collection with surviving subcollections looks like, and it must read as
+// extinct; `items` has some pointers and some data, which must not.
+const EXTINCT_FIXTURE = new Map([
+  ['transactions', { total: 100, empty: 0 }],
+  ['users/*/accounts', { total: 438, empty: 438 }],
+  ['items', { total: 20, empty: 8 }],
+]);
+
 describe('findExtinctDependencies', () => {
   // DEPENDED_ON is empty right now (#624 removed its only entry), so the check
   // cannot exercise itself against a real cache. These keep it honest anyway —
   // otherwise a gate nobody can currently trip is indistinguishable from a
   // gate that is broken.
-  const raw = new Map([
-    ['transactions', { total: 100, empty: 0 }],
-    // A collection consisting ENTIRELY of Firestore parent pointers: documents
-    // exist, but none carries a field. This is what an extinct collection with
-    // surviving subcollections looks like, and it must read as extinct.
-    ['users/*/accounts', { total: 438, empty: 438 }],
-    ['items', { total: 20, empty: 8 }],
-  ]);
+  const raw = EXTINCT_FIXTURE;
 
   test('flags a collection whose documents are all parent pointers', () => {
     expect(findExtinctDependencies(['users/*/accounts'], raw)).toEqual(['users/*/accounts']);
@@ -273,28 +312,30 @@ describe('findExtinctDependencies', () => {
   test('returns nothing for an empty dependency list', () => {
     expect(findExtinctDependencies([], raw)).toEqual([]);
   });
+});
 
-  describe('reportExtinctDependencies', () => {
-    test('SKIPs rather than passing when nothing is registered as depended-on (#763)', () => {
-      // The live state of the check: DEPENDED_ON has been empty since #624.
-      // "Every depended-on collection has documents" is true of nothing, and
-      // reads exactly like the same line over a populated list.
-      const { status, detail } = reportExtinctDependencies([], raw);
-      expect(status).toBe('SKIP');
-      expect(detail).toContain('compared nothing');
-    });
+describe('reportExtinctDependencies', () => {
+  const raw = EXTINCT_FIXTURE;
 
-    test('FAILs when a depended-on collection has no real documents', () => {
-      const { status, detail } = reportExtinctDependencies(['users/*/accounts'], raw);
-      expect(status).toBe('FAIL');
-      expect(detail).toContain('users/*/accounts');
-    });
+  test('SKIPs rather than passing when nothing is registered as depended-on (#763)', () => {
+    // The live state of the check: DEPENDED_ON has been empty since #624.
+    // "Every depended-on collection has documents" is true of nothing, and
+    // reads exactly like the same line over a populated list.
+    const { status, detail } = reportExtinctDependencies([], raw);
+    expect(status).toBe('SKIP');
+    expect(detail).toContain('compared nothing');
+  });
 
-    test('PASSes when every depended-on collection has documents', () => {
-      // The pass must stay reachable, or the SKIP branch has just disabled the
-      // check instead of qualifying it.
-      expect(reportExtinctDependencies(['transactions'], raw).status).toBe('PASS');
-    });
+  test('FAILs when a depended-on collection has no real documents', () => {
+    const { status, detail } = reportExtinctDependencies(['users/*/accounts'], raw);
+    expect(status).toBe('FAIL');
+    expect(detail).toContain('users/*/accounts');
+  });
+
+  test('PASSes when every depended-on collection has documents', () => {
+    // The pass must stay reachable, or the SKIP branch has just disabled the
+    // check instead of qualifying it.
+    expect(reportExtinctDependencies(['transactions'], raw).status).toBe('PASS');
   });
 });
 
