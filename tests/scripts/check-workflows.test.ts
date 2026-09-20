@@ -790,6 +790,33 @@ jobs:
     );
   });
 
+  test('a declared login as the owner segment of a github.com URL does not trip the scan', async () => {
+    // #765: `value.includes(login)` matched the substring, so a login that is
+    // also the owner segment of an unrelated github.com/<owner>/<repo> URL in
+    // free text (a PR-description template, a comment for a human) raised a
+    // false positive. The URL's slashes are exactly the boundary the fix
+    // requires on both sides of the match, so this must pass.
+    await withWorkflows(
+      {
+        'url-mention.yml': `name: URL mention
+on: push
+env:
+  TRUSTED_PUBLISHERS: '["octocat"]'
+jobs:
+  publish:
+    if: github.actor == 'octocat'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo "See https://github.com/octocat/some-repo for details"
+`,
+      },
+      ({ code }) => {
+        expect(code).toBe(0);
+      }
+    );
+  });
+
   test('a positive comparison against a bot login is not a trust declaration', async () => {
     // `github.actor == 'dependabot[bot]'` is the usual dependabot auto-merge
     // shape. Demanding it appear in `APPROVERS` would put a bot where the humans
