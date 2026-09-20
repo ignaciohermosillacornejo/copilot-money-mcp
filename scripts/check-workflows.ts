@@ -217,6 +217,25 @@ function* stringValuesOutsideGates(node: unknown, key = ''): Generator<string> {
     for (const [k, v] of Object.entries(node)) yield* stringValuesOutsideGates(v, k);
 }
 
+/**
+ * True when `login` appears in `value` as its own token — not flanked by a
+ * word character, hyphen, or slash on either side.
+ *
+ * A plain substring test also fires on a login that is merely the owner
+ * segment of a `github.com/<owner>/<repo>` URL sitting in unrelated free
+ * text (a PR description template, a comment left for a human) — that is
+ * not the login "written out" in the sense this invariant polices, and
+ * flagging it teaches the gate to cry wolf. The boundary excludes exactly
+ * the characters a URL or a compound identifier would use to extend the
+ * match (`/octocat/`, `octocat-bot`), while leaving quotes, spaces, and
+ * other punctuation as valid boundaries so the shell-literal case this scan
+ * exists to catch (`"octocat"`) still matches.
+ */
+function isLoginSpelledOut(value: string, login: string): boolean {
+  const escaped = login.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![\\w/-])${escaped}(?![\\w/-])`).test(value);
+}
+
 /** Every string anywhere in the parsed document — comments excluded by parsing. */
 function* stringValues(node: unknown): Generator<string> {
   if (typeof node === 'string') yield node;
@@ -437,7 +456,7 @@ for (const file of files) {
   if (declared !== null) {
     const humanDeclared = [...declared].filter((l) => !BOT_LOGIN.test(l));
     for (const value of stringValuesOutsideGates(doc)) {
-      const spelled = humanDeclared.find((login) => value.includes(login));
+      const spelled = humanDeclared.find((login) => isLoginSpelledOut(value, login));
       if (spelled === undefined) continue;
       problems.push(
         `${file}: the login '${spelled}' is written out somewhere that is neither the ` +
