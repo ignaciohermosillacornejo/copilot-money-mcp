@@ -821,6 +821,35 @@ jobs:
     );
   });
 
+  test('a declared login as the prefix of a hyphenated compound name does not trip the scan', async () => {
+    // The boundary excludes TWO characters — a slash and a hyphen — but every
+    // other fixture in this file only exercises the slash side (the URL test
+    // above) or a quote-adjacent true positive. `octocat-bot` names a
+    // DIFFERENT account than the declared `octocat`, so this must pass; a
+    // rule that only excluded slashes (or that stopped excluding hyphens)
+    // would flag it anyway, and nothing else in this suite would notice.
+    await withWorkflows(
+      {
+        'hyphen-mention.yml': `name: Hyphen mention
+on: push
+env:
+  TRUSTED_PUBLISHERS: '["octocat"]'
+jobs:
+  publish:
+    if: github.actor == 'octocat'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo "notify octocat-bot about this"
+`,
+      },
+      ({ code, stdout }) => {
+        expect(code).toBe(0);
+        expect(stdout).toContain('1 approver gate(s)');
+      }
+    );
+  });
+
   test('a positive comparison against a bot login is not a trust declaration', async () => {
     // `github.actor == 'dependabot[bot]'` is the usual dependabot auto-merge
     // shape. Demanding it appear in `APPROVERS` would put a bot where the humans
