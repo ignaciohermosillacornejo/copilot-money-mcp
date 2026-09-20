@@ -93,6 +93,12 @@
  *      an earlier run gave up on a file and nobody has reconciled it since,
  *      which is not a tree to report a green registry over.
  *
+ * Giving up is itself a write, so it can fail: every caller of `restoreEntry`
+ * does its bookkeeping in a `finally` and the exit sweep catches per entry, or
+ * a sidecar write that throws would leave the run's stop-editing flag unset and
+ * abandon the entries after it — a give-up path that does not leave the process
+ * in a state the next step can trust, which is the class this file is about.
+ *
  * Two things follow from the runner being the thing that holds the mutation.
  * The child test run is bounded (`TEST_TIMEOUT_MS`), because several registered
  * mutations delete an early exit and a hang would hold a tracked source file
@@ -601,19 +607,39 @@ let handlersInstalled = false;
 /** Set when a restore could not be completed safely; forces a non-zero exit. */
 let restoreFailed = false;
 
-function writeJournal(root: string): void {
+/**
+ * The one writer: `entries` becomes this root's journal, replacing whatever is
+ * there.
+ *
+ * Every caller has the same question to answer — which entries are still
+ * unreconciled — and the two that keep a journal after a refusal answer it
+ * differently if they each write their own object. `recoverJournal` narrows to
+ * the refused entries; the exit handler has to narrow the same way, or a root
+ * holding one recovered and one refused entry keeps a journal that re-arms the
+ * recovered one.
+ */
+function writeJournalEntries(root: string, entries: readonly JournalEntry[]): void {
   const path = journalPath(root);
   mkdirSync(dirname(path), { recursive: true });
   const journal: Journal = {
+    // This process. The field is only read to ask whether a LIVE run holds the
+    // journal, and whoever reads it back is a later run.
     pid: process.pid,
     startedAt: new Date().toISOString(),
-    // This root's entries only. A process driving more than one root (the
-    // meta-test does) would otherwise write every root's journal with every other
-    // root's files in it — which `validEntries` then rejects on read, turning a
-    // bookkeeping slip into a stream of scary-looking warnings.
-    entries: [...ACTIVE.values()].filter((entry) => entry.root === root),
+    entries: [...entries],
   };
   writeFileSync(path, JSON.stringify(journal), 'utf8');
+}
+
+function writeJournal(root: string): void {
+  // This root's entries only. A process driving more than one root (the
+  // meta-test does) would otherwise write every root's journal with every other
+  // root's files in it — which `validEntries` then rejects on read, turning a
+  // bookkeeping slip into a stream of scary-looking warnings.
+  writeJournalEntries(
+    root,
+    [...ACTIVE.values()].filter((entry) => entry.root === root)
+  );
 }
 
 function clearJournal(root: string): void {
@@ -688,22 +714,38 @@ function installHandlers(): void {
   handlersInstalled = true;
   const restoreAll = (): void => {
     const roots = new Set<string>();
-    const unreconciled = new Set<string>();
+    const unreconciled = new Map<string, JournalEntry[]>();
     for (const entry of [...ACTIVE.values()]) {
-      if (!restoreEntry(entry)) {
+      let ok = false;
+      try {
+        ok = restoreEntry(entry);
+      } catch {
+        // This is the last chance every OTHER entry gets, so one that throws
+        // on the way out — the sidecar write hitting a read-only directory, a
+        // full disk — must not take the rest of the sweep with it. Counted as
+        // a refusal, which keeps the journal that names it.
+      }
+      if (!ok) {
         restoreFailed = true;
-        unreconciled.add(entry.root);
+        unreconciled.set(entry.root, [...(unreconciled.get(entry.root) ?? []), entry]);
       }
       ACTIVE.delete(entry.abs);
       roots.add(entry.root);
     }
-    // A root with a refused entry keeps its journal, for the same reason
+    // A root with a refused entry keeps a journal, for the same reason
     // `recoverJournal` does: the journal is the record that the refusal
     // happened and the only copy of the original bytes, so clearing it here
     // would hand the next run an empty desk. Tracked per root rather than off
     // the module-level `restoreFailed`, which is sticky across calls in one
-    // process and would keep journals for roots that restored cleanly.
-    for (const root of roots) if (!unreconciled.has(root)) clearJournal(root);
+    // process and would keep journals for roots that restored cleanly — and
+    // narrowed to the refused entries, exactly as `recoverJournal` narrows,
+    // because what is left on disk otherwise still names the entries that DID
+    // come back and re-arms them against the next ordinary edit.
+    for (const root of roots) {
+      const stillRefused = unreconciled.get(root);
+      if (stillRefused === undefined) clearJournal(root);
+      else writeJournalEntries(root, stillRefused);
+    }
   };
   // 'exit' is synchronous-only, which is exactly what fs.*Sync needs; it covers
   // an escaped throw and an explicit process.exit. The signals do not fire
@@ -741,13 +783,28 @@ export async function withMutation<T>(
   try {
     return await fn();
   } finally {
-    const ok = restoreEntry(entry);
-    if (!ok) restoreFailed = true;
-    ACTIVE.delete(abs);
-    // Only a restore that worked clears the journal. A refusal leaves both the
-    // sidecar and the journal that names it, so the next run in this checkout
-    // inherits the refusal instead of finding nothing and starting green.
-    if (ok) clearJournal(root);
+    let ok = false;
+    try {
+      ok = restoreEntry(entry);
+    } finally {
+      // Bookkeeping in a `finally` of its own, because `restoreEntry` can THROW
+      // — it writes a sidecar, and a read-only directory or a full disk makes
+      // that a throw rather than a `false`. Assigning the flag after the call
+      // meant the throw left `restoreFailed` false, the loop's stop-editing
+      // guard read false, and the run carried on mutating a tree whose last
+      // file was never put back. Three of the six rows name one file, so the
+      // next row would have read that content as its `original`.
+      if (!ok) restoreFailed = true;
+      // Dropped from ACTIVE either way: a throwing entry left in it is retried
+      // by the exit handler, where the same throw is an uncaught exception
+      // inside `process.on('exit')` and takes the rest of the sweep with it.
+      ACTIVE.delete(abs);
+      // Only a restore that worked clears the journal. A refusal leaves both
+      // the sidecar and the journal that names it, so the next run in this
+      // checkout inherits the refusal instead of finding nothing and starting
+      // green.
+      if (ok) clearJournal(root);
+    }
   }
 }
 
@@ -829,15 +886,10 @@ export function recoverJournal(root: string): RecoveryReport {
   if (refused.length === 0) {
     rmSync(path, { force: true });
   } else {
-    const kept: Journal = {
-      // This process, as `writeJournal` does: the field is only read to ask
-      // whether a LIVE run holds the journal, and by the time anything reads
-      // it back this run is over.
-      pid: process.pid,
-      startedAt: new Date().toISOString(),
-      entries: entries.filter((entry) => refused.includes(entry.abs)),
-    };
-    writeFileSync(path, JSON.stringify(kept), 'utf8');
+    writeJournalEntries(
+      root,
+      entries.filter((entry) => refused.includes(entry.abs))
+    );
   }
   return { recovered, refused, sidecars };
 }
@@ -1325,6 +1377,14 @@ export function parseCliArgs(argv: readonly string[]): CliPlan {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i] ?? '';
     if (arg === '--list') {
+      // Rejected twice over for the same reason `--guard` is: `--list` carries
+      // no value to last-win over, so a repeat is harmless — but "the parser
+      // ignored one of the things you typed" is the shape being removed here,
+      // and an exception for the harmless case is the one a later reader
+      // copies.
+      if (list) {
+        return { kind: 'error', message: 'mutation-guards: --list given twice. One is enough.' };
+      }
       list = true;
       continue;
     }
