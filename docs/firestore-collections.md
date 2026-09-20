@@ -2,9 +2,9 @@
 
 Complete documentation of all Firestore collections cached locally by Copilot Money. This is the authoritative reference for understanding the local LevelDB data, derived from systematic app screenshots and raw Firestore document inspection.
 
-**Last verified:** 2026-04-05 | **App version:** macOS (App Store) | **Total documents:** ~55,953 across ~35 unique collection patterns
+**Last verified:** 2026-04-05 | **App version:** macOS (App Store) | **Total documents:** ~55,953 across ~35 unique collection patterns (2026-04-05); 62,790 documents as of 2026-09-18. Note that "patterns" collapse per-entity subcollections — the same cache expands to 191 distinct collection *paths*
 
-**Decode coverage:** 33 of 35 collection paths decoded — `investment_performance` and `investment_performance/{hash}/twr_holding` remain undecoded (cache data is non-analytical). `investment_splits` was restored 2026-05-11 after re-inspection revealed real date-keyed adjustment multipliers in docs for securities that have actually split (the original drop in 2026-05-10 was a false negative — none of the then-held securities had splits in their history).
+**Decode coverage:** 33 of 35 collection patterns decoded — `investment_performance` and `investment_performance/{hash}/twr_holding` remain undecoded (cache data is non-analytical). `investment_splits` was restored 2026-05-11 after re-inspection revealed real date-keyed adjustment multipliers in docs for securities that have actually split (the original drop in 2026-05-10 was a false negative — none of the then-held securities had splits in their history).
 
 ## Database Location
 
@@ -309,7 +309,7 @@ User overrides for account display. Must be checked BEFORE main `accounts` since
 | `auto_budget_lock` | boolean | Locked from automatic budget adjustments | Yes |
 | `auto_delete_lock` | boolean | Locked from automatic deletion | Yes |
 | `plaid_category_ids` | string[] | Plaid category IDs mapped to this custom category (e.g., `["18021000", "19025000"]`) | Yes |
-| `partial_name_rules` | string[] | Legacy auto-categorization rules. **Always an empty array** on read — see "Categorization rules" below. **Do not prune it from writes:** `create_category` must still send `partial_name_rules: []` (`reference/firestore-write-schema.md`); categories created without it were invisible to the Copilot app (#232) | Yes |
+| `partial_name_rules` | string[] | Legacy auto-categorization rules. **Always an empty array** on read — see "Categorization rules" below. Historically it was also a *required write* field: categories created without it were invisible to the Copilot app (#232). That constraint belonged to the retired Firestore transport and is archived with it ([`reference/firestore-write-schema.md`](reference/firestore-write-schema.md)) — today's `create_category` goes through GraphQL `createCategory`, whose `CreateCategoryInput` is `{name, colorName, emoji, isExcluded}` (`src/core/graphql/categories.ts:5-13`) and has no such field | Yes |
 | `user_id` | string | Owner user ID | Yes |
 | `budget_id` | string | Associated budget ID | No (in Firestore, not in schema) |
 | `children_categories` | unknown | Alternate children field | No (in Firestore, not in schema) |
