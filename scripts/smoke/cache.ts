@@ -129,21 +129,31 @@ export interface RootComparison {
  * detail string too, rather than only a verdict, is what lets a test pin that
  * the WARN actually names its reason instead of just being yellow.
  *
- * `comparedSummary` is the count checks 1 and 2 print, phrased here rather than
- * assembled at either call site — both share this blind spot, so both say how
- * much they measured instead of leaving it to a comment the output never shows.
- * It counts roots with `raw > 0` — the ones whose comparison
- * had a left-hand side — and NOT "roots that are not unmeasured", which would
- * put a `raw === 0 && rows === 0` root in the numerator: nothing on disk and
- * nothing decoded is consistent rather than vacuous, but it still compared
- * nothing. Returned as a finished fragment, not as two numbers for the caller
- * to divide, because the caller is `main()`: a figure whose whole job is to say
- * how much was measured must not be the one thing in this block that only runs
- * on a machine with a cache, and two fields are two chances to combine them
- * wrongly where one leaves none.
+ * `comparedSummary` is the coverage figure checks 1 and 2 print, phrased here
+ * rather than assembled at either call site — both share this blind spot, so
+ * both say how much the raw side could see instead of leaving it to a comment
+ * the output never shows.
+ *
+ * It states root-ANCHORING coverage — how many roots had raw documents at all —
+ * and deliberately not "how many this check compared", because the two checks
+ * compare different sets: conservation adds a `raw > 10` noise floor, so a root
+ * with a handful of documents is visible to the anchoring and still unreachable
+ * by that filter. One fragment with one definition that is true for both beats a
+ * second count per threshold, which would put back the "which number goes in
+ * which line" hazard this fragment exists to remove.
+ *
+ * The numerator is `raw > 0` and NOT "roots that are not unmeasured", which
+ * would put a `raw === 0 && rows === 0` root in it: nothing on disk and nothing
+ * decoded is consistent rather than vacuous, but the raw side still saw nothing.
+ * Returned as a finished fragment, not as two numbers for the caller to divide,
+ * because the caller is `main()`: a figure whose whole job is to say how much
+ * was seen must not be the one thing in this block that only runs on a machine
+ * with a cache, and two fields are two chances to combine them wrongly where one
+ * leaves none.
  *
  * SKIP for an empty list, matching {@link reportExtinctDependencies}: "all 0
- * roots had documents to compare" is the same true-of-nothing line this whole
+ * roots decoded rows only where raw documents backed them" is the same
+ * true-of-nothing line this whole
  * change exists to remove. Unreachable today — `decoded` in `main()` is a
  * nine-element literal — but a status that would be wrong if it were ever
  * reached is not worth keeping for the sake of a shorter function.
@@ -155,7 +165,7 @@ export function reportDecodeLossCoverage(roots: readonly RootComparison[]): {
 } {
   const measured = roots.filter((d) => d.raw > 0).length;
   const counts = {
-    comparedSummary: `${measured}/${roots.length} roots had documents to compare`,
+    comparedSummary: `${measured}/${roots.length} roots had raw documents at all`,
   };
   if (roots.length === 0) {
     return {
@@ -600,8 +610,10 @@ async function main(): Promise<void> {
   // Shares check 1's blind spot, and for the same reason: `d.raw > 10` is
   // never true for a root the raw side cannot find, so check 1b's WARN is the
   // coverage statement for this check too (#763) — which is why its PASS
-  // quotes the same count rather than leaving the caveat in this comment,
-  // where the output never shows it.
+  // quotes the same figure rather than leaving the caveat in this comment,
+  // where the output never shows it. The figure is anchoring coverage, not
+  // this check's own comparison count: the `> 10` floor below is a second,
+  // deliberate narrowing on top of it.
   // ---------------------------------------------------------------------
   const lossy = withRaw.filter((d) => d.raw > 10 && d.rows > 0 && d.rows / d.raw < 0.5);
 

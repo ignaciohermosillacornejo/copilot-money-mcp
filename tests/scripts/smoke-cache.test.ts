@@ -185,30 +185,30 @@ describe('reportDecodeLossCoverage', () => {
   });
 
   test('an empty comparison list SKIPs rather than passing over nothing', () => {
-    // "All 0 roots had documents to compare" is the same true-of-nothing line
-    // this whole change removes, and the sibling reporter already answers the
+    // A PASS over an empty list is the same true-of-nothing line this whole
+    // change removes, and the sibling reporter already answers the
     // empty case with SKIP. Unreachable today; wrong if it ever were reached —
     // which is also why the summary it carries is pinned rather than assumed:
     // the knowingly-unreached branch is the one nothing else would notice.
     const { status, comparedSummary } = reportDecodeLossCoverage([]);
     expect(status).toBe('SKIP');
-    expect(comparedSummary).toBe('0/0 roots had documents to compare');
+    expect(comparedSummary).toBe('0/0 roots had raw documents at all');
   });
 
   test('counts a root as measured only when raw documents backed it', () => {
-    // The count check 1 quotes. "Not unmeasured" is the wrong definition: a
+    // The figure checks 1 and 2 quote. "Not unmeasured" is the wrong definition: a
     // root with nothing on disk AND nothing decoded is consistent rather than
-    // vacuous, but it still compared nothing, so it must not inflate the
-    // numerator. `total - unmeasured` would say 3/4 here.
+    // vacuous, but the raw side still saw nothing there, so it must not
+    // inflate the numerator. `total - unmeasured` would say 3/4 here.
     const { comparedSummary } = reportDecodeLossCoverage([
       ...healthy,
       { root: 'accounts', raw: 0, rows: 21 }, // unmeasured: rows with no raw
       { root: 'financial_goals', raw: 0, rows: 0 }, // empty on both sides
     ]);
-    expect(comparedSummary).toBe('2/4 roots had documents to compare');
+    expect(comparedSummary).toBe('2/4 roots had raw documents at all');
   });
 
-  test('the summary check 1 quotes comes from here, already assembled', () => {
+  test('the summary checks 1 and 2 quote comes from here, already assembled', () => {
     // Returned as a finished fragment, not as two numbers: `main()` cannot be
     // reached by a test, so anything it has to combine itself is asserted
     // nowhere. One field leaves no way to combine it wrongly.
@@ -217,13 +217,13 @@ describe('reportDecodeLossCoverage', () => {
       { root: 'tags', raw: 0, rows: 11 },
     ];
     expect(reportDecodeLossCoverage(roots).comparedSummary).toBe(
-      '1/2 roots had documents to compare'
+      '1/2 roots had raw documents at all'
     );
   });
 
   test('reports zero measured when nothing on the list had raw documents', () => {
     expect(reportDecodeLossCoverage([{ root: 'tags', raw: 0, rows: 11 }]).comparedSummary).toBe(
-      '0/1 roots had documents to compare'
+      '0/1 roots had raw documents at all'
     );
   });
 });
