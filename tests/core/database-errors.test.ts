@@ -14,6 +14,26 @@ const DB_NOT_FOUND_MESSAGE =
   'Database not found. Please ensure Copilot Money is installed and has synced data.';
 
 /**
+ * Any non-empty string, because nothing here reads it (#756).
+ *
+ * Passing *a* path is the whole point: `new CopilotDatabase()` with no argument
+ * runs `findCopilotDatabase()`, which `readdirSync`s the user's live Copilot
+ * Money Firestore container on the way to a test that then throws the path
+ * away. That readdir is sub-millisecond ~99.9% of the time and, measured over
+ * 8,470 calls on an otherwise idle machine, blocks for seconds and fails with
+ * `EINTR` about once in a thousand — bimodally, with nothing between 100ms and
+ * 1s. Bun's 5,000ms default test timeout lands inside the stall, so one of
+ * these fifteen cases failed roughly 10% of runs in isolation and about one run
+ * in three under the concurrent load of a release day, always blaming whichever
+ * getter happened to be executing.
+ *
+ * The constructor's `if (dbPath)` branch touches no filesystem, and
+ * `requireDbPath()` throws before anything else does, so with a path supplied
+ * these tests reach the rejection with zero syscalls.
+ */
+const SYNTHETIC_DB_PATH = '/nonexistent/copilot-money-mcp/database-errors.test';
+
+/**
  * Each case describes a public getter that, when the dbPath is missing and
  * the associated cache fields are cleared, must surface the "database not
  * found" error instead of silently returning stale data.
@@ -61,7 +81,7 @@ describe('CopilotDatabase error handling', () => {
     test.each(dbPathErrorCases)(
       '$method rejects when dbPath is undefined and cache is empty',
       async ({ method, cacheFieldsToClear, args = [] }) => {
-        const db = new CopilotDatabase();
+        const db = new CopilotDatabase(SYNTHETIC_DB_PATH);
         // @ts-expect-error - accessing private property for testing
         db.dbPath = undefined;
         for (const field of cacheFieldsToClear) {
@@ -76,7 +96,7 @@ describe('CopilotDatabase error handling', () => {
 
   describe('isAvailable edge cases', () => {
     test('returns false when dbPath is null-ish', () => {
-      const db = new CopilotDatabase();
+      const db = new CopilotDatabase(SYNTHETIC_DB_PATH);
       // @ts-expect-error - accessing private property for testing
       db.dbPath = undefined;
       expect(db.isAvailable()).toBe(false);
