@@ -336,7 +336,7 @@ The 2026-04-22 sweep returned "Cannot query field on type Mutation" for every ca
 - **Recurring detection** (4 probed): `detectRecurring`, `acceptRecurring`, `rejectRecurring`, `suggestCategory`. Recurring-detection UI appears to be server-automated — no user-triggered mutations.
 - **Category suggestions** (2 probed): `acceptSuggestion`, `dismissSuggestion`. Suggestions live on `Transaction.suggestedCategoryIds` (read-only).
 
-**Total sweep (including prior): ~460 + 170 = ~630 candidate names across all known surfaces.** The discovered write surface is ~25 mutations. See the "Remaining recon work" section of `introspection-recon.md` for directions still uncovered (queries, subscriptions, optional-input-field enumeration).
+**Total sweep (including prior): ~460 + 170 = ~630 candidate names across all known surfaces.** The discovered write surface is ~25 mutations. See the ["Remaining gaps"](introspection-recon.md#remaining-gaps) section of `introspection-recon.md` for directions still uncovered (queries, subscriptions, optional-input-field enumeration).
 
 ---
 
