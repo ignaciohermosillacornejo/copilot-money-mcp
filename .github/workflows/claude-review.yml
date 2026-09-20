@@ -86,5 +86,5 @@ jobs:
               repo: context.repo.repo,
               pull_number: context.payload.pull_request.number,
               event: 'APPROVE',
-              body: 'Auto-approved: AI code review completed for a declared approver PR.'
+              body: 'Auto-approved: AI code review completed for a declared approver\'s PR.'
             });
