@@ -25,7 +25,13 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const WORKFLOW_DIR = '.github/workflows';
+// Relative, because every path this gate prints is a `file:line` a reviewer
+// has to find in the repo, and an absolute one from a CI runner is noise.
+// `bun run` sets the cwd to the package root, which is the only way it runs.
+// Overridable so tests can drive the real script — exit code, annotations and
+// all — against a synthetic workflow tree, matching CHECK_WORKFLOWS_DIR /
+// CHECK_DEPS_PINNED_PACKAGE_JSON.
+const WORKFLOW_DIR = process.env.CHECK_ACTION_PINS_DIR ?? '.github/workflows';
 
 /** `uses: owner/repo@<40-hex>` followed by a `# comment`, capturing all three. */
 const PINNED = /uses:\s*([A-Za-z0-9/_.-]+)@([0-9a-f]{40})(?:\s*#\s*(\S+))?/g;
@@ -90,17 +96,55 @@ export function findPinProblems(pins: Pin[]): string[] {
   return problems;
 }
 
-if (import.meta.main) {
-  const pins = collectPins();
+/** What the CLI would exit with and print, without exiting or printing. */
+export interface CheckResult {
+  /** Process exit code: 0 clean, 1 problems. */
+  code: number;
+  stdout: string[];
+  /** `::error::`-prefixed where GitHub should annotate the offending line. */
+  stderr: string[];
+}
+
+/**
+ * The whole CLI except the exiting. Split out so the decisions below — which
+ * of them exits non-zero, and what a reader is told — are asserted by tests
+ * rather than only by someone running the gate and looking.
+ *
+ * The zero-pins branch is the vacuity floor: a scan that matched nothing would
+ * otherwise satisfy the consistency check trivially and print "all labelled
+ * consistently" over an empty set, which is the most confident way this file
+ * could be wrong.
+ */
+export function runCheck(dir: string = WORKFLOW_DIR): CheckResult {
+  const pins = collectPins(dir);
   if (pins.length === 0) {
-    console.error('check-action-pins: found no SHA-pinned actions — the scan is broken.');
-    process.exit(1);
+    return {
+      code: 1,
+      stdout: [],
+      stderr: ['check-action-pins: found no SHA-pinned actions — the scan is broken.'],
+    };
   }
   const problems = findPinProblems(pins);
   if (problems.length > 0) {
-    for (const p of problems) console.error(`::error::${p}`);
-    console.error(`check-action-pins: ${problems.length} problem(s) across ${pins.length} pins.`);
-    process.exit(1);
+    return {
+      code: 1,
+      stdout: [],
+      stderr: [
+        ...problems.map((p) => `::error::${p}`),
+        `check-action-pins: ${problems.length} problem(s) across ${pins.length} pins.`,
+      ],
+    };
   }
-  console.log(`check-action-pins: ${pins.length} pinned actions, all labelled consistently.`);
+  return {
+    code: 0,
+    stdout: [`check-action-pins: ${pins.length} pinned actions, all labelled consistently.`],
+    stderr: [],
+  };
+}
+
+if (import.meta.main) {
+  const result = runCheck();
+  for (const line of result.stderr) console.error(line);
+  for (const line of result.stdout) console.log(line);
+  process.exit(result.code);
 }
