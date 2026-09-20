@@ -850,6 +850,51 @@ jobs:
     );
   });
 
+  test('the boundary holds on every (character × side) combination, not just the sides the other fixtures happen to pin', async () => {
+    // The URL fixture above writes `/octocat/` — a slash on BOTH sides — so
+    // it only ever detects a mutation that drops the slash from BOTH
+    // lookaround classes at once; drop it from just the lookbehind, or just
+    // the lookahead, and the surviving side still blocks the match on its
+    // own, so that fixture stays green either way and the asymmetric
+    // mutation goes unnoticed. The hyphen fixture is space-before,
+    // hyphen-after, so it only ever pins the hyphen LOOKAHEAD. Nothing above
+    // puts a hyphen or a slash immediately BEFORE a declared login as the
+    // only boundary on that side.
+    //
+    // Four one-sided mentions close all four (character × side) cells
+    // independently: nothing precedes or follows `octocat` on the other
+    // side of the boundary character being tested, so only that one
+    // lookaround can be responsible for the match staying blocked.
+    //   - "https://github.com/octocat" (nothing follows) → pins lookbehind /
+    //   - "octocat/some-repo" (nothing precedes but a space)  → pins lookahead /
+    //   - "octocat-bot" (nothing precedes but a space) → pins lookahead -
+    //   - "renovate-octocat" (nothing follows) → pins lookbehind -
+    await withWorkflows(
+      {
+        'boundary-matrix.yml': `name: Boundary matrix
+on: push
+env:
+  TRUSTED_PUBLISHERS: '["octocat"]'
+jobs:
+  publish:
+    if: github.actor == 'octocat'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: |
+          echo "profile https://github.com/octocat"
+          echo "clone octocat/some-repo"
+          echo "notify octocat-bot"
+          echo "ping renovate-octocat"
+`,
+      },
+      ({ code, stdout }) => {
+        expect(code).toBe(0);
+        expect(stdout).toContain('1 approver gate(s)');
+      }
+    );
+  });
+
   test('a positive comparison against a bot login is not a trust declaration', async () => {
     // `github.actor == 'dependabot[bot]'` is the usual dependabot auto-merge
     // shape. Demanding it appear in `APPROVERS` would put a bot where the humans
