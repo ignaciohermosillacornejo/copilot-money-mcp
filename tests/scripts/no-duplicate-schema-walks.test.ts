@@ -119,25 +119,29 @@ describe('no hand-rolled JSON-Schema argument walks under scripts/', () => {
   test('the sweep reaches the scripts it is meant to cover', () => {
     expect(files.length).toBeGreaterThan(0);
     expect(files).toContain(SHARED_MODULE);
-    // Descent specifically: a floor of `length > 0` plus the module itself is
-    // satisfied by the top-level files alone, so everything under
-    // scripts/smoke/ and scripts/graphql-capture/ could silently leave scope.
-    // tests/helpers/ts-files.test.ts covers extensions and ScriptKind, not
-    // whether a caller's tree is actually descended.
-    //
-    // Measured by separator, not by name prefix. The first version of this line
-    // was `startsWith(join(SCRIPTS_DIR, 'smoke'))`, which the TOP-LEVEL
-    // scripts/smoke-graphql.ts satisfies — an assertion written to close a
-    // vacuity, vacuous.
-    // Every subdirectory, not "at least one file somewhere below". A `> 0`
-    // floor is satisfied while one of the two trees leaves scope entirely.
+    // Descent specifically: the two floors above are satisfied by the
+    // top-level files alone, so a subtree could silently leave scope, and
+    // tests/helpers/ts-files.test.ts covers extensions and ScriptKind rather
+    // than whether a caller's tree is descended. So the assertion is set
+    // EQUALITY over subdirectory names split at the path separator — by
+    // separator because the earlier `startsWith(join(SCRIPTS_DIR, 'smoke'))`
+    // was satisfied by the top-level scripts/smoke-graphql.ts, and equality
+    // because "at least one file somewhere below" is a `> 0` floor again,
+    // green while one of the two trees is gone.
     const subdirectories = new Set(
       files
         .map((f) => f.slice(SCRIPTS_DIR.length + 1))
         .filter((rel) => rel.includes(sep))
         .map((rel) => rel.slice(0, rel.indexOf(sep)))
     );
-    expect([...subdirectories].sort()).toEqual(['graphql-capture', 'smoke']);
+    expect(
+      [...subdirectories].sort(),
+      'The scripts/ subdirectories this sweep descends into are PINNED by name, not ' +
+        'floored by count — a count is green while a whole subtree leaves scope. So this ' +
+        'failing does not mean the sweep is broken: it means scripts/ gained or lost a ' +
+        'subdirectory. Gained one, and it holds scripts? Add its name here, and the sweep ' +
+        'now covers it. Lost one? Check its files moved somewhere still swept.'
+    ).toEqual(['graphql-capture', 'smoke']);
   });
 
   // A scan that parsed nothing and a scan that found nothing both report zero
