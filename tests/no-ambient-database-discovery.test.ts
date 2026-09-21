@@ -32,6 +32,15 @@
  *     process.env.NOPE)`). Deciding that needs evaluation, not a parse; no
  *     instance in this suite, and the failure mode is a loud "database not
  *     found" rather than a stall;
+ *   - `new CopilotDatabase(...args)`. The first argument is a `SpreadElement`
+ *     whose text is `...args`, which is neither absent nor in the falsy set, so
+ *     it passes. Same reason as above: what it spreads to is a runtime fact;
+ *   - `new someModule.CopilotDatabase()`. The callee is a
+ *     `PropertyAccessExpression`, so the `ts.isIdentifier` test is false and
+ *     the node is never considered. Narrowing to a bare identifier is
+ *     deliberate — it is what makes `CopilotDatabase` mean this class rather
+ *     than any same-named thing — but it is a hole. Neither shape exists in the
+ *     suite today (checked);
  *   - a database constructed inside a helper OUTSIDE `tests/` that a test
  *     calls. `src/` is excluded on purpose — production constructing without a
  *     path is the feature — so a `src/` factory used only by tests would be
@@ -61,7 +70,19 @@ const DATABASE_SOURCE = join(REPO_ROOT, 'src', 'core', 'database.ts');
  */
 const SPECIMEN = join(TESTS_ROOT, 'fixtures', 'ambient-database-discovery-sample.ts');
 
-/** Spellings of "no path" that reach `findCopilotDatabase()` anyway. */
+/** The module-private function whose single call site is this gate's premise. */
+const DISCOVERY_FN = 'findCopilotDatabase';
+
+/**
+ * Spellings of "no path" that reach `findCopilotDatabase()` anyway.
+ *
+ * Every member needs its own line in the specimen, which
+ * `every falsy spelling it knows has a specimen` enforces in the direction that
+ * rots: a member with no specimen is deletable from this set with the suite
+ * green, and the sweep then walks past that spelling in silence. `""` is a
+ * member even though this repo's prettier rewrites it to `''`, because a
+ * `// prettier-ignore` — or a future config — puts it back within reach.
+ */
 const FALSY_FIRST_ARGS = new Set(['undefined', 'null', "''", '""', '``']);
 
 interface Finding {
@@ -146,7 +167,7 @@ function discoveryCallSites(file: string): string[] {
     if (
       ts.isCallExpression(node) &&
       ts.isIdentifier(node.expression) &&
-      node.expression.text === 'findCopilotDatabase'
+      node.expression.text === DISCOVERY_FN
     ) {
       sites.push(enclosing(node));
     }
@@ -155,6 +176,64 @@ function discoveryCallSites(file: string): string[] {
   visit(src);
 
   return sites;
+}
+
+/**
+ * Every way `findCopilotDatabase` escapes its module, described.
+ *
+ * An AST walk rather than a regex over the text, because "not exported" has
+ * more spellings than `export function`: `export { findCopilotDatabase }`,
+ * `export { findCopilotDatabase as findDb }`, `export const
+ * findCopilotDatabase = …` and `export default findCopilotDatabase` each leave
+ * it callable from a test while matching no pattern written for the
+ * declaration form. A single-spelling check here would be this gate committing
+ * the `silent-under-collecting-scan` it exists to refuse. Parsing also stops a
+ * docblock that merely MENTIONS `export function findCopilotDatabase` from
+ * failing it.
+ */
+function discoveryExports(file: string): string[] {
+  const src = parse(file);
+  const found: string[] = [];
+
+  const isExported = (node: ts.Node): boolean =>
+    ts.canHaveModifiers(node) &&
+    (ts.getModifiers(node) ?? []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
+
+  const visit = (node: ts.Node): void => {
+    if (
+      (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) &&
+      node.name?.text === DISCOVERY_FN &&
+      isExported(node)
+    ) {
+      found.push(`exported declaration of ${DISCOVERY_FN}`);
+    }
+    if (ts.isVariableStatement(node) && isExported(node)) {
+      for (const decl of node.declarationList.declarations) {
+        if (ts.isIdentifier(decl.name) && decl.name.text === DISCOVERY_FN) {
+          found.push(`exported binding \`export const ${DISCOVERY_FN}\``);
+        }
+      }
+    }
+    if (ts.isExportDeclaration(node) && node.exportClause && ts.isNamedExports(node.exportClause)) {
+      for (const element of node.exportClause.elements) {
+        // `export { a as b }` puts the local name in `propertyName`; a bare
+        // `export { a }` leaves that undefined and `name` is the local name.
+        const local = element.propertyName?.text ?? element.name.text;
+        if (local === DISCOVERY_FN) found.push(`re-export as \`${element.name.text}\``);
+      }
+    }
+    if (
+      ts.isExportAssignment(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === DISCOVERY_FN
+    ) {
+      found.push(`\`export default\` of ${DISCOVERY_FN}`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(src);
+
+  return found;
 }
 
 let swept: { files: string[]; findings: Finding[] } | undefined;
@@ -187,13 +266,36 @@ describe('no test discovers the real Copilot database', () => {
     expect(
       found.map((f) => f.what),
       `tests/fixtures/ambient-database-discovery-sample.ts reproduces every shape this gate ` +
-        `exists to catch, and two it must leave alone. Finding the wrong set means the ` +
-        `scanner stopped working, not that the suite is clean.`
+        `exists to catch — one line per FALSY_FIRST_ARGS member, so no member can be deleted ` +
+        `from the set with this green — and two it must leave alone. Finding the wrong set ` +
+        `means the scanner stopped working, not that the suite is clean.`
     ).toEqual([
       'new CopilotDatabase() with no path',
       'new CopilotDatabase(undefined) — falsy, so discovery runs anyway',
+      'new CopilotDatabase(null) — falsy, so discovery runs anyway',
       "new CopilotDatabase('') — falsy, so discovery runs anyway",
+      'new CopilotDatabase("") — falsy, so discovery runs anyway',
+      'new CopilotDatabase(``) — falsy, so discovery runs anyway',
     ]);
+  });
+
+  test('guards the gate: every falsy spelling it knows has a specimen', () => {
+    // The assertion above pins a LIST of findings; this one pins that list
+    // against the SET it is derived from, which is the direction that rots.
+    // Adding a member to FALSY_FIRST_ARGS without a specimen line leaves it
+    // deletable again with everything green — under-collection reported as a
+    // pass, which is the failure mode this whole file is about.
+    const covered = new Set(
+      scan(SPECIMEN)
+        .map((finding) => /^new CopilotDatabase\((.*)\) — falsy/.exec(finding.what)?.[1])
+        .filter((spelling): spelling is string => spelling !== undefined)
+    );
+    expect(
+      [...FALSY_FIRST_ARGS].filter((spelling) => !covered.has(spelling)),
+      `Every FALSY_FIRST_ARGS member needs its own line in the specimen. A member with none ` +
+        `can be deleted from the set with the suite green, and the sweep then walks past that ` +
+        `spelling in silence.`
+    ).toEqual([]);
   });
 
   test('guards the gate: the constructor is still the only route to discovery', () => {
@@ -207,9 +309,12 @@ describe('no test discovers the real Copilot database', () => {
         `else, or the sweep below stops being an exact statement about what tests can reach.`
     ).toEqual(['CopilotDatabase constructor']);
     expect(
-      readFileSync(DATABASE_SOURCE, 'utf8'),
-      'findCopilotDatabase() must stay module-private; exported, a test could call it directly.'
-    ).not.toMatch(/export\s+(async\s+)?function\s+findCopilotDatabase\b/);
+      discoveryExports(DATABASE_SOURCE),
+      'findCopilotDatabase() must stay module-private. Exported under ANY spelling — a ' +
+        'declaration modifier, a named re-export, an alias, a default — a test could call it ' +
+        'directly, and the sweep below would stop being an exact statement about what tests ' +
+        'can reach.'
+    ).toEqual([]);
   });
 
   test('every CopilotDatabase built in a test is given a path', () => {
