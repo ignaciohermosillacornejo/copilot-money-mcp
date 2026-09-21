@@ -153,10 +153,10 @@ export interface RootComparison {
  *
  * SKIP for an empty list, matching {@link reportExtinctDependencies}: "all 0
  * roots decoded rows only where raw documents backed them" is the same
- * true-of-nothing line this whole
- * change exists to remove. Unreachable today — `decoded` in `main()` is a
- * nine-element literal — but a status that would be wrong if it were ever
- * reached is not worth keeping for the sake of a shorter function.
+ * true-of-nothing line this whole change exists to remove. Unreachable today —
+ * `decoded` in `main()` is a nine-element literal — but a status that would be
+ * wrong if it were ever reached is not worth keeping for the sake of a shorter
+ * function.
  */
 export function reportDecodeLossCoverage(roots: readonly RootComparison[]): {
   status: Status;
@@ -630,7 +630,8 @@ async function main(): Promise<void> {
       'conservation',
       'PASS',
       `no collection loses more than half its documents ` +
-        `(${coverage.comparedSummary} — see the coverage check above)`
+        `(${coverage.comparedSummary}; roots under 10 documents are below this check's ` +
+        `floor — see the coverage check above)`
     );
   }
 
