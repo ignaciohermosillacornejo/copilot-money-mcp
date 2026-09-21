@@ -22,10 +22,12 @@
  *
  * WHAT IT CATCHES — every `tests/**` TypeScript file, syntax only, no type
  * checker: a `new CopilotDatabase(...)` whose first argument is absent, or is
- * one of the falsy literals that reach the same discovery branch (`undefined`,
- * `null`, `''`). The falsy literals are listed because they are the cheapest
- * way to satisfy a gate that only asked for *an* argument while changing
- * nothing about what the constructor does.
+ * one of the five falsy literals that reach the same discovery branch
+ * (`undefined`, `null`, `''`, `""`, and the empty template literal — the set is
+ * `FALSY_FIRST_ARGS` below, and the prose is not a second copy of it: a guard
+ * test requires one specimen line per member). They are listed because they are
+ * the cheapest way to satisfy a gate that only asked for *an* argument while
+ * changing nothing about what the constructor does.
  *
  * WHAT IT DOES NOT CATCH, stated rather than implied:
  *   - a path computed at runtime that turns out falsy (`new CopilotDatabase(
@@ -37,10 +39,15 @@
  *     it passes. Same reason as above: what it spreads to is a runtime fact;
  *   - `new someModule.CopilotDatabase()`. The callee is a
  *     `PropertyAccessExpression`, so the `ts.isIdentifier` test is false and
- *     the node is never considered. Narrowing to a bare identifier is
- *     deliberate — it is what makes `CopilotDatabase` mean this class rather
- *     than any same-named thing — but it is a hole. Neither shape exists in the
- *     suite today (checked);
+ *     the node is never considered;
+ *   - `import { CopilotDatabase as DB }` then `new DB()`. The callee IS a bare
+ *     identifier, just not that text. Both of these follow from the same fact,
+ *     stated plainly because an earlier draft of this block got it backwards:
+ *     the scanner matches a NAME, it does not resolve a binding. So it also
+ *     false-positives on a test that declares its own local
+ *     `class CopilotDatabase {}` — fail-closed, and the cheapness is the point,
+ *     but neither direction is binding resolution. None of the three shapes
+ *     exists in the suite today (checked);
  *   - a database constructed inside a helper OUTSIDE `tests/` that a test
  *     calls. `src/` is excluded on purpose — production constructing without a
  *     path is the feature — so a `src/` factory used only by tests would be
@@ -50,7 +57,12 @@
  *     `findCopilotDatabase` has exactly one call site and is not exported,
  *     which `the constructor is still the only route` below re-checks rather
  *     than assumes — an under-collecting scan reports clean, so the premise
- *     has to be asserted, not inherited from the day it was written.
+ *     has to be asserted, not inherited from the day it was written. That
+ *     re-check is itself a name match over one file: `export const findDb =
+ *     findCopilotDatabase` is caught, but an alias re-exported at a second hop
+ *     (`const findDb = findCopilotDatabase;` then `export { findDb }`) is not.
+ *     Moving the function to another module fails CLOSED — the call-site
+ *     assertion would then find none in `src/core/database.ts` and go red.
  */
 
 import { describe, test, expect } from 'bun:test';
@@ -150,8 +162,7 @@ function scan(file: string): Finding[] {
 }
 
 /** Every call to `findCopilotDatabase`, with the enclosing declaration named. */
-function discoveryCallSites(file: string): string[] {
-  const src = parse(file);
+function discoveryCallSites(src: ts.SourceFile): string[] {
   const sites: string[] = [];
 
   const enclosing = (node: ts.Node): string => {
@@ -191,8 +202,7 @@ function discoveryCallSites(file: string): string[] {
  * docblock that merely MENTIONS `export function findCopilotDatabase` from
  * failing it.
  */
-function discoveryExports(file: string): string[] {
-  const src = parse(file);
+function discoveryExports(src: ts.SourceFile): string[] {
   const found: string[] = [];
 
   const isExported = (node: ts.Node): boolean =>
@@ -211,6 +221,16 @@ function discoveryExports(file: string): string[] {
       for (const decl of node.declarationList.declarations) {
         if (ts.isIdentifier(decl.name) && decl.name.text === DISCOVERY_FN) {
           found.push(`exported binding \`export const ${DISCOVERY_FN}\``);
+        }
+        // `export const findDb = findCopilotDatabase` — the DECLARED name is
+        // innocent and the initializer is the escape. Checking the name alone
+        // would let a rename on the way out satisfy the premise while a test
+        // imports `findDb` and walks the container directly, which is the
+        // under-collecting scan this test exists to refuse.
+        if (decl.initializer && ts.isIdentifier(decl.initializer)) {
+          if (decl.initializer.text === DISCOVERY_FN) {
+            found.push(`exported alias \`${decl.name.getText(src)} = ${DISCOVERY_FN}\``);
+          }
         }
       }
     }
@@ -299,17 +319,21 @@ describe('no test discovers the real Copilot database', () => {
   });
 
   test('guards the gate: the constructor is still the only route to discovery', () => {
+    // Parsed once and handed to both walks. `sweepSuite()` two functions up is
+    // memoised for exactly this reason, and one file's AST built twice in one
+    // test would read as an oversight rather than a choice.
+    const databaseSource = parse(DATABASE_SOURCE);
     // This gate is exact only while argument-less construction is the sole way
     // a test can reach `findCopilotDatabase`. A second call site, or an
     // `export`, would leave the sweep reporting clean over a route it cannot
     // see — the failure mode this project files under `silent-under-collecting-scan`.
     expect(
-      discoveryCallSites(DATABASE_SOURCE),
+      discoveryCallSites(databaseSource),
       `src/core/database.ts must call findCopilotDatabase() from the constructor and nowhere ` +
         `else, or the sweep below stops being an exact statement about what tests can reach.`
     ).toEqual(['CopilotDatabase constructor']);
     expect(
-      discoveryExports(DATABASE_SOURCE),
+      discoveryExports(databaseSource),
       'findCopilotDatabase() must stay module-private. Exported under ANY spelling — a ' +
         'declaration modifier, a named re-export, an alias, a default — a test could call it ' +
         'directly, and the sweep below would stop being an exact statement about what tests ' +
