@@ -630,8 +630,8 @@ async function main(): Promise<void> {
       'conservation',
       'PASS',
       `no collection loses more than half its documents ` +
-        `(${coverage.comparedSummary}; roots under 10 documents are below this check's ` +
-        `floor — see the coverage check above)`
+        `(${coverage.comparedSummary}; roots with 10 or fewer documents are below this ` +
+        `check's floor — see the coverage check above)`
     );
   }
 
