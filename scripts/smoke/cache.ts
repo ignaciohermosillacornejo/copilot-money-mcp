@@ -612,8 +612,9 @@ async function main(): Promise<void> {
   // coverage statement for this check too (#763) — which is why its PASS
   // quotes the same figure rather than leaving the caveat in this comment,
   // where the output never shows it. The figure is anchoring coverage, not
-  // this check's own comparison count: the `> 10` floor below is a second,
-  // deliberate narrowing on top of it.
+  // this check's own comparison count: the filter below narrows twice more on
+  // top of it, by the `> 10` noise floor and by `rows > 0`, which leaves a
+  // total loss to check 1 so one root cannot be reported as two findings.
   // ---------------------------------------------------------------------
   const lossy = withRaw.filter((d) => d.raw > 10 && d.rows > 0 && d.rows / d.raw < 0.5);
 
@@ -631,7 +632,7 @@ async function main(): Promise<void> {
       'PASS',
       `no collection loses more than half its documents ` +
         `(${coverage.comparedSummary}; roots with 10 or fewer documents are below this ` +
-        `check's floor — see the coverage check above)`
+        `check's floor, and total losses are check 1's — see the coverage check above)`
     );
   }
 
