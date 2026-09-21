@@ -19,10 +19,10 @@ const DB_NOT_FOUND_MESSAGE =
  * Passing *a* path is the whole point: `new CopilotDatabase()` with no argument
  * runs `findCopilotDatabase()`, which `readdirSync`s the user's live Copilot
  * Money Firestore container on the way to a test that then throws the path
- * away. That readdir is sub-millisecond ~99.9% of the time and, measured over
- * 8,470 calls on an otherwise idle machine, blocks for seconds and fails with
- * `EINTR` about once in a thousand — bimodally, with nothing between 100ms and
- * 1s. Bun's 5,000ms default test timeout lands inside the stall, so one of
+ * away. That readdir is bimodal: measured over 8,470 calls on an otherwise idle
+ * machine, 93% came back under 1ms and 99.9% under 100ms, nothing at all landed
+ * between 100ms and 1s, and 8 calls (~0.1%) blocked for seconds and then failed
+ * with `EINTR`. Bun's 5,000ms default test timeout lands inside the stall, so one of
  * these fifteen cases failed roughly 10% of runs in isolation and about one run
  * in three under the concurrent load of a release day, always blaming whichever
  * getter happened to be executing.
