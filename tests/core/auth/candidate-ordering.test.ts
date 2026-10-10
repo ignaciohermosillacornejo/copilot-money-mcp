@@ -19,8 +19,9 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
+import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 import {
   extractRefreshTokenCandidates,
@@ -1109,7 +1110,9 @@ describe('a session installed at any resume point is returned, not reported as l
         oldSeen += 1;
         // The first caller's verdict lands at once; the second's is held until
         // the first has installed MID.
-        return oldSeen === 1 ? Promise.resolve(deadVerdict()) : oldAnswered.opened.then(deadVerdict);
+        return oldSeen === 1
+          ? Promise.resolve(deadVerdict())
+          : oldAnswered.opened.then(deadVerdict);
       }
       if (sent.includes(MID)) {
         midSeen += 1;
@@ -1152,5 +1155,37 @@ describe('a session installed at any resume point is returned, not reported as l
     retryAnswered.open();
     expect(await second).toBe(ID_TOKEN);
     expect(extractions).toBe(3);
+  });
+
+  test('every await in getIdToken is paired with a freshness re-check', () => {
+    // The class-level half. The three cases above pin the resume points that
+    // exist today. This pins the RULE, so that a fifth await added later
+    // without its check fails here, before anyone has to find the race by
+    // hand. The count is entry + one per await, because each await is a place
+    // the method can be overtaken. Comments are stripped first: the method's
+    // own commentary talks about awaits.
+    const source = readFileSync(
+      fileURLToPath(new URL('../../../src/core/auth/firebase-auth.ts', import.meta.url)),
+      'utf8'
+    );
+    const start = source.indexOf('async getIdToken(): Promise<string> {');
+    const end = source.indexOf('getUserId(): string | null', start);
+    expect(start, 'getIdToken was not found; update this detector').toBeGreaterThan(-1);
+    expect(end, 'the end of getIdToken was not found; update this detector').toBeGreaterThan(start);
+    const code = source
+      .slice(start, end)
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/.*$/gm, '');
+
+    const awaits = code.match(/\bawait\b/g)?.length ?? 0;
+    const checks = code.match(/this\.freshIdToken\(\)/g)?.length ?? 0;
+    // Anti-vacuity: a slice that stopped matching the method would count 0 = 0 - 1.
+    expect(awaits, 'expected to find the awaits in getIdToken').toBeGreaterThan(0);
+    expect(
+      checks,
+      `getIdToken has ${awaits} awaits and ${checks} freshIdToken() checks. Each await is a ` +
+        'resume point a sibling call can overtake (#765, #770): follow a new one with a ' +
+        'freshIdToken() check and add a case to this describe block that parks a caller there.'
+    ).toBe(awaits + 1);
   });
 });

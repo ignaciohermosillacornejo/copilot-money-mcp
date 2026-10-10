@@ -109,10 +109,26 @@ export class FirebaseAuth {
     this.extractToken = extractToken;
   }
 
+  /**
+   * The cached ID token if it is still inside its lifetime, else null.
+   *
+   * `getIdToken` calls this at entry and again at EVERY point where it resumes
+   * from an await (#765, #770). It has no in-flight dedupe, and the GraphQL
+   * client calls it once per request, so any await can be overtaken by a
+   * sibling call that installs a live session on this same object. A caller
+   * that resumed and carried on as if nothing had changed would, with nothing
+   * usable in its own hands, report "No Copilot Money session found" while
+   * its object held a working token. Rule: every await in `getIdToken` that
+   * can fall through to more work is followed by a call to this. A count test
+   * in tests/core/auth/candidate-ordering.test.ts enforces it.
+   */
+  private freshIdToken(): string | null {
+    return this.idToken && Date.now() < this.expiresAt ? this.idToken : null;
+  }
+
   async getIdToken(): Promise<string> {
-    if (this.idToken && Date.now() < this.expiresAt) {
-      return this.idToken;
-    }
+    const cached = this.freshIdToken();
+    if (cached) return cached;
     // Fast path: we already hold a Copilot-project refresh token (from a prior
     // successful exchange) — just refresh it. The server-returned refresh token
     // is known-good, so it can never be foreign; but "known-good" expires the
@@ -156,14 +172,26 @@ export class FirebaseAuth {
         // exchangeToken, which nulls the cached token ONLY when it still equals
         // the one that failed (#751). So a surviving, DIFFERENT refreshToken is
         // positive evidence that another caller installed it — not a leftover.
-        if (this.idToken && Date.now() < this.expiresAt) return this.idToken;
+        //
+        // Guard (1), the normal case: the other caller's session is still live.
+        const installedSession = this.freshIdToken();
+        if (installedSession) return installedSession;
 
-        if (this.refreshToken && this.refreshToken !== tried) {
+        // Guard (2), the rare case. It is reached only when the replacement's
+        // own lifetime is already inside EXPIRY_MARGIN_MS, so guard (1) found
+        // its ID token stale. Guard (1) covers the normal case; don't read
+        // this as the main path.
+        //
+        // Captured for the same reason as `tried`: the retry's await is a
+        // suspension point too, and the token it spends must be the one it
+        // checked.
+        const installed = this.refreshToken;
+        if (installed && installed !== tried) {
           // Exactly one retry, against the token someone else installed. Not a
           // loop: a second failure means that token is finished too, and the
           // cold path is the right answer at that point.
           try {
-            await this.exchangeToken(this.refreshToken);
+            await this.exchangeToken(installed);
             if (this.idToken) return this.idToken;
           } catch (retryErr) {
             if (!isTokenFinished(retryErr)) throw retryErr;
@@ -172,9 +200,25 @@ export class FirebaseAuth {
       }
     }
 
+    // Resume point: the fast path's exchange or its retry may have been
+    // overtaken (see `freshIdToken`). Checking here, before the cold path,
+    // covers both. With no fast path at all this repeats the entry check,
+    // which is harmless.
+    const beforeCold = this.freshIdToken();
+    if (beforeCold) return beforeCold;
+
     // Cold path: try each discovered candidate, discarding the ones the
     // endpoint rejects and keeping the first that exchanges cleanly.
     const { candidates, checked } = await this.extractToken();
+
+    // Resume point: the browser read is the slowest await in the file, so it
+    // is the one most likely to be overtaken. Return a session a sibling
+    // installed meanwhile before spending any exchange on what this read
+    // found. A successful exchange here would overwrite that session, possibly
+    // with a different account's.
+    const afterRead = this.freshIdToken();
+    if (afterRead) return afterRead;
+
     // A rejection that was NOT "this token is foreign" — kept so it can be
     // surfaced if nothing else works, instead of being flattened into the
     // "you are logged out" message it may well contradict.
@@ -210,6 +254,12 @@ export class FirebaseAuth {
         ) {
           firstUnexplainedRejection = err;
         }
+
+        // Resume point: a sibling may have installed a session while this
+        // candidate was in flight. Prefer it to the next candidate and to any
+        // error this loop would otherwise end on.
+        const installedMeanwhile = this.freshIdToken();
+        if (installedMeanwhile) return installedMeanwhile;
         continue;
       }
       if (!this.idToken) throw new Error('Firebase token exchange returned no ID token');
