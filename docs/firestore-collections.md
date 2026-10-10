@@ -346,7 +346,11 @@ cache and not on GraphQL. Do not re-derive this; the sweep below was exhaustive.
   zero entries on all of them. Verified at the protobuf byte level across all
   23 raw LevelDB values carrying the field — in every one the bytes after the
   field name are `12 02 4a 00`, i.e. `Value{array_value:{}}`, a zero-entry
-  array. **This is not a decoder bug.** (The raw scan sees 23 rather than 22
+  array. **This is not a decoder bug.** The decoder does read a non-empty
+  array: `tests/core/decoder-coverage.test.ts` ("extracts all new category
+  fields") writes a two-entry `partial_name_rules` into a synthetic LevelDB and
+  gets both entries back from `decodeCategories`, so a decoder that dropped the
+  entries would fail that test. (The raw scan sees 23 rather than 22
   because scanning values by substring also matches entries an ad-hoc key
   parser cannot attribute; the discrepancy is in that throwaway tooling, not in
   the data. Both counts agree that every array is empty.)
@@ -361,7 +365,8 @@ cache and not on GraphQL. Do not re-derive this; the sweep below was exhaustive.
   collection matching
   `rule|matcher|pattern|auto_categor|recategor|memoriz|learn`, and the field
   names of every non-timeseries collection were reviewed by hand.
-- **They never sync.** The `changes/{user_id}/{a,t}` change log only ever
+- **They never sync.** The `changes/{id}/{a,t}` change log (the middle segment
+  is a change id, not a user id; see `src/models/change.ts`) only ever
   references `items/…/accounts/…/transactions` paths.
 - **Not on GraphQL either** — see the "Rules" entry under "Tested-and-absent
   surface" in [`graphql-capture/hidden-mutations.md`](graphql-capture/hidden-mutations.md).
