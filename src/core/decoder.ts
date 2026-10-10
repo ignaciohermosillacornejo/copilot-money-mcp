@@ -418,6 +418,9 @@ export async function decodeAccounts(dbPath: string): Promise<Account[]> {
   const accounts: Account[] = [];
 
   for await (const doc of iterateDocuments(dbPath, { collection: 'accounts' })) {
+    // The `accounts` filter matches by leaf, so it admits `users/{uid}/accounts`
+    // too; skip it here exactly as decodeAllCollections does (#666).
+    if (isUserAccountCustomizationCollection(doc.collection)) continue;
     const acc = processAccount(doc.fields, doc.documentId);
     if (acc) accounts.push(acc);
   }
@@ -724,79 +727,26 @@ export async function decodeCategories(dbPath: string): Promise<Category[]> {
 }
 
 /**
- * User account customization data — EXTINCT CANDIDATE, kept on purpose (#666).
+ * `users/{uid}/accounts` — KNOWN COLLECTION, DELIBERATELY UNREAD (#666).
  *
- * `users/{uid}/accounts` was where Copilot once stored per-account display
- * overrides. It no longer is: the customizations live on the account document
- * itself, and both things that read this collection have been moved there —
- * the hidden-account filter in #624 (`Account.user_hidden`) and the account
- * name map in #660 (`Account.nickname`). Nothing under `src/` consumes this
- * decoder today; the remaining callers are `scripts/profile-database.ts` and
- * two test files.
+ * Copilot once stored per-account display overrides here (`name`, `hidden`,
+ * `order`). They moved onto the account document itself — `nickname` and
+ * `user_hidden` — and both readers moved with them (#624, #660). The decoder,
+ * its model and its fixtures had no consumer in `src/` and were deleted in
+ * #666. A 2026-10-10 scan of a real cache found no documents under this path
+ * at all, not even fieldless parent pointers.
  *
- * WHY IT IS STILL HERE. One cache cannot prove a collection is extinct — the
- * sampling-bias trap #622 documented, and the caveat #624 attached to exactly
- * this deletion. A scan of a real cache on 2026-09-16 (62,639 documents, 35
- * collection patterns) found ZERO `users/<uid>/accounts` documents, which is one
- * data point, not a proof: an older account, a different plan, or a
- * migration-in-progress user could still have them, and deleting the decoder
- * would turn "data we ignore" into "data we cannot see".
- *
- * WHAT WOULD SETTLE IT. `scripts/smoke/cache.ts` reports the observed document
- * count for this collection on every run, on whatever machine runs it, so the
- * evidence accumulates instead of being re-derived. Remove the decoder, the
- * loader, the fixtures and this interface once several independent caches have
- * reported zero — and NOT before, because the fixtures in
- * `tests/core/decoder-coverage.test.ts` are the only thing keeping the shape
- * described here recoverable.
+ * The PATH is kept, as this predicate, for one reason: it ends in `/accounts`,
+ * so the leaf-matching account routing would otherwise decode any such
+ * document as a real account, with a different field vocabulary. Both decode
+ * paths (`decodeAccounts` and `decodeAllCollections`) and
+ * `scripts/decode-coverage.ts` call this, so the collection stays named rather
+ * than falling into an "unknown" or a wrong bucket. `scripts/smoke/cache.ts`
+ * check 8 reports its document count on every run, so a cache where it is
+ * populated again is loud.
  */
-export interface UserAccountCustomization {
-  account_id: string;
-  /**
-   * The user's display override for the account.
-   *
-   * Historically "the name that beats the bank's label" — that job now belongs
-   * to `Account.nickname`, read through `preferredAccountName` (#660). Nothing
-   * reads this one.
-   */
-  name?: string;
-  user_id?: string;
-  hidden?: boolean;
-  order?: number;
-}
-
-/**
- * Decode user-defined account customizations from LevelDB database.
- *
- * EXTINCT CANDIDATE — see {@link UserAccountCustomization} for the evidence,
- * its limits, and what would justify deleting this. No `src/` caller.
- */
-export async function decodeUserAccounts(dbPath: string): Promise<UserAccountCustomization[]> {
-  const userAccounts: UserAccountCustomization[] = [];
-
-  // User accounts are in subcollection: users/{user_id}/accounts
-  for await (const doc of iterateDocuments(dbPath)) {
-    // Check if this is a user account document
-    if (!doc.collection.includes('users/') || !doc.collection.endsWith('/accounts')) {
-      continue;
-    }
-
-    const userAccount = processUserAccount(doc.fields, doc.documentId, doc.collection);
-    if (userAccount) userAccounts.push(userAccount);
-  }
-
-  // Deduplicate by account_id
-  const seen = new Set<string>();
-  const unique: UserAccountCustomization[] = [];
-
-  for (const userAccount of userAccounts) {
-    if (!seen.has(userAccount.account_id)) {
-      seen.add(userAccount.account_id);
-      unique.push(userAccount);
-    }
-  }
-
-  return unique;
+export function isUserAccountCustomizationCollection(collection: string): boolean {
+  return collection.includes('users/') && collection.endsWith('/accounts');
 }
 
 /**
@@ -813,7 +763,6 @@ export interface AllCollectionsResult {
   investmentSplits: InvestmentSplit[];
   items: Item[];
   categories: Category[];
-  userAccounts: UserAccountCustomization[];
   plaidAccounts: PlaidAccount[];
   balanceHistory: BalanceHistory[];
   holdingsHistoryMeta: HoldingsHistoryMeta[];
@@ -1900,47 +1849,6 @@ function processCategory(fields: Map<string, FirestoreValue>, docId: string): Ca
 }
 
 /**
- * Internal helper to process a user account document.
- */
-function processUserAccount(
-  fields: Map<string, FirestoreValue>,
-  docId: string,
-  collection: string
-): UserAccountCustomization | null {
-  const accountId = getString(fields, 'account_id') ?? docId;
-  const name = getString(fields, 'name');
-
-  if (!name) return null;
-
-  const userAccountData: UserAccountCustomization = {
-    account_id: accountId,
-    name,
-  };
-
-  const userIdMatch = collection.match(/users\/([^/]+)\/accounts/);
-  if (userIdMatch) {
-    userAccountData.user_id = userIdMatch[1];
-  }
-
-  const hidden = getBoolean(fields, 'hidden');
-  if (hidden !== undefined) userAccountData.hidden = hidden;
-
-  const order = getNumber(fields, 'order');
-  if (order !== undefined) userAccountData.order = order;
-
-  warnUnreadFields(
-    fields,
-    {
-      consumed: ['account_id', 'name', 'hidden', 'order'],
-      ignored: [],
-    },
-    { collection: 'user_accounts', docId }
-  );
-
-  return userAccountData;
-}
-
-/**
  * Internal helper to process a plaid account document (items/{id}/accounts/{id}).
  */
 function processPlaidAccount(
@@ -2948,7 +2856,6 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
   const rawInvestmentSplits: InvestmentSplit[] = [];
   const rawItems: Item[] = [];
   const rawCategories: Category[] = [];
-  const rawUserAccounts: UserAccountCustomization[] = [];
   const rawPlaidAccounts: PlaidAccount[] = [];
   const rawBalanceHistory: BalanceHistory[] = [];
   const rawHoldingsHistoryMeta: HoldingsHistoryMeta[] = [];
@@ -2972,10 +2879,10 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     const { fields, documentId, collection } = doc;
 
     // Route document to appropriate processor based on collection
-    // Note: User accounts (users/{user_id}/accounts) must be checked before regular accounts
-    if (collection.includes('users/') && collection.endsWith('/accounts')) {
-      const userAccount = processUserAccount(fields, documentId, collection);
-      if (userAccount) rawUserAccounts.push(userAccount);
+    if (isUserAccountCustomizationCollection(collection)) {
+      // Known and deliberately unread (#666). This branch MUST stay ahead of
+      // the `accounts` leaf match below, which would otherwise decode these
+      // documents as real accounts.
     } else if (collection.includes('/holdings_history/') && collection.endsWith('/history')) {
       const hh = processHoldingsHistory(fields, documentId, collection);
       if (hh) rawHoldingsHistory.push(hh);
@@ -3181,16 +3088,6 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     return nameA.localeCompare(nameB);
   });
 
-  // User accounts: dedupe by account_id
-  const userAccSeen = new Set<string>();
-  const userAccounts: UserAccountCustomization[] = [];
-  for (const userAccount of rawUserAccounts) {
-    if (!userAccSeen.has(userAccount.account_id)) {
-      userAccSeen.add(userAccount.account_id);
-      userAccounts.push(userAccount);
-    }
-  }
-
   // Plaid accounts: dedupe by plaid_account_id
   const plaidAccSeen = new Set<string>();
   const plaidAccounts: PlaidAccount[] = [];
@@ -3385,7 +3282,6 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     investmentSplits,
     items,
     categories,
-    userAccounts,
     plaidAccounts,
     balanceHistory,
     holdingsHistoryMeta,

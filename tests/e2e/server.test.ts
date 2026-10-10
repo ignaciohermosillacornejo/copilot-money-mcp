@@ -309,7 +309,6 @@ describe('CopilotMoneyServer E2E', () => {
       investmentPrices: [],
       items: [],
       userCategories: [],
-      userAccounts: [],
       categoryNameMap: new Map<string, string>(),
       accountNameMap: new Map<string, string>(),
     });
@@ -499,7 +498,6 @@ function createMockDb(): CopilotDatabase {
     investmentPrices: [...mockInvestmentPrices],
     items: [...mockItems],
     userCategories: [...mockUserCategories],
-    userAccounts: [],
     categoryNameMap: new Map<string, string>(),
     accountNameMap: new Map<string, string>(),
     tags: [...mockTags],
@@ -1426,7 +1424,6 @@ describe('transaction pagination edge cases', () => {
       investmentPrices: [],
       items: [],
       userCategories: [],
-      userAccounts: [],
       categoryNameMap: new Map<string, string>(),
       accountNameMap: new Map<string, string>(),
     });
@@ -1567,7 +1564,6 @@ describe('holdings cost basis edge cases', () => {
       investmentPrices: [],
       items: [],
       userCategories: [],
-      userAccounts: [],
       categoryNameMap: new Map(),
       accountNameMap: new Map(),
     });
@@ -1792,7 +1788,6 @@ describe('balance history downsampling edge cases', () => {
       investmentPrices: [],
       items: [],
       userCategories: [],
-      userAccounts: [],
       securities: [],
       categoryNameMap: new Map(),
       accountNameMap: new Map([

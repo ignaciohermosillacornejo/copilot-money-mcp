@@ -55,14 +55,13 @@ const dbPathErrorCases: Array<{
   { method: 'getInvestmentPrices', cacheFieldsToClear: ['_investmentPrices'] },
   { method: 'getItems', cacheFieldsToClear: ['_items'] },
   { method: 'getUserCategories', cacheFieldsToClear: ['_userCategories'] },
-  { method: 'getUserAccounts', cacheFieldsToClear: ['_userAccounts'] },
   {
     method: 'getCategoryNameMap',
     cacheFieldsToClear: ['_categoryNameMap', '_userCategories'],
   },
   {
     method: 'getAccountNameMap',
-    cacheFieldsToClear: ['_accountNameMap', '_userAccounts'],
+    cacheFieldsToClear: ['_accountNameMap', '_accounts'],
   },
   {
     method: 'getCategories',

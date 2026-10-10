@@ -12,7 +12,7 @@ import { existsSync, readdirSync, statSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { iterateDocuments } from '../src/core/leveldb-reader.js';
-import { collectionMatches } from '../src/core/decoder.js';
+import { collectionMatches, isUserAccountCustomizationCollection } from '../src/core/decoder.js';
 
 function findRealDatabase(): string | undefined {
   const home = homedir();
@@ -78,7 +78,8 @@ function normalizeCollectionPath(collection: string): string {
  */
 function isDecoded(rawCollection: string): boolean {
   // Mirror the exact if/else order from decodeAllCollections:
-  if (rawCollection.includes('users/') && rawCollection.endsWith('/accounts')) return true;
+  // Known and deliberately unread (#666) — accounted for, not unknown.
+  if (isUserAccountCustomizationCollection(rawCollection)) return true;
   if (rawCollection.includes('/holdings_history/') && rawCollection.endsWith('/history')) return true;
   if (rawCollection.includes('/holdings_history') && !rawCollection.endsWith('/history')) return true;
   if (rawCollection.endsWith('/balance_history')) return true;

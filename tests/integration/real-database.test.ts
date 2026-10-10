@@ -49,7 +49,6 @@ import type {
   Item,
   Category,
 } from '../../src/models/index.js';
-import type { UserAccountCustomization } from '../../src/core/decoder.js';
 
 /**
  * Find the real Copilot Money database path.
@@ -181,7 +180,6 @@ interface LoadedData {
   investmentPrices: InvestmentPrice[];
   items: Item[];
   userCategories: Category[];
-  userAccounts: UserAccountCustomization[];
   categoryNameMap: Map<string, string>;
   accountNameMap: Map<string, string>;
 }
@@ -213,7 +211,6 @@ describeWithRealDb('Real Copilot Money Database Integration', () => {
       const investmentPrices = await db.getInvestmentPrices();
       const items = await db.getItems();
       const userCategories = await db.getUserCategories();
-      const userAccounts = await db.getUserAccounts();
       const categoryNameMap = await db.getCategoryNameMap();
       const accountNameMap = await db.getAccountNameMap();
 
@@ -227,7 +224,6 @@ describeWithRealDb('Real Copilot Money Database Integration', () => {
         investmentPrices,
         items,
         userCategories,
-        userAccounts,
         categoryNameMap,
         accountNameMap,
       };
@@ -246,7 +242,6 @@ describeWithRealDb('Real Copilot Money Database Integration', () => {
       console.log(`   Investment Prices: ${investmentPrices.length.toLocaleString()}`);
       console.log(`   Items: ${items.length}`);
       console.log(`   User Categories: ${userCategories.length}`);
-      console.log(`   User Accounts: ${userAccounts.length}`);
       console.log('');
     } catch (error) {
       // Check for common LevelDB errors

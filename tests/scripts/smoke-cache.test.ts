@@ -455,8 +455,9 @@ describe('isAccountDocumentPattern', () => {
   });
 
   test('rejects a NESTED user-customization path, as the decoder does', () => {
-    // The decoder routes on `collection.includes('users/')`, so a path with
-    // the segment anywhere goes to processUserAccount. A startsWith-based
+    // The decoder skips on `collection.includes('users/')` (see
+    // isUserAccountCustomizationCollection), so a path with the segment
+    // anywhere never reaches processAccount. A startsWith-based
     // predicate here would admit it and read `user_hidden` off a document
     // that spells the flag `hidden`.
     expect(isAccountDocumentPattern('tenants/*/users/*/accounts')).toBe(false);

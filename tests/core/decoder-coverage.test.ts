@@ -7,7 +7,6 @@ import { __resetWarnedKeys } from '../../src/core/schema-warn.js';
 import {
   extractValue,
   decodeInvestmentPrices,
-  decodeUserAccounts,
   decodeItems,
   decodeAllCollections,
   decodeGoalHistory,
@@ -231,123 +230,6 @@ describe('decoder coverage', () => {
       const prices = await decodeInvestmentPrices(dbPath);
 
       expect(prices).toEqual([]);
-    });
-  });
-
-  describe('decodeUserAccounts', () => {
-    test('decodes user account customizations', async () => {
-      const dbPath = path.join(FIXTURES_DIR, 'user-accounts-db');
-      // User accounts are in subcollection: users/{user_id}/accounts
-      await createTestDatabase(dbPath, [
-        {
-          collection: 'users/user123/accounts',
-          id: 'acc1',
-          fields: {
-            account_id: 'acc1',
-            name: 'My Checking',
-            hidden: false,
-            order: 1,
-          },
-        },
-        {
-          collection: 'users/user123/accounts',
-          id: 'acc2',
-          fields: {
-            account_id: 'acc2',
-            name: 'My Savings',
-            hidden: true,
-            order: 2,
-          },
-        },
-      ]);
-
-      const userAccounts = await decodeUserAccounts(dbPath);
-
-      expect(userAccounts.length).toBe(2);
-      expect(userAccounts[0]?.name).toBe('My Checking');
-      expect(userAccounts[0]?.user_id).toBe('user123');
-    });
-
-    test('skips user accounts without name', async () => {
-      const dbPath = path.join(FIXTURES_DIR, 'user-accounts-no-name-db');
-      await createTestDatabase(dbPath, [
-        {
-          collection: 'users/user123/accounts',
-          id: 'acc1',
-          fields: {
-            account_id: 'acc1',
-            // No name - should be skipped
-            hidden: false,
-          },
-        },
-        {
-          collection: 'users/user123/accounts',
-          id: 'acc2',
-          fields: {
-            account_id: 'acc2',
-            name: 'Valid Account',
-          },
-        },
-      ]);
-
-      const userAccounts = await decodeUserAccounts(dbPath);
-
-      expect(userAccounts.length).toBe(1);
-      expect(userAccounts[0]?.name).toBe('Valid Account');
-    });
-
-    test('skips non-user-account collections', async () => {
-      const dbPath = path.join(FIXTURES_DIR, 'mixed-collections-db');
-      await createTestDatabase(dbPath, [
-        {
-          collection: 'accounts', // Not a user subcollection
-          id: 'acc1',
-          fields: {
-            account_id: 'acc1',
-            name: 'Regular Account',
-          },
-        },
-        {
-          collection: 'users/user123/accounts',
-          id: 'acc2',
-          fields: {
-            account_id: 'acc2',
-            name: 'User Account',
-          },
-        },
-      ]);
-
-      const userAccounts = await decodeUserAccounts(dbPath);
-
-      expect(userAccounts.length).toBe(1);
-      expect(userAccounts[0]?.name).toBe('User Account');
-    });
-
-    test('deduplicates user accounts by account_id', async () => {
-      const dbPath = path.join(FIXTURES_DIR, 'duplicate-user-accounts-db');
-      await createTestDatabase(dbPath, [
-        {
-          collection: 'users/user1/accounts',
-          id: 'acc1',
-          fields: {
-            account_id: 'acc1',
-            name: 'First Name',
-          },
-        },
-        {
-          collection: 'users/user2/accounts',
-          id: 'acc1',
-          fields: {
-            account_id: 'acc1',
-            name: 'Second Name',
-          },
-        },
-      ]);
-
-      const userAccounts = await decodeUserAccounts(dbPath);
-
-      // Should deduplicate by account_id
-      expect(userAccounts.length).toBe(1);
     });
   });
 
@@ -1295,29 +1177,46 @@ describe('decoder coverage', () => {
       expect(result.investmentSplits).toEqual([]);
       expect(result.items).toEqual([]);
       expect(result.categories).toEqual([]);
-      expect(result.userAccounts).toEqual([]);
     });
 
-    test('handles user accounts in subcollections', async () => {
+    test('users/{uid}/accounts documents are skipped, never decoded as accounts (#666)', async () => {
+      // The collection's reader was deleted in #666, but its path still ends in
+      // `/accounts`, so without an explicit skip the leaf-matching account
+      // routing would turn these customization documents into account rows.
+      // Both decode paths are checked: they route independently.
+      //
+      // The customization doc carries `current_balance` on purpose. Without it
+      // processAccount rejects the row by itself, and the test would stay green
+      // with the skip deleted. With it, the skip is the only thing keeping the
+      // row out.
       const dbPath = path.join(FIXTURES_DIR, 'all-collections-user-accounts-db');
       await createTestDatabase(dbPath, [
         {
-          collection: 'users/user123/accounts',
-          id: 'acc1',
+          collection: 'users/Hq7XtR2mVb9KpL4sNw3c/accounts',
+          id: 'Zp4QmT8vLr2NxK6bYc1W',
           fields: {
-            account_id: 'acc1',
-            name: 'My Custom Account Name',
-            hidden: false,
-            order: 1,
+            account_id: 'Zp4QmT8vLr2NxK6bYc1W',
+            name: 'Custom Name',
+            hidden: true,
+            current_balance: 100,
+          },
+        },
+        {
+          collection: 'accounts',
+          id: 'Bf9RkW3sPq7MzJ1tXv5D',
+          fields: {
+            account_id: 'Bf9RkW3sPq7MzJ1tXv5D',
+            name: 'Real Account',
+            current_balance: 100,
           },
         },
       ]);
 
-      const result = await decodeAllCollections(dbPath);
+      const all = await decodeAllCollections(dbPath);
+      const standalone = await decodeAccounts(dbPath);
 
-      expect(result.userAccounts.length).toBe(1);
-      expect(result.userAccounts[0]?.name).toBe('My Custom Account Name');
-      expect(result.userAccounts[0]?.user_id).toBe('user123');
+      expect(all.accounts.map((a) => a.account_id)).toEqual(['Bf9RkW3sPq7MzJ1tXv5D']);
+      expect(standalone.map((a) => a.account_id)).toEqual(['Bf9RkW3sPq7MzJ1tXv5D']);
     });
 
     test('handles internal_transfer transactions', async () => {

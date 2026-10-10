@@ -36,7 +36,7 @@ collection === target || collection.endsWith(`/${target}`)
 |---|---|---|---|
 | `transactions` | ~5,500+ | Yes | Financial transactions |
 | `accounts` | 0 observed | Yes | Top-level account collection. Decoded, and matched by leaf so `items/{id}/accounts` documents land here too — which is where all of them actually were on the cache measured 2026-09-16 |
-| `users/{user_id}/accounts` | 0 observed | Yes | User account customizations — **extinct candidate**, see its section below. Nothing in `src/` reads it (#624, #660) and the cache measured 2026-09-16 had none |
+| `users/{user_id}/accounts` | 0 observed | **Known, skipped** | Former user account customizations. Its decoder was deleted in #666, and both decode paths skip the path explicitly so its documents are never routed as accounts. None on the caches measured 2026-09-16 and 2026-10-10 — see its section below |
 | `users/{user_id}/recurring` | ~66 | Yes | Recurring transaction patterns |
 | `users/{user_id}/budgets` | ~36 | Yes | Budget configurations |
 | `users/{user_id}/categories` | ~32 | Yes | User-defined categories |
@@ -194,14 +194,24 @@ check 7 re-measures the independence on whatever cache it runs.
 
 **Path:** `users/{user_id}/accounts/{account_id}`
 
-User overrides for account display. Must be checked BEFORE main `accounts` since both end with `/accounts`.
+Former user overrides for account display. **Known but deliberately not decoded.**
 
-> **EXTINCT CANDIDATE.** Copilot no longer populates this collection: the overrides moved
+> **DECODER REMOVED (#666).** Copilot no longer populates this collection. The overrides moved
 > onto the account document itself, where `nickname` replaced `name` ([#660](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/660))
 > and `user_hidden` replaced `hidden` ([#624](bugs/624-hidden-accounts-not-filtered.md)).
-> Nothing in `src/` reads it; the decoder is kept because one cache cannot prove a
-> collection extinct (#622's sampling-bias trap), and `scripts/smoke/cache.ts` check 8
-> reports its document count on every run so the evidence accumulates (#666).
+> Nothing in `src/` read it, so the decoder, model and fixtures were deleted. A scan on
+> 2026-10-10 found no documents under the path at all, not even fieldless parent pointers.
+> That is still one cache, and one cache cannot prove a collection extinct (#622's
+> sampling-bias trap). The deletion rests on "nothing reads it", not on proof.
+>
+> The path is still NAMED in `src/core/decoder.ts` as `isUserAccountCustomizationCollection`.
+> It ends in `/accounts`, so the leaf-matching account routing would otherwise decode its
+> documents as real accounts. `decodeAccounts`, `decodeAllCollections` and
+> `scripts/decode-coverage.ts` all skip it through that predicate, so it counts as
+> accounted for rather than unknown. `scripts/smoke/cache.ts` check 8 reports its document
+> count on every run, and a non-zero count turns WARN.
+
+The field shape the deleted decoder read, kept so it stays recoverable:
 
 | Field | Type | Description |
 |---|---|---|

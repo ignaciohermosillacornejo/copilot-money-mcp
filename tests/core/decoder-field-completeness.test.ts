@@ -67,7 +67,7 @@
  *               `contents` is the load-bearing direction, and it is what
  *               catches deleting 'excluded'.
  *   non-vacuity discovery matching nothing reports one unambiguous reason
- *               instead of 27 confusing ones
+ *               instead of 26 confusing ones
  *
  * The backward direction also guards the DISCOVERY MECHANISM. If the regexes
  * below stop matching (a refactor to arrow functions, a list moved to module
@@ -110,12 +110,13 @@ const DECODER_PATH = join(import.meta.dir, '..', '..', 'src', 'core', 'decoder.t
 const SRC = readFileSync(DECODER_PATH, 'utf-8');
 
 /**
- * There are 27 `process*` functions today. The floor is a vacuity guard, not a
+ * There are 26 `process*` functions today (27 until #666 deleted
+ * processUserAccount). The floor is a vacuity guard, not a
  * budget: it exists so a discovery regex that silently stops matching reports
- * ONE unambiguous failure rather than 27 downstream ones. Raise it only if the
+ * ONE unambiguous failure rather than 26 downstream ones. Raise it only if the
  * decoder genuinely shrinks below it, and think hard first.
  */
-const MIN_PROCESSORS = 27;
+const MIN_PROCESSORS = 26;
 
 /**
  * Same idea one level down, over the field names inside those processors
@@ -842,16 +843,6 @@ const PINNED: Record<string, ProcessorPin> = {
       },
     ],
   },
-  processUserAccount: {
-    lists: {},
-    calls: [
-      {
-        collection: 'user_accounts',
-        consumed: ['account_id', 'name', 'hidden', 'order'],
-        ignored: [],
-      },
-    ],
-  },
   processPlaidAccount: {
     lists: {
       stringFields: [
@@ -1362,8 +1353,8 @@ describe('decoder field completeness (silent-drop class detector)', () => {
 
   // warnUnreadFields was per-processor opt-in with no registry. It is the only
   // detector for fields Copilot ADDS upstream, and deleting the call from
-  // processAccount or processHoldingsHistory left the whole suite green. All 27
-  // processors call it today; this is what keeps the 28th honest.
+  // processAccount or processHoldingsHistory left the whole suite green. All 26
+  // processors call it today; this is what keeps the 27th honest.
   test('every process* reports its unread fields', () => {
     expect(discovered.filter((p) => p.calls.length === 0).map((p) => p.name)).toEqual([]);
   });

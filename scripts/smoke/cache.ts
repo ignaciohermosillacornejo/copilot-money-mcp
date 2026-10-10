@@ -36,6 +36,7 @@ import {
   decodeInvestmentPrices,
   decodeItems,
   decodeCategories,
+  isUserAccountCustomizationCollection,
 } from '../../src/core/decoder.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import type { FirestoreValue } from '../../src/core/protobuf-parser.js';
@@ -288,9 +289,10 @@ export function nonEmptyRowsUnder(
  * ambiguity `docs/firestore-collections.md` warns about, and the reason this
  * is a named predicate rather than an inline `endsWith`.
  *
- * The exclusion is `includes('users/')`, not `startsWith`, to match the
- * decoder's own routing verbatim (`decodeAllCollections` in
- * `src/core/decoder.ts`, and `decodeUserAccounts` beside it). Real paths are
+ * The exclusion is the decoder's own predicate,
+ * `isUserAccountCustomizationCollection` (an `includes('users/')`, not a
+ * `startsWith`), so it matches both decode paths' routing verbatim
+ * (`decodeAccounts` and `decodeAllCollections` in `src/core/decoder.ts`). Real paths are
  * top-level today, so the two spellings agree — but this check's whole value
  * is that its row set is the one `processAccount` sees, and the permissive
  * spelling is the one that would quietly admit rows whose visibility
@@ -303,7 +305,7 @@ export function nonEmptyRowsUnder(
  * account processor would route. Left asymmetric rather than unified.
  */
 export function isAccountDocumentPattern(pattern: string): boolean {
-  if (pattern.includes('users/')) return false;
+  if (isUserAccountCustomizationCollection(pattern)) return false;
   return pattern === 'accounts' || pattern.endsWith('/accounts');
 }
 
@@ -655,10 +657,9 @@ async function main(): Promise<void> {
   // `users/*/accounts` was the founding entry and has been removed: #624
   // resolved by moving the two things that read it — the hidden-account filter
   // and the account name map — onto the account documents, where Copilot now
-  // puts those customizations. The collection is still decoded, so the data is
-  // there if it ever comes back, but no behaviour depends on it. It is not
-  // unwatched: check 8 below reports its document count as an extinct
-  // CANDIDATE, which is the question that replaced this one (#666).
+  // puts those customizations. Its decoder was then deleted (#666); the path
+  // is still named in the decoder so its documents are skipped rather than
+  // misrouted. It is not unwatched: check 8 below reports its document count.
   const DEPENDED_ON: string[] = [];
   const dependencies = reportExtinctDependencies(DEPENDED_ON, raw);
   record('extinct dependencies', dependencies.status, dependencies.detail);
@@ -843,35 +844,37 @@ async function main(): Promise<void> {
   }
 
   // ---------------------------------------------------------------------
-  // Check 8 — extinct candidate: users/<uid>/accounts (#624, #666).
+  // Check 8 — known-but-unread collection: users/<uid>/accounts (#624, #666).
   //
   // The inverse of check 3, and deliberately not part of it: check 3 fails
-  // when code DEPENDS on an empty collection. Nothing depends on this one any
-  // more — #624 moved the hidden filter and #660 moved the name map onto the
-  // account documents — so the question is not "is a filter a no-op" but "may
-  // the decoder, the model and the fixtures be deleted yet".
+  // when code DEPENDS on an empty collection. Nothing depends on this one —
+  // #624 moved the hidden filter and #660 moved the name map onto the account
+  // documents — and #666 deleted its decoder, model and fixtures. The decoder
+  // still NAMES the path (`isUserAccountCustomizationCollection`) so that its
+  // documents are skipped rather than routed as accounts.
   //
-  // One cache cannot answer that (#622's sampling-bias trap, which #624
-  // attached to exactly this deletion). What this check does is make every
-  // run on every machine a recorded data point, so the evidence accumulates
-  // instead of being re-derived by the next person who notices the dead code.
+  // One cache cannot prove a collection extinct (#622's sampling-bias trap,
+  // which #624 attached to exactly this deletion). The deletion was taken on
+  // the grounds that nothing read the code, not on proof of extinction, so this
+  // check keeps watching: a cache where the collection is populated again
+  // turns WARN, and that is the cue to decide whether the data needs a reader.
   // ---------------------------------------------------------------------
-  const EXTINCT_CANDIDATES = ['users/*/accounts'] as const;
-  for (const pattern of EXTINCT_CANDIDATES) {
+  const UNREAD_COLLECTIONS = ['users/*/accounts'] as const;
+  for (const pattern of UNREAD_COLLECTIONS) {
     const rows = nonEmptyRowsUnder(pattern, raw);
     if (rows === 0) {
       record(
-        `extinct candidate: ${pattern}`,
+        `unread collection: ${pattern}`,
         'PASS',
-        `zero documents on this cache — one more data point for deleting the decoder, ` +
-          `the model and the fixtures (#666). Deletion still waits on independent caches`
+        `zero documents on this cache — consistent with the decoder's deletion (#666)`
       );
     } else {
       record(
-        `extinct candidate: ${pattern}`,
+        `unread collection: ${pattern}`,
         'WARN',
-        `${rows} document(s) — NOT extinct on this cache, and nothing in src/ reads them. ` +
-          `Do not delete the path; re-open #666 with this cache as the counter-example`
+        `${rows} document(s) — NOT extinct on this cache, and the decoder skips them ` +
+          `unread since #666. Open an issue with this cache as the counter-example ` +
+          `and decide whether the data needs a reader again`
       );
     }
   }

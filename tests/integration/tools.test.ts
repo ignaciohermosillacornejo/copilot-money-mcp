@@ -317,7 +317,6 @@ function createMockDatabase(overrides?: {
     { category_id: 'shopping', name: 'Shopping', emoji: '🛍', order: 3 },
   ];
   (db as any)._userCategories = overrides?.userCategories ?? [...defaultUserCategories];
-  (db as any)._userAccounts = [];
   (db as any)._tags = overrides?.tags ?? [];
   (db as any)._securities = overrides?.securities ?? [];
   (db as any)._holdingsHistory = [];

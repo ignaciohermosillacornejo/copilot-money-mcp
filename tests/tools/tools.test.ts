@@ -192,7 +192,8 @@ const mockTransactionsWithFilters: Transaction[] = [
 // Hidden-ness lives on the account document itself (#624). It used to be
 // modelled here via a `users/{uid}/accounts` customization collection, which
 // Copilot no longer populates — so the fixture described a world in which the
-// filter worked while real caches got no filtering at all.
+// filter worked while real caches got no filtering at all. That collection's
+// reader is gone entirely since #666.
 const mockAccountsWithHidden: Account[] = [
   {
     account_id: 'acc_visible',
@@ -312,7 +313,6 @@ describe('CopilotMoneyTools', () => {
       { category_id: 'shopping', name: 'Shopping', emoji: '🛍', order: 3 },
       { category_id: 'education', name: 'Education & Coaching', emoji: '💸', order: 4 },
     ];
-    (db as any)._userAccounts = [];
     (db as any)._categoryNameMap = new Map<string, string>([
       ['food_and_drink', 'Food & Drink'],
       ['groceries', 'Groceries'],
@@ -1023,10 +1023,7 @@ describe('CopilotMoneyTools', () => {
 
   describe('getAccounts with hidden accounts', () => {
     beforeEach(() => {
-      // Deliberately seed the customization collection EMPTY, the way a real
-      // cache has it since Copilot moved these flags onto the account records.
       (db as any)._accounts = [...mockAccountsWithHidden];
-      (db as any)._userAccounts = [];
     });
 
     test('excludes hidden accounts by default', async () => {
@@ -1040,18 +1037,6 @@ describe('CopilotMoneyTools', () => {
       const result = await tools.getAccounts({ include_hidden: true });
       expect(result.count).toBe(2);
       expect(result.total_balance).toBe(6000.0);
-    });
-
-    test('does not rely on the users/{uid}/accounts customization collection (#624)', async () => {
-      // The whole bug: the filter consulted a collection that is always empty,
-      // so it silently did nothing. Populating that collection must not change
-      // the answer — if it does, the dead path has been reintroduced.
-      (db as any)._userAccounts = [{ account_id: 'acc_visible', hidden: true }];
-
-      const result = await tools.getAccounts();
-
-      expect(result.count).toBe(1);
-      expect(result.accounts[0].account_id).toBe('acc_visible');
     });
 
     test('include_hidden=true: default rows still discriminate hidden/deleted from active', async () => {
@@ -1962,7 +1947,6 @@ describe('CopilotMoneyTools - Location Filtering', () => {
     (db as any)._allCollectionsLoaded = true;
     (db as any)._accounts = mockAccounts;
     (db as any)._userCategories = [];
-    (db as any)._userAccounts = [];
   });
 
   test('filters by lat/lon coordinates within radius', async () => {
@@ -2098,7 +2082,6 @@ describe('CopilotMoneyTools - Recurring Transactions Detail View', () => {
     (db as any)._allCollectionsLoaded = true;
     (db as any)._accounts = mockAccounts;
     (db as any)._userCategories = [];
-    (db as any)._userAccounts = [];
   });
 
   test('a recurring on a HIDDEN account still resolves its account name (#683)', async () => {
@@ -2417,7 +2400,6 @@ describe('CopilotMoneyTools - getRecurringTransactions field selection (#606)', 
     (db as any)._allCollectionsLoaded = true;
     (db as any)._accounts = mockAccounts;
     (db as any)._userCategories = [];
-    (db as any)._userAccounts = [];
     (db as any)._recurring = []; // Isolate pattern-detection from Copilot subscriptions
     (db as any)._transactions = fatRecurringTransactions;
   });
@@ -2519,7 +2501,6 @@ describe('getCacheInfo', () => {
     (db as any)._investmentPrices = [];
     (db as any)._items = [];
     (db as any)._userCategories = [];
-    (db as any)._userAccounts = [];
     (db as any)._categoryNameMap = new Map<string, string>();
     (db as any)._accountNameMap = new Map<string, string>();
 
@@ -2563,7 +2544,6 @@ describe('refreshDatabase', () => {
     (db as any)._investmentPrices = [];
     (db as any)._items = [];
     (db as any)._userCategories = [];
-    (db as any)._userAccounts = [];
     (db as any)._categoryNameMap = new Map<string, string>();
     (db as any)._accountNameMap = new Map<string, string>();
 
@@ -2731,7 +2711,6 @@ describe('getConnectionStatus', () => {
     (db as any)._investmentPrices = [];
     (db as any)._items = [...mockItems];
     (db as any)._userCategories = [];
-    (db as any)._userAccounts = [];
     (db as any)._categoryNameMap = new Map<string, string>();
     (db as any)._accountNameMap = new Map<string, string>();
 
@@ -2805,7 +2784,6 @@ describe('getAccounts - total balance calculation', () => {
     (db as any)._investmentPrices = [];
     (db as any)._items = [];
     (db as any)._userCategories = [];
-    (db as any)._userAccounts = [];
     (db as any)._categoryNameMap = new Map<string, string>();
     (db as any)._accountNameMap = new Map<string, string>();
 
@@ -2842,7 +2820,6 @@ describe('getAccounts - total balance calculation', () => {
     ];
 
     (db as any)._accounts = mixedAccounts;
-    (db as any)._userAccounts = [];
 
     const result = await tools.getAccounts();
 
@@ -2871,7 +2848,6 @@ describe('getAccounts - total balance calculation', () => {
     ];
 
     (db as any)._accounts = assetAccounts;
-    (db as any)._userAccounts = [];
 
     const result = await tools.getAccounts();
     expect(result.total_balance).toBe(6000.0); // 1000 + 5000
@@ -2896,7 +2872,6 @@ describe('getAccounts - total balance calculation', () => {
     ];
 
     (db as any)._accounts = liabilityAccounts;
-    (db as any)._userAccounts = [];
 
     const result = await tools.getAccounts();
     expect(result.total_balance).toBe(-302000.0); // -(300000 + 2000)
@@ -2921,7 +2896,6 @@ describe('getAccounts - total balance calculation', () => {
     ];
 
     (db as any)._accounts = realEstateAccounts;
-    (db as any)._userAccounts = [];
 
     const result = await tools.getAccounts();
     // Home equity = 500000 - 400000 = 100000
@@ -2941,7 +2915,6 @@ describe('getAccounts - total balance calculation', () => {
     ];
 
     (db as any)._accounts = unknownAccounts;
-    (db as any)._userAccounts = [];
 
     const result = await tools.getAccounts();
     expect(result.total_balance).toBe(1000.0); // Treated as asset
@@ -3000,7 +2973,6 @@ describe('getInvestmentPrices', () => {
     (db as any)._allCollectionsLoaded = true;
     (db as any)._accounts = [];
     (db as any)._userCategories = [];
-    (db as any)._userAccounts = [];
     (db as any)._investmentPrices = [
       {
         investment_id: 'hash1',
@@ -3218,7 +3190,6 @@ describe('getHoldings', () => {
     (db as any)._investmentPrices = [];
     (db as any)._items = [];
     (db as any)._userCategories = [];
-    (db as any)._userAccounts = [];
     (db as any)._securities = [...mockSecurities];
     (db as any)._holdingsHistory = [...mockHoldingsHistoryData];
     tools = new CopilotMoneyTools(db);
@@ -3877,7 +3848,6 @@ describe('getInvestmentSplits', () => {
     (db as any)._investmentPrices = [];
     (db as any)._items = [];
     (db as any)._userCategories = [];
-    (db as any)._userAccounts = [];
     (db as any)._securities = [...synthSecurities];
     (db as any)._investmentSplits = [
       {

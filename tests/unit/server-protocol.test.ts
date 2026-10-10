@@ -87,7 +87,6 @@ function setupServerWithMockData(): CopilotMoneyServer {
   (db as any)._accounts = [...mockAccounts];
   // Also mock the auxiliary data needed for name resolution
   (db as any)._userCategories = []; // Empty - no user-defined categories
-  (db as any)._userAccounts = []; // Empty - no user-defined account names
   (db as any)._categoryNameMap = new Map<string, string>(); // Pre-compute empty map
   (db as any)._accountNameMap = new Map<string, string>(); // Pre-compute empty map
   (db as any)._recurring = []; // Empty recurring transactions
@@ -488,7 +487,6 @@ describe('CopilotMoneyServer - constructor and initialization', () => {
     (db as any)._accounts = [...mockAccounts];
     // Also mock auxiliary data for name resolution
     (db as any)._userCategories = [];
-    (db as any)._userAccounts = [];
     (db as any)._categoryNameMap = new Map<string, string>();
     (db as any)._accountNameMap = new Map<string, string>();
     (db as any)._recurring = [];

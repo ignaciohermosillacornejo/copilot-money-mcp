@@ -23,11 +23,11 @@
  * honestly-scoped one: the twin tests exercise the FIVE collections in
  * COLLECTIONS, on both their standalone and aggregate paths. Since #669 all
  * five route BOTH paths through one shared `deduplicate*` helper, so those two
- * paths are 5 of the decoder's 33 dedup blocks, not 8 of 36 — the drop is the
+ * paths are 5 of the decoder's 31 dedup blocks, not 8 of 36 — the drop is the
  * second copy going away, not coverage shrinking. A green run here still says
- * nothing about the other 28.
+ * nothing about the other 26.
  *
- * What IS enforced across all 33: the coverage guard discovers every dedup
+ * What IS enforced across all 31: the coverage guard discovers every dedup
  * BLOCK — each `new Set<string>()` allocation — and pins the KEY EXPRESSION it
  * tests. A block that is new, removed, or whose key changes from an id to a
  * content field fails there, and every block must be twin-tested, structural,
@@ -193,7 +193,7 @@ const DECODER_SRC = fs.readFileSync(
 // `if (!seen.has(` with exactly one space, so a comment sitting between `if`
 // and `(` used to be closed up and now leaves a run of spaces, and that shape
 // stops matching. No live instance, and it fails CLOSED — the block drops out
-// of the map and trips the non-vacuity floor and the 33-key equality — so it
+// of the map and trips the non-vacuity floor and the 31-key equality — so it
 // is loud rather than silent if one ever appears.
 //
 // A second limit of the same shape, named because the windows here are the
@@ -204,7 +204,7 @@ const DECODER_SRC = fs.readFileSync(
 // comment in a region no node's leading- or trailing-trivia scan reaches would
 // survive blanking, where the old unconditional regex removed it regardless.
 // Loud in that direction too: an unblanked comment that matched the guard regex
-// yields a wrong key and fails the 33-key equality and the non-vacuity floor,
+// yields a wrong key and fails the 31-key equality and the non-vacuity floor,
 // rather than passing quietly. It runs the other way too: a synthesised node
 // boundary landing mid-literal can pull a `//` that is inside a STRING into
 // leading trivia, blanking real characters — loud for the same reason, since a
@@ -380,12 +380,10 @@ const DEDUP_BLOCKS: Record<string, string> = {
     "key = `${price.security_id}/${price.price_type}/${price.date ?? price.month ?? 'unknown'}`",
   'decodeItems|seen': 'item.item_id',
   'decodeCategories|seen': 'category.category_id',
-  'decodeUserAccounts|seen': 'userAccount.account_id',
   'decodeAllCollections|histSeen': 'key = `${history.goal_id}:${history.month}`',
   'decodeAllCollections|splitSeen': 'split.security_id',
   'decodeAllCollections|itemSeen': 'item.item_id',
   'decodeAllCollections|catSeen': 'category.category_id',
-  'decodeAllCollections|userAccSeen': 'userAccount.account_id',
   'decodeAllCollections|plaidAccSeen': 'acc.plaid_account_id',
   'decodeAllCollections|bhSeen': 'bh.balance_id',
   'decodeAllCollections|hhMetaSeen': 'hhm.holdings_history_id',
@@ -432,11 +430,9 @@ const STRUCTURAL_KEYS: Record<string, string> = {
 const UNTESTED_BY_CHOICE = new Set([
   'decodeItems|seen',
   'decodeCategories|seen',
-  'decodeUserAccounts|seen',
   'decodeAllCollections|splitSeen',
   'decodeAllCollections|itemSeen',
   'decodeAllCollections|catSeen',
-  'decodeAllCollections|userAccSeen',
   'decodeAllCollections|plaidAccSeen',
   'decodeAllCollections|bhSeen',
   'decodeAllCollections|hhMetaSeen',
@@ -460,7 +456,7 @@ const UNTESTED_BY_CHOICE = new Set([
  * Slice out `open`..`close` starting at `openIdx`, counting nesting depth.
  *
  * ASSUMPTION: no string literal inside the region contains an unbalanced
- * bracket or brace. True for guard bodies today — zero of the 33 real dedup
+ * bracket or brace. True for guard bodies today — zero of the 31 real dedup
  * blocks contain one — but unlike the comment half of this same risk (closed
  * outright by the parser-owned stripComments, applied to the window before
  * balanced() ever sees it), the string half is not fixed here, only
@@ -593,7 +589,7 @@ const DISCOVERY_WINDOW = 3000;
  * pass silently end to end — the per-block scan in
  * `discoverAggregatePushTargets` still finds no genuine guard for the fake
  * declaration and returns `{}`, so the count-pin still catches it at
- * "Expected: 22, Received: 0" — only the DIAGNOSTIC quality regresses (caught
+ * "Expected: 21, Received: 0" — only the DIAGNOSTIC quality regresses (caught
  * two layers downstream instead of named here), not correctness. Note it is
  * the count-pin ALONE that does this, and the conjunction that used to be
  * written here — "and the `AGGREGATE_SET_VAR` pin" — stopped being true at
@@ -810,7 +806,7 @@ const TWIN_TESTED = new Set(
  *
  * The window is bounded by the NEXT function declaration as well as by
  * DISCOVERY_WINDOW (second review follow-up on #688 review). A character
- * count is not a syntactic boundary, and 18 of the decoder's 33 blocks have
+ * count is not a syntactic boundary, and 18 of the decoder's 31 blocks have
  * a 3 000-character window that reaches past the end of their own function
  * today — so a Set whose own guard is removed or refactored away would be
  * pinned from the NEXT function's guard instead of reported as unguarded.
@@ -818,7 +814,7 @@ const TWIN_TESTED = new Set(
  * forward scan this file's sibling closed with `balanced()` and
  * `decodeAllCollectionsBody()`; this was the last FUNCTION-level instance of
  * it left in either file. Bounding it changed no pin: comparing the
- * char-bounded and declaration-bounded resolution across all 33 real blocks
+ * char-bounded and declaration-bounded resolution across all 31 real blocks
  * yields 0 differences, so it closes a hole rather than moving a pin.
  *
  * "Function-level" is the qualifier that makes that claim true (third review
@@ -827,7 +823,7 @@ const TWIN_TESTED = new Set(
  * decodeAllCollectionsBody. It is safe for a reason rather than by
  * construction — its guard regex is `if (!`-anchored, so a window that runs
  * off can only find a guard belonging to another Set, and that yields either
- * a duplicate push target (throws) or none (fails the `toBe(22)` pin). Both
+ * a duplicate push target (throws) or none (fails the `toBe(21)` pin). Both
  * are loud. Left as-is rather than bounded, because the reason is real and
  * bounding it would be a change with no failing case behind it.
  *
@@ -838,7 +834,7 @@ const TWIN_TESTED = new Set(
  * class or object method, or an indented nested `function` is attributed to
  * whichever top-level function precedes it, and its window would extend to
  * the next top-level declaration rather than to the end of its real
- * enclosing scope. Not reachable in the decoder today — all 33 blocks sit
+ * enclosing scope. Not reachable in the decoder today — all 31 blocks sit
  * at one indent level directly inside a top-level `function` — but it is
  * why the duplicate-block throw below says "the same enclosing declaration"
  * rather than "the same function": the scanner cannot tell the difference.
@@ -882,7 +878,7 @@ function discoverDedupBlocks(source: string = DECODER_SRC): Record<string, strin
     // Both produce a key that is wrong and well-formed at the same time, which
     // then passes fieldFreeBlocks and looks like a good answer to whoever
     // regenerates DEDUP_BLOCKS from it. The declaration bound above does not
-    // help with either: it separates functions, and 22 of the decoder's 33
+    // help with either: it separates functions, and 21 of the decoder's 31
     // Sets share decodeAllCollections, so their windows overlap freely.
     //
     // The sibling scanner is immune to both for free, because its `if (!`
@@ -890,9 +886,9 @@ function discoverDedupBlocks(source: string = DECODER_SRC): Record<string, strin
     // the two scanners finally agree on what counts as "this Set's guard".
     //
     // Verified before tightening, both times: no Set name in the decoder is a
-    // proper suffix of another (33 Sets, 24 distinct names, 0 suffix pairs),
-    // and all 33 `.has(` receivers are bare identifiers (0 preceded by a dot).
-    // Neither tightening changes any of the 33 resolved keys — holes closed,
+    // proper suffix of another (31 Sets, 23 distinct names, 0 suffix pairs),
+    // and all 31 `.has(` receivers are bare identifiers (0 preceded by a dot).
+    // Neither tightening changes any of the 31 resolved keys — holes closed,
     // no pins moved.
     //
     // The `\)\s*\)` tail is load-bearing and is NOT an `if (!` remnant: it is
@@ -908,7 +904,7 @@ function discoverDedupBlocks(source: string = DECODER_SRC): Record<string, strin
     // "String(row.id". Not a detection hole (the string still moves when the
     // field does, so the pin and fieldFreeBlocks both stay honest), but a
     // maintainer regenerating the pin would get an entry that does not parse.
-    // No live instance: 0 of the decoder's 33 `.has(` sites nest a call.
+    // No live instance: 0 of the decoder's 31 `.has(` sites nest a call.
     // Capturing with `balanced()` would fix it, and is deliberately not done
     // here — that is a behaviour change to a scanner with no failing case
     // behind it, which is the same reason the sibling's per-Set window was
@@ -1011,7 +1007,7 @@ describe('dedup coverage is declared, not assumed (#668 review)', () => {
     // The justification here used to read "the exact comparison below would
     // pass over an empty object." That is false, and saying so was the same
     // defect this file exists to remove: `expect(discovered).toEqual(
-    // DEDUP_BLOCKS)` compares against a populated 33-entry literal, so `{}`
+    // DEDUP_BLOCKS)` compares against a populated 31-entry literal, so `{}`
     // fails it loudly. Corrected rather than deleted, because the floor does
     // earn its place — for a different reason (second review follow-up).
     //
@@ -1022,7 +1018,7 @@ describe('dedup coverage is declared, not assumed (#668 review)', () => {
     // `discovered` (the field-free invariant, the twin-tested check) is
     // vacuously satisfied by an empty map. A floor is the one assertion in
     // this describe that survives regenerating the pin, which is the same
-    // argument the `toBe(22)` count pin makes two tests down.
+    // argument the `toBe(21)` count pin makes two tests down.
     //
     // `>= 30` is still a margin rather than a pin, unlike that count: this
     // scan covers blocks the file does not otherwise enumerate one by one,
@@ -1035,27 +1031,28 @@ describe('dedup coverage is declared, not assumed (#668 review)', () => {
     expect(Object.keys(discovered).length).toBeGreaterThanOrEqual(30);
   });
 
-  test('aggregate push-target discovery finds exactly 22 blocks (count pin, not a loose floor)', () => {
+  test('aggregate push-target discovery finds exactly 21 blocks (count pin, not a loose floor)', () => {
     // Renamed from "...finds blocks at all" (review follow-up): that name
-    // described a non-vacuity check, but the value — 22, the real count —
+    // described a non-vacuity check, but the value — 21, the real count —
     // behaves as an exact-count PIN with zero headroom.
     //
     // Was 25 until #669 extracted the recurring/budgets/goals dedups out of
     // decodeAllCollections into shared helpers, taking their three Sets — and
     // with them every entry AGGREGATE_SET_VAR used to filter down to — out of
     // this scan's view. The three blocks did not stop being checked; they
-    // stopped being duplicated.
+    // stopped being duplicated. Was 22 until #666 deleted the extinct
+    // users/{uid}/accounts decoder and its `userAccSeen` block with it.
     //
     // Asserted with `toBe`, not `toBeGreaterThanOrEqual` (second review
-    // follow-up): "exactly 22" is a TWO-sided claim and a floor is one-sided,
+    // follow-up): "exactly 21" is a TWO-sided claim and a floor is one-sided,
     // so a 23rd aggregate dedup block used to pass this test in silence — a
     // test whose name asserted more than its expression did, which is the
     // exact defect this file exists to remove. Now removing a legitimate
-    // collection from decodeAllCollections turns this red at "Expected: 22,
-    // Received: 21" and adding one at "Received: 23". That tightness is
+    // collection from decodeAllCollections turns this red at "Expected: 21,
+    // Received: 20" and adding one at "Received: 22". That tightness is
     // deliberate, not an oversight — do not "fix" it by loosening back toward
     // a wide margin (contrast the sibling `discovered` floor at `>= 30`
-    // against 33 real, which genuinely IS a margin, chosen because that scan
+    // against 31 real, which genuinely IS a margin, chosen because that scan
     // covers blocks this file does not otherwise pin one by one). The
     // tightness here is what turns decodeAllCollectionsBody's two
     // silent-partial-slice failure modes — an anchor matching an embedded
@@ -1067,7 +1064,7 @@ describe('dedup coverage is declared, not assumed (#668 review)', () => {
     // collections AGGREGATE_SET_VAR filtered down to, and that number is zero
     // since #669 — a floor of 0 would be satisfied by a scan that found
     // nothing at all.
-    expect(Object.keys(AGGREGATE_PUSH_TARGETS).length).toBe(22);
+    expect(Object.keys(AGGREGATE_PUSH_TARGETS).length).toBe(21);
   });
 
   test('derived AGGREGATE_SET_VAR is unchanged', () => {
@@ -1080,8 +1077,8 @@ describe('dedup coverage is declared, not assumed (#668 review)', () => {
     // repopulates this map and fails here.
     //
     // Empty is NOT vacuous, but it is one-sided, so it does not stand alone:
-    // the `toBe(22)` pin above proves the scan that feeds it still finds all
-    // 22 real aggregate blocks, so an empty result here means "none of them
+    // the `toBe(21)` pin above proves the scan that feeds it still finds all
+    // 21 real aggregate blocks, so an empty result here means "none of them
     // belongs to a COLLECTIONS entry", not "the scan found nothing".
     expect(AGGREGATE_SET_VAR).toEqual({});
   });
@@ -1100,7 +1097,7 @@ describe('dedup coverage is declared, not assumed (#668 review)', () => {
     //   - `discovered` sees the helper, not its callers. The helper still
     //     exists and `decodeRecurring` still calls it, so DEDUP_BLOCKS is
     //     byte-identical with the aggregate call gone.
-    //   - `toBe(22)` and the empty AGGREGATE_SET_VAR count `new Set<string>()`
+    //   - `toBe(21)` and the empty AGGREGATE_SET_VAR count `new Set<string>()`
     //     allocations INSIDE decodeAllCollections. A removed call allocates
     //     no Set, so it moves neither number.
     //   - the aggregate twin test compares a SET of ids against two
@@ -1587,7 +1584,7 @@ export function decodeTwoScopes(): unknown {
 
 describe('discoverDedupBlocks bounds its window at the next declaration (#688 review)', () => {
   // DISCOVERY_WINDOW is a character count, not a syntactic boundary, and 18 of
-  // the decoder's 33 real blocks have a 3 000-character window that reaches
+  // the decoder's 31 real blocks have a 3 000-character window that reaches
   // past the end of their own function. So a Set whose guard was removed or
   // refactored away does not come back as unguarded — the scan walks into the
   // NEXT function and pins it to a guard that belongs to something else.
@@ -1634,7 +1631,7 @@ describe('discoverDedupBlocks anchors the Set name it matches (#688 review)', ()
   // `catSeen` is a suffix of `subcatSeen`, so an un-anchored
   // `${variable}\.has\(` matches the LONGER identifier's guard. The
   // declaration bound does not help here: both Sets live in one function, and
-  // inside decodeAllCollections 22 of the decoder's 33 Sets do exactly that,
+  // inside decodeAllCollections 21 of the decoder's 31 Sets do exactly that,
   // so their windows overlap freely. The sibling scanner is immune for free —
   // its `if (!` prefix forces the name to start right after the `!`.
   //

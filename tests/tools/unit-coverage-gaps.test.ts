@@ -38,7 +38,6 @@ function createMockDb(
   a._investmentSplits = [];
   a._items = [];
   a._userCategories = overrides.userCategories ?? [];
-  a._userAccounts = [];
   a._categoryNameMap = new Map<string, string>();
   a._accountNameMap = new Map<string, string>();
   a._securities = [];

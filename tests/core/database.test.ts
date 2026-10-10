@@ -92,7 +92,6 @@ describe('CopilotDatabase', () => {
     (db as any)._investmentSplits = [];
     (db as any)._items = [];
     (db as any)._userCategories = [];
-    (db as any)._userAccounts = [];
     (db as any)._categoryNameMap = new Map<string, string>();
     (db as any)._accountNameMap = new Map<string, string>();
   });
@@ -686,7 +685,6 @@ describe('CopilotDatabase', () => {
         },
         { account_id: 'acc_nameless', current_balance: 300 },
       ];
-      (db as any)._userAccounts = [];
       (db as any)._accountNameMap = null;
       (db as any)._allCollectionsLoaded = true;
     });
@@ -708,17 +706,6 @@ describe('CopilotDatabase', () => {
     test('omits accounts with no name at all rather than mapping undefined', async () => {
       const map = await db.getAccountNameMap();
       expect(map.has('acc_nameless')).toBe(false);
-    });
-
-    test('ignores the users/{uid}/accounts collection entirely', async () => {
-      // Populating the dead collection must not change the answer; if it does,
-      // the path that made this a silent no-op has been reintroduced.
-      (db as any)._userAccounts = [{ account_id: 'acc_plain', name: 'Ghost Name' }];
-      (db as any)._accountNameMap = null;
-
-      const map = await db.getAccountNameMap();
-
-      expect(map.get('acc_plain')).toBe('Bank Checking');
     });
   });
 

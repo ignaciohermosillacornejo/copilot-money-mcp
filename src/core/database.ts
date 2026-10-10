@@ -20,9 +20,7 @@ import {
   periodInRange,
   decodeItems,
   decodeCategories,
-  decodeUserAccounts,
   decodeAllCollectionsIsolated,
-  UserAccountCustomization,
   AllCollectionsResult,
 } from './decoder.js';
 import type { DecodeStatsByCollection } from './schema-warn.js';
@@ -186,7 +184,6 @@ export class CopilotDatabase {
   private _items: Item[] | null = null;
   private _userCategories: Category[] | null = null;
   private _categoryNameMap: Map<string, string> | null = null;
-  private _userAccounts: UserAccountCustomization[] | null = null;
   private _accountNameMap: Map<string, string> | null = null;
   private _securities: Security[] | null = null;
   private _tags: Tag[] | null = null;
@@ -203,7 +200,6 @@ export class CopilotDatabase {
   private _loadingInvestmentPrices: Promise<InvestmentPrice[]> | null = null;
   private _loadingItems: Promise<Item[]> | null = null;
   private _loadingUserCategories: Promise<Category[]> | null = null;
-  private _loadingUserAccounts: Promise<UserAccountCustomization[]> | null = null;
 
   // Batch loading state
   private _loadingAllCollections: Promise<AllCollectionsResult> | null = null;
@@ -308,7 +304,6 @@ export class CopilotDatabase {
     this._items = null;
     this._userCategories = null;
     this._categoryNameMap = null;
-    this._userAccounts = null;
     this._accountNameMap = null;
     this._securities = null;
     this._holdingsHistory = null;
@@ -325,7 +320,6 @@ export class CopilotDatabase {
     this._loadingInvestmentPrices = null;
     this._loadingItems = null;
     this._loadingUserCategories = null;
-    this._loadingUserAccounts = null;
     this._loadingAllCollections = null;
 
     // Reset batch loading state
@@ -362,7 +356,6 @@ export class CopilotDatabase {
     investmentSplits?: InvestmentSplit[];
     items?: Item[];
     userCategories?: Category[];
-    userAccounts?: UserAccountCustomization[];
     securities?: Security[];
     tags?: Tag[];
     holdingsHistory?: HoldingsHistory[];
@@ -380,7 +373,6 @@ export class CopilotDatabase {
     if (data.investmentSplits !== undefined) this._investmentSplits = data.investmentSplits;
     if (data.items !== undefined) this._items = data.items;
     if (data.userCategories !== undefined) this._userCategories = data.userCategories;
-    if (data.userAccounts !== undefined) this._userAccounts = data.userAccounts;
     if (data.securities !== undefined) this._securities = data.securities;
     if (data.tags !== undefined) this._tags = data.tags;
     if (data.holdingsHistory !== undefined) this._holdingsHistory = data.holdingsHistory;
@@ -686,7 +678,6 @@ export class CopilotDatabase {
       this._investmentSplits = result.investmentSplits;
       this._items = result.items;
       this._userCategories = result.categories;
-      this._userAccounts = result.userAccounts;
       this._securities = result.securities;
       this._holdingsHistory = result.holdingsHistory;
       this._tags = result.tags;
@@ -944,36 +935,6 @@ export class CopilotDatabase {
       return this._userCategories;
     } finally {
       this._loadingUserCategories = null;
-    }
-  }
-
-  /**
-   * Load user accounts with caching.
-   * Uses batch loading for optimal performance on first access.
-   *
-   * Feeds {@link CopilotDatabase.getUserAccounts}, which is an extinct
-   * candidate — see that method's note (#666).
-   */
-  private async loadUserAccounts(): Promise<UserAccountCustomization[]> {
-    if (this._userAccounts !== null) {
-      return this._userAccounts;
-    }
-
-    if (!this._allCollectionsLoaded) {
-      await this.loadAllCollections();
-      return this._userAccounts ?? [];
-    }
-
-    if (this._loadingUserAccounts !== null) {
-      return this._loadingUserAccounts;
-    }
-
-    this._loadingUserAccounts = decodeUserAccounts(this.requireDbPath());
-    try {
-      this._userAccounts = await this._loadingUserAccounts;
-      return this._userAccounts;
-    } finally {
-      this._loadingUserAccounts = null;
     }
   }
 
@@ -1340,33 +1301,13 @@ export class CopilotDatabase {
   }
 
   /**
-   * Get user-defined account customizations from `users/{uid}/accounts`.
-   *
-   * EXTINCT CANDIDATE, kept deliberately — see
-   * {@link UserAccountCustomization} in `src/core/decoder.ts` for the evidence,
-   * its limits, and the bar for deleting the path (#666).
-   *
-   * The description this JSDoc used to carry — "user-defined account names
-   * which override the bank's internal names" — describes what
-   * `Account.nickname` does now (#660). This collection is empty on the caches
-   * we have looked at, so the method reliably returns `[]`; no `src/` caller
-   * depends on it.
-   *
-   * @returns List of user account customizations
-   */
-  async getUserAccounts(): Promise<UserAccountCustomization[]> {
-    const userAccounts = await this.loadUserAccounts();
-    return [...userAccounts];
-  }
-
-  /**
    * Build a map of account ID to the name a user would recognize.
    *
    * Sourced from the account documents themselves, preferring a user-set
    * `nickname` over the institution-supplied `name`.
    *
-   * This previously read the `users/{uid}/accounts` customization collection,
-   * which Copilot no longer populates — so the map came back EMPTY on every
+   * This previously read the `users/{uid}/accounts` customization collection
+   * (whose reader was since deleted, #666), which Copilot no longer populates — so the map came back EMPTY on every
    * real cache and its one consumer (`get_balance_history`'s `account_name`)
    * silently returned `undefined` for every row. Same root cause as the hidden
    * filter in #624: those customizations moved onto the account records.

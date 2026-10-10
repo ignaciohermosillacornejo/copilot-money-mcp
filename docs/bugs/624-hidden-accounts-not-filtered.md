@@ -70,6 +70,15 @@ reports the collection's document count on every run so the evidence accumulates
 whatever machine runs it instead of being re-derived. Delete it when several independent
 caches have reported zero.
 
+**Then (#666, 2026-10-10): removed.** A second independent cache never arrived, and the
+decision was taken on a different ground: nothing in `src/` read the code, so keeping it
+bought nothing. The scan that day found no documents under the path at all, not even
+fieldless parent pointers, on the same single cache. The decoder, model, loader and
+fixtures are gone. The path itself is kept as `isUserAccountCustomizationCollection`, and
+both decode paths skip it explicitly. Its leaf is `/accounts`, so without the skip a
+returning document would be decoded as a real account. Check 8 still reports the count, and
+a non-zero count is now the cue to decide whether the data needs a reader again.
+
 ## Detector
 
 None — and notably, the detectors added for #622 (cross-path decode parity) would **not**

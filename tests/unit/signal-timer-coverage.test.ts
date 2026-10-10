@@ -28,7 +28,6 @@ function setupServerWithMockData(): CopilotMoneyServer {
   (db as any)._transactions = [];
   (db as any)._accounts = [];
   (db as any)._userCategories = [];
-  (db as any)._userAccounts = [];
   (db as any)._categoryNameMap = new Map<string, string>();
   (db as any)._accountNameMap = new Map<string, string>();
   (db as any)._recurring = [];

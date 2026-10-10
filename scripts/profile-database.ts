@@ -84,7 +84,6 @@ async function profile() {
     { name: 'investmentPrices', loader: () => db.getInvestmentPrices() },
     { name: 'items', loader: () => db.getItems() },
     { name: 'userCategories', loader: () => db.getUserCategories() },
-    { name: 'userAccounts', loader: () => db.getUserAccounts() },
   ];
 
   console.log('\n⏳ Loading entities...');
