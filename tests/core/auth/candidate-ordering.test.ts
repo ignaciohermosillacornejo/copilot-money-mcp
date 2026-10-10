@@ -950,3 +950,207 @@ describe('an endpoint-level failure does not discard a known-good cached token (
     }
   );
 });
+
+/**
+ * Every suspension point in `getIdToken` is a place another caller can finish
+ * first (#770, following #765).
+ *
+ * `getIdToken` has no in-flight dedupe and the GraphQL client calls it once per
+ * request, so while one caller is parked on an `await`, a sibling can complete
+ * an exchange and install a live session on the SAME object. #765 closed that
+ * for the first suspension point, the fast-path exchange. The same hole was
+ * left open at the three later ones: the one-shot retry, the cold-path browser
+ * read, and each cold-path candidate exchange. A caller that resumed at any of
+ * them went on as though nothing had changed, and with nothing usable in its
+ * own hands it reported "No Copilot Money session found" while its own object
+ * held a working token. That is #722's symptom again: telling a logged-in user
+ * to log in.
+ *
+ * Each case parks one caller at a single resume point, lets a sibling install a
+ * session that has a real expiry, then releases the parked caller. Before the
+ * fix every one of them rejected with the login message.
+ */
+describe('a session installed at any resume point is returned, not reported as logged out (#770)', () => {
+  const candidate = (token: string, scoped: boolean): TokenResult => ({
+    token,
+    browser: 'Chrome',
+    scoped,
+  });
+
+  /** Exchanges cleanly, for a full hour. */
+  const LIVE = syntheticToken('live');
+  /** Copilot-scoped but finished: the endpoint calls it INVALID_REFRESH_TOKEN. */
+  const DEAD = syntheticToken('dead');
+
+  const deadVerdict = () =>
+    Response.json({ error: { message: 'INVALID_REFRESH_TOKEN' } }, { status: 400 });
+
+  const session = (refreshToken: string, expiresIn: string) =>
+    Response.json({
+      id_token: ID_TOKEN,
+      refresh_token: refreshToken,
+      expires_in: expiresIn,
+      token_type: 'Bearer',
+      user_id: 'synthetic-user',
+    });
+
+  /** A promise plus the function that settles it. */
+  function gate(): { opened: Promise<void>; open: () => void } {
+    let open: () => void = () => {};
+    const opened = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    return { opened, open };
+  }
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  test('a session installed while the cold-path browser read was in flight', async () => {
+    // The MEDIUM item in #770, as stated there. Both callers start cold. The
+    // second caller's browser read is held until the first caller has
+    // installed a live session, and then it finds only a dead candidate,
+    // which on its own would end in the login message.
+    const attempts: string[] = [];
+    globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
+      const sent = String(options?.body ?? '');
+      if (sent.includes(LIVE)) {
+        attempts.push('live');
+        return Promise.resolve(session(LIVE, '3600'));
+      }
+      attempts.push('dead');
+      return Promise.resolve(deadVerdict());
+    }) as unknown as typeof fetch;
+
+    const secondRead = gate();
+    let extractions = 0;
+    const auth = new FirebaseAuth(async () => {
+      extractions += 1;
+      if (extractions === 1) return { candidates: [candidate(LIVE, true)], checked: ['Chrome'] };
+      await secondRead.opened;
+      return { candidates: [candidate(DEAD, true)], checked: ['Chrome'] };
+    });
+
+    // Both start before either can install anything: `getIdToken` runs to its
+    // first await synchronously.
+    const first = auth.getIdToken();
+    const second = auth.getIdToken();
+    expect(extractions).toBe(2);
+
+    expect(await first).toBe(ID_TOKEN);
+    secondRead.open();
+    expect(await second).toBe(ID_TOKEN);
+
+    // The check sits right after the browser read, before the candidate loop:
+    // the second caller spends no exchange on what its read found.
+    expect(attempts).toEqual(['live']);
+  });
+
+  test('a session installed while a cold-path candidate exchange was in flight', async () => {
+    // The browser read has already come back and the caller is exchanging the
+    // only candidate it found. A sibling installs a session meanwhile, and the
+    // candidate then turns out to be dead.
+    const attempts: string[] = [];
+    const deadAnswered = gate();
+    globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
+      const sent = String(options?.body ?? '');
+      if (sent.includes(LIVE)) {
+        attempts.push('live');
+        return Promise.resolve(session(LIVE, '3600'));
+      }
+      attempts.push('dead');
+      return deadAnswered.opened.then(deadVerdict);
+    }) as unknown as typeof fetch;
+
+    let extractions = 0;
+    const auth = new FirebaseAuth(() => {
+      extractions += 1;
+      const found = extractions === 1 ? LIVE : DEAD;
+      return Promise.resolve({ candidates: [candidate(found, true)], checked: ['Chrome'] });
+    });
+
+    const first = auth.getIdToken();
+    const second = auth.getIdToken();
+    expect(await first).toBe(ID_TOKEN);
+    deadAnswered.open();
+    expect(await second).toBe(ID_TOKEN);
+
+    // Precondition, not decoration. If the second caller had returned at the
+    // post-read check instead, this case would be a copy of the one above and
+    // would leave the in-loop check without a test.
+    expect(attempts).toEqual(['live', 'dead']);
+    expect(extractions).toBe(2);
+  });
+
+  test('a session installed while the one-shot retry was in flight', async () => {
+    // The retry (guard 2) is only reached when the replacement session's own
+    // lifetime is already inside the expiry margin. So here the token another
+    // caller installs (MID) expires the moment it is stored. MID turns out to
+    // be dead too, and while the retry against it is in flight a third caller
+    // installs a session with a real expiry.
+    const BOOT = syntheticToken('boot');
+    const OLD = syntheticToken('old');
+    const MID_SOURCE = syntheticToken('mid-source');
+    const MID = syntheticToken('mid');
+
+    const oldAnswered = gate();
+    const retryAnswered = gate();
+    const retrySent = gate();
+    let oldSeen = 0;
+    let midSeen = 0;
+
+    globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
+      const sent = String(options?.body ?? '');
+      if (sent.includes(BOOT)) return Promise.resolve(session(OLD, '0'));
+      if (sent.includes(MID_SOURCE)) return Promise.resolve(session(MID, '0'));
+      if (sent.includes(LIVE)) return Promise.resolve(session(LIVE, '3600'));
+      if (sent.includes(OLD)) {
+        oldSeen += 1;
+        // The first caller's verdict lands at once; the second's is held until
+        // the first has installed MID.
+        return oldSeen === 1 ? Promise.resolve(deadVerdict()) : oldAnswered.opened.then(deadVerdict);
+      }
+      if (sent.includes(MID)) {
+        midSeen += 1;
+        if (midSeen === 1) {
+          // The second caller's retry: held until the third caller is done.
+          retrySent.open();
+          return retryAnswered.opened.then(deadVerdict);
+        }
+        return Promise.resolve(deadVerdict());
+      }
+      throw new Error('unexpected token in the exchange fake');
+    }) as unknown as typeof fetch;
+
+    // 1: bootstrap. 2: the first caller's cold read. 3: the third caller's
+    // cold read. A fourth read finds nothing, which is where the second caller
+    // ended up before the fix.
+    const reads = [BOOT, MID_SOURCE, LIVE];
+    let extractions = 0;
+    const auth = new FirebaseAuth(() => {
+      const found = reads[extractions];
+      extractions += 1;
+      return Promise.resolve({
+        candidates: found === undefined ? [] : [candidate(found, true)],
+        checked: ['Chrome'],
+      });
+    });
+
+    expect(await auth.getIdToken()).toBe(ID_TOKEN);
+
+    const first = auth.getIdToken();
+    const second = auth.getIdToken();
+    expect(await first).toBe(ID_TOKEN); // OLD was dead, and the cold read installed MID.
+
+    oldAnswered.open();
+    await retrySent.opened; // The second caller is now parked on its retry against MID.
+
+    // The third caller spends MID too, finds it dead, and cold-reads LIVE.
+    expect(await auth.getIdToken()).toBe(ID_TOKEN);
+
+    retryAnswered.open();
+    expect(await second).toBe(ID_TOKEN);
+    expect(extractions).toBe(3);
+  });
+});
