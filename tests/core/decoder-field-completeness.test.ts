@@ -111,9 +111,9 @@ const SRC = readFileSync(DECODER_PATH, 'utf-8');
 
 /**
  * There are 26 `process*` functions today (27 until #666 deleted
- * processUserAccount). The floor is a vacuity guard, not a
- * budget: it exists so a discovery regex that silently stops matching reports
- * ONE unambiguous failure rather than 26 downstream ones. Raise it only if the
+ * processUserAccount). The floor is a vacuity guard, not a budget: it exists
+ * so a discovery regex that silently stops matching reports ONE unambiguous
+ * failure rather than 26 downstream ones. Raise it only if the
  * decoder genuinely shrinks below it, and think hard first.
  */
 const MIN_PROCESSORS = 26;

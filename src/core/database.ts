@@ -1307,9 +1307,10 @@ export class CopilotDatabase {
    * `nickname` over the institution-supplied `name`.
    *
    * This previously read the `users/{uid}/accounts` customization collection
-   * (whose reader was since deleted, #666), which Copilot no longer populates — so the map came back EMPTY on every
-   * real cache and its one consumer (`get_balance_history`'s `account_name`)
-   * silently returned `undefined` for every row. Same root cause as the hidden
+   * (whose reader was since deleted, #666), which Copilot no longer
+   * populates — so the map came back EMPTY on every real cache and its one
+   * consumer (`get_balance_history`'s `account_name`) silently returned
+   * `undefined` for every row. Same root cause as the hidden
    * filter in #624: those customizations moved onto the account records.
    *
    * The map is cached after the first call.

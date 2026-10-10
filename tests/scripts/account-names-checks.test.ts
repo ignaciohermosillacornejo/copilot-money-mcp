@@ -32,6 +32,7 @@ describe('compareAccountNames', () => {
       cacheOnly: 0,
       liveOnly: 1,
       discriminating: 0,
+      fallbackDiscriminating: 0,
     });
   });
 
@@ -57,6 +58,22 @@ describe('compareAccountNames', () => {
     expect(compareAccountNames(both, both, labels).discriminating).toBe(0);
   });
 
+  test('fallback-discriminating counts only un-nicknamed rows whose two provider labels differ', () => {
+    const labels: CacheAccountLabels[] = [
+      { account_id: A, name: 'Short', official_name: 'Long Official' }, // counts
+      { account_id: B, name: 'Same', official_name: 'Same' }, // labels agree
+      { account_id: C, nickname: 'Nick', name: 'Short', official_name: 'Long' }, // has nickname
+    ];
+    const both = names([
+      [A, 'Short'],
+      [B, 'Same'],
+      [C, 'Nick'],
+    ]);
+    const parity = compareAccountNames(both, both, labels);
+    expect(parity.fallbackDiscriminating).toBe(1);
+    expect(parity.discriminating).toBe(1);
+  });
+
   test('a cache-only id is neither compared nor discriminating', () => {
     const parity = compareAccountNames(names([[A, 'Household']]), names([]), [
       { account_id: A, nickname: 'Household', name: 'Provider' },
@@ -68,7 +85,14 @@ describe('compareAccountNames', () => {
 });
 
 describe('classifyAccountNameParity', () => {
-  const base = { compared: 5, mismatched: 0, cacheOnly: 0, liveOnly: 0, discriminating: 2 };
+  const base = {
+    compared: 5,
+    mismatched: 0,
+    cacheOnly: 0,
+    liveOnly: 0,
+    discriminating: 2,
+    fallbackDiscriminating: 0,
+  };
 
   test('PASS when every compared name agrees and some row discriminates', () => {
     expect(classifyAccountNameParity(base).status).toBe('PASS');
@@ -87,6 +111,21 @@ describe('classifyAccountNameParity', () => {
       liveOnly: 3,
     });
     expect(verdict.status).toBe('FAIL');
+  });
+
+  test('WARN, not FAIL, when neither mode returned any account', () => {
+    const verdict = classifyAccountNameParity({ ...base, compared: 0, discriminating: 0 });
+    expect(verdict.status).toBe('WARN');
+    expect(verdict.detail).toContain('nothing to compare');
+  });
+
+  test('WARN, never PASS, when the row sets are one-sided', () => {
+    expect(classifyAccountNameParity({ ...base, cacheOnly: 1 }).status).toBe('WARN');
+    expect(classifyAccountNameParity({ ...base, liveOnly: 1 }).status).toBe('WARN');
+  });
+
+  test('a mismatch still FAILs when the row sets are one-sided', () => {
+    expect(classifyAccountNameParity({ ...base, mismatched: 1, liveOnly: 2 }).status).toBe('FAIL');
   });
 
   test('WARN, never PASS, when no row could tell nickname from provider label', () => {

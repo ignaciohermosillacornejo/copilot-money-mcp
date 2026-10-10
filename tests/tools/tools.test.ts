@@ -922,10 +922,13 @@ describe('CopilotMoneyTools', () => {
       // takes the nickname, and an account with NO nickname keeps its own
       // provider label. Asserting only the first lets an unconditional
       // `name: account.nickname` pass while blanking every un-nicknamed row.
-      (db as any)._accounts = [
+      // Typed as Account[] before the neighbours' cast, so a renamed
+      // `nickname` field is a compile error, not a silently vacuous fixture.
+      const accounts: Account[] = [
         { ...mockAccounts[0], name: 'Provider Checking', nickname: 'Household Checking' },
         { ...mockAccounts[1], name: 'Provider Savings' },
       ];
+      (db as any)._accounts = accounts;
 
       const result = await tools.getAccounts();
       const nameById = new Map(result.accounts.map((a) => [a.account_id, a.name]));

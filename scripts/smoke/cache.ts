@@ -292,8 +292,8 @@ export function nonEmptyRowsUnder(
  * The exclusion is the decoder's own predicate,
  * `isUserAccountCustomizationCollection` (an `includes('users/')`, not a
  * `startsWith`), so it matches both decode paths' routing verbatim
- * (`decodeAccounts` and `decodeAllCollections` in `src/core/decoder.ts`). Real paths are
- * top-level today, so the two spellings agree — but this check's whole value
+ * (`decodeAccounts` and `decodeAllCollections` in `src/core/decoder.ts`).
+ * Real paths are top-level today, so the two spellings agree — but this check's whole value
  * is that its row set is the one `processAccount` sees, and the permissive
  * spelling is the one that would quietly admit rows whose visibility
  * vocabulary this file cannot read.
