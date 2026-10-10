@@ -86,7 +86,8 @@
     // below is load-bearing: one entry per helper, `<subject> <- ` followed by
     // repo-relative importer paths, and a trailing comma means the list
     // continues on the next comment line.
-    //   tests/helpers/strip-comments.ts <- tests/core/decoder-field-completeness.test.ts,
+    //   tests/helpers/strip-comments.ts <- tests/core/auth/candidate-ordering.test.ts,
+    //     tests/core/decoder-field-completeness.test.ts,
     //     tests/core/dedup-identity.test.ts,
     //     tests/helpers/strip-comments.test.ts,
     //     tests/scripts/no-duplicate-schema-walks.test.ts

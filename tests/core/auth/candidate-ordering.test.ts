@@ -22,6 +22,7 @@ import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
+import { stripComments } from '../../helpers/strip-comments.js';
 import { tmpdir } from 'os';
 import {
   extractRefreshTokenCandidates,
@@ -1164,22 +1165,22 @@ describe('a session installed at any resume point is returned, not reported as l
     // hand. The count is entry + one per await, because each await is a place
     // the method can be overtaken. Comments are stripped first: the method's
     // own commentary talks about awaits.
-    const source = readFileSync(
-      fileURLToPath(new URL('../../../src/core/auth/firebase-auth.ts', import.meta.url)),
-      'utf8'
+    const source = stripComments(
+      readFileSync(
+        fileURLToPath(new URL('../../../src/core/auth/firebase-auth.ts', import.meta.url)),
+        'utf8'
+      )
     );
     const start = source.indexOf('async getIdToken(): Promise<string> {');
     const end = source.indexOf('getUserId(): string | null', start);
     expect(start, 'getIdToken was not found; update this detector').toBeGreaterThan(-1);
     expect(end, 'the end of getIdToken was not found; update this detector').toBeGreaterThan(start);
-    const code = source
-      .slice(start, end)
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/\/\/.*$/gm, '');
+    const code = source.slice(start, end);
 
     const awaits = code.match(/\bawait\b/g)?.length ?? 0;
     const checks = code.match(/this\.freshIdToken\(\)/g)?.length ?? 0;
-    // Anti-vacuity: a slice that stopped matching the method would count 0 = 0 - 1.
+    // Anti-vacuity: a slice that missed the method's awaits (say, a renamed
+    // end marker cutting it short) could still balance on the entry check alone.
     expect(awaits, 'expected to find the awaits in getIdToken').toBeGreaterThan(0);
     expect(
       checks,
