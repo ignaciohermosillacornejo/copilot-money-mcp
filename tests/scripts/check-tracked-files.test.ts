@@ -162,8 +162,9 @@ async function buildTemplate(): Promise<string> {
     await git(root, ['commit', '-qm', 'initial']);
     return root;
   } catch (err) {
-    // Don't strand a half-built template. The error still propagates, so it
-    // fails the hook and every case that needs the fixture.
+    // Don't strand a half-built template. The error still propagates, and
+    // because the hook is file-scoped it fails every test in the file,
+    // including the one that runs against the real checkout.
     // The cleanup swallows its own error, so a failing rm can't replace the
     // git failure that matters.
     await rm(root, { recursive: true, force: true }).catch(() => undefined);
