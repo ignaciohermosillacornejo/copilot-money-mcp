@@ -48,6 +48,14 @@
  *     `class CopilotDatabase {}` — fail-closed, and the cheapness is the point,
  *     but neither direction is binding resolution. None of the three shapes
  *     exists in the suite today (checked);
+ *   - a subclass. `class StubDb extends CopilotDatabase { constructor() {
+ *     super(); } }` then `new StubDb()` performs the forbidden walk and is
+ *     invisible at both ends: `super()` is a `CallExpression` with a
+ *     `SuperKeyword` callee, so `ts.isNewExpression` never sees it, and
+ *     `new StubDb()` carries the wrong identifier text. `new (class extends
+ *     CopilotDatabase {})()` is the same shape in one expression. The same
+ *     name-not-binding fact as the alias, and likewise absent today — no
+ *     `extends CopilotDatabase` in `src/`, `tests/` or `scripts/` (checked);
  *   - a database constructed inside a helper OUTSIDE `tests/` that a test
  *     calls. `src/` is excluded on purpose — production constructing without a
  *     path is the feature — so a `src/` factory used only by tests would be
@@ -130,10 +138,18 @@ function parse(file: string): ts.SourceFile {
   );
 }
 
-function scan(file: string): Finding[] {
+/**
+ * Every `new CopilotDatabase(...)` in `file`, split into the flagged ones and
+ * the argument lists of the ones left alone. `cleared` exists for the specimen:
+ * its must-NOT-flag lines produce no findings by design, so without a record of
+ * what the scanner saw and cleared they could be deleted with every test green,
+ * and they are the only thing that would notice the predicate widening.
+ */
+function scanAll(file: string): { findings: Finding[]; cleared: string[] } {
   const src = parse(file);
   const rel = relative(REPO_ROOT, file);
   const findings: Finding[] = [];
+  const cleared: string[] = [];
 
   const visit = (node: ts.Node): void => {
     if (
@@ -152,13 +168,19 @@ function scan(file: string): Finding[] {
             ? 'new CopilotDatabase() with no path'
             : `new CopilotDatabase(${spelling}) — falsy, so discovery runs anyway`,
         });
+      } else {
+        cleared.push((node.arguments ?? []).map((arg) => arg.getText(src)).join(', '));
       }
     }
     ts.forEachChild(node, visit);
   };
   visit(src);
 
-  return findings;
+  return { findings, cleared };
+}
+
+function scan(file: string): Finding[] {
+  return scanAll(file).findings;
 }
 
 /** Every call to `findCopilotDatabase`, with the enclosing declaration named. */
@@ -297,6 +319,18 @@ describe('no test discovers the real Copilot database', () => {
       'new CopilotDatabase("") — falsy, so discovery runs anyway',
       'new CopilotDatabase(``) — falsy, so discovery runs anyway',
     ]);
+  });
+
+  test('guards the gate: the specimen lines it must leave alone are present and cleared', () => {
+    // The negative half of the specimen. These lines produce no findings, so
+    // the assertion above cannot see them go missing — and they are what turns
+    // an OVER-broad predicate red. Pinning the argument lists also pins that one
+    // of them carries a second argument, which is the case that line exists for.
+    expect(
+      scanAll(SPECIMEN).cleared,
+      `The specimen's must-NOT-flag lines (an explicit path, and an explicit path with a ` +
+        `timeout) must both be present and both be left alone by the scanner.`
+    ).toEqual(['SOME_PATH', 'SOME_PATH, 1000']);
   });
 
   test('guards the gate: every falsy spelling it knows has a specimen', () => {

@@ -23,9 +23,9 @@ const DB_NOT_FOUND_MESSAGE =
  * machine, 93% came back under 1ms and 99.9% under 100ms, nothing at all landed
  * between 100ms and 1s, and 8 calls (~0.1%) blocked for seconds and then failed
  * with `EINTR`. Bun's 5,000ms default test timeout lands inside the stall, so one of
- * these fifteen cases failed roughly 10% of runs in isolation and about one run
- * in three under the concurrent load of a release day, always blaming whichever
- * getter happened to be executing.
+ * these fifteen cases failed in 5 of 50 measured runs in isolation (~10%), and
+ * #756 reported about one run in three under the concurrent load of a release
+ * day — always blaming whichever getter happened to be executing.
  *
  * The constructor's `if (dbPath)` branch touches no filesystem, and
  * `requireDbPath()` throws before anything else does, so with a path supplied
