@@ -839,7 +839,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   {
     surface: 'AccountNode.name:resolvesNickname',
     kind: 'response-shape',
-    oracle: null,
+    oracle: 'smoke:account-names',
     class: 'verified-once',
     evidence:
       "Both get_accounts and get_accounts_live tell callers `name` is the user's Copilot " +
@@ -859,14 +859,23 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'reports the whitespace, if the server passes it through. No account in the probe had ' +
       'one, so which side is right is unknown; it is recorded because this entry exists to ' +
       'say where the claim rests on the server and nothing re-checks it. ' +
-      'Classed verified-once rather than left unrecorded: nothing re-checks it. If Copilot ' +
+      'Why it is recorded at all: nothing in CI re-checks it. If Copilot ' +
       'stopped resolving the nickname, AccountNode.name would keep its key and its type, the ' +
       'gated read-shape entry for Query.accounts would stay green because it gates KEYS not ' +
       "SEMANTICS, and get_accounts_live's description would quietly become false for exactly " +
       'the write-capable callers it was added for. ' +
-      "TO GATE: an oracle would have to compare live `name` against the cache document's " +
-      '`nickname` for an account that has one — which needs real data, so it belongs in a ' +
-      'smoke rather than in CI.',
+      'ORACLE (#665): `scripts/smoke/account-names.ts` compares cache `get_accounts` and ' +
+      '`get_accounts_live` names per account id, and counts the DISCRIMINATING rows (a ' +
+      'nickname that differs from the provider label) separately, because only those can ' +
+      'tell the two sources apart — a run with none reports WARN, not coverage. ' +
+      'RUN 2026-10-10 (counts only): 21 accounts compared; every nicknamed account (10 of them ' +
+      'discriminating) matched, so the nickname half re-verified. ONE MISMATCH, in the ' +
+      'FALLBACK branch: an account with no nickname whose provider `name` and `official_name` ' +
+      'differ — the only such account in the data — where live returned `official_name` and ' +
+      'cache (`preferredAccountName`: nickname, then name, then official_name) returned ' +
+      '`name`. So the server falls back to `official_name` before `name`, on n=1. ' +
+      'Still verified-once, not gated: the smoke is red on that row until the fallback order ' +
+      'is decided (#791), so it is not in the scheduled `bun run smoke` composite yet.',
   },
   {
     surface: 'AccountNode.hiddenAccounts:returnedUnfiltered',

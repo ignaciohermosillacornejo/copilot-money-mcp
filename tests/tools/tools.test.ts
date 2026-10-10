@@ -917,20 +917,21 @@ describe('CopilotMoneyTools', () => {
       expect(result.accounts).toHaveLength(2);
     });
 
-    test('uses the Copilot nickname as the account display name', async () => {
-      db._injectDataForTesting({
-        accounts: [
-          {
-            ...mockAccounts[0],
-            name: 'Provider Checking',
-            nickname: 'Household Checking',
-          },
-        ],
-      });
+    test('uses the Copilot nickname as the account display name, else the provider label', async () => {
+      // Both branches of the guard in getAccounts (#665): a nicknamed account
+      // takes the nickname, and an account with NO nickname keeps its own
+      // provider label. Asserting only the first lets an unconditional
+      // `name: account.nickname` pass while blanking every un-nicknamed row.
+      (db as any)._accounts = [
+        { ...mockAccounts[0], name: 'Provider Checking', nickname: 'Household Checking' },
+        { ...mockAccounts[1], name: 'Provider Savings' },
+      ];
 
       const result = await tools.getAccounts();
+      const nameById = new Map(result.accounts.map((a) => [a.account_id, a.name]));
 
-      expect(result.accounts[0].name).toBe('Household Checking');
+      expect(nameById.get('acc1')).toBe('Household Checking');
+      expect(nameById.get('acc2')).toBe('Provider Savings');
     });
 
     test('filters by account type', async () => {
