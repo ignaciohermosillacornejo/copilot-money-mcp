@@ -23,6 +23,12 @@ export interface SmokeHarnessOptions {
   verbose?: boolean;
   /** For tests only — bypass real auth + client construction. */
   injectedClient?: GraphQLClient;
+  /**
+   * For tests only — the local cache path. Omitted, `CopilotDatabase` discovers
+   * the user's real Copilot container, which is right for a smoke run and wrong
+   * inside `bun test` (#756: that readdir can stall for seconds).
+   */
+  dbPath?: string;
 }
 
 export interface SmokeHarnessContext {
@@ -42,7 +48,7 @@ export async function setupLiveSmoke(opts: SmokeHarnessOptions = {}): Promise<Sm
     graphql = new GraphQLClient(auth);
   }
 
-  const db = new CopilotDatabase();
+  const db = new CopilotDatabase(opts.dbPath);
   const live = new LiveCopilotDatabase(graphql, db, { verbose });
 
   await preflightLiveAuth(graphql);

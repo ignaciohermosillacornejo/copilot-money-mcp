@@ -59,7 +59,16 @@
  *   - a database constructed inside a helper OUTSIDE `tests/` that a test
  *     calls. `src/` is excluded on purpose — production constructing without a
  *     path is the feature — so a `src/` factory used only by tests would be
- *     out of reach;
+ *     out of reach. The same holds for `scripts/`, and there it was not
+ *     hypothetical: `setupLiveSmoke()` in `scripts/smoke/_harness.ts` built
+ *     `new CopilotDatabase()` unconditionally, and
+ *     `tests/scripts/smoke-harness.test.ts` called it twice — two discovery
+ *     walks per suite run that this sweep reported clean. Closed in #780 by a
+ *     test-only `dbPath` option, which that test passes (an entry counter on
+ *     `findCopilotDatabase` went from 2 to 0 for that file). The other two
+ *     argument-less constructions in `scripts/` (`smoke/cache.ts`,
+ *     `smoke-graphql.ts`) sit inside `main()`, which no test reaches (checked),
+ *     and finding the real database is their job;
  *   - any other route to ambient machine state. This closes one resource, not
  *     the class. It is exact for that resource only because
  *     `findCopilotDatabase` has exactly one call site and is not exported,
@@ -183,6 +192,13 @@ function scan(file: string): Finding[] {
   return scanAll(file).findings;
 }
 
+let specimenScan: ReturnType<typeof scanAll> | undefined;
+
+/** The specimen, parsed once — three guards read it, as `DATABASE_SOURCE` is parsed once below. */
+function scanSpecimen(): ReturnType<typeof scanAll> {
+  return (specimenScan ??= scanAll(SPECIMEN));
+}
+
 /** Every call to `findCopilotDatabase`, with the enclosing declaration named. */
 function discoveryCallSites(src: ts.SourceFile): string[] {
   const sites: string[] = [];
@@ -304,7 +320,7 @@ describe('no test discovers the real Copilot database', () => {
   });
 
   test('guards the gate: the scanner recognises the shapes it looks for', () => {
-    const found = scan(SPECIMEN);
+    const found = scanSpecimen().findings;
     expect(
       found.map((f) => f.what),
       `tests/fixtures/ambient-database-discovery-sample.ts reproduces every shape this gate ` +
@@ -327,7 +343,7 @@ describe('no test discovers the real Copilot database', () => {
     // an OVER-broad predicate red. Pinning the argument lists also pins that one
     // of them carries a second argument, which is the case that line exists for.
     expect(
-      scanAll(SPECIMEN).cleared,
+      scanSpecimen().cleared,
       `The specimen's must-NOT-flag lines (an explicit path, and an explicit path with a ` +
         `timeout) must both be present and both be left alone by the scanner.`
     ).toEqual(['SOME_PATH', 'SOME_PATH, 1000']);
@@ -340,8 +356,8 @@ describe('no test discovers the real Copilot database', () => {
     // deletable again with everything green — under-collection reported as a
     // pass, which is the failure mode this whole file is about.
     const covered = new Set(
-      scan(SPECIMEN)
-        .map((finding) => /^new CopilotDatabase\((.*)\) — falsy/.exec(finding.what)?.[1])
+      scanSpecimen()
+        .findings.map((finding) => /^new CopilotDatabase\((.*)\) — falsy/.exec(finding.what)?.[1])
         .filter((spelling): spelling is string => spelling !== undefined)
     );
     expect(
