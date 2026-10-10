@@ -19,8 +19,8 @@
  * turned off within a week. They cannot detect the gate's deletion on their own;
  * they exist to pin the boundary the failing cases are measured against.
  */
-import { describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { afterAll, describe, expect, test } from 'bun:test';
+import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -119,33 +119,58 @@ const PACKAGE_JSON = JSON.stringify(
 );
 
 /**
- * Build a committed synthetic repo, let the caller perturb it, then run the gate.
+ * The committed baseline every case starts from, built once per file run.
  *
  * `git add -A` is used rather than `add -f` on purpose: the silent skip it
  * performs on an ignored path is the defect under test, so the fixture must be
  * built the same way a contributor builds a commit.
+ *
+ * Built once and copied, not rebuilt per case (#779). Standing it up is seven
+ * process spawns, the same seven every time, and across the file's two dozen
+ * repos they were most of its runtime — enough to put the table-driven case
+ * below at 72-99% of bun's 5s default. A copy is a byte-identical repository:
+ * its own `.git`, config, index and commit, so no case can see another's
+ * perturbation. The stat data cached in the copied index no longer matches the
+ * copied files' inodes and mtimes, which git treats as "maybe changed" and
+ * re-hashes, so a copy reads exactly as clean as the original.
+ */
+let template: Promise<string> | undefined;
+
+async function buildTemplate(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), 'check-tracked-files-template-'));
+  await git(root, ['init', '-q', '-b', 'main']);
+  await git(root, ['config', 'user.email', 'test@example.com']);
+  await git(root, ['config', 'user.name', 'Test']);
+  await git(root, ['config', 'commit.gpgsign', 'false']);
+
+  await write(root, '.gitignore', GITIGNORE);
+  await write(root, 'package.json', PACKAGE_JSON);
+  await write(root, 'scripts/kept.ts', "console.log('kept');\n");
+  await write(root, 'src/entry.ts', "export const entry = 'entry';\n");
+  await write(root, 'tests/example.test.ts', "export const example = 'example';\n");
+
+  await git(root, ['add', '-A']);
+  await git(root, ['commit', '-qm', 'initial']);
+  return root;
+}
+
+afterAll(async () => {
+  if (template !== undefined) await rm(await template, { recursive: true, force: true });
+});
+
+/**
+ * Give the caller a fresh copy of the committed synthetic repo, let it perturb
+ * the copy, then run the gate against it.
  */
 async function withRepo(
   perturb: (root: string) => Promise<void>,
   assertions: (result: Result) => void,
   extraEnv: Record<string, string> = {}
 ): Promise<void> {
+  template ??= buildTemplate();
   const root = await mkdtemp(join(tmpdir(), 'check-tracked-files-'));
   try {
-    await git(root, ['init', '-q', '-b', 'main']);
-    await git(root, ['config', 'user.email', 'test@example.com']);
-    await git(root, ['config', 'user.name', 'Test']);
-    await git(root, ['config', 'commit.gpgsign', 'false']);
-
-    await write(root, '.gitignore', GITIGNORE);
-    await write(root, 'package.json', PACKAGE_JSON);
-    await write(root, 'scripts/kept.ts', "console.log('kept');\n");
-    await write(root, 'src/entry.ts', "export const entry = 'entry';\n");
-    await write(root, 'tests/example.test.ts', "export const example = 'example';\n");
-
-    await git(root, ['add', '-A']);
-    await git(root, ['commit', '-qm', 'initial']);
-
+    await cp(await template, root, { recursive: true });
     await perturb(root);
     assertions(await runCheck(root, extraEnv));
   } finally {
