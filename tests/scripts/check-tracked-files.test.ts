@@ -164,7 +164,9 @@ async function buildTemplate(): Promise<string> {
   } catch (err) {
     // Don't strand a half-built template. The error still propagates, so it
     // fails the hook and every case that needs the fixture.
-    await rm(root, { recursive: true, force: true });
+    // The cleanup swallows its own error, so a failing rm can't replace the
+    // git failure that matters.
+    await rm(root, { recursive: true, force: true }).catch(() => undefined);
     throw err;
   }
 }
@@ -186,8 +188,9 @@ async function withRepo(
   assertions: (result: Result) => void,
   extraEnv: Record<string, string> = {}
 ): Promise<void> {
-  // Thrown rather than asserted: bun would report an expect() here against
-  // whichever test happened to be running, not against the fixture.
+  // Thrown rather than asserted: a missing fixture is an infrastructure fault,
+  // not a claim about the gate. Reporting it as a failed assertion would make
+  // it look like a behavioural failure.
   if (template === undefined) throw new Error('the beforeAll template build did not run');
   const root = await mkdtemp(join(tmpdir(), 'check-tracked-files-'));
   try {
