@@ -4,7 +4,7 @@ title: A retryable EINTR failed every cache read, and told a synced user their d
 class: retryable-errno-treated-as-fatal
 status: fixed
 detected: incidental  # smoke:cache crashed under concurrent test load while gathering evidence for #666; the second site was measured during #756
-fixed_in: PR_LINK
+fixed_in: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/793
 issue: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/774
 date: 2026-10-10
 ---
