@@ -1039,13 +1039,18 @@ describe('a session installed at any resume point is returned, not reported as a
       const CACHED = syntheticToken('cached');
       const parkedAnswered = gate();
       let cachedSeen = 0;
+      let liveSeen = 0;
 
       globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
         const sent = String(options?.body ?? '');
         if (sent.includes(BOOT)) return Promise.resolve(session(CACHED, '0'));
         // Reached only if guard (1) were missing on the dead-verdict row: the
-        // one-shot retry would spend the sibling's token.
-        if (sent.includes(LIVE)) return Promise.resolve(session(LIVE, '3600', SIBLING_ID));
+        // one-shot retry would spend the sibling's token. Counted, and
+        // asserted zero below, so that row detects guard (1)'s removal too.
+        if (sent.includes(LIVE)) {
+          liveSeen += 1;
+          return Promise.resolve(session(LIVE, '3600', SIBLING_ID));
+        }
         if (sent.includes(CACHED)) {
           cachedSeen += 1;
           return cachedSeen === 1
@@ -1072,6 +1077,9 @@ describe('a session installed at any resume point is returned, not reported as a
       parkedAnswered.open();
       expect(await second).toBe(SIBLING_ID);
       expect(extractions).toBe(1);
+      // Guard (1) returned the sibling's session, so the retry never spent
+      // its token.
+      expect(liveSeen).toBe(0);
     }
   );
 
