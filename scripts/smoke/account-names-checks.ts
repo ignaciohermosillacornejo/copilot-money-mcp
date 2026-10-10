@@ -34,12 +34,18 @@ export interface AccountNameParity {
   /** Compared ids whose `name` differs between the two modes. */
   mismatched: number;
   /**
-   * The mismatches split by branch: rows whose cache labels carry a usable
-   * nickname (the nickname claim) vs rows that do not (the fallback order,
-   * #791). The two sum to `mismatched`, and they point at different causes.
+   * The mismatches split by branch. The three sum to `mismatched`, and they
+   * point at different causes:
+   * - nicknamed: the cache labels carry a usable nickname (the nickname claim).
+   * - fallback: no usable nickname, and `name` and `official_name` are both
+   *   usable and differ, so the row can show the fallback order (#791).
+   * - unclassified: everything else. Either there are no cache labels for the
+   *   id, or the two provider labels cannot discriminate, so no fallback order
+   *   explains the mismatch. Never counted as fallback evidence.
    */
   mismatchedNicknamed: number;
   mismatchedFallback: number;
+  mismatchedUnclassified: number;
   /** Ids only the cache returned (e.g. a stale cache, or an account added since). */
   cacheOnly: number;
   /** Ids only live returned. */
@@ -75,6 +81,7 @@ export function compareAccountNames(
   let mismatched = 0;
   let mismatchedNicknamed = 0;
   let mismatchedFallback = 0;
+  let mismatchedUnclassified = 0;
   let cacheOnly = 0;
   let discriminating = 0;
   let fallbackDiscriminating = 0;
@@ -86,13 +93,23 @@ export function compareAccountNames(
     }
     compared++;
     const labels = labelsById.get(id);
+    // One classification per row, shared by the evidence counters and the
+    // mismatch split, so the two cannot disagree about which branch a row is.
+    const nicknamed = Boolean(labels?.nickname?.trim());
+    const canShowFallback =
+      !nicknamed &&
+      Boolean(labels?.name?.trim()) &&
+      Boolean(labels?.official_name?.trim()) &&
+      labels?.name !== labels?.official_name;
+
     if (cacheName !== liveNames.get(id)) {
       mismatched++;
-      if (labels?.nickname?.trim()) mismatchedNicknamed++;
-      else mismatchedFallback++;
+      if (nicknamed) mismatchedNicknamed++;
+      else if (canShowFallback) mismatchedFallback++;
+      else mismatchedUnclassified++;
     }
 
-    if (labels?.nickname?.trim()) {
+    if (labels && nicknamed) {
       // The provider label is what the account would be called with no
       // nickname: the same rule, minus the nickname operand.
       const providerLabel = preferredAccountName({
@@ -100,11 +117,7 @@ export function compareAccountNames(
         official_name: labels.official_name,
       });
       if (preferredAccountName(labels) !== providerLabel) discriminating++;
-    } else if (
-      labels?.name?.trim() &&
-      labels.official_name?.trim() &&
-      labels.name !== labels.official_name
-    ) {
+    } else if (canShowFallback) {
       fallbackDiscriminating++;
     }
   }
@@ -117,6 +130,7 @@ export function compareAccountNames(
     mismatched,
     mismatchedNicknamed,
     mismatchedFallback,
+    mismatchedUnclassified,
     cacheOnly,
     liveOnly,
     discriminating,
@@ -147,7 +161,8 @@ export function classifyAccountNameParity(p: AccountNameParity): {
 } {
   const counts =
     `${p.compared} compared, ${p.mismatched} mismatched (${p.mismatchedNicknamed} nicknamed, ` +
-    `${p.mismatchedFallback} fallback), ${p.discriminating} discriminating ` +
+    `${p.mismatchedFallback} fallback, ${p.mismatchedUnclassified} unclassified), ` +
+    `${p.discriminating} discriminating ` +
     `(nickname differs from provider label), ${p.fallbackDiscriminating} fallback-discriminating ` +
     `(no nickname, name differs from official_name), ${p.cacheOnly} cache-only, ` +
     `${p.liveOnly} live-only`;
@@ -164,6 +179,13 @@ export function classifyAccountNameParity(p: AccountNameParity): {
       causes.push(
         `${p.mismatchedFallback} un-nicknamed account(s) differ: the two modes fall back to ` +
           `different provider labels (cache: name, then official_name; see #791)`
+      );
+    }
+    if (p.mismatchedUnclassified > 0) {
+      causes.push(
+        `${p.mismatchedUnclassified} account(s) differ whose branch could not be determined ` +
+          `(no cache labels for the id, or provider labels that cannot discriminate), so live ` +
+          `returned a label neither fallback order explains`
       );
     }
     return {

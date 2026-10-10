@@ -30,7 +30,9 @@ describe('compareAccountNames', () => {
       compared: 2,
       mismatched: 1,
       mismatchedNicknamed: 0,
-      mismatchedFallback: 1,
+      mismatchedFallback: 0,
+      // No cache labels for B, so its branch is unknown, not fallback evidence.
+      mismatchedUnclassified: 1,
       cacheOnly: 0,
       liveOnly: 1,
       discriminating: 0,
@@ -76,6 +78,33 @@ describe('compareAccountNames', () => {
     expect(parity.discriminating).toBe(1);
   });
 
+  test('mismatches land in exactly one of three buckets', () => {
+    const D = 'Rt6YuI9oPa2SdF5gHj8K';
+    const labels: CacheAccountLabels[] = [
+      { account_id: A, nickname: 'Nick', name: 'Provider' }, // nicknamed
+      { account_id: B, name: 'Short', official_name: 'Long Official' }, // fallback
+      { account_id: C, name: 'Same', official_name: 'Same' }, // cannot discriminate
+      // D has no labels at all
+    ];
+    const cache = names([
+      [A, 'Nick'],
+      [B, 'Short'],
+      [C, 'Same'],
+      [D, 'Whatever'],
+    ]);
+    const live = names([
+      [A, 'Other'],
+      [B, 'Long Official'],
+      [C, 'Third Label'],
+      [D, 'Different'],
+    ]);
+    const parity = compareAccountNames(cache, live, labels);
+    expect(parity.mismatched).toBe(4);
+    expect(parity.mismatchedNicknamed).toBe(1);
+    expect(parity.mismatchedFallback).toBe(1);
+    expect(parity.mismatchedUnclassified).toBe(2);
+  });
+
   test('a cache-only id is neither compared nor discriminating', () => {
     const parity = compareAccountNames(names([[A, 'Household']]), names([]), [
       { account_id: A, nickname: 'Household', name: 'Provider' },
@@ -92,6 +121,7 @@ describe('classifyAccountNameParity', () => {
     mismatched: 0,
     mismatchedNicknamed: 0,
     mismatchedFallback: 0,
+    mismatchedUnclassified: 0,
     cacheOnly: 0,
     liveOnly: 0,
     discriminating: 2,
@@ -125,6 +155,14 @@ describe('classifyAccountNameParity', () => {
     });
     expect(both.detail).toContain('stopped resolving the nickname');
     expect(both.detail).toContain('#791');
+
+    const unknown = classifyAccountNameParity({
+      ...base,
+      mismatched: 1,
+      mismatchedUnclassified: 1,
+    });
+    expect(unknown.detail).toContain('could not be determined');
+    expect(unknown.detail).not.toContain('#791');
   });
 
   test('FAIL when nothing was compared — an empty join is a broken check', () => {
