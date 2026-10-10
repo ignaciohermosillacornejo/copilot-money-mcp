@@ -25,7 +25,8 @@
  * Do not "fix" the constructions below. They are the specimen.
  */
 
-import { CopilotDatabase } from '../../src/core/database.js';
+import os, { homedir } from 'node:os';
+import { CopilotDatabase, discoverCopilotDatabase } from '../../src/core/database.js';
 
 const SOME_PATH = '/nonexistent/copilot-money-mcp/specimen';
 
@@ -58,3 +59,14 @@ export const explicitPath = new CopilotDatabase(SOME_PATH);
 
 // Must NOT be flagged either: a second argument does not change the first.
 export const explicitPathAndTimeout = new CopilotDatabase(SOME_PATH, 1000);
+
+// The second route (#774): the exported walker, handed the real home directory
+// in either spelling, or nothing (only legal here, in no program).
+export const walkerHomedir = discoverCopilotDatabase(homedir());
+
+export const walkerOsHomedir = discoverCopilotDatabase(os.homedir());
+
+export const walkerNoArg = discoverCopilotDatabase();
+
+// Must NOT be flagged: a synthetic home is what the export exists for.
+export const walkerSynthetic = discoverCopilotDatabase(SOME_PATH);

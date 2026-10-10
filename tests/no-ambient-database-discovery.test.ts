@@ -80,6 +80,19 @@
  *     (`const findDb = findCopilotDatabase;` then `export { findDb }`) is not.
  *     Moving the function to another module fails CLOSED — the call-site
  *     assertion would then find none in `src/core/database.ts` and go red.
+ *
+ * SECOND ROUTE, deliberate (#774). The walk itself now lives in the exported
+ * `discoverCopilotDatabase(home)`, so tests can point discovery at a synthetic
+ * home; `findCopilotDatabase()` is `discoverCopilotDatabase(homedir())` and
+ * keeps the single-call-site, no-export premise above. That export would be a
+ * route the premise cannot see, so the sweep also flags a call to it whose
+ * first argument is missing or is a `homedir()` call (`homedir()`,
+ * `os.homedir()`, any `<x>.homedir()`), and the premise test asserts that its
+ * `home` parameter is required — no `?`, no default — so the no-argument call
+ * cannot even typecheck in a checked file. Same name-match trade as above: a
+ * home computed elsewhere (`const h = homedir(); discoverCopilotDatabase(h)`)
+ * or `process.env.HOME` passes. Fail-open in that direction, and no instance
+ * exists (checked).
  */
 
 import { describe, test, expect } from 'bun:test';
@@ -101,6 +114,12 @@ const SPECIMEN = join(TESTS_ROOT, 'fixtures', 'ambient-database-discovery-sample
 
 /** The module-private function whose single call site is this gate's premise. */
 const DISCOVERY_FN = 'findCopilotDatabase';
+
+/** The exported walker that takes the home directory as a required argument (#774). */
+const WALKER_FN = 'discoverCopilotDatabase';
+
+/** A first argument to `WALKER_FN` that names the real home directory. */
+const REAL_HOME = /(^|\.)homedir\(\)$/;
 
 /**
  * Spellings of "no path" that reach `findCopilotDatabase()` anyway.
@@ -179,6 +198,21 @@ function scanAll(file: string): { findings: Finding[]; cleared: string[] } {
         });
       } else {
         cleared.push((node.arguments ?? []).map((arg) => arg.getText(src)).join(', '));
+      }
+    }
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === WALKER_FN
+    ) {
+      const first = node.arguments[0];
+      const spelling = first?.getText(src);
+      if (first === undefined || REAL_HOME.test(spelling ?? '')) {
+        findings.push({
+          file: rel,
+          line: src.getLineAndCharacterOfPosition(node.getStart(src)).line + 1,
+          what: `${WALKER_FN}(${spelling ?? ''}) — the real home directory`,
+        });
       }
     }
     ts.forEachChild(node, visit);
@@ -294,6 +328,20 @@ function discoveryExports(src: ts.SourceFile): string[] {
   return found;
 }
 
+/** Whether `WALKER_FN`'s first parameter is required, optional, or absent. */
+function walkerHomeParameter(src: ts.SourceFile): 'required' | 'optional' | 'missing' {
+  let verdict: 'required' | 'optional' | 'missing' = 'missing';
+  const visit = (node: ts.Node): void => {
+    if (ts.isFunctionDeclaration(node) && node.name?.text === WALKER_FN) {
+      const home = node.parameters[0];
+      if (home) verdict = home.questionToken || home.initializer ? 'optional' : 'required';
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(src);
+  return verdict;
+}
+
 let swept: { files: string[]; findings: Finding[] } | undefined;
 
 /** The whole-suite walk, run once on first use and never at collection time. */
@@ -334,6 +382,9 @@ describe('no test discovers the real Copilot database', () => {
       "new CopilotDatabase('') — falsy, so discovery runs anyway",
       'new CopilotDatabase("") — falsy, so discovery runs anyway',
       'new CopilotDatabase(``) — falsy, so discovery runs anyway',
+      'discoverCopilotDatabase(homedir()) — the real home directory',
+      'discoverCopilotDatabase(os.homedir()) — the real home directory',
+      'discoverCopilotDatabase() — the real home directory',
     ]);
   });
 
@@ -389,6 +440,14 @@ describe('no test discovers the real Copilot database', () => {
         'directly, and the sweep below would stop being an exact statement about what tests ' +
         'can reach.'
     ).toEqual([]);
+    // The exported walker is the deliberate second route. It stays fenced only
+    // while its `home` cannot be omitted; an optional or defaulted parameter
+    // would make `discoverCopilotDatabase()` a silent walk of the real home.
+    expect(
+      walkerHomeParameter(databaseSource),
+      `${WALKER_FN}(home) must keep \`home\` a required parameter (no \`?\`, no default), or a ` +
+        `test could call it with no argument and walk the user's real container.`
+    ).toBe('required');
   });
 
   test('every CopilotDatabase built in a test is given a path', () => {
