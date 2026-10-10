@@ -46,7 +46,7 @@ import type {
 import type { BalanceHistory } from '../models/balance-history.js';
 import { preferredAccountName } from '../models/account.js';
 import { getCategoryName } from '../utils/categories.js';
-import { retryInterrupted } from './fs-retry.js';
+import { retryInterrupted, isRetryableErrno } from './fs-retry.js';
 
 /**
  * Outcome of looking for the Copilot Money database.
@@ -112,39 +112,34 @@ export function discoverCopilotDatabase(home: string): DatabaseDiscovery {
     home,
     'Library/Containers/com.copilot.production/Data/Library/Application Support'
   );
-  if (fs.existsSync(containerBase)) {
-    try {
-      // Look for firestore directories
-      const firestorePath = join(containerBase, 'firestore/__FIRAPP_DEFAULT');
-      if (fs.existsSync(firestorePath)) {
-        const entries = retryInterrupted(() =>
-          fs.readdirSync(firestorePath, { withFileTypes: true })
-        );
-        for (const entry of entries) {
-          if (entry.isDirectory() && entry.name.startsWith('copilot-')) {
-            const mainPath = join(firestorePath, entry.name, 'main');
-            if (fs.existsSync(mainPath)) {
-              possiblePaths.unshift(mainPath); // Add to front as highest priority
-            }
-          }
-        }
+  // No `existsSync` anywhere in discovery, on purpose: it returns `false` on ANY
+  // error, so an interrupted existence check would read as "absent" before the
+  // retried read below ever ran. The retried `readdirSync` is the existence
+  // check — a missing directory throws `ENOENT`, which `noteFailure` files as
+  // absence, and every other error is kept.
+  try {
+    // Look for firestore directories
+    const firestorePath = join(containerBase, 'firestore/__FIRAPP_DEFAULT');
+    const entries = retryInterrupted(() => fs.readdirSync(firestorePath, { withFileTypes: true }));
+    for (const entry of entries) {
+      if (entry.isDirectory() && entry.name.startsWith('copilot-')) {
+        // Highest priority. Whether `main` exists is settled by the loop below.
+        possiblePaths.unshift(join(firestorePath, entry.name, 'main'));
       }
-    } catch (err) {
-      // Dynamic discovery is best effort — the static list below still runs —
-      // but a failure to read is remembered, not forgotten.
-      noteFailure(err);
     }
+  } catch (err) {
+    // Dynamic discovery is best effort — the static list below still runs —
+    // but a failure to read is remembered, not forgotten.
+    noteFailure(err);
   }
 
   // Check each path for validity (contains .ldb files or is a valid LevelDB directory)
   for (const path of possiblePaths) {
     try {
-      if (fs.existsSync(path)) {
-        const files = retryInterrupted(() => fs.readdirSync(path));
-        // Check for .ldb files or LevelDB manifest files
-        if (files.some((file) => file.endsWith('.ldb') || file.startsWith('MANIFEST-'))) {
-          return { path };
-        }
+      const files = retryInterrupted(() => fs.readdirSync(path));
+      // Check for .ldb files or LevelDB manifest files
+      if (files.some((file) => file.endsWith('.ldb') || file.startsWith('MANIFEST-'))) {
+        return { path };
       }
     } catch (err) {
       // Continue to next path, remembering that this one was not ruled out.
@@ -152,7 +147,7 @@ export function discoverCopilotDatabase(home: string): DatabaseDiscovery {
     }
   }
 
-  return lookupError ? { path: undefined, lookupError } : { path: undefined };
+  return { path: undefined, lookupError };
 }
 
 /**
@@ -164,12 +159,19 @@ function findCopilotDatabase(): DatabaseDiscovery {
 }
 
 /**
- * The error a read throws when there is no database path.
+ * The error to report when there is no usable database.
  *
- * Without a `lookupError` discovery established absence, and the install/sync
- * advice is right. With one it did not: telling a user who is installed and
- * synced to go install and sync is the misdiagnosis #774 is about, so that case
- * names the failure and says it is usually transient.
+ * Without a `lookupError` absence was established, and the install/sync advice
+ * is right. With one it was not: telling a user who is installed and synced to
+ * go install and sync is the misdiagnosis #774 is about, so that case names the
+ * failure instead.
+ *
+ * The errno code and syscall are named, never `lookupError.message` — an fs
+ * message carries the absolute path, home directory and username included, and
+ * this text is returned to the MCP client, not just logged. Only a retryable
+ * errno is called transient: what is left after `ENOENT`/`ENOTDIR` are filtered
+ * out is most likely `EACCES`/`EPERM` (a sandbox or privacy denial), which is
+ * persistent, and the remedy for it is different.
  */
 export function missingDatabaseError(lookupError: Error | undefined): Error {
   if (!lookupError) {
@@ -177,10 +179,20 @@ export function missingDatabaseError(lookupError: Error | undefined): Error {
       'Database not found. Please ensure Copilot Money is installed and has synced data.'
     );
   }
+  const errno = lookupError as NodeJS.ErrnoException;
+  const what = errno.code
+    ? `${errno.code}${errno.syscall ? ` from ${errno.syscall}` : ''}`
+    : lookupError.name;
+  const prefix = `Could not read the Copilot Money database directory (${what}).`;
+  if (isRetryableErrno(lookupError)) {
+    return new Error(
+      `${prefix} The read was interrupted after retrying, which is transient and not a ` +
+        'missing install — retry the request.'
+    );
+  }
   return new Error(
-    `Could not read the Copilot Money database directory (${lookupError.message}). ` +
-      'This is usually a transient filesystem error, not a missing install — retry the request. ' +
-      'If it persists, check that this process can read the Copilot Money container.'
+    `${prefix} Copilot Money may well be installed: check that the process running this ` +
+      'server is allowed to read the Copilot Money container.'
   );
 }
 
@@ -318,17 +330,30 @@ export class CopilotDatabase {
    * Check if database exists and is accessible.
    */
   isAvailable(): boolean {
-    try {
-      if (!this.dbPath || !fs.existsSync(this.dbPath)) {
-        return false;
-      }
+    return this.availability().available;
+  }
 
-      // Check if directory contains .ldb files or LevelDB manifest
-      const dbPath = this.dbPath;
+  /**
+   * `isAvailable()` with the reason kept. `lookupError` is set when the answer
+   * is "could not look" rather than "looked, absent" — from discovery when no
+   * path was given, or from reading `dbPath` when one was. The server's dispatch
+   * gate reads it so the message the user sees is `missingDatabaseError`'s, not
+   * a second copy of the install advice (#774).
+   */
+  availability(): { available: boolean; lookupError?: Error } {
+    // Copied to a local: `this.dbPath` does not stay narrowed inside the closure.
+    const dbPath = this.dbPath;
+    if (!dbPath) return { available: false, lookupError: this.discoveryError };
+    try {
+      // No `existsSync` first: it reports any error as absence. A missing
+      // directory throws ENOENT here, which is absence; anything else is kept.
       const files = retryInterrupted(() => fs.readdirSync(dbPath));
-      return files.some((file) => file.endsWith('.ldb') || file.startsWith('MANIFEST-'));
-    } catch {
-      return false;
+      return {
+        available: files.some((file) => file.endsWith('.ldb') || file.startsWith('MANIFEST-')),
+      };
+    } catch (err) {
+      if (isAbsence(err)) return { available: false };
+      return { available: false, lookupError: err instanceof Error ? err : new Error(String(err)) };
     }
   }
 

@@ -81,26 +81,37 @@ the only tests that reached it walked the user's real container, which is #756.
   `verify-optimistic-consistency.ts`) were converted by hand. The issue also listed five
   `scripts/profile-*`/`*-keys.ts` files; they no longer exist.
 - **The diagnosis half:** discovery now returns `{ path, lookupError? }`. A read error that
-  is not `ENOENT`/`ENOTDIR` is kept rather than swallowed, and `requireDbPath()` then says
-  the directory could not be read and that this is usually transient, instead of telling
-  the user to install and sync.
+  is not `ENOENT`/`ENOTDIR` is kept rather than swallowed. `CopilotDatabase.availability()`
+  carries it (or a read error on an explicit `dbPath`), and both `requireDbPath()` and the
+  server's dispatch gate in `src/server.ts` report it through `missingDatabaseError()`: the
+  errno and syscall (never the path), called transient only when the errno is retryable.
+  The dispatch gate matters most. It answers every cache-mode call before any read method
+  runs, so fixing only `requireDbPath()` would have left the user seeing the install advice.
+  Review caught that in the first round.
+- **`existsSync` removed from discovery and `availability()`.** It returns `false` on any
+  error, so an interrupted existence check reads as absence before the retried read runs.
+  The retried `readdirSync` is now the existence check, with `ENOENT` read as absence.
 
 ## Detector
 
 `tests/no-unretried-fs-syscalls.test.ts` (mutation-verified): a TypeScript-AST sweep of
-every file under `src/` that flags any reference to `copyFileSync`, `readdirSync`,
-`mkdtempSync` or `statSync` that is not exactly `retryInterrupted(() => <ns>.op(...))`.
-Unwrapping the original instance (the copy) turns it red naming
-`src/core/leveldb-reader.ts:<line>`. Its stated limits: `existsSync` (cannot be retried —
-it returns `false` on any error), the async API, sync ops outside the set, `scripts/`, and
-bindings it cannot see by name.
+every file under `src/` and the four container-reading scripts. It flags any reference to
+`copyFileSync`, `readdirSync`, `mkdtempSync` or `statSync` that is not exactly
+`retryInterrupted(() => <ns>.op(...))`. It also flags a file whose wrapper is not imported
+from `fs-retry`, which catches a local function of the same name. Unwrapping the original
+instance (the copy) turns it red and names `src/core/leveldb-reader.ts:<line>`; shadowing
+the wrapper in a script turns it red too. Its stated limits are: `existsSync`, which cannot
+be retried, though discovery no longer calls it; the async API; sync ops outside the set
+(`readFileSync` is plausibly in the class but has not been measured); the rest of
+`scripts/`; and bindings it cannot see by name.
 
 Behind it, the behaviour is pinned through fault injection rather than by shape:
 `tests/core/leveldb-reader-eintr.test.ts` swaps each of the four `fs` functions for one that
 throws `EINTR` N times and asserts the read completes, and that a permanent interrupt fails
 after exactly the bound with no temp copy left. `tests/core/database-discovery.test.ts`
-does the same for discovery against a synthetic home, and pins that a permanent interrupt
-is reported as a lookup error, not absence. Mutation-verified: removing the retry, removing
+does the same for discovery against a synthetic home. It pins that a permanent interrupt is
+reported as a lookup error, not absence, that `existsSync` is not consulted, and that the
+failure reaches the client through `handleCallTool`, not only through a direct read. Mutation-verified: removing the retry, removing
 the bound, unwrapping the copy site, dropping the recorded lookup error, and ignoring it in
 `requireDbPath` each turn named tests red.
 

@@ -18,7 +18,8 @@
  * store). Measured during #756: ~1 `readdirSync` in 1,000 against the live
  * container blocked for seconds and threw `EINTR`.
  *
- * WHAT IT CATCHES — every TypeScript file under `src/`, syntax only: any
+ * WHAT IT CATCHES — every TypeScript file under `src/`, plus the four scripts
+ * in `CONTAINER_SCRIPTS` that read the real container, syntax only: any
  * reference to one of `RETRYABLE_SYNC_OPS` (as `fs.op`, `anything.op`, or a
  * bare imported `op`) that is not exactly the call in
  * `retryInterrupted(() => <ns>.op(...))` — the concise arrow body, passed as
@@ -29,25 +30,38 @@
  * gate would have to follow data flow to know, and the one accepted shape
  * costs nothing to write.
  *
+ * And the wrapper must be the real one: a file whose accepted calls name
+ * `retryInterrupted` but that does not import it from `fs-retry` — a local
+ * function of that name, or an import from somewhere else — is flagged too,
+ * because the shape check alone would pass a wrapper that retries nothing.
+ *
  * WHAT IT DOES NOT CATCH, stated so a green run is not over-read:
  *   - `existsSync`. It cannot be retried: it returns `false` on ANY error,
  *     `EINTR` included, so an interrupted existence check reads as "absent"
- *     and nothing downstream can tell. Every `existsSync` in discovery is
- *     followed by a retried `readdirSync` of the same path, which narrows but
- *     does not close that hole;
+ *     and nothing downstream can tell. Discovery and `availability()` no
+ *     longer call it at all — the retried `readdirSync` is the existence check
+ *     there, with `ENOENT` read as absence — and
+ *     `tests/core/database-discovery.test.ts` pins that by making `existsSync`
+ *     always answer false. Elsewhere (`iterateDocuments`' path check, the
+ *     browser-token pre-filters) it remains, and is not swept;
  *   - the async API (`fs.promises.*`, callback `fs.*`). The only async site
  *     touching these trees is the orphan sweep, which is best effort by design;
- *   - sync ops outside the set (`readFileSync`, `writeFileSync`, `rmSync`, …).
- *     The set is the measured class — directory reads, stats and the snapshot
- *     copy against trees another process writes. Widening it is a deliberate
- *     edit here, not something the gate infers;
- *   - `scripts/`. The sibling scripts that read the real container
- *     (`snapshot.ts`, `profile-database.ts`, `decode-coverage.ts`,
- *     `verify-optimistic-consistency.ts`) were converted by hand in #774, but
- *     `scripts/` also holds many repo-file walkers that are not in the class,
- *     and a gate that flagged all of them would be argued down to an allowlist;
+ *   - sync ops outside the set (`readFileSync`, `appendFileSync`,
+ *     `writeFileSync`, `rmSync`, …). The set is what was MEASURED to fail —
+ *     `readdirSync` (8,470-call histogram, #756) and `copyFileSync` (the
+ *     `smoke:cache` crash) — plus `statSync`/`mkdtempSync` on the same paths.
+ *     `readFileSync` on the same trees is plausibly in the class too:
+ *     `browser-token.ts` reads browser LevelDB files inside `catch { continue }`,
+ *     so an interrupt there would be "no token in this file". It is left out
+ *     because nothing has measured it, not because it is known safe; widening
+ *     the set is a deliberate edit here, not something the gate infers;
+ *   - the rest of `scripts/`. It also holds many repo-file walkers that are not
+ *     in the class, and a gate that flagged all of them would be argued down to
+ *     an allowlist, so only `CONTAINER_SCRIPTS` are swept;
  *   - a binding the scanner does not see by name (`const { readdirSync: r } =
- *     fs`, `fs['readdirSync']`). It matches NAMES, not resolved bindings.
+ *     fs`, `fs['readdirSync']`). It matches NAMES, not resolved bindings; the
+ *     import check narrows that for the wrapper, but an import of the right
+ *     name from `fs-retry` that is then shadowed in an inner scope passes.
  */
 
 import { describe, test, expect } from 'bun:test';
@@ -59,6 +73,21 @@ import { tsFilesUnder, scriptKindFor } from './helpers/ts-files.js';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC_ROOT = join(REPO_ROOT, 'src');
+
+/**
+ * The scripts that read the real Copilot container (#774's sibling list, minus
+ * five that no longer exist). The rest of `scripts/` walks repo files.
+ */
+const CONTAINER_SCRIPTS = [
+  'scripts/decode-coverage.ts',
+  'scripts/profile-database.ts',
+  'scripts/snapshot.ts',
+  'scripts/verify-optimistic-consistency.ts',
+];
+
+/** The module the real wrapper lives in; the one file allowed to define it. */
+const HELPER_MODULE = 'src/core/fs-retry.ts';
+const HELPER_SPECIFIER = /(^|\/)fs-retry(\.js|\.ts)?$/;
 
 /** The synchronous fs operations in the class. */
 const RETRYABLE_SYNC_OPS = new Set(['copyFileSync', 'readdirSync', 'mkdtempSync', 'statSync']);
@@ -100,7 +129,24 @@ function scanSource(fileName: string, text: string): Scan {
     findings.push(`${fileName}:${line + 1} ${op} ${how}`);
   };
 
+  let importsWrapper = false;
+  let firstWrapped: ts.Node | undefined;
+
   const visit = (node: ts.Node): void => {
+    if (
+      ts.isImportDeclaration(node) &&
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      HELPER_SPECIFIER.test(node.moduleSpecifier.text)
+    ) {
+      const bindings = node.importClause?.namedBindings;
+      if (bindings && ts.isNamedImports(bindings)) {
+        for (const el of bindings.elements) {
+          if (el.name.text === WRAPPER && (el.propertyName ?? el.name).text === WRAPPER) {
+            importsWrapper = true;
+          }
+        }
+      }
+    }
     // The reference itself: `x.op` or a bare `op` that is not an import
     // specifier and not the `.name` half of a property access.
     let ref: ts.Expression | undefined;
@@ -120,8 +166,10 @@ function scanSource(fileName: string, text: string): Scan {
     if (ref && op) {
       const call = ref.parent;
       if (call && ts.isCallExpression(call) && call.expression === ref) {
-        if (isWrapped(call)) wrapped++;
-        else report(ref, op, `is called outside ${WRAPPER}(() => …)`);
+        if (isWrapped(call)) {
+          wrapped++;
+          firstWrapped ??= call;
+        } else report(ref, op, `is called outside ${WRAPPER}(() => …)`);
       } else {
         report(ref, op, 'is referenced as a value, so its calls cannot be checked');
       }
@@ -129,32 +177,52 @@ function scanSource(fileName: string, text: string): Scan {
     ts.forEachChild(node, visit);
   };
   visit(sf);
+  if (firstWrapped && !importsWrapper && fileName !== HELPER_MODULE) {
+    report(
+      firstWrapped,
+      WRAPPER,
+      `is not imported from fs-retry, so the wrapper may retry nothing`
+    );
+  }
   return { findings, wrapped };
 }
 
-function scanTree(): Scan & { files: number } {
+let memo: (Scan & { files: string[] }) | undefined;
+
+/** One parse of the tree per run — two tests read it. */
+function scanTree(): Scan & { files: string[] } {
+  if (memo) return memo;
   const all: Scan = { findings: [], wrapped: 0 };
-  const files = tsFilesUnder(SRC_ROOT).sort();
+  const files = [
+    ...tsFilesUnder(SRC_ROOT).map((file) => relative(REPO_ROOT, file)),
+    ...CONTAINER_SCRIPTS,
+  ].sort();
   for (const file of files) {
-    const { findings, wrapped } = scanSource(relative(REPO_ROOT, file), readFileSync(file, 'utf8'));
+    const { findings, wrapped } = scanSource(file, readFileSync(join(REPO_ROOT, file), 'utf8'));
     all.findings.push(...findings);
     all.wrapped += wrapped;
   }
-  return { ...all, files: files.length };
+  memo = { ...all, files };
+  return memo;
 }
 
 describe('no retryable fs syscall in src/ bypasses retryInterrupted (#774)', () => {
-  test('every copy/readdir/mkdtemp/stat in src/ is retried', () => {
+  test('every copy/readdir/mkdtemp/stat in src/ and the container scripts is retried', () => {
     const { findings } = scanTree();
     expect(findings).toEqual([]);
   });
 
   test('the sweep reached the sites it exists for (an empty scan is not a pass)', () => {
     const { files, wrapped } = scanTree();
-    expect(files).toBeGreaterThan(20);
+    expect(files.length).toBeGreaterThan(20);
+    for (const script of CONTAINER_SCRIPTS) expect(files).toContain(script);
     // The snapshot path alone has six wrapped calls; discovery has three.
     expect(wrapped).toBeGreaterThanOrEqual(9);
-    for (const file of ['src/core/leveldb-reader.ts', 'src/core/database.ts']) {
+    for (const file of [
+      'src/core/leveldb-reader.ts',
+      'src/core/database.ts',
+      ...CONTAINER_SCRIPTS,
+    ]) {
       const text = readFileSync(join(REPO_ROOT, file), 'utf8');
       expect(scanSource(file, text).wrapped).toBeGreaterThan(0);
     }
@@ -162,8 +230,12 @@ describe('no retryable fs syscall in src/ bypasses retryInterrupted (#774)', () 
 });
 
 describe('the scanner recognises the shapes', () => {
-  const flagged = (src: string): number => scanSource('specimen.ts', src).findings.length;
-  const wrapped = (src: string): number => scanSource('specimen.ts', src).wrapped;
+  // Specimens that use the wrapper get the real import, so the import check
+  // has its own tests below instead of failing every shape test.
+  const IMPORT = "import { retryInterrupted } from '../core/fs-retry.js';\n";
+  const flagged = (src: string): number => scanSource('specimen.ts', IMPORT + src).findings.length;
+  const wrapped = (src: string): number => scanSource('specimen.ts', IMPORT + src).wrapped;
+  const raw = (src: string): string[] => scanSource('specimen.ts', src).findings;
 
   test.each([
     ['bare namespaced call', 'fs.copyFileSync(a, b);'],
@@ -195,6 +267,37 @@ describe('the scanner recognises the shapes', () => {
         "import { readdirSync, existsSync } from 'node:fs';\nfs.existsSync(p);\nfs.rmSync(p);"
       )
     ).toBe(0);
+  });
+
+  test.each([
+    ['no import at all', 'retryInterrupted(() => fs.readdirSync(p));'],
+    [
+      'a local function of that name',
+      'function retryInterrupted<T>(op: () => T): T { return op(); }\nretryInterrupted(() => fs.readdirSync(p));',
+    ],
+    [
+      'imported from somewhere else',
+      "import { retryInterrupted } from './my-retry.js';\nretryInterrupted(() => fs.readdirSync(p));",
+    ],
+    [
+      'a different export renamed to it',
+      "import { other as retryInterrupted } from './fs-retry.js';\nretryInterrupted(() => fs.readdirSync(p));",
+    ],
+  ])('flags a wrapper that is not the real one: %s', (_label, src) => {
+    expect(raw(src)).toEqual([expect.stringContaining('is not imported from fs-retry')]);
+  });
+
+  test.each([
+    ["'../core/fs-retry.js'", "import { retryInterrupted } from '../core/fs-retry.js';"],
+    ["'./fs-retry.js'", "import { retryInterrupted } from './fs-retry.js';"],
+    ["'../src/core/fs-retry.js'", "import { retryInterrupted } from '../src/core/fs-retry.js';"],
+  ])('accepts the real import: %s', (_label, imp) => {
+    expect(raw(`${imp}\nretryInterrupted(() => fs.readdirSync(p));`)).toEqual([]);
+  });
+
+  test('the helper module itself needs no import', () => {
+    const text = readFileSync(join(REPO_ROOT, HELPER_MODULE), 'utf8');
+    expect(scanSource(HELPER_MODULE, text).findings).toEqual([]);
   });
 
   test('every op in the set is recognised', () => {

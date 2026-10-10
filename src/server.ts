@@ -12,7 +12,7 @@ import {
   ListToolsRequestSchema,
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
-import { CopilotDatabase } from './core/database.js';
+import { CopilotDatabase, missingDatabaseError } from './core/database.js';
 import { CopilotMoneyTools } from './tools/index.js';
 import { ALL_TOOL_DEFS, TOOL_REGISTRY, type LiveToolContext } from './tools/registry/index.js';
 import { GraphQLClient, GraphQLError } from './core/graphql/client.js';
@@ -234,13 +234,17 @@ export class CopilotMoneyServer {
     // the one that degrades safely.
     const needsLocalCache = !toolDef.requiresLiveReads && (toolDef.readOnly || !this.live);
     if (needsLocalCache && !this.db.isAvailable()) {
+      // "Could not look" is not "absent" (#774): when the check failed to read,
+      // say so rather than telling an installed, synced user to install.
+      const { lookupError } = this.db.availability();
       return {
         content: [
           {
             type: 'text' as const,
-            text:
-              'Database not available. Please ensure Copilot Money is installed ' +
-              'and has created local data, or provide a custom database path.',
+            text: lookupError
+              ? `Database not available. ${missingDatabaseError(lookupError).message}`
+              : 'Database not available. Please ensure Copilot Money is installed ' +
+                'and has created local data, or provide a custom database path.',
           },
         ],
         isError: true,

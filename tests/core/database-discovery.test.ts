@@ -26,6 +26,7 @@ import {
   missingDatabaseError,
 } from '../../src/core/database.js';
 import { MAX_INTERRUPT_ATTEMPTS } from '../../src/core/fs-retry.js';
+import { CopilotMoneyServer } from '../../src/server.js';
 
 const FIRESTORE =
   'Library/Containers/com.copilot.production/Data/Library/Application Support/firestore/__FIRAPP_DEFAULT';
@@ -38,6 +39,14 @@ const restores: Array<() => void> = [];
 function eintr(p: string): NodeJS.ErrnoException {
   const err: NodeJS.ErrnoException = new Error(`EINTR: interrupted system call, scandir '${p}'`);
   err.code = 'EINTR';
+  err.syscall = 'scandir';
+  return err;
+}
+
+function eacces(p: string): NodeJS.ErrnoException {
+  const err: NodeJS.ErrnoException = new Error(`EACCES: permission denied, scandir '${p}'`);
+  err.code = 'EACCES';
+  err.syscall = 'scandir';
   return err;
 }
 
@@ -100,6 +109,17 @@ describe('discoverCopilotDatabase: "could not look" is not "absent"', () => {
     }
   });
 
+  test('existsSync is not consulted, so an interrupted existence check cannot read as absence', () => {
+    // existsSync reports ANY error as false. If discovery gated its reads on it,
+    // an interrupt there would skip the retried readdir and say "absent".
+    const original = fs.existsSync;
+    (fs as { existsSync: unknown }).existsSync = () => false;
+    restores.push(() => {
+      (fs as { existsSync: unknown }).existsSync = original;
+    });
+    expect(discoverCopilotDatabase(home)).toEqual({ path: mainPath });
+  });
+
   test('a container with no LevelDB files is plain absence — no lookup error', () => {
     fs.rmSync(path.join(mainPath, '000001.ldb'));
     expect(discoverCopilotDatabase(home)).toEqual({ path: undefined });
@@ -120,6 +140,19 @@ describe('missingDatabaseError', () => {
     expect(message).not.toContain('ensure Copilot Money is installed');
   });
 
+  test('a non-retryable lookup error is not called transient', () => {
+    const message = missingDatabaseError(eacces('/synthetic/main')).message;
+    expect(message).toContain('EACCES from scandir');
+    expect(message).not.toContain('transient');
+    expect(message).not.toContain('ensure Copilot Money is installed');
+  });
+
+  test('the message names the errno, never the path (it reaches the MCP client)', () => {
+    for (const err of [eintr('/synthetic/home/user/main'), eacces('/synthetic/home/user/main')]) {
+      expect(missingDatabaseError(err).message).not.toContain('/synthetic');
+    }
+  });
+
   test('a reader whose discovery failed rejects with the lookup-failed message', async () => {
     // Constructed WITH a path so nothing walks a real home; the discovery
     // outcome is then set the way the no-path constructor would set it.
@@ -128,5 +161,54 @@ describe('missingDatabaseError', () => {
     internals.dbPath = undefined;
     internals.discoveryError = eintr('/synthetic/main');
     await expect(db.getAccounts()).rejects.toThrow('transient');
+  });
+});
+
+describe('availability: "could not look" survives to the server dispatch gate', () => {
+  test('an explicit path that cannot be read reports the lookup error, not absence', () => {
+    interruptReaddir(Number.POSITIVE_INFINITY);
+    const result = new CopilotDatabase(mainPath).availability();
+    expect(result.available).toBe(false);
+    expect((result.lookupError as NodeJS.ErrnoException | undefined)?.code).toBe('EINTR');
+  });
+
+  test('an explicit path that does not exist is plain absence', () => {
+    const result = new CopilotDatabase(path.join(home, 'nope')).availability();
+    expect(result).toEqual({ available: false });
+  });
+
+  test('an interrupt that clears leaves the database available', () => {
+    interruptReaddir(MAX_INTERRUPT_ATTEMPTS - 1);
+    expect(new CopilotDatabase(mainPath).availability()).toEqual({ available: true });
+  });
+
+  test('a cache-mode tool call relays the lookup failure instead of the install advice', async () => {
+    // Through handleCallTool, not the database directly: the dispatch gate in
+    // src/server.ts answers before any read method runs, so a test that called
+    // db.getAccounts() would pass while the user still saw the install advice.
+    const server = new CopilotMoneyServer(mainPath);
+    interruptReaddir(Number.POSITIVE_INFINITY);
+    const response = await server.handleCallTool('get_accounts', {});
+    const text = response.content[0]?.text ?? '';
+    expect(response.isError).toBe(true);
+    expect(text).toContain('EINTR');
+    expect(text).not.toContain('ensure Copilot Money is installed');
+  });
+
+  test('a failed no-path discovery reaches the client the same way', async () => {
+    const server = new CopilotMoneyServer(mainPath);
+    const db = (server as unknown as { db: CopilotDatabase }).db;
+    const internals = db as unknown as { dbPath?: string; discoveryError?: Error };
+    internals.dbPath = undefined;
+    internals.discoveryError = eintr('/synthetic/main');
+    const text = (await server.handleCallTool('get_accounts', {})).content[0]?.text ?? '';
+    expect(text).toContain('EINTR');
+    expect(text).not.toContain('ensure Copilot Money is installed');
+  });
+
+  test('control: genuine absence still gets the install advice', async () => {
+    const server = new CopilotMoneyServer(path.join(home, 'nope'));
+    const text = (await server.handleCallTool('get_accounts', {})).content[0]?.text ?? '';
+    expect(text).toContain('ensure Copilot Money is installed');
   });
 });
