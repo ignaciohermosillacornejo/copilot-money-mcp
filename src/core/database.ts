@@ -180,9 +180,11 @@ export function missingDatabaseError(lookupError: Error | undefined): Error {
     );
   }
   const errno = lookupError as NodeJS.ErrnoException;
+  // No errno code means a non-fs throw, wrapped by `noteFailure`. Its message is
+  // the only signal there is, so it is kept, with anything path-shaped removed.
   const what = errno.code
     ? `${errno.code}${errno.syscall ? ` from ${errno.syscall}` : ''}`
-    : lookupError.name;
+    : scrubPaths(lookupError.message) || lookupError.name;
   const prefix = `Could not read the Copilot Money database directory (${what}).`;
   if (isRetryableErrno(lookupError)) {
     return new Error(
@@ -190,10 +192,18 @@ export function missingDatabaseError(lookupError: Error | undefined): Error {
         'missing install — retry the request.'
     );
   }
+  // Generic about WHICH directory: this is also what an explicit `--db-path`
+  // that cannot be read produces, so it must not assume the default container.
   return new Error(
     `${prefix} Copilot Money may well be installed: check that the process running this ` +
-      'server is allowed to read the Copilot Money container.'
+      'server is allowed to read that directory — the Copilot Money container, or the ' +
+      'custom database path if one was given.'
   );
+}
+
+/** Replace absolute and home-relative paths with a placeholder. */
+function scrubPaths(text: string): string {
+  return text.replace(/(?:~|\/)[^\s'",)]*/g, '<path>').trim();
 }
 
 /**

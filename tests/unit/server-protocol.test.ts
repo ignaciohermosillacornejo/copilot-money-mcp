@@ -92,8 +92,8 @@ function setupServerWithMockData(): CopilotMoneyServer {
   (db as any)._recurring = []; // Empty recurring transactions
   (db as any)._budgets = []; // Empty budgets
   (db as any)._goals = []; // Empty goals
-  // Mock isAvailable to return true since we have mock data
-  db.isAvailable = () => true;
+  // Mock availability() to report available since we have mock data
+  db.availability = () => ({ available: true });
 
   // Inject mock database and tools
   server._injectForTesting(db, new CopilotMoneyTools(db));
@@ -368,7 +368,7 @@ describe('CopilotMoneyServer.handleCallTool - error handling', () => {
     const db = new CopilotDatabase('/fake/path');
     (db as any)._transactions = [...mockTransactions];
     (db as any)._accounts = [...mockAccounts];
-    db.isAvailable = () => true;
+    db.availability = () => ({ available: true });
     const tools = new CopilotMoneyTools(db);
     tools.getAccounts = () => {
       throw new Error('Test error from tool');
@@ -386,7 +386,7 @@ describe('CopilotMoneyServer.handleCallTool - error handling', () => {
     const db = new CopilotDatabase('/fake/path');
     (db as any)._transactions = [...mockTransactions];
     (db as any)._accounts = [...mockAccounts];
-    db.isAvailable = () => true;
+    db.availability = () => ({ available: true });
     const tools = new CopilotMoneyTools(db);
     tools.getCategories = () => {
       throw 'string error';
@@ -404,7 +404,7 @@ describe('CopilotMoneyServer.handleCallTool - error handling', () => {
     const db = new CopilotDatabase('/fake/path');
     (db as any)._transactions = [...mockTransactions];
     (db as any)._accounts = [...mockAccounts];
-    db.isAvailable = () => true;
+    db.availability = () => ({ available: true });
     const tools = new CopilotMoneyTools(db);
     tools.getCategories = () => {
       throw 42;
@@ -492,7 +492,7 @@ describe('CopilotMoneyServer - constructor and initialization', () => {
     (db as any)._recurring = [];
     (db as any)._budgets = [];
     (db as any)._goals = [];
-    db.isAvailable = () => true;
+    db.availability = () => ({ available: true });
     const tools = new CopilotMoneyTools(db);
 
     server._injectForTesting(db, tools);

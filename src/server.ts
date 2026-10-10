@@ -233,10 +233,14 @@ export class CopilotMoneyServer {
     // makes them equivalent today, but if that ever drifts, the object is
     // the one that degrades safely.
     const needsLocalCache = !toolDef.requiresLiveReads && (toolDef.readOnly || !this.live);
-    if (needsLocalCache && !this.db.isAvailable()) {
+    // One `availability()` call, not `isAvailable()` then `availability()`: the
+    // check is a retried readdir, so a second call would pay the retry bound
+    // twice on exactly the slow path, and could disagree with the first.
+    const availability = needsLocalCache ? this.db.availability() : undefined;
+    if (availability && !availability.available) {
       // "Could not look" is not "absent" (#774): when the check failed to read,
       // say so rather than telling an installed, synced user to install.
-      const { lookupError } = this.db.availability();
+      const { lookupError } = availability;
       return {
         content: [
           {

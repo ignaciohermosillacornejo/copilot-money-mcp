@@ -243,7 +243,8 @@ function tokensInFile(filePath: string): string[] {
 
 /** Search a directory for .ldb and .log files containing refresh tokens. */
 function searchLevelDBDir(dirPath: string): FoundToken[] {
-  if (!existsSync(dirPath)) return [];
+  // No `existsSync` first (#774): it reports any error — an interrupt included —
+  // as absence. A missing directory throws ENOENT into the same `return []`.
   let files: string[];
   try {
     files = retryInterrupted(() => readdirSync(dirPath));
@@ -263,7 +264,9 @@ function searchLevelDBDir(dirPath: string): FoundToken[] {
 
 /** Search Firefox profiles for refresh tokens. */
 function searchFirefoxProfiles(profilesDir: string): FoundToken[] {
-  if (!existsSync(profilesDir)) return [];
+  // No outer `existsSync` (#774): a missing directory throws ENOENT into the
+  // `catch` below, which returns the same empty list. The inner ones stay —
+  // there a throw would abort the whole profile loop instead of skipping one.
   const found: FoundToken[] = [];
   try {
     const profiles = retryInterrupted(() => readdirSync(profilesDir, { withFileTypes: true }))

@@ -42,8 +42,14 @@
  *     longer call it at all — the retried `readdirSync` is the existence check
  *     there, with `ENOENT` read as absence — and
  *     `tests/core/database-discovery.test.ts` pins that by making `existsSync`
- *     always answer false. Elsewhere (`iterateDocuments`' path check, the
- *     browser-token pre-filters) it remains, and is not swept;
+ *     always answer false. `browser-token.ts` dropped the two that sat directly
+ *     in front of a retried readdir whose `catch` already returns the same
+ *     empty answer (`searchLevelDBDir`, the outer gate in
+ *     `searchFirefoxProfiles`), since removing those is behaviour-identical.
+ *     The rest remain and are not swept: `iterateDocuments`' path check, the
+ *     Chromium profile scan (an interrupt there degrades to the `Default`
+ *     profile only), and the inner Firefox/Safari checks, where an unguarded
+ *     throw would abort the whole profile loop rather than skip one entry;
  *   - the async API (`fs.promises.*`, callback `fs.*`). The only async site
  *     touching these trees is the orphan sweep, which is best effort by design;
  *   - sync ops outside the set (`readFileSync`, `appendFileSync`,

@@ -37,7 +37,7 @@ function setupServerWithMockData(): CopilotMoneyServer {
   (db as any)._investmentPrices = [];
   (db as any)._investmentSplits = [];
   (db as any)._items = [];
-  db.isAvailable = () => true;
+  db.availability = () => ({ available: true });
   server._injectForTesting(db, new CopilotMoneyTools(db));
   return server;
 }

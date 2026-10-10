@@ -153,6 +153,20 @@ describe('missingDatabaseError', () => {
     }
   });
 
+  test('a non-retryable error does not assume the default container (an explicit path gets it too)', () => {
+    expect(missingDatabaseError(eacces('/synthetic/custom')).message).toContain(
+      'custom database path'
+    );
+  });
+
+  test('a non-errno error keeps its message, with paths scrubbed', () => {
+    const message = missingDatabaseError(
+      new Error("unexpected shape under '/synthetic/home/user/main'")
+    ).message;
+    expect(message).toContain('unexpected shape under');
+    expect(message).not.toContain('/synthetic');
+  });
+
   test('a reader whose discovery failed rejects with the lookup-failed message', async () => {
     // Constructed WITH a path so nothing walks a real home; the discovery
     // outcome is then set the way the no-path constructor would set it.
@@ -193,6 +207,15 @@ describe('availability: "could not look" survives to the server dispatch gate', 
     expect(response.isError).toBe(true);
     expect(text).toContain('EINTR');
     expect(text).not.toContain('ensure Copilot Money is installed');
+  });
+
+  test('the dispatch gate checks once, so a permanent interrupt pays the bound once', async () => {
+    // isAvailable() followed by availability() ran the retried readdir twice —
+    // twice the bound on the slow path, and a window where the two disagree.
+    const server = new CopilotMoneyServer(mainPath);
+    const delivered = interruptReaddir(Number.POSITIVE_INFINITY);
+    await server.handleCallTool('get_accounts', {});
+    expect(delivered()).toBe(MAX_INTERRUPT_ATTEMPTS);
   });
 
   test('a failed no-path discovery reaches the client the same way', async () => {

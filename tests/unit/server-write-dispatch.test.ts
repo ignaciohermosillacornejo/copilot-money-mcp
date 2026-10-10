@@ -123,7 +123,7 @@ describe('write tool dispatch (writeEnabled=true)', () => {
     server = new CopilotMoneyServer('/fake/path', undefined, true);
 
     const db = new CopilotDatabase('/fake/path');
-    db.isAvailable = () => true;
+    db.availability = () => ({ available: true });
 
     tools = new CopilotMoneyTools(db);
 
