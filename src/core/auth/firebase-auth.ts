@@ -124,8 +124,12 @@ export class FirebaseAuth {
    * this before anything else, before a rethrow too. A sibling's live session
    * is a better answer than any error this caller has, and returning it
    * discards nothing (#751 is about not discarding a credential, which this
-   * never does). The one await that can't fail this way, the browser read, is
-   * followed by a call to this.
+   * never does). The check is unconditional: a live sibling session beats ANY
+   * exception, not only an endpoint signal. That includes a failed fetch, a
+   * malformed response body, or a drifted response with no ID token. Each of
+   * those says nothing about the session the sibling already holds. The one
+   * await that can't fail this way, the browser read, is followed by a call
+   * to this.
    *
    * Exempt: returning the session an exchange has just installed. That is the
    * token the server just issued, so it is returned as is, even when its
@@ -208,6 +212,7 @@ export class FirebaseAuth {
           // cold path is the right answer at that point.
           try {
             await this.exchangeToken(installed);
+            // Just issued (see the exemption in freshIdToken).
             if (this.idToken) return this.idToken;
           } catch (retryErr) {
             // Resume point: the retry may have been overtaken too.
@@ -284,6 +289,7 @@ export class FirebaseAuth {
         continue;
       }
       if (!this.idToken) throw new Error('Firebase token exchange returned no ID token');
+      // Just issued (see the exemption in freshIdToken).
       return this.idToken;
     }
 

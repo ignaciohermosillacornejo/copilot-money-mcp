@@ -24,6 +24,7 @@ import { join } from 'path';
 import { fileURLToPath } from 'url';
 import { stripComments } from '../../helpers/strip-comments.js';
 import { tmpdir } from 'os';
+import ts from 'typescript';
 import {
   extractRefreshTokenCandidates,
   getChromiumProfileStoragePaths,
@@ -1255,13 +1256,32 @@ describe('a session installed at any resume point is returned, not reported as a
     // still need a check here. Comments are stripped first, because the
     // method's own commentary talks about awaits. String literals survive
     // stripping, but none in getIdToken contains `await` today.
+    //
+    // The window is the method's own body, found by the TypeScript parser, not
+    // the text between two markers. A member added after getIdToken must not
+    // fold its awaits and checks into this count.
     const path = fileURLToPath(new URL('../../../src/core/auth/firebase-auth.ts', import.meta.url));
-    const source = stripComments(readFileSync(path, 'utf8'), path);
-    const start = source.indexOf('async getIdToken(): Promise<string> {');
-    expect(start, 'getIdToken was not found; update this detector').toBeGreaterThan(-1);
-    const end = source.indexOf('getUserId(): string | null', start);
-    expect(end, 'the end of getIdToken was not found; update this detector').toBeGreaterThan(start);
-    const code = source.slice(start, end);
+    const file = ts.createSourceFile(
+      path,
+      readFileSync(path, 'utf8'),
+      ts.ScriptTarget.Latest,
+      true
+    );
+    const bodies: string[] = [];
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isMethodDeclaration(node) &&
+        ts.isIdentifier(node.name) &&
+        node.name.text === 'getIdToken' &&
+        node.body !== undefined
+      ) {
+        bodies.push(node.body.getText(file));
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(file);
+    expect(bodies.length, 'expected exactly one getIdToken method; update this detector').toBe(1);
+    const code = stripComments(bodies[0]!, path);
 
     const awaits = code.match(/\bawait\b/g)?.length ?? 0;
     const checks = code.match(/this\.freshIdToken\(\)/g)?.length ?? 0;
