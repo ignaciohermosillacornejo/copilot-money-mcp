@@ -29,6 +29,8 @@ describe('compareAccountNames', () => {
     expect(parity).toEqual({
       compared: 2,
       mismatched: 1,
+      mismatchedNicknamed: 0,
+      mismatchedFallback: 1,
       cacheOnly: 0,
       liveOnly: 1,
       discriminating: 0,
@@ -88,6 +90,8 @@ describe('classifyAccountNameParity', () => {
   const base = {
     compared: 5,
     mismatched: 0,
+    mismatchedNicknamed: 0,
+    mismatchedFallback: 0,
     cacheOnly: 0,
     liveOnly: 0,
     discriminating: 2,
@@ -99,7 +103,28 @@ describe('classifyAccountNameParity', () => {
   });
 
   test('FAIL on any mismatch, even with discriminating rows', () => {
-    expect(classifyAccountNameParity({ ...base, mismatched: 1 }).status).toBe('FAIL');
+    expect(
+      classifyAccountNameParity({ ...base, mismatched: 1, mismatchedNicknamed: 1 }).status
+    ).toBe('FAIL');
+  });
+
+  test('the FAIL detail names the branch that mismatched', () => {
+    const nick = classifyAccountNameParity({ ...base, mismatched: 1, mismatchedNicknamed: 1 });
+    expect(nick.detail).toContain('stopped resolving the nickname');
+    expect(nick.detail).not.toContain('#791');
+
+    const fallback = classifyAccountNameParity({ ...base, mismatched: 1, mismatchedFallback: 1 });
+    expect(fallback.detail).toContain('#791');
+    expect(fallback.detail).not.toContain('stopped resolving the nickname');
+
+    const both = classifyAccountNameParity({
+      ...base,
+      mismatched: 2,
+      mismatchedNicknamed: 1,
+      mismatchedFallback: 1,
+    });
+    expect(both.detail).toContain('stopped resolving the nickname');
+    expect(both.detail).toContain('#791');
   });
 
   test('FAIL when nothing was compared — an empty join is a broken check', () => {
@@ -120,12 +145,22 @@ describe('classifyAccountNameParity', () => {
   });
 
   test('WARN, never PASS, when the row sets are one-sided', () => {
-    expect(classifyAccountNameParity({ ...base, cacheOnly: 1 }).status).toBe('WARN');
+    const verdict = classifyAccountNameParity({ ...base, cacheOnly: 1 });
+    expect(verdict.status).toBe('WARN');
+    expect(verdict.detail).toContain('one-sided');
     expect(classifyAccountNameParity({ ...base, liveOnly: 1 }).status).toBe('WARN');
   });
 
+  test('one-sided wins over non-discriminating, because it is the actionable WARN', () => {
+    const verdict = classifyAccountNameParity({ ...base, discriminating: 0, cacheOnly: 1 });
+    expect(verdict.detail).toContain('one-sided');
+  });
+
   test('a mismatch still FAILs when the row sets are one-sided', () => {
-    expect(classifyAccountNameParity({ ...base, mismatched: 1, liveOnly: 2 }).status).toBe('FAIL');
+    expect(
+      classifyAccountNameParity({ ...base, mismatched: 1, mismatchedFallback: 1, liveOnly: 2 })
+        .status
+    ).toBe('FAIL');
   });
 
   test('WARN, never PASS, when no row could tell nickname from provider label', () => {

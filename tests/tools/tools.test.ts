@@ -922,8 +922,12 @@ describe('CopilotMoneyTools', () => {
       // takes the nickname, and an account with NO nickname keeps its own
       // provider label. Asserting only the first lets an unconditional
       // `name: account.nickname` pass while blanking every un-nicknamed row.
-      // Typed as Account[] before the neighbours' cast, so a renamed
-      // `nickname` field is a compile error, not a silently vacuous fixture.
+      // What makes this non-vacuous is asserting BOTH rows: if `nickname` were
+      // renamed in tools.ts while this fixture kept the old key, row 1 would
+      // come back as the provider label and the test would go red. The
+      // Account[] annotation only catches wrong value types and missing
+      // required fields. AccountSchema is .passthrough(), so an unknown or
+      // renamed key still compiles.
       const accounts: Account[] = [
         { ...mockAccounts[0], name: 'Provider Checking', nickname: 'Household Checking' },
         { ...mockAccounts[1], name: 'Provider Savings' },

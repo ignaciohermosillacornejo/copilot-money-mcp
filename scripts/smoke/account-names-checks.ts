@@ -33,6 +33,13 @@ export interface AccountNameParity {
   compared: number;
   /** Compared ids whose `name` differs between the two modes. */
   mismatched: number;
+  /**
+   * The mismatches split by branch: rows whose cache labels carry a usable
+   * nickname (the nickname claim) vs rows that do not (the fallback order,
+   * #791). The two sum to `mismatched`, and they point at different causes.
+   */
+  mismatchedNicknamed: number;
+  mismatchedFallback: number;
   /** Ids only the cache returned (e.g. a stale cache, or an account added since). */
   cacheOnly: number;
   /** Ids only live returned. */
@@ -66,6 +73,8 @@ export function compareAccountNames(
   const labelsById = new Map(cacheLabels.map((l) => [l.account_id, l]));
   let compared = 0;
   let mismatched = 0;
+  let mismatchedNicknamed = 0;
+  let mismatchedFallback = 0;
   let cacheOnly = 0;
   let discriminating = 0;
   let fallbackDiscriminating = 0;
@@ -76,9 +85,13 @@ export function compareAccountNames(
       continue;
     }
     compared++;
-    if (cacheName !== liveNames.get(id)) mismatched++;
-
     const labels = labelsById.get(id);
+    if (cacheName !== liveNames.get(id)) {
+      mismatched++;
+      if (labels?.nickname?.trim()) mismatchedNicknamed++;
+      else mismatchedFallback++;
+    }
+
     if (labels?.nickname?.trim()) {
       // The provider label is what the account would be called with no
       // nickname: the same rule, minus the nickname operand.
@@ -99,7 +112,16 @@ export function compareAccountNames(
   let liveOnly = 0;
   for (const id of liveNames.keys()) if (!cacheNames.has(id)) liveOnly++;
 
-  return { compared, mismatched, cacheOnly, liveOnly, discriminating, fallbackDiscriminating };
+  return {
+    compared,
+    mismatched,
+    mismatchedNicknamed,
+    mismatchedFallback,
+    cacheOnly,
+    liveOnly,
+    discriminating,
+    fallbackDiscriminating,
+  };
 }
 
 export type ParityStatus = 'PASS' | 'WARN' | 'FAIL';
@@ -111,12 +133,12 @@ export type ParityStatus = 'PASS' | 'WARN' | 'FAIL';
  *   one mode returned accounts but no id matched — a join that resolves
  *   nothing is a broken check, not a clean one.
  * - WARN when neither mode returned any account (nothing to compare).
+ * - WARN when the row sets are one-sided (cache-only or live-only ids): the
+ *   claim then covers only the overlap, typically because the cache is stale.
  * - WARN when every compared account agreed but none was discriminating: the
  *   two modes agree, and this data cannot say whether they agree on the
  *   nickname or on the provider label. Not a failure (the user simply has no
  *   such nickname), but never reported as coverage.
- * - WARN when the row sets are one-sided (cache-only or live-only ids): the
- *   claim then covers only the overlap, typically because the cache is stale.
  * - PASS otherwise.
  */
 export function classifyAccountNameParity(p: AccountNameParity): {
@@ -124,19 +146,31 @@ export function classifyAccountNameParity(p: AccountNameParity): {
   detail: string;
 } {
   const counts =
-    `${p.compared} compared, ${p.mismatched} mismatched, ${p.discriminating} discriminating ` +
+    `${p.compared} compared, ${p.mismatched} mismatched (${p.mismatchedNicknamed} nicknamed, ` +
+    `${p.mismatchedFallback} fallback), ${p.discriminating} discriminating ` +
     `(nickname differs from provider label), ${p.fallbackDiscriminating} fallback-discriminating ` +
     `(no nickname, name differs from official_name), ${p.cacheOnly} cache-only, ` +
     `${p.liveOnly} live-only`;
 
   if (p.mismatched > 0) {
+    const causes: string[] = [];
+    if (p.mismatchedNicknamed > 0) {
+      causes.push(
+        `${p.mismatchedNicknamed} nicknamed account(s) differ: the server stopped resolving ` +
+          `the nickname into AccountNode.name, or the cache's nickname semantics shifted`
+      );
+    }
+    if (p.mismatchedFallback > 0) {
+      causes.push(
+        `${p.mismatchedFallback} un-nicknamed account(s) differ: the two modes fall back to ` +
+          `different provider labels (cache: name, then official_name; see #791)`
+      );
+    }
     return {
       status: 'FAIL',
       detail:
-        `${counts} — cache get_accounts and get_accounts_live name ${p.mismatched} account(s) ` +
-        `differently. Either the server stopped resolving the nickname into AccountNode.name, ` +
-        `or the cache's nickname semantics shifted (or the cache is stale — reopen Copilot ` +
-        `to sync it and re-run before concluding drift)`,
+        `${counts} — ${causes.join('; ')}. A stale cache can cause either: reopen Copilot ` +
+        `to sync it and re-run before concluding drift`,
     };
   }
   if (p.compared === 0 && p.cacheOnly === 0 && p.liveOnly === 0) {
@@ -153,15 +187,8 @@ export function classifyAccountNameParity(p: AccountNameParity): {
         `Suspect the id join (cache account_id vs live id) before suspecting the data`,
     };
   }
-  if (p.discriminating === 0) {
-    return {
-      status: 'WARN',
-      detail:
-        `${counts} — every compared name agrees, but no account has a nickname that differs ` +
-        `from its provider label, so this run CANNOT distinguish "both report the nickname" ` +
-        `from "both report the provider label". Parity holds; the nickname claim is unexercised`,
-    };
-  }
+  // One-sided is checked before non-discriminating: when both apply, the
+  // one-sided clause is the one a reader can act on (re-sync and re-run).
   if (p.cacheOnly > 0 || p.liveOnly > 0) {
     return {
       status: 'WARN',
@@ -169,6 +196,15 @@ export function classifyAccountNameParity(p: AccountNameParity): {
         `${counts} — every compared name agrees, but the row sets are one-sided, so the ` +
         `parity claim covers only the ${p.compared} account(s) both modes returned. ` +
         `Usually a stale cache: reopen Copilot to sync it and re-run`,
+    };
+  }
+  if (p.discriminating === 0) {
+    return {
+      status: 'WARN',
+      detail:
+        `${counts} — every compared name agrees, but no account has a nickname that differs ` +
+        `from its provider label, so this run CANNOT distinguish "both report the nickname" ` +
+        `from "both report the provider label". Parity holds; the nickname claim is unexercised`,
     };
   }
   return {
