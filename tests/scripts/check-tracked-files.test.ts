@@ -19,7 +19,7 @@
  * turned off within a week. They cannot detect the gate's deletion on their own;
  * they exist to pin the boundary the failing cases are measured against.
  */
-import { afterAll, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -125,37 +125,56 @@ const PACKAGE_JSON = JSON.stringify(
  * performs on an ignored path is the defect under test, so the fixture must be
  * built the same way a contributor builds a commit.
  *
- * Built once and copied, not rebuilt per case (#779). Standing it up is seven
- * process spawns, the same seven every time, and across the file's two dozen
- * repos they were most of its runtime — enough to put the table-driven case
- * below at 72-99% of bun's 5s default. A copy is a byte-identical repository:
- * its own `.git`, config, index and commit, so no case can see another's
- * perturbation. The stat data cached in the copied index no longer matches the
- * copied files' inodes and mtimes, which git treats as "maybe changed" and
- * re-hashes, so a copy reads exactly as clean as the original.
+ * Built once and copied, not rebuilt per case (#779). Standing it up is six
+ * git spawns, the same six every time, and the file builds 33 repos per run
+ * (25 `withRepo` call sites, one of them looping over nine `clean` scripts).
+ * Those spawns were most of its runtime, enough to put the table-driven case
+ * below at 72-99% of bun's 5s default. A copy is a byte-identical repository
+ * with its own `.git`, config, index and commit, so no case can see another's
+ * perturbation. The gate reads only the index (`git ls-files`,
+ * `git check-ignore --no-index`), never worktree stat data, so the copy's
+ * stale stat cache cannot change an outcome. Where a `perturb` does run
+ * `git add` or `git commit`, git just re-hashes the files whose stat changed.
+ *
+ * Built in `beforeAll`, so no single test's timeout pays for it. One stated
+ * gap: `bun test --bail` (as `bun run check` runs it) aborts without firing
+ * `afterAll` (see tests/setup/temp-db-teardown.ts), so a bailed run leaves this
+ * one small `check-tracked-files-template-*` directory behind. Per-case copies
+ * are removed in `withRepo`'s `finally` and are not affected.
  */
-let template: Promise<string> | undefined;
+let template: string | undefined;
 
 async function buildTemplate(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'check-tracked-files-template-'));
-  await git(root, ['init', '-q', '-b', 'main']);
-  await git(root, ['config', 'user.email', 'test@example.com']);
-  await git(root, ['config', 'user.name', 'Test']);
-  await git(root, ['config', 'commit.gpgsign', 'false']);
+  try {
+    await git(root, ['init', '-q', '-b', 'main']);
+    await git(root, ['config', 'user.email', 'test@example.com']);
+    await git(root, ['config', 'user.name', 'Test']);
+    await git(root, ['config', 'commit.gpgsign', 'false']);
 
-  await write(root, '.gitignore', GITIGNORE);
-  await write(root, 'package.json', PACKAGE_JSON);
-  await write(root, 'scripts/kept.ts', "console.log('kept');\n");
-  await write(root, 'src/entry.ts', "export const entry = 'entry';\n");
-  await write(root, 'tests/example.test.ts', "export const example = 'example';\n");
+    await write(root, '.gitignore', GITIGNORE);
+    await write(root, 'package.json', PACKAGE_JSON);
+    await write(root, 'scripts/kept.ts', "console.log('kept');\n");
+    await write(root, 'src/entry.ts', "export const entry = 'entry';\n");
+    await write(root, 'tests/example.test.ts', "export const example = 'example';\n");
 
-  await git(root, ['add', '-A']);
-  await git(root, ['commit', '-qm', 'initial']);
-  return root;
+    await git(root, ['add', '-A']);
+    await git(root, ['commit', '-qm', 'initial']);
+    return root;
+  } catch (err) {
+    // Don't strand a half-built template. The error still propagates, so it
+    // fails the hook and every case that needs the fixture.
+    await rm(root, { recursive: true, force: true });
+    throw err;
+  }
 }
 
+beforeAll(async () => {
+  template = await buildTemplate();
+});
+
 afterAll(async () => {
-  if (template !== undefined) await rm(await template, { recursive: true, force: true });
+  if (template !== undefined) await rm(template, { recursive: true, force: true });
 });
 
 /**
@@ -167,10 +186,12 @@ async function withRepo(
   assertions: (result: Result) => void,
   extraEnv: Record<string, string> = {}
 ): Promise<void> {
-  template ??= buildTemplate();
+  // Thrown rather than asserted: bun would report an expect() here against
+  // whichever test happened to be running, not against the fixture.
+  if (template === undefined) throw new Error('the beforeAll template build did not run');
   const root = await mkdtemp(join(tmpdir(), 'check-tracked-files-'));
   try {
-    await cp(await template, root, { recursive: true });
+    await cp(template, root, { recursive: true });
     await perturb(root);
     assertions(await runCheck(root, extraEnv));
   } finally {
