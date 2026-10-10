@@ -19,6 +19,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'fs';
 import { join } from 'path';
 import { writeFileAtomic } from '../../utils/atomic-write.js';
+import { retryInterrupted } from '../fs-retry.js';
 
 type Meta = { accountId: string; itemId: string };
 
@@ -145,7 +146,7 @@ export class TransactionMetaStore {
       for (const id of out.keys()) this.persisted.add(id);
       // Size valve: duplicates across many sessions can bloat the file far
       // past its logical content; rewrite deduped once, atomically.
-      if (statSync(file).size > this.maxBytes) {
+      if (retryInterrupted(() => statSync(file)).size > this.maxBytes) {
         try {
           writeFileAtomic(file, this.serialize(out));
         } catch (e) {

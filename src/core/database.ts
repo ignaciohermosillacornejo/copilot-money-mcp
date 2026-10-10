@@ -6,7 +6,7 @@
  */
 
 import { randomUUID } from 'crypto';
-import { existsSync, readdirSync } from 'fs';
+import fs from 'node:fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import {
@@ -46,13 +46,46 @@ import type {
 import type { BalanceHistory } from '../models/balance-history.js';
 import { preferredAccountName } from '../models/account.js';
 import { getCategoryName } from '../utils/categories.js';
+import { retryInterrupted } from './fs-retry.js';
 
 /**
- * Find Copilot Money database by searching known locations.
- * Returns the first valid path found, or undefined if none found.
+ * Outcome of looking for the Copilot Money database.
+ *
+ * `path` set: found. `path` unset and no `lookupError`: every candidate was
+ * looked at and none holds a database — genuinely absent. `path` unset WITH a
+ * `lookupError`: at least one candidate could not be read, so absence was never
+ * established (#774). The two used to collapse into one `undefined`, and a
+ * transient `EINTR` reached the user as "please ensure Copilot Money is
+ * installed and has synced data".
  */
-function findCopilotDatabase(): string | undefined {
-  const home = homedir();
+export interface DatabaseDiscovery {
+  path: string | undefined;
+  lookupError?: Error;
+}
+
+/** Errnos that mean "not there" rather than "could not look". */
+const ABSENT_ERRNOS = new Set(['ENOENT', 'ENOTDIR']);
+
+function isAbsence(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  return typeof code === 'string' && ABSENT_ERRNOS.has(code);
+}
+
+/**
+ * Find the Copilot Money database under `home` by searching known locations.
+ *
+ * `home` is a parameter rather than `homedir()` so tests can point it at a
+ * synthetic tree; production reaches it only through `findCopilotDatabase()`.
+ * Directory reads go through `retryInterrupted`, so an `EINTR` that clears is
+ * invisible; one that does not is returned as `lookupError` instead of being
+ * swallowed into "absent".
+ */
+export function discoverCopilotDatabase(home: string): DatabaseDiscovery {
+  let lookupError: Error | undefined;
+  const noteFailure = (err: unknown): void => {
+    if (isAbsence(err)) return;
+    lookupError ??= err instanceof Error ? err : new Error(String(err));
+  };
 
   // Known possible locations for Copilot Money database (macOS)
   const possiblePaths = [
@@ -79,42 +112,76 @@ function findCopilotDatabase(): string | undefined {
     home,
     'Library/Containers/com.copilot.production/Data/Library/Application Support'
   );
-  if (existsSync(containerBase)) {
+  if (fs.existsSync(containerBase)) {
     try {
       // Look for firestore directories
       const firestorePath = join(containerBase, 'firestore/__FIRAPP_DEFAULT');
-      if (existsSync(firestorePath)) {
-        const entries = readdirSync(firestorePath, { withFileTypes: true });
+      if (fs.existsSync(firestorePath)) {
+        const entries = retryInterrupted(() =>
+          fs.readdirSync(firestorePath, { withFileTypes: true })
+        );
         for (const entry of entries) {
           if (entry.isDirectory() && entry.name.startsWith('copilot-')) {
             const mainPath = join(firestorePath, entry.name, 'main');
-            if (existsSync(mainPath)) {
+            if (fs.existsSync(mainPath)) {
               possiblePaths.unshift(mainPath); // Add to front as highest priority
             }
           }
         }
       }
-    } catch {
-      // Ignore errors during dynamic discovery
+    } catch (err) {
+      // Dynamic discovery is best effort — the static list below still runs —
+      // but a failure to read is remembered, not forgotten.
+      noteFailure(err);
     }
   }
 
   // Check each path for validity (contains .ldb files or is a valid LevelDB directory)
   for (const path of possiblePaths) {
     try {
-      if (existsSync(path)) {
-        const files = readdirSync(path);
+      if (fs.existsSync(path)) {
+        const files = retryInterrupted(() => fs.readdirSync(path));
         // Check for .ldb files or LevelDB manifest files
         if (files.some((file) => file.endsWith('.ldb') || file.startsWith('MANIFEST-'))) {
-          return path;
+          return { path };
         }
       }
-    } catch {
-      // Continue to next path
+    } catch (err) {
+      // Continue to next path, remembering that this one was not ruled out.
+      noteFailure(err);
     }
   }
 
-  return undefined;
+  return lookupError ? { path: undefined, lookupError } : { path: undefined };
+}
+
+/**
+ * Find the Copilot Money database in the current user's home directory.
+ * The constructor's no-path branch is the only caller.
+ */
+function findCopilotDatabase(): DatabaseDiscovery {
+  return discoverCopilotDatabase(homedir());
+}
+
+/**
+ * The error a read throws when there is no database path.
+ *
+ * Without a `lookupError` discovery established absence, and the install/sync
+ * advice is right. With one it did not: telling a user who is installed and
+ * synced to go install and sync is the misdiagnosis #774 is about, so that case
+ * names the failure and says it is usually transient.
+ */
+export function missingDatabaseError(lookupError: Error | undefined): Error {
+  if (!lookupError) {
+    return new Error(
+      'Database not found. Please ensure Copilot Money is installed and has synced data.'
+    );
+  }
+  return new Error(
+    `Could not read the Copilot Money database directory (${lookupError.message}). ` +
+      'This is usually a transient filesystem error, not a missing install — retry the request. ' +
+      'If it persists, check that this process can read the Copilot Money container.'
+  );
 }
 
 /**
@@ -214,6 +281,8 @@ export class CopilotDatabase {
 
   // Optional decode timeout override
   private decodeTimeoutMs?: number;
+  /** Set when no-path discovery could not read a candidate (see `DatabaseDiscovery`). */
+  private discoveryError?: Error;
 
   /**
    * Initialize database connection.
@@ -228,7 +297,9 @@ export class CopilotDatabase {
       this.dbPath = dbPath;
     } else {
       // Auto-detect database location
-      this.dbPath = findCopilotDatabase();
+      const discovery = findCopilotDatabase();
+      this.dbPath = discovery.path;
+      this.discoveryError = discovery.lookupError;
     }
     this.decodeTimeoutMs = decodeTimeoutMs;
   }
@@ -238,9 +309,7 @@ export class CopilotDatabase {
    */
   private requireDbPath(): string {
     if (!this.dbPath) {
-      throw new Error(
-        'Database not found. Please ensure Copilot Money is installed and has synced data.'
-      );
+      throw missingDatabaseError(this.discoveryError);
     }
     return this.dbPath;
   }
@@ -250,12 +319,13 @@ export class CopilotDatabase {
    */
   isAvailable(): boolean {
     try {
-      if (!this.dbPath || !existsSync(this.dbPath)) {
+      if (!this.dbPath || !fs.existsSync(this.dbPath)) {
         return false;
       }
 
       // Check if directory contains .ldb files or LevelDB manifest
-      const files = readdirSync(this.dbPath);
+      const dbPath = this.dbPath;
+      const files = retryInterrupted(() => fs.readdirSync(dbPath));
       return files.some((file) => file.endsWith('.ldb') || file.startsWith('MANIFEST-'));
     } catch {
       return false;

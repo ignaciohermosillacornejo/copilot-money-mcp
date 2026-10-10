@@ -36,6 +36,7 @@ import { FirebaseAuth } from '../src/core/auth/firebase-auth.js';
 import { extractRefreshTokenCandidates } from '../src/core/auth/browser-token.js';
 import { CopilotDatabase } from '../src/core/database.js';
 import { CopilotMoneyTools } from '../src/tools/tools.js';
+import { retryInterrupted } from '../src/core/fs-retry.js';
 
 // --- CLI ---
 const argv = process.argv.slice(2);
@@ -81,7 +82,7 @@ function findRealDatabase(): string | undefined {
   if (!existsSync(base)) return undefined;
   const fs = join(base, 'firestore/__FIRAPP_DEFAULT');
   if (!existsSync(fs)) return undefined;
-  for (const e of readdirSync(fs, { withFileTypes: true })) {
+  for (const e of retryInterrupted(() => readdirSync(fs, { withFileTypes: true }))) {
     if (e.isDirectory() && e.name.startsWith('copilot-')) {
       const m = join(fs, e.name, 'main');
       if (existsSync(m)) return m;

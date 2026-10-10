@@ -13,6 +13,7 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { retryInterrupted } from '../src/core/fs-retry.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SNAPSHOTS_DIR = join(__dirname, '../snapshots');
@@ -41,12 +42,12 @@ function formatBytes(bytes: number): string {
 
 function getDirSize(dirPath: string): number {
   let total = 0;
-  for (const entry of readdirSync(dirPath, { withFileTypes: true })) {
+  for (const entry of retryInterrupted(() => readdirSync(dirPath, { withFileTypes: true }))) {
     const full = join(dirPath, entry.name);
     if (entry.isDirectory()) {
       total += getDirSize(full);
     } else {
-      total += statSync(full).size;
+      total += retryInterrupted(() => statSync(full)).size;
     }
   }
   return total;
@@ -54,13 +55,13 @@ function getDirSize(dirPath: string): number {
 
 function copyDir(src: string, dest: string): void {
   mkdirSync(dest, { recursive: true });
-  for (const entry of readdirSync(src, { withFileTypes: true })) {
+  for (const entry of retryInterrupted(() => readdirSync(src, { withFileTypes: true }))) {
     const srcPath = join(src, entry.name);
     const destPath = join(dest, entry.name);
     if (entry.isDirectory()) {
       copyDir(srcPath, destPath);
     } else {
-      copyFileSync(srcPath, destPath);
+      retryInterrupted(() => copyFileSync(srcPath, destPath));
     }
   }
 }
@@ -88,7 +89,7 @@ function parseArgs(): { command: string | undefined; name: string | undefined; d
 function listSnapshots(): SnapshotMetadata[] {
   if (!existsSync(SNAPSHOTS_DIR)) return [];
 
-  const entries = readdirSync(SNAPSHOTS_DIR, { withFileTypes: true })
+  const entries = retryInterrupted(() => readdirSync(SNAPSHOTS_DIR, { withFileTypes: true }))
     .filter((e) => e.isDirectory())
     .map((e) => {
       const metaPath = join(SNAPSHOTS_DIR, e.name, 'metadata.json');

@@ -23,6 +23,7 @@ import {
   encodeFirestoreDocument,
   type FirestoreValue,
 } from './protobuf-parser.js';
+import { retryInterrupted } from './fs-retry.js';
 
 /**
  * Cache for temporary database copies.
@@ -75,11 +76,11 @@ function isLevelDBFile(file: string): boolean {
  * leave the fingerprint unchanged.
  */
 function sourceFingerprint(srcPath: string): number {
-  let max = fs.statSync(srcPath).mtimeMs;
-  for (const file of fs.readdirSync(srcPath)) {
+  let max = retryInterrupted(() => fs.statSync(srcPath)).mtimeMs;
+  for (const file of retryInterrupted(() => fs.readdirSync(srcPath))) {
     if (!isLevelDBFile(file)) continue;
     try {
-      const m = fs.statSync(path.join(srcPath, file)).mtimeMs;
+      const m = retryInterrupted(() => fs.statSync(path.join(srcPath, file))).mtimeMs;
       if (m > max) max = m;
     } catch (err) {
       // TOCTOU: compaction may delete .ldb between readdir and stat; vanished file is safe to skip (dir mtime bumps), others propagate.
@@ -157,17 +158,19 @@ function copyDatabaseToTemp(srcPath: string): string {
   // to the copy start as possible.
   const fingerprint = sourceFingerprint(srcPath);
 
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), TEMP_DB_PREFIX));
+  const tempDir = retryInterrupted(() => fs.mkdtempSync(path.join(os.tmpdir(), TEMP_DB_PREFIX)));
   // A copy now exists on disk. Guarantee it cannot outlive this process, and
   // (once per process) reclaim any copies stranded by an earlier version.
   registerTempDbExitSweep();
   startOrphanSweep();
   try {
-    const files = fs.readdirSync(srcPath);
+    const files = retryInterrupted(() => fs.readdirSync(srcPath));
     for (const file of files) {
       if (!isLevelDBFile(file)) continue;
       try {
-        fs.copyFileSync(path.join(srcPath, file), path.join(tempDir, file));
+        // EINTR/EAGAIN are reissued inside retryInterrupted (#774); only what
+        // survives the bound, or was never retryable, reaches the catch.
+        retryInterrupted(() => fs.copyFileSync(path.join(srcPath, file), path.join(tempDir, file)));
       } catch (err) {
         // TOCTOU: compaction may delete .ldb between readdir and copyFile; MANIFEST already dropped it, so omitting is correct, others propagate.
         if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
@@ -683,7 +686,7 @@ export async function* iterateDocuments(
   }
 
   // Validate path is a directory
-  const stats = fs.statSync(dbPath);
+  const stats = retryInterrupted(() => fs.statSync(dbPath));
   if (!stats.isDirectory()) {
     throw new Error('Path is not a directory');
   }

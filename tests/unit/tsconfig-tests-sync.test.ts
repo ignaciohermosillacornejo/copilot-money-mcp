@@ -405,6 +405,7 @@ const MEMBERSHIP_IS_THE_COVERAGE = [
   'tests/no-ambient-database-discovery.test.ts',
   'tests/no-collection-time-assertions.test.ts',
   'tests/no-hand-rolled-comment-strippers.test.ts',
+  'tests/no-unretried-fs-syscalls.test.ts',
   'tests/scripts/no-duplicate-schema-walks.test.ts',
   'tests/scripts/check-tracked-files.test.ts',
   'tests/scripts/mutation-guards.test.ts',

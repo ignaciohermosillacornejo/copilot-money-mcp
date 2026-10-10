@@ -13,6 +13,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { iterateDocuments } from '../src/core/leveldb-reader.js';
 import { collectionMatches, isUserAccountCustomizationCollection } from '../src/core/decoder.js';
+import { retryInterrupted } from '../src/core/fs-retry.js';
 
 function findRealDatabase(): string | undefined {
   const home = homedir();
@@ -26,7 +27,7 @@ function findRealDatabase(): string | undefined {
   const firestorePath = join(containerBase, 'firestore/__FIRAPP_DEFAULT');
   if (!existsSync(firestorePath)) return undefined;
 
-  const entries = readdirSync(firestorePath, { withFileTypes: true });
+  const entries = retryInterrupted(() => readdirSync(firestorePath, { withFileTypes: true }));
   for (const entry of entries) {
     if (entry.isDirectory() && entry.name.startsWith('copilot-')) {
       const mainPath = join(firestorePath, entry.name, 'main');
@@ -45,10 +46,10 @@ function findRealDatabase(): string | undefined {
  */
 function getDatabaseSizeMB(dbPath: string): number {
   let totalSize = 0;
-  const files = readdirSync(dbPath);
+  const files = retryInterrupted(() => readdirSync(dbPath));
   for (const file of files) {
     const filePath = join(dbPath, file);
-    const stat = statSync(filePath);
+    const stat = retryInterrupted(() => statSync(filePath));
     if (stat.isFile()) {
       totalSize += stat.size;
     }

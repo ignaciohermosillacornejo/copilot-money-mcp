@@ -562,6 +562,8 @@ const PINNED: Record<string, readonly string[]> = {
   RECURRING_STATES: ['active', 'paused', 'archived'],
   // src/core/graphql/recurrings.ts
   RECURRING_STATE_VALUES: ['ACTIVE', 'PAUSED', 'ARCHIVED'],
+  // src/core/fs-retry.ts
+  RETRYABLE_ERRNOS: ['EINTR', 'EAGAIN'],
   // src/utils/scheduled-smoke-status.ts
   SCHEDULED_SMOKE_RESULTS: ['pass', 'fail', 'auth-missing', 'incomplete'],
   // src/conformance/ledger.ts

@@ -96,6 +96,7 @@
     //     tests/helpers/ts-files.test.ts,
     //     tests/no-ambient-database-discovery.test.ts,
     //     tests/no-hand-rolled-comment-strippers.test.ts,
+    //     tests/no-unretried-fs-syscalls.test.ts,
     //     tests/scripts/no-duplicate-schema-walks.test.ts,
     //     tests/unit/live-auth-boot-nonfatal.test.ts,
     //     tests/unit/tsconfig-tests-sync.test.ts
@@ -146,6 +147,10 @@
     // Membership IS the coverage, so it is pinned in
     // tests/unit/tsconfig-tests-sync.test.ts.
     "tests/no-ambient-database-discovery.test.ts",
+    // The #774 ratchet: every retryable sync fs call in src/ goes through
+    // retryInterrupted. Here for the #725 reason — its findings are built by
+    // interpolating AST-derived values, and nothing else reads this file.
+    "tests/no-unretried-fs-syscalls.test.ts",
     "tests/unit/tsconfig-tests-sync.test.ts",
     // The sole verification of a gate that edits tracked source files in
     // place (scripts/mutation-guards.ts, #596). Nothing imports a .test.ts and

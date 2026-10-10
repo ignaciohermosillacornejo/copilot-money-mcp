@@ -105,18 +105,19 @@ a class yet.
 | `check-then-act-across-await` | An async method reads shared instance state, suspends on an `await`, and resumes acting on what it read before the suspension, although a concurrent call to the same object may have changed that state meanwhile. Each suspension point is its own instance, so a fix applied at one leaves the others open. | partial (mutation-verified) — `tests/core/auth/candidate-ordering.test.ts`, `FirebaseAuth.getIdToken` only: one case per resume point parks a caller there while a sibling installs a session, and a count test requires one `freshIdToken()` re-check per `await` in the method (#770). Nothing static covers other async methods that hold instance state |
 | `overbroad-precondition-gate` | A precondition for one resource is checked at a shared chokepoint (dispatch, startup) for all requests, including those whose handling never uses the resource — so any configuration where the resource is legitimately absent is fully locked out. | registry-walk sweep in `tests/integration/live-reads.test.ts` (mutation-verified): every live tool and live-mode write must dispatch past the local-cache gate with the cache absent |
 | `ambient-state-dependency` | A test reaches live state outside the repository — another application's data directory, the network, the wall clock — usually through a production default it declined to override, so its result is a property of the machine rather than of the code. Nothing distinguishes it from a hermetic test while the machine is quiet, and when the ambient state misbehaves the failure names the code under test. | partial (mutation-verified) — `tests/no-ambient-database-discovery.test.ts`: no `tests/**` file may construct `CopilotDatabase` without an explicit path, which is the only route from the suite to the user's live Copilot container; the five falsy spellings that reach discovery anyway are flagged with it, each pinned by its own specimen line so no member can be dropped from the set with the suite green, and the "only route" premise — one call site, not exported — is asserted rather than inherited from the day it was written (#756). One resource, not the class: no scan can decide whether an arbitrary default reaches the machine |
+| `retryable-errno-treated-as-fatal` | A syscall error whose contract is "reissue me" (`EINTR`, `EAGAIN`) handled by the branch meant for errors that mean "stop" — escalated into a failed operation, or swallowed into a false negative that is then reported as the user's misconfiguration. | `tests/no-unretried-fs-syscalls.test.ts` (mutation-verified): every `copyFileSync`/`readdirSync`/`mkdtempSync`/`statSync` under `src/` must be the concise body of `retryInterrupted(() => …)`. Partial by statement: `existsSync` cannot be retried (it returns `false` on any error), and the async API, other sync ops and `scripts/` are outside the sweep (#774) |
 
 ## How we find bugs
 
 Recorded per entry, using a fixed vocabulary so the corpus stays countable. Here is what
-this corpus actually says, across all 51 entries:
+this corpus actually says, across all 52 entries:
 
 | Found by | Count | |
 |---|---|---|
 | `dogfooding` — used the tool, noticed the answer disagreed with the Copilot app | 15 | █████████████ |
 | `live-probe` — a probe or smoke against the real backend | 7 | ██████ |
 | `audit-sweep` — a deliberate cross-cutting audit | 7 | ██████ |
-| `incidental` — found while working on something else | 7 | ██████ |
+| `incidental` — found while working on something else | 8 | ███████ |
 | `user-report` | 8 | ███████ |
 | `adversarial-review` — a reviewer tried to refute a claim or mutation-tested a guard | 2 | █ |
 | `detector-first` — a detector was built, and then found bugs | 1 | ▌ |
@@ -325,4 +326,10 @@ record near-misses.
 | | Bug | Found by | Date |
 |---|---|---|---|
 | #640 | [Every tool call — including pure-GraphQL live tools — blocked on machines without the native app's local cache](640-live-tools-blocked-by-cache-gate.md) | `user-report` | 2026-08-15 |
+
+**`retryable-errno-treated-as-fatal`** — 1
+
+| | Bug | Found by | Date |
+|---|---|---|---|
+| #774 | [A retryable EINTR failed every cache read, and told a synced user their database was not installed](774-eintr-treated-as-fatal.md) | `incidental` | 2026-10-10 |
 

@@ -1,0 +1,132 @@
+/**
+ * Database discovery under EINTR, and "could not look" vs "looked, absent"
+ * (#774, second site).
+ *
+ * Measured during #756: ~1 in 1,000 `readdirSync` calls against the live
+ * Copilot container blocked for seconds and threw `EINTR`. Both `catch` blocks
+ * in discovery swallowed it and fell through to "no database", so the user was
+ * told "Database not found. Please ensure Copilot Money is installed and has
+ * synced data." — a transient interrupt reported as a configuration problem.
+ *
+ * Two halves, two describes: the interrupt is reissued (so it almost never
+ * matters), and when it does not clear, the result says "could not determine"
+ * instead of collapsing into "absent".
+ *
+ * Every test runs against a synthetic home directory. Nothing here touches the
+ * real container — that dependence is what #756 removed from the suite.
+ */
+
+import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import path from 'node:path';
+import fs from 'node:fs';
+import os from 'node:os';
+import {
+  CopilotDatabase,
+  discoverCopilotDatabase,
+  missingDatabaseError,
+} from '../../src/core/database.js';
+import { MAX_INTERRUPT_ATTEMPTS } from '../../src/core/fs-retry.js';
+
+const FIRESTORE =
+  'Library/Containers/com.copilot.production/Data/Library/Application Support/firestore/__FIRAPP_DEFAULT';
+const DB_DIR_NAME = 'copilot-production-00000.copilot-production-firestore';
+
+let home: string;
+let mainPath: string;
+const restores: Array<() => void> = [];
+
+function eintr(p: string): NodeJS.ErrnoException {
+  const err: NodeJS.ErrnoException = new Error(`EINTR: interrupted system call, scandir '${p}'`);
+  err.code = 'EINTR';
+  return err;
+}
+
+/** `fs.readdirSync` throws EINTR for its first `failures` calls under `home`. */
+function interruptReaddir(failures: number): () => number {
+  const original = fs.readdirSync;
+  let delivered = 0;
+  (fs as { readdirSync: unknown }).readdirSync = (...args: unknown[]) => {
+    const first = args[0];
+    if (typeof first === 'string' && first.startsWith(home) && delivered < failures) {
+      delivered++;
+      throw eintr(first);
+    }
+    return (original as (...a: unknown[]) => unknown).apply(fs, args);
+  };
+  restores.push(() => {
+    (fs as { readdirSync: unknown }).readdirSync = original;
+  });
+  return () => delivered;
+}
+
+beforeEach(() => {
+  home = fs.mkdtempSync(path.join(os.tmpdir(), 'discovery-home-'));
+  mainPath = path.join(home, FIRESTORE, DB_DIR_NAME, 'main');
+  fs.mkdirSync(mainPath, { recursive: true });
+  fs.writeFileSync(path.join(mainPath, '000001.ldb'), '');
+});
+
+afterEach(() => {
+  while (restores.length) restores.pop()!();
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+describe('discoverCopilotDatabase: interrupts are reissued', () => {
+  test('control: with no fault the synthetic database is found', () => {
+    expect(discoverCopilotDatabase(home)).toEqual({ path: mainPath });
+  });
+
+  test('a readdir interrupt that clears does not lose the database', () => {
+    const delivered = interruptReaddir(MAX_INTERRUPT_ATTEMPTS - 1);
+    expect(discoverCopilotDatabase(home)).toEqual({ path: mainPath });
+    expect(delivered()).toBe(MAX_INTERRUPT_ATTEMPTS - 1);
+  });
+});
+
+describe('discoverCopilotDatabase: "could not look" is not "absent"', () => {
+  test('an interrupt that never clears is reported as a lookup error, not as absence', () => {
+    interruptReaddir(Number.POSITIVE_INFINITY);
+    const result = discoverCopilotDatabase(home);
+    expect(result.path).toBeUndefined();
+    expect((result.lookupError as NodeJS.ErrnoException | undefined)?.code).toBe('EINTR');
+  });
+
+  test('a home with no Copilot container is plain absence — no lookup error', () => {
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'discovery-empty-'));
+    try {
+      expect(discoverCopilotDatabase(empty)).toEqual({ path: undefined });
+    } finally {
+      fs.rmSync(empty, { recursive: true, force: true });
+    }
+  });
+
+  test('a container with no LevelDB files is plain absence — no lookup error', () => {
+    fs.rmSync(path.join(mainPath, '000001.ldb'));
+    expect(discoverCopilotDatabase(home)).toEqual({ path: undefined });
+  });
+});
+
+describe('missingDatabaseError', () => {
+  test('with no lookup error it is the not-installed message', () => {
+    expect(missingDatabaseError(undefined).message).toBe(
+      'Database not found. Please ensure Copilot Money is installed and has synced data.'
+    );
+  });
+
+  test('with a lookup error it says the lookup failed, and does not tell the user to install or sync', () => {
+    const message = missingDatabaseError(eintr('/synthetic/main')).message;
+    expect(message).toContain('EINTR');
+    expect(message).toContain('transient');
+    expect(message).not.toContain('ensure Copilot Money is installed');
+  });
+
+  test('a reader whose discovery failed rejects with the lookup-failed message', async () => {
+    // Constructed WITH a path so nothing walks a real home; the discovery
+    // outcome is then set the way the no-path constructor would set it.
+    const db = new CopilotDatabase('/synthetic/placeholder');
+    const internals = db as unknown as { dbPath?: string; discoveryError?: Error };
+    internals.dbPath = undefined;
+    internals.discoveryError = eintr('/synthetic/main');
+    await expect(db.getAccounts()).rejects.toThrow('transient');
+  });
+});

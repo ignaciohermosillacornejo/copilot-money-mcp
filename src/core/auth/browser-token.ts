@@ -9,6 +9,7 @@
 import { readdirSync, readFileSync, existsSync, statSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+import { retryInterrupted } from '../fs-retry.js';
 
 /** Configuration for a browser's token storage location. */
 export interface BrowserConfig {
@@ -126,7 +127,9 @@ export function getChromiumProfileStoragePaths(userDataDir: string): string[] {
   const profileDirs = new Set<string>(['Default']);
   if (existsSync(userDataDir)) {
     try {
-      for (const entry of readdirSync(userDataDir, { withFileTypes: true })) {
+      for (const entry of retryInterrupted(() =>
+        readdirSync(userDataDir, { withFileTypes: true })
+      )) {
         if (entry.isDirectory() && /^Profile \d+$/.test(entry.name)) {
           profileDirs.add(entry.name);
         }
@@ -243,7 +246,7 @@ function searchLevelDBDir(dirPath: string): FoundToken[] {
   if (!existsSync(dirPath)) return [];
   let files: string[];
   try {
-    files = readdirSync(dirPath);
+    files = retryInterrupted(() => readdirSync(dirPath));
   } catch {
     return [];
   }
@@ -263,13 +266,13 @@ function searchFirefoxProfiles(profilesDir: string): FoundToken[] {
   if (!existsSync(profilesDir)) return [];
   const found: FoundToken[] = [];
   try {
-    const profiles = readdirSync(profilesDir, { withFileTypes: true })
+    const profiles = retryInterrupted(() => readdirSync(profilesDir, { withFileTypes: true }))
       .filter((d) => d.isDirectory())
       .map((d) => d.name);
     for (const profile of profiles) {
       const idbBase = join(profilesDir, profile, 'storage/default');
       if (!existsSync(idbBase)) continue;
-      const origins = readdirSync(idbBase, { withFileTypes: true })
+      const origins = retryInterrupted(() => readdirSync(idbBase, { withFileTypes: true }))
         .filter((d) => d.isDirectory() && d.name.includes('copilot'))
         .map((d) => d.name);
       for (const origin of origins) {
@@ -280,7 +283,7 @@ function searchFirefoxProfiles(profilesDir: string): FoundToken[] {
         // fact that we read it. A `copilot-something-else.com` origin is still
         // read (unchanged behaviour) but ranks with the browser-wide pool.
         const scoped = isCopilotScopedPath(origin);
-        for (const file of readdirSync(idbDir)) {
+        for (const file of retryInterrupted(() => readdirSync(idbDir))) {
           found.push(...tokensInFile(join(idbDir, file)).map((token) => ({ token, scoped })));
         }
       }
@@ -298,14 +301,14 @@ function searchSafariDatabases(dbDir: string): FoundToken[] {
   try {
     const searchDir = (dir: string, depth: number): void => {
       if (depth > 4) return;
-      const entries = readdirSync(dir, { withFileTypes: true });
+      const entries = retryInterrupted(() => readdirSync(dir, { withFileTypes: true }));
       for (const entry of entries) {
         const fullPath = join(dir, entry.name);
         if (entry.isDirectory()) {
           searchDir(fullPath, depth + 1);
         } else if (entry.isFile()) {
           try {
-            if (statSync(fullPath).size > 10_000_000) continue;
+            if (retryInterrupted(() => statSync(fullPath)).size > 10_000_000) continue;
           } catch {
             continue;
           }
