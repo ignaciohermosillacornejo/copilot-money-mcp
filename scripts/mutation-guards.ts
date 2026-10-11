@@ -705,17 +705,6 @@ function writeJournal(root: string): void {
 }
 
 /**
- * Bring this root's journal in line with what is still unreconciled — rewrite
- * it if anything is, delete it if nothing is — and never throw.
- *
- * Every caller is on a give-up or clean-up path, and "giving up is a write too"
- * applies to this write as much as to the sidecar: unguarded, a throw here
- * escaped the exit sweep before the remaining roots were handled. A failure is
- * printed with the path rather than raised — not swallowed, because a journal
- * that could not be narrowed or cleared is one the next run will read, and the
- * operator should know why it says what it says.
- */
-/**
  * Roots whose LAST journal write failed.
  *
  * The rows that tell an operator "the original bytes are in the kept journal"
@@ -731,7 +720,7 @@ function keptJournalClause(root: string): string {
   const path = journalPath(root);
   return JOURNAL_UNWRITTEN.has(root)
     ? `the journal at ${path} could not be rewritten (see the messages above), so whatever ` +
-        `is there now may not hold them — reconcile from the ${SIDECAR_SUFFIX} sidecar, ` +
+        `is there now may not hold the pre-mutation bytes — reconcile from the ${SIDECAR_SUFFIX} sidecar, ` +
         `where one could be written`
     : `the pre-mutation bytes are in the kept journal, ${path}`;
 }
@@ -740,6 +729,17 @@ function capitalise(sentence: string): string {
   return sentence.charAt(0).toUpperCase() + sentence.slice(1);
 }
 
+/**
+ * Bring this root's journal in line with what is still unreconciled — rewrite
+ * it if anything is, delete it if nothing is — and never throw.
+ *
+ * Every caller is on a give-up or clean-up path, and "giving up is a write too"
+ * applies to this write as much as to the sidecar: unguarded, a throw here
+ * escaped the exit sweep before the remaining roots were handled. A failure is
+ * printed with the path rather than raised — not swallowed, because a journal
+ * that could not be narrowed or cleared is one the next run will read, and the
+ * operator should know why it says what it says.
+ */
 function persistJournal(root: string): boolean {
   const { entries, owner } = journalStateFor(root);
   try {
