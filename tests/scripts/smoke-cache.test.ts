@@ -916,13 +916,42 @@ describe('every decoder route is compared or excluded with a reason (#778)', () 
     }
   });
 
-  test('decodedRoots yields every compared route, in routing order', async () => {
+  test('decodedRoots yields every compared route, in routing order, each with its rows', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'smoke-cache-roots-'));
     try {
       const dbPath = path.join(dir, 'empty');
       await createEmptyDb(dbPath);
-      const roots = decodedRoots(await decodeAllCollections(dbPath)).map((r) => r.root);
-      expect(roots).toEqual(COLLECTION_ROUTES.filter((r) => r in ROUTE_ROWS));
+      // Written out, not derived from COLLECTION_ROUTES and ROUTE_ROWS, so the
+      // test does not restate the expression decodedRoots is built from.
+      expect(decodedRoots(await decodeAllCollections(dbPath))).toEqual(
+        [
+          'holdings_history',
+          'balance_history',
+          'transactions',
+          'accounts',
+          'recurring',
+          'budgets',
+          'financial_goals',
+          'financial_goal_history',
+          'investment_prices',
+          'investment_splits',
+          'items',
+          'tags',
+          'categories',
+          'transaction_changes',
+          'account_changes',
+          'changes',
+          'securities',
+          'users',
+          'amazon_orders',
+          'amazon',
+          'subscriptions',
+          'invites',
+          'user_items',
+          'feature_tracking',
+          'support',
+        ].map((root) => ({ root, rows: 0 }))
+      );
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

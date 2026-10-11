@@ -483,6 +483,23 @@ export async function decodeGoals(dbPath: string): Promise<Goal[]> {
 }
 
 /**
+ * The goal id in a `financial_goal_history` collection path: the segment after
+ * `financial_goals`, wherever that sits.
+ *
+ * One function so the goalId filter in {@link decodeGoalHistory} and
+ * `processGoalHistory` cannot disagree. They used to index the path at fixed
+ * positions, `[1]` and `[3]`, and each was right only for one layout: `[1]` for
+ * the top-level `financial_goals/{goal_id}/...` fixtures, `[3]` for the real
+ * `users/{uid}/financial_goals/{goal_id}/...` path, where `[1]` is the USER id
+ * (#778 review).
+ */
+function goalIdFromHistoryPath(collection: string): string | undefined {
+  const segments = collection.split('/');
+  const i = segments.indexOf('financial_goals');
+  return i >= 0 ? segments[i + 1] : undefined;
+}
+
+/**
  * Decode financial goal history from LevelDB database.
  */
 export async function decodeGoalHistory(dbPath: string, goalId?: string): Promise<GoalHistory[]> {
@@ -494,7 +511,8 @@ export async function decodeGoalHistory(dbPath: string, goalId?: string): Promis
     if (routeCollection(doc.collection) !== 'financial_goal_history') continue;
     // Filter by goalId if specified (before processing)
     if (goalId) {
-      const extractedGoalId = doc.collection.split('/')[1] ?? getString(doc.fields, 'goal_id');
+      const extractedGoalId =
+        goalIdFromHistoryPath(doc.collection) ?? getString(doc.fields, 'goal_id');
       if (extractedGoalId !== goalId) continue;
     }
 
@@ -1511,8 +1529,7 @@ function processGoalHistory(
     return null;
   }
 
-  // Collection path: users/{user_id}/financial_goals/{goal_id}/financial_goal_history
-  const extractedGoalId = collection.split('/')[3] ?? getString(fields, 'goal_id');
+  const extractedGoalId = goalIdFromHistoryPath(collection) ?? getString(fields, 'goal_id');
 
   const historyData: Record<string, unknown> = {
     month,

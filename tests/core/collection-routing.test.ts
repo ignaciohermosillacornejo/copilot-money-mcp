@@ -14,8 +14,16 @@
  * matching clause wins.
  */
 
-import { describe, test, expect } from 'bun:test';
-import { routeCollection } from '../../src/core/decoder.js';
+import { describe, test, expect, afterAll } from 'bun:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {
+  routeCollection,
+  decodeGoalHistory,
+  decodeAllCollections,
+} from '../../src/core/decoder.js';
+import { createDeepTestDb } from '../helpers/test-db.js';
 
 describe('routeCollection', () => {
   test.each([
@@ -89,5 +97,45 @@ describe('routeCollection', () => {
     expect(routeCollection('never_existed')).toBeNull();
     // Leaf match is on a whole segment, not a string suffix.
     expect(routeCollection('archived_transactions')).toBeNull();
+  });
+});
+
+describe('goal history resolves its goal id from the path the same way everywhere (#778 review)', () => {
+  // The same class one level down: decodeGoalHistory's goalId filter read the
+  // goal id at segment [1] while processGoalHistory read it at [3]. On the real
+  // layout [1] is the USER id, so filtering by goal returned nothing; on the
+  // only fixture layout ([1] = goal id) [3] does not exist. Each spelling was
+  // right for its own tests and neither was right for both.
+  const FIXTURES_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-history-path-'));
+  afterAll(() => fs.rmSync(FIXTURES_DIR, { recursive: true, force: true }));
+
+  const USER = 'usr_3hTq7WmZ2xKv9LpR4cNb';
+  const GOAL = 'gol_6rLpX3mQw9KzT2vN8cHb';
+  const OTHER = 'gol_2vLq9XmT4kRz7PwN3cHb';
+
+  test.each([
+    ['the real nested layout', `users/${USER}/financial_goals`],
+    ['the top-level fixture layout', 'financial_goals'],
+  ])('filtering by goal id works on %s', async (_label, goalsPath) => {
+    const dbPath = path.join(FIXTURES_DIR, goalsPath.replace(/\//g, '_'));
+    await createDeepTestDb(dbPath, [
+      {
+        collection: `${goalsPath}/${GOAL}/financial_goal_history`,
+        id: '2026-01',
+        fields: { current_amount: 100 },
+      },
+      {
+        collection: `${goalsPath}/${OTHER}/financial_goal_history`,
+        id: '2026-01',
+        fields: { current_amount: 200 },
+      },
+    ]);
+
+    const filtered = await decodeGoalHistory(dbPath, GOAL);
+    const all = await decodeAllCollections(dbPath);
+
+    expect(filtered.map((h) => h.goal_id)).toEqual([GOAL]);
+    // And the processor agrees with the filter about whose history this is.
+    expect(all.goalHistory.map((h) => h.goal_id).sort()).toEqual([GOAL, OTHER].sort());
   });
 });

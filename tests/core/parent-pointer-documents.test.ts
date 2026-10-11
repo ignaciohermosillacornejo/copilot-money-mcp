@@ -80,9 +80,10 @@ describe('fieldless documents never become rows (#627)', () => {
 });
 
 describe('every parent-pointer dispatch clause guards its processor (#627)', () => {
-  // The class-level ratchet. Three dispatch clauses in decodeAllCollections
-  // deliberately match Firestore's parent-pointer paths with a
-  // `/^name\/[^/]+$/` regex. Each is only safe because the processor it calls
+  // The class-level ratchet. Two routing clauses in routeCollection (users and
+  // amazon; the items one went with #627) deliberately match Firestore's
+  // parent-pointer paths with a `/^name\/[^/]+$/` regex, and the switch in
+  // decodeAllCollections sends each to a processor. Each is only safe because the processor it calls
   // returns null for a fieldless document — an invariant that lived nowhere
   // enforceable, which is how `items` shipped without it.
   //
