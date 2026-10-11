@@ -94,6 +94,13 @@ describe('every parent-pointer dispatch clause guards its processor (#627)', () 
   // dispatches to must carry the guard.
   test('each processor reachable from a parent-pointer clause checks fields.size === 0', () => {
     const src = fs.readFileSync(path.join(import.meta.dir, '../../src/core/decoder.ts'), 'utf8');
+    // Stripped ONCE and used for EVERY step below (switch bounds, clause regex,
+    // processor lookup, guard match), as decoder-field-completeness.test.ts
+    // does. Stripping only the final window left the discovery steps reading
+    // raw source, so a commented-out `case` or clause could steer the scan to a
+    // guarded processor and pass. stripComments (#691) blanks comments in place,
+    // so offsets into `text` are still offsets into `src`.
+    const text = stripComments(src, 'decoder.ts');
 
     // The routing decision lives in `routeCollection` and the processor call in
     // the matching `case` of `decodeAllCollections`'s switch (#778), so a clause
@@ -109,15 +116,15 @@ describe('every parent-pointer dispatch clause guards its processor (#627)', () 
 
     // Cases are looked up only inside decodeAllCollections's dispatch switch,
     // so a route string appearing earlier in the file cannot be mistaken for it.
-    const switchStart = src.indexOf('switch (route) {');
+    const switchStart = text.indexOf('switch (route) {');
     expect(switchStart).toBeGreaterThan(-1);
     // An unmatched end would make slice(start, -1) quietly re-widen the scope.
-    const dispatchEnd = src.indexOf('\n    }\n  }\n', switchStart);
+    const dispatchEnd = text.indexOf('\n    }\n  }\n', switchStart);
     expect(dispatchEnd).toBeGreaterThan(switchStart);
-    const dispatch = src.slice(switchStart, dispatchEnd);
+    const dispatch = text.slice(switchStart, dispatchEnd);
 
     let m: RegExpExecArray | null;
-    while ((m = clause.exec(src)) !== null) {
+    while ((m = clause.exec(text)) !== null) {
       const collectionName = m[1] ?? '?';
       const route = m[2] ?? '?';
       const caseIdx = dispatch.search(new RegExp(`case '${route}':\\s*\\{`));
@@ -135,21 +142,19 @@ describe('every parent-pointer dispatch clause guards its processor (#627)', () 
       checked.push(processor);
 
       // Pull the processor's own body and look for the guard.
-      const declIdx = src.indexOf(`function ${processor}(`);
+      const declIdx = text.indexOf(`function ${processor}(`);
       expect(declIdx).toBeGreaterThan(-1);
-      const decl = src.slice(declIdx, declIdx + 900);
+      const decl = text.slice(declIdx, declIdx + 900);
       // The literal is the contract with the two guard sites this reaches
       // (processUserProfile, processAmazonIntegration), which say so; the other
       // processors' guards are pinned behaviourally by the sweep below.
       // Hoisting it into a helper means updating this pattern to match, NOT
       // loosening it: a scan that accepts anything is a vacuous scan.
       //
-      // Comments are removed before matching (line, block and trailing, by the
-      // parser-owned stripComments, #691), and the pattern requires the `if (`:
+      // `decl` comes from the stripped text and the pattern requires the `if (`:
       // both guard sites carry a comment quoting the literal, so matching raw
-      // text would pass on the comment alone with the guard gone.
-      const code = stripComments(decl, 'decoder.ts');
-      if (!/if \(fields\.size === 0\)/.test(code)) unguarded.push(processor);
+      // source would pass on the comment alone with the guard gone.
+      if (!/if \(fields\.size === 0\)/.test(decl)) unguarded.push(processor);
     }
 
     // Vacuity guard: if the clause pattern stops matching (a refactor, a

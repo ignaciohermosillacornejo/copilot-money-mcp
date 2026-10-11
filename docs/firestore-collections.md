@@ -540,17 +540,13 @@ Stores daily and high-frequency price data per security (identified by SHA256 ha
 > Note that the decoder's `plaid_accounts` route is a **catch-all**: anything under
 > `items/*/accounts/*` that is not a known subcollection (`balance_history`, `transactions`,
 > `holdings_history`). A new per-account subcollection will route here until it is added to
-> `routeCollection`. The description below is
-> the historical one, including the count and priority on the next line.
+> `routeCollection`.
 
-*Historical:* ~6,867 documents | high priority — contains holdings with cost basis
-
-These are the raw Plaid account documents, distinct from the top-level `accounts` collection. They contain the `holdings` array with cost basis data.
-
-**Known fields:** All standard account fields plus nested `holdings` array.
-
-The `holdings` field table that used to be here now lives under the [`items/{item_id}/accounts`](#itemsitem_idaccounts-account-documents)
-section, whose documents actually carry the array (#797).
+**Measured 2026-10-11:** ~5,100 entries, none with a field, so there are no known fields to
+document. Earlier versions of this section described ~6,867 "raw Plaid account documents"
+carrying the `holdings` array with cost basis; that count was these structural entries, and the
+holdings array is on the account documents. Its field table lives under
+[`items/{item_id}/accounts`](#itemsitem_idaccounts-account-documents) (#797).
 
 ---
 
