@@ -11,6 +11,13 @@ import { CopilotDatabase } from '../../src/core/database.js';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import type { Transaction, Account } from '../../src/models/index.js';
 
+/**
+ * A path for servers whose tests never read the cache. Without one, the server
+ * hands `undefined` to CopilotDatabase, which walks the user's real Copilot
+ * container (#756) — enforced by tests/no-ambient-database-discovery.test.ts.
+ */
+const SYNTHETIC_DB_PATH = '/nonexistent/copilot-money-mcp/server-under-test';
+
 // Mock data for testing
 // Copilot Money format: positive = expenses, negative = income/refunds
 const mockTransactions: Transaction[] = [
@@ -470,9 +477,14 @@ describe('CopilotMoneyServer - constructor and initialization', () => {
     expect(server.handleCallTool).toBeDefined();
   });
 
-  test('creates server with default path', () => {
-    const server = new CopilotMoneyServer();
-    expect(server).toBeDefined();
+  // Was "creates server with default path", which constructed with no path and
+  // so walked the user's real Copilot container to assert only that the result
+  // existed (#756). What the server owns is forwarding its path; discovery
+  // itself is tested against a synthetic home in database-discovery.test.ts.
+  test('forwards its database path to the database', () => {
+    const server = new CopilotMoneyServer(SYNTHETIC_DB_PATH);
+    const db = (server as unknown as { db: CopilotDatabase }).db;
+    expect(db.getDbPath()).toBe(SYNTHETIC_DB_PATH);
   });
 
   test('has run method', () => {
@@ -525,7 +537,7 @@ describe('CopilotMoneyServer - tool arguments edge cases', () => {
 
 describe('CopilotMoneyServer - write mode', () => {
   test('handleListTools returns only read tools by default', () => {
-    const server = new CopilotMoneyServer();
+    const server = new CopilotMoneyServer(SYNTHETIC_DB_PATH);
     const toolNames = server.handleListTools().tools.map((t) => t.name);
 
     expect(toolNames).toContain('get_transactions');
@@ -562,7 +574,7 @@ describe('CopilotMoneyServer - write mode', () => {
   ] as const;
 
   test('handleListTools returns read + write tools when writeEnabled', () => {
-    const server = new CopilotMoneyServer(undefined, undefined, true);
+    const server = new CopilotMoneyServer(SYNTHETIC_DB_PATH, undefined, true);
     const toolNames = server.handleListTools().tools.map((t) => t.name);
 
     expect(toolNames).toContain('get_transactions');
@@ -600,7 +612,7 @@ describe('CopilotMoneyServer - write mode', () => {
     ['set_recurring_state', { readOnlyHint: false, destructiveHint: false, idempotentHint: true }],
     ['delete_recurring', { readOnlyHint: false, destructiveHint: true, idempotentHint: true }],
   ])('write tool %s has correct annotations', (toolName, expected) => {
-    const server = new CopilotMoneyServer(undefined, undefined, true);
+    const server = new CopilotMoneyServer(SYNTHETIC_DB_PATH, undefined, true);
     const tool = server.handleListTools().tools.find((t) => t.name === toolName);
     expect(tool).toBeDefined();
     expect(tool!.annotations).toEqual(expected);
@@ -658,7 +670,7 @@ describe('CopilotMoneyServer - write mode', () => {
     ['set_recurring_state', { recurring_id: 'rec_123', state: 'PAUSED' }],
     ['delete_recurring', { recurring_id: 'rec_123' }],
   ])('handleCallTool rejects %s when not in write mode', async (toolName, args) => {
-    const server = new CopilotMoneyServer();
+    const server = new CopilotMoneyServer(SYNTHETIC_DB_PATH);
     const result = await server.handleCallTool(toolName, args);
     expect(result.isError).toBe(true);
     expect((result.content[0] as { text: string }).text).toContain('--write mode');

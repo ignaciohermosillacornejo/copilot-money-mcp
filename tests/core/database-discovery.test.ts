@@ -168,6 +168,14 @@ describe('missingDatabaseError', () => {
     expect(message).not.toContain('/synthetic');
   });
 
+  test('a quoted path with spaces is scrubbed whole, not up to the first space', () => {
+    const message = missingDatabaseError(
+      new Error("unexpected shape under '/synthetic/user/Application Support/main' here")
+    ).message;
+    expect(message).toContain('unexpected shape under <path> here');
+    expect(message).not.toContain('Support');
+  });
+
   test('a reader whose discovery failed rejects with the lookup-failed message', async () => {
     // Constructed WITH a path so nothing walks a real home; the discovery
     // outcome is then set the way the no-path constructor would set it.

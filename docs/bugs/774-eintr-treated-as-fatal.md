@@ -118,6 +118,16 @@ the bound, unwrapping the copy site, dropping the recorded lookup error, and ign
 No `scripts/mutation-guards.ts` row: that registry's bar is a guard whose violation writes
 wrong data to a financial account. This one fails a read.
 
+## Follow-up: the fix's own advice could not be followed
+
+Review of the merged fix found that the no-path constructor ran discovery once and stored the
+error. `availability()` then returned it with no syscall on every later call, so "the read was
+interrupted after retrying… retry the request" was advice that could not change the answer;
+only a restart could. The follow-up re-runs discovery when the stored error is retryable, and
+still serves a persistent one (`EACCES`) from memory. It is tested through `handleCallTool`:
+one call interrupted past the bound, then a second call that succeeds. No earlier test called
+the gate twice, which is exactly the shape that hid it.
+
 ## Lesson
 
 A `catch` that rethrows "everything except X", or swallows everything, is making a claim

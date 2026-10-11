@@ -17,11 +17,12 @@
  * READS ONLY — one GraphQL Accounts query plus a local cache read; nothing
  * mutates. Needs BOTH a local Copilot cache and an authenticated
  * app.copilot.money browser session. With no cache it exits 0 as SKIP (there
- * is nothing to compare against, which is not drift). Logs counts only — never
+ * is nothing to compare against, which is not drift); with a cache it could
+ * not read it exits 1, because that is not "no cache". Logs counts only — never
  * an account name or balance (PII rules per CLAUDE.md).
  */
 
-import { CopilotDatabase } from '../../src/core/database.js';
+import { CopilotDatabase, missingDatabaseError } from '../../src/core/database.js';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { LiveAccountsTools } from '../../src/tools/live/accounts.js';
 import { setupLiveSmoke } from './_harness.js';
@@ -29,7 +30,16 @@ import { classifyAccountNameParity, compareAccountNames } from './account-names-
 
 async function main(): Promise<void> {
   const db = new CopilotDatabase();
-  if (!db.getDbPath() || !db.isAvailable()) {
+  const { available, lookupError } = db.availability();
+  // A cache that could not be READ is not "no cache" (#774): SKIP would report
+  // a parity check as having nothing to compare when it never looked.
+  if (lookupError) {
+    console.error(
+      `[smoke] FAIL account-name parity — ${missingDatabaseError(lookupError).message}`
+    );
+    process.exit(1);
+  }
+  if (!db.getDbPath() || !available) {
     console.error('[smoke] SKIP account-name parity — no local Copilot cache to compare against.');
     return;
   }
@@ -57,7 +67,7 @@ async function main(): Promise<void> {
   if (status === 'FAIL') process.exit(1);
 }
 
-main().catch((err: unknown) => {
+if (import.meta.main) main().catch((err: unknown) => {
   console.error('[smoke] FAIL:', err);
   process.exit(1);
 });

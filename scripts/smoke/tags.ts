@@ -49,7 +49,7 @@ async function main(): Promise<void> {
   log('done', { passed: 3 });
 }
 
-main().catch((err: unknown) => {
+if (import.meta.main) main().catch((err: unknown) => {
   console.error('[smoke] FAIL:', err);
   process.exit(1);
 });

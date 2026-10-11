@@ -17,7 +17,7 @@
  * this file, and `eslint.config.js` ignores `tests/**` — so nothing type-checks
  * or lints it. That is what lets `new CopilotDatabase(null)` sit here at all
  * (`null` is not assignable to `string | undefined`), and it is also the cost:
- * the two must-NOT-flag lines at the bottom will go on compiling in nobody's
+ * the must-NOT-flag lines below will go on compiling in nobody's
  * program if the constructor's signature ever changes, so they can stop
  * representing it silently. The trade-off is not resolvable by adding the file
  * to a program — that would reject the `null` line — so it is written down.
@@ -26,7 +26,9 @@
  */
 
 import os, { homedir } from 'node:os';
+import { join } from 'node:path';
 import { CopilotDatabase, discoverCopilotDatabase } from '../../src/core/database.js';
+import { CopilotMoneyServer } from '../../src/server.js';
 
 const SOME_PATH = '/nonexistent/copilot-money-mcp/specimen';
 
@@ -68,5 +70,17 @@ export const walkerOsHomedir = discoverCopilotDatabase(os.homedir());
 
 export const walkerNoArg = discoverCopilotDatabase();
 
+// A composed path still walks under the real home.
+export const walkerComposed = discoverCopilotDatabase(join(homedir(), 'Library'));
+
 // Must NOT be flagged: a synthetic home is what the export exists for.
 export const walkerSynthetic = discoverCopilotDatabase(SOME_PATH);
+
+// The server hands its first argument to CopilotDatabase unchanged, so the
+// same spellings walk the real container through it.
+export const serverImplicit = new CopilotMoneyServer();
+
+export const serverUndefined = new CopilotMoneyServer(undefined);
+
+// Must NOT be flagged: a server given a path.
+export const serverExplicit = new CopilotMoneyServer(SOME_PATH);

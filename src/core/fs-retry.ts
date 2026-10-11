@@ -43,6 +43,14 @@ export function isRetryableErrno(err: unknown): boolean {
  * friends) keep working exactly as before.
  */
 export function retryInterrupted<T>(op: () => T, maxAttempts = MAX_INTERRUPT_ATTEMPTS): T {
+  // `attempt >= maxAttempts` is never true for NaN or Infinity, so either would
+  // make a permanent interrupt spin forever, the one hang the bound exists to
+  // prevent; and below 1 there would be no attempt at all.
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
+    throw new RangeError(
+      `retryInterrupted: maxAttempts must be a positive integer, got ${maxAttempts}`
+    );
+  }
   for (let attempt = 1; ; attempt++) {
     try {
       return op();

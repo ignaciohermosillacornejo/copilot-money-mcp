@@ -3,6 +3,13 @@ import { CopilotMoneyServer } from '../../src/server.js';
 import type { GraphQLClient } from '../../src/core/graphql/client.js';
 import { LIVE_TOOL_DEFS, WRITE_TOOL_DEFS } from '../../src/tools/registry/index.js';
 
+/**
+ * A path for servers whose tests never read the cache. Without one, the server
+ * hands `undefined` to CopilotDatabase, which walks the user's real Copilot
+ * container (#756) — enforced by tests/no-ambient-database-discovery.test.ts.
+ */
+const SYNTHETIC_DB_PATH = '/nonexistent/copilot-money-mcp/server-under-test';
+
 describe('CopilotMoneyServer with --live-reads', () => {
   test('swaps get_transactions for get_transactions_live in handleListTools', () => {
     const mockClient = {
@@ -14,7 +21,7 @@ describe('CopilotMoneyServer with --live-reads', () => {
       ),
     } as unknown as GraphQLClient;
 
-    const server = new CopilotMoneyServer(undefined, undefined, false, true, mockClient);
+    const server = new CopilotMoneyServer(SYNTHETIC_DB_PATH, undefined, false, true, mockClient);
     const { tools } = server.handleListTools();
     const names = tools.map((t) => t.name);
 
@@ -23,7 +30,7 @@ describe('CopilotMoneyServer with --live-reads', () => {
   });
 
   test('registers get_transactions (not _live) when --live-reads is off', () => {
-    const server = new CopilotMoneyServer();
+    const server = new CopilotMoneyServer(SYNTHETIC_DB_PATH);
     const { tools } = server.handleListTools();
     const names = tools.map((t) => t.name);
 
@@ -32,7 +39,7 @@ describe('CopilotMoneyServer with --live-reads', () => {
   });
 
   test('handleCallTool returns isError when live tool not registered', async () => {
-    const server = new CopilotMoneyServer();
+    const server = new CopilotMoneyServer(SYNTHETIC_DB_PATH);
     const result = await server.handleCallTool('get_transactions_live', {});
     expect(result.isError).toBe(true);
   });

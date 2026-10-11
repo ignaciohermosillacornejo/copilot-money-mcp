@@ -77,6 +77,15 @@ describe('retryInterrupted', () => {
     expect(f.calls()).toBe(2);
   });
 
+  test.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    'a bound of %p is refused before the op runs (it would mean no attempt, or no bound)',
+    (bound) => {
+      const f = flaky('EINTR', Number.POSITIVE_INFINITY);
+      expect(() => retryInterrupted(f.op, bound)).toThrow(RangeError);
+      expect(f.calls()).toBe(0);
+    }
+  );
+
   test.each(['ENOENT', 'EACCES', 'EIO', 'ENOTDIR'])(
     '%s is not retryable and is thrown from the first attempt',
     (code) => {

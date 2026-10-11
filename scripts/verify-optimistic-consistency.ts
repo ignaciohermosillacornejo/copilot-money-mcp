@@ -519,7 +519,7 @@ async function main(): Promise<void> {
   process.exit(failed.length > 0 ? 1 : 0);
 }
 
-main().catch((e) => {
+if (import.meta.main) main().catch((e) => {
   console.error('Fatal:', e);
   process.exit(1);
 });

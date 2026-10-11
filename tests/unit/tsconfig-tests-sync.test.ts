@@ -408,6 +408,7 @@ const MEMBERSHIP_IS_THE_COVERAGE = [
   'tests/no-ts-extension-imports.test.ts',
   'tests/no-unretried-fs-syscalls.test.ts',
   'tests/scripts/check-action-pins.test.ts',
+  'tests/scripts/main-import-guard.test.ts',
   'tests/scripts/check-tracked-files.test.ts',
   'tests/scripts/mutation-guards.test.ts',
   'tests/scripts/no-duplicate-schema-walks.test.ts',

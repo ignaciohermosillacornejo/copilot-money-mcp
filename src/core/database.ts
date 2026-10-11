@@ -203,9 +203,17 @@ export function missingDatabaseError(lookupError: Error | undefined): Error {
   );
 }
 
-/** Replace absolute and home-relative paths with a placeholder. */
+/**
+ * Replace absolute and home-relative paths with a placeholder. A quoted path
+ * is replaced whole, quotes included, so a space inside it (`Application
+ * Support`) cannot leave a fragment of the path behind; an unquoted one ends at
+ * whitespace, which is the best a pattern without quotes to go on can do.
+ */
 function scrubPaths(text: string): string {
-  return text.replace(/(?:~|\/)[^\s'",)]*/g, '<path>').trim();
+  return text
+    .replace(/(['"])(?:~|\/)[^'"]*\1/g, '<path>')
+    .replace(/(?:~|\/)[^\s'",)]*/g, '<path>')
+    .trim();
 }
 
 /**

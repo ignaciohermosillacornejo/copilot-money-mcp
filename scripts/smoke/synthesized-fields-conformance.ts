@@ -38,4 +38,4 @@ async function main(): Promise<void> {
   process.exit(failed ? 1 : 0);
 }
 
-void main();
+if (import.meta.main) void main();

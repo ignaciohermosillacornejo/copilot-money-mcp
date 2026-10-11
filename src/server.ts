@@ -13,6 +13,7 @@ import {
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import { CopilotDatabase, missingDatabaseError } from './core/database.js';
+import { redactUserPaths } from './utils/redact-paths.js';
 import { CopilotMoneyTools } from './tools/index.js';
 import { ALL_TOOL_DEFS, TOOL_REGISTRY, type LiveToolContext } from './tools/registry/index.js';
 import { GraphQLClient, GraphQLError } from './core/graphql/client.js';
@@ -270,8 +271,10 @@ export class CopilotMoneyServer {
         ],
       };
     } catch (error) {
-      // Handle errors (validation, account not found, etc.)
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      // Handle errors (validation, account not found, etc.). The one place a
+      // thrown message reaches the client, so the one place the username in an
+      // fs path is removed from it.
+      const errorMessage = redactUserPaths(error instanceof Error ? error.message : String(error));
 
       return {
         content: [

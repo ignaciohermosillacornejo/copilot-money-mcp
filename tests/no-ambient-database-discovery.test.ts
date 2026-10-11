@@ -21,13 +21,24 @@
  * cost was landing on unrelated pushes.
  *
  * WHAT IT CATCHES — every `tests/**` TypeScript file, syntax only, no type
- * checker: a `new CopilotDatabase(...)` whose first argument is absent, or is
+ * checker: a `new CopilotDatabase(...)` — or `new CopilotMoneyServer(...)`,
+ * whose constructor hands its first argument straight to `CopilotDatabase` —
+ * whose first argument is absent, or is
  * one of the five falsy literals that reach the same discovery branch
  * (`undefined`, `null`, `''`, `""`, and the empty template literal — the set is
  * `FALSY_FIRST_ARGS` below, and the prose is not a second copy of it: a guard
  * test requires one specimen line per member). They are listed because they are
  * the cheapest way to satisfy a gate that only asked for *an* argument while
  * changing nothing about what the constructor does.
+ *
+ * And every `scripts/**` file, with one narrowing: a construction there is
+ * flagged only when a test could reach it — at module scope (it runs on
+ * import), or inside a top-level declaration that is exported. A smoke
+ * script's module-private `main()` is exempt, because finding the real
+ * database is its job. That is the line #780 drew by hand for
+ * `scripts/smoke/_harness.ts` (two discovery walks per suite run, reached from
+ * `tests/scripts/smoke-harness.test.ts`); it is a rule now, so reverting that
+ * fix turns this gate red instead of leaving the suite green (#798).
  *
  * WHAT IT DOES NOT CATCH, stated rather than implied:
  *   - a path computed at runtime that turns out falsy (`new CopilotDatabase(
@@ -56,19 +67,23 @@
  *     CopilotDatabase {})()` is the same shape in one expression. The same
  *     name-not-binding fact as the alias, and likewise absent today — no
  *     `extends CopilotDatabase` in `src/`, `tests/` or `scripts/` (checked);
- *   - a database constructed inside a helper OUTSIDE `tests/` that a test
- *     calls. `src/` is excluded on purpose — production constructing without a
- *     path is the feature — so a `src/` factory used only by tests would be
- *     out of reach. The same holds for `scripts/`, and there it was not
- *     hypothetical: `setupLiveSmoke()` in `scripts/smoke/_harness.ts` built
- *     `new CopilotDatabase()` unconditionally, and
- *     `tests/scripts/smoke-harness.test.ts` called it twice — two discovery
- *     walks per suite run that this sweep reported clean. Closed in #780 by a
- *     test-only `dbPath` option, which that test passes (an entry counter on
- *     `findCopilotDatabase` went from 2 to 0 for that file). The other two
- *     argument-less constructions in `scripts/` (`smoke/cache.ts`,
- *     `smoke-graphql.ts`) sit inside `main()`, which no test reaches (checked),
- *     and finding the real database is their job;
+ *   - a database constructed inside a `src/` helper that a test calls.
+ *     `src/` is excluded on purpose — production constructing without a path
+ *     is the feature — so a `src/` factory used only by tests would be out of
+ *     reach. `CopilotMoneyServer` is the one such factory the suite actually
+ *     uses, so it is named above rather than left here; five argument-less
+ *     `new CopilotMoneyServer()` calls existed when that was added, and were
+ *     given paths in the same change;
+ *   - in `scripts/`, an exported function reached only through a re-export
+ *     (`function f() {…}` then `export { f }`): the exported-ness test reads the
+ *     declaration's own modifier. No instance (checked);
+ *   - in `scripts/`, a helper that FORWARDS an optional path. `setupLiveSmoke`
+ *     builds `new CopilotDatabase(opts.dbPath)`; that argument is not falsy
+ *     text, so it is cleared, and a test that calls the harness without
+ *     `dbPath` walks the real container unseen. The gate catches the harness
+ *     dropping the forward, not a caller dropping the option. Closing that
+ *     needs data flow (what `opts.dbPath` is at the call site), which a parse
+ *     does not have;
  *   - any other route to ambient machine state. This closes one resource, not
  *     the class. It is exact for that resource only because
  *     `findCopilotDatabase` has exactly one call site and is not exported,
@@ -86,13 +101,17 @@
  * home; `findCopilotDatabase()` is `discoverCopilotDatabase(homedir())` and
  * keeps the single-call-site, no-export premise above. That export would be a
  * route the premise cannot see, so the sweep also flags a call to it whose
- * first argument is missing or is a `homedir()` call (`homedir()`,
- * `os.homedir()`, any `<x>.homedir()`), and the premise test asserts that its
- * `home` parameter is required — no `?`, no default — so the no-argument call
- * cannot even typecheck in a checked file. Same name-match trade as above: a
- * home computed elsewhere (`const h = homedir(); discoverCopilotDatabase(h)`)
- * or `process.env.HOME` passes. Fail-open in that direction, and no instance
- * exists (checked).
+ * first argument is missing or mentions a `homedir()` call anywhere —
+ * `homedir()`, `os.homedir()`, and composed forms such as
+ * `join(homedir(), 'Library')` — and the premise test asserts that its `home`
+ * parameter is required (no `?`, no default), so the no-argument call cannot
+ * even typecheck in a checked file. Same name-match trade as above: a home
+ * computed in another statement (`const h = homedir();
+ * discoverCopilotDatabase(h)`) or `process.env.HOME` passes. Fail-open in that
+ * direction, and no instance exists in `tests/` or `scripts/` (checked).
+ * Inside `src/`, `CopilotDatabase` itself calls the walker again with the home
+ * it recorded at construction, when a retryable discovery failure is retried;
+ * `src/` is not swept, and that home is the same one the constructor used.
  */
 
 import { describe, test, expect } from 'bun:test';
@@ -105,6 +124,20 @@ import { tsFilesUnder, scriptKindFor } from './helpers/ts-files.js';
 const TESTS_ROOT = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(TESTS_ROOT, '..');
 const DATABASE_SOURCE = join(REPO_ROOT, 'src', 'core', 'database.ts');
+const SCRIPTS_ROOT = join(REPO_ROOT, 'scripts');
+
+/**
+ * Constructors whose falsy first argument reaches `findCopilotDatabase()`:
+ * `CopilotDatabase` directly, and `CopilotMoneyServer`, which passes its first
+ * argument to `CopilotDatabase` unchanged (`src/server.ts`).
+ */
+const DISCOVERING_CONSTRUCTORS = new Set(['CopilotDatabase', 'CopilotMoneyServer']);
+
+/**
+ * Where a file lives decides what counts. In `tests/` every construction is a
+ * test's. In `scripts/` only the ones a test could reach are.
+ */
+type Scope = 'tests' | 'scripts';
 
 /**
  * The deliberate specimen reproduces every shape on purpose, so the sweep must
@@ -119,7 +152,7 @@ const DISCOVERY_FN = 'findCopilotDatabase';
 const WALKER_FN = 'discoverCopilotDatabase';
 
 /** A first argument to `WALKER_FN` that names the real home directory. */
-const REAL_HOME = /(^|\.)homedir\(\)$/;
+const REAL_HOME = /\bhomedir\(\)/;
 
 /**
  * Spellings of "no path" that reach `findCopilotDatabase()` anyway.
@@ -156,14 +189,34 @@ function testFiles(dir: string): string[] {
     .sort();
 }
 
-function parse(file: string): ts.SourceFile {
-  return ts.createSourceFile(
-    file,
-    readFileSync(file, 'utf8'),
-    ts.ScriptTarget.Latest,
-    true,
-    scriptKindFor(file)
+function parse(file: string, text = readFileSync(file, 'utf8')): ts.SourceFile {
+  return ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, scriptKindFor(file));
+}
+
+function hasExportModifier(node: ts.Node): boolean {
+  return (
+    ts.canHaveModifiers(node) &&
+    (ts.getModifiers(node) ?? []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword)
   );
+}
+
+/**
+ * Whether a test could reach `node` in a `scripts/` file: it runs at module
+ * scope (so on import), or its enclosing function sits inside an exported
+ * top-level statement. A module-private `main()` is the exempt case.
+ */
+function reachableFromATest(node: ts.Node): boolean {
+  let fn: ts.Node | undefined;
+  for (let p: ts.Node | undefined = node.parent; p; p = p.parent) {
+    if (ts.isFunctionLike(p)) {
+      fn = p;
+      break;
+    }
+  }
+  if (!fn) return true;
+  let top: ts.Node = fn;
+  while (top.parent && !ts.isSourceFile(top.parent)) top = top.parent;
+  return hasExportModifier(top);
 }
 
 /**
@@ -173,31 +226,41 @@ function parse(file: string): ts.SourceFile {
  * what the scanner saw and cleared they could be deleted with every test green,
  * and they are the only thing that would notice the predicate widening.
  */
-function scanAll(file: string): { findings: Finding[]; cleared: string[] } {
-  const src = parse(file);
+function scanAll(
+  file: string,
+  scope: Scope = 'tests',
+  text?: string
+): { findings: Finding[]; cleared: string[] } {
+  const src = parse(file, text);
   const rel = relative(REPO_ROOT, file);
   const findings: Finding[] = [];
   const cleared: string[] = [];
+  const counts = (node: ts.Node): boolean => scope === 'tests' || reachableFromATest(node);
 
   const visit = (node: ts.Node): void => {
     if (
       ts.isNewExpression(node) &&
       ts.isIdentifier(node.expression) &&
-      node.expression.text === 'CopilotDatabase'
+      DISCOVERING_CONSTRUCTORS.has(node.expression.text)
     ) {
+      const name = node.expression.text;
       const first = node.arguments?.[0];
       const spelling = first?.getText(src);
       const missing = first === undefined;
       if (missing || FALSY_FIRST_ARGS.has(spelling ?? '')) {
-        findings.push({
-          file: rel,
-          line: src.getLineAndCharacterOfPosition(node.getStart(src)).line + 1,
-          what: missing
-            ? 'new CopilotDatabase() with no path'
-            : `new CopilotDatabase(${spelling}) — falsy, so discovery runs anyway`,
-        });
+        if (counts(node)) {
+          findings.push({
+            file: rel,
+            line: src.getLineAndCharacterOfPosition(node.getStart(src)).line + 1,
+            what: missing
+              ? `new ${name}() with no path`
+              : `new ${name}(${spelling}) — falsy, so discovery runs anyway`,
+          });
+        }
       } else {
-        cleared.push((node.arguments ?? []).map((arg) => arg.getText(src)).join(', '));
+        cleared.push(
+          `${name}(${(node.arguments ?? []).map((arg) => arg.getText(src)).join(', ')})`
+        );
       }
     }
     if (
@@ -208,11 +271,15 @@ function scanAll(file: string): { findings: Finding[]; cleared: string[] } {
       const first = node.arguments[0];
       const spelling = first?.getText(src);
       if (first === undefined || REAL_HOME.test(spelling ?? '')) {
-        findings.push({
-          file: rel,
-          line: src.getLineAndCharacterOfPosition(node.getStart(src)).line + 1,
-          what: `${WALKER_FN}(${spelling ?? ''}) — the real home directory`,
-        });
+        if (counts(node)) {
+          findings.push({
+            file: rel,
+            line: src.getLineAndCharacterOfPosition(node.getStart(src)).line + 1,
+            what: `${WALKER_FN}(${spelling ?? ''}) — the real home directory`,
+          });
+        }
+      } else {
+        cleared.push(`${WALKER_FN}(${spelling})`);
       }
     }
     ts.forEachChild(node, visit);
@@ -347,8 +414,15 @@ let swept: { files: string[]; findings: Finding[] } | undefined;
 /** The whole-suite walk, run once on first use and never at collection time. */
 function sweepSuite(): { files: string[]; findings: Finding[] } {
   if (!swept) {
-    const files = testFiles(TESTS_ROOT);
-    swept = { files, findings: files.flatMap(scan) };
+    const tests = testFiles(TESTS_ROOT);
+    const scripts = tsFilesUnder(SCRIPTS_ROOT).sort();
+    swept = {
+      files: [...tests, ...scripts],
+      findings: [
+        ...tests.flatMap((file) => scan(file)),
+        ...scripts.flatMap((file) => scanAll(file, 'scripts').findings),
+      ],
+    };
   }
   return swept;
 }
@@ -361,6 +435,10 @@ describe('no test discovers the real Copilot database', () => {
     expect(
       files.some((f) => f.endsWith(join('core', 'database-errors.test.ts'))),
       'The sweep must reach the file this gate was written for.'
+    ).toBe(true);
+    expect(
+      files.some((f) => f.endsWith(join('scripts', 'smoke', '_harness.ts'))),
+      'The sweep must reach scripts/, where #780 found a construction a test could reach.'
     ).toBe(true);
     expect(files, 'The deliberate specimen must be scanned only by the gate below.').not.toContain(
       SPECIMEN
@@ -385,6 +463,9 @@ describe('no test discovers the real Copilot database', () => {
       'discoverCopilotDatabase(homedir()) — the real home directory',
       'discoverCopilotDatabase(os.homedir()) — the real home directory',
       'discoverCopilotDatabase() — the real home directory',
+      "discoverCopilotDatabase(join(homedir(), 'Library')) — the real home directory",
+      'new CopilotMoneyServer() with no path',
+      'new CopilotMoneyServer(undefined) — falsy, so discovery runs anyway',
     ]);
   });
 
@@ -395,9 +476,15 @@ describe('no test discovers the real Copilot database', () => {
     // of them carries a second argument, which is the case that line exists for.
     expect(
       scanSpecimen().cleared,
-      `The specimen's must-NOT-flag lines (an explicit path, and an explicit path with a ` +
-        `timeout) must both be present and both be left alone by the scanner.`
-    ).toEqual(['SOME_PATH', 'SOME_PATH, 1000']);
+      `The specimen's must-NOT-flag lines (an explicit path, an explicit path with a timeout, ` +
+        `the walker given a synthetic home, and a server given a path) must all be present and ` +
+        `all be left alone by the scanner.`
+    ).toEqual([
+      'CopilotDatabase(SOME_PATH)',
+      'CopilotDatabase(SOME_PATH, 1000)',
+      'discoverCopilotDatabase(SOME_PATH)',
+      'CopilotMoneyServer(SOME_PATH)',
+    ]);
   });
 
   test('guards the gate: every falsy spelling it knows has a specimen', () => {
@@ -448,6 +535,28 @@ describe('no test discovers the real Copilot database', () => {
       `${WALKER_FN}(home) must keep \`home\` a required parameter (no \`?\`, no default), or a ` +
         `test could call it with no argument and walk the user's real container.`
     ).toBe('required');
+  });
+
+  test.each([
+    ['an exported function', 'export function f() { return new CopilotDatabase(); }'],
+    ['an exported arrow', 'export const g = () => new CopilotMoneyServer();'],
+    ['module scope, which runs on import', 'const db = new CopilotDatabase();'],
+    [
+      'an inner function of an exported one',
+      'export async function setup() { const make = () => new CopilotDatabase(undefined); return make(); }',
+    ],
+  ])('guards the gate: in scripts/, flags a construction a test could reach — %s', (_l, text) => {
+    expect(scanAll(join(SCRIPTS_ROOT, 'specimen.ts'), 'scripts', text).findings).toHaveLength(1);
+  });
+
+  test.each([
+    ['a module-private main()', 'async function main() { const db = new CopilotDatabase(); }'],
+    [
+      'an exported function given a path',
+      'export function f(p: string) { return new CopilotDatabase(p); }',
+    ],
+  ])('guards the gate: in scripts/, leaves alone — %s', (_l, text) => {
+    expect(scanAll(join(SCRIPTS_ROOT, 'specimen.ts'), 'scripts', text).findings).toEqual([]);
   });
 
   test('every CopilotDatabase built in a test is given a path', () => {

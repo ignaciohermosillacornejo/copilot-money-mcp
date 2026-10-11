@@ -2969,7 +2969,7 @@ async function main(): Promise<void> {
   if (hasFailures || stragglers.length > 0) process.exit(1);
 }
 
-main().catch((e) => {
+if (import.meta.main) main().catch((e) => {
   console.error('Smoke script crashed:', e);
   if (stragglers.length > 0) {
     console.error(`\n⚠ ${stragglers.length} GQL-TEST-* entities may remain:`);

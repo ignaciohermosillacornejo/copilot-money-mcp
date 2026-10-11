@@ -40,7 +40,7 @@ import {
   COLLECTION_ROUTES,
 } from '../../src/core/decoder.js';
 import type { AllCollectionsResult, CollectionRoute } from '../../src/core/decoder.js';
-import { CopilotDatabase } from '../../src/core/database.js';
+import { CopilotDatabase, missingDatabaseError } from '../../src/core/database.js';
 import type { FirestoreValue } from '../../src/core/protobuf-parser.js';
 
 export type Status = 'PASS' | 'FAIL' | 'WARN' | 'SKIP';
@@ -646,8 +646,15 @@ const normalize = normalizeCollection;
 async function main(): Promise<void> {
   const db = new CopilotDatabase();
   const dbPath = db.getDbPath();
+  const { available, lookupError } = db.availability();
 
-  if (!dbPath || !db.isAvailable()) {
+  // "Could not look" is not "nothing there" (#774): a cache this smoke failed
+  // to read must not report a green "nothing to check".
+  if (lookupError) {
+    console.error(`[cache-smoke] cache-unreadable — ${missingDatabaseError(lookupError).message}`);
+    process.exit(1);
+  }
+  if (!dbPath || !available) {
     console.error('[cache-smoke] no-cache-found — no local Copilot cache; nothing to check.');
     console.error(
       '[cache-smoke] This is not a failure. Run on a machine with Copilot Money synced.'

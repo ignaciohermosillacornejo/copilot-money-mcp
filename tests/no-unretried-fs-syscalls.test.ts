@@ -28,7 +28,11 @@
  * value (`const r = fs.readdirSync`) are all flagged. Those last three are
  * fail-closed rather than wrong: they could be retried correctly, but the
  * gate would have to follow data flow to know, and the one accepted shape
- * costs nothing to write.
+ * costs nothing to write. A second argument — an explicit bound — is flagged
+ * too: `retryInterrupted(() => op(), 1)` has the accepted shape and retries
+ * nothing, so a different bound has to be argued here, not passed in. (The
+ * helper separately refuses a bound that is not a positive integer, which is
+ * what made `NaN` and `Infinity` spin forever.)
  *
  * And the wrapper must be the real one: a file whose accepted calls name
  * `retryInterrupted` but that does not import it from `fs-retry` — a local
@@ -115,7 +119,10 @@ function isWrapped(call: ts.CallExpression): boolean {
     ts.isCallExpression(outer) &&
     ts.isIdentifier(outer.expression) &&
     outer.expression.text === WRAPPER &&
-    outer.arguments[0] === arrow
+    outer.arguments[0] === arrow &&
+    // An explicit bound is a deliberate edit to argue with this gate, not a
+    // default to inherit: `retryInterrupted(() => op(), 1)` retries nothing.
+    outer.arguments.length === 1
   );
 }
 
@@ -251,6 +258,7 @@ describe('the scanner recognises the shapes', () => {
     ['arrow passed by name', 'const f = () => fs.mkdtempSync(p);\nretryInterrupted(f);'],
     ['wrapper is the wrong function', 'otherRetry(() => fs.readdirSync(p));'],
     ['arrow is not the first argument', 'retryInterrupted(3, () => fs.readdirSync(p));'],
+    ['an explicit bound', 'retryInterrupted(() => fs.readdirSync(p), 1);'],
     ['taken as a value', 'const r = fs.readdirSync;'],
     ['nested one level too deep', 'retryInterrupted(() => g(fs.statSync(p)));'],
   ])('flags: %s', (_label, src) => {
