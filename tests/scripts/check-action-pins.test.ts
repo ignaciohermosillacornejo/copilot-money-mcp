@@ -229,6 +229,17 @@ describe('collectPins', () => {
     expect(err).not.toContain('no version comment');
   });
 
+  test('a SHA run longer than 40 hex is unreadable, not skipped', () => {
+    // PINNED had no right boundary on the SHA, PIN_SHAPED did, so a 41-hex
+    // copy-paste matched the parse but failed the residual's guard — and the
+    // guard returning early dropped the line entirely.
+    const { pins, unread } = scanPins(
+      fixtureDir({ 'a.yml': `      - uses: actions/checkout@${SHA_A}f # v7` })
+    );
+    expect(pins).toEqual([]);
+    expect(unread).toHaveLength(1);
+  });
+
   test('the summary counts unreadable lines too, not "N problems across 0 pins"', () => {
     const result = runCheck(
       fixtureDir({ 'b.yml': `      - uses: 'actions/checkout@${SHA_A} # v7` })

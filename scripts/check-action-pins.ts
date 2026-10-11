@@ -56,7 +56,10 @@ function displayPath(path: string): string {
  * UNREAD: it dropped out of the scan, and the gate reported consistency over
  * a set that silently excluded it.
  */
-const PINNED = /uses:\s*(['"]?)([A-Za-z0-9/_.-]+)@([0-9a-f]{40})\1(?:\s*#\s*(\S+))?/g;
+// The `\b` after the SHA is what makes PIN_SHAPED below a true superset of this
+// pattern: without it a 41-hex run parsed here (first 40 as the SHA) while the
+// residual's `\b`-bounded guard skipped the line — no pin and no report.
+const PINNED = /uses:\s*(['"]?)([A-Za-z0-9/_.-]+)@([0-9a-f]{40})\b\1(?:\s*#\s*(\S+))?/g;
 
 export interface Pin {
   action: string;
@@ -71,9 +74,14 @@ export interface Pin {
  * its quoting. Deliberately looser than `PINNED`: it is the residual check, and
  * its only job is to notice when the grammar above reads less than is there.
  */
-const PIN_SHAPED = /uses:.*\b[0-9a-f]{40}\b/;
-/** Every 40-hex run on a line — what the parses on a pin-shaped line are counted against. */
-const SHA_RUN = /\b[0-9a-f]{40}\b/g;
+const PIN_SHAPED = /uses:.*[0-9a-f]{40}/;
+/**
+ * Every maximal run of 40 or more hex characters on a line — what the parses on
+ * a pin-shaped line are counted against. Unbounded on both shapes on purpose:
+ * a 41-hex copy-paste is not a pin PINNED will read, and it must still be
+ * counted here rather than fall between the two patterns.
+ */
+const SHA_RUN = /[0-9a-f]{40,}/g;
 
 /** A pin-shaped line `PINNED` could not parse. */
 export interface UnreadLine {
@@ -200,8 +208,9 @@ export function runCheck(dir: string = WORKFLOW_DIR): CheckResult {
       (u) =>
         `${u.file}:${u.line} — this gate could not read a pin-shaped line: \`${u.text}\`. ` +
         `It carries a SHA after \`uses:\` but does not parse as a bare or matched-quote ` +
-        `scalar, so it would otherwise drop out of the consistency check unseen. Fix the ` +
-        `quoting, or teach PINNED the shape.`
+        `scalar with a 40-hex SHA and a reachable comment, so it would otherwise drop out ` +
+        `of the consistency check unseen. Fix the quoting, the SHA, or whatever sits between ` +
+        `the SHA and its comment — or teach PINNED the shape.`
     ),
     ...findPinProblems(pins),
   ];

@@ -1252,14 +1252,21 @@ export async function runGuards(
     blocked.push({
       name: '(journal recovery)',
       ok: false,
-      detail:
-        `could not restore ${recovery.refused.join(', ')} — the pre-mutation bytes are in ` +
-        `the kept journal, and in the ${SIDECAR_SUFFIX} file beside each where one could be ` +
-        `written (see the messages above). The journal was KEPT, so this run and ` +
-        `every run after it says so rather than handing the next one a green registry over ` +
-        `the same tree. Two ways to end it, and BOTH are reconciling: put the original ` +
-        `bytes back, or keep the file as it stands and delete ${journalPath(root)}. Either ` +
-        `way delete the sidecar — while it is there the run below still refuses.`,
+      // Read off the disk, not assumed: `persistJournal` reports a failed
+      // write rather than raising it, so the row must not point at a journal
+      // that is not there.
+      detail: existsSync(journalPath(root))
+        ? `could not restore ${recovery.refused.join(', ')} — the pre-mutation bytes are in ` +
+          `the kept journal, and in the ${SIDECAR_SUFFIX} file beside each where one could be ` +
+          `written (see the messages above). The journal was KEPT, so this run and ` +
+          `every run after it says so rather than handing the next one a green registry over ` +
+          `the same tree. Two ways to end it, and BOTH are reconciling: put the original ` +
+          `bytes back, or keep the file as it stands and delete ${journalPath(root)}. Either ` +
+          `way delete the sidecar — while it is there the run below still refuses.`
+        : `could not restore ${recovery.refused.join(', ')}, AND the journal recording it ` +
+          `could not be kept (see the messages above) — so the only copy of the pre-mutation ` +
+          `bytes is the ${SIDECAR_SUFFIX} file beside each, where one could be written. ` +
+          `Reconcile from those by hand before trusting this tree, then delete each sidecar.`,
     });
   }
   if (recovery.sidecars.length > 0) {

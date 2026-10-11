@@ -14,8 +14,8 @@
  *
  * WHAT IT CATCHES — syntax only, every TypeScript file under the three trees:
  * the specifier of an `import … from`, an `export … from`, an
- * `import x = require(…)`, and a dynamic `import(…)` with a string-literal
- * argument, when the specifier is relative (`./`, `../`) and ends in `.ts`,
+ * `import x = require(…)`, a dynamic `import(…)` with a string-literal
+ * argument, and a type-position `import('…').T`, when the specifier is relative (`./`, `../`) and ends in `.ts`,
  * `.tsx`, `.mts` or `.cts`. Paths built at runtime and handed to `Bun.spawn`
  * or `new URL(…)` are deliberately NOT import specifiers and are not flagged —
  * several gate tests spawn a script by its `.ts` path, which is correct.
@@ -69,6 +69,10 @@ function tsExtensionSpecifiers(fileName: string, source: string): Offender[] {
       check(node.moduleReference.expression);
     } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
       check(node.arguments[0]);
+    } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) {
+      // `type T = import('./x.ts').Foo` — a type-position import, which tsc
+      // rejects with the same TS5097 and which is not a CallExpression.
+      check(node.argument.literal);
     }
     ts.forEachChild(node, visit);
   };
@@ -86,6 +90,7 @@ describe('no relative import specifier ends in a TypeScript extension', () => {
       "export { c } from './c.mts';",
       "import d = require('../d.cts');",
       "const e = await import('./e.ts');",
+      "type J = import('./j.ts').X;",
       // Not specifiers, or not relative: none of these may be flagged.
       "import f from './f.js';",
       "import g from 'some-package.ts';",
@@ -98,6 +103,7 @@ describe('no relative import specifier ends in a TypeScript extension', () => {
       './c.mts',
       '../d.cts',
       './e.ts',
+      './j.ts',
     ]);
   });
 
