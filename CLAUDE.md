@@ -51,7 +51,10 @@ src/
 │   ├── database.ts          # CopilotDatabase - cached data access layer
 │   ├── decoder.ts           # LevelDB binary decoder for Firestore protobufs
 │   ├── graphql/             # GraphQL client + per-domain write modules
-│   └── auth/                # Firebase authentication for writes
+│   ├── auth/                # Firebase authentication for writes
+│   ├── abort.ts             # Abort/timeout error classification (isAbortOrTimeout)
+│   ├── fs-retry.ts          # retryInterrupted: EINTR/EAGAIN retry for sync fs calls
+│   └── …                    # Key files only; see src/core/ for the rest
 ├── models/
 │   ├── transaction.ts  # Transaction Zod schema
 │   ├── account.ts      # Account Zod schema
