@@ -9,12 +9,14 @@ import { describe, test, expect } from 'bun:test';
 import { CopilotDatabase } from '../../src/core/database.js';
 import { extractValue } from '../../src/core/decoder.js';
 import type { FirestoreValue } from '../../src/core/protobuf-parser.js';
+import { SYNTHETIC_DB_PATH } from '../helpers/synthetic-db-path.js';
 
 const DB_NOT_FOUND_MESSAGE =
   'Database not found. Please ensure Copilot Money is installed and has synced data.';
 
-/**
- * Any non-empty string, because nothing here reads it (#756).
+/*
+ * Why these tests pass SYNTHETIC_DB_PATH (tests/helpers/synthetic-db-path.ts):
+ * any non-empty string would do, because nothing here reads it (#756).
  *
  * Passing *a* path is the whole point: `new CopilotDatabase()` with no argument
  * runs `findCopilotDatabase()`, which `readdirSync`s the user's live Copilot
@@ -31,7 +33,6 @@ const DB_NOT_FOUND_MESSAGE =
  * `requireDbPath()` throws before anything else does, so with a path supplied
  * these tests reach the rejection with zero syscalls.
  */
-const SYNTHETIC_DB_PATH = '/nonexistent/copilot-money-mcp/database-errors.test';
 
 /**
  * Each case describes a public getter that, when the dbPath is missing and

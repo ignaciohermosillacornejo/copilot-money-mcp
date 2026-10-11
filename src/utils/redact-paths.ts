@@ -21,6 +21,13 @@
  * errno and needs no path at all, so it replaces whole paths with `<path>`.
  * This one runs on errors whose path IS the useful part, so it keeps the path
  * and removes only the user.
+ *
+ * One stated limit: a home outside `/Users` and `/home` (`/var/root`, a
+ * container's home) is redacted only where it appears as a whole segment, so
+ * a SIBLING directory named after it — `${home}.bak/x` — matches neither the
+ * anchored home nor the generic prefix, and keeps the name. Contrived, and
+ * the price of not rewriting `/home/runner2` into `~2`; written down so it is
+ * a choice rather than a surprise.
  */
 
 import { homedir } from 'node:os';
@@ -30,12 +37,23 @@ const USER_PREFIX = /\/(Users|home)\/[^/\s'",)]+/g;
 
 export function redactUserPaths(text: string, home: string = safeHomedir()): string {
   let out = text;
-  if (home && home !== '/') {
-    // A whole-segment match only: `/home/runner` must not rewrite
-    // `/home/runner2/x` into the nonsense path `~2/x`.
-    out = out.replace(new RegExp(`${escapeRegExp(home)}(?=$|[/\\s'",)])`, 'g'), '~');
-  }
+  if (home && home !== '/') out = out.replace(homePattern(home), '~');
   return out.replace(USER_PREFIX, '/$1/<user>');
+}
+
+/** The last home's pattern. The home does not change within a process, so one slot suffices. */
+let cachedHome: string | undefined;
+let cachedPattern: RegExp | undefined;
+
+function homePattern(home: string): RegExp {
+  if (cachedHome !== home || !cachedPattern) {
+    // A whole-segment match only: `/home/runner` must not rewrite
+    // `/home/runner2/x` into the nonsense path `~2/x`. Safe to reuse with the
+    // `g` flag: `String.prototype.replace` resets `lastIndex` on every call.
+    cachedPattern = new RegExp(`${escapeRegExp(home)}(?=$|[/\\s'",)])`, 'g');
+    cachedHome = home;
+  }
+  return cachedPattern;
 }
 
 function escapeRegExp(text: string): string {

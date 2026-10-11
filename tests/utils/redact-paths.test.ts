@@ -9,6 +9,7 @@ import { redactUserPaths } from '../../src/utils/redact-paths.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import { CopilotMoneyServer } from '../../src/server.js';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
+import { SYNTHETIC_DB_PATH } from '../helpers/synthetic-db-path.js';
 
 const HOME = '/Users/synthetic-user';
 
@@ -50,6 +51,24 @@ describe('redactUserPaths', () => {
     expect(redactUserPaths('/Users/bob, and more', HOME)).toBe('/Users/<user>, and more');
   });
 
+  test('the cached pattern follows the home it was given, and survives reuse', () => {
+    // One cache slot: alternating homes must not leak the previous pattern,
+    // and the `g` flag must not carry lastIndex between calls.
+    const other = '/Users/another-synthetic';
+    for (let i = 0; i < 3; i++) {
+      expect(redactUserPaths(`${HOME}/a`, HOME)).toBe('~/a');
+      expect(redactUserPaths(`${other}/b`, other)).toBe('~/b');
+      expect(redactUserPaths(`${other}/b`, HOME)).toBe('/Users/<user>/b');
+    }
+  });
+
+  test('stated limit: a home outside /Users and /home keeps a sibling named after it', () => {
+    // Documented in redact-paths.ts. Pinned so changing it is a decision.
+    const home = '/var/synthetic-root';
+    expect(redactUserPaths(`${home}/x`, home)).toBe('~/x');
+    expect(redactUserPaths(`${home}.bak/x`, home)).toBe(`${home}.bak/x`);
+  });
+
   test('an empty or root home is not used as a pattern', () => {
     expect(redactUserPaths('a/b /c', '')).toBe('a/b /c');
     expect(redactUserPaths('a/b /c', '/')).toBe('a/b /c');
@@ -58,8 +77,8 @@ describe('redactUserPaths', () => {
 
 describe('handleCallTool relays a thrown error without the username', () => {
   test('an fs error thrown past the dispatch gate reaches the client redacted', async () => {
-    const server = new CopilotMoneyServer('/nonexistent/copilot-money-mcp/redact-test');
-    const db = new CopilotDatabase('/nonexistent/copilot-money-mcp/redact-test');
+    const server = new CopilotMoneyServer(SYNTHETIC_DB_PATH);
+    const db = new CopilotDatabase(SYNTHETIC_DB_PATH);
     db.availability = () => ({ available: true });
     const tools = new CopilotMoneyTools(db);
     const leaked = `${homedir()}/Library/Containers/x/main/000001.ldb`;

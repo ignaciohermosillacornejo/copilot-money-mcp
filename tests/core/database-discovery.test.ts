@@ -305,24 +305,18 @@ describe('a retryable discovery failure is looked at again, not served from memo
     // retry forever, and re-walk the container on every call.
     const server = await serverWithFailedDiscovery(eintr('/synthetic/main'));
     fs.rmSync(path.join(home, 'Library'), { recursive: true, force: true });
-    const delivered = interruptReaddir(0); // counts nothing; just installs the counter
     const first = (await server.handleCallTool('get_accounts', {})).content[0]?.text ?? '';
     expect(first).toContain('ensure Copilot Money is installed');
     expect(first).not.toContain('EINTR');
 
-    // Settled: a second call answers from memory without walking again.
+    // Settled: a second call answers from memory without walking again. Every
+    // readdir under the home is interrupted from here on, so a regression that
+    // kept the stale EINTR would re-walk, be counted, and report EINTR. Installed
+    // AFTER the first call: before it, the re-look itself would be interrupted
+    // and the install-advice assertion above could not pass.
+    const delivered = interruptReaddir(Number.POSITIVE_INFINITY);
     const db = (server as unknown as { db: CopilotDatabase }).db;
-    const walks: string[] = [];
-    const original = fs.readdirSync;
-    (fs as { readdirSync: unknown }).readdirSync = (...args: unknown[]) => {
-      walks.push(String(args[0]));
-      return (original as (...a: unknown[]) => unknown).apply(fs, args);
-    };
-    restores.push(() => {
-      (fs as { readdirSync: unknown }).readdirSync = original;
-    });
     expect(db.availability()).toEqual({ available: false });
-    expect(walks.filter((p) => p.startsWith(home))).toEqual([]);
     expect(delivered()).toBe(0);
   });
 

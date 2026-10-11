@@ -2,13 +2,7 @@ import { describe, test, expect, mock } from 'bun:test';
 import { CopilotMoneyServer } from '../../src/server.js';
 import type { GraphQLClient } from '../../src/core/graphql/client.js';
 import { LIVE_TOOL_DEFS, WRITE_TOOL_DEFS } from '../../src/tools/registry/index.js';
-
-/**
- * A path for servers whose tests never read the cache. Without one, the server
- * hands `undefined` to CopilotDatabase, which walks the user's real Copilot
- * container (#756) — enforced by tests/no-ambient-database-discovery.test.ts.
- */
-const SYNTHETIC_DB_PATH = '/nonexistent/copilot-money-mcp/server-under-test';
+import { SYNTHETIC_DB_PATH } from '../helpers/synthetic-db-path.js';
 
 describe('CopilotMoneyServer with --live-reads', () => {
   test('swaps get_transactions for get_transactions_live in handleListTools', () => {

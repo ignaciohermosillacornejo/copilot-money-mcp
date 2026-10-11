@@ -1,11 +1,6 @@
 import { describe, expect, test, mock } from 'bun:test';
 import type { GraphQLClient } from '../../src/core/graphql/client.js';
-
-/**
- * A synthetic cache path, so the harness never discovers the user's real
- * Copilot container from inside `bun test` (#756). Nothing here reads the cache.
- */
-const SYNTHETIC_DB_PATH = '/nonexistent/copilot-money-mcp/smoke-harness.test';
+import { SYNTHETIC_DB_PATH } from '../helpers/synthetic-db-path.js';
 
 describe('setupLiveSmoke', () => {
   test('assembles auth + client + live db and runs preflight', async () => {
