@@ -87,8 +87,9 @@ async function main(): Promise<void> {
   );
 }
 
-if (import.meta.main)
+if (import.meta.main) {
   main().catch((err: unknown) => {
     console.error('[smoke] FAIL:', err);
     process.exit(1);
   });
+}

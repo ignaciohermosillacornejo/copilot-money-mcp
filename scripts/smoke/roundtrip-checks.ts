@@ -898,8 +898,9 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
     appliesSurfaces: ['Mutation.editRecurring:applies'],
     run: async (ctx) => {
       const recurringId = ctx.state.recurringId;
-      if (!recurringId)
+      if (!recurringId) {
         return { skipped: 'no run-created recurring (create_recurring did not pass)' };
+      }
       await editRecurring(ctx.client, { id: recurringId, input: { frequency: 'WEEKLY' } });
       const after = (await fetchRecurrings(ctx.client)).find((rec) => rec.id === recurringId);
       check(after, `update_recurring: recurring ${recurringId} missing from re-read`);
@@ -917,8 +918,9 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
     appliesSurfaces: ['Mutation.editRecurring:applies'],
     run: async (ctx) => {
       const recurringId = ctx.state.recurringId;
-      if (!recurringId)
+      if (!recurringId) {
         return { skipped: 'no run-created recurring (create_recurring did not pass)' };
+      }
       const before = (await fetchRecurrings(ctx.client)).find((rec) => rec.id === recurringId);
       check(before, `set_recurring_state: recurring ${recurringId} missing from pre-read`);
       const original = before.state.toUpperCase() as RecurringStateValue;
@@ -952,8 +954,9 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
     appliesSurfaces: ['Mutation.addTransactionToRecurring:applies'],
     run: async (ctx) => {
       const recurringId = ctx.state.recurringId;
-      if (!recurringId)
+      if (!recurringId) {
         return { skipped: 'no run-created recurring (create_recurring did not pass)' };
+      }
       const txnB = await createSmokeTransaction(ctx, 'txn-b', 100);
       await addTransactionToRecurring(ctx.client, {
         id: txnB.id,
@@ -1030,8 +1033,9 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
     appliesSurfaces: ['Mutation.deleteRecurring:applies'],
     run: async (ctx) => {
       const recurringId = ctx.state.recurringId;
-      if (!recurringId)
+      if (!recurringId) {
         return { skipped: 'no run-created recurring (create_recurring did not pass)' };
+      }
       await deleteRecurring(ctx.client, { id: recurringId });
       const after = (await fetchRecurrings(ctx.client)).find((rec) => rec.id === recurringId);
       check(

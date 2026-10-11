@@ -2836,7 +2836,7 @@ async function main(): Promise<void> {
   if (hasFailures || stragglers.length > 0) process.exit(1);
 }
 
-if (import.meta.main)
+if (import.meta.main) {
   main().catch((e) => {
     console.error('Smoke script crashed:', e);
     if (stragglers.length > 0) {
@@ -2845,3 +2845,4 @@ if (import.meta.main)
     }
     process.exit(1);
   });
+}

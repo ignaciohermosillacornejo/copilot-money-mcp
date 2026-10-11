@@ -1713,8 +1713,9 @@ function runGhostScan(): never {
   // unrelated repository, git would answer about THAT repository's history and
   // every number below would describe the wrong tree.
   const top = gitText(['rev-parse', '--show-toplevel']);
-  if (!top.ok)
+  if (!top.ok) {
     ghostRefuse(top.why, 'Run this inside the repository whose pull request you are checking.');
+  }
   try {
     if (realpathSync.native(top.text.trim()) !== realpathSync.native(ROOT)) {
       ghostRefuse(
@@ -1907,8 +1908,9 @@ function runGhostScan(): never {
     } else {
       const exempt = SELF_EXEMPT.has(rel);
       const prose = isProse(rel);
-      for (let i = 0; i < lines.length; i++)
+      for (let i = 0; i < lines.length; i++) {
         checkLine(rel, i + 1, lines[i] as string, exempt, prose);
+      }
       const basename = rel.slice(rel.lastIndexOf(sep) + 1).toLowerCase();
       // Name only — `answersToName` asks the filesystem which file a name
       // opens, and a blob that is not in any tree has no filesystem to ask.

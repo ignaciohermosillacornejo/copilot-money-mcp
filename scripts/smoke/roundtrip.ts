@@ -208,8 +208,9 @@ async function main(): Promise<void> {
   );
 }
 
-if (import.meta.main)
+if (import.meta.main) {
   main().catch((err: unknown) => {
     console.error('[roundtrip] FAIL:', err);
     process.exit(1);
   });
+}
