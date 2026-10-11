@@ -1297,3 +1297,329 @@ describe('a session installed at any resume point is returned, not reported as a
     ).toBe(awaits + 1);
   });
 });
+
+/**
+ * One shared refresh attempt per instance (#796).
+ *
+ * `getIdToken` used to run a separate refresh for every caller, and the GraphQL
+ * client calls it once per request. So concurrent callers raced on the same
+ * `idToken` / `refreshToken` / `expiresAt`. #765 and #770 answered that with a
+ * re-check at every resume point, which stops a resumed caller from reporting a
+ * failure while its object holds a working token, but cannot stop a WRITE: a
+ * cold-path candidate that succeeds after a sibling installed a session
+ * overwrites it, possibly with another account's. And every caller still paid
+ * for its own browser read and exchanges.
+ *
+ * Now the first caller starts the attempt and every caller that arrives while
+ * it runs awaits the same promise. The cases below park the attempt at each
+ * await it has (the fast-path exchange, the browser read, a cold-path candidate
+ * exchange), let more callers arrive, and then let the parked await settle each
+ * way it can. Every caller must get the same outcome, at the cost of ONE
+ * caller's reads and exchanges.
+ */
+describe('concurrent callers share one refresh attempt (#796)', () => {
+  const candidate = (token: string, scoped: boolean): TokenResult => ({
+    token,
+    browser: 'Chrome',
+    scoped,
+  });
+
+  const BOOT = syntheticToken('boot');
+  const CACHED = syntheticToken('cached');
+  const LIVE = syntheticToken('live');
+  const DEAD = syntheticToken('dead');
+  const PARKED = syntheticToken('parked');
+  const CALLERS = 5;
+
+  const session = (
+    refreshToken: string,
+    expiresIn: string,
+    idToken: string = ID_TOKEN,
+    userId = 'synthetic-user'
+  ) =>
+    Response.json({
+      id_token: idToken,
+      refresh_token: refreshToken,
+      expires_in: expiresIn,
+      token_type: 'Bearer',
+      user_id: userId,
+    });
+
+  const deadVerdict = () =>
+    Response.json({ error: { message: 'INVALID_REFRESH_TOKEN' } }, { status: 400 });
+  const rateLimit = () =>
+    Response.json({ error: { message: 'RESOURCE_EXHAUSTED' } }, { status: 429 });
+
+  function gate(): { opened: Promise<void>; open: () => void } {
+    let open: () => void = () => {};
+    const opened = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    return { opened, open };
+  }
+
+  /** Every caller's outcome, as 'ok:<id token>' or 'err:<message>'. */
+  const settle = (calls: Promise<string>[]) =>
+    Promise.all(
+      calls.map((c) =>
+        c.then(
+          (id) => `ok:${id}`,
+          (err: unknown) => `err:${err instanceof Error ? err.message : String(err)}`
+        )
+      )
+    );
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  test('concurrent cold callers share one browser read and one exchange', async () => {
+    let exchanges = 0;
+    globalThis.fetch = mock(() => {
+      exchanges += 1;
+      return Promise.resolve(session(LIVE, '3600'));
+    }) as unknown as typeof fetch;
+
+    // The read is held until every caller has arrived, so none of them can be
+    // served from a session the first one finished installing.
+    const read = gate();
+    let extractions = 0;
+    const auth = new FirebaseAuth(async () => {
+      extractions += 1;
+      await read.opened;
+      return { candidates: [candidate(LIVE, true)], checked: ['Chrome'] };
+    });
+
+    const calls = Array.from({ length: CALLERS }, () => auth.getIdToken());
+    read.open();
+
+    expect(await settle(calls)).toEqual(Array(CALLERS).fill(`ok:${ID_TOKEN}`));
+    expect(extractions).toBe(1);
+    expect(exchanges).toBe(1);
+  });
+
+  test('concurrent fast-path callers share one exchange and read no browser', async () => {
+    const answered = gate();
+    let cachedExchanges = 0;
+    globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
+      const sent = String(options?.body ?? '');
+      if (sent.includes(BOOT)) return Promise.resolve(session(CACHED, '0'));
+      cachedExchanges += 1;
+      return answered.opened.then(() => session(CACHED, '3600'));
+    }) as unknown as typeof fetch;
+
+    let extractions = 0;
+    const auth = new FirebaseAuth(() => {
+      extractions += 1;
+      return Promise.resolve({ candidates: [candidate(BOOT, true)], checked: ['Chrome'] });
+    });
+    expect(await auth.getIdToken()).toBe(ID_TOKEN);
+
+    const calls = Array.from({ length: CALLERS }, () => auth.getIdToken());
+    answered.open();
+
+    expect(await settle(calls)).toEqual(Array(CALLERS).fill(`ok:${ID_TOKEN}`));
+    expect(cachedExchanges).toBe(1);
+    expect(extractions).toBe(1);
+  });
+
+  test('callers joining a fast-path exchange that hits a dead-token verdict share the cold read', async () => {
+    const answered = gate();
+    const sent: string[] = [];
+    globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
+      const body = String(options?.body ?? '');
+      if (body.includes(BOOT)) return Promise.resolve(session(CACHED, '0'));
+      if (body.includes(CACHED)) {
+        sent.push('cached');
+        return answered.opened.then(deadVerdict);
+      }
+      sent.push('live');
+      return Promise.resolve(session(LIVE, '3600'));
+    }) as unknown as typeof fetch;
+
+    let extractions = 0;
+    const auth = new FirebaseAuth(() => {
+      extractions += 1;
+      const found = extractions === 1 ? BOOT : LIVE;
+      return Promise.resolve({ candidates: [candidate(found, true)], checked: ['Chrome'] });
+    });
+    expect(await auth.getIdToken()).toBe(ID_TOKEN);
+
+    const calls = Array.from({ length: CALLERS }, () => auth.getIdToken());
+    answered.open();
+
+    expect(await settle(calls)).toEqual(Array(CALLERS).fill(`ok:${ID_TOKEN}`));
+    // One fast-path exchange, one cold read, one candidate exchange: what a
+    // single caller costs.
+    expect(sent).toEqual(['cached', 'live']);
+    expect(extractions).toBe(2);
+  });
+
+  test('callers joining a fast-path exchange that hits a rate limit all get it, and the cached token survives (#751)', async () => {
+    const answered = gate();
+    let cachedExchanges = 0;
+    let limited = true;
+    globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
+      const body = String(options?.body ?? '');
+      if (body.includes(BOOT)) return Promise.resolve(session(CACHED, '0'));
+      if (body.includes(CACHED)) {
+        cachedExchanges += 1;
+        if (!limited) return Promise.resolve(session(CACHED, '3600'));
+        return answered.opened.then(rateLimit);
+      }
+      throw new Error('unexpected token in the exchange fake');
+    }) as unknown as typeof fetch;
+
+    let extractions = 0;
+    const auth = new FirebaseAuth(() => {
+      extractions += 1;
+      return Promise.resolve({ candidates: [candidate(BOOT, true)], checked: ['Chrome'] });
+    });
+    expect(await auth.getIdToken()).toBe(ID_TOKEN);
+
+    const calls = Array.from({ length: CALLERS }, () => auth.getIdToken());
+    answered.open();
+
+    const outcomes = await settle(calls);
+    expect(new Set(outcomes).size).toBe(1);
+    expect(outcomes[0]).toContain('err:Firebase token exchange failed (429)');
+    // One request against the endpoint that said "slow down", not one per caller.
+    expect(cachedExchanges).toBe(1);
+    expect(extractions).toBe(1);
+
+    // The shared failure was endpoint-level, so the cached token is still held
+    // and the next call refreshes it without touching the browser.
+    limited = false;
+    expect(await auth.getIdToken()).toBe(ID_TOKEN);
+    expect(cachedExchanges).toBe(2);
+    expect(extractions).toBe(1);
+  });
+
+  test.each([
+    ['a dead-token verdict', deadVerdict, `ok:${ID_TOKEN}`, ['parked', 'live']],
+    ['a rate limit', rateLimit, 'err:Firebase token exchange failed (429)', ['parked']],
+  ] as [string, () => Response, string, string[]][])(
+    'callers joining a cold-path candidate exchange that hits %s share its outcome',
+    async (_label, parkedFailure, expected, expectedSent) => {
+      const answered = gate();
+      const sent: string[] = [];
+      globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
+        const body = String(options?.body ?? '');
+        if (body.includes(PARKED)) {
+          sent.push('parked');
+          return answered.opened.then(parkedFailure);
+        }
+        sent.push('live');
+        return Promise.resolve(session(LIVE, '3600'));
+      }) as unknown as typeof fetch;
+
+      let extractions = 0;
+      const auth = new FirebaseAuth(() => {
+        extractions += 1;
+        return Promise.resolve({
+          candidates: [candidate(PARKED, true), candidate(LIVE, true)],
+          checked: ['Chrome'],
+        });
+      });
+
+      const calls = Array.from({ length: CALLERS }, () => auth.getIdToken());
+      answered.open();
+
+      const outcomes = await settle(calls);
+      expect(new Set(outcomes).size).toBe(1);
+      expect(outcomes[0]).toContain(expected);
+      expect(sent).toEqual(expectedSent);
+      expect(extractions).toBe(1);
+    }
+  );
+
+  test('a cold-path candidate can no longer overwrite a session a sibling installed', async () => {
+    // The overwrite named in #796. Caller 1's read finds a dead candidate and
+    // then candidate B, and B's exchange is held. While it is in flight, caller
+    // 2's read finds S and installs it. Before the fix B then succeeded and
+    // exchangeToken overwrote S, another account's session, with B's: the two
+    // callers were handed two different accounts' ID tokens, and the instance
+    // kept the one caller 2 did not get. No re-check can stop that, because the
+    // write happens inside exchangeToken. One shared attempt removes the
+    // sibling.
+    const B = syntheticToken('account-b');
+    const S = syntheticToken('account-s');
+    const bSent = gate();
+    const bAnswered = gate();
+    globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
+      const body = String(options?.body ?? '');
+      if (body.includes(DEAD)) return Promise.resolve(deadVerdict());
+      if (body.includes(B)) {
+        bSent.open();
+        return bAnswered.opened.then(() => session(B, '3600', 'id-token-b', 'user-b'));
+      }
+      if (body.includes(S)) return Promise.resolve(session(S, '3600', 'id-token-s', 'user-s'));
+      throw new Error('unexpected token in the exchange fake');
+    }) as unknown as typeof fetch;
+
+    let extractions = 0;
+    const auth = new FirebaseAuth(async () => {
+      extractions += 1;
+      if (extractions === 1) {
+        return {
+          candidates: [candidate(DEAD, true), candidate(B, true)],
+          checked: ['Chrome'],
+        };
+      }
+      // A second read (only possible without the dedupe) comes back once B's
+      // exchange is in flight, which is the window the overwrite needs.
+      await bSent.opened;
+      return { candidates: [candidate(S, true)], checked: ['Chrome'] };
+    });
+    const transitions: string[] = [];
+    auth.setUidTransitionListener((prev, next) => transitions.push(`${prev}->${next}`));
+
+    const first = auth.getIdToken();
+    const second = auth.getIdToken();
+    await bSent.opened;
+    // Let a sibling, if there is one, finish installing S before B answers.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    bAnswered.open();
+
+    const outcomes = await settle([first, second]);
+    // Both callers hold the same account's token, it is the one still
+    // installed, and the identity never changed underneath them.
+    expect(outcomes[0]).toBe(outcomes[1]);
+    expect(`ok:${await auth.getIdToken()}`).toBe(outcomes[0]!);
+    expect(transitions).toEqual([]);
+    expect(extractions).toBe(1);
+  });
+
+  test.each([
+    ['a rejected browser read', 'reject'],
+    ['a browser read that throws before it returns a promise', 'throw'],
+  ] as const)('after %s, the next call starts a fresh attempt', async (_label, failure) => {
+    let exchanges = 0;
+    globalThis.fetch = mock(() => {
+      exchanges += 1;
+      return Promise.resolve(session(LIVE, '3600'));
+    }) as unknown as typeof fetch;
+
+    let extractions = 0;
+    const read = gate();
+    const auth = new FirebaseAuth(() => {
+      extractions += 1;
+      if (extractions === 1) {
+        if (failure === 'throw') throw new Error('synthetic read failure');
+        return read.opened.then(() => Promise.reject(new Error('synthetic read failure')));
+      }
+      return Promise.resolve({ candidates: [candidate(LIVE, true)], checked: ['Chrome'] });
+    });
+
+    const calls = Array.from({ length: CALLERS }, () => auth.getIdToken());
+    read.open();
+    expect(await settle(calls)).toEqual(Array(CALLERS).fill('err:synthetic read failure'));
+    expect(extractions).toBe(1);
+
+    // The failed attempt was cleared when it settled: this is a new one, not
+    // the old rejection replayed.
+    expect(await auth.getIdToken()).toBe(ID_TOKEN);
+    expect(extractions).toBe(2);
+    expect(exchanges).toBe(1);
+  });
+});
