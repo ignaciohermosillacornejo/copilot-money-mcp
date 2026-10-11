@@ -340,6 +340,9 @@ describe('GraphQLClient', () => {
         expect((e as GraphQLError).code).toBe('UNKNOWN');
         expect((e as GraphQLError).httpStatus).toBe(200);
         expect((e as GraphQLError).message).toContain('Invalid JSON');
+        // The parser's own error is kept as `cause`, like the transport
+        // failures' (#805), rather than flattened into the message only.
+        expect((e as GraphQLError).cause).toBeInstanceOf(Error);
       }
     } finally {
       globalThis.fetch = originalFetch2;
@@ -674,6 +677,39 @@ describe('GraphQLClient — retry/backoff (#443)', () => {
       }
     });
     expect(fetchCalls).toHaveLength(1);
+  });
+
+  test('a timeout keeps the transport error as `cause`, through finalize as well (#805)', async () => {
+    // The auth side's timeout already threads `{ cause: err }`; the GraphQL
+    // side rebuilt the error from a message and dropped the original. The
+    // mutation path goes through finalize(), which constructs a SECOND
+    // GraphQLError, so the cause must survive that rebuild too.
+    globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
+      return new Promise<Response>((_resolve, reject) => {
+        options?.signal?.addEventListener('abort', () => reject(options.signal?.reason));
+      });
+    }) as typeof fetch;
+
+    await silencingConsoleError(async () => {
+      const err = (await fastClient({ timeoutMs: 20 })
+        .mutate('M', 'mutation M { ok }', {})
+        .catch((e: unknown) => e)) as GraphQLError;
+      expect(err).toBeInstanceOf(GraphQLError);
+      // Rebuilt by finalize (writeMayHaveApplied flipped), and still carrying it.
+      expect(err.writeMayHaveApplied).toBe(true);
+      expect((err.cause as Error | undefined)?.name).toBe('TimeoutError');
+    });
+  });
+
+  test('a non-timeout transport failure keeps its cause too', async () => {
+    const original = new Error('read ECONNRESET');
+    mockFetchSequence([{ throwErr: original }]);
+    await silencingConsoleError(async () => {
+      const err = (await fastClient()
+        .mutate('M', 'mutation M { ok }', {})
+        .catch((e: unknown) => e)) as GraphQLError;
+      expect(err.cause).toBe(original);
+    });
   });
 
   test('mutation does NOT retry a 5xx; flags writeMayHaveApplied', async () => {

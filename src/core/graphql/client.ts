@@ -131,6 +131,13 @@ export interface GraphQLErrorMeta {
   writeMayHaveApplied?: boolean;
   /** Total attempts made before this error surfaced (≥ 1). */
   attempts?: number;
+  /**
+   * The transport error this one replaces, kept as the standard `Error.cause`
+   * (a timeout's `TimeoutError`, a socket reset). The message is rewritten for
+   * the caller; the original is what someone debugging needs, and the auth
+   * side's timeout already keeps it (#805).
+   */
+  cause?: unknown;
 }
 
 export class GraphQLError extends Error {
@@ -146,7 +153,7 @@ export class GraphQLError extends Error {
     public readonly serverErrors?: unknown,
     meta: GraphQLErrorMeta = {}
   ) {
-    super(message);
+    super(message, meta.cause === undefined ? undefined : { cause: meta.cause });
     this.name = 'GraphQLError';
     this.requestReachedServer = meta.requestReachedServer;
     this.writeMayHaveApplied = meta.writeMayHaveApplied ?? false;
@@ -336,6 +343,8 @@ export class GraphQLClient {
       requestReachedServer: e.requestReachedServer,
       writeMayHaveApplied,
       attempts,
+      // A rebuild, not a new failure: what it replaced is still the cause.
+      cause: e.cause,
     });
   }
 
@@ -372,6 +381,7 @@ export class GraphQLClient {
         // A timeout may have fired after the request was sent → ambiguous
         // (undefined). Only pre-connection failures are provably unsent.
         requestReachedServer: !timedOut && isProvablyUnsent(e) ? false : undefined,
+        cause: e,
       });
     }
 
@@ -412,7 +422,7 @@ export class GraphQLClient {
         operationName,
         response.status,
         undefined,
-        reached
+        { ...reached, cause: e }
       );
     }
 

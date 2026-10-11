@@ -1386,16 +1386,24 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
       true,
       ts.ScriptKind.TS
     );
+    // Recorded by specimen LINE as well as kind: `await using` and `using` are
+    // both a VariableDeclarationList, so kind alone could not tell a predicate
+    // that tests the AwaitUsing flag from one that tests Using — swapping them
+    // stayed green (#805). The line is what names which declaration it saw.
     const recognised: string[] = [];
     const scan = (node: ts.Node): void => {
-      if (suspendsNode(node)) recognised.push(ts.SyntaxKind[node.kind]);
+      if (suspendsNode(node)) {
+        const { line } = specimen.getLineAndCharacterOfPosition(node.getStart(specimen));
+        recognised.push(`${ts.SyntaxKind[node.kind]}@${String(line + 1)}`);
+      }
       ts.forEachChild(node, scan);
     };
     scan(specimen);
     expect(
       recognised.sort(),
-      'the suspension predicate must see await, for await and await using, and nothing else'
-    ).toEqual(['AwaitExpression', 'ForOfStatement', 'VariableDeclarationList']);
+      'the suspension predicate must see await (line 2), for await (3) and await using (4), ' +
+        'and nothing else — not `using` (5), not a plain for-of (7)'
+    ).toEqual(['AwaitExpression@2', 'ForOfStatement@3', 'VariableDeclarationList@4']);
 
     expect(getIdTokenAwaits, 'getIdToken must not await: join the shared attempt instead').toBe(0);
     expect(refreshRefs, 'refreshSession must only run as the shared refreshInFlight').toEqual([
