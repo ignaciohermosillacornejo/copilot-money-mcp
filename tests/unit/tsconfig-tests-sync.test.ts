@@ -407,6 +407,7 @@ const MEMBERSHIP_IS_THE_COVERAGE = [
   'tests/no-hand-rolled-comment-strippers.test.ts',
   'tests/no-unretried-fs-syscalls.test.ts',
   'tests/scripts/no-duplicate-schema-walks.test.ts',
+  'tests/scripts/check-action-pins.test.ts',
   'tests/scripts/check-tracked-files.test.ts',
   'tests/scripts/mutation-guards.test.ts',
   'tests/setup/temp-db-teardown.ts',

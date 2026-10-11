@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 /**
  * Every SHA-pinned GitHub Action must carry a version comment, and the SAME
  * `action@sha` must carry the SAME comment everywhere.
@@ -23,18 +24,39 @@
  * against upstream stays a manual step when adding a NEW action.
  */
 import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, isAbsolute, join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-// Relative, because every path this gate prints is a `file:line` a reviewer
-// has to find in the repo, and an absolute one from a CI runner is noise.
-// `bun run` sets the cwd to the package root, which is the only way it runs.
-// Overridable so tests can drive the real script — exit code, annotations and
-// all — against a synthetic workflow tree, matching CHECK_WORKFLOWS_DIR /
-// CHECK_DEPS_PINNED_PACKAGE_JSON.
-const WORKFLOW_DIR = process.env.CHECK_ACTION_PINS_DIR ?? '.github/workflows';
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-/** `uses: owner/repo@<40-hex>` followed by a `# comment`, capturing all three. */
-const PINNED = /uses:\s*([A-Za-z0-9/_.-]+)@([0-9a-f]{40})(?:\s*#\s*(\S+))?/g;
+// Resolved from this file rather than the cwd, matching scripts/check-workflows.ts:
+// a cwd-relative default made the gate (and `bun test` from a subdirectory)
+// die on a raw ENOENT instead of reporting. Overridable so tests can drive the
+// real script — exit code, annotations and all — against a synthetic workflow
+// tree, matching CHECK_WORKFLOWS_DIR / CHECK_DEPS_PINNED_PACKAGE_JSON.
+const WORKFLOW_DIR = process.env.CHECK_ACTION_PINS_DIR ?? join(REPO_ROOT, '.github/workflows');
+
+/**
+ * Every path this gate prints is a `file:line` a reviewer has to find in the
+ * repo, and an absolute one from a CI runner is noise — so a file inside the
+ * checkout is shown repo-relative, and anything else (a test's temp tree) as
+ * given.
+ */
+function displayPath(path: string): string {
+  const rel = relative(REPO_ROOT, path);
+  return rel.startsWith('..') || isAbsolute(rel) ? path : rel;
+}
+
+/**
+ * `uses: owner/repo@<40-hex>` followed by a `# comment`, capturing all three.
+ *
+ * The value may be a bare, single-quoted or double-quoted YAML scalar; the
+ * backreference requires the closing quote to match the opening one, and the
+ * comment follows it. Without the quotes, a quoted pin was not misread but
+ * UNREAD: it dropped out of the scan, and the gate reported consistency over
+ * a set that silently excluded it.
+ */
+const PINNED = /uses:\s*(['"]?)([A-Za-z0-9/_.-]+)@([0-9a-f]{40})\1(?:\s*#\s*(\S+))?/g;
 
 export interface Pin {
   action: string;
@@ -49,10 +71,11 @@ export function collectPins(dir: string = WORKFLOW_DIR): Pin[] {
   for (const name of readdirSync(dir)) {
     if (!name.endsWith('.yml') && !name.endsWith('.yaml')) continue;
     const path = join(dir, name);
+    const file = displayPath(path);
     const lines = readFileSync(path, 'utf-8').split('\n');
     lines.forEach((text, i) => {
       for (const m of text.matchAll(PINNED)) {
-        pins.push({ action: m[1]!, sha: m[2]!, comment: m[3], file: path, line: i + 1 });
+        pins.push({ action: m[2]!, sha: m[3]!, comment: m[4], file, line: i + 1 });
       }
     });
   }

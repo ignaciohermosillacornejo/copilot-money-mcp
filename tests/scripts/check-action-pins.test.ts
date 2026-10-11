@@ -15,7 +15,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join as joinPath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { collectPins, findPinProblems, runCheck } from '../../scripts/check-action-pins.ts';
+import { collectPins, findPinProblems, runCheck } from '../../scripts/check-action-pins.js';
 
 const SCRIPT = fileURLToPath(new URL('../../scripts/check-action-pins.ts', import.meta.url));
 
@@ -102,8 +102,10 @@ describe('collectPins', () => {
   test("finds the real repo's pins, and enough of them to be non-vacuous", () => {
     // The floor is the point. A scan that found ZERO pins would satisfy the
     // consistency check trivially — every "all labelled consistently" pass
-    // would be meaningless. 10 is well under the ~21 present and well over the
-    // 0 that would signal a broken scan.
+    // would be meaningless. 10 is well under the real count (which
+    // `bun run check:action-pins` prints, and which only grows) and well over
+    // the 0 that would signal a broken scan. No count is written here on
+    // purpose: one was, and it went stale as pins were added.
     const pins = collectPins('.github/workflows');
     expect(pins.length).toBeGreaterThan(10);
     expect(pins.every((p) => /^[0-9a-f]{40}$/.test(p.sha))).toBe(true);
@@ -130,6 +132,40 @@ describe('collectPins', () => {
       'b.yml': '    - uses: actions/checkout@v7',
     });
     expect(collectPins(dir)).toEqual([]);
+  });
+
+  test('reads a single-quoted uses: scalar, comment and all', () => {
+    // YAML allows the value quoted, and a quoted pin used to drop out of the
+    // scan entirely — so the gate reported consistency over a set that did not
+    // include it. The comment sits AFTER the closing quote.
+    const dir = fixtureDir({ 'q.yml': `    - uses: 'actions/checkout@${SHA_A}' # v7` });
+    expect(collectPins(dir)).toMatchObject([
+      { action: 'actions/checkout', sha: SHA_A, comment: 'v7', line: 1 },
+    ]);
+  });
+
+  test('reads a double-quoted uses: scalar, comment and all', () => {
+    const dir = fixtureDir({ 'q.yml': `    - uses: "actions/checkout@${SHA_A}"  #   v6` });
+    expect(collectPins(dir)).toMatchObject([
+      { action: 'actions/checkout', sha: SHA_A, comment: 'v6', line: 1 },
+    ]);
+  });
+
+  test('a quoted pin labelled against a bare one is the real bug, and is caught', () => {
+    // End to end, because the failure the quoted case produced was not a
+    // wrong parse but an ABSENT one: the contradiction was never compared.
+    const result = runCheck(
+      fixtureDir({
+        'a.yml': usesLine(SHA_A, 'v7'),
+        'b.yml': `      - uses: 'actions/checkout@${SHA_A}' # v6`,
+        'c.yml': `      - uses: "actions/checkout@${SHA_B}"`,
+      })
+    );
+    expect(result.code).toBe(1);
+    expect(result.stderr.join('\n')).toContain('is labelled 2 different ways');
+    // The double-quoted, comment-less pin is seen too, and flagged as such.
+    expect(result.stderr.join('\n')).toContain('no version comment');
+    expect(result.stderr.at(-1)).toContain('across 3 pins');
   });
 
   test('picks up a pin with no comment, so findPinProblems can flag it', () => {
@@ -221,6 +257,27 @@ describe('the CLI', () => {
     expect(out).toBe('');
     expect(err).toContain('::error::');
     expect(err).toContain('is labelled 2 different ways');
+  });
+
+  test('the default directory does not depend on the cwd it is run from', async () => {
+    // The default used to be the cwd-relative '.github/workflows', so running
+    // the gate (or `bun test`) from anywhere but the repo root raised a raw
+    // ENOENT instead of the gate's own output. Run from a directory that has
+    // no workflows at all, with no override.
+    const env = { ...process.env };
+    delete env.CHECK_ACTION_PINS_DIR;
+    const proc = Bun.spawn(['bun', 'run', SCRIPT], {
+      cwd: fixtureDir({}),
+      env,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [out, err] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    expect({ code: await proc.exited, err }).toEqual({ code: 0, err: '' });
+    expect(out).toContain('all labelled consistently');
   });
 
   test('exits 1 when the tree holds no pins, rather than reporting a clean scan', async () => {

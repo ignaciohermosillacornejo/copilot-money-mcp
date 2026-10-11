@@ -130,6 +130,14 @@
     // exactly, where a literal missing a declared field reads `undefined` in
     // the message that was supposed to explain the failure.
     "tests/scripts/check-tracked-files.test.ts",
+    // The action-pin gate's own tests (#755, #789), here for the same reason as
+    // the tests/scripts/ entries around it: nothing else in `bun run check`
+    // reads a line of that directory. The `Pin` literals it builds through a
+    // helper and the `CheckResult` fields its assertions read are the #725
+    // shape — a field renamed in the script would otherwise leave these
+    // reading `undefined` in silence. Membership IS the coverage, so it is
+    // pinned in tests/unit/tsconfig-tests-sync.test.ts.
+    "tests/scripts/check-action-pins.test.ts",
     // The run-wide teardown's own contract test (#642). `bun test` never fires
     // `process.on('exit')`, so the reader's exit sweep does not cover a test
     // run and this is what proves the replacement sweep works.
