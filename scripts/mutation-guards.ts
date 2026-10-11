@@ -732,7 +732,7 @@ const JOURNAL_UNWRITTEN = new Set<string>();
  * mentions it goes through here, so the claim cannot drift between them, and
  * which wording applies is decided once per row by the caller (`unwritten`).
  */
-function keptJournalClause(root: string, unwritten: boolean): string {
+export function keptJournalClause(root: string, unwritten: boolean): string {
   const path = journalPath(root);
   return unwritten
     ? `the journal at ${path} could not be rewritten (see the messages above), so whatever ` +

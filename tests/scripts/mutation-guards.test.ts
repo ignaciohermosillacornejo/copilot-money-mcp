@@ -70,6 +70,7 @@ import {
   CLI_USAGE_EXIT,
   findMarkers,
   journalPath,
+  keptJournalClause,
   MARKER_PREFIX,
   MUTATION_GUARDS,
   parseBunTestSummary,
@@ -1164,7 +1165,11 @@ describe('the working tree is put back whatever happens', () => {
       const { results } = await run(root, [guard]);
       const row = results.find((r) => r.name === '(journal recovery)');
       expect(row?.detail).toContain('could not be rewritten');
-      expect(row?.detail).not.toMatch(/the pre-mutation bytes are in the kept journal/i);
+      // Against the clause itself, not a transcription of it, so rewording the
+      // written branch cannot make this negative vacuous.
+      expect(row?.detail?.toLowerCase()).not.toContain(
+        keptJournalClause(root, false).toLowerCase()
+      );
     }
   );
 
@@ -1193,7 +1198,11 @@ describe('the working tree is put back whatever happens', () => {
       const { results } = await run(root, [guardFor(root)]);
       const row = results.find((r) => r.name === '(restore)');
       expect(row?.detail).toContain('could not be rewritten');
-      expect(row?.detail).not.toMatch(/the pre-mutation bytes are in the kept journal/i);
+      // Against the clause itself, not a transcription of it, so rewording the
+      // written branch cannot make this negative vacuous.
+      expect(row?.detail?.toLowerCase()).not.toContain(
+        keptJournalClause(root, false).toLowerCase()
+      );
     } finally {
       // afterEach's non-recursive rm would throw on the directory.
       rmSync(journalPath(root), { recursive: true, force: true });
