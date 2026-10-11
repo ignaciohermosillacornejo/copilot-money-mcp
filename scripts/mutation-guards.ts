@@ -1301,16 +1301,19 @@ export async function runGuards(
       ok: false,
       detail: unwritten
         ? `could not restore ${recovery.refused.join(', ')}, AND ` +
-          `${keptJournalClause(root, true)}. Reconcile by hand before trusting this tree, then ` +
-          `delete each sidecar and whatever is at that journal path.`
+          // `unwritten`, not a literal, in both arms: a literal would only be
+          // right because of the arm it sits in, and swapping the arms would
+          // then invert what the row claims about the journal.
+          `${keptJournalClause(root, unwritten)}. Reconcile by hand before trusting this ` +
+          `tree, then delete each sidecar and whatever is at that journal path.`
         : `could not restore ${recovery.refused.join(', ')} — ` +
-          `${keptJournalClause(root, false)}, and in the ${SIDECAR_SUFFIX} file beside each ` +
-          `where one could be written (see the messages above). The journal was KEPT, ` +
-          `so this run and ` +
-          `every run after it says so rather than handing the next one a green registry over ` +
-          `the same tree. Two ways to end it, and BOTH are reconciling: put the original ` +
-          `bytes back, or keep the file as it stands and delete ${journalPath(root)}. Either ` +
-          `way delete the sidecar — while it is there the run below still refuses.`,
+          `${keptJournalClause(root, unwritten)}, and in the ${SIDECAR_SUFFIX} file beside ` +
+          `each where one could be written (see the messages above). The journal was KEPT, ` +
+          `so this run and every run after it says so rather than handing the next one a ` +
+          `green registry over the same tree. Two ways to end it, and BOTH are reconciling: ` +
+          `put the original bytes back, or keep the file as it stands and delete ` +
+          `${journalPath(root)}. Either way delete the sidecar — while it is there the run ` +
+          `below still refuses.`,
     });
   }
   if (recovery.sidecars.length > 0) {

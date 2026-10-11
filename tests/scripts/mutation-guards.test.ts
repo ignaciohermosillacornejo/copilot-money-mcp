@@ -1164,7 +1164,7 @@ describe('the working tree is put back whatever happens', () => {
       const { results } = await run(root, [guard]);
       const row = results.find((r) => r.name === '(journal recovery)');
       expect(row?.detail).toContain('could not be rewritten');
-      expect(row?.detail).not.toContain('the pre-mutation bytes are in the kept journal');
+      expect(row?.detail).not.toMatch(/the pre-mutation bytes are in the kept journal/i);
     }
   );
 
@@ -1193,7 +1193,7 @@ describe('the working tree is put back whatever happens', () => {
       const { results } = await run(root, [guardFor(root)]);
       const row = results.find((r) => r.name === '(restore)');
       expect(row?.detail).toContain('could not be rewritten');
-      expect(row?.detail).not.toContain('the pre-mutation bytes are in the kept journal');
+      expect(row?.detail).not.toMatch(/the pre-mutation bytes are in the kept journal/i);
     } finally {
       // afterEach's non-recursive rm would throw on the directory.
       rmSync(journalPath(root), { recursive: true, force: true });
