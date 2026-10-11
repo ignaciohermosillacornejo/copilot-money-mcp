@@ -1263,7 +1263,10 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
     // Limits, stated rather than coded around: it reads `this.<name>` property
     // accesses, so a bracket access, an aliased `this`, a destructuring
     // assignment, or `Object.assign(this, …)` would slip past. The behavioural
-    // cases above are what pin the dedupe itself.
+    // cases above are what pin the dedupe itself. Link 5 pins WHERE the shared
+    // promise is written, not how often: an extra clear inside getIdToken
+    // passes it. A synchronous one is caught behaviourally (the concurrent
+    // cases would see a second read); a deferred one would pass both.
     const path = fileURLToPath(new URL('../../../src/core/auth/firebase-auth.ts', import.meta.url));
     // The whole file, not a method-body fragment, so nothing is parsed by
     // error recovery; and with an explicit ScriptKind, like every other
@@ -1290,6 +1293,8 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
           return n.name.text;
         }
       }
+      // Unreachable while the walk starts at the class: a label for the
+      // failure message, not a guard against a real case.
       return '(outside a member)';
     };
     const isThisMember = (node: ts.Node, name?: string): node is ts.PropertyAccessExpression =>
@@ -1318,6 +1323,16 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
     const refreshRefs: { member: string; shared: boolean }[] = [];
     const inFlightWriters: string[] = [];
     let getIdTokenAwaits = 0;
+    /**
+     * Every suspension form, not only `await x`: a `for await` loop and an
+     * `await using` declaration suspend too, and neither is an AwaitExpression
+     * (#802 review). Checked against a specimen below.
+     */
+    const suspendsNode = (node: ts.Node): boolean =>
+      ts.isAwaitExpression(node) ||
+      (ts.isForOfStatement(node) && node.awaitModifier !== undefined) ||
+      (ts.isVariableDeclarationList(node) &&
+        (node.flags & ts.NodeFlags.BlockScoped) === ts.NodeFlags.AwaitUsing);
     /** The `this.<field>` a node writes: `=`, compound `op=`, or `++`/`--`. */
     const writtenField = (node: ts.Node): string | undefined => {
       let target: ts.Node | undefined;
@@ -1344,18 +1359,43 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
       if (isThisMember(node, 'refreshSession')) {
         refreshRefs.push({ member: memberOf(node), shared: isSharedBy(node) });
       }
-      // Every suspension form, not only `await x`: a `for await` loop and an
-      // `await using` declaration suspend too, and neither is an
-      // AwaitExpression (#802 review).
-      const suspends =
-        ts.isAwaitExpression(node) ||
-        (ts.isForOfStatement(node) && node.awaitModifier !== undefined) ||
-        (ts.isVariableDeclarationList(node) &&
-          (node.flags & ts.NodeFlags.BlockScoped) === ts.NodeFlags.AwaitUsing);
-      if (suspends && memberOf(node) === 'getIdToken') getIdTokenAwaits += 1;
+      if (suspendsNode(node) && memberOf(node) === 'getIdToken') getIdTokenAwaits += 1;
       ts.forEachChild(node, visit);
     };
     visit(cls);
+
+    // The await count is asserted to be ZERO, so it can have no anti-vacuity
+    // partner of its own: a predicate that stopped recognising a form (say
+    // `ts.NodeFlags.AwaitUsing` reading undefined after a typescript bump)
+    // would look exactly like a method with no suspension points. So the
+    // predicate is checked against a specimen: exactly the three suspending
+    // forms, and none of their non-suspending look-alikes (#802 review).
+    const specimen = ts.createSourceFile(
+      'suspension-specimen.ts',
+      [
+        'async function f(xs: AsyncIterable<number>, r: () => AsyncDisposable & Disposable) {',
+        '  await 1;',
+        '  for await (const x of xs) void x;',
+        '  await using a = r();',
+        '  using b = r();',
+        '  const c = 1;',
+        '  for (const y of [c]) void y;',
+        '}',
+      ].join('\n'),
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS
+    );
+    const recognised: string[] = [];
+    const scan = (node: ts.Node): void => {
+      if (suspendsNode(node)) recognised.push(ts.SyntaxKind[node.kind]);
+      ts.forEachChild(node, scan);
+    };
+    scan(specimen);
+    expect(
+      recognised.sort(),
+      'the suspension predicate must see await, for await and await using, and nothing else'
+    ).toEqual(['AwaitExpression', 'ForOfStatement', 'VariableDeclarationList']);
 
     expect(getIdTokenAwaits, 'getIdToken must not await: join the shared attempt instead').toBe(0);
     expect(refreshRefs, 'refreshSession must only run as the shared refreshInFlight').toEqual([

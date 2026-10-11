@@ -15,6 +15,7 @@
  *    executed — so it surfaces immediately with `writeMayHaveApplied`.
  */
 
+import { isAbortOrTimeout } from '../abort.js';
 import type { FirebaseAuth } from '../auth/firebase-auth.js';
 import { validateMutationResponse } from './response-validation.js';
 import { validateQueryResponse } from './read-response-validation.js';
@@ -216,10 +217,6 @@ function isProvablyUnsent(err: unknown): boolean {
     current = cause;
   }
   return false;
-}
-
-function isAbortOrTimeout(err: unknown): boolean {
-  return err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
 }
 
 function sleep(ms: number): Promise<void> {

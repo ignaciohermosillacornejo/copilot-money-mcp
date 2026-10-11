@@ -6,6 +6,7 @@
  * when expired (3600 second lifetime).
  */
 
+import { isAbortOrTimeout } from '../abort.js';
 import {
   dedupeByToken,
   noCopilotSessionError,
@@ -58,8 +59,10 @@ export interface FirebaseAuthOptions {
  * timeout as a verdict on the token.
  */
 function describeTimeout(err: unknown, timeoutMs: number): unknown {
-  return err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
-    ? new Error(`Firebase token exchange timed out after ${timeoutMs}ms`)
+  // `cause` keeps the transport's own error chain for diagnosis; the message
+  // is what reaches the caller.
+  return isAbortOrTimeout(err)
+    ? new Error(`Firebase token exchange timed out after ${timeoutMs}ms`, { cause: err })
     : err;
 }
 
