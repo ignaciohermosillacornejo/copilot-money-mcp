@@ -22,6 +22,27 @@ const TOKEN_ENDPOINT = `https://securetoken.googleapis.com/v1/token?key=${FIREBA
 const EXPIRY_MARGIN_MS = 60_000;
 
 /**
+ * Upper bound on one securetoken exchange, the same 30s the GraphQL client
+ * gives each request.
+ *
+ * Load-bearing since #796, not just tidy. Concurrent callers share one
+ * in-flight refresh, so an exchange that never settles (a half-open socket
+ * after sleep/resume, a captive portal) would leave that promise pending for
+ * good, and every later `getIdToken()` on the instance, which in the server is
+ * every live read and write, would join it and hang with no error. Before the
+ * dedupe a stalled request stalled only its own caller. The abort rejects with
+ * a transport error, not a `TokenExchangeError`, so it propagates as a genuine
+ * failure, leaves the cached refresh token alone (#751), and clears the shared
+ * attempt for the next call.
+ */
+export const TOKEN_EXCHANGE_TIMEOUT_MS = 30_000;
+
+export interface FirebaseAuthOptions {
+  /** Per-exchange timeout; defaults to TOKEN_EXCHANGE_TIMEOUT_MS. Tests shorten it. */
+  exchangeTimeoutMs?: number;
+}
+
+/**
  * Upper bound on how many discovered refresh-token candidates we'll try to
  * exchange. A normal browser has a handful of Firebase-backed sites; this caps
  * the pathological case (many `AMf-` tokens in the browser-wide Local Storage
@@ -135,8 +156,11 @@ export class FirebaseAuth {
    */
   private refreshInFlight: Promise<string> | null = null;
 
-  constructor(extractToken: TokenExtractor) {
+  private readonly exchangeTimeoutMs: number;
+
+  constructor(extractToken: TokenExtractor, opts: FirebaseAuthOptions = {}) {
     this.extractToken = extractToken;
+    this.exchangeTimeoutMs = opts.exchangeTimeoutMs ?? TOKEN_EXCHANGE_TIMEOUT_MS;
   }
 
   /**
@@ -290,6 +314,9 @@ export class FirebaseAuth {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: `grant_type=refresh_token&refresh_token=${encodeURIComponent(refreshToken)}`,
+      // See TOKEN_EXCHANGE_TIMEOUT_MS: without it a hung exchange would hang
+      // every later caller that joins the shared attempt.
+      signal: AbortSignal.timeout(this.exchangeTimeoutMs),
     });
 
     if (!response.ok) {
@@ -333,6 +360,12 @@ export class FirebaseAuth {
       user_id: string;
     };
 
+    // The session install: these assignments must stay one synchronous block,
+    // with no `await` between them (#799). `getIdToken` reads `idToken` and
+    // `expiresAt` through `freshIdToken()` at entry, and a caller arriving
+    // while the shared attempt is in flight can run at any suspension point,
+    // so a split install would let it return a new ID token paired with the
+    // old expiry, or the reverse.
     const prevUid = this.userId;
     this.idToken = data.id_token;
     this.refreshToken = data.refresh_token;

@@ -24,6 +24,7 @@ import { join } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 import ts from 'typescript';
+import { scriptKindFor } from '../../helpers/ts-files.js';
 import {
   extractRefreshTokenCandidates,
   getChromiumProfileStoragePaths,
@@ -1123,8 +1124,8 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
     const outcomes = await settle([first, second]);
     // Both callers hold the same account's token, it is the one still
     // installed, and the identity never changed underneath them.
-    expect(outcomes[0]).toBe(outcomes[1]);
-    expect(`ok:${await auth.getIdToken()}`).toBe(outcomes[0]!);
+    expect(outcomes).toEqual(['ok:id-token-b', 'ok:id-token-b']);
+    expect(await auth.getIdToken()).toBe('id-token-b');
     expect(transitions).toEqual([]);
     expect(extractions).toBe(1);
   });
@@ -1162,6 +1163,49 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
     expect(exchanges).toBe(1);
   });
 
+  test('an exchange that never answers times out instead of hanging every later caller', async () => {
+    // The shared attempt makes a hung exchange everyone's problem: without a
+    // timeout its promise never settles, the clear never runs, and every
+    // later call on the instance joins it (#802 review). The fake fetch here
+    // answers only by honouring the abort signal, the way a half-open socket
+    // would. The cached token must survive the timeout (#751), and the next
+    // call must start a fresh attempt that can succeed.
+    let hung = true;
+    let cachedExchanges = 0;
+    globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
+      const body = String(options?.body ?? '');
+      if (body.includes(BOOT)) return Promise.resolve(session(CACHED, '0'));
+      cachedExchanges += 1;
+      if (!hung) return Promise.resolve(session(CACHED, '3600'));
+      return new Promise<Response>((_resolve, reject) => {
+        const signal = options?.signal;
+        if (!signal) return; // No signal: hang for good, which fails on the test timeout.
+        signal.addEventListener('abort', () => reject(signal.reason));
+      });
+    }) as unknown as typeof fetch;
+
+    let extractions = 0;
+    const auth = new FirebaseAuth(
+      () => {
+        extractions += 1;
+        return Promise.resolve({ candidates: [candidate(BOOT, true)], checked: ['Chrome'] });
+      },
+      { exchangeTimeoutMs: 20 }
+    );
+    expect(await auth.getIdToken()).toBe(ID_TOKEN);
+
+    const outcomes = await settle(Array.from({ length: CALLERS }, () => auth.getIdToken()));
+    expect(new Set(outcomes).size).toBe(1);
+    expect(outcomes[0]).toMatch(/^err:/);
+    expect(cachedExchanges).toBe(1);
+
+    hung = false;
+    expect(await auth.getIdToken()).toBe(ID_TOKEN);
+    // A fresh fast-path exchange of the same cached token, no browser read.
+    expect(cachedExchanges).toBe(2);
+    expect(extractions).toBe(1);
+  });
+
   test('every write to the session happens inside the one shared refresh attempt', () => {
     // The class-level half, and the replacement for #770's count test. That
     // test required one freshIdToken() re-check per await in getIdToken,
@@ -1171,7 +1215,8 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
     // is suspended. That holds only while this chain holds, so the chain is
     // what is asserted:
     //
-    //   1. getIdToken never awaits, so it has no resume point of its own.
+    //   1. getIdToken never suspends (`await`, `for await`, `await using`),
+    //      so it has no resume point of its own.
     //   2. refreshSession is referenced once, from getIdToken, inside the
     //      `this.refreshInFlight ??=` that shares it.
     //   3. exchangeToken is referenced only from refreshSession.
@@ -1184,11 +1229,15 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
     // bracket access, an aliased `this`, or a destructuring assignment would
     // slip past. The behavioural cases above are what pin the dedupe itself.
     const path = fileURLToPath(new URL('../../../src/core/auth/firebase-auth.ts', import.meta.url));
+    // The whole file, not a method-body fragment, so nothing is parsed by
+    // error recovery; and with an explicit ScriptKind, like every other
+    // direct createSourceFile call in the suite (#799).
     const file = ts.createSourceFile(
       path,
       readFileSync(path, 'utf8'),
       ts.ScriptTarget.Latest,
-      true
+      true,
+      scriptKindFor(path)
     );
     let cls: ts.ClassDeclaration | undefined;
     ts.forEachChild(file, (node) => {
@@ -1246,7 +1295,15 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
       if (isThisMember(node, 'refreshSession')) {
         refreshRefs.push({ member: memberOf(node), shared: isSharedBy(node) });
       }
-      if (ts.isAwaitExpression(node) && memberOf(node) === 'getIdToken') getIdTokenAwaits += 1;
+      // Every suspension form, not only `await x`: a `for await` loop and an
+      // `await using` declaration suspend too, and neither is an
+      // AwaitExpression (#802 review).
+      const suspends =
+        ts.isAwaitExpression(node) ||
+        (ts.isForOfStatement(node) && node.awaitModifier !== undefined) ||
+        (ts.isVariableDeclarationList(node) &&
+          (node.flags & ts.NodeFlags.BlockScoped) === ts.NodeFlags.AwaitUsing);
+      if (suspends && memberOf(node) === 'getIdToken') getIdTokenAwaits += 1;
       ts.forEachChild(node, visit);
     };
     visit(cls);
