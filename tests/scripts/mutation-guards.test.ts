@@ -485,19 +485,25 @@ describe('a guard is only green when its detector really detects it', () => {
     // throw EISDIR. The bookkeeping has to happen anyway: assigning the flag
     // after the call left it false, the loop's stop-editing guard read false,
     // and the run carried on editing a tree whose last file was never put back.
+    //
+    // The directory is planted from INSIDE the mutated run, beside the third
+    // party's write, rather than before it: a directory at a sidecar's name is
+    // itself the evidence of an unreconciled give-up, so the pre-run scan
+    // rightly refuses to start over one (see the sidecar-shape test below).
     const root = syntheticRepo({
       markerName: 'rows after the failure are never written',
       guardLine: 'break;',
       assertion: [
         "const fs = require('node:fs');",
-        "if (!fs.readFileSync('src/pay.ts', 'utf8').includes('break;'))",
+        "if (!fs.readFileSync('src/pay.ts', 'utf8').includes('break;')) {",
         "  fs.writeFileSync('src/pay.ts', 'SOMEONE ELSE WAS HERE');",
+        `  fs.mkdirSync('src/pay.ts${SIDECAR_SUFFIX}', { recursive: true });`,
+        '}',
         "expect(pay(['a', 'b', 'c'], 'b')).toEqual(['a']);",
       ].join('\n  '),
     });
     const first = guardFor(root);
     const second = addSecondGuard(root, 'a second marked site');
-    mkdirSync(join(root, `src/pay.ts${SIDECAR_SUFFIX}`), { recursive: true });
 
     const { ok, results } = await run(root, [first, second]);
 
@@ -509,7 +515,17 @@ describe('a guard is only green when its detector really detects it', () => {
     // report says so rather than reading as a one-row registry.
     expect(results.map((r) => r.name)).not.toContain(second.name);
     expect(results.find((r) => r.name === '(skipped)')?.detail).toContain(second.name);
-    expect(results.map((r) => r.name)).toContain('(restore)');
+    // And the `(restore)` row tells the truth about THIS path: refuse() threw
+    // before its console.error and its sidecar, so "see the message above and
+    // the sidecar" would send the operator after two things that do not exist.
+    // The bytes are in the kept journal, so that is what the row must name.
+    const restore = results.find((r) => r.name === '(restore)');
+    expect(restore?.detail).toContain(journalPath(root));
+    expect(restore?.detail).not.toContain('see the message above');
+    const kept: unknown = JSON.parse(readFileSync(journalPath(root), 'utf8'));
+    expect((kept as { entries: { abs: string }[] }).entries.map((e) => e.abs)).toEqual([
+      join(root, 'src/pay.ts'),
+    ]);
   }, 60_000);
 
   test('a killed BASELINE is diagnosed as the detector, not as a red-either-way test', async () => {
@@ -675,7 +691,184 @@ describe('the working tree is put back whatever happens', () => {
     const kept: unknown = JSON.parse(readFileSync(journalPath(root), 'utf8'));
     const entries = (kept as { entries: { abs: string }[] }).entries;
     expect(entries.map((e) => e.abs)).toEqual([pay]);
+    // Kept for a human, not held by a run: the exit sweep's own keep site must
+    // not stamp the dying process's pid either, or a reused pid reads as a
+    // live run (see 'a kept journal names no owner').
+    expect((kept as { pid: number }).pid).toBe(0);
   }, 60_000);
+
+  test('a write failure at the end of the exit sweep does not abandon the other roots', async () => {
+    // Giving up is a write, and so is narrowing or clearing a journal on the
+    // way out. Two roots live at once; root A's journal path is turned into a
+    // DIRECTORY mid-run, so clearing it throws. That throw used to escape the
+    // signal handler before root B's journal was cleared, leaving B a journal
+    // over a file that was already back.
+    const rootA = syntheticRepo({ markerName: 'x', guardLine: 'break;', assertion: '' });
+    const rootB = syntheticRepo({ markerName: 'x', guardLine: 'break;', assertion: '' });
+    const payA = join(rootA, 'src/pay.ts');
+    const payB = join(rootB, 'src/pay.ts');
+    const originalA = readFileSync(payA, 'utf8');
+    const originalB = readFileSync(payB, 'utf8');
+
+    const child = join(rootA, 'signal.ts');
+    writeFileSync(
+      child,
+      [
+        `import { withMutation, journalPath } from ${JSON.stringify(join(REPO_ROOT, 'scripts/mutation-guards.ts'))};`,
+        "import { mkdirSync, rmSync } from 'node:fs';",
+        `await withMutation(${JSON.stringify(rootA)}, 'src/pay.ts', 'A MUTATED', async () => {`,
+        `  await withMutation(${JSON.stringify(rootB)}, 'src/pay.ts', 'B MUTATED', async () => {`,
+        `    rmSync(journalPath(${JSON.stringify(rootA)}));`,
+        `    mkdirSync(journalPath(${JSON.stringify(rootA)}));`,
+        "    process.kill(process.pid, 'SIGTERM');",
+        '    await new Promise((r) => setTimeout(r, 10_000));',
+        '  });',
+        '});',
+        '',
+      ].join('\n'),
+      'utf8'
+    );
+    try {
+      const res = spawnSync('bun', ['run', child], { cwd: rootA, encoding: 'utf8' });
+      // 143 means the sweep finished and exited on purpose; an escaped throw
+      // leaves the process running into withMutation's own `finally` instead.
+      expect(res.status).toBe(143);
+      expect(readFileSync(payA, 'utf8')).toBe(originalA);
+      expect(readFileSync(payB, 'utf8')).toBe(originalB);
+      expect(existsSync(journalPath(rootB))).toBe(false);
+      // Not silent, either: the journal it could not update is named.
+      expect(res.stderr).toContain(journalPath(rootA));
+    } finally {
+      // afterEach's non-recursive rm would throw on the directory.
+      rmSync(journalPath(rootA), { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  test('an inner refusal survives an outer success: the journal is not cleared under it', async () => {
+    // Nested mutations in one root. The inner one is refused (a third party
+    // saved over it) and withMutation deliberately keeps the journal; the outer
+    // one then restores cleanly and used to clear the journal because no LIVE
+    // entry was left — deleting the only record of the inner refusal.
+    const root = syntheticRepo({ markerName: 'x', guardLine: 'break;', assertion: '' });
+    const pay = join(root, 'src/pay.ts');
+    const ship = join(root, 'src/ship.ts');
+    writeFileSync(ship, 'export const ship = () => [];\n', 'utf8');
+    const shipOriginal = readFileSync(ship, 'utf8');
+
+    await withMutation(root, 'src/ship.ts', 'SHIP MUTATED', async () => {
+      await withMutation(root, 'src/pay.ts', 'PAY MUTATED', () => {
+        writeFileSync(pay, 'SOMEONE ELSE WAS HERE', 'utf8');
+      });
+    });
+
+    expect(readFileSync(ship, 'utf8')).toBe(shipOriginal);
+    expect(existsSync(journalPath(root))).toBe(true);
+    const kept: unknown = JSON.parse(readFileSync(journalPath(root), 'utf8'));
+    expect((kept as { entries: { abs: string }[] }).entries.map((e) => e.abs)).toEqual([pay]);
+    // And the next recovery still reports it.
+    expect(recoverJournal(root).refused).toEqual([pay]);
+  });
+
+  test('a kept journal names no owner, so a reused pid cannot hold it', async () => {
+    // A kept journal is the one journal meant to outlive its process — for
+    // days, until a human reconciles. Stamped with the writer's pid, it reads
+    // as "held by a live run" the moment the OS hands that pid to anything
+    // else, and the next run throws "another run holds the journal" instead of
+    // reporting the refusal. Pid reuse cannot be forced, so it is stood in for
+    // faithfully: the process that wrote the kept journal is still alive.
+    const root = syntheticRepo({ markerName: 'x', guardLine: 'break;', assertion: '' });
+    const file = join(root, 'src/pay.ts');
+    mkdirSync(join(journalPath(root), '..'), { recursive: true });
+    writeFileSync(
+      journalPath(root),
+      JSON.stringify({
+        pid: 999_999_999,
+        startedAt: new Date().toISOString(),
+        entries: [{ abs: file, original: readFileSync(file, 'utf8'), mutated: 'MUTATED' }],
+      }),
+      'utf8'
+    );
+    writeFileSync(file, 'SOMEONE ELSE WAS HERE', 'utf8');
+
+    const script = join(root, 'hold.ts');
+    writeFileSync(
+      script,
+      [
+        `import { recoverJournal } from ${JSON.stringify(join(REPO_ROOT, 'scripts/mutation-guards.ts'))};`,
+        `console.log(JSON.stringify(recoverJournal(${JSON.stringify(root)}).refused));`,
+        'await new Promise((r) => setTimeout(r, 30_000));',
+        '',
+      ].join('\n'),
+      'utf8'
+    );
+    const holder = Bun.spawn(['bun', 'run', script], { cwd: root, stdout: 'pipe', stderr: 'pipe' });
+    try {
+      // Wait for the child's verdict, which it prints only after the kept
+      // journal is on disk.
+      const reader = holder.stdout.getReader();
+      let seen = '';
+      while (!seen.includes('\n')) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        seen += new TextDecoder().decode(value);
+      }
+      expect(JSON.parse(seen.trim())).toEqual([file]);
+
+      // The child is alive and is not us. The refusal must still be reported.
+      expect(recoverJournal(root).refused).toEqual([file]);
+    } finally {
+      holder.kill();
+      await holder.exited;
+    }
+  }, 60_000);
+
+  test('a give-up that throws during recovery does not abandon the entries after it', () => {
+    // recoverJournal's loop is the third caller of restoreEntry, and the only
+    // one that did no bookkeeping around a throw: a sidecar write hitting a
+    // directory (standing in for a read-only directory or a full disk) took
+    // every remaining entry with it and escaped runGuards before a row existed.
+    const root = syntheticRepo({ markerName: 'x', guardLine: 'break;', assertion: '' });
+    const pay = join(root, 'src/pay.ts');
+    const ship = join(root, 'src/ship.ts');
+    writeFileSync(pay, 'SOMEONE ELSE WAS HERE', 'utf8');
+    writeFileSync(ship, 'SHIP MUTATED', 'utf8');
+    mkdirSync(`${pay}${SIDECAR_SUFFIX}`);
+    mkdirSync(join(journalPath(root), '..'), { recursive: true });
+    writeFileSync(
+      journalPath(root),
+      JSON.stringify({
+        pid: 999_999_999,
+        startedAt: new Date().toISOString(),
+        entries: [
+          { abs: pay, original: 'PAY ORIGINAL', mutated: 'PAY MUTATED' },
+          { abs: ship, original: 'SHIP ORIGINAL', mutated: 'SHIP MUTATED' },
+        ],
+      }),
+      'utf8'
+    );
+
+    const report = recoverJournal(root);
+
+    expect(report.refused).toEqual([pay]);
+    expect(report.recovered).toEqual([ship]);
+    expect(readFileSync(ship, 'utf8')).toBe('SHIP ORIGINAL');
+    const kept: unknown = JSON.parse(readFileSync(journalPath(root), 'utf8'));
+    expect((kept as { entries: { abs: string }[] }).entries.map((e) => e.abs)).toEqual([pay]);
+  });
+
+  test('anything at a sidecar name is reported, not only a regular file', () => {
+    // A directory at the sidecar name is exactly what a THROWING give-up leaves
+    // (the tests above build one), and a symlink there is no less suspicious.
+    // Matching on isFile() made both invisible to the one scan that exists to
+    // say "an earlier run gave up here".
+    const root = syntheticRepo({ markerName: 'x', guardLine: 'break;', assertion: '' });
+    const asDir = join(root, `src/pay.ts${SIDECAR_SUFFIX}`);
+    const asLink = join(root, `src/ship.ts${SIDECAR_SUFFIX}`);
+    mkdirSync(asDir);
+    symlinkSync('/dev/null', asLink);
+
+    expect(recoverJournal(root).sidecars).toEqual([asDir, asLink].sort());
+  });
 
   test('one throwing entry in the exit sweep does not abandon the others', async () => {
     // The sweep is the last chance every entry gets, so a give-up that throws

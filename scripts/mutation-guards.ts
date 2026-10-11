@@ -93,11 +93,17 @@
  *      an earlier run gave up on a file and nobody has reconciled it since,
  *      which is not a tree to report a green registry over.
  *
- * Giving up is itself a write, so it can fail: every caller of `restoreEntry`
- * does its bookkeeping in a `finally` and the exit sweep catches per entry, or
- * a sidecar write that throws would leave the run's stop-editing flag unset and
- * abandon the entries after it — a give-up path that does not leave the process
- * in a state the next step can trust, which is the class this file is about.
+ * Giving up is itself a write, so it can fail. Each of the three callers of
+ * `restoreEntry` survives a throw from it: `withMutation` does its bookkeeping
+ * in a `finally`, and the exit sweep and `recoverJournal` catch per entry —
+ * otherwise a sidecar write that throws would leave the run's stop-editing flag
+ * unset, or abandon the entries after it. The journal writes on those paths go
+ * through `persistJournal`, which reports a failure instead of raising it, for
+ * the same reason one level down. A kept journal records `NO_OWNER` rather than
+ * the writer's pid, because it is meant to outlive that process and a reused
+ * pid would otherwise read as a live run holding it. A give-up path that does
+ * not leave the process in a state the next step can trust is the class this
+ * file is about.
  *
  * Two things follow from the runner being the thing that holds the mutation.
  * The child test run is bounded (`TEST_TIMEOUT_MS`), because several registered
@@ -591,11 +597,17 @@ export function findSidecars(root: string): string[] {
     }
     for (const entry of entries) {
       const abs = join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (!SKIPPED_DIRS.has(entry.name)) walk(abs);
+      // The name decides, not the entry type, and before the descent: a
+      // directory at a sidecar's name is exactly what a give-up whose sidecar
+      // write THREW leaves behind (the write hit something in the way), and a
+      // symlink there is no less a sign that something gave up or interfered.
+      // Matching on `isFile()` made both invisible to the one scan whose job
+      // is to say so.
+      if (entry.name.endsWith(SIDECAR_SUFFIX)) {
+        found.push(abs);
         continue;
       }
-      if (entry.isFile() && entry.name.endsWith(SIDECAR_SUFFIX)) found.push(abs);
+      if (entry.isDirectory() && !SKIPPED_DIRS.has(entry.name)) walk(abs);
     }
   };
   walk(root);
@@ -603,51 +615,114 @@ export function findSidecars(root: string): string[] {
 }
 
 const ACTIVE = new Map<string, JournalEntry>();
+/**
+ * Entries this process gave up on, per root, that no human has reconciled yet.
+ *
+ * One journal per root holds two kinds of entry: the live mutations in
+ * `ACTIVE`, and refusals kept for a human. Deciding "may this journal go?"
+ * from `ACTIVE` alone deleted the record of a refusal the moment a sibling
+ * mutation in the same root restored cleanly — a nested `withMutation` whose
+ * inner call refuses and whose outer call succeeds. So the refusals are state
+ * of their own, and `persistJournal` writes the union. `recoverJournal` resets
+ * a root's set from what is on disk, because between runs it is the journal,
+ * not this process's memory, that a human edits.
+ */
+const REFUSED = new Map<string, JournalEntry[]>();
 let handlersInstalled = false;
 /** Set when a restore could not be completed safely; forces a non-zero exit. */
 let restoreFailed = false;
+/**
+ * The files whose restore THREW rather than returned `false`, this run.
+ *
+ * Kept apart because the two give-ups leave different evidence. A `false`
+ * comes out of `refuse()` after it printed its message and wrote the sidecar;
+ * a throw means at least one of those never happened, so a report pointing at
+ * "the message above and the sidecar" would send the operator after things
+ * that do not exist.
+ */
+let restoreThrew: string[] = [];
+
+/**
+ * The `pid` a journal records when no run holds it.
+ *
+ * A kept journal is the one journal meant to outlive its process — for days,
+ * until a human reconciles. Stamped with the writer's pid, it reads as "held
+ * by a live run" as soon as the OS hands that pid to anything else, and the
+ * next run throws "another run holds the journal" instead of reporting the
+ * refusal. `isAlive` treats this value as dead by definition.
+ */
+const NO_OWNER = 0;
+
+function addRefused(entry: JournalEntry): void {
+  const others = (REFUSED.get(entry.root) ?? []).filter((e) => e.abs !== entry.abs);
+  REFUSED.set(entry.root, [...others, entry]);
+}
 
 /**
  * The one writer: `entries` becomes this root's journal, replacing whatever is
- * there.
- *
- * Every caller has the same question to answer — which entries are still
- * unreconciled — and the two that keep a journal after a refusal answer it
- * differently if they each write their own object. `recoverJournal` narrows to
- * the refused entries; the exit handler has to narrow the same way, or a root
- * holding one recovered and one refused entry keeps a journal that re-arms the
- * recovered one.
+ * there. Throws on a write failure — whether that is fatal is the caller's
+ * call (`withMutation` must not mutate a file it could not journal), or it is
+ * something to report and survive (`persistJournal`).
  */
-function writeJournalEntries(root: string, entries: readonly JournalEntry[]): void {
+function writeJournalEntries(root: string, entries: readonly JournalEntry[], owner: number): void {
   const path = journalPath(root);
   mkdirSync(dirname(path), { recursive: true });
   const journal: Journal = {
-    // This process. The field is only read to ask whether a LIVE run holds the
-    // journal, and whoever reads it back is a later run.
-    pid: process.pid,
+    // `process.pid` while a live mutation in this root is in flight, so a
+    // concurrent run backs off; `NO_OWNER` once only refusals are left, so a
+    // reused pid cannot make a journal kept for a human look held.
+    pid: owner,
     startedAt: new Date().toISOString(),
     entries: [...entries],
   };
   writeFileSync(path, JSON.stringify(journal), 'utf8');
 }
 
-function writeJournal(root: string): void {
+/** This root's kept refusals plus its live entries, and who (if anyone) holds them. */
+function journalStateFor(root: string): { entries: JournalEntry[]; owner: number } {
   // This root's entries only. A process driving more than one root (the
   // meta-test does) would otherwise write every root's journal with every other
   // root's files in it — which `validEntries` then rejects on read, turning a
   // bookkeeping slip into a stream of scary-looking warnings.
-  writeJournalEntries(
-    root,
-    [...ACTIVE.values()].filter((entry) => entry.root === root)
-  );
+  const live = [...ACTIVE.values()].filter((entry) => entry.root === root);
+  return {
+    entries: [...(REFUSED.get(root) ?? []), ...live],
+    owner: live.length > 0 ? process.pid : NO_OWNER,
+  };
 }
 
-function clearJournal(root: string): void {
-  if ([...ACTIVE.values()].some((entry) => entry.root === root)) {
-    writeJournal(root);
-    return;
+/** Journal BEFORE mutating, and throw if that fails: an unrecorded mutation is the worst state. */
+function writeJournal(root: string): void {
+  const { entries, owner } = journalStateFor(root);
+  writeJournalEntries(root, entries, owner);
+}
+
+/**
+ * Bring this root's journal in line with what is still unreconciled — rewrite
+ * it if anything is, delete it if nothing is — and never throw.
+ *
+ * Every caller is on a give-up or clean-up path, and "giving up is a write too"
+ * applies to this write as much as to the sidecar: unguarded, a throw here
+ * escaped the exit sweep before the remaining roots were handled. A failure is
+ * printed with the path rather than raised — not swallowed, because a journal
+ * that could not be narrowed or cleared is one the next run will read, and the
+ * operator should know why it says what it says.
+ */
+function persistJournal(root: string): boolean {
+  const { entries, owner } = journalStateFor(root);
+  try {
+    if (entries.length === 0) rmSync(journalPath(root), { force: true });
+    else writeJournalEntries(root, entries, owner);
+    return true;
+  } catch (e) {
+    console.error(
+      `mutation-guards: could not update ${journalPath(root)} ` +
+        `(${e instanceof Error ? e.message : String(e)}), so the next run may read a ` +
+        `journal that disagrees with this one. Unreconciled here: ` +
+        `${entries.length === 0 ? 'nothing' : entries.map((entry) => entry.abs).join(', ')}.`
+    );
+    return false;
   }
-  rmSync(journalPath(root), { force: true });
 }
 
 /**
@@ -714,7 +789,6 @@ function installHandlers(): void {
   handlersInstalled = true;
   const restoreAll = (): void => {
     const roots = new Set<string>();
-    const unreconciled = new Map<string, JournalEntry[]>();
     for (const entry of [...ACTIVE.values()]) {
       let ok = false;
       try {
@@ -727,7 +801,7 @@ function installHandlers(): void {
       }
       if (!ok) {
         restoreFailed = true;
-        unreconciled.set(entry.root, [...(unreconciled.get(entry.root) ?? []), entry]);
+        addRefused(entry);
       }
       ACTIVE.delete(entry.abs);
       roots.add(entry.root);
@@ -735,17 +809,14 @@ function installHandlers(): void {
     // A root with a refused entry keeps a journal, for the same reason
     // `recoverJournal` does: the journal is the record that the refusal
     // happened and the only copy of the original bytes, so clearing it here
-    // would hand the next run an empty desk. Tracked per root rather than off
-    // the module-level `restoreFailed`, which is sticky across calls in one
-    // process and would keep journals for roots that restored cleanly — and
-    // narrowed to the refused entries, exactly as `recoverJournal` narrows,
-    // because what is left on disk otherwise still names the entries that DID
-    // come back and re-arms them against the next ordinary edit.
-    for (const root of roots) {
-      const stillRefused = unreconciled.get(root);
-      if (stillRefused === undefined) clearJournal(root);
-      else writeJournalEntries(root, stillRefused);
-    }
+    // would hand the next run an empty desk. Decided per root from `REFUSED`
+    // rather than off the module-level `restoreFailed`, which is sticky across
+    // calls in one process and would keep journals for roots that restored
+    // cleanly — and narrowed to the refused entries, because what is left on
+    // disk otherwise still names the entries that DID come back and re-arms
+    // them against the next ordinary edit. `persistJournal` does not throw:
+    // this is the last write every OTHER root gets, too.
+    for (const root of roots) persistJournal(root);
   };
   // 'exit' is synchronous-only, which is exactly what fs.*Sync needs; it covers
   // an escaped throw and an explicit process.exit. The signals do not fire
@@ -784,8 +855,10 @@ export async function withMutation<T>(
     return await fn();
   } finally {
     let ok = false;
+    let threw = true;
     try {
       ok = restoreEntry(entry);
+      threw = false;
     } finally {
       // Bookkeeping in a `finally` of its own, because `restoreEntry` can THROW
       // — it writes a sidecar, and a read-only directory or a full disk makes
@@ -794,16 +867,22 @@ export async function withMutation<T>(
       // guard read false, and the run carried on mutating a tree whose last
       // file was never put back. Three of the six rows name one file, so the
       // next row would have read that content as its `original`.
-      if (!ok) restoreFailed = true;
+      if (!ok) {
+        restoreFailed = true;
+        addRefused(entry);
+        if (threw) restoreThrew.push(abs);
+      }
       // Dropped from ACTIVE either way: a throwing entry left in it is retried
       // by the exit handler, where the same throw is an uncaught exception
       // inside `process.on('exit')` and takes the rest of the sweep with it.
       ACTIVE.delete(abs);
-      // Only a restore that worked clears the journal. A refusal leaves both
-      // the sidecar and the journal that names it, so the next run in this
-      // checkout inherits the refusal instead of finding nothing and starting
-      // green.
-      if (ok) clearJournal(root);
+      // A refusal is kept — in `REFUSED`, and so in the journal, with the
+      // sidecar beside the file where one could be written — so the next run
+      // in this checkout inherits it instead of finding nothing and starting
+      // green. A success narrows the journal to what is left: the live entries
+      // of an enclosing call AND any refusal a sibling call recorded, which a
+      // decision made from `ACTIVE` alone used to delete.
+      persistJournal(root);
     }
   }
 }
@@ -848,7 +927,7 @@ export function recoverJournal(root: string): RecoveryReport {
   }
   const journal = isRecord(parsed) ? parsed : {};
   const entries = validEntries(journal.entries, root);
-  const pid = typeof journal.pid === 'number' ? journal.pid : 0;
+  const pid = typeof journal.pid === 'number' ? journal.pid : NO_OWNER;
   // Only refuse over a journal that actually holds something. `writeJournal` is
   // never called with an empty entry list for this root, so an entry-less
   // journal names no file either run could collide over — and refusing on one
@@ -864,11 +943,33 @@ export function recoverJournal(root: string): RecoveryReport {
   }
   const recovered: string[] = [];
   const refused: string[] = [];
+  // The journal on disk is what a human reconciles between runs, so it — not
+  // whatever this process remembered — is the record of this root's refusals.
+  REFUSED.delete(root);
   for (const entry of entries) {
-    const before = existsSync(entry.abs) ? readFileSync(entry.abs, 'utf8') : '';
-    if (before === entry.original) continue;
-    if (restoreEntry(entry)) recovered.push(entry.abs);
-    else refused.push(entry.abs);
+    let ok = false;
+    try {
+      const before = existsSync(entry.abs) ? readFileSync(entry.abs, 'utf8') : '';
+      if (before === entry.original) continue;
+      ok = restoreEntry(entry);
+    } catch (e) {
+      // The same per-entry catch the exit sweep has, for the same reason: a
+      // give-up that throws (its sidecar write hitting a directory, a full
+      // disk) must not abandon every entry after it and escape runGuards
+      // before a single row exists. Counted as a refusal, so the journal that
+      // holds its original bytes is kept — which matters most here, since a
+      // throwing refuse() may have written no sidecar at all.
+      console.error(
+        `mutation-guards: recovering ${entry.abs} threw ` +
+          `(${e instanceof Error ? e.message : String(e)}); its original bytes stay in ` +
+          `${path}.`
+      );
+    }
+    if (ok) recovered.push(entry.abs);
+    else {
+      refused.push(entry.abs);
+      addRefused(entry);
+    }
   }
   // The journal is deleted only when there is nothing left to recover. Deleting
   // it after a REFUSED entry destroys the only record of the original bytes and
@@ -883,14 +984,13 @@ export function recoverJournal(root: string): RecoveryReport {
   // DID come back is finished, and leaving it armed would turn the next
   // ordinary edit to that file into a refusal of its own — a sidecar dropped
   // over a file this runner never left mutated.
-  if (refused.length === 0) {
-    rmSync(path, { force: true });
-  } else {
-    writeJournalEntries(
-      root,
-      entries.filter((entry) => refused.includes(entry.abs))
-    );
-  }
+  //
+  // `persistJournal` writes exactly `REFUSED` for this root (nothing is live
+  // yet), stamped `NO_OWNER`: the journal is now waiting on a human, not held
+  // by this process, and a pid that outlives its meaning is what pid reuse
+  // turns into "another run holds the journal". It does not throw — this is a
+  // give-up path too, and one that runs before runGuards has built any row.
+  persistJournal(root);
   return { recovered, refused, sidecars };
 }
 
@@ -955,7 +1055,16 @@ function validEntries(raw: unknown, root: string): JournalEntry[] {
   return kept;
 }
 
+/**
+ * Whether `pid` names one live process.
+ *
+ * Only a positive integer can. `kill(0, 0)` signals the caller's own process
+ * GROUP and `kill(-1, 0)` every process it may signal, so both "succeed" and
+ * read as alive — which would make a `NO_OWNER` journal, or a planted
+ * negative pid, look held forever.
+ */
 function isAlive(pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);
     return true;
@@ -1114,6 +1223,7 @@ export async function runGuards(
   // Each run owns its own verdict, so clear it rather than inheriting one from
   // a previous call in the same process (the meta-test makes several).
   restoreFailed = false;
+  restoreThrew = [];
 
   const recovery = recoverJournal(root);
   for (const file of recovery.recovered) {
@@ -1129,7 +1239,8 @@ export async function runGuards(
       ok: false,
       detail:
         `could not restore ${recovery.refused.join(', ')} — the pre-mutation bytes are in ` +
-        `the ${SIDECAR_SUFFIX} file beside each. The journal was KEPT, so this run and ` +
+        `the kept journal, and in the ${SIDECAR_SUFFIX} file beside each where one could be ` +
+        `written (see the messages above). The journal was KEPT, so this run and ` +
         `every run after it says so rather than handing the next one a green registry over ` +
         `the same tree. Two ways to end it, and BOTH are reconciling: put the original ` +
         `bytes back, or keep the file as it stands and delete ${journalPath(root)}. Either ` +
@@ -1326,12 +1437,25 @@ export async function runGuards(
     // As its own row rather than a silent `ok: false`: every other failure here
     // names itself, and "0 of 6 failed" over a red exit code is the kind of
     // report that gets read as a flake and rerun.
+    //
+    // Two wordings, because the two give-ups leave different evidence. A
+    // refusal printed its reason and wrote the sidecar; a give-up that THREW
+    // did neither (or not both), so pointing that operator at "the message
+    // above and the sidecar" sends them after things that may not exist. What
+    // both paths do leave is the kept journal, which holds the original bytes.
+    const journal = journalPath(root);
     results.push({
       name: '(restore)',
       ok: false,
       detail:
-        'a mutated file could not be put back safely — see the message above and the ' +
-        '.mutation-guard-original sidecar. Reconcile before trusting anything else in this run.',
+        restoreThrew.length > 0
+          ? `restoring ${restoreThrew.join(', ')} THREW before it could finish giving up — the ` +
+            `error is on the row that was being evaluated, and there may be no ` +
+            `${SIDECAR_SUFFIX} sidecar and no message for it. The pre-mutation bytes are in ` +
+            `the kept journal, ${journal}. Reconcile before trusting anything else in this run.`
+          : `a mutated file could not be put back safely — see the message above and the ` +
+            `${SIDECAR_SUFFIX} sidecar (the kept journal, ${journal}, holds the same bytes). ` +
+            `Reconcile before trusting anything else in this run.`,
     });
   }
   return { ok: results.every((r) => r.ok), results };
