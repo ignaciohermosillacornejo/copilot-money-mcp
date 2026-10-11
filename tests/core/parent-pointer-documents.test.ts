@@ -137,8 +137,9 @@ describe('every parent-pointer dispatch clause guards its processor (#627)', () 
       const declIdx = src.indexOf(`function ${processor}(`);
       expect(declIdx).toBeGreaterThan(-1);
       const decl = src.slice(declIdx, declIdx + 900);
-      // The literal is the contract with the guard sites in decoder.ts, which
-      // say so. Hoisting it into a helper means updating this pattern to match,
+      // The literal is the contract with the two guard sites this reaches
+      // (processUserProfile, processAmazonIntegration), which say so; the other
+      // processors' guards are pinned behaviourally by the sweep below. Hoisting it into a helper means updating this pattern to match,
       // NOT loosening it: a scan that accepts anything is a vacuous scan.
       if (!/fields\.size === 0/.test(decl)) unguarded.push(processor);
     }

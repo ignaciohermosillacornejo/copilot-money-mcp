@@ -47,10 +47,10 @@ collection === target || collection.endsWith(`/${target}`)
 | `investment_prices/{hash}/hf` | ~850 | Yes | High-frequency price subcollection |
 | `investment_splits` | ~17 | Yes | Stock split records |
 | `items` | ~13 | Yes | Plaid item connections |
-| `items/{id}/accounts/{id}` | ~4,250 (2026-09-16), ~5,100 (2026-10-11), **all fieldless** | n/a | Not account documents. Firestore parent pointers for the per-account subcollections listed below — the `~6,867` this row used to claim was counting them as data (#666). The account documents themselves are the `items/{id}/accounts` row |
+| `items/{id}/accounts/{id}` | ~4,250 (2026-09-16), ~5,100 (2026-10-11), **all fieldless** | n/a | Not account documents. Measured 2026-10-11: every entry is fieldless, keyed at a subcollection's own path (the "document id" is the subcollection name, `transactions` or `balance_history`), repeated many times per account across ~18 accounts. Structural, not data; why there are so many copies is not established. The `~6,867` this row used to claim was counting them as data (#666). The account documents themselves are the `items/{id}/accounts` row |
 | `items/{id}/accounts/{id}/balance_history` | ~4,945 | Yes | Daily account balance history |
 | `items/{id}/accounts/{id}/transactions` | ~1,367 | Yes | Plaid raw transactions |
-| `items/{id}/accounts/{id}/holdings_history/{hash}` | ~800 (2026-10-11), **all fieldless** | n/a | Not metadata documents. Firestore parent pointers for the `history` subcollection below; the decoder used to build a `HoldingsHistoryMeta` row from each, and returns none since #797 |
+| `items/{id}/accounts/{id}/holdings_history/{hash}` | ~800 (2026-10-11), **all fieldless** | n/a | Not metadata documents. Measured 2026-10-11: every entry is fieldless, with "document id" `history`, the name of the subcollection below. The decoder used to build a `HoldingsHistoryMeta` row from each, with `security_id: "history"`, and returns none since #797 |
 | `items/{id}/accounts/{id}/holdings_history/{hash}/history` | ~84 | Yes | Daily holdings price/quantity |
 | `items/{id}/accounts` | ~21, none fieldless | Yes | **The account documents.** The only collection `processAccount` routes to on a real cache; there is no top-level `accounts` collection on the one measured 2026-09-16 |
 | `investment_performance` | ~10 | Yes | Performance tracking metadata |
@@ -512,11 +512,17 @@ Stores daily and high-frequency price data per security (identified by SHA256 ha
 
 ### `items/{item_id}/accounts/{account_id}` (Plaid Account Documents)
 
-> **Measured 2026-10-11: every document at this path on a real cache is a fieldless parent
-> pointer**, anchoring the per-account subcollections, as the table above says. The
-> holdings and cost basis live on the `items/{id}/accounts` documents instead. Until #797,
-> `processPlaidAccount` built a phantom row from each pointer; it now returns none, and would
-> still decode a populated document if Copilot ever wrote one here. The description below is
+> **Measured 2026-10-11: every entry at this path on a real cache is fieldless**: a
+> structural entry keyed at a subcollection's own path, as the table above says, not an
+> account document. The holdings and cost basis live on the `items/{id}/accounts`
+> documents instead. Until #797, `processPlaidAccount` built a phantom row from each, with the
+> subcollection name as its `plaid_account_id`. It now returns none, and would still decode a
+> populated document if Copilot ever wrote one here.
+>
+> Note that the decoder's `plaid_accounts` route is a **catch-all**: anything under
+> `items/*/accounts/*` that is not a known subcollection (`balance_history`, `transactions`,
+> `holdings_history`). A new per-account subcollection will route here until it is added to
+> `routeCollection`. The description below is
 > the historical one, including the count and priority on the next line.
 
 *Historical:* ~6,867 documents | high priority — contains holdings with cost basis
