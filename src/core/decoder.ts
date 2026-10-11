@@ -394,6 +394,9 @@ export async function decodeTransactions(dbPath: string): Promise<Transaction[]>
   const transactions: Transaction[] = [];
 
   for await (const doc of iterateDocuments(dbPath, { collection: 'transactions' })) {
+    // The leaf filter is a prefilter; the routing is routeCollection's, so this
+    // path and decodeAllCollections take the same documents (#778).
+    if (routeCollection(doc.collection) !== 'transactions') continue;
     const txn = processTransaction(doc.fields, doc.documentId);
     if (txn) transactions.push(txn);
   }
@@ -418,9 +421,9 @@ export async function decodeAccounts(dbPath: string): Promise<Account[]> {
   const accounts: Account[] = [];
 
   for await (const doc of iterateDocuments(dbPath, { collection: 'accounts' })) {
-    // The `accounts` filter matches by leaf, so it admits `users/{uid}/accounts`
-    // too; skip it here exactly as decodeAllCollections does (#666).
-    if (isUserAccountCustomizationCollection(doc.collection)) continue;
+    // The leaf filter is a prefilter; the routing is routeCollection's, so this
+    // path and decodeAllCollections take the same documents (#778).
+    if (routeCollection(doc.collection) !== 'accounts') continue;
     const acc = processAccount(doc.fields, doc.documentId);
     if (acc) accounts.push(acc);
   }
@@ -435,6 +438,9 @@ export async function decodeRecurring(dbPath: string): Promise<Recurring[]> {
   const recurring: Recurring[] = [];
 
   for await (const doc of iterateDocuments(dbPath, { collection: 'recurring' })) {
+    // The leaf filter is a prefilter; the routing is routeCollection's, so this
+    // path and decodeAllCollections take the same documents (#778).
+    if (routeCollection(doc.collection) !== 'recurring') continue;
     const rec = processRecurring(doc.fields, doc.documentId);
     if (rec) recurring.push(rec);
   }
@@ -449,6 +455,9 @@ export async function decodeBudgets(dbPath: string): Promise<Budget[]> {
   const budgets: Budget[] = [];
 
   for await (const doc of iterateDocuments(dbPath, { collection: 'budgets' })) {
+    // The leaf filter is a prefilter; the routing is routeCollection's, so this
+    // path and decodeAllCollections take the same documents (#778).
+    if (routeCollection(doc.collection) !== 'budgets') continue;
     const budget = processBudget(doc.fields, doc.documentId);
     if (budget) budgets.push(budget);
   }
@@ -463,6 +472,9 @@ export async function decodeGoals(dbPath: string): Promise<Goal[]> {
   const goals: Goal[] = [];
 
   for await (const doc of iterateDocuments(dbPath, { collection: 'financial_goals' })) {
+    // The leaf filter is a prefilter; the routing is routeCollection's, so this
+    // path and decodeAllCollections take the same documents (#778).
+    if (routeCollection(doc.collection) !== 'financial_goals') continue;
     const goal = processGoal(doc.fields, doc.documentId);
     if (goal) goals.push(goal);
   }
@@ -477,6 +489,9 @@ export async function decodeGoalHistory(dbPath: string, goalId?: string): Promis
   const histories: GoalHistory[] = [];
 
   for await (const doc of iterateDocuments(dbPath, { collection: 'financial_goal_history' })) {
+    // The leaf filter is a prefilter; the routing is routeCollection's, so this
+    // path and decodeAllCollections take the same documents (#778).
+    if (routeCollection(doc.collection) !== 'financial_goal_history') continue;
     // Filter by goalId if specified (before processing)
     if (goalId) {
       const extractedGoalId = doc.collection.split('/')[1] ?? getString(doc.fields, 'goal_id');
@@ -542,6 +557,8 @@ export async function decodeInvestmentPrices(
   // `collectionRoot`, not `collection`: the leaf segment here is `daily`/`hf`,
   // so a leaf match would find nothing at all.
   for await (const doc of iterateDocuments(dbPath, { collectionRoot: 'investment_prices' })) {
+    // The root filter is a prefilter; the routing is routeCollection's (#778).
+    if (routeCollection(doc.collection) !== 'investment_prices') continue;
     const parsed = parseInvestmentPriceCollection(doc.collection);
     if (!parsed) continue;
 
@@ -654,6 +671,9 @@ export async function decodeItems(
   const items: Item[] = [];
 
   for await (const doc of iterateDocuments(dbPath, { collection: 'items' })) {
+    // The leaf filter is a prefilter; the routing is routeCollection's, so this
+    // path and decodeAllCollections take the same documents (#778).
+    if (routeCollection(doc.collection) !== 'items') continue;
     const item = processItem(doc.fields, doc.documentId);
     if (!item) continue;
 
@@ -696,6 +716,9 @@ export async function decodeCategories(dbPath: string): Promise<Category[]> {
   const categories: Category[] = [];
 
   for await (const doc of iterateDocuments(dbPath, { collection: 'categories' })) {
+    // The leaf filter is a prefilter; the routing is routeCollection's, so this
+    // path and decodeAllCollections take the same documents (#778).
+    if (routeCollection(doc.collection) !== 'categories') continue;
     const category = processCategory(doc.fields, doc.documentId);
     if (category) categories.push(category);
   }
@@ -738,12 +761,12 @@ export async function decodeCategories(dbPath: string): Promise<Category[]> {
  *
  * The PATH is kept, as this predicate, for one reason: it ends in `/accounts`,
  * so the leaf-matching account routing would otherwise decode any such
- * document as a real account, with a different field vocabulary. Both decode
- * paths (`decodeAccounts` and `decodeAllCollections`) and
- * `scripts/decode-coverage.ts` call this, so the collection stays named rather
- * than falling into an "unknown" or a wrong bucket. `scripts/smoke/cache.ts`
- * check 8 reports its document count on every run, so a cache where it is
- * populated again is loud.
+ * document as a real account, with a different field vocabulary. It is the
+ * first clause of {@link routeCollection} (route `user_accounts`, which has no
+ * processor), so both decode paths, `scripts/decode-coverage.ts` and the cache
+ * smoke all see it through that one function rather than calling it
+ * separately (#778). `scripts/smoke/cache.ts` check 8 reports its document
+ * count on every run, so a cache where it is populated again is loud.
  */
 export function isUserAccountCustomizationCollection(collection: string): boolean {
   return collection.includes('users/') && collection.endsWith('/accounts');
@@ -2832,6 +2855,139 @@ export function collectionMatches(collection: string, target: string): boolean {
 }
 
 /**
+ * Every collection `decodeAllCollections` dispatches on (#778).
+ *
+ * Two routes have no processor. `financial_goal_sentinels` are the empty
+ * parent documents anchoring `financial_goal_history`, matched so coverage
+ * reports do not count them as undecoded. `user_accounts` is known and
+ * deliberately unread (#666); it is routed so the `accounts` leaf clause can
+ * never claim its documents.
+ */
+export const COLLECTION_ROUTES = [
+  'user_accounts',
+  'holdings_history',
+  'holdings_history_meta',
+  'balance_history',
+  'plaid_accounts',
+  'transactions',
+  'accounts',
+  'recurring',
+  'budgets',
+  'financial_goals',
+  'financial_goal_history',
+  'investment_prices',
+  'investment_splits',
+  'items',
+  'tags',
+  'categories',
+  'transaction_changes',
+  'account_changes',
+  'changes',
+  'securities',
+  'users',
+  'amazon_orders',
+  'amazon',
+  'subscriptions',
+  'invites',
+  'user_items',
+  'feature_tracking',
+  'support',
+  'financial_goal_sentinels',
+] as const;
+
+export type CollectionRoute = (typeof COLLECTION_ROUTES)[number];
+
+/**
+ * Which processor `decodeAllCollections` sends a document in `collection` to,
+ * or `null` when it skips it (#778).
+ *
+ * The ORDER is the routing: a leaf name alone is ambiguous, so the first
+ * matching clause wins. `users/<uid>/accounts` must be tested before the leaf
+ * `accounts` clause, and the account subcollections (`balance_history`,
+ * `holdings_history`, Plaid account docs) before `transactions` and `accounts`.
+ * Most clauses are LEAF-anchored via {@link collectionMatches};
+ * `investment_prices` is the ROOT-anchored exception.
+ *
+ * Exported so tools asking "where would the decoder put this document?" call
+ * this instead of keeping a copy. Two copies drifted before it existed:
+ * `scripts/smoke/cache.ts` counted by root prefix and so compared six of its
+ * nine roots against nothing, and `scripts/decode-coverage.ts` mirrored the
+ * chain by hand and kept the `items/{id}` clause #627 removed. Add a new
+ * collection here and the decoder, the smoke and the coverage script all follow.
+ */
+export function routeCollection(collection: string): CollectionRoute | null {
+  // User accounts (users/{user_id}/accounts) must be checked before regular accounts
+  if (isUserAccountCustomizationCollection(collection)) return 'user_accounts';
+  if (collection.includes('/holdings_history/') && collection.endsWith('/history')) {
+    return 'holdings_history';
+  }
+  if (collection.includes('/holdings_history') && !collection.endsWith('/history')) {
+    return 'holdings_history_meta';
+  }
+  if (collection.endsWith('/balance_history')) return 'balance_history';
+  if (
+    // Plaid account docs: items/{id}/accounts/{account_id}
+    // Exclude known subcollections — update this list when adding new ones:
+    //   /balance_history, /transactions, /holdings_history
+    collection.includes('items/') &&
+    collection.includes('/accounts/') &&
+    !collection.endsWith('/accounts') &&
+    !collection.endsWith('/balance_history') &&
+    !collection.endsWith('/transactions') &&
+    !collection.includes('/holdings_history')
+  ) {
+    return 'plaid_accounts';
+  }
+  if (collectionMatches(collection, 'transactions')) return 'transactions';
+  if (collectionMatches(collection, 'accounts')) return 'accounts';
+  if (collectionMatches(collection, 'recurring')) return 'recurring';
+  if (collectionMatches(collection, 'budgets')) return 'budgets';
+  if (collectionMatches(collection, 'financial_goals')) return 'financial_goals';
+  if (collection.endsWith('/financial_goal_history')) return 'financial_goal_history';
+  if (collection === 'investment_prices' || collection.startsWith('investment_prices/')) {
+    return 'investment_prices';
+  }
+  if (collectionMatches(collection, 'investment_splits')) return 'investment_splits';
+  // Only the real `items` collection. A previous version also matched
+  // `items/{item_id}` — Firestore's fieldless parent-pointer entries —
+  // on the stated assumption that "parent-pointer docs have empty fields
+  // and processItem returns null". That assumption was wrong in both
+  // halves: processItem always returns at least `{ item_id }`, so every
+  // such entry became a phantom row carrying nothing else (#627).
+  //
+  // A real cache holds hundreds of those pointers against a dozen real
+  // items, and none of them has a single field, so the clause could only
+  // ever manufacture rows. Dedup by item_id hid the scale, collapsing them
+  // to the handful whose ids matched no real item.
+  if (collectionMatches(collection, 'items')) return 'items';
+  if (collectionMatches(collection, 'tags')) return 'tags';
+  if (collectionMatches(collection, 'categories')) return 'categories';
+  if (collection.endsWith('/t') && collection.includes('changes/')) return 'transaction_changes';
+  if (collection.endsWith('/a') && collection.includes('changes/')) return 'account_changes';
+  if (collectionMatches(collection, 'changes')) return 'changes';
+  if (collectionMatches(collection, 'securities')) return 'securities';
+  // Match both top-level users and users/{user_id} parent-pointer sentinel docs.
+  if (collectionMatches(collection, 'users') || /^users\/[^/]+$/.test(collection)) return 'users';
+  if (collectionMatches(collection, 'orders') && collection.includes('amazon/')) {
+    return 'amazon_orders';
+  }
+  if (collection === 'amazon' || /^amazon\/[^/]+$/.test(collection)) return 'amazon';
+  if (collectionMatches(collection, 'subscriptions')) return 'subscriptions';
+  if (collectionMatches(collection, 'invites')) return 'invites';
+  if (collectionMatches(collection, 'user_items')) return 'user_items';
+  if (collectionMatches(collection, 'feature_tracking')) return 'feature_tracking';
+  if (collectionMatches(collection, 'support')) return 'support';
+  if (collection.includes('/financial_goals/') && !collection.endsWith('/financial_goal_history')) {
+    // Sentinel/parent docs at users/{uid}/financial_goals/{goal_id} exist because
+    // financial_goal_history is a subcollection underneath them. These documents are
+    // typically empty (no fields) — their presence just anchors the subcollection path.
+    // We match them here so they don't appear as "undecoded" in coverage reports.
+    return 'financial_goal_sentinels';
+  }
+  return null;
+}
+
+/**
  * Batch decode all collections from LevelDB database in a single pass.
  *
  * This is significantly faster than calling individual decode functions
@@ -2878,125 +3034,164 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
   for await (const doc of iterateDocuments(dbPath)) {
     const { fields, documentId, collection } = doc;
 
-    // Route document to appropriate processor based on collection
-    if (isUserAccountCustomizationCollection(collection)) {
-      // Known and deliberately unread (#666). This branch MUST stay ahead of
-      // the `accounts` leaf match below, which would otherwise decode these
-      // documents as real accounts.
-    } else if (collection.includes('/holdings_history/') && collection.endsWith('/history')) {
-      const hh = processHoldingsHistory(fields, documentId, collection);
-      if (hh) rawHoldingsHistory.push(hh);
-    } else if (collection.includes('/holdings_history') && !collection.endsWith('/history')) {
-      const hhm = processHoldingsHistoryMeta(fields, documentId, collection);
-      if (hhm) rawHoldingsHistoryMeta.push(hhm);
-    } else if (collection.endsWith('/balance_history')) {
-      const bh = processBalanceHistory(fields, documentId, collection);
-      if (bh) rawBalanceHistory.push(bh);
-    } else if (
-      // Plaid account docs: items/{id}/accounts/{account_id}
-      // Exclude known subcollections — update this list when adding new ones:
-      //   /balance_history, /transactions, /holdings_history
-      collection.includes('items/') &&
-      collection.includes('/accounts/') &&
-      !collection.endsWith('/accounts') &&
-      !collection.endsWith('/balance_history') &&
-      !collection.endsWith('/transactions') &&
-      !collection.includes('/holdings_history')
-    ) {
-      const plaidAccount = processPlaidAccount(fields, documentId, collection);
-      if (plaidAccount) rawPlaidAccounts.push(plaidAccount);
-    } else if (collectionMatches(collection, 'transactions')) {
-      const txn = processTransaction(fields, documentId);
-      if (txn) rawTransactions.push(txn);
-    } else if (collectionMatches(collection, 'accounts')) {
-      const acc = processAccount(fields, documentId);
-      if (acc) rawAccounts.push(acc);
-    } else if (collectionMatches(collection, 'recurring')) {
-      const rec = processRecurring(fields, documentId);
-      if (rec) rawRecurring.push(rec);
-    } else if (collectionMatches(collection, 'budgets')) {
-      const budget = processBudget(fields, documentId);
-      if (budget) rawBudgets.push(budget);
-    } else if (collectionMatches(collection, 'financial_goals')) {
-      const goal = processGoal(fields, documentId);
-      if (goal) rawGoals.push(goal);
-    } else if (collection.endsWith('/financial_goal_history')) {
-      const history = processGoalHistory(fields, documentId, collection);
-      if (history) rawGoalHistory.push(history);
-    } else if (collection === 'investment_prices' || collection.startsWith('investment_prices/')) {
-      const parsedPriceCollection = parseInvestmentPriceCollection(collection);
-      if (parsedPriceCollection) {
-        const price = processInvestmentPrice(fields, documentId, parsedPriceCollection);
-        if (price) rawInvestmentPrices.push(price);
+    // Route document to appropriate processor based on collection. The decision
+    // itself is `routeCollection`, so anything else that needs to know where a
+    // document would land asks the same function instead of keeping a copy (#778).
+    const route = routeCollection(collection);
+    switch (route) {
+      case 'holdings_history': {
+        const hh = processHoldingsHistory(fields, documentId, collection);
+        if (hh) rawHoldingsHistory.push(hh);
+        break;
       }
-    } else if (collectionMatches(collection, 'investment_splits')) {
-      const split = processInvestmentSplit(fields, documentId);
-      if (split) rawInvestmentSplits.push(split);
-    } else if (collectionMatches(collection, 'items')) {
-      // Only the real `items` collection. A previous version also matched
-      // `items/{item_id}` — Firestore's fieldless parent-pointer entries —
-      // on the stated assumption that "parent-pointer docs have empty fields
-      // and processItem returns null". That assumption was wrong in both
-      // halves: processItem always returns at least `{ item_id }`, so every
-      // such entry became a phantom row carrying nothing else (#627).
-      //
-      // A real cache holds hundreds of those pointers against a dozen real
-      // items, and none of them has a single field, so the clause could only
-      // ever manufacture rows. Dedup by item_id hid the scale, collapsing them
-      // to the handful whose ids matched no real item.
-      const item = processItem(fields, documentId);
-      if (item) rawItems.push(item);
-    } else if (collectionMatches(collection, 'tags')) {
-      const tag = processTag(fields, documentId);
-      if (tag) rawTags.push(tag);
-    } else if (collectionMatches(collection, 'categories')) {
-      const category = processCategory(fields, documentId);
-      if (category) rawCategories.push(category);
-    } else if (collection.endsWith('/t') && collection.includes('changes/')) {
-      const tc = processSubChange(fields, documentId, collection, TransactionChangeSchema);
-      if (tc) rawTransactionChanges.push(tc);
-    } else if (collection.endsWith('/a') && collection.includes('changes/')) {
-      const ac = processSubChange(fields, documentId, collection, AccountChangeSchema);
-      if (ac) rawAccountChanges.push(ac);
-    } else if (collectionMatches(collection, 'changes')) {
-      const change = processChange(fields, documentId);
-      if (change) rawChanges.push(change);
-    } else if (collectionMatches(collection, 'securities')) {
-      const security = processSecurity(fields, documentId);
-      if (security) rawSecurities.push(security);
-    } else if (collectionMatches(collection, 'users') || /^users\/[^/]+$/.test(collection)) {
-      // Match both top-level users and users/{user_id} parent-pointer sentinel docs.
-      const profile = processUserProfile(fields, documentId);
-      if (profile) rawUserProfiles.push(profile);
-    } else if (collectionMatches(collection, 'orders') && collection.includes('amazon/')) {
-      const order = processAmazonOrder(fields, documentId, collection);
-      if (order) rawAmazonOrders.push(order);
-    } else if (collection === 'amazon' || /^amazon\/[^/]+$/.test(collection)) {
-      const ai = processAmazonIntegration(fields, documentId);
-      if (ai) rawAmazonIntegrations.push(ai);
-    } else if (collectionMatches(collection, 'subscriptions')) {
-      const sub = processSubscription(fields, documentId);
-      if (sub) rawSubscriptions.push(sub);
-    } else if (collectionMatches(collection, 'invites')) {
-      const inv = processInvite(fields, documentId);
-      if (inv) rawInvites.push(inv);
-    } else if (collectionMatches(collection, 'user_items')) {
-      const ui = processUserItems(fields, documentId);
-      if (ui) rawUserItems.push(ui);
-    } else if (collectionMatches(collection, 'feature_tracking')) {
-      const ft = processFeatureTracking(fields, documentId);
-      if (ft) rawFeatureTracking.push(ft);
-    } else if (collectionMatches(collection, 'support')) {
-      const sup = processSupport(fields, documentId);
-      if (sup) rawSupportDocs.push(sup);
-    } else if (
-      collection.includes('/financial_goals/') &&
-      !collection.endsWith('/financial_goal_history')
-    ) {
-      // Sentinel/parent docs at users/{uid}/financial_goals/{goal_id} exist because
-      // financial_goal_history is a subcollection underneath them. These documents are
-      // typically empty (no fields) — their presence just anchors the subcollection path.
-      // We match them here so they don't appear as "undecoded" in coverage reports.
+      case 'holdings_history_meta': {
+        const hhm = processHoldingsHistoryMeta(fields, documentId, collection);
+        if (hhm) rawHoldingsHistoryMeta.push(hhm);
+        break;
+      }
+      case 'balance_history': {
+        const bh = processBalanceHistory(fields, documentId, collection);
+        if (bh) rawBalanceHistory.push(bh);
+        break;
+      }
+      case 'plaid_accounts': {
+        const plaidAccount = processPlaidAccount(fields, documentId, collection);
+        if (plaidAccount) rawPlaidAccounts.push(plaidAccount);
+        break;
+      }
+      case 'transactions': {
+        const txn = processTransaction(fields, documentId);
+        if (txn) rawTransactions.push(txn);
+        break;
+      }
+      case 'accounts': {
+        const acc = processAccount(fields, documentId);
+        if (acc) rawAccounts.push(acc);
+        break;
+      }
+      case 'recurring': {
+        const rec = processRecurring(fields, documentId);
+        if (rec) rawRecurring.push(rec);
+        break;
+      }
+      case 'budgets': {
+        const budget = processBudget(fields, documentId);
+        if (budget) rawBudgets.push(budget);
+        break;
+      }
+      case 'financial_goals': {
+        const goal = processGoal(fields, documentId);
+        if (goal) rawGoals.push(goal);
+        break;
+      }
+      case 'financial_goal_history': {
+        const history = processGoalHistory(fields, documentId, collection);
+        if (history) rawGoalHistory.push(history);
+        break;
+      }
+      case 'investment_prices': {
+        const parsedPriceCollection = parseInvestmentPriceCollection(collection);
+        if (parsedPriceCollection) {
+          const price = processInvestmentPrice(fields, documentId, parsedPriceCollection);
+          if (price) rawInvestmentPrices.push(price);
+        }
+        break;
+      }
+      case 'investment_splits': {
+        const split = processInvestmentSplit(fields, documentId);
+        if (split) rawInvestmentSplits.push(split);
+        break;
+      }
+      case 'items': {
+        const item = processItem(fields, documentId);
+        if (item) rawItems.push(item);
+        break;
+      }
+      case 'tags': {
+        const tag = processTag(fields, documentId);
+        if (tag) rawTags.push(tag);
+        break;
+      }
+      case 'categories': {
+        const category = processCategory(fields, documentId);
+        if (category) rawCategories.push(category);
+        break;
+      }
+      case 'transaction_changes': {
+        const tc = processSubChange(fields, documentId, collection, TransactionChangeSchema);
+        if (tc) rawTransactionChanges.push(tc);
+        break;
+      }
+      case 'account_changes': {
+        const ac = processSubChange(fields, documentId, collection, AccountChangeSchema);
+        if (ac) rawAccountChanges.push(ac);
+        break;
+      }
+      case 'changes': {
+        const change = processChange(fields, documentId);
+        if (change) rawChanges.push(change);
+        break;
+      }
+      case 'securities': {
+        const security = processSecurity(fields, documentId);
+        if (security) rawSecurities.push(security);
+        break;
+      }
+      case 'users': {
+        const profile = processUserProfile(fields, documentId);
+        if (profile) rawUserProfiles.push(profile);
+        break;
+      }
+      case 'amazon_orders': {
+        const order = processAmazonOrder(fields, documentId, collection);
+        if (order) rawAmazonOrders.push(order);
+        break;
+      }
+      case 'amazon': {
+        const ai = processAmazonIntegration(fields, documentId);
+        if (ai) rawAmazonIntegrations.push(ai);
+        break;
+      }
+      case 'subscriptions': {
+        const sub = processSubscription(fields, documentId);
+        if (sub) rawSubscriptions.push(sub);
+        break;
+      }
+      case 'invites': {
+        const inv = processInvite(fields, documentId);
+        if (inv) rawInvites.push(inv);
+        break;
+      }
+      case 'user_items': {
+        const ui = processUserItems(fields, documentId);
+        if (ui) rawUserItems.push(ui);
+        break;
+      }
+      case 'feature_tracking': {
+        const ft = processFeatureTracking(fields, documentId);
+        if (ft) rawFeatureTracking.push(ft);
+        break;
+      }
+      case 'support': {
+        const sup = processSupport(fields, documentId);
+        if (sup) rawSupportDocs.push(sup);
+        break;
+      }
+      // `user_accounts` is known and deliberately unread (#666); it is routed,
+      // not unrouted, so the `accounts` leaf clause can never claim it.
+      // Sentinels are routed so coverage reports count them as decoded, but
+      // carry nothing to decode; an unrouted collection is skipped.
+      case 'user_accounts':
+      case 'financial_goal_sentinels':
+      case null:
+        break;
+      default: {
+        // A route with no case would be a collection routed everywhere else
+        // (the smoke's raw side, decode-coverage) and silently dropped here.
+        // `never` makes that a compile error instead.
+        const unhandled: never = route;
+        throw new Error(`unhandled collection route: ${String(unhandled)}`);
+      }
     }
   }
 

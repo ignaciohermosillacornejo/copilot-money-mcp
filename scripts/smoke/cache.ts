@@ -36,8 +36,10 @@ import {
   decodeInvestmentPrices,
   decodeItems,
   decodeCategories,
-  isUserAccountCustomizationCollection,
+  routeCollection,
+  COLLECTION_ROUTES,
 } from '../../src/core/decoder.js';
+import type { AllCollectionsResult, CollectionRoute } from '../../src/core/decoder.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import type { FirestoreValue } from '../../src/core/protobuf-parser.js';
 
@@ -79,30 +81,21 @@ export function isTotalDecodeLoss(rawNonEmpty: number, decodedRows: number): boo
 }
 
 /**
- * The decoder returned rows and the raw side found nothing to compare them
- * against, so checks 1 and 2 never measured this root at all (#763).
+ * The decoder returned rows and the raw side found no non-empty document to
+ * compare them against (#763).
  *
- * Both checks read the raw side through {@link nonEmptyRowsUnder}, which is
- * ROOT-anchored: a pattern counts only if it IS the root or sits directly under
- * it. The decoder is LEAF-anchored — `collectionMatches` in
- * `src/core/decoder.ts` accepts `collection === target || endsWith('/'+target)`
- * — so for every collection whose real path is nested, the two never meet. On
- * the cache measured 2026-09-20 that is most of them: account documents live at
- * `items/<id>/accounts`, transactions at `items/<id>/accounts/<id>/transactions`,
- * and budgets, categories, financial_goals and tags all under `users/<uid>/...`.
- * Six of the nine roots came back `raw === 0` with a non-zero decoded count.
+ * Until #778 this was the permanent state of six of the nine roots: the raw
+ * side matched by root PREFIX while the decoder routed by LEAF, so every root
+ * whose documents live at a nested path (`items/<id>/accounts`,
+ * `users/<uid>/tags`, ...) read zero on the raw side and passed vacuously. The
+ * raw side now goes through the decoder's own `routeCollection`, so the two
+ * cannot disagree about which documents belong to a root, and anchoring can no
+ * longer produce this shape.
  *
- * `isTotalDecodeLoss(0, 21)` is `false`, so check 1 reported PASS for each of
- * them — the same PASS it would report if the decoder were wrong in every way
- * the check exists to catch. That is the #596 vacuity one level up from the
- * classifier already guarding against it, so it gets a name and a status of its
- * own instead of hiding inside another check's pass.
- *
- * WARN, not FAIL, matching this file's convention (check 2, and check 7's
- * `no-account-documents`): rows with no raw counterpart is the HEALTHY
- * direction — the decoder is reading real documents, and it is the check's
- * anchoring that is wrong. Failing would redden `smoke:cache` on every real
- * cache over a coverage gap no cache can clear, which is how a gate gets muted.
+ * What still can, and why it now FAILs (see {@link reportDecodeLossCoverage}):
+ * rows built from fieldless documents — the raw side excludes Firestore parent
+ * pointers and a processor that does not is #627's phantom-row bug — or a root
+ * in {@link decodedRoots} mapped to the wrong route.
  *
  * Disjoint from {@link isTotalDecodeLoss} by construction: that one needs
  * `rawNonEmpty > 0`, this one needs it to be `0`. Neither ever masks the other.
@@ -113,51 +106,165 @@ export function isUnmeasuredRoot(rawNonEmpty: number, decodedRows: number): bool
 
 /** One row of the decode-loss comparison: a root, its raw side and its decoded side. */
 export interface RootComparison {
-  root: string;
+  root: CollectionRoute;
   raw: number;
   rows: number;
+}
+
+/** Documents per decoder route, as `tallyRoutedDocument` counts them. */
+export type RoutedCounts = Map<CollectionRoute, { total: number; empty: number }>;
+type ReadonlyRoutedCounts = ReadonlyMap<CollectionRoute, { total: number; empty: number }>;
+
+/**
+ * Count one raw document toward the route the decoder would send it to (#778).
+ *
+ * Takes the RAW collection path, not the normalized pattern, because that is
+ * what `decodeAllCollections` routes on: same input, same function, same
+ * answer. Unrouted collections are dropped — the decoder skips them too.
+ */
+export function tallyRoutedDocument(
+  routed: RoutedCounts,
+  collection: string,
+  fieldless: boolean
+): void {
+  const route = routeCollection(collection);
+  if (route === null) return;
+  let entry = routed.get(route);
+  if (!entry) {
+    entry = { total: 0, empty: 0 };
+    routed.set(route, entry);
+  }
+  entry.total++;
+  // Firestore parent-pointer documents carry no fields. They are structural,
+  // not data, and must not be counted as decodable rows.
+  if (fieldless) entry.empty++;
+}
+
+/**
+ * Non-empty raw documents the decoder routed to `route`.
+ *
+ * Replaces the root-prefix `nonEmptyRowsUnder` (#778), which read `accounts` as
+ * the top-level collection only — zero on a real cache — and `items` as every
+ * document beneath every item, so one root was compared against nothing and
+ * another against a hundred times its real size.
+ */
+export function routedNonEmpty(route: CollectionRoute, routed: ReadonlyRoutedCounts): number {
+  const counts = routed.get(route);
+  return counts ? counts.total - counts.empty : 0;
+}
+
+/**
+ * Routes checks 1 and 2 deliberately do not compare, each with its reason.
+ *
+ * With {@link ROUTE_ROWS} this partitions `CollectionRoute`: the two `Record`
+ * types make a route missing from both, or present in both, a compile error,
+ * and a test asserts the partition over `COLLECTION_ROUTES` at runtime. So a
+ * newly routed collection cannot quietly escape the comparison the way six
+ * roots did before #778 — adding one forces a decision about it.
+ */
+export const ROUTES_NOT_COMPARED = {
+  financial_goal_sentinels:
+    'routed only so coverage reports count the empty parents of financial_goal_history; ' +
+    'it has no processor and decodes no rows, so there is nothing to compare',
+  user_accounts:
+    'known and deliberately unread since #666: routed so the accounts leaf clause cannot ' +
+    'claim it, but it has no processor; check 8 reports its document count instead',
+  // The two below are a known defect, not a design choice, and are excluded so
+  // check 1b reports new phantom rows rather than these on every run. Their
+  // processors build a row from a fieldless parent pointer and a real cache
+  // holds nothing else at these paths, so they would FAIL check 1b
+  // permanently. Move each back into ROUTE_ROWS when #797 guards its processor.
+  plaid_accounts:
+    'every real document at items/*/accounts/* is a fieldless parent pointer and ' +
+    'processPlaidAccount builds a row from one anyway (#797)',
+  holdings_history_meta:
+    'every real document at items/*/accounts/*/holdings_history is a fieldless parent ' +
+    'pointer and processHoldingsHistoryMeta builds a row from one anyway (#797)',
+} as const satisfies Partial<Record<CollectionRoute, string>>;
+
+type ComparedRoute = Exclude<CollectionRoute, keyof typeof ROUTES_NOT_COMPARED>;
+
+/**
+ * Where each compared route's decoded rows come from in `AllCollectionsResult`.
+ *
+ * Every route with a processor except the ones {@link ROUTES_NOT_COMPARED}
+ * names, not just the nine roots the check started with (#778 review). A route
+ * left off both lists would be a collection checks 1 and 2 never look at,
+ * which is the #763 gap under another name.
+ */
+export const ROUTE_ROWS: Record<ComparedRoute, (all: AllCollectionsResult) => number> = {
+  holdings_history: (all) => all.holdingsHistory.length,
+  balance_history: (all) => all.balanceHistory.length,
+  transactions: (all) => all.transactions.length,
+  accounts: (all) => all.accounts.length,
+  recurring: (all) => all.recurring.length,
+  budgets: (all) => all.budgets.length,
+  financial_goals: (all) => all.goals.length,
+  financial_goal_history: (all) => all.goalHistory.length,
+  investment_prices: (all) => all.investmentPrices.length,
+  investment_splits: (all) => all.investmentSplits.length,
+  items: (all) => all.items.length,
+  tags: (all) => all.tags.length,
+  categories: (all) => all.categories.length,
+  transaction_changes: (all) => all.transactionChanges.length,
+  account_changes: (all) => all.accountChanges.length,
+  changes: (all) => all.changes.length,
+  securities: (all) => all.securities.length,
+  users: (all) => all.userProfiles.length,
+  amazon_orders: (all) => all.amazonOrders.length,
+  amazon: (all) => all.amazonIntegrations.length,
+  subscriptions: (all) => all.subscriptions.length,
+  invites: (all) => all.invites.length,
+  user_items: (all) => all.userItems.length,
+  feature_tracking: (all) => all.featureTracking.length,
+  support: (all) => all.supportDocs.length,
+};
+
+/**
+ * The roots checks 1 and 2 compare, each named by the route its rows come from,
+ * in the decoder's routing order.
+ */
+export function decodedRoots(
+  all: AllCollectionsResult
+): Array<{ root: CollectionRoute; rows: number }> {
+  return COLLECTION_ROUTES.filter((r): r is ComparedRoute => r in ROUTE_ROWS).map((root) => ({
+    root,
+    rows: ROUTE_ROWS[root](all),
+  }));
+}
+
+/** Pair each decoded root with its routed raw count. */
+export function compareRoots(
+  decoded: ReadonlyArray<{ root: CollectionRoute; rows: number }>,
+  routed: ReadonlyRoutedCounts
+): RootComparison[] {
+  return decoded.map((d) => ({ ...d, raw: routedNonEmpty(d.root, routed) }));
 }
 
 /**
  * Check 1b's whole verdict — status, wording, and the coverage count that
  * checks 1 and 2 quote in their own PASS lines (#763).
  *
- * A function rather than an `if` in `main()` so the WARN can be asserted from a
- * test. `main()` needs a real Copilot cache and never runs under `bun test`, so
- * a branch left in there is executed on exactly the machines that have one and
- * on no CI run at all — and a status branch nothing can assert is the shape
- * `docs/bugs/596-vacuous-assertions-bulk-edit.md` is about. Returning the
- * detail string too, rather than only a verdict, is what lets a test pin that
- * the WARN actually names its reason instead of just being yellow.
+ * A function rather than an `if` in `main()` so the verdict can be asserted
+ * from a test. `main()` needs a real Copilot cache and never runs under
+ * `bun test`, so a branch left in there is executed on exactly the machines
+ * that have one and on no CI run at all — and a status branch nothing can
+ * assert is the shape `docs/bugs/596-vacuous-assertions-bulk-edit.md` is about.
  *
- * `comparedSummary` is the coverage figure checks 1 and 2 print, phrased here
- * rather than assembled at either call site — both share this blind spot, so
- * both say how much the raw side could see instead of leaving it to a comment
- * the output never shows.
+ * FAIL, not the WARN it was under #763. That WARN fired on every real cache
+ * because the raw side was root-anchored — a coverage gap no cache could clear,
+ * and so furniture. With the raw side routed through the decoder (#778), a root
+ * that decodes rows with no non-empty document behind it is a defect in this
+ * repo: a processor building rows from fieldless documents (#627), or a root in
+ * {@link decodedRoots} mapped to the wrong route. Either way it is red.
  *
- * It states root-ANCHORING coverage — how many roots had raw documents at all —
- * and deliberately not "how many this check compared", because the two checks
- * compare different sets: conservation adds a `raw > 10` noise floor, so a root
- * with a handful of documents is visible to the anchoring and still unreachable
- * by that filter. One fragment with one definition that is true for both beats a
- * second count per threshold, which would put back the "which number goes in
- * which line" hazard this fragment exists to remove.
+ * `comparedSummary` states how many roots the raw side saw documents for at
+ * all (`raw > 0`) — deliberately not "how many this check compared", because
+ * conservation narrows further by a `raw > 10` floor. The numerator is
+ * `raw > 0` and NOT "roots that are not unmeasured", which would count a
+ * `raw === 0 && rows === 0` root: consistent, but the raw side saw nothing.
  *
- * The numerator is `raw > 0` and NOT "roots that are not unmeasured", which
- * would put a `raw === 0 && rows === 0` root in it: nothing on disk and nothing
- * decoded is consistent rather than vacuous, but the raw side still saw nothing.
- * Returned as a finished fragment, not as two numbers for the caller to divide,
- * because the caller is `main()`: a figure whose whole job is to say how much
- * was seen must not be the one thing in this block that only runs on a machine
- * with a cache, and two fields are two chances to combine them wrongly where one
- * leaves none.
- *
- * SKIP for an empty list, matching {@link reportExtinctDependencies}: "all 0
- * roots decoded rows only where raw documents backed them" is the same
- * true-of-nothing line this whole change exists to remove. Unreachable today —
- * `decoded` in `main()` is a nine-element literal — but a status that would be
- * wrong if it were ever reached is not worth keeping for the sake of a shorter
- * function.
+ * SKIP for an empty list, matching {@link reportExtinctDependencies}.
  */
 export function reportDecodeLossCoverage(roots: readonly RootComparison[]): {
   status: Status;
@@ -185,15 +292,79 @@ export function reportDecodeLossCoverage(roots: readonly RootComparison[]): {
   }
   return {
     ...counts,
-    status: 'WARN',
+    status: 'FAIL',
     detail:
-      `${unmeasured.length}/${roots.length} roots decoded rows with zero raw documents beneath ` +
-      `them: ` +
+      `${unmeasured.length}/${roots.length} roots decoded rows with no non-empty document ` +
+      `routed to them: ` +
       unmeasured.map((d) => `${d.root} (0 raw → ${d.rows} rows)`).join(', ') +
-      ` — the root name matches no collection pattern on this cache, so the decode-loss and ` +
-      `conservation checks are measuring nothing for it. Their PASS for these roots carries no ` +
-      `evidence; re-anchor each root to the pattern its documents actually use (the decoder ` +
-      `matches by leaf, this counts by root prefix — #778)`,
+      ` — the raw side counts through the decoder's own routeCollection, so these rows ` +
+      `came from fieldless parent pointers (the #627 phantom-row class; see #797 for the processors known to do it) or the root is ` +
+      `mapped to the wrong route in decodedRoots`,
+  };
+}
+
+/**
+ * Check 1's verdict (#778): the #622 signature, documents on disk and zero rows.
+ *
+ * Extracted from `main()` for the reason {@link reportDecodeLossCoverage} gives.
+ * The PASS quotes `comparedSummary` because a decode-loss pass is only as good
+ * as the number of roots the raw side could see.
+ */
+export function reportTotalDecodeLoss(
+  roots: readonly RootComparison[],
+  comparedSummary: string
+): { status: Status; detail: string } {
+  const blackHoles = roots.filter((d) => isTotalDecodeLoss(d.raw, d.rows));
+  if (blackHoles.length > 0) {
+    return {
+      status: 'FAIL',
+      detail:
+        `collections with documents on disk but ZERO decoded rows: ` +
+        blackHoles.map((d) => `${d.root} (${d.raw} docs)`).join(', '),
+    };
+  }
+  return {
+    status: 'PASS',
+    detail:
+      `every collection with documents decoded at least one row ` +
+      `(${comparedSummary} — see the coverage check below)`,
+  };
+}
+
+/**
+ * Check 2's verdict (#778): large unexplained shrinkage between disk and output.
+ *
+ * The filter narrows three ways, and the PASS sentence names all three — the
+ * invariant that took four review rounds on #777 to get right while it lived
+ * in `main()`, where only a sentence-against-predicate read could check it:
+ *
+ * - `raw > 10` — a noise floor; "10 or fewer documents" in the PASS.
+ * - `rows > 0` — a total loss is check 1's, so one root is one finding.
+ * - `rows / raw < 0.5` — "more than half".
+ *
+ * WARN, not FAIL: some loss is legitimate (dedup, tombstones, soft-deletes).
+ */
+export function reportConservation(
+  roots: readonly RootComparison[],
+  comparedSummary: string
+): { status: Status; detail: string } {
+  const lossy = roots.filter((d) => d.raw > 10 && d.rows > 0 && d.rows / d.raw < 0.5);
+  if (lossy.length > 0) {
+    return {
+      status: 'WARN',
+      detail:
+        `collections losing >50% of documents: ` +
+        lossy.map((d) => `${d.root} ${d.raw}→${d.rows}`).join(', ') +
+        ` (legitimate for soft-deletes/dedup — confirm each)`,
+    };
+  }
+  return {
+    status: 'PASS',
+    detail:
+      `no collection loses more than half its documents ` +
+      `(${comparedSummary}; roots with 10 or fewer documents are below this ` +
+      `check's floor, and total losses are the total-decode-loss check's — see the ` +
+      `coverage check above)`,
   };
 }
 
@@ -262,51 +433,43 @@ export function reportExtinctDependencies(
 }
 
 /**
- * Non-empty documents under a normalized collection root.
- *
- * Shared by the decode-loss check and the extinct-candidate report so the two
- * cannot disagree about what "has documents" means. Fieldless Firestore parent
- * pointers are excluded for the reason spelled out on
- * {@link findExtinctDependencies}: they exist for any path with
- * subcollections and would make an extinct collection look alive.
- */
-export function nonEmptyRowsUnder(
-  root: string,
-  raw: ReadonlyMap<string, { total: number; empty: number }>
-): number {
-  let n = 0;
-  for (const [pattern, counts] of raw) {
-    if (pattern === root || pattern.startsWith(`${root}/`)) n += counts.total - counts.empty;
-  }
-  return n;
-}
-
-/**
- * Is this normalized pattern the ACCOUNT-document collection?
+ * Is this raw collection path the ACCOUNT-document collection?
  *
  * `users/<uid>/accounts` also ends in `/accounts` and is a different collection
  * with a different field vocabulary (`hidden`, not `user_hidden`) — the
- * ambiguity `docs/firestore-collections.md` warns about, and the reason this
- * is a named predicate rather than an inline `endsWith`.
+ * ambiguity `docs/firestore-collections.md` warns about.
  *
- * The exclusion is the decoder's own predicate,
- * `isUserAccountCustomizationCollection` (an `includes('users/')`, not a
- * `startsWith`), so it matches both decode paths' routing verbatim
- * (`decodeAccounts` and `decodeAllCollections` in `src/core/decoder.ts`).
- * Real paths are top-level today, so the two spellings agree — but this
- * check's whole value is that its row set is the one `processAccount` sees, and the permissive
- * spelling is the one that would quietly admit rows whose visibility
- * vocabulary this file cannot read.
- *
- * NOT the same definition check 1 uses: that one measures accounts as
- * `rawRows('accounts')`, root-anchored to the top-level collection, while this
- * admits every pattern whose leaf is `accounts`. Deliberate — check 1 compares a decoder's
- * output against the collection it names, this one wants every document the
- * account processor would route. Left asymmetric rather than unified.
+ * Delegates to the decoder's `routeCollection` (#778). It used to restate the
+ * rule (`includes('users/')` plus a leaf match) beside a second, root-prefix
+ * definition of "accounts" in checks 1 and 2; two spellings of one routing
+ * decision is the drift #778 fixed, so there is now one, and check 7's row set
+ * is by construction the one `processAccount` sees.
  */
-export function isAccountDocumentPattern(pattern: string): boolean {
-  if (isUserAccountCustomizationCollection(pattern)) return false;
-  return pattern === 'accounts' || pattern.endsWith('/accounts');
+export function isAccountDocumentCollection(collection: string): boolean {
+  return routeCollection(collection) === 'accounts';
+}
+
+/**
+ * Check 8's verdict for one known-but-unread collection (#666), extracted from
+ * `main()` (#778) for the reason {@link reportDecodeLossCoverage} gives.
+ */
+export function reportUnreadCollection(
+  pattern: string,
+  rows: number
+): { status: Status; detail: string } {
+  if (rows === 0) {
+    return {
+      status: 'PASS',
+      detail: `zero documents on this cache — consistent with the decoder's deletion (#666)`,
+    };
+  }
+  return {
+    status: 'WARN',
+    detail:
+      `${rows} document(s) — NOT extinct on this cache (${pattern}), and the decoder skips ` +
+      `them unread since #666. Open an issue with this cache as the counter-example and ` +
+      `decide whether the data needs a reader again`,
+  };
 }
 
 /**
@@ -374,11 +537,7 @@ export function readAccountVisibilityRow(
  *                          empty-`rows` set too.
  */
 export type DashboardActiveEvidence =
-  | 'independent'
-  | 'indistinguishable'
-  | 'no-negatives'
-  | 'absent'
-  | 'no-account-documents';
+  'independent' | 'indistinguishable' | 'no-negatives' | 'absent' | 'no-account-documents';
 
 /**
  * The three counts the verdict turns on, and the only numbers the check logs.
@@ -394,9 +553,7 @@ export interface DashboardActiveCounts {
   visibleNegatives: number;
 }
 
-export function countDashboardActive(
-  rows: readonly AccountVisibilityRow[]
-): DashboardActiveCounts {
+export function countDashboardActive(rows: readonly AccountVisibilityRow[]): DashboardActiveCounts {
   const carrying = rows.filter((row) => row.dashboardActive !== undefined);
   const negatives = carrying.filter((row) => row.dashboardActive === false);
   return {
@@ -492,16 +649,23 @@ async function main(): Promise<void> {
 
   if (!dbPath || !db.isAvailable()) {
     console.error('[cache-smoke] no-cache-found — no local Copilot cache; nothing to check.');
-    console.error('[cache-smoke] This is not a failure. Run on a machine with Copilot Money synced.');
+    console.error(
+      '[cache-smoke] This is not a failure. Run on a machine with Copilot Money synced.'
+    );
     process.exit(0);
   }
 
   console.error(`[cache-smoke] scanning real cache`);
 
   // ---------------------------------------------------------------------
-  // Raw scan: what is actually on disk, by normalized collection path.
+  // Raw scan: what is actually on disk, by normalized collection path and by
+  // the decoder route each document takes.
   // ---------------------------------------------------------------------
   const raw = new Map<string, { total: number; empty: number }>();
+  // Per decoder route, counted through `routeCollection` on the RAW path — the
+  // same function on the same input as `decodeAllCollections`, so checks 1, 2,
+  // 7 and 8 compare against exactly the documents the decoder routed (#778).
+  const routed: RoutedCounts = new Map();
   // `${collection}:${path}` → how many documents carry a non-finite value there.
   const nonFinite = new Map<string, number>();
   // Account documents reduced to two booleans for check 7. PII-safe by
@@ -522,13 +686,14 @@ async function main(): Promise<void> {
     // Firestore parent-pointer documents carry no fields. They are structural,
     // not data, and must not be counted as decodable rows.
     if (doc.fields.size === 0) entry.empty++;
+    tallyRoutedDocument(routed, doc.collection, doc.fields.size === 0);
 
     for (const leafPath of nonFiniteLeafPaths(doc.fields)) {
       const key = `${pattern}:${leafPath}`;
       nonFinite.set(key, (nonFinite.get(key) ?? 0) + 1);
     }
 
-    if (doc.fields.size > 0 && isAccountDocumentPattern(pattern)) {
+    if (doc.fields.size > 0 && isAccountDocumentCollection(doc.collection)) {
       accountRows.push(readAccountVisibilityRow(doc.fields));
     }
   }
@@ -540,9 +705,6 @@ async function main(): Promise<void> {
     `${scanned} documents across ${raw.size} collection patterns in ${elapsed}s`
   );
 
-  /** Non-empty raw documents under a collection root. */
-  const rawRows = (root: string): number => nonEmptyRowsUnder(root, raw);
-
   const all = await decodeAllCollections(dbPath);
 
   // ---------------------------------------------------------------------
@@ -552,52 +714,23 @@ async function main(): Promise<void> {
   // decoder produces zero rows. Nothing else in the suite notices, because a
   // fixture-backed test only proves the decoder agrees with its author.
   // ---------------------------------------------------------------------
-  const decoded: Array<{ root: string; rows: number }> = [
-    { root: 'transactions', rows: all.transactions.length },
-    { root: 'accounts', rows: all.accounts.length },
-    { root: 'items', rows: all.items.length },
-    { root: 'categories', rows: all.categories.length },
-    { root: 'budgets', rows: all.budgets.length },
-    { root: 'financial_goals', rows: all.goals.length },
-    { root: 'investment_prices', rows: all.investmentPrices.length },
-    { root: 'securities', rows: all.securities.length },
-    { root: 'tags', rows: all.tags.length },
-  ];
-
-  const withRaw = decoded.map((d) => ({ ...d, raw: rawRows(d.root) }));
+  const withRaw = compareRoots(decodedRoots(all), routed);
   // Computed before check 1 reports, because check 1's own PASS quotes how many
   // roots it compared and that count belongs to one tested function (#763).
   const coverage = reportDecodeLossCoverage(withRaw);
-  const blackHoles = withRaw.filter((d) => isTotalDecodeLoss(d.raw, d.rows));
-  if (blackHoles.length > 0) {
-    record(
-      'total decode loss',
-      'FAIL',
-      `collections with documents on disk but ZERO decoded rows: ` +
-        blackHoles.map((d) => `${d.root} (${d.raw} docs)`).join(', ')
-    );
-  } else {
-    record(
-      'total decode loss',
-      'PASS',
-      `every collection with documents decoded at least one row ` +
-        `(${coverage.comparedSummary} — see the coverage check below)`
-    );
-  }
+  const totalLoss = reportTotalDecodeLoss(withRaw, coverage.comparedSummary);
+  record('total decode loss', totalLoss.status, totalLoss.detail);
 
   // ---------------------------------------------------------------------
-  // Check 1b — decode-loss coverage (#763).
+  // Check 1b — decode-loss coverage (#763, #778).
   //
-  // What checks 1 and 2 could not see. Both read the raw side root-anchored
-  // while the decoder routes leaf-anchored, so a root whose documents live at
-  // a nested path is compared against nothing and passes vacuously. Reported
-  // as its own line rather than folded into check 1's detail: a caveat inside
-  // another check's PASS is read as part of the pass.
-  //
-  // This WARNs on every real cache today, which is its own hazard — a
-  // permanently-yellow line is read as furniture, and a SEVENTH root joining
-  // the set would move 6/9 to 7/9 unnoticed. Re-anchoring the roots, and
-  // ratcheting this on growth until that lands, are #778.
+  // Rows with no non-empty document behind them. Under #763 this WARNed on
+  // every real cache, because the raw side was root-anchored and six roots read
+  // zero. #778 routes the raw side through the decoder, so on a healthy cache
+  // this PASSes and a hit is a phantom-row or root-mapping defect — see
+  // `reportDecodeLossCoverage`. Reported as its own line rather than folded
+  // into check 1's detail: a caveat inside another check's PASS is read as part
+  // of the pass.
   // ---------------------------------------------------------------------
   record('decode-loss coverage', coverage.status, coverage.detail);
 
@@ -607,37 +740,11 @@ async function main(): Promise<void> {
   // Large unexplained shrinkage between disk and output. Some loss is
   // legitimate (dedup, tombstones, soft-deletes), so this warns rather than
   // fails; #622 discarded 91% of investment_prices and would have shown here
-  // long before anyone read the output.
-  //
-  // Shares check 1's blind spot, and for the same reason: `d.raw > 10` is
-  // never true for a root the raw side cannot find, so check 1b's WARN is the
-  // coverage statement for this check too (#763) — which is why its PASS
-  // quotes the same figure rather than leaving the caveat in this comment,
-  // where the output never shows it. The figure is anchoring coverage, not
-  // this check's own comparison count: the filter below narrows twice more on
-  // top of it, by the `> 10` noise floor and by `rows > 0`, which leaves a
-  // total loss to check 1 so one root cannot be reported as two findings.
+  // long before anyone read the output. The three narrowings of its filter, and
+  // the sentence that must name them, live in `reportConservation`.
   // ---------------------------------------------------------------------
-  const lossy = withRaw.filter((d) => d.raw > 10 && d.rows > 0 && d.rows / d.raw < 0.5);
-
-  if (lossy.length > 0) {
-    record(
-      'conservation',
-      'WARN',
-      `collections losing >50% of documents: ` +
-        lossy.map((d) => `${d.root} ${d.raw}→${d.rows}`).join(', ') +
-        ` (legitimate for soft-deletes/dedup — confirm each)`
-    );
-  } else {
-    record(
-      'conservation',
-      'PASS',
-      `no collection loses more than half its documents ` +
-        `(${coverage.comparedSummary}; roots with 10 or fewer documents are below this ` +
-        `check's floor, and total losses are the total-decode-loss check's — see the ` +
-        `coverage check above)`
-    );
-  }
+  const conservation = reportConservation(withRaw, coverage.comparedSummary);
+  record('conservation', conservation.status, conservation.detail);
 
   // ---------------------------------------------------------------------
   // Check 3 — extinct dependencies.
@@ -723,19 +830,35 @@ async function main(): Promise<void> {
   // real cache, because the fixtures did not have the nesting that broke it.
   // ---------------------------------------------------------------------
   const parity: Array<{ name: string; standalone: () => Promise<unknown[]>; aggregate: number }> = [
-    { name: 'transactions', standalone: () => decodeTransactions(dbPath), aggregate: all.transactions.length },
+    {
+      name: 'transactions',
+      standalone: () => decodeTransactions(dbPath),
+      aggregate: all.transactions.length,
+    },
     { name: 'accounts', standalone: () => decodeAccounts(dbPath), aggregate: all.accounts.length },
-    { name: 'recurring', standalone: () => decodeRecurring(dbPath), aggregate: all.recurring.length },
+    {
+      name: 'recurring',
+      standalone: () => decodeRecurring(dbPath),
+      aggregate: all.recurring.length,
+    },
     { name: 'budgets', standalone: () => decodeBudgets(dbPath), aggregate: all.budgets.length },
     { name: 'financial_goals', standalone: () => decodeGoals(dbPath), aggregate: all.goals.length },
-    { name: 'goal_history', standalone: () => decodeGoalHistory(dbPath), aggregate: all.goalHistory.length },
+    {
+      name: 'goal_history',
+      standalone: () => decodeGoalHistory(dbPath),
+      aggregate: all.goalHistory.length,
+    },
     {
       name: 'investment_prices',
       standalone: () => decodeInvestmentPrices(dbPath),
       aggregate: all.investmentPrices.length,
     },
     { name: 'items', standalone: () => decodeItems(dbPath), aggregate: all.items.length },
-    { name: 'categories', standalone: () => decodeCategories(dbPath), aggregate: all.categories.length },
+    {
+      name: 'categories',
+      standalone: () => decodeCategories(dbPath),
+      aggregate: all.categories.length,
+    },
   ];
 
   const mismatches: string[] = [];
@@ -755,7 +878,11 @@ async function main(): Promise<void> {
         `which one runs depends on load order`
     );
   } else {
-    record('decode-path parity', 'PASS', `all ${parity.length} collections agree across both paths`);
+    record(
+      'decode-path parity',
+      'PASS',
+      `all ${parity.length} collections agree across both paths`
+    );
   }
 
   // ---------------------------------------------------------------------
@@ -837,8 +964,8 @@ async function main(): Promise<void> {
         `${counts} — no account documents were collected at all, so the check is ` +
           `measuring nothing. ` +
           `Zero accounts on a real cache is itself surprising, so suspect a moved ` +
-          `collection path over an empty cache, and compare isAccountDocumentPattern ` +
-          `against the decoder's routing`
+          `collection path over an empty cache, and check the decoder's routeCollection ` +
+          `still sends account documents to 'accounts'`
       );
       break;
   }
@@ -850,8 +977,9 @@ async function main(): Promise<void> {
   // when code DEPENDS on an empty collection. Nothing depends on this one —
   // #624 moved the hidden filter and #660 moved the name map onto the account
   // documents — and #666 deleted its decoder, model and fixtures. The decoder
-  // still NAMES the path (`isUserAccountCustomizationCollection`) so that its
-  // documents are skipped rather than routed as accounts.
+  // still NAMES the path (`isUserAccountCustomizationCollection`, the first
+  // clause of `routeCollection`, route `user_accounts`) so that its documents
+  // are skipped rather than routed as accounts.
   //
   // One cache cannot prove a collection extinct (#622's sampling-bias trap,
   // which #624 attached to exactly this deletion). The deletion was taken on
@@ -859,24 +987,12 @@ async function main(): Promise<void> {
   // check keeps watching: a cache where the collection is populated again
   // turns WARN, and that is the cue to decide whether the data needs a reader.
   // ---------------------------------------------------------------------
-  const UNREAD_COLLECTIONS = ['users/*/accounts'] as const;
-  for (const pattern of UNREAD_COLLECTIONS) {
-    const rows = nonEmptyRowsUnder(pattern, raw);
-    if (rows === 0) {
-      record(
-        `unread collection: ${pattern}`,
-        'PASS',
-        `zero documents on this cache — consistent with the decoder's deletion (#666)`
-      );
-    } else {
-      record(
-        `unread collection: ${pattern}`,
-        'WARN',
-        `${rows} document(s) — NOT extinct on this cache, and the decoder skips them ` +
-          `unread since #666. Open an issue with this cache as the counter-example ` +
-          `and decide whether the data needs a reader again`
-      );
-    }
+  // Counted by decoder route (#778), not by root prefix, so it counts exactly
+  // the documents the decoder recognises as this collection and skips.
+  const UNREAD_COLLECTIONS = [{ pattern: 'users/*/accounts', route: 'user_accounts' }] as const;
+  for (const { pattern, route } of UNREAD_COLLECTIONS) {
+    const unread = reportUnreadCollection(pattern, routedNonEmpty(route, routed));
+    record(`unread collection: ${pattern}`, unread.status, unread.detail);
   }
 
   // ---------------------------------------------------------------------

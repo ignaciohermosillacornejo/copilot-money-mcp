@@ -1183,7 +1183,7 @@ describe('decoder coverage', () => {
       // The collection's reader was deleted in #666, but its path still ends in
       // `/accounts`, so without an explicit skip the leaf-matching account
       // routing would turn these customization documents into account rows.
-      // Both decode paths are checked: they route independently.
+      // Both decode paths are checked; since #778 both ask routeCollection.
       //
       // The customization doc carries `current_balance` on purpose. Without it
       // processAccount rejects the row by itself, and the test would stay green

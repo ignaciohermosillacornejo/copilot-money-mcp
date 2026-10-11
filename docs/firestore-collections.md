@@ -206,9 +206,10 @@ Former user overrides for account display. **Known but deliberately not decoded.
 >
 > The path is still NAMED in `src/core/decoder.ts` as `isUserAccountCustomizationCollection`.
 > It ends in `/accounts`, so the leaf-matching account routing would otherwise decode its
-> documents as real accounts. `decodeAccounts`, `decodeAllCollections` and
-> `scripts/decode-coverage.ts` all skip it through that predicate, so it counts as
-> accounted for rather than unknown. `scripts/smoke/cache.ts` check 8 reports its document
+> documents as real accounts. It is the first clause of `routeCollection` (route
+> `user_accounts`, no processor), and `decodeAccounts`, `decodeAllCollections` and
+> `scripts/decode-coverage.ts` all route through that one function (#778), so it is skipped
+> by every path and counts as accounted for rather than unknown. `scripts/smoke/cache.ts` check 8 reports its document
 > count on every run, and a non-zero count turns WARN.
 
 The field shape the deleted decoder read, kept so it stays recoverable:

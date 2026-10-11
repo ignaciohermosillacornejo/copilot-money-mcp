@@ -6,7 +6,10 @@
  * threshold would make the whole gate decorative.
  */
 
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect, afterAll } from 'bun:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   normalizeCollection,
   isTotalDecodeLoss,
@@ -16,14 +19,30 @@ import {
   findExtinctDependencies,
   reportExtinctDependencies,
   nonFiniteLeafPaths,
-  nonEmptyRowsUnder,
-  isAccountDocumentPattern,
+  isAccountDocumentCollection,
+  tallyRoutedDocument,
+  routedNonEmpty,
+  compareRoots,
+  decodedRoots,
+  reportTotalDecodeLoss,
+  reportConservation,
+  reportUnreadCollection,
+  ROUTE_ROWS,
+  ROUTES_NOT_COMPARED,
   readAccountVisibilityRow,
   countDashboardActive,
   classifyDashboardActive,
 } from '../../scripts/smoke/cache.js';
-import type { AccountVisibilityRow, RootComparison } from '../../scripts/smoke/cache.js';
+import type { CollectionRoute } from '../../src/core/decoder.js';
+import type {
+  AccountVisibilityRow,
+  RootComparison,
+  RoutedCounts,
+} from '../../scripts/smoke/cache.js';
 import type { FirestoreValue } from '../../src/core/protobuf-parser.js';
+import { iterateDocuments } from '../../src/core/leveldb-reader.js';
+import { decodeAllCollections, COLLECTION_ROUTES } from '../../src/core/decoder.js';
+import { createDeepTestDb, createEmptyDb } from '../helpers/test-db.js';
 import { isVisibleAccount } from '../../src/models/account.js';
 import type { Account } from '../../src/models/account.js';
 
@@ -135,30 +154,36 @@ describe('reportDecodeLossCoverage', () => {
     { root: 'investment_prices', raw: 498, rows: 498 },
   ];
 
-  test('WARNs when a root decoded rows the raw side never found', () => {
-    // The branch that did not exist before #763: without it this list produces
-    // the same output as `healthy`, which is the vacuous PASS itself.
+  test('FAILs when a root decoded rows with no non-empty document behind them', () => {
+    // Before #778 this was a permanent WARN: the raw side was root-anchored, so
+    // six roots read 0 on every real cache and the line was yellow forever.
+    // The raw side now routes through the decoder's own `routeCollection`, so
+    // anchoring can no longer produce this shape. What can: rows built from
+    // fieldless documents (#627's phantom items), or a root mapped to the wrong
+    // route. Both are defects in this repo, not facts about the cache.
     const { status } = reportDecodeLossCoverage([
       ...healthy,
       { root: 'accounts', raw: 0, rows: 21 },
     ]);
-    expect(status).toBe('WARN');
+    expect(status).toBe('FAIL');
   });
 
-  test('the WARN names the roots it could not measure', () => {
+  test('the FAIL names the roots and both causes', () => {
     const { detail } = reportDecodeLossCoverage([
       ...healthy,
       { root: 'accounts', raw: 0, rows: 21 },
       { root: 'tags', raw: 0, rows: 11 },
     ]);
-    expect(detail).toContain('accounts');
-    expect(detail).toContain('tags');
+    expect(detail).toContain('accounts (0 raw → 21 rows)');
+    expect(detail).toContain('tags (0 raw → 11 rows)');
     expect(detail).toContain('2/4');
-    // A yellow line that does not say why is a line people learn to skip.
-    expect(detail).toContain('measuring nothing');
+    // A red line that does not say where to look is a line people re-run
+    // until it goes away.
+    expect(detail).toContain('fieldless');
+    expect(detail).toContain('route');
   });
 
-  test('the WARN does not name a root it did measure', () => {
+  test('the FAIL does not name a root it did measure', () => {
     // Listing a healthy root would make the reason false for it, and the
     // reader cannot tell which half of the list to believe.
     const { detail } = reportDecodeLossCoverage([
@@ -169,27 +194,25 @@ describe('reportDecodeLossCoverage', () => {
   });
 
   test('PASSes when every root had raw documents to compare against', () => {
-    // The other direction: a healthy cache must not warn, or the WARN is noise
-    // on every run and stops being read.
+    // The state every real cache is expected to be in after #778. If this
+    // were not reachable the check would be furniture in the other colour.
     const { status, detail } = reportDecodeLossCoverage(healthy);
     expect(status).toBe('PASS');
     expect(detail).toContain('all 2 roots');
   });
 
-  test('a total decode loss is left to check 1 rather than warned about here', () => {
-    // raw > 0 and zero rows is the #622 FAIL. Reporting it as a coverage WARN
-    // would downgrade the only failing status this file has.
+  test('a total decode loss is left to check 1 rather than reported here', () => {
+    // raw > 0 and zero rows is the #622 FAIL. Reporting it twice would make one
+    // finding read as two.
     expect(
       reportDecodeLossCoverage([{ root: 'investment_prices', raw: 863, rows: 0 }]).status
     ).toBe('PASS');
   });
 
   test('an empty comparison list SKIPs rather than passing over nothing', () => {
-    // A PASS over an empty list is the same true-of-nothing line this whole
-    // change removes, and the sibling reporter already answers the
-    // empty case with SKIP. Unreachable today; wrong if it ever were reached —
-    // which is also why the summary it carries is pinned rather than assumed:
-    // the knowingly-unreached branch is the one nothing else would notice.
+    // A PASS over an empty list is the true-of-nothing line #763 removed.
+    // Unreachable today; wrong if it ever were reached — which is also why the
+    // summary it carries is pinned rather than assumed.
     const { status, comparedSummary } = reportDecodeLossCoverage([]);
     expect(status).toBe('SKIP');
     expect(comparedSummary).toBe('0/0 roots had raw documents at all');
@@ -208,23 +231,275 @@ describe('reportDecodeLossCoverage', () => {
     expect(comparedSummary).toBe('2/4 roots had raw documents at all');
   });
 
-  test('the summary checks 1 and 2 quote comes from here, already assembled', () => {
-    // Returned as a finished fragment, not as two numbers: `main()` cannot be
-    // reached by a test, so anything it has to combine itself is asserted
-    // nowhere. One field leaves no way to combine it wrongly.
-    const roots: RootComparison[] = [
-      { root: 'securities', raw: 16, rows: 16 },
-      { root: 'tags', raw: 0, rows: 11 },
-    ];
-    expect(reportDecodeLossCoverage(roots).comparedSummary).toBe(
-      '1/2 roots had raw documents at all'
-    );
-  });
-
   test('reports zero measured when nothing on the list had raw documents', () => {
     expect(reportDecodeLossCoverage([{ root: 'tags', raw: 0, rows: 11 }]).comparedSummary).toBe(
       '0/1 roots had raw documents at all'
     );
+  });
+});
+
+describe('reportTotalDecodeLoss', () => {
+  // Check 1's verdict, extracted from `main()` (#778) for the reason #777 gave
+  // for check 1b: a status branch only a real cache executes is asserted nowhere.
+  const summary = '2/2 roots had raw documents at all';
+
+  test('FAILs and names every root with documents and zero rows (the #622 shape)', () => {
+    const { status, detail } = reportTotalDecodeLoss(
+      [
+        { root: 'investment_prices', raw: 863, rows: 0 },
+        { root: 'securities', raw: 16, rows: 16 },
+        { root: 'tags', raw: 4, rows: 0 },
+      ],
+      summary
+    );
+    expect(status).toBe('FAIL');
+    expect(detail).toContain('investment_prices (863 docs)');
+    expect(detail).toContain('tags (4 docs)');
+    expect(detail).not.toContain('securities');
+  });
+
+  test('PASSes when every root with documents decoded something, quoting coverage', () => {
+    // The PASS must carry the coverage figure: a decode-loss pass is only as
+    // good as the number of roots the raw side could see.
+    const { status, detail } = reportTotalDecodeLoss(
+      [
+        { root: 'securities', raw: 16, rows: 16 },
+        { root: 'investment_prices', raw: 863, rows: 78 },
+      ],
+      summary
+    );
+    expect(status).toBe('PASS');
+    expect(detail).toContain(summary);
+  });
+
+  test('a root empty on both sides is not a loss', () => {
+    expect(reportTotalDecodeLoss([{ root: 'tags', raw: 0, rows: 0 }], summary).status).toBe('PASS');
+  });
+});
+
+describe('reportConservation', () => {
+  const summary = '9/9 roots had raw documents at all';
+
+  test('WARNs on a root that kept under half its documents', () => {
+    const { status, detail } = reportConservation(
+      [
+        { root: 'investment_prices', raw: 863, rows: 78 },
+        { root: 'securities', raw: 16, rows: 16 },
+      ],
+      summary
+    );
+    expect(status).toBe('WARN');
+    expect(detail).toContain('investment_prices 863→78');
+    expect(detail).not.toContain('securities');
+  });
+
+  test('exactly half is not a loss of MORE than half', () => {
+    expect(reportConservation([{ root: 'tags', raw: 20, rows: 10 }], summary).status).toBe('PASS');
+    expect(reportConservation([{ root: 'tags', raw: 20, rows: 9 }], summary).status).toBe('WARN');
+  });
+
+  test('a root at or below the 10-document floor never warns', () => {
+    // `raw > 10`, not `>= 10`: ten documents decoding to one row is below the
+    // floor. The PASS text says "10 or fewer", and this pins the two together.
+    expect(reportConservation([{ root: 'tags', raw: 10, rows: 1 }], summary).status).toBe('PASS');
+    expect(reportConservation([{ root: 'tags', raw: 11, rows: 1 }], summary).status).toBe('WARN');
+  });
+
+  test('a total loss is left to the total-decode-loss check', () => {
+    // `rows > 0`: one root, one finding.
+    expect(reportConservation([{ root: 'tags', raw: 863, rows: 0 }], summary).status).toBe('PASS');
+  });
+
+  test('the PASS names all three narrowings of the filter, and the coverage', () => {
+    // The invariant that drifted through four review rounds on #777: the
+    // sentence must describe the predicate. Each narrowing is pinned by a test
+    // above, so a change to one fails both there and here.
+    const { status, detail } = reportConservation(
+      [{ root: 'securities', raw: 16, rows: 16 }],
+      summary
+    );
+    expect(status).toBe('PASS');
+    expect(detail).toContain('more than half'); // the ratio
+    expect(detail).toContain('10 or fewer documents'); // raw > 10
+    expect(detail).toContain('total losses'); // rows > 0
+    expect(detail).toContain(summary);
+  });
+});
+
+describe('routed raw counts (#778)', () => {
+  const ITEM = 'itm_5pQw8ZnRvL3MxK7cHt2J';
+  const ACCT = 'acc_9wKe4RnTpB2XvL7mQd3F';
+  const USER = 'usr_3hTq7WmZ2xKv9LpR4cNb';
+
+  test('a nested document counts toward the route the decoder sends it to', () => {
+    // The six roots the root-prefix count could not see were all nested.
+    const routed: RoutedCounts = new Map();
+    tallyRoutedDocument(routed, `items/${ITEM}/accounts/${ACCT}/transactions`, false);
+    tallyRoutedDocument(routed, `users/${USER}/tags`, false);
+    expect(routedNonEmpty('transactions', routed)).toBe(1);
+    expect(routedNonEmpty('tags', routed)).toBe(1);
+  });
+
+  test('items no longer sums the subcollections beneath it', () => {
+    // The other half of the same bug: by root prefix, `items` counted every
+    // account, transaction and balance document under every item.
+    const routed: RoutedCounts = new Map();
+    tallyRoutedDocument(routed, 'items', false);
+    tallyRoutedDocument(routed, `items/${ITEM}/accounts`, false);
+    tallyRoutedDocument(routed, `items/${ITEM}/accounts/${ACCT}/transactions`, false);
+    tallyRoutedDocument(routed, `items/${ITEM}/accounts/${ACCT}/balance_history`, false);
+    expect(routedNonEmpty('items', routed)).toBe(1);
+  });
+
+  test('the user-customization accounts collection is not counted as accounts', () => {
+    // Why this is not a blanket switch to leaf matching: both end in
+    // `/accounts`, and only one of them is what processAccount reads.
+    const routed: RoutedCounts = new Map();
+    tallyRoutedDocument(routed, `users/${USER}/accounts`, false);
+    tallyRoutedDocument(routed, `items/${ITEM}/accounts`, false);
+    expect(routedNonEmpty('accounts', routed)).toBe(1);
+    expect(routedNonEmpty('user_accounts', routed)).toBe(1);
+  });
+
+  test('fieldless parent pointers are tallied but not counted as rows', () => {
+    const routed: RoutedCounts = new Map();
+    tallyRoutedDocument(routed, 'items', true);
+    tallyRoutedDocument(routed, 'items', true);
+    tallyRoutedDocument(routed, 'items', false);
+    expect(routed.get('items')).toEqual({ total: 3, empty: 2 });
+    expect(routedNonEmpty('items', routed)).toBe(1);
+  });
+
+  test('an unrouted collection is ignored, and an absent route reads as zero', () => {
+    const routed: RoutedCounts = new Map();
+    tallyRoutedDocument(routed, 'never_existed', false);
+    expect(routed.size).toBe(0);
+    expect(routedNonEmpty('tags', routed)).toBe(0);
+  });
+
+  test('compareRoots pairs each decoded root with its routed raw count', () => {
+    const routed: RoutedCounts = new Map([
+      ['tags', { total: 5, empty: 1 }],
+      ['items', { total: 40, empty: 27 }],
+    ]);
+    expect(
+      compareRoots(
+        [
+          { root: 'tags', rows: 4 },
+          { root: 'items', rows: 13 },
+          { root: 'budgets', rows: 0 },
+        ],
+        routed
+      )
+    ).toEqual([
+      { root: 'tags', raw: 4, rows: 4 },
+      { root: 'items', raw: 13, rows: 13 },
+      { root: 'budgets', raw: 0, rows: 0 },
+    ]);
+  });
+});
+
+describe('checks 1 and 2 measure every root on the real nested layout (#778)', () => {
+  // The class-level detector. Every unit test above feeds hand-built counts,
+  // which is exactly how the root-prefix bug survived: the fixtures were
+  // top-level collections, so root and leaf anchoring agreed on them. This one
+  // writes each of the nine roots at the NESTED path a real cache uses, runs
+  // the real decoder over it, and requires the smoke's raw side to see every
+  // root the decoder produced rows for.
+  const FIXTURES_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'smoke-cache-routing-'));
+  afterAll(() => fs.rmSync(FIXTURES_DIR, { recursive: true, force: true }));
+
+  const ITEM = 'itm_5pQw8ZnRvL3MxK7cHt2J';
+  const ACCT = 'acc_9wKe4RnTpB2XvL7mQd3F';
+  const USER = 'usr_3hTq7WmZ2xKv9LpR4cNb';
+  const SEC = 'sec_8nVc2KpX5tLm3QwR7zHd';
+
+  test('no root is unmeasured and none sums a neighbour', async () => {
+    const dbPath = path.join(FIXTURES_DIR, 'nested');
+    await createDeepTestDb(dbPath, [
+      { collection: 'items', id: ITEM, fields: { institution_name: 'Synthetic Bank' } },
+      {
+        collection: `items/${ITEM}/accounts`,
+        id: ACCT,
+        fields: { name: 'Synthetic Checking', current_balance: 100, item_id: ITEM },
+      },
+      {
+        collection: `items/${ITEM}/accounts/${ACCT}/transactions`,
+        id: 'txn_2vLq9XmT4kRz7PwN3cHb',
+        fields: { amount: 100, date: '2026-01-15', name: 'Synthetic Merchant', account_id: ACCT },
+      },
+      {
+        collection: `items/${ITEM}/accounts/${ACCT}/balance_history`,
+        id: '2026-01-15',
+        fields: { current_balance: 100 },
+      },
+      // A user-customization account: same leaf, must not join `accounts`.
+      {
+        collection: `users/${USER}/accounts`,
+        id: ACCT,
+        fields: { name: 'Custom Name', hidden: false },
+      },
+      {
+        collection: `users/${USER}/categories`,
+        id: 'cat_7Kd2mQxZ1vBnR4pLcS9t',
+        fields: { name: 'Synthetic Category' },
+      },
+      {
+        collection: `users/${USER}/budgets`,
+        id: 'bud_4kWzR8nVq2XmT7pLc3Hd',
+        fields: { amount: 200, category_id: 'cat_7Kd2mQxZ1vBnR4pLcS9t' },
+      },
+      {
+        collection: `users/${USER}/financial_goals`,
+        id: 'gol_6rLpX3mQw9KzT2vN8cHb',
+        fields: { name: 'Synthetic Goal' },
+      },
+      {
+        collection: `users/${USER}/tags`,
+        id: 'tag_3hTq7WmZ2xKv9LpR4cNb',
+        fields: { name: 'Synthetic Tag' },
+      },
+      { collection: 'securities', id: SEC, fields: { ticker_symbol: 'SYN' } },
+      {
+        collection: `investment_prices/${SEC}/daily`,
+        id: '2026-01',
+        fields: { prices: { '1768435200000': 100 } },
+      },
+    ]);
+
+    const routed: RoutedCounts = new Map();
+    for await (const doc of iterateDocuments(dbPath)) {
+      tallyRoutedDocument(routed, doc.collection, doc.fields.size === 0);
+    }
+    const roots = compareRoots(decodedRoots(await decodeAllCollections(dbPath)), routed);
+
+    // Vacuity guard: the fixture must actually produce a row for every route it
+    // seeds, or "no root is unmeasured" is true of a list of zeroes. The other
+    // compared routes read 0 on both sides here, which the next line accepts.
+    const seeded: readonly CollectionRoute[] = [
+      'transactions',
+      'accounts',
+      'items',
+      'categories',
+      'budgets',
+      'financial_goals',
+      'investment_prices',
+      'securities',
+      'tags',
+      'balance_history',
+    ];
+    // Read from `seeded`, not from `roots`, so a seeded route that dropped out
+    // of the comparison fails here instead of being filtered past.
+    expect(seeded.filter((s) => !roots.find((r) => r.root === s)?.rows)).toEqual([]);
+    expect(roots.filter((r) => isUnmeasuredRoot(r.raw, r.rows)).map((r) => r.root)).toEqual([]);
+    expect(reportDecodeLossCoverage(roots).status).toBe('PASS');
+    // And `items` is the one item document, not the four beneath it.
+    expect(roots.find((r) => r.root === 'items')).toEqual({ root: 'items', raw: 1, rows: 1 });
+    // Route-anchored, not leaf-anchored: the users/<uid>/accounts document shares
+    // this leaf and must be counted under user_accounts (unread since #666, so
+    // not compared — check 8 counts it), not here.
+    expect(roots.find((r) => r.root === 'accounts')).toEqual({ root: 'accounts', raw: 1, rows: 1 });
+    expect(routedNonEmpty('user_accounts', routed)).toBe(1);
   });
 });
 
@@ -343,6 +618,21 @@ describe('reportExtinctDependencies', () => {
   });
 });
 
+describe('reportUnreadCollection', () => {
+  test('PASSes with zero documents — consistent with the decoder deletion (#666)', () => {
+    const { status, detail } = reportUnreadCollection('users/*/accounts', 0);
+    expect(status).toBe('PASS');
+    expect(detail).toContain('zero documents');
+  });
+
+  test('WARNs when the unread collection has documents again, naming it', () => {
+    const { status, detail } = reportUnreadCollection('users/*/accounts', 3);
+    expect(status).toBe('WARN');
+    expect(detail).toContain('3 document(s)');
+    expect(detail).toContain('users/*/accounts');
+  });
+});
+
 describe('nonFiniteLeafPaths', () => {
   const num = (value: number): FirestoreValue => ({ type: 'double', value });
 
@@ -413,58 +703,37 @@ describe('nonFiniteLeafPaths', () => {
   });
 });
 
-describe('nonEmptyRowsUnder', () => {
-  const raw = new Map([
-    ['items/*/accounts', { total: 30, empty: 9 }],
-    ['items/*/accounts/*/transactions', { total: 1000, empty: 0 }],
-    ['users/*/accounts', { total: 438, empty: 438 }],
-    ['accounts_archive', { total: 5, empty: 0 }],
-  ]);
-
-  test('sums a root and its subcollections, excluding parent pointers', () => {
-    expect(nonEmptyRowsUnder('items/*/accounts', raw)).toBe(21 + 1000);
-  });
-
-  test('reads an all-parent-pointer collection as zero rows', () => {
-    // The extinct-candidate report turns on this number, so counting the 438
-    // structural documents would report a dead collection as alive.
-    expect(nonEmptyRowsUnder('users/*/accounts', raw)).toBe(0);
-  });
-
-  test('returns zero for a collection the cache does not have', () => {
-    expect(nonEmptyRowsUnder('never/*/existed', raw)).toBe(0);
-  });
-
-  test('matches on a path SEGMENT, not a string prefix', () => {
-    // 'accounts_archive' starts with neither 'accounts' nor 'accounts/'; a
-    // bare startsWith would fold it into the accounts total.
-    expect(nonEmptyRowsUnder('accounts', raw)).toBe(0);
-  });
-});
-
-describe('isAccountDocumentPattern', () => {
-  test.each([['accounts'], ['items/*/accounts']])('accepts %s', (pattern) => {
-    expect(isAccountDocumentPattern(pattern)).toBe(true);
+describe('isAccountDocumentCollection', () => {
+  // Delegates to the decoder's `routeCollection` (#778) instead of keeping a
+  // second spelling of the rule, so check 7's row set is by construction the
+  // one processAccount sees.
+  test.each([['accounts'], ['items/itm_5pQw8ZnRvL3MxK7cHt2J/accounts']])('accepts %s', (c) => {
+    expect(isAccountDocumentCollection(c)).toBe(true);
   });
 
   test('rejects the user-customization collection that shares the leaf', () => {
     // Both end in '/accounts' and the two have different field vocabularies —
     // 'hidden' there, 'user_hidden' here. Mixing them would feed check 7 rows
     // whose visibility is unreadable.
-    expect(isAccountDocumentPattern('users/*/accounts')).toBe(false);
+    expect(isAccountDocumentCollection('users/usr_3hTq7WmZ2xKv9LpR4cNb/accounts')).toBe(false);
   });
 
   test('rejects a NESTED user-customization path, as the decoder does', () => {
-    // The decoder skips on `collection.includes('users/')` (see
-    // isUserAccountCustomizationCollection), so a path with the segment
-    // anywhere never reaches processAccount. A startsWith-based
-    // predicate here would admit it and read `user_hidden` off a document
-    // that spells the flag `hidden`.
-    expect(isAccountDocumentPattern('tenants/*/users/*/accounts')).toBe(false);
+    // The decoder routes on `collection.includes('users/')`, so a path with
+    // the segment anywhere routes to user_accounts and is skipped unread.
+    expect(isAccountDocumentCollection('tenants/t_1/users/usr_3hTq7WmZ2xKv9LpR4cNb/accounts')).toBe(
+      false
+    );
+  });
+
+  test('rejects the Plaid account documents and subcollections beneath an account', () => {
+    const acct = 'items/itm_5pQw8ZnRvL3MxK7cHt2J/accounts/acc_9wKe4RnTpB2XvL7mQd3F';
+    expect(isAccountDocumentCollection(acct)).toBe(false);
+    expect(isAccountDocumentCollection(`${acct}/balance_history`)).toBe(false);
   });
 
   test('rejects an unrelated collection', () => {
-    expect(isAccountDocumentPattern('transactions')).toBe(false);
+    expect(isAccountDocumentCollection('transactions')).toBe(false);
   });
 });
 
@@ -629,4 +898,33 @@ describe('readAccountVisibilityRow agrees with isVisibleAccount (for now)', () =
       expect(row.invisible).toBe(!isVisibleAccount(account));
     }
   );
+});
+
+describe('every decoder route is compared or excluded with a reason (#778)', () => {
+  // The two Record types already make a missing or doubled route a compile
+  // error; this is the runtime half, so a cast cannot get one past.
+  test('ROUTE_ROWS and ROUTES_NOT_COMPARED partition COLLECTION_ROUTES', () => {
+    const compared = Object.keys(ROUTE_ROWS);
+    const excluded = Object.keys(ROUTES_NOT_COMPARED);
+    expect(compared.filter((r) => excluded.includes(r))).toEqual([]);
+    expect([...compared, ...excluded].sort()).toEqual([...COLLECTION_ROUTES].sort());
+  });
+
+  test('every exclusion states why', () => {
+    for (const reason of Object.values(ROUTES_NOT_COMPARED)) {
+      expect(reason.length).toBeGreaterThan(40);
+    }
+  });
+
+  test('decodedRoots yields every compared route, in routing order', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'smoke-cache-roots-'));
+    try {
+      const dbPath = path.join(dir, 'empty');
+      await createEmptyDb(dbPath);
+      const roots = decodedRoots(await decodeAllCollections(dbPath)).map((r) => r.root);
+      expect(roots).toEqual(COLLECTION_ROUTES.filter((r) => r in ROUTE_ROWS));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

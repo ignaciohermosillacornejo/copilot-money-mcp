@@ -12,7 +12,7 @@ import { existsSync, readdirSync, statSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { iterateDocuments } from '../src/core/leveldb-reader.js';
-import { collectionMatches, isUserAccountCustomizationCollection } from '../src/core/decoder.js';
+import { routeCollection } from '../src/core/decoder.js';
 import { retryInterrupted } from '../src/core/fs-retry.js';
 
 function findRealDatabase(): string | undefined {
@@ -71,64 +71,17 @@ function normalizeCollectionPath(collection: string): string {
 }
 
 /**
- * Check if a raw collection path is decoded by matching against decodeAllCollections logic.
- * Uses the exported collectionMatches helper from decoder.ts to stay in sync.
+ * Would `decodeAllCollections` route a document in this raw collection path?
  *
- * IMPORTANT: Keep this in sync with the if/else chain in decoder.ts decodeAllCollections().
- * When adding new collection decoders, add the corresponding check here.
+ * Asks the decoder's own `routeCollection` (#778). This used to be a
+ * hand-mirrored copy of the dispatch chain behind a "keep this in sync"
+ * comment, and it had drifted: it still accepted the `items/{id}`
+ * parent-pointer clause #627 removed from the decoder, and matched
+ * `investment_prices/` anywhere in the path where the decoder anchors it at
+ * the root. A coverage figure computed from a copy measures the copy.
  */
 function isDecoded(rawCollection: string): boolean {
-  // Mirror the exact if/else order from decodeAllCollections:
-  // Known and deliberately unread (#666) — accounted for, not unknown.
-  if (isUserAccountCustomizationCollection(rawCollection)) return true;
-  if (rawCollection.includes('/holdings_history/') && rawCollection.endsWith('/history')) return true;
-  if (rawCollection.includes('/holdings_history') && !rawCollection.endsWith('/history')) return true;
-  if (rawCollection.endsWith('/balance_history')) return true;
-  if (
-    rawCollection.includes('items/') &&
-    rawCollection.includes('/accounts/') &&
-    !rawCollection.endsWith('/accounts') &&
-    !rawCollection.endsWith('/balance_history') &&
-    !rawCollection.endsWith('/transactions') &&
-    !rawCollection.includes('/holdings_history')
-  )
-    return true;
-  if (collectionMatches(rawCollection, 'transactions')) return true;
-  if (collectionMatches(rawCollection, 'accounts')) return true;
-  if (collectionMatches(rawCollection, 'recurring')) return true;
-  if (collectionMatches(rawCollection, 'budgets')) return true;
-  if (collectionMatches(rawCollection, 'financial_goals')) return true;
-  if (rawCollection.endsWith('/financial_goal_history')) return true;
-  if (
-    collectionMatches(rawCollection, 'investment_prices') ||
-    rawCollection.includes('investment_prices/')
-  )
-    return true;
-  if (collectionMatches(rawCollection, 'investment_splits')) return true;
-  if (collectionMatches(rawCollection, 'items') || /^items\/[^/]+$/.test(rawCollection))
-    return true;
-  if (collectionMatches(rawCollection, 'tags')) return true;
-  if (collectionMatches(rawCollection, 'categories')) return true;
-  if (rawCollection.endsWith('/t') && rawCollection.includes('changes/')) return true;
-  if (rawCollection.endsWith('/a') && rawCollection.includes('changes/')) return true;
-  if (collectionMatches(rawCollection, 'changes')) return true;
-  if (collectionMatches(rawCollection, 'securities')) return true;
-  if (collectionMatches(rawCollection, 'users') || /^users\/[^/]+$/.test(rawCollection))
-    return true;
-  if (collectionMatches(rawCollection, 'orders') && rawCollection.includes('amazon/')) return true;
-  if (rawCollection === 'amazon' || /^amazon\/[^/]+$/.test(rawCollection)) return true;
-  if (collectionMatches(rawCollection, 'subscriptions')) return true;
-  if (collectionMatches(rawCollection, 'invites')) return true;
-  if (collectionMatches(rawCollection, 'user_items')) return true;
-  if (collectionMatches(rawCollection, 'feature_tracking')) return true;
-  if (collectionMatches(rawCollection, 'support')) return true;
-  if (
-    rawCollection.includes('/financial_goals/') &&
-    !rawCollection.endsWith('/financial_goal_history')
-  )
-    return true;
-
-  return false;
+  return routeCollection(rawCollection) !== null;
 }
 
 function parseDbPath(): string | undefined {
