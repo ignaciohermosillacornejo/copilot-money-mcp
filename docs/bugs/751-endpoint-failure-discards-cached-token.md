@@ -95,6 +95,12 @@ the fast path with the same expired credential, the first re-extracts and instal
 one, and the second's true-but-stale verdict must not null the replacement. That is this
 same class, one level down, inside the fix for it.
 
+(Since [#796](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/796)
+concurrent callers share one in-flight refresh, so the second caller never sends that
+exchange and the stale verdict cannot arrive. That test was restated for the shared
+attempt, and the identity conjunct stays in `exchangeToken` as defence in depth: no test
+fails without it any more, and this paragraph should not be read as saying one does.)
+
 The class's other half lives in `scripts/check-workflows.ts` (invariant 3), which catches
 the same substitution in GitHub workflow gates; see
 [#741](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/741). Neither

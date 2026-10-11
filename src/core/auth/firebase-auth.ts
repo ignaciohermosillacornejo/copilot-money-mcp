@@ -315,8 +315,10 @@ export class FirebaseAuth {
       // concurrent callers inside this method, the second's verdict arriving
       // after the first had installed a replacement. Since #796 that cannot
       // happen on one instance (`refreshInFlight`), and on the cold path the
-      // cache is already empty. It stays because it is the discard rule stated
-      // correctly, not a race patch: a dead CANDIDATE is not a statement about
+      // cache is already empty, so today the conjunct never changes the outcome
+      // and no test fails without it (checked by mutation for #796). It stays
+      // as defence in depth, not as a guarded invariant: it is the discard rule
+      // stated correctly, and a dead CANDIDATE is not a statement about
       // whatever is cached, whoever calls this.
       if (isTokenFinished(failure) && this.refreshToken === refreshToken) {
         this.refreshToken = null;

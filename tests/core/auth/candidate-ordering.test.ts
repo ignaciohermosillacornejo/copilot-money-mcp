@@ -726,7 +726,9 @@ describe('an endpoint-level failure does not discard a known-good cached token (
   );
 
   test('concurrent fast-path callers whose cached token is dead share one re-extract, and keep its replacement', async () => {
-    // Restated for #796. This case and the one after it used to start two
+    // Restated for #796, replacing two cases ("a verdict on a token that is no
+    // longer the cached one leaves the cache alone" and "a still-valid idToken
+    // installed mid-flight is returned without another exchange"). Both started two
     // fast-path callers on the same expired credential and hold the SECOND
     // caller's own rejection until the first had cold-extracted and installed a
     // replacement. They pinned two things that scenario needed: that the late
