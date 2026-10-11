@@ -923,6 +923,12 @@ export function recoverJournal(root: string): RecoveryReport {
   // Reset BEFORE any early return: "no journal" is the documented way to
   // accept a refusal, and an early exit that skipped this reset let the next
   // successful mutation in the same process write the accepted refusal back.
+  // It also precedes the live-owner throw below, deliberately: a root whose
+  // journal another live run holds is not this process's to remember refusals
+  // for. Harmless today: that throw leaves `runGuards` before any
+  // `withMutation` puts an entry for this root in `ACTIVE`, and the exit sweep
+  // only persists roots it found there — so nothing in this process reaches
+  // `persistJournal(root)` afterwards to rewrite (or delete) that run's journal.
   REFUSED.delete(root);
   const path = journalPath(root);
   if (!existsSync(path)) return { recovered: [], refused: [], sidecars };

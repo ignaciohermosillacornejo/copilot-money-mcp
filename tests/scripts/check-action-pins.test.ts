@@ -15,7 +15,12 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join as joinPath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { collectPins, findPinProblems, runCheck } from '../../scripts/check-action-pins.js';
+import {
+  collectPins,
+  findPinProblems,
+  runCheck,
+  scanPins,
+} from '../../scripts/check-action-pins.js';
 
 const SCRIPT = fileURLToPath(new URL('../../scripts/check-action-pins.ts', import.meta.url));
 
@@ -106,7 +111,9 @@ describe('collectPins', () => {
     // `bun run check:action-pins` prints, and which only grows) and well over
     // the 0 that would signal a broken scan. No count is written here on
     // purpose: one was, and it went stale as pins were added.
-    const pins = collectPins('.github/workflows');
+    // No argument: the default resolves from the script's own location, so
+    // this does not depend on the cwd `bun test` was started from.
+    const pins = collectPins();
     expect(pins.length).toBeGreaterThan(10);
     expect(pins.every((p) => /^[0-9a-f]{40}$/.test(p.sha))).toBe(true);
     expect(pins.every((p) => p.action.includes('/'))).toBe(true);
@@ -114,7 +121,12 @@ describe('collectPins', () => {
   });
 
   test('the real repo is currently consistent — the gate passes end to end', () => {
-    expect(findPinProblems(collectPins('.github/workflows'))).toEqual([]);
+    // Through scanPins, not collectPins: a real pin the grammar could not read
+    // would otherwise be excluded here exactly as the gate exists to prevent,
+    // and this test would stay green over a set that silently lacks it.
+    const { pins, unread } = scanPins();
+    expect(unread).toEqual([]);
+    expect(findPinProblems(pins)).toEqual([]);
   });
 
   test('parses action, sha, comment and line from a workflow file', () => {
@@ -186,6 +198,43 @@ describe('collectPins', () => {
     expect(err).toMatch(/b\.yml:1\b/);
     expect(err).toMatch(/c\.yml:1\b/);
     expect(result.stdout).toEqual([]);
+  });
+
+  test('the residual compares counts: one readable pin does not hide an unreadable one', () => {
+    // A line that yields ONE parse used to be exempt from the residual, so a
+    // second pin-shaped span on it could drop out unseen.
+    const { pins, unread } = scanPins(
+      fixtureDir({
+        'a.yml': `      - uses: actions/checkout@${SHA_A} # v7 uses: 'actions/setup-node@${SHA_B}`,
+      })
+    );
+    expect(pins).toHaveLength(1);
+    expect(unread).toHaveLength(1);
+  });
+
+  test('a stray closing quote before the comment is unreadable, not "no comment"', () => {
+    // `uses: x@sha' # v7` parses as a bare pin whose comment the regex then
+    // cannot reach past the quote. Reporting "add a '# vN'" on a line that
+    // visibly has one sends the reader after the wrong fix; the quoting is
+    // what is wrong, so it is reported as a line the gate could not read.
+    const result = runCheck(
+      fixtureDir({
+        'a.yml': usesLine(SHA_A, 'v7'),
+        'b.yml': `      - uses: actions/checkout@${SHA_A}' # v7`,
+      })
+    );
+    expect(result.code).toBe(1);
+    const err = result.stderr.join('\n');
+    expect(err).toMatch(/could not read.*b\.yml:1|b\.yml:1.*could not read/);
+    expect(err).not.toContain('no version comment');
+  });
+
+  test('the summary counts unreadable lines too, not "N problems across 0 pins"', () => {
+    const result = runCheck(
+      fixtureDir({ 'b.yml': `      - uses: 'actions/checkout@${SHA_A} # v7` })
+    );
+    expect(result.code).toBe(1);
+    expect(result.stderr.at(-1)).toContain('across 0 pins and 1 unreadable pin-shaped line');
   });
 
   test('a SHA-shaped string that is not on a uses: line is not a pin', () => {

@@ -72,6 +72,8 @@ export interface Pin {
  * its only job is to notice when the grammar above reads less than is there.
  */
 const PIN_SHAPED = /uses:.*\b[0-9a-f]{40}\b/;
+/** Every 40-hex run on a line — what the parses on a pin-shaped line are counted against. */
+const SHA_RUN = /\b[0-9a-f]{40}\b/g;
 
 /** A pin-shaped line `PINNED` could not parse. */
 export interface UnreadLine {
@@ -99,14 +101,26 @@ export function scanPins(dir: string = WORKFLOW_DIR): { pins: Pin[]; unread: Unr
     const file = displayPath(path);
     const lines = readFileSync(path, 'utf-8').split('\n');
     lines.forEach((text, i) => {
-      let parsed = 0;
+      if (!PIN_SHAPED.test(text)) return;
+      let accounted = 0;
+      let unreadable = false;
       for (const m of text.matchAll(PINNED)) {
+        accounted += 1;
+        // A pin that parsed with no comment, on a line that still has a `#`
+        // after it: the comment is there but the grammar could not reach it
+        // (a stray closing quote, say). Reporting "add a '# vN'" would send
+        // the reader after something already present, so it is unread instead.
+        if (m[4] === undefined && text.slice(m.index + m[0].length).includes('#')) {
+          unreadable = true;
+          continue;
+        }
         pins.push({ action: m[2]!, sha: m[3]!, comment: m[4], file, line: i + 1 });
-        parsed += 1;
       }
-      if (parsed === 0 && PIN_SHAPED.test(text)) {
-        unread.push({ file, line: i + 1, text: text.trim() });
-      }
+      // The count comparison the docblock promises: every SHA on a pin-shaped
+      // line must be accounted for by a parse, so one readable pin cannot hide
+      // a second span beside it that the grammar could not read.
+      if (accounted < (text.match(SHA_RUN) ?? []).length) unreadable = true;
+      if (unreadable) unread.push({ file, line: i + 1, text: text.trim() });
     });
   }
   return { pins, unread };
@@ -197,7 +211,12 @@ export function runCheck(dir: string = WORKFLOW_DIR): CheckResult {
       stdout: [],
       stderr: [
         ...problems.map((p) => `::error::${p}`),
-        `check-action-pins: ${problems.length} problem(s) across ${pins.length} pins.`,
+        // Counting unreadable lines too: when every pin is unreadable,
+        // "3 problem(s) across 0 pins" reads as a scan that saw nothing.
+        unread.length === 0
+          ? `check-action-pins: ${problems.length} problem(s) across ${pins.length} pins.`
+          : `check-action-pins: ${problems.length} problem(s) across ${pins.length} pins ` +
+            `and ${unread.length} unreadable pin-shaped line(s).`,
       ],
     };
   }
