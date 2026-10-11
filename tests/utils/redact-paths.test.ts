@@ -72,6 +72,27 @@ describe('redactUserPaths', () => {
     expect(redactUserPaths(`${home}-backup/x`, home)).toBe(`${home}-backup/x`);
   });
 
+  test("under /Users, a home that is a prefix of another user's name never matches inside it", () => {
+    // `/Users/bob` inside `/Users/bob.smith/...` must not become `~.smith/...`,
+    // which would leak the other user's name tail. Under /Users and /home the
+    // home matches only when followed by `/` or end of input, and the generic
+    // prefix rule takes every sibling whole.
+    const home = '/Users/bob';
+    expect(redactUserPaths('/Users/bob.smith/x', home)).toBe('/Users/<user>/x');
+    expect(redactUserPaths('/Users/bob.bak/x', home)).toBe('/Users/<user>/x');
+    expect(redactUserPaths('/home/bob.smith/x', '/home/bob')).toBe('/home/<user>/x');
+    expect(redactUserPaths('/Users/bob/x and /Users/bob', home)).toBe('~/x and ~');
+  });
+
+  test('a non-ASCII continuation is a different name, under /Users and outside it', () => {
+    // `\w` is ASCII-only, so a name continued by `ü` would read as "not a name
+    // character" to an ASCII lookahead and leak the tail as `~ü`.
+    expect(redactUserPaths('/Users/bobü/x', '/Users/bob')).toBe('/Users/<user>/x');
+    const home = '/var/synthetic-root';
+    expect(redactUserPaths(`${home}ü/x`, home)).toBe(`${home}ü/x`);
+    expect(redactUserPaths(`${home}.bak/x`, home)).toBe('~.bak/x');
+  });
+
   test('an empty or root home is not used as a pattern', () => {
     expect(redactUserPaths('a/b /c', '')).toBe('a/b /c');
     expect(redactUserPaths('a/b /c', '/')).toBe('a/b /c');

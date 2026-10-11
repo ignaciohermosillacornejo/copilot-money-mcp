@@ -22,19 +22,24 @@
  * This one runs on errors whose path IS the useful part, so it keeps the path
  * and removes only the user.
  *
- * The home is matched wherever it is not continued by a name character
- * (a letter, digit, `_` or `-`). So `/home/runner2` and `/home/runner-backup`
- * are someone else's and fall to the generic prefix rule, while a sibling
- * named after the home — `${home}.bak/x` — becomes `~.bak/x`, which keeps the
- * path's shape and drops the name. That last case matters for a home outside
- * `/Users` and `/home` (`/var/root`, a container's home), which the generic
- * prefix rule cannot see.
+ * How the home is matched depends on where it lives, because the generic
+ * prefix rule only sees `/Users` and `/home`:
  *
- * What remains, stated: for such a home, a sibling joined by a name character
- * (`${home}-backup`, `${home}2`) keeps the name. Telling that apart from a
- * different user's directory is exactly what the lookahead cannot do, and
- * under `/Users` and `/home` the prefix rule covers it anyway. Pinned by a
- * test so changing it is a decision.
+ *   - Under `/Users` or `/home`, the home matches only when followed by `/` or
+ *     the end of the text. Any sibling — `/Users/bob.smith`, `/Users/bob2`,
+ *     `/Users/bob.bak` — is left to the prefix rule, which replaces the whole
+ *     name segment. Matching more loosely here would turn `/Users/bob.smith/x`
+ *     into `~.smith/x` and leak another user's name tail.
+ *   - Anywhere else (`/var/root`, a container's home), the prefix rule is
+ *     blind, so the home matches wherever it is not continued by a name
+ *     character — any Unicode letter or digit, `_` or `-`. A sibling such as
+ *     `${home}.bak/x` becomes `~.bak/x`: the path keeps its shape and loses the
+ *     name.
+ *
+ * What remains, stated: for a home outside `/Users` and `/home`, a sibling
+ * joined by a name character (`${home}-backup`, `${home}2`, `${home}ü`) keeps
+ * the name, because telling it apart from a different directory is exactly
+ * what a lookahead cannot do. Pinned by tests so changing it is a decision.
  */
 
 import { homedir } from 'node:os';
@@ -58,9 +63,11 @@ let cachedPattern: RegExp | undefined;
 
 function homePattern(home: string): RegExp {
   if (cachedHome !== home || !cachedPattern) {
-    // Not continued by a name character: `/home/runner` must not rewrite
-    // `/home/runner2/x` into the nonsense path `~2/x`.
-    cachedPattern = new RegExp(`${escapeRegExp(home)}(?![\\w-])`, 'g');
+    // See the module docblock: strict where the prefix rule can take over,
+    // broad (and Unicode-aware) only where it cannot.
+    const underUserRoot = /^\/(Users|home)\/[^/]+$/.test(home);
+    const boundary = underUserRoot ? '(?=/|$)' : '(?![\\p{L}\\p{N}_-])';
+    cachedPattern = new RegExp(`${escapeRegExp(home)}${boundary}`, 'gu');
     cachedHome = home;
   }
   // `replace` resets a global regex's lastIndex itself; resetting here too
