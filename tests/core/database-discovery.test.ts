@@ -317,7 +317,7 @@ describe('a retryable discovery failure is looked at again, not served from memo
     const delivered = interruptReaddir(Number.POSITIVE_INFINITY);
     const db = (server as unknown as { db: CopilotDatabase }).db;
     expect(db.availability()).toEqual({ available: false });
-    expect(delivered()).toBe(0);
+    expect(delivered(), 'availability() walked the home again after absence was settled').toBe(0);
   });
 
   test('a persistent error is served from memory, not re-walked on every call', async () => {

@@ -22,12 +22,19 @@
  * This one runs on errors whose path IS the useful part, so it keeps the path
  * and removes only the user.
  *
- * One stated limit: a home outside `/Users` and `/home` (`/var/root`, a
- * container's home) is redacted only where it appears as a whole segment, so
- * a SIBLING directory named after it — `${home}.bak/x` — matches neither the
- * anchored home nor the generic prefix, and keeps the name. Contrived, and
- * the price of not rewriting `/home/runner2` into `~2`; written down so it is
- * a choice rather than a surprise.
+ * The home is matched wherever it is not continued by a name character
+ * (a letter, digit, `_` or `-`). So `/home/runner2` and `/home/runner-backup`
+ * are someone else's and fall to the generic prefix rule, while a sibling
+ * named after the home — `${home}.bak/x` — becomes `~.bak/x`, which keeps the
+ * path's shape and drops the name. That last case matters for a home outside
+ * `/Users` and `/home` (`/var/root`, a container's home), which the generic
+ * prefix rule cannot see.
+ *
+ * What remains, stated: for such a home, a sibling joined by a name character
+ * (`${home}-backup`, `${home}2`) keeps the name. Telling that apart from a
+ * different user's directory is exactly what the lookahead cannot do, and
+ * under `/Users` and `/home` the prefix rule covers it anyway. Pinned by a
+ * test so changing it is a decision.
  */
 
 import { homedir } from 'node:os';
@@ -41,18 +48,24 @@ export function redactUserPaths(text: string, home: string = safeHomedir()): str
   return out.replace(USER_PREFIX, '/$1/<user>');
 }
 
-/** The last home's pattern. The home does not change within a process, so one slot suffices. */
+/**
+ * The last home's pattern. In production the home is fixed for the process, so
+ * one slot suffices; it is keyed only so that a caller passing an explicit home
+ * (the tests do) is never served the previous home's pattern.
+ */
 let cachedHome: string | undefined;
 let cachedPattern: RegExp | undefined;
 
 function homePattern(home: string): RegExp {
   if (cachedHome !== home || !cachedPattern) {
-    // A whole-segment match only: `/home/runner` must not rewrite
-    // `/home/runner2/x` into the nonsense path `~2/x`. Safe to reuse with the
-    // `g` flag: `String.prototype.replace` resets `lastIndex` on every call.
-    cachedPattern = new RegExp(`${escapeRegExp(home)}(?=$|[/\\s'",)])`, 'g');
+    // Not continued by a name character: `/home/runner` must not rewrite
+    // `/home/runner2/x` into the nonsense path `~2/x`.
+    cachedPattern = new RegExp(`${escapeRegExp(home)}(?![\\w-])`, 'g');
     cachedHome = home;
   }
+  // `replace` resets a global regex's lastIndex itself; resetting here too
+  // keeps the shared instance safe if a later caller reaches for test()/exec().
+  cachedPattern.lastIndex = 0;
   return cachedPattern;
 }
 

@@ -62,11 +62,14 @@ describe('redactUserPaths', () => {
     }
   });
 
-  test('stated limit: a home outside /Users and /home keeps a sibling named after it', () => {
-    // Documented in redact-paths.ts. Pinned so changing it is a decision.
+  test('a sibling named after a home outside /Users and /home loses the name too', () => {
+    // The generic prefix rule cannot see `/var/...`, so this one rests on the
+    // home pattern alone. It used to be a stated limit; the negative lookahead
+    // closes it without giving up the `~2` case above.
     const home = '/var/synthetic-root';
     expect(redactUserPaths(`${home}/x`, home)).toBe('~/x');
-    expect(redactUserPaths(`${home}.bak/x`, home)).toBe(`${home}.bak/x`);
+    expect(redactUserPaths(`${home}.bak/x`, home)).toBe('~.bak/x');
+    expect(redactUserPaths(`${home}-backup/x`, home)).toBe(`${home}-backup/x`);
   });
 
   test('an empty or root home is not used as a pattern', () => {
