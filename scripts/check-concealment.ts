@@ -776,8 +776,9 @@ function checkGitAttributes(contents: string, rel: string): void {
       !unterminatedQuote &&
       !pattern.includes('\\') &&
       INERT_BINARY_EXTENSIONS.has(extensionOf(pattern))
-    )
+    ) {
       return;
+    }
     for (const re of DIFF_SUPPRESSING_ATTRS) {
       if (!re.test(stripped)) continue;
       report(
