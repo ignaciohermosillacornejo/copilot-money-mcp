@@ -22,7 +22,6 @@ import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
-import { stripComments } from '../../helpers/strip-comments.js';
 import { tmpdir } from 'os';
 import ts from 'typescript';
 import {
@@ -726,53 +725,37 @@ describe('an endpoint-level failure does not discard a known-good cached token (
     }
   );
 
-  test('a verdict on a token that is no longer the cached one leaves the cache alone', async () => {
-    // The same substitution one level down, and the reason the discard takes
-    // TWO facts: `isTokenFinished` says the token in THAT REQUEST is dead, which
-    // authorises clearing `this.refreshToken` only while they are the same
-    // token. `getIdToken()` has no in-flight dedupe and the GraphQL client calls
-    // it once per request, so they need not be.
-    //
-    // Both callers below enter the fast path holding the same expired
-    // credential. The first finishes — clears, re-extracts, installs a fresh
-    // one — and only then does the second's rejection arrive: a TRUE verdict
-    // about a token nobody holds any more. Clearing on it costs the
-    // browser-wide re-extract this whole change exists to prevent, which the
-    // third call is here to observe.
+  test('concurrent fast-path callers whose cached token is dead share one re-extract, and keep its replacement', async () => {
+    // Restated for #796. This case and the one after it used to start two
+    // fast-path callers on the same expired credential and hold the SECOND
+    // caller's own rejection until the first had cold-extracted and installed a
+    // replacement. They pinned two things that scenario needed: that the late
+    // verdict, about a token nobody held any more, did not null the
+    // replacement (the identity check in exchangeToken), and that the second
+    // caller returned the replacement instead of reporting "No Copilot Money
+    // session found" (#765). Since #796 the second caller joins the first
+    // caller's attempt and never sends an exchange of its own, so neither
+    // late verdict exists to hold. What is left to pin is the cost: one
+    // exchange of the dead token, one browser read, and a replacement that is
+    // still cached for the call after.
     const attempts: string[] = [];
-    // Overwritten synchronously by the Promise executor below; the no-op
-    // initializer is what keeps it callable without a definite-assignment
-    // assertion.
-    let releaseSecond: () => void = () => {};
-    const secondRejectionSent = new Promise<void>((resolve) => {
-      releaseSecond = resolve;
-    });
-    let seenExpiredToken = 0;
-
     globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
       const sent = String(options?.body ?? '');
       if (sent.includes(syntheticToken('server-issued'))) {
         attempts.push('expired-token');
-        seenExpiredToken += 1;
-        const rejection = Response.json(
-          { error: { message: 'INVALID_REFRESH_TOKEN' } },
-          { status: 400 }
+        return Promise.resolve(
+          Response.json({ error: { message: 'INVALID_REFRESH_TOKEN' } }, { status: 400 })
         );
-        // Hold the second caller's rejection until the first has finished
-        // installing its replacement. That ordering IS the bug's precondition.
-        return seenExpiredToken === 1
-          ? Promise.resolve(rejection)
-          : secondRejectionSent.then(() => rejection);
       }
       attempts.push(sent.includes(REAL_SESSION) ? 'session-token' : 'bootstrap');
       return Promise.resolve(
         Response.json({
           id_token: ID_TOKEN,
-          // Every exchange expires immediately, so each call has to refresh and
-          // the cached refresh token is what the next one depends on.
           refresh_token: sent.includes(REAL_SESSION)
             ? REAL_SESSION
             : syntheticToken('server-issued'),
+          // Every exchange expires immediately, so each call has to refresh and
+          // the cached refresh token is what the next one depends on.
           expires_in: '0',
           token_type: 'Bearer',
           user_id: 'synthetic-user',
@@ -780,109 +763,9 @@ describe('an endpoint-level failure does not discard a known-good cached token (
       );
     }) as unknown as typeof fetch;
 
-    // Extraction 1 seeds the cache, extraction 2 is the first caller's cold
-    // re-extract and finds the live session; anything after that finds nothing,
-    // so a needless third extraction is fatal rather than merely wasteful.
-    const found: TokenResult[][] = [
-      [candidate(syntheticToken('bootstrap'), true)],
-      [candidate(REAL_SESSION, true)],
-    ];
-    let extractions = 0;
-    const auth = new FirebaseAuth(() => {
-      const candidates = found[extractions] ?? [];
-      extractions += 1;
-      return Promise.resolve({ candidates, checked: ['Chrome'] });
-    });
-
-    expect(await auth.getIdToken()).toBe(ID_TOKEN);
-    expect(extractions).toBe(1);
-
-    // Both start before either can mutate the cache: `getIdToken` runs to its
-    // first await synchronously, so both read the same `refreshToken`.
-    const first = auth.getIdToken();
-    const second = auth.getIdToken();
-    expect(await first).toBe(ID_TOKEN);
-    expect(extractions).toBe(2);
-
-    releaseSecond();
-    // THE POINT (#765): the second caller's own token is finished, but the
-    // INSTANCE is not logged out — the first caller installed a live session
-    // while this exchange was in flight. Before the fix this fell through to a
-    // cold re-extract and told the caller 'No Copilot Money session found'
-    // while the object it was holding had a working token.
-    expect(await second).toBe(ID_TOKEN);
-    expect(extractions).toBe(2);
-
-    // And the fresh credential is still cached, so this refreshes it rather
-    // than re-reading every browser profile.
-    expect(await auth.getIdToken()).toBe(ID_TOKEN);
-    expect(extractions).toBe(2);
-    // Both callers spent the expired token once; the replacement was exchanged
-    // by the caller that installed it; the second caller then retried ONCE
-    // against that replacement rather than re-reading every browser profile;
-    // and the last call refreshed the same replacement. Never a third browser
-    // read.
-    //
-    // That third 'session-token' is the #765 fix showing up as cost, and it is
-    // the cheap side of the trade: one token exchange in place of a cold walk
-    // over ten browser profiles that would have ended in 'No Copilot Money
-    // session found'.
-    expect(attempts).toEqual([
-      'bootstrap',
-      'expired-token',
-      'expired-token',
-      'session-token',
-      'session-token',
-      'session-token',
-    ]);
-  });
-
-  test('a still-valid idToken installed mid-flight is returned without another exchange', async () => {
-    // The OTHER half of the #765 fix, and it needs its own fixture: every
-    // scenario above uses `expires_in: '0'`, so `this.idToken` is expired the
-    // instant it is stored and the fresh-idToken check can never return. That
-    // made the check a guard which executed but could not fail — removing it
-    // left the whole suite green (verified by mutation).
-    //
-    // Here the replacement carries a REAL expiry, so the second caller should
-    // hand back the token the first installed and perform no exchange of its
-    // own — not even the one-shot retry.
-    const attempts: string[] = [];
-    let releaseSecond: () => void = () => {};
-    const secondRejectionSent = new Promise<void>((resolve) => {
-      releaseSecond = resolve;
-    });
-    let seenExpiredToken = 0;
-
-    globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
-      const sent = String(options?.body ?? '');
-      if (sent.includes(syntheticToken('server-issued'))) {
-        attempts.push('expired-token');
-        seenExpiredToken += 1;
-        const rejection = Response.json(
-          { error: { message: 'INVALID_REFRESH_TOKEN' } },
-          { status: 400 }
-        );
-        return seenExpiredToken === 1
-          ? Promise.resolve(rejection)
-          : secondRejectionSent.then(() => rejection);
-      }
-      attempts.push(sent.includes(REAL_SESSION) ? 'session-token' : 'bootstrap');
-      return Promise.resolve(
-        Response.json({
-          id_token: ID_TOKEN,
-          refresh_token: sent.includes(REAL_SESSION)
-            ? REAL_SESSION
-            : syntheticToken('server-issued'),
-          // The one difference that matters: a live token, not an
-          // already-expired one.
-          expires_in: sent.includes(REAL_SESSION) ? '3600' : '0',
-          token_type: 'Bearer',
-          user_id: 'synthetic-user',
-        })
-      );
-    }) as unknown as typeof fetch;
-
+    // Extraction 1 seeds the cache, extraction 2 is the shared cold re-extract
+    // and finds the live session; anything after that finds nothing, so a
+    // needless third extraction is fatal rather than merely wasteful.
     const found: TokenResult[][] = [
       [candidate(syntheticToken('bootstrap'), true)],
       [candidate(REAL_SESSION, true)],
@@ -900,16 +783,14 @@ describe('an endpoint-level failure does not discard a known-good cached token (
     const first = auth.getIdToken();
     const second = auth.getIdToken();
     expect(await first).toBe(ID_TOKEN);
-    expect(extractions).toBe(2);
-
-    releaseSecond();
     expect(await second).toBe(ID_TOKEN);
     expect(extractions).toBe(2);
 
-    // No third 'session-token': the second caller returned the live idToken
-    // directly instead of retrying the exchange. That is the distinction
-    // between this test and the one above it.
-    expect(attempts).toEqual(['bootstrap', 'expired-token', 'expired-token', 'session-token']);
+    // The replacement is still cached, so this refreshes it rather than
+    // re-reading every browser profile.
+    expect(await auth.getIdToken()).toBe(ID_TOKEN);
+    expect(extractions).toBe(2);
+    expect(attempts).toEqual(['bootstrap', 'expired-token', 'session-token', 'session-token']);
   });
 
   test.each([...DEAD_TOKEN_CODES])(
@@ -952,350 +833,6 @@ describe('an endpoint-level failure does not discard a known-good cached token (
       expect(extractions).toBe(3);
     }
   );
-});
-
-/**
- * Every suspension point in `getIdToken` is a place another caller can finish
- * first (#770, following #765).
- *
- * `getIdToken` has no in-flight dedupe and the GraphQL client calls it once per
- * request, so while one caller is parked on an `await`, a sibling can complete
- * an exchange and install a live session on the SAME object. #765 closed that
- * for the first suspension point, the fast-path exchange, and only when that
- * exchange came back with a dead-token verdict. The same hole was left open at
- * the three later ones: the one-shot retry, the cold-path browser read, and
- * each cold-path candidate exchange. A caller that resumed at any of them went
- * on as though nothing had changed. With nothing usable in its own hands it
- * reported "No Copilot Money session found", or rethrew an endpoint error,
- * while its own object held a working token. That is #722's symptom again:
- * reporting failure to a logged-in user.
- *
- * Each case parks one caller at a single resume point, lets a sibling install a
- * session that has a real expiry, then releases the parked caller. The
- * sibling's session carries its own ID token (SIBLING_ID), so each assertion
- * names the session that came back, not just that some token did. Where the
- * parked await can fail, the case runs once with a dead-token verdict and once
- * with a rate limit, since a resumed caller must prefer the sibling's session
- * to an endpoint error too.
- */
-describe('a session installed at any resume point is returned, not reported as a failure (#770)', () => {
-  const candidate = (token: string, scoped: boolean): TokenResult => ({
-    token,
-    browser: 'Chrome',
-    scoped,
-  });
-
-  /** Exchanges cleanly, for a full hour, into the sibling's session. */
-  const LIVE = syntheticToken('live');
-  /** Copilot-scoped but finished: the endpoint calls it INVALID_REFRESH_TOKEN. */
-  const DEAD = syntheticToken('dead');
-  /** The ID token of the session the sibling installs. */
-  const SIBLING_ID = 'synthetic-sibling-id-token';
-
-  const deadVerdict = () =>
-    Response.json({ error: { message: 'INVALID_REFRESH_TOKEN' } }, { status: 400 });
-
-  /**
-   * How the parked await fails. The first is a verdict on the token; the
-   * second is endpoint-level (#751), which the caller would otherwise rethrow.
-   */
-  const PARKED_FAILURES: [string, () => Response][] = [
-    ['a dead-token verdict', deadVerdict],
-    [
-      'a rate limit',
-      () => Response.json({ error: { message: 'RESOURCE_EXHAUSTED' } }, { status: 429 }),
-    ],
-  ];
-
-  const session = (refreshToken: string, expiresIn: string, idToken: string = ID_TOKEN) =>
-    Response.json({
-      id_token: idToken,
-      refresh_token: refreshToken,
-      expires_in: expiresIn,
-      token_type: 'Bearer',
-      user_id: 'synthetic-user',
-    });
-
-  /** A promise plus the function that settles it. */
-  function gate(): { opened: Promise<void>; open: () => void } {
-    let open: () => void = () => {};
-    const opened = new Promise<void>((resolve) => {
-      open = resolve;
-    });
-    return { opened, open };
-  }
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-  });
-
-  test.each(PARKED_FAILURES)(
-    'a session installed while the fast-path exchange was in flight, which then hit %s',
-    async (_label, parkedFailure) => {
-      // #765's resume point. Both callers refresh the same cached token. The
-      // first succeeds and installs a live session; the second's answer is
-      // held until then. #765 returned the sibling's session only after a
-      // dead-token verdict, and rethrew a rate limit.
-      const BOOT = syntheticToken('boot');
-      const CACHED = syntheticToken('cached');
-      const parkedAnswered = gate();
-      let cachedSeen = 0;
-      let liveSeen = 0;
-
-      globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
-        const sent = String(options?.body ?? '');
-        if (sent.includes(BOOT)) return Promise.resolve(session(CACHED, '0'));
-        // Reached only if guard (1) were missing on the dead-verdict row: the
-        // one-shot retry would spend the sibling's token. Counted, and
-        // asserted zero below, so that row detects guard (1)'s removal too.
-        if (sent.includes(LIVE)) {
-          liveSeen += 1;
-          return Promise.resolve(session(LIVE, '3600', SIBLING_ID));
-        }
-        if (sent.includes(CACHED)) {
-          cachedSeen += 1;
-          return cachedSeen === 1
-            ? Promise.resolve(session(LIVE, '3600', SIBLING_ID))
-            : parkedAnswered.opened.then(parkedFailure);
-        }
-        throw new Error('unexpected token in the exchange fake');
-      }) as unknown as typeof fetch;
-
-      let extractions = 0;
-      const auth = new FirebaseAuth(() => {
-        extractions += 1;
-        return Promise.resolve({
-          candidates: extractions === 1 ? [candidate(BOOT, true)] : [],
-          checked: ['Chrome'],
-        });
-      });
-
-      expect(await auth.getIdToken()).toBe(ID_TOKEN);
-
-      const first = auth.getIdToken();
-      const second = auth.getIdToken();
-      expect(await first).toBe(SIBLING_ID);
-      parkedAnswered.open();
-      expect(await second).toBe(SIBLING_ID);
-      expect(extractions).toBe(1);
-      // Guard (1) returned the sibling's session, so the retry never spent
-      // its token.
-      expect(liveSeen).toBe(0);
-    }
-  );
-
-  test('a session installed while the cold-path browser read was in flight', async () => {
-    // The MEDIUM item in #770, as stated there. Both callers start cold. The
-    // second caller's browser read is held until the first caller has
-    // installed a live session, and then it finds only a dead candidate,
-    // which on its own would end in the login message. The browser read
-    // cannot fail the way an exchange can, so this case has no rate-limit row.
-    const attempts: string[] = [];
-    globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
-      const sent = String(options?.body ?? '');
-      if (sent.includes(LIVE)) {
-        attempts.push('live');
-        return Promise.resolve(session(LIVE, '3600', SIBLING_ID));
-      }
-      attempts.push('dead');
-      return Promise.resolve(deadVerdict());
-    }) as unknown as typeof fetch;
-
-    const secondRead = gate();
-    let extractions = 0;
-    const auth = new FirebaseAuth(async () => {
-      extractions += 1;
-      if (extractions === 1) return { candidates: [candidate(LIVE, true)], checked: ['Chrome'] };
-      await secondRead.opened;
-      return { candidates: [candidate(DEAD, true)], checked: ['Chrome'] };
-    });
-
-    // Both start before either can install anything: `getIdToken` runs to its
-    // first await synchronously.
-    const first = auth.getIdToken();
-    const second = auth.getIdToken();
-    expect(extractions).toBe(2);
-
-    expect(await first).toBe(SIBLING_ID);
-    secondRead.open();
-    expect(await second).toBe(SIBLING_ID);
-
-    // The check sits right after the browser read, before the candidate loop:
-    // the second caller spends no exchange on what its read found.
-    expect(attempts).toEqual(['live']);
-  });
-
-  test.each(PARKED_FAILURES)(
-    'a session installed while a cold-path candidate exchange was in flight, which then hit %s',
-    async (_label, parkedFailure) => {
-      // The browser read has already come back and the caller is exchanging
-      // the only candidate it found. A sibling installs a session meanwhile,
-      // and then the candidate's exchange fails.
-      const attempts: string[] = [];
-      const parkedAnswered = gate();
-      globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
-        const sent = String(options?.body ?? '');
-        if (sent.includes(LIVE)) {
-          attempts.push('live');
-          return Promise.resolve(session(LIVE, '3600', SIBLING_ID));
-        }
-        attempts.push('parked');
-        return parkedAnswered.opened.then(parkedFailure);
-      }) as unknown as typeof fetch;
-
-      let extractions = 0;
-      const auth = new FirebaseAuth(() => {
-        extractions += 1;
-        const found = extractions === 1 ? LIVE : DEAD;
-        return Promise.resolve({ candidates: [candidate(found, true)], checked: ['Chrome'] });
-      });
-
-      const first = auth.getIdToken();
-      const second = auth.getIdToken();
-      expect(await first).toBe(SIBLING_ID);
-      parkedAnswered.open();
-      expect(await second).toBe(SIBLING_ID);
-
-      // Precondition, not decoration. If the second caller had returned at the
-      // post-read check instead, this case would be a copy of the one above
-      // and would leave the in-loop check without a test.
-      expect(attempts).toEqual(['live', 'parked']);
-      expect(extractions).toBe(2);
-    }
-  );
-
-  test.each(PARKED_FAILURES)(
-    'a session installed while the one-shot retry was in flight, which then hit %s',
-    async (_label, parkedFailure) => {
-      // The retry (guard 2) is only reached when the replacement session's own
-      // lifetime is already inside the expiry margin. So here the token another
-      // caller installs (MID) expires the moment it is stored. MID turns out to
-      // be dead, and while the second caller's retry against it is in flight a
-      // third caller installs a session with a real expiry.
-      const BOOT = syntheticToken('boot');
-      const OLD = syntheticToken('old');
-      const MID_SOURCE = syntheticToken('mid-source');
-      const MID = syntheticToken('mid');
-
-      const oldAnswered = gate();
-      const retryAnswered = gate();
-      const retrySent = gate();
-      let oldSeen = 0;
-      let midSeen = 0;
-
-      globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
-        const sent = String(options?.body ?? '');
-        if (sent.includes(BOOT)) return Promise.resolve(session(OLD, '0'));
-        if (sent.includes(MID_SOURCE)) return Promise.resolve(session(MID, '0'));
-        if (sent.includes(LIVE)) return Promise.resolve(session(LIVE, '3600', SIBLING_ID));
-        if (sent.includes(OLD)) {
-          oldSeen += 1;
-          // The first caller's verdict lands at once; the second's is held
-          // until the first has installed MID. Both are dead-token verdicts,
-          // which is what sends the second caller on to the retry.
-          return oldSeen === 1
-            ? Promise.resolve(deadVerdict())
-            : oldAnswered.opened.then(deadVerdict);
-        }
-        if (sent.includes(MID)) {
-          midSeen += 1;
-          if (midSeen === 1) {
-            // The second caller's retry: held until the third caller is done.
-            retrySent.open();
-            return retryAnswered.opened.then(parkedFailure);
-          }
-          return Promise.resolve(deadVerdict());
-        }
-        throw new Error('unexpected token in the exchange fake');
-      }) as unknown as typeof fetch;
-
-      // 1: bootstrap. 2: the first caller's cold read. 3: the third caller's
-      // cold read. A fourth read finds nothing, which is where the second
-      // caller ended up before the fix.
-      const reads = [BOOT, MID_SOURCE, LIVE];
-      let extractions = 0;
-      const auth = new FirebaseAuth(() => {
-        const found = reads[extractions];
-        extractions += 1;
-        return Promise.resolve({
-          candidates: found === undefined ? [] : [candidate(found, true)],
-          checked: ['Chrome'],
-        });
-      });
-
-      expect(await auth.getIdToken()).toBe(ID_TOKEN);
-
-      const first = auth.getIdToken();
-      const second = auth.getIdToken();
-      expect(await first).toBe(ID_TOKEN); // OLD was dead, and the cold read installed MID.
-
-      oldAnswered.open();
-      await retrySent.opened; // The second caller is now parked on its retry against MID.
-
-      // The third caller spends MID too, finds it dead, and cold-reads LIVE.
-      expect(await auth.getIdToken()).toBe(SIBLING_ID);
-
-      retryAnswered.open();
-      expect(await second).toBe(SIBLING_ID);
-      expect(extractions).toBe(3);
-    }
-  );
-
-  test('every await in getIdToken is paired with a freshness re-check', () => {
-    // The class-level half, as a tripwire. The cases above pin the resume
-    // points that exist today. This makes a fifth await added later without
-    // its check fail here, before anyone has to find the race by hand. The
-    // count is entry + one per await, because each await is a place the method
-    // can be overtaken.
-    //
-    // Limits, stated rather than coded around. It counts, so it can't see
-    // placement: five checks stacked at the top over four unguarded awaits
-    // would pass, and the behavioural cases above are what pin each check to
-    // its resume point. It is also deliberately stricter than the rule in
-    // `freshIdToken`'s docblock: an await followed only by a return would
-    // still need a check here. Comments are stripped first, because the
-    // method's own commentary talks about awaits. String literals survive
-    // stripping, but none in getIdToken contains `await` today.
-    //
-    // The window is the method's own body, found by the TypeScript parser, not
-    // the text between two markers. A member added after getIdToken must not
-    // fold its awaits and checks into this count.
-    const path = fileURLToPath(new URL('../../../src/core/auth/firebase-auth.ts', import.meta.url));
-    const file = ts.createSourceFile(
-      path,
-      readFileSync(path, 'utf8'),
-      ts.ScriptTarget.Latest,
-      true
-    );
-    const bodies: string[] = [];
-    const visit = (node: ts.Node): void => {
-      if (
-        ts.isMethodDeclaration(node) &&
-        ts.isIdentifier(node.name) &&
-        node.name.text === 'getIdToken' &&
-        node.body !== undefined
-      ) {
-        bodies.push(node.body.getText(file));
-      }
-      ts.forEachChild(node, visit);
-    };
-    visit(file);
-    expect(bodies.length, 'expected exactly one getIdToken method; update this detector').toBe(1);
-    const code = stripComments(bodies[0]!, path);
-
-    const awaits = code.match(/\bawait\b/g)?.length ?? 0;
-    const checks = code.match(/this\.freshIdToken\(\)/g)?.length ?? 0;
-    // Anti-vacuity: a slice that missed the method's awaits (say, a renamed
-    // end marker cutting it short) could still balance on the entry check alone.
-    expect(awaits, 'expected to find the awaits in getIdToken').toBeGreaterThan(0);
-    expect(
-      checks,
-      `getIdToken has ${awaits} awaits and ${checks} freshIdToken() checks. Each await is a ` +
-        'resume point a sibling call can overtake (#765, #770): check freshIdToken() first ' +
-        "in the new await's catch (or right after it, if it cannot fail), and add a case to " +
-        'this describe block that parks a caller there.'
-    ).toBe(awaits + 1);
-  });
 });
 
 /**
@@ -1621,5 +1158,111 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
     expect(await auth.getIdToken()).toBe(ID_TOKEN);
     expect(extractions).toBe(2);
     expect(exchanges).toBe(1);
+  });
+
+  test('every write to the session happens inside the one shared refresh attempt', () => {
+    // The class-level half, and the replacement for #770's count test. That
+    // test required one freshIdToken() re-check per await in getIdToken,
+    // because any await could be overtaken by a sibling call. The re-checks
+    // are gone because the sibling is: refreshSession runs only as the shared
+    // promise, so nothing else on this instance writes the session while it
+    // is suspended. That holds only while this chain holds, so the chain is
+    // what is asserted:
+    //
+    //   1. getIdToken never awaits, so it has no resume point of its own.
+    //   2. refreshSession is referenced once, from getIdToken, inside the
+    //      `this.refreshInFlight ??=` that shares it.
+    //   3. exchangeToken is referenced only from refreshSession.
+    //   4. idToken / refreshToken / expiresAt / userId are assigned only in
+    //      exchangeToken (field initialisers aside).
+    //
+    // A new await, a second caller of exchangeToken, or a new writer of the
+    // session brings the #770 race back, and fails here first. Limits, stated
+    // rather than coded around: it reads `this.<name>` property accesses, so a
+    // bracket access, an aliased `this`, or a destructuring assignment would
+    // slip past. The behavioural cases above are what pin the dedupe itself.
+    const path = fileURLToPath(new URL('../../../src/core/auth/firebase-auth.ts', import.meta.url));
+    const file = ts.createSourceFile(
+      path,
+      readFileSync(path, 'utf8'),
+      ts.ScriptTarget.Latest,
+      true
+    );
+    let cls: ts.ClassDeclaration | undefined;
+    ts.forEachChild(file, (node) => {
+      if (ts.isClassDeclaration(node) && node.name?.text === 'FirebaseAuth') cls = node;
+    });
+    if (cls === undefined) throw new Error('expected a FirebaseAuth class; update this detector');
+
+    /** The class member a node sits in, by name. */
+    const memberOf = (node: ts.Node): string => {
+      for (let n: ts.Node | undefined = node; n !== undefined; n = n.parent) {
+        if (n.parent !== cls) continue;
+        if (ts.isConstructorDeclaration(n)) return 'constructor';
+        if (ts.isClassElement(n) && n.name !== undefined && ts.isIdentifier(n.name)) {
+          return n.name.text;
+        }
+      }
+      return '(outside a member)';
+    };
+    const isThisMember = (node: ts.Node, name?: string): node is ts.PropertyAccessExpression =>
+      ts.isPropertyAccessExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ThisKeyword &&
+      (name === undefined || node.name.text === name);
+    const isSharedBy = (node: ts.Node): boolean => {
+      for (let n: ts.Node | undefined = node; n !== undefined; n = n.parent) {
+        const p: ts.Node | undefined = n.parent;
+        if (
+          p !== undefined &&
+          ts.isBinaryExpression(p) &&
+          p.right === n &&
+          p.operatorToken.kind === ts.SyntaxKind.QuestionQuestionEqualsToken &&
+          isThisMember(p.left, 'refreshInFlight')
+        ) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    const SESSION = new Set(['idToken', 'refreshToken', 'expiresAt', 'userId']);
+    const sessionWriters: string[] = [];
+    const exchangeRefs: string[] = [];
+    const refreshRefs: { member: string; shared: boolean }[] = [];
+    let getIdTokenAwaits = 0;
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+        node.operatorToken.kind <= ts.SyntaxKind.LastAssignment &&
+        isThisMember(node.left) &&
+        SESSION.has(node.left.name.text)
+      ) {
+        sessionWriters.push(memberOf(node));
+      }
+      if (isThisMember(node, 'exchangeToken')) exchangeRefs.push(memberOf(node));
+      if (isThisMember(node, 'refreshSession')) {
+        refreshRefs.push({ member: memberOf(node), shared: isSharedBy(node) });
+      }
+      if (ts.isAwaitExpression(node) && memberOf(node) === 'getIdToken') getIdTokenAwaits += 1;
+      ts.forEachChild(node, visit);
+    };
+    visit(cls);
+
+    expect(getIdTokenAwaits, 'getIdToken must not await: join the shared attempt instead').toBe(0);
+    expect(refreshRefs, 'refreshSession must only run as the shared refreshInFlight').toEqual([
+      { member: 'getIdToken', shared: true },
+    ]);
+    // Anti-vacuity on both: a rename would otherwise leave nothing to check.
+    expect(exchangeRefs.length).toBeGreaterThan(0);
+    expect(
+      [...new Set(exchangeRefs)],
+      'exchangeToken writes the session, so only the shared attempt may call it'
+    ).toEqual(['refreshSession']);
+    expect(sessionWriters.length).toBeGreaterThan(0);
+    expect(
+      [...new Set(sessionWriters)],
+      'the session is written only by exchangeToken, inside the shared attempt'
+    ).toEqual(['exchangeToken']);
   });
 });

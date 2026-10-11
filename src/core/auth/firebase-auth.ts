@@ -105,6 +105,36 @@ export class FirebaseAuth {
   private extractToken: TokenExtractor;
   private uidTransitionListener: ((prevUid: string, newUid: string) => void) | null = null;
 
+  /**
+   * The refresh attempt in progress, if any, shared by every caller that
+   * arrives while it runs (#796).
+   *
+   * The GraphQL client calls `getIdToken` once per request, so concurrent
+   * callers are the normal case, not an edge. Before this, each one ran its own
+   * refresh against the same `idToken` / `refreshToken` / `expiresAt`, and any
+   * await could be overtaken by a sibling that installed a session meanwhile.
+   * #765 and #770 re-checked for that at every resume point. That stopped a
+   * resumed caller from reporting a failure while its object held a working
+   * token, but it could not stop a WRITE: a cold-path candidate that succeeded
+   * after a sibling installed a session overwrote it inside `exchangeToken`,
+   * possibly with another account's. And every caller still paid for its own
+   * browser read and exchanges.
+   *
+   * With one attempt per instance there is no sibling. Every write to the
+   * session happens in `exchangeToken`, which only `refreshSession` calls, which
+   * only runs as this promise. So nothing can change the session while
+   * `refreshSession` is suspended, and it needs no re-checks. A structural test
+   * in tests/core/auth/candidate-ordering.test.ts pins that chain, because the
+   * absence of the re-checks rests on it.
+   *
+   * Cleared when the attempt settles, on success AND failure. A failure must not
+   * stay cached, or every later call would replay the same rejection instead of
+   * retrying. That does not weaken #751: whether the cached refresh token
+   * survives a failure is still decided in `exchangeToken`, by the verdict, and
+   * the next attempt starts from whatever it left.
+   */
+  private refreshInFlight: Promise<string> | null = null;
+
   constructor(extractToken: TokenExtractor) {
     this.extractToken = extractToken;
   }
@@ -112,41 +142,42 @@ export class FirebaseAuth {
   /**
    * The cached ID token if it is still inside its lifetime, else null.
    *
-   * `getIdToken` calls this at entry and again at EVERY point where it resumes
-   * from an await (#765, #770). It has no in-flight dedupe, and the GraphQL
-   * client calls it once per request, so any await can be overtaken by a
-   * sibling call that installs a live session on this same object. A caller
-   * that resumed and carried on as if nothing had changed would, with nothing
-   * usable in its own hands, report a failure ("No Copilot Money session
-   * found", or a raw endpoint error) while its object held a working token.
-   *
-   * Rule: each await that can fail is wrapped in a try, and its catch calls
-   * this before anything else, before a rethrow too. A sibling's live session
-   * is a better answer than any error this caller has, and returning it
-   * discards nothing (#751 is about not discarding a credential, which this
-   * never does). The check is unconditional: a live sibling session beats ANY
-   * exception, not only an endpoint signal. That includes a failed fetch, a
-   * malformed response body, or a drifted response with no ID token. Each of
-   * those says nothing about the session the sibling already holds. The one
-   * await that can't fail this way, the browser read, is followed by a call
-   * to this.
-   *
    * Exempt: returning the session an exchange has just installed. That is the
-   * token the server just issued, so it is returned as is, even when its
-   * lifetime is already inside EXPIRY_MARGIN_MS.
-   *
-   * A count test in tests/core/auth/candidate-ordering.test.ts requires one
-   * call per await plus the entry check. That is a tripwire, not the rule.
-   * Counting can't check placement, so the behavioural cases in the same file
-   * are what pin each check to its resume point.
+   * token the server just issued, so `refreshSession` returns it as is, even
+   * when its lifetime is already inside EXPIRY_MARGIN_MS.
    */
   private freshIdToken(): string | null {
     return this.idToken && Date.now() < this.expiresAt ? this.idToken : null;
   }
 
+  /**
+   * A live ID token: the cached one while it lasts, else the result of the one
+   * refresh attempt in flight, started here if none is (#796).
+   *
+   * Never awaits. Every caller either returns the cached token or joins the
+   * shared attempt, so this method has no resume point a sibling could
+   * overtake.
+   */
   async getIdToken(): Promise<string> {
     const cached = this.freshIdToken();
     if (cached) return cached;
+    // `.finally` rather than a try/finally inside refreshSession: an extractor
+    // that throws synchronously would run that finally before this assignment,
+    // and the settled rejection would then stay cached for good. A `.finally`
+    // reaction always runs after this line, and before any caller awaiting the
+    // returned promise resumes.
+    this.refreshInFlight ??= this.refreshSession().finally(() => {
+      this.refreshInFlight = null;
+    });
+    return this.refreshInFlight;
+  }
+
+  /**
+   * One refresh attempt. It runs only as `refreshInFlight`, so it is never
+   * concurrent with itself on this instance, and nothing else writes the
+   * session while it is suspended (see `refreshInFlight`).
+   */
+  private async refreshSession(): Promise<string> {
     // Fast path: we already hold a Copilot-project refresh token (from a prior
     // successful exchange) — just refresh it. The server-returned refresh token
     // is known-good, so it can never be foreign; but "known-good" expires the
@@ -165,85 +196,24 @@ export class FirebaseAuth {
     // predicate is what makes "fell through ⇒ the token it failed on is no
     // longer cached" true by construction rather than by two expressions
     // happening to agree.
+    //
+    // No re-check for a sibling's session after any await below, and no
+    // one-shot retry against a token "someone else installed" (#765, #770):
+    // with one attempt per instance there is no someone else (#796).
     if (this.refreshToken) {
-      // Capture WHICH token this attempt spends. `this.refreshToken` is instance
-      // state and the await below is a suspension point, so a concurrent caller
-      // can replace it — and whether it did is the only thing that distinguishes
-      // "we are logged out" from "someone else just logged us in".
-      const tried = this.refreshToken;
       try {
-        await this.exchangeToken(tried);
+        await this.exchangeToken(this.refreshToken);
         if (!this.idToken) throw new Error('Firebase token exchange returned no ID token');
-        // Not routed through freshIdToken: this is the session just issued
-        // (see the exemption there).
+        // Just issued (see the exemption in freshIdToken).
         return this.idToken;
       } catch (err) {
-        // Guard (1), the normal case, and checked first (see `freshIdToken`).
-        // While the exchange above was in flight, a concurrent getIdToken()
-        // could have completed a cold extract and installed a live session.
-        // Falling through to the cold path would re-scan every browser profile
-        // and then very likely report "No Copilot Money session found" to a
-        // caller whose own object is holding a working token. That is #722's
-        // symptom reached from a third side: telling a logged-in user to log
-        // in. Rethrowing an endpoint error here would be the same symptom with
-        // a raw 429 in place of the login message.
-        const installedSession = this.freshIdToken();
-        if (installedSession) return installedSession;
-
         if (!isTokenFinished(err)) throw err;
-
-        // Guard (2), the rare case. It is reached only when the replacement's
-        // own lifetime is already inside EXPIRY_MARGIN_MS, so guard (1) found
-        // its ID token stale. Guard (1) covers the normal case; don't read
-        // this as the main path.
-        //
-        // Reachable only because of the guard in exchangeToken, which nulls
-        // the cached token ONLY when it still equals the one that failed
-        // (#751). So a surviving, DIFFERENT refreshToken is positive evidence
-        // that another caller installed it, not a leftover.
-        //
-        // Captured for the same reason as `tried`: the retry's await is a
-        // suspension point too, and the token it spends must be the one it
-        // checked.
-        const installed = this.refreshToken;
-        if (installed && installed !== tried) {
-          // Exactly one retry, against the token someone else installed. Not a
-          // loop: a second failure means that token is finished too, and the
-          // cold path is the right answer at that point.
-          try {
-            await this.exchangeToken(installed);
-            // Just issued (see the exemption in freshIdToken).
-            if (this.idToken) return this.idToken;
-          } catch (retryErr) {
-            // Resume point: the retry may have been overtaken too.
-            const installedDuringRetry = this.freshIdToken();
-            if (installedDuringRetry) return installedDuringRetry;
-            if (!isTokenFinished(retryErr)) throw retryErr;
-          }
-        }
       }
     }
 
     // Cold path: try each discovered candidate, discarding the ones the
-    // endpoint rejects and keeping the first that exchanges cleanly. No check
-    // is needed before it. Every path to this line either never awaited, or
-    // ran a check after its last await. The one exception is a retry that
-    // succeeded but returned no ID token, and there the fall-through is the
-    // point.
+    // endpoint rejects and keeping the first that exchanges cleanly.
     const { candidates, checked } = await this.extractToken();
-
-    // Resume point: the browser read is the slowest await in the file, so it
-    // is the one most likely to be overtaken. Return a session a sibling
-    // installed meanwhile before spending any exchange on what this read
-    // found, since a successful exchange would overwrite that session,
-    // possibly with a different account's. This protects the FIRST exchange
-    // only. A sibling can still install a session while a later candidate is
-    // in flight, and that candidate's success then overwrites it. A re-check
-    // can't close that, because the overwrite happens inside exchangeToken.
-    // Only in-flight dedupe would (one shared promise per instance, #796); the
-    // uid-transition listener at least reports it when the account changes.
-    const afterRead = this.freshIdToken();
-    if (afterRead) return afterRead;
 
     // A rejection that was NOT "this token is foreign" — kept so it can be
     // surfaced if nothing else works, instead of being flattened into the
@@ -254,12 +224,6 @@ export class FirebaseAuth {
       try {
         await this.exchangeToken(candidate.token);
       } catch (err) {
-        // Resume point: a sibling may have installed a session while this
-        // candidate was in flight. Prefer it to the next candidate and to any
-        // error this loop would otherwise throw or end on.
-        const installedMeanwhile = this.freshIdToken();
-        if (installedMeanwhile) return installedMeanwhile;
-
         // The endpoint, our API key, or the network is the problem — not this
         // candidate. Retrying nine more times would only hammer it and bury
         // the cause behind an unactionable message.
@@ -345,18 +309,15 @@ export class FirebaseAuth {
       // MAX_EXCHANGE_CANDIDATES exchanges against the endpoint that had just
       // said "slow down" (#751).
       //
-      // The identity check is the same mistake one level down (#760 review).
-      // `getIdToken` has no in-flight dedupe and the GraphQL client calls it per
-      // request, so two callers can be inside this method at once: the first
-      // clears a dead token, cold-extracts, and installs a FRESH one, and the
-      // second's rejection — a true verdict, about a token nobody holds any
-      // more — would then null the replacement. It also makes the cold loop's
-      // safety explicit rather than incidental: a dead CANDIDATE is not a
-      // statement about whatever is cached.
-      //
-      // The fast path's "fell through ⇒ the token it failed on is no longer
-      // cached" still holds, and is now the stronger claim: either this cleared
-      // it, or someone else had already replaced it with a live one.
+      // The identity check is the same mistake one level down (#760 review): a
+      // verdict is about the token in THIS request, so it may discard the
+      // cached token only while that is the same token. It was written for two
+      // concurrent callers inside this method, the second's verdict arriving
+      // after the first had installed a replacement. Since #796 that cannot
+      // happen on one instance (`refreshInFlight`), and on the cold path the
+      // cache is already empty. It stays because it is the discard rule stated
+      // correctly, not a race patch: a dead CANDIDATE is not a statement about
+      // whatever is cached, whoever calls this.
       if (isTokenFinished(failure) && this.refreshToken === refreshToken) {
         this.refreshToken = null;
       }
