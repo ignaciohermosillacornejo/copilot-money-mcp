@@ -926,7 +926,9 @@ describe('every decoder route is compared or excluded with a reason (#778)', () 
       expect(decodedRoots(await decodeAllCollections(dbPath))).toEqual(
         [
           'holdings_history',
+          'holdings_history_meta',
           'balance_history',
+          'plaid_accounts',
           'transactions',
           'accounts',
           'recurring',
@@ -952,6 +954,34 @@ describe('every decoder route is compared or excluded with a reason (#778)', () 
           'support',
         ].map((root) => ({ root, rows: 0 }))
       );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('no two compared routes read the same decoded array', async () => {
+    // ROUTE_ROWS is hand-written, one accessor per route. A copy-paste slip
+    // (two routes reading one array) passes the partition and order tests,
+    // because on an empty cache every count is 0, and it would hide the #622
+    // signature for the route that lost its own array: raw N, rows N, from
+    // someone else's rows. Give every array in a real decode result a distinct
+    // length, so a shared accessor shows up as a repeated row count, without
+    // this test restating the mapping.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'smoke-cache-accessors-'));
+    try {
+      const dbPath = path.join(dir, 'empty');
+      await createEmptyDb(dbPath);
+      const all = (await decodeAllCollections(dbPath)) as unknown as Record<string, unknown>;
+      let length = 1;
+      for (const key of Object.keys(all)) {
+        if (Array.isArray(all[key])) all[key] = Array.from({ length: length++ });
+      }
+      const rows = decodedRoots(all as unknown as Parameters<typeof decodedRoots>[0]).map(
+        (r) => r.rows
+      );
+      // Vacuity guard: every compared route must have read some array.
+      expect(rows.filter((n) => n === 0)).toEqual([]);
+      expect(new Set(rows).size).toBe(rows.length);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

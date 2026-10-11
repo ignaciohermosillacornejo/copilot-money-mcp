@@ -83,9 +83,11 @@ describe('every parent-pointer dispatch clause guards its processor (#627)', () 
   // The class-level ratchet. Two routing clauses in routeCollection (users and
   // amazon; the items one went with #627) deliberately match Firestore's
   // parent-pointer paths with a `/^name\/[^/]+$/` regex, and the switch in
-  // decodeAllCollections sends each to a processor. Each is only safe because the processor it calls
-  // returns null for a fieldless document — an invariant that lived nowhere
-  // enforceable, which is how `items` shipped without it.
+  // decodeAllCollections sends each to a processor. Each is only safe because
+  // the processor it calls returns null for a fieldless document — an
+  // invariant that lived nowhere enforceable, which is how `items` shipped
+  // without it. Since #797 every processor carries the guard, and the sweep
+  // below asserts it behaviourally for every route.
   //
   // This pins the pairing: add a parent-pointer clause, and the processor it
   // dispatches to must carry the guard.
@@ -151,7 +153,7 @@ const NO_PROCESSOR = ['financial_goal_sentinels', 'user_accounts'] as const;
 /** Every route that has a processor. */
 type SweptRoute = Exclude<CollectionRoute, (typeof NO_PROCESSOR)[number]>;
 
-describe('no route builds a row from a fieldless document (#627, #778)', () => {
+describe('no route builds a row from a fieldless document (#627, #778, #797)', () => {
   // The behavioural form of the source scan above, over EVERY route the smoke
   // compares rather than the clauses a regex can find. One fieldless document
   // is written at a real path for each route, and the decoder must produce
@@ -163,13 +165,9 @@ describe('no route builds a row from a fieldless document (#627, #778)', () => {
   const I = 'itm_5pQw8ZnRvL3MxK7cHt2J';
   const A = 'acc_9wKe4RnTpB2XvL7mQd3F';
   const U = 'usr_3hTq7WmZ2xKv9LpR4cNb';
-  // Every route with a processor: ROUTE_ROWS, plus the two the smoke excludes
-  // because of exactly this defect (ROUTES_NOT_COMPARED, #797).
-  const ROWS: Record<SweptRoute, (all: AllCollectionsResult) => number> = {
-    ...ROUTE_ROWS,
-    plaid_accounts: (all) => all.plaidAccounts.length,
-    holdings_history_meta: (all) => all.holdingsHistoryMeta.length,
-  };
+  // Every route with a processor is compared by the smoke since #797, so the
+  // smoke's own accessor table is the row source.
+  const ROWS: Record<SweptRoute, (all: AllCollectionsResult) => number> = ROUTE_ROWS;
   const PATHS: Record<SweptRoute, { collection: string; id: string }> = {
     holdings_history: {
       collection: `items/${I}/accounts/${A}/holdings_history/hh_4kWz8nVq/history`,
@@ -209,32 +207,6 @@ describe('no route builds a row from a fieldless document (#627, #778)', () => {
     support: { collection: 'support', id: U },
   };
 
-  // RATCHET (#797). Every route here builds a row from a fieldless document
-  // today. The list must match exactly in both directions: a route joining it
-  // is a new phantom-row processor, and a route that has been fixed must be
-  // removed so it cannot regress unnoticed. Shrink it; never grow it.
-  const KNOWN_FIELDLESS_ROW_ROUTES: readonly SweptRoute[] = [
-    'holdings_history',
-    'holdings_history_meta',
-    'balance_history',
-    'plaid_accounts',
-    'recurring',
-    'financial_goals',
-    'financial_goal_history',
-    'investment_prices',
-    'tags',
-    'transaction_changes',
-    'account_changes',
-    'changes',
-    'securities',
-    'amazon_orders',
-    'subscriptions',
-    'invites',
-    'user_items',
-    'feature_tracking',
-    'support',
-  ];
-
   test('the sweep covers every route that has a processor', () => {
     const swept = COLLECTION_ROUTES.filter(
       (r) => !(NO_PROCESSOR as readonly string[]).includes(r)
@@ -253,12 +225,6 @@ describe('no route builds a row from a fieldless document (#627, #778)', () => {
     const all = await decodeAllCollections(dbPath);
     const rows = ROWS[route as SweptRoute](all);
 
-    if (KNOWN_FIELDLESS_ROW_ROUTES.includes(route as SweptRoute)) {
-      // Known offender: still produces exactly the phantom row. When this
-      // starts failing with 0, the processor was fixed — drop it from the list.
-      expect(rows).toBe(1);
-    } else {
-      expect(rows).toBe(0);
-    }
+    expect(rows).toBe(0);
   });
 });

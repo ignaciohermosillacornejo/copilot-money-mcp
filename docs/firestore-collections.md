@@ -50,7 +50,7 @@ collection === target || collection.endsWith(`/${target}`)
 | `items/{id}/accounts/{id}` | ~4,250, **all fieldless** | n/a | Not account documents. Firestore parent pointers for the per-account subcollections listed below — the `~6,867` this row used to claim was counting them as data (#666). The account documents themselves are the `items/{id}/accounts` row |
 | `items/{id}/accounts/{id}/balance_history` | ~4,945 | Yes | Daily account balance history |
 | `items/{id}/accounts/{id}/transactions` | ~1,367 | Yes | Plaid raw transactions |
-| `items/{id}/accounts/{id}/holdings_history/{hash}` | ~630 | Yes | Holdings snapshot metadata |
+| `items/{id}/accounts/{id}/holdings_history/{hash}` | ~800, **all fieldless** | n/a | Not metadata documents. Firestore parent pointers for the `history` subcollection below; the decoder used to build a `HoldingsHistoryMeta` row from each, and returns none since #797 |
 | `items/{id}/accounts/{id}/holdings_history/{hash}/history` | ~84 | Yes | Daily holdings price/quantity |
 | `items/{id}/accounts` | ~21, none fieldless | Yes | **The account documents.** The only collection `processAccount` routes to on a real cache; there is no top-level `accounts` collection on the one measured 2026-09-16 |
 | `investment_performance` | ~10 | Yes | Performance tracking metadata |
@@ -511,6 +511,13 @@ Stores daily and high-frequency price data per security (identified by SHA256 ha
 ## Undecoded Collections
 
 ### `items/{item_id}/accounts/{account_id}` (Plaid Account Documents)
+
+> **Measured 2026-10-11: every document at this path on a real cache is a fieldless parent
+> pointer** (~5,100), anchoring the per-account subcollections, as the table above says. The
+> holdings and cost basis live on the `items/{id}/accounts` documents instead. Until #797,
+> `processPlaidAccount` built a phantom row from each pointer; it now returns none, and would
+> still decode a populated document if Copilot ever wrote one here. The description below is
+> the historical one.
 
 **~6,867 documents** | **High priority - contains holdings with cost basis**
 

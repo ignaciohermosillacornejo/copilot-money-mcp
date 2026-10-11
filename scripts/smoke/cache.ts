@@ -169,17 +169,6 @@ export const ROUTES_NOT_COMPARED = {
   user_accounts:
     'known and deliberately unread since #666: routed so the accounts leaf clause cannot ' +
     'claim it, but it has no processor; check 8 reports its document count instead',
-  // The two below are a known defect, not a design choice, and are excluded so
-  // check 1b reports new phantom rows rather than these on every run. Their
-  // processors build a row from a fieldless parent pointer and a real cache
-  // holds nothing else at these paths, so they would FAIL check 1b
-  // permanently. Move each back into ROUTE_ROWS when #797 guards its processor.
-  plaid_accounts:
-    'every real document at items/*/accounts/* is a fieldless parent pointer and ' +
-    'processPlaidAccount builds a row from one anyway (#797)',
-  holdings_history_meta:
-    'every real document at items/*/accounts/*/holdings_history is a fieldless parent ' +
-    'pointer and processHoldingsHistoryMeta builds a row from one anyway (#797)',
 } as const satisfies Partial<Record<CollectionRoute, string>>;
 
 type ComparedRoute = Exclude<CollectionRoute, keyof typeof ROUTES_NOT_COMPARED>;
@@ -194,7 +183,9 @@ type ComparedRoute = Exclude<CollectionRoute, keyof typeof ROUTES_NOT_COMPARED>;
  */
 export const ROUTE_ROWS: Record<ComparedRoute, (all: AllCollectionsResult) => number> = {
   holdings_history: (all) => all.holdingsHistory.length,
+  holdings_history_meta: (all) => all.holdingsHistoryMeta.length,
   balance_history: (all) => all.balanceHistory.length,
+  plaid_accounts: (all) => all.plaidAccounts.length,
   transactions: (all) => all.transactions.length,
   accounts: (all) => all.accounts.length,
   recurring: (all) => all.recurring.length,
@@ -298,8 +289,9 @@ export function reportDecodeLossCoverage(roots: readonly RootComparison[]): {
       `routed to them: ` +
       unmeasured.map((d) => `${d.root} (0 raw → ${d.rows} rows)`).join(', ') +
       ` — the raw side counts through the decoder's own routeCollection, so these rows ` +
-      `came from fieldless parent pointers (the #627 phantom-row class; see #797 for the processors known to do it) or the root is ` +
-      `mapped to the wrong route in decodedRoots`,
+      `came from fieldless parent pointers (the #627 phantom-row class, which #797 ` +
+      `guarded in every processor, so a hit here is a processor that lost its ` +
+      `guard) or the root is mapped to the wrong route in decodedRoots`,
   };
 }
 

@@ -1219,6 +1219,10 @@ function processAccount(fields: Map<string, FirestoreValue>, docId: string): Acc
  * Internal helper to process a recurring document.
  */
 function processRecurring(fields: Map<string, FirestoreValue>, docId: string): Recurring | null {
+  // A fieldless document is a Firestore parent pointer, not data: building a
+  // row from one manufactures a record that does not exist (#627, #797).
+  if (fields.size === 0) return null;
+
   // Use 'id' field as the recurring_id (Copilot stores it as 'id')
   const recurringId = getString(fields, 'recurring_id') ?? getString(fields, 'id') ?? docId;
 
@@ -1420,6 +1424,10 @@ function processBudget(fields: Map<string, FirestoreValue>, docId: string): Budg
  * Internal helper to process a goal document.
  */
 function processGoal(fields: Map<string, FirestoreValue>, docId: string): Goal | null {
+  // A fieldless document is a Firestore parent pointer, not data: building a
+  // row from one manufactures a record that does not exist (#627, #797).
+  if (fields.size === 0) return null;
+
   const goalId = getString(fields, 'goal_id') ?? docId;
 
   const goalData: Record<string, unknown> = {
@@ -1524,6 +1532,10 @@ function processGoalHistory(
   docId: string,
   collection: string
 ): GoalHistory | null {
+  // A fieldless document is a Firestore parent pointer, not data: building a
+  // row from one manufactures a record that does not exist (#627, #797).
+  if (fields.size === 0) return null;
+
   const month = docId;
   if (!/^\d{4}-\d{2}$/.test(month)) {
     return null;
@@ -1620,6 +1632,10 @@ function processInvestmentPrice(
   docId: string,
   parsed: { securityId: string; priceType: PriceType }
 ): InvestmentPrice | null {
+  // A fieldless document is a Firestore parent pointer, not data: building a
+  // row from one manufactures a record that does not exist (#627, #797).
+  if (fields.size === 0) return null;
+
   const ticker = getString(fields, 'ticker_symbol');
   // The document id IS the period: YYYY-MM for daily, YYYY-MM-DD for hf.
   // Fall back to the document body for the (unobserved) case where Copilot
@@ -1896,6 +1912,10 @@ function processPlaidAccount(
   docId: string,
   collection: string
 ): PlaidAccount | null {
+  // A fieldless document is a Firestore parent pointer, not data: building a
+  // row from one manufactures a record that does not exist (#627, #797).
+  if (fields.size === 0) return null;
+
   const data: Record<string, unknown> = {
     plaid_account_id: docId,
   };
@@ -2036,6 +2056,10 @@ function processPlaidAccount(
  * Path: users/{user_id}/tags/{tag_id}
  */
 function processTag(fields: Map<string, FirestoreValue>, docId: string): Tag | null {
+  // A fieldless document is a Firestore parent pointer, not data: building a
+  // row from one manufactures a record that does not exist (#627, #797).
+  if (fields.size === 0) return null;
+
   const data: Record<string, unknown> = {
     tag_id: docId,
   };
@@ -2076,6 +2100,10 @@ function processBalanceHistory(
   docId: string,
   collection: string
 ): BalanceHistory | null {
+  // A fieldless document is a Firestore parent pointer, not data: building a
+  // row from one manufactures a record that does not exist (#627, #797).
+  if (fields.size === 0) return null;
+
   const data: Record<string, unknown> = {};
 
   // Extract item_id and account_id from path: items/{item_id}/accounts/{account_id}/balance_history
@@ -2141,6 +2169,10 @@ function processHoldingsHistoryMeta(
   docId: string,
   collection: string
 ): HoldingsHistoryMeta | null {
+  // A fieldless document is a Firestore parent pointer, not data: building a
+  // row from one manufactures a record that does not exist (#627, #797).
+  if (fields.size === 0) return null;
+
   const data: Record<string, unknown> = {};
 
   data.holdings_history_id = docId;
@@ -2188,6 +2220,10 @@ function processHoldingsHistory(
   docId: string,
   collection: string
 ): HoldingsHistory | null {
+  // A fieldless document is a Firestore parent pointer, not data: building a
+  // row from one manufactures a record that does not exist (#627, #797).
+  if (fields.size === 0) return null;
+
   const data: Record<string, unknown> = {};
 
   // Extract security_id from path (the holdings_history/{hash} part)
@@ -2259,6 +2295,10 @@ function processHoldingsHistory(
  * Internal helper to process a top-level change document.
  */
 function processChange(fields: Map<string, FirestoreValue>, docId: string): Change | null {
+  // A fieldless document is a Firestore parent pointer, not data: building a
+  // row from one manufactures a record that does not exist (#627, #797).
+  if (fields.size === 0) return null;
+
   const data: Record<string, unknown> = { change_id: docId };
   for (const [key, value] of fields) {
     if (!(key in data)) {
@@ -2290,6 +2330,10 @@ function processSubChange<T>(
   collection: string,
   schema: ZodType<T>
 ): T | null {
+  // A fieldless document is a Firestore parent pointer, not data: building a
+  // row from one manufactures a record that does not exist (#627, #797).
+  if (fields.size === 0) return null;
+
   const data: Record<string, unknown> = { change_id: docId };
   const parts = collection.split('/');
   const changesIdx = parts.indexOf('changes');
@@ -2336,6 +2380,10 @@ function processSubChange<T>(
  * Internal helper to process a security document.
  */
 function processSecurity(fields: Map<string, FirestoreValue>, docId: string): Security | null {
+  // A fieldless document is a Firestore parent pointer, not data: building a
+  // row from one manufactures a record that does not exist (#627, #797).
+  if (fields.size === 0) return null;
+
   // security_id: try field first, fall back to docId
   const securityId = getString(fields, 'security_id') ?? docId;
   const data: Record<string, unknown> = { security_id: securityId };
@@ -2621,6 +2669,10 @@ function processAmazonOrder(
   docId: string,
   collection: string
 ): AmazonOrder | null {
+  // A fieldless document is a Firestore parent pointer, not data: building a
+  // row from one manufactures a record that does not exist (#627, #797).
+  if (fields.size === 0) return null;
+
   const data: Record<string, unknown> = { order_id: docId };
 
   // Extract amazon_user_id from collection path: amazon/{user_id}/orders
@@ -2691,6 +2743,10 @@ function processSubscription(
   fields: Map<string, FirestoreValue>,
   docId: string
 ): Subscription | null {
+  // A fieldless document is a Firestore parent pointer, not data: building a
+  // row from one manufactures a record that does not exist (#627, #797).
+  if (fields.size === 0) return null;
+
   const data: Record<string, unknown> = {
     subscription_id: getString(fields, 'subscription_id') ?? docId,
   };
@@ -2741,6 +2797,10 @@ function processSubscription(
  * Internal helper to process an invite document.
  */
 function processInvite(fields: Map<string, FirestoreValue>, docId: string): Invite | null {
+  // A fieldless document is a Firestore parent pointer, not data: building a
+  // row from one manufactures a record that does not exist (#627, #797).
+  if (fields.size === 0) return null;
+
   const data: Record<string, unknown> = {
     invite_id: getString(fields, 'invite_id') ?? docId,
   };
@@ -2780,6 +2840,10 @@ function processInvite(fields: Map<string, FirestoreValue>, docId: string): Invi
  * Internal helper to process a user_items document.
  */
 function processUserItems(fields: Map<string, FirestoreValue>, docId: string): UserItems | null {
+  // A fieldless document is a Firestore parent pointer, not data: building a
+  // row from one manufactures a record that does not exist (#627, #797).
+  if (fields.size === 0) return null;
+
   const data: Record<string, unknown> = {
     user_items_id: getString(fields, 'user_items_id') ?? docId,
   };
@@ -2811,6 +2875,10 @@ function processFeatureTracking(
   fields: Map<string, FirestoreValue>,
   docId: string
 ): FeatureTracking | null {
+  // A fieldless document is a Firestore parent pointer, not data: building a
+  // row from one manufactures a record that does not exist (#627, #797).
+  if (fields.size === 0) return null;
+
   const data: Record<string, unknown> = {
     feature_tracking_id: getString(fields, 'feature_tracking_id') ?? docId,
   };
@@ -2839,6 +2907,10 @@ function processFeatureTracking(
  * Internal helper to process a support document.
  */
 function processSupport(fields: Map<string, FirestoreValue>, docId: string): Support | null {
+  // A fieldless document is a Firestore parent pointer, not data: building a
+  // row from one manufactures a record that does not exist (#627, #797).
+  if (fields.size === 0) return null;
+
   const data: Record<string, unknown> = {
     support_id: getString(fields, 'support_id') ?? docId,
   };
