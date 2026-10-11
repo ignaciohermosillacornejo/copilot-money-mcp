@@ -109,6 +109,7 @@ import {
 import type { GoalHistory } from '../models/goal-history.js';
 import { isItemHealthy, itemNeedsAttention, getItemDisplayName } from '../models/item.js';
 import { type Category, getCategoryDisplayName } from '../models/category.js';
+import { redactUserPaths } from '../utils/redact-paths.js';
 
 // ============================================
 // Category Constants
@@ -3496,14 +3497,18 @@ export class CopilotMoneyTools {
       .sort((a, b) => a.index - b.index)
       .map(({ transaction_id, updated }) => ({ transaction_id, updated }));
 
+    // Redacted here, where it is built: with `continue_on_error` these messages
+    // are RETURNED in a success-shaped result and never pass the redaction at
+    // `handleCallTool`'s catch, which only sees thrown errors.
     const failures = poolFailures.map(({ index, error }) => ({
       transaction_id: edits[index]!.transaction_id,
-      error:
+      error: redactUserPaths(
         error instanceof GraphQLError
           ? graphQLErrorToMcpError(error)
           : error instanceof Error
             ? error.message
-            : String(error),
+            : String(error)
+      ),
     }));
 
     // Stop-on-error is a hard failure: throw so the caller can't mistake a

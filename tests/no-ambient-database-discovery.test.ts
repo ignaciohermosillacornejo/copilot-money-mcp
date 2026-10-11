@@ -151,7 +151,12 @@ const DISCOVERY_FN = 'findCopilotDatabase';
 /** The exported walker that takes the home directory as a required argument (#774). */
 const WALKER_FN = 'discoverCopilotDatabase';
 
-/** A first argument to `WALKER_FN` that names the real home directory. */
+/**
+ * A first argument to `WALKER_FN` that names the real home directory, anywhere
+ * in its text. Deliberately wide: it also matches `homedir()` inside a string
+ * literal, which is fail-closed and has no instance; anchoring it to the end
+ * was what let `join(homedir(), 'Library')` through.
+ */
 const REAL_HOME = /\bhomedir\(\)/;
 
 /**

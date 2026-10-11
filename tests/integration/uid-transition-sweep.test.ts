@@ -101,7 +101,7 @@ test('mid-session uid transition flushes all live caches (#521)', async () => {
     });
   }) as unknown as typeof fetch;
 
-  // Provide a synthetic LevelDB so isAvailable() passes on CI (no real DB).
+  // Provide a synthetic LevelDB so availability() passes on CI (no real DB).
   // The live tools never touch LevelDB; the DB only needs to satisfy the guard.
   tempDbDir = mkdtempSync(join(tmpdir(), 'copilot-sweep-'));
   await createTestDb(tempDbDir, []);

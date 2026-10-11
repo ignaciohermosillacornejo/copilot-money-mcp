@@ -22,7 +22,10 @@
  *     function declaration (`export function run() { main(); }`) — the
  *     declaration is skipped whole, because defining a function runs nothing,
  *     so a call nested in one is never seen even when an importer would call
- *     it. The name is the convention every script here follows (checked);
+ *     it. One live instance, benign: `scripts/smoke/run-standalone.ts`, where
+ *     `main()` sits inside the exported `runConformanceStandalone()` — importing
+ *     still runs nothing, and a caller invokes it deliberately. The name is the
+ *     convention every script here follows (checked);
  *   - fail-closed: `callsMain` searches the whole statement, so a module-scope
  *     statement that only CONTAINS a call — `export const x = { run: () =>
  *     main() }` — is flagged although importing it runs nothing. No instance

@@ -93,16 +93,16 @@ describe('CopilotDatabase error handling', () => {
     );
   });
 
-  describe('isAvailable edge cases', () => {
+  describe('availability edge cases', () => {
     test('returns false when dbPath is null-ish', () => {
       const db = new CopilotDatabase(SYNTHETIC_DB_PATH);
       // @ts-expect-error - accessing private property for testing
       db.dbPath = undefined;
-      expect(db.isAvailable()).toBe(false);
+      expect(db.availability().available).toBe(false);
 
       // @ts-expect-error - setting to empty string
       db.dbPath = '';
-      expect(db.isAvailable()).toBe(false);
+      expect(db.availability().available).toBe(false);
     });
   });
 });

@@ -351,18 +351,19 @@ export class CopilotDatabase {
   }
 
   /**
-   * Check if database exists and is accessible.
-   */
-  isAvailable(): boolean {
-    return this.availability().available;
-  }
-
-  /**
-   * `isAvailable()` with the reason kept. `lookupError` is set when the answer
-   * is "could not look" rather than "looked, absent" — from discovery when no
-   * path was given, or from reading `dbPath` when one was. The server's dispatch
-   * gate reads it so the message the user sees is `missingDatabaseError`'s, not
-   * a second copy of the install advice (#774).
+   * Whether the database exists and is readable, with the reason kept.
+   *
+   * `lookupError` is set when the answer is "could not look" rather than
+   * "looked, absent" — from discovery when no path was given, or from reading
+   * `dbPath` when one was. The server's dispatch gate reads it so the message
+   * the user sees is `missingDatabaseError`'s, not a second copy of the install
+   * advice (#774).
+   *
+   * This is the only availability check, deliberately. There used to be a
+   * boolean `isAvailable()` beside it, which collapsed both answers into
+   * `false`; its last two callers (the cache and account-name smokes) printed
+   * "no cache" for a cache they could not read. It was removed rather than
+   * gated, so the collapse is not an API anyone can reach for.
    */
   availability(): { available: boolean; lookupError?: Error } {
     this.rediscoverIfTransient();

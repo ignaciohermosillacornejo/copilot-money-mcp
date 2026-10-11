@@ -45,7 +45,7 @@ describe('CopilotMoneyServer with --live-reads', () => {
   });
 });
 
-// #640: the db.isAvailable() gate must be scoped to tools whose dispatch
+// #640: the db.availability() gate must be scoped to tools whose dispatch
 // actually reads the local LevelDB cache. Live tools run entirely on GraphQL,
 // and live-mode writes resolve live-first (the cache is only touched via
 // null-guarded patchCached* write-through) — so on a machine without the

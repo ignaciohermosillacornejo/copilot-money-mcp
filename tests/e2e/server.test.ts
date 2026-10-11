@@ -30,7 +30,7 @@ import { createMockGraphQLClient, bulkEditEcho } from '../helpers/mock-graphql.j
 import type { EditTransactionResponse } from '../../src/core/graphql/transactions.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
-// Temp directory with a dummy .ldb so CopilotDatabase.isAvailable() returns true
+// Temp directory with a dummy .ldb so CopilotDatabase.availability() reports available
 const FAKE_DB_DIR = mkdtempSync(join(tmpdir(), 'copilot-test-'));
 writeFileSync(join(FAKE_DB_DIR, 'dummy.ldb'), '');
 afterAll(() => rmSync(FAKE_DB_DIR, { recursive: true, force: true }));
@@ -476,7 +476,7 @@ describe('CopilotMoneyServer E2E', () => {
   describe('error handling', () => {
     test('database unavailable returns appropriate message', async () => {
       const dbUnavailable = new CopilotDatabase('/nonexistent/path');
-      expect(dbUnavailable.isAvailable()).toBe(false);
+      expect(dbUnavailable.availability().available).toBe(false);
     });
   });
 });

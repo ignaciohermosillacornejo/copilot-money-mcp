@@ -2,7 +2,7 @@
  * A smoke that could not READ the cache must not report "no cache" (#774).
  *
  * `smoke:cache` printed `no-cache-found … This is not a failure` and exited 0,
- * and `smoke:account-names` printed SKIP, whenever `isAvailable()` was false —
+ * and `smoke:account-names` printed SKIP, whenever the since-removed boolean `isAvailable()` was false —
  * which included a cache that exists and could not be read. Both now ask
  * `availability()` and fail when it carries a lookup error.
  *

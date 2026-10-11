@@ -219,7 +219,7 @@ describe('availability: "could not look" survives to the server dispatch gate', 
   });
 
   test('the dispatch gate checks once, so a permanent interrupt pays the bound once', async () => {
-    // isAvailable() followed by availability() ran the retried readdir twice —
+    // A boolean check followed by availability() ran the retried readdir twice —
     // twice the bound on the slow path, and a window where the two disagree.
     const server = new CopilotMoneyServer(mainPath);
     const delivered = interruptReaddir(Number.POSITIVE_INFINITY);
@@ -296,6 +296,34 @@ describe('a retryable discovery failure is looked at again, not served from memo
     const server = await serverWithFailedDiscovery(eintr('/synthetic/main'));
     const db = (server as unknown as { db: CopilotDatabase }).db;
     expect(db.getDbPath()).toBe(mainPath);
+  });
+
+  test('a re-look that finds genuine absence stops re-looking and gives the install advice', async () => {
+    // The third outcome, and the one the termination argument rests on: the
+    // re-look succeeds and there is nothing there, so the stored EINTR must be
+    // REPLACED by "no error". Kept instead, the server would tell the user to
+    // retry forever, and re-walk the container on every call.
+    const server = await serverWithFailedDiscovery(eintr('/synthetic/main'));
+    fs.rmSync(path.join(home, 'Library'), { recursive: true, force: true });
+    const delivered = interruptReaddir(0); // counts nothing; just installs the counter
+    const first = (await server.handleCallTool('get_accounts', {})).content[0]?.text ?? '';
+    expect(first).toContain('ensure Copilot Money is installed');
+    expect(first).not.toContain('EINTR');
+
+    // Settled: a second call answers from memory without walking again.
+    const db = (server as unknown as { db: CopilotDatabase }).db;
+    const walks: string[] = [];
+    const original = fs.readdirSync;
+    (fs as { readdirSync: unknown }).readdirSync = (...args: unknown[]) => {
+      walks.push(String(args[0]));
+      return (original as (...a: unknown[]) => unknown).apply(fs, args);
+    };
+    restores.push(() => {
+      (fs as { readdirSync: unknown }).readdirSync = original;
+    });
+    expect(db.availability()).toEqual({ available: false });
+    expect(walks.filter((p) => p.startsWith(home))).toEqual([]);
+    expect(delivered()).toBe(0);
   });
 
   test('a persistent error is served from memory, not re-walked on every call', async () => {

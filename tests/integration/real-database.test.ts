@@ -271,7 +271,7 @@ describeWithRealDb('Real Copilot Money Database Integration', () => {
   }, 300000); // 5 minute timeout for large database loading
 
   test('database is available and accessible', () => {
-    expect(db.isAvailable()).toBe(true);
+    expect(db.availability().available).toBe(true);
     expect(db.getDbPath()).toBe(REAL_DB_PATH);
   });
 

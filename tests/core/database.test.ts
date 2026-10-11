@@ -215,10 +215,10 @@ describe('CopilotDatabase', () => {
     });
   });
 
-  describe('isAvailable', () => {
+  describe('availability', () => {
     test('returns false for non-existent path', async () => {
       const db = new CopilotDatabase('/fake/nonexistent/path');
-      expect(db.isAvailable()).toBe(false);
+      expect(db.availability().available).toBe(false);
     });
   });
 

@@ -1168,8 +1168,10 @@ export function buildResidueReaders(client: GraphQLClient): ResidueReaders {
 }
 
 // ---------------------------------------------------------------------------
-// Runner plumbing (kept here so it stays unit-testable without executing
-// scripts/smoke/roundtrip.ts, whose import runs main()).
+// Runner plumbing, kept apart from scripts/smoke/roundtrip.ts so it can be
+// unit-tested without importing the entry point. (Importing roundtrip.ts used
+// to run main(); it is guarded by `import.meta.main` now, so the split is about
+// keeping the entry point thin, not about avoiding a side effect.)
 // ---------------------------------------------------------------------------
 
 export interface RoundtripArgs {

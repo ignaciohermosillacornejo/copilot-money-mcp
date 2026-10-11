@@ -14,6 +14,7 @@
  */
 
 import { describe, test, expect, mock } from 'bun:test';
+import { homedir } from 'node:os';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
@@ -533,6 +534,27 @@ describe('update_transactions partial-failure accounting', () => {
     expect(result.failures).toHaveLength(1);
     expect(result.failures[0]!.transaction_id).toBe('txn-05');
     expect(result.failures[0]!.error).toMatch(/simulated failure/);
+  });
+
+  test('continue_on_error: a returned failure message has the username redacted', async () => {
+    // Returned, not thrown, so it never passes the redaction at handleCallTool's
+    // catch. The row's message is redacted where it is built instead.
+    const ids = ['txn-01', 'txn-02'];
+    const { tools } = toolsWithFailure(ids, 'none');
+    const leaked = `${homedir()}/Library/Containers/x/main/000001.ldb`;
+    (tools as unknown as { graphqlClient: { mutate: unknown } }).graphqlClient.mutate = mock(
+      (_op: string, _q: string, vars: any) =>
+        vars.id === 'txn-02'
+          ? Promise.reject(new Error(`EACCES: permission denied, open '${leaked}'`))
+          : Promise.resolve(echoResponse(vars))
+    );
+    const result = await tools.updateTransactions({
+      edits: ids.map((id) => ({ transaction_id: id, note: 'x' })),
+      continue_on_error: true,
+    });
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]!.error).toContain('~/Library/Containers/x/main/000001.ldb');
+    expect(result.failures[0]!.error).not.toContain(homedir());
   });
 
   test('continue_on_error with no failures reports success', async () => {
