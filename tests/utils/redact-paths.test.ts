@@ -38,6 +38,18 @@ describe('redactUserPaths', () => {
     }
   });
 
+  test('the home matches as a whole segment, not as a prefix of a longer name', () => {
+    // `/Users/synthetic-user2` is someone else: it gets the generic prefix
+    // redaction, never `~2`.
+    expect(redactUserPaths("open '/Users/synthetic-user2/x'", HOME)).toBe("open '/Users/<user>/x'");
+    expect(redactUserPaths(`cwd is ${HOME}`, HOME)).toBe('cwd is ~');
+  });
+
+  test('closing punctuation after a username is kept', () => {
+    expect(redactUserPaths('(/home/bob)', HOME)).toBe('(/home/<user>)');
+    expect(redactUserPaths('/Users/bob, and more', HOME)).toBe('/Users/<user>, and more');
+  });
+
   test('an empty or root home is not used as a pattern', () => {
     expect(redactUserPaths('a/b /c', '')).toBe('a/b /c');
     expect(redactUserPaths('a/b /c', '/')).toBe('a/b /c');

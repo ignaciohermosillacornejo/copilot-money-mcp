@@ -645,8 +645,8 @@ const normalize = normalizeCollection;
 
 async function main(): Promise<void> {
   const db = new CopilotDatabase();
-  const dbPath = db.getDbPath();
   const { available, lookupError } = db.availability();
+  const dbPath = db.getDbPath();
 
   // "Could not look" is not "nothing there" (#774): a cache this smoke failed
   // to read must not report a green "nothing to check".

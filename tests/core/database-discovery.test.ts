@@ -255,6 +255,12 @@ describe('a retryable discovery failure is looked at again, not served from memo
    * Driven through `handleCallTool`, twice. The discovery outcome is set the way
    * the no-path constructor sets it, with `discoveryHome` pointed at the
    * synthetic home, so nothing here walks the real container.
+   *
+   * Coupled to three private field names by necessity: the ambient-discovery
+   * gate forbids the honest route (a no-path constructor). Renaming
+   * `discoveryHome` would leave these tests setting a field nothing reads, so
+   * the second assertion of the first test — the database IS found — is what
+   * would go red: without a home to re-walk, the re-look cannot succeed.
    */
   async function serverWithFailedDiscovery(err: Error): Promise<CopilotMoneyServer> {
     fs.rmSync(mainPath, { recursive: true, force: true });
@@ -281,6 +287,15 @@ describe('a retryable discovery failure is looked at again, not served from memo
     // The interrupt has cleared. Retrying — what the message said to do — works.
     const second = await server.handleCallTool('get_accounts', {});
     expect(second.content[0]?.text ?? '').not.toContain('Database not available');
+  });
+
+  test('getDbPath() re-looks too, so reading the path first cannot miss a cleared interrupt', async () => {
+    // smoke:cache read getDbPath() before availability(); with getDbPath() not
+    // re-looking, a cleared interrupt left it undefined and the smoke printed
+    // "no-cache-found … This is not a failure" for a cache that was there.
+    const server = await serverWithFailedDiscovery(eintr('/synthetic/main'));
+    const db = (server as unknown as { db: CopilotDatabase }).db;
+    expect(db.getDbPath()).toBe(mainPath);
   });
 
   test('a persistent error is served from memory, not re-walked on every call', async () => {

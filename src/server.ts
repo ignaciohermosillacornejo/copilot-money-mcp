@@ -241,6 +241,9 @@ export class CopilotMoneyServer {
     if (availability && !availability.available) {
       // "Could not look" is not "absent" (#774): when the check failed to read,
       // say so rather than telling an installed, synced user to install.
+      // This message names an errno and no path (`missingDatabaseError`); the
+      // catch below keeps a thrown error's path and redacts only the user
+      // (`redactUserPaths`). Two scrubs on purpose — see redact-paths.ts.
       const { lookupError } = availability;
       return {
         content: [

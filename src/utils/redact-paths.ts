@@ -10,20 +10,36 @@
  * also eat text that only contains a slash — a category named `Food/Dining`,
  * a date, the GraphQL endpoint URL — and an error that has lost its subject is
  * worse than one that names a directory. So this replaces only the part that
- * identifies the user: the current home directory, wherever it appears
- * (spaces in the path included, since it is matched literally), and any other
- * `/Users/<name>` or `/home/<name>` prefix. What follows the prefix is kept,
- * because it is what says which file failed.
+ * identifies the user: the current home directory, wherever it appears as a
+ * whole path segment (spaces in the rest of the path included, since the home
+ * is matched literally), and any other `/Users/<name>` or `/home/<name>`
+ * prefix. What follows the prefix is kept, because it is what says which file
+ * failed.
+ *
+ * Not the same scrub as `scrubPaths` in `src/core/database.ts`, on purpose.
+ * That one builds the dispatch gate's "could not read" message, which names an
+ * errno and needs no path at all, so it replaces whole paths with `<path>`.
+ * This one runs on errors whose path IS the useful part, so it keeps the path
+ * and removes only the user.
  */
 
 import { homedir } from 'node:os';
 
-const USER_PREFIX = /\/(Users|home)\/[^/\s'"]+/g;
+/** Characters that end a username segment: a separator, space, quote or closing punctuation. */
+const USER_PREFIX = /\/(Users|home)\/[^/\s'",)]+/g;
 
 export function redactUserPaths(text: string, home: string = safeHomedir()): string {
   let out = text;
-  if (home && home !== '/') out = out.split(home).join('~');
+  if (home && home !== '/') {
+    // A whole-segment match only: `/home/runner` must not rewrite
+    // `/home/runner2/x` into the nonsense path `~2/x`.
+    out = out.replace(new RegExp(`${escapeRegExp(home)}(?=$|[/\\s'",)])`, 'g'), '~');
+  }
   return out.replace(USER_PREFIX, '/$1/<user>');
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function safeHomedir(): string {

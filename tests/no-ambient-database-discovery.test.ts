@@ -559,7 +559,7 @@ describe('no test discovers the real Copilot database', () => {
     expect(scanAll(join(SCRIPTS_ROOT, 'specimen.ts'), 'scripts', text).findings).toEqual([]);
   });
 
-  test('every CopilotDatabase built in a test is given a path', () => {
+  test('every discovering construction a test can reach is given a path (tests/ and scripts/)', () => {
     const { findings } = sweepSuite();
     expect(
       findings.map((f) => `${f.file}:${f.line} — ${f.what}`),

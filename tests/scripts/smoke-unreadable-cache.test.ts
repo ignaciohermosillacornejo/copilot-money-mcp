@@ -11,6 +11,12 @@
  * synthetic home. In the unreadable case the Firestore directory exists with
  * mode 000, so discovery's readdir fails with EACCES; in the absent case the
  * home is empty. Neither reaches the user's real container.
+ *
+ * Only EACCES, deliberately. An EINTR is a signal arriving mid-syscall in the
+ * child, which a test cannot induce from outside the process; the in-process
+ * fault injection in tests/core/database-discovery.test.ts covers the
+ * retryable path instead, including `getDbPath()` re-looking, which is what
+ * `smoke:cache` reads.
  */
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';

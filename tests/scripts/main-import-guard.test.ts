@@ -16,10 +16,17 @@
  * `void main()`, `await main()`) and is not an `if` whose condition is exactly
  * `import.meta.main`.
  *
- * WHAT IT DOES NOT CATCH: an entry point not named `main`, and a top-level
- * call to some other function with the same effect. The name is the
- * convention every script here follows (checked), which is what the gate
- * relies on.
+ * WHAT IT DOES NOT CATCH, in both directions:
+ *   - fail-open: an entry point not named `main`, a top-level call to some
+ *     other function with the same effect, and a `main()` inside a top-level
+ *     function declaration (`export function run() { main(); }`) — the
+ *     declaration is skipped whole, because defining a function runs nothing,
+ *     so a call nested in one is never seen even when an importer would call
+ *     it. The name is the convention every script here follows (checked);
+ *   - fail-closed: `callsMain` searches the whole statement, so a module-scope
+ *     statement that only CONTAINS a call — `export const x = { run: () =>
+ *     main() }` — is flagged although importing it runs nothing. No instance
+ *     (checked), and wrapping it in the guard costs nothing.
  */
 
 import { describe, test, expect } from 'bun:test';
