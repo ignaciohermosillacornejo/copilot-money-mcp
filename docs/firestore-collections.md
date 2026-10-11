@@ -47,7 +47,7 @@ collection === target || collection.endsWith(`/${target}`)
 | `investment_prices/{hash}/hf` | ~850 | Yes | High-frequency price subcollection |
 | `investment_splits` | ~17 | Yes | Stock split records |
 | `items` | ~13 | Yes | Plaid item connections |
-| `items/{id}/accounts/{id}` | ~4,250 (2026-09-16), ~5,100 (2026-10-11), **all fieldless** | n/a | Not account documents. Measured 2026-10-11: every entry is fieldless, keyed at a subcollection's own path (the "document id" is the subcollection name, `transactions` or `balance_history`), repeated many times per account across ~18 accounts. Structural, not data; why there are so many copies is not established. The `~6,867` this row used to claim was counting them as data (#666). The account documents themselves are the `items/{id}/accounts` row |
+| `items/{id}/accounts/{id}` | ~4,250 (2026-09-16), ~5,100 (2026-10-11), **all fieldless** | n/a | Not account documents. Measured 2026-10-11: every entry is fieldless, keyed at a subcollection's own path (the "document id" is the subcollection name, `transactions` or `balance_history`), repeated many times per account across ~18 accounts. Structural, not data; why there are so many copies is not established (#807 tracks the key-parser hypothesis). The `~6,867` this row used to claim was counting them as data (#666). The account documents themselves are the `items/{id}/accounts` row |
 | `items/{id}/accounts/{id}/balance_history` | ~4,945 | Yes | Daily account balance history |
 | `items/{id}/accounts/{id}/transactions` | ~1,367 | Yes | Plaid raw transactions |
 | `items/{id}/accounts/{id}/holdings_history/{hash}` | ~800 (2026-10-11), **all fieldless** | n/a | Not metadata documents. Measured 2026-10-11: every entry is fieldless, with "document id" `history`, the name of the subcollection below. The decoder used to build a `HoldingsHistoryMeta` row from each, with `security_id: "history"`, and returns none since #797 |
@@ -154,7 +154,7 @@ collection === target || collection.endsWith(`/${target}`)
 | `user_deleted` | boolean | User has deleted this account, or it was merged into another |
 | `user_hidden` | boolean | User has hidden this account in the UI |
 | `dashboard_active` | boolean | **Not** a visibility flag despite the name — see below |
-| `holdings` | array | Investment holdings (see Cost Basis section) |
+| `holdings` | array | Investment holdings (see **Holdings** below) |
 
 **Naming:** the account's display name is your Copilot nickname when you have
 set a non-blank one, otherwise the provider's label — `preferredAccountName`
@@ -187,6 +187,22 @@ check 7 re-measures the independence on whatever cache it runs.
 - Account balance change % shown in list view
 - Credit limit shown next to balance for credit cards (e.g., "/ $XX,XXX.00")
 - "Goals" section on checking accounts links via `financial_goals.associated_accounts`
+
+**Holdings** (`holdings` array, on investment accounts):
+
+| Field | Type | Description |
+|---|---|---|
+| `cost_basis` | number/null | Total cost basis in dollars (NOT per-share) |
+| `institution_price` | number | Current price per share (from institution) |
+| `institution_value` | number | Current total value |
+| `quantity` | number | Number of shares |
+| `security_id` | string | SHA256 hash linking to `securities` |
+| `account_id` | string | Parent account |
+| `iso_currency_code` | string | Currency |
+| `vested_quantity` | number | Vested shares |
+| `vested_value` | number | Vested value |
+
+**Average cost = cost_basis / quantity** (verified against app screenshots).
 
 ---
 
@@ -531,20 +547,8 @@ These are the raw Plaid account documents, distinct from the top-level `accounts
 
 **Known fields:** All standard account fields plus nested `holdings` array.
 
-Each holdings entry:
-| Field | Type | Description |
-|---|---|---|
-| `cost_basis` | number/null | Total cost basis in dollars (NOT per-share) |
-| `institution_price` | number | Current price per share (from institution) |
-| `institution_value` | number | Current total value |
-| `quantity` | number | Number of shares |
-| `security_id` | string | SHA256 hash linking to `securities` |
-| `account_id` | string | Parent account |
-| `iso_currency_code` | string | Currency |
-| `vested_quantity` | number | Vested shares |
-| `vested_value` | number | Vested value |
-
-**Average cost = cost_basis / quantity** (verified against app screenshots).
+The `holdings` field table that used to be here now lives under the [`accounts`](#accounts)
+section, whose documents actually carry the array (#797).
 
 ---
 
@@ -889,7 +893,7 @@ When a charge posts, two versions coexist. The posted version has `pending_trans
 ### 6. Investment Data Architecture
 Investment data is spread across multiple collections:
 - `securities` - Master data (ticker, name, type, current price)
-- `items/*/accounts/*` - Holdings array (cost_basis, quantity, institution_price)
+- `items/*/accounts` - Account documents carrying the holdings array (cost_basis, quantity, institution_price)
 - `investment_prices/{hash}` - Historical prices (daily + high-frequency)
 - `investment_performance/{hash}/twr_holding` - Time-weighted returns
 - `items/*/accounts/*/holdings_history/{hash}/history` - Historical holdings snapshots

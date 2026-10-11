@@ -139,9 +139,18 @@ describe('every parent-pointer dispatch clause guards its processor (#627)', () 
       const decl = src.slice(declIdx, declIdx + 900);
       // The literal is the contract with the two guard sites this reaches
       // (processUserProfile, processAmazonIntegration), which say so; the other
-      // processors' guards are pinned behaviourally by the sweep below. Hoisting it into a helper means updating this pattern to match,
-      // NOT loosening it: a scan that accepts anything is a vacuous scan.
-      if (!/fields\.size === 0/.test(decl)) unguarded.push(processor);
+      // processors' guards are pinned behaviourally by the sweep below.
+      // Hoisting it into a helper means updating this pattern to match, NOT
+      // loosening it: a scan that accepts anything is a vacuous scan.
+      //
+      // Comment lines are dropped before matching, and the pattern requires
+      // the `if (`: both guard sites carry a comment quoting the literal, so
+      // matching raw text would pass on the comment alone with the guard gone.
+      const code = decl
+        .split('\n')
+        .filter((line) => !line.trim().startsWith('//'))
+        .join('\n');
+      if (!/if \(fields\.size === 0\)/.test(code)) unguarded.push(processor);
     }
 
     // Vacuity guard: if the clause pattern stops matching (a refactor, a
@@ -163,9 +172,9 @@ describe('no route builds a row from a fieldless document (#627, #778, #797)', (
   // is written at a real path for each route, and the decoder must produce
   // nothing from it. `smoke:cache` check 1b fails on the real-cache shape of
   // this (rows with no non-empty document behind them); this catches it with
-  // no cache at all. A route with no path here fails the coverage test below
-  // (tests/ is not in the typechecked set, so the Record types alone would
-  // not catch it).
+  // no cache at all. A route with no path here is a type error under
+  // `bun run check` (this file is in tsconfig.tests.json), and also fails the
+  // coverage test below, which is what catches it under a bare `bun test`.
   const I = 'itm_5pQw8ZnRvL3MxK7cHt2J';
   const A = 'acc_9wKe4RnTpB2XvL7mQd3F';
   const U = 'usr_3hTq7WmZ2xKv9LpR4cNb';
