@@ -29,6 +29,7 @@ import {
 import type { AllCollectionsResult, CollectionRoute } from '../../src/core/decoder.js';
 import { ROUTE_ROWS } from '../../scripts/smoke/cache.js';
 import { createDeepTestDb } from '../helpers/test-db.js';
+import { stripComments } from '../helpers/strip-comments.js';
 import { createTestDatabase } from '../../src/core/leveldb-reader.js';
 
 const FIXTURES_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'parent-pointer-'));
@@ -143,13 +144,11 @@ describe('every parent-pointer dispatch clause guards its processor (#627)', () 
       // Hoisting it into a helper means updating this pattern to match, NOT
       // loosening it: a scan that accepts anything is a vacuous scan.
       //
-      // Comment lines are dropped before matching, and the pattern requires
-      // the `if (`: both guard sites carry a comment quoting the literal, so
-      // matching raw text would pass on the comment alone with the guard gone.
-      const code = decl
-        .split('\n')
-        .filter((line) => !line.trim().startsWith('//'))
-        .join('\n');
+      // Comments are removed before matching (line, block and trailing, by the
+      // parser-owned stripComments, #691), and the pattern requires the `if (`:
+      // both guard sites carry a comment quoting the literal, so matching raw
+      // text would pass on the comment alone with the guard gone.
+      const code = stripComments(decl, 'decoder.ts');
       if (!/if \(fields\.size === 0\)/.test(code)) unguarded.push(processor);
     }
 

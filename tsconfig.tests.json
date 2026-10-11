@@ -88,6 +88,7 @@
     // continues on the next comment line.
     //   tests/helpers/strip-comments.ts <- tests/core/decoder-field-completeness.test.ts,
     //     tests/core/dedup-identity.test.ts,
+    //     tests/core/parent-pointer-documents.test.ts,
     //     tests/helpers/strip-comments.test.ts,
     //     tests/scripts/no-duplicate-schema-walks.test.ts
     //   tests/helpers/ts-files.ts <- tests/core/auth/candidate-ordering.test.ts,

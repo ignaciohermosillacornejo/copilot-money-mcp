@@ -130,9 +130,11 @@ collection === target || collection.endsWith(`/${target}`)
 
 ---
 
-### `accounts`
+### `items/{item_id}/accounts` (Account Documents)
 
-**Path:** top-level `accounts/{account_id}`
+**Path:** `items/{item_id}/accounts/{account_id}`. A real cache has no top-level `accounts`
+collection, as the inventory table says; the decoder's `accounts` route matches this path by
+its leaf.
 **App view:** Accounts list, Account detail panel, Sidebar account list
 
 | Field | Type | Description |
@@ -547,7 +549,7 @@ These are the raw Plaid account documents, distinct from the top-level `accounts
 
 **Known fields:** All standard account fields plus nested `holdings` array.
 
-The `holdings` field table that used to be here now lives under the [`accounts`](#accounts)
+The `holdings` field table that used to be here now lives under the [`items/{item_id}/accounts`](#itemsitem_idaccounts-account-documents)
 section, whose documents actually carry the array (#797).
 
 ---
