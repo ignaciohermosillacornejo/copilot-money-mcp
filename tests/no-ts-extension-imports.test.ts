@@ -15,8 +15,8 @@
  * WHAT IT CATCHES — syntax only, every TypeScript file under the three trees:
  * the specifier of an `import … from`, an `export … from`, an
  * `import x = require(…)`, a dynamic `import(…)` with a string-literal
- * argument, and a type-position `import('…').T`, when the specifier is relative (`./`, `../`) and ends in `.ts`,
- * `.tsx`, `.mts` or `.cts`. Paths built at runtime and handed to `Bun.spawn`
+ * argument, and a type-position `import('…').T`, when the specifier is
+ * relative (`./`, `../`) and ends in `.ts`, `.tsx`, `.mts` or `.cts`. Paths built at runtime and handed to `Bun.spawn`
  * or `new URL(…)` are deliberately NOT import specifiers and are not flagged —
  * several gate tests spawn a script by its `.ts` path, which is correct.
  *

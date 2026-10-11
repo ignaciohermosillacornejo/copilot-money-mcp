@@ -701,6 +701,7 @@ function journalStateFor(root: string): { entries: JournalEntry[]; owner: number
 function writeJournal(root: string): void {
   const { entries, owner } = journalStateFor(root);
   writeJournalEntries(root, entries, owner);
+  JOURNAL_UNWRITTEN.delete(root);
 }
 
 /**
@@ -714,13 +715,40 @@ function writeJournal(root: string): void {
  * that could not be narrowed or cleared is one the next run will read, and the
  * operator should know why it says what it says.
  */
+/**
+ * Roots whose LAST journal write failed.
+ *
+ * The rows that tell an operator "the original bytes are in the kept journal"
+ * must read this, not the disk: a failed rewrite usually leaves something at
+ * the path — the previous file, one truncated by `writeFileSync`'s `O_TRUNC`
+ * before the write failed, a directory — so `existsSync` vouches for bytes the
+ * write just failed to put there. The write's own outcome is the evidence.
+ */
+const JOURNAL_UNWRITTEN = new Set<string>();
+
+/** What a report may say about the kept journal, given whether its last write landed. */
+function keptJournalClause(root: string): string {
+  const path = journalPath(root);
+  return JOURNAL_UNWRITTEN.has(root)
+    ? `the journal at ${path} could not be rewritten (see the messages above), so whatever ` +
+        `is there now may not hold them — reconcile from the ${SIDECAR_SUFFIX} sidecar, ` +
+        `where one could be written`
+    : `the pre-mutation bytes are in the kept journal, ${path}`;
+}
+
+function capitalise(sentence: string): string {
+  return sentence.charAt(0).toUpperCase() + sentence.slice(1);
+}
+
 function persistJournal(root: string): boolean {
   const { entries, owner } = journalStateFor(root);
   try {
     if (entries.length === 0) rmSync(journalPath(root), { force: true });
     else writeJournalEntries(root, entries, owner);
+    JOURNAL_UNWRITTEN.delete(root);
     return true;
   } catch (e) {
+    JOURNAL_UNWRITTEN.add(root);
     console.error(
       `mutation-guards: could not update ${journalPath(root)} ` +
         `(${e instanceof Error ? e.message : String(e)}), so the next run may read a ` +
@@ -1252,10 +1280,8 @@ export async function runGuards(
     blocked.push({
       name: '(journal recovery)',
       ok: false,
-      // Read off the disk, not assumed: `persistJournal` reports a failed
-      // write rather than raising it, so the row must not point at a journal
-      // that is not there.
-      detail: existsSync(journalPath(root))
+      // From the write's own outcome, not a disk probe: see `JOURNAL_UNWRITTEN`.
+      detail: !JOURNAL_UNWRITTEN.has(root)
         ? `could not restore ${recovery.refused.join(', ')} — the pre-mutation bytes are in ` +
           `the kept journal, and in the ${SIDECAR_SUFFIX} file beside each where one could be ` +
           `written (see the messages above). The journal was KEPT, so this run and ` +
@@ -1263,10 +1289,9 @@ export async function runGuards(
           `the same tree. Two ways to end it, and BOTH are reconciling: put the original ` +
           `bytes back, or keep the file as it stands and delete ${journalPath(root)}. Either ` +
           `way delete the sidecar — while it is there the run below still refuses.`
-        : `could not restore ${recovery.refused.join(', ')}, AND the journal recording it ` +
-          `could not be kept (see the messages above) — so the only copy of the pre-mutation ` +
-          `bytes is the ${SIDECAR_SUFFIX} file beside each, where one could be written. ` +
-          `Reconcile from those by hand before trusting this tree, then delete each sidecar.`,
+        : `could not restore ${recovery.refused.join(', ')}, AND ${keptJournalClause(root)}. ` +
+          `Reconcile by hand before trusting this tree, then delete each sidecar and ` +
+          `whatever is at that journal path.`,
     });
   }
   if (recovery.sidecars.length > 0) {
@@ -1465,7 +1490,11 @@ export async function runGuards(
     // did neither (or not both), so pointing that operator at "the message
     // above and the sidecar" sends them after things that may not exist. What
     // both paths do leave is the kept journal, which holds the original bytes.
-    const journal = journalPath(root);
+    //
+    // And what the row says about the journal comes from the journal write's
+    // own outcome (`keptJournalClause`), not from assuming it landed: the
+    // write that keeps a refusal is a give-up write, and can fail too.
+    const journalUnwritten = JOURNAL_UNWRITTEN.has(root);
     results.push({
       name: '(restore)',
       ok: false,
@@ -1473,10 +1502,13 @@ export async function runGuards(
         restoreThrew.length > 0
           ? `restoring ${restoreThrew.join(', ')} THREW before it could finish giving up — the ` +
             `error is on the row that was being evaluated, and there may be no ` +
-            `${SIDECAR_SUFFIX} sidecar and no message for it. The pre-mutation bytes are in ` +
-            `the kept journal, ${journal}. Reconcile before trusting anything else in this run.`
+            `${SIDECAR_SUFFIX} sidecar and no message for it. ${capitalise(keptJournalClause(root))}. ` +
+            `Reconcile before trusting anything else in this run.`
           : `a mutated file could not be put back safely — see the message above and the ` +
-            `${SIDECAR_SUFFIX} sidecar (the kept journal, ${journal}, holds the same bytes). ` +
+            `${SIDECAR_SUFFIX} sidecar` +
+            (journalUnwritten
+              ? `; ${keptJournalClause(root)}. `
+              : ` (the kept journal, ${journalPath(root)}, holds the same bytes). `) +
             `Reconcile before trusting anything else in this run.`,
     });
   }

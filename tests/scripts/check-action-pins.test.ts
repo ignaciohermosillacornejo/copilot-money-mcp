@@ -229,6 +229,17 @@ describe('collectPins', () => {
     expect(err).not.toContain('no version comment');
   });
 
+  test('a SHA BEFORE the uses: is not counted against the pin after it', () => {
+    // The residual counts SHAs from `uses:` onward: one earlier on the line can
+    // never be parsed as a pin, and counting it reported a readable line as
+    // unreadable.
+    const { pins, unread } = scanPins(
+      fixtureDir({ 'a.yml': `      - name: build-${SHA_B} uses: actions/checkout@${SHA_A} # v7` })
+    );
+    expect(unread).toEqual([]);
+    expect(pins).toHaveLength(1);
+  });
+
   test('a SHA run longer than 40 hex is unreadable, not skipped', () => {
     // PINNED had no right boundary on the SHA, PIN_SHAPED did, so a 41-hex
     // copy-paste matched the parse but failed the residual's guard — and the

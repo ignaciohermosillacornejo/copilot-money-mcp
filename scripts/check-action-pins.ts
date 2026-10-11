@@ -73,6 +73,12 @@ export interface Pin {
  * A line that LOOKS like a pin — `uses:` and a 40-hex run after it — whatever
  * its quoting. Deliberately looser than `PINNED`: it is the residual check, and
  * its only job is to notice when the grammar above reads less than is there.
+ *
+ * One shape it reports ON PURPOSE: a digest-pinned Docker step,
+ * `uses: docker://image@sha256:<64 hex>`. PINNED does not read `docker://`
+ * (the `:` is outside its action grammar), so such a line comes back as
+ * unreadable. That is the gate working — nothing here checks a Docker digest's
+ * label — not a bug in it; teach PINNED the shape if the repo adopts one.
  */
 const PIN_SHAPED = /uses:.*[0-9a-f]{40}/;
 /**
@@ -127,7 +133,11 @@ export function scanPins(dir: string = WORKFLOW_DIR): { pins: Pin[]; unread: Unr
       // The count comparison the docblock promises: every SHA on a pin-shaped
       // line must be accounted for by a parse, so one readable pin cannot hide
       // a second span beside it that the grammar could not read.
-      if (accounted < (text.match(SHA_RUN) ?? []).length) unreadable = true;
+      // Counted from the first `uses:` onward: a SHA earlier on the line can
+      // never be a pin PINNED parses, so counting it would report a readable
+      // line as unreadable.
+      const afterUses = text.slice(text.indexOf('uses:'));
+      if (accounted < (afterUses.match(SHA_RUN) ?? []).length) unreadable = true;
       if (unreadable) unread.push({ file, line: i + 1, text: text.trim() });
     });
   }
