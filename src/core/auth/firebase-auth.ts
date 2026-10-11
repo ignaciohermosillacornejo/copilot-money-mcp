@@ -30,16 +30,37 @@ const EXPIRY_MARGIN_MS = 60_000;
  * after sleep/resume, a captive portal) would leave that promise pending for
  * good, and every later `getIdToken()` on the instance, which in the server is
  * every live read and write, would join it and hang with no error. Before the
- * dedupe a stalled request stalled only its own caller. The abort rejects with
- * a transport error, not a `TokenExchangeError`, so it propagates as a genuine
- * failure, leaves the cached refresh token alone (#751), and clears the shared
- * attempt for the next call.
+ * dedupe a stalled request stalled only its own caller. The abort becomes a
+ * plain "timed out" Error, not a `TokenExchangeError`, so it propagates as a
+ * genuine failure, leaves the cached refresh token alone (#751), and clears the
+ * shared attempt for the next call.
+ *
+ * The bound is per EXCHANGE, not per attempt. A cold attempt can spend up to
+ * MAX_EXCHANGE_CANDIDATES of them, and the browser read before them has no
+ * bound of its own (it reads local LevelDB copies, so a hang there is far less
+ * likely). So a joined caller waits at worst minutes, not forever.
  */
 export const TOKEN_EXCHANGE_TIMEOUT_MS = 30_000;
 
 export interface FirebaseAuthOptions {
-  /** Per-exchange timeout; defaults to TOKEN_EXCHANGE_TIMEOUT_MS. Tests shorten it. */
+  /**
+   * Per-exchange timeout; defaults to TOKEN_EXCHANGE_TIMEOUT_MS. Tests shorten
+   * it. A non-finite or non-positive value means no timeout, as in the
+   * GraphQL client.
+   */
   exchangeTimeoutMs?: number;
+}
+
+/**
+ * Give a timed-out exchange a message that names it, the way the GraphQL
+ * client names its own timeouts. Anything else passes through untouched. The
+ * result is never a `TokenExchangeError`, so the #751 discard rule cannot see a
+ * timeout as a verdict on the token.
+ */
+function describeTimeout(err: unknown, timeoutMs: number): unknown {
+  return err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
+    ? new Error(`Firebase token exchange timed out after ${timeoutMs}ms`)
+    : err;
 }
 
 /**
@@ -310,17 +331,24 @@ export class FirebaseAuth {
   }
 
   private async exchangeToken(refreshToken: string): Promise<void> {
+    const timeoutMs = this.exchangeTimeoutMs;
+    // The signal covers the body reads below as well as the headers, so a
+    // stall after the status line is bounded too; each await names a timeout.
+    const timedOut = (err: unknown): never => {
+      throw describeTimeout(err, timeoutMs);
+    };
     const response = await fetch(TOKEN_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: `grant_type=refresh_token&refresh_token=${encodeURIComponent(refreshToken)}`,
       // See TOKEN_EXCHANGE_TIMEOUT_MS: without it a hung exchange would hang
       // every later caller that joins the shared attempt.
-      signal: AbortSignal.timeout(this.exchangeTimeoutMs),
-    });
+      signal:
+        Number.isFinite(timeoutMs) && timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined,
+    }).catch(timedOut);
 
     if (!response.ok) {
-      const errorBody = await response.text();
+      const errorBody = await response.text().catch(timedOut);
       const failure = new TokenExchangeError(
         response.status,
         `Firebase token exchange failed (${response.status}): ${errorBody}`
@@ -353,7 +381,7 @@ export class FirebaseAuth {
       throw failure;
     }
 
-    const data = (await response.json()) as {
+    const data = (await response.json().catch(timedOut)) as {
       id_token: string;
       refresh_token: string;
       expires_in: string;

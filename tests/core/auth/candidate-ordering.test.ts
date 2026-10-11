@@ -18,7 +18,7 @@
  * provenance label ('session' / 'foreign'), never the bytes it was given.
  */
 
-import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
@@ -38,6 +38,7 @@ import {
   ENDPOINT_LEVEL_STATUSES,
   FirebaseAuth,
   MAX_EXCHANGE_CANDIDATES,
+  TOKEN_EXCHANGE_TIMEOUT_MS,
 } from '../../../src/core/auth/firebase-auth.js';
 
 /**
@@ -1172,14 +1173,20 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
     // call must start a fresh attempt that can succeed.
     let hung = true;
     let cachedExchanges = 0;
+    let unsignalled = 0;
     globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
       const body = String(options?.body ?? '');
       if (body.includes(BOOT)) return Promise.resolve(session(CACHED, '0'));
       cachedExchanges += 1;
       if (!hung) return Promise.resolve(session(CACHED, '3600'));
+      const signal = options?.signal;
+      if (!signal) {
+        // Without a signal the real request would hang for good. Fail fast
+        // and countably instead of waiting for the test runner's timeout.
+        unsignalled += 1;
+        return Promise.reject(new Error('exchange sent without an abort signal'));
+      }
       return new Promise<Response>((_resolve, reject) => {
-        const signal = options?.signal;
-        if (!signal) return; // No signal: hang for good, which fails on the test timeout.
         signal.addEventListener('abort', () => reject(signal.reason));
       });
     }) as unknown as typeof fetch;
@@ -1195,8 +1202,10 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
     expect(await auth.getIdToken()).toBe(ID_TOKEN);
 
     const outcomes = await settle(Array.from({ length: CALLERS }, () => auth.getIdToken()));
-    expect(new Set(outcomes).size).toBe(1);
-    expect(outcomes[0]).toMatch(/^err:/);
+    expect(unsignalled, 'the exchange must carry an abort signal').toBe(0);
+    expect(outcomes).toEqual(
+      Array(CALLERS).fill('err:Firebase token exchange timed out after 20ms')
+    );
     expect(cachedExchanges).toBe(1);
 
     hung = false;
@@ -1204,6 +1213,29 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
     // A fresh fast-path exchange of the same cached token, no browser read.
     expect(cachedExchanges).toBe(2);
     expect(extractions).toBe(1);
+  });
+
+  test('a default-constructed instance bounds each exchange by TOKEN_EXCHANGE_TIMEOUT_MS', async () => {
+    // The production path never passes the option, so pin that the default
+    // is what reaches AbortSignal.timeout.
+    const timeouts: number[] = [];
+    const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const spy = spyOn(AbortSignal, 'timeout').mockImplementation((ms: number) => {
+      timeouts.push(ms);
+      return realTimeout(ms);
+    });
+    try {
+      globalThis.fetch = mock(() =>
+        Promise.resolve(session(LIVE, '3600'))
+      ) as unknown as typeof fetch;
+      const auth = new FirebaseAuth(() =>
+        Promise.resolve({ candidates: [candidate(LIVE, true)], checked: ['Chrome'] })
+      );
+      expect(await auth.getIdToken()).toBe(ID_TOKEN);
+      expect(timeouts).toEqual([TOKEN_EXCHANGE_TIMEOUT_MS]);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   test('every write to the session happens inside the one shared refresh attempt', () => {
@@ -1220,14 +1252,18 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
     //   2. refreshSession is referenced once, from getIdToken, inside the
     //      `this.refreshInFlight ??=` that shares it.
     //   3. exchangeToken is referenced only from refreshSession.
-    //   4. idToken / refreshToken / expiresAt / userId are assigned only in
+    //   4. idToken / refreshToken / expiresAt / userId are written only in
     //      exchangeToken (field initialisers aside).
+    //   5. refreshInFlight is set and cleared only in getIdToken, so nothing
+    //      can clear it while an attempt is suspended and let a second start.
     //
-    // A new await, a second caller of exchangeToken, or a new writer of the
-    // session brings the #770 race back, and fails here first. Limits, stated
-    // rather than coded around: it reads `this.<name>` property accesses, so a
-    // bracket access, an aliased `this`, or a destructuring assignment would
-    // slip past. The behavioural cases above are what pin the dedupe itself.
+    // A new await, a second caller of exchangeToken, a new writer of the
+    // session, or a stray clear of refreshInFlight brings the #770 race back,
+    // and fails here first. A write is `=`, a compound `op=`, or `++`/`--`.
+    // Limits, stated rather than coded around: it reads `this.<name>` property
+    // accesses, so a bracket access, an aliased `this`, a destructuring
+    // assignment, or `Object.assign(this, …)` would slip past. The behavioural
+    // cases above are what pin the dedupe itself.
     const path = fileURLToPath(new URL('../../../src/core/auth/firebase-auth.ts', import.meta.url));
     // The whole file, not a method-body fragment, so nothing is parsed by
     // error recovery; and with an explicit ScriptKind, like every other
@@ -1280,17 +1316,30 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
     const sessionWriters: string[] = [];
     const exchangeRefs: string[] = [];
     const refreshRefs: { member: string; shared: boolean }[] = [];
+    const inFlightWriters: string[] = [];
     let getIdTokenAwaits = 0;
-    const visit = (node: ts.Node): void => {
+    /** The `this.<field>` a node writes: `=`, compound `op=`, or `++`/`--`. */
+    const writtenField = (node: ts.Node): string | undefined => {
+      let target: ts.Node | undefined;
       if (
         ts.isBinaryExpression(node) &&
         node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
-        node.operatorToken.kind <= ts.SyntaxKind.LastAssignment &&
-        isThisMember(node.left) &&
-        SESSION.has(node.left.name.text)
+        node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
       ) {
-        sessionWriters.push(memberOf(node));
+        target = node.left;
+      } else if (
+        (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+        (node.operator === ts.SyntaxKind.PlusPlusToken ||
+          node.operator === ts.SyntaxKind.MinusMinusToken)
+      ) {
+        target = node.operand;
       }
+      return target !== undefined && isThisMember(target) ? target.name.text : undefined;
+    };
+    const visit = (node: ts.Node): void => {
+      const field = writtenField(node);
+      if (field !== undefined && SESSION.has(field)) sessionWriters.push(memberOf(node));
+      if (field === 'refreshInFlight') inFlightWriters.push(memberOf(node));
       if (isThisMember(node, 'exchangeToken')) exchangeRefs.push(memberOf(node));
       if (isThisMember(node, 'refreshSession')) {
         refreshRefs.push({ member: memberOf(node), shared: isSharedBy(node) });
@@ -1323,5 +1372,13 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
       [...new Set(sessionWriters)],
       'the session is written only by exchangeToken, inside the shared attempt'
     ).toEqual(['exchangeToken']);
+    // Both the `??=` and the `.finally` clear sit in getIdToken. A clear
+    // anywhere else (a reset(), a logout()) could run while an attempt is
+    // suspended and let a second one start beside it.
+    expect(inFlightWriters.length).toBeGreaterThan(0);
+    expect(
+      [...new Set(inFlightWriters)],
+      'refreshInFlight may be set and cleared only by getIdToken'
+    ).toEqual(['getIdToken']);
   });
 });
