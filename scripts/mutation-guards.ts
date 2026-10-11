@@ -700,7 +700,14 @@ function journalStateFor(root: string): { entries: JournalEntry[]; owner: number
 /** Journal BEFORE mutating, and throw if that fails: an unrecorded mutation is the worst state. */
 function writeJournal(root: string): void {
   const { entries, owner } = journalStateFor(root);
-  writeJournalEntries(root, entries, owner);
+  try {
+    writeJournalEntries(root, entries, owner);
+  } catch (e) {
+    // Recorded before rethrowing, so `JOURNAL_UNWRITTEN` really is "the last
+    // write failed" for every writer, not only for `persistJournal`.
+    JOURNAL_UNWRITTEN.add(root);
+    throw e;
+  }
   JOURNAL_UNWRITTEN.delete(root);
 }
 
@@ -712,16 +719,25 @@ function writeJournal(root: string): void {
  * the path — the previous file, one truncated by `writeFileSync`'s `O_TRUNC`
  * before the write failed, a directory — so `existsSync` vouches for bytes the
  * write just failed to put there. The write's own outcome is the evidence.
+ *
+ * Every journal writer records into it (`writeJournal` and `persistJournal`),
+ * and `runGuards` clears a root's entry at the start of each run alongside
+ * `restoreFailed`, so a verdict never carries over from an earlier call in
+ * the same process.
  */
 const JOURNAL_UNWRITTEN = new Set<string>();
 
-/** What a report may say about the kept journal, given whether its last write landed. */
-function keptJournalClause(root: string): string {
+/**
+ * The ONE sentence any report makes about the kept journal. Every row that
+ * mentions it goes through here, so the claim cannot drift between them, and
+ * which wording applies is decided once per row by the caller (`unwritten`).
+ */
+function keptJournalClause(root: string, unwritten: boolean): string {
   const path = journalPath(root);
-  return JOURNAL_UNWRITTEN.has(root)
+  return unwritten
     ? `the journal at ${path} could not be rewritten (see the messages above), so whatever ` +
-        `is there now may not hold the pre-mutation bytes — reconcile from the ${SIDECAR_SUFFIX} sidecar, ` +
-        `where one could be written`
+        `is there now may not hold the pre-mutation bytes — reconcile from the ` +
+        `${SIDECAR_SUFFIX} sidecar, where one could be written`
     : `the pre-mutation bytes are in the kept journal, ${path}`;
 }
 
@@ -1267,6 +1283,7 @@ export async function runGuards(
   // a previous call in the same process (the meta-test makes several).
   restoreFailed = false;
   restoreThrew = [];
+  JOURNAL_UNWRITTEN.delete(root);
 
   const recovery = recoverJournal(root);
   for (const file of recovery.recovered) {
@@ -1277,21 +1294,23 @@ export async function runGuards(
   // operator has to deal with before the next run can say anything.
   const blocked: GuardResult[] = [];
   if (recovery.refused.length > 0) {
+    // From the write's own outcome, not a disk probe: see `JOURNAL_UNWRITTEN`.
+    const unwritten = JOURNAL_UNWRITTEN.has(root);
     blocked.push({
       name: '(journal recovery)',
       ok: false,
-      // From the write's own outcome, not a disk probe: see `JOURNAL_UNWRITTEN`.
-      detail: !JOURNAL_UNWRITTEN.has(root)
-        ? `could not restore ${recovery.refused.join(', ')} — the pre-mutation bytes are in ` +
-          `the kept journal, and in the ${SIDECAR_SUFFIX} file beside each where one could be ` +
-          `written (see the messages above). The journal was KEPT, so this run and ` +
+      detail: unwritten
+        ? `could not restore ${recovery.refused.join(', ')}, AND ` +
+          `${keptJournalClause(root, true)}. Reconcile by hand before trusting this tree, then ` +
+          `delete each sidecar and whatever is at that journal path.`
+        : `could not restore ${recovery.refused.join(', ')} — ` +
+          `${keptJournalClause(root, false)}, and in the ${SIDECAR_SUFFIX} file beside each ` +
+          `where one could be written (see the messages above). The journal was KEPT, ` +
+          `so this run and ` +
           `every run after it says so rather than handing the next one a green registry over ` +
           `the same tree. Two ways to end it, and BOTH are reconciling: put the original ` +
           `bytes back, or keep the file as it stands and delete ${journalPath(root)}. Either ` +
-          `way delete the sidecar — while it is there the run below still refuses.`
-        : `could not restore ${recovery.refused.join(', ')}, AND ${keptJournalClause(root)}. ` +
-          `Reconcile by hand before trusting this tree, then delete each sidecar and ` +
-          `whatever is at that journal path.`,
+          `way delete the sidecar — while it is there the run below still refuses.`,
     });
   }
   if (recovery.sidecars.length > 0) {
@@ -1494,7 +1513,7 @@ export async function runGuards(
     // And what the row says about the journal comes from the journal write's
     // own outcome (`keptJournalClause`), not from assuming it landed: the
     // write that keeps a refusal is a give-up write, and can fail too.
-    const journalUnwritten = JOURNAL_UNWRITTEN.has(root);
+    const journal = keptJournalClause(root, JOURNAL_UNWRITTEN.has(root));
     results.push({
       name: '(restore)',
       ok: false,
@@ -1502,13 +1521,10 @@ export async function runGuards(
         restoreThrew.length > 0
           ? `restoring ${restoreThrew.join(', ')} THREW before it could finish giving up — the ` +
             `error is on the row that was being evaluated, and there may be no ` +
-            `${SIDECAR_SUFFIX} sidecar and no message for it. ${capitalise(keptJournalClause(root))}. ` +
+            `${SIDECAR_SUFFIX} sidecar and no message for it. ${capitalise(journal)}. ` +
             `Reconcile before trusting anything else in this run.`
           : `a mutated file could not be put back safely — see the message above and the ` +
-            `${SIDECAR_SUFFIX} sidecar` +
-            (journalUnwritten
-              ? `; ${keptJournalClause(root)}. `
-              : ` (the kept journal, ${journalPath(root)}, holds the same bytes). `) +
+            `${SIDECAR_SUFFIX} sidecar; ${journal}. ` +
             `Reconcile before trusting anything else in this run.`,
     });
   }

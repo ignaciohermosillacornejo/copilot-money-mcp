@@ -62,7 +62,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 
 import {
   applyMutation,
@@ -1131,44 +1131,51 @@ describe('the working tree is put back whatever happens', () => {
     expect(existsSync(journalPath(root))).toBe(false);
   });
 
-  test('the (journal recovery) row does not vouch for a journal it failed to rewrite', async () => {
-    // The row used to probe the disk (`existsSync`), but a failed rewrite
-    // usually leaves SOMETHING at the path — the old file, a truncated one, a
-    // directory — so the probe vouched for bytes the write had just failed to
-    // put there. The write's own outcome is the signal. A read-only journal
-    // stands in: readable for recovery, unwritable for the narrowing write.
-    const root = syntheticRepo({
-      markerName: 'rows after the failure are never written',
-      guardLine: 'break;',
-      assertion: "expect(pay(['a', 'b', 'c'], 'b')).toEqual(['a']);",
-    });
-    const guard = guardFor(root);
-    const file = join(root, 'src/pay.ts');
-    mkdirSync(join(journalPath(root), '..'), { recursive: true });
-    writeFileSync(
-      journalPath(root),
-      JSON.stringify({
-        pid: 999_999_999,
-        startedAt: new Date().toISOString(),
-        entries: [{ abs: file, original: readFileSync(file, 'utf8'), mutated: 'MUTATED' }],
-      }),
-      'utf8'
-    );
-    writeFileSync(file, 'SOMEONE ELSE WAS HERE', 'utf8');
-    chmodSync(journalPath(root), 0o444);
+  // A read-only file is no obstacle to uid 0, so under root the write would land
+  // and this would fail as a false alarm (CI runs as an ordinary user).
+  test.skipIf(process.getuid?.() === 0)(
+    'the (journal recovery) row does not vouch for a journal it failed to rewrite',
+    async () => {
+      // The row used to probe the disk (`existsSync`), but a failed rewrite
+      // usually leaves SOMETHING at the path — the old file, a truncated one, a
+      // directory — so the probe vouched for bytes the write had just failed to
+      // put there. The write's own outcome is the signal. A read-only journal
+      // stands in: readable for recovery, unwritable for the narrowing write.
+      const root = syntheticRepo({
+        markerName: 'rows after the failure are never written',
+        guardLine: 'break;',
+        assertion: "expect(pay(['a', 'b', 'c'], 'b')).toEqual(['a']);",
+      });
+      const guard = guardFor(root);
+      const file = join(root, 'src/pay.ts');
+      mkdirSync(dirname(journalPath(root)), { recursive: true });
+      writeFileSync(
+        journalPath(root),
+        JSON.stringify({
+          pid: 999_999_999,
+          startedAt: new Date().toISOString(),
+          entries: [{ abs: file, original: readFileSync(file, 'utf8'), mutated: 'MUTATED' }],
+        }),
+        'utf8'
+      );
+      writeFileSync(file, 'SOMEONE ELSE WAS HERE', 'utf8');
+      chmodSync(journalPath(root), 0o444);
 
-    const { results } = await run(root, [guard]);
-    const row = results.find((r) => r.name === '(journal recovery)');
-    expect(row?.detail).toContain('could not be rewritten');
-    expect(row?.detail).not.toContain('the pre-mutation bytes are in the kept journal');
-  });
+      const { results } = await run(root, [guard]);
+      const row = results.find((r) => r.name === '(journal recovery)');
+      expect(row?.detail).toContain('could not be rewritten');
+      expect(row?.detail).not.toContain('the pre-mutation bytes are in the kept journal');
+    }
+  );
 
   test('the (restore) row does not vouch for a journal it failed to rewrite', async () => {
     // The sibling of the row above. The detector, once the mutation is in,
     // both overwrites the guarded file (so restore is refused) and puts a
     // DIRECTORY where the journal is, so the refusal's journal write fails
     // while the path still "exists".
-    const journalRel = 'node_modules/.cache/mutation-guards/journal.json';
+    // Derived from the real `journalPath`, not spelled out: the layout is the
+    // script's to change. Root-independent, so any root gives the same answer.
+    const journalRel = relative('/r', journalPath('/r'));
     const root = syntheticRepo({
       markerName: 'rows after the failure are never written',
       guardLine: 'break;',
@@ -1186,7 +1193,7 @@ describe('the working tree is put back whatever happens', () => {
       const { results } = await run(root, [guardFor(root)]);
       const row = results.find((r) => r.name === '(restore)');
       expect(row?.detail).toContain('could not be rewritten');
-      expect(row?.detail).not.toContain('holds the same bytes');
+      expect(row?.detail).not.toContain('the pre-mutation bytes are in the kept journal');
     } finally {
       // afterEach's non-recursive rm would throw on the directory.
       rmSync(journalPath(root), { recursive: true, force: true });

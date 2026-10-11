@@ -679,7 +679,7 @@ describe('GraphQLClient — retry/backoff (#443)', () => {
     expect(fetchCalls).toHaveLength(1);
   });
 
-  test('a timeout keeps the transport error as `cause`, through finalize as well (#805)', async () => {
+  test('a timeout keeps its transport error as `cause`, through finalize (#805)', async () => {
     // The auth side's timeout already threads `{ cause: err }`; the GraphQL
     // side rebuilt the error from a message and dropped the original. The
     // mutation path goes through finalize(), which constructs a SECOND
