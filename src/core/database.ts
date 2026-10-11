@@ -152,10 +152,12 @@ export function discoverCopilotDatabase(home: string): DatabaseDiscovery {
 
 /**
  * Find the Copilot Money database in the current user's home directory.
- * The constructor's no-path branch is the only caller.
+ * The constructor's no-path branch is the only caller. The home it searched is
+ * returned too, so a retryable failure can be re-looked at in the same place.
  */
-function findCopilotDatabase(): DatabaseDiscovery {
-  return discoverCopilotDatabase(homedir());
+function findCopilotDatabase(): DatabaseDiscovery & { home: string } {
+  const home = homedir();
+  return { ...discoverCopilotDatabase(home), home };
 }
 
 /**
@@ -305,6 +307,8 @@ export class CopilotDatabase {
   private decodeTimeoutMs?: number;
   /** Set when no-path discovery could not read a candidate (see `DatabaseDiscovery`). */
   private discoveryError?: Error;
+  /** The home no-path discovery searched; unset when a path was given. */
+  private discoveryHome?: string;
 
   /**
    * Initialize database connection.
@@ -322,6 +326,7 @@ export class CopilotDatabase {
       const discovery = findCopilotDatabase();
       this.dbPath = discovery.path;
       this.discoveryError = discovery.lookupError;
+      this.discoveryHome = discovery.home;
     }
     this.decodeTimeoutMs = decodeTimeoutMs;
   }
@@ -330,6 +335,7 @@ export class CopilotDatabase {
    * Get the database path, throwing if not available.
    */
   private requireDbPath(): string {
+    this.rediscoverIfTransient();
     if (!this.dbPath) {
       throw missingDatabaseError(this.discoveryError);
     }
@@ -351,6 +357,7 @@ export class CopilotDatabase {
    * a second copy of the install advice (#774).
    */
   availability(): { available: boolean; lookupError?: Error } {
+    this.rediscoverIfTransient();
     // Copied to a local: `this.dbPath` does not stay narrowed inside the closure.
     const dbPath = this.dbPath;
     if (!dbPath) return { available: false, lookupError: this.discoveryError };
@@ -365,6 +372,24 @@ export class CopilotDatabase {
       if (isAbsence(err)) return { available: false };
       return { available: false, lookupError: err instanceof Error ? err : new Error(String(err)) };
     }
+  }
+
+  /**
+   * Look again when no-path discovery failed with a retryable errno.
+   *
+   * Discovery runs once, in the constructor. Its error used to be stored and
+   * served on every later call without a syscall, so the message's own advice —
+   * the read was interrupted, retry the request — could never change the
+   * answer; only restarting the server could. A retryable failure is by
+   * definition one a later look may settle, so it gets that look. A persistent
+   * one (`EACCES`/`EPERM`) is still served from memory: its message says to fix
+   * permissions, and re-walking the container on every call would not help.
+   */
+  private rediscoverIfTransient(): void {
+    if (this.dbPath || !this.discoveryHome || !isRetryableErrno(this.discoveryError)) return;
+    const again = discoverCopilotDatabase(this.discoveryHome);
+    this.dbPath = again.path;
+    this.discoveryError = again.lookupError;
   }
 
   /**

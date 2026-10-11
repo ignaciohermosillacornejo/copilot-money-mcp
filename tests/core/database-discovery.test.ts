@@ -27,6 +27,7 @@ import {
 } from '../../src/core/database.js';
 import { MAX_INTERRUPT_ATTEMPTS } from '../../src/core/fs-retry.js';
 import { CopilotMoneyServer } from '../../src/server.js';
+import { createTestDatabase } from '../../src/core/leveldb-reader.js';
 
 const FIRESTORE =
   'Library/Containers/com.copilot.production/Data/Library/Application Support/firestore/__FIRAPP_DEFAULT';
@@ -233,5 +234,53 @@ describe('availability: "could not look" survives to the server dispatch gate', 
     const server = new CopilotMoneyServer(path.join(home, 'nope'));
     const text = (await server.handleCallTool('get_accounts', {})).content[0]?.text ?? '';
     expect(text).toContain('ensure Copilot Money is installed');
+  });
+});
+
+describe('a retryable discovery failure is looked at again, not served from memory', () => {
+  /**
+   * The no-path constructor runs discovery once. If that hit an interrupt past
+   * the bound, the error used to be stored and returned on every later call
+   * with no syscall — so the message's own advice, "retry the request", could
+   * never change the answer; only a restart could.
+   *
+   * Driven through `handleCallTool`, twice. The discovery outcome is set the way
+   * the no-path constructor sets it, with `discoveryHome` pointed at the
+   * synthetic home, so nothing here walks the real container.
+   */
+  async function serverWithFailedDiscovery(err: Error): Promise<CopilotMoneyServer> {
+    fs.rmSync(mainPath, { recursive: true, force: true });
+    await createTestDatabase(mainPath, [{ collection: 'test', id: 'doc1', fields: { x: 1 } }]);
+    const server = new CopilotMoneyServer(mainPath);
+    const db = (server as unknown as { db: CopilotDatabase }).db;
+    const internals = db as unknown as {
+      dbPath?: string;
+      discoveryError?: Error;
+      discoveryHome?: string;
+    };
+    internals.dbPath = undefined;
+    internals.discoveryError = err;
+    internals.discoveryHome = home;
+    return server;
+  }
+
+  test('once the interrupt clears, retrying the request finds the database', async () => {
+    const server = await serverWithFailedDiscovery(eintr('/synthetic/main'));
+    // The first re-look is itself interrupted past the bound: still unavailable.
+    interruptReaddir(MAX_INTERRUPT_ATTEMPTS);
+    const first = (await server.handleCallTool('get_accounts', {})).content[0]?.text ?? '';
+    expect(first).toContain('EINTR');
+    // The interrupt has cleared. Retrying — what the message said to do — works.
+    const second = await server.handleCallTool('get_accounts', {});
+    expect(second.content[0]?.text ?? '').not.toContain('Database not available');
+  });
+
+  test('a persistent error is served from memory, not re-walked on every call', async () => {
+    const server = await serverWithFailedDiscovery(eacces('/synthetic/main'));
+    const delivered = interruptReaddir(Number.POSITIVE_INFINITY);
+    const text = (await server.handleCallTool('get_accounts', {})).content[0]?.text ?? '';
+    // Its message says to fix permissions; re-walking would not change that.
+    expect(text).toContain('EACCES');
+    expect(delivered()).toBe(0);
   });
 });
