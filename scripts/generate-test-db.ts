@@ -195,7 +195,9 @@ function encodeStringField(fieldName: string, value: string): Buffer {
   const fieldNameBuf = encodeFieldName(fieldName);
   const valueBuf = Buffer.from(value, 'utf-8');
   if (valueBuf.length > 255) {
-    throw new Error(`String value too long for field ${fieldName}: ${valueBuf.length} bytes, max 255`);
+    throw new Error(
+      `String value too long for field ${fieldName}: ${valueBuf.length} bytes, max 255`
+    );
   }
   const tag = Buffer.alloc(3);
   tag[0] = 0x8a;

@@ -155,7 +155,7 @@ if (import.meta.main) {
     console.error(`      committer: ${f.committer}\n`);
   }
   console.error('  Commit authorship is attacker-controlled: `git commit --author` accepts');
-  console.error('  any identity, and GitHub renders that account\'s avatar beside it. This is');
+  console.error("  any identity, and GitHub renders that account's avatar beside it. This is");
   console.error('  the shape used in better-auth PR #6003 to make a payload commit read as a');
   console.error('  routine maintainer change.\n');
   console.error('  If a maintainer really did write these, they pushed them and the committer');

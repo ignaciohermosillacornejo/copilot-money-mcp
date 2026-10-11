@@ -27,7 +27,7 @@ if (typeof description !== 'string') {
   issues.push('description is missing or not a string');
 } else if (description.length > DESCRIPTION_MAX) {
   issues.push(
-    `description is ${description.length} chars (max ${DESCRIPTION_MAX}). The MCP registry rejects longer values with HTTP 422.`,
+    `description is ${description.length} chars (max ${DESCRIPTION_MAX}). The MCP registry rejects longer values with HTTP 422.`
   );
 }
 
@@ -39,5 +39,5 @@ if (issues.length > 0) {
 
 // Past the early-exit above, `description` is guaranteed to be a string.
 console.log(
-  `server.json passes MCP registry constraints (description: ${(description as string).length}/${DESCRIPTION_MAX} chars)`,
+  `server.json passes MCP registry constraints (description: ${(description as string).length}/${DESCRIPTION_MAX} chars)`
 );

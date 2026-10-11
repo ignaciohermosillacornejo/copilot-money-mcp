@@ -65,13 +65,10 @@ if (offenders.length > 0) {
     '\nA floating specifier resolves to whatever the registry serves at install ' +
       'time, so the same commit can build a different tree tomorrow. Replace each ' +
       'with a range on the currently resolved version, e.g. "^2.1.2" — check with ' +
-      '`npm view <name> version`, or read it out of package-lock.json.',
+      '`npm view <name> version`, or read it out of package-lock.json.'
   );
   process.exit(1);
 }
 
-const total = DEPENDENCY_FIELDS.reduce(
-  (n, field) => n + Object.keys(pkg[field] ?? {}).length,
-  0,
-);
+const total = DEPENDENCY_FIELDS.reduce((n, field) => n + Object.keys(pkg[field] ?? {}).length, 0);
 console.log(`All ${total} dependency specifiers are pinned or ranged`);

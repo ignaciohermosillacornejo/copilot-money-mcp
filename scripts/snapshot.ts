@@ -10,7 +10,16 @@
  * The --db-path flag overrides the default database location.
  */
 
-import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync, readFileSync } from 'fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+  readFileSync,
+} from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { retryInterrupted } from '../src/core/fs-retry.js';
@@ -21,7 +30,7 @@ const SNAPSHOTS_DIR = join(__dirname, '../snapshots');
 const DEFAULT_DB_PATH = join(
   process.env.HOME ?? '/tmp',
   'Library/Containers/com.copilot.production/Data/Library/Application Support',
-  'firestore/__FIRAPP_DEFAULT/copilot-production-22904/main',
+  'firestore/__FIRAPP_DEFAULT/copilot-production-22904/main'
 );
 
 interface SnapshotMetadata {

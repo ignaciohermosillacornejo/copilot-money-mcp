@@ -28,9 +28,7 @@
 import { existsSync, readdirSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
-import {
-  cleanupAllTempDatabases,
-} from '../src/core/leveldb-reader.js';
+import { cleanupAllTempDatabases } from '../src/core/leveldb-reader.js';
 import { GraphQLClient } from '../src/core/graphql/client.js';
 import { FirebaseAuth } from '../src/core/auth/firebase-auth.js';
 import { extractRefreshTokenCandidates } from '../src/core/auth/browser-token.js';
@@ -54,16 +52,12 @@ const skip = new Set((argVal('--skip') ?? '').split(',').filter(Boolean));
 const only = argVal('--only');
 
 if (only && !PHASE_NAMES.includes(only as PhaseName)) {
-  console.error(
-    `Unknown --only phase: "${only}". Valid phases: ${PHASE_NAMES.join(', ')}`
-  );
+  console.error(`Unknown --only phase: "${only}". Valid phases: ${PHASE_NAMES.join(', ')}`);
   process.exit(1);
 }
 for (const s of skip) {
   if (!PHASE_NAMES.includes(s as PhaseName)) {
-    console.error(
-      `Unknown --skip phase: "${s}". Valid phases: ${PHASE_NAMES.join(', ')}`
-    );
+    console.error(`Unknown --skip phase: "${s}". Valid phases: ${PHASE_NAMES.join(', ')}`);
     process.exit(1);
   }
 }
@@ -194,313 +188,313 @@ async function main(): Promise<void> {
   // 1) TAGS: create a disposable tag, verify it shows up optimistically, then after fresh decode.
   if (enabled('tags')) {
     await runPhase('tags.create', async () => {
-    heading('tags — create then delete');
-    const tagName = `opt-probe-${marker}`;
-    let tagId: string | undefined;
-    try {
-      const created = await tools.createTag({ name: tagName, color_name: 'OLIVE1' });
-      tagId = created.tag_id;
-      console.log(`  created tag ${tagId} (name="${tagName}") — optimistic cache now has it`);
+      heading('tags — create then delete');
+      const tagName = `opt-probe-${marker}`;
+      let tagId: string | undefined;
+      try {
+        const created = await tools.createTag({ name: tagName, color_name: 'OLIVE1' });
+        tagId = created.tag_id;
+        console.log(`  created tag ${tagId} (name="${tagName}") — optimistic cache now has it`);
 
-      // Optimistic read
-      const tagsOpt = await db.getTags();
-      const optFound = tagsOpt.find((t) => t.tag_id === tagId);
-      console.log(`  optimistic read: ${optFound ? 'FOUND' : 'NOT FOUND'} name="${optFound?.name}"`);
+        // Optimistic read
+        const tagsOpt = await db.getTags();
+        const optFound = tagsOpt.find((t) => t.tag_id === tagId);
+        console.log(
+          `  optimistic read: ${optFound ? 'FOUND' : 'NOT FOUND'} name="${optFound?.name}"`
+        );
 
-      // Fresh-decode poll until synced tag appears OR timeout
-      const synced = await pollUntilFreshMatches(
-        db,
-        () => db.getTags(),
-        (tags) => tags.some((t) => t.tag_id === tagId),
-        60,
-        5
-      );
-      const syncedFound = synced.lastValue.find((t) => t.tag_id === tagId);
-      console.log(
-        `  synced read (after ${synced.elapsedSec.toFixed(1)}s fresh decode): ${synced.matched ? `FOUND name="${syncedFound?.name}"` : 'NOT FOUND (timed out)'}`
-      );
-      results.push({
-        name: 'tags.create',
-        optimisticValue: { tag_id: optFound?.tag_id, name: optFound?.name },
-        syncedValue: { tag_id: syncedFound?.tag_id, name: syncedFound?.name },
-        matched:
-          !!optFound &&
-          !!syncedFound &&
-          optFound.tag_id === syncedFound.tag_id &&
-          optFound.name === syncedFound.name,
-        syncSec: synced.matched ? synced.elapsedSec : null,
-      });
-    } finally {
-      if (tagId) {
-        try {
-          await tools.deleteTag({ tag_id: tagId });
-          console.log(`  cleanup: deleted tag ${tagId} ✓`);
-        } catch (e) {
-          console.log(`  cleanup: deleteTag FAILED — manual cleanup for id=${tagId}: ${e}`);
+        // Fresh-decode poll until synced tag appears OR timeout
+        const synced = await pollUntilFreshMatches(
+          db,
+          () => db.getTags(),
+          (tags) => tags.some((t) => t.tag_id === tagId),
+          60,
+          5
+        );
+        const syncedFound = synced.lastValue.find((t) => t.tag_id === tagId);
+        console.log(
+          `  synced read (after ${synced.elapsedSec.toFixed(1)}s fresh decode): ${synced.matched ? `FOUND name="${syncedFound?.name}"` : 'NOT FOUND (timed out)'}`
+        );
+        results.push({
+          name: 'tags.create',
+          optimisticValue: { tag_id: optFound?.tag_id, name: optFound?.name },
+          syncedValue: { tag_id: syncedFound?.tag_id, name: syncedFound?.name },
+          matched:
+            !!optFound &&
+            !!syncedFound &&
+            optFound.tag_id === syncedFound.tag_id &&
+            optFound.name === syncedFound.name,
+          syncSec: synced.matched ? synced.elapsedSec : null,
+        });
+      } finally {
+        if (tagId) {
+          try {
+            await tools.deleteTag({ tag_id: tagId });
+            console.log(`  cleanup: deleted tag ${tagId} ✓`);
+          } catch (e) {
+            console.log(`  cleanup: deleteTag FAILED — manual cleanup for id=${tagId}: ${e}`);
+          }
         }
       }
-    }
     });
   }
 
   // 2) CATEGORIES: create a disposable category, verify and delete.
   if (enabled('categories')) {
     await runPhase('categories.create', async () => {
-    heading('categories — create then delete');
-    const catName = `opt-probe-${marker}`;
-    let catId: string | undefined;
-    try {
-      const created = await tools.createCategory({
-        name: catName,
-        color_name: 'OLIVE1',
-        emoji: '🧪',
-        is_excluded: false,
-      });
-      catId = created.category_id;
-      console.log(`  created category ${catId} (name="${catName}")`);
+      heading('categories — create then delete');
+      const catName = `opt-probe-${marker}`;
+      let catId: string | undefined;
+      try {
+        const created = await tools.createCategory({
+          name: catName,
+          color_name: 'OLIVE1',
+          emoji: '🧪',
+          is_excluded: false,
+        });
+        catId = created.category_id;
+        console.log(`  created category ${catId} (name="${catName}")`);
 
-      const catsOpt = await db.getUserCategories();
-      const optFound = catsOpt.find((c) => c.category_id === catId);
-      console.log(`  optimistic: ${optFound ? `FOUND name="${optFound.name}"` : 'NOT FOUND'}`);
+        const catsOpt = await db.getUserCategories();
+        const optFound = catsOpt.find((c) => c.category_id === catId);
+        console.log(`  optimistic: ${optFound ? `FOUND name="${optFound.name}"` : 'NOT FOUND'}`);
 
-      const synced = await pollUntilFreshMatches(
-        db,
-        () => db.getUserCategories(),
-        (cats) => cats.some((c) => c.category_id === catId),
-        60,
-        5
-      );
-      const syncedFound = synced.lastValue.find((c) => c.category_id === catId);
-      console.log(
-        `  synced (${synced.elapsedSec.toFixed(1)}s): ${synced.matched ? `FOUND name="${syncedFound?.name}"` : 'NOT FOUND (timed out)'}`
-      );
-      results.push({
-        name: 'categories.create',
-        optimisticValue: { id: optFound?.category_id, name: optFound?.name },
-        syncedValue: { id: syncedFound?.category_id, name: syncedFound?.name },
-        matched:
-          !!optFound &&
-          !!syncedFound &&
-          optFound.category_id === syncedFound.category_id &&
-          optFound.name === syncedFound.name,
-        syncSec: synced.matched ? synced.elapsedSec : null,
-      });
-    } finally {
-      if (catId) {
-        try {
-          await tools.deleteCategory({ category_id: catId });
-          console.log(`  cleanup: deleted category ${catId} ✓`);
-        } catch (e) {
-          console.log(`  cleanup: deleteCategory FAILED — manual cleanup for id=${catId}: ${e}`);
+        const synced = await pollUntilFreshMatches(
+          db,
+          () => db.getUserCategories(),
+          (cats) => cats.some((c) => c.category_id === catId),
+          60,
+          5
+        );
+        const syncedFound = synced.lastValue.find((c) => c.category_id === catId);
+        console.log(
+          `  synced (${synced.elapsedSec.toFixed(1)}s): ${synced.matched ? `FOUND name="${syncedFound?.name}"` : 'NOT FOUND (timed out)'}`
+        );
+        results.push({
+          name: 'categories.create',
+          optimisticValue: { id: optFound?.category_id, name: optFound?.name },
+          syncedValue: { id: syncedFound?.category_id, name: syncedFound?.name },
+          matched:
+            !!optFound &&
+            !!syncedFound &&
+            optFound.category_id === syncedFound.category_id &&
+            optFound.name === syncedFound.name,
+          syncSec: synced.matched ? synced.elapsedSec : null,
+        });
+      } finally {
+        if (catId) {
+          try {
+            await tools.deleteCategory({ category_id: catId });
+            console.log(`  cleanup: deleted category ${catId} ✓`);
+          } catch (e) {
+            console.log(`  cleanup: deleteCategory FAILED — manual cleanup for id=${catId}: ${e}`);
+          }
         }
       }
-    }
     });
   }
 
   // 3) TRANSACTIONS: edit a note on a real transaction, then restore.
   if (enabled('txn')) {
     await runPhase('transactions.update_note', async () => {
-    heading('transactions — edit note then restore');
-    const all = await db.getAllTransactions();
-    const target = all.find((t) => t.account_id && t.item_id && !t.is_pending);
-    if (!target) {
-      console.log('  (no suitable transaction found; skipping)');
-    } else {
-      const original = target.user_note ?? '';
-      const newNote = `opt-probe-${marker}`;
-      try {
-        await tools.updateTransaction({
-          transaction_id: target.transaction_id,
-          note: newNote,
-        });
-        console.log(
-          `  edited txn ${target.transaction_id} note="${newNote}" (original="${original}")`
-        );
-
-        const txnsOpt = await db.getAllTransactions();
-        const optFound = txnsOpt.find((t) => t.transaction_id === target.transaction_id);
-        console.log(`  optimistic note="${optFound?.user_note}"`);
-
-        const synced = await pollUntilFreshMatches(
-          db,
-          () => db.getAllTransactions(),
-          (txns) => txns.find((t) => t.transaction_id === target.transaction_id)?.user_note === newNote,
-          60,
-          5
-        );
-        const syncedFound = synced.lastValue.find(
-          (t) => t.transaction_id === target.transaction_id
-        );
-        console.log(
-          `  synced (${synced.elapsedSec.toFixed(1)}s) note="${syncedFound?.user_note}" ${synced.matched ? '✓' : '(timed out)'}`
-        );
-        results.push({
-          name: 'transactions.update_note',
-          optimisticValue: { note: optFound?.user_note },
-          syncedValue: { note: syncedFound?.user_note },
-          matched: optFound?.user_note === syncedFound?.user_note,
-          syncSec: synced.matched ? synced.elapsedSec : null,
-        });
-      } finally {
+      heading('transactions — edit note then restore');
+      const all = await db.getAllTransactions();
+      const target = all.find((t) => t.account_id && t.item_id && !t.is_pending);
+      if (!target) {
+        console.log('  (no suitable transaction found; skipping)');
+      } else {
+        const original = target.user_note ?? '';
+        const newNote = `opt-probe-${marker}`;
         try {
           await tools.updateTransaction({
             transaction_id: target.transaction_id,
-            note: original,
+            note: newNote,
           });
-          console.log(`  cleanup: restored note ✓`);
-        } catch (e) {
           console.log(
-            `  cleanup: restore FAILED — manual: set note on ${target.transaction_id} to "${original}": ${e}`
+            `  edited txn ${target.transaction_id} note="${newNote}" (original="${original}")`
           );
+
+          const txnsOpt = await db.getAllTransactions();
+          const optFound = txnsOpt.find((t) => t.transaction_id === target.transaction_id);
+          console.log(`  optimistic note="${optFound?.user_note}"`);
+
+          const synced = await pollUntilFreshMatches(
+            db,
+            () => db.getAllTransactions(),
+            (txns) =>
+              txns.find((t) => t.transaction_id === target.transaction_id)?.user_note === newNote,
+            60,
+            5
+          );
+          const syncedFound = synced.lastValue.find(
+            (t) => t.transaction_id === target.transaction_id
+          );
+          console.log(
+            `  synced (${synced.elapsedSec.toFixed(1)}s) note="${syncedFound?.user_note}" ${synced.matched ? '✓' : '(timed out)'}`
+          );
+          results.push({
+            name: 'transactions.update_note',
+            optimisticValue: { note: optFound?.user_note },
+            syncedValue: { note: syncedFound?.user_note },
+            matched: optFound?.user_note === syncedFound?.user_note,
+            syncSec: synced.matched ? synced.elapsedSec : null,
+          });
+        } finally {
+          try {
+            await tools.updateTransaction({
+              transaction_id: target.transaction_id,
+              note: original,
+            });
+            console.log(`  cleanup: restored note ✓`);
+          } catch (e) {
+            console.log(
+              `  cleanup: restore FAILED — manual: set note on ${target.transaction_id} to "${original}": ${e}`
+            );
+          }
         }
       }
-    }
     });
   }
 
   // 4) BUDGETS: set amount on a LEAF category (no children), then restore.
   if (enabled('budgets')) {
     await runPhase('budgets.set_leaf', async () => {
-    heading('budgets — setBudget on a leaf category, then restore');
-    const cats = await db.getUserCategories();
-    const userCatIds = new Set(cats.map((c) => c.category_id));
-    const isLeaf = (c: { children_category_ids?: string[]; category_id: string }): boolean => {
-      if (c.children_category_ids && c.children_category_ids.length > 0) return false;
-      // Also check reverse: is anyone's parent == c?
-      return !cats.some((other) => other.parent_category_id === c.category_id);
-    };
-    const leafCat = cats.find((c) => isLeaf(c) && userCatIds.has(c.category_id));
-    if (!leafCat) {
-      console.log('  (no leaf category found; skipping)');
-    } else {
-      const existingBudgets = await db.getBudgets();
-      const existing = existingBudgets.find((b) => b.category_id === leafCat.category_id);
-      const originalAmount = existing?.amount ?? 0;
-      const testAmount = '123.45';
-      const parsedTestAmount = 123.45;
-      try {
-        await tools.setBudget({
-          category_id: leafCat.category_id,
-          amount: testAmount,
-        });
-        console.log(
-          `  set budget for "${leafCat.name}" (${leafCat.category_id}) to ${testAmount} (original=${originalAmount})`
-        );
-
-        const optBudgets = await tools.getBudgets({});
-        const opt = optBudgets.budgets.find((b) => b.category_id === leafCat.category_id);
-        console.log(`  optimistic amount=${opt?.amount}`);
-
-        // Budgets sync slower — allow 5 min
-        const synced = await pollUntilFreshMatches(
-          db,
-          async () => {
-            const res = await tools.getBudgets({});
-            return res.budgets.find((b) => b.category_id === leafCat.category_id);
-          },
-          (b) => b !== undefined && Math.abs((b.amount ?? 0) - parsedTestAmount) < 0.005,
-          300,
-          15
-        );
-        console.log(
-          `  synced (${synced.elapsedSec.toFixed(1)}s) amount=${synced.lastValue?.amount} ${synced.matched ? '✓' : '(timed out)'}`
-        );
-        results.push({
-          name: 'budgets.set_leaf',
-          optimisticValue: { amount: opt?.amount },
-          syncedValue: { amount: synced.lastValue?.amount },
-          matched:
-            opt !== undefined &&
-            synced.lastValue !== undefined &&
-            Math.abs((opt.amount ?? 0) - (synced.lastValue.amount ?? 0)) < 0.005,
-          syncSec: synced.matched ? synced.elapsedSec : null,
-          note: synced.matched
-            ? undefined
-            : 'Timed out — budget sync to LevelDB can exceed 5 min for some setups. Optimistic value is still correct.',
-        });
-      } finally {
+      heading('budgets — setBudget on a leaf category, then restore');
+      const cats = await db.getUserCategories();
+      const userCatIds = new Set(cats.map((c) => c.category_id));
+      const isLeaf = (c: { children_category_ids?: string[]; category_id: string }): boolean => {
+        if (c.children_category_ids && c.children_category_ids.length > 0) return false;
+        // Also check reverse: is anyone's parent == c?
+        return !cats.some((other) => other.parent_category_id === c.category_id);
+      };
+      const leafCat = cats.find((c) => isLeaf(c) && userCatIds.has(c.category_id));
+      if (!leafCat) {
+        console.log('  (no leaf category found; skipping)');
+      } else {
+        const existingBudgets = await db.getBudgets();
+        const existing = existingBudgets.find((b) => b.category_id === leafCat.category_id);
+        const originalAmount = existing?.amount ?? 0;
+        const testAmount = '123.45';
+        const parsedTestAmount = 123.45;
         try {
           await tools.setBudget({
             category_id: leafCat.category_id,
-            amount: originalAmount.toFixed(2),
+            amount: testAmount,
           });
-          console.log(`  cleanup: restored budget to ${originalAmount} ✓`);
-        } catch (e) {
           console.log(
-            `  cleanup: restore FAILED — manual: setBudget category=${leafCat.category_id} amount=${originalAmount}: ${e}`
+            `  set budget for "${leafCat.name}" (${leafCat.category_id}) to ${testAmount} (original=${originalAmount})`
           );
+
+          const optBudgets = await tools.getBudgets({});
+          const opt = optBudgets.budgets.find((b) => b.category_id === leafCat.category_id);
+          console.log(`  optimistic amount=${opt?.amount}`);
+
+          // Budgets sync slower — allow 5 min
+          const synced = await pollUntilFreshMatches(
+            db,
+            async () => {
+              const res = await tools.getBudgets({});
+              return res.budgets.find((b) => b.category_id === leafCat.category_id);
+            },
+            (b) => b !== undefined && Math.abs((b.amount ?? 0) - parsedTestAmount) < 0.005,
+            300,
+            15
+          );
+          console.log(
+            `  synced (${synced.elapsedSec.toFixed(1)}s) amount=${synced.lastValue?.amount} ${synced.matched ? '✓' : '(timed out)'}`
+          );
+          results.push({
+            name: 'budgets.set_leaf',
+            optimisticValue: { amount: opt?.amount },
+            syncedValue: { amount: synced.lastValue?.amount },
+            matched:
+              opt !== undefined &&
+              synced.lastValue !== undefined &&
+              Math.abs((opt.amount ?? 0) - (synced.lastValue.amount ?? 0)) < 0.005,
+            syncSec: synced.matched ? synced.elapsedSec : null,
+            note: synced.matched
+              ? undefined
+              : 'Timed out — budget sync to LevelDB can exceed 5 min for some setups. Optimistic value is still correct.',
+          });
+        } finally {
+          try {
+            await tools.setBudget({
+              category_id: leafCat.category_id,
+              amount: originalAmount.toFixed(2),
+            });
+            console.log(`  cleanup: restored budget to ${originalAmount} ✓`);
+          } catch (e) {
+            console.log(
+              `  cleanup: restore FAILED — manual: setBudget category=${leafCat.category_id} amount=${originalAmount}: ${e}`
+            );
+          }
         }
       }
-    }
     });
   }
 
   // 5) RECURRINGS: toggle state on an existing recurring and restore.
   if (enabled('recurrings')) {
     await runPhase('recurrings.set_state', async () => {
-    heading('recurrings — setRecurringState then restore');
-    const recurrings = await db.getRecurring();
-    const target = recurrings.find((r) => r.state === 'active');
-    if (!target) {
-      console.log('  (no active recurring found; skipping)');
-      return;
-    }
-    // Capture the actual current state and uppercase it for the GraphQL enum
-    // restore. The decoder yields lowercase ('active'), the API expects upper.
-    // The .find matched `state === 'active'`, so `target.state` is 'active'
-    // here; the `?? 'active'` only satisfies the type checker — find's
-    // predicate doesn't narrow the found element's property.
-    const originalState = (target.state ?? 'active').toUpperCase();
-    try {
-      await tools.setRecurringState({ recurring_id: target.recurring_id, state: 'PAUSED' });
-      console.log(`  paused recurring ${target.recurring_id} "${target.name}"`);
-
-      const optAll = await db.getRecurring();
-      const opt = optAll.find((r) => r.recurring_id === target.recurring_id);
-      console.log(`  optimistic state=${opt?.state}`);
-
-      const synced = await pollUntilFreshMatches(
-        db,
-        () => db.getRecurring(),
-        (recs) =>
-          recs.find((r) => r.recurring_id === target.recurring_id)?.state === 'paused',
-        60,
-        5
-      );
-      const syncedR = synced.lastValue.find((r) => r.recurring_id === target.recurring_id);
-      console.log(
-        `  synced (${synced.elapsedSec.toFixed(1)}s) state=${syncedR?.state} ${synced.matched ? '✓' : '(timed out)'}`
-      );
-      results.push({
-        name: 'recurrings.set_state',
-        optimisticValue: { state: opt?.state },
-        syncedValue: { state: syncedR?.state },
-        matched: opt?.state === syncedR?.state,
-        syncSec: synced.matched ? synced.elapsedSec : null,
-      });
-    } finally {
-      try {
-        await tools.setRecurringState({
-          recurring_id: target.recurring_id,
-          state: originalState,
-        });
-        console.log(`  cleanup: restored state ✓`);
-      } catch (e) {
-        console.log(
-          `  cleanup: restore FAILED — manual: setRecurringState ${target.recurring_id} to ${originalState}: ${e}`
-        );
+      heading('recurrings — setRecurringState then restore');
+      const recurrings = await db.getRecurring();
+      const target = recurrings.find((r) => r.state === 'active');
+      if (!target) {
+        console.log('  (no active recurring found; skipping)');
+        return;
       }
-    }
+      // Capture the actual current state and uppercase it for the GraphQL enum
+      // restore. The decoder yields lowercase ('active'), the API expects upper.
+      // The .find matched `state === 'active'`, so `target.state` is 'active'
+      // here; the `?? 'active'` only satisfies the type checker — find's
+      // predicate doesn't narrow the found element's property.
+      const originalState = (target.state ?? 'active').toUpperCase();
+      try {
+        await tools.setRecurringState({ recurring_id: target.recurring_id, state: 'PAUSED' });
+        console.log(`  paused recurring ${target.recurring_id} "${target.name}"`);
+
+        const optAll = await db.getRecurring();
+        const opt = optAll.find((r) => r.recurring_id === target.recurring_id);
+        console.log(`  optimistic state=${opt?.state}`);
+
+        const synced = await pollUntilFreshMatches(
+          db,
+          () => db.getRecurring(),
+          (recs) => recs.find((r) => r.recurring_id === target.recurring_id)?.state === 'paused',
+          60,
+          5
+        );
+        const syncedR = synced.lastValue.find((r) => r.recurring_id === target.recurring_id);
+        console.log(
+          `  synced (${synced.elapsedSec.toFixed(1)}s) state=${syncedR?.state} ${synced.matched ? '✓' : '(timed out)'}`
+        );
+        results.push({
+          name: 'recurrings.set_state',
+          optimisticValue: { state: opt?.state },
+          syncedValue: { state: syncedR?.state },
+          matched: opt?.state === syncedR?.state,
+          syncSec: synced.matched ? synced.elapsedSec : null,
+        });
+      } finally {
+        try {
+          await tools.setRecurringState({
+            recurring_id: target.recurring_id,
+            state: originalState,
+          });
+          console.log(`  cleanup: restored state ✓`);
+        } catch (e) {
+          console.log(
+            `  cleanup: restore FAILED — manual: setRecurringState ${target.recurring_id} to ${originalState}: ${e}`
+          );
+        }
+      }
     });
   }
 
   // --- summary ---
   console.log();
   console.log(`=== Summary ===`);
-  console.log(
-    `${'test'.padEnd(26)}${'match'.padEnd(8)}${'sync'.padEnd(12)}optimistic vs synced`
-  );
+  console.log(`${'test'.padEnd(26)}${'match'.padEnd(8)}${'sync'.padEnd(12)}optimistic vs synced`);
   console.log('─'.repeat(90));
   for (const r of results) {
     const match = r.matched ? '✓' : '✗';
@@ -519,7 +513,8 @@ async function main(): Promise<void> {
   process.exit(failed.length > 0 ? 1 : 0);
 }
 
-if (import.meta.main) main().catch((e) => {
-  console.error('Fatal:', e);
-  process.exit(1);
-});
+if (import.meta.main)
+  main().catch((e) => {
+    console.error('Fatal:', e);
+    process.exit(1);
+  });

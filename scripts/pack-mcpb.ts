@@ -63,9 +63,7 @@ function copyInto(src: string, dest: string): void {
 }
 
 if (writeMode && !existsSync(writeManifestPath)) {
-  console.error(
-    `--write requires manifest.write.json. Run: bun run sync-manifest -- --write`
-  );
+  console.error(`--write requires manifest.write.json. Run: bun run sync-manifest -- --write`);
   process.exit(1);
 }
 

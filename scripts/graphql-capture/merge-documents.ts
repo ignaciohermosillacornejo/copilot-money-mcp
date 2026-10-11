@@ -22,7 +22,8 @@ export async function mergeDocuments(jsonlPath: string, documentsPath: string): 
       return l;
     }
     const verbatim = body.operationName ? dump.documents[body.operationName] : undefined;
-    const isInferred = typeof body.query === 'string' && body.query.includes('inferred from response');
+    const isInferred =
+      typeof body.query === 'string' && body.query.includes('inferred from response');
     if (verbatim && isInferred) {
       body.query = verbatim;
       entry.requestBody = JSON.stringify(body);
@@ -42,7 +43,9 @@ export async function mergeDocuments(jsonlPath: string, documentsPath: string): 
 if (import.meta.main) {
   const [, , jsonlPath, documentsPath] = process.argv;
   if (!jsonlPath || !documentsPath) {
-    console.error('usage: bun scripts/graphql-capture/merge-documents.ts <captured-log.jsonl> <documents.json>');
+    console.error(
+      'usage: bun scripts/graphql-capture/merge-documents.ts <captured-log.jsonl> <documents.json>'
+    );
     process.exit(1);
   }
   await mergeDocuments(jsonlPath, documentsPath);

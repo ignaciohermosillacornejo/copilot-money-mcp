@@ -107,7 +107,7 @@ async function profile() {
   console.log('\n📈 Summary:');
   console.log(`   Total time: ${(totalTime / 1000).toFixed(2)}s`);
   console.log(`   Total items: ${totalItems.toLocaleString()}`);
-  console.log(`   Throughput: ${((dbSize / 1024 / 1024) / (totalTime / 1000)).toFixed(2)} MB/s`);
+  console.log(`   Throughput: ${(dbSize / 1024 / 1024 / (totalTime / 1000)).toFixed(2)} MB/s`);
 
   // Find slowest operations
   const sorted = Object.entries(timings).sort(([, a], [, b]) => b - a);

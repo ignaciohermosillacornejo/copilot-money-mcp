@@ -178,10 +178,34 @@ const SKIP_FILES = new Set(['package-lock.json', 'bun.lock', 'bun.lockb', 'yarn.
  * executable formats in BINARY_EXTENSIONS.
  */
 const INERT_BINARY_EXTENSIONS = new Set([
-  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.icns', '.bmp', '.tiff',
-  '.pdf', '.zip', '.gz', '.tgz', '.bz2', '.xz', '.7z', '.tar',
-  '.woff', '.woff2', '.ttf', '.otf', '.eot',
-  '.mp3', '.mp4', '.wav', '.mov', '.webm', '.ogg',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.ico',
+  '.icns',
+  '.bmp',
+  '.tiff',
+  '.pdf',
+  '.zip',
+  '.gz',
+  '.tgz',
+  '.bz2',
+  '.xz',
+  '.7z',
+  '.tar',
+  '.woff',
+  '.woff2',
+  '.ttf',
+  '.otf',
+  '.eot',
+  '.mp3',
+  '.mp4',
+  '.wav',
+  '.mov',
+  '.webm',
+  '.ogg',
 ]);
 
 /**
@@ -210,7 +234,15 @@ const BINARY_EXTENSIONS = new Set([
   //   - they are containers whose contents a reviewer might genuinely need to
   //     see, and which can carry code: .mcpb bundles this server, .ldb/.sst
   //     are LevelDB tables holding cached user data
-  '.mcpb', '.node', '.wasm', '.ldb', '.sst', '.dylib', '.so', '.dll', '.exe',
+  '.mcpb',
+  '.node',
+  '.wasm',
+  '.ldb',
+  '.sst',
+  '.dylib',
+  '.so',
+  '.dll',
+  '.exe',
 ]);
 
 /** Extension of the BASENAME — `docs/v1.2/README` has no extension, not `.2/README`. */
@@ -266,22 +298,40 @@ const GENERATED_RE = /\.generated\.[cm]?[jt]sx?$/;
  */
 const AUTO_LIFECYCLE = new Set([
   // install
-  'preinstall', 'install', 'postinstall', 'dependencies',
+  'preinstall',
+  'install',
+  'postinstall',
+  'dependencies',
   // publish + pack
-  'prepublish', 'prepublishOnly', 'prepack', 'postpack', 'publish', 'postpublish',
+  'prepublish',
+  'prepublishOnly',
+  'prepack',
+  'postpack',
+  'publish',
+  'postpublish',
   // prepare runs on install AND publish
   'prepare',
   // version
-  'preversion', 'version', 'postversion',
+  'preversion',
+  'version',
+  'postversion',
   // uninstall
-  'preuninstall', 'uninstall', 'postuninstall',
+  'preuninstall',
+  'uninstall',
+  'postuninstall',
   // shrinkwrap
-  'preshrinkwrap', 'shrinkwrap', 'postshrinkwrap',
+  'preshrinkwrap',
+  'shrinkwrap',
+  'postshrinkwrap',
   // wrappers around the explicitly-invoked commands
-  'pretest', 'posttest',
-  'prestart', 'poststart',
-  'prestop', 'poststop',
-  'prerestart', 'postrestart',
+  'pretest',
+  'posttest',
+  'prestart',
+  'poststart',
+  'prestop',
+  'poststop',
+  'prerestart',
+  'postrestart',
 ]);
 
 /**
@@ -474,7 +524,11 @@ function linkTarget(path: string): string | undefined {
  * an attacker would want to join — ASCII identifier characters, Latin-1 — is
  * below 0x2000, so the floor separates the two without enumerating emoji.
  */
-function invisibleIsBenign(cp: number, prev: number | undefined, next: number | undefined): boolean {
+function invisibleIsBenign(
+  cp: number,
+  prev: number | undefined,
+  next: number | undefined
+): boolean {
   if (cp !== 0x200d) return false;
   return prev !== undefined && next !== undefined && prev >= 0x2000 && next >= 0x2000;
 }
@@ -778,7 +832,11 @@ function checkLifecycleScripts(contents: string, rel: string): void {
   // script X, so a wrapper around an existing script fires implicitly too.
   for (const hook of Object.keys(scripts)) {
     if (AUTO_LIFECYCLE.has(hook) || PINNED_NAMES.includes(hook)) continue;
-    const base = hook.startsWith('pre') ? hook.slice(3) : hook.startsWith('post') ? hook.slice(4) : '';
+    const base = hook.startsWith('pre')
+      ? hook.slice(3)
+      : hook.startsWith('post')
+        ? hook.slice(4)
+        : '';
     if (base === '' || scripts[base] === undefined) continue;
     report(
       rel,
@@ -1067,7 +1125,10 @@ function listFiles(root: string): { files: string[]; strategy: 'git' | 'walk' } 
  * inside its own fix.
  */
 function underSkippedDir(root: string, file: string): boolean {
-  return relative(root, file).split(sep).slice(0, -1).some((seg) => SKIP_DIRS.has(seg));
+  return relative(root, file)
+    .split(sep)
+    .slice(0, -1)
+    .some((seg) => SKIP_DIRS.has(seg));
 }
 
 /**
@@ -1293,7 +1354,10 @@ function gitText(
  * multi-byte sequences preceded it, so the parser has to see bytes and the
  * decode has to happen per object, after the split.
  */
-function gitBytes(args: string[], input: string): { ok: true; bytes: Buffer } | { ok: false; why: string } {
+function gitBytes(
+  args: string[],
+  input: string
+): { ok: true; bytes: Buffer } | { ok: false; why: string } {
   const shown = `git -C ${ROOT} ${args.join(' ')}`;
   const r = spawnSync('git', ['-C', ROOT, ...args], {
     env: gitEnv(),
@@ -1389,7 +1453,7 @@ function actionsRange(): RangeOutcome | undefined {
       kind: 'refuse',
       why: `this mode compares a pull request's commits against its final tree, and this run is a "${event}" event`,
       remedy:
-        'Gate the step on `if: github.event_name == \'pull_request\'`, or pass an explicit ' +
+        "Gate the step on `if: github.event_name == 'pull_request'`, or pass an explicit " +
         '`--range=<base>..<head>`.',
     };
   }
@@ -1501,7 +1565,9 @@ function resolveRange(): RangeOutcome {
 }
 
 function ghostRefuse(why: string, remedy: string): never {
-  console.error('check-concealment --ghost-lines: REFUSING to report on a range it could not read.\n');
+  console.error(
+    'check-concealment --ghost-lines: REFUSING to report on a range it could not read.\n'
+  );
   console.error(`  Cause: ${why}\n`);
   console.error(`  ${remedy}\n`);
   process.exit(1);
@@ -1514,7 +1580,7 @@ function ghostSkip(why: string): never {
   console.error('check-concealment --ghost-lines: SKIPPED — nothing was checked.\n');
   console.error(`  ${why}.\n`);
   console.error(
-    '  This mode compares a pull request\'s own commits against its final tree, so it needs a\n' +
+    "  This mode compares a pull request's own commits against its final tree, so it needs a\n" +
       '  commit range. Give it one with `--range=<base>..<head>` or CHECK_GHOST_LINES_RANGE.\n'
   );
   console.error(
@@ -1647,7 +1713,8 @@ function runGhostScan(): never {
   // unrelated repository, git would answer about THAT repository's history and
   // every number below would describe the wrong tree.
   const top = gitText(['rev-parse', '--show-toplevel']);
-  if (!top.ok) ghostRefuse(top.why, 'Run this inside the repository whose pull request you are checking.');
+  if (!top.ok)
+    ghostRefuse(top.why, 'Run this inside the repository whose pull request you are checking.');
   try {
     if (realpathSync.native(top.text.trim()) !== realpathSync.native(ROOT)) {
       ghostRefuse(
@@ -1840,7 +1907,8 @@ function runGhostScan(): never {
     } else {
       const exempt = SELF_EXEMPT.has(rel);
       const prose = isProse(rel);
-      for (let i = 0; i < lines.length; i++) checkLine(rel, i + 1, lines[i] as string, exempt, prose);
+      for (let i = 0; i < lines.length; i++)
+        checkLine(rel, i + 1, lines[i] as string, exempt, prose);
       const basename = rel.slice(rel.lastIndexOf(sep) + 1).toLowerCase();
       // Name only — `answersToName` asks the filesystem which file a name
       // opens, and a blob that is not in any tree has no filesystem to ask.
@@ -1883,7 +1951,9 @@ function runGhostScan(): never {
     for (const [rule, items] of byRule) {
       console.error(`  ${rule}:`);
       for (const f of items) {
-        console.error(`    ${f.file}:${f.line}${f.origin === undefined ? '' : `  added in ${f.origin}`}`);
+        console.error(
+          `    ${f.file}:${f.line}${f.origin === undefined ? '' : `  added in ${f.origin}`}`
+        );
         console.error(`      ${f.detail}`);
       }
       console.error('');

@@ -95,7 +95,8 @@ export function classifySmokeOutcome(run: SmokeRunResult): ScheduledSmokeResult 
 /** How an incomplete run ended, in the fewest words that stay actionable. */
 function describeTermination(run: SmokeRunResult): string {
   if (run.signal) {
-    const cause = run.errorCode === 'ETIMEDOUT' ? ` after the ${SMOKE_TIMEOUT_MINUTES}m timeout` : '';
+    const cause =
+      run.errorCode === 'ETIMEDOUT' ? ` after the ${SMOKE_TIMEOUT_MINUTES}m timeout` : '';
     return `killed by ${run.signal}${cause}`;
   }
   if (run.errorCode) return `could not run (${run.errorCode})`;

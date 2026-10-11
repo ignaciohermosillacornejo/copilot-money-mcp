@@ -81,7 +81,7 @@ export function inferVariableSchema(entries: RawEntry[]): VariableSchema[] {
 export function renderOperationMarkdown(
   opName: string,
   kind: 'query' | 'mutation',
-  entries: RawEntry[],
+  entries: RawEntry[]
 ): string {
   const first = entries[0];
   const body = parseBody(first);
@@ -94,7 +94,9 @@ export function renderOperationMarkdown(
     ? [
         '| Name | Type | Required | Example |',
         '|------|------|----------|---------|',
-        ...vars.map((v) => `| ${v.name} | ${v.type} | ${v.required} | \`${JSON.stringify(v.example)}\` |`),
+        ...vars.map(
+          (v) => `| ${v.name} | ${v.type} | ${v.required} | \`${JSON.stringify(v.example)}\` |`
+        ),
       ].join('\n')
     : '_(no variables)_';
 
@@ -155,7 +157,9 @@ export async function generateAll(scrubbedPath: string, outDir: string): Promise
     const file = path.join(dir, `${opName}.md`);
     await Bun.write(file, renderOperationMarkdown(opName, group.kind, group.entries));
     const rel = path.relative(outDir, file);
-    indexLines.push(`- [${opName}](${rel}) — ${group.kind}, ${group.entries.length} observation(s)`);
+    indexLines.push(
+      `- [${opName}](${rel}) — ${group.kind}, ${group.entries.length} observation(s)`
+    );
   }
   await Bun.write(path.join(schemaDir, 'operations.md'), indexLines.join('\n') + '\n');
 }

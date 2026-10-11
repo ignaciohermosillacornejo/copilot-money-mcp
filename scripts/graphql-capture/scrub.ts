@@ -40,18 +40,44 @@ const NAME_FIELDS = new Set(['name', 'displayName']);
 const EMAIL_FIELDS = new Set(['email', 'emailAddress']);
 const PHONE_FIELDS = new Set(['phone', 'phoneNumber']);
 const AMOUNT_FIELDS = new Set([
-  'amount', 'amountCents', 'balance', 'value', 'cost', 'price', 'total',
-  'limit', 'debt', 'debts', 'assets', 'equity', 'net', 'spend', 'earned',
-  'income', 'expense', 'savings',
+  'amount',
+  'amountCents',
+  'balance',
+  'value',
+  'cost',
+  'price',
+  'total',
+  'limit',
+  'debt',
+  'debts',
+  'assets',
+  'equity',
+  'net',
+  'spend',
+  'earned',
+  'income',
+  'expense',
+  'savings',
 ]);
 const ACCOUNT_ID_FIELDS = new Set([
-  'accountNumber', 'routingNumber', 'institutionId', 'plaidItemId', 'plaidAccountId',
+  'accountNumber',
+  'routingNumber',
+  'institutionId',
+  'plaidItemId',
+  'plaidAccountId',
   'mask', // Plaid/Firebase shorthand for card/account last-4 digits
 ]);
 const ID_FIELDS = new Set(['userId', 'uid', 'householdId', 'id', 'documentId']);
 const OPAQUE_TOKEN_FIELDS = new Set([
-  'cursor', 'nextCursor', 'previousCursor', 'hash', 'token', 'refreshToken',
-  'accessToken', 'sessionToken', 'intercomUserHash',
+  'cursor',
+  'nextCursor',
+  'previousCursor',
+  'hash',
+  'token',
+  'refreshToken',
+  'accessToken',
+  'sessionToken',
+  'intercomUserHash',
 ]);
 
 // camelCase fields whose suffix indicates a money value are scrubbed, e.g.
@@ -85,10 +111,7 @@ function scrubValue(key: string, value: unknown): unknown {
   if (NAME_FIELDS.has(key)) return '<name>';
   if (EMAIL_FIELDS.has(key)) return '<email>';
   if (PHONE_FIELDS.has(key)) return '<phone>';
-  if (
-    (AMOUNT_FIELDS.has(key) || AMOUNT_SUFFIX_RE.test(key)) &&
-    typeof value !== 'boolean'
-  ) {
+  if ((AMOUNT_FIELDS.has(key) || AMOUNT_SUFFIX_RE.test(key)) && typeof value !== 'boolean') {
     return '<amount>';
   }
   if (ACCOUNT_ID_FIELDS.has(key)) return '<account-id>';

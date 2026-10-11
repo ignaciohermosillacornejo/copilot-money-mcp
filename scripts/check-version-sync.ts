@@ -28,7 +28,7 @@ const pkgVersion: string = pkg.version;
 const serverVersion: string = server.version;
 const manifestVersion: string = manifest.version;
 const npmPackage = (server.packages ?? []).find(
-  (p: { registryType?: string }) => p.registryType === 'npm',
+  (p: { registryType?: string }) => p.registryType === 'npm'
 );
 const npmPackageVersion: string | undefined = npmPackage?.version;
 const lockfileVersion: string = lockfile.version;
@@ -36,26 +36,28 @@ const lockfileSelfVersion: string | undefined = lockfile.packages?.['']?.version
 
 const mismatches: string[] = [];
 if (serverVersion !== pkgVersion) {
-  mismatches.push(`server.json#version (${serverVersion}) !== package.json#version (${pkgVersion})`);
+  mismatches.push(
+    `server.json#version (${serverVersion}) !== package.json#version (${pkgVersion})`
+  );
 }
 if (npmPackageVersion !== pkgVersion) {
   mismatches.push(
-    `server.json#packages[npm].version (${npmPackageVersion}) !== package.json#version (${pkgVersion})`,
+    `server.json#packages[npm].version (${npmPackageVersion}) !== package.json#version (${pkgVersion})`
   );
 }
 if (manifestVersion !== pkgVersion) {
   mismatches.push(
-    `manifest.json#version (${manifestVersion}) !== package.json#version (${pkgVersion})`,
+    `manifest.json#version (${manifestVersion}) !== package.json#version (${pkgVersion})`
   );
 }
 if (lockfileVersion !== pkgVersion) {
   mismatches.push(
-    `package-lock.json#version (${lockfileVersion}) !== package.json#version (${pkgVersion})`,
+    `package-lock.json#version (${lockfileVersion}) !== package.json#version (${pkgVersion})`
   );
 }
 if (lockfileSelfVersion !== pkgVersion) {
   mismatches.push(
-    `package-lock.json#packages[''].version (${lockfileSelfVersion}) !== package.json#version (${pkgVersion})`,
+    `package-lock.json#packages[''].version (${lockfileSelfVersion}) !== package.json#version (${pkgVersion})`
   );
 }
 
@@ -65,7 +67,7 @@ if (mismatches.length > 0) {
   console.error(
     '\nBump the version consistently across package.json, server.json (#version + ' +
       "#packages[npm].version), manifest.json, and package-lock.json (#version + #packages[''].version) " +
-      'to the same value before publishing.',
+      'to the same value before publishing.'
   );
   process.exit(1);
 }

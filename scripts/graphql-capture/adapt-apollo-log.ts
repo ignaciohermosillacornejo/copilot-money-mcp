@@ -95,7 +95,7 @@ function inferQuery(
   kind: 'query' | 'mutation',
   opName: string,
   variables: Record<string, unknown>,
-  data: unknown,
+  data: unknown
 ): string {
   const varDefs = Object.entries(variables)
     .map(([k, v]) => `$${k}: ${jsTypeToGraphQL(v)}`)
@@ -118,7 +118,7 @@ function toRawEntry(
   kind: 'query' | 'mutation',
   variables: Record<string, unknown>,
   data: unknown,
-  timestamp: string,
+  timestamp: string
 ): RawEntry {
   const query = inferQuery(kind, opName, variables, data);
   return {
@@ -143,7 +143,7 @@ function toRawEntryVerbatim(
   variables: Record<string, unknown>,
   query: string,
   data: unknown,
-  timestamp: string,
+  timestamp: string
 ): RawEntry {
   return {
     ts: new Date(timestamp).getTime() || Date.now(),
@@ -170,14 +170,7 @@ export async function adaptApolloCapture(inputPath: string, outputPath: string):
       const data = e.response?.data ?? e.data;
       if (e.query && e.query.length > 10) {
         entries.push(
-          toRawEntryVerbatim(
-            e.operationName,
-            kind,
-            e.variables,
-            e.query,
-            data,
-            capture.capturedAt,
-          ),
+          toRawEntryVerbatim(e.operationName, kind, e.variables, e.query, data, capture.capturedAt)
         );
         verbatim++;
       } else {
@@ -191,7 +184,9 @@ export async function adaptApolloCapture(inputPath: string, outputPath: string):
     for (const e of capture.linkLevelCaptures) {
       const kind = e.type === 'mutation' ? 'mutation' : 'query';
       if (e.query && e.query.length > 10) {
-        entries.push(toRawEntryVerbatim(e.operationName, kind, e.variables, e.query, e.data, e.timestamp));
+        entries.push(
+          toRawEntryVerbatim(e.operationName, kind, e.variables, e.query, e.data, e.timestamp)
+        );
         verbatim++;
       } else {
         entries.push(toRawEntry(e.operationName, kind, e.variables, e.data, e.timestamp));
@@ -203,7 +198,7 @@ export async function adaptApolloCapture(inputPath: string, outputPath: string):
   if (capture.queryManagerCaptures?.length && !capture.operations?.length) {
     for (const e of capture.queryManagerCaptures) {
       entries.push(
-        toRawEntry(e.operationName, 'query', e.variables, e.lastResult?.data, capture.capturedAt),
+        toRawEntry(e.operationName, 'query', e.variables, e.lastResult?.data, capture.capturedAt)
       );
       inferred++;
     }
@@ -212,7 +207,7 @@ export async function adaptApolloCapture(inputPath: string, outputPath: string):
   const jsonl = entries.map((e) => JSON.stringify(e)).join('\n');
   await Bun.write(outputPath, jsonl + '\n');
   console.log(
-    `adapted ${entries.length} entries (${verbatim} verbatim query strings, ${inferred} inferred) → ${outputPath}`,
+    `adapted ${entries.length} entries (${verbatim} verbatim query strings, ${inferred} inferred) → ${outputPath}`
   );
 }
 
@@ -220,7 +215,7 @@ if (import.meta.main) {
   const [, , inPath, outPath] = process.argv;
   if (!inPath || !outPath) {
     console.error(
-      'usage: bun scripts/graphql-capture/adapt-apollo-log.ts <apollo-capture.json> <out.jsonl>',
+      'usage: bun scripts/graphql-capture/adapt-apollo-log.ts <apollo-capture.json> <out.jsonl>'
     );
     process.exit(1);
   }
