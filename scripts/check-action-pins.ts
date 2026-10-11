@@ -66,20 +66,54 @@ export interface Pin {
   line: number;
 }
 
-export function collectPins(dir: string = WORKFLOW_DIR): Pin[] {
+/**
+ * A line that LOOKS like a pin — `uses:` and a 40-hex run after it — whatever
+ * its quoting. Deliberately looser than `PINNED`: it is the residual check, and
+ * its only job is to notice when the grammar above reads less than is there.
+ */
+const PIN_SHAPED = /uses:.*\b[0-9a-f]{40}\b/;
+
+/** A pin-shaped line `PINNED` could not parse. */
+export interface UnreadLine {
+  file: string;
+  line: number;
+  text: string;
+}
+
+/**
+ * Every pin, plus every pin-shaped line the grammar failed to read.
+ *
+ * The second list is what turns a grammar gap from a silent exclusion into a
+ * failure. The quoted-scalar case (#789) was not a misread: the line produced
+ * no match at all, and the vacuity floor in `runCheck` only notices when the
+ * WHOLE scan comes back empty. An unterminated or mismatched quote is the same
+ * shape one character over, and the next gap will be some shape nobody has
+ * thought of yet — so the gate compares what it parsed against what it saw.
+ */
+export function scanPins(dir: string = WORKFLOW_DIR): { pins: Pin[]; unread: UnreadLine[] } {
   const pins: Pin[] = [];
+  const unread: UnreadLine[] = [];
   for (const name of readdirSync(dir)) {
     if (!name.endsWith('.yml') && !name.endsWith('.yaml')) continue;
     const path = join(dir, name);
     const file = displayPath(path);
     const lines = readFileSync(path, 'utf-8').split('\n');
     lines.forEach((text, i) => {
+      let parsed = 0;
       for (const m of text.matchAll(PINNED)) {
         pins.push({ action: m[2]!, sha: m[3]!, comment: m[4], file, line: i + 1 });
+        parsed += 1;
+      }
+      if (parsed === 0 && PIN_SHAPED.test(text)) {
+        unread.push({ file, line: i + 1, text: text.trim() });
       }
     });
   }
-  return pins;
+  return { pins, unread };
+}
+
+export function collectPins(dir: string = WORKFLOW_DIR): Pin[] {
+  return scanPins(dir).pins;
 }
 
 export function findPinProblems(pins: Pin[]): string[] {
@@ -139,15 +173,24 @@ export interface CheckResult {
  * could be wrong.
  */
 export function runCheck(dir: string = WORKFLOW_DIR): CheckResult {
-  const pins = collectPins(dir);
-  if (pins.length === 0) {
+  const { pins, unread } = scanPins(dir);
+  if (pins.length === 0 && unread.length === 0) {
     return {
       code: 1,
       stdout: [],
       stderr: ['check-action-pins: found no SHA-pinned actions — the scan is broken.'],
     };
   }
-  const problems = findPinProblems(pins);
+  const problems = [
+    ...unread.map(
+      (u) =>
+        `${u.file}:${u.line} — this gate could not read a pin-shaped line: \`${u.text}\`. ` +
+        `It carries a SHA after \`uses:\` but does not parse as a bare or matched-quote ` +
+        `scalar, so it would otherwise drop out of the consistency check unseen. Fix the ` +
+        `quoting, or teach PINNED the shape.`
+    ),
+    ...findPinProblems(pins),
+  ];
   if (problems.length > 0) {
     return {
       code: 1,

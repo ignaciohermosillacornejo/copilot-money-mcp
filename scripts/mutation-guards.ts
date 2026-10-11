@@ -101,7 +101,13 @@
  * through `persistJournal`, which reports a failure instead of raising it, for
  * the same reason one level down. A kept journal records `NO_OWNER` rather than
  * the writer's pid, because it is meant to outlive that process and a reused
- * pid would otherwise read as a live run holding it. A give-up path that does
+ * pid would otherwise read as a live run holding it. One residual is left, and
+ * stated rather than implied away: a run SIGKILLed MID-mutation leaves its own
+ * pid in the journal with no handler left to rewrite it, so if the OS reuses
+ * that pid before the next run, recovery throws "another run holds the
+ * journal" instead of recovering. Fail-closed, and the message names the pid
+ * and the remedy (delete the journal once sure the process is unrelated); a
+ * liveness token that is not a bare pid would close it. A give-up path that does
  * not leave the process in a state the next step can trust is the class this
  * file is about.
  *
@@ -912,6 +918,12 @@ export function recoverJournal(root: string): RecoveryReport {
   // leaves behind AFTER its journal is gone, so a scan that only ran when there
   // was a journal to read would miss the exact state it exists to catch.
   const sidecars = findSidecars(root);
+  // The journal on disk is what a human reconciles between runs, so it — not
+  // whatever this process remembered — is the record of this root's refusals.
+  // Reset BEFORE any early return: "no journal" is the documented way to
+  // accept a refusal, and an early exit that skipped this reset let the next
+  // successful mutation in the same process write the accepted refusal back.
+  REFUSED.delete(root);
   const path = journalPath(root);
   if (!existsSync(path)) return { recovered: [], refused: [], sidecars };
   let parsed: unknown;
@@ -943,9 +955,6 @@ export function recoverJournal(root: string): RecoveryReport {
   }
   const recovered: string[] = [];
   const refused: string[] = [];
-  // The journal on disk is what a human reconciles between runs, so it — not
-  // whatever this process remembered — is the record of this root's refusals.
-  REFUSED.delete(root);
   for (const entry of entries) {
     let ok = false;
     try {

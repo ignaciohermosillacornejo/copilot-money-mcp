@@ -168,6 +168,36 @@ describe('collectPins', () => {
     expect(result.stderr.at(-1)).toContain('across 3 pins');
   });
 
+  test('a pin-shaped line the grammar cannot read fails, instead of dropping out', () => {
+    // Whatever the regex's grammar misses next, the miss must be reported:
+    // the quoted-scalar gap was a silent exclusion, and an unterminated or
+    // mismatched quote is the same shape one character over. Each line here
+    // carries a 40-hex SHA after `uses:` but is not a pin PINNED can parse.
+    const result = runCheck(
+      fixtureDir({
+        'a.yml': usesLine(SHA_A, 'v7'),
+        'b.yml': `      - uses: 'actions/checkout@${SHA_A} # v7`,
+        'c.yml': `      - uses: "actions/checkout@${SHA_A}' # v7`,
+      })
+    );
+    expect(result.code).toBe(1);
+    const err = result.stderr.join('\n');
+    expect(err).toContain('could not read');
+    expect(err).toMatch(/b\.yml:1\b/);
+    expect(err).toMatch(/c\.yml:1\b/);
+    expect(result.stdout).toEqual([]);
+  });
+
+  test('a SHA-shaped string that is not on a uses: line is not a pin', () => {
+    // The cry-wolf control for the residual above.
+    const result = runCheck(
+      fixtureDir({
+        'a.yml': [usesLine(SHA_A, 'v7'), `      run: git checkout ${SHA_B}`].join('\n'),
+      })
+    );
+    expect(result).toMatchObject({ code: 0, stderr: [] });
+  });
+
   test('picks up a pin with no comment, so findPinProblems can flag it', () => {
     const dir = fixtureDir({ 'c.yaml': `    - uses: actions/setup-node@${'b'.repeat(40)}` });
     const pins = collectPins(dir);
@@ -276,8 +306,16 @@ describe('the CLI', () => {
       new Response(proc.stdout).text(),
       new Response(proc.stderr).text(),
     ]);
-    expect({ code: await proc.exited, err }).toEqual({ code: 0, err: '' });
-    expect(out).toContain('all labelled consistently');
+    // The property is "the gate found the real tree and reported", NOT "the
+    // real tree is consistent": that is check:action-pins' job, and asserting
+    // it here would turn this test red under a title about cwd resolution the
+    // day a real pin drifts. So: no ENOENT, and the gate's own summary line
+    // on whichever stream its verdict chose.
+    const code = await proc.exited;
+    expect(err).not.toContain('ENOENT');
+    expect(code === 0 || code === 1).toBe(true);
+    expect(`${out}\n${err}`).toMatch(/check-action-pins: .*\b(pinned actions|pins)\b/);
+    expect(`${out}\n${err}`).not.toContain('found no SHA-pinned actions');
   });
 
   test('exits 1 when the tree holds no pins, rather than reporting a clean scan', async () => {

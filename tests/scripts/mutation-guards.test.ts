@@ -769,6 +769,29 @@ describe('the working tree is put back whatever happens', () => {
     expect(recoverJournal(root).refused).toEqual([pay]);
   });
 
+  test('an accepted refusal stays accepted for the rest of the process', async () => {
+    // "Keep the file and delete the journal" is the documented way to accept a
+    // refusal. recoverJournal then finds no journal and returns early — and
+    // used to return BEFORE resetting the root's in-memory refusals, so the
+    // next successful mutation in the same process wrote the accepted refusal
+    // straight back out.
+    const root = syntheticRepo({ markerName: 'x', guardLine: 'break;', assertion: '' });
+    const pay = join(root, 'src/pay.ts');
+    await withMutation(root, 'src/pay.ts', 'PAY MUTATED', () => {
+      writeFileSync(pay, 'SOMEONE ELSE WAS HERE', 'utf8');
+    });
+    expect(existsSync(journalPath(root))).toBe(true);
+
+    // Accept it: the edit stays, the two records of the refusal go.
+    rmSync(`${pay}${SIDECAR_SUFFIX}`);
+    rmSync(journalPath(root));
+    expect(recoverJournal(root)).toEqual({ recovered: [], refused: [], sidecars: [] });
+
+    writeFileSync(join(root, 'src/ship.ts'), 'export const ship = 1;\n', 'utf8');
+    await withMutation(root, 'src/ship.ts', 'SHIP MUTATED', () => {});
+    expect(existsSync(journalPath(root))).toBe(false);
+  });
+
   test('a kept journal names no owner, so a reused pid cannot hold it', async () => {
     // A kept journal is the one journal meant to outlive its process — for
     // days, until a human reconciles. Stamped with the writer's pid, it reads
