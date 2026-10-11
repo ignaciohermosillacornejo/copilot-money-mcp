@@ -39,7 +39,7 @@ describe('redactUserPaths', () => {
     }
   });
 
-  test('the home matches as a whole segment, not as a prefix of a longer name', () => {
+  test('the home is not matched as the prefix of a longer name', () => {
     // `/Users/synthetic-user2` is someone else: it gets the generic prefix
     // redaction, never `~2`.
     expect(redactUserPaths("open '/Users/synthetic-user2/x'", HOME)).toBe("open '/Users/<user>/x'");
@@ -75,19 +75,34 @@ describe('redactUserPaths', () => {
   test("under /Users, a home that is a prefix of another user's name never matches inside it", () => {
     // `/Users/bob` inside `/Users/bob.smith/...` must not become `~.smith/...`,
     // which would leak the other user's name tail. Under /Users and /home the
-    // home matches only when followed by `/` or end of input, and the generic
-    // prefix rule takes every sibling whole.
+    // home matches only before `/`, the end of input, or a quote or closing
+    // punctuation, and the generic prefix rule takes every sibling whole.
     const home = '/Users/bob';
     expect(redactUserPaths('/Users/bob.smith/x', home)).toBe('/Users/<user>/x');
     expect(redactUserPaths('/Users/bob.bak/x', home)).toBe('/Users/<user>/x');
     expect(redactUserPaths('/home/bob.smith/x', '/home/bob')).toBe('/home/<user>/x');
     expect(redactUserPaths('/Users/bob/x and /Users/bob', home)).toBe('~/x and ~');
+    // Rests on the STRICT boundary plus the prefix rule, not on the Unicode
+    // class below: `ü` is simply not `/`, end of input, a quote or `,)`.
+    expect(redactUserPaths('/Users/bobü/x', home)).toBe('/Users/<user>/x');
   });
 
-  test('a non-ASCII continuation is a different name, under /Users and outside it', () => {
-    // `\w` is ASCII-only, so a name continued by `ü` would read as "not a name
-    // character" to an ASCII lookahead and leak the tail as `~ü`.
-    expect(redactUserPaths('/Users/bobü/x', '/Users/bob')).toBe('/Users/<user>/x');
+  test('under /Users, the home collapses to ~ before a quote or closing punctuation', () => {
+    // Without these in the boundary, `open '${HOME}'` fell to the prefix rule
+    // (`/Users/<user>'`), and a home containing a space was cut at the space,
+    // leaving the rest of the name behind: `/Users/<user> smith'`.
+    expect(redactUserPaths(`open '${HOME}'`, HOME)).toBe("open '~'");
+    expect(redactUserPaths(`${HOME}, then more`, HOME)).toBe('~, then more');
+    expect(redactUserPaths(`(${HOME})`, HOME)).toBe('(~)');
+    const spaced = '/Users/bob smith';
+    expect(redactUserPaths(`open '${spaced}'`, spaced)).toBe("open '~'");
+    expect(redactUserPaths(`open "${spaced}/x"`, spaced)).toBe('open "~/x"');
+  });
+
+  test('outside /Users and /home, a non-ASCII continuation counts as a name character', () => {
+    // `\w` is ASCII-only, so an ASCII lookahead would read `ü` as "not a name
+    // character" and rewrite `${home}ü` to `~ü`. This is the case the Unicode
+    // class exists for; the /Users case above never reaches it.
     const home = '/var/synthetic-root';
     expect(redactUserPaths(`${home}ü/x`, home)).toBe(`${home}ü/x`);
     expect(redactUserPaths(`${home}.bak/x`, home)).toBe('~.bak/x');

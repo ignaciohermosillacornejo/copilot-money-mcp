@@ -10,10 +10,10 @@
  * also eat text that only contains a slash — a category named `Food/Dining`,
  * a date, the GraphQL endpoint URL — and an error that has lost its subject is
  * worse than one that names a directory. So this replaces only the part that
- * identifies the user: the current home directory, wherever it appears as a
- * whole path segment (spaces in the rest of the path included, since the home
- * is matched literally), and any other `/Users/<name>` or `/home/<name>`
- * prefix. What follows the prefix is kept, because it is what says which file
+ * identifies the user: the current home directory, matched literally (so a
+ * space inside it is no obstacle) and only where it is not the start of a
+ * longer name — see the two boundaries below — and any other `/Users/<name>`
+ * or `/home/<name>` prefix. What follows the prefix is kept, because it is what says which file
  * failed.
  *
  * Not the same scrub as `scrubPaths` in `src/core/database.ts`, on purpose.
@@ -25,11 +25,15 @@
  * How the home is matched depends on where it lives, because the generic
  * prefix rule only sees `/Users` and `/home`:
  *
- *   - Under `/Users` or `/home`, the home matches only when followed by `/` or
- *     the end of the text. Any sibling — `/Users/bob.smith`, `/Users/bob2`,
- *     `/Users/bob.bak` — is left to the prefix rule, which replaces the whole
- *     name segment. Matching more loosely here would turn `/Users/bob.smith/x`
- *     into `~.smith/x` and leak another user's name tail.
+ *   - Under `/Users` or `/home`, the home matches only when followed by `/`,
+ *     the end of the text, a quote, or `,` or `)` — the characters that end a
+ *     path in an error message (`open '/Users/bob'`, `/Users/bob, …`). Any
+ *     sibling — `/Users/bob.smith`, `/Users/bob2`, `/Users/bob.bak` — is left
+ *     to the prefix rule, which replaces the whole name segment. Matching more
+ *     loosely here would turn `/Users/bob.smith/x` into `~.smith/x` and leak
+ *     another user's name tail. The quote matters for a home containing a
+ *     space: without it the prefix rule would stop at the space and leave the
+ *     rest of the name (`/Users/<user> smith'`).
  *   - Anywhere else (`/var/root`, a container's home), the prefix rule is
  *     blind, so the home matches wherever it is not continued by a name
  *     character — any Unicode letter or digit, `_` or `-`. A sibling such as
@@ -66,7 +70,7 @@ function homePattern(home: string): RegExp {
     // See the module docblock: strict where the prefix rule can take over,
     // broad (and Unicode-aware) only where it cannot.
     const underUserRoot = /^\/(Users|home)\/[^/]+$/.test(home);
-    const boundary = underUserRoot ? '(?=/|$)' : '(?![\\p{L}\\p{N}_-])';
+    const boundary = underUserRoot ? `(?=/|$|['",)])` : '(?![\\p{L}\\p{N}_-])';
     cachedPattern = new RegExp(`${escapeRegExp(home)}${boundary}`, 'gu');
     cachedHome = home;
   }
