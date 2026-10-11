@@ -1219,8 +1219,10 @@ function processAccount(fields: Map<string, FirestoreValue>, docId: string): Acc
  * Internal helper to process a recurring document.
  */
 function processRecurring(fields: Map<string, FirestoreValue>, docId: string): Recurring | null {
-  // A fieldless document is a Firestore parent pointer, not data: building a
-  // row from one manufactures a record that does not exist (#627, #797).
+  // A fieldless document is a Firestore parent pointer or a deleted-document
+  // tombstone (#278), not data: building a row from one manufactures a record
+  // that does not exist (#627, #797). The literal `fields.size === 0` is
+  // pinned by tests/core/parent-pointer-documents.test.ts; change both together.
   if (fields.size === 0) return null;
 
   // Use 'id' field as the recurring_id (Copilot stores it as 'id')
@@ -1424,8 +1426,10 @@ function processBudget(fields: Map<string, FirestoreValue>, docId: string): Budg
  * Internal helper to process a goal document.
  */
 function processGoal(fields: Map<string, FirestoreValue>, docId: string): Goal | null {
-  // A fieldless document is a Firestore parent pointer, not data: building a
-  // row from one manufactures a record that does not exist (#627, #797).
+  // A fieldless document is a Firestore parent pointer or a deleted-document
+  // tombstone (#278), not data: building a row from one manufactures a record
+  // that does not exist (#627, #797). The literal `fields.size === 0` is
+  // pinned by tests/core/parent-pointer-documents.test.ts; change both together.
   if (fields.size === 0) return null;
 
   const goalId = getString(fields, 'goal_id') ?? docId;
@@ -1532,8 +1536,10 @@ function processGoalHistory(
   docId: string,
   collection: string
 ): GoalHistory | null {
-  // A fieldless document is a Firestore parent pointer, not data: building a
-  // row from one manufactures a record that does not exist (#627, #797).
+  // A fieldless document is a Firestore parent pointer or a deleted-document
+  // tombstone (#278), not data: building a row from one manufactures a record
+  // that does not exist (#627, #797). The literal `fields.size === 0` is
+  // pinned by tests/core/parent-pointer-documents.test.ts; change both together.
   if (fields.size === 0) return null;
 
   const month = docId;
@@ -1632,8 +1638,10 @@ function processInvestmentPrice(
   docId: string,
   parsed: { securityId: string; priceType: PriceType }
 ): InvestmentPrice | null {
-  // A fieldless document is a Firestore parent pointer, not data: building a
-  // row from one manufactures a record that does not exist (#627, #797).
+  // A fieldless document is a Firestore parent pointer or a deleted-document
+  // tombstone (#278), not data: building a row from one manufactures a record
+  // that does not exist (#627, #797). The literal `fields.size === 0` is
+  // pinned by tests/core/parent-pointer-documents.test.ts; change both together.
   if (fields.size === 0) return null;
 
   const ticker = getString(fields, 'ticker_symbol');
@@ -1912,8 +1920,10 @@ function processPlaidAccount(
   docId: string,
   collection: string
 ): PlaidAccount | null {
-  // A fieldless document is a Firestore parent pointer, not data: building a
-  // row from one manufactures a record that does not exist (#627, #797).
+  // A fieldless document is a Firestore parent pointer or a deleted-document
+  // tombstone (#278), not data: building a row from one manufactures a record
+  // that does not exist (#627, #797). The literal `fields.size === 0` is
+  // pinned by tests/core/parent-pointer-documents.test.ts; change both together.
   if (fields.size === 0) return null;
 
   const data: Record<string, unknown> = {
@@ -2056,8 +2066,10 @@ function processPlaidAccount(
  * Path: users/{user_id}/tags/{tag_id}
  */
 function processTag(fields: Map<string, FirestoreValue>, docId: string): Tag | null {
-  // A fieldless document is a Firestore parent pointer, not data: building a
-  // row from one manufactures a record that does not exist (#627, #797).
+  // A fieldless document is a Firestore parent pointer or a deleted-document
+  // tombstone (#278), not data: building a row from one manufactures a record
+  // that does not exist (#627, #797). The literal `fields.size === 0` is
+  // pinned by tests/core/parent-pointer-documents.test.ts; change both together.
   if (fields.size === 0) return null;
 
   const data: Record<string, unknown> = {
@@ -2100,8 +2112,10 @@ function processBalanceHistory(
   docId: string,
   collection: string
 ): BalanceHistory | null {
-  // A fieldless document is a Firestore parent pointer, not data: building a
-  // row from one manufactures a record that does not exist (#627, #797).
+  // A fieldless document is a Firestore parent pointer or a deleted-document
+  // tombstone (#278), not data: building a row from one manufactures a record
+  // that does not exist (#627, #797). The literal `fields.size === 0` is
+  // pinned by tests/core/parent-pointer-documents.test.ts; change both together.
   if (fields.size === 0) return null;
 
   const data: Record<string, unknown> = {};
@@ -2169,8 +2183,10 @@ function processHoldingsHistoryMeta(
   docId: string,
   collection: string
 ): HoldingsHistoryMeta | null {
-  // A fieldless document is a Firestore parent pointer, not data: building a
-  // row from one manufactures a record that does not exist (#627, #797).
+  // A fieldless document is a Firestore parent pointer or a deleted-document
+  // tombstone (#278), not data: building a row from one manufactures a record
+  // that does not exist (#627, #797). The literal `fields.size === 0` is
+  // pinned by tests/core/parent-pointer-documents.test.ts; change both together.
   if (fields.size === 0) return null;
 
   const data: Record<string, unknown> = {};
@@ -2220,8 +2236,10 @@ function processHoldingsHistory(
   docId: string,
   collection: string
 ): HoldingsHistory | null {
-  // A fieldless document is a Firestore parent pointer, not data: building a
-  // row from one manufactures a record that does not exist (#627, #797).
+  // A fieldless document is a Firestore parent pointer or a deleted-document
+  // tombstone (#278), not data: building a row from one manufactures a record
+  // that does not exist (#627, #797). The literal `fields.size === 0` is
+  // pinned by tests/core/parent-pointer-documents.test.ts; change both together.
   if (fields.size === 0) return null;
 
   const data: Record<string, unknown> = {};
@@ -2295,8 +2313,10 @@ function processHoldingsHistory(
  * Internal helper to process a top-level change document.
  */
 function processChange(fields: Map<string, FirestoreValue>, docId: string): Change | null {
-  // A fieldless document is a Firestore parent pointer, not data: building a
-  // row from one manufactures a record that does not exist (#627, #797).
+  // A fieldless document is a Firestore parent pointer or a deleted-document
+  // tombstone (#278), not data: building a row from one manufactures a record
+  // that does not exist (#627, #797). The literal `fields.size === 0` is
+  // pinned by tests/core/parent-pointer-documents.test.ts; change both together.
   if (fields.size === 0) return null;
 
   const data: Record<string, unknown> = { change_id: docId };
@@ -2330,8 +2350,10 @@ function processSubChange<T>(
   collection: string,
   schema: ZodType<T>
 ): T | null {
-  // A fieldless document is a Firestore parent pointer, not data: building a
-  // row from one manufactures a record that does not exist (#627, #797).
+  // A fieldless document is a Firestore parent pointer or a deleted-document
+  // tombstone (#278), not data: building a row from one manufactures a record
+  // that does not exist (#627, #797). The literal `fields.size === 0` is
+  // pinned by tests/core/parent-pointer-documents.test.ts; change both together.
   if (fields.size === 0) return null;
 
   const data: Record<string, unknown> = { change_id: docId };
@@ -2380,8 +2402,10 @@ function processSubChange<T>(
  * Internal helper to process a security document.
  */
 function processSecurity(fields: Map<string, FirestoreValue>, docId: string): Security | null {
-  // A fieldless document is a Firestore parent pointer, not data: building a
-  // row from one manufactures a record that does not exist (#627, #797).
+  // A fieldless document is a Firestore parent pointer or a deleted-document
+  // tombstone (#278), not data: building a row from one manufactures a record
+  // that does not exist (#627, #797). The literal `fields.size === 0` is
+  // pinned by tests/core/parent-pointer-documents.test.ts; change both together.
   if (fields.size === 0) return null;
 
   // security_id: try field first, fall back to docId
@@ -2669,8 +2693,10 @@ function processAmazonOrder(
   docId: string,
   collection: string
 ): AmazonOrder | null {
-  // A fieldless document is a Firestore parent pointer, not data: building a
-  // row from one manufactures a record that does not exist (#627, #797).
+  // A fieldless document is a Firestore parent pointer or a deleted-document
+  // tombstone (#278), not data: building a row from one manufactures a record
+  // that does not exist (#627, #797). The literal `fields.size === 0` is
+  // pinned by tests/core/parent-pointer-documents.test.ts; change both together.
   if (fields.size === 0) return null;
 
   const data: Record<string, unknown> = { order_id: docId };
@@ -2743,8 +2769,10 @@ function processSubscription(
   fields: Map<string, FirestoreValue>,
   docId: string
 ): Subscription | null {
-  // A fieldless document is a Firestore parent pointer, not data: building a
-  // row from one manufactures a record that does not exist (#627, #797).
+  // A fieldless document is a Firestore parent pointer or a deleted-document
+  // tombstone (#278), not data: building a row from one manufactures a record
+  // that does not exist (#627, #797). The literal `fields.size === 0` is
+  // pinned by tests/core/parent-pointer-documents.test.ts; change both together.
   if (fields.size === 0) return null;
 
   const data: Record<string, unknown> = {
@@ -2797,8 +2825,10 @@ function processSubscription(
  * Internal helper to process an invite document.
  */
 function processInvite(fields: Map<string, FirestoreValue>, docId: string): Invite | null {
-  // A fieldless document is a Firestore parent pointer, not data: building a
-  // row from one manufactures a record that does not exist (#627, #797).
+  // A fieldless document is a Firestore parent pointer or a deleted-document
+  // tombstone (#278), not data: building a row from one manufactures a record
+  // that does not exist (#627, #797). The literal `fields.size === 0` is
+  // pinned by tests/core/parent-pointer-documents.test.ts; change both together.
   if (fields.size === 0) return null;
 
   const data: Record<string, unknown> = {
@@ -2840,8 +2870,10 @@ function processInvite(fields: Map<string, FirestoreValue>, docId: string): Invi
  * Internal helper to process a user_items document.
  */
 function processUserItems(fields: Map<string, FirestoreValue>, docId: string): UserItems | null {
-  // A fieldless document is a Firestore parent pointer, not data: building a
-  // row from one manufactures a record that does not exist (#627, #797).
+  // A fieldless document is a Firestore parent pointer or a deleted-document
+  // tombstone (#278), not data: building a row from one manufactures a record
+  // that does not exist (#627, #797). The literal `fields.size === 0` is
+  // pinned by tests/core/parent-pointer-documents.test.ts; change both together.
   if (fields.size === 0) return null;
 
   const data: Record<string, unknown> = {
@@ -2875,8 +2907,10 @@ function processFeatureTracking(
   fields: Map<string, FirestoreValue>,
   docId: string
 ): FeatureTracking | null {
-  // A fieldless document is a Firestore parent pointer, not data: building a
-  // row from one manufactures a record that does not exist (#627, #797).
+  // A fieldless document is a Firestore parent pointer or a deleted-document
+  // tombstone (#278), not data: building a row from one manufactures a record
+  // that does not exist (#627, #797). The literal `fields.size === 0` is
+  // pinned by tests/core/parent-pointer-documents.test.ts; change both together.
   if (fields.size === 0) return null;
 
   const data: Record<string, unknown> = {
@@ -2907,8 +2941,10 @@ function processFeatureTracking(
  * Internal helper to process a support document.
  */
 function processSupport(fields: Map<string, FirestoreValue>, docId: string): Support | null {
-  // A fieldless document is a Firestore parent pointer, not data: building a
-  // row from one manufactures a record that does not exist (#627, #797).
+  // A fieldless document is a Firestore parent pointer or a deleted-document
+  // tombstone (#278), not data: building a row from one manufactures a record
+  // that does not exist (#627, #797). The literal `fields.size === 0` is
+  // pinned by tests/core/parent-pointer-documents.test.ts; change both together.
   if (fields.size === 0) return null;
 
   const data: Record<string, unknown> = {

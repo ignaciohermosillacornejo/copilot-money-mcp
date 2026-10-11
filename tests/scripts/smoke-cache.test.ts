@@ -923,36 +923,37 @@ describe('every decoder route is compared or excluded with a reason (#778)', () 
       await createEmptyDb(dbPath);
       // Written out, not derived from COLLECTION_ROUTES and ROUTE_ROWS, so the
       // test does not restate the expression decodedRoots is built from.
+      const expected: CollectionRoute[] = [
+        'holdings_history',
+        'holdings_history_meta',
+        'balance_history',
+        'plaid_accounts',
+        'transactions',
+        'accounts',
+        'recurring',
+        'budgets',
+        'financial_goals',
+        'financial_goal_history',
+        'investment_prices',
+        'investment_splits',
+        'items',
+        'tags',
+        'categories',
+        'transaction_changes',
+        'account_changes',
+        'changes',
+        'securities',
+        'users',
+        'amazon_orders',
+        'amazon',
+        'subscriptions',
+        'invites',
+        'user_items',
+        'feature_tracking',
+        'support',
+      ];
       expect(decodedRoots(await decodeAllCollections(dbPath))).toEqual(
-        [
-          'holdings_history',
-          'holdings_history_meta',
-          'balance_history',
-          'plaid_accounts',
-          'transactions',
-          'accounts',
-          'recurring',
-          'budgets',
-          'financial_goals',
-          'financial_goal_history',
-          'investment_prices',
-          'investment_splits',
-          'items',
-          'tags',
-          'categories',
-          'transaction_changes',
-          'account_changes',
-          'changes',
-          'securities',
-          'users',
-          'amazon_orders',
-          'amazon',
-          'subscriptions',
-          'invites',
-          'user_items',
-          'feature_tracking',
-          'support',
-        ].map((root) => ({ root, rows: 0 }))
+        expected.map((root) => ({ root, rows: 0 }))
       );
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -966,7 +967,9 @@ describe('every decoder route is compared or excluded with a reason (#778)', () 
     // signature for the route that lost its own array: raw N, rows N, from
     // someone else's rows. Give every array in a real decode result a distinct
     // length, so a shared accessor shows up as a repeated row count, without
-    // this test restating the mapping.
+    // this test restating the mapping. This relies on every accessor reading
+    // exactly one array's length: an accessor that legitimately sums two (1 + 2)
+    // would alias another route's 3, and needs a non-aliasing encoding here.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'smoke-cache-accessors-'));
     try {
       const dbPath = path.join(dir, 'empty');

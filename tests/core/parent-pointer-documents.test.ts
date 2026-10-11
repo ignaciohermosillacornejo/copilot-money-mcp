@@ -137,6 +137,9 @@ describe('every parent-pointer dispatch clause guards its processor (#627)', () 
       const declIdx = src.indexOf(`function ${processor}(`);
       expect(declIdx).toBeGreaterThan(-1);
       const decl = src.slice(declIdx, declIdx + 900);
+      // The literal is the contract with the guard sites in decoder.ts, which
+      // say so. Hoisting it into a helper means updating this pattern to match,
+      // NOT loosening it: a scan that accepts anything is a vacuous scan.
       if (!/fields\.size === 0/.test(decl)) unguarded.push(processor);
     }
 
@@ -165,8 +168,12 @@ describe('no route builds a row from a fieldless document (#627, #778, #797)', (
   const I = 'itm_5pQw8ZnRvL3MxK7cHt2J';
   const A = 'acc_9wKe4RnTpB2XvL7mQd3F';
   const U = 'usr_3hTq7WmZ2xKv9LpR4cNb';
-  // Every route with a processor is compared by the smoke since #797, so the
-  // smoke's own accessor table is the row source.
+  // Invariant pinned here (#797): the smoke excludes a route from checks 1 and
+  // 2 ONLY for lacking a processor, so its accessor table covers exactly the
+  // swept routes, and the coverage test below fails if a processor-bearing
+  // route is ever excluded. If one must be excluded for another reason (as
+  // plaid_accounts was before #797), restore an explicit accessor for it here
+  // rather than dropping it from the sweep.
   const ROWS: Record<SweptRoute, (all: AllCollectionsResult) => number> = ROUTE_ROWS;
   const PATHS: Record<SweptRoute, { collection: string; id: string }> = {
     holdings_history: {

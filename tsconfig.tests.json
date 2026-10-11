@@ -140,6 +140,11 @@
     // reading `undefined` in silence. Membership IS the coverage, so it is
     // pinned in tests/unit/tsconfig-tests-sync.test.ts.
     "tests/scripts/check-action-pins.test.ts",
+    // The smoke:cache gate's unit tests (#778, #797). Its accessor table and
+    // route partition are load-bearing, and its accessor-distinctness test
+    // casts a decode result to rewrite its arrays, so the casts it relies on
+    // are worth a compiler.
+    "tests/scripts/smoke-cache.test.ts",
     // The run-wide teardown's own contract test (#642). `bun test` never fires
     // `process.on('exit')`, so the reader's exit sweep does not cover a test
     // run and this is what proves the replacement sweep works.
