@@ -273,8 +273,8 @@ export const deleteTransactionTool = defineTool({
       'account_id, item_id) are required — no lookups — so a typo in one field ' +
       "returns 'Transaction not found' rather than silently deleting a different " +
       'transaction. Refuses a known split parent: Copilot would credit its amount back ' +
-      'a second time and leave the balance wrong — delete its children instead (the ' +
-      'parent stays hidden). Plaid rows may be re-added on the next sync, without user ' +
+      'a second time and leave the balance wrong — delete its children instead. ' +
+      'Plaid rows may be re-added on the next sync, without user ' +
       'metadata (category, tags, notes, reviewed, goal, split children).',
     inputSchema: {
       type: 'object',

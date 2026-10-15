@@ -112,6 +112,8 @@ fragment CategoryFields on Category {
 
 Post-split, the `parentTransaction` carries `category_id: ""` and an `old_category_id: <original>` in the Firestore doc, plus a `children_transaction_ids` array pointing at the new children. Each child carries `parent_transaction_id` back to the parent. The parent is hidden from Copilot's UI but not deleted — there is no reversal mutation (`unsplitTransaction`, `revertSplit`, `undoSplit` all probed and don't exist).
 
+**Hazard (#822): never delete the parent.** `DeleteTransaction` on a split parent succeeds, and the server credits the parent's amount back to the account a second time — the children already replaced it — so the balance ends wrong by that amount (observed live 2026-10-14 on a manual account, where it stays wrong). A 2026-10-15 probe of twenty more candidate names (incl. `mergeTransaction(s)`, `removeSplit`, `deleteSplit(Transaction)`) found no unsplit either. `delete_transaction` refuses a known split parent; to remove a split's effect, delete the children.
+
 ```json
 {
   "data": {

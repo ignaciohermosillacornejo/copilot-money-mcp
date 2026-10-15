@@ -160,7 +160,7 @@ After the user approves a batch, apply it in Phase 7.
 
 **If `split_transaction` is not available** in the installed MCP (older bundle), skip the split step and only do single-category updates. Tell the user: *"Splits require the split_transaction tool — your MCP bundle predates it. Rebuild with `bun run pack:mcpb`, reinstall the .mcpb, and re-run."* Continue with the rest of the flow.
 
-**Reversibility note:** `split_transaction` has no reversal — undoing a split means deleting each child and restoring the parent's category. Always present the split plan for approval before executing.
+**Reversibility note:** `split_transaction` cannot be undone — there is no unsplit, and the split parent must never be deleted (Copilot would credit its amount back a second time and the account balance would end wrong; `delete_transaction` refuses it). To remove a split's effect, delete each child. Always present the split plan for approval before executing.
 
 ## Phase 8 — Match Card Refunds
 

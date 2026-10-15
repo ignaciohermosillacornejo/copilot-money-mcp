@@ -115,7 +115,13 @@ export class CleanupRegistry {
     this.items.push(item);
   }
 
-  /** Deregister after a check has already deleted (and verified) the object. */
+  /**
+   * Deregister an object cleanup must not delete: either a check has already
+   * deleted (and verified) it, or it is deliberately left behind because
+   * deleting it would do harm — the split parent of the split_transaction
+   * check (#822). A deliberate leave-behind must be logged by its caller so
+   * the run says what it left.
+   */
   remove(id: string): void {
     this.items = this.items.filter((item) => item.id !== id);
   }
@@ -994,9 +1000,15 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
       });
       // Never delete a split parent (#822): Copilot credits its amount back a
       // second time and the test account's balance ends wrong by 200. Cleanup
-      // deletes only the children; the parent stays hidden, which is the
-      // correct end state (there is no unsplit mutation).
+      // deletes only the children (there is no unsplit mutation). That the
+      // parent then stays hidden is an unverified assumption, so the run logs
+      // the id it leaves behind.
       ctx.registry.remove(parent.id);
+      ctx.log(
+        `split_transaction: intentionally leaving split parent '${ctx.state.marker}-txn-c' ` +
+          `(never deleted — #822); cleanup deletes only its children`,
+        { id: parent.id }
+      );
       for (const child of result.splitTransactions) {
         ctx.registry.add({
           kind: 'transaction',

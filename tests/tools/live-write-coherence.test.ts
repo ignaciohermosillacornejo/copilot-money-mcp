@@ -549,15 +549,18 @@ describe('write → live-read coherence (#820, #821)', () => {
       expect(before._cache_hit).toBe(false);
       expect(fetches()).toBe(1);
 
-      // b. Write through the tool's public handler.
+      // b. Write through the tool's public handler. A write may itself fetch
+      // (delete_transaction loads the write-resolve window to check for a
+      // split parent, #822), so the count is taken after it.
       await call(toolName, c.args);
+      const afterWrite = fetches();
 
       // c. Read back through the live tool + mapper. Must be served from the
       // cache (no refetch) — otherwise this would test the server mock, not
       // the write-through.
       const after = await read();
       expect(after._cache_hit).toBe(true);
-      expect(fetches()).toBe(1);
+      expect(fetches()).toBe(afterWrite);
 
       const rows = new Map(after.transactions.map((r) => [r.transaction_id as string, r]));
       c.verify(rows);
