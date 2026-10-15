@@ -434,6 +434,30 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     expectFailingTests: ['insert: a row with empty routing ids is not inserted'],
     expectFails: 'tests/core/live-database.test.ts',
   },
+  {
+    name: 'delete_transaction refuses a split parent',
+    file: 'src/tools/tools.ts',
+    invariant:
+      "Deleting a split parent makes Copilot credit the parent's amount back to the account a " +
+      'second time (the children already replaced it), so the account balance ends wrong by ' +
+      'that amount, and on a manual account it stays wrong. There is no unsplit mutation, so ' +
+      'a known split parent must be refused before anything is sent (#822).',
+    mutation: {
+      kind: 'replace',
+      find:
+        '    // mutation-guard: delete_transaction refuses a split parent\n' +
+        '    if (evidence.isParent) {',
+      with:
+        '    // mutation-guard: delete_transaction refuses a split parent\n' + '    if (false) {',
+    },
+    // The exact #822 sequence (both children deleted first, so only the session
+    // record knows the parent) and a cache-only source of evidence.
+    expectFailingTests: [
+      '(b) delete both children, then the parent',
+      '(d) parent known only via a live-cache child row',
+    ],
+    expectFails: 'tests/unit/delete-split-parent.test.ts',
+  },
 ];
 
 // ---------------------------------------------------------------------------

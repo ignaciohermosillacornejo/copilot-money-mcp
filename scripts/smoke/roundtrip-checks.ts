@@ -977,7 +977,7 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
   {
     tool: 'split_transaction',
     domain: 'transactions',
-    flow: 'create a third marker transaction (amount 200) → split into 2×100 children → verify children via re-read (no unsplit mutation exists; parent + children are all run-created and deleted in cleanup)',
+    flow: 'create a third marker transaction (amount 200) → split into 2×100 children → verify children via re-read (no unsplit mutation exists; cleanup deletes the children only — deleting a split parent corrupts the balance, #822)',
     appliesSurfaces: ['Mutation.splitTransaction:applies'],
     run: async (ctx) => {
       const parent = await createSmokeTransaction(ctx, 'txn-c', 200);
@@ -992,6 +992,11 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
           { name: `${ctx.state.marker}-split-b`, date, amount: 100, categoryId },
         ],
       });
+      // Never delete a split parent (#822): Copilot credits its amount back a
+      // second time and the test account's balance ends wrong by 200. Cleanup
+      // deletes only the children; the parent stays hidden, which is the
+      // correct end state (there is no unsplit mutation).
+      ctx.registry.remove(parent.id);
       for (const child of result.splitTransactions) {
         ctx.registry.add({
           kind: 'transaction',
@@ -1008,7 +1013,7 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
       // Verify via RE-READ, not the mutation echo: both children must come
       // back from the Transactions query pointing at the parent. (Copilot
       // hides the parent in its UI after a split but does not delete it —
-      // cleanup deletes children and parent explicitly.)
+      // cleanup deletes only the children, see above.)
       const rows = await readTransactionsByMarker(ctx.client, ctx.state.marker);
       const children = rows.filter((node) => node.parentId === parent.id);
       check(

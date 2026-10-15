@@ -619,6 +619,18 @@ export class CopilotMoneyTools {
   private liveDb: LiveCopilotDatabase | undefined;
   private _userCategoryMap: Map<string, string> | null = null;
   private _excludedCategoryIds: Set<string> | null = null;
+  /**
+   * Split-parent ids this session has learned about (#822): every parent
+   * split_transaction split, and the parent of every split child
+   * delete_transaction was asked to delete (recorded before the delete is
+   * sent). The second source is what still knows a parent after both of its
+   * children are gone, when no cached row points at it any more.
+   *
+   * In memory only — it does not persist across server restarts. After a
+   * restart a parent is known only if a cached row (local or live) still
+   * shows it, which is why delete_transaction's description states the rule.
+   */
+  private readonly knownSplitParentIds = new Set<string>();
 
   /**
    * Initialize tools with a database connection.
@@ -3711,6 +3723,26 @@ export class CopilotMoneyTools {
     validateDocId(account_id, 'account_id');
     validateDocId(item_id, 'item_id');
 
+    // Split parents (#822): deleting one makes the server credit the parent's
+    // amount back to the account a second time — the children already replaced
+    // it — so the balance ends wrong by that amount (and stays wrong on a manual
+    // account). There is no unsplit mutation, so the only safe answer is to
+    // refuse before anything is sent. Best-effort: a parent split in the app,
+    // in a month no cache holds, is not known here.
+    const evidence = await this.splitParentEvidence(transaction_id);
+    // mutation-guard: delete_transaction refuses a split parent
+    if (evidence.isParent) {
+      throw new Error(
+        `Transaction ${transaction_id} is a split parent and cannot be deleted: Copilot would ` +
+          `credit its amount back to the account a second time, leaving the account balance ` +
+          `wrong. Delete the child transactions instead — the parent stays hidden once split. ` +
+          `There is no unsplit operation.`
+      );
+    }
+    // Deleting a child: remember its parent BEFORE the delete is sent, so the
+    // parent stays known after its last child is gone.
+    if (evidence.parentOfTarget) this.knownSplitParentIds.add(evidence.parentOfTarget);
+
     try {
       const deleted = await gqlDeleteTransaction(client, {
         id: transaction_id,
@@ -3737,6 +3769,47 @@ export class CopilotMoneyTools {
       }
       throw e;
     }
+  }
+
+  /**
+   * What the caches and this session know about `id` as a split (#822):
+   * whether it is a split parent, and — when it is a split child — its parent.
+   *
+   * Sources, cheapest first: the session record (knownSplitParentIds); the
+   * live window cache (a cached row whose parentId is `id`, and `id`'s own
+   * row's parentId); the local LevelDB cache (`id`'s row carrying
+   * children_transaction_ids or parent_transaction_id, or any row whose
+   * parent_transaction_id is `id`). The local cache is best-effort: when it
+   * cannot be read (no Copilot install, unreadable files) it simply
+   * contributes nothing, rather than blocking every delete.
+   */
+  private async splitParentEvidence(
+    id: string
+  ): Promise<{ isParent: boolean; parentOfTarget: string | null }> {
+    let parentOfTarget: string | null = null;
+    if (this.knownSplitParentIds.has(id)) return { isParent: true, parentOfTarget };
+
+    if (this.liveDb) {
+      if (this.liveDb.hasSplitChildOf(id)) return { isParent: true, parentOfTarget };
+      parentOfTarget = this.liveDb.lookupTransactionNodes([id]).get(id)?.parentId ?? null;
+    }
+
+    let local: Transaction[] = [];
+    try {
+      local = await this.db.getAllTransactions();
+    } catch {
+      // No readable local cache: the live cache and session record still apply.
+    }
+    for (const t of local) {
+      if (t.parent_transaction_id === id) return { isParent: true, parentOfTarget };
+      if (t.transaction_id === id) {
+        if ((t.children_transaction_ids?.length ?? 0) > 0) {
+          return { isParent: true, parentOfTarget };
+        }
+        parentOfTarget ??= t.parent_transaction_id || null;
+      }
+    }
+    return { isParent: false, parentOfTarget };
   }
 
   /**
@@ -3858,10 +3931,13 @@ export class CopilotMoneyTools {
    * refresh_database will pick them up. Callers that need the children
    * immediately can read them from the returned `children` array.
    *
-   * Reversal: there is no `unsplitTransaction` / `revertSplit` / `undoSplit`
-   * on the server (all three probed and don't exist). To "undo" a split,
-   * callers must delete each child via delete_transaction and edit the
-   * parent's category back via update_transaction.
+   * Reversal: there is no unsplit on the server (probed 2026-10-15: twenty
+   * candidate names incl. unsplitTransaction, mergeTransaction(s), undoSplit,
+   * removeSplit, deleteSplit(Transaction), revertSplit — none exist). Deleting
+   * the parent is NOT an undo: the server credits its amount back a second
+   * time and the balance ends wrong (#822), so delete_transaction refuses a
+   * known split parent. To remove the split's effect, delete the children;
+   * the parent stays hidden.
    *
    * Per-split metadata (tags, notes, reviewed state) is not accepted by
    * the server's SplitTransactionInput — follow-up edits require per-child
@@ -4013,6 +4089,9 @@ export class CopilotMoneyTools {
 
       const parent = toLocal(result.parentTransaction);
       const children = result.splitTransactions.map(toLocal);
+
+      // Session record (#822): delete_transaction refuses this id from now on.
+      this.knownSplitParentIds.add(transaction_id);
 
       // Feed the live meta index with the parent (it leaves the live cache
       // below, so the children's upserts are not its route in) — so a
