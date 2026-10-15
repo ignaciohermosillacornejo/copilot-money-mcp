@@ -41,6 +41,7 @@ import {
   isDecodableTransactionDocument,
   transactionDocumentId,
   getString,
+  getBoolean,
 } from '../../src/core/decoder.js';
 import type { AllCollectionsResult, CollectionRoute } from '../../src/core/decoder.js';
 import { CopilotDatabase, missingDatabaseError } from '../../src/core/database.js';
@@ -639,8 +640,7 @@ export function hasCategoryOnIncomeOrTransfer(fields: Map<string, FirestoreValue
   // validation, and a pending row superseded by its posted twin.
   if (!isDecodableTransactionDocument(fields)) return false;
   const typeName = getString(fields, 'type')?.toLowerCase() ?? '';
-  const flag = fields.get('internal_transfer');
-  const isTransferFlag = flag?.type === 'boolean' && flag.value === true;
+  const isTransferFlag = getBoolean(fields, 'internal_transfer') === true;
   if (typeName !== 'income' && typeName !== 'internal_transfer' && !isTransferFlag) return false;
   return (getString(fields, 'category_id') ?? '') !== '';
 }

@@ -136,9 +136,10 @@ function getNumber(fields: Map<string, FirestoreValue>, key: string): number | u
 }
 
 /**
- * Extract a boolean field from parsed Firestore fields.
+ * Extract a boolean field from parsed Firestore fields. Exported for the same
+ * reason as getString: a raw-document reader must read fields the decoder's way.
  */
-function getBoolean(fields: Map<string, FirestoreValue>, key: string): boolean | undefined {
+export function getBoolean(fields: Map<string, FirestoreValue>, key: string): boolean | undefined {
   const value = fields.get(key);
   if (value?.type === 'boolean') {
     return value.value;
@@ -844,7 +845,8 @@ export function transactionDocumentId(fields: Map<string, FirestoreValue>, docId
 /**
  * The fields a transaction document needs to produce a row at all, parsed
  * once: a non-zero amount and a date, on a document that is not soft-deleted.
- * Null when the document yields no row.
+ * Null when the document yields no row at this stage (schema validation and
+ * pending reconciliation can still drop it later).
  */
 function decodableTransactionCore(
   fields: Map<string, FirestoreValue>
