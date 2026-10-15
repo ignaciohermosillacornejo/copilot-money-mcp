@@ -102,7 +102,7 @@ export class TransactionWindowCache<T extends CachedTransaction = CachedTransact
       const entry = this.windows.get(month);
       const ttl = this.ttlFor(tier);
       if (entry && now.getTime() - entry.fetched_at < ttl) {
-        this.lastAccessed.set(month, now.getTime());
+        this.touch(month, now.getTime());
         for (const row of entry.rows) {
           if (row.date >= range.from && row.date <= range.to) cachedRows.push(row);
         }
@@ -120,7 +120,7 @@ export class TransactionWindowCache<T extends CachedTransaction = CachedTransact
     const cloned = [...rows];
     this.windows.set(month, { rows: cloned, fetched_at });
     this._totalRows += cloned.length;
-    this.lastAccessed.set(month, Date.now());
+    this.touch(month, Date.now());
     this.evictLRU(this.opts.maxRows);
   }
 
@@ -148,10 +148,10 @@ export class TransactionWindowCache<T extends CachedTransaction = CachedTransact
       entry.rows.push(tx);
       this._totalRows += 1;
     }
-    this.lastAccessed.set(month, Date.now());
+    this.touch(month, Date.now());
     // An insert grows the cache without an ingest (write-through creates and
     // split children), so it must honor the same cap. The month just written
-    // is the most recently accessed, so it is evicted last.
+    // is the most recently touched, so it is evicted last (see touch()).
     this.evictLRU(this.opts.maxRows);
   }
 
@@ -218,6 +218,19 @@ export class TransactionWindowCache<T extends CachedTransaction = CachedTransact
       this.windows.delete(oldest);
       this.lastAccessed.delete(oldest);
     }
+  }
+
+  /**
+   * Record an access. Delete-then-set moves the month to the END of the
+   * map's iteration order. oldestAccessedMonth() keeps the FIRST month with
+   * the smallest timestamp, so among months touched in the same millisecond
+   * the one touched most recently is evicted last — Map.set on an existing
+   * key would keep its original position and let a just-written month lose
+   * the tie.
+   */
+  private touch(month: YearMonth, ts: number): void {
+    this.lastAccessed.delete(month);
+    this.lastAccessed.set(month, ts);
   }
 
   private oldestAccessedMonth(): YearMonth | null {

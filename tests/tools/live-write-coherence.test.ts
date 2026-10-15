@@ -762,4 +762,26 @@ describe('a partial batch writes through the rows that landed', () => {
     expect(local(TX_BATCH_1)).toMatchObject({ category_id: CAT_NEW });
     expect(local(TX_BATCH_2)).toMatchObject({ category_id: CAT_OLD });
   });
+
+  // A transport timeout or GraphQL error may arrive after the server applied
+  // some rows, and says nothing about which. The months holding the targeted
+  // rows must be refetched, not served pre-write from the cache for a week.
+  test.each(['review_transactions', 'bulk_edit_transactions'])(
+    '%s: a bulk edit that throws leaves the next read to the server',
+    async (tool) => {
+      const { call, read, fetches } = setup({
+        BulkEditTransactions: new Error('synthetic transport timeout'),
+      });
+      await read();
+
+      const rows = [TX_BULK_1, TX_BULK_2].map((id) => ({ ...routing, transaction_id: id }));
+      await expect(
+        call(tool, tool === 'review_transactions' ? { rows } : { rows, category_id: CAT_NEW })
+      ).rejects.toThrow();
+
+      const after = await read();
+      expect(after._cache_hit).toBe(false);
+      expect(fetches()).toBe(2);
+    }
+  );
 });

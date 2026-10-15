@@ -4110,6 +4110,10 @@ export class CopilotMoneyTools {
       'review_transactions',
       (updated) => {
         for (const tx of updated) {
+          // Local patch from the request's `reviewed`, live patch from the
+          // server row: the local model has no field mapping from that row, and
+          // isReviewed is the only field sent, so for every row in `updated`
+          // the two agree.
           this.db.patchCachedTransaction(tx.id, { user_reviewed: reviewed });
           this.liveDb?.upsertLiveTransaction(tx);
         }
@@ -4227,6 +4231,11 @@ export class CopilotMoneyTools {
     try {
       result = await gqlBulkEditTransactions(client, { ids, input });
     } catch (e) {
+      // The batch may have partly landed before the error (a timeout after the
+      // server wrote, say), and nothing says which rows did. Drop the live
+      // months holding the targeted rows so the next read asks the server
+      // instead of serving pre-write rows for up to a week.
+      this.liveDb?.invalidateLiveTransactionMonths(ids.map((t) => t.id));
       if (e instanceof GraphQLError) {
         throw new Error(`${label} failed: ${graphQLErrorToMcpError(e)}`, { cause: e });
       }

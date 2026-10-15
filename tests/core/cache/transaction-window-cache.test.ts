@@ -199,6 +199,23 @@ describe('TransactionWindowCache.evictLRU', () => {
     expect(cache.hasMonth('2026-02')).toBe(true);
     expect(cache.hasMonth('2026-01')).toBe(false);
   });
+
+  test('the month just written survives eviction even when it was cached first', () => {
+    // Access timestamps are millisecond-grained, so the three touches below
+    // usually tie. A tie must not evict the month that was just written.
+    const cache = new TransactionWindowCache(
+      { liveTtlMs: 0, coldTtlMs: 7 * 24 * 60 * 60 * 1000, maxRows: 3 },
+      new InFlightRegistry()
+    );
+    cache.ingestMonth('2026-01', [mkTx('a', '2026-01-10')], 1);
+    cache.ingestMonth('2026-02', [mkTx('b', '2026-02-10'), mkTx('c', '2026-02-11')], 2);
+
+    cache.upsert(mkTx('d', '2026-01-12'));
+
+    expect(cache.totalRows()).toBeLessThanOrEqual(3);
+    expect(cache.hasMonth('2026-01')).toBe(true);
+    expect(cache.hasMonth('2026-02')).toBe(false);
+  });
 });
 
 describe('TransactionWindowCache.totalRows running counter', () => {

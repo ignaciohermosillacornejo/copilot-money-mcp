@@ -65,7 +65,7 @@
  * so a reviewer can see at a glance whether the detection is the one the row
  * claims. That is also why each row must name those tests up front
  * (`expectFailingTests`): "the file went red" is satisfied by a sibling test in
- * a shared detector file, and four of the eight rows share one.
+ * a shared detector file, and four of the nine rows share one.
  *
  * ## Restoration
  *
@@ -216,7 +216,7 @@ export interface MutationGuard {
    * The test(s) inside `expectFails` that must be among the failures, matched
    * as substrings of the names bun prints.
    *
-   * `expectFails` alone would let a row ride on a sibling: four of the eight rows
+   * `expectFails` alone would let a row ride on a sibling: four of the nine rows
    * share `bulk-edit-transactions.test.ts`, so "the file went red" can be true
    * while the test covering THIS guard has quietly stopped covering it. Naming
    * the test turns that from invisible into a failure — the same reason `find`
@@ -408,6 +408,31 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
       'on a row absent from a cached month: the next read comes from the server',
     ],
     expectFails: 'tests/tools/live-write-coherence.test.ts',
+  },
+  {
+    name: 'a drifted routing id is never inserted',
+    file: 'src/core/live-database.ts',
+    invariant:
+      'Mutation responses are validated warn-only, so a drifted create or split response can ' +
+      'carry an empty accountId or itemId. Inserting that row puts a transaction into the live ' +
+      'cache that no later write can address (every write needs the routing pair), and that ' +
+      'reads report with empty account ids. Such a row must not be inserted; its month is ' +
+      'refetched instead.',
+    mutation: {
+      kind: 'replace',
+      // Stacked above the edit guard's marker, which this find leaves in place,
+      // so the two rows bind to the same condition without sharing a find.
+      find:
+        '    // mutation-guard: a drifted routing id is never inserted\n' +
+        '    // mutation-guard: an edit never inserts an uncached row\n' +
+        '    if (!existing && (opts.insert !== true || !hasRouting)) {',
+      with:
+        '    // mutation-guard: a drifted routing id is never inserted\n' +
+        '    // mutation-guard: an edit never inserts an uncached row\n' +
+        '    if (!existing && opts.insert !== true) {',
+    },
+    expectFailingTests: ['insert: a row with empty routing ids is not inserted'],
+    expectFails: 'tests/core/live-database.test.ts',
   },
 ];
 

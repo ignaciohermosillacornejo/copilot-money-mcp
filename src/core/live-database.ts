@@ -709,15 +709,16 @@ export class LiveCopilotDatabase {
     // Response validation is warn-only: a drifted row with no id or date
     // cannot be placed, and must not be inserted as a phantom.
     if (!node.id || !node.date) return;
+    const hasRouting = Boolean(node.accountId && node.itemId);
     // Keep the meta index consistent with the invariant "any row this class
     // has seen is indexed". Same empty-routing-id guard as every other feed
     // (#518) — feedMeta re-checks, this skips the flush too.
-    if (node.accountId && node.itemId) {
+    if (hasRouting) {
       this.feedMeta(node.id, { accountId: node.accountId, itemId: node.itemId });
       this.metaStore.flush();
     }
     const existing = this.lookupTransactionNodes([node.id]).get(node.id);
-    const hasRouting = Boolean(node.accountId && node.itemId);
+    // mutation-guard: a drifted routing id is never inserted
     // mutation-guard: an edit never inserts an uncached row
     if (!existing && (opts.insert !== true || !hasRouting)) {
       // Not inserting: an edit (see above), or a drifted create/split response
@@ -747,6 +748,23 @@ export class LiveCopilotDatabase {
   /** Remove a cached transaction by id. No-op if not found. */
   patchLiveTransactionDelete(id: string): void {
     this.transactionsWindowCache.delete(id);
+  }
+
+  /**
+   * Drop every cached month that holds any of `ids`, so the next read refetches
+   * them. For a write whose outcome is unknown — a bulk edit that threw on the
+   * transport or with a GraphQL error may still have applied some rows, and no
+   * response says which. A month that holds none of them is left alone; an id
+   * in no cached month has nothing stale to serve.
+   */
+  invalidateLiveTransactionMonths(ids: readonly string[]): void {
+    const wanted = new Set(ids);
+    const stale = this.transactionsWindowCache
+      .cachedMonths()
+      .filter((m) =>
+        this.transactionsWindowCache.entriesForMonth(m).some((row) => wanted.has(row.id))
+      );
+    if (stale.length > 0) this.transactionsWindowCache.invalidate(stale);
   }
 
   patchLiveTagUpsert(tag: TagNode): void {
