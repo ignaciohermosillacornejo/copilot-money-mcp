@@ -682,38 +682,53 @@ export class LiveCopilotDatabase {
    *
    * - Row cached → `{ ...existing, ...node }`. Keys the mutation fragment does
    *   not select (`parentId`, except bulk's; `isoCurrencyCode`) keep their
-   *   cached values instead of being blanked.
-   * - Row not cached (a created row, a split child, a date move into a cached
-   *   month) → inserted with `null` for those two unselected keys.
-   * - Target month not cached → the cache's upsert is a no-op for the insert
-   *   (and still removes the row from the month it used to live in), so the
-   *   next read fetches the month from the server.
+   *   cached values instead of being blanked. A date move takes the row out of
+   *   its old month and into the new one if that month is cached.
+   * - Row not cached, `insert: true` (a created row, a split child) → inserted
+   *   with `null` for those two unselected keys, or `opts.parentId`.
+   * - Row not cached, an EDIT (the default) → NOT inserted. An edit's target
+   *   can be absent from a cached month legitimately: it is a split parent,
+   *   which the Transactions query omits, and the mutation response does not
+   *   say so. Inserting it would put the hidden parent back beside its
+   *   children and double-count the amount. Instead the node's month is
+   *   invalidated, so the next read refetches the server's truth — which also
+   *   covers an ordinary row edited into a cached month from an uncached one.
+   * - Target month not cached → nothing to insert or invalidate; the next read
+   *   fetches it. (The cache's upsert still removes a moved row from the
+   *   month it used to live in.)
    *
-   * `extra` carries what the caller knows and the fragment omits — today only
-   * a split child's `parentId`.
+   * The meta index is fed on every path.
    */
   upsertLiveTransaction(
     node: CreatedTransaction & { parentId?: string | null },
-    extra: Pick<Partial<TransactionNode>, 'parentId'> = {}
+    opts: { insert?: boolean; parentId?: string | null } = {}
   ): void {
     // Response validation is warn-only: a drifted row with no id or date
     // cannot be placed, and must not be inserted as a phantom.
     if (!node.id || !node.date) return;
+    // Keep the meta index consistent with the invariant "any row this class
+    // has seen is indexed". Same empty-routing-id guard as every other feed
+    // (#518) — feedMeta re-checks, this skips the flush too.
+    if (node.accountId && node.itemId) {
+      this.feedMeta(node.id, { accountId: node.accountId, itemId: node.itemId });
+      this.metaStore.flush();
+    }
     const existing = this.lookupTransactionNodes([node.id]).get(node.id);
+    // mutation-guard: an edit never inserts an uncached row
+    if (!existing && opts.insert !== true) {
+      const month = node.date.slice(0, 7);
+      if (this.transactionsWindowCache.hasMonth(month)) {
+        this.transactionsWindowCache.invalidate([month]);
+      }
+      return;
+    }
     const merged: TransactionNode = {
       parentId: null,
       isoCurrencyCode: null,
       ...existing,
       ...node,
-      ...extra,
+      ...(opts.parentId !== undefined ? { parentId: opts.parentId } : {}),
     };
-    // Keep the meta index consistent with the invariant "any row this class
-    // has seen is indexed". Same empty-routing-id guard as every other feed
-    // (#518) — feedMeta re-checks, this skips the flush too.
-    if (merged.accountId && merged.itemId) {
-      this.feedMeta(merged.id, { accountId: merged.accountId, itemId: merged.itemId });
-      this.metaStore.flush();
-    }
     this.transactionsWindowCache.upsert(merged);
   }
 

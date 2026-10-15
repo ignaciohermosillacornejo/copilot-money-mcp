@@ -3653,7 +3653,7 @@ export class CopilotMoneyTools {
       // resolves without a network fetch; the empty-routing-id guard (#518)
       // lives inside upsertLiveTransaction.
       // mutation-guard: create_transaction writes through to the live cache
-      this.liveDb?.upsertLiveTransaction(tx);
+      this.liveDb?.upsertLiveTransaction(tx, { insert: true });
 
       return {
         success: true,
@@ -4040,7 +4040,7 @@ export class CopilotMoneyTools {
       // that is what a Transactions read reports for a split child. Each
       // upsert also feeds the meta index for that child.
       for (const child of result.splitTransactions) {
-        this.liveDb?.upsertLiveTransaction(child, { parentId: parentTx.id });
+        this.liveDb?.upsertLiveTransaction(child, { insert: true, parentId: parentTx.id });
       }
 
       return {

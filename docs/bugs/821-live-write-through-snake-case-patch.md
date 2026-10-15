@@ -59,6 +59,13 @@ by `upsertLiveTransaction(node)`, whose parameter is the GraphQL shape: a cache-
 transaction it got back. Keys the mutation fragment does not select (`parentId`,
 `isoCurrencyCode`) keep their cached values.
 
+An edit never inserts a row the cached month did not have. Its target can be absent
+legitimately: a split parent, which the Transactions query omits and the mutation
+response does not identify. Inserting it would double-count the parent beside its
+children, so an edit of an uncached row invalidates its month instead and the next read
+refetches. Only creates and split children insert (found in review of the first version
+of this fix, and registered as a second mutation guard).
+
 ## Detector
 
 `tests/tools/live-write-coherence.test.ts`: one case per transaction write tool, derived

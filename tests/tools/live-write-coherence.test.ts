@@ -119,8 +119,16 @@ function mutationNode(base: TransactionNode, overrides: Partial<CreatedTransacti
   return node;
 }
 
+/**
+ * A split parent that already exists on the server. The Transactions query
+ * omits split parents, so it is NOT in the seeded month — but the edit tools
+ * accept its id, and their mutation responses do not say it is a parent.
+ */
+const TX_HIDDEN_PARENT = 'yZ7jW3nO6kL1sR8tV5xY';
+const HIDDEN_PARENT = seedNode(TX_HIDDEN_PARENT, { name: 'Split parent', amount: 300 });
+
 function seedById(id: string): TransactionNode {
-  const row = SEED.find((r) => r.id === id);
+  const row = [...SEED, HIDDEN_PARENT].find((r) => r.id === id);
   if (!row) throw new Error(`no seed row ${id}`);
   return row;
 }
@@ -509,6 +517,103 @@ describe('write → live-read coherence (#820, #821)', () => {
 
       const rows = new Map(after.transactions.map((r) => [r.transaction_id as string, r]));
       c.verify(rows);
+    }
+  );
+});
+
+// ── Edits must never insert a row the cached month did not have ─────────────
+//
+// An edit's target can be missing from a cached month for a legitimate reason:
+// it is a split parent, which the Transactions query omits. The mutation
+// response does not say so (no parentId), so inserting it would put the hidden
+// parent back beside its children and double-count the amount. Only creates and
+// split children may insert; an edit of an uncached row must leave the month
+// to be refetched from the server instead.
+
+const hiddenRouting = { ...routing, transaction_id: TX_HIDDEN_PARENT };
+const hiddenEditEcho: MockResponsesByOp = {
+  EditTransaction: (vars) => {
+    const v = vars as { id: string; input: EditTransactionInput };
+    return { editTransaction: { transaction: applyEdit(v.id, v.input) } };
+  },
+};
+
+/** Every transaction write tool that edits an existing row, with args targeting the hidden parent. */
+const EDIT_OF_UNCACHED_ROW: Record<
+  string,
+  { mocks: MockResponsesByOp; args: Record<string, unknown> }
+> = {
+  update_transaction: {
+    mocks: hiddenEditEcho,
+    args: { ...hiddenRouting, category_id: CAT_NEW },
+  },
+  update_transactions: {
+    mocks: hiddenEditEcho,
+    args: { edits: [{ ...hiddenRouting, note: 'parent note' }] },
+  },
+  add_transaction_to_recurring: {
+    mocks: {
+      AddTransactionToRecurring: {
+        addTransactionToRecurring: {
+          transaction: mutationNode(HIDDEN_PARENT, { recurringId: RECURRING_ID }),
+        },
+      },
+    },
+    args: { ...hiddenRouting, recurring_id: RECURRING_ID },
+  },
+  review_transactions: {
+    mocks: {
+      BulkEditTransactions: {
+        bulkEditTransactions: {
+          updated: [{ ...mutationNode(HIDDEN_PARENT, { isReviewed: false }), parentId: null }],
+          failed: [],
+        },
+      },
+    },
+    args: { rows: [hiddenRouting], reviewed: false },
+  },
+  bulk_edit_transactions: {
+    mocks: {
+      BulkEditTransactions: {
+        bulkEditTransactions: {
+          updated: [{ ...mutationNode(HIDDEN_PARENT, { categoryId: CAT_NEW }), parentId: null }],
+          failed: [],
+        },
+      },
+    },
+    args: { rows: [hiddenRouting], category_id: CAT_NEW },
+  },
+};
+
+/** Write tools that are not edits of an existing row: they create, or remove. */
+const NOT_EDITS = ['create_transaction', 'split_transaction', 'delete_transaction'];
+
+describe('an edit of an uncached row never inserts it (split parents)', () => {
+  test('every editing transaction write tool has a case', () => {
+    const editTools = WRITE_TOOL_DEFS.map((d) => d.name)
+      .filter((name) => /transaction/.test(name) && !NOT_EDITS.includes(name))
+      .sort();
+    expect(editTools.length).toBeGreaterThan(0);
+    expect(Object.keys(EDIT_OF_UNCACHED_ROW).sort()).toEqual(editTools);
+  });
+
+  test.each(Object.keys(EDIT_OF_UNCACHED_ROW))(
+    '%s on a row absent from a cached month: the next read comes from the server',
+    async (toolName) => {
+      const c = EDIT_OF_UNCACHED_ROW[toolName]!;
+      const { call, read, fetches } = setup(c.mocks);
+
+      await read();
+      expect(fetches()).toBe(1);
+
+      await call(toolName, c.args);
+
+      // The server (mocked by the same Transactions response) still omits the
+      // parent. A refetch returns that truth; an insert would serve the parent
+      // from the cache beside the rows it was split into.
+      const after = await read();
+      expect(after.transactions.map((r) => r.transaction_id)).not.toContain(TX_HIDDEN_PARENT);
+      expect(fetches()).toBe(2);
     }
   );
 });

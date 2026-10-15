@@ -486,12 +486,12 @@ describe('LiveCopilotDatabase.upsertLiveTransaction', () => {
     expect(row!.isoCurrencyCode).toBe('USD');
   });
 
-  test('an uncached row is inserted into its cached month, unselected keys null (#820)', () => {
+  test('insert: an uncached row is added to its cached month, unselected keys null (#820)', () => {
     const live = mkLive();
     const wc = live.getTransactionsWindowCache();
     wc.ingestMonth('2024-01', [], Date.now());
 
-    live.upsertLiveTransaction(mutationRow({ id: 'sT1gT7hI0eF5mJ2kP6nQ' }));
+    live.upsertLiveTransaction(mutationRow({ id: 'sT1gT7hI0eF5mJ2kP6nQ' }), { insert: true });
 
     const rows = wc.entriesForMonth('2024-01');
     expect(rows.map((r) => r.id)).toEqual(['sT1gT7hI0eF5mJ2kP6nQ']);
@@ -499,16 +499,33 @@ describe('LiveCopilotDatabase.upsertLiveTransaction', () => {
     expect(rows[0]!.isoCurrencyCode).toBeNull();
   });
 
-  test('extra.parentId is applied (split children)', () => {
+  test('opts.parentId is applied (split children)', () => {
     const live = mkLive();
     const wc = live.getTransactionsWindowCache();
     wc.ingestMonth('2024-01', [], Date.now());
 
     live.upsertLiveTransaction(mutationRow({ id: 'uV3hU9jK2gH7oL4mR8pS' }), {
+      insert: true,
       parentId: 'qR9fS5fG8cD3kH0iN4lO',
     });
 
     expect(wc.entriesForMonth('2024-01')[0]!.parentId).toBe('qR9fS5fG8cD3kH0iN4lO');
+  });
+
+  test('an edit of an uncached row does not insert it — its month is invalidated instead', () => {
+    // The row may be a split parent, which the Transactions query omits; the
+    // mutation response cannot tell us. Refetching is the only safe answer.
+    const live = mkLive();
+    const wc = live.getTransactionsWindowCache();
+    wc.ingestMonth('2024-01', [queryRow({ id: 'cD5yL1rS4oP9wT6uZ0xA' })], Date.now());
+    wc.ingestMonth('2024-02', [], Date.now());
+
+    live.upsertLiveTransaction(mutationRow());
+
+    expect(wc.hasMonth('2024-01')).toBe(false);
+    expect(wc.hasMonth('2024-02')).toBe(true);
+    // The routing ids are still learned.
+    expect(live.lookupTransactionMeta(['aB3xK9pQ2mN7vR4tY8wZ']).size).toBe(1);
   });
 
   test('no-op for the window cache when the target month is not cached', () => {

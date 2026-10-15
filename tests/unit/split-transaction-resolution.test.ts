@@ -344,9 +344,9 @@ describe('splitTransaction output feeds the live cache and meta index', () => {
     ]);
     const upserts = upsertLiveTransaction.mock.calls as any[];
     expect(upserts.map((c) => [c[0].id, c[1]])).toEqual([
-      ['child-a', { parentId: 'parent-1' }],
-      ['child-b', { parentId: 'parent-1' }],
-      ['child-c', { parentId: 'parent-1' }],
+      ['child-a', { insert: true, parentId: 'parent-1' }],
+      ['child-b', { insert: true, parentId: 'parent-1' }],
+      ['child-c', { insert: true, parentId: 'parent-1' }],
     ]);
   });
 

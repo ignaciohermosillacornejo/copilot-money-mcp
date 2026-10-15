@@ -65,7 +65,7 @@
  * so a reviewer can see at a glance whether the detection is the one the row
  * claims. That is also why each row must name those tests up front
  * (`expectFailingTests`): "the file went red" is satisfied by a sibling test in
- * a shared detector file, and four of the seven rows share one.
+ * a shared detector file, and four of the eight rows share one.
  *
  * ## Restoration
  *
@@ -216,7 +216,7 @@ export interface MutationGuard {
    * The test(s) inside `expectFails` that must be among the failures, matched
    * as substrings of the names bun prints.
    *
-   * `expectFails` alone would let a row ride on a sibling: four of the seven rows
+   * `expectFails` alone would let a row ride on a sibling: four of the eight rows
    * share `bulk-edit-transactions.test.ts`, so "the file went red" can be true
    * while the test covering THIS guard has quietly stopped covering it. Naming
    * the test turns that from invisible into a failure — the same reason `find`
@@ -377,12 +377,36 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
       kind: 'remove',
       find: wholeLines(
         '      // mutation-guard: create_transaction writes through to the live cache',
-        '      this.liveDb?.upsertLiveTransaction(tx);'
+        '      this.liveDb?.upsertLiveTransaction(tx, { insert: true });'
       ),
     },
     // The table key, which is the `%s` half of the test.each title — the only
     // part of the rendered name that is unique to this case.
     expectFailingTests: ['create_transaction'],
+    expectFails: 'tests/tools/live-write-coherence.test.ts',
+  },
+  {
+    name: 'an edit never inserts an uncached row',
+    file: 'src/core/live-database.ts',
+    invariant:
+      'An edit tool may target a split parent, which the Transactions query omits from every ' +
+      'month, and the mutation response does not say the row is a parent. Inserting an edited ' +
+      'row that was not cached puts the hidden parent back beside its children, so the live ' +
+      "read double-counts the parent's amount for up to a week. Edits of uncached rows must " +
+      'invalidate the month instead; only creates and split children may insert.',
+    mutation: {
+      kind: 'replace',
+      find:
+        '    // mutation-guard: an edit never inserts an uncached row\n' +
+        '    if (!existing && opts.insert !== true) {',
+      with:
+        '    // mutation-guard: an edit never inserts an uncached row\n' +
+        '    if (!existing && false) {',
+    },
+    // The invariant half of the test.each title; every edit tool's case runs it.
+    expectFailingTests: [
+      'on a row absent from a cached month: the next read comes from the server',
+    ],
     expectFails: 'tests/tools/live-write-coherence.test.ts',
   },
 ];
