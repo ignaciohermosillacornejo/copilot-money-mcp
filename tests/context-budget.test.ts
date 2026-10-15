@@ -82,6 +82,12 @@ const RESPONSE_BUDGETS: Record<string, number> = {
   // ordinary active rows do. The cost only lands on the hidden/merged rows
   // that a caller had to ask for; the behaviour tests in
   // tests/tools/tools.test.ts cover that path.
+  //
+  // Re-measured after #791 (583, ~8% headroom), so the budget does not move:
+  // an un-nicknamed account is now named by its `official_name`, and the
+  // fixture's checking account has a longer official name than its `name`, so
+  // the row grew by that difference. `official_name` is still dropped as its
+  // own key.
   get_accounts: 635,
   // 1_900 -> 2_100 by #659: `decode_health.collections` gained a `repaired`
   // counter (documents kept after a non-finite numeric field was stripped),

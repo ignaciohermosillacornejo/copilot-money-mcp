@@ -147,15 +147,17 @@ caller is the one who has to change something.
   `get_recurring_transactions`' detail view reported the provider label where
   `get_accounts` reports your Copilot nickname, so the same account appeared
   under two names depending on which tool you asked. All four now prefer your
-  nickname when you have set a non-blank one, and fall back to the provider's
-  label otherwise (`preferredAccountName`, `src/models/account.ts` — blank
-  means whitespace-only too, at every step, so there is no exact one-line
-  formula to quote). Two consequences worth knowing: an
+  nickname when you have set a non-blank one, and otherwise fall back to the
+  provider's `official_name`, then its `name` — the order the Copilot app
+  itself uses (`preferredAccountName`, `src/models/account.ts`; blank means
+  whitespace-only too, at every step). Two consequences worth knowing: an
   account whose nickname you cleared previously came back from
   `get_balance_history` with **no name at all**, and now returns the provider
-  label; and an account that has no `name` at all now reports its
-  `official_name` — which the accounts diet drops from the default preset as a
-  name dupe, so that value reappears under the `name` key. **`account_name` is
+  label; and an un-nicknamed account whose `official_name` differs from its
+  generic `name` (a card called "Credit Card" by the provider, say) is now
+  named by its `official_name` (#791). The accounts diet drops
+  `official_name` from the default preset as a name dupe, so for those
+  accounts that value now appears under the `name` key. **`account_name` is
   user-editable and always was** — it is not a stable key, and `get_accounts`'
   own description now says so. Correlate on `account_id`.
 - **`get_holdings` and `get_holdings_live` no longer report positions on hidden

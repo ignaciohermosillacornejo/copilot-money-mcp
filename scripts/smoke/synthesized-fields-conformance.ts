@@ -35,6 +35,11 @@ async function main(): Promise<void> {
       );
     }
   }
+  if (failed) {
+    // The marker scripts/scheduled-smoke.ts recognises as a drift verdict; the
+    // per-type lines above say which assumptions drifted.
+    console.error('\n[smoke] FAIL — synthesized-field absence drift detected');
+  }
   process.exit(failed ? 1 : 0);
 }
 

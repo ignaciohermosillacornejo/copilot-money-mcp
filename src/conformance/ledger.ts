@@ -872,7 +872,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'discriminating) matched, so the nickname half re-verified. ONE MISMATCH, in the ' +
       'FALLBACK branch: an account with no nickname whose provider `name` and `official_name` ' +
       'differ — the only such account in the data — where live returned `official_name` and ' +
-      'cache (`preferredAccountName`, which then tried nickname, then name, then official_name) returned ' +
+      'cache (which then tried nickname, then name, then official_name) returned ' +
       '`name`. So the server falls back to `official_name` before `name`, on n=1. ' +
       'RESOLVED (#791): the Copilot iOS and web apps both show `official_name` for that ' +
       'account too, so `preferredAccountName` now tries nickname, then official_name, then ' +

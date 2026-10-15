@@ -172,7 +172,7 @@ failed checks are visible without hunting for logs.
 | Ledger enforcement (CI) | `tests/conformance/ledger.test.ts` |
 | Enum/field probes (Tier 1) | `scripts/smoke/_conformance.ts`, `_field-conformance.ts` |
 | Read smokes (Tier 1) | `scripts/smoke/read-checks.ts` |
-| Cache↔live parity (Tier 1, by hand) | `scripts/smoke/account-names.ts` (`smoke:account-names`; needs a local cache too, not in `smoke` until #791) |
+| Cache↔live parity (Tier 1) | `scripts/smoke/account-names.ts` (`smoke:account-names`; in `smoke` since #791, SKIPs where there is no local cache) |
 | Round-trips (Tier 2, attended) | `scripts/smoke/roundtrip.ts`, `roundtrip-checks.ts` |
 | Coverage bijection gates | `tests/scripts/{read-smoke,roundtrip}-coverage.test.ts` |
 | Response validation (runtime) | `src/core/graphql/client.ts` |

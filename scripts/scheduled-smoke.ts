@@ -42,13 +42,20 @@ const SMOKE_TIMEOUT_MINUTES = 10;
 
 /**
  * The only outputs that mean "the smoke reached a verdict and the verdict was
- * drift". Both are printed by the smoke immediately before it exits nonzero
- * (`scripts/smoke/conformance.ts`, `scripts/smoke/reads.ts`). Requiring one of
- * these is what keeps `fail` from becoming the fallthrough bucket.
+ * drift". Each drift-checking member of the `bun run smoke` composite prints
+ * its own marker immediately before it exits nonzero. Requiring one of these
+ * is what keeps `fail` from becoming the fallthrough bucket.
+ *
+ * `tests/scripts/smoke-composite-verdicts.test.ts` walks the composite and
+ * fails if a member neither prints one of these nor is listed as exempt, so a
+ * new drift check cannot join the composite and have its drift reported as
+ * "drift NOT checked" (#818).
  */
 export const DRIFT_VERDICT_MARKERS = [
   '[smoke] FAIL — conformance drift detected',
+  '[smoke] FAIL — synthesized-field absence drift detected',
   '[smoke] FAIL — read-surface drift detected',
+  '[smoke] FAIL — account-name parity drift detected',
 ] as const;
 
 /** Signatures that mean "could not authenticate", not "the API drifted". */

@@ -2,8 +2,8 @@
  * Smoke: cache↔live account-naming parity (#665).
  *
  * Run: `bun run scripts/smoke/account-names.ts` (or `bun run smoke:account-names`).
- *      Not in the `bun run smoke` composite yet: it is red on real data until
- *      the no-nickname fallback order is decided (#791).
+ *      Part of the `bun run smoke` composite since #791 settled the no-nickname
+ *      fallback order. SKIPs (exit 0) where there is no local cache.
  *
  * Calls cache-mode `get_accounts` and live-mode `get_accounts_live` (both with
  * `include_hidden: true`, so visibility filtering cannot hide a row from one
@@ -64,7 +64,14 @@ async function main(): Promise<void> {
   const { status, detail } = classifyAccountNameParity(parity);
   log(`${status} account-name parity — ${detail}`);
 
-  if (status === 'FAIL') process.exit(1);
+  if (status === 'FAIL') {
+    // The marker scripts/scheduled-smoke.ts recognises as a drift verdict.
+    // Without it, a real mismatch in the weekly run is reported as "drift NOT
+    // checked". The could-not-read-the-cache FAIL above deliberately does not
+    // print it: that run never compared anything.
+    console.error('[smoke] FAIL — account-name parity drift detected');
+    process.exit(1);
+  }
 }
 
 if (import.meta.main) {

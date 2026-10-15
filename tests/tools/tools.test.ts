@@ -3645,6 +3645,70 @@ describe('getHoldings', () => {
     });
   });
 
+  test('an un-nicknamed account with BOTH provider labels reports official_name on all four (#791)', async () => {
+    // The common case #791 changed: no nickname, a generic provider `name`, and
+    // a distinct `official_name`. The Copilot app shows the official name, so
+    // all four surfaces must too. The helper is shared, so this pins that none
+    // of them re-derives the name with its own order.
+    (db as any)._accounts = [
+      {
+        account_id: 'acc_two_labels',
+        current_balance: 1000,
+        name: 'Credit Card',
+        official_name: 'Rewards Card',
+        account_type: 'investment',
+        holdings: [
+          {
+            security_id: 'sec_aapl',
+            account_id: 'acc_two_labels',
+            cost_basis: 100,
+            institution_price: 1.0,
+            institution_value: 100,
+            quantity: 100,
+            iso_currency_code: 'USD',
+          },
+        ],
+      },
+    ];
+    (db as any)._balanceHistory = [
+      {
+        balance_id: 'i1:acc_two_labels:2024-01-01',
+        date: '2024-01-01',
+        item_id: 'i1',
+        account_id: 'acc_two_labels',
+        current_balance: 1000,
+      },
+    ];
+    (db as any)._recurring = [
+      {
+        recurring_id: 'rec_1',
+        name: 'Advisory Fee',
+        amount: 40,
+        merchant_name: 'Advisory Fee',
+        account_id: 'acc_two_labels',
+        frequency: 'monthly',
+        state: 'active',
+        transaction_ids: [],
+      },
+    ];
+    (db as any)._transactions = [];
+
+    const fromAccounts = (await tools.getAccounts({})).accounts[0]?.name;
+    const fromHoldings = (await tools.getHoldings({})).holdings[0]?.account_name;
+    const fromRecurring = (await tools.getRecurringTransactions({ name: 'Advisory Fee' }))
+      .detail_view?.[0]?.account_name;
+    const fromBalanceHistory = (
+      await tools.getBalanceHistory({ account_id: 'acc_two_labels', granularity: 'daily' })
+    ).balance_history?.[0]?.account_name;
+
+    expect({ fromAccounts, fromHoldings, fromRecurring, fromBalanceHistory }).toEqual({
+      fromAccounts: 'Rewards Card',
+      fromHoldings: 'Rewards Card',
+      fromRecurring: 'Rewards Card',
+      fromBalanceHistory: 'Rewards Card',
+    });
+  });
+
   test('get_holdings reports the Copilot nickname, like get_accounts (#663)', async () => {
     // #660 made get_accounts prefer the user's nickname over the provider
     // label. get_holdings kept reporting `name ?? official_name`, so the same
