@@ -48,9 +48,28 @@ describe('Account model helpers', () => {
       );
     });
 
+    test('with no nickname, official_name wins over the provider `name` (#791)', () => {
+      // The order the Copilot app itself uses. A credit card with `name:
+      // "Credit Card"` and a distinct `official_name` shows the official name in
+      // both the iOS app and the web app, and get_accounts_live returns that too.
+      // Cache mode used to try `name` first and reported the generic label.
+      expect(
+        preferredAccountName({ ...base, name: 'Credit Card', official_name: 'Rewards Card' })
+      ).toBe('Rewards Card');
+    });
+
     test('falls back to official_name when there is no name at all', () => {
       // `name` is optional on AccountSchema, so this shape is representable.
       expect(preferredAccountName({ ...base, official_name: 'OFFICIAL' })).toBe('OFFICIAL');
+    });
+
+    test('falls back to the provider `name` when there is no official_name', () => {
+      // The other half of the #791 order. `official_name` is optional too, and
+      // an account without one must still be identifiable.
+      expect(preferredAccountName({ ...base, name: 'PROVIDER' })).toBe('PROVIDER');
+      expect(preferredAccountName({ ...base, name: 'PROVIDER', official_name: '   ' })).toBe(
+        'PROVIDER'
+      );
     });
 
     test('a BLANK provider `name` is not a name either, so official_name wins', () => {

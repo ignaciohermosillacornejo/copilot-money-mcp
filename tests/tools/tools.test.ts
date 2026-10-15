@@ -930,7 +930,7 @@ describe('CopilotMoneyTools', () => {
       // renamed key still compiles.
       const accounts: Account[] = [
         { ...mockAccounts[0], name: 'Provider Checking', nickname: 'Household Checking' },
-        { ...mockAccounts[1], name: 'Provider Savings' },
+        { ...mockAccounts[1], name: 'Provider Savings', official_name: 'Official Savings' },
       ];
       (db as any)._accounts = accounts;
 
@@ -938,7 +938,9 @@ describe('CopilotMoneyTools', () => {
       const nameById = new Map(result.accounts.map((a) => [a.account_id, a.name]));
 
       expect(nameById.get('acc1')).toBe('Household Checking');
-      expect(nameById.get('acc2')).toBe('Provider Savings');
+      // The provider label is `official_name` before `name` (#791), which is
+      // the order the Copilot app shows.
+      expect(nameById.get('acc2')).toBe('Official Savings');
     });
 
     test('filters by account type', async () => {
@@ -982,7 +984,8 @@ describe('CopilotMoneyTools', () => {
       const result = await tools.getAccounts({});
       expect(result.accounts[0]).toMatchObject({
         account_id: 'acc1',
-        name: 'Checking Account',
+        // No nickname, so `official_name` is the display name (#791).
+        name: 'Checking Account Official',
         account_type: 'checking',
         subtype: 'checking',
         current_balance: 1500,

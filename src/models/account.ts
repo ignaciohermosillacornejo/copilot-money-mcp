@@ -204,6 +204,12 @@ export function isVisibleAccountNode(account: {
  * The label to show for an account: the user's Copilot nickname when they have
  * set a usable one, the provider's label otherwise (#660, #663).
  *
+ * The provider fallback is `official_name` first, then `name` (#791). That is
+ * the order the Copilot app uses: an account with no nickname, whose generic
+ * `name` and specific `official_name` differ, shows the `official_name` in both
+ * the iOS and web apps, and GraphQL `AccountNode.name` returns it too. Trying
+ * `name` first made cache mode report a generic label for that account.
+ *
  * Empty-string handling is the whole reason this is a function. `nickname` is
  * a bare optional string on {@link AccountSchema} — no `.min(1)` — so `''` is
  * a value the decoder can produce for a cleared nickname, and the two call
@@ -239,5 +245,5 @@ export function preferredAccountName(
   // of them special-cased: a rule stated for one input and applied to another
   // is how the two call sites drifted in the first place (#663).
   const usable = (s?: string): string | undefined => (s?.trim() ? s : undefined);
-  return usable(account.nickname) || usable(account.name) || usable(account.official_name);
+  return usable(account.nickname) || usable(account.official_name) || usable(account.name);
 }

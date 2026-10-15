@@ -840,7 +840,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
     surface: 'AccountNode.name:resolvesNickname',
     kind: 'response-shape',
     oracle: 'smoke:account-names',
-    class: 'verified-once',
+    class: 'gated',
     evidence:
       "Both get_accounts and get_accounts_live tell callers `name` is the user's Copilot " +
       'nickname when one is set, and that it is therefore user-editable and unsafe as a key ' +
@@ -872,10 +872,14 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'discriminating) matched, so the nickname half re-verified. ONE MISMATCH, in the ' +
       'FALLBACK branch: an account with no nickname whose provider `name` and `official_name` ' +
       'differ — the only such account in the data — where live returned `official_name` and ' +
-      'cache (`preferredAccountName`: nickname, then name, then official_name) returned ' +
+      'cache (`preferredAccountName`, which then tried nickname, then name, then official_name) returned ' +
       '`name`. So the server falls back to `official_name` before `name`, on n=1. ' +
-      'Still verified-once, not gated: the smoke is red on that row until the fallback order ' +
-      'is decided (#791), so it is not in the scheduled `bun run smoke` composite yet.',
+      'RESOLVED (#791): the Copilot iOS and web apps both show `official_name` for that ' +
+      'account too, so `preferredAccountName` now tries nickname, then official_name, then ' +
+      'name. RUN 2026-10-14 after the change (counts only): 21 compared, 0 mismatched, 10 ' +
+      'discriminating, 1 fallback-discriminating. GATED: `smoke:account-names` is now in the ' +
+      '`bun run smoke` composite, where any mismatch fails the run. It SKIPs where there is ' +
+      'no local cache, so the gate holds only on a machine that has one.',
   },
   {
     surface: 'AccountNode.hiddenAccounts:returnedUnfiltered',

@@ -178,7 +178,7 @@ export function classifyAccountNameParity(p: AccountNameParity): {
     if (p.mismatchedFallback > 0) {
       causes.push(
         `${p.mismatchedFallback} un-nicknamed account(s) differ: the two modes fall back to ` +
-          `different provider labels (cache: name, then official_name; see #791)`
+          `different provider labels (cache: official_name, then name; see #791)`
       );
     }
     if (p.mismatchedUnclassified > 0) {

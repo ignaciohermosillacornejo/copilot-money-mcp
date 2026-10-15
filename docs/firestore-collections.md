@@ -141,8 +141,8 @@ its leaf.
 |---|---|---|
 | `account_id` | string | Unique identifier — the only stable key for an account |
 | `nickname` | string | The user's Copilot nickname. Optional; `''` when cleared, and whitespace-only when sloppily set — which is why `preferredAccountName` trims for the blank test but not for the value it returns. Preferred over `name` / `official_name` whenever non-blank, so this, not `name`, is normally what the app shows |
-| `name` | string | The provider's label for the account. The displayed name only when `nickname` is blank or absent |
-| `official_name` | string | Official name from institution; last fallback after `nickname` and `name` |
+| `name` | string | The provider's generic label for the account (e.g. "Credit Card"). The displayed name only when both `nickname` and `official_name` are blank or absent (#791) |
+| `official_name` | string | Official name from the institution. The displayed name when `nickname` is blank or absent, ahead of `name`: that is the order the Copilot iOS and web apps use, and what GraphQL `AccountNode.name` returns (#791) |
 | `account_type` | string | Account type: `depository`, `credit`, `investment`, `loan`, `brokerage` |
 | `subtype` | string | Subtype: `checking`, `savings`, `credit card`, `401k`, `brokerage`, etc. |
 | `mask` | string | Last 4 digits of account number |
