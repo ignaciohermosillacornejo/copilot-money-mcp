@@ -1098,18 +1098,21 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
     surface: 'Transaction.parentId:splitChildren',
     kind: 'response-shape',
     oracle: null,
-    class: 'unverified',
+    class: 'verified-once',
     evidence:
       'After split_transaction the live window cache is written through from the mutation ' +
       'response (#820): the parent is evicted and each child is inserted with `parentId` set ' +
-      "to the parent's id. Two claims about the Transactions QUERY rest on that and neither " +
-      'has a probe transcript: (1) it omits split parents (the premise of rejecting ' +
-      'exclude_split_parents=false in live mode), and (2) it returns each split child with ' +
-      "`parentId` = the parent's id. The write-through has to supply (2) itself because the " +
-      "mutations' TransactionFields fragment does not select `parentId` (nor " +
-      '`isoCurrencyCode`, which a created or split row therefore carries as null until its ' +
-      'month is refetched) — see operations.generated.ts. Close this with a split on a ' +
-      'throwaway manual transaction and a Transactions read of its month.',
+      "to the parent's id. Two claims about the Transactions QUERY rest on that: (1) it omits " +
+      'split parents (the premise of rejecting exclude_split_parents=false in live mode, and ' +
+      'of the edit path never inserting an uncached row), and (2) it returns each split child ' +
+      "with `parentId` = the parent's id. PROBE 2026-10-15 (counts only): a year-to-date " +
+      'Transactions read of the real account returned 2029 rows; 5 carried a non-null ' +
+      '`parentId`, and none of the ids those 5 point at appeared in the result — children ' +
+      'present with their parent pointer, parents absent, both claims as assumed. The ' +
+      "write-through supplies (2) itself because the mutations' TransactionFields fragment " +
+      'does not select `parentId` (nor `isoCurrencyCode`, which a created or split row ' +
+      'therefore carries as null until its month is refetched) — see ' +
+      'operations.generated.ts. Nothing re-checks it.',
   },
 
   queryOperation('categories'),
