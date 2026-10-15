@@ -667,6 +667,21 @@ export class LiveCopilotDatabase {
     return out;
   }
 
+  /**
+   * True when any cached window-cache row is a split child of `parentId`
+   * (#822). Read-only; stops at the first match. The Transactions query omits
+   * split parents themselves, so a cached child pointing at the id is the
+   * only evidence the window cache can hold that `parentId` is a parent.
+   */
+  hasSplitChildOf(parentId: string): boolean {
+    for (const month of this.transactionsWindowCache.cachedMonths()) {
+      for (const row of this.transactionsWindowCache.entriesForMonth(month)) {
+        if (row.parentId === parentId) return true;
+      }
+    }
+    return false;
+  }
+
   // ── Phase 2: write-through patch methods ─────────────────────────────────
 
   /**

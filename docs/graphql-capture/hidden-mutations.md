@@ -83,7 +83,7 @@ input SplitTransactionInput {
 
 **How splits manifest in Firestore (for the cache):** after success, the parent doc gets `children_transaction_ids: [...]` with the new child IDs and `category_id: ""` + `old_category_id: <original>`. Each child doc gets `parent_transaction_id: <parent>`. This is what the Phase 1 decoder work (PR #315) surfaces to MCP consumers.
 
-**Reversal:** no dedicated mutation. Probes for `unsplitTransaction`, `revertSplit`, `undoSplit` all "Cannot query field". To undo a split, callers would delete each child (via `deleteTransaction`) and then edit the parent to restore its category — but Copilot's UI also supports reverting via "edit split → remove all entries".
+**Reversal:** no dedicated mutation. Probes for `unsplitTransaction`, `revertSplit`, `undoSplit` all "Cannot query field". A 2026-10-15 probe of twenty more candidate names (incl. `mergeTransaction(s)`, `removeSplit`, `deleteSplit(Transaction)`) also found none. Never delete the split parent: the server credits its amount back a second time and the account balance ends wrong (#822), so `delete_transaction` refuses a known parent. To remove a split's effect, delete each child; the parent stays hidden. Copilot's UI also offers "edit split → remove all entries", whose underlying operation is not mapped.
 
 ---
 
