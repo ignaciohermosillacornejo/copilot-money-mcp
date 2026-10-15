@@ -31,15 +31,20 @@ const MARKER_OF: Record<string, (typeof DRIFT_VERDICT_MARKERS)[number]> = {
 };
 
 /**
- * Members that are not drift checks. The refresh scripts exercise the live
- * cache-refresh paths and throw on a broken refresh; that is an error in our
- * code, not a change in Copilot's API, so `incomplete` is the honest bucket.
+ * Members that print no drift marker. The four refresh smokes throw on a
+ * failed assertion and the scheduled run reports that as `incomplete`. That is
+ * right for their local assertions (e.g. a warm-cache timing bound), but some
+ * of what they assert is server-controlled (budgets.ts: a non-empty budget
+ * list, and `months_window` anchoring to the current month), so a server-side
+ * change there is reported as "drift NOT checked" today. Exempt, so the gap is
+ * visible here rather than silent; splitting the server-controlled assertions
+ * behind their own marker is tracked in #819.
  */
 const EXEMPT: Record<string, string> = {
-  'scripts/smoke/budgets.ts': 'refresh exerciser, not a drift check',
-  'scripts/smoke/categories.ts': 'refresh exerciser, not a drift check',
-  'scripts/smoke/recurring.ts': 'refresh exerciser, not a drift check',
-  'scripts/smoke/tags.ts': 'refresh exerciser, not a drift check',
+  'scripts/smoke/budgets.ts': 'refresh smoke without a drift marker (#819)',
+  'scripts/smoke/categories.ts': 'refresh smoke without a drift marker (#819)',
+  'scripts/smoke/recurring.ts': 'refresh smoke without a drift marker (#819)',
+  'scripts/smoke/tags.ts': 'refresh smoke without a drift marker (#819)',
 };
 
 function compositeMembers(): string[] {
@@ -48,17 +53,19 @@ function compositeMembers(): string[] {
       scripts: Record<string, string>;
     }
   ).scripts;
-  const seen = new Set<string>();
-  const walk = (name: string): string[] => {
-    if (seen.has(name)) throw new Error(`package.json script cycle at ${name}`);
-    seen.add(name);
+  // `stack` is the current path, not every alias seen so far: an alias used by
+  // two steps is fine, and only one that reaches itself is a cycle.
+  const walk = (name: string, stack: readonly string[] = []): string[] => {
+    if (stack.includes(name)) {
+      throw new Error(`package.json script cycle: ${[...stack, name].join(' -> ')}`);
+    }
     const body = scripts[name];
     if (body === undefined) throw new Error(`package.json has no script "${name}"`);
     return body.split('&&').flatMap((part) => {
       const m = /^bun run (\S+)$/.exec(part.trim());
       if (!m) throw new Error(`unrecognised composite step in "${name}": ${part.trim()}`);
       const target = m[1] as string;
-      return target.startsWith('scripts/') ? [target] : walk(target);
+      return target.startsWith('scripts/') ? [target] : walk(target, [...stack, name]);
     });
   };
   return walk('smoke');
@@ -86,7 +93,12 @@ describe('bun run smoke composite drift verdicts (#818)', () => {
       if (!(DRIFT_VERDICT_MARKERS as readonly string[]).includes(marker)) {
         missing.push(`${m}: marker not in DRIFT_VERDICT_MARKERS`);
       }
-      if (!fs.readFileSync(path.join(ROOT, m), 'utf8').includes(marker)) {
+      // The marker must be the start of a console.error/console.log argument
+      // (optionally after leading newlines), not merely somewhere in the file:
+      // a copy in a comment or docblock would otherwise satisfy the check.
+      const escaped = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const printed = new RegExp(`console\\.(?:error|log)\\(\\s*['"\`](?:\\\\n)*${escaped}`);
+      if (!printed.test(fs.readFileSync(path.join(ROOT, m), 'utf8'))) {
         missing.push(`${m}: never prints "${marker}"`);
       }
     }
