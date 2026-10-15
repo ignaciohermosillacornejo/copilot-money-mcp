@@ -25,12 +25,17 @@
  * WRITE_TOOL_DEFS without a case here fails the first test.
  */
 
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect, afterAll } from 'bun:test';
+import { mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import { LiveCopilotDatabase } from '../../src/core/live-database.js';
+import { TransactionMetaStore } from '../../src/core/persistence/transaction-meta-store.js';
 import { LiveTransactionsTools } from '../../src/tools/live/transactions.js';
 import { TOOL_REGISTRY, WRITE_TOOL_DEFS } from '../../src/tools/registry/index.js';
+import * as transactionRegistry from '../../src/tools/registry/transactions.js';
 import type { LiveToolContext, ToolContext } from '../../src/tools/registry/types.js';
 import type { TransactionNode } from '../../src/core/graphql/queries/transactions.js';
 import type {
@@ -173,6 +178,9 @@ const REFERENCE_MOCKS: MockResponsesByOp = {
 
 // ── Harness ─────────────────────────────────────────────────────────────────
 
+const META_DIR = mkdtempSync(join(tmpdir(), 'live-write-coherence-meta-'));
+afterAll(() => rmSync(META_DIR, { recursive: true, force: true }));
+
 const READ_FIELDS = [
   'transaction_id',
   'name',
@@ -215,10 +223,27 @@ function setup(mutationMocks: MockResponsesByOp) {
   });
   const db = new CopilotDatabase('/nonexistent');
   (db as any).dbPath = '/fake';
-  (db as any)._transactions = [];
+  // The local (LevelDB-model) cache holds the same rows, so a partial batch can
+  // be checked against both caches.
+  (db as any)._transactions = SEED.map((n) => ({
+    transaction_id: n.id,
+    account_id: n.accountId,
+    item_id: n.itemId,
+    category_id: n.categoryId,
+    user_reviewed: n.isReviewed,
+    tag_ids: [],
+    amount: n.amount,
+    date: n.date,
+    name: n.name,
+  }));
   (db as any)._allCollectionsLoaded = true;
   (db as any)._cacheLoadedAt = Date.now();
-  const liveDb = new LiveCopilotDatabase(client, db);
+  // Persisted routing index in a per-run temp dir — never the user's home.
+  const metaStore = new TransactionMetaStore({
+    baseDir: mkdtempSync(join(META_DIR, 'store-')),
+    uidProvider: () => 'test-uid',
+  });
+  const liveDb = new LiveCopilotDatabase(client, db, { metaStore });
   const tools = new CopilotMoneyTools(db, client, liveDb);
   const ctx: ToolContext = {
     tools,
@@ -238,7 +263,11 @@ function setup(mutationMocks: MockResponsesByOp) {
       limit: 500,
       fields: READ_FIELDS,
     })) as { transactions: Row[]; _cache_hit: boolean };
-  return { call, read, fetches: () => transactionsFetches };
+  const local = (id: string) =>
+    ((db as any)._transactions as Array<Record<string, unknown>>).find(
+      (t) => t.transaction_id === id
+    );
+  return { call, read, local, fetches: () => transactionsFetches };
 }
 
 const routing = { account_id: ACCOUNT_ID, item_id: ITEM_ID };
@@ -485,11 +514,26 @@ const CASES: Record<string, Case> = {
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
+/**
+ * Every registered write tool that writes transactions, derived structurally:
+ * the definitions the transactions domain module (src/tools/registry/
+ * transactions.ts) exports that are registered as writes. A transaction write
+ * tool defined in another domain module would escape that rule, so any write
+ * tool whose name mentions transactions is included as well — the union can
+ * only widen the set, never let a tool through.
+ */
+function transactionWriteToolNames(): string[] {
+  const inTransactionsModule = new Set<unknown>(Object.values(transactionRegistry));
+  return WRITE_TOOL_DEFS.filter(
+    (def) => inTransactionsModule.has(def) || /transaction/.test(def.name)
+  )
+    .map((def) => def.name)
+    .sort();
+}
+
 describe('write → live-read coherence (#820, #821)', () => {
   test('every transaction write tool has a case in this table', () => {
-    const transactionWriteTools = WRITE_TOOL_DEFS.map((d) => d.name)
-      .filter((name) => /transaction/.test(name))
-      .sort();
+    const transactionWriteTools = transactionWriteToolNames();
     expect(transactionWriteTools.length).toBeGreaterThan(0);
     expect(Object.keys(CASES).sort()).toEqual(transactionWriteTools);
   });
@@ -590,9 +634,7 @@ const NOT_EDITS = ['create_transaction', 'split_transaction', 'delete_transactio
 
 describe('an edit of an uncached row never inserts it (split parents)', () => {
   test('every editing transaction write tool has a case', () => {
-    const editTools = WRITE_TOOL_DEFS.map((d) => d.name)
-      .filter((name) => /transaction/.test(name) && !NOT_EDITS.includes(name))
-      .sort();
+    const editTools = transactionWriteToolNames().filter((name) => !NOT_EDITS.includes(name));
     expect(editTools.length).toBeGreaterThan(0);
     expect(Object.keys(EDIT_OF_UNCACHED_ROW).sort()).toEqual(editTools);
   });
@@ -616,4 +658,108 @@ describe('an edit of an uncached row never inserts it (split parents)', () => {
       expect(fetches()).toBe(2);
     }
   );
+});
+
+// ── A partial batch still writes through the rows that landed ───────────────
+//
+// The bulk tools throw when the server skips a row (unknown id, no failed[]
+// entry) or rejects one (failed[]). Rows the server DID write must still reach
+// both caches before that throw, or the caches claim they never changed.
+
+const TX_UNKNOWN = 'zA1kX4oP7lM2tS9uW6yB';
+
+/** Bulk response: TX_REVIEW updated, plus either a silent skip or a failed[] entry. */
+function partialBulk(kind: 'skipped' | 'failed', overrides: Partial<CreatedTransaction>) {
+  return {
+    BulkEditTransactions: {
+      bulkEditTransactions: {
+        updated: [{ ...mutationNode(seedById(TX_REVIEW), overrides), parentId: null }],
+        failed:
+          kind === 'failed'
+            ? [
+                {
+                  transaction: mutationNode(seedById(TX_BULK_1)),
+                  error: 'synthetic rejection',
+                  errorCode: 'SYNTHETIC',
+                },
+              ]
+            : [],
+      },
+    },
+  } satisfies MockResponsesByOp;
+}
+
+interface PartialCase {
+  label: string;
+  tool: string;
+  mocks: MockResponsesByOp;
+  args: Record<string, unknown>;
+  expected: { live: Row; local: Row };
+}
+
+const PARTIAL_CASES: PartialCase[] = (['skipped', 'failed'] as const).flatMap((kind) => {
+  const second = kind === 'skipped' ? TX_UNKNOWN : TX_BULK_1;
+  const rows = [TX_REVIEW, second].map((id) => ({ ...routing, transaction_id: id }));
+  return [
+    {
+      label: `review_transactions, one row ${kind}`,
+      tool: 'review_transactions',
+      mocks: partialBulk(kind, { isReviewed: false }),
+      args: { rows, reviewed: false },
+      expected: { live: { user_reviewed: false }, local: { user_reviewed: false } },
+    },
+    {
+      label: `bulk_edit_transactions, one row ${kind}`,
+      tool: 'bulk_edit_transactions',
+      mocks: partialBulk(kind, { categoryId: CAT_NEW }),
+      args: { rows, category_id: CAT_NEW },
+      expected: { live: { category_id: CAT_NEW }, local: { category_id: CAT_NEW } },
+    },
+  ];
+});
+
+describe('a partial batch writes through the rows that landed', () => {
+  test.each(PARTIAL_CASES.map((c) => [c.label, c] as const))(
+    '%s: the landed row is in both caches despite the error',
+    async (_label, c) => {
+      const { call, read, local, fetches } = setup(c.mocks);
+      await read();
+
+      await expect(call(c.tool, c.args)).rejects.toThrow();
+
+      const after = await read();
+      expect(fetches()).toBe(1);
+      const rows = new Map(after.transactions.map((r) => [r.transaction_id as string, r]));
+      expect(rows.get(TX_REVIEW)).toMatchObject(c.expected.live);
+      expect(local(TX_REVIEW)).toMatchObject(c.expected.local);
+    }
+  );
+
+  test('update_transactions: a failed edit does not stop a landed one being written through', async () => {
+    const { call, read, local, fetches } = setup({
+      EditTransaction: (vars) => {
+        const v = vars as { id: string; input: EditTransactionInput };
+        if (v.id === TX_BATCH_2) return new Error('synthetic failure');
+        return { editTransaction: { transaction: applyEdit(v.id, v.input) } };
+      },
+    });
+    await read();
+
+    await expect(
+      call('update_transactions', {
+        edits: [
+          { ...routing, transaction_id: TX_BATCH_1, category_id: CAT_NEW },
+          { ...routing, transaction_id: TX_BATCH_2, category_id: CAT_NEW },
+        ],
+      })
+    ).rejects.toThrow();
+
+    const after = await read();
+    expect(fetches()).toBe(1);
+    const rows = new Map(after.transactions.map((r) => [r.transaction_id as string, r]));
+    expect(rows.get(TX_BATCH_1)).toMatchObject({ category_id: CAT_NEW });
+    expect(rows.get(TX_BATCH_2)).toMatchObject({ category_id: CAT_OLD });
+    expect(local(TX_BATCH_1)).toMatchObject({ category_id: CAT_NEW });
+    expect(local(TX_BATCH_2)).toMatchObject({ category_id: CAT_OLD });
+  });
 });

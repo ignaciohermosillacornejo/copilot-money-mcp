@@ -149,6 +149,10 @@ export class TransactionWindowCache<T extends CachedTransaction = CachedTransact
       this._totalRows += 1;
     }
     this.lastAccessed.set(month, Date.now());
+    // An insert grows the cache without an ingest (write-through creates and
+    // split children), so it must honor the same cap. The month just written
+    // is the most recently accessed, so it is evicted last.
+    this.evictLRU(this.opts.maxRows);
   }
 
   delete(id: string): void {

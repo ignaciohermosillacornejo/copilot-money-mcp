@@ -4098,11 +4098,22 @@ export class CopilotMoneyTools {
     // one-input-many-rows shape. (Tools that need per-row edits, or the
     // name/date/amount/note fields bulk does not support, still fan out.)
     const [first, ...rest] = entries;
+    // Optimistic cache patch — only ids the server confirmed it wrote, applied
+    // inside bulkEdit before any partial-batch error is thrown. A partial batch
+    // must not leave the cache claiming writes that never landed, nor hide the
+    // ones that did. For rows-mode entries outside the local cache the local
+    // patch is a no-op (same eviction-is-a-no-op contract as delete_transaction).
     const result = await this.bulkEdit(
       client,
       [first!, ...rest],
       { isReviewed: reviewed },
-      'review_transactions'
+      'review_transactions',
+      (updated) => {
+        for (const tx of updated) {
+          this.db.patchCachedTransaction(tx.id, { user_reviewed: reviewed });
+          this.liveDb?.upsertLiveTransaction(tx);
+        }
+      }
     );
 
     // Unknown ids are dropped silently by the server rather than reported in
@@ -4116,15 +4127,6 @@ export class CopilotMoneyTools {
           `no error for them: ${result.skipped.join(', ')}. They may have been deleted, or the ` +
           'account_id/item_id routing may not match the transaction.'
       );
-    }
-
-    // Optimistic cache patch — only ids the server confirmed it wrote. A
-    // partial batch must not leave the cache claiming writes that never
-    // landed. For rows-mode entries outside the local cache both patches are
-    // no-ops (same eviction-is-a-no-op contract as delete_transaction).
-    for (const tx of result.updated) {
-      this.db.patchCachedTransaction(tx.id, { user_reviewed: reviewed });
-      this.liveDb?.upsertLiveTransaction(tx);
     }
 
     return {
@@ -4218,7 +4220,8 @@ export class CopilotMoneyTools {
       ...{ id: string; accountId: string; itemId: string }[],
     ],
     input: BulkEditTransactionInput,
-    label: string
+    label: string,
+    onLanded: (updated: BulkEditTransactionsResult['updated']) => void
   ): Promise<BulkEditTransactionsResult> {
     let result: BulkEditTransactionsResult;
     try {
@@ -4229,6 +4232,11 @@ export class CopilotMoneyTools {
       }
       throw e;
     }
+    // Rows the server confirmed it wrote reach the caches BEFORE any partial-
+    // batch error below (or the caller's silently-skipped check) throws — a
+    // rejected sibling must not leave the caches claiming a landed row never
+    // changed.
+    onLanded(result.updated);
     if (result.failed.length > 0) {
       const detail = result.failed
         .map(
@@ -4381,7 +4389,35 @@ export class CopilotMoneyTools {
     if (remove_tag_ids !== undefined) input.removeTagIds = remove_tag_ids;
 
     const [first, ...rest] = entries;
-    const result = await this.bulkEdit(client, [first!, ...rest], input, 'bulk_edit_transactions');
+    // Optimistic cache patch, per confirmed row, applied inside bulkEdit before
+    // any partial-batch error is thrown. `type` itself has no local
+    // counterpart (the cache stores Plaid's transaction_type, not Copilot's
+    // classification) — only its category-clearing side effect is patchable.
+    // Tag add/remove is applied against the tag list the SERVER returned, not
+    // recomputed locally, so the cache matches the authoritative result.
+    const result = await this.bulkEdit(
+      client,
+      [first!, ...rest],
+      input,
+      'bulk_edit_transactions',
+      (updated) => {
+        for (const tx of updated) {
+          const patch: Partial<Transaction> = {};
+          if (category_id !== undefined) patch.category_id = category_id;
+          if (reviewed !== undefined) patch.user_reviewed = reviewed;
+          if (type === 'INCOME' || type === 'INTERNAL_TRANSFER') patch.category_id = '';
+          if (add_tag_ids !== undefined || remove_tag_ids !== undefined) {
+            patch.tag_ids = tx.tags.map((t) => t.id);
+          }
+          if (Object.keys(patch).length > 0) {
+            this.db.patchCachedTransaction(tx.id, patch);
+          }
+          // Live cache: the server's returned row, which already carries the
+          // type, the cleared category and the post-edit tag list (#821).
+          this.liveDb?.upsertLiveTransaction(tx);
+        }
+      }
+    );
 
     // mutation-guard: bulk_edit_transactions surfaces silently-skipped rows
     if (result.skipped.length > 0) {
@@ -4391,27 +4427,6 @@ export class CopilotMoneyTools {
           `error for them: ${result.skipped.join(', ')}. They may have been deleted, or the ` +
           'account_id/item_id routing may not match the transaction.'
       );
-    }
-
-    // Optimistic cache patch, per confirmed row. `type` itself has no local
-    // counterpart (the cache stores Plaid's transaction_type, not Copilot's
-    // classification) — only its category-clearing side effect is patchable.
-    // Tag add/remove is applied against the tag list the SERVER returned, not
-    // recomputed locally, so the cache matches the authoritative result.
-    for (const tx of result.updated) {
-      const patch: Partial<Transaction> = {};
-      if (category_id !== undefined) patch.category_id = category_id;
-      if (reviewed !== undefined) patch.user_reviewed = reviewed;
-      if (type === 'INCOME' || type === 'INTERNAL_TRANSFER') patch.category_id = '';
-      if (add_tag_ids !== undefined || remove_tag_ids !== undefined) {
-        patch.tag_ids = tx.tags.map((t) => t.id);
-      }
-      if (Object.keys(patch).length > 0) {
-        this.db.patchCachedTransaction(tx.id, patch);
-      }
-      // Live cache: the server's returned row, which already carries the
-      // type, the cleared category and the post-edit tag list (#821).
-      this.liveDb?.upsertLiveTransaction(tx);
     }
 
     return {

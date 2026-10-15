@@ -47,8 +47,15 @@ looked the same as one that had it.
 `split_transaction` evicts the parent as before and then upserts each child, setting
 `parentId` to the parent's id, because the mutation fragment does not select it and a
 Transactions read reports split children that way (ledger:
-`Transaction.parentId:splitChildren`, unverified). The upsert is a no-op for a month that
-is not cached, so the next read fetches it from the server.
+`Transaction.parentId:splitChildren`, verified-once: probe 2026-10-15, counts only). The
+upsert is a no-op for a month that is not cached, so the next read fetches it from the
+server.
+
+Not fixed, and out of scope here: the local LevelDB snapshot that cache mode reads.
+`split_transaction` evicts the parent from it too, but `CopilotDatabase` has no insert
+API, so split children are never added. Cache-mode reads show the vanished-amount symptom
+until the local cache reloads (5-minute TTL by default, `COPILOT_CACHE_TTL_MINUTES`) and
+the Copilot app has synced the children into its LevelDB.
 
 ## Detector
 

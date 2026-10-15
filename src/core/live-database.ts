@@ -685,7 +685,10 @@ export class LiveCopilotDatabase {
    *   cached values instead of being blanked. A date move takes the row out of
    *   its old month and into the new one if that month is cached.
    * - Row not cached, `insert: true` (a created row, a split child) → inserted
-   *   with `null` for those two unselected keys, or `opts.parentId`.
+   *   with `null` for those two unselected keys, or `opts.parentId` — unless
+   *   its routing ids are empty (a drifted response), in which case it is
+   *   treated like an uncached edit below. A merge never lets an empty routing
+   *   id overwrite the cached row's.
    * - Row not cached, an EDIT (the default) → NOT inserted. An edit's target
    *   can be absent from a cached month legitimately: it is a split parent,
    *   which the Transactions query omits, and the mutation response does not
@@ -714,8 +717,12 @@ export class LiveCopilotDatabase {
       this.metaStore.flush();
     }
     const existing = this.lookupTransactionNodes([node.id]).get(node.id);
+    const hasRouting = Boolean(node.accountId && node.itemId);
     // mutation-guard: an edit never inserts an uncached row
-    if (!existing && opts.insert !== true) {
+    if (!existing && (opts.insert !== true || !hasRouting)) {
+      // Not inserting: an edit (see above), or a drifted create/split response
+      // with empty routing ids — a row no later write could address. Either
+      // way the month is refetched rather than left without the server's row.
       const month = node.date.slice(0, 7);
       if (this.transactionsWindowCache.hasMonth(month)) {
         this.transactionsWindowCache.invalidate([month]);
@@ -729,6 +736,11 @@ export class LiveCopilotDatabase {
       ...node,
       ...(opts.parentId !== undefined ? { parentId: opts.parentId } : {}),
     };
+    // A drifted empty routing id never overwrites the cached row's real one.
+    if (existing && !hasRouting) {
+      merged.accountId = node.accountId || existing.accountId;
+      merged.itemId = node.itemId || existing.itemId;
+    }
     this.transactionsWindowCache.upsert(merged);
   }
 

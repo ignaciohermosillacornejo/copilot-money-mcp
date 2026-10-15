@@ -5,11 +5,25 @@
  * it remains the sole resolver in degraded mode (no liveDb).
  */
 
-import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
+import { describe, test, expect, mock, beforeEach, afterEach, afterAll } from 'bun:test';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import { LiveCopilotDatabase } from '../../src/core/live-database.js';
 import { createMockGraphQLClient, bulkEditEcho } from '../helpers/mock-graphql.js';
+import { mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { TransactionMetaStore } from '../../src/core/persistence/transaction-meta-store.js';
+
+// A persisted routing index in a per-run temp dir, so a LiveCopilotDatabase
+// built here never reads or writes the user's real one under ~/.claude.
+const META_DIR = mkdtempSync(join(tmpdir(), 'resolve-transaction-meta-meta-'));
+afterAll(() => rmSync(META_DIR, { recursive: true, force: true }));
+const isolatedMetaStore = () =>
+  new TransactionMetaStore({
+    baseDir: mkdtempSync(join(META_DIR, 'store-')),
+    uidProvider: () => 'test-uid',
+  });
 
 function echoEdit(vars: any) {
   return {
@@ -320,7 +334,7 @@ describe('createTransaction feeds the meta index', () => {
     // so assert the observable result (the id resolves), not the call.
     const db = makeDb();
     (db as any)._userCategories = [{ category_id: 'c1', name: 'Synthetic Cat' }];
-    const liveDb = new LiveCopilotDatabase(client, db);
+    const liveDb = new LiveCopilotDatabase(client, db, { metaStore: isolatedMetaStore() });
     const tools = new CopilotMoneyTools(db, client, liveDb);
 
     await tools.createTransaction({

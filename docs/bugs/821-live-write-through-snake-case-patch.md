@@ -66,6 +66,11 @@ children, so an edit of an uncached row invalidates its month instead and the ne
 refetches. Only creates and split children insert (found in review of the first version
 of this fix, and registered as a second mutation guard).
 
+The bulk tools (`review_transactions`, `bulk_edit_transactions`) throw when the server
+skips or rejects part of a batch. The rows it did write now reach both caches before that
+throw; previously the throw came first and the landed rows stayed stale (also found in
+review, and covered by partial-batch cases in the detector).
+
 ## Detector
 
 `tests/tools/live-write-coherence.test.ts`: one case per transaction write tool, derived

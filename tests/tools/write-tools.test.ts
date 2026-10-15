@@ -7,7 +7,7 @@
  * into set_budget.
  */
 
-import { describe, test, expect, beforeEach } from 'bun:test';
+import { describe, test, expect, beforeEach, afterAll } from 'bun:test';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
@@ -16,6 +16,20 @@ import type {
   CreateTransactionResponse,
 } from '../../src/core/graphql/transactions.js';
 import { LiveCopilotDatabase } from '../../src/core/live-database.js';
+import { mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { TransactionMetaStore } from '../../src/core/persistence/transaction-meta-store.js';
+
+// A persisted routing index in a per-run temp dir, so a LiveCopilotDatabase
+// built here never reads or writes the user's real one under ~/.claude.
+const META_DIR = mkdtempSync(join(tmpdir(), 'write-tools-meta-'));
+afterAll(() => rmSync(META_DIR, { recursive: true, force: true }));
+const isolatedMetaStore = () =>
+  new TransactionMetaStore({
+    baseDir: mkdtempSync(join(META_DIR, 'store-')),
+    uidProvider: () => 'test-uid',
+  });
 
 describe('updateCategory', () => {
   let tools: CopilotMoneyTools;
@@ -630,7 +644,7 @@ describe('createTransaction', () => {
   // method was called.
   test('response routing ids feed the live meta index', async () => {
     const client = createMockGraphQLClient({ CreateTransaction: { createTransaction: createdTx } });
-    const liveDb = new LiveCopilotDatabase(client, mockDb);
+    const liveDb = new LiveCopilotDatabase(client, mockDb, { metaStore: isolatedMetaStore() });
     tools = new CopilotMoneyTools(mockDb, client, liveDb);
 
     await tools.createTransaction(validArgs);
@@ -648,7 +662,7 @@ describe('createTransaction', () => {
     const client = createMockGraphQLClient({
       CreateTransaction: { createTransaction: { ...createdTx, accountId: '' } },
     });
-    const liveDb = new LiveCopilotDatabase(client, mockDb);
+    const liveDb = new LiveCopilotDatabase(client, mockDb, { metaStore: isolatedMetaStore() });
     tools = new CopilotMoneyTools(mockDb, client, liveDb);
 
     await tools.createTransaction(validArgs);
@@ -661,7 +675,7 @@ describe('createTransaction', () => {
     const client = createMockGraphQLClient({
       CreateTransaction: { createTransaction: { ...createdTx, itemId: '' } },
     });
-    const liveDb = new LiveCopilotDatabase(client, mockDb);
+    const liveDb = new LiveCopilotDatabase(client, mockDb, { metaStore: isolatedMetaStore() });
     tools = new CopilotMoneyTools(mockDb, client, liveDb);
 
     await tools.createTransaction(validArgs);

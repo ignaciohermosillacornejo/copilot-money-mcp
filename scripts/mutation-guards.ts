@@ -398,10 +398,10 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
       kind: 'replace',
       find:
         '    // mutation-guard: an edit never inserts an uncached row\n' +
-        '    if (!existing && opts.insert !== true) {',
+        '    if (!existing && (opts.insert !== true || !hasRouting)) {',
       with:
         '    // mutation-guard: an edit never inserts an uncached row\n' +
-        '    if (!existing && false) {',
+        '    if (!existing && !hasRouting) {',
     },
     // The invariant half of the test.each title; every edit tool's case runs it.
     expectFailingTests: [

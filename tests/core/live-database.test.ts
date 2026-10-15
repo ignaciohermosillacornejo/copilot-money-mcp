@@ -562,6 +562,31 @@ describe('LiveCopilotDatabase.upsertLiveTransaction', () => {
     expect(wc.entriesForMonth('2024-01')).toHaveLength(0);
   });
 
+  test('insert: a row with empty routing ids is not inserted, but still merges if cached', () => {
+    // A drifted create/split response (warn-only validation) would otherwise put
+    // a row no later write could address into the cache. It is not inserted;
+    // its month is invalidated so the next read refetches the server's row.
+    const live = mkLive();
+    const wc = live.getTransactionsWindowCache();
+    for (const drift of [{ accountId: '' }, { itemId: '' }]) {
+      wc.ingestMonth('2024-01', [queryRow()], Date.now());
+      wc.ingestMonth('2024-02', [], Date.now());
+      live.upsertLiveTransaction(mutationRow({ id: 'sT1gT7hI0eF5mJ2kP6nQ', ...drift }), {
+        insert: true,
+      });
+      expect(wc.hasMonth('2024-01')).toBe(false);
+      expect(wc.hasMonth('2024-02')).toBe(true);
+    }
+
+    // Merging into a row that is already cached keeps working; the cached
+    // routing ids survive because an empty server value is not trusted over them.
+    wc.ingestMonth('2024-01', [queryRow()], Date.now());
+    live.upsertLiveTransaction(mutationRow({ name: 'Merged', accountId: '' }), { insert: true });
+    const [row] = wc.entriesForMonth('2024-01');
+    expect(row!.name).toBe('Merged');
+    expect(row!.accountId).toBe('kQ7vN2xR9pL4mW8tY3zB');
+  });
+
   test('empty routing ids are not fed to the meta index (#518)', () => {
     const live = mkLive();
     live.upsertLiveTransaction(mutationRow({ accountId: '' }));

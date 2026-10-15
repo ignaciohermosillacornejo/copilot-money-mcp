@@ -180,6 +180,25 @@ describe('TransactionWindowCache.evictLRU', () => {
     // The newest months survive.
     expect(cache.hasMonth('2026-03')).toBe(true);
   });
+
+  test('an upsert that inserts a row past the cap evicts too, not only an ingest', () => {
+    // Write-through inserts (create_transaction, split children) grow the
+    // cache without an ingest; they must honor the same cap.
+    const cache = new TransactionWindowCache(
+      { liveTtlMs: 0, coldTtlMs: 7 * 24 * 60 * 60 * 1000, maxRows: 3 },
+      new InFlightRegistry()
+    );
+    cache.ingestMonth('2026-01', [mkTx('a', '2026-01-10'), mkTx('b', '2026-01-11')], 1);
+    cache.ingestMonth('2026-02', [mkTx('c', '2026-02-10')], 2);
+    expect(cache.totalRows()).toBe(3);
+
+    cache.upsert(mkTx('d', '2026-02-12'));
+
+    expect(cache.totalRows()).toBeLessThanOrEqual(3);
+    // The month just written to is the most recently accessed, so it survives.
+    expect(cache.hasMonth('2026-02')).toBe(true);
+    expect(cache.hasMonth('2026-01')).toBe(false);
+  });
 });
 
 describe('TransactionWindowCache.totalRows running counter', () => {
