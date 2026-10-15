@@ -4,7 +4,7 @@ title: In live mode, a created transaction (or split children) was invisible to 
 class: stale-cache-semantics
 status: fixed
 detected: live-probe  # v3.0 release parity test (2026-10-14): create_transaction in last month, then get_transactions_live
-fixed_in: not yet
+fixed_in: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/831
 issue: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/820
 date: 2026-10-15
 ---

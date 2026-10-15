@@ -4,7 +4,7 @@ title: In live mode, category, tag, note, review and recurring edits were invisi
 class: stale-cache-semantics
 status: fixed
 detected: live-probe  # v3.0 release parity test (2026-10-14): write, then read the same cold month through the live tool
-fixed_in: not yet
+fixed_in: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/831
 issue: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/821
 date: 2026-10-15
 ---
