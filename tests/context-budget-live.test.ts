@@ -60,6 +60,7 @@ export const COVERED_LIVE_TOOLS = [
   'get_upcoming_recurrings_live',
   'get_accounts_live',
   'get_transactions_live',
+  'get_monthly_spend_live',
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -225,7 +226,7 @@ const transactionsPage: TransactionsPage = {
 };
 
 /**
- * One response map covering every operation any of the 7 covered tools
+ * One response map covering every operation any of the covered tools
  * might issue. A fresh client built from this per call (see
  * buildLiveServer()) means each tool only exercises the ops it actually
  * needs — unused entries are harmless.
@@ -240,6 +241,14 @@ const STUB_RESPONSES: MockResponsesByOp = {
   InvestmentBalance: { investmentBalance: investmentBalanceHistory },
   InvestmentLiveBalance: { investmentLiveBalance: investmentLiveBalanceDot },
   Transactions: { transactions: transactionsPage },
+  // Two real days plus one placeholder, the shape of a mid-month response.
+  MonthlySpend: {
+    monthlySpending: [
+      { id: 'ms-1', date: '2026-08-01', totalAmount: 100, comparisonAmount: 900 },
+      { id: 'ms-2', date: '2026-08-02', totalAmount: 150, comparisonAmount: 1800 },
+      { id: 'ms-3', date: '2026-08-03', totalAmount: null, comparisonAmount: null },
+    ],
+  },
 };
 
 /**
@@ -337,6 +346,10 @@ const LIVE_BUDGETS: Record<string, number> = {
   // row back. Same gap the get_accounts_live and recurring entries above
   // closed, on the tool the flip was actually about. 455 is measured +~11%.
   get_transactions_live: 455,
+  // Added by #823, which gave each row a `daily_amount`. Measured 349 against
+  // the two real stub days above (the placeholder is filtered); 385 is that
+  // +~10%. The series is at most 31 rows, so this scales to ~5k worst case.
+  get_monthly_spend_live: 385,
 };
 
 const coveredDefs: ToolDefinition[] = COVERED_LIVE_TOOLS.map((name) => {

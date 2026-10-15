@@ -101,13 +101,12 @@ export class LiveMonthlySpendTools {
       cached.map(projectRow).sort((a, b) => a.date.localeCompare(b.date))
     );
     const includeFuture = args.include_future ?? false;
-    // Default: drop any row where either amount is null (placeholder rows
-    // for future dates). The captured response always pairs both nulls
-    // together, but treat a single null as a placeholder too — emitting
-    // half-populated rows would be more confusing than dropping them.
-    const rows = includeFuture
-      ? series
-      : series.filter((r) => r.total_amount !== null && r.comparison_amount !== null);
+    // Default: drop placeholder rows — the server pads the rest of the month
+    // with rows whose total_amount is null. Keyed on total_amount alone: a row
+    // with a known cumulative total is real spend even if comparison_amount is
+    // missing, and dropping it would leave the visible daily_amount column
+    // short of the last total_amount.
+    const rows = includeFuture ? series : series.filter((r) => r.total_amount !== null);
 
     this.live.logReadCall({
       op: 'MonthlySpend',
@@ -139,7 +138,8 @@ export function createLiveMonthlySpendToolSchema(): ToolSchema {
       "month-to-date; `daily_amount` is that day's increase (the first row's, its own total). " +
       'Counts REGULAR transactions with no recurring link, net of refunds, pending included; ' +
       'leaves out income, transfers and recurring charges (rent, subscriptions), so it is ' +
-      'NOT the app\'s "spent this month" — for that, sum the POSITIVE amounts from ' +
+      'NOT the app\'s "spent this month" — for that, sum the POSITIVE amounts (the app does ' +
+      'not net refunds) from ' +
       'get_transactions_live, whose defaults already drop transfers and excluded rows. ' +
       '`comparison_amount`\'s meaning is unconfirmed; do not use it for "vs last month". ' +
       'A row dated tomorrow can appear. Future rows (null amounts) are dropped unless ' +

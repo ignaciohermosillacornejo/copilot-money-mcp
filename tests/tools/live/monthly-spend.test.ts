@@ -126,6 +126,20 @@ describe('LiveMonthlySpendTools.getMonthlySpend', () => {
     expect(full.daily_spending.find((r) => r.id === 'c')?.daily_amount).toBe(50);
   });
 
+  test('default view keeps a row whose comparison_amount alone is null', async () => {
+    const client = makeClient([
+      { id: 'a', date: '2026-04-01', totalAmount: 100, comparisonAmount: 90 },
+      { id: 'b', date: '2026-04-02', totalAmount: 150, comparisonAmount: null },
+      { id: 'c', date: '2026-04-03', totalAmount: 200, comparisonAmount: 80 },
+    ]);
+    const tools = new LiveMonthlySpendTools(makeLive(client));
+
+    const result = await tools.getMonthlySpend({});
+
+    // The visible daily_amount column sums to the last total_amount.
+    expect(result.daily_spending.map((r) => r.daily_amount)).toEqual([100, 50, 50]);
+  });
+
   test('passes numeric wire amounts through as numbers', async () => {
     const client = makeClient([pastRow]);
     const tools = new LiveMonthlySpendTools(makeLive(client));
@@ -157,10 +171,9 @@ describe('LiveMonthlySpendTools.getMonthlySpend', () => {
     expect(result.daily_spending).toEqual([]);
   });
 
-  test('row with one null amount is treated as future and filtered by default', async () => {
-    // Defensive: spec says "both amounts are null" is the placeholder shape,
-    // but if only one is null we still drop the row by default rather than
-    // emit a partial number.
+  test('row with a null total_amount is treated as future and filtered by default', async () => {
+    // Defensive: the captured placeholder pairs both nulls, but a null total
+    // alone is enough — there is no spend figure to show.
     const halfNull = {
       id: 'd-half',
       date: '2026-04-19',
