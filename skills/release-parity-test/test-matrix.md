@@ -133,7 +133,7 @@ need it.
 | ID | Case | Compare | Expected | Last run |
 |---|---|---|---|---|
 | CAT-01 | [P1] Category list and budget amounts | live `get_categories_live` `budget_amount` vs web Categories BUDGET column | Equal for every category, including negative rollover values | 2026-10-14 PASS (blank vs 0 note #825) |
-| CAT-02 | [P1] Month spend | web "spent in <month>" vs sum of positive non-transfer, non-excluded `get_transactions_live` amounts vs `get_monthly_spend_live` last row | Transactions sum within $1 of the web; monthly spend series per #823 | 2026-10-14 FAIL #823 |
+| CAT-02 | [P1] Month spend | web "spent in <month>" vs sum of positive non-transfer, non-excluded `get_transactions_live` amounts vs `get_monthly_spend_live` last row | Transactions sum within $1 of the web; monthly spend last row = that month's positive-minus-refund REGULAR amounts with no `recurring_id` (read with fields: ["default", "recurring_id", "type"]; cumulative non-recurring spend, #823), NOT the web figure | 2026-10-14 FAIL #823 (description fixed in #829; re-run) |
 | CAT-03 | [P1] Dashboard | web "budgeted" vs sum of top-level non-excluded `budget_amount`; web "left" vs budgeted minus CAT-02 spend | Equal | 2026-10-14 PASS |
 | CAT-04 | [P1] Spend in a parent category | `get_transactions_live {category: <parent id>}` vs the sum over its children vs web parent "spent" | Returns parent plus children, or the description says the filter matches one exact id (`transactions.ts` ~415) | not run |
 | CAT-05 | [P1] Category passed by name | `{category: "<real name>"}` in both modes | An error or a warning; a silent 0 is a FAIL (cache substring-matches the id, `src/core/database.ts` ~1197) | not run |

@@ -296,7 +296,9 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // schema fragment is shared verbatim between the two tools so their
   // descriptions cannot drift. Measured 1_718 (~10% headroom).
   get_upcoming_recurrings_live: 1_890,
-  get_monthly_spend_live: 1_235,
+  // Lowered 1_235 -> 1_135 by #823, whose rewritten description is shorter.
+  // Measured 1_029 (~10% headroom).
+  get_monthly_spend_live: 1_135,
   // Raised 1_210 -> 1_615 by #683, the live half of the same fix that raised
   // get_holdings. Same trade, same reason: an `include_hidden` param so
   // filtering by default removes no capability, and a description sentence

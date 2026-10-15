@@ -10,12 +10,12 @@
  * is NOT the app's "spent this month": it leaves out every transaction
  * linked to a recurring (rent, subscriptions). Measured 2026-10-15 (#823):
  * each day's increase equals that day's REGULAR transactions with no
- * recurring link, net of refunds, pending included, to the cent (income
- * and internal transfers do not count). The tool
- * adds `daily_amount` (the day's increase) so callers need not difference
- * the series themselves. `comparisonAmount`'s meaning is unconfirmed — it
- * grows far faster than any prior-month spend, so it is not the
- * "same day last month" figure an earlier description claimed.
+ * recurring link, net of refunds, pending included, to the cent; income
+ * and internal transfers do not count. The tool adds `daily_amount` (the
+ * day's increase) so callers need not difference the series themselves.
+ * `comparisonAmount`'s meaning is unconfirmed: it grows far faster than
+ * any prior-month spend, so it is not the "same day last month" figure an
+ * earlier description claimed.
  *
  * The response includes future-dated placeholder rows where both amount
  * fields are `null` (the server pads the full month). By default the
@@ -29,7 +29,7 @@ import {
   fetchMonthlySpend,
   type DailySpendNode,
 } from '../../core/graphql/queries/monthly-spend.js';
-import { parseAmount } from '../../utils/round.js';
+import { parseAmount, roundAmount } from '../../utils/round.js';
 import type { ToolSchema } from '../tools.js';
 
 export interface GetMonthlySpendLiveArgs {
@@ -58,7 +58,9 @@ export interface GetMonthlySpendLiveResult {
   _cache_hit: boolean;
 }
 
-function projectRow(row: DailySpendNode): Omit<GetMonthlySpendLiveDay, 'daily_amount'> {
+type ProjectedDay = Omit<GetMonthlySpendLiveDay, 'daily_amount'>;
+
+function projectRow(row: DailySpendNode): ProjectedDay {
   return {
     id: row.id,
     date: row.date,
@@ -68,17 +70,16 @@ function projectRow(row: DailySpendNode): Omit<GetMonthlySpendLiveDay, 'daily_am
 }
 
 /**
- * Difference the cumulative series into per-day amounts. Runs over the
- * date-sorted rows; a null total (future placeholder) yields null and does
- * not reset the running baseline.
+ * Difference the cumulative series into per-day amounts. Runs over the full
+ * date-sorted series BEFORE any filtering, so a day's value never depends on
+ * which other rows the caller asked to see; a null total yields null and
+ * does not reset the running baseline.
  */
-function withDailyAmounts(
-  rows: Array<Omit<GetMonthlySpendLiveDay, 'daily_amount'>>
-): GetMonthlySpendLiveDay[] {
+function withDailyAmounts(rows: ProjectedDay[]): GetMonthlySpendLiveDay[] {
   let previous = 0;
   return rows.map((r) => {
     if (r.total_amount === null) return { ...r, daily_amount: null };
-    const daily_amount = Math.round((r.total_amount - previous) * 100) / 100;
+    const daily_amount = roundAmount(r.total_amount - previous);
     previous = r.total_amount;
     return { ...r, daily_amount };
   });
@@ -96,17 +97,17 @@ export class LiveMonthlySpendTools {
       hit,
     } = await cache.read(() => fetchMonthlySpend(this.live.getClient()));
 
-    const projected = cached.map(projectRow);
+    const series = withDailyAmounts(
+      cached.map(projectRow).sort((a, b) => a.date.localeCompare(b.date))
+    );
     const includeFuture = args.include_future ?? false;
     // Default: drop any row where either amount is null (placeholder rows
     // for future dates). The captured response always pairs both nulls
     // together, but treat a single null as a placeholder too — emitting
     // half-populated rows would be more confusing than dropping them.
-    const filtered = includeFuture
-      ? projected
-      : projected.filter((r) => r.total_amount !== null && r.comparison_amount !== null);
-
-    const rows = withDailyAmounts([...filtered].sort((a, b) => a.date.localeCompare(b.date)));
+    const rows = includeFuture
+      ? series
+      : series.filter((r) => r.total_amount !== null && r.comparison_amount !== null);
 
     this.live.logReadCall({
       op: 'MonthlySpend',
@@ -135,13 +136,14 @@ export function createLiveMonthlySpendToolSchema(): ToolSchema {
     name: 'get_monthly_spend_live',
     description:
       "Current month's NON-RECURRING spend, day by day (live). `total_amount` is CUMULATIVE " +
-      "month-to-date; `daily_amount` is that day's increase. Counts REGULAR transactions " +
-      'with no recurring link, net of refunds, pending included; leaves out income, transfers ' +
-      'and recurring charges (rent, subscriptions), so it is NOT the app\'s "spent this ' +
-      'month" — for that, sum `amount` from get_transactions_live. `comparison_amount`\'s ' +
-      'meaning is unconfirmed: not last month\'s spend, do not use it for "vs last month". ' +
-      'Dated in UTC; may include a row for tomorrow. Future rows (null amounts) are dropped ' +
-      'unless `include_future: true`. ≤31 rows, no pagination.',
+      "month-to-date; `daily_amount` is that day's increase (the first row's, its own total). " +
+      'Counts REGULAR transactions with no recurring link, net of refunds, pending included; ' +
+      'leaves out income, transfers and recurring charges (rent, subscriptions), so it is ' +
+      'NOT the app\'s "spent this month" — for that, sum the POSITIVE amounts from ' +
+      'get_transactions_live, whose defaults already drop transfers and excluded rows. ' +
+      '`comparison_amount`\'s meaning is unconfirmed; do not use it for "vs last month". ' +
+      'A row dated tomorrow can appear. Future rows (null amounts) are dropped unless ' +
+      '`include_future: true`. ≤31 rows. Available when --live-reads is on.',
     inputSchema: {
       type: 'object' as const,
       properties: {

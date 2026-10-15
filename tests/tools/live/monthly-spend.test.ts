@@ -80,6 +80,52 @@ describe('LiveMonthlySpendTools.getMonthlySpend', () => {
     expect(result.daily_spending.map((r) => r.id)).toEqual(['a', 'b', 'c']);
   });
 
+  // #823: total_amount is cumulative month-to-date, so the per-day figure is
+  // the difference between consecutive rows, sorted by date.
+  test('daily_amount differences the cumulative series in date order', async () => {
+    const client = makeClient([
+      { id: 'c', date: '2026-04-03', totalAmount: 175.5, comparisonAmount: 30 },
+      { id: 'a', date: '2026-04-01', totalAmount: 100.1, comparisonAmount: 10 },
+      { id: 'b', date: '2026-04-02', totalAmount: 100.1, comparisonAmount: 20 },
+    ]);
+    const tools = new LiveMonthlySpendTools(makeLive(client));
+
+    const result = await tools.getMonthlySpend({});
+
+    expect(result.daily_spending.map((r) => r.daily_amount)).toEqual([100.1, 0, 75.4]);
+  });
+
+  test('a null total mid-series yields null and keeps the running baseline', async () => {
+    const client = makeClient([
+      { id: 'a', date: '2026-04-01', totalAmount: 100, comparisonAmount: 10 },
+      { id: 'b', date: '2026-04-02', totalAmount: null, comparisonAmount: null },
+      { id: 'c', date: '2026-04-03', totalAmount: 150, comparisonAmount: 30 },
+    ]);
+    const tools = new LiveMonthlySpendTools(makeLive(client));
+
+    const result = await tools.getMonthlySpend({ include_future: true });
+
+    // A baseline reset on the null row would give 150 for the last day.
+    expect(result.daily_spending.map((r) => r.daily_amount)).toEqual([100, null, 50]);
+  });
+
+  test("a day's daily_amount does not depend on include_future", async () => {
+    const rows = [
+      { id: 'a', date: '2026-04-01', totalAmount: 100, comparisonAmount: 90 },
+      { id: 'b', date: '2026-04-02', totalAmount: 150, comparisonAmount: null },
+      { id: 'c', date: '2026-04-03', totalAmount: 200, comparisonAmount: 80 },
+    ];
+    const filtered = await new LiveMonthlySpendTools(makeLive(makeClient(rows))).getMonthlySpend(
+      {}
+    );
+    const full = await new LiveMonthlySpendTools(makeLive(makeClient(rows))).getMonthlySpend({
+      include_future: true,
+    });
+
+    expect(filtered.daily_spending.find((r) => r.id === 'c')?.daily_amount).toBe(50);
+    expect(full.daily_spending.find((r) => r.id === 'c')?.daily_amount).toBe(50);
+  });
+
   test('passes numeric wire amounts through as numbers', async () => {
     const client = makeClient([pastRow]);
     const tools = new LiveMonthlySpendTools(makeLive(client));
@@ -149,29 +195,5 @@ describe('createLiveMonthlySpendToolSchema', () => {
     expect((schema.inputSchema as { required?: string[] }).required ?? []).not.toContain(
       'include_future'
     );
-  });
-
-  // #823: total_amount is cumulative month-to-date, so the per-day figure is
-  // the difference between consecutive rows, sorted by date.
-  test('daily_amount differences the cumulative series in date order', async () => {
-    const client = makeClient([
-      { id: 'c', date: '2026-04-03', totalAmount: 175.5, comparisonAmount: 30 },
-      { id: 'a', date: '2026-04-01', totalAmount: 100.1, comparisonAmount: 10 },
-      { id: 'b', date: '2026-04-02', totalAmount: 100.1, comparisonAmount: 20 },
-    ]);
-    const tools = new LiveMonthlySpendTools(makeLive(client));
-
-    const result = await tools.getMonthlySpend({});
-
-    expect(result.daily_spending.map((r) => r.daily_amount)).toEqual([100.1, 0, 75.4]);
-  });
-
-  test('daily_amount is null on a placeholder row and keeps the running baseline', async () => {
-    const client = makeClient([pastRow, todayRow, futureRow]);
-    const tools = new LiveMonthlySpendTools(makeLive(client));
-
-    const result = await tools.getMonthlySpend({ include_future: true });
-
-    expect(result.daily_spending.map((r) => r.daily_amount)).toEqual([100, -50, null]);
   });
 });
