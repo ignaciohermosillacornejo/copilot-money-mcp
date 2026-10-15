@@ -57,6 +57,8 @@ whose Last run is a FAIL, and record the rest as SKIP (not run this time).
 5. **PII.** Real balances, amounts, account, merchant and place names go only
    into the local report under `docs/superpowers/` (gitignored).
    `test-matrix.md`, issues and PRs get PASS/FAIL, ratios and synthetic numbers.
+   The session transcript holds real figures too (tool output, page text): never
+   paste from it into an issue or PR without rewriting the figures.
 6. **Cleanup always runs**, including after a failure partway through. It works
    from the ledger file, so a new session can finish it: Phase 0 reads the
    latest `RELEASE-PARITY-TEST-*.md` and completes any ledger line not marked
@@ -64,7 +66,10 @@ whose Last run is a FAIL, and record the rest as SKIP (not run this time).
    (CL-07). Stop and tell the user, without trying to repair anything, if the
    balance moves by an amount the ledger does not explain, or if any write
    reached a non-Manual account.
-7. **Web automation.** Load the Chrome tools first (`claude-in-chrome` skill).
+7. **Web automation.** The web column needs the Claude in Chrome extension; its
+   skill is provided by the host, not this repo. Load its tools first. If it is
+   unavailable, every web comparison is SKIP (no browser), never PASS on two
+   sources: the web is the ground truth.
    Read pages with the extension's page-text tool rather than screenshots, and
    read figures from the page's own search, filters and totals, never by
    counting rendered rows (lists load more as you scroll). Record the raw text
@@ -113,9 +118,13 @@ whose Last run is a FAIL, and record the rest as SKIP (not run this time).
   method against the local cache (read methods only):
 
   ```bash
-  bun run scripts/parity/cache-call.ts getAccounts '{"include_hidden":true}'
-  bun run scripts/parity/cache-call.ts getTransactions '{"start_date":"…","end_date":"…","fields":["all"]}'
+  bun run parity:cache getAccounts '{"include_hidden":true}'
+  bun run parity:cache getTransactions '{"start_date":"…","end_date":"…","fields":["all"]}'
   ```
+
+  If the server's `copilot-money` entry passes `--db-path`, export
+  `PARITY_DB_PATH` with the same value, or the two columns read different
+  databases. The helper prints the database it read to stderr; record it.
 
   Before each cache comparison, confirm with `getCacheInfo` that the desktop app
   has synced (P-07). Wait at most 15 minutes, then mark the case SKIP (stale).
@@ -172,6 +181,13 @@ to name the step that caused it, give the user the exact difference and the
 steps to set the Manual account's balance back in the web app, and afterwards
 read it back in the web and in live (after `refresh_cache { scope: "accounts" }`).
 Never create a balancing transaction.
+
+## Phase 3.5 — Session and packaging (SES)
+
+After cleanup: SES-01 needs the server to have run 65+ minutes (schedule its
+read and write late in the run), SES-03 and SES-04 are quick local checks,
+SES-05 installs the release artifact in a scratch directory, and SES-02 (log
+out of the web app) runs last of all, because it ends the web session.
 
 ## Phase 4 — Report
 

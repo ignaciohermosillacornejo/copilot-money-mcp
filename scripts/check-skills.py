@@ -457,6 +457,25 @@ def collect_field_vocabulary() -> set[str]:
     return vocabulary
 
 
+def skill_docs(skill_dir: Path) -> list[Path]:
+    """Every markdown file in a skill's folder, SKILL.md first.
+
+    A skill's instructions are not always in SKILL.md alone: release-parity-test
+    keeps its ~150 cases, and nearly every tool and field name it uses, in
+    test-matrix.md. Linting only SKILL.md left those references unchecked, so a
+    renamed tool or a field dropped from a v3 preset would rot there silently.
+    Frontmatter stays a SKILL.md-only check; the reference checks read all of
+    these.
+    """
+    docs = sorted(skill_dir.glob("*.md"), key=lambda p: (p.name != "SKILL.md", p.name))
+    return [d for d in docs if d.is_file()]
+
+
+def _where(skill_dir: Path, doc: Path) -> str:
+    """`<skill>` for SKILL.md (the historical message form), `<skill>/<file>` otherwise."""
+    return skill_dir.name if doc.name == "SKILL.md" else f"{skill_dir.name}/{doc.name}"
+
+
 def check_field_refs(
     skill_dir: Path,
     terse_tools: dict[str, set[str]],
@@ -465,9 +484,22 @@ def check_field_refs(
 ) -> list[str]:
     """Report fields a skill reads that its tool no longer returns by default."""
     errors: list[str] = []
-    for line_no, line in enumerate(
-        (skill_dir / "SKILL.md").read_text().splitlines(), start=1
-    ):
+    for doc in skill_docs(skill_dir):
+        errors.extend(
+            _field_refs_in(skill_dir, doc, terse_tools, tool_args, vocabulary)
+        )
+    return errors
+
+
+def _field_refs_in(
+    skill_dir: Path,
+    doc: Path,
+    terse_tools: dict[str, set[str]],
+    tool_args: dict[str, set[str]],
+    vocabulary: set[str],
+) -> list[str]:
+    errors: list[str] = []
+    for line_no, line in enumerate(doc.read_text().splitlines(), start=1):
         tokens = BACKTICK_IDENT_RE.findall(line)
         referenced = [t for t in tokens if t in terse_tools]
         if not referenced:
@@ -495,7 +527,7 @@ def check_field_refs(
             if token in default_fields or token not in vocabulary:
                 continue
             errors.append(
-                f"{skill_dir.name}:SKILL.md:{line_no}: `{token}` is a row field, but "
+                f"{skill_dir.name}:{doc.name}:{line_no}: `{token}` is a row field, but "
                 f"{'/'.join(referenced)} does not return it by default (v3 terse rows) "
                 f"and this line passes no `fields:` argument. Add "
                 f'fields: ["default", "{token}"] to the call if the instruction needs '
@@ -536,40 +568,41 @@ def check_frontmatter(skill_dir: Path) -> list[str]:
 
 def check_tool_refs(skill_dir: Path, known_tools: set[str]) -> list[str]:
     errors: list[str] = []
-    content = (skill_dir / "SKILL.md").read_text()
-    backtick_tokens = re.findall(r"`([a-z_][a-z0-9_]*)`", content)
-    seen: set[str] = set()
-    for tok in backtick_tokens:
-        if tok in seen:
-            continue
-        seen.add(tok)
-        if not any(tok.startswith(p) for p in TOOL_PREFIXES):
-            continue
-        if tok in KNOWN_TOOL_PARAMS:
-            continue
-        if tok not in known_tools:
-            errors.append(
-                f"{skill_dir.name}: references unknown MCP tool `{tok}`"
-            )
+    for doc in skill_docs(skill_dir):
+        content = doc.read_text()
+        backtick_tokens = re.findall(r"`([a-z_][a-z0-9_]*)`", content)
+        seen: set[str] = set()
+        for tok in backtick_tokens:
+            if tok in seen:
+                continue
+            seen.add(tok)
+            if not any(tok.startswith(p) for p in TOOL_PREFIXES):
+                continue
+            if tok in KNOWN_TOOL_PARAMS:
+                continue
+            if tok not in known_tools:
+                errors.append(
+                    f"{_where(skill_dir, doc)}: references unknown MCP tool `{tok}`"
+                )
     return errors
 
 
 def check_profile_path(skill_dir: Path) -> list[str]:
     errors: list[str] = []
-    content = (skill_dir / "SKILL.md").read_text()
-    for line_no, line in enumerate(content.splitlines(), start=1):
-        if "user-profile" not in line:
-            continue
-        # Extract every contiguous non-whitespace token that mentions user-profile
-        for token in re.findall(r"\S*user-profile[^\s`]*", line):
-            # Strip surrounding markdown punctuation (backticks, quotes, parens, commas)
-            stripped = token.strip("`'\"(),.[]")
-            if stripped in ALLOWED_PROFILE_PATHS:
+    for doc in skill_docs(skill_dir):
+        for line_no, line in enumerate(doc.read_text().splitlines(), start=1):
+            if "user-profile" not in line:
                 continue
-            errors.append(
-                f"{skill_dir.name}:SKILL.md:{line_no}: "
-                f"non-canonical profile path: {stripped[:120]}"
-            )
+            # Extract every contiguous non-whitespace token that mentions user-profile
+            for token in re.findall(r"\S*user-profile[^\s`]*", line):
+                # Strip surrounding markdown punctuation (backticks, quotes, parens, commas)
+                stripped = token.strip("`'\"(),.[]")
+                if stripped in ALLOWED_PROFILE_PATHS:
+                    continue
+                errors.append(
+                    f"{skill_dir.name}:{doc.name}:{line_no}: "
+                    f"non-canonical profile path: {stripped[:120]}"
+                )
     return errors
 
 

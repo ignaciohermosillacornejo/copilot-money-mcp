@@ -108,6 +108,8 @@ async function makeRepo(opts: {
    *  the whole scripts/ directory makes the names lookup raise first. */
   omitArgs?: boolean;
   skill?: string;
+  /** Extra markdown files beside SKILL.md, e.g. a test matrix the skill reads. */
+  extraDocs?: Record<string, string>;
   sourceFiles?: Record<string, string | null>;
 }): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'check-skills-'));
@@ -132,6 +134,9 @@ async function makeRepo(opts: {
   }
   await mkdir(join(root, 'skills', 'demo'), { recursive: true });
   await writeFile(join(root, 'skills', 'demo', 'SKILL.md'), opts.skill ?? SKILL_BODY);
+  for (const [name, body] of Object.entries(opts.extraDocs ?? {})) {
+    await writeFile(join(root, 'skills', 'demo', name), body);
+  }
   return root;
 }
 
@@ -144,6 +149,7 @@ async function withRepo(
     argsBody?: string;
     omitArgs?: boolean;
     skill?: string;
+    extraDocs?: Record<string, string>;
     sourceFiles?: Record<string, string | null>;
     env?: Record<string, string>;
   },
@@ -312,6 +318,37 @@ Call \`get_transactions\` and then \`delete_everything\`.
       ({ code, stderr }) => {
         expect(code).toBe(1);
         expect(stderr).toContain('references unknown MCP tool `delete_everything`');
+      }
+    );
+  });
+
+  // A skill's instructions can live beside SKILL.md: release-parity-test keeps
+  // its ~150 cases in test-matrix.md. When the linter read SKILL.md alone, every
+  // reference in that file went unchecked (review on #826).
+  test('lints markdown files beside SKILL.md, naming the file', async () => {
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        extraDocs: { 'test-matrix.md': 'Then call `get_everything_live`.\n' },
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain(
+          'demo/test-matrix.md: references unknown MCP tool `get_everything_live`'
+        );
+      }
+    );
+  });
+
+  test('applies the terse-default field check to files beside SKILL.md', async () => {
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        extraDocs: { 'test-matrix.md': 'Use `get_transactions`, then read `tag_ids`.\n' },
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('demo:test-matrix.md:1: `tag_ids` is a row field');
       }
     );
   });
