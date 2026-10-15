@@ -1241,6 +1241,36 @@ describe('decoder coverage', () => {
       expect(result.transactions[0]?.internal_transfer).toBe(true);
     });
 
+    // #824: Copilot clears the category of an income or transfer row (the web
+    // app and GraphQL show none), but a document can still carry the old
+    // category_id — observed on rows created through create_transaction. Cache
+    // mode must agree with the app, so the decoder drops it by the doc's type.
+    test.each([
+      ['income', ''],
+      ['internal_transfer', ''],
+      ['regular', 'Qm7vR2kX9pL4tN8wB3sD'],
+    ])('a %s document reports category_id %p', async (type, expected) => {
+      const dbPath = path.join(FIXTURES_DIR, `type-category-${type}-db`);
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'transactions',
+          id: 'Hx4nT8qW2mK6vR9pL3sY',
+          fields: {
+            transaction_id: 'Hx4nT8qW2mK6vR9pL3sY',
+            amount: -50.0,
+            date: '2024-01-15',
+            name: 'Synthetic',
+            type,
+            category_id: 'Qm7vR2kX9pL4tN8wB3sD',
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.transactions[0]?.category_id).toBe(expected);
+    });
+
     test('handles accounts with available_balance', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'available-balance-db');
       await createTestDatabase(dbPath, [

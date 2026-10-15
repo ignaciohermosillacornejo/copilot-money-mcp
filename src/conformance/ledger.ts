@@ -924,6 +924,25 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'fails that ratchet (verified, not assumed). Type-scoped it is.',
   },
   {
+    surface: 'FirestoreTransaction.type:clearsCategory',
+    kind: 'response-shape',
+    oracle: null,
+    class: 'verified-once',
+    evidence:
+      "The decoder treats the cache transaction document's `type` string as Copilot's " +
+      'classification and drops `category_id` when it is `income` or `internal_transfer` ' +
+      '(#824). PROBE 2026-10-15 (counts only): every transaction from the last ~2.5 months ' +
+      'was read through the GraphQL Transactions query and joined by id to its cache ' +
+      "document. On all 283 the document's `type` was the lowercase form of the GraphQL " +
+      "`type` (250 regular, 30 internal_transfer, 3 income), and on all 283 the document's " +
+      '`category_id` equalled the GraphQL `categoryId`, so app-made income and transfer rows ' +
+      'already carry no category and the rule changes nothing for them. It matters for rows ' +
+      'whose document kept a category: observed in the 2026-10-14 release test on rows made ' +
+      'by create_transaction with type INCOME / INTERNAL_TRANSFER, where GraphQL and the web ' +
+      'app showed no category and cache mode showed the passed one. Not re-checked after ' +
+      'this fix landed; the release parity test covers it.',
+  },
+  {
     surface: 'FirestoreAccount.dashboard_active:notVisibility',
     kind: 'response-shape',
     oracle: null,

@@ -979,6 +979,17 @@ function processTransaction(
   if (copilotType === 'internal_transfer') {
     txnData.internal_transfer = true;
   }
+  // Income and transfer rows have no category in Copilot: the server clears it
+  // (GraphQL returns an empty categoryId) and the app shows none. A document
+  // can still carry the old category_id — observed on rows created through
+  // create_transaction (#824) — so drop it here, to the same '' the
+  // write-through patch uses for the same type change.
+  if (
+    (copilotType === 'income' || copilotType === 'internal_transfer') &&
+    txnData.category_id !== undefined
+  ) {
+    txnData.category_id = '';
+  }
 
   warnUnreadFields(
     fields,

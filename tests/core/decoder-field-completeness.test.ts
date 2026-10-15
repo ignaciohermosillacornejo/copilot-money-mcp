@@ -1195,7 +1195,7 @@ const PINNED: Record<string, ProcessorPin> = {
  */
 const NOT_SURFACED: Record<string, Record<string, string>> = {
   processTransaction: {
-    type: "Copilot's `type` string is read only to derive the boolean `internal_transfer`; the raw string is never emitted.",
+    type: "Copilot's `type` string is read only to derive the boolean `internal_transfer` and to clear `category_id` on income/transfer rows (#824); the raw string is never emitted.",
   },
   processAccount: {
     type: 'Read as a fallback source for `account_type`; emitted under that name, never as `type`.',
