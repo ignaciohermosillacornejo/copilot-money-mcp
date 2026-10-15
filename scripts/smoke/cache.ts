@@ -40,6 +40,7 @@ import {
   COLLECTION_ROUTES,
   isDecodableTransactionDocument,
   transactionDocumentId,
+  getString,
 } from '../../src/core/decoder.js';
 import type { AllCollectionsResult, CollectionRoute } from '../../src/core/decoder.js';
 import { CopilotDatabase, missingDatabaseError } from '../../src/core/database.js';
@@ -625,23 +626,23 @@ export function nonFiniteLeafPaths(fields: Map<string, FirestoreValue>): string[
  * Check 9's raw side (#824): does this RAW transaction document carry a
  * category on a row Copilot treats as uncategorizable — `type` income or
  * internal_transfer, or the `internal_transfer` boolean set — on a document
- * the decoder turns into a row? Reads the disk,
- * not decoder output, because the decoder is what clears the field: a check
- * on decoded rows alone could never fail.
+ * the decoder turns into a row? Reads the disk, not decoder output, because
+ * the decoder is what clears the field: a check on decoded rows alone could
+ * never fail. Strings are read with the decoder's own reader, so a value
+ * stored as a Firestore reference counts here exactly as it does there.
  */
 export function hasCategoryOnIncomeOrTransfer(fields: Map<string, FirestoreValue>): boolean {
   // A document the decoder drops (soft-deleted, zero amount, no date) would
   // only ever count as "not compared" and hold the check at WARN. Asked of the
-  // decoder's own predicate, so this cannot drift from what it drops.
+  // decoder's own predicate, so this cannot drift from what it drops. Two
+  // later drops are not covered and stay WARN-shaped: a row that fails schema
+  // validation, and a pending row superseded by its posted twin.
   if (!isDecodableTransactionDocument(fields)) return false;
-  const type = fields.get('type');
-  const typeName =
-    type?.type === 'string' && typeof type.value === 'string' ? type.value.toLowerCase() : '';
+  const typeName = getString(fields, 'type')?.toLowerCase() ?? '';
   const flag = fields.get('internal_transfer');
   const isTransferFlag = flag?.type === 'boolean' && flag.value === true;
   if (typeName !== 'income' && typeName !== 'internal_transfer' && !isTransferFlag) return false;
-  const category = fields.get('category_id');
-  return category?.type === 'string' && typeof category.value === 'string' && category.value !== '';
+  return (getString(fields, 'category_id') ?? '') !== '';
 }
 
 /**
@@ -740,7 +741,8 @@ async function main(): Promise<void> {
   // construction: nothing but flags is kept, and only counts are reported.
   const accountRows: AccountVisibilityRow[] = [];
   // Ids only, for check 9 — no values are kept.
-  const incomeTransferWithCategory: string[] = [];
+  // A Set: the decoder dedupes same-id documents, so the counts must too.
+  const incomeTransferWithCategory = new Set<string>();
   let scanned = 0;
   const started = Date.now();
 
@@ -771,7 +773,7 @@ async function main(): Promise<void> {
       hasCategoryOnIncomeOrTransfer(doc.fields)
     ) {
       // The decoder's identity, not the document id: the two can differ.
-      incomeTransferWithCategory.push(transactionDocumentId(doc.fields, doc.documentId));
+      incomeTransferWithCategory.add(transactionDocumentId(doc.fields, doc.documentId));
     }
   }
 
@@ -1082,7 +1084,10 @@ async function main(): Promise<void> {
   // a cache with none is the common case, not a fault.
   // ---------------------------------------------------------------------
   const decodedCategory = new Map(all.transactions.map((t) => [t.transaction_id, t.category_id]));
-  const incomeTransfer = reportIncomeTransferCategory(incomeTransferWithCategory, decodedCategory);
+  const incomeTransfer = reportIncomeTransferCategory(
+    [...incomeTransferWithCategory],
+    decodedCategory
+  );
   record('income/transfer rows have no category', incomeTransfer.status, incomeTransfer.detail);
 
   // ---------------------------------------------------------------------

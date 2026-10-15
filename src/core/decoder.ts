@@ -109,9 +109,11 @@ export function extractValue(value: FirestoreValue | undefined): unknown {
 }
 
 /**
- * Extract a string field from parsed Firestore fields.
+ * Extract a string field from parsed Firestore fields. Accepts a Firestore
+ * reference as well as a string. Exported so a raw-document reader
+ * (scripts/smoke/cache.ts) reads fields the way the decoder does.
  */
-function getString(fields: Map<string, FirestoreValue>, key: string): string | undefined {
+export function getString(fields: Map<string, FirestoreValue>, key: string): string | undefined {
   const value = fields.get(key);
   if (value?.type === 'string') {
     return value.value;
@@ -840,19 +842,31 @@ export function transactionDocumentId(fields: Map<string, FirestoreValue>, docId
 }
 
 /**
- * Whether a transaction document produces a row at all, before schema
- * validation: it needs a non-zero amount and a date, and must not be
- * soft-deleted. Exported for the same reason as transactionDocumentId — a
- * raw-side check must not keep its own copy of these rules.
+ * The fields a transaction document needs to produce a row at all, parsed
+ * once: a non-zero amount and a date, on a document that is not soft-deleted.
+ * Null when the document yields no row.
  */
-export function isDecodableTransactionDocument(fields: Map<string, FirestoreValue>): boolean {
+function decodableTransactionCore(
+  fields: Map<string, FirestoreValue>
+): { amount: number; date: string } | null {
   const amount = getNumber(fields, 'amount');
   const date = getDateString(fields, 'date') ?? getDateString(fields, 'original_date');
-  if (amount === undefined || !date || amount === 0) return false;
+  if (amount === undefined || !date || amount === 0) return null;
   // Soft delete: Copilot does not write Firestore tombstones for transaction
   // deletes — it flips `user_deleted: true` on the Document and leaves the
   // rest in place. Drop these the same way `getAccounts` does (#326).
-  return getBoolean(fields, 'user_deleted') !== true;
+  if (getBoolean(fields, 'user_deleted') === true) return null;
+  return { amount, date };
+}
+
+/**
+ * Whether a transaction document produces a row (before schema validation
+ * and pending reconciliation). Exported for the same reason as
+ * transactionDocumentId — a raw-side check must not keep its own copy of
+ * these rules.
+ */
+export function isDecodableTransactionDocument(fields: Map<string, FirestoreValue>): boolean {
+  return decodableTransactionCore(fields) !== null;
 }
 
 /**
@@ -862,13 +876,12 @@ function processTransaction(
   fields: Map<string, FirestoreValue>,
   docId: string
 ): Transaction | null {
-  if (!isDecodableTransactionDocument(fields)) {
+  const core = decodableTransactionCore(fields);
+  if (!core) {
     return null;
   }
   const transactionId = transactionDocumentId(fields, docId);
-  // Both defined: isDecodableTransactionDocument checked them.
-  const amount = getNumber(fields, 'amount') as number;
-  const date = (getDateString(fields, 'date') ?? getDateString(fields, 'original_date')) as string;
+  const { amount, date } = core;
 
   const txnData: Record<string, unknown> = {
     transaction_id: transactionId,

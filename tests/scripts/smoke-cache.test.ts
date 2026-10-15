@@ -1057,6 +1057,14 @@ describe('check 9: income/transfer rows decode with no category (#824)', () => {
       false,
     ],
     [
+      'income with a reference-typed category',
+      [
+        ['type', str('income')],
+        ['category_id', { type: 'reference', value: 'Qm7vR2kX9pL4tN8wB3sD' }],
+      ],
+      true,
+    ],
+    [
       'zero-amount income with a category',
       [
         ['type', str('income')],

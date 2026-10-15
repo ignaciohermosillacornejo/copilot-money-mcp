@@ -1273,6 +1273,44 @@ describe('decoder coverage', () => {
       expect(result.transactions[0]?.category_id).toBe(expected);
     });
 
+    // The id precedence both the decoder and smoke:cache check 9 rely on
+    // (transactionDocumentId): the transaction_id field wins over the
+    // document id, which is only the fallback.
+    test('transaction_id from the field takes precedence over the document id', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'txn-id-precedence-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'transactions',
+          id: 'Dk3mW8qR2nT6vL9pX4sY',
+          fields: {
+            transaction_id: 'Fz7nQ2kW9mR4tV8xB3sL',
+            amount: -50.0,
+            date: '2024-01-15',
+            name: 'Synthetic',
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.transactions[0]?.transaction_id).toBe('Fz7nQ2kW9mR4tV8xB3sL');
+    });
+
+    test('transaction_id falls back to the document id when the field is absent', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'txn-id-docid-fallback-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'transactions',
+          id: 'Dk3mW8qR2nT6vL9pX4sY',
+          fields: { amount: -50.0, date: '2024-01-15', name: 'Synthetic' },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.transactions[0]?.transaction_id).toBe('Dk3mW8qR2nT6vL9pX4sY');
+    });
+
     // The clear must not invent a key: "never had a category" stays absent,
     // distinct from "cleared" ('').
     test('an income document with no category_id leaves it absent', async () => {
