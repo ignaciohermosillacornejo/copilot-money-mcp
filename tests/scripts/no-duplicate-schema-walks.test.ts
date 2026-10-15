@@ -141,7 +141,7 @@ describe('no hand-rolled JSON-Schema argument walks under scripts/', () => {
         'failing does not mean the sweep is broken: it means scripts/ gained or lost a ' +
         'subdirectory. Gained one, and it holds scripts? Add its name here, and the sweep ' +
         'now covers it. Lost one? Check its files moved somewhere still swept.'
-    ).toEqual(['graphql-capture', 'smoke']);
+    ).toEqual(['graphql-capture', 'parity', 'smoke']);
   });
 
   // A scan that parsed nothing and a scan that found nothing both report zero
