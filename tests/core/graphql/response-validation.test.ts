@@ -61,7 +61,11 @@ const VALID_RESPONSES: Record<string, unknown> = {
   BulkEditTransactions: {
     bulkEditTransactions: {
       __typename: 'BulkEditTransactionsOutput',
-      updated: [makeTransaction(), makeTransaction()],
+      // Bulk's TransactionFields fragment, alone among the mutations', selects parentId.
+      updated: [
+        { ...makeTransaction(), parentId: null },
+        { ...makeTransaction(), parentId: null },
+      ],
       failed: [
         {
           __typename: 'TransactionError',

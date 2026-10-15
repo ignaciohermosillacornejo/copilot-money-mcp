@@ -39,11 +39,15 @@ export interface CreateTransactionArgs {
 }
 
 /**
- * GraphQL response shape for CreateTransaction. Mirrors the Transaction
- * type selected by the generated query (TransactionFields fragment). Kept
- * as `unknown`-tolerant for optional/client-computed fields that the
- * server may or may not populate; only `id` is strictly required by
- * downstream callers.
+ * A transaction as every transaction mutation returns it: the mutations'
+ * TransactionFields fragment (createTransaction, editTransaction,
+ * addTransactionToRecurring, splitTransaction, bulkEditTransactions).
+ *
+ * This is also what the live window cache is patched from after a write
+ * (`LiveCopilotDatabase.upsertLiveTransaction`, #820/#821), so every field
+ * here is consumed. Note what the mutation fragment does NOT select, unlike
+ * the Transactions query's: `parentId` (except bulkEditTransactions) and
+ * `isoCurrencyCode`.
  */
 export interface CreatedTransaction {
   id: string;
@@ -101,17 +105,8 @@ export interface EditTransactionArgs {
 
 export interface EditTransactionResponse {
   editTransaction: {
-    transaction: {
-      id: string;
-      name: string;
-      categoryId: string;
-      userNotes: string | null;
-      isReviewed: boolean;
-      type: TransactionType;
-      date: string;
-      amount: number;
-      tags: Array<{ id: string }>;
-    };
+    /** The full TransactionFields selection — see {@link CreatedTransaction}. */
+    transaction: CreatedTransaction;
   };
 }
 
@@ -176,17 +171,11 @@ export interface BulkEditTransactionsArgs {
 
 export interface BulkEditTransactionsResponse {
   bulkEditTransactions: {
-    updated: Array<{
-      id: string;
-      name: string;
-      categoryId: string;
-      userNotes: string | null;
-      isReviewed: boolean;
-      type: TransactionType;
-      date: string;
-      amount: number;
-      tags: Array<{ id: string }>;
-    }>;
+    /**
+     * The full TransactionFields selection. Bulk's fragment, unlike the other
+     * transaction mutations', also selects `parentId`.
+     */
+    updated: Array<CreatedTransaction & { parentId: string | null }>;
     failed: Array<{
       transaction: { id: string } | null;
       error: string | null;
@@ -389,7 +378,7 @@ export async function splitTransaction(
 export async function editTransaction(
   client: GraphQLClient,
   args: EditTransactionArgs
-): Promise<{ id: string; changed: EditTransactionChanges }> {
+): Promise<{ id: string; changed: EditTransactionChanges; transaction: CreatedTransaction }> {
   const data = await client.mutate<EditTransactionArgs, EditTransactionResponse>(
     'EditTransaction',
     EDIT_TRANSACTION,
@@ -409,5 +398,8 @@ export async function editTransaction(
   if ('type' in args.input) changed.type = tx.type;
   if ('date' in args.input) changed.date = tx.date;
   if ('amount' in args.input) changed.amount = tx.amount;
-  return { id: tx.id, changed };
+  // `transaction` is the server's whole post-edit row, for the live cache
+  // write-through (#821) — patch from what the server says, not from a
+  // locally-translated copy of the input.
+  return { id: tx.id, changed, transaction: tx };
 }

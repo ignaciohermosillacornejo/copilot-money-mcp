@@ -26,7 +26,11 @@ import type {
   InvestmentPrice,
   HoldingsHistory,
 } from '../../src/models/index.js';
-import { createMockGraphQLClient, bulkEditEcho } from '../helpers/mock-graphql.js';
+import {
+  createMockGraphQLClient,
+  bulkEditEcho,
+  serverTransaction,
+} from '../helpers/mock-graphql.js';
 import type { EditTransactionResponse } from '../../src/core/graphql/transactions.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
@@ -518,7 +522,7 @@ function createMockWriteClient() {
     BulkEditTransactions: bulkEditEcho,
     EditTransaction: (vars: any): EditTransactionResponse => ({
       editTransaction: {
-        transaction: {
+        transaction: serverTransaction({
           id: vars.id,
           name: vars.input?.name ?? 'Existing Txn',
           categoryId: vars.input?.categoryId ?? 'c',
@@ -528,7 +532,7 @@ function createMockWriteClient() {
           date: vars.input?.date ?? '2024-01-15',
           amount: vars.input?.amount ?? 50,
           tags: (vars.input?.tagIds ?? []).map((id: string) => ({ id })),
-        },
+        }),
       },
     }),
     CreateTag: (vars: any) => ({

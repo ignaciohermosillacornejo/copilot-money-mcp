@@ -1094,6 +1094,23 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'mode, and no probe has exercised it — 0 of 521 cache rows carried the raw flag, so ' +
       "the parity run's agreement on that half is trivially false === false, not evidence.",
   },
+  {
+    surface: 'Transaction.parentId:splitChildren',
+    kind: 'response-shape',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      'After split_transaction the live window cache is written through from the mutation ' +
+      'response (#820): the parent is evicted and each child is inserted with `parentId` set ' +
+      "to the parent's id. Two claims about the Transactions QUERY rest on that and neither " +
+      'has a probe transcript: (1) it omits split parents (the premise of rejecting ' +
+      'exclude_split_parents=false in live mode), and (2) it returns each split child with ' +
+      "`parentId` = the parent's id. The write-through has to supply (2) itself because the " +
+      "mutations' TransactionFields fragment does not select `parentId` (nor " +
+      '`isoCurrencyCode`, which a created or split row therefore carries as null until its ' +
+      'month is refetched) — see operations.generated.ts. Close this with a split on a ' +
+      'throwaway manual transaction and a Transactions read of its month.',
+  },
 
   queryOperation('categories'),
   gatedQueryResponseShape('categories', {

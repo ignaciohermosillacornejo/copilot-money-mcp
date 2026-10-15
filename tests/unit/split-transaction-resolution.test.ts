@@ -94,6 +94,7 @@ function stubLiveDb(overrides: {
     });
   });
   const indexTransactionMeta = mock();
+  const upsertLiveTransaction = mock();
   const lookupTransactionNodes = (ids: string[]) => {
     const pool = [
       ...(overrides.cachedNodes ?? []),
@@ -111,10 +112,10 @@ function stubLiveDb(overrides: {
     lookupTransactionMeta: () => new Map(),
     getTransactions,
     indexTransactionMeta,
-    patchLiveTransaction: () => {},
+    upsertLiveTransaction,
     patchLiveTransactionDelete: () => {},
   } as unknown as LiveCopilotDatabase;
-  return { liveDb, getTransactions, indexTransactionMeta };
+  return { liveDb, getTransactions, indexTransactionMeta, upsertLiveTransaction };
 }
 
 const SPLIT_RESPONSE: {
@@ -308,8 +309,11 @@ describe('splitTransaction parent resolution — live mode', () => {
   });
 });
 
-describe('splitTransaction output feeds the meta index', () => {
-  test('parent and children are indexed from the mutation response; empty ids skipped', async () => {
+describe('splitTransaction output feeds the live cache and meta index', () => {
+  // The parent leaves the live cache, so it is indexed directly; each child is
+  // written through upsertLiveTransaction (#820), which also indexes it — its
+  // empty-routing-id guard is unit-tested in tests/core/live-database.test.ts.
+  test('parent indexed (empty ids skipped); every child upserted with parentId', async () => {
     const emptyIdChild = { ...serverTx('child-c', 0), accountId: '' };
     const client = createMockGraphQLClient({
       SplitTransaction: {
@@ -319,7 +323,7 @@ describe('splitTransaction output feeds the meta index', () => {
         },
       },
     });
-    const { liveDb, indexTransactionMeta } = stubLiveDb({
+    const { liveDb, indexTransactionMeta, upsertLiveTransaction } = stubLiveDb({
       cachedNodes: [node('parent-1', 120, '2025-10-05', 'Cached Parent')],
     });
     const tools = new CopilotMoneyTools(makeDb(), client, liveDb);
@@ -335,14 +339,42 @@ describe('splitTransaction output feeds the meta index', () => {
       ],
     });
 
-    const indexedIds = indexTransactionMeta.mock.calls.map((c: any[]) => c[0]);
-    expect(indexedIds).toContain('parent-1');
-    expect(indexedIds).toContain('child-a');
-    expect(indexedIds).toContain('child-b');
-    expect(indexedIds).not.toContain('child-c'); // empty accountId → skipped
-    for (const call of indexTransactionMeta.mock.calls as any[]) {
-      expect(call[1]).toEqual({ accountId: 'acct-P', itemId: 'item-P' });
-    }
+    expect(indexTransactionMeta.mock.calls).toEqual([
+      ['parent-1', { accountId: 'acct-P', itemId: 'item-P' }],
+    ]);
+    const upserts = upsertLiveTransaction.mock.calls as any[];
+    expect(upserts.map((c) => [c[0].id, c[1]])).toEqual([
+      ['child-a', { parentId: 'parent-1' }],
+      ['child-b', { parentId: 'parent-1' }],
+      ['child-c', { parentId: 'parent-1' }],
+    ]);
+  });
+
+  test('a parent with empty routing ids is not indexed', async () => {
+    const client = createMockGraphQLClient({
+      SplitTransaction: {
+        splitTransaction: {
+          parentTransaction: { ...serverTx('parent-1', 120), itemId: '' },
+          splitTransactions: [serverTx('child-a', 70), serverTx('child-b', 50)],
+        },
+      },
+    });
+    const { liveDb, indexTransactionMeta } = stubLiveDb({
+      cachedNodes: [node('parent-1', 120, '2025-10-05', 'Cached Parent')],
+    });
+    const tools = new CopilotMoneyTools(makeDb(), client, liveDb);
+
+    await tools.splitTransaction({
+      transaction_id: 'parent-1',
+      account_id: 'acct-P',
+      item_id: 'item-P',
+      splits: [
+        { amount: 70, category_id: 'catA' },
+        { amount: 50, category_id: 'catB' },
+      ],
+    });
+
+    expect(indexTransactionMeta).not.toHaveBeenCalled();
   });
 });
 

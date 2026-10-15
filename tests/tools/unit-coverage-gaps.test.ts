@@ -8,7 +8,11 @@ import { describe, test, expect } from 'bun:test';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import type { Transaction, Account, Category, Tag, Budget } from '../../src/models/index.js';
-import { createMockGraphQLClient, bulkEditEcho } from '../helpers/mock-graphql.js';
+import {
+  createMockGraphQLClient,
+  bulkEditEcho,
+  serverTransaction,
+} from '../helpers/mock-graphql.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -253,7 +257,7 @@ describe('cross-tool interactions', () => {
       CreateTag: { createTag: { id: 'tag-urgent', name: 'urgent', colorName: 'PURPLE2' } },
       EditTransaction: {
         editTransaction: {
-          transaction: {
+          transaction: serverTransaction({
             id: 'txn_cross',
             name: 'Cross Tool Txn',
             categoryId: 'food_and_drink',
@@ -263,7 +267,7 @@ describe('cross-tool interactions', () => {
             date: '2024-01-15',
             amount: 50,
             tags: [{ id: 'tag-urgent' }],
-          },
+          }),
         },
       },
     });
@@ -294,7 +298,7 @@ describe('cross-tool interactions', () => {
       },
       EditTransaction: {
         editTransaction: {
-          transaction: {
+          transaction: serverTransaction({
             id: 'txn_cross',
             name: 'Cross Tool Txn',
             categoryId: 'cat-custom',
@@ -304,7 +308,7 @@ describe('cross-tool interactions', () => {
             date: '2024-01-15',
             amount: 50,
             tags: [],
-          },
+          }),
         },
       },
     });
@@ -348,7 +352,7 @@ describe('cross-tool interactions', () => {
       BulkEditTransactions: bulkEditEcho,
       EditTransaction: (vars: any) => ({
         editTransaction: {
-          transaction: {
+          transaction: serverTransaction({
             id: vars.id,
             name: 'Coffee Shop',
             categoryId: 'c',
@@ -358,7 +362,7 @@ describe('cross-tool interactions', () => {
             date: '2024-01-15',
             amount: 50,
             tags: [],
-          },
+          }),
         },
       }),
     });

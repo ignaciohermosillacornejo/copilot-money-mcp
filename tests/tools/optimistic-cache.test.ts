@@ -10,7 +10,11 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
-import { createMockGraphQLClient, bulkEditEcho } from '../helpers/mock-graphql.js';
+import {
+  createMockGraphQLClient,
+  bulkEditEcho,
+  serverTransaction,
+} from '../helpers/mock-graphql.js';
 
 const currentMonth = (): string => {
   const d = new Date();
@@ -46,7 +50,7 @@ describe('optimistic cache patching — transactions', () => {
     const client = createMockGraphQLClient({
       EditTransaction: {
         editTransaction: {
-          transaction: {
+          transaction: serverTransaction({
             id: 'txn1',
             name: 'Coffee Shop',
             categoryId: 'cat_food',
@@ -56,7 +60,7 @@ describe('optimistic cache patching — transactions', () => {
             date: '2026-04-01',
             amount: 50,
             tags: [],
-          },
+          }),
         },
       },
     });

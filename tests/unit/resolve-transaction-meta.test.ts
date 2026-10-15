@@ -8,7 +8,7 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
-import type { LiveCopilotDatabase } from '../../src/core/live-database.js';
+import { LiveCopilotDatabase } from '../../src/core/live-database.js';
 import { createMockGraphQLClient, bulkEditEcho } from '../helpers/mock-graphql.js';
 
 function echoEdit(vars: any) {
@@ -78,7 +78,7 @@ function stubLiveDb(overrides: {
   const liveDb = {
     lookupTransactionMeta,
     getTransactions,
-    patchLiveTransaction: () => {},
+    upsertLiveTransaction: () => {},
   } as unknown as LiveCopilotDatabase;
   return { liveDb, getTransactions };
 }
@@ -316,11 +316,11 @@ describe('createTransaction feeds the meta index', () => {
         },
       },
     });
-    const indexTransactionMeta = mock();
-    const { liveDb } = stubLiveDb({});
-    (liveDb as any).indexTransactionMeta = indexTransactionMeta;
+    // A real LiveCopilotDatabase: since #820 the feed is upsertLiveTransaction,
+    // so assert the observable result (the id resolves), not the call.
     const db = makeDb();
     (db as any)._userCategories = [{ category_id: 'c1', name: 'Synthetic Cat' }];
+    const liveDb = new LiveCopilotDatabase(client, db);
     const tools = new CopilotMoneyTools(db, client, liveDb);
 
     await tools.createTransaction({
@@ -333,7 +333,7 @@ describe('createTransaction feeds the meta index', () => {
       type: 'REGULAR',
     });
 
-    expect(indexTransactionMeta).toHaveBeenCalledWith('tNew', {
+    expect(liveDb.lookupTransactionMeta(['tNew']).get('tNew')).toEqual({
       accountId: 'acct-5',
       itemId: 'item-5',
     });

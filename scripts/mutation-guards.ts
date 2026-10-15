@@ -65,7 +65,7 @@
  * so a reviewer can see at a glance whether the detection is the one the row
  * claims. That is also why each row must name those tests up front
  * (`expectFailingTests`): "the file went red" is satisfied by a sibling test in
- * a shared detector file, and four of the six rows share one.
+ * a shared detector file, and four of the seven rows share one.
  *
  * ## Restoration
  *
@@ -216,7 +216,7 @@ export interface MutationGuard {
    * The test(s) inside `expectFails` that must be among the failures, matched
    * as substrings of the names bun prints.
    *
-   * `expectFails` alone would let a row ride on a sibling: four of the six rows
+   * `expectFails` alone would let a row ride on a sibling: four of the seven rows
    * share `bulk-edit-transactions.test.ts`, so "the file went red" can be true
    * while the test covering THIS guard has quietly stopped covering it. Naming
    * the test turns that from invisible into a failure — the same reason `find`
@@ -364,6 +364,26 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     },
     expectFailingTests: ['unknown category is rejected client-side — the server would persist it'],
     expectFails: 'tests/tools/bulk-edit-transactions.test.ts',
+  },
+  {
+    name: 'create_transaction writes through to the live cache',
+    file: 'src/tools/tools.ts',
+    invariant:
+      'A created transaction must enter its month in the live window cache. Months older ' +
+      'than 14 days are cached for a week, so without the write-through a row created in ' +
+      'one is invisible to get_transactions_live for up to seven days while the write ' +
+      'reports success — the caller sees wrong totals and repeats the write (#820).',
+    mutation: {
+      kind: 'remove',
+      find: wholeLines(
+        '      // mutation-guard: create_transaction writes through to the live cache',
+        '      this.liveDb?.upsertLiveTransaction(tx);'
+      ),
+    },
+    // The table key, which is the `%s` half of the test.each title — the only
+    // part of the rendered name that is unique to this case.
+    expectFailingTests: ['create_transaction'],
+    expectFails: 'tests/tools/live-write-coherence.test.ts',
   },
 ];
 

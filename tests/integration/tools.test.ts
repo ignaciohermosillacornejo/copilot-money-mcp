@@ -7,7 +7,11 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { CopilotMoneyTools, createToolSchemas } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
-import { createMockGraphQLClient, bulkEditEcho } from '../helpers/mock-graphql.js';
+import {
+  createMockGraphQLClient,
+  bulkEditEcho,
+  serverTransaction,
+} from '../helpers/mock-graphql.js';
 import type { EditTransactionResponse } from '../../src/core/graphql/transactions.js';
 import type {
   Transaction,
@@ -939,7 +943,7 @@ describe('CopilotMoneyTools Integration', () => {
         BulkEditTransactions: bulkEditEcho,
         EditTransaction: (vars: any): EditTransactionResponse => ({
           editTransaction: {
-            transaction: {
+            transaction: serverTransaction({
               id: vars.id,
               name: vars.input.name ?? 'Existing Txn',
               categoryId: vars.input.categoryId ?? 'c',
@@ -949,7 +953,7 @@ describe('CopilotMoneyTools Integration', () => {
               date: vars.input.date ?? '2024-01-15',
               amount: vars.input.amount ?? 50,
               tags: (vars.input.tagIds ?? []).map((id: string) => ({ id })),
-            },
+            }),
           },
         }),
         CreateTag: (vars: any) => ({

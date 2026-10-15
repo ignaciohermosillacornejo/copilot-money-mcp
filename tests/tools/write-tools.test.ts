@@ -7,7 +7,7 @@
  * into set_budget.
  */
 
-import { describe, test, expect, beforeEach, mock } from 'bun:test';
+import { describe, test, expect, beforeEach } from 'bun:test';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
@@ -15,7 +15,7 @@ import type {
   CreatedTransaction,
   CreateTransactionResponse,
 } from '../../src/core/graphql/transactions.js';
-import type { LiveCopilotDatabase } from '../../src/core/live-database.js';
+import { LiveCopilotDatabase } from '../../src/core/live-database.js';
 
 describe('updateCategory', () => {
   let tools: CopilotMoneyTools;
@@ -624,17 +624,18 @@ describe('createTransaction', () => {
     expect(client._calls).toHaveLength(0);
   });
 
+  // Since #820 the feed is upsertLiveTransaction (which also puts the row into
+  // its cached month), so these run against a real LiveCopilotDatabase and
+  // assert the observable result — the id resolves — not which internal
+  // method was called.
   test('response routing ids feed the live meta index', async () => {
     const client = createMockGraphQLClient({ CreateTransaction: { createTransaction: createdTx } });
-    const indexTransactionMeta = mock();
-    tools = new CopilotMoneyTools(mockDb, client, {
-      indexTransactionMeta,
-    } as unknown as LiveCopilotDatabase);
+    const liveDb = new LiveCopilotDatabase(client, mockDb);
+    tools = new CopilotMoneyTools(mockDb, client, liveDb);
 
     await tools.createTransaction(validArgs);
 
-    expect(indexTransactionMeta).toHaveBeenCalledTimes(1);
-    expect(indexTransactionMeta).toHaveBeenCalledWith('new-tx-1', {
+    expect(liveDb.lookupTransactionMeta(['new-tx-1']).get('new-tx-1')).toEqual({
       accountId: 'acc1',
       itemId: 'item1',
     });
@@ -647,14 +648,12 @@ describe('createTransaction', () => {
     const client = createMockGraphQLClient({
       CreateTransaction: { createTransaction: { ...createdTx, accountId: '' } },
     });
-    const indexTransactionMeta = mock();
-    tools = new CopilotMoneyTools(mockDb, client, {
-      indexTransactionMeta,
-    } as unknown as LiveCopilotDatabase);
+    const liveDb = new LiveCopilotDatabase(client, mockDb);
+    tools = new CopilotMoneyTools(mockDb, client, liveDb);
 
     await tools.createTransaction(validArgs);
 
-    expect(indexTransactionMeta).not.toHaveBeenCalled();
+    expect(liveDb.lookupTransactionMeta(['new-tx-1']).size).toBe(0);
   });
 
   test('drifted response with empty itemId is not fed to the index (#518)', async () => {
@@ -662,14 +661,12 @@ describe('createTransaction', () => {
     const client = createMockGraphQLClient({
       CreateTransaction: { createTransaction: { ...createdTx, itemId: '' } },
     });
-    const indexTransactionMeta = mock();
-    tools = new CopilotMoneyTools(mockDb, client, {
-      indexTransactionMeta,
-    } as unknown as LiveCopilotDatabase);
+    const liveDb = new LiveCopilotDatabase(client, mockDb);
+    tools = new CopilotMoneyTools(mockDb, client, liveDb);
 
     await tools.createTransaction(validArgs);
 
-    expect(indexTransactionMeta).not.toHaveBeenCalled();
+    expect(liveDb.lookupTransactionMeta(['new-tx-1']).size).toBe(0);
   });
 });
 

@@ -3342,8 +3342,10 @@ export class CopilotMoneyTools {
       const patch = buildEditCachePatch(args);
       if (Object.keys(patch).length > 0) {
         this.db.patchCachedTransaction(transaction_id, patch);
-        this.liveDb?.patchLiveTransaction(transaction_id, patch);
       }
+      // Live cache: patch from the server's returned row, not the local patch
+      // (#821 — the snake_case patch never matched the camelCase node).
+      this.liveDb?.upsertLiveTransaction(result.transaction);
 
       return {
         success: true,
@@ -3488,8 +3490,8 @@ export class CopilotMoneyTools {
         const patch = buildEditCachePatch(edit);
         if (Object.keys(patch).length > 0) {
           this.db.patchCachedTransaction(route.id, patch);
-          this.liveDb?.patchLiveTransaction(route.id, patch);
         }
+        this.liveDb?.upsertLiveTransaction(result.transaction);
       }
     );
 
@@ -3644,13 +3646,14 @@ export class CopilotMoneyTools {
         is_manual: true,
       };
 
-      // Feed the live meta index so an immediate follow-up write on the new
-      // transaction resolves without a network fetch. Same empty-id guard as
-      // the other mutation feeds (#518) — response validation is warn-only,
-      // so a drifted response must not reach the index.
-      if (tx.accountId && tx.itemId) {
-        this.liveDb?.indexTransactionMeta(tx.id, { accountId: tx.accountId, itemId: tx.itemId });
-      }
+      // Live cache write-through (#820): put the server's row into its month
+      // so a read of an already-cached month shows it (a no-op when the month
+      // is not cached — the next read fetches it). This also feeds the meta
+      // index, so an immediate follow-up write on the new transaction
+      // resolves without a network fetch; the empty-routing-id guard (#518)
+      // lives inside upsertLiveTransaction.
+      // mutation-guard: create_transaction writes through to the live cache
+      this.liveDb?.upsertLiveTransaction(tx);
 
       return {
         success: true,
@@ -3810,7 +3813,7 @@ export class CopilotMoneyTools {
       // id is absent — both acceptable, same as delete_transaction's
       // eviction-is-a-no-op contract.
       this.db.patchCachedTransaction(transaction_id, { recurring_id });
-      this.liveDb?.patchLiveTransaction(transaction_id, { recurring_id });
+      this.liveDb?.upsertLiveTransaction(tx);
 
       return {
         success: true,
@@ -4011,25 +4014,34 @@ export class CopilotMoneyTools {
       const parent = toLocal(result.parentTransaction);
       const children = result.splitTransactions.map(toLocal);
 
-      // Feed the live meta index with everything the mutation returned —
-      // parent and children arrive as full TransactionFields — so a
-      // follow-up edit on a child resolves without a network fetch. Same
+      // Feed the live meta index with the parent (it leaves the live cache
+      // below, so the children's upserts are not its route in) — so a
+      // follow-up write naming it resolves without a network fetch. Same
       // empty-id guard as the other feeds (#508).
-      for (const tx of [result.parentTransaction, ...result.splitTransactions]) {
-        if (tx.accountId && tx.itemId) {
-          this.liveDb?.indexTransactionMeta(tx.id, {
-            accountId: tx.accountId,
-            itemId: tx.itemId,
-          });
-        }
+      const parentTx = result.parentTransaction;
+      if (parentTx.accountId && parentTx.itemId) {
+        this.liveDb?.indexTransactionMeta(parentTx.id, {
+          accountId: parentTx.accountId,
+          itemId: parentTx.itemId,
+        });
       }
 
-      // Evict the parent from the in-memory cache so subsequent
-      // get_transactions reads stop surfacing the now-hidden row. No-op
+      // Evict the parent from both caches so subsequent reads stop surfacing
+      // the now-hidden row (the Transactions query omits split parents). No-op
       // if the cache is unloaded or the id is absent — same eviction-is-a-
       // no-op contract as delete_transaction.
       this.db.patchCachedTransactionDelete(transaction_id);
       this.liveDb?.patchLiveTransactionDelete(transaction_id);
+
+      // Live cache write-through for the children (#820) — without it a split
+      // in a cached month made the whole amount vanish (parent evicted,
+      // children absent) until TTL expiry. The mutation fragment does not
+      // select parentId, so set it from the parent the server just returned:
+      // that is what a Transactions read reports for a split child. Each
+      // upsert also feeds the meta index for that child.
+      for (const child of result.splitTransactions) {
+        this.liveDb?.upsertLiveTransaction(child, { parentId: parentTx.id });
+      }
 
       return {
         success: true,
@@ -4112,7 +4124,7 @@ export class CopilotMoneyTools {
     // no-ops (same eviction-is-a-no-op contract as delete_transaction).
     for (const tx of result.updated) {
       this.db.patchCachedTransaction(tx.id, { user_reviewed: reviewed });
-      this.liveDb?.patchLiveTransaction(tx.id, { user_reviewed: reviewed });
+      this.liveDb?.upsertLiveTransaction(tx);
     }
 
     return {
@@ -4396,8 +4408,10 @@ export class CopilotMoneyTools {
       }
       if (Object.keys(patch).length > 0) {
         this.db.patchCachedTransaction(tx.id, patch);
-        this.liveDb?.patchLiveTransaction(tx.id, patch);
       }
+      // Live cache: the server's returned row, which already carries the
+      // type, the cleared category and the post-edit tag list (#821).
+      this.liveDb?.upsertLiveTransaction(tx);
     }
 
     return {

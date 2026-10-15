@@ -17,7 +17,7 @@ import { describe, test, expect, mock } from 'bun:test';
 import { homedir } from 'node:os';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
-import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
+import { createMockGraphQLClient, serverTransaction } from '../helpers/mock-graphql.js';
 import { GraphQLError } from '../../src/core/graphql/client.js';
 import type { GraphQLClient } from '../../src/core/graphql/client.js';
 import type { EditTransactionResponse } from '../../src/core/graphql/transactions.js';
@@ -25,7 +25,7 @@ import type { EditTransactionResponse } from '../../src/core/graphql/transaction
 function echoResponse(vars: any) {
   return {
     editTransaction: {
-      transaction: {
+      transaction: serverTransaction({
         id: vars.id,
         name: vars.input.name ?? 'Coffee Shop',
         // Mirror the verified server behaviour: INCOME/INTERNAL_TRANSFER
@@ -40,7 +40,7 @@ function echoResponse(vars: any) {
         date: vars.input.date ?? '2024-01-15',
         amount: vars.input.amount ?? 50,
         tags: (vars.input.tagIds ?? []).map((id: string) => ({ id })),
-      },
+      }),
     },
   };
 }
@@ -365,7 +365,7 @@ describe('update_transactions respects the 5-parallel concurrency cap', () => {
           const v = vars as { id: string; input: Record<string, unknown> };
           const response: EditTransactionResponse = {
             editTransaction: {
-              transaction: {
+              transaction: serverTransaction({
                 id: v.id,
                 name: 'Coffee Shop',
                 categoryId: 'food',
@@ -375,7 +375,7 @@ describe('update_transactions respects the 5-parallel concurrency cap', () => {
                 date: '2024-01-15',
                 amount: 50,
                 tags: [],
-              },
+              }),
             },
           };
           return response;

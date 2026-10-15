@@ -116,28 +116,18 @@ export const MUTATION_RESPONSE_SCHEMAS: Readonly<Record<string, ResponseShapeEnt
     'createTransaction',
     z.looseObject({ createTransaction: CreatedTransactionSchema })
   ),
-  // Mirrors EditTransactionResponse — deliberately the SUBSET of
-  // TransactionFields the wrapper actually reads back (no `type`, `amount`,
-  // etc.). The wire selection returns more, but only fields code consumes
-  // are drift-gated; the rest flow through loose.
+  // Mirrors EditTransactionResponse. The whole TransactionFields selection is
+  // gated, not a subset: since #821 the returned row is what the live cache is
+  // patched from, so every field is read.
   EditTransaction: entry(
     'editTransaction',
     z.looseObject({
-      editTransaction: z.looseObject({
-        transaction: z.looseObject({
-          id: z.string(),
-          name: z.string(),
-          categoryId: z.string(),
-          userNotes: z.string().nullable(),
-          isReviewed: z.boolean(),
-          tags: z.array(z.looseObject({ id: z.string() })),
-        }),
-      }),
+      editTransaction: z.looseObject({ transaction: CreatedTransactionSchema }),
     })
   ),
-  // Mirrors BulkEditTransactionsResponse. `updated` reuses the same subset
-  // EditTransaction gates, since the wire selection is the same
-  // TransactionFields fragment.
+  // Mirrors BulkEditTransactionsResponse. `updated` reuses the same schema
+  // EditTransaction gates (plus `parentId`, which bulk's fragment alone
+  // selects), since the rows feed the live cache write-through (#821).
   //
   // `failed` is gated but NEVER observed populated: seven live probes
   // (nonexistent transaction / tag / category ids) all returned `failed: []`,
@@ -152,16 +142,7 @@ export const MUTATION_RESPONSE_SCHEMAS: Readonly<Record<string, ResponseShapeEnt
     'bulkEditTransactions',
     z.looseObject({
       bulkEditTransactions: z.looseObject({
-        updated: z.array(
-          z.looseObject({
-            id: z.string().min(1),
-            name: z.string(),
-            categoryId: z.string(),
-            userNotes: z.string().nullable(),
-            isReviewed: z.boolean(),
-            tags: z.array(z.looseObject({ id: z.string() })),
-          })
-        ),
+        updated: z.array(CreatedTransactionSchema.extend({ parentId: z.string().nullable() })),
         failed: z.array(
           z.looseObject({
             transaction: z.looseObject({ id: z.string() }).nullable(),

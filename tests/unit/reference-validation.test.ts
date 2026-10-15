@@ -65,7 +65,7 @@ function stubLiveDb(graphqlClient: unknown) {
     getTransactions: mock(() =>
       Promise.resolve({ rows: [], oldest_fetched_at: 0, newest_fetched_at: 0, hit: false })
     ),
-    patchLiveTransaction: () => {},
+    upsertLiveTransaction: () => {},
     patchLiveRecurringUpsert: () => {},
   } as unknown as LiveCopilotDatabase;
 }

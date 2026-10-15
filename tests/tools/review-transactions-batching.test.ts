@@ -18,12 +18,12 @@
 import { describe, test, expect } from 'bun:test';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
-import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
+import { createMockGraphQLClient, bulkServerTransaction } from '../helpers/mock-graphql.js';
 import { GraphQLError } from '../../src/core/graphql/client.js';
 import type { BulkEditTransactionsResponse } from '../../src/core/graphql/transactions.js';
 
 function txnPayload(id: string, isReviewed = true) {
-  return {
+  return bulkServerTransaction({
     id,
     name: `Txn ${id}`,
     categoryId: 'c',
@@ -33,7 +33,7 @@ function txnPayload(id: string, isReviewed = true) {
     date: '2024-01-01',
     amount: 50,
     tags: [],
-  };
+  });
 }
 
 /** Echo every requested id back as updated — the all-succeeded server case. */

@@ -20,7 +20,11 @@
 import { describe, test, expect } from 'bun:test';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
-import { createMockGraphQLClient, bulkEditEcho } from '../helpers/mock-graphql.js';
+import {
+  createMockGraphQLClient,
+  bulkEditEcho,
+  bulkServerTransaction,
+} from '../helpers/mock-graphql.js';
 import { GraphQLError } from '../../src/core/graphql/client.js';
 import { bulkEditTransactions } from '../../src/core/graphql/transactions.js';
 
@@ -272,7 +276,7 @@ describe('bulk_edit_transactions surfaces partial application', () => {
       BulkEditTransactions: {
         bulkEditTransactions: {
           updated: [
-            {
+            bulkServerTransaction({
               id: 'a',
               name: 'n',
               categoryId: 'groceries',
@@ -282,7 +286,7 @@ describe('bulk_edit_transactions surfaces partial application', () => {
               date: '2024-01-15',
               amount: 50,
               tags: [],
-            },
+            }),
           ],
           failed: [],
         },

@@ -23,6 +23,7 @@ import type {
 import type {
   AddTransactionToRecurringResponse,
   BulkEditTransactionsResponse,
+  CreatedTransaction,
   CreateTransactionResponse,
   DeleteTransactionResponse,
   EditTransactionResponse,
@@ -163,6 +164,56 @@ export function createMockGraphQLClient(responsesByOp: MockResponsesByOp = {}): 
   return client as unknown as MockGraphQLClient;
 }
 
+/** Fields a fixture may set on {@link serverTransaction}; tags may be id-only. */
+export type ServerTransactionFields = Omit<Partial<CreatedTransaction>, 'tags'> & {
+  id: string;
+  tags?: Array<{ id: string; name?: string; colorName?: string }>;
+};
+
+/**
+ * A transaction as the transaction MUTATIONS return it (their TransactionFields
+ * fragment — see CreatedTransaction), with neutral defaults for every field a
+ * fixture does not care about.
+ *
+ * The response types are the full selection because since #821 the live cache
+ * is patched from the returned row, so every field is consumed; a fixture that
+ * spelled out only the handful of fields one assertion reads no longer
+ * type-checks. Tags may be given id-only — name/colorName are defaulted.
+ */
+export function serverTransaction(fields: ServerTransactionFields): CreatedTransaction {
+  const { tags, ...rest } = fields;
+  return {
+    name: 'Coffee Shop',
+    date: '2024-01-15',
+    amount: 50,
+    categoryId: 'c',
+    type: 'REGULAR',
+    accountId: 'acct1',
+    itemId: 'item1',
+    isPending: false,
+    isReviewed: false,
+    createdAt: 0,
+    recurringId: null,
+    userNotes: null,
+    tipAmount: null,
+    suggestedCategoryIds: [],
+    goal: null,
+    ...rest,
+    tags: (tags ?? []).map((t) => ({
+      id: t.id,
+      name: t.name ?? `tag ${t.id}`,
+      colorName: t.colorName ?? 'BLUE1',
+    })),
+  };
+}
+
+/** {@link serverTransaction} for bulkEditTransactions, whose fragment also selects parentId. */
+export function bulkServerTransaction(
+  fields: ServerTransactionFields & { parentId?: string | null }
+): CreatedTransaction & { parentId: string | null } {
+  return { ...serverTransaction(fields), parentId: fields.parentId ?? null };
+}
+
 /**
  * Canned `BulkEditTransactions` response that echoes every requested id back
  * as updated, with the requested input applied.
@@ -186,22 +237,24 @@ export function bulkEditEcho(vars: unknown): GraphQLOperationResponses['BulkEdit
   };
   return {
     bulkEditTransactions: {
-      updated: v.filter.ids.map((t) => ({
-        id: t.id,
-        name: 'Coffee Shop',
-        // Mirror the verified server behaviour: INCOME/INTERNAL_TRANSFER clear
-        // the category regardless of what categoryId was sent.
-        categoryId:
-          v.input.type === 'INCOME' || v.input.type === 'INTERNAL_TRANSFER'
-            ? ''
-            : (v.input.categoryId ?? 'c'),
-        userNotes: null,
-        isReviewed: v.input.isReviewed ?? true,
-        type: v.input.type ?? ('REGULAR' as const),
-        date: '2024-01-15',
-        amount: 50,
-        tags: (v.input.addTagIds ?? []).map((id) => ({ id })),
-      })),
+      updated: v.filter.ids.map((t) =>
+        bulkServerTransaction({
+          id: t.id,
+          name: 'Coffee Shop',
+          // Mirror the verified server behaviour: INCOME/INTERNAL_TRANSFER clear
+          // the category regardless of what categoryId was sent.
+          categoryId:
+            v.input.type === 'INCOME' || v.input.type === 'INTERNAL_TRANSFER'
+              ? ''
+              : (v.input.categoryId ?? 'c'),
+          userNotes: null,
+          isReviewed: v.input.isReviewed ?? true,
+          type: v.input.type ?? ('REGULAR' as const),
+          date: '2024-01-15',
+          amount: 50,
+          tags: (v.input.addTagIds ?? []).map((id) => ({ id })),
+        })
+      ),
       failed: [],
     },
   };

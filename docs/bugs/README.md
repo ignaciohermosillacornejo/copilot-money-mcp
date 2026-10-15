@@ -62,7 +62,7 @@ a class yet.
 | `fixture-reality-drift` | A fixture encodes an assumed external-data shape that reality does not have, so the fixture and the code share an error term and their agreement proves nothing. Signature: **fixing the bug makes the tests fail.** | `tests/core/decode-path-parity.test.ts` — partial: catches two decoders of one collection disagreeing, not a collection that is simply extinct |
 | `heuristic-decode-bleed` | Parsing structured binary by pattern-scanning fixed byte windows rather than walking the real format. Symptoms: fields bleeding between adjacent records, records silently missing. | retired architecturally by the structural parser (#73/#74) |
 | `numeric-width-overflow` | Decoding uses a narrower numeric representation than the wire format, silently corrupting values into other plausible numbers. | none |
-| `stale-cache-semantics` | Wrong assumptions about soft-delete vs tombstones, refresh, invalidation, or staleness windows. | none — closed structurally (live-first resolution), not by a gate |
+| `stale-cache-semantics` | Wrong assumptions about soft-delete vs tombstones, refresh, invalidation, or staleness windows. | partial (mutation-verified) — `tests/tools/live-write-coherence.test.ts` covers live-cache write-through: every transaction write tool, derived from `WRITE_TOOL_DEFS`, must be visible to the next cached `get_transactions_live` read (#820/#821). The rest of the class — soft-delete, tombstones, refresh, the local cache — is closed structurally (live-first resolution), not by a gate |
 | `phantom-row` | A decoder processor builds a row from a fieldless cache entry — a Firestore parent pointer, a deleted-document tombstone, or another structural key — filling every field from the path or document id, so it manufactures a record that does not exist. Dedup by id hides the scale. | `tests/core/parent-pointer-documents.test.ts` (#797, mutation-verified by construction: the sweep was red for each of 19 routes before its guard): writes one fieldless document at a real path for every route that has a processor and requires zero rows; a coverage test fails if a route has no path in the sweep. `smoke:cache` check 1b FAILs on the real-cache shape (rows with no non-empty document behind them) for every compared route |
 | `absence-inference` | Concluding a field or collection is structurally absent because one snapshot didn't exercise it, then pruning schema or removing a capability on that basis. | none |
 
@@ -112,12 +112,12 @@ a class yet.
 ## How we find bugs
 
 Recorded per entry, using a fixed vocabulary so the corpus stays countable. Here is what
-this corpus actually says, across all 52 entries:
+this corpus actually says, across all 54 entries:
 
 | Found by | Count | |
 |---|---|---|
 | `dogfooding` — used the tool, noticed the answer disagreed with the Copilot app | 15 | █████████████ |
-| `live-probe` — a probe or smoke against the real backend | 7 | ██████ |
+| `live-probe` — a probe or smoke against the real backend | 9 | ████████ |
 | `audit-sweep` — a deliberate cross-cutting audit | 7 | ██████ |
 | `incidental` — found while working on something else | 8 | ███████ |
 | `user-report` | 8 | ███████ |
@@ -173,7 +173,7 @@ record near-misses.
 |---|---|---|---|
 | #83 | [64-bit varint decoding silently corrupted negative transaction amounts (32-bit bitwise overflow)](83-varint-32bit-overflow.md) | `dogfooding` | 2026-01-16 |
 
-**`stale-cache-semantics`** — 6
+**`stale-cache-semantics`** — 8
 
 | | Bug | Found by | Date |
 |---|---|---|---|
@@ -183,6 +183,8 @@ record near-misses.
 | #326 | [Deleted transactions kept appearing in reads — Copilot soft-deletes, decoder never filtered](326-soft-deleted-transactions-leak.md) | `live-probe` | 2026-05-03 |
 | #498 | [Write tools could only edit transactions inside the ~30-day local cache window, despite docs promising otherwise](498-write-resolution-cache-window.md) | `user-report` | 2026-06-19 |
 | #528 | [Live caches kept serving the previous account's data after a mid-session re-auth as a different user](528-uid-transition-stale-live-caches.md) | `adversarial-review` | 2026-07-08 |
+| #820 | [In live mode, a created transaction (or split children) was invisible to reads of a cached month for up to a week](820-live-create-split-missing-write-through.md) | `live-probe` | 2026-10-15 |
+| #821 | [In live mode, category, tag, note, review and recurring edits were invisible to reads of a cached month for up to a week](821-live-write-through-snake-case-patch.md) | `live-probe` | 2026-10-15 |
 
 **`absence-inference`** — 1
 

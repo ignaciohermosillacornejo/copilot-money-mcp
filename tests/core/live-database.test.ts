@@ -3,7 +3,11 @@ import { LiveCopilotDatabase, preflightLiveAuth } from '../../src/core/live-data
 import { GraphQLError } from '../../src/core/graphql/client.js';
 import type { GraphQLClient } from '../../src/core/graphql/client.js';
 import type { CopilotDatabase } from '../../src/core/database.js';
-import type { TransactionsPage } from '../../src/core/graphql/queries/transactions.js';
+import type {
+  TransactionNode,
+  TransactionsPage,
+} from '../../src/core/graphql/queries/transactions.js';
+import type { CreatedTransaction } from '../../src/core/graphql/transactions.js';
 import { SnapshotCache, TransactionWindowCache } from '../../src/core/cache/index.js';
 import type { Tag } from '../../src/models/index.js';
 import type { CategoryNode } from '../../src/core/graphql/queries/categories.js';
@@ -405,55 +409,146 @@ describe('LiveCopilotDatabase — userCache', () => {
   });
 });
 
-// ── patchLiveTransaction ────────────────────────────────────────────────────
+// ── upsertLiveTransaction ───────────────────────────────────────────────────
 
-describe('LiveCopilotDatabase.patchLiveTransaction', () => {
+describe('LiveCopilotDatabase.upsertLiveTransaction', () => {
   function mkLive() {
     return new LiveCopilotDatabase(mkClient(), mkCache());
   }
 
-  test('updates matching row in cached month', () => {
+  /** A row as the Transactions query returns it. */
+  function queryRow(overrides: Partial<TransactionNode> = {}): TransactionNode {
+    return {
+      id: 'aB3xK9pQ2mN7vR4tY8wZ',
+      accountId: 'kQ7vN2xR9pL4mW8tY3zB',
+      itemId: 'hT5cJ8wF2nD6sG1qV4xM',
+      categoryId: 'gR4tH7jK2lM9nP3qS6vW',
+      recurringId: null,
+      parentId: 'qR9fS5fG8cD3kH0iN4lO',
+      isReviewed: true,
+      isPending: false,
+      amount: 10,
+      date: '2024-01-15',
+      name: 'Old',
+      type: 'REGULAR',
+      userNotes: null,
+      tipAmount: null,
+      suggestedCategoryIds: [],
+      isoCurrencyCode: 'USD',
+      createdAt: 0,
+      tags: [],
+      goal: null,
+      ...overrides,
+    };
+  }
+
+  /** The same row as a mutation returns it: no parentId, no isoCurrencyCode. */
+  function mutationRow(overrides: Partial<CreatedTransaction> = {}): CreatedTransaction {
+    const { parentId: _p, isoCurrencyCode: _c, categoryId, ...rest } = queryRow();
+    return { ...rest, categoryId: categoryId ?? '', ...overrides };
+  }
+
+  test('a cached row takes the server values for camelCase fields (#821)', () => {
     const live = mkLive();
     const wc = live.getTransactionsWindowCache();
-    // Seed a warm/cold month (2024-01) with one row.
-    wc.ingestMonth('2024-01', [{ id: 'tx1', date: '2024-01-15', name: 'Old' }], Date.now());
+    wc.ingestMonth('2024-01', [queryRow()], Date.now());
 
-    live.patchLiveTransaction('tx1', { name: 'New' } as Record<string, unknown>);
+    live.upsertLiveTransaction(
+      mutationRow({
+        categoryId: 'zX8cV5bN1mQ4wE7rT2yU',
+        isReviewed: false,
+        userNotes: 'note',
+        recurringId: 'yU7iO4pA1sD8fG5hJ2kL',
+        tags: [{ id: 'pL6kJ3hG9fD2sA5qW8eR', name: 'Trip', colorName: 'BLUE1' }],
+      })
+    );
+
+    const [row] = wc.entriesForMonth('2024-01');
+    expect(row).toMatchObject({
+      categoryId: 'zX8cV5bN1mQ4wE7rT2yU',
+      isReviewed: false,
+      userNotes: 'note',
+      recurringId: 'yU7iO4pA1sD8fG5hJ2kL',
+      tags: [{ id: 'pL6kJ3hG9fD2sA5qW8eR' }],
+    });
+  });
+
+  test('keys the mutation fragment does not select keep their cached values', () => {
+    const live = mkLive();
+    const wc = live.getTransactionsWindowCache();
+    wc.ingestMonth('2024-01', [queryRow()], Date.now());
+
+    live.upsertLiveTransaction(mutationRow({ name: 'New' }));
+
+    const [row] = wc.entriesForMonth('2024-01');
+    expect(row!.name).toBe('New');
+    expect(row!.parentId).toBe('qR9fS5fG8cD3kH0iN4lO');
+    expect(row!.isoCurrencyCode).toBe('USD');
+  });
+
+  test('an uncached row is inserted into its cached month, unselected keys null (#820)', () => {
+    const live = mkLive();
+    const wc = live.getTransactionsWindowCache();
+    wc.ingestMonth('2024-01', [], Date.now());
+
+    live.upsertLiveTransaction(mutationRow({ id: 'sT1gT7hI0eF5mJ2kP6nQ' }));
 
     const rows = wc.entriesForMonth('2024-01');
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.name).toBe('New');
-    expect(rows[0]!.id).toBe('tx1');
+    expect(rows.map((r) => r.id)).toEqual(['sT1gT7hI0eF5mJ2kP6nQ']);
+    expect(rows[0]!.parentId).toBeNull();
+    expect(rows[0]!.isoCurrencyCode).toBeNull();
   });
 
-  test('no-op when transaction id is not cached', () => {
+  test('extra.parentId is applied (split children)', () => {
     const live = mkLive();
     const wc = live.getTransactionsWindowCache();
-    wc.ingestMonth('2024-01', [{ id: 'tx1', date: '2024-01-15' }], Date.now());
+    wc.ingestMonth('2024-01', [], Date.now());
 
-    // Should not throw; cache unchanged
-    live.patchLiveTransaction('missing', { name: 'Ghost' } as Record<string, unknown>);
+    live.upsertLiveTransaction(mutationRow({ id: 'uV3hU9jK2gH7oL4mR8pS' }), {
+      parentId: 'qR9fS5fG8cD3kH0iN4lO',
+    });
 
-    expect(wc.entriesForMonth('2024-01')).toHaveLength(1);
+    expect(wc.entriesForMonth('2024-01')[0]!.parentId).toBe('qR9fS5fG8cD3kH0iN4lO');
   });
 
-  test('no-op when cache is empty', () => {
-    const live = mkLive();
-    // No error thrown
-    live.patchLiveTransaction('tx99', { name: 'X' } as Record<string, unknown>);
-  });
-
-  test('id field is preserved from the patch argument', () => {
+  test('no-op for the window cache when the target month is not cached', () => {
     const live = mkLive();
     const wc = live.getTransactionsWindowCache();
-    wc.ingestMonth('2024-01', [{ id: 'tx1', date: '2024-01-10' }], Date.now());
 
-    live.patchLiveTransaction('tx1', { id: 'should-be-ignored', name: 'Z' } as Record<
-      string,
-      unknown
-    >);
+    live.upsertLiveTransaction(mutationRow());
 
-    expect(wc.entriesForMonth('2024-01')[0]!.id).toBe('tx1');
+    expect(wc.cachedMonths()).toEqual([]);
+    // ...but the routing ids are still learned.
+    expect(live.lookupTransactionMeta(['aB3xK9pQ2mN7vR4tY8wZ']).size).toBe(1);
+  });
+
+  test('a date move leaves the old month and lands in the new one', () => {
+    const live = mkLive();
+    const wc = live.getTransactionsWindowCache();
+    wc.ingestMonth('2024-01', [queryRow()], Date.now());
+    wc.ingestMonth('2024-02', [], Date.now());
+
+    live.upsertLiveTransaction(mutationRow({ date: '2024-02-03' }));
+
+    expect(wc.entriesForMonth('2024-01')).toHaveLength(0);
+    expect(wc.entriesForMonth('2024-02').map((r) => r.date)).toEqual(['2024-02-03']);
+  });
+
+  test('a drifted row with no id or date is not inserted', () => {
+    const live = mkLive();
+    const wc = live.getTransactionsWindowCache();
+    wc.ingestMonth('2024-01', [], Date.now());
+
+    live.upsertLiveTransaction(mutationRow({ id: '' }));
+    live.upsertLiveTransaction(mutationRow({ date: '' }));
+
+    expect(wc.entriesForMonth('2024-01')).toHaveLength(0);
+  });
+
+  test('empty routing ids are not fed to the meta index (#518)', () => {
+    const live = mkLive();
+    live.upsertLiveTransaction(mutationRow({ accountId: '' }));
+    expect(live.lookupTransactionMeta(['aB3xK9pQ2mN7vR4tY8wZ']).size).toBe(0);
   });
 });
 
@@ -1370,8 +1465,8 @@ describe('transaction meta index', () => {
     expect(queries).toBe(2);
   });
 
-  test('patchLiveTransaction feeds persistence; new instance resolves the routing id without fetching (#511)', () => {
-    // Verify that patchLiveTransaction's feedMeta path persists entries so a
+  test('upsertLiveTransaction feeds persistence; new instance resolves the routing id without fetching (#511)', () => {
+    // Verify that upsertLiveTransaction's feedMeta path persists entries so a
     // fresh LiveCopilotDatabase can resolve them without any network call.
     const tmpDir = mkdtempSync(join(tmpdir(), 'live-meta-patch-'));
     try {
@@ -1383,7 +1478,7 @@ describe('transaction meta index', () => {
       );
 
       // Seed the window cache directly (bypassing getTransactions so the meta
-      // index is not pre-populated — patchLiveTransaction is the entry point).
+      // index is not pre-populated — upsertLiveTransaction is the entry point).
       const wc = live1.getTransactionsWindowCache();
       wc.ingestMonth(
         '2025-03',
@@ -1413,8 +1508,14 @@ describe('transaction meta index', () => {
         Date.now()
       );
 
-      // patchLiveTransaction feeds the meta index for this not-yet-persisted id.
-      live1.patchLiveTransaction('patch-t1', { name: 'After Patch' } as Record<string, unknown>);
+      // upsertLiveTransaction feeds the meta index for this not-yet-persisted id.
+      const [seeded] = wc.entriesForMonth('2025-03');
+      const { parentId: _p, isoCurrencyCode: _c, ...mutationShape } = seeded!;
+      live1.upsertLiveTransaction({
+        ...mutationShape,
+        categoryId: mutationShape.categoryId ?? '',
+        name: 'After Patch',
+      });
 
       // Fresh instance + fresh store on the same dir must resolve without fetching.
       const store2 = new TransactionMetaStore({ baseDir: tmpDir, uidProvider: () => 'user-1' });

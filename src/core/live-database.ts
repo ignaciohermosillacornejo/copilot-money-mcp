@@ -49,7 +49,7 @@ import type { TopMoverNode } from './graphql/queries/top-movers.js';
 import type { AggregatedHoldingNode } from './graphql/queries/aggregated-holdings.js';
 import type { InvestmentBalanceNode } from './graphql/queries/investment-balance.js';
 import { fetchUser, type UserNode } from './graphql/queries/user.js';
-import type { Transaction } from '../models/index.js';
+import type { CreatedTransaction } from './graphql/transactions.js';
 import { ONE_HOUR_MS, SIX_HOURS_MS, ONE_DAY_MS, ONE_WEEK_MS } from '../utils/durations.js';
 
 export interface LiveDatabaseOptions {
@@ -670,29 +670,48 @@ export class LiveCopilotDatabase {
   // ── Phase 2: write-through patch methods ─────────────────────────────────
 
   /**
-   * Patch a cached transaction by id. Locates the row across all cached
-   * months, merges the provided fields, and upserts the result. No-op if
-   * the row is not currently cached.
+   * Write-through for a transaction a mutation just returned (#820, #821).
+   *
+   * Takes the SERVER's row — the mutation's TransactionFields selection, the
+   * same camelCase shape the window cache stores — never a locally-built
+   * patch. That is the point: an earlier version merged the snake_case cache
+   * model (`category_id`, `user_reviewed`, `tag_ids`, …) onto the camelCase
+   * node, so every field not spelled the same in both models was silently
+   * dropped. The parameter type is the GraphQL shape (it requires `accountId`
+   * and `itemId`), so a cache-model `Transaction` no longer compiles here.
+   *
+   * - Row cached → `{ ...existing, ...node }`. Keys the mutation fragment does
+   *   not select (`parentId`, except bulk's; `isoCurrencyCode`) keep their
+   *   cached values instead of being blanked.
+   * - Row not cached (a created row, a split child, a date move into a cached
+   *   month) → inserted with `null` for those two unselected keys.
+   * - Target month not cached → the cache's upsert is a no-op for the insert
+   *   (and still removes the row from the month it used to live in), so the
+   *   next read fetches the month from the server.
+   *
+   * `extra` carries what the caller knows and the fragment omits — today only
+   * a split child's `parentId`.
    */
-  patchLiveTransaction(id: string, fields: Partial<Transaction>): void {
-    let existing: TransactionNode | undefined;
-    for (const month of this.transactionsWindowCache.cachedMonths()) {
-      const row = this.transactionsWindowCache.entriesForMonth(month).find((r) => r.id === id);
-      if (row) {
-        existing = row;
-        break;
-      }
-    }
-    if (!existing) return;
-    const merged: TransactionNode = { ...existing, ...fields, id };
+  upsertLiveTransaction(
+    node: CreatedTransaction & { parentId?: string | null },
+    extra: Pick<Partial<TransactionNode>, 'parentId'> = {}
+  ): void {
+    // Response validation is warn-only: a drifted row with no id or date
+    // cannot be placed, and must not be inserted as a phantom.
+    if (!node.id || !node.date) return;
+    const existing = this.lookupTransactionNodes([node.id]).get(node.id);
+    const merged: TransactionNode = {
+      parentId: null,
+      isoCurrencyCode: null,
+      ...existing,
+      ...node,
+      ...extra,
+    };
     // Keep the meta index consistent with the invariant "any row this class
-    // has seen is indexed" (redundant for ingested rows, cheap insurance).
-    // Merging `fields` cannot change the routing ids: it is
-    // Partial<Transaction> (snake_case account_id/item_id, not the node's
-    // camelCase keys), and the ids are server-immutable regardless.
-    // Guard against drifted responses with null/empty routing ids (review finding).
+    // has seen is indexed". Same empty-routing-id guard as every other feed
+    // (#518) — feedMeta re-checks, this skips the flush too.
     if (merged.accountId && merged.itemId) {
-      this.feedMeta(id, { accountId: merged.accountId, itemId: merged.itemId });
+      this.feedMeta(merged.id, { accountId: merged.accountId, itemId: merged.itemId });
       this.metaStore.flush();
     }
     this.transactionsWindowCache.upsert(merged);
