@@ -620,6 +620,73 @@ export function nonFiniteLeafPaths(fields: Map<string, FirestoreValue>): string[
 }
 
 /**
+ * Check 9's raw side (#824): does this RAW transaction document carry a
+ * category on a row Copilot treats as uncategorizable — `type` income or
+ * internal_transfer, or the `internal_transfer` boolean set — and not
+ * soft-deleted? Reads the disk,
+ * not decoder output, because the decoder is what clears the field: a check
+ * on decoded rows alone could never fail.
+ */
+export function hasCategoryOnIncomeOrTransfer(fields: Map<string, FirestoreValue>): boolean {
+  // A soft-deleted row never decodes (the decoder drops user_deleted), so it
+  // would only ever count as "not compared" and keep the check at WARN.
+  const deleted = fields.get('user_deleted');
+  if (deleted?.type === 'boolean' && deleted.value === true) return false;
+  const type = fields.get('type');
+  const typeName =
+    type?.type === 'string' && typeof type.value === 'string' ? type.value.toLowerCase() : '';
+  const flag = fields.get('internal_transfer');
+  const isTransferFlag = flag?.type === 'boolean' && flag.value === true;
+  if (typeName !== 'income' && typeName !== 'internal_transfer' && !isTransferFlag) return false;
+  const category = fields.get('category_id');
+  return category?.type === 'string' && typeof category.value === 'string' && category.value !== '';
+}
+
+/**
+ * Check 9's verdict (#824): every raw income/transfer document that carries a
+ * category must decode to a row with no category. `decoded` maps transaction
+ * id → decoded category_id for the rows the decoder produced.
+ */
+export function reportIncomeTransferCategory(
+  staleIds: readonly string[],
+  decoded: ReadonlyMap<string, string | undefined>
+): { status: Status; detail: string } {
+  if (staleIds.length === 0) {
+    return {
+      status: 'SKIP',
+      detail:
+        'no income/transfer document carries a category on this cache, so the decoder rule ' +
+        'has nothing to clear and this check measures nothing',
+    };
+  }
+  const missing = staleIds.filter((id) => !decoded.has(id));
+  const leaked = staleIds.filter((id) => decoded.has(id) && (decoded.get(id) ?? '') !== '');
+  const compared = staleIds.length - missing.length;
+  if (leaked.length > 0) {
+    return {
+      status: 'FAIL',
+      detail:
+        `${leaked.length} of ${compared} income/transfer document(s) with a category on disk ` +
+        `still decode with that category — cache mode attributes a category the app does not`,
+    };
+  }
+  if (compared === 0) {
+    return {
+      status: 'WARN',
+      detail:
+        `${staleIds.length} income/transfer document(s) carry a category on disk, but none ` +
+        `of them decoded to a row, so nothing was compared`,
+    };
+  }
+  return {
+    status: 'PASS',
+    detail:
+      `${compared} income/transfer document(s) carry a category on disk; all decode with none` +
+      (missing.length > 0 ? ` (${missing.length} not decoded, not compared)` : ''),
+  };
+}
+
+/**
  * Field names in this cache are lowercase snake_case. Anything else — an epoch
  * timestamp, a `YYYY-MM-DD`, a Firestore id — is a dynamic key and is redacted.
  *
@@ -670,6 +737,8 @@ async function main(): Promise<void> {
   // Account documents reduced to two booleans for check 7. PII-safe by
   // construction: nothing but flags is kept, and only counts are reported.
   const accountRows: AccountVisibilityRow[] = [];
+  // Ids only, for check 9 — no values are kept.
+  const incomeTransferWithCategory: string[] = [];
   let scanned = 0;
   const started = Date.now();
 
@@ -694,6 +763,12 @@ async function main(): Promise<void> {
 
     if (doc.fields.size > 0 && isAccountDocumentCollection(doc.collection)) {
       accountRows.push(readAccountVisibilityRow(doc.fields));
+    }
+    if (
+      routeCollection(doc.collection) === 'transactions' &&
+      hasCategoryOnIncomeOrTransfer(doc.fields)
+    ) {
+      incomeTransferWithCategory.push(doc.documentId);
     }
   }
 
@@ -993,6 +1068,19 @@ async function main(): Promise<void> {
     const unread = reportUnreadCollection(pattern, routedNonEmpty(route, routed));
     record(`unread collection: ${pattern}`, unread.status, unread.detail);
   }
+
+  // ---------------------------------------------------------------------
+  // Check 9 — income and transfer rows decode with no category (#824).
+  //
+  // Copilot clears the category of an income or transfer row; a document can
+  // still carry the old one. The raw side is read from disk during the scan,
+  // so this fails if the decoder ever stops clearing it. SKIP on a cache with
+  // no such document — the app's own rows already carry an empty category, so
+  // a cache with none is the common case, not a fault.
+  // ---------------------------------------------------------------------
+  const decodedCategory = new Map(all.transactions.map((t) => [t.transaction_id, t.category_id]));
+  const incomeTransfer = reportIncomeTransferCategory(incomeTransferWithCategory, decodedCategory);
+  record('income/transfer rows have no category', incomeTransfer.status, incomeTransfer.detail);
 
   // ---------------------------------------------------------------------
   // Summary

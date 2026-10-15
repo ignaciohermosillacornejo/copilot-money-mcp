@@ -975,7 +975,7 @@ function processTransaction(
     if (mapValue) txnData[field] = toPlainObject(mapValue);
   }
 
-  const copilotType = getString(fields, 'type');
+  const copilotType = getString(fields, 'type')?.toLowerCase();
   if (copilotType === 'internal_transfer') {
     txnData.internal_transfer = true;
   }
@@ -983,9 +983,14 @@ function processTransaction(
   // (GraphQL returns an empty categoryId) and the app shows none. A document
   // can still carry the old category_id — observed on rows created through
   // create_transaction (#824) — so drop it here, to the same '' the
-  // write-through patch uses for the same type change.
+  // write-through patch uses for the same type change. Keyed off the
+  // internal_transfer FLAG rather than the type string alone, because some
+  // documents mark a transfer only with the boolean (see booleanFields).
+  // Only category_id is normalized: category_id_source, old_category_id and
+  // intelligence_chosen_category_id are passed through as the raw document
+  // has them, and nothing resolves a category from them.
   if (
-    (copilotType === 'income' || copilotType === 'internal_transfer') &&
+    (copilotType === 'income' || txnData.internal_transfer === true) &&
     txnData.category_id !== undefined
   ) {
     txnData.category_id = '';

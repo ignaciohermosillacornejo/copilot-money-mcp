@@ -17,6 +17,7 @@ Promote a row to a full entry if a later instance turns out to be user-visible.
 | | Bug | Class | Fixed in |
 |---|---|---|---|
 | #9 | Release workflow silently skipped builds on `workflow_dispatch` | `silent-failure-masking` | #9 |
+| #824 | Cache mode reported a category on INCOME / INTERNAL_TRANSFER rows. Copilot clears the category for those types and the app shows none, but a cache document can keep the old `category_id`; observed on rows made by `create_transaction`. App-made rows already carried an empty category, so in practice only MCP-created rows were affected. The decoder now clears it by the document's `type` or `internal_transfer` flag, and `smoke:cache` check 9 compares raw documents against decoded rows | `ui-parity` | #830 |
 | #26 | Internal transfers counted as spending; cross-record field contamination; accounts missed by the 1000-byte scan window | `heuristic-decode-bleed` | #26 |
 | #62 | Description truncation dropped or garbled text when no period was present | `ui-parity` | #62 |
 | #65 | Fixtures used future dates, so date-window filters were never realistically exercised | `fixture-reality-drift` | #65 |

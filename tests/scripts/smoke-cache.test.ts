@@ -32,6 +32,8 @@ import {
   readAccountVisibilityRow,
   countDashboardActive,
   classifyDashboardActive,
+  hasCategoryOnIncomeOrTransfer,
+  reportIncomeTransferCategory,
 } from '../../scripts/smoke/cache.js';
 import type { CollectionRoute } from '../../src/core/decoder.js';
 import type {
@@ -988,5 +990,107 @@ describe('every decoder route is compared or excluded with a reason (#778)', () 
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('check 9: income/transfer rows decode with no category (#824)', () => {
+  const str = (value: string): FirestoreValue => ({ type: 'string', value });
+  const bool = (value: boolean): FirestoreValue => ({ type: 'boolean', value });
+  const doc = (entries: ReadonlyArray<readonly [string, FirestoreValue]>) =>
+    new Map<string, FirestoreValue>(entries);
+
+  test.each([
+    [
+      'income with a category',
+      [
+        ['type', str('income')],
+        ['category_id', str('Qm7vR2kX9pL4tN8wB3sD')],
+      ],
+      true,
+    ],
+    [
+      'transfer by type',
+      [
+        ['type', str('internal_transfer')],
+        ['category_id', str('Qm7vR2kX9pL4tN8wB3sD')],
+      ],
+      true,
+    ],
+    [
+      'transfer by flag only',
+      [
+        ['type', str('regular')],
+        ['internal_transfer', bool(true)],
+        ['category_id', str('Qm7vR2kX9pL4tN8wB3sD')],
+      ],
+      true,
+    ],
+    [
+      'upper-case type',
+      [
+        ['type', str('INCOME')],
+        ['category_id', str('Qm7vR2kX9pL4tN8wB3sD')],
+      ],
+      true,
+    ],
+    [
+      'income with an empty category',
+      [
+        ['type', str('income')],
+        ['category_id', str('')],
+      ],
+      false,
+    ],
+    ['income with no category', [['type', str('income')]], false],
+    [
+      'soft-deleted income with a category',
+      [
+        ['type', str('income')],
+        ['category_id', str('Qm7vR2kX9pL4tN8wB3sD')],
+        ['user_deleted', bool(true)],
+      ],
+      false,
+    ],
+    [
+      'regular with a category',
+      [
+        ['type', str('regular')],
+        ['category_id', str('Qm7vR2kX9pL4tN8wB3sD')],
+      ],
+      false,
+    ],
+  ] as const)('%s → %p', (_label, entries, expected) => {
+    expect(hasCategoryOnIncomeOrTransfer(doc(entries))).toBe(expected);
+  });
+
+  test('SKIP when no document carries a category on an income/transfer row', () => {
+    expect(reportIncomeTransferCategory([], new Map()).status).toBe('SKIP');
+  });
+
+  test('PASS when every such document decodes with no category', () => {
+    const verdict = reportIncomeTransferCategory(
+      ['Hx4nT8qW2mK6vR9pL3sY', 'Pz2kW7nQ4mR9tV3xB8sL'],
+      new Map<string, string | undefined>([
+        ['Hx4nT8qW2mK6vR9pL3sY', ''],
+        ['Pz2kW7nQ4mR9tV3xB8sL', ''],
+      ])
+    );
+    expect(verdict.status).toBe('PASS');
+  });
+
+  test('FAIL when one decodes with its category', () => {
+    const verdict = reportIncomeTransferCategory(
+      ['Hx4nT8qW2mK6vR9pL3sY', 'Pz2kW7nQ4mR9tV3xB8sL'],
+      new Map<string, string | undefined>([
+        ['Hx4nT8qW2mK6vR9pL3sY', ''],
+        ['Pz2kW7nQ4mR9tV3xB8sL', 'Qm7vR2kX9pL4tN8wB3sD'],
+      ])
+    );
+    expect(verdict.status).toBe('FAIL');
+    expect(verdict.detail).toStartWith('1 of 2');
+  });
+
+  test('WARN when none of them decoded, so nothing was compared', () => {
+    expect(reportIncomeTransferCategory(['Hx4nT8qW2mK6vR9pL3sY'], new Map()).status).toBe('WARN');
   });
 });
