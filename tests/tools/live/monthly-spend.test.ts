@@ -109,23 +109,6 @@ describe('LiveMonthlySpendTools.getMonthlySpend', () => {
     expect(result.daily_spending.map((r) => r.daily_amount)).toEqual([100, null, 50]);
   });
 
-  test("a day's daily_amount does not depend on include_future", async () => {
-    const rows = [
-      { id: 'a', date: '2026-04-01', totalAmount: 100, comparisonAmount: 90 },
-      { id: 'b', date: '2026-04-02', totalAmount: 150, comparisonAmount: null },
-      { id: 'c', date: '2026-04-03', totalAmount: 200, comparisonAmount: 80 },
-    ];
-    const filtered = await new LiveMonthlySpendTools(makeLive(makeClient(rows))).getMonthlySpend(
-      {}
-    );
-    const full = await new LiveMonthlySpendTools(makeLive(makeClient(rows))).getMonthlySpend({
-      include_future: true,
-    });
-
-    expect(filtered.daily_spending.find((r) => r.id === 'c')?.daily_amount).toBe(50);
-    expect(full.daily_spending.find((r) => r.id === 'c')?.daily_amount).toBe(50);
-  });
-
   test('default view keeps a row whose comparison_amount alone is null', async () => {
     const client = makeClient([
       { id: 'a', date: '2026-04-01', totalAmount: 100, comparisonAmount: 90 },
@@ -136,8 +119,15 @@ describe('LiveMonthlySpendTools.getMonthlySpend', () => {
 
     const result = await tools.getMonthlySpend({});
 
-    // The visible daily_amount column sums to the last total_amount.
+    // The visible daily_amount column sums to the last total_amount. This is
+    // also what makes a day's value independent of include_future: it fails
+    // on a revert to the either-null filter ([100, 50]) and, combined with
+    // differencing after the filter, on [100, 100].
     expect(result.daily_spending.map((r) => r.daily_amount)).toEqual([100, 50, 50]);
+    const full = await new LiveMonthlySpendTools(makeLive(client)).getMonthlySpend({
+      include_future: true,
+    });
+    expect(full.daily_spending.map((r) => r.daily_amount)).toEqual([100, 50, 50]);
   });
 
   test('passes numeric wire amounts through as numbers', async () => {

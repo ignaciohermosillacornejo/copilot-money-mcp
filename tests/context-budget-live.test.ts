@@ -348,7 +348,7 @@ const LIVE_BUDGETS: Record<string, number> = {
   get_transactions_live: 455,
   // Added by #823, which gave each row a `daily_amount`. Measured 349 against
   // the two real stub days above (the placeholder is filtered); 385 is that
-  // +~10%. The series is at most 31 rows, so this scales to ~5k worst case.
+  // +~10%. The series is at most 31 rows (~100 chars each), so ~3k worst case.
   get_monthly_spend_live: 385,
 };
 

@@ -34,9 +34,9 @@ import type { ToolSchema } from '../tools.js';
 
 export interface GetMonthlySpendLiveArgs {
   /**
-   * Include future-dated placeholder rows (both totalAmount and
-   * comparisonAmount are null). Default: false — only days with at
-   * least one amount value are returned.
+   * Include placeholder rows — days with no totalAmount (the server pads the
+   * rest of the month with them). Default: false — only days with a
+   * total_amount are returned.
    */
   include_future?: boolean;
 }
@@ -70,10 +70,13 @@ function projectRow(row: DailySpendNode): ProjectedDay {
 }
 
 /**
- * Difference the cumulative series into per-day amounts. Runs over the full
- * date-sorted series BEFORE any filtering, so a day's value never depends on
- * which other rows the caller asked to see; a null total yields null and
- * does not reset the running baseline.
+ * Difference the cumulative series into per-day amounts. A null total yields
+ * null and does not reset the running baseline. A day's value never depends
+ * on which rows the caller asked to see, for two reasons: the default filter
+ * drops only null-total rows (which never move the baseline), and this runs
+ * over the full date-sorted series before any filtering anyway, so a wider
+ * filter added later cannot break it. Assumes 2-dp totals: each difference is
+ * rounded, so sub-cent server values would re-sum to within a cent.
  */
 function withDailyAmounts(rows: ProjectedDay[]): GetMonthlySpendLiveDay[] {
   let previous = 0;
@@ -138,11 +141,11 @@ export function createLiveMonthlySpendToolSchema(): ToolSchema {
       "month-to-date; `daily_amount` is that day's increase (the first row's, its own total). " +
       'Counts REGULAR transactions with no recurring link, net of refunds, pending included; ' +
       'leaves out income, transfers and recurring charges (rent, subscriptions), so it is ' +
-      'NOT the app\'s "spent this month" — for that, sum the POSITIVE amounts (the app does ' +
-      'not net refunds) from ' +
-      'get_transactions_live, whose defaults already drop transfers and excluded rows. ' +
+      'NOT the app\'s "spent this month" — for that, sum the POSITIVE amounts from ' +
+      "get_transactions_live (the app's own convention), whose defaults already drop " +
+      'transfers and excluded rows. ' +
       '`comparison_amount`\'s meaning is unconfirmed; do not use it for "vs last month". ' +
-      'A row dated tomorrow can appear. Future rows (null amounts) are dropped unless ' +
+      'A row dated tomorrow can appear. Future rows (null total) are dropped unless ' +
       '`include_future: true`. ≤31 rows. Available when --live-reads is on.',
     inputSchema: {
       type: 'object' as const,
@@ -150,7 +153,7 @@ export function createLiveMonthlySpendToolSchema(): ToolSchema {
         include_future: {
           type: 'boolean',
           description:
-            'If true, include future-dated placeholder rows (both amounts null) ' +
+            'If true, include placeholder rows (null total_amount) ' +
             'in the response. Default: false.',
           default: false,
         },
