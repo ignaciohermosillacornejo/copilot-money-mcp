@@ -17,11 +17,11 @@
  * any prior-month spend, so it is not the "same day last month" figure an
  * earlier description claimed.
  *
- * The response includes future-dated placeholder rows where both amount
- * fields are `null` (the server pads the full month). By default the
- * projection drops those rows. Pass `include_future: true` to receive
- * the full padded series (e.g., for callers that want a complete date
- * axis with explicit nulls).
+ * The server pads the rest of the month with placeholder rows (captured
+ * with both amounts `null`). By default the projection drops every row with
+ * no `total_amount`. Pass `include_future: true` to receive the full padded
+ * series (e.g., for callers that want a complete date axis with explicit
+ * nulls).
  */
 
 import type { LiveCopilotDatabase } from '../../core/live-database.js';

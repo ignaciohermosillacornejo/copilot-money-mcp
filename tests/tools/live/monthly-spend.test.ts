@@ -43,7 +43,7 @@ describe('LiveMonthlySpendTools.getMonthlySpend', () => {
     expect(client.query).toHaveBeenCalledTimes(1);
   });
 
-  test('default: filters out future-dated rows where both amounts are null', async () => {
+  test('default: filters out placeholder rows with no total_amount', async () => {
     const client = makeClient([pastRow, todayRow, futureRow]);
     const tools = new LiveMonthlySpendTools(makeLive(client));
 
@@ -127,6 +127,9 @@ describe('LiveMonthlySpendTools.getMonthlySpend', () => {
     const full = await new LiveMonthlySpendTools(makeLive(client)).getMonthlySpend({
       include_future: true,
     });
+    // Belt-and-braces: with this fixture both modes return the same rows, so
+    // this only starts to discriminate if a later filter widens (e.g. a date
+    // range) — the default-mode assertion above is the detector today.
     expect(full.daily_spending.map((r) => r.daily_amount)).toEqual([100, 50, 50]);
   });
 

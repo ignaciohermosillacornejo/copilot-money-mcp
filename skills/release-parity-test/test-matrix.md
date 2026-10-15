@@ -141,7 +141,7 @@ need it.
 | CAT-07 | [P2] Rename in the web, read through the MCP | Rename the test tag and category in the web; `get_tags_live`, `tag: <new name>` filter, the test row's `category_name` | New names show, or the result points at `refresh_cache` (tags/categories cached 24h) | not run |
 | CAT-08 | [P2] Excluded parent category | Mark the test parent excluded with a test child under it | Child rows hidden exactly as the web hides them | not run |
 | CAT-09 | [P2] Cache category spend | cache `getCategories {view:"list", period:"last_month"}` per category vs web | Equal per category within cache sync age | not run |
-| CAT-10 | [P3] `excluded_only` / `include_history` / monthly `include_future` | `get_categories_live {excluded_only:true}`; `{fields:["default","budget"], include_history:true}`; `get_monthly_spend_live {include_future:true}` | Only excluded rows (= web); `budget.histories` only with `include_history`; one row per day of the month, future rows null | not run |
+| CAT-10 | [P3] `excluded_only` / `include_history` / monthly `include_future` | `get_categories_live {excluded_only:true}`; `{fields:["default","budget"], include_history:true}`; `get_monthly_spend_live {include_future:true}` | Only excluded rows (= web); `budget.histories` only with `include_history`; one row per day of the month, future rows with a null `total_amount` | not run |
 
 ## BUD — Budgets
 
