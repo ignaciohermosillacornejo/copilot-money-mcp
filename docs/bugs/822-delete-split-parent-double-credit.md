@@ -4,7 +4,7 @@ title: delete_transaction accepted a split parent, and Copilot credited the pare
 class: aggregation-double-count
 status: fixed
 detected: live-probe # v3.0 release parity test (2026-10-14): round-trip create → split → delete on a manual account, then the account balance in the web app
-fixed_in: not yet
+fixed_in: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/835
 issue: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/822
 date: 2026-10-15
 ---
