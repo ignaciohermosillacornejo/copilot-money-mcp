@@ -458,22 +458,67 @@ def collect_field_vocabulary() -> set[str]:
 
 
 def skill_docs(skill_dir: Path) -> list[Path]:
-    """Every markdown file in a skill's folder, SKILL.md first.
+    """Every markdown file under a skill's folder, recursively, SKILL.md first.
 
     A skill's instructions are not always in SKILL.md alone: release-parity-test
     keeps its ~150 cases, and nearly every tool and field name it uses, in
-    test-matrix.md. Linting only SKILL.md left those references unchecked, so a
-    renamed tool or a field dropped from a v3 preset would rot there silently.
-    Frontmatter stays a SKILL.md-only check; the reference checks read all of
-    these.
+    test-matrix.md, and skills commonly grow a references/ subfolder. Linting
+    only SKILL.md left those references unchecked, so a renamed tool or a field
+    dropped from a v3 preset would rot there silently. Frontmatter stays a
+    SKILL.md-only check (pinned by a test); the reference and table checks read
+    all of these.
     """
-    docs = sorted(skill_dir.glob("*.md"), key=lambda p: (p.name != "SKILL.md", p.name))
-    return [d for d in docs if d.is_file()]
+    docs = sorted(
+        (d for d in skill_dir.rglob("*.md") if d.is_file()),
+        key=lambda p: (p != skill_dir / "SKILL.md", str(p.relative_to(skill_dir))),
+    )
+    return docs
 
 
-def _where(skill_dir: Path, doc: Path) -> str:
-    """`<skill>` for SKILL.md (the historical message form), `<skill>/<file>` otherwise."""
-    return skill_dir.name if doc.name == "SKILL.md" else f"{skill_dir.name}/{doc.name}"
+def _loc(skill_dir: Path, doc: Path, line_no: int | None = None) -> str:
+    """One location format for every message: `<skill>/<file>[:<line>]`."""
+    where = f"{skill_dir.name}/{doc.relative_to(skill_dir)}"
+    return where if line_no is None else f"{where}:{line_no}"
+
+
+_UNESCAPED_PIPE = re.compile(r"(?<!\\)\|")
+_TABLE_SEPARATOR = re.compile(r"^\|(\s*:?-{3,}:?\s*\|)+\s*$")
+
+
+def _cell_count(line: str) -> int:
+    return len(_UNESCAPED_PIPE.split(line.strip())) - 2
+
+
+def check_tables(skill_dir: Path) -> list[str]:
+    """Every markdown table row has exactly as many cells as its header.
+
+    GFM drops cells past the header's count without a warning, so a row with an
+    extra cell renders its Expected in the Last run column and loses its real
+    status. In a file that is a test specification that is a silent wrong
+    answer, which is how four release-parity-test rows shipped (review on #826).
+    """
+    errors: list[str] = []
+    for doc in skill_docs(skill_dir):
+        lines = doc.read_text().splitlines()
+        header: int | None = None
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped.startswith("|"):
+                header = None
+                continue
+            if _TABLE_SEPARATOR.match(stripped) and i > 0 and lines[i - 1].strip().startswith("|"):
+                header = _cell_count(lines[i - 1])
+                continue
+            if header is None:
+                continue
+            count = _cell_count(stripped)
+            if count != header:
+                errors.append(
+                    f"{_loc(skill_dir, doc, i + 1)}: table row has {count} cells, its header "
+                    f"has {header}. Markdown drops the extra cells without a warning, so "
+                    "the row renders shifted. Merge or split cells to match the header."
+                )
+    return errors
 
 
 def check_field_refs(
@@ -482,7 +527,14 @@ def check_field_refs(
     tool_args: dict[str, set[str]],
     vocabulary: set[str],
 ) -> list[str]:
-    """Report fields a skill reads that its tool no longer returns by default."""
+    """Report fields a skill reads that its tool no longer returns by default.
+
+    The `fields:` exemption is per LINE: a line that passes `fields:` anywhere is
+    skipped whole. That suits SKILL.md prose (one call per line) but is coarse
+    for a dense table row naming several tools, so a green run says less about
+    test-matrix.md than its row count suggests. Keep `fields:` on rows that need
+    it and nothing else, rather than relying on this check for the rest.
+    """
     errors: list[str] = []
     for doc in skill_docs(skill_dir):
         errors.extend(
@@ -527,7 +579,7 @@ def _field_refs_in(
             if token in default_fields or token not in vocabulary:
                 continue
             errors.append(
-                f"{skill_dir.name}:{doc.name}:{line_no}: `{token}` is a row field, but "
+                f"{_loc(skill_dir, doc, line_no)}: `{token}` is a row field, but "
                 f"{'/'.join(referenced)} does not return it by default (v3 terse rows) "
                 f"and this line passes no `fields:` argument. Add "
                 f'fields: ["default", "{token}"] to the call if the instruction needs '
@@ -582,7 +634,7 @@ def check_tool_refs(skill_dir: Path, known_tools: set[str]) -> list[str]:
                 continue
             if tok not in known_tools:
                 errors.append(
-                    f"{_where(skill_dir, doc)}: references unknown MCP tool `{tok}`"
+                    f"{_loc(skill_dir, doc)}: references unknown MCP tool `{tok}`"
                 )
     return errors
 
@@ -600,7 +652,7 @@ def check_profile_path(skill_dir: Path) -> list[str]:
                 if stripped in ALLOWED_PROFILE_PATHS:
                     continue
                 errors.append(
-                    f"{skill_dir.name}:{doc.name}:{line_no}: "
+                    f"{_loc(skill_dir, doc, line_no)}: "
                     f"non-canonical profile path: {stripped[:120]}"
                 )
     return errors
@@ -637,6 +689,7 @@ def main() -> int:
         if (skill_dir / "SKILL.md").exists():
             all_errors.extend(check_tool_refs(skill_dir, known_tools))
             all_errors.extend(check_profile_path(skill_dir))
+            all_errors.extend(check_tables(skill_dir))
             all_errors.extend(
                 check_field_refs(skill_dir, terse_tools, tool_args, vocabulary)
             )

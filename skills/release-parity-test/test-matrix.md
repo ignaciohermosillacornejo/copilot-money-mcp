@@ -30,6 +30,12 @@ release-blocking bug, **[P2]** correctness, **[P3]** nice to have. When a fix
 lands, re-run its cases and update **Last run**; do not delete a case because it
 passes.
 
+After editing, run `bun run check:skills`: it checks every tool name, every field
+against the tool's default row, and that each table row has as many cells as its
+header (a row with an extra cell renders shifted and loses its result). Its field
+check skips a whole row that passes `fields:`, so keep `fields:` only on rows that
+need it.
+
 ### Review history
 
 - 2026-10-14: first run (ACC/INV/TXN/CAT/REC/V3/W/COH/ERR/CL first rows).
@@ -174,7 +180,7 @@ passes.
 | V3-04 | [P3] Unsupported live filter (`city`) | Error names it and lists supported filters | 2026-10-14 PASS |
 | V3-05 | [P2] Default rows on every remaining `fields` tool | Keys equal the preset table in `docs/MIGRATING-v3.md` exactly | not run |
 | V3-06 | [P2] `fields: ["default","zzz"]` and `["*"]` and `[]` on every read tool | `_field_warning` names `zzz`; `*` equals `all`; `[]` equals default; tools without `fields` reject or warn | not run |
-| V3-07 | [P3] Other removed or unsupported arguments | `include_logos` (cache accounts); live `exclude_split_parents:false`, `exclude_deleted:false`, `transaction_type:"foreign"` | Each errors, naming the argument and the alternative | not run |
+| V3-07 | [P3] Other removed or unsupported arguments: `include_logos` (cache accounts); live `exclude_split_parents:false`, `exclude_deleted:false`, `transaction_type:"foreign"` | Each errors, naming the argument and the alternative | not run |
 | V3-08 | [P3] No dropped rows during the run | No `_dropped_invalid_rows` in any response; no `read-shape drift` line in the server log | not run |
 
 ## W — Writes (Manual account only, `ZZ MCP Test <RUN>` prefix)
@@ -221,11 +227,11 @@ read once first so it is cached. Check `_cache_hit` and `_cache_oldest_fetched_a
 | COH-06 | [P1] `add_transaction_to_recurring` on a cold-month row | `recurring_id` visible | not run (expected FAIL by code, #821) |
 | COH-07 | [P1] `delete_transaction` on a cold-month row | Gone | not run |
 | COH-08 | [P2] Manual account balance after a transaction write | `get_accounts_live` shows it | 2026-10-14 FAIL (1h stale) #825 |
-| COH-09 | [P1] Edits made in the **web**, read through the MCP | Edit a cold-month test row in the web (category, note, tag, amount) and create one there; read live | Visible; expected FAIL (cold months cached a week). At minimum `refresh_cache` fixes it | not run |
-| COH-10 | [P2] Other live caches after MCP writes | `get_recurring_live` payments after `add_transaction_to_recurring`; `get_budgets_live` after `set_budget`; `get_upcoming_recurrings_live` after PAUSED; `get_monthly_spend_live` after a create dated today; `get_networth_live` after a manual write | Each shows the write; by code, up to 1h stale | not run |
-| COH-11 | [P2] A month changes tier during the run | Write into a month at age 14 days before UTC midnight, read after | Visible | not run |
+| COH-09 | [P1] Edits made in the **web**, read through the MCP: Edit a cold-month test row in the web (category, note, tag, amount) and create one there; read live | Visible; expected FAIL (cold months cached a week). At minimum `refresh_cache` fixes it | not run |
+| COH-10 | [P2] Other live caches after MCP writes: `get_recurring_live` payments after `add_transaction_to_recurring`; `get_budgets_live` after `set_budget`; `get_upcoming_recurrings_live` after PAUSED; `get_monthly_spend_live` after a create dated today; `get_networth_live` after a manual write | Each shows the write; by code, up to 1h stale | not run |
+| COH-11 | [P2] A month changes tier during the run: Write into a month at age 14 days before UTC midnight, read after | Visible | not run |
 | COH-12 | [P2] `set_budget` without `month` in the last hours of a local month | Patched month is the one the web shows (UTC vs local month, `live-database.ts` ~738 vs `budgets.ts` ~46) | not run |
-| COH-13 | [P2] Restart after writes | `/mcp` reconnect, re-read the cold month | Matches the web | not run |
+| COH-13 | [P2] Restart after writes: `/mcp` reconnect, re-read the cold month | Matches the web | not run |
 | COH-14 | [P3] `refresh_cache {months:[M]}` | Only M's fetch time moves | not run |
 
 ## ERR — Validation and error messages

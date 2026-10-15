@@ -135,7 +135,9 @@ async function makeRepo(opts: {
   await mkdir(join(root, 'skills', 'demo'), { recursive: true });
   await writeFile(join(root, 'skills', 'demo', 'SKILL.md'), opts.skill ?? SKILL_BODY);
   for (const [name, body] of Object.entries(opts.extraDocs ?? {})) {
-    await writeFile(join(root, 'skills', 'demo', name), body);
+    const path = join(root, 'skills', 'demo', name);
+    await mkdir(join(path, '..'), { recursive: true });
+    await writeFile(path, body);
   }
   return root;
 }
@@ -348,7 +350,69 @@ Call \`get_transactions\` and then \`delete_everything\`.
       },
       ({ code, stderr }) => {
         expect(code).toBe(1);
-        expect(stderr).toContain('demo:test-matrix.md:1: `tag_ids` is a row field');
+        expect(stderr).toContain('demo/test-matrix.md:1: `tag_ids` is a row field');
+      }
+    );
+  });
+
+  test('lints markdown nested below the skill folder too', async () => {
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        extraDocs: { 'references/notes.md': 'Then call `get_everything_live`.\n' },
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('demo/references/notes.md: references unknown MCP tool');
+      }
+    );
+  });
+
+  test('a clean extra file needs no frontmatter of its own', async () => {
+    // Frontmatter is a SKILL.md-only check. The two cases above both carry a
+    // bad reference and expect exit 1, so they would still pass if frontmatter
+    // validation leaked onto every file; this one would not.
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        extraDocs: { 'test-matrix.md': '# Matrix\n\nCall `get_transactions`.\n' },
+      },
+      ({ code, stdout }) => {
+        expect(code).toBe(0);
+        expect(stdout).toContain('1 skills validated');
+      }
+    );
+  });
+
+  test('rejects a table row with more cells than its header', async () => {
+    // GFM silently drops the extra cell, so the row renders shifted: in a test
+    // matrix the real status vanishes from the Last run column (review on #826).
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        extraDocs: {
+          'test-matrix.md':
+            '| ID | Case | Last run |\n|---|---|---|\n| A-1 | ok | PASS |\n| A-2 | steps | expected | not run |\n',
+        },
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('demo/test-matrix.md:4: table row has 4 cells, its header has 3');
+      }
+    );
+  });
+
+  test('accepts tables whose rows match, including escaped pipes in a cell', async () => {
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        extraDocs: {
+          'test-matrix.md':
+            '| ID | Steps |\n|---|---|\n| A-1 | `ps \\| grep cli` |\n\nProse after the table.\n\n| X | Y |\n|---|---|\n| 1 | 2 |\n',
+        },
+      },
+      ({ code }) => {
+        expect(code).toBe(0);
       }
     );
   });
