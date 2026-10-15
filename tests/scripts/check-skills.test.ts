@@ -402,6 +402,49 @@ Call \`get_transactions\` and then \`delete_everything\`.
     );
   });
 
+  test('a short row is reported as rendering blank, not shifted', async () => {
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        extraDocs: { 'test-matrix.md': '| ID | Case | Last run |\n|---|---|---|\n| A-1 | ok |\n' },
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('demo/test-matrix.md:3: table row has 2 cells, its header has 3');
+        expect(stderr).toContain('renders blank');
+      }
+    );
+  });
+
+  test('recognises a one-dash separator, so the table is still checked', async () => {
+    // A separator the regex did not recognise used to leave the whole table
+    // unchecked with no output: a check that fails open (#577's class).
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        extraDocs: { 'test-matrix.md': '| ID | Case |\n|-|-|\n| A-1 | ok | extra |\n' },
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('demo/test-matrix.md:3: table row has 3 cells, its header has 2');
+      }
+    );
+  });
+
+  test('ignores table-shaped lines inside a fenced code block', async () => {
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        extraDocs: {
+          'test-matrix.md': '```\n| a | b |\n|---|---|\n| 1 | 2 | 3 |\n```\n',
+        },
+      },
+      ({ code }) => {
+        expect(code).toBe(0);
+      }
+    );
+  });
+
   test('accepts tables whose rows match, including escaped pipes in a cell', async () => {
     await withRepo(
       {

@@ -50,7 +50,7 @@ every skill reference as an unknown tool. It also reads the terse-by-default
 field presets out of `src/tools/field-selection.ts` and reports any field a
 skill tells its agent to read that the tool no longer returns by default
 (#704) — add the explicit `fields: ["default", "<name>"]` argument to that
-instruction, or drop the backticks when the line is prose about the field.
+instruction, or drop the backticks when the line is prose about the field. It reads every `.md` file under a skill's folder, not just `SKILL.md`, and also fails a markdown table row whose cell count differs from its header (Markdown would render it shifted or blank without a warning).
 
 #### Writes-enabled bundle (local-only)
 

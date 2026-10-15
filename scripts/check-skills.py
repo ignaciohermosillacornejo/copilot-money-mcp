@@ -9,6 +9,11 @@ Checks:
    except for the literal template reference skills/user-profile.template.md.
 4. Field references resolve against the referenced tool's DEFAULT field
    preset (#704) — see "Check 4" below.
+5. Every markdown table row has as many cells as its header (review on #826);
+   see check_tables.
+
+Checks 2–5 read every markdown file under a skill's folder, not just
+SKILL.md (skill_docs); check 1 reads SKILL.md only.
 
 Check 2 gets its tool list from `scripts/dump-tool-names.ts`, which imports
 `ALL_TOOL_DEFS` — the same registry the server builds dispatch from. This
@@ -482,7 +487,10 @@ def _loc(skill_dir: Path, doc: Path, line_no: int | None = None) -> str:
 
 
 _UNESCAPED_PIPE = re.compile(r"(?<!\\)\|")
-_TABLE_SEPARATOR = re.compile(r"^\|(\s*:?-{3,}:?\s*\|)+\s*$")
+# GFM accepts one dash per cell and an optional trailing pipe. Anything looser
+# than the real grammar would fail OPEN: an unrecognised separator leaves the
+# table unchecked with no output (the #577 vacuous-assertion class).
+_TABLE_SEPARATOR = re.compile(r"^\|(\s*:?-+:?\s*\|)*\s*:?-+:?\s*\|?\s*$")
 
 
 def _cell_count(line: str) -> int:
@@ -493,17 +501,29 @@ def check_tables(skill_dir: Path) -> list[str]:
     """Every markdown table row has exactly as many cells as its header.
 
     GFM drops cells past the header's count without a warning, so a row with an
-    extra cell renders its Expected in the Last run column and loses its real
-    status. In a file that is a test specification that is a silent wrong
-    answer, which is how four release-parity-test rows shipped (review on #826).
+    extra cell renders shifted, its Expected in the Last run column, and loses
+    its real status; a short row is padded and renders a blank last column. In a
+    file that is a test specification both are silent wrong answers, which is how
+    five release-parity-test rows shipped (review on #826).
+
+    LIMITATIONS: tuned to this repo's `| a | b |` style. A GFM-legal row with no
+    trailing pipe counts one cell short (a false positive, never a silent miss);
+    a table with no leading pipes is not seen at all; `\\|` (an escaped
+    backslash before a real cell boundary) counts one cell short. Lines inside
+    fenced code blocks are skipped, since they do not render as tables.
     """
     errors: list[str] = []
     for doc in skill_docs(skill_dir):
         lines = doc.read_text().splitlines()
         header: int | None = None
+        in_fence = False
         for i, line in enumerate(lines):
             stripped = line.strip()
-            if not stripped.startswith("|"):
+            if stripped.startswith("```") or stripped.startswith("~~~"):
+                in_fence = not in_fence
+                header = None
+                continue
+            if in_fence or not stripped.startswith("|"):
                 header = None
                 continue
             if _TABLE_SEPARATOR.match(stripped) and i > 0 and lines[i - 1].strip().startswith("|"):
@@ -512,11 +532,17 @@ def check_tables(skill_dir: Path) -> list[str]:
             if header is None:
                 continue
             count = _cell_count(stripped)
-            if count != header:
+            if count > header:
                 errors.append(
                     f"{_loc(skill_dir, doc, i + 1)}: table row has {count} cells, its header "
                     f"has {header}. Markdown drops the extra cells without a warning, so "
-                    "the row renders shifted. Merge or split cells to match the header."
+                    "the row renders shifted. Merge cells to match the header."
+                )
+            elif count < header:
+                errors.append(
+                    f"{_loc(skill_dir, doc, i + 1)}: table row has {count} cells, its header "
+                    f"has {header}. Markdown pads the row with empty cells, so its last "
+                    "column renders blank. Add the missing cells."
                 )
     return errors
 

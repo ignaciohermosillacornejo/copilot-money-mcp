@@ -27,7 +27,10 @@ bun run fix          # Run lint:fix + format
 > needs `bun` on PATH and a completed `bun install`. It also cross-checks the
 > field names skills reference against each terse-by-default tool's
 > `DEFAULT_*_FIELDS` preset (#704), so a skill that reads a field the v3 diet
-> dropped fails the lint instead of failing silently at use time.
+> dropped fails the lint instead of failing silently at use time. These checks,
+> and a table-shape check (every row has as many cells as its header), read every
+> `.md` file under a skill's folder, not just `SKILL.md` — so a skill's test
+> matrix or reference files are linted too.
 
 ## Architecture
 
