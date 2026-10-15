@@ -6,9 +6,16 @@
  * rows for the current month/period. Backed by the SnapshotCache
  * <DailySpendNode> on LiveCopilotDatabase (1h TTL).
  *
- * `total_amount` is the day's actual spend; `comparison_amount` is the
- * same-day-of-prior-period spend (used by the web app for "vs last
- * month" comparisons).
+ * `totalAmount` is CUMULATIVE month-to-date, not a per-day figure, and it
+ * is NOT the app's "spent this month": it leaves out every transaction
+ * linked to a recurring (rent, subscriptions). Measured 2026-10-15 (#823):
+ * each day's increase equals that day's REGULAR transactions with no
+ * recurring link, net of refunds, pending included, to the cent (income
+ * and internal transfers do not count). The tool
+ * adds `daily_amount` (the day's increase) so callers need not difference
+ * the series themselves. `comparisonAmount`'s meaning is unconfirmed — it
+ * grows far faster than any prior-month spend, so it is not the
+ * "same day last month" figure an earlier description claimed.
  *
  * The response includes future-dated placeholder rows where both amount
  * fields are `null` (the server pads the full month). By default the
@@ -38,6 +45,8 @@ export interface GetMonthlySpendLiveDay {
   id: string;
   date: string;
   total_amount: number | null;
+  /** The day's increase in `total_amount` (the first row's is its own total). */
+  daily_amount: number | null;
   comparison_amount: number | null;
 }
 
@@ -49,13 +58,30 @@ export interface GetMonthlySpendLiveResult {
   _cache_hit: boolean;
 }
 
-function projectRow(row: DailySpendNode): GetMonthlySpendLiveDay {
+function projectRow(row: DailySpendNode): Omit<GetMonthlySpendLiveDay, 'daily_amount'> {
   return {
     id: row.id,
     date: row.date,
     total_amount: parseAmount(row.totalAmount),
     comparison_amount: parseAmount(row.comparisonAmount),
   };
+}
+
+/**
+ * Difference the cumulative series into per-day amounts. Runs over the
+ * date-sorted rows; a null total (future placeholder) yields null and does
+ * not reset the running baseline.
+ */
+function withDailyAmounts(
+  rows: Array<Omit<GetMonthlySpendLiveDay, 'daily_amount'>>
+): GetMonthlySpendLiveDay[] {
+  let previous = 0;
+  return rows.map((r) => {
+    if (r.total_amount === null) return { ...r, daily_amount: null };
+    const daily_amount = Math.round((r.total_amount - previous) * 100) / 100;
+    previous = r.total_amount;
+    return { ...r, daily_amount };
+  });
 }
 
 export class LiveMonthlySpendTools {
@@ -80,7 +106,7 @@ export class LiveMonthlySpendTools {
       ? projected
       : projected.filter((r) => r.total_amount !== null && r.comparison_amount !== null);
 
-    const rows = [...filtered].sort((a, b) => a.date.localeCompare(b.date));
+    const rows = withDailyAmounts([...filtered].sort((a, b) => a.date.localeCompare(b.date)));
 
     this.live.logReadCall({
       op: 'MonthlySpend',
@@ -108,17 +134,14 @@ export function createLiveMonthlySpendToolSchema(): ToolSchema {
   return {
     name: 'get_monthly_spend_live',
     description:
-      "Get the current month's TOTAL daily spending series across ALL categories (live, GraphQL-backed) — " +
-      'use for overall month-to-date spend, not for one category (for a single category use ' +
-      'get_transactions_live filtered by its category id). ' +
-      "Each row carries `total_amount` (this period's spend on `date`) and " +
-      '`comparison_amount` (same-day-of-prior-period spend, used by the web app ' +
-      'for "vs last month" deltas). Future-dated placeholder rows (where both ' +
-      'amounts are null) are filtered out by default; pass `include_future: true` ' +
-      'to opt in to the full padded series. Available when --live-reads is on. ' +
-      'No pagination — the response is always ≤31 daily rows (one month). ' +
-      'The other time-series live tools expose `max_rows`/`offset`/`total_rows`/`truncated` ' +
-      "for capping long histories; this tool doesn't need them at this scale.",
+      "Current month's NON-RECURRING spend, day by day (live). `total_amount` is CUMULATIVE " +
+      "month-to-date; `daily_amount` is that day's increase. Counts REGULAR transactions " +
+      'with no recurring link, net of refunds, pending included; leaves out income, transfers ' +
+      'and recurring charges (rent, subscriptions), so it is NOT the app\'s "spent this ' +
+      'month" — for that, sum `amount` from get_transactions_live. `comparison_amount`\'s ' +
+      'meaning is unconfirmed: not last month\'s spend, do not use it for "vs last month". ' +
+      'Dated in UTC; may include a row for tomorrow. Future rows (null amounts) are dropped ' +
+      'unless `include_future: true`. ≤31 rows, no pagination.',
     inputSchema: {
       type: 'object' as const,
       properties: {

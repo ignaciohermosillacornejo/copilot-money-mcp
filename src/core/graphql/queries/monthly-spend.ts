@@ -2,9 +2,9 @@
  * GraphQL query wrapper for MonthlySpend.
  *
  * Despite the operation name, the response is a daily series for the
- * current month (or comparison period). Each row carries `totalAmount`
- * (this period's spend on `date`) and `comparisonAmount` (same-day-of
- * prior-period spend, used by the web app for "vs last month" deltas).
+ * current month. Each row carries `totalAmount` — CUMULATIVE month-to-date
+ * non-recurring spend, see src/tools/live/monthly-spend.ts for the measured
+ * semantics (#823) — and `comparisonAmount`, whose meaning is unconfirmed.
  *
  * For dates beyond today, both `totalAmount` and `comparisonAmount` are
  * `null` — the response pads the full month with placeholder rows.

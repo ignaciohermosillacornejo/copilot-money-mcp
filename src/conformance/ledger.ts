@@ -1111,6 +1111,22 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   gatedQueryResponseShape('unpaidUpcomingRecurrings'),
   queryOperation('monthlySpending'),
   gatedQueryResponseShape('monthlySpending'),
+  {
+    surface: 'CategoriesDailySpent.totalAmount:cumulativeNonRecurring',
+    kind: 'response-shape',
+    oracle: null,
+    class: 'verified-once',
+    evidence:
+      'Measured 2026-10-15 (#823) against one month of real transactions read through ' +
+      'get_transactions_live: the series is cumulative month-to-date, and every checked ' +
+      "day's increase equalled that day's REGULAR transactions with no recurringId, net of " +
+      'refunds, pending included, to the cent. Days with a recurring-linked charge, an ' +
+      'INCOME row or an INTERNAL_TRANSFER all matched only with those left out. Not ' +
+      'checked: transactions in a user-excluded category (none in the sample). ' +
+      '`comparisonAmount` was NOT identified; it grows far faster than any prior-month ' +
+      'spend, so the tool description no longer names a meaning for it. Nothing re-checks ' +
+      'this; the server could change the aggregation silently.',
+  },
   queryOperation('networthHistory'),
   gatedQueryResponseShape('networthHistory'),
   queryOperation('accountBalanceHistory'),

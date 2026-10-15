@@ -150,4 +150,28 @@ describe('createLiveMonthlySpendToolSchema', () => {
       'include_future'
     );
   });
+
+  // #823: total_amount is cumulative month-to-date, so the per-day figure is
+  // the difference between consecutive rows, sorted by date.
+  test('daily_amount differences the cumulative series in date order', async () => {
+    const client = makeClient([
+      { id: 'c', date: '2026-04-03', totalAmount: 175.5, comparisonAmount: 30 },
+      { id: 'a', date: '2026-04-01', totalAmount: 100.1, comparisonAmount: 10 },
+      { id: 'b', date: '2026-04-02', totalAmount: 100.1, comparisonAmount: 20 },
+    ]);
+    const tools = new LiveMonthlySpendTools(makeLive(client));
+
+    const result = await tools.getMonthlySpend({});
+
+    expect(result.daily_spending.map((r) => r.daily_amount)).toEqual([100.1, 0, 75.4]);
+  });
+
+  test('daily_amount is null on a placeholder row and keeps the running baseline', async () => {
+    const client = makeClient([pastRow, todayRow, futureRow]);
+    const tools = new LiveMonthlySpendTools(makeLive(client));
+
+    const result = await tools.getMonthlySpend({ include_future: true });
+
+    expect(result.daily_spending.map((r) => r.daily_amount)).toEqual([100, -50, null]);
+  });
 });
