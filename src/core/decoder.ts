@@ -831,26 +831,44 @@ export interface AllCollectionsResult {
 }
 
 /**
+ * The id a transaction document decodes to: its `transaction_id` field, or
+ * the document id when the field is absent. Exported so a raw-document reader
+ * (scripts/smoke/cache.ts) joins on the same identity the decoder emits.
+ */
+export function transactionDocumentId(fields: Map<string, FirestoreValue>, docId: string): string {
+  return getString(fields, 'transaction_id') ?? docId;
+}
+
+/**
+ * Whether a transaction document produces a row at all, before schema
+ * validation: it needs a non-zero amount and a date, and must not be
+ * soft-deleted. Exported for the same reason as transactionDocumentId — a
+ * raw-side check must not keep its own copy of these rules.
+ */
+export function isDecodableTransactionDocument(fields: Map<string, FirestoreValue>): boolean {
+  const amount = getNumber(fields, 'amount');
+  const date = getDateString(fields, 'date') ?? getDateString(fields, 'original_date');
+  if (amount === undefined || !date || amount === 0) return false;
+  // Soft delete: Copilot does not write Firestore tombstones for transaction
+  // deletes — it flips `user_deleted: true` on the Document and leaves the
+  // rest in place. Drop these the same way `getAccounts` does (#326).
+  return getBoolean(fields, 'user_deleted') !== true;
+}
+
+/**
  * Internal helper to process a transaction document.
  */
 function processTransaction(
   fields: Map<string, FirestoreValue>,
   docId: string
 ): Transaction | null {
-  const transactionId = getString(fields, 'transaction_id') ?? docId;
-  const amount = getNumber(fields, 'amount');
-  const date = getDateString(fields, 'date') ?? getDateString(fields, 'original_date');
-
-  if (amount === undefined || !date || amount === 0) {
+  if (!isDecodableTransactionDocument(fields)) {
     return null;
   }
-
-  // Soft delete: Copilot does not write Firestore tombstones for transaction
-  // deletes — it flips `user_deleted: true` on the Document and leaves the
-  // rest in place. Drop these the same way `getAccounts` does (#326).
-  if (getBoolean(fields, 'user_deleted') === true) {
-    return null;
-  }
+  const transactionId = transactionDocumentId(fields, docId);
+  // Both defined: isDecodableTransactionDocument checked them.
+  const amount = getNumber(fields, 'amount') as number;
+  const date = (getDateString(fields, 'date') ?? getDateString(fields, 'original_date')) as string;
 
   const txnData: Record<string, unknown> = {
     transaction_id: transactionId,

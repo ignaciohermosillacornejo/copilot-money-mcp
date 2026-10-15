@@ -929,8 +929,10 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
     oracle: null,
     class: 'verified-once',
     evidence:
-      "The decoder treats the cache transaction document's `type` string as Copilot's " +
-      'classification and drops `category_id` when it is `income` or `internal_transfer` ' +
+      "The decoder drops a cache transaction document's `category_id` when its `type` " +
+      'string is `income`, or when the row is a transfer by either source the ' +
+      '`internal_transfer` flag unions (the `type` string or the boolean some documents ' +
+      'carry instead) ' +
       '(#824). PROBE 2026-10-15 (counts only): every transaction from the last ~2.5 months ' +
       'was read through the GraphQL Transactions query and joined by id to its cache ' +
       "document. On all 283 the document's `type` was the lowercase form of the GraphQL " +
@@ -940,7 +942,10 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'whose document kept a category: observed in the 2026-10-14 release test on rows made ' +
       'by create_transaction with type INCOME / INTERNAL_TRANSFER, where GraphQL and the web ' +
       'app showed no category and cache mode showed the passed one. Not re-checked after ' +
-      'this fix landed; the release parity test covers it.',
+      'this fix landed; the release parity test covers it. The boolean-only transfer branch ' +
+      'composes with `Transaction.internalTransfer:synthesized` below, which measured the ' +
+      'cache flag against live `type === INTERNAL_TRANSFER` on every row: a boolean-flagged ' +
+      'document is an INTERNAL_TRANSFER row in live, whose categoryId this probe found empty.',
   },
   {
     surface: 'FirestoreAccount.dashboard_active:notVisibility',

@@ -996,8 +996,13 @@ describe('every decoder route is compared or excluded with a reason (#778)', () 
 describe('check 9: income/transfer rows decode with no category (#824)', () => {
   const str = (value: string): FirestoreValue => ({ type: 'string', value });
   const bool = (value: boolean): FirestoreValue => ({ type: 'boolean', value });
+  // Every case is a decodable document (amount + date) unless it overrides one.
   const doc = (entries: ReadonlyArray<readonly [string, FirestoreValue]>) =>
-    new Map<string, FirestoreValue>(entries);
+    new Map<string, FirestoreValue>([
+      ['amount', { type: 'double', value: -50 }],
+      ['date', str('2024-01-15')],
+      ...entries,
+    ]);
 
   test.each([
     [
@@ -1048,6 +1053,15 @@ describe('check 9: income/transfer rows decode with no category (#824)', () => {
         ['type', str('income')],
         ['category_id', str('Qm7vR2kX9pL4tN8wB3sD')],
         ['user_deleted', bool(true)],
+      ],
+      false,
+    ],
+    [
+      'zero-amount income with a category',
+      [
+        ['type', str('income')],
+        ['category_id', str('Qm7vR2kX9pL4tN8wB3sD')],
+        ['amount', { type: 'double', value: 0 }],
       ],
       false,
     ],

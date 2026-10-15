@@ -38,6 +38,8 @@ import {
   decodeCategories,
   routeCollection,
   COLLECTION_ROUTES,
+  isDecodableTransactionDocument,
+  transactionDocumentId,
 } from '../../src/core/decoder.js';
 import type { AllCollectionsResult, CollectionRoute } from '../../src/core/decoder.js';
 import { CopilotDatabase, missingDatabaseError } from '../../src/core/database.js';
@@ -622,16 +624,16 @@ export function nonFiniteLeafPaths(fields: Map<string, FirestoreValue>): string[
 /**
  * Check 9's raw side (#824): does this RAW transaction document carry a
  * category on a row Copilot treats as uncategorizable — `type` income or
- * internal_transfer, or the `internal_transfer` boolean set — and not
- * soft-deleted? Reads the disk,
+ * internal_transfer, or the `internal_transfer` boolean set — on a document
+ * the decoder turns into a row? Reads the disk,
  * not decoder output, because the decoder is what clears the field: a check
  * on decoded rows alone could never fail.
  */
 export function hasCategoryOnIncomeOrTransfer(fields: Map<string, FirestoreValue>): boolean {
-  // A soft-deleted row never decodes (the decoder drops user_deleted), so it
-  // would only ever count as "not compared" and keep the check at WARN.
-  const deleted = fields.get('user_deleted');
-  if (deleted?.type === 'boolean' && deleted.value === true) return false;
+  // A document the decoder drops (soft-deleted, zero amount, no date) would
+  // only ever count as "not compared" and hold the check at WARN. Asked of the
+  // decoder's own predicate, so this cannot drift from what it drops.
+  if (!isDecodableTransactionDocument(fields)) return false;
   const type = fields.get('type');
   const typeName =
     type?.type === 'string' && typeof type.value === 'string' ? type.value.toLowerCase() : '';
@@ -768,7 +770,8 @@ async function main(): Promise<void> {
       routeCollection(doc.collection) === 'transactions' &&
       hasCategoryOnIncomeOrTransfer(doc.fields)
     ) {
-      incomeTransferWithCategory.push(doc.documentId);
+      // The decoder's identity, not the document id: the two can differ.
+      incomeTransferWithCategory.push(transactionDocumentId(doc.fields, doc.documentId));
     }
   }
 

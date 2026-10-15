@@ -82,7 +82,7 @@ a class yet.
 | `identity-resolution` | Comparing values across id spaces — matching a display name against an id, or an id belonging to a different entity. Includes treating content as identity, e.g. a dedup key built from a display name. | `assertOpaqueIds` fixture invariant (#461); `tests/core/dedup-identity.test.ts` — the five primary decoder dedups must preserve two documents identical in content and differing only by id, and every other dedup site must be explicitly listed as omitted (#662) |
 | `aggregation-double-count` | Summing across a parent/child hierarchy without excluding parents, so the same money is counted twice. | none |
 | `sign-convention` | Ignoring the domain's sign/direction convention, so the stored sign is not the semantic sign and naive sums are wrong. | none |
-| `ui-parity` | A reimplementation of an app-side computation uses different semantics — time window, enumeration set, exclusion rules — and disagrees with the Copilot app. | none |
+| `ui-parity` | A reimplementation of an app-side computation uses different semantics — time window, enumeration set, exclusion rules — and disagrees with the Copilot app. | partial — `smoke:cache` check 9 (#824) covers income/transfer rows carrying a category, raw documents against decoded rows; nothing covers the class at large |
 | `config-blind-default` | Hardcoding a parameter the vendor's own client derives from live user configuration; silently wrong for everyone whose config differs from the guess. | none |
 
 ### Our own machinery
