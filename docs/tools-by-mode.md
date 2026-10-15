@@ -36,7 +36,7 @@ When enabled, 6 cache-mode read tools are replaced with GraphQL-backed equivalen
 | `get_tags_live` | _(additive)_ | ✅ | No cache-mode counterpart |
 | `get_networth_live` | _(additive)_ | ✅ | Net worth over time |
 | `get_upcoming_recurrings_live` | _(additive)_ | ✅ | Next-due unpaid recurrings (distinct from `get_recurring_live`'s historical view). Rows are terse by default (`fields: [...]` opts into `rule`, `payments`, `icon`) |
-| `get_monthly_spend_live` | _(additive)_ | ✅ | Cumulative month-to-date non-recurring spend, day by day (not the app's "spent this month") |
+| `get_monthly_spend_live` | _(additive)_ | ✅ | Cumulative month-to-date non-recurring spend, day by day, with each day's increase as `daily_amount` (not the app's "spent this month") |
 | `get_balance_history_live` | _(additive)_ | ✅ | ⚠️ Single-account only (server constraint — requires `item_id` + `account_id`); use cache-mode `get_balance_history` for cross-account or weekly/monthly granularity |
 | `get_investment_prices_live` | _(additive)_ | ✅ | ⚠️ Server-side ownership-gated: only works for securities currently in your linked accounts |
 | `get_investment_allocation_live` | _(additive)_ | ✅ | Portfolio asset-class allocation (`type` / `amount` / `percentage`); `percentage` is a percent (0–100). Optional `account_id` / `item_id` scope (server-side) |

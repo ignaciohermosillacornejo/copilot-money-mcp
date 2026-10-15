@@ -45,9 +45,12 @@ export interface GetMonthlySpendLiveDay {
   id: string;
   date: string;
   total_amount: number | null;
-  /** The day's increase in `total_amount` (the first row's is its own total). */
-  daily_amount: number | null;
   comparison_amount: number | null;
+  /**
+   * The day's increase in `total_amount` (the first row's is its own total).
+   * Declared last because it is computed after projection and serializes last.
+   */
+  daily_amount: number | null;
 }
 
 export interface GetMonthlySpendLiveResult {
@@ -71,7 +74,10 @@ function projectRow(row: DailySpendNode): ProjectedDay {
 
 /**
  * Difference the cumulative series into per-day amounts. A null total yields
- * null and does not reset the running baseline. A day's value never depends
+ * null and does not reset the running baseline, so the next row with a total
+ * reports the increase since the last row that had one — a multi-day figure
+ * if a null-total row ever sat mid-series (the captured padding is trailing
+ * only, so nothing follows it in practice). A day's value never depends
  * on which rows the caller asked to see, for two reasons: the default filter
  * drops only null-total rows (which never move the baseline), and this runs
  * over the full date-sorted series before any filtering anyway, so a wider
