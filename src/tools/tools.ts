@@ -627,14 +627,31 @@ export class CopilotMoneyTools {
    * sent). The second source is what still knows a parent after both of its
    * children are gone, when no cached row points at it any more.
    *
+   * Value: the live window cache's generationId() when the entry was taken
+   * (null without a liveDb). While the generation is unchanged nothing has
+   * been invalidated since, so the entry refuses without a fetch. Once it has
+   * changed (refresh_cache, or any write's month invalidation), the next check
+   * fetches the window, and the entry is retired only by a row for the id
+   * from a month fetched during that check — the Transactions query omits
+   * split parents, so such a row means the split was removed in the app. A
+   * merely cached row never retires it: it may be the pre-split row a
+   * drifted split response left behind.
+   *
    * In memory only — a server restart clears it. After a restart a parent is
-   * known only if a cached row (local or live) still shows it, which is why
-   * delete_transaction's description states the rule. An entry is also
-   * retired when a live window read returns the id as an ordinary row (the
-   * split was removed in the app) — see splitParentEvidence(); refresh_cache
-   * makes the next check re-read the window.
+   * known only if a cache still shows it, which is why delete_transaction's
+   * description states the rule. In cache-only mode (no liveDb — a
+   * library/test fallback; the shipped CLI always runs writes in live mode)
+   * an entry is never retired except by a restart.
    */
-  private readonly knownSplitParentIds = new Set<string>();
+  private readonly knownSplitParents = new Map<string, number | null>();
+
+  /** Record a split parent for this session (#822); see knownSplitParents. */
+  private recordSplitParent(id: string): void {
+    this.knownSplitParents.set(
+      id,
+      this.liveDb ? this.liveDb.getTransactionsWindowCache().generationId() : null
+    );
+  }
 
   /**
    * Initialize tools with a database connection.
@@ -3709,10 +3726,17 @@ export class CopilotMoneyTools {
    * detect Plaid vs manual — the warning belongs in the tool
    * description, not in runtime logic.
    *
-   * Split parents (#822): before sending anything it reads the caches (in
-   * live mode the write-resolve window, which may fetch) and this session's
-   * split record, and REFUSES a known split parent — see
+   * Split parents (#822): before sending anything it checks this session's
+   * split record and the caches, and REFUSES a known split parent — see
    * splitParentEvidence(). Routing ids are still never looked up.
+   *
+   * Cost, per call (not just the first): a cheap positive (session record
+   * with no invalidation since, or a cached child row) refuses with no
+   * request. Otherwise the write-resolve window is loaded — the same windowed
+   * fetch write resolution uses. Cold months are served from the cache, but
+   * the live-tier months (the recent ones, TTL 0) are refetched on every
+   * delete: typically one or two Transactions requests, a full window fetch
+   * when nothing is cached yet. A LevelDB decode is never triggered.
    */
   async deleteTransaction(args: {
     transaction_id: string;
@@ -3746,13 +3770,13 @@ export class CopilotMoneyTools {
           `credit its amount back to the account a second time, leaving the account balance ` +
           `wrong. Delete the child transactions instead — the parent stays hidden once split. ` +
           `There is no unsplit operation. If you removed this split in the Copilot app, run ` +
-          `refresh_cache (live mode) or refresh_database (cache mode) and retry.`
+          `refresh_cache (or refresh_database in cache mode) and retry.`
       );
     }
     // Deleting a child: remember its parent BEFORE the delete is sent, so the
     // parent stays known after its last child is gone — including when the
     // delete then fails: a real parent is a parent either way.
-    if (evidence.parentOfTarget) this.knownSplitParentIds.add(evidence.parentOfTarget);
+    if (evidence.parentOfTarget) this.recordSplitParent(evidence.parentOfTarget);
 
     try {
       const deleted = await gqlDeleteTransaction(client, {
@@ -3786,35 +3810,46 @@ export class CopilotMoneyTools {
    * What the caches and this session know about `id` as a split (#822):
    * whether it is a split parent, and — when it is a split child — its parent.
    *
-   * Live mode (liveDb present — always the case with --write): the
-   * write-resolve window is loaded first (the same windowed fetch
-   * resolveTransactionMeta uses; cached months are served without a request),
-   * so the check sees current server data for that window. Then:
-   *   - `id`'s own row is in the window → NOT a parent. The Transactions query
-   *     omits split parents, so a returned row proves the id is not one now;
-   *     this also retires a stale session record (the split was removed in
-   *     the app). Its parentId, when set, is reported as `parentOfTarget`.
-   *   - otherwise the session record (knownSplitParentIds), or any cached row
-   *     whose parentId is `id`, makes it a parent.
-   * The local LevelDB cache is NOT read in live mode — decoding it on a write
-   * path is what resolveTransactionMeta / resolveParentSnapshot deliberately
-   * avoid, and the live window is fresher.
+   * Live mode (liveDb present — the shipped CLI always runs writes this way,
+   * since --write implies --live-reads):
+   *   1. Cheap positives, no request: a session record whose window-cache
+   *      generation is unchanged (nothing invalidated since it was taken), or
+   *      a cached row whose parentId is `id`. Refusal either way.
+   *   2. Otherwise the write-resolve window is loaded (the same windowed fetch
+   *      resolveTransactionMeta uses). A row for `id` itself from a month
+   *      FETCHED DURING THIS CALL (window-cache fetched_at ≥ the call's start)
+   *      proves it is not a parent — the Transactions query omits split
+   *      parents — and retires a session record (the split was removed in the
+   *      app). A merely cached row proves nothing: it may be the pre-split row
+   *      a drifted split response left behind.
+   *   3. Otherwise any of: a session record, a window row (cached or fetched)
+   *      whose parentId is `id`, or the local cache — only if its
+   *      transactions are ALREADY in memory (free, and it survives restarts;
+   *      a decode is never triggered here, which is what
+   *      resolveTransactionMeta / resolveParentSnapshot deliberately avoid).
    *
    * A failed window fetch does not block the delete: the check proceeds on
    * what the caches and the session record already hold, matching its
    * best-effort framing (refusing would make delete unusable offline).
    *
-   * Cache-only mode (no liveDb): the session record, then the local cache —
-   * `id`'s row carrying children_transaction_ids, or any row whose
-   * parent_transaction_id is `id`. An unreadable local cache contributes
-   * nothing rather than blocking every delete.
+   * Cache-only mode (no liveDb — a library/test fallback): the session
+   * record, then the local cache (decoded if needed) — `id`'s row carrying
+   * children_transaction_ids, or any row whose parent_transaction_id is `id`.
+   * An unreadable local cache contributes nothing rather than blocking every
+   * delete.
    */
   private async splitParentEvidence(
     id: string
   ): Promise<{ isParent: boolean; parentOfTarget: string | null }> {
-    let parentOfTarget: string | null = null;
-
     if (this.liveDb) {
+      const windowCache = this.liveDb.getTransactionsWindowCache();
+      const record = this.knownSplitParents.get(id);
+      if (record !== undefined && record === windowCache.generationId()) {
+        return { isParent: true, parentOfTarget: null };
+      }
+      if (this.liveDb.hasSplitChildOf(id)) return { isParent: true, parentOfTarget: null };
+
+      const startedAt = Date.now();
       let fetched: TransactionNode[] = [];
       try {
         const { from, to } = CopilotMoneyTools.writeResolveWindow();
@@ -3823,33 +3858,52 @@ export class CopilotMoneyTools {
         // Best-effort: proceed on what the caches and session record hold.
       }
       // Rows-fallback as in resolveParentSnapshot: the window cache can
-      // LRU-evict early months during a large fetch.
+      // LRU-evict early months during a large fetch. A row found only in the
+      // returned rows has no fetched_at to prove freshness, so it is not used
+      // to retire a record.
       const own =
         this.liveDb.lookupTransactionNodes([id]).get(id) ?? fetched.find((r) => r.id === id);
-      if (own) {
-        this.knownSplitParentIds.delete(id);
+      const ownFetchedAt = own ? windowCache.getFetchedAt(own.date.slice(0, 7)) : undefined;
+      if (own && ownFetchedAt !== undefined && ownFetchedAt >= startedAt) {
+        this.knownSplitParents.delete(id);
         return { isParent: false, parentOfTarget: own.parentId ?? null };
       }
+
+      const local = this.localSplitEvidence(id, this.db.peekLoadedTransactions() ?? []);
       const isParent =
-        this.knownSplitParentIds.has(id) ||
+        record !== undefined ||
         this.liveDb.hasSplitChildOf(id) ||
-        fetched.some((r) => r.parentId === id);
-      return { isParent, parentOfTarget };
+        fetched.some((r) => r.parentId === id) ||
+        local.isParent;
+      return { isParent, parentOfTarget: own?.parentId ?? local.parentOfTarget };
     }
 
-    if (this.knownSplitParentIds.has(id)) return { isParent: true, parentOfTarget };
+    if (this.knownSplitParents.has(id)) return { isParent: true, parentOfTarget: null };
 
-    let local: Transaction[] = [];
+    let local: readonly Transaction[] = [];
     try {
       local = await this.db.getAllTransactions();
     } catch {
-      // No readable local cache: the live cache and session record still apply.
+      // No readable local cache: the session record still applies.
     }
-    for (const t of local) {
-      if (t.parent_transaction_id === id) return { isParent: true, parentOfTarget };
+    return this.localSplitEvidence(id, local);
+  }
+
+  /**
+   * Split evidence for `id` in local-cache rows (#822): a parent when its own
+   * row carries children_transaction_ids or any row's parent_transaction_id is
+   * `id`; `parentOfTarget` is its own row's parent_transaction_id.
+   */
+  private localSplitEvidence(
+    id: string,
+    rows: readonly Transaction[]
+  ): { isParent: boolean; parentOfTarget: string | null } {
+    let parentOfTarget: string | null = null;
+    for (const t of rows) {
+      if (t.parent_transaction_id === id) return { isParent: true, parentOfTarget: null };
       if (t.transaction_id === id) {
         if ((t.children_transaction_ids?.length ?? 0) > 0) {
-          return { isParent: true, parentOfTarget };
+          return { isParent: true, parentOfTarget: null };
         }
         parentOfTarget ??= t.parent_transaction_id || null;
       }
@@ -4114,9 +4168,19 @@ export class CopilotMoneyTools {
         input: inputs,
       });
       // Session record (#822): the server has split, so delete_transaction
-      // refuses this id from now on. First statement after the mutation, so a
-      // drifted response that makes the mapping below throw cannot skip it.
-      this.knownSplitParentIds.add(transaction_id);
+      // refuses this id from now on. First statements after the mutation, so a
+      // drifted response that makes the mapping below throw cannot skip them.
+      //
+      // The parent is evicted from both caches here too, not after the
+      // mapping: the Transactions query omits split parents, so reads must
+      // stop surfacing it, and a throw below must not leave the pre-split row
+      // cached for a later split-parent check to mistake for a live row. (Its
+      // whole month is not invalidated: that would also drop the children
+      // written through below, #820.) No-op if the cache is unloaded or the id
+      // is absent — same eviction-is-a-no-op contract as delete_transaction.
+      this.recordSplitParent(transaction_id);
+      this.db.patchCachedTransactionDelete(transaction_id);
+      this.liveDb?.patchLiveTransactionDelete(transaction_id);
 
       // Map each server-side TransactionFields shape to the local snake_case
       // Transaction model. Same field set as create_transaction / add_to_recurring.
@@ -4150,13 +4214,6 @@ export class CopilotMoneyTools {
           itemId: parentTx.itemId,
         });
       }
-
-      // Evict the parent from both caches so subsequent reads stop surfacing
-      // the now-hidden row (the Transactions query omits split parents). No-op
-      // if the cache is unloaded or the id is absent — same eviction-is-a-
-      // no-op contract as delete_transaction.
-      this.db.patchCachedTransactionDelete(transaction_id);
-      this.liveDb?.patchLiveTransactionDelete(transaction_id);
 
       // Live cache write-through for the children (#820) — without it a split
       // in a cached month made the whole amount vanish (parent evicted,

@@ -56,26 +56,33 @@ by re-read and never looks at the account balance afterwards.
 
 ## The fix
 
-`deleteTransaction` refuses, before any network call, an id it knows to be a split parent:
+`deleteTransaction` refuses an id it knows to be a split parent, before the delete is
+sent:
 
-- live mode (always the case with `--write`): the write-resolve window is loaded first (the
-  same windowed fetch write resolution uses), then any window row whose `parentId` is the id
-  (`LiveCopilotDatabase.hasSplitChildOf`) marks it a parent. A window row for the id itself
-  proves it is not one — the Transactions query omits split parents — and retires a stale
-  session record. The local cache is not decoded on this path. A failed window fetch does
-  not block the delete; the check proceeds on what is already held;
-- cache-only mode: the local cache row has non-empty `children_transaction_ids`, or any
-  cached row's `parent_transaction_id` is the id;
-- an in-memory session record: `split_transaction` records the parent it split, and
-  deleting a split **child** records that child's parent before the delete is sent — which
-  is what still knows the parent after its last child is gone, the exact sequence above.
+- an in-memory session record: `split_transaction` records the parent it split (first
+  statement after the mutation resolves, and the parent is evicted from both caches at the
+  same point, so a drifted response cannot leave a stale pre-split row behind), and deleting
+  a split **child** records that child's parent before the delete is sent — which is what
+  still knows the parent after its last child is gone, the exact sequence above;
+- live mode (the shipped CLI always runs writes this way, since `--write` implies
+  `--live-reads`): a session record taken with no window-cache invalidation since, or a
+  cached row whose `parentId` is the id (`LiveCopilotDatabase.hasSplitChildOf`), refuses
+  with no request. Otherwise the write-resolve window is loaded (the same windowed fetch
+  write resolution uses) and checked for a child row. A row for the id itself, from a month
+  fetched during this check, proves it is not a parent — the Transactions query omits split
+  parents — and retires a session record; a merely cached row does not. Local-cache rows are
+  scanned only if already in memory; a LevelDB decode is never triggered. A failed window
+  fetch does not block the delete; the check proceeds on what is already held;
+- cache-only mode (a library/test fallback): the local cache row has non-empty
+  `children_transaction_ids`, or any cached row's `parent_transaction_id` is the id.
 
-The refusal says to delete the children instead and that there is no unsplit, and how to
-retry after removing the split in the app (`refresh_cache` / `refresh_database`). That the
-parent stays hidden once its children are deleted is **unverified**; the smoke harness logs
-the parent id it leaves behind. There is no opt-in override. Both tool descriptions now state the rule, and the
-smoke harness deregisters the parent after a successful split so cleanup deletes only the
-children.
+The refusal says to delete the children instead, that there is no unsplit, and how to retry
+after removing the split in the app (`refresh_cache`, or `refresh_database` in cache mode).
+That the parent stays hidden once its children are deleted is **unverified**; the smoke
+harness logs the parent id it leaves behind. There is no opt-in override. Both tool
+descriptions now state the rule, and the smoke harness deregisters the parent before it
+sends the split, so cleanup deletes only the children even when the split's response is
+lost.
 
 Best-effort by construction: a parent split in the app, in a month neither cache holds, and
 not seen this session, is still accepted — after a server restart the session record is

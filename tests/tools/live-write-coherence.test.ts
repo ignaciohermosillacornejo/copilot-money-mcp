@@ -204,6 +204,29 @@ interface Case {
   args: Record<string, unknown>;
   /** Assertions against the post-write live read, keyed by transaction id. */
   verify: (rows: Map<string, Row>) => void;
+  /**
+   * Transactions fetches the write itself makes. Default 0, so an accidental
+   * fetch in any write tool goes red; a tool that fetches by design declares
+   * its count.
+   */
+  expectedWriteFetches?: number;
+}
+
+/**
+ * Months in the write-resolve window (mirrors CopilotMoneyTools'
+ * writeResolveWindow: today back COPILOT_WRITE_RESOLVE_WINDOW_MONTHS, default
+ * 13, inclusive of both ends). None of them is cached here — the seeded cold
+ * month is older than the window — so a window load fetches each one.
+ */
+function writeResolveWindowMonthCount(): number {
+  const env = parseInt(process.env.COPILOT_WRITE_RESOLVE_WINDOW_MONTHS ?? '', 10);
+  const months = !isNaN(env) && env > 0 ? env : 13;
+  const to = new Date();
+  const from = new Date();
+  from.setMonth(from.getMonth() - months);
+  return (
+    (to.getUTCFullYear() - from.getUTCFullYear()) * 12 + (to.getUTCMonth() - from.getUTCMonth()) + 1
+  );
 }
 
 function setup(mutationMocks: MockResponsesByOp) {
@@ -509,6 +532,9 @@ const CASES: Record<string, Case> = {
     verify: (rows) => {
       expect(rows.has(TX_DELETE)).toBe(false);
     },
+    // The split-parent check (#822) loads the write-resolve window: one fetch
+    // per window month, none of which is cached in this setup.
+    expectedWriteFetches: writeResolveWindowMonthCount(),
   },
 };
 
@@ -549,18 +575,17 @@ describe('write → live-read coherence (#820, #821)', () => {
       expect(before._cache_hit).toBe(false);
       expect(fetches()).toBe(1);
 
-      // b. Write through the tool's public handler. A write may itself fetch
-      // (delete_transaction loads the write-resolve window to check for a
-      // split parent, #822), so the count is taken after it.
+      // b. Write through the tool's public handler. Only a tool that fetches
+      // by design (declared per case) may add Transactions fetches.
       await call(toolName, c.args);
-      const afterWrite = fetches();
+      expect(fetches()).toBe(1 + (c.expectedWriteFetches ?? 0));
 
       // c. Read back through the live tool + mapper. Must be served from the
       // cache (no refetch) — otherwise this would test the server mock, not
       // the write-through.
       const after = await read();
       expect(after._cache_hit).toBe(true);
-      expect(fetches()).toBe(afterWrite);
+      expect(fetches()).toBe(1 + (c.expectedWriteFetches ?? 0));
 
       const rows = new Map(after.transactions.map((r) => [r.transaction_id as string, r]));
       c.verify(rows);

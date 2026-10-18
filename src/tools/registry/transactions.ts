@@ -270,12 +270,13 @@ export const deleteTransactionTool = defineTool({
     description:
       '**DESTRUCTIVE**: Permanently deletes a transaction from Copilot Money. ' +
       'There is no soft-delete and no undo. All three IDs (transaction_id, ' +
-      'account_id, item_id) are required — no lookups — so a typo in one field ' +
+      'account_id, item_id) are required — no id lookups — so a typo in one field ' +
       "returns 'Transaction not found' rather than silently deleting a different " +
-      'transaction. Refuses a known split parent: Copilot would credit its amount back ' +
-      'a second time and leave the balance wrong — delete its children instead. ' +
-      'Plaid rows may be re-added on the next sync, without user ' +
-      'metadata (category, tags, notes, reviewed, goal, split children).',
+      'transaction. Refuses a split parent known from live data or this session: ' +
+      'Copilot would credit its amount back a second time and leave the balance ' +
+      'wrong — delete its children instead. The source account may re-add Plaid ' +
+      'rows on its next sync, without user metadata (category, tags, notes, ' +
+      'reviewed, goal, split children).',
     inputSchema: {
       type: 'object',
       additionalProperties: false,

@@ -114,6 +114,9 @@ function stubLiveDb(overrides: {
     indexTransactionMeta,
     upsertLiveTransaction,
     patchLiveTransactionDelete: () => {},
+    // split records its parent for delete_transaction (#822) with the
+    // window-cache generation.
+    getTransactionsWindowCache: () => ({ generationId: () => 0 }),
   } as unknown as LiveCopilotDatabase;
   return { liveDb, getTransactions, indexTransactionMeta, upsertLiveTransaction };
 }

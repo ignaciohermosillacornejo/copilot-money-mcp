@@ -989,6 +989,24 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
       const parent = await createSmokeTransaction(ctx, 'txn-c', 200);
       const date = todayIso();
       const categoryId = await ensureCategory(ctx);
+      // Never delete a split parent (#822): Copilot credits its amount back a
+      // second time and the test account's balance ends wrong by 200. Cleanup
+      // deletes only the children (there is no unsplit mutation).
+      //
+      // Deregistered BEFORE the split is sent, not after it resolves: a
+      // transport or 5xx failure after the server applied the split would
+      // otherwise leave the parent registered, and cleanup would delete a
+      // split parent. The trade-off: when the split genuinely fails, one
+      // visible, un-split marker row leaks — a clutter cost, not a wrong
+      // balance. That the parent stays hidden once its children are deleted
+      // is an unverified assumption, so the run logs the id it leaves behind.
+      ctx.registry.remove(parent.id);
+      ctx.log(
+        `split_transaction: intentionally leaving split parent '${ctx.state.marker}-txn-c' ` +
+          `(never deleted — #822; if the split fails it is left un-split); cleanup deletes ` +
+          `only its children`,
+        { id: parent.id }
+      );
       const result = await splitTransaction(ctx.client, {
         id: parent.id,
         accountId: parent.accountId,
@@ -998,17 +1016,6 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
           { name: `${ctx.state.marker}-split-b`, date, amount: 100, categoryId },
         ],
       });
-      // Never delete a split parent (#822): Copilot credits its amount back a
-      // second time and the test account's balance ends wrong by 200. Cleanup
-      // deletes only the children (there is no unsplit mutation). That the
-      // parent then stays hidden is an unverified assumption, so the run logs
-      // the id it leaves behind.
-      ctx.registry.remove(parent.id);
-      ctx.log(
-        `split_transaction: intentionally leaving split parent '${ctx.state.marker}-txn-c' ` +
-          `(never deleted — #822); cleanup deletes only its children`,
-        { id: parent.id }
-      );
       for (const child of result.splitTransactions) {
         ctx.registry.add({
           kind: 'transaction',

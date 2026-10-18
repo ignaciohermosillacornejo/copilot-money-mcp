@@ -690,6 +690,15 @@ export class CopilotDatabase {
   }
 
   /**
+   * The transactions already decoded into memory, or null when none are.
+   * Never triggers a decode — for write paths that may use local evidence
+   * when it is free but must not pay for a LevelDB decode (#822).
+   */
+  peekLoadedTransactions(): readonly Transaction[] | null {
+    return this._transactions;
+  }
+
+  /**
    * Summarize per-collection decode health from the last full decode pass.
    *
    * Surfaces silent schema drops (issue #442): documents that failed Zod
